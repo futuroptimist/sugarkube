@@ -1,3 +1,4 @@
+# LEGACY / INACTIVE Flux/Longhorn patch: not validated for the current live cluster and must not be applied as written.
 apiVersion: v1
 kind: ConfigMap
 metadata:

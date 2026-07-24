@@ -1,3 +1,6 @@
+# LEGACY / INACTIVE Flux/Longhorn values: do not apply to staging or production as currently written.
+# Use platform/observability/helm/kube-prometheus-stack.values.common.yaml plus
+# clusters/staging/observability/kube-prometheus-stack.values.yaml for the current live staging release.
 apiVersion: v1
 kind: ConfigMap
 metadata:

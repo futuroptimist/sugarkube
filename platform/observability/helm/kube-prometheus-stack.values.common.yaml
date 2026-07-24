@@ -1,0 +1,66 @@
+# Canonical non-Flux kube-prometheus-stack values for the live staging lifecycle.
+# Do not apply the legacy Flux manifests for this release at the same time.
+fullnameOverride: kube-prometheus-stack
+prometheus:
+  service:
+    type: ClusterIP
+  prometheusSpec:
+    replicas: 1
+    retention: 7d
+    retentionSize: 15GB
+    enableAdminAPI: false
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        memory: 2Gi
+    externalLabels:
+      cluster: sugarkube-int
+    serviceMonitorSelector:
+      matchLabels:
+        release: kube-prometheus-stack
+    serviceMonitorSelectorNilUsesHelmValues: false
+    probeSelector:
+      matchLabels:
+        release: kube-prometheus-stack
+    probeSelectorNilUsesHelmValues: false
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-path
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 20Gi
+grafana:
+  admin:
+    existingSecret: grafana-admin-credentials
+    userKey: admin-user
+    passwordKey: admin-password
+  persistence:
+    enabled: false
+  ingress:
+    enabled: false
+  service:
+    type: NodePort
+    nodePort: 30300
+alertmanager:
+  service:
+    type: ClusterIP
+  alertmanagerSpec:
+    replicas: 1
+  config:
+    route:
+      receiver: "null"
+    receivers:
+      - name: "null"
+kubeEtcd:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false

@@ -1,3 +1,7 @@
+# LEGACY / INACTIVE Flux design: do not apply to staging or production as currently written.
+# The canonical live staging lifecycle is `just observability-* env=staging` with
+# platform/observability/helm/ and clusters/staging/observability/ values.
+# Do not combine Flux/Longhorn and non-Flux Helm lifecycles for this release.
 apiVersion: helm.toolkit.fluxcd.io/v2beta2
 kind: HelmRelease
 metadata:

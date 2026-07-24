@@ -1,0 +1,2 @@
+# Staging overlay for the guarded non-Flux Helm lifecycle.
+# Production observability values are intentionally not codified yet.

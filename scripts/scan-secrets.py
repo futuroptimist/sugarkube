@@ -25,6 +25,12 @@ PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"password", re.IGNORECASE),
 )
 
+ALLOWLIST_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"grafana-admin-credentials", re.IGNORECASE),
+    re.compile(r"passwordKey:\s*admin-password", re.IGNORECASE),
+    re.compile(r"`admin-password`", re.IGNORECASE),
+)
+
 
 def run_ripsecrets(diff_text: str) -> bool | None:
     """Return True if secrets found via ripsecrets, False if clean.
@@ -67,6 +73,8 @@ def regex_scan(lines: Iterable[str]) -> bool:
         if not line.startswith("+"):
             continue
         if file_path and file_path.endswith(SCAN_SCRIPT_PATH):
+            continue
+        if any(allow.search(line) for allow in ALLOWLIST_PATTERNS):
             continue
         for pattern in PATTERNS:
             if pattern.search(line):

@@ -2,7 +2,9 @@
 
 This is the canonical, implementation-ready design for Sugarkube observability across the Raspberry Pi k3s platform and the four flagship applications: DSPACE, token.place, danielsmith.io, and jobbot3000. It reconciles the earlier implementation prompt in [`docs/prompts/codex/observability.md`](./prompts/codex/observability.md): that prompt is useful bootstrap context, but this document is the source of truth for phased productionization, ownership, privacy, release gates, and current-state claims.
 
-This document is the design contract. The repository now includes Flux-managed kube-prometheus-stack, Loki/Promtail, and the first blackbox exporter/Probe manifests, but those source files are not live deployment evidence until a cluster is reconciled and verified. See [`docs/observability-blackbox.md`](./observability-blackbox.md) for the runtime blackbox slice.
+This document is the design contract.
+> **Current live staging lifecycle:** the guarded non-Flux Helm recipes in [`docs/operations/observability-helm.md`](./operations/observability-helm.md) are canonical for the current `kube-prometheus-stack` staging release. The existing Flux/Longhorn resources remain inactive, unvalidated future/legacy configuration and must not be applied to staging or production as currently written. Operators must not combine both lifecycle paths for the same release.
+ The repository now includes Flux-managed kube-prometheus-stack, Loki/Promtail, and the first blackbox exporter/Probe manifests, but those source files are not live deployment evidence until a cluster is reconciled and verified. See [`docs/observability-blackbox.md`](./observability-blackbox.md) for the runtime blackbox slice.
 
 ## Audit scope and evidence
 
