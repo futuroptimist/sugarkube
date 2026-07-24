@@ -11,3 +11,17 @@ env:
     value: https://staging.token.place
   - name: DSPACE_TOKEN_PLACE_CHAT_MODEL
     value: llama-3.1-8b-instruct
+
+metrics:
+  enabled: true
+  auth:
+    existingSecret: dspace-staging-metrics-token
+    secretKey: token
+
+serviceMonitor:
+  enabled: true
+  interval: 30s
+  scrapeTimeout: 10s
+  additionalLabels:
+    release: kube-prometheus-stack
+  cluster: sugarkube-int
