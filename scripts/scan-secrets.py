@@ -25,6 +25,13 @@ PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"password", re.IGNORECASE),
 )
 
+# Exact metadata placeholders are identifiers, not credential values. Keep this
+# deliberately narrow: trailing content must still be scanned.
+SAFE_PLACEHOLDERS = (
+    re.compile(r"^\+\s*passwordKey:\s*admin-password\s*(?:#.*)?$"),
+    re.compile(r"^\+\s*-\s*Password key:\s*`admin-password`\.\s*$"),
+)
+
 
 def run_ripsecrets(diff_text: str) -> bool | None:
     """Return True if secrets found via ripsecrets, False if clean.
@@ -67,6 +74,8 @@ def regex_scan(lines: Iterable[str]) -> bool:
         if not line.startswith("+"):
             continue
         if file_path and file_path.endswith(SCAN_SCRIPT_PATH):
+            continue
+        if any(pattern.fullmatch(line) for pattern in SAFE_PLACEHOLDERS):
             continue
         for pattern in PATTERNS:
             if pattern.search(line):
