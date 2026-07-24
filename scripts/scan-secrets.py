@@ -75,12 +75,11 @@ def regex_scan(lines: Iterable[str]) -> bool:
             continue
         if file_path and file_path.endswith(SCAN_SCRIPT_PATH):
             continue
-        if any(pattern.fullmatch(line) for pattern in SAFE_PLACEHOLDERS):
-            continue
-        for pattern in PATTERNS:
-            if pattern.search(line):
-                print(f"Possible secret: {line.rstrip()}", file=sys.stderr)
-                return True
+        if not any(pattern.fullmatch(line) for pattern in SAFE_PLACEHOLDERS):
+            for pattern in PATTERNS:
+                if pattern.search(line):
+                    print(f"Possible secret: {line.rstrip()}", file=sys.stderr)
+                    return True
     return False
 
 
