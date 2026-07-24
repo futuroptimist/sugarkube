@@ -65,7 +65,7 @@ The current apps map to that model as examples:
 
 | App | Image | Chart | Release | Namespace | Version pin | Prod tag pin |
 | --- | --- | --- | --- | --- | --- | --- |
-| dspace | `ghcr.io/democratizedspace/dspace` | `oci://ghcr.io/democratizedspace/charts/dspace` | `dspace` | `dspace` | `docs/apps/dspace.version` | `docs/apps/dspace.prod.tag` |
+| dspace | `ghcr.io/democratizedspace/dspace` | `oci://ghcr.io/democratizedspace/charts/dspace` | `dspace` | `dspace` | `docs/apps/dspace.version` shared fallback; `docs/apps/dspace.staging.version` for staging; `docs/apps/dspace.prod.version` for prod | `docs/apps/dspace.prod.tag` |
 | token.place | `ghcr.io/futuroptimist/tokenplace-relay` | `oci://ghcr.io/futuroptimist/charts/tokenplace` | `tokenplace` | `tokenplace` | `docs/apps/tokenplace.version` | `docs/apps/tokenplace.prod.tag` |
 | danielsmith.io | `ghcr.io/futuroptimist/danielsmith.io` | `oci://ghcr.io/futuroptimist/charts/danielsmith` | `danielsmith` | `danielsmith` | `docs/apps/danielsmith.version` | `docs/apps/danielsmith.prod.tag` |
 | jobbot3000 | `ghcr.io/futuroptimist/jobbot3000` | `oci://ghcr.io/futuroptimist/charts/jobbot3000` | `jobbot3000` | `jobbot3000` | `docs/apps/jobbot3000.version` | `docs/apps/jobbot3000.prod.tag` |
@@ -155,6 +155,11 @@ Rules for app config files:
 - Quote values only when the shell requires it.
 - Keep values chains comma-separated and ordered from base to overlay.
 - Keep verify paths comma-separated with leading slashes.
+- Optional environment-specific chart pins (`SUGARKUBE_VERSION_FILE_DEV`,
+  `SUGARKUBE_VERSION_FILE_STAGING`, and `SUGARKUBE_VERSION_FILE_PROD`) override
+  `SUGARKUBE_VERSION_FILE` only for the matching `env=`. Apps that define only
+  the shared pin keep the historical behavior. The resolved pin file must exist,
+  contain a non-empty semver chart version, and pass validation before Helm runs.
 - Do not store secrets in app config files.
 
 Required keys for the generic recipes:
@@ -165,7 +170,10 @@ Required keys for the generic recipes:
 | `SUGARKUBE_RELEASE` | Helm release name. |
 | `SUGARKUBE_NAMESPACE` | Kubernetes namespace. |
 | `SUGARKUBE_CHART` | Helm OCI chart reference. |
-| `SUGARKUBE_VERSION_FILE` | Chart version pin file. |
+| `SUGARKUBE_VERSION_FILE` | Shared/default chart version pin file. |
+| `SUGARKUBE_VERSION_FILE_DEV` | Optional dev-only chart version pin file; falls back to `SUGARKUBE_VERSION_FILE`. |
+| `SUGARKUBE_VERSION_FILE_STAGING` | Optional staging-only chart version pin file; falls back to `SUGARKUBE_VERSION_FILE`. |
+| `SUGARKUBE_VERSION_FILE_PROD` | Optional production-only chart version pin file; falls back to `SUGARKUBE_VERSION_FILE`. |
 | `SUGARKUBE_PROD_TAG_FILE` | Production-approved tag pin file. |
 | `SUGARKUBE_VALUES_DEV` | Values chain for `env=dev`. |
 | `SUGARKUBE_VALUES_STAGING` | Values chain for `env=staging`. |

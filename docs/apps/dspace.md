@@ -73,10 +73,11 @@ gh workflow run ci-image.yml --repo democratizedspace/dspace --ref main
 
 ## Confirm/publish OCI chart
 
-Sugarkube deploys the chart version pinned in `docs/apps/dspace.version`. Use [recent chart workflow runs](https://github.com/democratizedspace/dspace/actions/workflows/ci-helm.yml) to find chart publish attempts, `helm show chart` below to confirm available immutable chart versions, and [the chart source](https://github.com/democratizedspace/dspace/tree/main/charts/dspace) to review the chart content that should match the pinned version. The DSPACE OCI chart does not currently have an associated public GHCR package page; check the [DSPACE chart package lookup](https://github.com/orgs/democratizedspace/packages?repo_name=dspace&q=charts%2Fdspace) until that package page appears.
+Sugarkube keeps a backward-compatible shared DSPACE chart pin in `docs/apps/dspace.version`, but the example app config now resolves environment-specific pins first: staging uses `docs/apps/dspace.staging.version` (`3.1.0`) and production uses `docs/apps/dspace.prod.version` (`3.0.1`). Dev still resolves the shared `docs/apps/dspace.version` pin unless a local config opts into a dev-specific file. This persists the proven staging and recovered production coordinates; merging this documentation/configuration change does not deploy anything by itself. Use [recent chart workflow runs](https://github.com/democratizedspace/dspace/actions/workflows/ci-helm.yml) to find chart publish attempts, `helm show chart` below to confirm available immutable chart versions, and [the chart source](https://github.com/democratizedspace/dspace/tree/main/charts/dspace) to review the chart content that should match the pinned version. The DSPACE OCI chart does not currently have an associated public GHCR package page; check the [DSPACE chart package lookup](https://github.com/orgs/democratizedspace/packages?repo_name=dspace&q=charts%2Fdspace) until that package page appears.
 
 ```bash
-CHART_VERSION=$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.version | head -n 1)
+# Pick the resolved environment pin for the deployment you are validating.
+CHART_VERSION=$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.staging.version | head -n 1)
 ```
 
 ```bash
@@ -91,7 +92,7 @@ gh workflow run ci-helm.yml --repo democratizedspace/dspace --ref main
 
 ## Deploy staging
 
-After this repository change is merged, deploy the new immutable, environment-neutral DSPACE image that contains runtime `/config.json` support. The image tag stays the same as it moves between staging and production; the Sugarkube values overlays, not image names, select the token.place origin.
+After this repository change is merged, deploy the new immutable, environment-neutral DSPACE image that contains runtime `/config.json` support. The image tag stays the same as it moves between staging and production; the Sugarkube values overlays, not image names, select the token.place origin. Staging is intentionally pinned to chart `3.1.0` so it can use authenticated metrics and a ServiceMonitor, while production remains intentionally pinned to the recovered chart `3.0.1` with image `main-1a31a56`. This repository change only persists those pins and values; it does not run Helm or change any live deployment.
 
 Preferred generic command:
 
@@ -284,6 +285,8 @@ just cf-tunnel-route host=democratized.space
 ## App-specific notes
 
 - DSPACE serves `/config.json`; verify it with `jq` before production promotion and before opening `/chat`.
+- Staging metrics are enabled through the operator-managed `dspace-staging-metrics-token` Secret. The values overlay references only the Secret name/key and never stores the token value.
+- The staging ServiceMonitor is authenticated, labeled for `kube-prometheus-stack`, and carries the `sugarkube-int` cluster label. Do not copy these chart-3.1.0-only settings into production while production remains recovered on chart `3.0.1`.
 - Keep release lineage separate from environment routing: image tags identify app code, values overlays identify `staging` or `prod` hostnames and token.place origins.
 - The optional `prod.democratized.space` overlay is not the default production path in the generic config.
 
@@ -292,9 +295,9 @@ just cf-tunnel-route host=democratized.space
 The generic app commands above should be the normal operator path. Keep these lower-level helpers available for compatibility with existing tests and older runbooks when debugging raw Helm parameters.
 
 ```bash
-just helm-oci-install release=dspace namespace=dspace chart=oci://ghcr.io/democratizedspace/charts/dspace values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml version_file=docs/apps/dspace.version tag="$APP_TAG" env=staging
+just helm-oci-install release=dspace namespace=dspace chart=oci://ghcr.io/democratizedspace/charts/dspace values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml version_file=docs/apps/dspace.staging.version tag="$APP_TAG" env=staging
 ```
 
 ```bash
-just helm-oci-upgrade release=dspace namespace=dspace chart=oci://ghcr.io/democratizedspace/charts/dspace values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml version_file=docs/apps/dspace.version tag="$APP_TAG" env=staging
+just helm-oci-upgrade release=dspace namespace=dspace chart=oci://ghcr.io/democratizedspace/charts/dspace values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml version_file=docs/apps/dspace.staging.version tag="$APP_TAG" env=staging
 ```
