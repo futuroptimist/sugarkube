@@ -49,9 +49,7 @@ def _runtime_env(path: Path) -> dict[str, list[str]]:
             current_name = line.removeprefix("- name: ").strip()
             continue
         if line.startswith("value: ") and current_name is not None:
-            env.setdefault(current_name, []).append(
-                line.removeprefix("value: ").strip().strip('"')
-            )
+            env.setdefault(current_name, []).append(line.removeprefix("value: ").strip().strip('"'))
             current_name = None
     return env
 
@@ -89,3 +87,44 @@ def test_dspace_values_chains_resolve_expected_deployment_overlays() -> None:
     for env, expected_values in EXPECTED_VALUES_CHAINS.items():
         config = load_config("dspace", env)
         assert config["SUGARKUBE_VALUES"] == expected_values
+
+
+def test_dspace_chart_pins_resolve_staging_and_prod_versions() -> None:
+    staging = load_config("dspace", "staging")
+    prod = load_config("dspace", "prod")
+
+    assert (REPO_ROOT / staging["SUGARKUBE_VERSION_FILE"]).read_text(encoding="utf-8").splitlines()[
+        -1
+    ] == "3.1.0"
+    assert (REPO_ROOT / prod["SUGARKUBE_VERSION_FILE"]).read_text(encoding="utf-8").splitlines()[
+        -1
+    ] == "3.0.1"
+
+
+def test_dspace_staging_values_enable_authenticated_metrics_servicemonitor() -> None:
+    text = OVERLAYS["staging"].read_text(encoding="utf-8")
+
+    assert "metrics:\n  enabled: true" in text
+    assert "existingSecret: dspace-staging-metrics-token" in text
+    assert "secretKey: token" in text
+    assert text.count("serviceMonitor:") == 1
+    assert "serviceMonitor:\n  enabled: true" in text
+    assert "release: kube-prometheus-stack" in text
+    assert "cluster: sugarkube-int" in text
+
+
+def test_dspace_prod_values_do_not_enable_metrics_or_servicemonitor() -> None:
+    text = OVERLAYS["prod"].read_text(encoding="utf-8")
+
+    assert "metrics:" not in text
+    assert "serviceMonitor:" not in text
+    assert "dspace-staging-metrics-token" not in text
+
+
+def test_dspace_fixtures_do_not_contain_real_credentials() -> None:
+    for path in [REPO_ROOT / "docs/examples/apps/dspace.env", *ALL_DSPACE_VALUES]:
+        text = path.read_text(encoding="utf-8")
+        assert (
+            "dspace-staging-metrics-token" not in text or path.name == "dspace.values.staging.yaml"
+        )
+        assert "secretKey: token" not in text or path.name == "dspace.values.staging.yaml"

@@ -1346,12 +1346,21 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     python3 "{{ justfile_directory() }}/scripts/cluster_identity.py" assert --kubeconfig "${KUBECONFIG}" --env "${requested_env}" >/dev/null
 
     chart_version="${version}"
-    if [ -z "${chart_version}" ] && [ -n "${version_file}" ] && [ -f "${version_file}" ]; then
+    if [ -z "${chart_version}" ] && [ -n "${version_file}" ]; then
+        if [ ! -f "${version_file}" ]; then
+            echo "ERROR: resolved chart version file for env=${requested_env} does not exist: ${version_file}" >&2
+            exit 2
+        fi
         chart_version="$(
             sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' "${version_file}" | head -n1 | tr -d '[:space:]' || true
         )"
         if [ -z "${chart_version}" ]; then
-            echo "Warning: version_file '${version_file}' did not contain a valid version" >&2
+            echo "ERROR: resolved chart version file for env=${requested_env} is empty: ${version_file}" >&2
+            exit 2
+        fi
+        if ! [[ "${chart_version}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z][0-9A-Za-z.+-]*)?$ ]]; then
+            echo "ERROR: resolved chart version file for env=${requested_env} contains malformed version '${chart_version}' at ${version_file}; expected semver like 3.1.0." >&2
+            exit 2
         fi
     fi
 
@@ -1865,13 +1874,14 @@ dspace-oci-deploy env='staging' tag='':
       export KUBECONFIG="${HOME}/.kube/config"
     fi
     export SUGARKUBE_ENV="${env_name}"
+    eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell --app dspace --env "${env_name}")"
     just --justfile "{{ justfile_directory() }}/justfile" assert-cluster-env "${env_name}" "${KUBECONFIG}" >/dev/null
 
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
       release='dspace' namespace='dspace' \
       chart='oci://ghcr.io/democratizedspace/charts/dspace' \
       values="${values_chain}" \
-      version_file='docs/apps/dspace.version' \
+      version_file="${SUGARKUBE_VERSION_FILE}" \
       tag="${deploy_tag}" \
       env="${env_name}"
 
@@ -1929,13 +1939,14 @@ dspace-oci-deploy-prod-subdomain tag='':
       export KUBECONFIG="${HOME}/.kube/config"
     fi
     export SUGARKUBE_ENV="prod"
+    eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell --app dspace --env prod)"
     just --justfile "{{ justfile_directory() }}/justfile" assert-cluster-env "prod" "${KUBECONFIG}" >/dev/null
 
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
       release='dspace' namespace='dspace' \
       chart='oci://ghcr.io/democratizedspace/charts/dspace' \
       values="${values_chain}" \
-      version_file='docs/apps/dspace.version' \
+      version_file="${SUGARKUBE_VERSION_FILE}" \
       tag="${deploy_tag}" \
       env="prod"
 
@@ -2002,6 +2013,7 @@ dspace-oci-redeploy env='staging' tag='':
       export KUBECONFIG="${HOME}/.kube/config"
     fi
     export SUGARKUBE_ENV="${env_name}"
+    eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell --app dspace --env "${env_name}")"
     just --justfile "{{ justfile_directory() }}/justfile" assert-cluster-env "${env_name}" "${KUBECONFIG}" >/dev/null
 
     deploy_tag="{{ tag }}"
@@ -2022,7 +2034,7 @@ dspace-oci-redeploy env='staging' tag='':
       release='dspace' namespace='dspace' \
       chart='oci://ghcr.io/democratizedspace/charts/dspace' \
       values="${values_chain}" \
-      version_file='docs/apps/dspace.version' \
+      version_file="${SUGARKUBE_VERSION_FILE}" \
       tag="${deploy_tag}" \
       env="${env_name}" default_tag="${default_tag_value}"
 
