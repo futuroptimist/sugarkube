@@ -19,7 +19,14 @@ LEGACY = [
 
 def yaml_load(path: Path):
     result = subprocess.run(
-        ["ruby", "-ryaml", "-rjson", "-e", "puts JSON.generate(YAML.load_file(ARGV[0]))", str(path)],
+        [
+            "ruby",
+            "-ryaml",
+            "-rjson",
+            "-e",
+            "puts JSON.generate(YAML.safe_load_file(ARGV[0], aliases: false))",
+            str(path),
+        ],
         check=True,
         text=True,
         capture_output=True,
@@ -132,6 +139,10 @@ def test_status_and_verify_are_read_only():
     assert "30300" in verify
     assert "release=kube-prometheus-stack" in verify
     assert "value intentionally not printed" in verify
+    assert '--timeout="${TIMEOUT}"' in verify
+    assert "desiredNumberScheduled" in verify and "numberReady" in verify
+    assert "|| true" not in verify
+    assert 'target.get("health") != "up" for target in dspace' in verify
 
 
 def test_justfile_exposes_observability_recipes():
@@ -153,3 +164,19 @@ def test_legacy_flux_longhorn_files_are_clearly_marked_inactive():
         assert "LEGACY/FUTURE ONLY" in text
         assert "Do not apply to live staging or production" in text
         assert "Do not combine both lifecycle paths" in text
+
+
+def test_legacy_flux_resources_are_absent_from_reconciliation_graph():
+    platform = (ROOT / "platform" / "observability" / "kustomization.yaml").read_text(
+        encoding="utf-8"
+    )
+    staging = (ROOT / "clusters" / "staging" / "kustomization.yaml").read_text(
+        encoding="utf-8"
+    )
+    production = (ROOT / "clusters" / "prod" / "kustomization.yaml").read_text(
+        encoding="utf-8"
+    )
+    assert "kube-prometheus-stack.yaml" not in platform
+    assert "kube-prometheus-stack-values.yaml" not in platform
+    assert "patches/kube-prometheus-stack-values.yaml" not in staging
+    assert "patches/kube-prometheus-stack-values.yaml" not in production

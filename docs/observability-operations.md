@@ -11,7 +11,7 @@ Production observability is intentionally unsupported in this slice because no p
 - Staging overrides: `clusters/staging/observability/kube-prometheus-stack.values.yaml`.
 - Helper: `scripts/observability_helm.sh` through `just observability-*` recipes.
 
-The old Flux/Longhorn files under `platform/observability/*.yaml` and `clusters/*/patches/kube-prometheus-stack-values.yaml` are inactive, unvalidated future/legacy configuration. They must not be applied to staging or production as currently written, and operators must not combine Flux and manual Helm lifecycle paths for the same `kube-prometheus-stack` release.
+The old Flux/Longhorn files under `platform/observability/*.yaml` and `clusters/*/patches/kube-prometheus-stack-values.yaml` are inactive, unvalidated future/legacy configuration. They are deliberately absent from the platform resources and cluster overlay patches, so Flux does not reconcile the manually managed release. They must not be applied to staging or production as currently written, and operators must not combine Flux and manual Helm lifecycle paths for the same `kube-prometheus-stack` release.
 
 ## Prerequisites
 
@@ -94,6 +94,7 @@ The mutating recipes never use `--reuse-values`; the committed version and both 
 - Grafana URL: `http://sugarkube3.local:30300`; the same NodePort is available through the other staging nodes.
 - Prometheus, Alertmanager, and administrative services remain ClusterIP-only.
 - No public ingress, public DNS, Cloudflare route, router forwarding, or public observability endpoint is part of this lifecycle.
+- Verification waits up to the configured Helm timeout for each workload, requires every desired node-exporter pod to be ready, and fails unless every discovered DSPACE target reports healthy.
 
 ## Troubleshooting signals
 

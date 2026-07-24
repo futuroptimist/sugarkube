@@ -57,10 +57,52 @@ render_to() {
 }
 release_exists() { helm -n "${NAMESPACE}" status "${RELEASE}" >/dev/null 2>&1; }
 render() { require_tools helm kubectl; print_resolved staging; tmp="$(mktemp -t sugarkube-observability-render.XXXXXX.yaml)"; trap 'rm -f "${tmp}"' EXIT; render_to "${tmp}"; cat "${tmp}"; }
-install_release() { require_tools helm kubectl python3; print_resolved staging; assert_context; tmp="$(mktemp -t sugarkube-observability-install.XXXXXX.yaml)"; trap 'rm -f "${tmp}"' EXIT; render_to "${tmp}"; if release_exists; then echo "ERROR: install requires missing release; ${RELEASE} already exists in ${NAMESPACE}. Use observability-upgrade." >&2; exit 4; fi; helm install "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --create-namespace --version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}" --wait --timeout "${TIMEOUT}"; }
+install_release() { require_tools helm kubectl python3; print_resolved staging; assert_context; tmp="$(mktemp -t sugarkube-observability-install.XXXXXX.yaml)"; trap 'rm -f "${tmp}"' EXIT; render_to "${tmp}"; if release_exists; then echo "ERROR: install requires the release to be absent; ${RELEASE} already exists in ${NAMESPACE}. Use observability-upgrade." >&2; exit 4; fi; helm install "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --create-namespace --version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}" --wait --timeout "${TIMEOUT}"; }
 upgrade_release() { require_tools helm kubectl python3; print_resolved staging; assert_context; tmp="$(mktemp -t sugarkube-observability-upgrade.XXXXXX.yaml)"; trap 'rm -f "${tmp}"' EXIT; render_to "${tmp}"; if ! release_exists; then echo "ERROR: upgrade requires an existing Helm release ${RELEASE} in ${NAMESPACE}. Use observability-install for a fresh cluster." >&2; exit 5; fi; helm upgrade "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}" --wait --timeout "${TIMEOUT}"; }
 status() { require_tools helm kubectl; print_resolved staging; helm -n "${NAMESPACE}" status "${RELEASE}" || true; kubectl -n "${NAMESPACE}" get deploy,statefulset,daemonset -l "app.kubernetes.io/instance=${RELEASE}"; kubectl -n "${NAMESPACE}" get prometheus,alertmanager; kubectl -n "${NAMESPACE}" get svc,pvc; kubectl get crd prometheuses.monitoring.coreos.com alertmanagers.monitoring.coreos.com servicemonitors.monitoring.coreos.com probes.monitoring.coreos.com; }
-verify() { require_tools kubectl; print_resolved staging; kubectl get crd prometheuses.monitoring.coreos.com alertmanagers.monitoring.coreos.com servicemonitors.monitoring.coreos.com probes.monitoring.coreos.com >/dev/null; kubectl -n "${NAMESPACE}" rollout status deploy/kube-prometheus-stack-operator --timeout=5s; kubectl -n "${NAMESPACE}" rollout status deploy/kube-prometheus-stack-grafana --timeout=5s; kubectl -n "${NAMESPACE}" rollout status deploy/kube-prometheus-stack-kube-state-metrics --timeout=5s; kubectl -n "${NAMESPACE}" rollout status statefulset/prometheus-kube-prometheus-stack-prometheus --timeout=5s; kubectl -n "${NAMESPACE}" rollout status statefulset/alertmanager-kube-prometheus-stack-alertmanager --timeout=5s; ready_ne="$(kubectl -n "${NAMESPACE}" get pods -l app.kubernetes.io/name=prometheus-node-exporter -o jsonpath='{range .items[*]}{.status.containerStatuses[0].ready}{"\n"}{end}' | awk '$1=="true"{c++} END{print c+0}')"; [[ "${ready_ne}" == 3 ]] || { echo "ERROR: expected exactly 3 ready node-exporter pods, got ${ready_ne}." >&2; exit 6; }; kubectl -n "${NAMESPACE}" get pvc -o jsonpath='{range .items[?(@.metadata.name=="prometheus-kube-prometheus-stack-prometheus-db-prometheus-kube-prometheus-stack-prometheus-0")]}{.status.phase}{" "}{.spec.storageClassName}{"\n"}{end}' | grep -qx 'Bound local-path'; [[ "$(kubectl -n "${NAMESPACE}" get prometheus kube-prometheus-stack-prometheus -o jsonpath='{.spec.replicas}')" == 1 ]]; [[ "$(kubectl -n "${NAMESPACE}" get alertmanager kube-prometheus-stack-alertmanager -o jsonpath='{.spec.replicas}')" == 1 ]]; [[ -z "$(kubectl -n "${NAMESPACE}" get ingress -l app.kubernetes.io/name=grafana -o name 2>/dev/null)" ]]; [[ "$(kubectl -n "${NAMESPACE}" get svc kube-prometheus-stack-grafana -o jsonpath='{.spec.ports[?(@.port==80)].nodePort}')" == 30300 ]]; kubectl -n dspace get servicemonitor -l release=kube-prometheus-stack >/dev/null; secret_name="$(kubectl -n dspace get servicemonitor -l release=kube-prometheus-stack -o jsonpath='{.items[0].spec.endpoints[0].bearerTokenSecret.name}')"; [[ -n "${secret_name}" ]]; kubectl -n dspace get secret "${secret_name}" >/dev/null; echo "DSPACE ServiceMonitor secret reference exists (value intentionally not printed)."; if kubectl -n "${NAMESPACE}" get svc kube-prometheus-stack-prometheus >/dev/null 2>&1; then targets_json="$(kubectl -n "${NAMESPACE}" exec statefulset/prometheus-kube-prometheus-stack-prometheus -- wget -qO- "http://127.0.0.1:9090/api/v1/targets?state=active" 2>/dev/null || true)"; if [[ -n "${targets_json}" ]]; then grep -q "dspace" <<<"${targets_json}" && grep -q '"health":"up"' <<<"${targets_json}" || { echo "ERROR: Prometheus was reachable but healthy DSPACE targets were not confirmed." >&2; exit 7; }; echo "DSPACE Prometheus targets confirmed healthy without printing Secret values."; else echo "WARNING: Prometheus service exists but the local read-only targets query was not reachable; skipping DSPACE target health confirmation." >&2; fi; fi; echo "Grafana LAN URL: ${GRAFANA_URL} (same NodePort is available through the other staging nodes)"; }
+verify() {
+  require_tools kubectl python3
+  print_resolved staging
+  kubectl get crd prometheuses.monitoring.coreos.com alertmanagers.monitoring.coreos.com servicemonitors.monitoring.coreos.com probes.monitoring.coreos.com >/dev/null
+  for workload in \
+    deploy/kube-prometheus-stack-operator \
+    deploy/kube-prometheus-stack-grafana \
+    deploy/kube-prometheus-stack-kube-state-metrics \
+    statefulset/prometheus-kube-prometheus-stack-prometheus \
+    statefulset/alertmanager-kube-prometheus-stack-alertmanager; do
+    kubectl -n "${NAMESPACE}" rollout status "${workload}" --timeout="${TIMEOUT}"
+  done
+
+  read -r desired_ne ready_ne < <(kubectl -n "${NAMESPACE}" get daemonset kube-prometheus-stack-prometheus-node-exporter -o jsonpath='{.status.desiredNumberScheduled}{" "}{.status.numberReady}{"\n"}')
+  [[ "${desired_ne}" -gt 0 && "${ready_ne}" == "${desired_ne}" ]] || {
+    echo "ERROR: node-exporter daemonset has ${ready_ne:-0}/${desired_ne:-0} ready pods." >&2
+    exit 6
+  }
+  kubectl -n "${NAMESPACE}" get pvc -o jsonpath='{range .items[?(@.metadata.name=="prometheus-kube-prometheus-stack-prometheus-db-prometheus-kube-prometheus-stack-prometheus-0")]}{.status.phase}{" "}{.spec.storageClassName}{"\n"}{end}' | grep -qx 'Bound local-path'
+  [[ "$(kubectl -n "${NAMESPACE}" get prometheus kube-prometheus-stack-prometheus -o jsonpath='{.spec.replicas}')" == 1 ]]
+  [[ "$(kubectl -n "${NAMESPACE}" get alertmanager kube-prometheus-stack-alertmanager -o jsonpath='{.spec.replicas}')" == 1 ]]
+  [[ -z "$(kubectl -n "${NAMESPACE}" get ingress -l app.kubernetes.io/name=grafana -o name 2>/dev/null)" ]]
+  [[ "$(kubectl -n "${NAMESPACE}" get svc kube-prometheus-stack-grafana -o jsonpath='{.spec.ports[?(@.port==80)].nodePort}')" == 30300 ]]
+  kubectl -n dspace get servicemonitor -l release=kube-prometheus-stack >/dev/null
+  secret_name="$(kubectl -n dspace get servicemonitor -l release=kube-prometheus-stack -o jsonpath='{.items[0].spec.endpoints[0].bearerTokenSecret.name}')"
+  [[ -n "${secret_name}" ]]
+  kubectl -n dspace get secret "${secret_name}" >/dev/null
+  echo "DSPACE ServiceMonitor secret reference exists (value intentionally not printed)."
+
+  kubectl -n "${NAMESPACE}" get svc kube-prometheus-stack-prometheus >/dev/null
+  targets_json="$(kubectl -n "${NAMESPACE}" exec statefulset/prometheus-kube-prometheus-stack-prometheus -- wget -qO- "http://127.0.0.1:9090/api/v1/targets?state=active")" || {
+    echo "ERROR: unable to query Prometheus targets; DSPACE health was not verified." >&2
+    exit 7
+  }
+  python3 -c 'import json, sys
+data = json.load(sys.stdin)
+targets = data.get("data", {}).get("activeTargets", [])
+dspace = [target for target in targets if "dspace" in json.dumps(target).lower()]
+if not dspace or any(target.get("health") != "up" for target in dspace):
+    raise SystemExit("ERROR: one or more DSPACE Prometheus targets are missing or unhealthy.")' <<<"${targets_json}"
+  echo "DSPACE Prometheus targets confirmed healthy without printing Secret values."
+  echo "Grafana LAN URL: ${GRAFANA_URL} (same NodePort is available through the other staging nodes)"
+}
 
 cmd="${1:-}"; shift || true; [[ -n "${cmd}" ]] || { usage; exit 2; }
 env_arg="${1:-}"; env_name="$(normalize_env "${env_arg}")"
