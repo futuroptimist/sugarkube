@@ -1358,7 +1358,7 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
             echo "ERROR: resolved chart version file for env=${requested_env} is empty: ${version_file}" >&2
             exit 2
         fi
-        if ! [[ "${chart_version}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z][0-9A-Za-z.+-]*)?$ ]]; then
+        if ! [[ "${chart_version}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?(\+[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
             echo "ERROR: resolved chart version file for env=${requested_env} contains malformed version '${chart_version}' at ${version_file}; expected semver like 3.1.0." >&2
             exit 2
         fi
@@ -1881,7 +1881,8 @@ dspace-oci-deploy env='staging' tag='':
       release='dspace' namespace='dspace' \
       chart='oci://ghcr.io/democratizedspace/charts/dspace' \
       values="${values_chain}" \
-      version_file="${SUGARKUBE_VERSION_FILE}" \
+      version="${SUGARKUBE_VERSION:-}" \
+      version_file="${SUGARKUBE_VERSION_FILE:-}" \
       tag="${deploy_tag}" \
       env="${env_name}"
 
@@ -1946,7 +1947,8 @@ dspace-oci-deploy-prod-subdomain tag='':
       release='dspace' namespace='dspace' \
       chart='oci://ghcr.io/democratizedspace/charts/dspace' \
       values="${values_chain}" \
-      version_file="${SUGARKUBE_VERSION_FILE}" \
+      version="${SUGARKUBE_VERSION:-}" \
+      version_file="${SUGARKUBE_VERSION_FILE:-}" \
       tag="${deploy_tag}" \
       env="prod"
 
@@ -2034,7 +2036,8 @@ dspace-oci-redeploy env='staging' tag='':
       release='dspace' namespace='dspace' \
       chart='oci://ghcr.io/democratizedspace/charts/dspace' \
       values="${values_chain}" \
-      version_file="${SUGARKUBE_VERSION_FILE}" \
+      version="${SUGARKUBE_VERSION:-}" \
+      version_file="${SUGARKUBE_VERSION_FILE:-}" \
       tag="${deploy_tag}" \
       env="${env_name}" default_tag="${default_tag_value}"
 

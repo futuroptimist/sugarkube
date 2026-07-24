@@ -1264,6 +1264,44 @@ def test_app_deploy_rejects_mutable_tag_before_helm(
 
 
 @pytest.mark.usefixtures("ensure_just_available")
+def test_dspace_oci_deploy_wrapper_propagates_inline_chart_pin(
+    tmp_path: Path, generic_app_stub_env: dict[str, str]
+) -> None:
+    config_dir = tmp_path / "app-config"
+    config_dir.mkdir()
+    (config_dir / "dspace.env").write_text(
+        "\n".join(
+            [
+                "SUGARKUBE_APP=dspace",
+                "SUGARKUBE_RELEASE=dspace",
+                "SUGARKUBE_NAMESPACE=dspace",
+                "SUGARKUBE_CHART=oci://ghcr.io/democratizedspace/charts/dspace",
+                "SUGARKUBE_VERSION=3.1.0-rc.1+build.5",
+                "SUGARKUBE_VALUES_DEV=docs/examples/dspace.values.dev.yaml",
+                "SUGARKUBE_VALUES_STAGING="
+                "docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml",
+                "SUGARKUBE_VALUES_PROD="
+                "docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_APP_CONFIG_DIR"] = str(config_dir)
+
+    result = _run_just(["dspace-oci-deploy", "env=staging", "tag=main-deadbee"], env)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    helm_log = Path(env["HELM_LOG"]).read_text(encoding="utf-8")
+    assert (
+        "show chart oci://ghcr.io/democratizedspace/charts/dspace "
+        "--version 3.1.0-rc.1+build.5"
+    ) in helm_log
+    assert "--version ${SUGARKUBE_VERSION_FILE}" not in helm_log
+
+
+@pytest.mark.usefixtures("ensure_just_available")
 @pytest.mark.parametrize(
     ("recipe", "app"),
     [
@@ -2497,6 +2535,30 @@ def test_direct_helm_oci_helper_mismatch_fails_before_any_helm(
 
 
 @pytest.mark.usefixtures("ensure_just_available")
+def test_direct_helm_oci_helper_accepts_inline_semver_with_prerelease_and_build(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    result = _run_just(
+        [
+            "helm-oci-install",
+            "release=tokenplace",
+            "namespace=tokenplace",
+            "chart=oci://ghcr.io/futuroptimist/charts/tokenplace",
+            "version=1.2.3-rc.1+build.5",
+            "env=staging",
+        ],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
+    assert (
+        "show chart oci://ghcr.io/futuroptimist/charts/tokenplace "
+        "--version 1.2.3-rc.1+build.5"
+    ) in helm_log
+    assert "upgrade tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace" in helm_log
+
+
 def test_direct_helm_oci_helper_matching_env_succeeds(
     generic_app_stub_env: dict[str, str],
 ) -> None:
