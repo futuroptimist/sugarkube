@@ -2622,6 +2622,7 @@ def test_tokenplace_rollback_sugarkube_env_invocation_remains_guarded(
     helm_log_path = Path(env["HELM_LOG"])
     assert not helm_log_path.exists() or helm_log_path.read_text(encoding="utf-8") == ""
 
+
 @pytest.mark.usefixtures("ensure_just_available")
 def test_app_deploy_guard_mismatch_fails_before_helm(generic_app_stub_env: dict[str, str]) -> None:
     env = generic_app_stub_env.copy()
@@ -2666,3 +2667,46 @@ def test_dspace_promote_prod_guard_mismatch_fails_before_helm(
     assert "requested env=prod" in result.stderr
     helm_log_path = Path(env["HELM_LOG"])
     assert not helm_log_path.exists() or helm_log_path.read_text(encoding="utf-8") == ""
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_dspace_wrappers_use_environment_specific_chart_pins(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    result = _run_just(
+        ["dspace-oci-deploy", "env=staging", "tag=main-deadbee"],
+        generic_app_stub_env,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
+    assert "--version 3.1.0" in helm_log
+    assert "--version 3.0.1" not in helm_log
+
+    Path(generic_app_stub_env["HELM_LOG"]).write_text("", encoding="utf-8")
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_NODE_ENV"] = "prod"
+    result = _run_just(["dspace-oci-promote-prod"], env)
+    assert result.returncode == 0, result.stderr + result.stdout
+    helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
+    assert "--version 3.0.1" in helm_log
+    assert "--set image.tag=main-1a31a56" in helm_log
+    assert "--version 3.1.0" not in helm_log
+
+
+def test_dspace_values_keep_metrics_staging_only() -> None:
+    staging = (REPO_ROOT / "docs/examples/dspace.values.staging.yaml").read_text(
+        encoding="utf-8"
+    )
+    prod = (REPO_ROOT / "docs/examples/dspace.values.prod.yaml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "existingSecret: dspace-staging-metrics-token" in staging
+    assert "secretKey: token" in staging
+    assert "serviceMonitor:" in staging
+    assert "release: kube-prometheus-stack" in staging
+    assert "cluster: sugarkube-int" in staging
+    assert "dspace-staging-metrics-token" not in prod
+    assert "serviceMonitor:" not in prod
+    assert "metrics:" not in prod
+    assert "=" not in staging

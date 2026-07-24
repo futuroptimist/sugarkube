@@ -165,7 +165,10 @@ Required keys for the generic recipes:
 | `SUGARKUBE_RELEASE` | Helm release name. |
 | `SUGARKUBE_NAMESPACE` | Kubernetes namespace. |
 | `SUGARKUBE_CHART` | Helm OCI chart reference. |
-| `SUGARKUBE_VERSION_FILE` | Chart version pin file. |
+| `SUGARKUBE_VERSION_FILE` | Shared chart version pin file and fallback when no environment-specific pin is configured. |
+| `SUGARKUBE_VERSION_FILE_DEV` | Optional `env=dev` chart version pin file; overrides `SUGARKUBE_VERSION_FILE` only for dev. |
+| `SUGARKUBE_VERSION_FILE_STAGING` | Optional `env=staging` chart version pin file; overrides `SUGARKUBE_VERSION_FILE` only for staging. |
+| `SUGARKUBE_VERSION_FILE_PROD` | Optional `env=prod` chart version pin file; overrides `SUGARKUBE_VERSION_FILE` only for production. |
 | `SUGARKUBE_PROD_TAG_FILE` | Production-approved tag pin file. |
 | `SUGARKUBE_VALUES_DEV` | Values chain for `env=dev`. |
 | `SUGARKUBE_VALUES_STAGING` | Values chain for `env=staging`. |
@@ -173,6 +176,11 @@ Required keys for the generic recipes:
 | `SUGARKUBE_STATUS_HOST_KEY` | Dotted Helm values key used to discover the public host. |
 | `SUGARKUBE_VERIFY_PATHS` | Comma-separated HTTP paths that `just app-verify` executes after deploy. |
 | `SUGARKUBE_DEBUG_SELECTOR` | Kubernetes label selector for app pod logs/debugging. |
+
+
+Chart pin resolution is environment-aware and backward-compatible: `just app-config` and the generic deploy/redeploy/promote recipes select `SUGARKUBE_VERSION_FILE_${ENV}` when present, otherwise they fall back to `SUGARKUBE_VERSION_FILE`. The selected file must exist, contain a nonempty SemVer chart version, and validate before Helm is invoked, so a staging command cannot silently use a production-only DSPACE pin (or vice versa).
+
+For DSPACE specifically, the committed example config keeps the shared default at `docs/apps/dspace.version` while pinning staging to `docs/apps/dspace.staging.version` (`3.1.0`) and production to `docs/apps/dspace.prod.version` (`3.0.1`). This persists the safe configuration split only; it does not deploy either environment.
 
 Example local setup:
 

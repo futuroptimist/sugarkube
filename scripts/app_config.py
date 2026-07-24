@@ -32,6 +32,9 @@ ALLOWED_KEYS = {
     "SUGARKUBE_CHART",
     "SUGARKUBE_VERSION",
     "SUGARKUBE_VERSION_FILE",
+    "SUGARKUBE_VERSION_FILE_DEV",
+    "SUGARKUBE_VERSION_FILE_STAGING",
+    "SUGARKUBE_VERSION_FILE_PROD",
     "SUGARKUBE_PROD_TAG_FILE",
     "SUGARKUBE_VALUES_DEV",
     "SUGARKUBE_VALUES_STAGING",
@@ -154,6 +157,36 @@ def parse_dotenv(path: Path) -> dict[str, str]:
     return data
 
 
+def resolve_version_file(data: dict[str, str], env: str, config_path: Path) -> str:
+    env_key = f"SUGARKUBE_VERSION_FILE_{env.upper()}"
+    selected = data.get(env_key) or data.get("SUGARKUBE_VERSION_FILE", "")
+    if not selected:
+        return ""
+    path = Path(selected)
+    if not path.is_absolute():
+        path = Path(__file__).resolve().parents[1] / path
+    if not path.is_file():
+        raise AppConfigError(
+            f"{config_path}: selected chart version file for env={env} does not exist: {selected}"
+        )
+    version = ""
+    for line in path.read_text(encoding="utf-8").splitlines():
+        value = line.split("#", 1)[0].strip()
+        if value:
+            version = value
+            break
+    if not version:
+        raise AppConfigError(
+            f"{config_path}: selected chart version file for env={env} is empty: {selected}"
+        )
+    if not SEMVER_RE.fullmatch(version):
+        raise AppConfigError(
+            f"{config_path}: selected chart version file for env={env} is malformed: "
+            f"{selected} contains {version!r}; expected a semver chart version such as 3.1.0."
+        )
+    return selected
+
+
 def load_config(app: str, env: str, explicit: str | None = None) -> dict[str, str]:
     app = validate_app_name(app)
     env = normalize_env(env)
@@ -171,7 +204,8 @@ def load_config(app: str, env: str, explicit: str | None = None) -> dict[str, st
         raise AppConfigError(
             f"{config_path}: SUGARKUBE_APP={data['SUGARKUBE_APP']!r} does not match app={app!r}."
         )
-    if not (data.get("SUGARKUBE_VERSION") or data.get("SUGARKUBE_VERSION_FILE")):
+    resolved_version_file = resolve_version_file(data, env, config_path)
+    if not (data.get("SUGARKUBE_VERSION") or resolved_version_file):
         raise AppConfigError(
             f"{config_path}: missing chart version pin; set SUGARKUBE_VERSION "
             "or SUGARKUBE_VERSION_FILE."
@@ -181,6 +215,8 @@ def load_config(app: str, env: str, explicit: str | None = None) -> dict[str, st
     if not values:
         raise AppConfigError(f"{config_path}: missing {values_key} for env={env}.")
     resolved = dict(data)
+    if resolved_version_file:
+        resolved["SUGARKUBE_VERSION_FILE"] = resolved_version_file
     resolved["SUGARKUBE_ENV"] = env
     resolved["SUGARKUBE_VALUES"] = values
     resolved["SUGARKUBE_CONFIG_PATH"] = str(config_path)
@@ -221,6 +257,9 @@ def shell_emit(config: dict[str, str]) -> str:
         "SUGARKUBE_VALUES",
         "SUGARKUBE_VERSION",
         "SUGARKUBE_VERSION_FILE",
+        "SUGARKUBE_VERSION_FILE_DEV",
+        "SUGARKUBE_VERSION_FILE_STAGING",
+        "SUGARKUBE_VERSION_FILE_PROD",
         "SUGARKUBE_PROD_TAG_FILE",
         "SUGARKUBE_STATUS_HOST_KEY",
         "SUGARKUBE_VERIFY_PATHS",
