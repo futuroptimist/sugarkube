@@ -2,7 +2,7 @@
 
 This is the canonical, implementation-ready design for Sugarkube observability across the Raspberry Pi k3s platform and the four flagship applications: DSPACE, token.place, danielsmith.io, and jobbot3000. It reconciles the earlier implementation prompt in [`docs/prompts/codex/observability.md`](./prompts/codex/observability.md): that prompt is useful bootstrap context, but this document is the source of truth for phased productionization, ownership, privacy, release gates, and current-state claims.
 
-This document is the design contract. The repository now includes Flux-managed kube-prometheus-stack, Loki/Promtail, and the first blackbox exporter/Probe manifests, but those source files are not live deployment evidence until a cluster is reconciled and verified. See [`docs/observability-blackbox.md`](./observability-blackbox.md) for the runtime blackbox slice.
+This document is the design contract. The current live staging kube-prometheus-stack lifecycle is the guarded, non-Flux Helm flow in [`docs/operations/observability-helm-staging.md`](./operations/observability-helm-staging.md). The repository also contains older Flux/Longhorn kube-prometheus-stack, Loki/Promtail, and blackbox exporter/Probe manifests; those files are inactive, unvalidated future/legacy configuration and must not be applied to staging or production as currently written. Operators must not combine both lifecycle paths for the same release. See [`docs/observability-blackbox.md`](./observability-blackbox.md) for the runtime blackbox slice.
 
 ## Audit scope and evidence
 
@@ -145,7 +145,7 @@ graph TD
 
 ### Retention and resource budget
 
-- Start with one Prometheus replica, 15 days retention, and a small persistent volume; the existing values use `15d` and `50Gi` as a starting point ([values](../platform/observability/kube-prometheus-stack-values.yaml)).
+- For current live staging, use one Prometheus replica, `7d` retention, `15GB` retention size, and a `20Gi` `local-path` persistent volume via the non-Flux Helm values chain. The older Flux/Longhorn values use different storage and retention assumptions and are not validated for live staging or production ([runbook](./operations/observability-helm-staging.md)).
 - Keep default scrape intervals at 30-60 seconds for application metrics and 60 seconds for low-change blackbox/TLS probes unless staging data proves tighter intervals are necessary.
 - Prefer fewer, high-value metrics over broad per-request dimensions.
 - Review Prometheus memory, WAL growth, and PV usage after staging soak before production.

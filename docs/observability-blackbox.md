@@ -1,6 +1,6 @@
 # Public blackbox monitoring
 
-Sugarkube now defines the first Flux-managed runtime slice for public endpoint monitoring. The stack stays internal: Prometheus, Grafana, Alertmanager, and the blackbox exporter are ClusterIP-only resources in `monitoring`; no public ingress is added.
+Sugarkube defines a Flux-era runtime slice for public endpoint monitoring, but the current live staging kube-prometheus-stack is managed by the guarded non-Flux Helm flow in [`docs/operations/observability-helm-staging.md`](./operations/observability-helm-staging.md). Do not apply or reconcile the legacy Flux/Longhorn observability files against staging or production as currently written, and do not combine Flux and non-Flux lifecycle paths for the same release. The stack stays internal: Prometheus and Alertmanager are ClusterIP-only, Grafana is LAN-only on NodePort 30300, and no public ingress is added.
 
 ## Architecture
 

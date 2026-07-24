@@ -30,6 +30,7 @@ and supporting services stay healthy.
   fleet dashboards.
 
 ## Operations Playbooks
+- [operations/observability-helm-staging.md](../operations/observability-helm-staging.md) — guarded non-Flux Helm lifecycle for the live staging kube-prometheus-stack.
 - [pi_carrier_launch_playbook.md](../pi_carrier_launch_playbook.md) — end-to-end
   rollout covering hardware prep through k3s readiness.
 - [Pi Support Bundles](../pi_support_bundles.md) — collect evidence for

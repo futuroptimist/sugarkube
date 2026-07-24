@@ -1,3 +1,8 @@
+# NOTE: Legacy/future Flux + Longhorn configuration only. The current live staging
+# kube-prometheus-stack lifecycle is the guarded non-Flux Helm flow documented in
+# docs/operations/observability-helm-staging.md. Do not apply this file to staging
+# or production as currently written, and never combine it with the non-Flux Helm
+# lifecycle for the same release.
 apiVersion: v1
 kind: ConfigMap
 metadata:

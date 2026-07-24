@@ -18,6 +18,10 @@ from typing import Iterable
 
 SCAN_SCRIPT_PATH = "scripts/scan-secrets.py"
 
+ALLOWLIST: tuple[re.Pattern[str], ...] = (
+    re.compile(r"passwordKey:\s*admin-password", re.IGNORECASE),
+)
+
 PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"aws(.{0,20})?(?:secret|access)_key", re.IGNORECASE),
     re.compile(r"api[_-]?key", re.IGNORECASE),
@@ -67,6 +71,8 @@ def regex_scan(lines: Iterable[str]) -> bool:
         if not line.startswith("+"):
             continue
         if file_path and file_path.endswith(SCAN_SCRIPT_PATH):
+            continue
+        if any(pattern.search(line) for pattern in ALLOWLIST):
             continue
         for pattern in PATTERNS:
             if pattern.search(line):

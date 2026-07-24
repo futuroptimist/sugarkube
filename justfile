@@ -3277,3 +3277,23 @@ platform-bootstrap env='dev':
         env_name="staging"
     fi
     just --justfile "{{ justfile_directory() }}/justfile" flux-bootstrap "${env_name}"
+
+# Render the pinned non-Flux staging kube-prometheus-stack chart without applying it.
+observability-render env='':
+    scripts/observability_helm.sh render {{ quote(env) }}
+
+# Install the pinned non-Flux staging kube-prometheus-stack release; fails if it already exists.
+observability-install env='':
+    scripts/observability_helm.sh install {{ quote(env) }}
+
+# Upgrade the pinned non-Flux staging kube-prometheus-stack release; fails if it is absent.
+observability-upgrade env='':
+    scripts/observability_helm.sh upgrade {{ quote(env) }}
+
+# Read-only staging observability status summary.
+observability-status env='':
+    scripts/observability_helm.sh status {{ quote(env) }}
+
+# Read-only staging observability verification.
+observability-verify env='':
+    scripts/observability_helm.sh verify {{ quote(env) }}
