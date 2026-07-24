@@ -1833,6 +1833,8 @@ dspace-oci-deploy env='staging' tag='':
         ;;
     esac
 
+    eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell --app dspace --env "${env_name}")"
+
     deploy_tag="$(echo "{{ tag }}" | xargs)"
     if [ -z "${deploy_tag}" ]; then
       echo "Set tag=<immutable-tag> (for example main-<shortsha> or 3.1.0) for dspace immutable deploys." >&2
@@ -1871,7 +1873,7 @@ dspace-oci-deploy env='staging' tag='':
       release='dspace' namespace='dspace' \
       chart='oci://ghcr.io/democratizedspace/charts/dspace' \
       values="${values_chain}" \
-      version_file='docs/apps/dspace.version' \
+      version_file="${SUGARKUBE_VERSION_FILE}" \
       tag="${deploy_tag}" \
       env="${env_name}"
 
@@ -1905,6 +1907,8 @@ dspace-oci-deploy-prod-subdomain tag='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
+    eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell --app dspace --env prod)"
+
     deploy_tag="$(echo "{{ tag }}" | xargs)"
     if [ -z "${deploy_tag}" ]; then
       echo "Set tag=<immutable-tag> (for example main-<shortsha> or 3.1.0) for prod subdomain deploys." >&2
@@ -1935,7 +1939,7 @@ dspace-oci-deploy-prod-subdomain tag='':
       release='dspace' namespace='dspace' \
       chart='oci://ghcr.io/democratizedspace/charts/dspace' \
       values="${values_chain}" \
-      version_file='docs/apps/dspace.version' \
+      version_file="${SUGARKUBE_VERSION_FILE}" \
       tag="${deploy_tag}" \
       env="prod"
 
@@ -1983,6 +1987,8 @@ dspace-oci-redeploy env='staging' tag='':
       env_name="staging"
     fi
 
+    eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell --app dspace --env "${env_name}")"
+
     read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
 
     overlay="docs/examples/dspace.values.${env_name}.yaml"
@@ -2022,7 +2028,7 @@ dspace-oci-redeploy env='staging' tag='':
       release='dspace' namespace='dspace' \
       chart='oci://ghcr.io/democratizedspace/charts/dspace' \
       values="${values_chain}" \
-      version_file='docs/apps/dspace.version' \
+      version_file="${SUGARKUBE_VERSION_FILE}" \
       tag="${deploy_tag}" \
       env="${env_name}" default_tag="${default_tag_value}"
 
