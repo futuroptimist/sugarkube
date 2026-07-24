@@ -1,0 +1,68 @@
+# Common non-Flux kube-prometheus-stack values for Sugarkube.
+# Canonical live staging lifecycle: scripts/observability_helm.sh via just observability-*.
+# Do not combine these Helm values with the legacy Flux/Longhorn manifests in platform/observability/*.yaml.
+fullnameOverride: kube-prometheus-stack
+prometheus:
+  service:
+    type: ClusterIP
+  prometheusSpec:
+    replicas: 1
+    retention: 7d
+    retentionSize: 15GB
+    enableAdminAPI: false
+    serviceMonitorSelector:
+      matchLabels:
+        release: kube-prometheus-stack
+    podMonitorSelector:
+      matchLabels:
+        release: kube-prometheus-stack
+    probeSelector:
+      matchLabels:
+        release: kube-prometheus-stack
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        memory: 2Gi
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-path
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 20Gi
+grafana:
+  admin:
+    existingSecret: grafana-admin-credentials
+    userKey: admin-user
+    passwordKey: admin-password
+  persistence:
+    enabled: false
+  ingress:
+    enabled: false
+  service:
+    type: NodePort
+    nodePort: 30300
+  serviceMonitor:
+    selfMonitor: true
+alertmanager:
+  service:
+    type: ClusterIP
+  alertmanagerSpec:
+    replicas: 1
+  config:
+    route:
+      receiver: "null"
+    receivers:
+      - name: "null"
+kubeEtcd:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
