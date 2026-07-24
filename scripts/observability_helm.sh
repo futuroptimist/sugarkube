@@ -118,12 +118,12 @@ if data.get("status") != "success":
     raise SystemExit("ERROR: Prometheus targets query was unsuccessful.")
 targets = data.get("data", {}).get("activeTargets", [])
 dspace = [target for target in targets if target.get("labels", {}).get("app") == "dspace" and target.get("labels", {}).get("namespace") == "dspace"]
-if not any(target.get("health") == "up" for target in dspace):
-    raise SystemExit("ERROR: a healthy DSPACE Prometheus target is missing.")' <<<"${targets_json}"
+if not dspace or not all(target.get("health") == "up" for target in dspace):
+    raise SystemExit("ERROR: every discovered DSPACE Prometheus target must be healthy.")' <<<"${targets_json}"
   echo "DSPACE Prometheus targets confirmed healthy without printing Secret values."
   echo "Grafana LAN URL: ${GRAFANA_URL} (same NodePort is available through the other staging nodes)"
 }
 
 cmd="${1:-}"; shift || true; [[ -n "${cmd}" ]] || { usage; exit 2; }
-env_arg="${1:-}"; env_name="$(normalize_env "${env_arg}")"
+env_arg="${1:-}"; normalize_env "${env_arg}" >/dev/null
 case "${cmd}" in render) render ;; install) install_release ;; upgrade) upgrade_release ;; status) status ;; verify) verify ;; *) usage; exit 2 ;; esac

@@ -215,7 +215,15 @@ case "$*" in
   *"get servicemonitor dspace"*"metadata.labels.release"*) [ "$KUBECTL_MODE" = wrong-release ] && echo wrong || echo kube-prometheus-stack ;;
   *"get servicemonitor dspace"*"bearerTokenSecret.name"*) [ "$KUBECTL_MODE" != missing-secret-ref ] && echo dspace-token ;;
   *"get secret dspace-token -o name"*) [ "$KUBECTL_MODE" != missing-secret ] || exit 44; echo secret/dspace-token ;;
-  *"get --raw "*) [ "$KUBECTL_MODE" != query-fail ] || exit 45; [ "$KUBECTL_MODE" = unhealthy ] && health=down || health=up; printf '{"status":"success","data":{"activeTargets":[{"labels":{"app":"dspace","namespace":"dspace"},"health":"%s"}]}}\n' "$health" ;;
+  *"get --raw "*)
+    [ "$KUBECTL_MODE" != query-fail ] || exit 45
+    if [ "$KUBECTL_MODE" = mixed-targets ]; then
+      printf '%s\n' '{"status":"success","data":{"activeTargets":[{"labels":{"app":"dspace","namespace":"dspace"},"health":"up"},{"labels":{"app":"dspace","namespace":"dspace"},"health":"down"}]}}'
+    else
+      [ "$KUBECTL_MODE" = unhealthy ] && health=down || health=up
+      printf '{"status":"success","data":{"activeTargets":[{"labels":{"app":"dspace","namespace":"dspace"},"health":"%s"}]}}\n' "$health"
+    fi
+    ;;
   *) exit 0 ;;
 esac
 """,
@@ -289,6 +297,14 @@ def test_status_requires_staging_identity(tmp_path):
 def test_verify_exact_three_nodes_secret_reference_and_target_health(tmp_path):
     healthy, audit = run_helper(tmp_path / "healthy", "verify")
     assert healthy.returncode == 0 and "get --raw /api/v1/namespaces/monitoring/services/http:" in audit
-    for mode in ("two-nodes", "wrong-release", "missing-secret-ref", "missing-secret", "query-fail", "unhealthy"):
+    for mode in (
+        "two-nodes",
+        "wrong-release",
+        "missing-secret-ref",
+        "missing-secret",
+        "query-fail",
+        "unhealthy",
+        "mixed-targets",
+    ):
         result, _ = run_helper(tmp_path / mode, "verify", kubectl_mode=mode)
         assert result.returncode != 0, mode
