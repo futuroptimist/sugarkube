@@ -32,6 +32,9 @@ ALLOWED_KEYS = {
     "SUGARKUBE_CHART",
     "SUGARKUBE_VERSION",
     "SUGARKUBE_VERSION_FILE",
+    "SUGARKUBE_VERSION_FILE_DEV",
+    "SUGARKUBE_VERSION_FILE_STAGING",
+    "SUGARKUBE_VERSION_FILE_PROD",
     "SUGARKUBE_PROD_TAG_FILE",
     "SUGARKUBE_VALUES_DEV",
     "SUGARKUBE_VALUES_STAGING",
@@ -56,6 +59,42 @@ BRANCH_SHA_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*-[0-9a-f]{7,}$", re.IGNORECASE
 SEMVER_RE = re.compile(
     r"^v?[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?(?:\+[0-9A-Za-z][0-9A-Za-z.-]*)?$"
 )
+
+
+def resolve_repo_path(path: str) -> Path:
+    candidate = Path(path)
+    return candidate if candidate.is_absolute() else Path(__file__).resolve().parents[1] / candidate
+
+
+def read_chart_version_pin(path: str, env: str) -> str:
+    display_path = path or "<empty>"
+    if not path.strip():
+        raise AppConfigError(f"env={env}: chart version file path must not be empty.")
+    resolved_path = resolve_repo_path(path)
+    if not resolved_path.is_file():
+        raise AppConfigError(
+            f"env={env}: chart version file not found: {display_path}. "
+            "Create the file or update the app config version-file setting."
+        )
+    for line in resolved_path.read_text(encoding="utf-8").splitlines():
+        version = line.split("#", 1)[0].strip()
+        if not version:
+            continue
+        if not SEMVER_RE.fullmatch(version):
+            raise AppConfigError(
+                f"env={env}: chart version file {display_path} contains malformed version "
+                f"{version!r}. Use semver such as 3.1.0."
+            )
+        return version
+    raise AppConfigError(
+        f"env={env}: chart version file {display_path} is empty. "
+        "Add a semver chart version such as 3.1.0."
+    )
+
+
+def select_version_file(data: dict[str, str], env: str) -> str:
+    env_key = f"SUGARKUBE_VERSION_FILE_{env.upper()}"
+    return data.get(env_key) or data.get("SUGARKUBE_VERSION_FILE", "")
 
 
 class AppConfigError(ValueError):
@@ -171,10 +210,11 @@ def load_config(app: str, env: str, explicit: str | None = None) -> dict[str, st
         raise AppConfigError(
             f"{config_path}: SUGARKUBE_APP={data['SUGARKUBE_APP']!r} does not match app={app!r}."
         )
-    if not (data.get("SUGARKUBE_VERSION") or data.get("SUGARKUBE_VERSION_FILE")):
+    selected_version_file = select_version_file(data, env)
+    if not (data.get("SUGARKUBE_VERSION") or selected_version_file):
         raise AppConfigError(
-            f"{config_path}: missing chart version pin; set SUGARKUBE_VERSION "
-            "or SUGARKUBE_VERSION_FILE."
+            f"{config_path}: missing chart version pin for env={env}; set SUGARKUBE_VERSION, "
+            "SUGARKUBE_VERSION_FILE, or SUGARKUBE_VERSION_FILE_<ENV>."
         )
     values_key = f"SUGARKUBE_VALUES_{env.upper()}"
     values = data.get(values_key, "")
@@ -183,6 +223,18 @@ def load_config(app: str, env: str, explicit: str | None = None) -> dict[str, st
     resolved = dict(data)
     resolved["SUGARKUBE_ENV"] = env
     resolved["SUGARKUBE_VALUES"] = values
+    if selected_version_file:
+        resolved["SUGARKUBE_VERSION_FILE"] = selected_version_file
+        if not resolved.get("SUGARKUBE_VERSION"):
+            resolved["SUGARKUBE_VERSION"] = read_chart_version_pin(selected_version_file, env)
+    elif resolved.get("SUGARKUBE_VERSION") and not SEMVER_RE.fullmatch(
+        resolved["SUGARKUBE_VERSION"]
+    ):
+        version = resolved["SUGARKUBE_VERSION"]
+        raise AppConfigError(
+            f"{config_path}: SUGARKUBE_VERSION for env={env} is malformed: {version!r}. "
+            "Use semver such as 3.1.0."
+        )
     resolved["SUGARKUBE_CONFIG_PATH"] = str(config_path)
     resolved.setdefault("SUGARKUBE_STATUS_HOST_KEY", "ingress.host")
     resolved.setdefault("SUGARKUBE_VERIFY_PATHS", "/")
@@ -221,6 +273,9 @@ def shell_emit(config: dict[str, str]) -> str:
         "SUGARKUBE_VALUES",
         "SUGARKUBE_VERSION",
         "SUGARKUBE_VERSION_FILE",
+        "SUGARKUBE_VERSION_FILE_DEV",
+        "SUGARKUBE_VERSION_FILE_STAGING",
+        "SUGARKUBE_VERSION_FILE_PROD",
         "SUGARKUBE_PROD_TAG_FILE",
         "SUGARKUBE_STATUS_HOST_KEY",
         "SUGARKUBE_VERIFY_PATHS",

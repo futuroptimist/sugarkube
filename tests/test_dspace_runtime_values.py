@@ -89,3 +89,40 @@ def test_dspace_values_chains_resolve_expected_deployment_overlays() -> None:
     for env, expected_values in EXPECTED_VALUES_CHAINS.items():
         config = load_config("dspace", env)
         assert config["SUGARKUBE_VALUES"] == expected_values
+
+
+def test_dspace_environment_chart_pins_resolve_verified_versions() -> None:
+    staging = load_config("dspace", "staging")
+    prod = load_config("dspace", "prod")
+
+    assert staging["SUGARKUBE_VERSION_FILE"] == "docs/apps/dspace.staging.version"
+    assert staging["SUGARKUBE_VERSION"] == "3.1.0"
+    assert prod["SUGARKUBE_VERSION_FILE"] == "docs/apps/dspace.prod.version"
+    assert prod["SUGARKUBE_VERSION"] == "3.0.1"
+
+
+def test_dspace_prod_promotion_tag_pin_remains_recovered_image() -> None:
+    tag_file = REPO_ROOT / load_config("dspace", "prod")["SUGARKUBE_PROD_TAG_FILE"]
+    lines = [line.split("#", 1)[0].strip() for line in tag_file.read_text().splitlines()]
+
+    assert next(line for line in lines if line) == "main-1a31a56"
+
+
+def test_dspace_staging_metrics_overlay_uses_existing_secret_without_credentials() -> None:
+    text = OVERLAYS["staging"].read_text(encoding="utf-8")
+
+    assert text.count("serviceMonitor:") == 1
+    assert "metrics:\n  enabled: true" in text
+    assert "existingSecret: dspace-staging-metrics-token" in text
+    assert "secretKey: token" in text
+    assert "serviceMonitor:\n  enabled: true" in text
+    assert "release: kube-prometheus-stack" in text
+    assert "cluster: sugarkube-int" in text
+
+
+def test_dspace_prod_values_do_not_enable_metrics_or_service_monitor() -> None:
+    text = OVERLAYS["prod"].read_text(encoding="utf-8")
+
+    assert "serviceMonitor:" not in text
+    assert "metrics:" not in text
+    assert "dspace-staging-metrics-token" not in text

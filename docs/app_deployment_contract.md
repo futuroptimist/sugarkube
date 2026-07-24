@@ -133,6 +133,8 @@ git push
 
 `app-chart-bump` validates the requested chart with `helm show chart <chart-ref> --version <version>`, edits only `docs/apps/<app>.version`, and prints the resulting diff. Do not use `chart=latest` or silent auto-upgrade behavior for production; commit chart pin bumps before or with release operations.
 
+When app configs define `SUGARKUBE_VERSION_FILE_<ENV>`, `just app-config` and the generic deploy/redeploy/promote recipes resolve that environment-specific chart pin first and fall back to `SUGARKUBE_VERSION_FILE` only when the environment-specific setting is absent. A configured selected pin must exist, contain a non-empty semver value, and parse successfully before Helm is invoked. This lets staging and production carry different proven chart pins without changing apps that still use only the shared setting.
+
 ## App config file shape
 
 Generic recipes load a simple shell/dotenv-style config with
@@ -165,7 +167,10 @@ Required keys for the generic recipes:
 | `SUGARKUBE_RELEASE` | Helm release name. |
 | `SUGARKUBE_NAMESPACE` | Kubernetes namespace. |
 | `SUGARKUBE_CHART` | Helm OCI chart reference. |
-| `SUGARKUBE_VERSION_FILE` | Chart version pin file. |
+| `SUGARKUBE_VERSION_FILE` | Shared/default chart version pin file. |
+| `SUGARKUBE_VERSION_FILE_DEV` | Optional dev-only chart version pin file; overrides the shared pin only for `env=dev`. |
+| `SUGARKUBE_VERSION_FILE_STAGING` | Optional staging-only chart version pin file; overrides the shared pin only for `env=staging`. |
+| `SUGARKUBE_VERSION_FILE_PROD` | Optional prod-only chart version pin file; overrides the shared pin only for `env=prod`. |
 | `SUGARKUBE_PROD_TAG_FILE` | Production-approved tag pin file. |
 | `SUGARKUBE_VALUES_DEV` | Values chain for `env=dev`. |
 | `SUGARKUBE_VALUES_STAGING` | Values chain for `env=staging`. |

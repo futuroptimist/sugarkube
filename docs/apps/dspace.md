@@ -15,7 +15,9 @@ This is the canonical runbook for deploying DSPACE from GHCR artifacts to Sugark
 | Release | `dspace` |
 | Namespace | `dspace` |
 | App config | `docs/examples/apps/dspace.env` |
-| Chart version pin | `docs/apps/dspace.version` |
+| Default chart version pin | `docs/apps/dspace.version` |
+| Staging chart version pin | `docs/apps/dspace.staging.version` (`3.1.0`) |
+| Production chart version pin | `docs/apps/dspace.prod.version` (`3.0.1`) |
 | Production tag pin | `docs/apps/dspace.prod.tag` |
 | Verify paths | `/config.json`, `/healthz`, `/livez` |
 
@@ -40,9 +42,9 @@ Use these links before changing a deployment so the workflow runs, package versi
 
 - `env=dev`: future single-node/non-HA environment using `docs/examples/dspace.values.dev.yaml`.
   The dev overlay intentionally does not choose a token.place origin; developers who need local runtime routing can copy `docs/examples/apps/dspace.env` to a local app config and add chart-supported `env` entries to their private values file.
-- `env=staging`: HA staging on the staging Sugarkube cluster with host `staging.democratized.space` and values `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml`.
+- `env=staging`: HA staging on the staging Sugarkube cluster with host `staging.democratized.space`, chart `3.1.0` from `docs/apps/dspace.staging.version`, and values `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml`. The staging overlay persists authenticated metrics and one ServiceMonitor using the operator-managed Secret `dspace-staging-metrics-token`; Sugarkube records only the Secret name/key, never the token value.
   The staging overlay injects `DSPACE_TOKEN_PLACE_URL=https://staging.token.place` and `DSPACE_TOKEN_PLACE_CHAT_MODEL=llama-3.1-8b-instruct`.
-- `env=prod`: HA production on the production Sugarkube cluster with host `democratized.space` and values `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml`.
+- `env=prod`: HA production on the production Sugarkube cluster with host `democratized.space`, chart `3.0.1` from `docs/apps/dspace.prod.version`, image tag `main-1a31a56` from `docs/apps/dspace.prod.tag`, and values `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml`. Production remains intentionally pinned to the recovered deployment; do not enable metrics or ServiceMonitor in production while it remains on chart `3.0.1`.
   The production overlay injects `DSPACE_TOKEN_PLACE_URL=https://token.place` and `DSPACE_TOKEN_PLACE_CHAT_MODEL=llama-3.1-8b-instruct`.
 - Optional legacy/canary host `prod.democratized.space` still has `docs/examples/dspace.values.prod-subdomain.yaml`, but the generic app flow uses the production apex overlay unless a local app config intentionally overrides it.
 
@@ -71,9 +73,14 @@ If no suitable image exists, publish it from the app repo workflow, then return 
 gh workflow run ci-image.yml --repo democratizedspace/dspace --ref main
 ```
 
+
+### Staging metrics persistence
+
+The committed staging overlay records the verified live metrics shape for chart `3.1.0`: metrics are enabled, authentication reads the token from the existing operator-managed Secret `dspace-staging-metrics-token` key `token`, and the chart creates one ServiceMonitor labeled `release: kube-prometheus-stack` with cluster label `sugarkube-int`. This repository must not contain, render, log, or document the Secret value. These files persist desired configuration only; they do not deploy anything until an operator runs a deploy or redeploy command against the cluster.
+
 ## Confirm/publish OCI chart
 
-Sugarkube deploys the chart version pinned in `docs/apps/dspace.version`. Use [recent chart workflow runs](https://github.com/democratizedspace/dspace/actions/workflows/ci-helm.yml) to find chart publish attempts, `helm show chart` below to confirm available immutable chart versions, and [the chart source](https://github.com/democratizedspace/dspace/tree/main/charts/dspace) to review the chart content that should match the pinned version. The DSPACE OCI chart does not currently have an associated public GHCR package page; check the [DSPACE chart package lookup](https://github.com/orgs/democratizedspace/packages?repo_name=dspace&q=charts%2Fdspace) until that package page appears.
+Sugarkube deploys the chart version resolved for the selected environment: `SUGARKUBE_VERSION_FILE_STAGING` and `SUGARKUBE_VERSION_FILE_PROD` take precedence for staging and production, while `docs/apps/dspace.version` remains the shared/default fallback pin. Use [recent chart workflow runs](https://github.com/democratizedspace/dspace/actions/workflows/ci-helm.yml) to find chart publish attempts, `helm show chart` below to confirm available immutable chart versions, and [the chart source](https://github.com/democratizedspace/dspace/tree/main/charts/dspace) to review the chart content that should match the pinned version. The DSPACE OCI chart does not currently have an associated public GHCR package page; check the [DSPACE chart package lookup](https://github.com/orgs/democratizedspace/packages?repo_name=dspace&q=charts%2Fdspace) until that package page appears.
 
 ```bash
 CHART_VERSION=$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.version | head -n 1)

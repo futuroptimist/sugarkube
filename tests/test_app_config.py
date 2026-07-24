@@ -172,6 +172,8 @@ def test_rejects_unknown_dotenv_keys(tmp_path: Path) -> None:
 
 
 def test_dotenv_parser_strips_inline_comments(tmp_path: Path) -> None:
+    pin = tmp_path / "commented.version"
+    pin.write_text("1.2.3\n", encoding="utf-8")
     config = tmp_path / "commented.env"
     config.write_text(
         "\n".join(
@@ -180,7 +182,7 @@ def test_dotenv_parser_strips_inline_comments(tmp_path: Path) -> None:
                 "SUGARKUBE_RELEASE=commented",
                 "SUGARKUBE_NAMESPACE=commented",
                 "SUGARKUBE_CHART=oci://example.invalid/charts/commented",
-                "SUGARKUBE_VERSION_FILE=docs/apps/commented.version # approved chart pin",
+                f"SUGARKUBE_VERSION_FILE={pin} # approved chart pin",
                 "SUGARKUBE_VALUES_DEV=dev.yaml",
                 "SUGARKUBE_VALUES_STAGING=dev.yaml,staging.yaml # staging overlays",
                 "SUGARKUBE_VALUES_PROD=dev.yaml,prod.yaml",
@@ -195,7 +197,7 @@ def test_dotenv_parser_strips_inline_comments(tmp_path: Path) -> None:
 
     assert cfg["SUGARKUBE_VALUES"] == "dev.yaml,staging.yaml"
     assert cfg["SUGARKUBE_VERIFY_PATHS"] == "/,/healthz"
-    assert cfg["SUGARKUBE_VERSION_FILE"] == "docs/apps/commented.version"
+    assert cfg["SUGARKUBE_VERSION_FILE"] == str(pin)
 
 
 def test_requires_chart_version_pin(tmp_path: Path) -> None:
@@ -362,3 +364,64 @@ def test_main_supports_json_shell_validate_tag_and_host_value(
 def test_main_reports_config_errors(capsys: pytest.CaptureFixture[str]) -> None:
     assert app_config.main(["json", "--app", "missing", "--env", "staging"]) == 2
     assert "ERROR: no config found for app 'missing'" in capsys.readouterr().err
+
+
+def test_shared_version_file_preserves_existing_behavior(tmp_path: Path) -> None:
+    pin = tmp_path / "shared.version"
+    pin.write_text("# shared pin\n1.2.3\n", encoding="utf-8")
+    config = _write_config(
+        tmp_path / "custom.env",
+        SUGARKUBE_VERSION="",
+        SUGARKUBE_VERSION_FILE=str(pin),
+    )
+
+    cfg = app_config.load_config("custom", "staging", str(config))
+
+    assert cfg["SUGARKUBE_VERSION_FILE"] == str(pin)
+    assert cfg["SUGARKUBE_VERSION"] == "1.2.3"
+
+
+def test_environment_specific_version_file_overrides_only_that_env(tmp_path: Path) -> None:
+    shared = tmp_path / "shared.version"
+    staging = tmp_path / "staging.version"
+    shared.write_text("1.0.0\n", encoding="utf-8")
+    staging.write_text("1.1.0\n", encoding="utf-8")
+    config = _write_config(
+        tmp_path / "custom.env",
+        SUGARKUBE_VERSION="",
+        SUGARKUBE_VERSION_FILE=str(shared),
+        SUGARKUBE_VERSION_FILE_STAGING=str(staging),
+    )
+
+    staging_cfg = app_config.load_config("custom", "staging", str(config))
+    prod_cfg = app_config.load_config("custom", "prod", str(config))
+
+    assert staging_cfg["SUGARKUBE_VERSION_FILE"] == str(staging)
+    assert staging_cfg["SUGARKUBE_VERSION"] == "1.1.0"
+    assert prod_cfg["SUGARKUBE_VERSION_FILE"] == str(shared)
+    assert prod_cfg["SUGARKUBE_VERSION"] == "1.0.0"
+
+
+@pytest.mark.parametrize(
+    ("filename", "content", "message"),
+    [
+        ("missing.version", None, "env=staging: chart version file not found"),
+        ("empty.version", "# comment only\n", "env=staging: chart version file .* is empty"),
+        ("bad.version", "not-a-version\n", "env=staging: chart version file .* malformed"),
+    ],
+)
+def test_selected_version_file_errors_before_helm(
+    tmp_path: Path, filename: str, content: str | None, message: str
+) -> None:
+    pin = tmp_path / filename
+    if content is not None:
+        pin.write_text(content, encoding="utf-8")
+    config = _write_config(
+        tmp_path / "custom.env",
+        SUGARKUBE_VERSION="",
+        SUGARKUBE_VERSION_FILE_STAGING=str(pin),
+        SUGARKUBE_VERSION_FILE=str(tmp_path / "shared.version"),
+    )
+
+    with pytest.raises(app_config.AppConfigError, match=message):
+        app_config.load_config("custom", "staging", str(config))
