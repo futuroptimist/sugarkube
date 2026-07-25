@@ -145,7 +145,16 @@ elif args[:1] == ["kustomize"]:
         print(open(os.environ["POLICY"]).read())
     else: print("kind: Probe\nmetadata:\n  name: rendered-probe")
 elif args[:2] == ["create", "--dry-run=client"]:
-    print(json.dumps(json.load(open(os.environ["POLICY_JSON"]))))
+    source = args[args.index("-f") + 1]
+    if "prometheus-chart" in source:
+        print(json.dumps({"kind": "List", "items": [{"apiVersion": "monitoring.coreos.com/v1", "kind": "Prometheus", "metadata": {"name": "kube-prometheus-stack-prometheus"}}]}))
+    elif "blackbox-chart" in source:
+        print(json.dumps({"kind": "List", "items": [
+            {"kind": "Deployment", "metadata": {"name": "prometheus-blackbox-exporter"}, "spec": {"replicas": 1, "template": {"metadata": {"labels": {"app.kubernetes.io/name": "prometheus-blackbox-exporter", "app.kubernetes.io/instance": "prometheus-blackbox-exporter"}}}}},
+            {"kind": "ServiceMonitor", "metadata": {"name": "prometheus-blackbox-exporter", "labels": {"release": "kube-prometheus-stack"}}},
+        ]}))
+    else:
+        print(json.dumps(json.load(open(os.environ["POLICY_JSON"]))))
 elif args[:2] == ["apply", "-f"] and scenario == "policy_apply_failure" and "policy" in args[2]:
     sys.exit(41)
 elif "get crd" in joined and scenario == "missing_crds": sys.exit(1)

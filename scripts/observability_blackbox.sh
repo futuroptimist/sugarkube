@@ -60,7 +60,7 @@ assert_context() {
   python3 "${ROOT}/scripts/cluster_identity.py" assert --kubeconfig "${KUBECONFIG:-${HOME}/.kube/config}" --env staging >/dev/null
 }
 render_to() {
-  local base_out="$1" chart_out="$2" policy_out="$3" probe_out="$4" selectors_out="$5"
+  local base_out="$1" chart_out="$2" policy_out="$3" probe_out="$4" selectors_out="$5" base_json="$6" chart_json="$7"
   helm repo add prometheus-community "${REPOSITORY}" --force-update >/dev/null
   helm repo update prometheus-community >/dev/null
   helm template "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${VALUES}" >"${chart_out}"
@@ -68,36 +68,29 @@ render_to() {
   kubectl kustomize "${POLICIES}" >"${policy_out}"
   kubectl kustomize "${PROBES}" >"${probe_out}"
   [[ -s "${base_out}" && -s "${chart_out}" && -s "${policy_out}" && -s "${probe_out}" ]] || { echo "ERROR: prerequisite chart, exporter chart, NetworkPolicy, and Probe renders must all be non-empty." >&2; exit 4; }
-  python3 - "${base_out}" "${chart_out}" "${selectors_out}" <<'PY'
-import json, re, sys
-def documents(path):
-    return re.split(r"(?m)^---\s*$", open(path, encoding="utf-8").read())
-def scalar(doc, path):
-    stack=[]
-    for raw in doc.splitlines():
-        if not raw.strip() or raw.lstrip().startswith(("#", "- ")): continue
-        indent=len(raw)-len(raw.lstrip()); match=re.match(r"\s*([^:]+):(?:\s+(.*))?$", raw)
-        if not match: continue
-        while stack and stack[-1][0] >= indent: stack.pop()
-        key=match.group(1).strip(); value=(match.group(2) or "").strip().strip('"\'')
-        current=tuple(x[1] for x in stack)+(key,)
-        if current == path: return value
-        if not value: stack.append((indent,key))
-    return None
-base=[d for d in documents(sys.argv[1]) if scalar(d,("kind",))=="Prometheus"]
-exporter=[d for d in documents(sys.argv[2]) if scalar(d,("kind",))=="Deployment" and scalar(d,("metadata","name"))=="prometheus-blackbox-exporter"]
-monitors=[d for d in documents(sys.argv[2]) if scalar(d,("kind",))=="ServiceMonitor" and scalar(d,("metadata","name"))=="prometheus-blackbox-exporter"]
-if len(base)!=1 or not scalar(base[0],("metadata","name")): raise SystemExit("ERROR: pinned base chart must render exactly one named Prometheus object.")
-if len(exporter) != 1 or scalar(exporter[0],("spec","replicas")) != "1":
+  # Let kubectl's client-side YAML decoder parse the complete streams semantically;
+  # unlike cluster operations, these conversions neither read nor mutate a cluster.
+  kubectl create --dry-run=client -f "${base_out}" -o json >"${base_json}"
+  kubectl create --dry-run=client -f "${chart_out}" -o json >"${chart_json}"
+  python3 - "${base_json}" "${chart_json}" "${selectors_out}" <<'PY'
+import json, sys
+def items(path):
+    value=json.load(open(path,encoding="utf-8"))
+    return value.get("items",[]) if value.get("kind")=="List" else [value]
+base=[d for d in items(sys.argv[1]) if d.get("kind")=="Prometheus"]
+exporter=[d for d in items(sys.argv[2]) if d.get("kind")=="Deployment" and d.get("metadata",{}).get("name")=="prometheus-blackbox-exporter"]
+monitors=[d for d in items(sys.argv[2]) if d.get("kind")=="ServiceMonitor" and d.get("metadata",{}).get("name")=="prometheus-blackbox-exporter"]
+if len(base)!=1 or not base[0].get("metadata",{}).get("name"): raise SystemExit("ERROR: pinned base chart must render exactly one named Prometheus object.")
+if len(exporter) != 1 or exporter[0].get("spec",{}).get("replicas") != 1:
     raise SystemExit("ERROR: rendered exporter Deployment must have exactly one replica.")
-if len(monitors) != 1 or scalar(monitors[0],("metadata","labels","release")) != "kube-prometheus-stack":
+if len(monitors) != 1 or monitors[0].get("metadata",{}).get("labels",{}).get("release") != "kube-prometheus-stack":
     raise SystemExit("ERROR: rendered exporter ServiceMonitor must carry the base release label.")
 labels={}
 for key in ("app.kubernetes.io/instance","app.kubernetes.io/name"):
-    value=scalar(exporter[0],("spec","template","metadata","labels",key))
+    value=exporter[0].get("spec",{}).get("template",{}).get("metadata",{}).get("labels",{}).get(key)
     if not value: raise SystemExit(f"ERROR: exporter Deployment lacks required template label {key}.")
     labels[key]=value
-json.dump({"source":{"app.kubernetes.io/name":"prometheus","operator.prometheus.io/name":scalar(base[0],("metadata","name"))},"destination":labels},open(sys.argv[3],"w",encoding="utf-8"),sort_keys=True)
+json.dump({"source":{"app.kubernetes.io/name":"prometheus","operator.prometheus.io/name":base[0]["metadata"]["name"]},"destination":labels},open(sys.argv[3],"w",encoding="utf-8"),sort_keys=True)
 PY
   validate_policy_file "${policy_out}" "${selectors_out}"
 }
@@ -138,9 +131,11 @@ with_render() {
   POLICY_RENDER="$(mktemp -t sugarkube-blackbox-policy.XXXXXX.yaml)"
   PROBE_RENDER="$(mktemp -t sugarkube-blackbox-probes.XXXXXX.yaml)"
   SELECTORS_RENDER="$(mktemp -t sugarkube-blackbox-selectors.XXXXXX.json)"
+  BASE_RENDER_JSON="$(mktemp -t sugarkube-prometheus-chart.XXXXXX.json)"
+  CHART_RENDER_JSON="$(mktemp -t sugarkube-blackbox-chart.XXXXXX.json)"
   EXPECTED_POLICY_JSON="$(mktemp -t sugarkube-blackbox-policy.XXXXXX.json)"
-  trap 'rm -f "${BASE_RENDER:-}" "${CHART_RENDER:-}" "${POLICY_RENDER:-}" "${PROBE_RENDER:-}" "${SELECTORS_RENDER:-}" "${EXPECTED_POLICY_JSON:-}"' EXIT
-  render_to "${BASE_RENDER}" "${CHART_RENDER}" "${POLICY_RENDER}" "${PROBE_RENDER}" "${SELECTORS_RENDER}"
+  trap 'rm -f "${BASE_RENDER:-}" "${CHART_RENDER:-}" "${POLICY_RENDER:-}" "${PROBE_RENDER:-}" "${SELECTORS_RENDER:-}" "${BASE_RENDER_JSON:-}" "${CHART_RENDER_JSON:-}" "${EXPECTED_POLICY_JSON:-}"' EXIT
+  render_to "${BASE_RENDER}" "${CHART_RENDER}" "${POLICY_RENDER}" "${PROBE_RENDER}" "${SELECTORS_RENDER}" "${BASE_RENDER_JSON}" "${CHART_RENDER_JSON}"
 }
 render() { require_tools helm kubectl python3; with_render; print_resolved; cat "${CHART_RENDER}"; printf '\n---\n'; cat "${POLICY_RENDER}"; printf '\n---\n'; cat "${PROBE_RENDER}"; }
 mutate() {
