@@ -80,7 +80,9 @@ def test_grafana_alertmanager_k3s_monitor_values_are_guarded():
 
 def test_no_production_values_or_public_exposure_or_credentials_added():
     assert STAGING.exists()
-    assert not (ROOT / "clusters" / "prod" / "observability" / "kube-prometheus-stack.values.yaml").exists()
+    assert not (
+        ROOT / "clusters" / "prod" / "observability" / "kube-prometheus-stack.values.yaml"
+    ).exists()
     text = COMMON.read_text(encoding="utf-8") + STAGING.read_text(encoding="utf-8")
     forbidden = ["longhorn", "cloudflare", "IngressRoute", "kind: Ingress", "password:", "adminPassword"]
     for needle in forbidden:
@@ -97,9 +99,17 @@ def test_discovery_contract_uses_release_label():
 
 def test_lifecycle_uses_pinned_version_ordered_values_and_no_reuse_values():
     script = SCRIPT.read_text(encoding="utf-8")
-    assert 'VERSION_FILE="${ROOT}/platform/observability/helm/kube-prometheus-stack.version"' in script
-    assert 'COMMON_VALUES="${ROOT}/platform/observability/helm/kube-prometheus-stack.values.common.yaml"' in script
-    assert 'STAGING_VALUES="${ROOT}/clusters/staging/observability/kube-prometheus-stack.values.yaml"' in script
+    assert (
+        'VERSION_FILE="${ROOT}/platform/observability/helm/kube-prometheus-stack.version"' in script
+    )
+    assert (
+        'COMMON_VALUES="${ROOT}/platform/observability/helm/kube-prometheus-stack.values.common.yaml"'
+        in script
+    )
+    assert (
+        'STAGING_VALUES="${ROOT}/clusters/staging/observability/kube-prometheus-stack.values.yaml"'
+        in script
+    )
     assert 'CHART="prometheus-community/kube-prometheus-stack"' in script
     assert '--version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}"' in script
     assert "--reuse-values" not in script
@@ -126,7 +136,7 @@ def test_unsupported_env_and_context_mismatch_fail_before_mutation():
     script = SCRIPT.read_text(encoding="utf-8")
     assert "prod|production" in script
     assert "production observability is not yet codified" in script
-    assert 'expected \'sugar-staging\'' in script
+    assert "expected 'sugar-staging'" in script
     assert script.index("assert_context") < script.index("helm install")
     assert script.index("assert_context") < script.index("helm upgrade")
 
@@ -135,7 +145,14 @@ def test_status_and_verify_are_read_only():
     script = SCRIPT.read_text(encoding="utf-8")
     status = re.search(r"status\(\).*?\nverify\(", script, re.S).group(0)
     verify = re.search(r"verify\(\).*?\n\ncmd=", script, re.S).group(0)
-    mutating = [" helm install", " helm upgrade", "kubectl apply", "kubectl create", "kubectl patch", "kubectl delete"]
+    mutating = [
+        " helm install",
+        " helm upgrade",
+        "kubectl apply",
+        "kubectl create",
+        "kubectl patch",
+        "kubectl delete",
+    ]
     for body in (status, verify):
         for token in mutating:
             assert token not in body
@@ -145,7 +162,7 @@ def test_status_and_verify_are_read_only():
     assert '--timeout="${TIMEOUT}"' in verify
     assert "desiredNumberScheduled" in verify and "numberReady" in verify
     assert "|| true" not in verify
-    assert 'target.get("health") == "up" for target in dspace' in verify
+    assert "verify_dspace_targets" in verify
 
 
 def test_justfile_exposes_observability_recipes():
@@ -173,15 +190,9 @@ def test_legacy_flux_resources_are_absent_from_reconciliation_graph():
     platform = (ROOT / "platform" / "observability" / "kustomization.yaml").read_text(
         encoding="utf-8"
     )
-    staging = (ROOT / "clusters" / "staging" / "kustomization.yaml").read_text(
-        encoding="utf-8"
-    )
-    development = (ROOT / "clusters" / "dev" / "kustomization.yaml").read_text(
-        encoding="utf-8"
-    )
-    production = (ROOT / "clusters" / "prod" / "kustomization.yaml").read_text(
-        encoding="utf-8"
-    )
+    staging = (ROOT / "clusters" / "staging" / "kustomization.yaml").read_text(encoding="utf-8")
+    development = (ROOT / "clusters" / "dev" / "kustomization.yaml").read_text(encoding="utf-8")
+    production = (ROOT / "clusters" / "prod" / "kustomization.yaml").read_text(encoding="utf-8")
     assert "kube-prometheus-stack.yaml" not in platform
     assert "kube-prometheus-stack-values.yaml" not in platform
     assert "patches/kube-prometheus-stack-values.yaml" not in development
@@ -202,11 +213,30 @@ def test_flux_health_checks_exclude_manually_managed_observability():
     assert "just observability-verify" in text
 
 
-def run_helper(tmp_path: Path, command: str, *, helm_mode="absent", context="sugar-staging", kubectl_mode="healthy"):
+def run_helper(
+    tmp_path: Path,
+    command: str,
+    *,
+    helm_mode="absent",
+    context="sugar-staging",
+    kubectl_mode="healthy",
+    target_responses=None,
+    attempts=1,
+    interval=1,
+):
     """Run the lifecycle against deterministic command stubs and return its audit log."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(parents=True)
     audit = tmp_path / "audit"
+    responses = tmp_path / "target-responses"
+    if target_responses is not None:
+        responses.write_text(
+            "\n".join(
+                json.dumps(item) if not isinstance(item, str) else item for item in target_responses
+            )
+            + "\n",
+            encoding="utf-8",
+        )
     (bin_dir / "helm").write_text(
         """#!/bin/sh
 echo "helm $*" >> "$AUDIT"
@@ -236,7 +266,11 @@ case "$*" in
   *"get secret dspace-token -o name"*) [ "$KUBECTL_MODE" != missing-secret ] || exit 44; echo secret/dspace-token ;;
   *"get --raw "*)
     [ "$KUBECTL_MODE" != query-fail ] || exit 45
-    if [ "$KUBECTL_MODE" = mixed-targets ]; then
+    if [ -s "$TARGET_RESPONSES" ]; then
+      count_file="${TARGET_RESPONSES}.count"
+      count=$(cat "$count_file" 2>/dev/null || echo 0); count=$((count + 1)); echo "$count" > "$count_file"
+      sed -n "${count}p" "$TARGET_RESPONSES"
+    elif [ "$KUBECTL_MODE" = mixed-targets ]; then
       printf '%s\n' '{"status":"success","data":{"activeTargets":[{"labels":{"app":"dspace","namespace":"dspace"},"health":"up"},{"labels":{"app":"dspace","namespace":"dspace"},"health":"down"}]}}'
     else
       [ "$KUBECTL_MODE" = unhealthy ] && health=down || health=up
@@ -257,6 +291,13 @@ esac
         "CONTEXT": context,
         "KUBECTL_MODE": kubectl_mode,
         "KUBECONFIG": str(tmp_path / "kubeconfig"),
+    }
+    (bin_dir / "sleep").write_text('#!/bin/sh\necho "sleep $*" >> "$AUDIT"\n', encoding="utf-8")
+    (bin_dir / "sleep").chmod(0o755)
+    env |= {
+        "TARGET_RESPONSES": str(responses),
+        "SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_ATTEMPTS": str(attempts),
+        "SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_INTERVAL_SECONDS": str(interval),
     }
     result = subprocess.run(
         ["bash", str(SCRIPT), command, "env=staging"],
@@ -289,7 +330,9 @@ def test_fallback_secret_scanner_allows_only_complete_placeholders():
 
 
 def test_pre_mutation_guards_are_fail_closed(tmp_path):
-    unsupported = subprocess.run(["bash", str(SCRIPT), "install", "env=prod"], capture_output=True, text=True, check=False)
+    unsupported = subprocess.run(
+        ["bash", str(SCRIPT), "install", "env=prod"], capture_output=True, text=True, check=False
+    )
     assert unsupported.returncode != 0
     mismatch, audit = run_helper(tmp_path / "mismatch", "install", context="other")
     assert mismatch.returncode != 0 and "helm install" not in audit
@@ -317,7 +360,10 @@ def test_status_requires_staging_identity(tmp_path):
 
 def test_verify_exact_three_nodes_secret_reference_and_target_health(tmp_path):
     healthy, audit = run_helper(tmp_path / "healthy", "verify")
-    assert healthy.returncode == 0 and "get --raw /api/v1/namespaces/monitoring/services/http:" in audit
+    assert (
+        healthy.returncode == 0
+        and "get --raw /api/v1/namespaces/monitoring/services/http:" in audit
+    )
     for mode in (
         "two-nodes",
         "wrong-release",
@@ -329,3 +375,101 @@ def test_verify_exact_three_nodes_secret_reference_and_target_health(tmp_path):
     ):
         result, _ = run_helper(tmp_path / mode, "verify", kubectl_mode=mode)
         assert result.returncode != 0, mode
+
+
+def target(health="up", *, pod="dspace-0", instance="10.0.0.1:8080", error="", scrape="now"):
+    return {
+        "labels": {"app": "dspace", "namespace": "dspace", "pod": pod, "instance": instance},
+        "health": health,
+        "lastError": error,
+        "lastScrape": scrape,
+    }
+
+
+def response(*targets, status="success"):
+    return {"status": status, "data": {"activeTargets": list(targets)}}
+
+
+def test_target_health_accepts_one_or_multiple_healthy_targets_immediately(tmp_path):
+    for name, targets in (("one", [target()]), ("many", [target(), target(pod="dspace-1")])):
+        result, audit = run_helper(tmp_path / name, "verify", target_responses=[response(*targets)])
+        assert result.returncode == 0
+        assert audit.count("get --raw ") == 1
+        assert "sleep " not in audit
+
+
+def test_target_health_retries_empty_unknown_and_mixed_until_healthy(tmp_path):
+    sequences = {
+        "empty": [response(), response(target())],
+        "unknown": [response(target("unknown")), response(target())],
+        "mixed": [response(target(), target("down", pod="dspace-1")), response(target())],
+    }
+    for name, responses in sequences.items():
+        result, audit = run_helper(
+            tmp_path / name, "verify", target_responses=responses, attempts=2, interval=7
+        )
+        assert result.returncode == 0
+        assert audit.count("get --raw ") == 2
+        assert audit.count("sleep 7") == 1
+        assert "Waiting for DSPACE Prometheus targets (1/2)." in result.stderr
+
+
+def test_target_health_timeout_is_bounded_and_diagnostics_are_safe(tmp_path):
+    secret_value = "do-not-print-this-secret"
+    cases = {
+        "empty": [response(), response(), response()],
+        "mixed": [response(target(), target("down", error="connection refused"))] * 3,
+    }
+    for name, responses in cases.items():
+        result, audit = run_helper(
+            tmp_path / name, "verify", target_responses=responses, attempts=3, interval=4
+        )
+        assert result.returncode != 0
+        assert audit.count("get --raw ") == 3
+        assert audit.count("sleep 4") == 2
+        assert secret_value not in result.stdout + result.stderr
+        assert "activeTargets" not in result.stderr
+    mixed_result, _ = run_helper(
+        tmp_path / "safe-fields",
+        "verify",
+        target_responses=[
+            response(
+                target("down", error="connection refused", scrape="2026-07-25T12:00:00Z"),
+                {
+                    "labels": {"app": "other", "namespace": "other"},
+                    "health": "up",
+                    "token": secret_value,
+                },
+            )
+        ],
+    )
+    assert all(
+        value in mixed_result.stderr
+        for value in ("dspace-0", "down", "connection refused", "2026-07-25")
+    )
+    assert secret_value not in mixed_result.stderr
+
+
+def test_target_health_transport_and_payload_failures_are_immediate(tmp_path):
+    cases = {
+        "transport": {"kubectl_mode": "query-fail"},
+        "malformed": {"target_responses": ["not-json"]},
+        "api-status": {"target_responses": [response(status="error")]},
+        "structure": {"target_responses": [{"status": "success", "data": {}}]},
+    }
+    for name, kwargs in cases.items():
+        result, audit = run_helper(tmp_path / name, "verify", attempts=3, **kwargs)
+        assert result.returncode != 0
+        assert audit.count("get --raw ") == 1
+        assert "sleep " not in audit
+
+
+def test_invalid_target_retry_configuration_fails_before_polling(tmp_path):
+    for name, attempts, interval in (
+        ("zero-attempts", 0, 1),
+        ("bad-attempts", "x", 1),
+        ("zero-interval", 1, 0),
+    ):
+        result, audit = run_helper(tmp_path / name, "verify", attempts=attempts, interval=interval)
+        assert result.returncode != 0
+        assert "get --raw " not in audit
