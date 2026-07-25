@@ -1,5 +1,8 @@
+import contextlib
+import io
 import json
 import os
+import runpy
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -381,14 +384,29 @@ def test_prometheus_transport_failures_are_redacted_and_cleanup(scenario, transp
 
 
 def verify(payload, final=False, *args):
-    env = {**os.environ, "FINAL_ATTEMPT": "1" if final else "0"}
-    return subprocess.run(
-        [str(ROOT / "scripts/verify_blackbox_prometheus.py"), *args],
-        input=json.dumps(payload) if not isinstance(payload, str) else payload,
-        text=True,
-        capture_output=True,
-        env=env,
-    )
+    stdin = io.StringIO(json.dumps(payload) if not isinstance(payload, str) else payload)
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    old_argv, old_stdin = sys.argv, sys.stdin
+    old_final_attempt = os.environ.get("FINAL_ATTEMPT")
+    sys.argv = [str(ROOT / "scripts/verify_blackbox_prometheus.py"), *args]
+    sys.stdin = stdin
+    os.environ["FINAL_ATTEMPT"] = "1" if final else "0"
+    try:
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            try:
+                runpy.run_path(sys.argv[0], run_name="__main__")
+            except SystemExit as error:
+                returncode = error.code or 0
+            else:
+                returncode = 0
+    finally:
+        sys.argv, sys.stdin = old_argv, old_stdin
+        if old_final_attempt is None:
+            os.environ.pop("FINAL_ATTEMPT", None)
+        else:
+            os.environ["FINAL_ATTEMPT"] = old_final_attempt
+    return subprocess.CompletedProcess(sys.argv, returncode, stdout.getvalue(), stderr.getvalue())
 
 
 def test_prometheus_verifier_accepts_exact_lifecycle_jobs_and_ignores_unrelated():
@@ -427,6 +445,30 @@ def test_prometheus_verifier_fails_immediately_on_bad_responses():
         assert verify(payload).returncode == 9
 
 
+def test_prometheus_verifier_rejects_malformed_targets_and_metrics():
+    malformed = []
+    for targets in (
+        [],
+        {"status": "success", "data": []},
+        {"status": "success", "data": {"activeTargets": {}}},
+        {"status": "success", "data": {"activeTargets": [None]}},
+    ):
+        payload = verifier_bundle()
+        payload["targets"] = targets
+        malformed.append(payload)
+
+    payload = verifier_bundle()
+    payload["targets"]["data"]["activeTargets"][0]["labels"]["route"] = "wrong"
+    malformed.append(payload)
+
+    payload = verifier_bundle()
+    payload["metrics"]["probe_success"]["data"]["resultType"] = "matrix"
+    malformed.append(payload)
+
+    for payload in malformed:
+        assert verify(payload).returncode == 9
+
+
 def test_probe_validator_requires_exact_names_and_mappings():
     docs = subprocess.run(
         [
@@ -445,3 +487,6 @@ def test_probe_validator_requires_exact_names_and_mappings():
     assert verify(items, False, "--probes").returncode == 0
     items["items"][0]["metadata"]["labels"]["route"] = "wrong"
     assert verify(items, False, "--probes").returncode == 7
+    assert verify({}, False, "--probes").returncode == 7
+    assert verify({"items": [None]}, False, "--probes").returncode == 7
+    assert verify(items, False, "--unknown").returncode == 9
