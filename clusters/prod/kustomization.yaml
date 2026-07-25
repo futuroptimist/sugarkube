@@ -10,6 +10,5 @@ patchesStrategicMerge:
   - patches/cloudflared-values.yaml
   - patches/cert-manager-settings.yaml
   - patches/longhorn-values.yaml
-  - patches/kube-prometheus-stack-values.yaml
 configurations:
   - kustomizeconfig.yaml

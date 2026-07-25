@@ -1,3 +1,4 @@
+# LEGACY/FUTURE ONLY: inactive Flux/Longhorn configuration. Do not apply to live staging or production as written; use the non-Flux Helm lifecycle in scripts/observability_helm.sh for current staging. Do not combine both lifecycle paths for kube-prometheus-stack.
 apiVersion: v1
 kind: ConfigMap
 metadata:

@@ -1,8 +1,8 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+# Current live clusters have no Flux CRDs and never established Flux ownership of the
+# retained legacy HelmRelease; future Flux use must keep the manual release outside this graph.
 resources:
-  - kube-prometheus-stack-values.yaml
-  - kube-prometheus-stack.yaml
   - prometheus-blackbox-exporter.yaml
   - loki-values.yaml
   - loki.yaml

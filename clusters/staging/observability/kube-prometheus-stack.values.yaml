@@ -1,0 +1,6 @@
+# Staging-only non-Flux kube-prometheus-stack overrides.
+# Production observability values are intentionally not codified yet.
+prometheus:
+  prometheusSpec:
+    externalLabels:
+      cluster: sugarkube-int
