@@ -145,7 +145,7 @@ def test_status_and_verify_are_read_only():
     assert '--timeout="${TIMEOUT}"' in verify
     assert "desiredNumberScheduled" in verify and "numberReady" in verify
     assert "|| true" not in verify
-    assert 'target.get("health") == "up" for target in dspace' in verify
+    assert "verify_dspace_targets" in verify
 
 
 def test_justfile_exposes_observability_recipes():
@@ -202,11 +202,24 @@ def test_flux_health_checks_exclude_manually_managed_observability():
     assert "just observability-verify" in text
 
 
-def run_helper(tmp_path: Path, command: str, *, helm_mode="absent", context="sugar-staging", kubectl_mode="healthy"):
+def run_helper(
+    tmp_path: Path,
+    command: str,
+    *,
+    helm_mode="absent",
+    context="sugar-staging",
+    kubectl_mode="healthy",
+    target_responses=None,
+    attempts="1",
+    interval="1",
+):
     """Run the lifecycle against deterministic command stubs and return its audit log."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(parents=True)
     audit = tmp_path / "audit"
+    responses = tmp_path / "target-responses"
+    if target_responses is not None:
+        responses.write_text("\n".join(target_responses) + "\n", encoding="utf-8")
     (bin_dir / "helm").write_text(
         """#!/bin/sh
 echo "helm $*" >> "$AUDIT"
@@ -236,7 +249,12 @@ case "$*" in
   *"get secret dspace-token -o name"*) [ "$KUBECTL_MODE" != missing-secret ] || exit 44; echo secret/dspace-token ;;
   *"get --raw "*)
     [ "$KUBECTL_MODE" != query-fail ] || exit 45
-    if [ "$KUBECTL_MODE" = mixed-targets ]; then
+    if [ -f "$TARGET_RESPONSES" ]; then
+      count=0
+      [ ! -f "$TARGET_COUNT" ] || count=$(cat "$TARGET_COUNT")
+      count=$((count + 1)); echo "$count" > "$TARGET_COUNT"
+      sed -n "${count}p" "$TARGET_RESPONSES"
+    elif [ "$KUBECTL_MODE" = mixed-targets ]; then
       printf '%s\n' '{"status":"success","data":{"activeTargets":[{"labels":{"app":"dspace","namespace":"dspace"},"health":"up"},{"labels":{"app":"dspace","namespace":"dspace"},"health":"down"}]}}'
     else
       [ "$KUBECTL_MODE" = unhealthy ] && health=down || health=up
@@ -248,6 +266,9 @@ esac
 """,
         encoding="utf-8",
     )
+    (bin_dir / "sleep").write_text(
+        '#!/bin/sh\necho "sleep $*" >> "$AUDIT"\n', encoding="utf-8"
+    )
     for stub in bin_dir.iterdir():
         stub.chmod(0o755)
     env = os.environ | {
@@ -257,6 +278,10 @@ esac
         "CONTEXT": context,
         "KUBECTL_MODE": kubectl_mode,
         "KUBECONFIG": str(tmp_path / "kubeconfig"),
+        "TARGET_RESPONSES": str(responses),
+        "TARGET_COUNT": str(tmp_path / "target-count"),
+        "SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_ATTEMPTS": attempts,
+        "SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_INTERVAL_SECONDS": interval,
     }
     result = subprocess.run(
         ["bash", str(SCRIPT), command, "env=staging"],
@@ -329,3 +354,130 @@ def test_verify_exact_three_nodes_secret_reference_and_target_health(tmp_path):
     ):
         result, _ = run_helper(tmp_path / mode, "verify", kubectl_mode=mode)
         assert result.returncode != 0, mode
+
+
+def target_payload(*targets, status="success"):
+    return json.dumps({"status": status, "data": {"activeTargets": list(targets)}})
+
+
+def dspace_target(health, *, pod="dspace-0", instance="10.0.0.1:8080", marker=None):
+    target = {
+        "labels": {
+            "app": "dspace",
+            "namespace": "dspace",
+            "pod": pod,
+            "instance": instance,
+        },
+        "health": health,
+        "lastError": "connection refused",
+        "lastScrape": "2026-07-25T12:00:00Z",
+    }
+    if marker is not None:
+        target["authorization"] = marker
+        target["labels"]["secretValue"] = marker
+    return target
+
+
+def api_calls(audit):
+    return audit.count("kubectl get --raw ")
+
+
+def test_target_health_succeeds_on_first_observation_for_one_or_many_targets(tmp_path):
+    one, audit = run_helper(
+        tmp_path / "one", "verify", target_responses=[target_payload(dspace_target("up"))]
+    )
+    assert one.returncode == 0
+    assert api_calls(audit) == 1 and "sleep " not in audit
+
+    many, audit = run_helper(
+        tmp_path / "many",
+        "verify",
+        target_responses=[target_payload(dspace_target("up"), dspace_target("up", pod="dspace-1"))],
+    )
+    assert many.returncode == 0
+    assert api_calls(audit) == 1 and "sleep " not in audit
+
+
+def test_target_health_retries_empty_unknown_and_mixed_then_succeeds(tmp_path):
+    healthy = target_payload(dspace_target("up"), dspace_target("up", pod="dspace-1"))
+    cases = {
+        "empty": [target_payload(), healthy],
+        "unknown": [target_payload(dspace_target("unknown")), healthy],
+        "mixed": [
+            target_payload(dspace_target("up"), dspace_target("down", pod="dspace-1")),
+            healthy,
+        ],
+    }
+    for name, responses in cases.items():
+        result, audit = run_helper(
+            tmp_path / name, "verify", target_responses=responses, attempts="2", interval="7"
+        )
+        assert result.returncode == 0, name
+        assert api_calls(audit) == 2
+        assert audit.count("sleep 7") == 1
+        assert "attempt 1/2" in result.stderr
+
+
+def test_target_health_timeout_is_bounded_and_empty_never_passes(tmp_path):
+    for name, response in {
+        "empty": target_payload(),
+        "down": target_payload(dspace_target("down")),
+        "mixed": target_payload(dspace_target("up"), dspace_target("down", pod="dspace-1")),
+    }.items():
+        result, audit = run_helper(
+            tmp_path / name,
+            "verify",
+            target_responses=[response, response, response],
+            attempts="3",
+            interval="4",
+        )
+        assert result.returncode != 0, name
+        assert api_calls(audit) == 3
+        assert audit.count("sleep 4") == 2
+        assert "after 3 attempts" in result.stderr
+
+
+def test_target_health_hard_failures_do_not_retry(tmp_path):
+    cases = {
+        "malformed": ["not-json"],
+        "api-error": [target_payload(status="error")],
+        "bad-structure": [json.dumps({"status": "success", "data": {}})],
+    }
+    for name, responses in cases.items():
+        result, audit = run_helper(
+            tmp_path / name, "verify", target_responses=responses, attempts="3"
+        )
+        assert result.returncode != 0, name
+        assert api_calls(audit) == 1
+        assert "sleep " not in audit
+
+    result, audit = run_helper(
+        tmp_path / "transport", "verify", kubectl_mode="query-fail", attempts="3"
+    )
+    assert result.returncode != 0
+    assert api_calls(audit) == 1 and "sleep " not in audit
+
+
+def test_invalid_target_retry_configuration_fails_before_polling(tmp_path):
+    for attempts, interval in (("0", "1"), ("two", "1"), ("1", "0"), ("1", "1.5")):
+        result, audit = run_helper(
+            tmp_path / f"case-{attempts}-{interval}",
+            "verify",
+            attempts=attempts,
+            interval=interval,
+        )
+        assert result.returncode != 0
+        assert api_calls(audit) == 0
+
+
+def test_final_target_diagnostics_are_useful_and_privacy_safe(tmp_path):
+    sensitive = "do-not-print-this-secret"
+    response = target_payload(dspace_target("down", marker=sensitive))
+    result, audit = run_helper(
+        tmp_path, "verify", target_responses=[response, response], attempts="2"
+    )
+    assert result.returncode != 0 and api_calls(audit) == 2
+    for expected in ("dspace-0", "10.0.0.1:8080", "down", "connection refused", "lastScrape"):
+        assert expected in result.stderr
+    assert sensitive not in result.stdout + result.stderr
+    assert "authorization" not in result.stdout + result.stderr

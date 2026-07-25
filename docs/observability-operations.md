@@ -94,7 +94,7 @@ The mutating recipes never use `--reuse-values`; the committed version and both 
 - Grafana URL: `http://sugarkube3.local:30300`; the same NodePort is available through the other staging nodes.
 - Prometheus, Alertmanager, and administrative services remain ClusterIP-only.
 - No public ingress, public DNS, Cloudflare route, router forwarding, or public observability endpoint is part of this lifecycle.
-- Verification waits up to the configured Helm timeout for each workload, requires every desired node-exporter pod to be ready, and fails unless every discovered DSPACE target reports healthy.
+- Verification waits up to the configured Helm timeout for each workload and requires every desired node-exporter pod to be ready. Because Prometheus readiness can precede target discovery and the first completed scrape, verification polls until one or more discovered DSPACE targets all report healthy. By default it makes 20 observations 15 seconds apart, for a maximum wait just under five minutes. Override these positive-integer settings with `SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_ATTEMPTS` and `SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_INTERVAL_SECONDS`. Missing, unknown, down, and partially healthy target sets are retried; kubectl transport errors, malformed JSON, invalid response structure, and unsuccessful Prometheus API status remain immediate hard failures.
 
 ## Troubleshooting signals
 
