@@ -247,7 +247,7 @@ case "$*" in
   *"get servicemonitor dspace"*"metadata.labels.release"*) [ "$KUBECTL_MODE" = wrong-release ] && echo wrong || echo kube-prometheus-stack ;;
   *"get servicemonitor dspace"*"bearerTokenSecret.name"*) [ "$KUBECTL_MODE" != missing-secret-ref ] && echo dspace-token ;;
   *"get secret dspace-token -o name"*) [ "$KUBECTL_MODE" != missing-secret ] || exit 44; echo secret/dspace-token ;;
-  *"get --request-timeout=30s --raw "*)
+  *"get --request-timeout="*"s --raw "*)
     [ "$KUBECTL_MODE" != query-fail ] || exit 45
     if [ -n "$TARGET_RESPONSES" ]; then
       count=0
@@ -284,7 +284,13 @@ esac
     }
     if target_responses is not None:
         responses = tmp_path / "target-responses"
-        responses.write_text("\n".join(target_responses) + "\n", encoding="utf-8")
+        if any(isinstance(response, bytes) for response in target_responses):
+            responses.write_bytes(b"\n".join(
+                response if isinstance(response, bytes) else response.encode()
+                for response in target_responses
+            ) + b"\n")
+        else:
+            responses.write_text("\n".join(target_responses) + "\n", encoding="utf-8")
         env["TARGET_RESPONSES"] = str(responses)
     result = subprocess.run(
         ["bash", str(SCRIPT), command, "env=staging"],
@@ -365,7 +371,7 @@ def test_verify_exact_three_nodes_secret_reference_and_first_observation_health(
     healthy, audit = run_helper(tmp_path / "healthy", "verify")
     assert (
         healthy.returncode == 0
-        and "get --request-timeout=30s --raw /api/v1/namespaces/monitoring/services/http:" in audit
+        and "get --request-timeout=1s --raw /api/v1/namespaces/monitoring/services/http:" in audit
     )
     assert audit.count(" --raw ") == 1
     assert "sleep " not in audit
@@ -429,10 +435,26 @@ def test_verify_mixed_targets_time_out_with_safe_diagnostics(tmp_path):
     assert "activeTargets" not in result.stderr
 
 
+def test_verify_diagnostics_only_emit_sanitized_scalar_strings(tmp_path):
+    target = dspace_target("down", pod="dspace-1\nforged", error="Bearer TOP_SECRET_SENTINEL")
+    target["labels"]["authorization"] = "NESTED_SECRET_SENTINEL"
+    target["labels"]["instance"] = {"raw": "INSTANCE_SECRET_SENTINEL"}
+    target["lastScrape"] = ["SCRAPE_SECRET_SENTINEL"]
+    result, _ = run_helper(tmp_path, "verify", target_responses=[target_response(target)] * 3)
+    assert result.returncode != 0
+    assert "dspace-1 forged" in result.stderr and '"health": "down"' in result.stderr
+    for forbidden in (
+        "TOP_SECRET_SENTINEL", "NESTED_SECRET_SENTINEL", "INSTANCE_SECRET_SENTINEL",
+        "SCRAPE_SECRET_SENTINEL", "authorization", "activeTargets", "Traceback", "raw",
+    ):
+        assert forbidden not in result.stderr
+
+
 def test_verify_api_and_parsing_failures_are_immediate(tmp_path):
     cases = {
         "transport": ("query-fail", None, "kubectl could not query"),
         "malformed": ("healthy", ["not-json"], "malformed JSON"),
+        "encoding": ("healthy", [b'{"status":"success","bad":"\xff"}'], "not valid UTF-8"),
         "api": ("healthy", [target_response(status="error")], "query was unsuccessful"),
         "structure": (
             "healthy",
@@ -448,6 +470,18 @@ def test_verify_api_and_parsing_failures_are_immediate(tmp_path):
         assert audit.count(" --raw ") == 1
         assert "sleep " not in audit
         assert message in result.stderr
+
+
+def test_verify_missing_and_non_string_health_fail_immediately(tmp_path):
+    matching = {"labels": {"app": "dspace", "namespace": "dspace"}}
+    for name, value in (("missing", None), ("object", {"state": "up"})):
+        target = dict(matching)
+        if name != "missing":
+            target["health"] = value
+        result, audit = run_helper(tmp_path / name, "verify", target_responses=[target_response(target)])
+        assert result.returncode != 0
+        assert audit.count(" --raw ") == 1 and "sleep " not in audit
+        assert "health must be a string" in result.stderr and "Traceback" not in result.stderr
 
 
 def test_verify_invalid_retry_configuration_fails_before_polling(tmp_path):
@@ -472,5 +506,15 @@ def test_verify_treats_leading_zero_retry_configuration_as_decimal(tmp_path):
         retry_interval="01",
     )
     assert result.returncode != 0
-    assert audit.count("get --request-timeout=30s --raw ") == 8
+    assert audit.count("get --request-timeout=1s --raw ") == 8
     assert audit.count("sleep 1") == 7
+
+
+def test_verify_request_budget_and_default_deadline_are_derived_from_retry_controls(tmp_path):
+    result, audit = run_helper(
+        tmp_path, "verify", target_responses=[target_response()] * 20, retry_attempts="20", retry_interval="15"
+    )
+    assert result.returncode != 0
+    assert audit.count("get --request-timeout=14s --raw ") == 20
+    assert audit.count("sleep 15") == 19
+    assert (20 - 1) * 15 + (15 - 1) == 299

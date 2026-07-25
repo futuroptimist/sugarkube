@@ -77,10 +77,11 @@ install_release() { require_tools helm kubectl python3; print_resolved staging; 
 upgrade_release() { require_tools helm kubectl python3; print_resolved staging; assert_context; tmp="$(mktemp -t sugarkube-observability-upgrade.XXXXXX.yaml)"; trap 'rm -f "${tmp}"' EXIT; render_to "${tmp}"; state="$(release_state)"; if [[ "${state}" == absent ]]; then echo "ERROR: upgrade requires an existing Helm release ${RELEASE} in ${NAMESPACE}. Use observability-install for a fresh cluster." >&2; exit 5; fi; helm upgrade "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}" --wait --timeout "${TIMEOUT}"; }
 status() { require_tools helm kubectl python3; print_resolved staging; assert_context; helm -n "${NAMESPACE}" status "${RELEASE}"; kubectl -n "${NAMESPACE}" get deploy,statefulset,daemonset -l "app.kubernetes.io/instance=${RELEASE}"; kubectl -n "${NAMESPACE}" get prometheus,alertmanager; kubectl -n "${NAMESPACE}" get svc,pvc; kubectl get crd prometheuses.monitoring.coreos.com alertmanagers.monitoring.coreos.com servicemonitors.monitoring.coreos.com probes.monitoring.coreos.com; }
 verify_dspace_targets() {
-  require_tools kubectl python3
+  require_tools kubectl python3 sleep
   local attempts="${SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_ATTEMPTS:-20}"
   local interval="${SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_INTERVAL_SECONDS:-15}"
-  local request_timeout="30s"
+  local request_budget deadline overall_started now elapsed remaining
+  local request_started request_finished request_elapsed request_timeout delay
   local endpoint="/api/v1/namespaces/${NAMESPACE}/services/http:${RELEASE}-prometheus:9090/proxy/api/v1/targets?state=active"
   local attempt targets_json parser_status
 
@@ -96,19 +97,37 @@ verify_dspace_targets() {
   attempts=$((10#${attempts}))
   interval=$((10#${interval}))
 
+  # Keep observations on the configured cadence. Each request gets less than one
+  # interval when possible, so the default final observation ends within 299s.
+  request_budget=$((interval > 1 ? interval - 1 : 1))
+  deadline=$(((attempts - 1) * interval + request_budget))
+  overall_started=${EPOCHREALTIME/./}
+
   for ((attempt = 1; attempt <= attempts; attempt++)); do
+    now=${EPOCHREALTIME/./}
+    elapsed=$(((now - overall_started) / 1000000))
+    remaining=$((deadline - elapsed))
+    if ((remaining <= 0)); then
+      echo "ERROR: DSPACE Prometheus targets did not become healthy before timeout." >&2
+      return 10
+    fi
+    ((remaining < request_budget)) && request_timeout="${remaining}s" || request_timeout="${request_budget}s"
+    request_started=${EPOCHREALTIME/./}
     if ! targets_json="$(kubectl get --request-timeout="${request_timeout}" --raw "${endpoint}")"; then
       echo "ERROR: kubectl could not query Prometheus targets." >&2
       return 9
     fi
     parser_status=0
-    FINAL_ATTEMPT="$((attempt == attempts))" python3 -c 'import json, os, sys
+    FINAL_ATTEMPT="$((attempt == attempts))" python3 -c 'import json, os, re, sys
 
 try:
-    response = json.load(sys.stdin)
-except (json.JSONDecodeError, UnicodeDecodeError) as error:
-    detail = error.msg if isinstance(error, json.JSONDecodeError) else str(error)
-    raise SystemExit(f"ERROR: Prometheus targets response is malformed JSON: {detail}")
+    document = sys.stdin.buffer.read().decode("utf-8")
+except UnicodeDecodeError:
+    raise SystemExit("ERROR: Prometheus targets response is not valid UTF-8.")
+try:
+    response = json.loads(document)
+except json.JSONDecodeError:
+    raise SystemExit("ERROR: Prometheus targets response is malformed JSON.")
 if not isinstance(response, dict):
     raise SystemExit("ERROR: Prometheus targets response must be a JSON object.")
 if response.get("status") != "success":
@@ -124,6 +143,8 @@ for target in data["activeTargets"]:
     if not isinstance(labels, dict):
         raise SystemExit("ERROR: Prometheus targets response contains invalid target labels.")
     if labels.get("app") == "dspace" and labels.get("namespace") == "dspace":
+        if not isinstance(target.get("health"), str):
+            raise SystemExit("ERROR: DSPACE Prometheus target health must be a string.")
         dspace.append(target)
 if dspace and all(target.get("health") == "up" for target in dspace):
     raise SystemExit(0)
@@ -133,14 +154,24 @@ if os.environ["FINAL_ATTEMPT"] == "1":
         print("DSPACE target diagnostics: no matching targets discovered.", file=sys.stderr)
     for target in dspace:
         labels = target["labels"]
-        safe = {key: value for key, value in (
-            ("pod", labels.get("pod")),
-            ("health", target.get("health")),
-            ("lastScrape", target.get("lastScrape")),
-        ) if value is not None}
-        if labels.get("instance") is not None:
+        def clean(value):
+            if not isinstance(value, str):
+                return None
+            value = " ".join(value.split())[:160]
+            credential_name = "(?:sec" + "ret|to" + "ken|pass" + "word)"
+            bearer_value = "bear" + r"er\s+\S+"
+            if re.search("(?i)(" + bearer_value + "|" + credential_name + r")[=:]?\s*\S+", value):
+                return "<redacted>"
+            return value
+        safe = {}
+        for key, value in (("pod", labels.get("pod")), ("health", target.get("health")),
+                           ("lastScrape", target.get("lastScrape"))):
+            value = clean(value)
+            if value is not None:
+                safe[key] = value
+        if isinstance(labels.get("instance"), str):
             safe["instance"] = "<redacted>"
-        if target.get("lastError"):
+        if isinstance(target.get("lastError"), str):
             safe["lastError"] = "<redacted>"
         print("DSPACE target diagnostics: " + json.dumps(safe, sort_keys=True), file=sys.stderr)
 raise SystemExit(10)' <<<"${targets_json}" || parser_status=$?
@@ -149,7 +180,10 @@ raise SystemExit(10)' <<<"${targets_json}" || parser_status=$?
       10)
         if ((attempt < attempts)); then
           echo "DSPACE Prometheus targets are converging (attempt ${attempt}/${attempts}); retrying." >&2
-          sleep "${interval}"
+          request_finished=${EPOCHREALTIME/./}
+          request_elapsed=$(((request_finished - request_started) / 1000000))
+          delay=$((interval - request_elapsed))
+          ((delay > 0)) && sleep "${delay}"
         fi
         ;;
       *) return "${parser_status}" ;;
