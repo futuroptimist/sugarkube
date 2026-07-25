@@ -145,7 +145,7 @@ def test_status_and_verify_are_read_only():
     assert '--timeout="${TIMEOUT}"' in verify
     assert "desiredNumberScheduled" in verify and "numberReady" in verify
     assert "|| true" not in verify
-    assert 'target.get("health") == "up" for target in dspace' in verify
+    assert 'all(target["health"] == "up" for target in matches)' in script
 
 
 def test_justfile_exposes_observability_recipes():
@@ -202,7 +202,16 @@ def test_flux_health_checks_exclude_manually_managed_observability():
     assert "just observability-verify" in text
 
 
-def run_helper(tmp_path: Path, command: str, *, helm_mode="absent", context="sugar-staging", kubectl_mode="healthy"):
+def run_helper(
+    tmp_path: Path,
+    command: str,
+    *,
+    helm_mode="absent",
+    context="sugar-staging",
+    kubectl_mode="healthy",
+    attempts="3",
+    interval="1",
+):
     """Run the lifecycle against deterministic command stubs and return its audit log."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(parents=True)
@@ -235,19 +244,30 @@ case "$*" in
   *"get servicemonitor dspace"*"bearerTokenSecret.name"*) [ "$KUBECTL_MODE" != missing-secret-ref ] && echo dspace-token ;;
   *"get secret dspace-token -o name"*) [ "$KUBECTL_MODE" != missing-secret ] || exit 44; echo secret/dspace-token ;;
   *"get --raw "*)
+    count_file="$AUDIT.target-count"
+    count=0; [ ! -f "$count_file" ] || count=$(cat "$count_file")
+    count=$((count + 1)); echo "$count" > "$count_file"
     [ "$KUBECTL_MODE" != query-fail ] || exit 45
-    if [ "$KUBECTL_MODE" = mixed-targets ]; then
-      printf '%s\n' '{"status":"success","data":{"activeTargets":[{"labels":{"app":"dspace","namespace":"dspace"},"health":"up"},{"labels":{"app":"dspace","namespace":"dspace"},"health":"down"}]}}'
-    else
-      [ "$KUBECTL_MODE" = unhealthy ] && health=down || health=up
-      printf '{"status":"success","data":{"activeTargets":[{"labels":{"app":"dspace","namespace":"dspace"},"health":"%s"}]}}\n' "$health"
-    fi
+    case "$KUBECTL_MODE" in
+      malformed) echo 'not-json' ;;
+      api-fail) echo '{"status":"error","data":{"activeTargets":[]}}' ;;
+      bad-structure) echo '{"status":"success","data":{"activeTargets":{}}}' ;;
+      absent) echo '{"status":"success","data":{"activeTargets":[]}}' ;;
+      absent-then-healthy) [ "$count" -lt 2 ] && echo '{"status":"success","data":{"activeTargets":[]}}' || echo "$ONE_HEALTHY" ;;
+      mixed-then-healthy) [ "$count" -lt 3 ] && echo "$MIXED" || echo "$TWO_HEALTHY" ;;
+      unknown-then-healthy) [ "$count" -lt 2 ] && echo "$UNKNOWN" || echo "$ONE_HEALTHY" ;;
+      mixed-targets) echo "$MIXED" ;;
+      unhealthy) echo "$DOWN" ;;
+      two-healthy) echo "$TWO_HEALTHY" ;;
+      *) echo "$ONE_HEALTHY" ;;
+    esac
     ;;
   *) exit 0 ;;
 esac
 """,
         encoding="utf-8",
     )
+    (bin_dir / "sleep").write_text('#!/bin/sh\necho "sleep $*" >> "$AUDIT"\n', encoding="utf-8")
     for stub in bin_dir.iterdir():
         stub.chmod(0o755)
     env = os.environ | {
@@ -257,6 +277,13 @@ esac
         "CONTEXT": context,
         "KUBECTL_MODE": kubectl_mode,
         "KUBECONFIG": str(tmp_path / "kubeconfig"),
+        "SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_ATTEMPTS": attempts,
+        "SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_INTERVAL_SECONDS": interval,
+        "ONE_HEALTHY": '{"status":"success","data":{"activeTargets":[{"labels":{"app":"dspace","namespace":"dspace","pod":"safe-pod","instance":"safe-instance"},"health":"up","lastError":"","lastScrape":"2026-07-25T00:00:00Z"}]}}',
+        "TWO_HEALTHY": '{"status":"success","data":{"activeTargets":[{"labels":{"app":"dspace","namespace":"dspace"},"health":"up"},{"labels":{"app":"dspace","namespace":"dspace"},"health":"up"}]}}',
+        "MIXED": '{"status":"success","data":{"activeTargets":[{"labels":{"app":"dspace","namespace":"dspace","pod":"safe-pod"},"health":"up","lastError":""},{"labels":{"app":"dspace","namespace":"dspace","instance":"safe-instance"},"health":"down","lastError":"safe diagnostic","lastScrape":"2026-07-25T00:00:00Z"}]}}',
+        "DOWN": '{"status":"success","data":{"activeTargets":[{"labels":{"app":"dspace","namespace":"dspace","pod":"safe-pod"},"health":"down","lastError":"safe diagnostic","lastScrape":"2026-07-25T00:00:00Z","authorization":"Bearer TOP-SECRET","secret":"TOP-SECRET"}]}}',
+        "UNKNOWN": '{"status":"success","data":{"activeTargets":[{"labels":{"app":"dspace","namespace":"dspace"},"health":"unknown"}]}}',
     }
     result = subprocess.run(
         ["bash", str(SCRIPT), command, "env=staging"],
@@ -323,9 +350,59 @@ def test_verify_exact_three_nodes_secret_reference_and_target_health(tmp_path):
         "wrong-release",
         "missing-secret-ref",
         "missing-secret",
-        "query-fail",
-        "unhealthy",
-        "mixed-targets",
     ):
         result, _ = run_helper(tmp_path / mode, "verify", kubectl_mode=mode)
         assert result.returncode != 0, mode
+
+
+def test_target_health_convergence_is_bounded_and_accepts_any_positive_count(tmp_path):
+    for mode in ("healthy", "two-healthy"):
+        result, audit = run_helper(tmp_path / mode, "verify", kubectl_mode=mode)
+        assert result.returncode == 0
+        assert audit.count("get --raw") == 1
+        assert "sleep " not in audit
+
+    absent, audit = run_helper(tmp_path / "absent-then", "verify", kubectl_mode="absent-then-healthy")
+    assert absent.returncode == 0
+    assert audit.count("get --raw") == 2 and audit.count("sleep 1") == 1
+
+    mixed, audit = run_helper(tmp_path / "mixed-then", "verify", kubectl_mode="mixed-then-healthy")
+    assert mixed.returncode == 0
+    assert audit.count("get --raw") == 3 and audit.count("sleep 1") == 2
+
+    unknown, audit = run_helper(
+        tmp_path / "unknown-then", "verify", kubectl_mode="unknown-then-healthy"
+    )
+    assert unknown.returncode == 0
+    assert audit.count("get --raw") == 2 and audit.count("sleep 1") == 1
+
+
+def test_target_health_timeout_rejects_empty_down_and_mixed_sets_safely(tmp_path):
+    for mode in ("absent", "unhealthy", "mixed-targets"):
+        result, audit = run_helper(tmp_path / mode, "verify", kubectl_mode=mode)
+        assert result.returncode != 0
+        assert audit.count("get --raw") == 3 and audit.count("sleep 1") == 2
+        assert "Safe target diagnostics:" in result.stderr
+        assert "TOP-SECRET" not in result.stderr
+    assert "safe-pod" in result.stderr
+    assert "safe diagnostic" in result.stderr
+
+
+def test_target_query_and_parsing_failures_are_immediate(tmp_path):
+    for mode in ("query-fail", "malformed", "api-fail", "bad-structure"):
+        result, audit = run_helper(tmp_path / mode, "verify", kubectl_mode=mode)
+        assert result.returncode != 0
+        assert audit.count("get --raw") == 1
+        assert "sleep " not in audit
+
+
+def test_invalid_target_retry_configuration_fails_before_polling(tmp_path):
+    for attempts, interval in (("0", "1"), ("no", "1"), ("1", "0"), ("1", "1.5")):
+        result, audit = run_helper(
+            tmp_path / f"{attempts}-{interval}",
+            "verify",
+            attempts=attempts,
+            interval=interval,
+        )
+        assert result.returncode != 0
+        assert "get --raw" not in audit

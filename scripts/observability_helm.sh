@@ -10,6 +10,8 @@ COMMON_VALUES="${ROOT}/platform/observability/helm/kube-prometheus-stack.values.
 STAGING_VALUES="${ROOT}/clusters/staging/observability/kube-prometheus-stack.values.yaml"
 TIMEOUT="${SUGARKUBE_OBSERVABILITY_HELM_TIMEOUT:-20m}"
 GRAFANA_URL="http://sugarkube3.local:30300"
+TARGET_HEALTH_ATTEMPTS="${SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_ATTEMPTS:-20}"
+TARGET_HEALTH_INTERVAL_SECONDS="${SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_INTERVAL_SECONDS:-15}"
 
 usage() { echo "Usage: $0 <render|install|upgrade|status|verify> env=staging" >&2; }
 normalize_env() {
@@ -72,6 +74,69 @@ release_state() {
     return 1
   fi
 }
+verify_dspace_targets() {
+  local attempts="${TARGET_HEALTH_ATTEMPTS}" interval="${TARGET_HEALTH_INTERVAL_SECONDS}"
+  local attempt targets_json observation rc
+  [[ "${attempts}" =~ ^[0-9]+$ && "${attempts}" -gt 0 ]] || {
+    echo "ERROR: SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_ATTEMPTS must be a positive integer." >&2
+    return 8
+  }
+  [[ "${interval}" =~ ^[0-9]+$ && "${interval}" -gt 0 ]] || {
+    echo "ERROR: SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_INTERVAL_SECONDS must be a positive integer." >&2
+    return 8
+  }
+
+  for ((attempt = 1; attempt <= attempts; attempt++)); do
+    if ! targets_json="$(kubectl get --raw "/api/v1/namespaces/${NAMESPACE}/services/http:${RELEASE}-prometheus:9090/proxy/api/v1/targets?state=active" 2>/dev/null)"; then
+      echo "ERROR: Prometheus targets query transport failed." >&2
+      return 9
+    fi
+    set +e
+    observation="$(python3 -c 'import json, sys
+try:
+    response = json.load(sys.stdin)
+    if not isinstance(response, dict) or response.get("status") != "success":
+        raise ValueError("Prometheus API status was not success")
+    data = response.get("data")
+    if not isinstance(data, dict) or not isinstance(data.get("activeTargets"), list):
+        raise TypeError("required Prometheus target structure is missing")
+    matches = []
+    for target in data["activeTargets"]:
+        if not isinstance(target, dict) or not isinstance(target.get("labels"), dict):
+            raise TypeError("target labels cannot be parsed safely")
+        labels = target["labels"]
+        if labels.get("app") == "dspace" and labels.get("namespace") == "dspace":
+            if not isinstance(target.get("health"), str):
+                raise TypeError("target health cannot be parsed safely")
+            matches.append(target)
+    if matches and all(target["health"] == "up" for target in matches):
+        raise SystemExit(0)
+    safe = [{key: target.get(key) for key in ("health", "lastError", "lastScrape")}
+            | {key: target["labels"].get(key) for key in ("pod", "instance")}
+            for target in matches]
+    print(json.dumps(safe, separators=(",", ":")))
+    raise SystemExit(10)
+except (json.JSONDecodeError, TypeError, ValueError) as error:
+    print("ERROR: invalid Prometheus targets response: " + str(error), file=sys.stderr)
+    raise SystemExit(2)' <<<"${targets_json}")"
+    rc=$?
+    set -e
+    case "${rc}" in
+      0) echo "DSPACE Prometheus targets confirmed healthy without printing Secret values."; return 0 ;;
+      10)
+        if (( attempt < attempts )); then
+          echo "DSPACE Prometheus targets not yet healthy (attempt ${attempt}/${attempts}); retrying." >&2
+          sleep "${interval}"
+        else
+          echo "ERROR: DSPACE Prometheus targets did not become healthy after ${attempts} attempts." >&2
+          echo "Safe target diagnostics: ${observation}" >&2
+          return 10
+        fi
+        ;;
+      *) return "${rc}" ;;
+    esac
+  done
+}
 render() { require_tools helm kubectl; print_resolved staging; tmp="$(mktemp -t sugarkube-observability-render.XXXXXX.yaml)"; trap 'rm -f "${tmp}"' EXIT; render_to "${tmp}"; cat "${tmp}"; }
 install_release() { require_tools helm kubectl python3; print_resolved staging; assert_context; tmp="$(mktemp -t sugarkube-observability-install.XXXXXX.yaml)"; trap 'rm -f "${tmp}"' EXIT; render_to "${tmp}"; state="$(release_state)"; if [[ "${state}" == present ]]; then echo "ERROR: cannot install: ${RELEASE} already exists in ${NAMESPACE}. Use observability-upgrade." >&2; exit 4; fi; helm install "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --create-namespace --version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}" --wait --timeout "${TIMEOUT}"; }
 upgrade_release() { require_tools helm kubectl python3; print_resolved staging; assert_context; tmp="$(mktemp -t sugarkube-observability-upgrade.XXXXXX.yaml)"; trap 'rm -f "${tmp}"' EXIT; render_to "${tmp}"; state="$(release_state)"; if [[ "${state}" == absent ]]; then echo "ERROR: upgrade requires an existing Helm release ${RELEASE} in ${NAMESPACE}. Use observability-install for a fresh cluster." >&2; exit 5; fi; helm upgrade "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}" --wait --timeout "${TIMEOUT}"; }
@@ -111,16 +176,7 @@ if len(claims) != 1 or claims[0].get("status", {}).get("phase") != "Bound" or cl
   kubectl -n dspace get secret "${secret_name}" -o name >/dev/null
   echo "DSPACE ServiceMonitor secret reference exists (value intentionally not printed)."
 
-  targets_json="$(kubectl get --raw "/api/v1/namespaces/${NAMESPACE}/services/http:${RELEASE}-prometheus:9090/proxy/api/v1/targets?state=active")"
-  python3 -c 'import json, sys
-data = json.load(sys.stdin)
-if data.get("status") != "success":
-    raise SystemExit("ERROR: Prometheus targets query was unsuccessful.")
-targets = data.get("data", {}).get("activeTargets", [])
-dspace = [target for target in targets if target.get("labels", {}).get("app") == "dspace" and target.get("labels", {}).get("namespace") == "dspace"]
-if not dspace or not all(target.get("health") == "up" for target in dspace):
-    raise SystemExit("ERROR: every discovered DSPACE Prometheus target must be healthy.")' <<<"${targets_json}"
-  echo "DSPACE Prometheus targets confirmed healthy without printing Secret values."
+  verify_dspace_targets
   echo "Grafana LAN URL: ${GRAFANA_URL} (same NodePort is available through the other staging nodes)"
 }
 
