@@ -77,22 +77,27 @@ install_release() { require_tools helm kubectl python3; print_resolved staging; 
 upgrade_release() { require_tools helm kubectl python3; print_resolved staging; assert_context; tmp="$(mktemp -t sugarkube-observability-upgrade.XXXXXX.yaml)"; trap 'rm -f "${tmp}"' EXIT; render_to "${tmp}"; state="$(release_state)"; if [[ "${state}" == absent ]]; then echo "ERROR: upgrade requires an existing Helm release ${RELEASE} in ${NAMESPACE}. Use observability-install for a fresh cluster." >&2; exit 5; fi; helm upgrade "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}" --wait --timeout "${TIMEOUT}"; }
 status() { require_tools helm kubectl python3; print_resolved staging; assert_context; helm -n "${NAMESPACE}" status "${RELEASE}"; kubectl -n "${NAMESPACE}" get deploy,statefulset,daemonset -l "app.kubernetes.io/instance=${RELEASE}"; kubectl -n "${NAMESPACE}" get prometheus,alertmanager; kubectl -n "${NAMESPACE}" get svc,pvc; kubectl get crd prometheuses.monitoring.coreos.com alertmanagers.monitoring.coreos.com servicemonitors.monitoring.coreos.com probes.monitoring.coreos.com; }
 verify_dspace_targets() {
+  require_tools kubectl python3
   local attempts="${SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_ATTEMPTS:-20}"
   local interval="${SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_INTERVAL_SECONDS:-15}"
+  local request_timeout="30s"
   local endpoint="/api/v1/namespaces/${NAMESPACE}/services/http:${RELEASE}-prometheus:9090/proxy/api/v1/targets?state=active"
   local attempt targets_json parser_status
 
-  [[ "${attempts}" =~ ^[1-9][0-9]*$ ]] || {
+  [[ "${attempts}" =~ ^0*[1-9][0-9]*$ ]] || {
     echo "ERROR: SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_ATTEMPTS must be a positive integer." >&2
     return 8
   }
-  [[ "${interval}" =~ ^[1-9][0-9]*$ ]] || {
+  [[ "${interval}" =~ ^0*[1-9][0-9]*$ ]] || {
     echo "ERROR: SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_INTERVAL_SECONDS must be a positive integer." >&2
     return 8
   }
+  # Force decimal interpretation: Bash otherwise treats a leading zero as octal.
+  attempts=$((10#${attempts}))
+  interval=$((10#${interval}))
 
   for ((attempt = 1; attempt <= attempts; attempt++)); do
-    if ! targets_json="$(kubectl get --raw "${endpoint}")"; then
+    if ! targets_json="$(kubectl get --request-timeout="${request_timeout}" --raw "${endpoint}")"; then
       echo "ERROR: kubectl could not query Prometheus targets." >&2
       return 9
     fi
@@ -102,7 +107,8 @@ verify_dspace_targets() {
 try:
     response = json.load(sys.stdin)
 except (json.JSONDecodeError, UnicodeDecodeError) as error:
-    raise SystemExit(f"ERROR: Prometheus targets response is malformed JSON: {error.msg}")
+    detail = error.msg if isinstance(error, json.JSONDecodeError) else str(error)
+    raise SystemExit(f"ERROR: Prometheus targets response is malformed JSON: {detail}")
 if not isinstance(response, dict):
     raise SystemExit("ERROR: Prometheus targets response must be a JSON object.")
 if response.get("status") != "success":
@@ -129,11 +135,13 @@ if os.environ["FINAL_ATTEMPT"] == "1":
         labels = target["labels"]
         safe = {key: value for key, value in (
             ("pod", labels.get("pod")),
-            ("instance", labels.get("instance")),
             ("health", target.get("health")),
-            ("lastError", target.get("lastError")),
             ("lastScrape", target.get("lastScrape")),
         ) if value is not None}
+        if labels.get("instance") is not None:
+            safe["instance"] = "<redacted>"
+        if target.get("lastError"):
+            safe["lastError"] = "<redacted>"
         print("DSPACE target diagnostics: " + json.dumps(safe, sort_keys=True), file=sys.stderr)
 raise SystemExit(10)' <<<"${targets_json}" || parser_status=$?
     case "${parser_status}" in

@@ -147,6 +147,8 @@ def test_status_and_verify_are_read_only():
     assert "|| true" not in verify
     assert "verify_dspace_targets" in verify
     assert 'all(target.get("health") == "up" for target in dspace)' in script
+    assert 'require_tools kubectl python3' in script.split("verify_dspace_targets()", 1)[1]
+    assert '--request-timeout="${request_timeout}" --raw' in script
 
 
 def test_justfile_exposes_observability_recipes():
@@ -245,7 +247,7 @@ case "$*" in
   *"get servicemonitor dspace"*"metadata.labels.release"*) [ "$KUBECTL_MODE" = wrong-release ] && echo wrong || echo kube-prometheus-stack ;;
   *"get servicemonitor dspace"*"bearerTokenSecret.name"*) [ "$KUBECTL_MODE" != missing-secret-ref ] && echo dspace-token ;;
   *"get secret dspace-token -o name"*) [ "$KUBECTL_MODE" != missing-secret ] || exit 44; echo secret/dspace-token ;;
-  *"get --raw "*)
+  *"get --request-timeout=30s --raw "*)
     [ "$KUBECTL_MODE" != query-fail ] || exit 45
     if [ -n "$TARGET_RESPONSES" ]; then
       count=0
@@ -363,9 +365,9 @@ def test_verify_exact_three_nodes_secret_reference_and_first_observation_health(
     healthy, audit = run_helper(tmp_path / "healthy", "verify")
     assert (
         healthy.returncode == 0
-        and "get --raw /api/v1/namespaces/monitoring/services/http:" in audit
+        and "get --request-timeout=30s --raw /api/v1/namespaces/monitoring/services/http:" in audit
     )
-    assert audit.count("get --raw ") == 1
+    assert audit.count(" --raw ") == 1
     assert "sleep " not in audit
     for mode in ("two-nodes", "wrong-release", "missing-secret-ref", "missing-secret"):
         result, _ = run_helper(tmp_path / mode, "verify", kubectl_mode=mode)
@@ -383,7 +385,7 @@ def test_verify_retries_empty_unknown_and_mixed_then_accepts_one_target(tmp_path
         tmp_path, "verify", target_responses=responses, retry_attempts="4", retry_interval="7"
     )
     assert result.returncode == 0
-    assert audit.count("get --raw ") == 4
+    assert audit.count(" --raw ") == 4
     assert audit.count("sleep 7") == 3
     assert result.stderr.count("targets are converging") == 3
 
@@ -392,13 +394,13 @@ def test_verify_accepts_multiple_healthy_targets(tmp_path):
     response = target_response(dspace_target("up"), dspace_target("up", pod="dspace-1"))
     result, audit = run_helper(tmp_path, "verify", target_responses=[response])
     assert result.returncode == 0
-    assert audit.count("get --raw ") == 1
+    assert audit.count(" --raw ") == 1
 
 
 def test_verify_empty_targets_time_out_without_vacuous_success(tmp_path):
     result, audit = run_helper(tmp_path, "verify", target_responses=[target_response()] * 3)
     assert result.returncode != 0
-    assert audit.count("get --raw ") == 3
+    assert audit.count(" --raw ") == 3
     assert audit.count("sleep 1") == 2
     assert "no matching targets discovered" in result.stderr
 
@@ -410,9 +412,18 @@ def test_verify_mixed_targets_time_out_with_safe_diagnostics(tmp_path):
     )
     result, audit = run_helper(tmp_path, "verify", target_responses=[response] * 3)
     assert result.returncode != 0
-    assert audit.count("get --raw ") == 3 and audit.count("sleep 1") == 2
-    for value in ("dspace-1", "down", "connection refused", "lastScrape"):
+    assert audit.count(" --raw ") == 3 and audit.count("sleep 1") == 2
+    safe_values = (
+        "dspace-1",
+        "down",
+        "lastScrape",
+        '"instance": "<redacted>"',
+        '"lastError": "<redacted>"',
+    )
+    for value in safe_values:
         assert value in result.stderr
+    assert "connection refused" not in result.stderr
+    assert "10.0.0.1:3000" not in result.stderr
     assert "dspace-token" not in result.stderr
     assert '"app": "dspace"' not in result.stderr
     assert "activeTargets" not in result.stderr
@@ -434,7 +445,7 @@ def test_verify_api_and_parsing_failures_are_immediate(tmp_path):
             tmp_path / name, "verify", kubectl_mode=mode, target_responses=responses
         )
         assert result.returncode != 0
-        assert audit.count("get --raw ") == 1
+        assert audit.count(" --raw ") == 1
         assert "sleep " not in audit
         assert message in result.stderr
 
@@ -449,4 +460,17 @@ def test_verify_invalid_retry_configuration_fails_before_polling(tmp_path):
         )
         assert result.returncode != 0
         assert "positive integer" in result.stderr
-        assert "get --raw " not in audit
+        assert " --raw " not in audit
+
+
+def test_verify_treats_leading_zero_retry_configuration_as_decimal(tmp_path):
+    result, audit = run_helper(
+        tmp_path,
+        "verify",
+        target_responses=[target_response()] * 8,
+        retry_attempts="08",
+        retry_interval="01",
+    )
+    assert result.returncode != 0
+    assert audit.count("get --request-timeout=30s --raw ") == 8
+    assert audit.count("sleep 1") == 7
