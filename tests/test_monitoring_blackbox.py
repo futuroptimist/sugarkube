@@ -57,14 +57,17 @@ def test_pinned_chart_values_are_private_and_bounded():
     assert value["ingress"]["enabled"] is False and value["networkPolicy"]["enabled"] is False
     assert value["serviceMonitor"]["enabled"] is False
     assert value["serviceMonitor"]["selfMonitor"]["enabled"] is True
-    assert (
-        value["serviceMonitor"]["selfMonitor"]["labels"]["release"]
-        == "kube-prometheus-stack"
-    )
+    assert value["serviceMonitor"]["selfMonitor"]["labels"]["release"] == "kube-prometheus-stack"
     assert value["secretConfig"] is False
-    assert all(value[key] == [] for key in (
-        "extraConfigmapMounts", "extraSecretMounts", "extraVolumes", "extraVolumeMounts"
-    ))
+    assert all(
+        value[key] == []
+        for key in (
+            "extraConfigmapMounts",
+            "extraSecretMounts",
+            "extraVolumes",
+            "extraVolumeMounts",
+        )
+    )
     modules = value["config"]["modules"]
     assert set(modules) == {"https_2xx", "json_health_2xx", "static_content_2xx"}
     for module in modules.values():
@@ -112,7 +115,68 @@ def test_legacy_resources_are_outside_active_graphs():
     assert "LEGACY/FUTURE ONLY" in (ROOT / "monitoring/probes/public-apps.yaml").read_text()
 
 
-def test_network_policy_prerequisite_is_explicitly_deferred():
-    docs = (ROOT / "docs/observability-blackbox.md").read_text()
-    assert "separately\nscoped egress-policy prerequisite" in docs
-    assert "this lifecycle does not\nresolve that prerequisite" in docs
+def test_lifecycle_network_policy_is_exact_and_inactive():
+    policy_path = (
+        ROOT
+        / "clusters/staging/observability/network-policies/prometheus-to-blackbox-exporter.yaml"
+    )
+    policy = yaml(policy_path)[0]
+    assert policy["metadata"] == {
+        "name": "allow-kube-prometheus-stack-to-blackbox-exporter",
+        "namespace": "monitoring",
+    }
+    assert policy["spec"] == {
+        "podSelector": {
+            "matchLabels": {
+                "app.kubernetes.io/name": "prometheus",
+                "operator.prometheus.io/name": "kube-prometheus-stack-prometheus",
+            }
+        },
+        "policyTypes": ["Egress"],
+        "egress": [
+            {
+                "to": [
+                    {
+                        "podSelector": {
+                            "matchLabels": {
+                                "app.kubernetes.io/instance": "prometheus-blackbox-exporter",
+                                "app.kubernetes.io/name": "prometheus-blackbox-exporter",
+                            }
+                        }
+                    }
+                ],
+                "ports": [{"protocol": "TCP", "port": 9115}],
+            }
+        ],
+    }
+    staging = (ROOT / "clusters/staging/kustomization.yaml").read_text()
+    assert "observability/network-policies" not in staging
+
+
+def test_policy_selectors_track_pinned_chart_render_contract():
+    assert (
+        ROOT / "platform/observability/helm/kube-prometheus-stack.version"
+    ).read_text().strip() == "87.19.0"
+    assert (
+        ROOT / "platform/observability/helm/prometheus-blackbox-exporter.version"
+    ).read_text().strip() == "11.15.1"
+    exporter = yaml(VALUES)[0]
+    assert exporter["fullnameOverride"] == "prometheus-blackbox-exporter"
+    # Chart 11.15.1 renders these two labels in the Deployment pod template and selector.
+    expected_exporter = {
+        "app.kubernetes.io/name": "prometheus-blackbox-exporter",
+        "app.kubernetes.io/instance": "prometheus-blackbox-exporter",
+    }
+    policy = yaml(
+        ROOT
+        / "clusters/staging/observability/network-policies/prometheus-to-blackbox-exporter.yaml"
+    )[0]
+    assert policy["spec"]["egress"][0]["to"][0]["podSelector"]["matchLabels"] == expected_exporter
+    # Chart 87.19.0 renders the canonical Prometheus CR name; the operator's pod-label
+    # contract adds app.kubernetes.io/name=prometheus and operator.prometheus.io/name=<CR name>.
+    common = yaml(ROOT / "platform/observability/helm/kube-prometheus-stack.values.common.yaml")[0]
+    assert common["fullnameOverride"] == "kube-prometheus-stack"
+    assert policy["spec"]["podSelector"]["matchLabels"] == {
+        "app.kubernetes.io/name": "prometheus",
+        "operator.prometheus.io/name": "kube-prometheus-stack-prometheus",
+    }

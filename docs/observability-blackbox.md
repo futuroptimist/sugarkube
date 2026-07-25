@@ -3,11 +3,12 @@
 Public-route monitoring has a guarded, **staging-only, non-Flux** lifecycle. The
 exporter, Prometheus, and their administrative interfaces remain LAN/internal
 only. The exporter is a `ClusterIP` service; this work adds no Ingress,
-NodePort, public DNS, router rule, credential, persistence, or NetworkPolicy.
-The existing monitoring default-deny policy therefore requires a separately
-scoped egress-policy prerequisite allowing Prometheus to reach exporter TCP
-9115 before any fresh-cluster rollout can succeed; this lifecycle does not
-resolve that prerequisite.
+NodePort, public DNS, router rule, credential, or persistence. The only added
+network permission is the lifecycle-owned policy described below.
+The lifecycle now owns one narrowly scoped staging `NetworkPolicy` allowing
+only the canonical Prometheus pods to reach only the canonical exporter pods
+on TCP 9115. Existing monitoring DNS and external HTTPS permissions remain
+unchanged.
 
 ## Canonical sources
 
@@ -19,6 +20,9 @@ resolve that prerequisite.
   `clusters/staging/observability/prometheus-blackbox-exporter.values.yaml`.
 - Lifecycle-owned Probes and deterministic Kustomize entrypoint:
   `clusters/staging/observability/probes/`.
+- Lifecycle-owned NetworkPolicy and deterministic Kustomize entrypoint:
+  `clusters/staging/observability/network-policies/`. Its stable object name is
+  `allow-kube-prometheus-stack-to-blackbox-exporter`.
 - Helper: `scripts/observability_blackbox.sh`, exposed by
   `just observability-blackbox-*`.
 
@@ -43,12 +47,15 @@ just observability-blackbox-verify env=staging
 ```
 
 Render, status, and verify are read-only. Install is only for an absent exporter
-release; upgrade requires it to exist. Both render the pinned chart and Probes
-first, pass the complete committed values on every Helm operation, and wait up
-to the Pi-appropriate timeout. Only after Helm succeeds, they delete the eleven
-explicit legacy production Probe names formerly present in the shared matrix,
-using `--ignore-not-found`, then apply the rendered staging Probes. No selector
-pruning or staging Probe deletion is used. Neither uses
+release; upgrade requires it to exist. All commands render and validate the
+pinned chart, policy, and Probes before cluster access. Mutations pass the
+complete committed values on every Helm operation and wait up to the
+Pi-appropriate timeout. Only after Helm succeeds, they apply the policy, delete
+the eleven explicit legacy production Probe names formerly present in the
+shared matrix using `--ignore-not-found`, and apply the rendered staging
+Probes, in that order. A Helm failure changes neither policy nor Probes; a
+policy failure changes no Probe. No selector pruning or staging Probe deletion
+is used. Neither mutation uses
 `--reuse-values`. Missing environments and production are rejected;
 `env=int` remains a deprecated alias for staging.
 
@@ -68,25 +75,35 @@ app/route target matrix, `probe_success == 1`, and the duration, HTTP status,
 DNS lookup, and earliest TLS certificate-expiry metric families. It never logs
 raw target payloads or URLs; terminal diagnostics contain bounded labels and
 health/series states only.
+Before polling Prometheus, verification retrieves the policy by its exact name
+and compares its deployed JSON with the required source selector, destination
+selector, sole egress rule, TCP port 9115, and sole `Egress` policy type. It
+fails closed for an absent, broad, or additional selector, peer, rule, port,
+policy type, namespace selector, IP block, or ingress behavior. Status displays
+that exact policy.
 
 ## Post-merge rollout
 
 1. Select and independently confirm the staging kubeconfig and cluster identity.
 2. Review `just observability-blackbox-render env=staging` without applying it.
-3. Use install for a new release or upgrade for an existing release.
+3. Use `just observability-blackbox-install env=staging` when the exporter Helm
+   release is absent, or `just observability-blackbox-upgrade env=staging` when
+   it already exists.
 4. Run status, then verify. Preserve this output as separate live evidence.
 5. Stop and investigate rather than attempting production if any guard fails.
 
-No live-cluster operation is part of repository review or CI.
+No live deployment was performed as part of this repository change; repository
+state is not evidence of a live rollout.
 
 ## Rollback
 
-Inspect Helm history, roll back the exporter, then reapply the Probe render from
-the matching Git revision and verify:
+Inspect Helm history, roll back the exporter, then reapply the policy and Probe
+renders from the matching Git revision in lifecycle order and verify:
 
 ```bash
 helm -n monitoring history prometheus-blackbox-exporter
 helm -n monitoring rollback prometheus-blackbox-exporter <prior-revision> --wait --timeout 20m
+kubectl apply -k clusters/staging/observability/network-policies
 kubectl apply -k clusters/staging/observability/probes
 just observability-blackbox-verify env=staging
 ```
@@ -122,3 +139,5 @@ helper neither manages production nor supplies a replacement production
 lifecycle. Any future Flux adoption
 of the exporter or staging Probes must first retire the manual lifecycle and
 must never manage the same Helm release or Probe object names simultaneously.
+The lifecycle-owned policy directory is likewise absent from active Flux and
+cluster Kustomize graphs and must be mutated only through this guarded helper.

@@ -1,0 +1,6 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Lifecycle-owned staging resource; applied only by observability_blackbox.sh.
+resources:
+  - prometheus-to-blackbox-exporter.yaml
