@@ -78,6 +78,11 @@ mutate() {
   if [[ "${action}" == upgrade && "${state}" == absent ]]; then echo "ERROR: upgrade requires an existing ${RELEASE} release; use install." >&2; exit 6; fi
   helm "${action}" "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${VALUES}" --wait --timeout "${TIMEOUT}"
   kubectl apply -f "${PROBE_RENDER}"
+  # Remove production Probes left by the former mixed-environment staging overlay.
+  # The staging identity guard above makes this cleanup safe; production retains
+  # its own Flux-owned Probe manifests under clusters/prod/observability/probes.
+  kubectl -n "${NAMESPACE}" delete probe \
+    -l "release=${BASE_RELEASE},environment=prod" --ignore-not-found
 }
 status() {
   require_tools helm kubectl python3; print_resolved; assert_context; with_render
@@ -107,7 +112,7 @@ for x in items:
   owned.append((labels.get("app"),labels.get("route")))
 if len(owned)!=16 or set(owned)!=expected: raise SystemExit("ERROR: staging Probe app/route matrix is missing, unexpected, or mislabelled.")'
 }
-prom_get() { kubectl get --request-timeout="${SUGARKUBE_BLACKBOX_REQUEST_TIMEOUT:-14s}" --raw "/api/v1/namespaces/${NAMESPACE}/services/http:${PROMETHEUS_SERVICE}:9090/proxy$1" 2>/dev/null; }
+prom_get() { kubectl get --request-timeout="${SUGARKUBE_BLACKBOX_REQUEST_TIMEOUT:-14s}" --raw "/api/v1/namespaces/${NAMESPACE}/services/http:${PROMETHEUS_SERVICE}:9090/proxy$1"; }
 verify_series() {
   local attempts="${SUGARKUBE_BLACKBOX_VERIFY_ATTEMPTS:-20}" interval="${SUGARKUBE_BLACKBOX_VERIFY_INTERVAL_SECONDS:-15}" attempt targets metrics family encoded output rc
   [[ "${attempts}" =~ ^[1-9][0-9]*$ && "${interval}" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: verification attempts and interval must be positive integers." >&2; exit 8; }

@@ -5,6 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 VALUES = ROOT / "clusters/staging/observability/prometheus-blackbox-exporter.values.yaml"
 PROBES = ROOT / "clusters/staging/observability/probes/public-apps.yaml"
+PROD_PROBES = ROOT / "clusters/prod/observability/probes/public-apps.yaml"
 EXPECTED = {
     ("dspace", "root", "https://staging.democratized.space/", "https_2xx"),
     ("dspace", "config", "https://staging.democratized.space/config.json", "static_content_2xx"),
@@ -95,8 +96,27 @@ def test_legacy_resources_are_outside_active_graphs():
     for env in ("dev", "staging", "prod"):
         overlay = (ROOT / f"clusters/{env}/kustomization.yaml").read_text()
         assert "monitoring/probes" not in overlay
+    assert "observability/probes" in (ROOT / "clusters/prod/kustomization.yaml").read_text()
+    prod_docs = yaml(PROD_PROBES)
+    assert prod_docs
+    assert all(doc["metadata"]["labels"]["environment"] == "prod" for doc in prod_docs)
+    assert all("-prod-" in doc["metadata"]["name"] for doc in prod_docs)
     assert (
         "LEGACY/FUTURE ONLY"
         in (ROOT / "platform/observability/prometheus-blackbox-exporter.yaml").read_text()
     )
     assert "LEGACY/FUTURE ONLY" in (ROOT / "monitoring/probes/public-apps.yaml").read_text()
+
+
+def test_network_policy_allows_prometheus_to_scrape_exporter():
+    policies = yaml(ROOT / "platform/networking/platform-allow.yaml")
+    policy = next(
+        p for p in policies if p["metadata"]["name"] == "allow-prometheus-to-blackbox-exporter"
+    )
+    assert policy["spec"]["podSelector"]["matchLabels"]["app.kubernetes.io/name"] == "prometheus"
+    rule = policy["spec"]["egress"][0]
+    assert (
+        rule["to"][0]["podSelector"]["matchLabels"]["app.kubernetes.io/name"]
+        == "prometheus-blackbox-exporter"
+    )
+    assert rule["ports"] == [{"port": 9115, "protocol": "TCP"}]
