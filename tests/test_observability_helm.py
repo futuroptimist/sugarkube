@@ -14,6 +14,7 @@ FLUX_SYNC = ROOT / "flux" / "gotk-sync.yaml"
 LEGACY = [
     ROOT / "platform" / "observability" / "kube-prometheus-stack.yaml",
     ROOT / "platform" / "observability" / "kube-prometheus-stack-values.yaml",
+    ROOT / "clusters" / "dev" / "patches" / "kube-prometheus-stack-values.yaml",
     ROOT / "clusters" / "staging" / "patches" / "kube-prometheus-stack-values.yaml",
     ROOT / "clusters" / "prod" / "patches" / "kube-prometheus-stack-values.yaml",
 ]
@@ -175,11 +176,15 @@ def test_legacy_flux_resources_are_absent_from_reconciliation_graph():
     staging = (ROOT / "clusters" / "staging" / "kustomization.yaml").read_text(
         encoding="utf-8"
     )
+    development = (ROOT / "clusters" / "dev" / "kustomization.yaml").read_text(
+        encoding="utf-8"
+    )
     production = (ROOT / "clusters" / "prod" / "kustomization.yaml").read_text(
         encoding="utf-8"
     )
     assert "kube-prometheus-stack.yaml" not in platform
     assert "kube-prometheus-stack-values.yaml" not in platform
+    assert "patches/kube-prometheus-stack-values.yaml" not in development
     assert "patches/kube-prometheus-stack-values.yaml" not in staging
     assert "patches/kube-prometheus-stack-values.yaml" not in production
     assert "no Flux CRDs" in platform
