@@ -246,8 +246,8 @@ def test_documented_omissions_and_wiring_are_intentional():
     assert "jobbot3000-prod" not in probes_text
     assert "/resume.pdf" not in probes_text
     docs = (ROOT / "docs" / "observability-blackbox.md").read_text(encoding="utf-8")
-    assert "jobbot3000.example.test" in docs
-    assert "environment=dev" in docs
+    assert "staging only" in docs
+    assert "LEGACY/FUTURE ONLY" in docs
     assert "probe_duration_seconds_bucket" not in docs
     assert "avg by (app, environment, route) (probe_duration_seconds)" in docs
     shared = (ROOT / "monitoring" / "kustomization.yaml").read_text(encoding="utf-8")
@@ -260,5 +260,7 @@ def test_documented_omissions_and_wiring_are_intentional():
     assert "probes/public-apps.yaml" not in shared
     assert "public-apps.yaml" in probes_kustomization
     assert "../../monitoring/probes" not in dev
-    assert "../../monitoring/probes" in staging
-    assert "../../monitoring/probes" in prod
+    assert "../../monitoring/probes" not in staging
+    assert "../../monitoring/probes" not in prod
+    platform = (PLATFORM / "kustomization.yaml").read_text(encoding="utf-8")
+    assert "prometheus-blackbox-exporter.yaml" not in platform

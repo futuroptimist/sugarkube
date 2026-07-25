@@ -4,6 +4,9 @@ This runbook covers the current live **staging-only** kube-prometheus-stack life
 
 Production observability is intentionally unsupported in this slice because no production live baseline has been proven yet.
 
+The separately pinned exporter and Probe lifecycle is documented in
+[Staging blackbox monitoring](./observability-blackbox.md).
+
 ## Canonical sources
 
 - Chart version: `platform/observability/helm/kube-prometheus-stack.version` (`87.19.0`).

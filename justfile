@@ -3297,3 +3297,23 @@ observability-status env='':
 # Verify the canonical non-Flux kube-prometheus-stack release for staging (read-only).
 observability-verify env='':
     @scripts/observability_helm.sh verify '{{ env }}'
+
+# Render the pinned staging-only blackbox exporter and Probe lifecycle (read-only).
+observability-blackbox-render env='':
+    @scripts/observability_blackbox.sh render '{{ env }}'
+
+# Fresh-install the staging-only blackbox exporter, then apply its canonical Probes.
+observability-blackbox-install env='':
+    @scripts/observability_blackbox.sh install '{{ env }}'
+
+# Upgrade the existing staging-only exporter, then apply its canonical Probes.
+observability-blackbox-upgrade env='':
+    @scripts/observability_blackbox.sh upgrade '{{ env }}'
+
+# Summarize the staging-only blackbox lifecycle (read-only).
+observability-blackbox-status env='':
+    @scripts/observability_blackbox.sh status '{{ env }}'
+
+# Verify exporter readiness, Probe discovery, and staging series (read-only).
+observability-blackbox-verify env='':
+    @scripts/observability_blackbox.sh verify '{{ env }}'

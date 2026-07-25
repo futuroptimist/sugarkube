@@ -1,3 +1,5 @@
+# LEGACY/FUTURE ONLY. This file is intentionally absent from every active
+# Kustomize graph. Do not reconcile it while the manual lifecycle owns this release.
 apiVersion: helm.toolkit.fluxcd.io/v2beta2
 kind: HelmRelease
 metadata:
