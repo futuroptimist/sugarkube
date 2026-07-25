@@ -5,6 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 VALUES = ROOT / "clusters/staging/observability/prometheus-blackbox-exporter.values.yaml"
 PROBES = ROOT / "clusters/staging/observability/probes/public-apps.yaml"
+POLICY = ROOT / "clusters/staging/observability/network-policies/prometheus-to-blackbox-exporter.yaml"
 EXPECTED = {
     ("dspace", "root", "https://staging.democratized.space/", "https_2xx"),
     ("dspace", "config", "https://staging.democratized.space/config.json", "static_content_2xx"),
@@ -112,7 +113,54 @@ def test_legacy_resources_are_outside_active_graphs():
     assert "LEGACY/FUTURE ONLY" in (ROOT / "monitoring/probes/public-apps.yaml").read_text()
 
 
-def test_network_policy_prerequisite_is_explicitly_deferred():
-    docs = (ROOT / "docs/observability-blackbox.md").read_text()
-    assert "separately\nscoped egress-policy prerequisite" in docs
-    assert "this lifecycle does not\nresolve that prerequisite" in docs
+def test_lifecycle_network_policy_is_exact_and_inactive():
+    policy = yaml(POLICY)[0]
+    assert policy == {
+        "apiVersion": "networking.k8s.io/v1",
+        "kind": "NetworkPolicy",
+        "metadata": {
+            "name": "allow-kube-prometheus-stack-to-blackbox-exporter",
+            "namespace": "monitoring",
+        },
+        "spec": {
+            "podSelector": {"matchLabels": {
+                "app.kubernetes.io/instance": "kube-prometheus-stack-prometheus",
+                "app.kubernetes.io/name": "prometheus",
+            }},
+            "policyTypes": ["Egress"],
+            "egress": [{
+                "to": [{"podSelector": {"matchLabels": {
+                    "app.kubernetes.io/instance": "prometheus-blackbox-exporter",
+                    "app.kubernetes.io/name": "prometheus-blackbox-exporter",
+                }}}],
+                "ports": [{"protocol": "TCP", "port": 9115}],
+            }],
+        },
+    }
+    entrypoint = yaml(POLICY.parent / "kustomization.yaml")[0]
+    assert entrypoint["resources"] == ["prometheus-to-blackbox-exporter.yaml"]
+    assert "network-policies" not in (
+        ROOT / "clusters/staging/kustomization.yaml"
+    ).read_text()
+
+
+def test_policy_selectors_match_pinned_chart_render_labels():
+    """Labels recorded from complete 87.19.0 and 11.15.1 staging renders."""
+    assert (
+        ROOT / "platform/observability/helm/kube-prometheus-stack.version"
+    ).read_text().strip() == "87.19.0"
+    source = yaml(POLICY)[0]["spec"]["podSelector"]["matchLabels"]
+    destination = yaml(POLICY)[0]["spec"]["egress"][0]["to"][0]["podSelector"][
+        "matchLabels"
+    ]
+    # The complete stack render's Prometheus affinity targets the operator-created
+    # pods with this canonical resource identity; the exporter Deployment render
+    # uses these exact selector/template labels.
+    assert source == {
+        "app.kubernetes.io/name": "prometheus",
+        "app.kubernetes.io/instance": "kube-prometheus-stack-prometheus",
+    }
+    assert destination == {
+        "app.kubernetes.io/name": "prometheus-blackbox-exporter",
+        "app.kubernetes.io/instance": "prometheus-blackbox-exporter",
+    }

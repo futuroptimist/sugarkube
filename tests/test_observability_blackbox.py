@@ -13,6 +13,10 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/observability_blackbox.sh"
 VALUES = ROOT / "clusters/staging/observability/prometheus-blackbox-exporter.values.yaml"
+POLICY = (
+    ROOT / "clusters/staging/observability/network-policies/prometheus-to-blackbox-exporter.yaml"
+)
+POLICY_NAME = "allow-kube-prometheus-stack-to-blackbox-exporter"
 LEGACY = [
     "blackbox-dspace-prod-root",
     "blackbox-dspace-prod-config",
@@ -100,6 +104,15 @@ metadata:
   name: prometheus-blackbox-exporter
 spec:
   replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prometheus-blackbox-exporter
+      app.kubernetes.io/instance: prometheus-blackbox-exporter
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: prometheus-blackbox-exporter
+        app.kubernetes.io/instance: prometheus-blackbox-exporter
 ---
 kind: ServiceMonitor
 metadata:
@@ -126,7 +139,31 @@ joined = " ".join(args)
 if args[:2] == ["config", "current-context"]:
     print("wrong-context" if scenario == "bad_context" else "sugar-staging")
 elif args[:1] == ["kustomize"]:
-    print("kind: Probe\nmetadata:\n  name: rendered-probe")
+    if "network-policies" in joined:
+        print(open(os.environ["POLICY_YAML"]).read())
+    else: print("kind: Probe\nmetadata:\n  name: rendered-probe")
+elif "get networkpolicy" in joined and "-o json" in joined:
+    if scenario == "missing_policy": sys.exit(1)
+    if scenario == "malformed_policy": print("not-json"); sys.exit(0)
+    policy = json.load(open(os.environ["POLICY_JSON"]))
+    if scenario.startswith("policy_"):
+        mutation = scenario.removeprefix("policy_")
+        spec = policy["spec"]
+        if mutation == "source_broad": spec["podSelector"] = {"matchLabels": {"app.kubernetes.io/name": "prometheus"}}
+        elif mutation == "source_empty": spec["podSelector"] = {}
+        elif mutation == "destination_broad": spec["egress"][0]["to"][0]["podSelector"] = {}
+        elif mutation == "protocol": spec["egress"][0]["ports"][0]["protocol"] = "UDP"
+        elif mutation == "port": spec["egress"][0]["ports"][0]["port"] = 9116
+        elif mutation == "peer": spec["egress"][0]["to"].append({"podSelector": {"matchLabels": {"x": "y"}}})
+        elif mutation == "rule": spec["egress"].append({"to": [{"ipBlock": {"cidr": "0.0.0.0/0"}}]})
+        elif mutation == "type": spec["policyTypes"].append("Ingress")
+        elif mutation == "ipblock": spec["egress"][0]["to"][0] = {"ipBlock": {"cidr": "10.0.0.0/8"}}
+        elif mutation == "namespace": spec["egress"][0]["to"][0]["namespaceSelector"] = {}
+        elif mutation == "ingress": spec["ingress"] = []
+        elif mutation == "additional_port": spec["egress"][0]["ports"].append({"protocol": "TCP", "port": 443})
+    print(json.dumps(policy))
+elif "get networkpolicy" in joined and "-o yaml" in joined:
+    print(open(os.environ["POLICY_YAML"]).read())
 elif "get crd" in joined and scenario == "missing_crds": sys.exit(1)
 elif "get service kube-prometheus-stack-prometheus" in joined and scenario == "missing_service": sys.exit(1)
 elif "rollout status" in joined and scenario == "not_ready": sys.exit(1)
@@ -165,6 +202,8 @@ elif "--raw" in joined:
         family = next(name for name in bundle["metrics"] if name in joined)
         payload = bundle["metrics"][family]
     print(json.dumps(payload))
+elif args[:2] == ["apply", "-f"] and scenario == "policy_apply_failure" and "policy" in joined:
+    sys.exit(31)
 """
 
 PYTHON_STUB = r"""#!/usr/bin/python3
@@ -229,6 +268,23 @@ def scenario(tmp_path):
         capture_output=True,
     )
     probes.write_text(json.dumps({"items": json.loads(docs.stdout)}))
+    policy_docs = json.loads(
+        subprocess.run(
+            [
+                "ruby",
+                "-ryaml",
+                "-rjson",
+                "-e",
+                "puts JSON.generate(YAML.load_file(ARGV[0]))",
+                str(POLICY),
+            ],
+            check=True,
+            text=True,
+            capture_output=True,
+        ).stdout
+    )
+    policy_json = tmp_path / "policy.json"
+    policy_json.write_text(json.dumps(policy_docs))
     prom = tmp_path / "prom.json"
     prom.write_text(json.dumps(verifier_bundle()))
     env = {
@@ -236,6 +292,8 @@ def scenario(tmp_path):
         "PATH": f"{bindir}:{os.environ['PATH']}",
         "LOG": str(tmp_path / "operations.log"),
         "PROBES_JSON": str(probes),
+        "POLICY_YAML": str(POLICY),
+        "POLICY_JSON": str(policy_json),
         "PROM_JSON": str(prom),
         "RAW_COUNT": str(tmp_path / "raw-count"),
         "REAL_PYTHON": sys.executable,
@@ -291,11 +349,9 @@ def test_rendering_precedes_release_queries(scenario):
     result = scenario.run("install", SCENARIO="release_absent")
     assert result.returncode == 0
     template = next(i for i, line in enumerate(scenario.log) if line.startswith("helm template"))
-    kustomize = next(
-        i for i, line in enumerate(scenario.log) if line.startswith("kubectl kustomize")
-    )
+    kustomizes = [i for i, line in enumerate(scenario.log) if line.startswith("kubectl kustomize")]
     query = next(i for i, line in enumerate(scenario.log) if line.startswith("helm list"))
-    assert template < query and kustomize < query
+    assert template < query and len(kustomizes) == 2 and max(kustomizes) < query
 
 
 @pytest.mark.parametrize("command,state", [("install", "success"), ("upgrade", "upgrade_absent")])
@@ -315,8 +371,16 @@ def test_successful_mutation_uses_pinned_complete_values_and_order(scenario, com
     assert "--wait --timeout 7m" in mutation
     assert "--reuse-values" not in mutation
     delete = next(line for line in scenario.log if " delete probe " in line)
-    apply = next(line for line in scenario.log if line.startswith("kubectl apply"))
-    assert scenario.log.index(mutation) < scenario.log.index(delete) < scenario.log.index(apply)
+    applies = [line for line in scenario.log if line.startswith("kubectl apply")]
+    assert len(applies) == 2
+    assert "sugarkube-blackbox-policy" in applies[0]
+    assert "sugarkube-blackbox-probes" in applies[1]
+    assert (
+        scenario.log.index(mutation)
+        < scenario.log.index(applies[0])
+        < scenario.log.index(delete)
+        < scenario.log.index(applies[1])
+    )
     assert delete.endswith("delete probe " + " ".join(LEGACY) + " --ignore-not-found")
 
 
@@ -328,11 +392,52 @@ def test_failed_helm_mutation_suppresses_cleanup_and_apply(scenario):
     )
 
 
+def test_failed_policy_apply_suppresses_all_probe_mutation(scenario):
+    result = scenario.run("upgrade", SCENARIO="policy_apply_failure")
+    assert result.returncode == 31
+    assert not any(" delete probe " in line for line in scenario.log)
+    assert not any(
+        "sugarkube-blackbox-probes" in line and line.startswith("kubectl apply")
+        for line in scenario.log
+    )
+
+
 @pytest.mark.parametrize("command", ["status", "verify"])
 def test_read_only_commands_never_mutate(scenario, command):
     result = scenario.run(command)
     assert result.returncode == 0
     assert not mutations(scenario.log)
+
+
+def test_status_displays_exact_lifecycle_policy(scenario):
+    result = scenario.run("status")
+    assert result.returncode == 0
+    assert any(f"get networkpolicy {POLICY_NAME} -o yaml" in line for line in scenario.log)
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "missing_policy",
+        "malformed_policy",
+        "policy_source_broad",
+        "policy_source_empty",
+        "policy_destination_broad",
+        "policy_protocol",
+        "policy_port",
+        "policy_peer",
+        "policy_rule",
+        "policy_type",
+        "policy_ipblock",
+        "policy_namespace",
+        "policy_ingress",
+        "policy_additional_port",
+    ],
+)
+def test_policy_verification_fails_closed_before_prometheus(scenario, failure):
+    result = scenario.run("verify", SCENARIO=failure)
+    assert result.returncode != 0
+    assert not any("--raw" in line for line in scenario.log)
 
 
 @pytest.mark.parametrize(
