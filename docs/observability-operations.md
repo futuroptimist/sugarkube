@@ -116,6 +116,6 @@ just observability-verify env=staging
 
 Do not use `--reuse-values` for the next forward upgrade; commit the full intended version and values chain first.
 
-## Follow-ups intentionally out of scope
+## Related blackbox lifecycle
 
-Blackbox exporter installation changes, Probe application, dashboards, useful Alertmanager receivers, NetworkPolicies, Grafana persistence, central multi-cluster Grafana, and production observability codification are separate follow-ups.
+The separate staging-only exporter and Probe lifecycle is documented in [Staging blackbox observability operations](observability-blackbox.md). It depends on this canonical base stack but has distinct guarded install and upgrade commands. Dashboards, Alertmanager receivers, NetworkPolicies, Grafana persistence, central multi-cluster Grafana, and production observability remain out of scope.
