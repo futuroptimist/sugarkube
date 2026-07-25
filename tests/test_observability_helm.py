@@ -213,6 +213,7 @@ def run_helper(
     context="sugar-staging",
     kubectl_mode="healthy",
     target_responses=None,
+    target_response_delay="0",
     retry_attempts="3",
     retry_interval="1",
 ):
@@ -247,8 +248,9 @@ case "$*" in
   *"get servicemonitor dspace"*"metadata.labels.release"*) [ "$KUBECTL_MODE" = wrong-release ] && echo wrong || echo kube-prometheus-stack ;;
   *"get servicemonitor dspace"*"bearerTokenSecret.name"*) [ "$KUBECTL_MODE" != missing-secret-ref ] && echo dspace-token ;;
   *"get secret dspace-token -o name"*) [ "$KUBECTL_MODE" != missing-secret ] || exit 44; echo secret/dspace-token ;;
-  *"get --request-timeout="*"s --raw "*)
+  *"get --request-timeout="*" --raw "*)
     [ "$KUBECTL_MODE" != query-fail ] || exit 45
+    [ "$TARGET_RESPONSE_DELAY" = 0 ] || /bin/sleep "$TARGET_RESPONSE_DELAY"
     if [ -n "$TARGET_RESPONSES" ]; then
       count=0
       [ ! -f "$TARGET_COUNTER" ] || count=$(cat "$TARGET_COUNTER")
@@ -279,6 +281,7 @@ esac
         "KUBECONFIG": str(tmp_path / "kubeconfig"),
         "TARGET_RESPONSES": "",
         "TARGET_COUNTER": str(tmp_path / "target-counter"),
+        "TARGET_RESPONSE_DELAY": target_response_delay,
         "SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_ATTEMPTS": retry_attempts,
         "SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_INTERVAL_SECONDS": retry_interval,
     }
@@ -371,7 +374,8 @@ def test_verify_exact_three_nodes_secret_reference_and_first_observation_health(
     healthy, audit = run_helper(tmp_path / "healthy", "verify")
     assert (
         healthy.returncode == 0
-        and "get --request-timeout=1s --raw /api/v1/namespaces/monitoring/services/http:" in audit
+        and "get --request-timeout=" in audit
+        and "ms --raw /api/v1/namespaces/monitoring/services/http:" in audit
     )
     assert audit.count(" --raw ") == 1
     assert "sleep " not in audit
@@ -392,7 +396,7 @@ def test_verify_retries_empty_unknown_and_mixed_then_accepts_one_target(tmp_path
     )
     assert result.returncode == 0
     assert audit.count(" --raw ") == 4
-    assert audit.count("sleep 7") == 3
+    assert audit.count("sleep ") == 3
     assert result.stderr.count("targets are converging") == 3
 
 
@@ -407,7 +411,7 @@ def test_verify_empty_targets_time_out_without_vacuous_success(tmp_path):
     result, audit = run_helper(tmp_path, "verify", target_responses=[target_response()] * 3)
     assert result.returncode != 0
     assert audit.count(" --raw ") == 3
-    assert audit.count("sleep 1") == 2
+    assert audit.count("sleep ") == 2
     assert "no matching targets discovered" in result.stderr
 
 
@@ -418,7 +422,7 @@ def test_verify_mixed_targets_time_out_with_safe_diagnostics(tmp_path):
     )
     result, audit = run_helper(tmp_path, "verify", target_responses=[response] * 3)
     assert result.returncode != 0
-    assert audit.count(" --raw ") == 3 and audit.count("sleep 1") == 2
+    assert audit.count(" --raw ") == 3 and audit.count("sleep ") == 2
     safe_values = (
         "dspace-1",
         "down",
@@ -436,16 +440,28 @@ def test_verify_mixed_targets_time_out_with_safe_diagnostics(tmp_path):
 
 
 def test_verify_diagnostics_only_emit_sanitized_scalar_strings(tmp_path):
-    target = dspace_target("down", pod="dspace-1\nforged", error="Bearer TOP_SECRET_SENTINEL")
-    target["labels"]["authorization"] = "NESTED_SECRET_SENTINEL"
-    target["labels"]["instance"] = {"raw": "INSTANCE_SECRET_SENTINEL"}
-    target["lastScrape"] = ["SCRAPE_SECRET_SENTINEL"]
-    result, _ = run_helper(tmp_path, "verify", target_responses=[target_response(target)] * 3)
+    markers = (
+        "Bear" + "er",
+        "Authoriz" + "ation",
+        "to" + "ken=",
+        "sec" + "ret:",
+        "pass" + "word=",
+    )
+    targets = [
+        dspace_target("down", pod=f"{marker} POD_SENTINEL_{index}",
+                      scrape=f"{marker} SCRAPE_SENTINEL_{index}")
+        for index, marker in enumerate(markers)
+    ]
+    targets[0]["lastError"] = "Bearer ERROR_SECRET_SENTINEL"
+    targets[0]["labels"]["authorization"] = "NESTED_SECRET_SENTINEL"
+    targets[0]["labels"]["instance"] = {"raw": "INSTANCE_SECRET_SENTINEL"}
+    response = target_response(*targets)
+    result, _ = run_helper(tmp_path, "verify", target_responses=[response] * 3)
     assert result.returncode != 0
-    assert "dspace-1 forged" in result.stderr and '"health": "down"' in result.stderr
+    assert result.stderr.count('"<redacted>"') >= 10 and '"health": "down"' in result.stderr
     for forbidden in (
-        "TOP_SECRET_SENTINEL", "NESTED_SECRET_SENTINEL", "INSTANCE_SECRET_SENTINEL",
-        "SCRAPE_SECRET_SENTINEL", "authorization", "activeTargets", "Traceback", "raw",
+        "POD_SENTINEL", "SCRAPE_SENTINEL", "ERROR_SECRET_SENTINEL", "NESTED_SECRET_SENTINEL",
+        "INSTANCE_SECRET_SENTINEL", "authorization", "activeTargets", "Traceback", "raw",
     ):
         assert forbidden not in result.stderr
 
@@ -506,15 +522,44 @@ def test_verify_treats_leading_zero_retry_configuration_as_decimal(tmp_path):
         retry_interval="01",
     )
     assert result.returncode != 0
-    assert audit.count("get --request-timeout=1s --raw ") == 8
-    assert audit.count("sleep 1") == 7
+    assert audit.count("get --request-timeout=") == 8
+    assert audit.count("sleep ") == 7
 
 
 def test_verify_request_budget_and_default_deadline_are_derived_from_retry_controls(tmp_path):
     result, audit = run_helper(
-        tmp_path, "verify", target_responses=[target_response()] * 20, retry_attempts="20", retry_interval="15"
+        tmp_path,
+        "verify",
+        target_responses=[target_response()] * 20,
+        retry_attempts="20",
+        retry_interval="15",
     )
     assert result.returncode != 0
-    assert audit.count("get --request-timeout=14s --raw ") == 20
-    assert audit.count("sleep 15") == 19
+    assert audit.count("get --request-timeout=14000ms --raw ") == 20
+    assert audit.count("sleep ") == 19
     assert (20 - 1) * 15 + (15 - 1) == 299
+
+
+def test_verify_request_duration_reduces_cadence_delay(tmp_path):
+    result, audit = run_helper(
+        tmp_path,
+        "verify",
+        target_responses=[target_response(), target_response(dspace_target("up"))],
+        retry_attempts="2",
+        retry_interval="1",
+        target_response_delay="0.2",
+    )
+    assert result.returncode == 0
+    delay = float(re.search(r"sleep ([0-9.]+)", audit).group(1))
+    assert 0 < delay < 0.9
+
+
+def test_verify_deadline_uses_latest_safe_diagnostics_without_extra_request(tmp_path):
+    target = dspace_target("down", pod="dspace-safe")
+    result, audit = run_helper(
+        tmp_path, "verify", target_responses=[target_response(target)], retry_attempts="1",
+        retry_interval="1", target_response_delay="1.05"
+    )
+    assert result.returncode != 0 and audit.count(" --raw ") == 1
+    assert '"pod": "dspace-safe"' in result.stderr and '"health": "down"' in result.stderr
+    assert "activeTargets" not in result.stderr and "Traceback" not in result.stderr

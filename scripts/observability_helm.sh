@@ -80,8 +80,8 @@ verify_dspace_targets() {
   require_tools kubectl python3 sleep
   local attempts="${SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_ATTEMPTS:-20}"
   local interval="${SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_INTERVAL_SECONDS:-15}"
-  local request_budget deadline overall_started now elapsed remaining
-  local request_started request_finished request_elapsed request_timeout delay
+  local request_budget deadline overall_started now remaining
+  local request_started request_finished request_elapsed request_timeout delay deadline_expired
   local endpoint="/api/v1/namespaces/${NAMESPACE}/services/http:${RELEASE}-prometheus:9090/proxy/api/v1/targets?state=active"
   local attempt targets_json parser_status
 
@@ -100,25 +100,29 @@ verify_dspace_targets() {
   # Keep observations on the configured cadence. Each request gets less than one
   # interval when possible, so the default final observation ends within 299s.
   request_budget=$((interval > 1 ? interval - 1 : 1))
-  deadline=$(((attempts - 1) * interval + request_budget))
+  deadline=$((((attempts - 1) * interval + request_budget) * 1000000))
   overall_started=${EPOCHREALTIME/./}
 
   for ((attempt = 1; attempt <= attempts; attempt++)); do
     now=${EPOCHREALTIME/./}
-    elapsed=$(((now - overall_started) / 1000000))
-    remaining=$((deadline - elapsed))
+    remaining=$((deadline - (now - overall_started)))
     if ((remaining <= 0)); then
       echo "ERROR: DSPACE Prometheus targets did not become healthy before timeout." >&2
       return 10
     fi
-    ((remaining < request_budget)) && request_timeout="${remaining}s" || request_timeout="${request_budget}s"
+    request_timeout=$((remaining < request_budget * 1000000 ? remaining / 1000 : request_budget * 1000))
+    ((request_timeout > 0)) || request_timeout=1
+    request_timeout="${request_timeout}ms"
     request_started=${EPOCHREALTIME/./}
     if ! targets_json="$(kubectl get --request-timeout="${request_timeout}" --raw "${endpoint}")"; then
       echo "ERROR: kubectl could not query Prometheus targets." >&2
       return 9
     fi
     parser_status=0
-    FINAL_ATTEMPT="$((attempt == attempts))" python3 -c 'import json, os, re, sys
+    now=${EPOCHREALTIME/./}
+    deadline_expired=0
+    ((now - overall_started >= deadline)) && deadline_expired=1
+    FINAL_ATTEMPT="$((attempt == attempts || deadline_expired))" python3 -c 'import json, os, re, sys
 
 try:
     document = sys.stdin.buffer.read().decode("utf-8")
@@ -158,9 +162,8 @@ if os.environ["FINAL_ATTEMPT"] == "1":
             if not isinstance(value, str):
                 return None
             value = " ".join(value.split())[:160]
-            credential_name = "(?:sec" + "ret|to" + "ken|pass" + "word)"
-            bearer_value = "bear" + r"er\s+\S+"
-            if re.search("(?i)(" + bearer_value + "|" + credential_name + r")[=:]?\s*\S+", value):
+            sensitive_marker = "(?:bear" + "er|authoriz" + "ation|sec" + "ret|to" + "ken|pass" + "word)"
+            if re.search(sensitive_marker, value, re.IGNORECASE):
                 return "<redacted>"
             return value
         safe = {}
@@ -178,12 +181,16 @@ raise SystemExit(10)' <<<"${targets_json}" || parser_status=$?
     case "${parser_status}" in
       0) echo "DSPACE Prometheus targets confirmed healthy without printing Secret values."; return 0 ;;
       10)
+        ((deadline_expired == 0)) || return 10
         if ((attempt < attempts)); then
           echo "DSPACE Prometheus targets are converging (attempt ${attempt}/${attempts}); retrying." >&2
           request_finished=${EPOCHREALTIME/./}
-          request_elapsed=$(((request_finished - request_started) / 1000000))
-          delay=$((interval - request_elapsed))
-          ((delay > 0)) && sleep "${delay}"
+          request_elapsed=$((request_finished - request_started))
+          now=${EPOCHREALTIME/./}
+          remaining=$((deadline - (now - overall_started)))
+          delay=$((interval * 1000000 - request_elapsed))
+          ((delay > remaining)) && delay=${remaining}
+          ((delay > 0)) && printf -v delay '%d.%06d' "$((delay / 1000000))" "$((delay % 1000000))" && sleep "${delay}"
         fi
         ;;
       *) return "${parser_status}" ;;
