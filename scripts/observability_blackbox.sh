@@ -115,16 +115,42 @@ validate_resources() {
   [[ "$(kubectl -n "${NAMESPACE}" get servicemonitor "${RELEASE}" -o jsonpath='{.metadata.labels.release}')" == "${BASE_RELEASE}" ]] || { echo "ERROR: exporter ServiceMonitor is absent or lacks release: ${BASE_RELEASE}." >&2; exit 7; }
   kubectl -n "${NAMESPACE}" get probe -l 'release=kube-prometheus-stack' -o json | python3 "${ROOT}/scripts/verify_blackbox_prometheus.py" --probes
 }
-prom_get() { kubectl get --request-timeout="${SUGARKUBE_BLACKBOX_REQUEST_TIMEOUT:-14s}" --raw "/api/v1/namespaces/${NAMESPACE}/services/http:${PROMETHEUS_SERVICE}:9090/proxy$1"; }
+prom_get() {
+  local operation="$1" path="$2" error_file output rc category
+  error_file="$(mktemp -t sugarkube-blackbox-prometheus.XXXXXX)"
+  if output="$(kubectl get --request-timeout="${SUGARKUBE_BLACKBOX_REQUEST_TIMEOUT:-14s}" --raw "/api/v1/namespaces/${NAMESPACE}/services/http:${PROMETHEUS_SERVICE}:9090/proxy${path}" 2>"${error_file}")"; then
+    rm -f "${error_file}"
+    printf '%s' "${output}"
+    return
+  else
+    rc=$?
+  fi
+  if grep -Eqi 'unauthenticated|unauthorized|authentication|credential|token' "${error_file}"; then
+    category=authentication
+  elif grep -Eqi 'forbidden|authorization|permission denied|access denied' "${error_file}"; then
+    category=authorization
+  elif grep -Eqi 'timed out|timeout|deadline exceeded' "${error_file}"; then
+    category=timeout
+  elif grep -Eqi 'connection|unable to connect|no route to host|tls handshake|x509' "${error_file}"; then
+    category=connection
+  elif grep -Eqi 'not found|status[=: ]+404|http 404' "${error_file}"; then
+    category=not_found
+  else
+    category=other
+  fi
+  rm -f "${error_file}"
+  printf 'ERROR: Prometheus transport operation=%s category=%s status=%d error=<redacted>\n' "${operation}" "${category}" "${rc}" >&2
+  return "${rc}"
+}
 verify_series() {
   local attempts="${SUGARKUBE_BLACKBOX_VERIFY_ATTEMPTS:-20}" interval="${SUGARKUBE_BLACKBOX_VERIFY_INTERVAL_SECONDS:-15}" attempt targets metrics family encoded output rc
   [[ "${attempts}" =~ ^[1-9][0-9]*$ && "${interval}" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: verification attempts and interval must be positive integers." >&2; exit 8; }
   for ((attempt=1; attempt<=attempts; attempt++)); do
-    targets="$(prom_get '/api/v1/targets?state=active')" || { echo "ERROR: Prometheus target transport failed." >&2; exit 9; }
+    targets="$(prom_get targets '/api/v1/targets?state=active')" || exit 9
     metrics='{}'
     for family in probe_success probe_duration_seconds probe_http_status_code probe_dns_lookup_time_seconds probe_ssl_earliest_cert_expiry; do
       printf -v encoded '%%7Benvironment%%3D%%22staging%%22%%7D'
-      output="$(prom_get "/api/v1/query?query=${family}${encoded}")" || { echo "ERROR: Prometheus metric transport failed." >&2; exit 9; }
+      output="$(prom_get "${family}" "/api/v1/query?query=${family}${encoded}")" || exit 9
       metrics="$(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); d[sys.argv[2]]=json.loads(sys.stdin.read()); print(json.dumps(d,separators=(",",":")))' "${metrics}" "${family}" <<<"${output}")" || { echo "ERROR: Prometheus metric response is malformed JSON." >&2; exit 9; }
     done
     rc=0

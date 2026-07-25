@@ -48,6 +48,70 @@ def test_helper_has_guarded_complete_lifecycle():
     assert " apply " not in status and "helm install" not in status and "helm upgrade" not in status
 
 
+def test_prometheus_transport_failures_are_redacted_and_cleanup(tmp_path):
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    kubectl = bindir / "kubectl"
+    kubectl.write_text(
+        "#!/bin/sh\n"
+        "printf '%s\\n' \"$STUB_ERROR\" >&2\n"
+        "printf '%s\\n' 'Authorization: Bearer sentinel-token' >&2\n"
+        "printf '%s\\n' 'https://secret.example.invalid/private?credential=sentinel' >&2\n"
+        "printf '%s\\n' 'arbitrary sentinel server payload' >&2\n"
+        "exit \"$STUB_STATUS\"\n"
+    )
+    kubectl.chmod(0o755)
+    script_text = SCRIPT.read_text()
+    function_source = (
+        'NAMESPACE="monitoring"\n'
+        'PROMETHEUS_SERVICE="kube-prometheus-stack-prometheus"\n'
+        + script_text[script_text.index("prom_get() {") : script_text.index("verify_series() {")]
+    )
+    cases = [
+        ("targets", "Unauthorized by API server", "authentication", 23),
+        ("probe_success", "connection refused", "authentication", 37),
+    ]
+    for operation, stub_error, category, status in cases:
+        env = {
+            **os.environ,
+            "PATH": f"{bindir}:{os.environ['PATH']}",
+            "TMPDIR": str(tmp_path),
+            "STUB_ERROR": stub_error,
+            "STUB_STATUS": str(status),
+        }
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f'{function_source}\nprom_get "$1" /sentinel || exit 9',
+                "test",
+                operation,
+            ],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+        assert result.returncode == 9
+        assert result.stdout == ""
+        assert result.stderr == (
+            "ERROR: Prometheus transport "
+            f"operation={operation} category={category} status={status} error=<redacted>\n"
+        )
+        for sentinel in (
+            stub_error,
+            "Authorization",
+            "Bearer",
+            "sentinel-token",
+            "https://secret.example.invalid",
+            "/private",
+            "credential",
+            "arbitrary sentinel server payload",
+        ):
+            assert sentinel not in result.stderr
+        assert not list(tmp_path.glob("sugarkube-blackbox-prometheus.*"))
+
+
 def expected_names():
     text = (ROOT / "clusters/staging/observability/probes/public-apps.yaml").read_text()
     return [
