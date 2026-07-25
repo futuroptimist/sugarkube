@@ -1,0 +1,25 @@
+{
+  "kube-prometheus-stack": {
+    "chartVersion": "87.19.0",
+    "renderedService": "kube-prometheus-stack-prometheus",
+    "podSelector": {
+      "app.kubernetes.io/name": "prometheus",
+      "operator.prometheus.io/name": "kube-prometheus-stack-prometheus"
+    },
+    "values": [
+      "platform/observability/helm/kube-prometheus-stack.values.common.yaml",
+      "clusters/staging/observability/kube-prometheus-stack.values.yaml"
+    ]
+  },
+  "prometheus-blackbox-exporter": {
+    "chartVersion": "11.15.1",
+    "renderedDeployment": "prometheus-blackbox-exporter",
+    "podSelector": {
+      "app.kubernetes.io/instance": "prometheus-blackbox-exporter",
+      "app.kubernetes.io/name": "prometheus-blackbox-exporter"
+    },
+    "values": [
+      "clusters/staging/observability/prometheus-blackbox-exporter.values.yaml"
+    ]
+  }
+}
