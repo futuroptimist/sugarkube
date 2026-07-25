@@ -3,6 +3,7 @@
 This runbook covers the current live **staging-only** kube-prometheus-stack lifecycle. It is intentionally non-Flux: operators use guarded Helm commands from this repository, with the chart version and full values chain committed in Git.
 
 Production observability is intentionally unsupported in this slice because no production live baseline has been proven yet.
+The separate staging-only blackbox exporter and Probe lifecycle is documented in [`observability-blackbox.md`](./observability-blackbox.md).
 
 ## Canonical sources
 

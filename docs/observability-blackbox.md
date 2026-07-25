@@ -1,59 +1,79 @@
 # Public blackbox monitoring
 
-Sugarkube now defines the first Flux-managed runtime slice for public endpoint monitoring. The stack stays internal: Prometheus, Grafana, Alertmanager, and the blackbox exporter are ClusterIP-only resources in `monitoring`; no public ingress is added.
+The current blackbox path is a guarded, **staging-only, non-Flux** Helm lifecycle. It installs an internal blackbox exporter and applies exactly 16 Prometheus Operator `Probe` objects. Repository configuration is not evidence that either resource is deployed; deployment and validation are separate, post-merge operator actions.
 
-## Architecture
+## Canonical configuration and architecture
 
-- `platform/observability/prometheus-blackbox-exporter.yaml` installs the pinned `prometheus-community/prometheus-blackbox-exporter` chart at version `11.15.1`.
-- `platform/observability/prometheus-blackbox-exporter.yaml` embeds the values ConfigMap with three deliberately small modules: generic HTTPS 2xx, bounded JSON health, and static content.
-- `monitoring/probes/public-apps.yaml` defines Prometheus Operator `Probe` resources selected by `release: kube-prometheus-stack`; `monitoring/probes/kustomization.yaml` is included by the staging and production cluster profiles, not by dev.
+- Release: `prometheus-blackbox-exporter` in `monitoring`.
+- Chart: `prometheus-community/prometheus-blackbox-exporter` from the official `https://prometheus-community.github.io/helm-charts` repository.
+- Pin: `platform/observability/helm/prometheus-blackbox-exporter.version` (`11.15.1`).
+- Complete staging values: `clusters/staging/observability/prometheus-blackbox-exporter.values.yaml`.
+- Probe render root: `clusters/staging/observability/probes/kustomization.yaml`.
+- Lifecycle helper: `scripts/observability_blackbox.sh`, exposed through `just observability-blackbox-*`.
 
-## Labels and ownership
+The exporter service is available only as `prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115`. It is a single-replica `ClusterIP` service with no Ingress, NodePort, persistence, credentials, or NetworkPolicy. Prometheus and its Kubernetes service proxy remain LAN/internal-only; this lifecycle creates no public observability access.
 
-Every probe target exports bounded labels: `app`, `environment`, `route`, and `criticality`. App labels are exactly `dspace`, `tokenplace`, `danielsmith`, and `jobbot3000`; route labels use names such as `root`, `healthz`, `livez`, `config`, `metadata`, `tracker`, and `manifest` instead of arbitrary URLs.
+The three bounded modules are `https_2xx`, `json_health_2xx`, and `static_content_2xx`. They require verified HTTPS, use finite timeouts, and bound content-check response bodies. The chart creates a ServiceMonitor labeled `release: kube-prometheus-stack`.
 
-App owners own endpoint semantics and public contracts. Sugarkube owns the blackbox exporter, Probe resources, label taxonomy, and promotion runbook. Source configuration in this repository is not live deployment evidence; live evidence requires a later cluster check after Flux reconciliation.
+## Prerequisites and commands
 
-## Active targets
+Before any install or upgrade, select the `sugar-staging` context and confirm that the canonical `kube-prometheus-stack` release, the `Probe` and `ServiceMonitor` CRDs, and the `kube-prometheus-stack-prometheus` service exist in `monitoring`. Helm, kubectl, Python 3, and access to the official chart repository are required.
 
-| App | Environment | Routes |
-| --- | --- | --- |
-| dspace | staging `https://staging.democratized.space` | `root`, `config`, `healthz`, `livez` |
-| dspace | prod `https://democratized.space` | `root`, `config`, `healthz`, `livez` |
-| tokenplace | staging `https://staging.token.place` | `root`, `healthz`, `livez`, `metadata` (`/api/v1/meta`) |
-| tokenplace | prod `https://token.place` | `root`, `healthz`, `livez`, `metadata` (`/api/v1/meta`) |
-| danielsmith | staging `https://staging.danielsmith.io` | `root`, `healthz`, `livez` |
-| danielsmith | prod `https://danielsmith.io` | `root`, `healthz`, `livez` |
-| jobbot3000 | staging `https://staging.jobbot3000.tech` | `root`, `healthz`, `livez`, `tracker`, `manifest` |
-
-## Omitted targets
-
-- jobbot3000 production is omitted because the committed production overlay still uses `jobbot3000.example.test`, which is a placeholder and must never be probed as an active public target.
-- danielsmith `/resume.pdf` is omitted because the stable root resume contract is not yet documented as available; the design keeps it future-gated.
-- No `environment=dev` targets are included. The public Probe matrix is excluded from the dev cluster profile so dev does not run duplicate staging or production probes; staging and production profiles render the shared matrix for the public staging/prod endpoints only.
-
-## PromQL examples
-
-```promql
-sum by (app, environment, route) (probe_success)
+```bash
+just observability-blackbox-render env=staging
+just observability-blackbox-install env=staging
+just observability-blackbox-upgrade env=staging
+just observability-blackbox-status env=staging
+just observability-blackbox-verify env=staging
 ```
 
-```promql
-avg by (app, environment, route) (probe_duration_seconds)
-```
+`install` is only for an absent exporter release; it fails if the exact release already exists. `upgrade` is only for an existing release; it fails when absent. Both render the pinned chart and Probes first, validate context and cluster identity, run prerequisites, pass the complete values file with `--wait`, and apply Probes only after Helm succeeds. They never reuse live values. `render`, `status`, and `verify` do not mutate the cluster.
 
-```promql
-min by (app, environment) (probe_ssl_earliest_cert_expiry - time()) / 86400
-```
+Only explicit staging is supported. The deprecated `env=int` alias normalizes to staging. Missing, unknown, `prod`, and `production` are rejected. Production Probe ownership is deliberately absent.
+
+## Exact staging target matrix
+
+| App | Base URL | Route label | Path |
+| --- | --- | --- | --- |
+| dspace | `https://staging.democratized.space` | `root` | `/` |
+| dspace | `https://staging.democratized.space` | `config` | `/config.json` |
+| dspace | `https://staging.democratized.space` | `healthz` | `/healthz` |
+| dspace | `https://staging.democratized.space` | `livez` | `/livez` |
+| tokenplace | `https://staging.token.place` | `root` | `/` |
+| tokenplace | `https://staging.token.place` | `healthz` | `/healthz` |
+| tokenplace | `https://staging.token.place` | `livez` | `/livez` |
+| tokenplace | `https://staging.token.place` | `metadata` | `/api/v1/meta` |
+| danielsmith | `https://staging.danielsmith.io` | `root` | `/` |
+| danielsmith | `https://staging.danielsmith.io` | `healthz` | `/healthz` |
+| danielsmith | `https://staging.danielsmith.io` | `livez` | `/livez` |
+| jobbot3000 | `https://staging.jobbot3000.tech` | `root` | `/` |
+| jobbot3000 | `https://staging.jobbot3000.tech` | `healthz` | `/healthz` |
+| jobbot3000 | `https://staging.jobbot3000.tech` | `livez` | `/livez` |
+| jobbot3000 | `https://staging.jobbot3000.tech` | `tracker` | `/tracker` |
+| jobbot3000 | `https://staging.jobbot3000.tech` | `manifest` | `/manifest.webmanifest` |
+
+Every Probe has bounded `release`, `app`, `environment`, `route`, and `criticality` labels. Verification checks this exact matrix, eventual Prometheus discovery, `probe_success == 1`, and the duration, HTTP status, DNS lookup, and earliest TLS certificate expiry metric families through the Kubernetes service proxy.
+
+## Rollout and rollback
+
+After merge, an operator—not repository automation—should:
+
+1. select and independently confirm `sugar-staging`;
+2. render and review both outputs;
+3. use `install` for a fresh release or `upgrade` for an existing release;
+4. run `status`, then `verify` through convergence;
+5. record deployment evidence separately from the repository change.
+
+For rollback, check out the last known-good pin, values, and Probe directory, render them, then run `observability-blackbox-upgrade env=staging` and verify. There is intentionally no uninstall recipe. If Helm fails, Probes are not applied; repair the cause and retry the correct operation.
 
 ## Troubleshooting
 
-1. Confirm the Probe exists: `kubectl -n monitoring get probe`.
-2. Confirm Prometheus discovered it by filtering on `app`, `environment`, and `route` in the Prometheus UI.
-3. Run the same target manually from an operator machine with `curl -fsS` before declaring an application outage.
-4. Check DNS and Cloudflare Tunnel health when all routes for one host fail together.
-5. Check app rollout and ingress when only one route or one app fails.
+- **Missing CRDs or base stack:** install/repair the canonical staging kube-prometheus-stack lifecycle first. Do not install Flux CRDs as a workaround.
+- **Exporter not ready:** use `status`, then inspect the Deployment events and pod logs. Keep diagnostic output free of credentials and arbitrary target payloads.
+- **TLS, DNS, or HTTP failure:** check the bounded `app` and `route` result, certificate chain/expiry, public DNS resolution, tunnel/application readiness, and expected status or body contract.
+- **Absent Prometheus series:** confirm the ServiceMonitor label, Probe labels, exporter service, and Prometheus target discovery. Initial discovery and scrapes are eventually consistent, so `verify` polls for a bounded period.
+- **Timeout:** diagnostics intentionally contain only app, environment, route, health, and a redacted error; query sensitive details manually only in an approved operator environment.
 
-## Staging-to-production promotion
+## Legacy/Future Flux ownership boundary
 
-Add or promote production probes only after the hostname is committed in app values/runbooks, resolves publicly, returns the expected status/body, and has live evidence outside this repository. Do not add placeholders such as `example.test`, `REPLACE`, or localhost targets.
+`platform/observability/prometheus-blackbox-exporter.yaml` and `monitoring/probes/public-apps.yaml` remain only as clearly marked legacy/future references. They are absent from all active dev, staging, and production Kustomize reconciliation graphs. Future Flux adoption must first retire this manual lifecycle and must never manage the same Helm release or Probe objects simultaneously. Placeholder and production targets must not be copied into the staging lifecycle.
