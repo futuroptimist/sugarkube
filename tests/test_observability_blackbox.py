@@ -23,6 +23,12 @@ LEGACY = [
     "blackbox-danielsmith-prod-healthz",
     "blackbox-danielsmith-prod-livez",
 ]
+COVERAGE_BOOTSTRAP_ENV = (
+    "COV_CORE_SOURCE",
+    "COV_CORE_CONFIG",
+    "COV_CORE_DATAFILE",
+    "COVERAGE_PROCESS_START",
+)
 
 
 def expected_names():
@@ -184,6 +190,8 @@ class Scenario:
 
     def run(self, command, environment="staging", **extra):
         env = {**self.env, **{key: str(value) for key, value in extra.items()}}
+        for key in COVERAGE_BOOTSTRAP_ENV:
+            env.pop(key, None)
         args = [str(SCRIPT), command]
         if environment is not None:
             args.append(f"env={environment}")
@@ -342,7 +350,14 @@ def test_delayed_target_discovery_retries_then_succeeds(scenario):
 
 @pytest.mark.parametrize("failure", ["persistent_missing", "persistent_down"])
 def test_persistent_target_failure_is_bounded_and_redacted(scenario, failure):
-    result = scenario.run("verify", SCENARIO=failure)
+    result = scenario.run(
+        "verify",
+        SCENARIO=failure,
+        COV_CORE_SOURCE="invalid-source",
+        COV_CORE_CONFIG=scenario.root / "missing-coveragerc",
+        COV_CORE_DATAFILE=scenario.root / "unwritable" / ".coverage",
+        COVERAGE_PROCESS_START=scenario.root / "missing-coveragerc",
+    )
     assert result.returncode == 10
     assert scenario.log.count("sleep 1") == 1
     assert sum("targets?state=active" in line for line in scenario.log) == 2
