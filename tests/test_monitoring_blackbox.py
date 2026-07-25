@@ -196,7 +196,6 @@ def test_lifecycle_network_policy_is_exact_and_chart_render_backed():
     ]
     assert len(prometheus) == len(deployments) == 1
     source = {
-        "app.kubernetes.io/name": "prometheus",
         "operator.prometheus.io/name": prometheus[0]["metadata"]["name"],
     }
     rendered_labels = deployments[0]["spec"]["template"]["metadata"]["labels"]

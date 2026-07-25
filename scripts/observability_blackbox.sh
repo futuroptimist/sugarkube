@@ -40,7 +40,7 @@ normalize_env() {
 require_tools() { local t; for t in "$@"; do command -v "$t" >/dev/null || { echo "ERROR: required tool missing: $t" >&2; exit 127; }; done; }
 version() { tr -d '[:space:]' <"${VERSION_FILE}"; }
 current_context() { kubectl config current-context 2>/dev/null || true; }
-print_resolved() { local ctx; ctx="$(current_context)"; cat >&2 <<EOT
+print_resolved() { local ctx; if (($#)); then ctx="$1"; else ctx="$(current_context)"; fi; cat <<EOT
 blackbox environment: staging
 current Kubernetes context: ${ctx:-<unknown>}
 namespace: ${NAMESPACE}
@@ -60,7 +60,7 @@ assert_context() {
   python3 "${ROOT}/scripts/cluster_identity.py" assert --kubeconfig "${KUBECONFIG:-${HOME}/.kube/config}" --env staging >/dev/null
 }
 render_to() {
-  local base_out="$1" chart_out="$2" policy_out="$3" probe_out="$4" selectors_out="$5" base_json="$6" chart_json="$7"
+  local base_out="$1" chart_out="$2" policy_out="$3" probe_out="$4" selectors_out="$5" base_json="$6" chart_json="$7" policy_json="$8" probes_json="$9"
   helm repo add prometheus-community "${REPOSITORY}" --force-update >/dev/null
   helm repo update prometheus-community >/dev/null
   helm template "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${VALUES}" >"${chart_out}"
@@ -68,18 +68,29 @@ render_to() {
   kubectl kustomize "${POLICIES}" >"${policy_out}"
   kubectl kustomize "${PROBES}" >"${probe_out}"
   [[ -s "${base_out}" && -s "${chart_out}" && -s "${policy_out}" && -s "${probe_out}" ]] || { echo "ERROR: prerequisite chart, exporter chart, NetworkPolicy, and Probe renders must all be non-empty." >&2; exit 4; }
-  # Let kubectl's client-side YAML decoder parse the complete streams semantically;
-  # unlike cluster operations, these conversions neither read nor mutate a cluster.
-  kubectl create --dry-run=client -f "${base_out}" -o json >"${base_json}"
-  kubectl create --dry-run=client -f "${chart_out}" -o json >"${chart_json}"
+  # Psych parses every rendered document locally, without Kubernetes discovery.
+  ruby -ryaml -rjson - "${base_out}" "${base_json}" "${chart_out}" "${chart_json}" "${policy_out}" "${policy_json}" "${probe_out}" "${probes_json}" <<'RUBY'
+begin
+  ARGV.each_slice(2) do |source, destination|
+    documents = YAML.load_stream(File.read(source))
+    unless documents.all? { |document| document.nil? || document.is_a?(Hash) }
+      raise ArgumentError, "render contains a non-object YAML document"
+    end
+    File.write(destination, JSON.generate({"items" => documents}))
+  end
+rescue Psych::Exception, JSON::GeneratorError, ArgumentError => error
+  warn "ERROR: rendered YAML is malformed: #{error.message}"
+  exit 4
+end
+RUBY
   python3 - "${base_json}" "${chart_json}" "${selectors_out}" <<'PY'
 import json, sys
 def items(path):
     value=json.load(open(path,encoding="utf-8"))
-    return value.get("items",[]) if value.get("kind")=="List" else [value]
-base=[d for d in items(sys.argv[1]) if d.get("kind")=="Prometheus"]
-exporter=[d for d in items(sys.argv[2]) if d.get("kind")=="Deployment" and d.get("metadata",{}).get("name")=="prometheus-blackbox-exporter"]
-monitors=[d for d in items(sys.argv[2]) if d.get("kind")=="ServiceMonitor" and d.get("metadata",{}).get("name")=="prometheus-blackbox-exporter"]
+    return value["items"]
+base=[d for d in items(sys.argv[1]) if isinstance(d,dict) and d.get("kind")=="Prometheus"]
+exporter=[d for d in items(sys.argv[2]) if isinstance(d,dict) and d.get("kind")=="Deployment" and d.get("metadata",{}).get("name")=="prometheus-blackbox-exporter"]
+monitors=[d for d in items(sys.argv[2]) if isinstance(d,dict) and d.get("kind")=="ServiceMonitor" and d.get("metadata",{}).get("name")=="prometheus-blackbox-exporter"]
 if len(base)!=1 or not base[0].get("metadata",{}).get("name"): raise SystemExit("ERROR: pinned base chart must render exactly one named Prometheus object.")
 if len(exporter) != 1 or exporter[0].get("spec",{}).get("replicas") != 1:
     raise SystemExit("ERROR: rendered exporter Deployment must have exactly one replica.")
@@ -90,17 +101,21 @@ for key in ("app.kubernetes.io/instance","app.kubernetes.io/name"):
     value=exporter[0].get("spec",{}).get("template",{}).get("metadata",{}).get("labels",{}).get(key)
     if not value: raise SystemExit(f"ERROR: exporter Deployment lacks required template label {key}.")
     labels[key]=value
-json.dump({"source":{"app.kubernetes.io/name":"prometheus","operator.prometheus.io/name":base[0]["metadata"]["name"]},"destination":labels},open(sys.argv[3],"w",encoding="utf-8"),sort_keys=True)
+# Helm renders the Prometheus CR; operator-created pods carry
+# operator.prometheus.io/name=<CR name>, so the render supplies this value.
+json.dump({"source":{"operator.prometheus.io/name":base[0]["metadata"]["name"]},"destination":labels},open(sys.argv[3],"w",encoding="utf-8"),sort_keys=True)
 PY
-  validate_policy_file "${policy_out}" "${selectors_out}"
+  validate_policy_file "${policy_json}" "${selectors_out}"
+  python3 "${ROOT}/scripts/verify_blackbox_prometheus.py" --probes <"${probes_json}"
 }
 validate_policy_file() {
-  local policy_json
-  [[ "$(awk '/^kind:/{count++} END{print count+0}' "$1")" == 1 ]] || { echo "ERROR: lifecycle policy render must contain exactly one Kubernetes object." >&2; exit 4; }
-  policy_json="$(kubectl create --dry-run=client -f "$1" -o json)"
-  python3 - "$2" "${POLICY_NAME}" "${NAMESPACE}" "${policy_json}" "${EXPECTED_POLICY_JSON}" <<'PY'
+  python3 - "$2" "${POLICY_NAME}" "${NAMESPACE}" "$1" "${EXPECTED_POLICY_JSON}" <<'PY'
 import json, sys
-selectors=json.load(open(sys.argv[1],encoding="utf-8")); policy=json.loads(sys.argv[4])
+selectors=json.load(open(sys.argv[1],encoding="utf-8")); documents=json.load(open(sys.argv[4],encoding="utf-8"))["items"]
+objects=[document for document in documents if document is not None]
+if len(objects) != 1 or not isinstance(objects[0],dict):
+    raise SystemExit("ERROR: lifecycle policy render must contain exactly one non-null Kubernetes object.")
+policy=objects[0]
 expected = {
     "podSelector": {"matchLabels": selectors["source"]},
     "policyTypes": ["Egress"],
@@ -133,14 +148,16 @@ with_render() {
   SELECTORS_RENDER="$(mktemp -t sugarkube-blackbox-selectors.XXXXXX.json)"
   BASE_RENDER_JSON="$(mktemp -t sugarkube-prometheus-chart.XXXXXX.json)"
   CHART_RENDER_JSON="$(mktemp -t sugarkube-blackbox-chart.XXXXXX.json)"
+  POLICY_RENDER_JSON="$(mktemp -t sugarkube-blackbox-policy.XXXXXX.json)"
+  PROBE_RENDER_JSON="$(mktemp -t sugarkube-blackbox-probes.XXXXXX.json)"
   EXPECTED_POLICY_JSON="$(mktemp -t sugarkube-blackbox-policy.XXXXXX.json)"
-  trap 'rm -f "${BASE_RENDER:-}" "${CHART_RENDER:-}" "${POLICY_RENDER:-}" "${PROBE_RENDER:-}" "${SELECTORS_RENDER:-}" "${BASE_RENDER_JSON:-}" "${CHART_RENDER_JSON:-}" "${EXPECTED_POLICY_JSON:-}"' EXIT
-  render_to "${BASE_RENDER}" "${CHART_RENDER}" "${POLICY_RENDER}" "${PROBE_RENDER}" "${SELECTORS_RENDER}" "${BASE_RENDER_JSON}" "${CHART_RENDER_JSON}"
+  trap 'rm -f "${BASE_RENDER:-}" "${CHART_RENDER:-}" "${POLICY_RENDER:-}" "${PROBE_RENDER:-}" "${SELECTORS_RENDER:-}" "${BASE_RENDER_JSON:-}" "${CHART_RENDER_JSON:-}" "${POLICY_RENDER_JSON:-}" "${PROBE_RENDER_JSON:-}" "${EXPECTED_POLICY_JSON:-}"' EXIT
+  render_to "${BASE_RENDER}" "${CHART_RENDER}" "${POLICY_RENDER}" "${PROBE_RENDER}" "${SELECTORS_RENDER}" "${BASE_RENDER_JSON}" "${CHART_RENDER_JSON}" "${POLICY_RENDER_JSON}" "${PROBE_RENDER_JSON}"
 }
-render() { require_tools helm kubectl python3; with_render; print_resolved; cat "${CHART_RENDER}"; printf '\n---\n'; cat "${POLICY_RENDER}"; printf '\n---\n'; cat "${PROBE_RENDER}"; }
+render() { require_tools helm kubectl python3 ruby; with_render; print_resolved "" >&2; cat "${CHART_RENDER}"; printf '\n---\n'; cat "${POLICY_RENDER}"; printf '\n---\n'; cat "${PROBE_RENDER}"; }
 mutate() {
   local action="$1" state
-  require_tools helm kubectl python3; with_render; print_resolved; assert_context; preflight; state="$(release_state)"
+  require_tools helm kubectl python3 ruby; with_render; print_resolved; assert_context; preflight; state="$(release_state)"
   if [[ "${action}" == install && "${state}" == present ]]; then echo "ERROR: install requires an absent ${RELEASE} release; use upgrade." >&2; exit 6; fi
   if [[ "${action}" == upgrade && "${state}" == absent ]]; then echo "ERROR: upgrade requires an existing ${RELEASE} release; use install." >&2; exit 6; fi
   helm "${action}" "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${VALUES}" --wait --timeout "${TIMEOUT}"
@@ -150,7 +167,7 @@ mutate() {
   kubectl apply -f "${PROBE_RENDER}"
 }
 status() {
-  require_tools helm kubectl python3; with_render; print_resolved; assert_context
+  require_tools helm kubectl python3 ruby; with_render; print_resolved; assert_context
   helm -n "${NAMESPACE}" status "${RELEASE}"
   kubectl -n "${NAMESPACE}" get deployment,pods,service,servicemonitor -l "app.kubernetes.io/instance=${RELEASE}"
   kubectl -n "${NAMESPACE}" get networkpolicy "${POLICY_NAME}" -o yaml
@@ -220,7 +237,7 @@ verify_series() {
   done
   exit 10
 }
-verify() { require_tools helm kubectl python3 sleep; with_render; print_resolved; assert_context; preflight; [[ "$(release_state)" == present ]] || { echo "ERROR: exporter release is absent." >&2; exit 7; }; validate_policy_live; validate_resources; verify_series; }
+verify() { require_tools helm kubectl python3 ruby sleep; with_render; print_resolved; assert_context; preflight; [[ "$(release_state)" == present ]] || { echo "ERROR: exporter release is absent." >&2; exit 7; }; validate_policy_live; validate_resources; verify_series; }
 
 cmd="${1:-}"; shift || true; [[ -n "${cmd}" ]] || { usage; exit 2; }; normalize_env "${1:-}" >/dev/null
 case "${cmd}" in render) render;; install|upgrade) mutate "${cmd}";; status) status;; verify) verify;; *) usage; exit 2;; esac

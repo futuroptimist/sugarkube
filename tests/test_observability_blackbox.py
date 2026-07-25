@@ -100,11 +100,13 @@ with open(os.environ["LOG"], "a") as log:
 scenario = os.environ.get("SCENARIO", "success")
 if args[:1] == ["template"]:
     if "kube-prometheus-stack" in args and "prometheus-blackbox-exporter" not in args:
+        name = "changed-prometheus" if scenario == "changed_prometheus_name" else "kube-prometheus-stack-prometheus"
         print("""apiVersion: monitoring.coreos.com/v1
 kind: Prometheus
 metadata:
-  name: kube-prometheus-stack-prometheus""")
+  name: %s""" % name)
     else:
+        exporter_name = "changed-exporter" if scenario == "changed_exporter_labels" else "prometheus-blackbox-exporter"
         print("""kind: Deployment
 metadata:
   name: prometheus-blackbox-exporter
@@ -113,14 +115,14 @@ spec:
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: prometheus-blackbox-exporter
+        app.kubernetes.io/name: %s
         app.kubernetes.io/instance: prometheus-blackbox-exporter
 ---
 kind: ServiceMonitor
 metadata:
   name: prometheus-blackbox-exporter
   labels:
-    release: kube-prometheus-stack""")
+    release: kube-prometheus-stack""" % exporter_name)
 elif args[:1] == ["list"]:
     base = any("kube-prometheus-stack" in value for value in args)
     if base:
@@ -143,18 +145,7 @@ if args[:2] == ["config", "current-context"]:
 elif args[:1] == ["kustomize"]:
     if "network-policies" in joined:
         print(open(os.environ["POLICY"]).read())
-    else: print("kind: Probe\nmetadata:\n  name: rendered-probe")
-elif args[:2] == ["create", "--dry-run=client"]:
-    source = args[args.index("-f") + 1]
-    if "prometheus-chart" in source:
-        print(json.dumps({"kind": "List", "items": [{"apiVersion": "monitoring.coreos.com/v1", "kind": "Prometheus", "metadata": {"name": "kube-prometheus-stack-prometheus"}}]}))
-    elif "blackbox-chart" in source:
-        print(json.dumps({"kind": "List", "items": [
-            {"kind": "Deployment", "metadata": {"name": "prometheus-blackbox-exporter"}, "spec": {"replicas": 1, "template": {"metadata": {"labels": {"app.kubernetes.io/name": "prometheus-blackbox-exporter", "app.kubernetes.io/instance": "prometheus-blackbox-exporter"}}}}},
-            {"kind": "ServiceMonitor", "metadata": {"name": "prometheus-blackbox-exporter", "labels": {"release": "kube-prometheus-stack"}}},
-        ]}))
-    else:
-        print(json.dumps(json.load(open(os.environ["POLICY_JSON"]))))
+    else: print(open(os.environ["PROBES_YAML"]).read())
 elif args[:2] == ["apply", "-f"] and scenario == "policy_apply_failure" and "policy" in args[2]:
     sys.exit(41)
 elif "get crd" in joined and scenario == "missing_crds": sys.exit(1)
@@ -178,7 +169,11 @@ elif "get networkpolicy allow-kube-prometheus-stack-to-blackbox-exporter -o json
     elif scenario == "broad_source": spec["podSelector"] = {}
     elif scenario == "broad_destination": spec["egress"][0]["to"][0]["podSelector"] = {}
     elif scenario == "wrong_protocol": spec["egress"][0]["ports"][0]["protocol"] = "UDP"
+    elif scenario == "wrong_port": spec["egress"][0]["ports"][0]["port"] = 9116
+    elif scenario == "additional_protocol": spec["egress"][0]["ports"].append({"protocol": "UDP", "port": 9115})
     elif scenario == "additional_port": spec["egress"][0]["ports"].append({"protocol": "TCP", "port": 9116})
+    elif scenario == "additional_source_selector": spec["podSelector"]["matchLabels"]["extra"] = "forbidden"
+    elif scenario == "additional_destination_selector": spec["egress"][0]["to"][0]["podSelector"]["matchLabels"]["extra"] = "forbidden"
     elif scenario == "additional_peer": spec["egress"][0]["to"].append({"ipBlock": {"cidr": "0.0.0.0/0"}})
     elif scenario == "additional_rule": spec["egress"].append({"to": [{"podSelector": {}}]})
     elif scenario == "namespace_selector": spec["egress"][0]["to"][0]["namespaceSelector"] = {}
@@ -296,6 +291,7 @@ def scenario(tmp_path):
         "PATH": f"{bindir}:{os.environ['PATH']}",
         "LOG": str(tmp_path / "operations.log"),
         "PROBES_JSON": str(probes),
+        "PROBES_YAML": str(ROOT / "clusters/staging/observability/probes/public-apps.yaml"),
         "POLICY": str(POLICY),
         "POLICY_JSON": str(policy_json),
         "PROM_JSON": str(prom),
@@ -332,6 +328,23 @@ def test_environment_normalization_renders_offline(scenario, environment):
     assert any(line.startswith("helm repo add") for line in scenario.log)
     assert sum(line.startswith("helm template") for line in scenario.log) == 2
     assert sum(line.startswith("kubectl kustomize") for line in scenario.log) == 2
+    assert all(
+        line.startswith("kubectl kustomize") for line in scenario.log if line.startswith("kubectl ")
+    )
+    assert not mutations(scenario.log)
+
+
+def test_render_succeeds_with_unusable_kubeconfig(scenario):
+    result = scenario.run("render", KUBECONFIG="/dev/null")
+    assert result.returncode == 0
+    assert not any("config current-context" in line for line in scenario.log)
+
+
+@pytest.mark.parametrize("failure", ["changed_prometheus_name", "changed_exporter_labels"])
+def test_rendered_selector_drift_fails_before_cluster_access(scenario, failure):
+    result = scenario.run("install", SCENARIO=failure)
+    assert result.returncode != 0
+    assert not any("config current-context" in line for line in scenario.log)
     assert not mutations(scenario.log)
 
 
@@ -346,12 +359,8 @@ def test_render_stdout_is_a_clean_separated_kubernetes_stream(scenario):
         text=True,
     )
     docs = [doc for doc in json.loads(parsed.stdout) if doc]
-    assert [doc["kind"] for doc in docs] == [
-        "Deployment",
-        "ServiceMonitor",
-        "NetworkPolicy",
-        "Probe",
-    ]
+    assert [doc["kind"] for doc in docs[:3]] == ["Deployment", "ServiceMonitor", "NetworkPolicy"]
+    assert [doc["kind"] for doc in docs[3:]] == ["Probe"] * 16
     assert docs[2] == json.loads(Path(scenario.env["POLICY_JSON"]).read_text())
     assert "blackbox environment:" not in result.stdout
     assert "blackbox environment: staging" in result.stderr
@@ -436,7 +445,11 @@ def test_failed_policy_apply_suppresses_probe_mutation(scenario):
         "broad_source",
         "broad_destination",
         "wrong_protocol",
+        "wrong_port",
+        "additional_protocol",
         "additional_port",
+        "additional_source_selector",
+        "additional_destination_selector",
         "additional_peer",
         "additional_rule",
         "namespace_selector",

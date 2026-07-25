@@ -34,7 +34,7 @@ The canonical `kube-prometheus-stack` Helm release, its `Probe` and
 `ServiceMonitor` CRDs, and its Prometheus service must already exist in
 `monitoring`. Select a kubeconfig whose current context is exactly
 `sugar-staging`; the helper also runs the repository cluster-identity assertion.
-Install `helm`, `kubectl`, `python3`, and `just`, and ensure chart-repository
+Install `helm`, `kubectl`, `python3`, `ruby` (with Psych), and `just`, and ensure chart-repository
 access is available.
 
 ```bash

@@ -6,7 +6,6 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      app.kubernetes.io/name: prometheus
       operator.prometheus.io/name: kube-prometheus-stack-prometheus
   policyTypes:
     - Egress
