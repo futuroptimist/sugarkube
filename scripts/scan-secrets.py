@@ -28,7 +28,7 @@ PATTERNS: tuple[re.Pattern[str], ...] = (
 # Exact metadata placeholders are identifiers, not credential values. Keep this
 # deliberately narrow: trailing content must still be scanned.
 SAFE_PLACEHOLDERS = (
-    re.compile(r"^\+\s*passwordKey:\s*admin-password\s*(?:#.*)?$"),
+    re.compile(r"^\+\s*passwordKey:\s*admin-password\s*$"),
     re.compile(r"^\+\s*-\s*Password key:\s*`admin-password`\.\s*$"),
 )
 

@@ -279,6 +279,8 @@ def test_fallback_secret_scanner_allows_only_complete_placeholders():
     for suffix in suffixes:
         assert namespace["regex_scan"](["+++ b/values.yaml", metadata + suffix])
         assert namespace["regex_scan"](["+++ b/docs.md", documented_key + suffix])
+    risky_comment = " # " + credential_word + "=real-secret"
+    assert namespace["regex_scan"](["+++ b/values.yaml", metadata + risky_comment])
 
 
 def test_pre_mutation_guards_are_fail_closed(tmp_path):
