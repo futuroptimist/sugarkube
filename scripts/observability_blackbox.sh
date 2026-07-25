@@ -12,6 +12,14 @@ VALUES="${ROOT}/clusters/staging/observability/prometheus-blackbox-exporter.valu
 PROBES="${ROOT}/clusters/staging/observability/probes"
 TIMEOUT="${SUGARKUBE_OBSERVABILITY_HELM_TIMEOUT:-20m}"
 PROMETHEUS_SERVICE="kube-prometheus-stack-prometheus"
+LEGACY_PROBES=(
+  blackbox-dspace-prod-root blackbox-dspace-prod-config
+  blackbox-dspace-prod-healthz blackbox-dspace-prod-livez
+  blackbox-tokenplace-prod-root blackbox-tokenplace-prod-healthz
+  blackbox-tokenplace-prod-livez blackbox-tokenplace-prod-metadata
+  blackbox-danielsmith-prod-root blackbox-danielsmith-prod-healthz
+  blackbox-danielsmith-prod-livez
+)
 
 usage() { echo "Usage: $0 <render|install|upgrade|status|verify> env=staging" >&2; }
 normalize_env() {
@@ -51,6 +59,17 @@ render_to() {
   helm template "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${VALUES}" >"${chart_out}"
   kubectl kustomize "${PROBES}" >"${probe_out}"
   [[ -s "${chart_out}" && -s "${probe_out}" ]] || { echo "ERROR: chart and Probe renders must both be non-empty." >&2; exit 4; }
+  python3 - "${chart_out}" <<'PY'
+import re, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+docs = text.split("\n---")
+deployments = [d for d in docs if re.search(r"(?m)^kind: Deployment$", d) and re.search(r"(?m)^  name: prometheus-blackbox-exporter$", d)]
+monitors = [d for d in docs if re.search(r"(?m)^kind: ServiceMonitor$", d) and re.search(r"(?m)^  name: prometheus-blackbox-exporter$", d)]
+if len(deployments) != 1 or not re.search(r"(?m)^  replicas: 1$", deployments[0]):
+    raise SystemExit("ERROR: rendered exporter Deployment must have exactly one replica.")
+if len(monitors) != 1 or not re.search(r"(?m)^    release: kube-prometheus-stack$", monitors[0]):
+    raise SystemExit("ERROR: rendered exporter ServiceMonitor must carry the base release label.")
+PY
 }
 release_state() {
   local matches
@@ -73,44 +92,28 @@ with_render() {
 render() { require_tools helm kubectl; print_resolved; with_render; cat "${CHART_RENDER}" "${PROBE_RENDER}"; }
 mutate() {
   local action="$1" state
-  require_tools helm kubectl python3; print_resolved; assert_context; with_render; preflight; state="$(release_state)"
+  require_tools helm kubectl python3; print_resolved; with_render; assert_context; preflight; state="$(release_state)"
   if [[ "${action}" == install && "${state}" == present ]]; then echo "ERROR: install requires an absent ${RELEASE} release; use upgrade." >&2; exit 6; fi
   if [[ "${action}" == upgrade && "${state}" == absent ]]; then echo "ERROR: upgrade requires an existing ${RELEASE} release; use install." >&2; exit 6; fi
   helm "${action}" "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${VALUES}" --wait --timeout "${TIMEOUT}"
+  # Remove only the production Probes left by the former mixed staging matrix.
+  kubectl -n "${NAMESPACE}" delete probe "${LEGACY_PROBES[@]}" --ignore-not-found
   kubectl apply -f "${PROBE_RENDER}"
-  # Remove production Probes left by the former mixed-environment staging overlay.
-  # The staging identity guard above makes this cleanup safe; production retains
-  # its own Flux-owned Probe manifests under clusters/prod/observability/probes.
-  kubectl -n "${NAMESPACE}" delete probe \
-    -l "release=${BASE_RELEASE},environment=prod" --ignore-not-found
 }
 status() {
-  require_tools helm kubectl python3; print_resolved; assert_context; with_render
+  require_tools helm kubectl python3; print_resolved; with_render; assert_context
   helm -n "${NAMESPACE}" status "${RELEASE}"
   kubectl -n "${NAMESPACE}" get deployment,pods,service,servicemonitor -l "app.kubernetes.io/instance=${RELEASE}"
   kubectl -n "${NAMESPACE}" get probe -l 'release=kube-prometheus-stack,environment=staging' -L app,route,criticality
 }
 validate_resources() {
   kubectl -n "${NAMESPACE}" rollout status "deployment/${RELEASE}" --timeout="${TIMEOUT}"
+  [[ "$(kubectl -n "${NAMESPACE}" get deployment "${RELEASE}" -o jsonpath='{.spec.replicas} {.status.readyReplicas} {.status.availableReplicas}')" == "1 1 1" ]] || { echo "ERROR: exporter Deployment desired, ready, and available replicas must all equal one." >&2; exit 7; }
   [[ "$(kubectl -n "${NAMESPACE}" get service "${RELEASE}" -o jsonpath='{.spec.type}')" == ClusterIP ]] || { echo "ERROR: exporter Service must be ClusterIP." >&2; exit 7; }
   [[ -z "$(kubectl -n "${NAMESPACE}" get ingress -l "app.kubernetes.io/instance=${RELEASE}" -o name)" ]] || { echo "ERROR: exporter Ingress is forbidden." >&2; exit 7; }
   [[ -z "$(kubectl -n "${NAMESPACE}" get service -l "app.kubernetes.io/instance=${RELEASE}" -o jsonpath='{range .items[*].spec.ports[*]}{.nodePort}{"\n"}{end}' | sed '/^$/d')" ]] || { echo "ERROR: exporter NodePort is forbidden." >&2; exit 7; }
   [[ "$(kubectl -n "${NAMESPACE}" get servicemonitor "${RELEASE}" -o jsonpath='{.metadata.labels.release}')" == "${BASE_RELEASE}" ]] || { echo "ERROR: exporter ServiceMonitor is absent or lacks release: ${BASE_RELEASE}." >&2; exit 7; }
-  kubectl -n "${NAMESPACE}" get probe -l 'release=kube-prometheus-stack' -o json | python3 -c 'import json,sys
-expected={
-("dspace","root"),("dspace","config"),("dspace","healthz"),("dspace","livez"),
-("tokenplace","root"),("tokenplace","healthz"),("tokenplace","livez"),("tokenplace","metadata"),
-("danielsmith","root"),("danielsmith","healthz"),("danielsmith","livez"),
-("jobbot3000","root"),("jobbot3000","healthz"),("jobbot3000","livez"),("jobbot3000","tracker"),("jobbot3000","manifest")}
-d=json.load(sys.stdin); items=d.get("items") if isinstance(d,dict) else None
-if not isinstance(items,list): raise SystemExit("ERROR: invalid Probe response structure.")
-owned=[]
-for x in items:
- m=x.get("metadata",{}); labels=m.get("labels",{})
- if m.get("name","").startswith("blackbox-"):
-  if labels.get("environment")!="staging": raise SystemExit("ERROR: lifecycle-owned non-staging Probe exists.")
-  owned.append((labels.get("app"),labels.get("route")))
-if len(owned)!=16 or set(owned)!=expected: raise SystemExit("ERROR: staging Probe app/route matrix is missing, unexpected, or mislabelled.")'
+  kubectl -n "${NAMESPACE}" get probe -l 'release=kube-prometheus-stack' -o json | python3 "${ROOT}/scripts/verify_blackbox_prometheus.py" --probes
 }
 prom_get() { kubectl get --request-timeout="${SUGARKUBE_BLACKBOX_REQUEST_TIMEOUT:-14s}" --raw "/api/v1/namespaces/${NAMESPACE}/services/http:${PROMETHEUS_SERVICE}:9090/proxy$1"; }
 verify_series() {
@@ -119,7 +122,7 @@ verify_series() {
   for ((attempt=1; attempt<=attempts; attempt++)); do
     targets="$(prom_get '/api/v1/targets?state=active')" || { echo "ERROR: Prometheus target transport failed." >&2; exit 9; }
     metrics='{}'
-    for family in probe_success probe_duration_seconds probe_http_status_code probe_dns_lookup_time_seconds probe_ssl_earliest_cert_expiry_seconds; do
+    for family in probe_success probe_duration_seconds probe_http_status_code probe_dns_lookup_time_seconds probe_ssl_earliest_cert_expiry; do
       printf -v encoded '%%7Benvironment%%3D%%22staging%%22%%7D'
       output="$(prom_get "/api/v1/query?query=${family}${encoded}")" || { echo "ERROR: Prometheus metric transport failed." >&2; exit 9; }
       metrics="$(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); d[sys.argv[2]]=json.loads(sys.stdin.read()); print(json.dumps(d,separators=(",",":")))' "${metrics}" "${family}" <<<"${output}")" || { echo "ERROR: Prometheus metric response is malformed JSON." >&2; exit 9; }
@@ -130,7 +133,7 @@ verify_series() {
   done
   exit 10
 }
-verify() { require_tools helm kubectl python3 sleep; print_resolved; assert_context; with_render; preflight; [[ "$(release_state)" == present ]] || { echo "ERROR: exporter release is absent." >&2; exit 7; }; validate_resources; verify_series; }
+verify() { require_tools helm kubectl python3 sleep; print_resolved; with_render; assert_context; preflight; [[ "$(release_state)" == present ]] || { echo "ERROR: exporter release is absent." >&2; exit 7; }; validate_resources; verify_series; }
 
 cmd="${1:-}"; shift || true; [[ -n "${cmd}" ]] || { usage; exit 2; }; normalize_env "${1:-}" >/dev/null
 case "${cmd}" in render) render;; install|upgrade) mutate "${cmd}";; status) status;; verify) verify;; *) usage; exit 2;; esac

@@ -1,5 +1,5 @@
 fullnameOverride: prometheus-blackbox-exporter
-replicaCount: 1
+replicas: 1
 
 service:
   type: ClusterIP
@@ -9,10 +9,17 @@ ingress:
   enabled: false
 
 serviceMonitor:
-  enabled: true
-  defaults:
+  enabled: false
+  selfMonitor:
+    enabled: true
     labels:
       release: kube-prometheus-stack
+
+secretConfig: false
+extraConfigmapMounts: []
+extraSecretMounts: []
+extraVolumes: []
+extraVolumeMounts: []
 
 networkPolicy:
   enabled: false

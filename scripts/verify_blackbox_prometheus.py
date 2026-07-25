@@ -6,29 +6,31 @@ import os
 import sys
 
 EXPECTED = {
-    ("dspace", "root"),
-    ("dspace", "config"),
-    ("dspace", "healthz"),
-    ("dspace", "livez"),
-    ("tokenplace", "root"),
-    ("tokenplace", "healthz"),
-    ("tokenplace", "livez"),
-    ("tokenplace", "metadata"),
-    ("danielsmith", "root"),
-    ("danielsmith", "healthz"),
-    ("danielsmith", "livez"),
-    ("jobbot3000", "root"),
-    ("jobbot3000", "healthz"),
-    ("jobbot3000", "livez"),
-    ("jobbot3000", "tracker"),
-    ("jobbot3000", "manifest"),
+    "blackbox-dspace-staging-root": ("dspace", "root"),
+    "blackbox-dspace-staging-config": ("dspace", "config"),
+    "blackbox-dspace-staging-healthz": ("dspace", "healthz"),
+    "blackbox-dspace-staging-livez": ("dspace", "livez"),
+    "blackbox-tokenplace-staging-root": ("tokenplace", "root"),
+    "blackbox-tokenplace-staging-healthz": ("tokenplace", "healthz"),
+    "blackbox-tokenplace-staging-livez": ("tokenplace", "livez"),
+    "blackbox-tokenplace-staging-metadata": ("tokenplace", "metadata"),
+    "blackbox-danielsmith-staging-root": ("danielsmith", "root"),
+    "blackbox-danielsmith-staging-healthz": ("danielsmith", "healthz"),
+    "blackbox-danielsmith-staging-livez": ("danielsmith", "livez"),
+    "blackbox-jobbot3000-staging-root": ("jobbot3000", "root"),
+    "blackbox-jobbot3000-staging-healthz": ("jobbot3000", "healthz"),
+    "blackbox-jobbot3000-staging-livez": ("jobbot3000", "livez"),
+    "blackbox-jobbot3000-staging-tracker": ("jobbot3000", "tracker"),
+    "blackbox-jobbot3000-staging-manifest": ("jobbot3000", "manifest"),
 }
+EXPECTED_JOBS = {f"probe/monitoring/{name}": labels for name, labels in EXPECTED.items()}
+
 FAMILIES = {
     "probe_success",
     "probe_duration_seconds",
     "probe_http_status_code",
     "probe_dns_lookup_time_seconds",
-    "probe_ssl_earliest_cert_expiry_seconds",
+    "probe_ssl_earliest_cert_expiry",
 }
 
 
@@ -48,10 +50,31 @@ def response(value, description):
     return data
 
 
+def validate_probes(document):
+    items = document.get("items") if isinstance(document, dict) else None
+    if not isinstance(items, list):
+        fail("Probe response has an invalid structure.", 7)
+    found = {}
+    for item in items:
+        metadata = item.get("metadata") if isinstance(item, dict) else None
+        labels = metadata.get("labels") if isinstance(metadata, dict) else None
+        if not isinstance(labels, dict) or not isinstance(metadata.get("name"), str):
+            fail("Probe response contains an invalid object.", 7)
+        name = metadata["name"]
+        found[name] = (labels.get("app"), labels.get("route"))
+    if found != EXPECTED:
+        fail("staging Probe names or app/route mappings are incorrect.", 7)
+
+
 try:
     document = json.load(sys.stdin)
 except (UnicodeDecodeError, json.JSONDecodeError):
-    fail("Prometheus response is malformed JSON.")
+    fail("response is malformed JSON.")
+if sys.argv[1:] == ["--probes"]:
+    validate_probes(document)
+    raise SystemExit(0)
+if sys.argv[1:]:
+    fail("invalid verifier arguments.")
 if not isinstance(document, dict) or set(document) != {"targets", "metrics"}:
     fail("Prometheus response bundle has an invalid structure.")
 
@@ -64,12 +87,13 @@ for item in active:
     if not isinstance(item, dict) or not isinstance(item.get("labels"), dict):
         fail("Prometheus targets response contains an invalid target.")
     labels = item["labels"]
-    if labels.get("environment") != "staging" or labels.get("app") not in {x[0] for x in EXPECTED}:
+    job = labels.get("job")
+    if job not in EXPECTED_JOBS:
         continue
     key = (labels.get("app"), labels.get("route"))
     health = item.get("health")
-    if key not in EXPECTED or not isinstance(health, str):
-        fail("Prometheus target contains unexpected or invalid bounded labels.")
+    if key != EXPECTED_JOBS[job] or not isinstance(health, str):
+        fail("Prometheus target contains invalid lifecycle-owned labels.")
     discovered[key] = health
 
 metrics = document["metrics"]
@@ -86,11 +110,12 @@ for family, raw in metrics.items():
         if not isinstance(sample, dict) or not isinstance(sample.get("metric"), dict):
             fail(f"{family} response contains an invalid sample.")
         labels = sample["metric"]
-        if labels.get("environment") != "staging":
+        job = labels.get("job")
+        if job not in EXPECTED_JOBS:
             continue
         key = (labels.get("app"), labels.get("route"))
-        if key not in EXPECTED:
-            fail(f"{family} contains unexpected bounded labels.")
+        if key != EXPECTED_JOBS[job]:
+            fail(f"{family} contains invalid lifecycle-owned labels.")
         value = sample.get("value")
         if not isinstance(value, list) or len(value) != 2 or not isinstance(value[1], str):
             fail(f"{family} response contains an invalid sample value.")
@@ -103,13 +128,13 @@ for family, raw in metrics.items():
             zero.add(key)
     metric_sets[family] = found
 
-healthy = set(discovered) == EXPECTED and all(v == "up" for v in discovered.values())
-complete = all(values == EXPECTED for values in metric_sets.values())
+healthy = set(discovered) == set(EXPECTED.values()) and all(v == "up" for v in discovered.values())
+complete = all(values == set(EXPECTED.values()) for values in metric_sets.values())
 if healthy and complete and not zero:
     raise SystemExit(0)
 if os.environ.get("FINAL_ATTEMPT") == "1":
     print("ERROR: staging blackbox verification did not converge before timeout.", file=sys.stderr)
-    for app, route in sorted(EXPECTED):
+    for app, route in sorted(EXPECTED.values()):
         health = discovered.get((app, route), "missing")
         series = (
             "present" if all((app, route) in value for value in metric_sets.values()) else "missing"

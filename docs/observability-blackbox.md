@@ -3,8 +3,11 @@
 Public-route monitoring has a guarded, **staging-only, non-Flux** lifecycle. The
 exporter, Prometheus, and their administrative interfaces remain LAN/internal
 only. The exporter is a `ClusterIP` service; this work adds no Ingress,
-NodePort, public DNS, router rule, credential, or persistence. A narrow
-NetworkPolicy permits Prometheus to reach exporter TCP 9115.
+NodePort, public DNS, router rule, credential, persistence, or NetworkPolicy.
+The existing monitoring default-deny policy therefore requires a separately
+scoped egress-policy prerequisite allowing Prometheus to reach exporter TCP
+9115 before any fresh-cluster rollout can succeed; this lifecycle does not
+resolve that prerequisite.
 
 ## Canonical sources
 
@@ -41,10 +44,11 @@ just observability-blackbox-verify env=staging
 
 Render, status, and verify are read-only. Install is only for an absent exporter
 release; upgrade requires it to exist. Both render the pinned chart and Probes
-first, pass the complete committed values on every Helm operation, wait up to
-the Pi-appropriate timeout, and apply Probes only after Helm succeeds. After a
-successful apply, they remove legacy `environment=prod` Probes from the guarded
-staging cluster so the staging matrix converges exactly. Neither uses
+first, pass the complete committed values on every Helm operation, and wait up
+to the Pi-appropriate timeout. Only after Helm succeeds, they delete the eleven
+explicit legacy production Probe names formerly present in the shared matrix,
+using `--ignore-not-found`, then apply the rendered staging Probes. No selector
+pruning or staging Probe deletion is used. Neither uses
 `--reuse-values`. Missing environments and production are rejected;
 `env=int` remains a deprecated alias for staging.
 
@@ -88,7 +92,11 @@ just observability-blackbox-verify env=staging
 ```
 
 Restore the corresponding version and complete values file before a subsequent
-forward upgrade. Do not use `--reuse-values`.
+forward upgrade. The one-time legacy cleanup is not undone by Helm rollback;
+restoring those former production Probe objects, if actually intended on the
+staging cluster, requires an explicit application of an approved historical
+manifest. Never restore them by applying the retained legacy mixed matrix.
+Do not use `--reuse-values`.
 
 ## Troubleshooting
 
@@ -109,8 +117,8 @@ forward upgrade. Do not use `--reuse-values`.
 `platform/observability/prometheus-blackbox-exporter.yaml` and
 `monitoring/probes/public-apps.yaml` are retained as `LEGACY/FUTURE ONLY`
 references and are absent from every active Kustomize graph. They must not be
-applied. Production retains a separate, production-only Probe set under
-`clusters/prod/observability/probes/` in its Flux-reconciled overlay; the
-staging helper neither manages nor replaces that set. Any future Flux adoption
+applied. Production Probe ownership is outside this staging-only lifecycle. The staging
+helper neither manages production nor supplies a replacement production
+lifecycle. Any future Flux adoption
 of the exporter or staging Probes must first retire the manual lifecycle and
 must never manage the same Helm release or Probe object names simultaneously.

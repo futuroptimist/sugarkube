@@ -5,7 +5,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 VALUES = ROOT / "clusters/staging/observability/prometheus-blackbox-exporter.values.yaml"
 PROBES = ROOT / "clusters/staging/observability/probes/public-apps.yaml"
-PROD_PROBES = ROOT / "clusters/prod/observability/probes/public-apps.yaml"
 EXPECTED = {
     ("dspace", "root", "https://staging.democratized.space/", "https_2xx"),
     ("dspace", "config", "https://staging.democratized.space/config.json", "static_content_2xx"),
@@ -54,9 +53,18 @@ def test_pinned_chart_values_are_private_and_bounded():
         ROOT / "platform/observability/helm/prometheus-blackbox-exporter.version"
     ).read_text().strip() == "11.15.1"
     assert value["fullnameOverride"] == "prometheus-blackbox-exporter"
-    assert value["replicaCount"] == 1 and value["service"]["type"] == "ClusterIP"
+    assert value["replicas"] == 1 and value["service"]["type"] == "ClusterIP"
     assert value["ingress"]["enabled"] is False and value["networkPolicy"]["enabled"] is False
-    assert value["serviceMonitor"]["defaults"]["labels"]["release"] == "kube-prometheus-stack"
+    assert value["serviceMonitor"]["enabled"] is False
+    assert value["serviceMonitor"]["selfMonitor"]["enabled"] is True
+    assert (
+        value["serviceMonitor"]["selfMonitor"]["labels"]["release"]
+        == "kube-prometheus-stack"
+    )
+    assert value["secretConfig"] is False
+    assert all(value[key] == [] for key in (
+        "extraConfigmapMounts", "extraSecretMounts", "extraVolumes", "extraVolumeMounts"
+    ))
     modules = value["config"]["modules"]
     assert set(modules) == {"https_2xx", "json_health_2xx", "static_content_2xx"}
     for module in modules.values():
@@ -96,11 +104,7 @@ def test_legacy_resources_are_outside_active_graphs():
     for env in ("dev", "staging", "prod"):
         overlay = (ROOT / f"clusters/{env}/kustomization.yaml").read_text()
         assert "monitoring/probes" not in overlay
-    assert "observability/probes" in (ROOT / "clusters/prod/kustomization.yaml").read_text()
-    prod_docs = yaml(PROD_PROBES)
-    assert prod_docs
-    assert all(doc["metadata"]["labels"]["environment"] == "prod" for doc in prod_docs)
-    assert all("-prod-" in doc["metadata"]["name"] for doc in prod_docs)
+    assert "observability/probes" not in (ROOT / "clusters/prod/kustomization.yaml").read_text()
     assert (
         "LEGACY/FUTURE ONLY"
         in (ROOT / "platform/observability/prometheus-blackbox-exporter.yaml").read_text()
@@ -108,15 +112,7 @@ def test_legacy_resources_are_outside_active_graphs():
     assert "LEGACY/FUTURE ONLY" in (ROOT / "monitoring/probes/public-apps.yaml").read_text()
 
 
-def test_network_policy_allows_prometheus_to_scrape_exporter():
-    policies = yaml(ROOT / "platform/networking/platform-allow.yaml")
-    policy = next(
-        p for p in policies if p["metadata"]["name"] == "allow-prometheus-to-blackbox-exporter"
-    )
-    assert policy["spec"]["podSelector"]["matchLabels"]["app.kubernetes.io/name"] == "prometheus"
-    rule = policy["spec"]["egress"][0]
-    assert (
-        rule["to"][0]["podSelector"]["matchLabels"]["app.kubernetes.io/name"]
-        == "prometheus-blackbox-exporter"
-    )
-    assert rule["ports"] == [{"port": 9115, "protocol": "TCP"}]
+def test_network_policy_prerequisite_is_explicitly_deferred():
+    docs = (ROOT / "docs/observability-blackbox.md").read_text()
+    assert "separately\nscoped egress-policy prerequisite" in docs
+    assert "this lifecycle does not\nresolve that prerequisite" in docs
