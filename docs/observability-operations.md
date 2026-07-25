@@ -12,7 +12,10 @@ Production observability is intentionally unsupported in this slice because no p
 - Helper: `scripts/observability_helm.sh` through `just observability-*` recipes.
 
 The staging blackbox exporter and Probe lifecycle is documented separately in
-[Staging blackbox monitoring](observability-blackbox.md).
+[Staging blackbox monitoring](observability-blackbox.md). That lifecycle also
+exclusively owns its staging-only Prometheus-to-exporter NetworkPolicy; the
+policy is not part of this base-stack or Flux lifecycle, and the existing DNS
+and external HTTPS permissions remain unchanged.
 
 The old Flux/Longhorn files under `platform/observability/*.yaml` and `clusters/*/patches/kube-prometheus-stack-values.yaml` are inactive, unvalidated future/legacy configuration. They are deliberately absent from the platform resources and cluster overlay patches, so Flux does not reconcile the manually managed release. They must not be applied to staging or production as currently written, and operators must not combine Flux and manual Helm lifecycle paths for the same `kube-prometheus-stack` release.
 
@@ -121,6 +124,6 @@ Do not use `--reuse-values` for the next forward upgrade; commit the full intend
 
 ## Follow-ups intentionally out of scope
 
-Dashboards, useful Alertmanager receivers, NetworkPolicies, Grafana persistence,
+Dashboards, useful Alertmanager receivers, additional NetworkPolicies, Grafana persistence,
 central multi-cluster Grafana, and production observability codification are
 separate follow-ups.

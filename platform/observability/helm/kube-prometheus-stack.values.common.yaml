@@ -6,6 +6,11 @@ prometheus:
   service:
     type: ClusterIP
   prometheusSpec:
+    # Stable, lifecycle-consumed identity for the staging blackbox egress policy.
+    podMetadata:
+      labels:
+        app.kubernetes.io/name: prometheus
+        app.kubernetes.io/instance: kube-prometheus-stack
     replicas: 1
     retention: 7d
     retentionSize: 15GB

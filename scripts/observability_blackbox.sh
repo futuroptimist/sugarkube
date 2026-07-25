@@ -10,6 +10,9 @@ REPOSITORY="https://prometheus-community.github.io/helm-charts"
 VERSION_FILE="${ROOT}/platform/observability/helm/prometheus-blackbox-exporter.version"
 VALUES="${ROOT}/clusters/staging/observability/prometheus-blackbox-exporter.values.yaml"
 PROBES="${ROOT}/clusters/staging/observability/probes"
+POLICY_KUSTOMIZATION="${ROOT}/clusters/staging/observability/network-policies"
+POLICY_SOURCE="${POLICY_KUSTOMIZATION}/prometheus-to-blackbox-exporter.yaml"
+POLICY_NAME="allow-kube-prometheus-stack-to-blackbox-exporter"
 TIMEOUT="${SUGARKUBE_OBSERVABILITY_HELM_TIMEOUT:-20m}"
 PROMETHEUS_SERVICE="kube-prometheus-stack-prometheus"
 LEGACY_PROBES=(
@@ -45,6 +48,7 @@ pinned version: $(version)
 ordered values files:
   - ${VALUES}
 Probe manifest path: ${PROBES}
+NetworkPolicy manifest path: ${POLICY_SOURCE}
 EOT
 }
 assert_context() {
@@ -53,13 +57,14 @@ assert_context() {
   python3 "${ROOT}/scripts/cluster_identity.py" assert --kubeconfig "${KUBECONFIG:-${HOME}/.kube/config}" --env staging >/dev/null
 }
 render_to() {
-  local chart_out="$1" probe_out="$2"
+  local chart_out="$1" policy_out="$2" probe_out="$3"
   helm repo add prometheus-community "${REPOSITORY}" --force-update >/dev/null
   helm repo update prometheus-community >/dev/null
   helm template "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${VALUES}" >"${chart_out}"
+  kubectl kustomize "${POLICY_KUSTOMIZATION}" >"${policy_out}"
   kubectl kustomize "${PROBES}" >"${probe_out}"
-  [[ -s "${chart_out}" && -s "${probe_out}" ]] || { echo "ERROR: chart and Probe renders must both be non-empty." >&2; exit 4; }
-  python3 - "${chart_out}" <<'PY'
+  [[ -s "${chart_out}" && -s "${policy_out}" && -s "${probe_out}" ]] || { echo "ERROR: chart, NetworkPolicy, and Probe renders must all be non-empty." >&2; exit 4; }
+  python3 - "${chart_out}" "${policy_out}" <<'PY'
 import re, sys
 text = open(sys.argv[1], encoding="utf-8").read()
 docs = text.split("\n---")
@@ -67,8 +72,32 @@ deployments = [d for d in docs if re.search(r"(?m)^kind: Deployment$", d) and re
 monitors = [d for d in docs if re.search(r"(?m)^kind: ServiceMonitor$", d) and re.search(r"(?m)^  name: prometheus-blackbox-exporter$", d)]
 if len(deployments) != 1 or not re.search(r"(?m)^  replicas: 1$", deployments[0]):
     raise SystemExit("ERROR: rendered exporter Deployment must have exactly one replica.")
+for label in (
+    r"(?m)^        app\.kubernetes\.io/instance: prometheus-blackbox-exporter$",
+    r"(?m)^        app\.kubernetes\.io/name: prometheus-blackbox-exporter$",
+):
+    if not re.search(label, deployments[0]):
+        raise SystemExit("ERROR: rendered exporter pod labels do not match the NetworkPolicy selector.")
 if len(monitors) != 1 or not re.search(r"(?m)^    release: kube-prometheus-stack$", monitors[0]):
     raise SystemExit("ERROR: rendered exporter ServiceMonitor must carry the base release label.")
+policy = open(sys.argv[2], encoding="utf-8").read()
+required = [
+    r"(?m)^kind: NetworkPolicy$",
+    r"(?m)^  name: allow-kube-prometheus-stack-to-blackbox-exporter$",
+    r"(?m)^  namespace: monitoring$",
+    r"(?m)^\s+- Egress$",
+    r"(?m)^      app\.kubernetes\.io/instance: kube-prometheus-stack$",
+    r"(?m)^      app\.kubernetes\.io/name: prometheus$",
+    r"(?m)^              app\.kubernetes\.io/instance: prometheus-blackbox-exporter$",
+    r"(?m)^              app\.kubernetes\.io/name: prometheus-blackbox-exporter$",
+    r"(?m)^\s+-?\s*port: 9115$",
+    r"(?m)^\s+-?\s*protocol: TCP$",
+]
+if any(not re.search(pattern, policy) for pattern in required) or policy.count("kind: NetworkPolicy") != 1:
+    raise SystemExit("ERROR: rendered NetworkPolicy does not match the lifecycle contract.")
+for forbidden in ("namespaceSelector:", "ipBlock:", "ingress:", "podSelector: {}"):
+    if forbidden in policy:
+        raise SystemExit("ERROR: rendered NetworkPolicy contains forbidden broad behavior.")
 PY
 }
 release_state() {
@@ -85,17 +114,28 @@ preflight() {
 }
 with_render() {
   CHART_RENDER="$(mktemp -t sugarkube-blackbox-chart.XXXXXX.yaml)"
+  POLICY_RENDER="$(mktemp -t sugarkube-blackbox-policy.XXXXXX.yaml)"
   PROBE_RENDER="$(mktemp -t sugarkube-blackbox-probes.XXXXXX.yaml)"
-  trap 'rm -f "${CHART_RENDER:-}" "${PROBE_RENDER:-}"' EXIT
-  render_to "${CHART_RENDER}" "${PROBE_RENDER}"
+  trap 'rm -f "${CHART_RENDER:-}" "${POLICY_RENDER:-}" "${PROBE_RENDER:-}"' EXIT
+  render_to "${CHART_RENDER}" "${POLICY_RENDER}" "${PROBE_RENDER}"
 }
-render() { require_tools helm kubectl; print_resolved; with_render; cat "${CHART_RENDER}" "${PROBE_RENDER}"; }
+render() {
+  require_tools helm kubectl python3
+  print_resolved
+  with_render
+  cat "${CHART_RENDER}"
+  printf '\n---\n'
+  cat "${POLICY_RENDER}"
+  printf '\n---\n'
+  cat "${PROBE_RENDER}"
+}
 mutate() {
   local action="$1" state
   require_tools helm kubectl python3; print_resolved; with_render; assert_context; preflight; state="$(release_state)"
   if [[ "${action}" == install && "${state}" == present ]]; then echo "ERROR: install requires an absent ${RELEASE} release; use upgrade." >&2; exit 6; fi
   if [[ "${action}" == upgrade && "${state}" == absent ]]; then echo "ERROR: upgrade requires an existing ${RELEASE} release; use install." >&2; exit 6; fi
   helm "${action}" "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${VALUES}" --wait --timeout "${TIMEOUT}"
+  kubectl apply -f "${POLICY_RENDER}"
   # Remove only the production Probes left by the former mixed staging matrix.
   kubectl -n "${NAMESPACE}" delete probe "${LEGACY_PROBES[@]}" --ignore-not-found
   kubectl apply -f "${PROBE_RENDER}"
@@ -104,7 +144,39 @@ status() {
   require_tools helm kubectl python3; print_resolved; with_render; assert_context
   helm -n "${NAMESPACE}" status "${RELEASE}"
   kubectl -n "${NAMESPACE}" get deployment,pods,service,servicemonitor -l "app.kubernetes.io/instance=${RELEASE}"
+  kubectl -n "${NAMESPACE}" get networkpolicy "${POLICY_NAME}" -o yaml
   kubectl -n "${NAMESPACE}" get probe -l 'release=kube-prometheus-stack,environment=staging' -L app,route,criticality
+}
+validate_policy() {
+  local deployed
+  deployed="$(mktemp -t sugarkube-blackbox-deployed-policy.XXXXXX.json)"
+  kubectl -n "${NAMESPACE}" get networkpolicy "${POLICY_NAME}" -o json >"${deployed}" || { rm -f "${deployed}"; echo "ERROR: lifecycle NetworkPolicy is absent." >&2; return 7; }
+  python3 - "${deployed}" <<'PY' || { local rc=$?; rm -f "${deployed}"; return "${rc}"; }
+import json, sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as stream:
+        actual = json.load(stream)
+except (json.JSONDecodeError, UnicodeDecodeError):
+    raise SystemExit("ERROR: lifecycle NetworkPolicy response is malformed JSON.")
+expected = {
+    "podSelector": {"matchLabels": {
+        "app.kubernetes.io/instance": "kube-prometheus-stack",
+        "app.kubernetes.io/name": "prometheus",
+    }},
+    "policyTypes": ["Egress"],
+    "egress": [{
+        "to": [{"podSelector": {"matchLabels": {
+            "app.kubernetes.io/instance": "prometheus-blackbox-exporter",
+            "app.kubernetes.io/name": "prometheus-blackbox-exporter",
+        }}}],
+        "ports": [{"protocol": "TCP", "port": 9115}],
+    }],
+}
+if not isinstance(actual, dict) or actual.get("spec") != expected:
+    raise SystemExit("ERROR: deployed lifecycle NetworkPolicy is absent, broad, or differs from the required contract.")
+PY
+  rm -f "${deployed}"
 }
 validate_resources() {
   kubectl -n "${NAMESPACE}" rollout status "deployment/${RELEASE}" --timeout="${TIMEOUT}"
@@ -159,7 +231,7 @@ verify_series() {
   done
   exit 10
 }
-verify() { require_tools helm kubectl python3 sleep; print_resolved; with_render; assert_context; preflight; [[ "$(release_state)" == present ]] || { echo "ERROR: exporter release is absent." >&2; exit 7; }; validate_resources; verify_series; }
+verify() { require_tools helm kubectl python3 sleep; print_resolved; with_render; assert_context; preflight; [[ "$(release_state)" == present ]] || { echo "ERROR: exporter release is absent." >&2; exit 7; }; validate_policy || exit 7; validate_resources; verify_series; }
 
 cmd="${1:-}"; shift || true; [[ -n "${cmd}" ]] || { usage; exit 2; }; normalize_env "${1:-}" >/dev/null
 case "${cmd}" in render) render;; install|upgrade) mutate "${cmd}";; status) status;; verify) verify;; *) usage; exit 2;; esac
