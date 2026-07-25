@@ -76,6 +76,79 @@ render() { require_tools helm kubectl; print_resolved staging; tmp="$(mktemp -t 
 install_release() { require_tools helm kubectl python3; print_resolved staging; assert_context; tmp="$(mktemp -t sugarkube-observability-install.XXXXXX.yaml)"; trap 'rm -f "${tmp}"' EXIT; render_to "${tmp}"; state="$(release_state)"; if [[ "${state}" == present ]]; then echo "ERROR: cannot install: ${RELEASE} already exists in ${NAMESPACE}. Use observability-upgrade." >&2; exit 4; fi; helm install "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --create-namespace --version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}" --wait --timeout "${TIMEOUT}"; }
 upgrade_release() { require_tools helm kubectl python3; print_resolved staging; assert_context; tmp="$(mktemp -t sugarkube-observability-upgrade.XXXXXX.yaml)"; trap 'rm -f "${tmp}"' EXIT; render_to "${tmp}"; state="$(release_state)"; if [[ "${state}" == absent ]]; then echo "ERROR: upgrade requires an existing Helm release ${RELEASE} in ${NAMESPACE}. Use observability-install for a fresh cluster." >&2; exit 5; fi; helm upgrade "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}" --wait --timeout "${TIMEOUT}"; }
 status() { require_tools helm kubectl python3; print_resolved staging; assert_context; helm -n "${NAMESPACE}" status "${RELEASE}"; kubectl -n "${NAMESPACE}" get deploy,statefulset,daemonset -l "app.kubernetes.io/instance=${RELEASE}"; kubectl -n "${NAMESPACE}" get prometheus,alertmanager; kubectl -n "${NAMESPACE}" get svc,pvc; kubectl get crd prometheuses.monitoring.coreos.com alertmanagers.monitoring.coreos.com servicemonitors.monitoring.coreos.com probes.monitoring.coreos.com; }
+verify_dspace_targets() {
+  local attempts="${SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_ATTEMPTS:-20}"
+  local interval="${SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_INTERVAL_SECONDS:-15}"
+  local endpoint="/api/v1/namespaces/${NAMESPACE}/services/http:${RELEASE}-prometheus:9090/proxy/api/v1/targets?state=active"
+  local attempt targets_json parser_status
+
+  [[ "${attempts}" =~ ^[1-9][0-9]*$ ]] || {
+    echo "ERROR: SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_ATTEMPTS must be a positive integer." >&2
+    return 8
+  }
+  [[ "${interval}" =~ ^[1-9][0-9]*$ ]] || {
+    echo "ERROR: SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_INTERVAL_SECONDS must be a positive integer." >&2
+    return 8
+  }
+
+  for ((attempt = 1; attempt <= attempts; attempt++)); do
+    if ! targets_json="$(kubectl get --raw "${endpoint}")"; then
+      echo "ERROR: kubectl could not query Prometheus targets." >&2
+      return 9
+    fi
+    parser_status=0
+    FINAL_ATTEMPT="$((attempt == attempts))" python3 -c 'import json, os, sys
+
+try:
+    response = json.load(sys.stdin)
+except (json.JSONDecodeError, UnicodeDecodeError) as error:
+    raise SystemExit(f"ERROR: Prometheus targets response is malformed JSON: {error.msg}")
+if not isinstance(response, dict):
+    raise SystemExit("ERROR: Prometheus targets response must be a JSON object.")
+if response.get("status") != "success":
+    raise SystemExit("ERROR: Prometheus targets query was unsuccessful.")
+data = response.get("data")
+if not isinstance(data, dict) or not isinstance(data.get("activeTargets"), list):
+    raise SystemExit("ERROR: Prometheus targets response has an invalid data structure.")
+dspace = []
+for target in data["activeTargets"]:
+    if not isinstance(target, dict):
+        raise SystemExit("ERROR: Prometheus targets response contains an invalid target.")
+    labels = target.get("labels")
+    if not isinstance(labels, dict):
+        raise SystemExit("ERROR: Prometheus targets response contains invalid target labels.")
+    if labels.get("app") == "dspace" and labels.get("namespace") == "dspace":
+        dspace.append(target)
+if dspace and all(target.get("health") == "up" for target in dspace):
+    raise SystemExit(0)
+if os.environ["FINAL_ATTEMPT"] == "1":
+    print("ERROR: DSPACE Prometheus targets did not become healthy before timeout.", file=sys.stderr)
+    if not dspace:
+        print("DSPACE target diagnostics: no matching targets discovered.", file=sys.stderr)
+    for target in dspace:
+        labels = target["labels"]
+        safe = {key: value for key, value in (
+            ("pod", labels.get("pod")),
+            ("instance", labels.get("instance")),
+            ("health", target.get("health")),
+            ("lastError", target.get("lastError")),
+            ("lastScrape", target.get("lastScrape")),
+        ) if value is not None}
+        print("DSPACE target diagnostics: " + json.dumps(safe, sort_keys=True), file=sys.stderr)
+raise SystemExit(10)' <<<"${targets_json}" || parser_status=$?
+    case "${parser_status}" in
+      0) echo "DSPACE Prometheus targets confirmed healthy without printing Secret values."; return 0 ;;
+      10)
+        if ((attempt < attempts)); then
+          echo "DSPACE Prometheus targets are converging (attempt ${attempt}/${attempts}); retrying." >&2
+          sleep "${interval}"
+        fi
+        ;;
+      *) return "${parser_status}" ;;
+    esac
+  done
+  return 10
+}
 verify() {
   require_tools kubectl python3
   print_resolved staging
@@ -111,16 +184,7 @@ if len(claims) != 1 or claims[0].get("status", {}).get("phase") != "Bound" or cl
   kubectl -n dspace get secret "${secret_name}" -o name >/dev/null
   echo "DSPACE ServiceMonitor secret reference exists (value intentionally not printed)."
 
-  targets_json="$(kubectl get --raw "/api/v1/namespaces/${NAMESPACE}/services/http:${RELEASE}-prometheus:9090/proxy/api/v1/targets?state=active")"
-  python3 -c 'import json, sys
-data = json.load(sys.stdin)
-if data.get("status") != "success":
-    raise SystemExit("ERROR: Prometheus targets query was unsuccessful.")
-targets = data.get("data", {}).get("activeTargets", [])
-dspace = [target for target in targets if target.get("labels", {}).get("app") == "dspace" and target.get("labels", {}).get("namespace") == "dspace"]
-if not dspace or not all(target.get("health") == "up" for target in dspace):
-    raise SystemExit("ERROR: every discovered DSPACE Prometheus target must be healthy.")' <<<"${targets_json}"
-  echo "DSPACE Prometheus targets confirmed healthy without printing Secret values."
+  verify_dspace_targets
   echo "Grafana LAN URL: ${GRAFANA_URL} (same NodePort is available through the other staging nodes)"
 }
 
