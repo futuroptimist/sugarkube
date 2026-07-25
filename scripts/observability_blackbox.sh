@@ -8,6 +8,9 @@ NAMESPACE="monitoring"
 CHART="prometheus-community/prometheus-blackbox-exporter"
 REPOSITORY="https://prometheus-community.github.io/helm-charts"
 VERSION_FILE="${ROOT}/platform/observability/helm/prometheus-blackbox-exporter.version"
+BASE_VERSION_FILE="${ROOT}/platform/observability/helm/kube-prometheus-stack.version"
+BASE_COMMON_VALUES="${ROOT}/platform/observability/helm/kube-prometheus-stack.values.common.yaml"
+BASE_STAGING_VALUES="${ROOT}/clusters/staging/observability/kube-prometheus-stack.values.yaml"
 VALUES="${ROOT}/clusters/staging/observability/prometheus-blackbox-exporter.values.yaml"
 PROBES="${ROOT}/clusters/staging/observability/probes"
 POLICIES="${ROOT}/clusters/staging/observability/network-policies"
@@ -37,7 +40,7 @@ normalize_env() {
 require_tools() { local t; for t in "$@"; do command -v "$t" >/dev/null || { echo "ERROR: required tool missing: $t" >&2; exit 127; }; done; }
 version() { tr -d '[:space:]' <"${VERSION_FILE}"; }
 current_context() { kubectl config current-context 2>/dev/null || true; }
-print_resolved() { local ctx; ctx="$(current_context)"; cat <<EOT
+print_resolved() { local ctx; ctx="$(current_context)"; cat >&2 <<EOT
 blackbox environment: staging
 current Kubernetes context: ${ctx:-<unknown>}
 namespace: ${NAMESPACE}
@@ -57,43 +60,64 @@ assert_context() {
   python3 "${ROOT}/scripts/cluster_identity.py" assert --kubeconfig "${KUBECONFIG:-${HOME}/.kube/config}" --env staging >/dev/null
 }
 render_to() {
-  local chart_out="$1" policy_out="$2" probe_out="$3"
+  local base_out="$1" chart_out="$2" policy_out="$3" probe_out="$4" selectors_out="$5"
   helm repo add prometheus-community "${REPOSITORY}" --force-update >/dev/null
   helm repo update prometheus-community >/dev/null
   helm template "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${VALUES}" >"${chart_out}"
+  helm template "${BASE_RELEASE}" "prometheus-community/${BASE_RELEASE}" --namespace "${NAMESPACE}" --version "$(tr -d '[:space:]' <"${BASE_VERSION_FILE}")" -f "${BASE_COMMON_VALUES}" -f "${BASE_STAGING_VALUES}" >"${base_out}"
   kubectl kustomize "${POLICIES}" >"${policy_out}"
   kubectl kustomize "${PROBES}" >"${probe_out}"
-  [[ -s "${chart_out}" && -s "${policy_out}" && -s "${probe_out}" ]] || { echo "ERROR: chart, NetworkPolicy, and Probe renders must all be non-empty." >&2; exit 4; }
-  python3 - "${chart_out}" <<'PY'
-import re, sys
-text = open(sys.argv[1], encoding="utf-8").read()
-docs = text.split("\n---")
-deployments = [d for d in docs if re.search(r"(?m)^kind: Deployment$", d) and re.search(r"(?m)^  name: prometheus-blackbox-exporter$", d)]
-monitors = [d for d in docs if re.search(r"(?m)^kind: ServiceMonitor$", d) and re.search(r"(?m)^  name: prometheus-blackbox-exporter$", d)]
-if len(deployments) != 1 or not re.search(r"(?m)^  replicas: 1$", deployments[0]):
+  [[ -s "${base_out}" && -s "${chart_out}" && -s "${policy_out}" && -s "${probe_out}" ]] || { echo "ERROR: prerequisite chart, exporter chart, NetworkPolicy, and Probe renders must all be non-empty." >&2; exit 4; }
+  python3 - "${base_out}" "${chart_out}" "${selectors_out}" <<'PY'
+import json, re, sys
+def documents(path):
+    return re.split(r"(?m)^---\s*$", open(path, encoding="utf-8").read())
+def scalar(doc, path):
+    stack=[]
+    for raw in doc.splitlines():
+        if not raw.strip() or raw.lstrip().startswith(("#", "- ")): continue
+        indent=len(raw)-len(raw.lstrip()); match=re.match(r"\s*([^:]+):(?:\s+(.*))?$", raw)
+        if not match: continue
+        while stack and stack[-1][0] >= indent: stack.pop()
+        key=match.group(1).strip(); value=(match.group(2) or "").strip().strip('"\'')
+        current=tuple(x[1] for x in stack)+(key,)
+        if current == path: return value
+        if not value: stack.append((indent,key))
+    return None
+base=[d for d in documents(sys.argv[1]) if scalar(d,("kind",))=="Prometheus"]
+exporter=[d for d in documents(sys.argv[2]) if scalar(d,("kind",))=="Deployment" and scalar(d,("metadata","name"))=="prometheus-blackbox-exporter"]
+monitors=[d for d in documents(sys.argv[2]) if scalar(d,("kind",))=="ServiceMonitor" and scalar(d,("metadata","name"))=="prometheus-blackbox-exporter"]
+if len(base)!=1 or not scalar(base[0],("metadata","name")): raise SystemExit("ERROR: pinned base chart must render exactly one named Prometheus object.")
+if len(exporter) != 1 or scalar(exporter[0],("spec","replicas")) != "1":
     raise SystemExit("ERROR: rendered exporter Deployment must have exactly one replica.")
-if len(monitors) != 1 or not re.search(r"(?m)^    release: kube-prometheus-stack$", monitors[0]):
+if len(monitors) != 1 or scalar(monitors[0],("metadata","labels","release")) != "kube-prometheus-stack":
     raise SystemExit("ERROR: rendered exporter ServiceMonitor must carry the base release label.")
+labels={}
+for key in ("app.kubernetes.io/instance","app.kubernetes.io/name"):
+    value=scalar(exporter[0],("spec","template","metadata","labels",key))
+    if not value: raise SystemExit(f"ERROR: exporter Deployment lacks required template label {key}.")
+    labels[key]=value
+json.dump({"source":{"app.kubernetes.io/name":"prometheus","operator.prometheus.io/name":scalar(base[0],("metadata","name"))},"destination":labels},open(sys.argv[3],"w",encoding="utf-8"),sort_keys=True)
 PY
-  validate_policy_file "${policy_out}"
+  validate_policy_file "${policy_out}" "${selectors_out}"
 }
 validate_policy_file() {
-  python3 - "$1" <<'PY'
-import json, subprocess, sys
-
-path = sys.argv[1]
-result = subprocess.run(
-    ["ruby", "-ryaml", "-rjson", "-e", "puts JSON.generate(YAML.safe_load(File.read(ARGV[0]), aliases: false))", path],
-    check=True, capture_output=True, text=True,
-)
-policy = json.loads(result.stdout)
+  local policy_json
+  [[ "$(awk '/^kind:/{count++} END{print count+0}' "$1")" == 1 ]] || { echo "ERROR: lifecycle policy render must contain exactly one Kubernetes object." >&2; exit 4; }
+  policy_json="$(kubectl create --dry-run=client -f "$1" -o json)"
+  python3 - "$2" "${POLICY_NAME}" "${NAMESPACE}" "${policy_json}" "${EXPECTED_POLICY_JSON}" <<'PY'
+import json, sys
+selectors=json.load(open(sys.argv[1],encoding="utf-8")); policy=json.loads(sys.argv[4])
 expected = {
-    "podSelector": {"matchLabels": {"app.kubernetes.io/name": "prometheus", "operator.prometheus.io/name": "kube-prometheus-stack-prometheus"}},
+    "podSelector": {"matchLabels": selectors["source"]},
     "policyTypes": ["Egress"],
-    "egress": [{"to": [{"podSelector": {"matchLabels": {"app.kubernetes.io/instance": "prometheus-blackbox-exporter", "app.kubernetes.io/name": "prometheus-blackbox-exporter"}}}], "ports": [{"protocol": "TCP", "port": 9115}]}],
+    "egress": [{"to": [{"podSelector": {"matchLabels": selectors["destination"]}}], "ports": [{"protocol": "TCP", "port": 9115}]}],
 }
-if policy != {"apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy", "metadata": {"name": "allow-kube-prometheus-stack-to-blackbox-exporter", "namespace": "monitoring"}, "spec": expected}:
+required={"apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy", "metadata": {"name": sys.argv[2], "namespace": sys.argv[3]}, "spec": expected}
+policy.get("metadata",{}).pop("creationTimestamp",None)
+if policy != required:
     raise SystemExit("ERROR: lifecycle NetworkPolicy is not the required exact narrow policy.")
+json.dump(required,open(sys.argv[5],"w",encoding="utf-8"),sort_keys=True)
 PY
 }
 release_state() {
@@ -109,16 +133,19 @@ preflight() {
   kubectl -n "${NAMESPACE}" get service "${PROMETHEUS_SERVICE}" >/dev/null || { echo "ERROR: required Prometheus service is absent." >&2; exit 5; }
 }
 with_render() {
+  BASE_RENDER="$(mktemp -t sugarkube-prometheus-chart.XXXXXX.yaml)"
   CHART_RENDER="$(mktemp -t sugarkube-blackbox-chart.XXXXXX.yaml)"
   POLICY_RENDER="$(mktemp -t sugarkube-blackbox-policy.XXXXXX.yaml)"
   PROBE_RENDER="$(mktemp -t sugarkube-blackbox-probes.XXXXXX.yaml)"
-  trap 'rm -f "${CHART_RENDER:-}" "${POLICY_RENDER:-}" "${PROBE_RENDER:-}"' EXIT
-  render_to "${CHART_RENDER}" "${POLICY_RENDER}" "${PROBE_RENDER}"
+  SELECTORS_RENDER="$(mktemp -t sugarkube-blackbox-selectors.XXXXXX.json)"
+  EXPECTED_POLICY_JSON="$(mktemp -t sugarkube-blackbox-policy.XXXXXX.json)"
+  trap 'rm -f "${BASE_RENDER:-}" "${CHART_RENDER:-}" "${POLICY_RENDER:-}" "${PROBE_RENDER:-}" "${SELECTORS_RENDER:-}" "${EXPECTED_POLICY_JSON:-}"' EXIT
+  render_to "${BASE_RENDER}" "${CHART_RENDER}" "${POLICY_RENDER}" "${PROBE_RENDER}" "${SELECTORS_RENDER}"
 }
-render() { require_tools helm kubectl python3 ruby; with_render; print_resolved; cat "${CHART_RENDER}" "${POLICY_RENDER}" "${PROBE_RENDER}"; }
+render() { require_tools helm kubectl python3; with_render; print_resolved; cat "${CHART_RENDER}"; printf '\n---\n'; cat "${POLICY_RENDER}"; printf '\n---\n'; cat "${PROBE_RENDER}"; }
 mutate() {
   local action="$1" state
-  require_tools helm kubectl python3 ruby; with_render; print_resolved; assert_context; preflight; state="$(release_state)"
+  require_tools helm kubectl python3; with_render; print_resolved; assert_context; preflight; state="$(release_state)"
   if [[ "${action}" == install && "${state}" == present ]]; then echo "ERROR: install requires an absent ${RELEASE} release; use upgrade." >&2; exit 6; fi
   if [[ "${action}" == upgrade && "${state}" == absent ]]; then echo "ERROR: upgrade requires an existing ${RELEASE} release; use install." >&2; exit 6; fi
   helm "${action}" "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${VALUES}" --wait --timeout "${TIMEOUT}"
@@ -128,7 +155,7 @@ mutate() {
   kubectl apply -f "${PROBE_RENDER}"
 }
 status() {
-  require_tools helm kubectl python3 ruby; with_render; print_resolved; assert_context
+  require_tools helm kubectl python3; with_render; print_resolved; assert_context
   helm -n "${NAMESPACE}" status "${RELEASE}"
   kubectl -n "${NAMESPACE}" get deployment,pods,service,servicemonitor -l "app.kubernetes.io/instance=${RELEASE}"
   kubectl -n "${NAMESPACE}" get networkpolicy "${POLICY_NAME}" -o yaml
@@ -139,11 +166,11 @@ validate_policy_live() {
   policy="$(kubectl -n "${NAMESPACE}" get networkpolicy "${POLICY_NAME}" -o json)" || { echo "ERROR: required lifecycle NetworkPolicy is absent." >&2; exit 7; }
   python3 -c '
 import json, sys
-p=json.load(sys.stdin)
-expected={"podSelector":{"matchLabels":{"app.kubernetes.io/name":"prometheus","operator.prometheus.io/name":"kube-prometheus-stack-prometheus"}},"policyTypes":["Egress"],"egress":[{"to":[{"podSelector":{"matchLabels":{"app.kubernetes.io/instance":"prometheus-blackbox-exporter","app.kubernetes.io/name":"prometheus-blackbox-exporter"}}}],"ports":[{"protocol":"TCP","port":9115}]}]}
-if p.get("apiVersion")!="networking.k8s.io/v1" or p.get("kind")!="NetworkPolicy" or p.get("metadata",{}).get("name")!="allow-kube-prometheus-stack-to-blackbox-exporter" or p.get("metadata",{}).get("namespace")!="monitoring" or p.get("spec")!=expected:
+live=json.load(sys.stdin); expected=json.load(open(sys.argv[1]))
+live={"apiVersion":live.get("apiVersion"),"kind":live.get("kind"),"metadata":{"name":live.get("metadata",{}).get("name"),"namespace":live.get("metadata",{}).get("namespace")},"spec":live.get("spec")}
+if live != expected:
  raise SystemExit("ERROR: deployed lifecycle NetworkPolicy differs from the required exact narrow policy.")
-' <<<"${policy}" || exit 7
+' "${EXPECTED_POLICY_JSON}" <<<"${policy}" || exit 7
 }
 validate_resources() {
   kubectl -n "${NAMESPACE}" rollout status "deployment/${RELEASE}" --timeout="${TIMEOUT}"
@@ -198,7 +225,7 @@ verify_series() {
   done
   exit 10
 }
-verify() { require_tools helm kubectl python3 ruby sleep; with_render; print_resolved; assert_context; preflight; [[ "$(release_state)" == present ]] || { echo "ERROR: exporter release is absent." >&2; exit 7; }; validate_policy_live; validate_resources; verify_series; }
+verify() { require_tools helm kubectl python3 sleep; with_render; print_resolved; assert_context; preflight; [[ "$(release_state)" == present ]] || { echo "ERROR: exporter release is absent." >&2; exit 7; }; validate_policy_live; validate_resources; verify_series; }
 
 cmd="${1:-}"; shift || true; [[ -n "${cmd}" ]] || { usage; exit 2; }; normalize_env "${1:-}" >/dev/null
 case "${cmd}" in render) render;; install|upgrade) mutate "${cmd}";; status) status;; verify) verify;; *) usage; exit 2;; esac

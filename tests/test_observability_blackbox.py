@@ -99,7 +99,13 @@ with open(os.environ["LOG"], "a") as log:
     log.write("helm " + " ".join(args) + "\n")
 scenario = os.environ.get("SCENARIO", "success")
 if args[:1] == ["template"]:
-    print("""kind: Deployment
+    if "kube-prometheus-stack" in args and "prometheus-blackbox-exporter" not in args:
+        print("""apiVersion: monitoring.coreos.com/v1
+kind: Prometheus
+metadata:
+  name: kube-prometheus-stack-prometheus""")
+    else:
+        print("""kind: Deployment
 metadata:
   name: prometheus-blackbox-exporter
 spec:
@@ -138,6 +144,8 @@ elif args[:1] == ["kustomize"]:
     if "network-policies" in joined:
         print(open(os.environ["POLICY"]).read())
     else: print("kind: Probe\nmetadata:\n  name: rendered-probe")
+elif args[:2] == ["create", "--dry-run=client"]:
+    print(json.dumps(json.load(open(os.environ["POLICY_JSON"]))))
 elif args[:2] == ["apply", "-f"] and scenario == "policy_apply_failure" and "policy" in args[2]:
     sys.exit(41)
 elif "get crd" in joined and scenario == "missing_crds": sys.exit(1)
@@ -313,8 +321,31 @@ def test_environment_normalization_renders_offline(scenario, environment):
     result = scenario.run("render", environment)
     assert result.returncode == 0
     assert any(line.startswith("helm repo add") for line in scenario.log)
+    assert sum(line.startswith("helm template") for line in scenario.log) == 2
     assert sum(line.startswith("kubectl kustomize") for line in scenario.log) == 2
     assert not mutations(scenario.log)
+
+
+def test_render_stdout_is_a_clean_separated_kubernetes_stream(scenario):
+    result = scenario.run("render")
+    assert result.returncode == 0
+    parsed = subprocess.run(
+        ["ruby", "-ryaml", "-rjson", "-e", "puts JSON.generate(YAML.load_stream(STDIN.read))"],
+        input=result.stdout,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    docs = [doc for doc in json.loads(parsed.stdout) if doc]
+    assert [doc["kind"] for doc in docs] == [
+        "Deployment",
+        "ServiceMonitor",
+        "NetworkPolicy",
+        "Probe",
+    ]
+    assert docs[2] == json.loads(Path(scenario.env["POLICY_JSON"]).read_text())
+    assert "blackbox environment:" not in result.stdout
+    assert "blackbox environment: staging" in result.stderr
 
 
 @pytest.mark.parametrize("failure", ["bad_context", "bad_identity"])

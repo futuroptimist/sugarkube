@@ -8,7 +8,6 @@ PROBES = ROOT / "clusters/staging/observability/probes/public-apps.yaml"
 POLICY = (
     ROOT / "clusters/staging/observability/network-policies/prometheus-to-blackbox-exporter.yaml"
 )
-SELECTORS = ROOT / "tests/fixtures/observability_blackbox_chart_selectors.json"
 EXPECTED = {
     ("dspace", "root", "https://staging.democratized.space/", "https_2xx"),
     ("dspace", "config", "https://staging.democratized.space/config.json", "static_content_2xx"),
@@ -121,9 +120,90 @@ def test_legacy_resources_are_outside_active_graphs():
 
 def test_lifecycle_network_policy_is_exact_and_chart_render_backed():
     policy = yaml(POLICY)[0]
-    selectors = json.loads(SELECTORS.read_text())
-    source = selectors["kube-prometheus-stack"]["podSelector"]
-    destination = selectors["prometheus-blackbox-exporter"]["podSelector"]
+    subprocess.run(
+        [
+            "helm",
+            "repo",
+            "add",
+            "prometheus-community",
+            "https://prometheus-community.github.io/helm-charts",
+            "--force-update",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    base = subprocess.run(
+        [
+            "helm",
+            "template",
+            "kube-prometheus-stack",
+            "prometheus-community/kube-prometheus-stack",
+            "--namespace",
+            "monitoring",
+            "--version",
+            (ROOT / "platform/observability/helm/kube-prometheus-stack.version")
+            .read_text()
+            .strip(),
+            "-f",
+            str(ROOT / "platform/observability/helm/kube-prometheus-stack.values.common.yaml"),
+            "-f",
+            str(ROOT / "clusters/staging/observability/kube-prometheus-stack.values.yaml"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    exporter = subprocess.run(
+        [
+            "helm",
+            "template",
+            "prometheus-blackbox-exporter",
+            "prometheus-community/prometheus-blackbox-exporter",
+            "--namespace",
+            "monitoring",
+            "--version",
+            (ROOT / "platform/observability/helm/prometheus-blackbox-exporter.version")
+            .read_text()
+            .strip(),
+            "-f",
+            str(VALUES),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    def load_stream(text):
+        result = subprocess.run(
+            ["ruby", "-ryaml", "-rjson", "-e", "puts JSON.generate(YAML.load_stream(STDIN.read))"],
+            input=text,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return json.loads(result.stdout)
+
+    prometheus = [
+        doc for doc in load_stream(base.stdout) if doc and doc.get("kind") == "Prometheus"
+    ]
+    deployments = [
+        doc
+        for doc in load_stream(exporter.stdout)
+        if doc
+        and doc.get("kind") == "Deployment"
+        and doc["metadata"]["name"] == "prometheus-blackbox-exporter"
+    ]
+    assert len(prometheus) == len(deployments) == 1
+    source = {
+        "app.kubernetes.io/name": "prometheus",
+        "operator.prometheus.io/name": prometheus[0]["metadata"]["name"],
+    }
+    rendered_labels = deployments[0]["spec"]["template"]["metadata"]["labels"]
+    destination = {
+        key: rendered_labels[key]
+        for key in ("app.kubernetes.io/instance", "app.kubernetes.io/name")
+    }
     assert policy == {
         "apiVersion": "networking.k8s.io/v1",
         "kind": "NetworkPolicy",
@@ -148,9 +228,3 @@ def test_lifecycle_network_policy_is_exact_and_chart_render_backed():
         *ROOT.glob("clusters/*/kustomization.yaml"),
     ]:
         assert "observability/network-policies" not in graph.read_text()
-    assert (
-        ROOT / "platform/observability/helm/kube-prometheus-stack.version"
-    ).read_text().strip() == selectors["kube-prometheus-stack"]["chartVersion"]
-    assert (
-        ROOT / "platform/observability/helm/prometheus-blackbox-exporter.version"
-    ).read_text().strip() == selectors["prometheus-blackbox-exporter"]["chartVersion"]
