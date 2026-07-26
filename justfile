@@ -1637,7 +1637,6 @@ app-deploy app env='staging' tag='' config='' manifest='' evidence='':
       if [ -z "${evidence_output}" ]; then
         evidence_output="$(python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" evidence-path --manifest "${release_manifest}")"
       fi
-      python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" check-output --output "${evidence_output}"
     fi
 
     export KUBECONFIG="${HOME}/.kube/config"
@@ -1653,6 +1652,11 @@ app-deploy app env='staging' tag='' config='' manifest='' evidence='':
       --values "${SUGARKUBE_VALUES}" \
       --release "${SUGARKUBE_RELEASE}" \
       --namespace "${SUGARKUBE_NAMESPACE}"
+    if [ "${SUGARKUBE_APP}" = dspace ] && { [ "${SUGARKUBE_ENV}" = staging ] || [ "${SUGARKUBE_ENV}" = prod ]; }; then
+      evidence_reservation="$(python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" reserve \
+        --manifest "${release_manifest}" --output "${evidence_output}" \
+        --environment "${SUGARKUBE_ENV}" --release "${SUGARKUBE_RELEASE}" --namespace "${SUGARKUBE_NAMESPACE}")"
+    fi
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
       release="${SUGARKUBE_RELEASE}" \
       namespace="${SUGARKUBE_NAMESPACE}" \
@@ -1668,7 +1672,7 @@ app-deploy app env='staging' tag='' config='' manifest='' evidence='':
         --environment "${SUGARKUBE_ENV}" --image-tag "${SUGARKUBE_TAG}" \
         --chart-version "${chart_version}" --kubeconfig "${KUBECONFIG}" \
         --release "${SUGARKUBE_RELEASE}" --namespace "${SUGARKUBE_NAMESPACE}" \
-        --chart-ref "${SUGARKUBE_CHART}"
+        --chart-ref "${SUGARKUBE_CHART}" --reservation "${evidence_reservation}"
     fi
 
 # Generic upgrade-only app redeploy backed by app config files.
@@ -1694,7 +1698,6 @@ app-redeploy app env='staging' tag='' config='' manifest='' evidence='':
       python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" preflight --manifest "${release_manifest}" --environment "${SUGARKUBE_ENV}" --image-tag "${SUGARKUBE_TAG}" --chart-version "${chart_version}" \
         --chart-ref "${SUGARKUBE_CHART}"
       if [ -z "${evidence_output}" ]; then evidence_output="$(python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" evidence-path --manifest "${release_manifest}")"; fi
-      python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" check-output --output "${evidence_output}"
     fi
 
     export KUBECONFIG="${HOME}/.kube/config"
@@ -1710,6 +1713,11 @@ app-redeploy app env='staging' tag='' config='' manifest='' evidence='':
       --values "${SUGARKUBE_VALUES}" \
       --release "${SUGARKUBE_RELEASE}" \
       --namespace "${SUGARKUBE_NAMESPACE}"
+    if [ "${SUGARKUBE_APP}" = dspace ] && { [ "${SUGARKUBE_ENV}" = staging ] || [ "${SUGARKUBE_ENV}" = prod ]; }; then
+      evidence_reservation="$(python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" reserve \
+        --manifest "${release_manifest}" --output "${evidence_output}" \
+        --environment "${SUGARKUBE_ENV}" --release "${SUGARKUBE_RELEASE}" --namespace "${SUGARKUBE_NAMESPACE}")"
+    fi
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
       release="${SUGARKUBE_RELEASE}" \
       namespace="${SUGARKUBE_NAMESPACE}" \
@@ -1723,7 +1731,7 @@ app-redeploy app env='staging' tag='' config='' manifest='' evidence='':
       python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" finalize --manifest "${release_manifest}" --output "${evidence_output}" \
         --environment "${SUGARKUBE_ENV}" --image-tag "${SUGARKUBE_TAG}" --chart-version "${chart_version}" --kubeconfig "${KUBECONFIG}" \
         --release "${SUGARKUBE_RELEASE}" --namespace "${SUGARKUBE_NAMESPACE}" \
-        --chart-ref "${SUGARKUBE_CHART}"
+        --chart-ref "${SUGARKUBE_CHART}" --reservation "${evidence_reservation}"
     fi
 
 # Promote an app to prod with an explicit immutable tag, or the configured prod tag file.

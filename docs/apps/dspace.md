@@ -176,6 +176,21 @@ through the selected Helm release's Deployment and ReplicaSet. Each DSPACE
 container must use the approved repository and immutable image tag before its
 resolved image ID is accepted. No HTTP build-identity check is claimed.
 
+Immediately before Helm changes the release, the guarded recipe atomically creates
+`<evidence-path>.reservation`. This sidecar binds the normalized destination,
+approved-candidate fingerprint, environment, Helm release, and namespace to one
+opaque invocation identifier. A competitor stops before Helm or Kubernetes
+mutation. Only the owner can finalize; success atomically creates the JSON and
+removes the sidecar.
+
+Failures after reservation deliberately leave the sidecar. There is no timeout or
+automatic stale-lock takeover. For recovery, first inspect and reconcile the
+selected cluster, Helm release, pods, intended candidate, and existing evidence. If
+that proves the original invocation cannot resume and its destination must be
+abandoned, explicitly remove that exact sidecar (for example,
+`rm -- deployment-evidence/dspace/staging/<file>.json.reservation`) and rerun the
+guarded command. Never remove a reservation merely because it is old.
+
 This repository change only persists the staging configuration; it does not deploy anything to a cluster. After it is merged, deploy the new immutable, environment-neutral DSPACE image that contains runtime `/config.json` support. The image tag stays the same as it moves between staging and production; the Sugarkube values overlays, not image names, select the token.place origin.
 
 Preferred generic command:

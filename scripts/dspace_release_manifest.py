@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import os
 import re
+import secrets
 import subprocess
 import sys
 import tempfile
@@ -51,6 +53,7 @@ REVISION_ANNOTATION = "org.opencontainers.image.revision"
 RUNTIME_METHOD = "podImageID+ociRevisionAnnotation"
 IMAGE_REF = "ghcr.io/democratizedspace/dspace"
 CHART_REF = "ghcr.io/democratizedspace/charts/dspace"
+RESERVATION_SUFFIX = ".reservation"
 
 
 class ManifestError(ValueError):
@@ -192,21 +195,105 @@ def _write_new(path: Path, value: dict[str, Any]) -> None:
         try:
             os.link(temporary, path)
         except FileExistsError as exc:
-            raise ManifestError(f"refusing to overwrite existing record: {path}") from exc
-        # Persist the new directory entry as well as the file contents. Some
-        # filesystems otherwise permit a successful return followed by losing
-        # the link during a power failure.
-        try:
-            directory_fd = os.open(path.parent, os.O_RDONLY)
-            try:
-                os.fsync(directory_fd)
-            finally:
-                os.close(directory_fd)
-        except OSError:
-            # Directory fsync is not supported on every platform/filesystem.
-            pass
+            raise ManifestError(
+                f"refusing to overwrite existing record: {path}"
+            ) from exc
+        _sync_directory(path.parent)
     finally:
         Path(temporary).unlink(missing_ok=True)
+
+
+def _sync_directory(path: Path) -> None:
+    try:
+        directory_fd = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except OSError:
+        pass
+
+
+def reservation_path(output: Path) -> Path:
+    """Return the non-secret sidecar used to reserve an evidence destination."""
+    normalized = output.expanduser().resolve(strict=False)
+    return normalized.with_name(normalized.name + RESERVATION_SUFFIX)
+
+
+def _candidate_fingerprint(value: dict[str, Any]) -> str:
+    validate(value, False)
+    return hashlib.sha256(_canonical(value).encode()).hexdigest()
+
+
+def reserve(
+    output: Path, value: dict[str, Any], environment: str, release: str, namespace: str
+) -> str:
+    """Atomically reserve output for one invocation and return its opaque ID."""
+    validate(value, False)
+    if value["environment"] != environment:
+        raise ManifestError("reservation environment does not match candidate")
+    normalized = output.expanduser().resolve(strict=False)
+    sidecar = reservation_path(normalized)
+    normalized.parent.mkdir(parents=True, exist_ok=True)
+    if normalized.exists():
+        raise ManifestError(f"refusing to overwrite existing record: {normalized}")
+    identifier = secrets.token_hex(32)
+    metadata = {
+        "schemaVersion": 1,
+        "output": str(normalized),
+        "candidateFingerprint": _candidate_fingerprint(value),
+        "environment": environment,
+        "release": release,
+        "namespace": namespace,
+        "reservationId": identifier,
+    }
+    try:
+        fd = os.open(sidecar, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError as exc:
+        raise ManifestError(
+            f"evidence destination is already reserved: {sidecar}"
+        ) from exc
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(_canonical(metadata))
+            stream.flush()
+            os.fsync(stream.fileno())
+        _sync_directory(normalized.parent)
+    except BaseException:
+        sidecar.unlink(missing_ok=True)
+        raise
+    return identifier
+
+
+def verify_reservation(
+    output: Path,
+    value: dict[str, Any],
+    environment: str,
+    release: str,
+    namespace: str,
+    identifier: str,
+) -> Path:
+    normalized = output.expanduser().resolve(strict=False)
+    sidecar = reservation_path(normalized)
+    metadata = _object(sidecar)
+    expected = {
+        "schemaVersion": 1,
+        "output": str(normalized),
+        "candidateFingerprint": _candidate_fingerprint(value),
+        "environment": environment,
+        "release": release,
+        "namespace": namespace,
+        "reservationId": identifier,
+    }
+    if not secrets.compare_digest(
+        json.dumps(metadata, sort_keys=True), json.dumps(expected, sort_keys=True)
+    ):
+        raise ManifestError(
+            "reservation ownership or deployment coordinates do not match"
+        )
+    if normalized.exists():
+        raise ManifestError(f"refusing to overwrite existing record: {normalized}")
+    return sidecar
 
 
 def candidate(
@@ -580,11 +667,20 @@ def main(argv: list[str] | None = None) -> int:
     finish.add_argument("--namespace", required=True)
     finish.add_argument("--image-ref", default=IMAGE_REF)
     finish.add_argument("--chart-ref", default=CHART_REF)
-    finish.add_argument("--oras-command", default=os.environ.get("SUGARKUBE_ORAS_COMMAND", "oras"))
+    finish.add_argument("--reservation", required=True)
+    finish.add_argument(
+        "--oras-command", default=os.environ.get("SUGARKUBE_ORAS_COMMAND", "oras")
+    )
     available = sub.add_parser("check-output")
     available.add_argument("--output", type=Path, required=True)
     destination = sub.add_parser("evidence-path")
     destination.add_argument("--manifest", type=Path, required=True)
+    claim = sub.add_parser("reserve")
+    claim.add_argument("--manifest", type=Path, required=True)
+    claim.add_argument("--output", type=Path, required=True)
+    claim.add_argument("--environment", required=True)
+    claim.add_argument("--release", required=True)
+    claim.add_argument("--namespace", required=True)
     args = parser.parse_args(argv)
     try:
         if args.command == "candidate":
@@ -612,6 +708,14 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.write(_canonical(result))
         elif args.command == "finalize":
             source = _object(args.manifest)
+            sidecar = verify_reservation(
+                args.output,
+                source,
+                args.environment,
+                args.release,
+                args.namespace,
+                args.reservation,
+            )
             results = preflight(
                 source,
                 args.image_ref,
@@ -694,10 +798,33 @@ def main(argv: list[str] | None = None) -> int:
                 namespace=args.namespace,
                 cluster_environment=cluster_environment,
             )
+            sidecar = verify_reservation(
+                args.output,
+                source,
+                args.environment,
+                args.release,
+                args.namespace,
+                args.reservation,
+            )
             _write_new(args.output, result)
+            sidecar.unlink()
+            _sync_directory(args.output.expanduser().resolve(strict=False).parent)
         elif args.command == "check-output":
             if args.output.exists():
-                raise ManifestError(f"refusing to overwrite existing record: {args.output}")
+                raise ManifestError(
+                    f"refusing to overwrite existing record: {args.output}"
+                )
+        elif args.command == "reserve":
+            sys.stdout.write(
+                reserve(
+                    args.output,
+                    _object(args.manifest),
+                    args.environment,
+                    args.release,
+                    args.namespace,
+                )
+                + "\n"
+            )
         else:
             sys.stdout.write(str(evidence_path(_object(args.manifest))) + "\n")
     except (ManifestError, json.JSONDecodeError) as exc:

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -406,6 +408,111 @@ def test_check_output_rejects_collision_before_deployment(tmp_path: Path, capsys
     output.write_text("already recorded", encoding="utf-8")
     assert manifest.main(["check-output", "--output", str(output)]) == 2
     assert "refusing to overwrite" in capsys.readouterr().err
+
+
+def test_reservation_is_atomic_and_bound_to_owner(tmp_path: Path) -> None:
+    output = tmp_path / "evidence.json"
+    barrier = threading.Barrier(2)
+
+    def acquire() -> tuple[str, str]:
+        barrier.wait()
+        try:
+            return (
+                "owner",
+                manifest.reserve(output, candidate(), "staging", "dspace", "dspace"),
+            )
+        except manifest.ManifestError as exc:
+            return ("loser", str(exc))
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _: acquire(), range(2)))
+
+    owners = [value for status, value in results if status == "owner"]
+    assert len(owners) == 1
+    assert [status for status, _ in results].count("loser") == 1
+    sidecar = manifest.verify_reservation(
+        output, candidate(), "staging", "dspace", "dspace", owners[0]
+    )
+    metadata = json.loads(sidecar.read_text(encoding="utf-8"))
+    assert metadata["output"] == str(output.resolve())
+    assert metadata["candidateFingerprint"] == manifest._candidate_fingerprint(
+        candidate()
+    )
+
+
+def test_reservation_rejects_existing_record_or_reservation(tmp_path: Path) -> None:
+    output = tmp_path / "evidence.json"
+    owner = manifest.reserve(output, candidate(), "staging", "dspace", "dspace")
+    with pytest.raises(manifest.ManifestError, match="already reserved"):
+        manifest.reserve(output, candidate(), "staging", "dspace", "dspace")
+    with pytest.raises(manifest.ManifestError, match="ownership"):
+        manifest.verify_reservation(
+            output, candidate(), "staging", "dspace", "dspace", owner + "wrong"
+        )
+    manifest.reservation_path(output).unlink()
+    output.write_text("final", encoding="utf-8")
+    with pytest.raises(manifest.ManifestError, match="overwrite"):
+        manifest.reserve(output, candidate(), "staging", "dspace", "dspace")
+
+
+def test_reservation_binds_candidate_output_and_coordinates(tmp_path: Path) -> None:
+    output = tmp_path / "evidence.json"
+    owner = manifest.reserve(output, candidate(), "staging", "dspace", "dspace")
+    changed = candidate()
+    changed["approvedBy"] = "another-approver"
+    for selected_output, selected, release in (
+        (tmp_path / "other.json", candidate(), "dspace"),
+        (output, changed, "dspace"),
+        (output, candidate(), "other"),
+    ):
+        with pytest.raises(manifest.ManifestError):
+            manifest.verify_reservation(
+                selected_output, selected, "staging", release, "dspace", owner
+            )
+
+
+def test_post_reservation_failure_preserves_ownership(
+    tmp_path: Path, monkeypatch
+) -> None:
+    source = tmp_path / "candidate.json"
+    output = tmp_path / "evidence.json"
+    source.write_text(manifest._canonical(candidate()), encoding="utf-8")
+    owner = manifest.reserve(output, candidate(), "staging", "dspace", "dspace")
+    monkeypatch.setattr(
+        manifest,
+        "preflight",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            manifest.ManifestError("OCI failed")
+        ),
+    )
+    assert (
+        manifest.main(
+            [
+                "finalize",
+                "--manifest",
+                str(source),
+                "--output",
+                str(output),
+                "--environment",
+                "staging",
+                "--image-tag",
+                "main-abcdef0",
+                "--chart-version",
+                "3.2.0",
+                "--kubeconfig",
+                "kubeconfig",
+                "--release",
+                "dspace",
+                "--namespace",
+                "dspace",
+                "--reservation",
+                owner,
+            ]
+        )
+        == 2
+    )
+    assert not output.exists()
+    assert manifest.reservation_path(output).exists()
 
 
 def test_default_evidence_path_is_stable_and_approval_unique() -> None:

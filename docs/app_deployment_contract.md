@@ -217,6 +217,16 @@ Helm-owned Deployment, and rejects terminating, non-Running, non-Ready, or
 non-running DSPACE containers. Both the pod-spec image coordinate and resolved
 image ID must match the approval. Existing files are never overwritten.
 
+Immediately before Helm mutation, the guard exclusively creates
+`<evidence-path>.reservation`. It binds the normalized destination, canonical
+candidate fingerprint, environment, release, namespace, and an opaque invocation
+identifier. Finalization requires matching ownership and removes the sidecar only
+after its no-overwrite evidence write succeeds. A post-reservation failure preserves
+the sidecar; reservations never expire or get stolen automatically. Recovery
+requires inspecting and reconciling the cluster, Helm release, candidate, and
+existing evidence before an operator explicitly removes the exact stranded sidecar
+and retries.
+
 These recipes are implemented in the root `justfile` and use the app config
 lookup order above.
 

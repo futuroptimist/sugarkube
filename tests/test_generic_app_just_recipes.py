@@ -13,6 +13,7 @@ import pytest
 
 from scripts import app_chart
 from scripts import app_verify
+from scripts import dspace_release_manifest as release_manifest
 from scripts.app_verify import base_url_from_host, tokenplace_meta_failure
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -1390,9 +1391,13 @@ def test_dspace_guarded_deploy_orders_preflight_mutation_and_finalization(
     final = json.loads(evidence.read_text(encoding="utf-8"))
     assert final["recordType"] == "final"
     assert final["helmRevision"] == 7
+    assert "reservation" not in json.dumps(final).lower()
+    assert not Path(str(evidence.resolve()) + ".reservation").exists()
     commands = (tmp_path / "commands.log").read_text(encoding="utf-8").splitlines()
     preflight = next(i for i, line in enumerate(commands) if line.startswith("oras "))
-    mutation = next(i for i, line in enumerate(commands) if line.startswith("helm upgrade "))
+    mutation = next(
+        i for i, line in enumerate(commands) if line.startswith("helm upgrade ")
+    )
     collection = next(i for i, line in enumerate(commands) if " status dspace" in line)
     pods = next(i for i, line in enumerate(commands) if " -n dspace get pods" in line)
     assert preflight < mutation < collection < pods
@@ -1427,6 +1432,37 @@ def test_dspace_digest_mismatch_stops_before_helm(
     assert expected_check in result.stderr
     helm_log = Path(env["HELM_LOG"])
     assert not helm_log.exists() or "upgrade " not in helm_log.read_text(encoding="utf-8")
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_dspace_reservation_collision_stops_before_helm(
+    tmp_path: Path, generic_app_stub_env: dict[str, str]
+) -> None:
+    candidate_path = tmp_path / "candidate.json"
+    evidence = tmp_path / "evidence.json"
+    _write_dspace_candidate(candidate_path, "staging")
+    candidate_record = json.loads(candidate_path.read_text(encoding="utf-8"))
+    release_manifest.reserve(evidence, candidate_record, "staging", "dspace", "dspace")
+
+    result = _run_just(
+        [
+            "app-deploy",
+            "dspace",
+            "staging",
+            "main-abcdef0",
+            "",
+            str(candidate_path),
+            str(evidence),
+        ],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode != 0
+    assert "already reserved" in result.stderr
+    helm_log = Path(generic_app_stub_env["HELM_LOG"])
+    assert not helm_log.exists() or "upgrade " not in helm_log.read_text(
+        encoding="utf-8"
+    )
 
 
 @pytest.mark.usefixtures("ensure_just_available")
