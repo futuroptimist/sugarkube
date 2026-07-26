@@ -5,6 +5,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 VALUES = ROOT / "clusters/staging/observability/prometheus-blackbox-exporter.values.yaml"
 PROBES = ROOT / "clusters/staging/observability/probes/public-apps.yaml"
+POLICY = (
+    ROOT / "clusters/staging/observability/network-policies/prometheus-to-blackbox-exporter.yaml"
+)
 EXPECTED = {
     ("dspace", "root", "https://staging.democratized.space/", "https_2xx"),
     ("dspace", "config", "https://staging.democratized.space/config.json", "static_content_2xx"),
@@ -57,14 +60,17 @@ def test_pinned_chart_values_are_private_and_bounded():
     assert value["ingress"]["enabled"] is False and value["networkPolicy"]["enabled"] is False
     assert value["serviceMonitor"]["enabled"] is False
     assert value["serviceMonitor"]["selfMonitor"]["enabled"] is True
-    assert (
-        value["serviceMonitor"]["selfMonitor"]["labels"]["release"]
-        == "kube-prometheus-stack"
-    )
+    assert value["serviceMonitor"]["selfMonitor"]["labels"]["release"] == "kube-prometheus-stack"
     assert value["secretConfig"] is False
-    assert all(value[key] == [] for key in (
-        "extraConfigmapMounts", "extraSecretMounts", "extraVolumes", "extraVolumeMounts"
-    ))
+    assert all(
+        value[key] == []
+        for key in (
+            "extraConfigmapMounts",
+            "extraSecretMounts",
+            "extraVolumes",
+            "extraVolumeMounts",
+        )
+    )
     modules = value["config"]["modules"]
     assert set(modules) == {"https_2xx", "json_health_2xx", "static_content_2xx"}
     for module in modules.values():
@@ -112,7 +118,112 @@ def test_legacy_resources_are_outside_active_graphs():
     assert "LEGACY/FUTURE ONLY" in (ROOT / "monitoring/probes/public-apps.yaml").read_text()
 
 
-def test_network_policy_prerequisite_is_explicitly_deferred():
-    docs = (ROOT / "docs/observability-blackbox.md").read_text()
-    assert "separately\nscoped egress-policy prerequisite" in docs
-    assert "this lifecycle does not\nresolve that prerequisite" in docs
+def test_lifecycle_network_policy_is_exact_and_chart_render_backed():
+    policy = yaml(POLICY)[0]
+    subprocess.run(
+        [
+            "helm",
+            "repo",
+            "add",
+            "prometheus-community",
+            "https://prometheus-community.github.io/helm-charts",
+            "--force-update",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    base = subprocess.run(
+        [
+            "helm",
+            "template",
+            "kube-prometheus-stack",
+            "prometheus-community/kube-prometheus-stack",
+            "--namespace",
+            "monitoring",
+            "--version",
+            (ROOT / "platform/observability/helm/kube-prometheus-stack.version")
+            .read_text()
+            .strip(),
+            "-f",
+            str(ROOT / "platform/observability/helm/kube-prometheus-stack.values.common.yaml"),
+            "-f",
+            str(ROOT / "clusters/staging/observability/kube-prometheus-stack.values.yaml"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    exporter = subprocess.run(
+        [
+            "helm",
+            "template",
+            "prometheus-blackbox-exporter",
+            "prometheus-community/prometheus-blackbox-exporter",
+            "--namespace",
+            "monitoring",
+            "--version",
+            (ROOT / "platform/observability/helm/prometheus-blackbox-exporter.version")
+            .read_text()
+            .strip(),
+            "-f",
+            str(VALUES),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    def load_stream(text):
+        result = subprocess.run(
+            ["ruby", "-ryaml", "-rjson", "-e", "puts JSON.generate(YAML.load_stream(STDIN.read))"],
+            input=text,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return json.loads(result.stdout)
+
+    prometheus = [
+        doc for doc in load_stream(base.stdout) if doc and doc.get("kind") == "Prometheus"
+    ]
+    deployments = [
+        doc
+        for doc in load_stream(exporter.stdout)
+        if doc
+        and doc.get("kind") == "Deployment"
+        and doc["metadata"]["name"] == "prometheus-blackbox-exporter"
+    ]
+    assert len(prometheus) == len(deployments) == 1
+    source = {
+        "operator.prometheus.io/name": prometheus[0]["metadata"]["name"],
+    }
+    rendered_labels = deployments[0]["spec"]["template"]["metadata"]["labels"]
+    destination = {
+        key: rendered_labels[key]
+        for key in ("app.kubernetes.io/instance", "app.kubernetes.io/name")
+    }
+    assert policy == {
+        "apiVersion": "networking.k8s.io/v1",
+        "kind": "NetworkPolicy",
+        "metadata": {
+            "name": "allow-kube-prometheus-stack-to-blackbox-exporter",
+            "namespace": "monitoring",
+        },
+        "spec": {
+            "podSelector": {"matchLabels": source},
+            "policyTypes": ["Egress"],
+            "egress": [
+                {
+                    "to": [{"podSelector": {"matchLabels": destination}}],
+                    "ports": [{"protocol": "TCP", "port": 9115}],
+                }
+            ],
+        },
+    }
+    assert (POLICY.parent / "kustomization.yaml").read_text().count(POLICY.name) == 1
+    for graph in [
+        ROOT / "platform/networking/kustomization.yaml",
+        *ROOT.glob("clusters/*/kustomization.yaml"),
+    ]:
+        assert "observability/network-policies" not in graph.read_text()
