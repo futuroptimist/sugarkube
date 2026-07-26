@@ -103,7 +103,7 @@ for key in ("app.kubernetes.io/instance","app.kubernetes.io/name"):
     labels[key]=value
 # Helm renders the Prometheus CR; operator-created pods carry
 # operator.prometheus.io/name=<CR name>, so the render supplies this value.
-json.dump({"source":{"operator.prometheus.io/name":base[0]["metadata"]["name"]},"destination":labels},open(sys.argv[3],"w",encoding="utf-8"),sort_keys=True)
+json.dump({"prometheus":{"operator.prometheus.io/name":base[0]["metadata"]["name"]},"exporter":labels},open(sys.argv[3],"w",encoding="utf-8"),sort_keys=True)
 PY
   validate_policy_file "${policy_json}" "${selectors_out}"
   python3 "${ROOT}/scripts/verify_blackbox_prometheus.py" --probes <"${probes_json}"
@@ -117,9 +117,9 @@ if len(objects) != 1 or not isinstance(objects[0],dict):
     raise SystemExit("ERROR: lifecycle policy render must contain exactly one non-null Kubernetes object.")
 policy=objects[0]
 expected = {
-    "podSelector": {"matchLabels": selectors["source"]},
-    "policyTypes": ["Egress"],
-    "egress": [{"to": [{"podSelector": {"matchLabels": selectors["destination"]}}], "ports": [{"protocol": "TCP", "port": 9115}]}],
+    "podSelector": {"matchLabels": selectors["exporter"]},
+    "policyTypes": ["Ingress"],
+    "ingress": [{"from": [{"podSelector": {"matchLabels": selectors["prometheus"]}}], "ports": [{"protocol": "TCP", "port": 9115}]}],
 }
 required={"apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy", "metadata": {"name": sys.argv[2], "namespace": sys.argv[3]}, "spec": expected}
 policy.get("metadata",{}).pop("creationTimestamp",None)
