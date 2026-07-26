@@ -1877,8 +1877,8 @@ dspace-oci-deploy-prod-subdomain tag='' manifest='' evidence='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    echo "WARNING: the prod-subdomain compatibility command now uses the gated production deployment path." >&2
-    delegate=(just --justfile "{{ justfile_directory() }}/justfile" app-deploy app=dspace env=prod tag={{ quote(tag) }})
+    delegate=(just --justfile "{{ justfile_directory() }}/justfile" app-deploy app=dspace env=prod tag={{ quote(tag) }} \
+      "{{ justfile_directory() }}/docs/examples/apps/dspace-prod-subdomain.env")
     [ -z {{ quote(manifest) }} ] || delegate+=(manifest={{ quote(manifest) }})
     [ -z {{ quote(evidence) }} ] || delegate+=(evidence={{ quote(evidence) }})
     "${delegate[@]}"

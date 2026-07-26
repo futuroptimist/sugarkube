@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -64,6 +65,11 @@ fi
         f"""#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >> {str(tmp_path / "kubectl.log")!r}
+printf 'kubectl %s\n' "$*" >> {str(tmp_path / "commands.log")!r}
+if [[ "$*" == *"get pods"* && "$*" == *"-o json"* ]]; then
+  printf '{{"items":[{{"metadata":{{"name":"dspace-0"}},"status":{{"startTime":"2026-07-26T12:10:00Z","containerStatuses":[{{"imageID":"ghcr.io/democratizedspace/dspace@sha256:%s"}}]}}}}]}}\n' "${{SUGARKUBE_STUB_IMAGE_DIGEST_HEX:-1111111111111111111111111111111111111111111111111111111111111111}}"
+  exit 0
+fi
 if [[ "$*" == *"get nodes -o json"* ]]; then
   env_label="${{SUGARKUBE_STUB_NODE_ENV:-staging}}"
   cluster_label="${{SUGARKUBE_STUB_CLUSTER:-sugar}}"
@@ -104,6 +110,11 @@ exit 0
         f"""#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >> {str(log_path)!r}
+printf 'helm %s\n' "$*" >> {str(tmp_path / "commands.log")!r}
+if [[ "$*" == "status dspace --namespace dspace -o json" ]]; then
+  printf '{{"version":7}}\n'
+  exit 0
+fi
 if [[ "$*" == *"get values"* ]]; then
   if [ "${{SUGARKUBE_STUB_HELM_GET_VALUES_FAIL:-}}" = "1" ]; then
     echo 'Error: Kubernetes cluster unreachable for context sugar-staging' >&2
@@ -113,6 +124,11 @@ if [[ "$*" == *"get values"* ]]; then
   exit 0
 fi
 if [[ "$*" == show\ chart* ]]; then
+  if [[ "$*" == *"charts/dspace"* ]]; then
+    version="${{*: -1}}"
+    printf 'apiVersion: v2\nname: dspace\nversion: %s\nappVersion: main-abcdef0\n' "$version"
+    exit 0
+  fi
   printf 'apiVersion: v2\nname: tokenplace\nversion: 0.1.3\nappVersion: main-deadbee\ndigest: sha256:abc123\n'
   exit 0
 fi
@@ -271,6 +287,39 @@ fi
 printf '%s' "${{status}}"
 exit "${{curl_exit}}"
 """,
+    )
+    _write_executable(
+        bin_dir / "oras",
+        f'''#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+
+image = "sha256:" + os.environ.get("SUGARKUBE_STUB_RESOLVED_IMAGE", "1" * 64)
+chart = "sha256:" + os.environ.get("SUGARKUBE_STUB_RESOLVED_CHART", "2" * 64)
+platform = "sha256:" + "3" * 64
+image_config = "sha256:" + "4" * 64
+chart_config = "sha256:" + "5" * 64
+sha = "abcdef0123456789abcdef0123456789abcdef01"
+args = sys.argv[1:]
+with Path({str(tmp_path / "commands.log")!r}).open("a", encoding="utf-8") as log:
+    log.write("oras " + " ".join(args) + "\\n")
+ref = args[-1]
+if "--descriptor" in args:
+    value = {{"digest": chart if "charts/dspace" in ref else image}}
+elif args[:2] == ["manifest", "fetch"] and ref.endswith("@" + image):
+    value = {{"manifests": [{{"digest": platform}}]}}
+elif args[:2] == ["manifest", "fetch"] and ref.endswith("@" + platform):
+    value = {{"config": {{"digest": image_config}}}}
+elif args[:2] == ["manifest", "fetch"] and ref.endswith("@" + chart):
+    value = {{"config": {{"digest": chart_config}}}}
+elif args[:2] == ["blob", "fetch"]:
+    value = {{"config": {{"Labels": {{"org.opencontainers.image.revision": sha}}}}}}
+else:
+    raise SystemExit("unexpected oras command: " + " ".join(args))
+print(json.dumps(value))
+''',
     )
 
     env = os.environ.copy()
@@ -1283,6 +1332,122 @@ def test_dspace_oci_deploy_wrapper_propagates_inline_chart_pin(
     assert result.returncode != 0
     assert "manifest=<approved-candidate.json> is required" in result.stderr
     assert not Path(env["HELM_LOG"]).exists()
+
+
+def _write_dspace_candidate(path: Path, environment: str, *, image_digest: str | None = None) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "app": "dspace",
+                "applicationVersion": "3.2.0",
+                "sourceRevision": "abcdef0123456789abcdef0123456789abcdef01",
+                "imageTag": "main-abcdef0",
+                "imageDigest": image_digest or "sha256:" + "1" * 64,
+                "chartVersion": "3.1.0" if environment == "staging" else "3.0.1",
+                "chartDigest": "sha256:" + "2" * 64,
+                "semanticTag": "v3.2.0",
+                "recordType": "candidate",
+                "environment": environment,
+                "expectedDefaultChatProvider": "token-place",
+                "approvedAt": "2026-07-26T12:00:00Z",
+                "approvedBy": "synthetic-test-approver",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_dspace_guarded_deploy_orders_preflight_mutation_and_finalization(
+    tmp_path: Path, generic_app_stub_env: dict[str, str]
+) -> None:
+    manifest = tmp_path / "candidate.json"
+    evidence = tmp_path / "evidence.json"
+    _write_dspace_candidate(manifest, "staging")
+
+    result = _run_just(
+        [
+            "app-deploy",
+            "dspace",
+            "staging",
+            "main-abcdef0",
+            "",
+            str(manifest),
+            str(evidence),
+        ],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    final = json.loads(evidence.read_text(encoding="utf-8"))
+    assert final["recordType"] == "final"
+    assert final["helmRevision"] == 7
+    commands = (tmp_path / "commands.log").read_text(encoding="utf-8").splitlines()
+    preflight = next(i for i, line in enumerate(commands) if line.startswith("oras "))
+    mutation = next(i for i, line in enumerate(commands) if line.startswith("helm upgrade "))
+    collection = next(i for i, line in enumerate(commands) if line.startswith("helm status dspace"))
+    pods = next(i for i, line in enumerate(commands) if "kubectl -n dspace get pods" in line)
+    assert preflight < mutation < collection < pods
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+@pytest.mark.parametrize(
+    ("env_override", "manifest_digest", "expected_check"),
+    [
+        ({"SUGARKUBE_STUB_RESOLVED_IMAGE": "9" * 64}, None, "imageDigest"),
+        ({"SUGARKUBE_STUB_RESOLVED_CHART": "9" * 64}, None, "chartDigest"),
+    ],
+)
+def test_dspace_digest_mismatch_stops_before_helm(
+    tmp_path: Path,
+    generic_app_stub_env: dict[str, str],
+    env_override: dict[str, str],
+    manifest_digest: str | None,
+    expected_check: str,
+) -> None:
+    manifest = tmp_path / "candidate.json"
+    _write_dspace_candidate(manifest, "staging", image_digest=manifest_digest)
+    env = generic_app_stub_env.copy()
+    env.update(env_override)
+
+    result = _run_just(
+        ["app-deploy", "dspace", "staging", "main-abcdef0", "", str(manifest)],
+        env,
+    )
+
+    assert result.returncode != 0
+    assert expected_check in result.stderr
+    helm_log = Path(env["HELM_LOG"])
+    assert not helm_log.exists() or "upgrade " not in helm_log.read_text(encoding="utf-8")
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_prod_subdomain_wrapper_preserves_canary_overlay_through_guarded_path(
+    tmp_path: Path, generic_app_stub_env: dict[str, str]
+) -> None:
+    manifest = tmp_path / "candidate.json"
+    evidence = tmp_path / "evidence.json"
+    _write_dspace_candidate(manifest, "prod")
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_NODE_ENV"] = "prod"
+
+    result = _run_just(
+        [
+            "dspace-oci-deploy-prod-subdomain",
+            "main-abcdef0",
+            str(manifest),
+            str(evidence),
+        ],
+        env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    helm_log = Path(env["HELM_LOG"]).read_text(encoding="utf-8")
+    assert "-f docs/examples/dspace.values.prod-subdomain.yaml" in helm_log
+    assert "-f docs/examples/dspace.values.prod.yaml" not in helm_log
+    assert evidence.exists()
 
 
 @pytest.mark.usefixtures("ensure_just_available")
