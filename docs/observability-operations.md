@@ -15,6 +15,13 @@ The staging blackbox exporter and Probe lifecycle is documented separately in
 [Staging blackbox monitoring](observability-blackbox.md). That guarded lifecycle
 exclusively owns its narrowly scoped staging Prometheus-to-exporter
 NetworkPolicy; it is not part of an active Flux or cluster Kustomize graph.
+That ingress-only policy selects the ClusterIP-only exporter pods and allows
+TCP 9115 solely from canonical Prometheus pods. The observed live baseline has
+no monitoring default-deny or `allow-monitoring-ingress` policy. An egress
+policy selecting Prometheus was therefore unsafe: creating it isolated all
+Prometheus egress, including DNS. The corrected policy never selects
+Prometheus at the top level, so Prometheus DNS and every other egress path stay
+unaffected. It does not introduce a namespace-wide default deny or DNS policy.
 
 The old Flux/Longhorn files under `platform/observability/*.yaml` and `clusters/*/patches/kube-prometheus-stack-values.yaml` are inactive, unvalidated future/legacy configuration. They are deliberately absent from the platform resources and cluster overlay patches, so Flux does not reconcile the manually managed release. They must not be applied to staging or production as currently written, and operators must not combine Flux and manual Helm lifecycle paths for the same `kube-prometheus-stack` release.
 
@@ -90,6 +97,12 @@ The mutating recipes never use `--reuse-values`; the committed version and both 
    just observability-verify env=staging
    ```
 
+The staging blackbox exporter release already exists. For the post-merge
+blackbox NetworkPolicy correction, use `observability-blackbox-render`, then
+`observability-blackbox-upgrade`, status, and verify; do not use the blackbox
+install recipe. Repository tests are offline/stubbed and perform no live
+cluster mutation, so their results are not rollout evidence.
+
 ## Runtime expectations
 
 - Helm release: `kube-prometheus-stack` in namespace `monitoring`.
@@ -123,6 +136,6 @@ Do not use `--reuse-values` for the next forward upgrade; commit the full intend
 
 ## Follow-ups intentionally out of scope
 
-Dashboards, useful Alertmanager receivers, NetworkPolicies, Grafana persistence,
-central multi-cluster Grafana, and production observability codification are
-separate follow-ups.
+Dashboards, useful Alertmanager receivers, namespace-wide default-deny
+policies, Grafana persistence, central multi-cluster Grafana, and production
+observability codification are separate follow-ups.

@@ -195,11 +195,11 @@ def test_lifecycle_network_policy_is_exact_and_chart_render_backed():
         and doc["metadata"]["name"] == "prometheus-blackbox-exporter"
     ]
     assert len(prometheus) == len(deployments) == 1
-    source = {
+    prometheus_selector = {
         "operator.prometheus.io/name": prometheus[0]["metadata"]["name"],
     }
     rendered_labels = deployments[0]["spec"]["template"]["metadata"]["labels"]
-    destination = {
+    exporter_selector = {
         key: rendered_labels[key]
         for key in ("app.kubernetes.io/instance", "app.kubernetes.io/name")
     }
@@ -211,11 +211,11 @@ def test_lifecycle_network_policy_is_exact_and_chart_render_backed():
             "namespace": "monitoring",
         },
         "spec": {
-            "podSelector": {"matchLabels": source},
-            "policyTypes": ["Egress"],
-            "egress": [
+            "podSelector": {"matchLabels": exporter_selector},
+            "policyTypes": ["Ingress"],
+            "ingress": [
                 {
-                    "to": [{"podSelector": {"matchLabels": destination}}],
+                    "from": [{"podSelector": {"matchLabels": prometheus_selector}}],
                     "ports": [{"protocol": "TCP", "port": 9115}],
                 }
             ],

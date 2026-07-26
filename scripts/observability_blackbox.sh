@@ -116,10 +116,13 @@ objects=[document for document in documents if document is not None]
 if len(objects) != 1 or not isinstance(objects[0],dict):
     raise SystemExit("ERROR: lifecycle policy render must contain exactly one non-null Kubernetes object.")
 policy=objects[0]
+spec=policy.get("spec",{})
+if "Egress" in spec.get("policyTypes",[]) or "egress" in spec or spec.get("podSelector") == {"matchLabels": selectors["source"]}:
+    raise SystemExit("ERROR: unsafe lifecycle NetworkPolicy must not select or isolate Prometheus egress.")
 expected = {
-    "podSelector": {"matchLabels": selectors["source"]},
-    "policyTypes": ["Egress"],
-    "egress": [{"to": [{"podSelector": {"matchLabels": selectors["destination"]}}], "ports": [{"protocol": "TCP", "port": 9115}]}],
+    "podSelector": {"matchLabels": selectors["destination"]},
+    "policyTypes": ["Ingress"],
+    "ingress": [{"from": [{"podSelector": {"matchLabels": selectors["source"]}}], "ports": [{"protocol": "TCP", "port": 9115}]}],
 }
 required={"apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy", "metadata": {"name": sys.argv[2], "namespace": sys.argv[3]}, "spec": expected}
 policy.get("metadata",{}).pop("creationTimestamp",None)
@@ -180,6 +183,9 @@ validate_policy_live() {
 import json, sys
 live=json.load(sys.stdin); expected=json.load(open(sys.argv[1]))
 live={"apiVersion":live.get("apiVersion"),"kind":live.get("kind"),"metadata":{"name":live.get("metadata",{}).get("name"),"namespace":live.get("metadata",{}).get("namespace")},"spec":live.get("spec")}
+spec=live.get("spec") or {}; prometheus=expected["spec"]["ingress"][0]["from"][0]["podSelector"]
+if "Egress" in spec.get("policyTypes",[]) or "egress" in spec or spec.get("podSelector") == prometheus:
+ raise SystemExit("ERROR: unsafe deployed NetworkPolicy selects or isolates Prometheus egress.")
 if live != expected:
  raise SystemExit("ERROR: deployed lifecycle NetworkPolicy differs from the required exact narrow policy.")
 ' "${EXPECTED_POLICY_JSON}" <<<"${policy}" || exit 7
