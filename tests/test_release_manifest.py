@@ -621,6 +621,155 @@ def test_post_reservation_failure_preserves_ownership(
     assert manifest.reservation_path(output).exists()
 
 
+def test_finalize_cli_collects_bound_evidence_before_consuming_reservation(
+    tmp_path: Path, monkeypatch
+) -> None:
+    source = tmp_path / "candidate.json"
+    output = tmp_path / "evidence.json"
+    source.write_text(manifest._canonical(candidate()), encoding="utf-8")
+    owner = manifest.reserve(output, candidate(), "staging", "dspace", "dspace")
+    sidecar = manifest.reservation_path(output)
+    oci_results = manifest.preflight(
+        candidate(), manifest.IMAGE_REF, manifest.CHART_REF, "oras", runner=oras_runner()
+    )
+    events = []
+
+    def preflight(*args, **kwargs):
+        events.append("oci-preflight")
+        assert args[1:] == (
+            manifest.IMAGE_REF,
+            manifest.CHART_REF,
+            "oras",
+            "staging",
+            "main-abcdef0",
+            "3.2.0",
+        )
+        return oci_results
+
+    def run(command):
+        if "cluster_identity.py" in " ".join(command):
+            events.append("cluster-identity")
+            return "staging\n"
+        if command[0] == "helm":
+            events.append("helm-status")
+            return json.dumps(helm_status())
+        resource = command[command.index("get") + 1]
+        if resource == "pods":
+            events.append("pod-discovery")
+            return json.dumps({"items": [pod("dspace-b"), pod("dspace-a")]})
+        assert resource == "replicasets,deployments"
+        events.append("workload-discovery")
+        return json.dumps(workloads())
+
+    write_new = manifest._write_new
+
+    def atomic_write(path, value):
+        events.append("atomic-final-write")
+        assert sidecar.exists()
+        write_new(path, value)
+        assert sidecar.exists()
+
+    monkeypatch.setattr(manifest, "preflight", preflight)
+    monkeypatch.setattr(manifest, "_run", run)
+    monkeypatch.setattr(manifest, "_write_new", atomic_write)
+
+    assert (
+        manifest.main(
+            [
+                "finalize",
+                "--manifest",
+                str(source),
+                "--output",
+                str(output),
+                "--environment",
+                "staging",
+                "--image-tag",
+                "main-abcdef0",
+                "--chart-version",
+                "3.2.0",
+                "--kubeconfig",
+                "kubeconfig",
+                "--release",
+                "dspace",
+                "--namespace",
+                "dspace",
+                "--reservation",
+                owner,
+            ]
+        )
+        == 0
+    )
+    assert events == [
+        "oci-preflight",
+        "cluster-identity",
+        "helm-status",
+        "pod-discovery",
+        "workload-discovery",
+        "atomic-final-write",
+    ]
+    final = manifest.validate(json.loads(output.read_text(encoding="utf-8")), True)
+    assert final["helmRevision"] == 17
+    assert [item["name"] for item in final["pods"]] == ["dspace-a", "dspace-b"]
+    assert not sidecar.exists()
+
+
+def test_public_read_only_and_reservation_dispatch(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    source = tmp_path / "candidate.json"
+    output = tmp_path / "evidence.json"
+    source.write_text(manifest._canonical(candidate()), encoding="utf-8")
+    oci_results = manifest.preflight(
+        candidate(), manifest.IMAGE_REF, manifest.CHART_REF, "oras", runner=oras_runner()
+    )
+    monkeypatch.setattr(manifest, "preflight", lambda *args, **kwargs: oci_results)
+
+    assert (
+        manifest.main(
+            [
+                "preflight",
+                "--manifest",
+                str(source),
+                "--environment",
+                "staging",
+                "--image-tag",
+                "main-abcdef0",
+                "--chart-version",
+                "3.2.0",
+            ]
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out) == oci_results
+
+    assert manifest.main(["evidence-path", "--manifest", str(source)]) == 0
+    assert capsys.readouterr().out.strip() == str(manifest.evidence_path(candidate()))
+
+    assert (
+        manifest.main(
+            [
+                "reserve",
+                "--manifest",
+                str(source),
+                "--output",
+                str(output),
+                "--environment",
+                "staging",
+                "--release",
+                "dspace",
+                "--namespace",
+                "dspace",
+            ]
+        )
+        == 0
+    )
+    owner = capsys.readouterr().out.strip()
+    assert owner
+    assert manifest.verify_reservation(
+        output, candidate(), "staging", "dspace", "dspace", owner
+    ) == manifest.reservation_path(output)
+
+
 def test_default_evidence_path_is_stable_and_approval_unique() -> None:
     assert str(manifest.evidence_path(candidate())) == (
         "deployment-evidence/dspace/staging/main-abcdef0-20260726T120000Z.json"
