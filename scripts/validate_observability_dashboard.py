@@ -71,6 +71,8 @@ def validate_dashboard(path: Path) -> str:
         if not matching or any("or on() vector(0)" not in expr for expr in matching):
             raise SystemExit(f"ERROR: event-driven metric {metric} must use a safe zero fallback.")
     serialized = json.dumps(dashboard)
+    if re.search(r"https?://", serialized, re.IGNORECASE):
+        raise SystemExit("ERROR: dashboard must not contain embedded raw URLs.")
     if re.search(r"\$\{?DS_|__inputs", serialized, re.IGNORECASE) or re.search(
         r"(?:\{|,)\s*target\s*(?:=|=~|!~|!=)|{{\s*target\s*}}", expression_text
     ):
@@ -103,14 +105,26 @@ def validate_render(path: Path, dashboard_json: str) -> None:
         raise SystemExit(
             "ERROR: custom dashboard is not in the intended Grafana provisioning ConfigMap."
         )
-    # Ensure validation is tied to the source passed to --set-file, not merely a
-    # coincidental title/UID in another chart dashboard.
-    source = json.loads(dashboard_json)
-    for metric in REQUIRED_METRICS:
-        if document.count(metric) != json.dumps(source).count(metric):
-            raise SystemExit(
-                "ERROR: rendered dashboard differs from the version-controlled source."
-            )
+    # Decode the ConfigMap block scalar and compare the complete JSON object, so
+    # changes to queries, labels, thresholds, or panel options cannot hide behind
+    # matching metric-name counts.
+    lines = document.splitlines()
+    key_index = next(i for i, line in enumerate(lines) if line.strip() == f"{key} |")
+    key_indent = len(lines[key_index]) - len(lines[key_index].lstrip())
+    payload = []
+    for line in lines[key_index + 1 :]:
+        indent = len(line) - len(line.lstrip())
+        if line.strip() and indent <= key_indent:
+            break
+        payload.append(line[key_indent + 2 :] if line.strip() else "")
+    try:
+        rendered_dashboard = json.loads("\n".join(payload))
+    except json.JSONDecodeError as error:
+        raise SystemExit("ERROR: rendered dashboard ConfigMap contains malformed JSON.") from error
+    if rendered_dashboard != json.loads(dashboard_json):
+        raise SystemExit(
+            "ERROR: rendered dashboard differs from the version-controlled source."
+        )
 
 
 def main() -> None:

@@ -160,8 +160,13 @@ Use Helm rollback to the prior known-good revision, then restore the prior compl
 helm -n monitoring history kube-prometheus-stack
 helm -n monitoring rollback kube-prometheus-stack <prior-revision> --wait --timeout 20m
 just observability-verify env=staging
+# Run this only when <prior-revision> already provisioned the dashboard.
 just observability-dashboard-verify env=staging
 ```
+
+If `<prior-revision>` predates the first dashboard-as-code rollout, a missing
+dashboard is the expected rollback state: omit `observability-dashboard-verify`
+and use the general `observability-verify` result as acceptance evidence.
 
 Do not use `--reuse-values` for the next forward upgrade; commit the full intended version and values chain first.
 

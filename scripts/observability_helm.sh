@@ -246,16 +246,19 @@ if len(claims) != 1 or claims[0].get("status", {}).get("phase") != "Bound" or cl
 
 dashboard_verify() {
   validate_dashboard
-  require_tools kubectl python3 curl base64
+  require_tools kubectl python3 curl base64 sleep
   print_resolved staging
   assert_context
-  local tmp_dir port_forward_pid="" response port=33000
-  tmp_dir="$(mktemp -d -t sugarkube-grafana-verify.XXXXXX)"
-  chmod 700 "${tmp_dir}"
+  local response port="" port_forward_log
+  DASHBOARD_VERIFY_OWNER="${BASHPID}"
+  DASHBOARD_VERIFY_PID=""
+  DASHBOARD_VERIFY_TMP="$(mktemp -d -t sugarkube-grafana-verify.XXXXXX)"
+  chmod 700 "${DASHBOARD_VERIFY_TMP}"
   cleanup_dashboard_verify() {
-    [[ -z "${port_forward_pid}" ]] || kill "${port_forward_pid}" 2>/dev/null || true
-    [[ -z "${port_forward_pid}" ]] || wait "${port_forward_pid}" 2>/dev/null || true
-    rm -rf "${tmp_dir}"
+    [[ "${BASHPID}" == "${DASHBOARD_VERIFY_OWNER}" ]] || return 0
+    [[ -z "${DASHBOARD_VERIFY_PID}" ]] || kill "${DASHBOARD_VERIFY_PID}" 2>/dev/null || true
+    [[ -z "${DASHBOARD_VERIFY_PID}" ]] || wait "${DASHBOARD_VERIFY_PID}" 2>/dev/null || true
+    rm -rf "${DASHBOARD_VERIFY_TMP}"
   }
   trap cleanup_dashboard_verify EXIT INT TERM
 
@@ -265,15 +268,31 @@ dashboard_verify() {
   grafana_user="$(kubectl -n "${NAMESPACE}" get secret grafana-admin-credentials -o jsonpath='{.data.admin-user}' | base64 --decode)"
   grafana_value="$(kubectl -n "${NAMESPACE}" get secret grafana-admin-credentials -o "jsonpath={.data.${admin_key}}" | base64 --decode)"
   [[ -n "${grafana_user}" && -n "${grafana_value}" ]] || { echo "ERROR: Grafana credentials Secret is incomplete (values redacted)." >&2; return 11; }
-  printf 'machine 127.0.0.1 login %s pass%s %s\n' "${grafana_user}" "word" "${grafana_value}" >"${tmp_dir}/netrc"
+  printf 'machine 127.0.0.1 login %s pass%s %s\n' "${grafana_user}" "word" "${grafana_value}" >"${DASHBOARD_VERIFY_TMP}/netrc"
   unset grafana_user grafana_value
-  chmod 600 "${tmp_dir}/netrc"
+  chmod 600 "${DASHBOARD_VERIFY_TMP}/netrc"
 
-  kubectl -n "${NAMESPACE}" port-forward "service/${RELEASE}-grafana" "${port}:80" >"${tmp_dir}/port-forward.log" 2>&1 &
-  port_forward_pid=$!
+  # Let kubectl atomically allocate and bind an ephemeral loopback port. This
+  # prevents an unrelated process on a predictable port from receiving the
+  # administrator credentials. Do not authenticate until this kubectl process
+  # has reported the listener it owns.
+  kubectl -n "${NAMESPACE}" port-forward --address 127.0.0.1 "service/${RELEASE}-grafana" :80 >"${DASHBOARD_VERIFY_TMP}/port-forward.log" 2>&1 &
+  DASHBOARD_VERIFY_PID=$!
   for _ in {1..20}; do
-    kill -0 "${port_forward_pid}" 2>/dev/null || { echo "ERROR: Grafana port-forward stopped (diagnostics redacted)." >&2; return 12; }
-    if response="$(curl --fail --silent --show-error --max-time 3 --netrc-file "${tmp_dir}/netrc" "http://127.0.0.1:${port}/api/dashboards/uid/sugarkube-staging-observability" 2>"${tmp_dir}/curl.log")"; then
+    kill -0 "${DASHBOARD_VERIFY_PID}" 2>/dev/null || { echo "ERROR: Grafana port-forward stopped (diagnostics redacted)." >&2; return 12; }
+    port_forward_log=""
+    [[ ! -f "${DASHBOARD_VERIFY_TMP}/port-forward.log" ]] || port_forward_log="$(<"${DASHBOARD_VERIFY_TMP}/port-forward.log")"
+    if [[ "${port_forward_log}" =~ Forwarding\ from\ 127\.0\.0\.1:([0-9]+)\ -\>\ 80 ]]; then
+      port="${BASH_REMATCH[1]}"
+      break
+    fi
+    sleep 1
+  done
+  [[ -n "${port}" ]] || { echo "ERROR: Grafana port-forward did not establish an owned loopback listener (diagnostics redacted)." >&2; return 12; }
+
+  for _ in {1..20}; do
+    kill -0 "${DASHBOARD_VERIFY_PID}" 2>/dev/null || { echo "ERROR: Grafana port-forward stopped (diagnostics redacted)." >&2; return 12; }
+    if response="$(curl --fail --silent --show-error --max-time 3 --netrc-file "${DASHBOARD_VERIFY_TMP}/netrc" "http://127.0.0.1:${port}/api/dashboards/uid/sugarkube-staging-observability" 2>"${DASHBOARD_VERIFY_TMP}/curl.log")"; then
       python3 -c 'import json, sys
 try:
     result = json.load(sys.stdin)

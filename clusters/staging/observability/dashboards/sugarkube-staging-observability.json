@@ -527,7 +527,9 @@
         {
           "refId": "A",
           "expr": "dspace_build_info{environment=~\"$environment\"}",
-          "legendFormat": "{{pod}} {{version}} {{revision}}"
+          "legendFormat": "{{pod}} {{version}} {{revision}}",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -685,7 +687,9 @@
         {
           "refId": "A",
           "expr": "probe_success{environment=~\"$environment\",app=~\"$app\",route=~\"$route\"}",
-          "legendFormat": "{{environment}} / {{app}} / {{route}}"
+          "legendFormat": "{{environment}} / {{app}} / {{route}}",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -789,7 +793,9 @@
         {
           "refId": "A",
           "expr": "probe_http_status_code{environment=~\"$environment\",app=~\"$app\",route=~\"$route\"}",
-          "legendFormat": "{{environment}} / {{app}} / {{route}}"
+          "legendFormat": "{{environment}} / {{app}} / {{route}}",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
