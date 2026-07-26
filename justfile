@@ -1606,7 +1606,7 @@ app-config app env='staging' config='':
       --config {{ quote(config) }}
 
 # Generic immutable-tag app deploy backed by docs/examples/apps/*.env or local app configs.
-app-deploy app env='staging' tag='' config='':
+app-deploy app env='staging' tag='' config='' manifest='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -1616,6 +1616,19 @@ app-deploy app env='staging' tag='' config='':
       --config {{ quote(config) }} \
       --tag {{ quote(tag) }} \
       --require-tag)"
+
+    if [ "${SUGARKUBE_APP}" = "dspace" ] && [ "${SUGARKUBE_ENV}" != "dev" ]; then
+      approved_manifest={{ quote(manifest) }}
+      : "${approved_manifest:=${SUGARKUBE_DSPACE_RELEASE_MANIFEST:-}}"
+      if [ -z "${approved_manifest}" ]; then
+        echo "ERROR: DSPACE ${SUGARKUBE_ENV} deployment requires manifest=<approved-candidate.json>." >&2
+        exit 1
+      fi
+      chart_version="${SUGARKUBE_VERSION:-}"
+      if [ -z "${chart_version}" ]; then chart_version="$(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' "${SUGARKUBE_VERSION_FILE}" | head -n1 | xargs)"; fi
+      python3 "{{ justfile_directory() }}/scripts/release_manifest.py" preflight "${approved_manifest}" \
+        --environment "${SUGARKUBE_ENV}" --image-tag "${SUGARKUBE_TAG}" --chart-version "${chart_version}"
+    fi
 
     export KUBECONFIG="${HOME}/.kube/config"
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${SUGARKUBE_ENV}"
@@ -1639,9 +1652,15 @@ app-deploy app env='staging' tag='' config='':
       version_file="${SUGARKUBE_VERSION_FILE:-}" \
       tag="${SUGARKUBE_TAG}" \
       env="${SUGARKUBE_ENV}"
+    if [ "${SUGARKUBE_APP}" = "dspace" ] && [ "${SUGARKUBE_ENV}" != "dev" ]; then
+      source_revision="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["sourceRevision"])' "${approved_manifest}")"
+      record="${SUGARKUBE_DSPACE_EVIDENCE_OUTPUT:-deployment-evidence/dspace/${SUGARKUBE_ENV}/${source_revision}.json}"
+      python3 "{{ justfile_directory() }}/scripts/release_manifest.py" collect "${approved_manifest}" --output "${record}" --namespace "${SUGARKUBE_NAMESPACE}" --release "${SUGARKUBE_RELEASE}"
+      echo "Finalized deployment evidence: ${record}"
+    fi
 
 # Generic upgrade-only app redeploy backed by app config files.
-app-redeploy app env='staging' tag='' config='':
+app-redeploy app env='staging' tag='' config='' manifest='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -1651,6 +1670,14 @@ app-redeploy app env='staging' tag='' config='':
       --config {{ quote(config) }} \
       --tag {{ quote(tag) }} \
       --require-tag)"
+
+    if [ "${SUGARKUBE_APP}" = "dspace" ] && [ "${SUGARKUBE_ENV}" != "dev" ]; then
+      approved_manifest={{ quote(manifest) }}
+      : "${approved_manifest:=${SUGARKUBE_DSPACE_RELEASE_MANIFEST:-}}"
+      if [ -z "${approved_manifest}" ]; then echo "ERROR: DSPACE ${SUGARKUBE_ENV} redeployment requires manifest=<approved-candidate.json>." >&2; exit 1; fi
+      chart_version="${SUGARKUBE_VERSION:-}"; if [ -z "${chart_version}" ]; then chart_version="$(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' "${SUGARKUBE_VERSION_FILE}" | head -n1 | xargs)"; fi
+      python3 "{{ justfile_directory() }}/scripts/release_manifest.py" preflight "${approved_manifest}" --environment "${SUGARKUBE_ENV}" --image-tag "${SUGARKUBE_TAG}" --chart-version "${chart_version}"
+    fi
 
     export KUBECONFIG="${HOME}/.kube/config"
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${SUGARKUBE_ENV}"
@@ -1676,7 +1703,7 @@ app-redeploy app env='staging' tag='' config='':
       env="${SUGARKUBE_ENV}"
 
 # Promote an app to prod with an explicit immutable tag, or the configured prod tag file.
-app-promote-prod app tag='' config='':
+app-promote-prod app tag='' config='' manifest='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -1687,6 +1714,8 @@ app-promote-prod app tag='' config='':
       --tag {{ quote(tag) }} \
       --prod-tag-fallback \
       --require-tag)"
+    promote_manifest={{ quote(manifest) }}
+    if [ -n "${promote_manifest}" ]; then export SUGARKUBE_DSPACE_RELEASE_MANIFEST="${promote_manifest}"; fi
     just --justfile "{{ justfile_directory() }}/justfile" app-deploy \
       app="${SUGARKUBE_APP}" \
       env=prod \
@@ -1816,7 +1845,7 @@ app-cors-verify app env='staging' config='' origin='https://cors-smoke.invalid' 
 #
 
 # Use this for steady-state release validation flows where explicit image pinning matters.
-dspace-oci-deploy env='staging' tag='':
+dspace-oci-deploy env='staging' tag='' manifest='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -1875,6 +1904,12 @@ dspace-oci-deploy env='staging' tag='':
     fi
     export SUGARKUBE_ENV="${env_name}"
     eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell --app dspace --env "${env_name}")"
+    if [ "${env_name}" != "dev" ]; then
+      approved_manifest={{ quote(manifest) }}; : "${approved_manifest:=${SUGARKUBE_DSPACE_RELEASE_MANIFEST:-}}"
+      if [ -z "${approved_manifest}" ]; then echo "ERROR: DSPACE ${env_name} deployment requires manifest=<approved-candidate.json>." >&2; exit 1; fi
+      chart_version="${SUGARKUBE_VERSION:-}"; if [ -z "${chart_version}" ]; then chart_version="$(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' "${SUGARKUBE_VERSION_FILE}" | head -n1 | xargs)"; fi
+      python3 "{{ justfile_directory() }}/scripts/release_manifest.py" preflight "${approved_manifest}" --environment "${env_name}" --image-tag "${deploy_tag}" --chart-version "${chart_version}"
+    fi
     just --justfile "{{ justfile_directory() }}/justfile" assert-cluster-env "${env_name}" "${KUBECONFIG}" >/dev/null
 
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
@@ -1885,6 +1920,12 @@ dspace-oci-deploy env='staging' tag='':
       version_file="${SUGARKUBE_VERSION_FILE:-}" \
       tag="${deploy_tag}" \
       env="${env_name}"
+    if [ "${env_name}" != "dev" ]; then
+      source_revision="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["sourceRevision"])' "${approved_manifest}")"
+      record="${SUGARKUBE_DSPACE_EVIDENCE_OUTPUT:-deployment-evidence/dspace/${env_name}/${source_revision}.json}"
+      python3 "{{ justfile_directory() }}/scripts/release_manifest.py" collect "${approved_manifest}" --output "${record}"
+      echo "Finalized deployment evidence: ${record}"
+    fi
 
     echo "Resolved deployment image(s):"
     kubectl -n dspace get deploy dspace \
@@ -1965,7 +2006,7 @@ dspace-oci-deploy-prod-subdomain tag='':
 # Promote dspace to production apex (democratized.space) using immutable tags.
 
 # If tag is omitted, this reads the pinned value from docs/apps/dspace.prod.tag.
-dspace-oci-promote-prod tag='':
+dspace-oci-promote-prod tag='' manifest='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -1975,6 +2016,8 @@ dspace-oci-promote-prod tag='':
       --tag {{ quote(tag) }} \
       --prod-tag-fallback \
       --require-tag)"
+    promote_manifest={{ quote(manifest) }}
+    if [ -n "${promote_manifest}" ]; then export SUGARKUBE_DSPACE_RELEASE_MANIFEST="${promote_manifest}"; fi
     just --justfile "{{ justfile_directory() }}/justfile" dspace-oci-deploy env=prod tag="${SUGARKUBE_TAG}"
 
 # Fast redeploy of dspace from GHCR (emergency mutable-tag refresh).

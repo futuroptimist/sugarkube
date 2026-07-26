@@ -2,6 +2,79 @@
 
 This is the canonical runbook for deploying DSPACE from GHCR artifacts to Sugarkube. The generic `just app-*` recipes are the preferred future path. The `dspace-oci-*` recipes remain compatibility shims and are scheduled for later removal only after the generic flow has been exercised across routine releases.
 
+## Approved release manifest and deployment evidence
+
+DSPACE staging and production mutations are fail closed: an operator must supply an approved
+Sugarkube candidate, and its immutable image tag, chart version, environment, digests, and source
+revision must pass an OCI-native preflight before Helm or Kubernetes can mutate the cluster.
+`semanticTag` is retained for human evidence only and is never passed to Helm. Other applications
+are not gated until they adopt an explicit compatible contract.
+
+1. Download the `dspace-release-manifest/dspace-release-manifest.json` artifact from the successful
+   upstream DSPACE release workflow. Keep the downloaded producer file unchanged.
+2. Generate, inspect, and validate a staging candidate. Use the existing DSPACE provider spelling
+   `openai`; approval timestamps are UTC RFC 3339 values and the approver must be attributable.
+
+   ```bash
+   python3 scripts/release_manifest.py candidate upstream.json \
+     --environment staging --provider openai \
+     --approved-at 2026-07-26T12:00:00Z --approved-by OPERATOR \
+     --output candidates/dspace-staging.json
+   python3 scripts/release_manifest.py validate candidates/dspace-staging.json
+   ```
+
+3. Deploy the exact candidate coordinates. Both generic and compatibility paths use the same
+   guard. `skopeo inspect` resolves the image-index digest and revision label, while `oras manifest
+   fetch --descriptor` resolves the chart OCI digest and revision annotation directly from GHCR.
+   This is the OCI-native fallback when the GitHub Packages REST API is unavailable; it needs no
+   ad hoc `read:packages` token for public artifacts.
+
+   ```bash
+   just app-deploy app=dspace env=staging tag=main-abcdef0 \
+     manifest=candidates/dspace-staging.json
+   # Compatibility equivalent:
+   just dspace-oci-deploy env=staging tag=main-abcdef0 \
+     manifest=candidates/dspace-staging.json
+   ```
+
+   After rollout waits succeed, the recipe reads Helm status and every running pod, proves each
+   resolved image ID equals the approved digest, and atomically creates
+   `deployment-evidence/dspace/staging/<full-source-sha>.json`. Existing records are never
+   overwritten. Runtime identity is recorded using
+   `oci-artifact-revision-and-all-pod-image-digests`: it means the exact OCI artifact's revision
+   metadata matched the approved full SHA and all pods resolved to its approved digest. It does
+   **not** claim an HTTP build-identity check.
+4. Inspect and preserve the finalized staging record. Add it to the reviewed promotion change or
+   attach it to the promotion record; the tool never commits automatically.
+
+   ```bash
+   python3 scripts/release_manifest.py validate --final \
+     deployment-evidence/dspace/staging/FULL_SOURCE_SHA.json
+   git add deployment-evidence/dspace/staging/FULL_SOURCE_SHA.json
+   ```
+
+5. Generate a new approved production candidate from the **same unchanged upstream manifest**,
+   changing only deployment environment and approval fields. Validate it, then promote:
+
+   ```bash
+   python3 scripts/release_manifest.py candidate upstream.json \
+     --environment prod --provider openai \
+     --approved-at 2026-07-26T13:00:00Z --approved-by OPERATOR \
+     --output candidates/dspace-prod.json
+   just app-promote-prod app=dspace tag=main-abcdef0 \
+     manifest=candidates/dspace-prod.json
+   python3 scripts/release_manifest.py validate --final \
+     deployment-evidence/dspace/prod/FULL_SOURCE_SHA.json
+   git add deployment-evidence/dspace/prod/FULL_SOURCE_SHA.json
+   ```
+
+To reconstruct a deployment during an incident, read its finalized JSON record and use
+`imageTag@imageDigest` plus chart `chartVersion@chartDigest`. Confirm the recorded full
+`sourceRevision`, pod image IDs, Helm revision, and approval; do not resolve `latest`, a branch,
+an environment tag, or the semantic evidence tag. Synthetic examples above are placeholders, not
+real approval evidence. Genuine staging and production records remain the operational follow-up
+tracked by issue #2326.
+
 ## Artifact model
 
 - App repository responsibilities: build `ghcr.io/democratizedspace/dspace`, publish immutable image tags, maintain the Helm chart, and publish immutable chart versions to `oci://ghcr.io/democratizedspace/charts/dspace`.

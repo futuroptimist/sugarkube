@@ -204,15 +204,21 @@ roll back a release. Use `just cluster-env-detect` to inspect the current
 read-only identity. `app-chart-bump` remains cluster-independent because it only
 validates a public OCI chart and edits the repository pin.
 
+DSPACE is additionally gated in `staging` and `prod` by its approved release manifest. Generic
+and retained `dspace-oci-*` mutation paths require `manifest=<approved-candidate.json>`, compare
+the requested coordinates and OCI source metadata before Helm, and atomically collect finalized
+Helm and pod evidence. Unrelated apps are not gated. See the
+[DSPACE operator flow](apps/dspace.md#approved-release-manifest-and-deployment-evidence).
+
 ```bash
 # Deploy or install a specific immutable candidate into an environment.
-just app-deploy app=dspace env=staging tag=main-REPLACE_SHORTSHA
+just app-deploy app=dspace env=staging tag=main-REPLACE_SHORTSHA manifest=candidates/dspace-staging.json
 
 # Redeploy an existing release with a specific immutable tag.
-just app-redeploy app=dspace env=staging tag=main-REPLACE_SHORTSHA
+just app-redeploy app=dspace env=staging tag=main-REPLACE_SHORTSHA manifest=candidates/dspace-staging.json
 
 # Promote an approved immutable tag to production.
-just app-promote-prod app=dspace tag=main-REPLACE_SHORTSHA
+just app-promote-prod app=dspace tag=main-REPLACE_SHORTSHA manifest=candidates/dspace-prod.json
 
 # Inspect and intentionally bump the chart pin.
 just app-chart-status app=dspace
