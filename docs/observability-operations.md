@@ -138,3 +138,59 @@ Do not use `--reuse-values` for the next forward upgrade; commit the full intend
 Dashboards, useful Alertmanager receivers, NetworkPolicies, Grafana persistence,
 central multi-cluster Grafana, and production observability codification are
 separate follow-ups.
+
+## Staging dashboard as code
+
+The standalone source is
+`clusters/staging/observability/dashboards/sugarkube-staging-observability.json`.
+Render, install, and upgrade pass that one file through the chart-native
+`grafana.dashboards.default` `--set-file` value. Grafana therefore provisions
+**Sugarkube Staging Observability**, stable UID
+`sugarkube-staging-observability`, with the chart-provisioned Prometheus
+ datasource UID `prometheus` whenever its persistence-free pod starts.
+
+The dashboard covers DSPACE availability, bounded route/status HTTP rates and
+latency, runtime/build identity, feature traffic, and bounded `environment`,
+`app`, and `route` blackbox health. A zero in dChat or token.place dependency
+activity means no relevant requests were observed; it is not an instrumentation
+failure. Visual inspection of layout, legends, units, thresholds, and useful
+variable defaults remains part of staging acceptance.
+
+The dashboard verifier checks the Grafana API, rather than merely a ConfigMap.
+It rejects a non-staging identity before reading state, stores credentials and
+responses only in a mode-600 temporary directory, passes authentication through
+a curl config rather than command arguments, redacts diagnostics, and cleans up
+the local port-forward and files on every exit.
+
+### Post-merge operator checklist
+
+```bash
+cd ~/sugarkube
+git status --short
+git pull --ff-only
+just kubeconfig-env env=staging
+
+just observability-render env=staging \
+  >/tmp/kube-prometheus-stack.dashboard.rendered.yaml
+
+just observability-upgrade env=staging
+just observability-verify env=staging
+just observability-dashboard-verify env=staging
+just observability-blackbox-verify env=staging
+
+# Restart the single Grafana pod, wait for rollout, and prove that the
+# Helm-provisioned dashboard reappears without manual UI changes.
+kubectl -n monitoring delete pod \
+  -l 'app.kubernetes.io/name=grafana,app.kubernetes.io/instance=kube-prometheus-stack'
+
+kubectl -n monitoring rollout status \
+  deployment/kube-prometheus-stack-grafana \
+  --timeout=20m
+
+just observability-dashboard-verify env=staging
+```
+
+Rollback uses the existing Helm history/rollback lifecycle documented above;
+restore the matching Git dashboard and complete values chain before the next
+forward upgrade. No Grafana persistence, Ingress, public access, production
+configuration, or Flux ownership is introduced.

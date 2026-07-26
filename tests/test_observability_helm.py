@@ -221,18 +221,20 @@ def run_helper(
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(parents=True)
     audit = tmp_path / "audit"
+    # fmt: off
     (bin_dir / "helm").write_text(
         """#!/bin/sh
 echo "helm $*" >> "$AUDIT"
 case "$*" in
   *"repo add"*|*"repo update"*) exit 0 ;;
-  *template*) [ "$HELM_MODE" != render-fail ] || exit 31; echo rendered; exit 0 ;;
+  *template*) [ "$HELM_MODE" != render-fail ] || exit 31; printf '%s\n' 'path: /var/lib/grafana/dashboards/default' '  "uid": "sugarkube-staging-observability"'; exit 0 ;;
   *list*) [ "$HELM_MODE" != query-fail ] || exit 32; [ "$HELM_MODE" = present ] && echo kube-prometheus-stack; exit 0 ;;
   *) exit 0 ;;
 esac
 """,
         encoding="utf-8",
     )
+    # fmt: on
     (bin_dir / "kubectl").write_text(
         """#!/bin/sh
 echo "kubectl $*" >> "$AUDIT"
