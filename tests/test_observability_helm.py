@@ -134,7 +134,7 @@ def test_unsupported_env_and_context_mismatch_fail_before_mutation():
 def test_status_and_verify_are_read_only():
     script = SCRIPT.read_text(encoding="utf-8")
     status = re.search(r"status\(\).*?\nverify\(", script, re.S).group(0)
-    verify = re.search(r"verify\(\).*?\n\ncmd=", script, re.S).group(0)
+    verify = re.search(r"verify\(\).*?\ndashboard_verify\(", script, re.S).group(0)
     mutating = [" helm install", " helm upgrade", "kubectl apply", "kubectl create", "kubectl patch", "kubectl delete"]
     for body in (status, verify):
         for token in mutating:
@@ -226,7 +226,19 @@ def run_helper(
 echo "helm $*" >> "$AUDIT"
 case "$*" in
   *"repo add"*|*"repo update"*) exit 0 ;;
-  *template*) [ "$HELM_MODE" != render-fail ] || exit 31; echo rendered; exit 0 ;;
+  *template*)
+    [ "$HELM_MODE" != render-fail ] || exit 31
+    cat <<'RENDERED'
+---
+kind: ConfigMap
+data:
+  sugarkube-staging-observability.json:
+    |-
+      {"uid": "sugarkube-staging-observability"}
+---
+mountPath: "/var/lib/grafana/dashboards/default/sugarkube-staging-observability.json"
+RENDERED
+    exit 0 ;;
   *list*) [ "$HELM_MODE" != query-fail ] || exit 32; [ "$HELM_MODE" = present ] && echo kube-prometheus-stack; exit 0 ;;
   *) exit 0 ;;
 esac

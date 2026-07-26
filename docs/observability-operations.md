@@ -9,6 +9,7 @@ Production observability is intentionally unsupported in this slice because no p
 - Chart version: `platform/observability/helm/kube-prometheus-stack.version` (`87.19.0`).
 - Common values: `platform/observability/helm/kube-prometheus-stack.values.common.yaml`.
 - Staging overrides: `clusters/staging/observability/kube-prometheus-stack.values.yaml`.
+- Staging dashboard: `clusters/staging/observability/dashboards/sugarkube-staging-observability.json`.
 - Helper: `scripts/observability_helm.sh` through `just observability-*` recipes.
 
 The staging blackbox exporter and Probe lifecycle is documented separately in
@@ -45,6 +46,7 @@ Never put example credentials or plaintext Secret data in commands, logs, docs, 
 just observability-render env=staging
 just observability-status env=staging
 just observability-verify env=staging
+just observability-dashboard-verify env=staging
 ```
 
 `env=int` is accepted only through the repository's deprecated alias normalization to `staging`. Missing, unknown, `prod`, and `production` fail before Helm or kubectl mutation with a message that production observability is not yet codified.
@@ -58,6 +60,11 @@ Each helper prints the resolved environment, current Kubernetes context, namespa
 - `just observability-upgrade env=staging` is for steady-state changes. It renders first, checks the staging context, and fails if the Helm release does not exist.
 
 The mutating recipes never use `--reuse-values`; the committed version and both values files are always supplied in order.
+All three chart paths (render, install, and upgrade) pass the same standalone
+dashboard JSON with Helm's chart-native `grafana.dashboards.default` file
+value. The pinned chart renders that value into the Grafana dashboard
+ConfigMap and mounts it below `/var/lib/grafana/dashboards/default`; therefore
+Grafana restores it even though persistence remains disabled.
 The existing staging blackbox exporter release is upgraded after this change
 with `just observability-blackbox-upgrade env=staging`; it is not reinstalled.
 Repository tests do not perform any live cluster mutation, and repository state
@@ -108,6 +115,11 @@ is not rollout evidence.
 - Prometheus: one replica, `7d` retention, `15GB` retention size, `local-path` `ReadWriteOnce` PVC requesting `20Gi`, CPU request `200m`, memory request `512Mi`, memory limit `2Gi`, admin API disabled, and external label `cluster=sugarkube-int`.
 - Alertmanager: one replica and no-op receiver named exactly `"null"`.
 - Grafana: persistence disabled, no Ingress, LAN-only NodePort `30300`.
+- Grafana automatically provisions **Sugarkube Staging Observability**, stable
+  UID `sugarkube-staging-observability`, from the committed staging JSON. Its
+  dChat and token.place panels display zero as "No requests observed" when
+  event-driven series have not appeared; that state is not an instrumentation
+  failure. The instrumentation status panel is the health signal.
 - Grafana URL: `http://sugarkube3.local:30300`; the same NodePort is available through the other staging nodes.
 - Prometheus, Alertmanager, and administrative services remain ClusterIP-only.
 - No public ingress, public DNS, Cloudflare route, router forwarding, or public observability endpoint is part of this lifecycle.
@@ -133,8 +145,53 @@ just observability-verify env=staging
 
 Do not use `--reuse-values` for the next forward upgrade; commit the full intended version and values chain first.
 
+## Dashboard rollout and acceptance
+
+After an upgrade, `just observability-dashboard-verify env=staging` retrieves
+Grafana credentials from `grafana-admin-credentials` into a mode-restricted
+temporary curl configuration, uses a local port-forward, and queries Grafana's
+dashboard-by-UID API. It prints neither credentials nor API response content,
+cleans up on every exit path, rejects a non-staging context, and performs no
+cluster mutation. API verification complements rather than replaces visual
+inspection: staging acceptance includes opening the LAN-only dashboard,
+checking variables, legends, units, thresholds, tables, and current data.
+
+Post-merge operators should run:
+
+```bash
+cd ~/sugarkube
+git status --short
+git pull --ff-only
+just kubeconfig-env env=staging
+
+just observability-render env=staging \
+  >/tmp/kube-prometheus-stack.dashboard.rendered.yaml
+
+just observability-upgrade env=staging
+just observability-verify env=staging
+just observability-dashboard-verify env=staging
+just observability-blackbox-verify env=staging
+
+# Restart the single Grafana pod, wait for rollout, and prove that the
+# Helm-provisioned dashboard reappears without manual UI changes.
+kubectl -n monitoring delete pod \
+  -l 'app.kubernetes.io/name=grafana,app.kubernetes.io/instance=kube-prometheus-stack'
+
+kubectl -n monitoring rollout status \
+  deployment/kube-prometheus-stack-grafana \
+  --timeout=20m
+
+just observability-dashboard-verify env=staging
+```
+
+The restart proof deliberately exercises ephemeral Grafana storage: successful
+API verification after rollout proves Helm provisioning restored the dashboard
+without a manual UI edit. To roll back, use the existing Helm rollback
+procedure above, run both observability verifiers, and visually inspect the
+dashboard associated with that revision.
+
 ## Follow-ups intentionally out of scope
 
-Dashboards, useful Alertmanager receivers, NetworkPolicies, Grafana persistence,
+Additional dashboards, useful Alertmanager receivers, NetworkPolicies, Grafana persistence,
 central multi-cluster Grafana, and production observability codification are
 separate follow-ups.
