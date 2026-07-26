@@ -526,7 +526,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "dspace_build_info{environment=~\"$environment\"}",
+          "expr": "max by (pod, version, revision) (dspace_build_info{environment=~\"$environment\"})",
           "legendFormat": "{{pod}} {{version}} {{revision}}",
           "instant": true,
           "range": false
@@ -546,7 +546,27 @@
         "tooltip": {
           "mode": "multi"
         }
-      }
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value": true
+            },
+            "indexByName": {
+              "pod": 0,
+              "version": 1,
+              "revision": 2
+            }
+          }
+        }
+      ]
     },
     {
       "id": 13,
@@ -686,7 +706,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "probe_success{environment=~\"$environment\",app=~\"$app\",route=~\"$route\"}",
+          "expr": "min by (environment, app, route) (probe_success{environment=~\"$environment\",app=~\"$app\",route=~\"$route\"})",
           "legendFormat": "{{environment}} / {{app}} / {{route}}",
           "instant": true,
           "range": false
@@ -754,7 +774,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "probe_duration_seconds{environment=~\"$environment\",app=~\"$app\",route=~\"$route\"}",
+          "expr": "max by (environment, app, route) (probe_duration_seconds{environment=~\"$environment\",app=~\"$app\",route=~\"$route\"})",
           "legendFormat": "{{environment}} / {{app}} / {{route}}"
         }
       ],
@@ -792,7 +812,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "probe_http_status_code{environment=~\"$environment\",app=~\"$app\",route=~\"$route\"}",
+          "expr": "max by (environment, app, route) (probe_http_status_code{environment=~\"$environment\",app=~\"$app\",route=~\"$route\"})",
           "legendFormat": "{{environment}} / {{app}} / {{route}}",
           "instant": true,
           "range": false
@@ -853,7 +873,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "(probe_ssl_earliest_cert_expiry{environment=~\"$environment\",app=~\"$app\",route=~\"$route\"} - time()) / 86400",
+          "expr": "(min by (environment, app, route) (probe_ssl_earliest_cert_expiry{environment=~\"$environment\",app=~\"$app\",route=~\"$route\"}) - time()) / 86400",
           "legendFormat": "{{environment}} / {{app}} / {{route}}"
         }
       ],

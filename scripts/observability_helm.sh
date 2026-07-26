@@ -244,55 +244,78 @@ if len(claims) != 1 or claims[0].get("status", {}).get("phase") != "Bound" or cl
   echo "Grafana LAN URL: ${GRAFANA_URL} (same NodePort is available through the other staging nodes)"
 }
 
-dashboard_verify() {
-  validate_dashboard
+dashboard_verify() (
   require_tools kubectl python3 curl base64 sleep
   print_resolved staging
   assert_context
-  local response port="" port_forward_log
-  DASHBOARD_VERIFY_OWNER="${BASHPID}"
-  DASHBOARD_VERIFY_PID=""
-  DASHBOARD_VERIFY_TMP="$(mktemp -d -t sugarkube-grafana-verify.XXXXXX)"
-  chmod 700 "${DASHBOARD_VERIFY_TMP}"
+  local response body http_status port="" line
+  local -a port_forward_lines=()
+  local verify_pid="" verify_tmp
+  verify_tmp="$(mktemp -d -t sugarkube-grafana-verify.XXXXXX)"
+  chmod 700 "${verify_tmp}"
   cleanup_dashboard_verify() {
-    [[ "${BASHPID}" == "${DASHBOARD_VERIFY_OWNER}" ]] || return 0
-    [[ -z "${DASHBOARD_VERIFY_PID}" ]] || kill "${DASHBOARD_VERIFY_PID}" 2>/dev/null || true
-    [[ -z "${DASHBOARD_VERIFY_PID}" ]] || wait "${DASHBOARD_VERIFY_PID}" 2>/dev/null || true
-    rm -rf "${DASHBOARD_VERIFY_TMP}"
+    if [[ -n "${verify_pid}" && " $(jobs -pr) " == *" ${verify_pid} "* ]]; then
+      kill "${verify_pid}" 2>/dev/null || true
+    fi
+    [[ -z "${verify_pid}" ]] || wait "${verify_pid}" 2>/dev/null || true
+    rm -rf "${verify_tmp}"
   }
-  trap cleanup_dashboard_verify EXIT INT TERM
+  port_forward_stopped() {
+    wait "${verify_pid}" 2>/dev/null || true
+    verify_pid=""
+    echo "ERROR: Grafana port-forward stopped (diagnostics redacted)." >&2
+    return 12
+  }
+  trap cleanup_dashboard_verify EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
 
   # Keep decoded credentials out of argv, stdout, diagnostics, and persistent files.
   umask 077
   local grafana_user grafana_value admin_key="admin-pass""word"
   grafana_user="$(kubectl -n "${NAMESPACE}" get secret grafana-admin-credentials -o jsonpath='{.data.admin-user}' | base64 --decode)"
   grafana_value="$(kubectl -n "${NAMESPACE}" get secret grafana-admin-credentials -o "jsonpath={.data.${admin_key}}" | base64 --decode)"
-  [[ -n "${grafana_user}" && -n "${grafana_value}" ]] || { echo "ERROR: Grafana credentials Secret is incomplete (values redacted)." >&2; return 11; }
-  printf 'machine 127.0.0.1 login %s pass%s %s\n' "${grafana_user}" "word" "${grafana_value}" >"${DASHBOARD_VERIFY_TMP}/netrc"
+  [[ -n "${grafana_user}" && -n "${grafana_value}" && "${grafana_user}" != *$'\n'* && "${grafana_value}" != *$'\n'* ]] || { echo "ERROR: Grafana credentials Secret is missing or malformed (values redacted)." >&2; return 11; }
+  grafana_user="${grafana_user//\\/\\\\}"; grafana_user="${grafana_user//\"/\\\"}"
+  grafana_value="${grafana_value//\\/\\\\}"; grafana_value="${grafana_value//\"/\\\"}"
+  printf 'machine 127.0.0.1 login "%s" pass%s "%s"\n' "${grafana_user}" "word" "${grafana_value}" >"${verify_tmp}/netrc"
   unset grafana_user grafana_value
-  chmod 600 "${DASHBOARD_VERIFY_TMP}/netrc"
+  chmod 600 "${verify_tmp}/netrc"
 
   # Let kubectl atomically allocate and bind an ephemeral loopback port. This
   # prevents an unrelated process on a predictable port from receiving the
   # administrator credentials. Do not authenticate until this kubectl process
   # has reported the listener it owns.
-  kubectl -n "${NAMESPACE}" port-forward --address 127.0.0.1 "service/${RELEASE}-grafana" :80 >"${DASHBOARD_VERIFY_TMP}/port-forward.log" 2>&1 &
-  DASHBOARD_VERIFY_PID=$!
+  # Do not let the asynchronous child inherit the parent's EXIT cleanup trap.
+  : >"${verify_tmp}/port-forward.log"
+  trap - EXIT
+  kubectl -n "${NAMESPACE}" port-forward --address=127.0.0.1 "service/${RELEASE}-grafana" :80 >"${verify_tmp}/port-forward.log" 2>&1 &
+  verify_pid=$!
+  trap cleanup_dashboard_verify EXIT
   for _ in {1..20}; do
-    kill -0 "${DASHBOARD_VERIFY_PID}" 2>/dev/null || { echo "ERROR: Grafana port-forward stopped (diagnostics redacted)." >&2; return 12; }
-    port_forward_log=""
-    [[ ! -f "${DASHBOARD_VERIFY_TMP}/port-forward.log" ]] || port_forward_log="$(<"${DASHBOARD_VERIFY_TMP}/port-forward.log")"
-    if [[ "${port_forward_log}" =~ Forwarding\ from\ 127\.0\.0\.1:([0-9]+)\ -\>\ 80 ]]; then
-      port="${BASH_REMATCH[1]}"
-      break
-    fi
+    kill -0 "${verify_pid}" 2>/dev/null || port_forward_stopped
+    mapfile -t port_forward_lines <"${verify_tmp}/port-forward.log"
+    for line in "${port_forward_lines[@]}"; do
+      if [[ "${line}" =~ ^Forwarding\ from\ 127\.0\.0\.1:([1-9][0-9]{0,4})\ -\>\ 80$ ]] && ((10#${BASH_REMATCH[1]} <= 65535)); then
+        port="${BASH_REMATCH[1]}"
+      fi
+    done
+    [[ -z "${port}" ]] || break
     sleep 1
   done
   [[ -n "${port}" ]] || { echo "ERROR: Grafana port-forward did not establish an owned loopback listener (diagnostics redacted)." >&2; return 12; }
+  kill -0 "${verify_pid}" 2>/dev/null || port_forward_stopped
 
   for _ in {1..20}; do
-    kill -0 "${DASHBOARD_VERIFY_PID}" 2>/dev/null || { echo "ERROR: Grafana port-forward stopped (diagnostics redacted)." >&2; return 12; }
-    if response="$(curl --fail --silent --show-error --max-time 3 --netrc-file "${DASHBOARD_VERIFY_TMP}/netrc" "http://127.0.0.1:${port}/api/dashboards/uid/sugarkube-staging-observability" 2>"${DASHBOARD_VERIFY_TMP}/curl.log")"; then
+    kill -0 "${verify_pid}" 2>/dev/null || port_forward_stopped
+    if response="$(curl --silent --show-error --max-time 3 --netrc-file "${verify_tmp}/netrc" --write-out $'\n%{http_code}' "http://127.0.0.1:${port}/api/dashboards/uid/sugarkube-staging-observability" 2>"${verify_tmp}/curl.log")"; then
+      http_status="${response##*$'\n'}"; body="${response%$'\n'*}"
+      case "${http_status}" in
+        401|403) echo "ERROR: Grafana authentication was rejected (credentials and response redacted)." >&2; return 14 ;;
+        200) ;;
+        000|404|429|500|502|503|504) sleep 1; continue ;;
+        *) echo "ERROR: Grafana dashboard API rejected the request (response redacted)." >&2; return 13 ;;
+      esac
       python3 -c 'import json, sys
 try:
     result = json.load(sys.stdin)
@@ -300,7 +323,7 @@ except (json.JSONDecodeError, UnicodeError):
     raise SystemExit("ERROR: Grafana dashboard API returned malformed JSON (response redacted).")
 dashboard = result.get("dashboard") if isinstance(result, dict) else None
 if not isinstance(dashboard, dict) or dashboard.get("uid") != "sugarkube-staging-observability" or dashboard.get("title") != "Sugarkube Staging Observability":
-    raise SystemExit("ERROR: Grafana did not return the expected provisioned dashboard (response redacted).")' <<<"${response}"
+    raise SystemExit("ERROR: Grafana did not return the expected provisioned dashboard (response redacted).")' <<<"${body}"
       echo "Grafana API confirmed dashboard UID sugarkube-staging-observability (credentials and response redacted)."
       return 0
     fi
@@ -308,8 +331,9 @@ if not isinstance(dashboard, dict) or dashboard.get("uid") != "sugarkube-staging
   done
   echo "ERROR: Grafana dashboard API was unavailable or rejected the request (diagnostics redacted)." >&2
   return 13
-}
+)
 
 cmd="${1:-}"; shift || true; [[ -n "${cmd}" ]] || { usage; exit 2; }
 env_arg="${1:-}"; normalize_env "${env_arg}" >/dev/null
+validate_dashboard
 case "${cmd}" in render) render ;; install) install_release ;; upgrade) upgrade_release ;; status) status ;; verify) verify ;; dashboard-verify) dashboard_verify ;; *) usage; exit 2 ;; esac

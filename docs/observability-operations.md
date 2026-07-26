@@ -147,9 +147,14 @@ is not rollout evidence.
 - **Dashboard API verification:** `just observability-dashboard-verify
   env=staging` checks the stable UID through Grafana's API. It validates context
   and cluster identity first, reads the existing Secret without printing it,
-  uses a mode-`0600` temporary netrc and local port-forward, and removes both on
-  every exit path. It performs no Helm or Kubernetes mutation and redacts API
-  response diagnostics. A ConfigMap check alone is not acceptance evidence.
+  uses a mode-`0600` temporary netrc, and asks this invocation's `kubectl` to
+  bind an ephemeral `127.0.0.1` port. Authentication begins only after that
+  child reports the exact owned forwarding endpoint. Success, failure, and
+  interruption all terminate and wait for the child and remove the netrc and
+  temporary directory. HTTP 401/403 responses fail immediately with redacted
+  diagnostics; only connection and readiness failures are retried. It performs
+  no Helm or Kubernetes mutation. A ConfigMap check alone is not acceptance
+  evidence.
 - **Failed workloads:** use `just observability-status env=staging`, `kubectl -n monitoring describe`, and pod logs to identify image pulls, scheduling, resources, or PVC failures.
 
 ## Rollback

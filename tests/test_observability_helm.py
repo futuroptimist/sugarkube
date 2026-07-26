@@ -9,6 +9,7 @@ VERSION = ROOT / "platform" / "observability" / "helm" / "kube-prometheus-stack.
 COMMON = ROOT / "platform" / "observability" / "helm" / "kube-prometheus-stack.values.common.yaml"
 STAGING = ROOT / "clusters" / "staging" / "observability" / "kube-prometheus-stack.values.yaml"
 SCRIPT = ROOT / "scripts" / "observability_helm.sh"
+DASHBOARD = ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
 JUSTFILE = ROOT / "justfile"
 FLUX_SYNC = ROOT / "flux" / "gotk-sync.yaml"
 LEGACY = [
@@ -183,6 +184,7 @@ def test_justfile_exposes_observability_recipes():
         "observability-upgrade",
         "observability-status",
         "observability-verify",
+        "observability-dashboard-verify",
     ):
         assert f"{recipe} env=''" in text
         assert f"scripts/observability_helm.sh {recipe.removeprefix('observability-')}" in text
@@ -248,6 +250,7 @@ case "$*" in
     [ "$HELM_MODE" != render-fail ] || exit 31
     printf '%s\n' 'apiVersion: v1' 'kind: ConfigMap' 'metadata:' '  name: kube-prometheus-stack-grafana-dashboards-sugarkube' '  labels:' '    dashboard-provider: sugarkube' 'data:' '  sugarkube-staging-observability.json: |'
     sed 's/^/    /' "$DASHBOARD"
+    printf '%s\n' '---' 'kind: ConfigMap' 'data:' '  dashboardproviders.yaml: |' '    providers:' '      - name: sugarkube' '        options:' '          path: /var/lib/grafana/dashboards/sugarkube' '---' 'kind: Deployment' 'spec:' '  template:' '    spec:' '      containers:' '        - volumeMounts:' '            - mountPath: /var/lib/grafana/dashboards/sugarkube'
     exit 0
     ;;
   *list*) [ "$HELM_MODE" != query-fail ] || exit 32; [ "$HELM_MODE" = present ] && echo kube-prometheus-stack; exit 0 ;;
@@ -608,3 +611,127 @@ def test_verify_deadline_uses_latest_safe_diagnostics_without_extra_request(tmp_
     assert result.returncode != 0 and audit.count(" --raw ") == 1
     assert '"pod": "dspace-safe"' in result.stderr and '"health": "down"' in result.stderr
     assert "activeTargets" not in result.stderr and "Traceback" not in result.stderr
+
+
+def run_dashboard_verifier(tmp_path, mode="success", context="sugar-staging"):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(parents=True)
+    audit = tmp_path / "audit"
+    pid_file = tmp_path / "port-forward.terminated"
+    (bin_dir / "kubectl").write_text(
+        """#!/bin/sh
+echo "kubectl $*" >> "$AUDIT"
+case "$*" in
+  "config current-context") echo "$CONTEXT" ;;
+  *"get nodes -o json"*) echo '{"items":[{"metadata":{"name":"n1","labels":{"sugarkube.env":"staging","sugarkube.cluster":"sugar-staging"}}}]}' ;;
+  *"get secret grafana-admin-credentials"*"admin-user"*)
+    [ "$MODE" != secret-missing ] || exit 41
+    [ "$MODE" != secret-malformed ] || { printf not-base64; exit; }
+    printf admin | base64 ;;
+  *"get secret grafana-admin-credentials"*"admin-pass""word"*) printf placeholder | base64 ;;
+  *"port-forward"*)
+    [ "$MODE" != forward-fail ] || exit 42
+    echo 'Forwarding from 127.0.0.1:43127 -> 80'
+    trap 'echo terminated > "$PID_FILE"; exit 0' TERM INT
+    if [ "$MODE" != success ]; then
+      /bin/sleep 0.2
+      echo terminated > "$PID_FILE"
+      exit 0
+    fi
+    while :; do /bin/sleep 1; done
+    ;;
+esac
+""",
+        encoding="utf-8",
+    )
+    (bin_dir / "curl").write_text(
+        """#!/bin/sh
+echo "curl $*" >> "$AUDIT"
+case "$*" in *"http://127.0.0.1:43127/"*) ;; *) exit 51 ;; esac
+[ -f "$TMPDIR"/sugarkube-grafana-verify.*/netrc ] || exit 52
+[ "$MODE" = success ] || /bin/sleep 0.3
+case "$MODE" in
+  auth401) printf '%s\n%s\n' '{"message":"redacted"}' 401 ;;
+  auth403) printf '%s\n%s\n' '{"message":"redacted"}' 403 ;;
+  malformed-api) printf '%s\n%s\n' '{' 200 ;;
+  wrong-api) printf '%s\n%s\n' '{"dashboard":{"uid":"wrong","title":"wrong"}}' 200 ;;
+  interrupt) exit 143 ;;
+  *) printf '%s\n%s\n' '{"dashboard":{"uid":"sugarkube-staging-observability","title":"Sugarkube Staging Observability"}}' 200 ;;
+esac
+""",
+        encoding="utf-8",
+    )
+    for stub in bin_dir.iterdir():
+        stub.chmod(0o755)
+    (bin_dir / "sleep").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    (bin_dir / "sleep").chmod(0o755)
+    env = os.environ | {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "AUDIT": str(audit),
+        "MODE": mode,
+        "CONTEXT": context,
+        "PID_FILE": str(pid_file),
+        "TMPDIR": str(tmp_path),
+        "KUBECONFIG": str(tmp_path / "kubeconfig"),
+    }
+    result = subprocess.run(
+        ["bash", str(SCRIPT), "dashboard-verify", "env=staging"],
+        env=env,
+        capture_output=True,
+        text=True,
+        start_new_session=True,
+    )
+    return result, audit.read_text() if audit.exists() else "", pid_file
+
+
+def test_dashboard_verifier_runtime_owns_port_and_cleans_up(tmp_path):
+    result, audit, pid_file = run_dashboard_verifier(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert "port-forward --address=127.0.0.1" in audit
+    assert "http://127.0.0.1:43127/" in audit
+    assert not list(tmp_path.glob("sugarkube-grafana-verify.*"))
+    assert pid_file.read_text(encoding="utf-8").strip() == "terminated"
+
+
+def test_dashboard_verifier_checks_context_before_secret_access(tmp_path):
+    result, audit, _ = run_dashboard_verifier(tmp_path, context="wrong-context")
+    assert result.returncode != 0
+    assert "get secret" not in audit
+
+
+def test_dashboard_verifier_rejects_missing_and_malformed_credentials(tmp_path):
+    for mode in ("secret-missing", "secret-malformed"):
+        result, audit, _ = run_dashboard_verifier(tmp_path / mode, mode)
+        assert result.returncode != 0
+        assert "port-forward" not in audit and "curl " not in audit
+        assert "placeholder" not in result.stdout + result.stderr
+
+
+def test_dashboard_verifier_port_forward_failure_never_authenticates(tmp_path):
+    failed, audit, _ = run_dashboard_verifier(tmp_path / "forward", "forward-fail")
+    assert failed.returncode != 0 and "curl " not in audit
+    assert not list((tmp_path / "forward").glob("sugarkube-grafana-verify.*"))
+
+
+def test_dashboard_verifier_auth_failures_are_immediate_and_redacted(tmp_path):
+    for mode in ("auth401", "auth403"):
+        result, audit, _ = run_dashboard_verifier(tmp_path / mode, mode)
+        assert result.returncode != 0 and audit.count("curl ") == 1
+        assert "redacted" in result.stderr and "placeholder" not in result.stdout + result.stderr
+        assert not list((tmp_path / mode).glob("sugarkube-grafana-verify.*"))
+
+
+def test_dashboard_verifier_rejects_incorrect_and_malformed_api_json(tmp_path):
+    for mode in ("wrong-api", "malformed-api"):
+        result, _, _ = run_dashboard_verifier(tmp_path / mode, mode)
+        assert result.returncode != 0
+        assert "response redacted" in result.stderr
+        assert not list((tmp_path / mode).glob("sugarkube-grafana-verify.*"))
+
+
+def test_dashboard_verifier_cleans_up_when_interrupted(tmp_path):
+    result, audit, _ = run_dashboard_verifier(tmp_path, "interrupt")
+    assert result.returncode != 0 and "curl " in audit
+    body = SCRIPT.read_text(encoding="utf-8").split("dashboard_verify()", 1)[1]
+    assert "trap 'exit 130' INT" in body and "trap 'exit 143' TERM" in body
+    assert not list(tmp_path.glob("sugarkube-grafana-verify.*"))

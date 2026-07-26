@@ -9,6 +9,7 @@ from pathlib import Path
 TITLE = "Sugarkube Staging Observability"
 UID = "sugarkube-staging-observability"
 DATASOURCE_UID = "prometheus"
+DASHBOARD_PATH = "/var/lib/grafana/dashboards/sugarkube"
 REQUIRED_METRICS = {
     "up",
     "dspace_instrumentation_up",
@@ -90,7 +91,10 @@ def validate_dashboard(path: Path) -> str:
 
 
 def validate_render(path: Path, dashboard_json: str) -> None:
-    rendered = path.read_text(encoding="utf-8")
+    try:
+        rendered = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        raise SystemExit(f"ERROR: rendered Helm output is missing or malformed: {error}") from error
     key = f"{UID}.json:"
     if rendered.count(key) != 1 or rendered.count(f'"uid": "{UID}"') != 1:
         raise SystemExit("ERROR: Helm render must contain exactly one custom dashboard copy.")
@@ -105,6 +109,19 @@ def validate_render(path: Path, dashboard_json: str) -> None:
         raise SystemExit(
             "ERROR: custom dashboard is not in the intended Grafana provisioning ConfigMap."
         )
+    provider_documents = [
+        doc
+        for doc in rendered.split("\n---")
+        if "dashboardproviders.yaml:" in doc and "name: sugarkube" in doc
+    ]
+    if len(provider_documents) != 1:
+        raise SystemExit("ERROR: Helm render must contain exactly one Sugarkube provider.")
+    provider_paths = re.findall(r"(?m)^[ \t]*path:[ \t]*(\S+)[ \t]*$", provider_documents[0])
+    if provider_paths != [DASHBOARD_PATH]:
+        raise SystemExit(f"ERROR: rendered dashboard provider path must be exactly {DASHBOARD_PATH}.")
+    mount_paths = re.findall(r"(?m)^[ \t]*-[ \t]+mountPath:[ \t]*(\S+)[ \t]*$", rendered)
+    if mount_paths.count(DASHBOARD_PATH) != 1:
+        raise SystemExit(f"ERROR: rendered dashboard mount must be exactly {DASHBOARD_PATH}.")
     # Decode the ConfigMap block scalar and compare the complete JSON object, so
     # changes to queries, labels, thresholds, or panel options cannot hide behind
     # matching metric-name counts.
