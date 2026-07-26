@@ -1,5 +1,14 @@
 # Sugarkube app deployment contract
 
+
+## DSPACE release-manifest exception
+
+DSPACE staging and production deployments have an additional fail-closed contract. They require
+an approved candidate passed as `manifest=<path>`; other applications are deliberately not gated
+until they publish a compatible manifest. Both the generic `app-deploy`/`app-promote-prod` path and
+the retained `dspace-oci-*` wrappers validate that candidate and perform the same read-only OCI
+preflight before Helm. See the [DSPACE release evidence flow](apps/dspace.md#release-manifest-and-deployment-evidence).
+
 Sugarkube now exposes a generic app deployment surface where each app is
 identified by a small local config file and deployed with shared `just` recipes.
 This page is the contract that app repositories and local operator configs should

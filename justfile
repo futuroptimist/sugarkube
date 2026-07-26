@@ -1606,7 +1606,7 @@ app-config app env='staging' config='':
       --config {{ quote(config) }}
 
 # Generic immutable-tag app deploy backed by docs/examples/apps/*.env or local app configs.
-app-deploy app env='staging' tag='' config='':
+app-deploy app env='staging' tag='' config='' manifest='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -1616,6 +1616,22 @@ app-deploy app env='staging' tag='' config='':
       --config {{ quote(config) }} \
       --tag {{ quote(tag) }} \
       --require-tag)"
+
+    manifest_path={{ quote(manifest) }}
+    while [ "${manifest_path#manifest=}" != "${manifest_path}" ]; do manifest_path="${manifest_path#manifest=}"; done
+    if [ "${SUGARKUBE_APP}" = dspace ]; then
+      if [ -z "${manifest_path}" ]; then echo "ERROR: DSPACE deployments require manifest=<approved-candidate.json>." >&2; exit 2; fi
+      python3 "{{ justfile_directory() }}/scripts/release_manifest.py" validate "${manifest_path}"
+      python3 - "${manifest_path}" "${SUGARKUBE_ENV}" "${SUGARKUBE_TAG}" "${SUGARKUBE_VERSION:-$(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' "${SUGARKUBE_VERSION_FILE}" | head -1)}" <<'PY'
+    import json, sys
+    m=json.load(open(sys.argv[1], encoding="utf-8"))
+    if (m["environment"], m["imageTag"], m["chartVersion"]) != tuple(sys.argv[2:5]):
+        raise SystemExit("ERROR: approved manifest coordinates do not match requested deployment")
+    PY
+      python3 "{{ justfile_directory() }}/scripts/release_manifest.py" preflight "${manifest_path}" \
+        --environment "${SUGARKUBE_ENV}" --image-tag "${SUGARKUBE_TAG}" \
+        --chart-version "${SUGARKUBE_VERSION:-$(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' "${SUGARKUBE_VERSION_FILE}" | head -1)}"
+    fi
 
     export KUBECONFIG="${HOME}/.kube/config"
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${SUGARKUBE_ENV}"
@@ -1639,6 +1655,12 @@ app-deploy app env='staging' tag='' config='':
       version_file="${SUGARKUBE_VERSION_FILE:-}" \
       tag="${SUGARKUBE_TAG}" \
       env="${SUGARKUBE_ENV}"
+    if [ "${SUGARKUBE_APP}" = dspace ]; then
+      evidence_dir="${SUGARKUBE_DEPLOYMENT_EVIDENCE_DIR:-deployment-evidence/dspace}"
+      output="${evidence_dir}/${SUGARKUBE_ENV}-${SUGARKUBE_TAG}.json"
+      python3 "{{ justfile_directory() }}/scripts/release_manifest.py" finalize "${manifest_path}" --output "${output}"
+      echo "Final deployment evidence: ${output}"
+    fi
 
 # Generic upgrade-only app redeploy backed by app config files.
 app-redeploy app env='staging' tag='' config='':
@@ -1676,7 +1698,7 @@ app-redeploy app env='staging' tag='' config='':
       env="${SUGARKUBE_ENV}"
 
 # Promote an app to prod with an explicit immutable tag, or the configured prod tag file.
-app-promote-prod app tag='' config='':
+app-promote-prod app tag='' config='' manifest='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -1691,7 +1713,8 @@ app-promote-prod app tag='' config='':
       app="${SUGARKUBE_APP}" \
       env=prod \
       tag="${SUGARKUBE_TAG}" \
-      config="${SUGARKUBE_CONFIG_PATH}"
+      config="${SUGARKUBE_CONFIG_PATH}" \
+      manifest={{ quote(manifest) }}
 
 # Show the pinned chart version and whether a newer semver chart appears published.
 app-chart-status app env='staging' config='':
@@ -1816,9 +1839,13 @@ app-cors-verify app env='staging' config='' origin='https://cors-smoke.invalid' 
 #
 
 # Use this for steady-state release validation flows where explicit image pinning matters.
-dspace-oci-deploy env='staging' tag='':
+dspace-oci-deploy env='staging' tag='' manifest='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
+
+    manifest_path={{ quote(manifest) }}
+    while [ "${manifest_path#manifest=}" != "${manifest_path}" ]; do manifest_path="${manifest_path#manifest=}"; done
+    if [ -z "${manifest_path}" ]; then echo "ERROR: DSPACE deployments require manifest=<approved-candidate.json>." >&2; exit 2; fi
 
     env_input={{ quote(env) }}
     env_name="${env_input}"
@@ -1875,6 +1902,10 @@ dspace-oci-deploy env='staging' tag='':
     fi
     export SUGARKUBE_ENV="${env_name}"
     eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell --app dspace --env "${env_name}")"
+    python3 "{{ justfile_directory() }}/scripts/release_manifest.py" validate "${manifest_path}"
+    python3 "{{ justfile_directory() }}/scripts/release_manifest.py" preflight "${manifest_path}" \
+      --environment "${env_name}" --image-tag "${deploy_tag}" \
+      --chart-version "${SUGARKUBE_VERSION:-$(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' "${SUGARKUBE_VERSION_FILE}" | head -1)}"
     just --justfile "{{ justfile_directory() }}/justfile" assert-cluster-env "${env_name}" "${KUBECONFIG}" >/dev/null
 
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
@@ -1885,6 +1916,9 @@ dspace-oci-deploy env='staging' tag='':
       version_file="${SUGARKUBE_VERSION_FILE:-}" \
       tag="${deploy_tag}" \
       env="${env_name}"
+
+    evidence_dir="${SUGARKUBE_DEPLOYMENT_EVIDENCE_DIR:-deployment-evidence/dspace}"
+    python3 "{{ justfile_directory() }}/scripts/release_manifest.py" finalize "${manifest_path}" --output "${evidence_dir}/${env_name}-${deploy_tag}.json"
 
     echo "Resolved deployment image(s):"
     kubectl -n dspace get deploy dspace \
@@ -1965,7 +1999,7 @@ dspace-oci-deploy-prod-subdomain tag='':
 # Promote dspace to production apex (democratized.space) using immutable tags.
 
 # If tag is omitted, this reads the pinned value from docs/apps/dspace.prod.tag.
-dspace-oci-promote-prod tag='':
+dspace-oci-promote-prod tag='' manifest='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -1975,7 +2009,7 @@ dspace-oci-promote-prod tag='':
       --tag {{ quote(tag) }} \
       --prod-tag-fallback \
       --require-tag)"
-    just --justfile "{{ justfile_directory() }}/justfile" dspace-oci-deploy env=prod tag="${SUGARKUBE_TAG}"
+    just --justfile "{{ justfile_directory() }}/justfile" dspace-oci-deploy env=prod tag="${SUGARKUBE_TAG}" manifest={{ quote(manifest) }}
 
 # Fast redeploy of dspace from GHCR (emergency mutable-tag refresh).
 dspace-oci-redeploy env='staging' tag='':

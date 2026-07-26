@@ -2,6 +2,88 @@
 
 This is the canonical runbook for deploying DSPACE from GHCR artifacts to Sugarkube. The generic `just app-*` recipes are the preferred future path. The `dspace-oci-*` recipes remain compatibility shims and are scheduled for later removal only after the generic flow has been exercised across routine releases.
 
+
+## Release manifest and deployment evidence
+
+DSPACE promotion enriches the upstream `dspace-release-manifest` artifact with approval and observed
+cluster evidence. A semantic tag remains evidence only. Helm receives the immutable branch-SHA
+`imageTag`, whose seven-character suffix must match the full `sourceRevision`.
+
+Download the artifact from the successful DSPACE release workflow, validate it, and create an
+explicitly approved staging candidate. Provider values use DSPACE's exact `openai` and
+`token-place` spellings. The tool never invents an approver or timestamp.
+
+```bash
+gh run download <run-id> --repo democratizedspace/dspace \
+  --name dspace-release-manifest --dir dspace-release-manifest
+python3 scripts/release_manifest.py import \
+  dspace-release-manifest/dspace-release-manifest.json
+python3 scripts/release_manifest.py candidate \
+  dspace-release-manifest/dspace-release-manifest.json \
+  --environment staging --expected-default-chat-provider token-place \
+  --approved-at 2026-07-26T12:00:00Z --approved-by '<reviewer identity>' \
+  --output staging-candidate.json
+python3 scripts/release_manifest.py validate staging-candidate.json
+```
+
+Inspect the canonical JSON before deploying. The guard compares its environment, image tag, and
+chart version with the command, then resolves both OCI descriptors and checks both
+`org.opencontainers.image.revision` annotations before Helm can mutate the cluster.
+
+```bash
+just app-deploy app=dspace env=staging tag=main-abcdef0 manifest=staging-candidate.json
+# Retained compatibility path, protected by the same guard:
+just dspace-oci-deploy env=staging tag=main-abcdef0 manifest=staging-candidate.json
+```
+
+After Helm succeeds, the recipe captures the Helm revision and every DSPACE pod's name, start time,
+and resolved image ID. It verifies every image ID against the approved index digest and atomically
+creates `deployment-evidence/dspace/staging-<imageTag>.json`; it refuses overwrite. Until DSPACE
+issue 4732 exposes direct runtime identity, `pod-image-id-and-oci-revision` is the only accepted
+method: all pod digests and that exact OCI artifact's revision annotation must agree with approval.
+This does **not** claim an HTTP runtime identity check.
+
+Create production approval from the same upstream JSON, without resolving any tag again:
+
+```bash
+python3 scripts/release_manifest.py candidate \
+  dspace-release-manifest/dspace-release-manifest.json \
+  --environment prod --expected-default-chat-provider token-place \
+  --approved-at 2026-07-26T14:00:00Z --approved-by '<reviewer identity>' \
+  --output prod-candidate.json
+python3 scripts/release_manifest.py validate prod-candidate.json
+just app-promote-prod app=dspace tag=main-abcdef0 manifest=prod-candidate.json
+# Or: just dspace-oci-promote-prod tag=main-abcdef0 manifest=prod-candidate.json
+```
+
+Preserve each finalized file by committing it on the promotion change (`git add
+deployment-evidence/dspace/<record>.json && git commit`) or attaching that exact file to the
+promotion record. Deployment does not auto-commit. Genuine staging and production evidence remains
+an operational action tracked by Sugarkube issue 2326.
+
+### OCI-native fallback without package API access
+
+No GitHub Packages REST access or ad hoc `read:packages` token is required. ORAS talks directly to
+the OCI registry and exposes the same descriptors and annotations used by preflight:
+
+```bash
+oras manifest fetch --descriptor ghcr.io/democratizedspace/dspace:main-abcdef0
+oras manifest fetch ghcr.io/democratizedspace/dspace:main-abcdef0
+oras manifest fetch --descriptor ghcr.io/democratizedspace/charts/dspace:3.2.1
+oras manifest fetch ghcr.io/democratizedspace/charts/dspace:3.2.1
+```
+
+Set `SUGARKUBE_RELEASE_MANIFEST_ORAS` when ORAS has a nonstandard executable path. Never put
+credentials in a manifest or command line; a normal OCI credential store can authenticate where
+registry policy requires it. The tool does not read, log, or write tokens.
+
+### Reconstructing without mutable tags
+
+The finalized record supplies the full source SHA, image tag and digest, independently versioned
+chart and digest, approval, Helm revision, and pod identities. Pull the image by recorded digest and
+fetch the chart manifest by recorded digest. Never consult `latest`, a semantic tag, a bare branch,
+or an environment tag during reconstruction.
+
 ## Artifact model
 
 - App repository responsibilities: build `ghcr.io/democratizedspace/dspace`, publish immutable image tags, maintain the Helm chart, and publish immutable chart versions to `oci://ghcr.io/democratizedspace/charts/dspace`.
