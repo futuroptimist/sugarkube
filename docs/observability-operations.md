@@ -15,6 +15,14 @@ The staging blackbox exporter and Probe lifecycle is documented separately in
 [Staging blackbox monitoring](observability-blackbox.md). That guarded lifecycle
 exclusively owns its narrowly scoped staging Prometheus-to-exporter
 NetworkPolicy; it is not part of an active Flux or cluster Kustomize graph.
+The observed live baseline had no monitoring default-deny or
+`allow-monitoring-ingress` policy. The blackbox policy therefore selects only
+the exporter and isolates only ingress to it, allowing the canonical Prometheus
+pods to reach TCP 9115. The former egress policy selected Prometheus and was
+unsafe because that selection isolated every Prometheus egress path, including
+DNS, while permitting only exporter traffic. The corrected policy leaves
+Prometheus DNS and all other egress unaffected. The exporter remains
+ClusterIP-only.
 
 The old Flux/Longhorn files under `platform/observability/*.yaml` and `clusters/*/patches/kube-prometheus-stack-values.yaml` are inactive, unvalidated future/legacy configuration. They are deliberately absent from the platform resources and cluster overlay patches, so Flux does not reconcile the manually managed release. They must not be applied to staging or production as currently written, and operators must not combine Flux and manual Helm lifecycle paths for the same `kube-prometheus-stack` release.
 
@@ -50,6 +58,10 @@ Each helper prints the resolved environment, current Kubernetes context, namespa
 - `just observability-upgrade env=staging` is for steady-state changes. It renders first, checks the staging context, and fails if the Helm release does not exist.
 
 The mutating recipes never use `--reuse-values`; the committed version and both values files are always supplied in order.
+The existing staging blackbox exporter release is upgraded after this change
+with `just observability-blackbox-upgrade env=staging`; it is not reinstalled.
+Repository tests do not perform any live cluster mutation, and repository state
+is not rollout evidence.
 
 ## Fresh install procedure
 
