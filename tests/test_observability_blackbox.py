@@ -165,20 +165,23 @@ elif "get networkpolicy allow-kube-prometheus-stack-to-blackbox-exporter -o json
     if scenario == "missing_policy": sys.exit(1)
     policy = json.load(open(os.environ["POLICY_JSON"]))
     spec = policy["spec"]
-    if scenario == "malformed_policy": spec["policyTypes"] = ["Ingress"]
-    elif scenario == "broad_source": spec["podSelector"] = {}
-    elif scenario == "broad_destination": spec["egress"][0]["to"][0]["podSelector"] = {}
-    elif scenario == "wrong_protocol": spec["egress"][0]["ports"][0]["protocol"] = "UDP"
-    elif scenario == "wrong_port": spec["egress"][0]["ports"][0]["port"] = 9116
-    elif scenario == "additional_protocol": spec["egress"][0]["ports"].append({"protocol": "UDP", "port": 9115})
-    elif scenario == "additional_port": spec["egress"][0]["ports"].append({"protocol": "TCP", "port": 9116})
-    elif scenario == "additional_source_selector": spec["podSelector"]["matchLabels"]["extra"] = "forbidden"
-    elif scenario == "additional_destination_selector": spec["egress"][0]["to"][0]["podSelector"]["matchLabels"]["extra"] = "forbidden"
-    elif scenario == "additional_peer": spec["egress"][0]["to"].append({"ipBlock": {"cidr": "0.0.0.0/0"}})
-    elif scenario == "additional_rule": spec["egress"].append({"to": [{"podSelector": {}}]})
-    elif scenario == "namespace_selector": spec["egress"][0]["to"][0]["namespaceSelector"] = {}
-    elif scenario == "ingress_spec": spec["ingress"] = []
-    elif scenario == "additional_policy_type": spec["policyTypes"].append("Ingress")
+    if scenario == "old_egress_policy":
+        spec = {"podSelector": {"matchLabels": {"operator.prometheus.io/name": "kube-prometheus-stack-prometheus"}}, "policyTypes": ["Egress"], "egress": [{"to": [{"podSelector": {"matchLabels": {"app.kubernetes.io/instance": "prometheus-blackbox-exporter", "app.kubernetes.io/name": "prometheus-blackbox-exporter"}}}], "ports": [{"protocol": "TCP", "port": 9115}]}]}
+        policy["spec"] = spec
+    elif scenario == "malformed_policy": spec["policyTypes"] = ["Egress"]
+    elif scenario == "broad_source": spec["ingress"][0]["from"][0]["podSelector"] = {}
+    elif scenario == "broad_destination": spec["podSelector"] = {}
+    elif scenario == "wrong_protocol": spec["ingress"][0]["ports"][0]["protocol"] = "UDP"
+    elif scenario == "wrong_port": spec["ingress"][0]["ports"][0]["port"] = 9116
+    elif scenario == "additional_protocol": spec["ingress"][0]["ports"].append({"protocol": "UDP", "port": 9115})
+    elif scenario == "additional_port": spec["ingress"][0]["ports"].append({"protocol": "TCP", "port": 9116})
+    elif scenario == "additional_source_selector": spec["ingress"][0]["from"][0]["podSelector"]["matchLabels"]["extra"] = "forbidden"
+    elif scenario == "additional_destination_selector": spec["podSelector"]["matchLabels"]["extra"] = "forbidden"
+    elif scenario == "additional_peer": spec["ingress"][0]["from"].append({"ipBlock": {"cidr": "0.0.0.0/0"}})
+    elif scenario == "additional_rule": spec["ingress"].append({"from": [{"podSelector": {}}]})
+    elif scenario == "namespace_selector": spec["ingress"][0]["from"][0]["namespaceSelector"] = {}
+    elif scenario == "egress_spec": spec["egress"] = []
+    elif scenario == "additional_policy_type": spec["policyTypes"].append("Egress")
     print(json.dumps(policy))
 elif "get probe -l" in joined and "-o json" in joined:
     print(open(os.environ["PROBES_JSON"]).read())
@@ -348,6 +351,67 @@ def test_rendered_selector_drift_fails_before_cluster_access(scenario, failure):
     assert not mutations(scenario.log)
 
 
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "old_egress",
+        "empty_exporter_selector",
+        "extra_exporter_label",
+        "empty_prometheus_selector",
+        "extra_prometheus_label",
+        "extra_peer",
+        "extra_rule",
+        "extra_port",
+        "extra_protocol",
+        "ip_block",
+        "namespace_selector",
+    ],
+)
+def test_unsafe_lifecycle_policy_fails_before_cluster_access(scenario, mutation, tmp_path):
+    policy = json.loads(Path(scenario.env["POLICY_JSON"]).read_text())
+    spec = policy["spec"]
+    peer = spec["ingress"][0]["from"][0]
+    if mutation == "old_egress":
+        spec.clear()
+        spec.update(
+            {
+                "podSelector": {
+                    "matchLabels": {
+                        "operator.prometheus.io/name": "kube-prometheus-stack-prometheus"
+                    }
+                },
+                "policyTypes": ["Egress"],
+                "egress": [],
+            }
+        )
+    elif mutation == "empty_exporter_selector":
+        spec["podSelector"] = {}
+    elif mutation == "extra_exporter_label":
+        spec["podSelector"]["matchLabels"]["extra"] = "forbidden"
+    elif mutation == "empty_prometheus_selector":
+        peer["podSelector"] = {}
+    elif mutation == "extra_prometheus_label":
+        peer["podSelector"]["matchLabels"]["extra"] = "forbidden"
+    elif mutation == "extra_peer":
+        spec["ingress"][0]["from"].append({"podSelector": {}})
+    elif mutation == "extra_rule":
+        spec["ingress"].append({"from": [{"podSelector": {}}]})
+    elif mutation == "extra_port":
+        spec["ingress"][0]["ports"].append({"protocol": "TCP", "port": 9116})
+    elif mutation == "extra_protocol":
+        spec["ingress"][0]["ports"].append({"protocol": "UDP", "port": 9115})
+    elif mutation == "ip_block":
+        peer["ipBlock"] = {"cidr": "0.0.0.0/0"}
+    elif mutation == "namespace_selector":
+        peer["namespaceSelector"] = {}
+    unsafe = tmp_path / "unsafe-policy.yaml"
+    unsafe.write_text(json.dumps(policy))
+    result = scenario.run("upgrade", POLICY=unsafe)
+    assert result.returncode != 0
+    assert not any("config current-context" in line for line in scenario.log)
+    assert not mutations(scenario.log)
+
+
 def test_render_stdout_is_a_clean_separated_kubernetes_stream(scenario):
     result = scenario.run("render")
     assert result.returncode == 0
@@ -441,6 +505,7 @@ def test_failed_policy_apply_suppresses_probe_mutation(scenario):
     "failure",
     [
         "missing_policy",
+        "old_egress_policy",
         "malformed_policy",
         "broad_source",
         "broad_destination",
@@ -453,7 +518,7 @@ def test_failed_policy_apply_suppresses_probe_mutation(scenario):
         "additional_peer",
         "additional_rule",
         "namespace_selector",
-        "ingress_spec",
+        "egress_spec",
         "additional_policy_type",
     ],
 )

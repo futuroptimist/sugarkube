@@ -14,7 +14,19 @@ Production observability is intentionally unsupported in this slice because no p
 The staging blackbox exporter and Probe lifecycle is documented separately in
 [Staging blackbox monitoring](observability-blackbox.md). That guarded lifecycle
 exclusively owns its narrowly scoped staging Prometheus-to-exporter
-NetworkPolicy; it is not part of an active Flux or cluster Kustomize graph.
+NetworkPolicy; it is not part of an active Flux or cluster Kustomize graph. The
+policy selects only exporter pods and permits ingress only from the canonical
+Prometheus pods on TCP 9115. It does not assume a monitoring default-deny
+baseline, select Prometheus, or alter Prometheus DNS or other egress. The
+exporter remains ClusterIP-only.
+
+The replaced egress form selected Prometheus and, on the observed live baseline
+without monitoring default-deny/allow policies, isolated all Prometheus egress.
+That broke DNS and all 16 blackbox targets and risked unrelated scrape paths.
+The corrected exporter-ingress policy avoids that outage mode. The current
+staging exporter release already exists, so its post-merge rollout uses
+`just observability-blackbox-upgrade env=staging`, never install. Repository
+tests perform no live mutation and are not evidence of rollout state.
 
 The old Flux/Longhorn files under `platform/observability/*.yaml` and `clusters/*/patches/kube-prometheus-stack-values.yaml` are inactive, unvalidated future/legacy configuration. They are deliberately absent from the platform resources and cluster overlay patches, so Flux does not reconcile the manually managed release. They must not be applied to staging or production as currently written, and operators must not combine Flux and manual Helm lifecycle paths for the same `kube-prometheus-stack` release.
 
