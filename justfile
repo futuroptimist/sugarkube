@@ -1665,6 +1665,8 @@ app-deploy app env='staging' tag='' config='' manifest='' evidence='':
     if [ "${SUGARKUBE_APP}" = dspace ] && { [ "${SUGARKUBE_ENV}" = staging ] || [ "${SUGARKUBE_ENV}" = prod ]; }; then
       python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" finalize \
         --manifest "${release_manifest}" --output "${evidence_output}" \
+        --environment "${SUGARKUBE_ENV}" --image-tag "${SUGARKUBE_TAG}" \
+        --chart-version "${chart_version}" --kubeconfig "${KUBECONFIG}" \
         --release "${SUGARKUBE_RELEASE}" --namespace "${SUGARKUBE_NAMESPACE}" \
         --chart-ref "${SUGARKUBE_CHART}"
     fi
@@ -1718,7 +1720,9 @@ app-redeploy app env='staging' tag='' config='' manifest='' evidence='':
       tag="${SUGARKUBE_TAG}" \
       env="${SUGARKUBE_ENV}"
     if [ "${SUGARKUBE_APP}" = dspace ] && { [ "${SUGARKUBE_ENV}" = staging ] || [ "${SUGARKUBE_ENV}" = prod ]; }; then
-      python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" finalize --manifest "${release_manifest}" --output "${evidence_output}" --release "${SUGARKUBE_RELEASE}" --namespace "${SUGARKUBE_NAMESPACE}" \
+      python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" finalize --manifest "${release_manifest}" --output "${evidence_output}" \
+        --environment "${SUGARKUBE_ENV}" --image-tag "${SUGARKUBE_TAG}" --chart-version "${chart_version}" --kubeconfig "${KUBECONFIG}" \
+        --release "${SUGARKUBE_RELEASE}" --namespace "${SUGARKUBE_NAMESPACE}" \
         --chart-ref "${SUGARKUBE_CHART}"
     fi
 

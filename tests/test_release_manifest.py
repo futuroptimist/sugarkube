@@ -206,39 +206,176 @@ def test_preflight_rejects_noncanonical_deployed_chart() -> None:
 
 def pod(name: str, digest: str = DIGEST) -> dict[str, object]:
     return {
-        "metadata": {"name": name},
+        "metadata": {
+            "name": name,
+            "uid": f"{name}-uid",
+            "labels": {
+                "app.kubernetes.io/name": "dspace",
+                "app.kubernetes.io/instance": "dspace",
+            },
+            "ownerReferences": [
+                {"kind": "ReplicaSet", "name": "dspace-rs", "uid": "rs-uid", "controller": True}
+            ],
+        },
+        "spec": {"containers": [{"name": "dspace", "image": f"{manifest.IMAGE_REF}:main-abcdef0"}]},
         "status": {
+            "phase": "Running",
             "startTime": "2026-07-26T12:01:00Z",
-            "containerStatuses": [{"imageID": "ghcr.io/democratizedspace/dspace@" + digest}],
+            "conditions": [{"type": "Ready", "status": "True"}],
+            "containerStatuses": [
+                {
+                    "name": "dspace",
+                    "imageID": "ghcr.io/democratizedspace/dspace@" + digest,
+                    "state": {"running": {"startedAt": "2026-07-26T12:01:00Z"}},
+                }
+            ],
         },
     }
 
 
-def test_finalize_collects_sorted_multi_pod_identity() -> None:
-    final = manifest.finalize(
-        candidate(),
-        {"version": 17},
-        {"items": [pod("dspace-b"), pod("dspace-a")]},
-        manifest.preflight(
+def helm_status(**changes) -> dict[str, object]:
+    value = {
+        "name": "dspace",
+        "namespace": "dspace",
+        "version": 17,
+        "info": {"status": "deployed"},
+        "chart": {"metadata": {"name": "dspace", "version": "3.2.0"}},
+    }
+    value.update(changes)
+    return value
+
+
+def workloads() -> dict[str, object]:
+    labels = {
+        "app.kubernetes.io/name": "dspace",
+        "app.kubernetes.io/instance": "dspace",
+    }
+    helm_labels = {**labels, "app.kubernetes.io/managed-by": "Helm"}
+    return {
+        "items": [
+            {
+                "kind": "ReplicaSet",
+                "metadata": {
+                    "name": "dspace-rs",
+                    "uid": "rs-uid",
+                    "labels": labels,
+                    "ownerReferences": [
+                        {
+                            "kind": "Deployment",
+                            "name": "dspace",
+                            "uid": "deploy-uid",
+                            "controller": True,
+                        }
+                    ],
+                },
+            },
+            {
+                "kind": "Deployment",
+                "metadata": {
+                    "name": "dspace",
+                    "uid": "deploy-uid",
+                    "labels": helm_labels,
+                    "annotations": {
+                        "meta.helm.sh/release-name": "dspace",
+                        "meta.helm.sh/release-namespace": "dspace",
+                    },
+                },
+            },
+        ]
+    }
+
+
+def finalize(**changes):
+    arguments = {
+        "value": candidate(),
+        "helm_json": helm_status(),
+        "pods_json": {"items": [pod("dspace-b"), pod("dspace-a")]},
+        "workloads_json": workloads(),
+        "preflight_results": manifest.preflight(
             candidate(), manifest.IMAGE_REF, manifest.CHART_REF, "oras", runner=oras_runner()
         ),
-    )
+        "environment": "staging",
+        "image_tag": "main-abcdef0",
+        "chart_version": "3.2.0",
+        "release": "dspace",
+        "namespace": "dspace",
+        "cluster_environment": "staging",
+    }
+    arguments.update(changes)
+    return manifest.finalize(**arguments)
+
+
+def test_finalize_collects_sorted_multi_pod_identity() -> None:
+    final = finalize()
     assert final["helmRevision"] == 17
     assert [item["name"] for item in final["pods"]] == ["dspace-a", "dspace-b"]
     assert final["runtimeSourceRevision"] == SHA
     assert final["runtimeSourceRevisionMethod"] == "podImageID+ociRevisionAnnotation"
+    assert {item["check"] for item in final["verificationResults"]} >= {
+        "selectedCoordinates",
+        "clusterEnvironment",
+        "helmRelease",
+        "installedChart",
+        "releaseOwnershipAndReadiness",
+        "podImageCoordinates",
+        "podImageDigests",
+    }
 
 
 def test_finalize_rejects_pod_image_mismatch() -> None:
     with pytest.raises(manifest.ManifestError, match="does not match"):
-        manifest.finalize(
-            candidate(),
-            {"version": 1},
-            {"items": [pod("dspace-a", "sha256:" + "9" * 64)]},
-            manifest.preflight(
-                candidate(), manifest.IMAGE_REF, manifest.CHART_REF, "oras", runner=oras_runner()
-            ),
-        )
+        finalize(pods_json={"items": [pod("dspace-a", "sha256:" + "9" * 64)]})
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"environment": "prod"}, "selected environment"),
+        ({"image_tag": "main-deadbee"}, "selected imageTag"),
+        ({"chart_version": "3.2.1"}, "selected chartVersion"),
+        ({"cluster_environment": "prod"}, "cluster environment"),
+        ({"helm_json": helm_status(name="other")}, "release and namespace"),
+        ({"helm_json": helm_status(info={"status": "failed"})}, "must be deployed"),
+        (
+            {"helm_json": helm_status(chart={"metadata": {"name": "other", "version": "3.2.0"}})},
+            "chart identity",
+        ),
+        ({"helm_json": helm_status(chart={})}, "chart identity"),
+    ],
+)
+def test_finalize_rejects_unbound_coordinates_and_helm_state(changes, message) -> None:
+    with pytest.raises(manifest.ManifestError, match=message):
+        finalize(**changes)
+
+
+@pytest.mark.parametrize(
+    "failure", ["wrong-instance", "owner", "terminating", "phase", "ready", "image", "container"]
+)
+def test_finalize_rejects_unowned_or_non_serving_pods(failure: str) -> None:
+    item = pod("dspace-a")
+    if failure == "wrong-instance":
+        item["metadata"]["labels"]["app.kubernetes.io/instance"] = "other"
+    elif failure == "owner":
+        item["metadata"]["ownerReferences"][0]["uid"] = "wrong"
+    elif failure == "terminating":
+        item["metadata"]["deletionTimestamp"] = "2026-07-26T12:02:00Z"
+    elif failure == "phase":
+        item["status"]["phase"] = "Pending"
+    elif failure == "ready":
+        item["status"]["conditions"][0]["status"] = "False"
+    elif failure == "image":
+        item["spec"]["containers"][0]["image"] = f"{manifest.IMAGE_REF}:main-deadbee"
+    else:
+        item["status"]["containerStatuses"][0]["state"] = {"waiting": {}}
+    with pytest.raises(manifest.ManifestError):
+        finalize(pods_json={"items": [item]})
+
+
+def test_finalize_rejects_workload_not_owned_by_helm() -> None:
+    discovered = workloads()
+    discovered["items"][1]["metadata"]["annotations"]["meta.helm.sh/release-name"] = "other"
+    with pytest.raises(manifest.ManifestError, match="not owned"):
+        finalize(workloads_json=discovered)
 
 
 def test_atomic_write_refuses_overwrite_and_leaves_no_temporary_file(
@@ -261,7 +398,7 @@ def test_record_excludes_tokens_and_secrets() -> None:
 
 def test_finalize_requires_preflight_results() -> None:
     with pytest.raises(manifest.ManifestError, match="fresh OCI preflight"):
-        manifest.finalize(candidate(), {"version": 1}, {"items": [pod("dspace-a")]}, [])
+        finalize(preflight_results=[])
 
 
 def test_check_output_rejects_collision_before_deployment(tmp_path: Path, capsys) -> None:

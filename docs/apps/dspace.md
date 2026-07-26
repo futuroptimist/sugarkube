@@ -169,7 +169,12 @@ branch-SHA image tag and digest plus chart version and digest, without resolving
 adds direct runtime identity, `runtimeSourceRevisionMethod` is strictly
 `podImageID+ociRevisionAnnotation`: every pod image ID must equal the approved
 digest and that exact OCI artifact's revision annotation must equal the full
-approved SHA. No HTTP build-identity check is claimed.
+approved SHA. Finalization also reasserts the connected cluster environment,
+requires Helm to report the selected release and namespace as deployed with the
+exact approved DSPACE chart version, and accepts only Running, Ready pods owned
+through the selected Helm release's Deployment and ReplicaSet. Each DSPACE
+container must use the approved repository and immutable image tag before its
+resolved image ID is accepted. No HTTP build-identity check is claimed.
 
 This repository change only persists the staging configuration; it does not deploy anything to a cluster. After it is merged, deploy the new immutable, environment-neutral DSPACE image that contains runtime `/config.json` support. The image tag stays the same as it moves between staging and production; the Sugarkube values overlays, not image names, select the token.place origin.
 

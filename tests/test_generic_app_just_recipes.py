@@ -67,7 +67,11 @@ set -euo pipefail
 printf '%s\n' "$*" >> {str(tmp_path / "kubectl.log")!r}
 printf 'kubectl %s\n' "$*" >> {str(tmp_path / "commands.log")!r}
 if [[ "$*" == *"get pods"* && "$*" == *"-o json"* ]]; then
-  printf '{{"items":[{{"metadata":{{"name":"dspace-0"}},"status":{{"startTime":"2026-07-26T12:10:00Z","containerStatuses":[{{"imageID":"ghcr.io/democratizedspace/dspace@sha256:%s"}}]}}}}]}}\n' "${{SUGARKUBE_STUB_IMAGE_DIGEST_HEX:-1111111111111111111111111111111111111111111111111111111111111111}}"
+  printf '{{"items":[{{"metadata":{{"name":"dspace-0","labels":{{"app.kubernetes.io/name":"dspace","app.kubernetes.io/instance":"dspace"}},"ownerReferences":[{{"kind":"ReplicaSet","name":"dspace-rs","uid":"rs-uid","controller":true}}]}},"spec":{{"containers":[{{"name":"dspace","image":"ghcr.io/democratizedspace/dspace:main-abcdef0"}}]}},"status":{{"phase":"Running","startTime":"2026-07-26T12:10:00Z","conditions":[{{"type":"Ready","status":"True"}}],"containerStatuses":[{{"name":"dspace","imageID":"ghcr.io/democratizedspace/dspace@sha256:%s","state":{{"running":{{}}}}}}]}}}}]}}\n' "${{SUGARKUBE_STUB_IMAGE_DIGEST_HEX:-1111111111111111111111111111111111111111111111111111111111111111}}"
+  exit 0
+fi
+if [[ "$*" == *"get replicasets,deployments"* && "$*" == *"-o json"* ]]; then
+  printf '{{"items":[{{"kind":"ReplicaSet","metadata":{{"name":"dspace-rs","uid":"rs-uid","labels":{{"app.kubernetes.io/name":"dspace","app.kubernetes.io/instance":"dspace"}},"ownerReferences":[{{"kind":"Deployment","name":"dspace","uid":"deploy-uid","controller":true}}]}}}},{{"kind":"Deployment","metadata":{{"name":"dspace","uid":"deploy-uid","labels":{{"app.kubernetes.io/name":"dspace","app.kubernetes.io/instance":"dspace","app.kubernetes.io/managed-by":"Helm"}},"annotations":{{"meta.helm.sh/release-name":"dspace","meta.helm.sh/release-namespace":"dspace"}}}}}}]}}\n'
   exit 0
 fi
 if [[ "$*" == *"get nodes -o json"* ]]; then
@@ -111,8 +115,10 @@ exit 0
 set -euo pipefail
 printf '%s\n' "$*" >> {str(log_path)!r}
 printf 'helm %s\n' "$*" >> {str(tmp_path / "commands.log")!r}
-if [[ "$*" == "status dspace --namespace dspace -o json" ]]; then
-  printf '{{"version":7}}\n'
+if [[ "$*" == *"status dspace --namespace dspace -o json" ]]; then
+  chart_version=3.1.0
+  [ "${{SUGARKUBE_STUB_NODE_ENV:-staging}}" != prod ] || chart_version=3.0.1
+  printf '{{"name":"dspace","namespace":"dspace","version":7,"info":{{"status":"deployed"}},"chart":{{"metadata":{{"name":"dspace","version":"%s"}}}}}}\n' "$chart_version"
   exit 0
 fi
 if [[ "$*" == *"get values"* ]]; then
@@ -1387,8 +1393,8 @@ def test_dspace_guarded_deploy_orders_preflight_mutation_and_finalization(
     commands = (tmp_path / "commands.log").read_text(encoding="utf-8").splitlines()
     preflight = next(i for i, line in enumerate(commands) if line.startswith("oras "))
     mutation = next(i for i, line in enumerate(commands) if line.startswith("helm upgrade "))
-    collection = next(i for i, line in enumerate(commands) if line.startswith("helm status dspace"))
-    pods = next(i for i, line in enumerate(commands) if "kubectl -n dspace get pods" in line)
+    collection = next(i for i, line in enumerate(commands) if " status dspace" in line)
+    pods = next(i for i, line in enumerate(commands) if " -n dspace get pods" in line)
     assert preflight < mutation < collection < pods
 
 

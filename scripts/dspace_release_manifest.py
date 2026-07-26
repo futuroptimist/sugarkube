@@ -377,19 +377,113 @@ def finalize(
     value: dict[str, Any],
     helm_json: dict[str, Any],
     pods_json: dict[str, Any],
+    workloads_json: dict[str, Any],
     preflight_results: list[dict[str, Any]],
+    *,
+    environment: str,
+    image_tag: str,
+    chart_version: str,
+    release: str,
+    namespace: str,
+    cluster_environment: str,
 ) -> dict[str, Any]:
     validate(value, False)
+    selected = {
+        "environment": environment,
+        "imageTag": image_tag,
+        "chartVersion": chart_version,
+    }
+    for field, actual in selected.items():
+        if value[field] != actual:
+            raise ManifestError(f"selected {field} does not match approved manifest")
+    if cluster_environment != environment:
+        raise ManifestError("connected cluster environment does not match selected environment")
+
+    if helm_json.get("name") != release or helm_json.get("namespace") != namespace:
+        raise ManifestError("Helm status does not match selected release and namespace")
+    if helm_json.get("info", {}).get("status") != "deployed":
+        raise ManifestError("Helm release status must be deployed")
     revision = helm_json.get("version")
+    chart_metadata = helm_json.get("chart", {}).get("metadata", {})
+    if chart_metadata.get("name") != "dspace" or chart_metadata.get("version") != chart_version:
+        raise ManifestError("installed Helm chart identity or version does not match approval")
+
+    selector_labels = {
+        "app.kubernetes.io/name": "dspace",
+        "app.kubernetes.io/instance": release,
+    }
+    workloads: dict[tuple[str, str], dict[str, Any]] = {}
+    for item in workloads_json.get("items", []):
+        metadata = item.get("metadata", {}) if isinstance(item, dict) else {}
+        kind = item.get("kind") if isinstance(item, dict) else None
+        name = metadata.get("name")
+        if kind not in {"ReplicaSet", "Deployment"} or not isinstance(name, str):
+            raise ManifestError("release workload discovery returned an unexpected object")
+        if any(
+            metadata.get("labels", {}).get(key) != expected
+            for key, expected in selector_labels.items()
+        ):
+            raise ManifestError("release workload labels do not match selected release")
+        if kind == "Deployment":
+            annotations = metadata.get("annotations", {})
+            if (
+                metadata.get("labels", {}).get("app.kubernetes.io/managed-by") != "Helm"
+                or annotations.get("meta.helm.sh/release-name") != release
+                or annotations.get("meta.helm.sh/release-namespace") != namespace
+            ):
+                raise ManifestError("Deployment is not owned by the selected Helm release")
+        workloads[(kind, name)] = item
+
+    def controller(item: dict[str, Any], expected_kind: str) -> dict[str, Any]:
+        references = item.get("metadata", {}).get("ownerReferences", [])
+        owners = [
+            ref for ref in references if isinstance(ref, dict) and ref.get("controller") is True
+        ]
+        if len(owners) != 1 or owners[0].get("kind") != expected_kind:
+            raise ManifestError(f"broken {expected_kind} controller owner-reference chain")
+        owner = workloads.get((expected_kind, owners[0].get("name")))
+        if owner is None or owner.get("metadata", {}).get("uid") != owners[0].get("uid"):
+            raise ManifestError(f"broken {expected_kind} controller owner-reference chain")
+        return owner
+
     pods = []
     for item in pods_json.get("items", []):
-        statuses = item.get("status", {}).get("containerStatuses", [])
-        if len(statuses) != 1:
-            raise ManifestError("DSPACE pods must expose exactly one application container imageID")
+        metadata = item.get("metadata", {}) if isinstance(item, dict) else {}
+        if any(
+            metadata.get("labels", {}).get(key) != expected
+            for key, expected in selector_labels.items()
+        ):
+            raise ManifestError("pod labels do not match selected release")
+        if metadata.get("deletionTimestamp") is not None:
+            raise ManifestError("terminating pods cannot provide serving evidence")
+        replica_set = controller(item, "ReplicaSet")
+        controller(replica_set, "Deployment")
+        status = item.get("status", {})
+        if status.get("phase") != "Running":
+            raise ManifestError("all release pods must be Running")
+        conditions = status.get("conditions", [])
+        if not any(c.get("type") == "Ready" and c.get("status") == "True" for c in conditions):
+            raise ManifestError("all release pods must be Ready")
+        containers = item.get("spec", {}).get("containers", [])
+        application = [container for container in containers if container.get("name") == "dspace"]
+        if len(application) != 1:
+            raise ManifestError("pod must contain exactly one dspace application container")
+        expected_image = f"{IMAGE_REF}:{image_tag}"
+        if application[0].get("image") != expected_image:
+            raise ManifestError(
+                "pod application image does not match approved repository and imageTag"
+            )
+        statuses = [
+            container
+            for container in status.get("containerStatuses", [])
+            if container.get("name") == "dspace"
+        ]
+        if len(statuses) != 1 or statuses[0].get("state", {}).get("running") is None:
+            raise ManifestError("dspace application container must be running")
         pods.append(
             {
-                "name": item.get("metadata", {}).get("name"),
-                "startTime": item.get("status", {}).get("startTime"),
+                "name": metadata.get("name"),
+                "startTime": status.get("startTime"),
                 "imageID": statuses[0].get("imageID"),
             }
         )
@@ -406,6 +500,36 @@ def finalize(
         raise ManifestError("finalization requires complete fresh OCI preflight results")
     results = [
         *preflight_results,
+        {
+            "check": "selectedCoordinates",
+            "passed": True,
+            "details": f"environment={environment}; imageTag={image_tag}; chartVersion={chart_version}",
+        },
+        {
+            "check": "clusterEnvironment",
+            "passed": True,
+            "details": f"connected cluster environment={cluster_environment}",
+        },
+        {
+            "check": "helmRelease",
+            "passed": True,
+            "details": f"release={release}; namespace={namespace}; revision={revision}; status=deployed",
+        },
+        {
+            "check": "installedChart",
+            "passed": True,
+            "details": f"chart=dspace; version={chart_version}",
+        },
+        {
+            "check": "releaseOwnershipAndReadiness",
+            "passed": True,
+            "details": f"{len(pods)} pod(s) owned by release workloads and serving",
+        },
+        {
+            "check": "podImageCoordinates",
+            "passed": True,
+            "details": f"all dspace containers use {IMAGE_REF}:{image_tag}",
+        },
         {
             "check": "podImageDigests",
             "passed": True,
@@ -448,8 +572,12 @@ def main(argv: list[str] | None = None) -> int:
     finish = sub.add_parser("finalize")
     finish.add_argument("--manifest", type=Path, required=True)
     finish.add_argument("--output", type=Path, required=True)
-    finish.add_argument("--release", default="dspace")
-    finish.add_argument("--namespace", default="dspace")
+    finish.add_argument("--environment", required=True)
+    finish.add_argument("--image-tag", required=True)
+    finish.add_argument("--chart-version", required=True)
+    finish.add_argument("--kubeconfig", required=True)
+    finish.add_argument("--release", required=True)
+    finish.add_argument("--namespace", required=True)
     finish.add_argument("--image-ref", default=IMAGE_REF)
     finish.add_argument("--chart-ref", default=CHART_REF)
     finish.add_argument("--oras-command", default=os.environ.get("SUGARKUBE_ORAS_COMMAND", "oras"))
@@ -484,11 +612,32 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.write(_canonical(result))
         elif args.command == "finalize":
             source = _object(args.manifest)
-            results = preflight(source, args.image_ref, args.chart_ref, args.oras_command)
+            results = preflight(
+                source,
+                args.image_ref,
+                args.chart_ref,
+                args.oras_command,
+                args.environment,
+                args.image_tag,
+                args.chart_version,
+            )
+            cluster_environment = _run(
+                [
+                    sys.executable,
+                    str(Path(__file__).with_name("cluster_identity.py")),
+                    "assert",
+                    "--kubeconfig",
+                    args.kubeconfig,
+                    "--env",
+                    args.environment,
+                ]
+            ).strip()
             helm = json.loads(
                 _run(
                     [
                         "helm",
+                        "--kubeconfig",
+                        args.kubeconfig,
                         "status",
                         args.release,
                         "--namespace",
@@ -502,18 +651,49 @@ def main(argv: list[str] | None = None) -> int:
                 _run(
                     [
                         "kubectl",
+                        "--kubeconfig",
+                        args.kubeconfig,
                         "-n",
                         args.namespace,
                         "get",
                         "pods",
                         "-l",
-                        "app.kubernetes.io/name=dspace",
+                        f"app.kubernetes.io/name=dspace,app.kubernetes.io/instance={args.release}",
                         "-o",
                         "json",
                     ]
                 )
             )
-            result = finalize(source, helm, pods, results)
+            workloads = json.loads(
+                _run(
+                    [
+                        "kubectl",
+                        "--kubeconfig",
+                        args.kubeconfig,
+                        "-n",
+                        args.namespace,
+                        "get",
+                        "replicasets,deployments",
+                        "-l",
+                        f"app.kubernetes.io/name=dspace,app.kubernetes.io/instance={args.release}",
+                        "-o",
+                        "json",
+                    ]
+                )
+            )
+            result = finalize(
+                source,
+                helm,
+                pods,
+                workloads,
+                results,
+                environment=args.environment,
+                image_tag=args.image_tag,
+                chart_version=args.chart_version,
+                release=args.release,
+                namespace=args.namespace,
+                cluster_environment=cluster_environment,
+            )
             _write_new(args.output, result)
         elif args.command == "check-output":
             if args.output.exists():

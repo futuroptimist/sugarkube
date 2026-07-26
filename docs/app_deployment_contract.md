@@ -208,7 +208,14 @@ After rollout the command writes a new record beneath
 (or the explicit `evidence=` path). The approval-qualified default is stable and
 deployment-unique; an occupied destination is rejected before mutation, so a
 repeat operation must supply a new explicit `evidence=` path. It records the Helm revision and every DSPACE pod's name,
-start time, and resolved image ID. Existing files are never overwritten.
+start time, and resolved image ID. Finalization requires the selected
+environment, image tag, chart version, kubeconfig, release, namespace, and chart
+reference; reruns exact-digest OCI provenance and cluster-identity checks; and
+verifies Helm reports that exact release as deployed with the approved DSPACE
+chart. Pod discovery is release-scoped, follows controller references to a
+Helm-owned Deployment, and rejects terminating, non-Running, non-Ready, or
+non-running DSPACE containers. Both the pod-spec image coordinate and resolved
+image ID must match the approval. Existing files are never overwritten.
 
 These recipes are implemented in the root `justfile` and use the app config
 lookup order above.
