@@ -516,6 +516,7 @@ def finalize(
     release: str,
     namespace: str,
     cluster_environment: str,
+    invocation_description: str,
 ) -> dict[str, Any]:
     validate(value, False)
     selected = {
@@ -531,8 +532,11 @@ def finalize(
 
     if helm_json.get("name") != release or helm_json.get("namespace") != namespace:
         raise ManifestError("Helm status does not match selected release and namespace")
-    if helm_json.get("info", {}).get("status") != "deployed":
+    helm_info = helm_json.get("info", {})
+    if helm_info.get("status") != "deployed":
         raise ManifestError("Helm release status must be deployed")
+    if helm_info.get("description") != invocation_description:
+        raise ManifestError("Helm release description does not match this invocation")
     revision = helm_json.get("version")
     chart_metadata = helm_json.get("chart", {}).get("metadata", {})
     if chart_metadata.get("name") != "dspace" or chart_metadata.get("version") != chart_version:
@@ -643,7 +647,10 @@ def finalize(
         {
             "check": "helmRelease",
             "passed": True,
-            "details": f"release={release}; namespace={namespace}; revision={revision}; status=deployed",
+            "details": (
+                f"release={release}; namespace={namespace}; revision={revision}; "
+                "status=deployed; binding=Helm mutation description"
+            ),
         },
         {
             "check": "installedChart",
@@ -769,6 +776,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.namespace,
                 args.reservation,
             )
+            invocation_description = f"sugarkube-release-manifest:{args.reservation}"
             results = preflight(
                 source,
                 args.image_ref,
@@ -850,6 +858,7 @@ def main(argv: list[str] | None = None) -> int:
                 release=args.release,
                 namespace=args.namespace,
                 cluster_environment=cluster_environment,
+                invocation_description=invocation_description,
             )
             sidecar = verify_reservation(
                 args.output,
@@ -859,6 +868,37 @@ def main(argv: list[str] | None = None) -> int:
                 args.namespace,
                 args.reservation,
             )
+            stable_helm = json.loads(
+                _run(
+                    [
+                        "helm",
+                        "--kubeconfig",
+                        args.kubeconfig,
+                        "status",
+                        args.release,
+                        "--namespace",
+                        args.namespace,
+                        "-o",
+                        "json",
+                    ]
+                )
+            )
+
+            def binding_fields(status: dict[str, Any]) -> tuple[Any, ...]:
+                metadata = status.get("chart", {}).get("metadata", {})
+                info = status.get("info", {})
+                return (
+                    status.get("name"),
+                    status.get("namespace"),
+                    info.get("status"),
+                    status.get("version"),
+                    info.get("description"),
+                    metadata.get("name"),
+                    metadata.get("version"),
+                )
+
+            if binding_fields(stable_helm) != binding_fields(helm):
+                raise ManifestError("Helm release changed during evidence collection")
             _write_new(args.output, result)
             sidecar.unlink()
             _sync_directory(args.output.expanduser().resolve(strict=False).parent)

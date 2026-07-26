@@ -1218,7 +1218,7 @@ cf-tunnel-route host='':
         '' \
         'Dashboard steps are documented in docs/cloudflare_tunnel.md.'
 
-_helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' env='' allow_install='false' reuse_values='false':
+_helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' env='' description='' allow_install='false' reuse_values='false':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -1237,7 +1237,7 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     fi
     raw_args=(
         "{{ release }}" "{{ namespace }}" "{{ chart }}" "{{ values }}" "{{ host }}" "{{ version }}"
-        "{{ version_file }}" "{{ tag }}" "{{ default_tag }}" "{{ env }}"
+        "{{ version_file }}" "{{ tag }}" "{{ default_tag }}" "{{ env }}" "{{ description }}"
     )
 
     release=""
@@ -1250,6 +1250,7 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     tag=""
     default_tag=""
     requested_env=""
+    description=""
 
     normalize_prefixed_value() {
         local key="${1}"
@@ -1291,6 +1292,7 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
             tag=*) tag="${raw_arg#tag=}" ;;
             default_tag=*) default_tag="${raw_arg#default_tag=}" ;;
             env=*) requested_env="${raw_arg#env=}" ;;
+            description=*) description="${raw_arg#description=}" ;;
             *)
                 case "${raw_index}" in
                     0) assign_if_empty release "${raw_arg}" ;;
@@ -1303,6 +1305,7 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
                     7) assign_if_empty tag "${raw_arg}" ;;
                     8) assign_if_empty default_tag "${raw_arg}" ;;
                     9) assign_if_empty requested_env "${raw_arg}" ;;
+                    10) assign_if_empty description "${raw_arg}" ;;
                 esac
                 ;;
         esac
@@ -1318,6 +1321,7 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     tag="$(normalize_prefixed_value tag "${tag}")"
     default_tag="$(normalize_prefixed_value default_tag "${default_tag}")"
     requested_env="$(normalize_prefixed_value env "${requested_env}")"
+    description="$(normalize_prefixed_value description "${description}")"
     if [ -z "${requested_env}" ] && [ -n "${SUGARKUBE_ENV:-}" ]; then
       requested_env="${SUGARKUBE_ENV}"
     fi
@@ -1577,6 +1581,10 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
 
     helm_args=(upgrade "${release}" "${chart}" --namespace "${namespace}")
 
+    if [ -n "${description}" ]; then
+        helm_args+=(--description "${description}")
+    fi
+
     if [ "${allow_install}" = "true" ]; then
         helm_args+=(--install --create-namespace)
     fi
@@ -1600,11 +1608,11 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     helm "${helm_args[@]}"
     wait_for_rollouts
 
-helm-oci-install release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' env='':
-    @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' '{{ env }}' allow_install='true' reuse_values='false'
+helm-oci-install release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' env='' description='':
+    @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' '{{ env }}' '{{ description }}' allow_install='true' reuse_values='false'
 
-helm-oci-upgrade release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' env='':
-    @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' '{{ env }}' allow_install='false' reuse_values='true'
+helm-oci-upgrade release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' env='' description='':
+    @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' '{{ env }}' '{{ description }}' allow_install='false' reuse_values='true'
 
 # Print resolved Sugarkube app deployment config for an app/environment.
 app-config app env='staging' config='':
@@ -1667,6 +1675,7 @@ app-deploy app env='staging' tag='' config='' manifest='' evidence='':
       evidence_reservation="$(python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" reserve \
         --manifest "${release_manifest}" --output "${evidence_output}" \
         --environment "${SUGARKUBE_ENV}" --release "${SUGARKUBE_RELEASE}" --namespace "${SUGARKUBE_NAMESPACE}")"
+      helm_description="sugarkube-release-manifest:${evidence_reservation}"
     fi
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
       release="${SUGARKUBE_RELEASE}" \
@@ -1676,7 +1685,8 @@ app-deploy app env='staging' tag='' config='' manifest='' evidence='':
       version="${SUGARKUBE_VERSION:-}" \
       version_file="${SUGARKUBE_VERSION_FILE:-}" \
       tag="${SUGARKUBE_TAG}" \
-      env="${SUGARKUBE_ENV}"
+      env="${SUGARKUBE_ENV}" \
+      description="${helm_description:-}"
     if [ "${SUGARKUBE_APP}" = dspace ] && { [ "${SUGARKUBE_ENV}" = staging ] || [ "${SUGARKUBE_ENV}" = prod ]; }; then
       python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" finalize \
         --manifest "${release_manifest}" --output "${evidence_output}" \
@@ -1728,6 +1738,7 @@ app-redeploy app env='staging' tag='' config='' manifest='' evidence='':
       evidence_reservation="$(python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" reserve \
         --manifest "${release_manifest}" --output "${evidence_output}" \
         --environment "${SUGARKUBE_ENV}" --release "${SUGARKUBE_RELEASE}" --namespace "${SUGARKUBE_NAMESPACE}")"
+      helm_description="sugarkube-release-manifest:${evidence_reservation}"
     fi
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
       release="${SUGARKUBE_RELEASE}" \
@@ -1737,7 +1748,8 @@ app-redeploy app env='staging' tag='' config='' manifest='' evidence='':
       version="${SUGARKUBE_VERSION:-}" \
       version_file="${SUGARKUBE_VERSION_FILE:-}" \
       tag="${SUGARKUBE_TAG}" \
-      env="${SUGARKUBE_ENV}"
+      env="${SUGARKUBE_ENV}" \
+      description="${helm_description:-}"
     if [ "${SUGARKUBE_APP}" = dspace ] && { [ "${SUGARKUBE_ENV}" = staging ] || [ "${SUGARKUBE_ENV}" = prod ]; }; then
       python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" finalize --manifest "${release_manifest}" --output "${evidence_output}" \
         --environment "${SUGARKUBE_ENV}" --image-tag "${SUGARKUBE_TAG}" --chart-version "${chart_version}" --kubeconfig "${KUBECONFIG}" \

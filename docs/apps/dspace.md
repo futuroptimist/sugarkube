@@ -150,6 +150,10 @@ checked after rollout. The guarded deploy itself passes Helm the immutable
 `oci://ghcr.io/democratizedspace/charts/dspace@<chartDigest>` coordinate emitted
 by the successful preflight, without `--version`, so a tag cannot be resolved
 again between approval and installation.
+The mutation also carries an opaque description derived from the evidence
+reservation. Finalization requires that description and the Helm revision to
+remain stable across runtime evidence collection, failing closed if another
+upgrade or rollback becomes current.
 
 After staging sign-off, generate a separate `prod` candidate from the **same
 upstream manifest**, approve it independently, and promote it. The image tag,

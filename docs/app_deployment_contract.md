@@ -207,6 +207,9 @@ mutation passes Helm that chart as
 `--version`; the approved `chartVersion` remains separate display metadata and
 is checked against Helm's installed-chart metadata after rollout. A semantic
 release tag remains evidence and is never passed to Helm.
+The guarded mutation binds its evidence reservation to Helm's release
+description. Finalization verifies that description and the revision before
+and after runtime evidence collection, and fails closed if either changes.
 
 After rollout the command writes a new record beneath
 `deployment-evidence/dspace/<environment>/<image-tag>-<approval-time>.json`

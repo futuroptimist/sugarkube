@@ -116,10 +116,21 @@ exit 0
 set -euo pipefail
 printf '%s\n' "$*" >> {str(log_path)!r}
 printf 'helm %s\n' "$*" >> {str(tmp_path / "commands.log")!r}
+if [ "${{1:-}}" = upgrade ]; then
+  previous=""
+  for argument in "$@"; do
+    if [ "$previous" = --description ]; then
+      printf '%s' "$argument" > {str(tmp_path / "helm-description")!r}
+      break
+    fi
+    previous="$argument"
+  done
+fi
 if [[ "$*" == *"status dspace --namespace dspace -o json" ]]; then
   chart_version=3.1.0
   [ "${{SUGARKUBE_STUB_NODE_ENV:-staging}}" != prod ] || chart_version=3.0.1
-  printf '{{"name":"dspace","namespace":"dspace","version":7,"info":{{"status":"deployed"}},"chart":{{"metadata":{{"name":"dspace","version":"%s"}}}}}}\n' "$chart_version"
+  description="$(cat {str(tmp_path / "helm-description")!r} 2>/dev/null || true)"
+  printf '{{"name":"dspace","namespace":"dspace","version":7,"info":{{"status":"deployed","description":"%s"}},"chart":{{"metadata":{{"name":"dspace","version":"%s"}}}}}}\n' "$description" "$chart_version"
   exit 0
 fi
 if [[ "$*" == *"get values"* ]]; then
@@ -1402,6 +1413,7 @@ def test_dspace_guarded_deploy_orders_preflight_mutation_and_finalization(
     mutation_line = next(line for line in helm_log.splitlines() if line.startswith("upgrade "))
     assert coordinate in mutation_line
     assert "--version" not in mutation_line
+    assert "--description sugarkube-release-manifest:" in mutation_line
     commands = (tmp_path / "commands.log").read_text(encoding="utf-8").splitlines()
     preflight = next(i for i, line in enumerate(commands) if line.startswith("oras "))
     mutation = next(
@@ -1444,6 +1456,7 @@ def test_dspace_guarded_redeploy_installs_approved_chart_digest(
     )
     assert coordinate in mutation_line
     assert "--version" not in mutation_line
+    assert "--description sugarkube-release-manifest:" in mutation_line
 
 
 @pytest.mark.usefixtures("ensure_just_available")
@@ -2884,6 +2897,7 @@ def test_direct_helm_oci_helper_matching_env_succeeds(
     helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
     assert "show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.3" in helm_log
     assert "upgrade tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace" in helm_log
+    assert "--description" not in helm_log
 
 
 @pytest.mark.usefixtures("ensure_just_available")

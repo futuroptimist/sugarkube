@@ -264,7 +264,10 @@ def helm_status(**changes) -> dict[str, object]:
         "name": "dspace",
         "namespace": "dspace",
         "version": 17,
-        "info": {"status": "deployed"},
+        "info": {
+            "status": "deployed",
+            "description": "sugarkube-release-manifest:test-reservation",
+        },
         "chart": {"metadata": {"name": "dspace", "version": "3.2.0"}},
     }
     value.update(changes)
@@ -326,6 +329,7 @@ def finalize(**changes):
         "release": "dspace",
         "namespace": "dspace",
         "cluster_environment": "staging",
+        "invocation_description": "sugarkube-release-manifest:test-reservation",
     }
     arguments.update(changes)
     return manifest.finalize(**arguments)
@@ -444,6 +448,14 @@ def test_finalize_rejects_pod_image_mismatch() -> None:
         ({"cluster_environment": "prod"}, "cluster environment"),
         ({"helm_json": helm_status(name="other")}, "release and namespace"),
         ({"helm_json": helm_status(info={"status": "failed"})}, "must be deployed"),
+        (
+            {
+                "helm_json": helm_status(
+                    info={"status": "deployed", "description": "another invocation"}
+                )
+            },
+            "description",
+        ),
         (
             {"helm_json": helm_status(chart={"metadata": {"name": "other", "version": "3.2.0"}})},
             "chart identity",
@@ -652,7 +664,14 @@ def test_finalize_cli_collects_bound_evidence_before_consuming_reservation(
             return "staging\n"
         if command[0] == "helm":
             events.append("helm-status")
-            return json.dumps(helm_status())
+            return json.dumps(
+                helm_status(
+                    info={
+                        "status": "deployed",
+                        "description": f"sugarkube-release-manifest:{owner}",
+                    }
+                )
+            )
         resource = command[command.index("get") + 1]
         if resource == "pods":
             events.append("pod-discovery")
@@ -705,12 +724,64 @@ def test_finalize_cli_collects_bound_evidence_before_consuming_reservation(
         "helm-status",
         "pod-discovery",
         "workload-discovery",
+        "helm-status",
         "atomic-final-write",
     ]
     final = manifest.validate(json.loads(output.read_text(encoding="utf-8")), True)
     assert final["helmRevision"] == 17
     assert [item["name"] for item in final["pods"]] == ["dspace-a", "dspace-b"]
     assert not sidecar.exists()
+
+
+@pytest.mark.parametrize("changed_field", ["version", "description"])
+def test_finalize_cli_rejects_changed_helm_binding_and_preserves_reservation(
+    tmp_path: Path, monkeypatch, changed_field: str
+) -> None:
+    source = tmp_path / "candidate.json"
+    output = tmp_path / "evidence.json"
+    source.write_text(manifest._canonical(candidate()), encoding="utf-8")
+    owner = manifest.reserve(output, candidate(), "staging", "dspace", "dspace")
+    description = f"sugarkube-release-manifest:{owner}"
+    status_reads = 0
+
+    oci_results = manifest.preflight(
+        candidate(), manifest.IMAGE_REF, manifest.CHART_REF, "oras", runner=oras_runner()
+    )
+    monkeypatch.setattr(
+        manifest,
+        "preflight",
+        lambda *args, **kwargs: oci_results,
+    )
+
+    def run(command):
+        nonlocal status_reads
+        if "cluster_identity.py" in " ".join(command):
+            return "staging\n"
+        if command[0] == "helm":
+            status_reads += 1
+            info = {"status": "deployed", "description": description}
+            status = helm_status(info=info)
+            if status_reads == 2:
+                if changed_field == "version":
+                    status["version"] = 18
+                else:
+                    status["info"]["description"] = "another invocation"
+            return json.dumps(status)
+        resource = command[command.index("get") + 1]
+        return json.dumps(
+            {"items": [pod("dspace-a")]} if resource == "pods" else workloads()
+        )
+
+    monkeypatch.setattr(manifest, "_run", run)
+    args = [
+        "finalize", "--manifest", str(source), "--output", str(output),
+        "--environment", "staging", "--image-tag", "main-abcdef0",
+        "--chart-version", "3.2.0", "--kubeconfig", "kubeconfig",
+        "--release", "dspace", "--namespace", "dspace", "--reservation", owner,
+    ]
+    assert manifest.main(args) == 2
+    assert not output.exists()
+    assert manifest.reservation_path(output).exists()
 
 
 def test_public_read_only_and_reservation_dispatch(
