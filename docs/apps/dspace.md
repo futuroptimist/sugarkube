@@ -96,7 +96,7 @@ gh workflow run ci-helm.yml --repo democratizedspace/dspace --ref main
 
 ## Deploy staging
 
-## Release-manifest approval and evidence flow
+### Release-manifest approval and evidence flow
 
 Download the `dspace-release-manifest` artifact from the successful upstream
 image workflow and extract `dspace-release-manifest/dspace-release-manifest.json`.
@@ -285,18 +285,20 @@ curl -fsS https://democratized.space/livez
 
 ## Rollback
 
-Rollback by deploying the previous known-good immutable image tag with the generic redeploy command.
+Rollback by deploying the previous known-good immutable image tag with the generic redeploy command and an approved environment-specific candidate for that release. Use a unique `evidence=` path if evidence for the tag already exists; occupied paths are rejected before Helm runs.
 
 ```bash
 APP_TAG=main-REPLACE_PREVIOUS_SHORTSHA
+STAGING_ROLLBACK_MANIFEST=deployment-candidates/dspace/previous-release-staging.json
+PROD_ROLLBACK_MANIFEST=deployment-candidates/dspace/previous-release-prod.json
 ```
 
 ```bash
-just app-redeploy app=dspace env=staging tag="$APP_TAG"
+just app-redeploy app=dspace env=staging tag="$APP_TAG" manifest="$STAGING_ROLLBACK_MANIFEST" evidence=deployment-evidence/dspace/staging/"$APP_TAG"-rollback.json
 ```
 
 ```bash
-just app-redeploy app=dspace env=prod tag="$APP_TAG"
+just app-redeploy app=dspace env=prod tag="$APP_TAG" manifest="$PROD_ROLLBACK_MANIFEST" evidence=deployment-evidence/dspace/prod/"$APP_TAG"-rollback.json
 ```
 
 Rollback by Helm revision is still available through the existing parameterized helper. Set `ROLLBACK_ENV=staging` instead when intentionally rolling back staging.

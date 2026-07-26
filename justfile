@@ -1636,6 +1636,7 @@ app-deploy app env='staging' tag='' config='' manifest='' evidence='':
       if [ -z "${evidence_output}" ]; then
         evidence_output="deployment-evidence/dspace/${SUGARKUBE_ENV}/${SUGARKUBE_TAG}.json"
       fi
+      python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" check-output --output "${evidence_output}"
     fi
 
     export KUBECONFIG="${HOME}/.kube/config"
@@ -1660,7 +1661,7 @@ app-deploy app env='staging' tag='' config='' manifest='' evidence='':
       version_file="${SUGARKUBE_VERSION_FILE:-}" \
       tag="${SUGARKUBE_TAG}" \
       env="${SUGARKUBE_ENV}"
-    if [ "${SUGARKUBE_APP}" = dspace ] && [ -n "${release_manifest}" ]; then
+    if [ "${SUGARKUBE_APP}" = dspace ] && { [ "${SUGARKUBE_ENV}" = staging ] || [ "${SUGARKUBE_ENV}" = prod ]; }; then
       python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" finalize \
         --manifest "${release_manifest}" --output "${evidence_output}" \
         --release "${SUGARKUBE_RELEASE}" --namespace "${SUGARKUBE_NAMESPACE}"
@@ -1688,6 +1689,7 @@ app-redeploy app env='staging' tag='' config='' manifest='' evidence='':
       if [ -z "${chart_version}" ]; then chart_version="$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' "${SUGARKUBE_VERSION_FILE}" | head -n1)"; fi
       python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" preflight --manifest "${release_manifest}" --environment "${SUGARKUBE_ENV}" --image-tag "${SUGARKUBE_TAG}" --chart-version "${chart_version}"
       if [ -z "${evidence_output}" ]; then evidence_output="deployment-evidence/dspace/${SUGARKUBE_ENV}/${SUGARKUBE_TAG}.json"; fi
+      python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" check-output --output "${evidence_output}"
     fi
 
     export KUBECONFIG="${HOME}/.kube/config"
@@ -1712,7 +1714,7 @@ app-redeploy app env='staging' tag='' config='' manifest='' evidence='':
       version_file="${SUGARKUBE_VERSION_FILE:-}" \
       tag="${SUGARKUBE_TAG}" \
       env="${SUGARKUBE_ENV}"
-    if [ "${SUGARKUBE_APP}" = dspace ] && [ -n "${release_manifest}" ]; then
+    if [ "${SUGARKUBE_APP}" = dspace ] && { [ "${SUGARKUBE_ENV}" = staging ] || [ "${SUGARKUBE_ENV}" = prod ]; }; then
       python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" finalize --manifest "${release_manifest}" --output "${evidence_output}" --release "${SUGARKUBE_RELEASE}" --namespace "${SUGARKUBE_NAMESPACE}"
     fi
 
@@ -1865,149 +1867,17 @@ dspace-oci-deploy env='staging' tag='' manifest='' evidence='':
     [ -z {{ quote(manifest) }} ] || delegate+=(manifest={{ quote(manifest) }})
     [ -z {{ quote(evidence) }} ] || delegate+=(evidence={{ quote(evidence) }})
     "${delegate[@]}"
-    exit
-
-    env_input={{ quote(env) }}
-    env_name="${env_input}"
-    while [ "${env_name#env=}" != "${env_name}" ]; do
-      env_name="${env_name#env=}"
-    done
-    if [ -z "${env_name}" ]; then
-      printf 'ERROR: env must not be empty. Use env=dev|staging|prod.\n' >&2
-      exit 1
-    fi
-    if [ "${env_name}" = "int" ]; then
-      printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
-      env_name="staging"
-    fi
-
-    case "${env_name}" in
-      dev|staging|prod) ;;
-      *)
-        echo "Unsupported env=${env_name}. Use env=dev|staging|prod." >&2
-        exit 1
-        ;;
-    esac
-
-    deploy_tag="$(echo "{{ tag }}" | xargs)"
-    if [ -z "${deploy_tag}" ]; then
-      echo "Set tag=<immutable-tag> (for example main-<shortsha> or 3.1.0) for dspace immutable deploys." >&2
-      exit 1
-    fi
-    tag_lc="$(echo "${deploy_tag}" | tr '[:upper:]' '[:lower:]')"
-    if [[ "${tag_lc}" == *"latest"* || "${tag_lc}" == "main" || "${tag_lc}" == *":main" ]]; then
-      echo "Refusing mutable tag '${deploy_tag}'. Use an immutable RC/stable image tag." >&2
-      exit 1
-    fi
-
-    overlay=""
-    if [ "${env_name}" != "dev" ]; then
-      overlay="docs/examples/dspace.values.${env_name}.yaml"
-      if [ ! -f "${overlay}" ]; then
-        echo "No dspace values overlay found for env=${env_name} (${overlay})." >&2
-        exit 1
-      fi
-    fi
-
-    values_chain="docs/examples/dspace.values.dev.yaml"
-    if [ -n "${overlay}" ]; then
-      values_chain="${values_chain},${overlay}"
-    fi
-
-    if [ -z "${KUBECONFIG:-}" ] && [ ! -r "${HOME}/.kube/config" ]; then
-      scripts/ensure_user_kubeconfig.sh || true
-    fi
-    if [ -z "${KUBECONFIG:-}" ]; then
-      export KUBECONFIG="${HOME}/.kube/config"
-    fi
-    export SUGARKUBE_ENV="${env_name}"
-    eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell --app dspace --env "${env_name}")"
-    just --justfile "{{ justfile_directory() }}/justfile" assert-cluster-env "${env_name}" "${KUBECONFIG}" >/dev/null
-
-    just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
-      release='dspace' namespace='dspace' \
-      chart='oci://ghcr.io/democratizedspace/charts/dspace' \
-      values="${values_chain}" \
-      version="${SUGARKUBE_VERSION:-}" \
-      version_file="${SUGARKUBE_VERSION_FILE:-}" \
-      tag="${deploy_tag}" \
-      env="${env_name}"
-
-    echo "Resolved deployment image(s):"
-    kubectl -n dspace get deploy dspace \
-      -o jsonpath='{range .spec.template.spec.containers[*]}{.name}={.image}{"\n"}{end}'
-
-    verify_host="$(kubectl -n dspace get ingress dspace -o jsonpath='{.spec.rules[0].host}' 2>/dev/null || true)"
-    if [ -z "${verify_host}" ]; then
-      verify_host="<dspace-host>"
-    fi
-
-    echo
-    echo "Post-deploy verification commands:"
-    if [[ "${verify_host}" == "<"*">" ]]; then
-      echo "  # Replace ${verify_host} with your ingress hostname."
-      echo "  curl -fsS https://${verify_host}/config.json | jq ."
-      echo "  curl -fsS https://${verify_host}/healthz | jq ."
-      echo "  curl -fsS https://${verify_host}/livez | jq ."
-    else
-      echo "  curl -fsS https://${verify_host}/config.json | jq ."
-      echo "  curl -fsS https://${verify_host}/healthz | jq ."
-      echo "  curl -fsS https://${verify_host}/livez | jq ."
-    fi
-
-# Deploy dspace to the optional production preview subdomain (prod.democratized.space).
-#
 
 # Use this for optional canary/smoke testing before or alongside apex promotion workflows.
-dspace-oci-deploy-prod-subdomain tag='':
+dspace-oci-deploy-prod-subdomain tag='' manifest='' evidence='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    deploy_tag="$(echo "{{ tag }}" | xargs)"
-    if [ -z "${deploy_tag}" ]; then
-      echo "Set tag=<immutable-tag> (for example main-<shortsha> or 3.1.0) for prod subdomain deploys." >&2
-      exit 1
-    fi
-    tag_lc="$(echo "${deploy_tag}" | tr '[:upper:]' '[:lower:]')"
-    if [[ "${tag_lc}" == *"latest"* || "${tag_lc}" == "main" || "${tag_lc}" == *":main" ]]; then
-      echo "Refusing mutable tag '${deploy_tag}'. Use an immutable RC/stable image tag." >&2
-      exit 1
-    fi
-
-    values_chain="docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod-subdomain.yaml"
-    if [ ! -f "docs/examples/dspace.values.prod-subdomain.yaml" ]; then
-      echo "Missing values overlay: docs/examples/dspace.values.prod-subdomain.yaml" >&2
-      exit 1
-    fi
-
-    if [ -z "${KUBECONFIG:-}" ] && [ ! -r "${HOME}/.kube/config" ]; then
-      scripts/ensure_user_kubeconfig.sh || true
-    fi
-    if [ -z "${KUBECONFIG:-}" ]; then
-      export KUBECONFIG="${HOME}/.kube/config"
-    fi
-    export SUGARKUBE_ENV="prod"
-    eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell --app dspace --env prod)"
-    just --justfile "{{ justfile_directory() }}/justfile" assert-cluster-env "prod" "${KUBECONFIG}" >/dev/null
-
-    just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
-      release='dspace' namespace='dspace' \
-      chart='oci://ghcr.io/democratizedspace/charts/dspace' \
-      values="${values_chain}" \
-      version="${SUGARKUBE_VERSION:-}" \
-      version_file="${SUGARKUBE_VERSION_FILE:-}" \
-      tag="${deploy_tag}" \
-      env="prod"
-
-    echo "Resolved deployment image(s):"
-    kubectl -n dspace get deploy dspace \
-      -o jsonpath='{range .spec.template.spec.containers[*]}{.name}={.image}{"\n"}{end}'
-
-    echo
-    echo "Post-deploy verification commands for the production preview endpoint:"
-    echo "  curl -fsS https://prod.democratized.space/config.json | jq ."
-    echo "  curl -fsS https://prod.democratized.space/healthz | jq ."
-    echo "  curl -fsS https://prod.democratized.space/livez | jq ."
+    echo "WARNING: the prod-subdomain compatibility command now uses the gated production deployment path." >&2
+    delegate=(just --justfile "{{ justfile_directory() }}/justfile" app-deploy app=dspace env=prod tag={{ quote(tag) }})
+    [ -z {{ quote(manifest) }} ] || delegate+=(manifest={{ quote(manifest) }})
+    [ -z {{ quote(evidence) }} ] || delegate+=(evidence={{ quote(evidence) }})
+    "${delegate[@]}"
 
 # Promote dspace to production apex (democratized.space) using immutable tags.
 
@@ -2028,80 +1898,14 @@ dspace-oci-promote-prod tag='' manifest='' evidence='':
     "${delegate[@]}"
 
 # Fast redeploy of dspace from GHCR (emergency mutable-tag refresh).
-dspace-oci-redeploy env='staging' tag='':
+dspace-oci-redeploy env='staging' tag='' manifest='' evidence='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    env_input={{ quote(env) }}
-    env_name="${env_input}"
-    while [ "${env_name#env=}" != "${env_name}" ]; do
-      env_name="${env_name#env=}"
-    done
-    if [ -z "${env_name}" ]; then
-      printf 'ERROR: env must not be empty. Use env=dev|staging|prod.\n' >&2
-      exit 1
-    fi
-    if [ "${env_name}" = "int" ]; then
-      printf 'WARNING: env name "int" is deprecated; using env=staging.\n' >&2
-      env_name="staging"
-    fi
-
-    read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
-
-    overlay="docs/examples/dspace.values.${env_name}.yaml"
-    if [ ! -f "${overlay}" ]; then
-      echo "No dspace values overlay found for env=${env_name} (${overlay})." >&2
-      exit 1
-    fi
-    values_chain="docs/examples/dspace.values.dev.yaml"
-    if [ "${env_name}" != "dev" ]; then
-      values_chain="${values_chain},${overlay}"
-    fi
-
-    if [ -z "${KUBECONFIG:-}" ] && [ ! -r "${HOME}/.kube/config" ]; then
-      scripts/ensure_user_kubeconfig.sh || true
-    fi
-    if [ -z "${KUBECONFIG:-}" ]; then
-      export KUBECONFIG="${HOME}/.kube/config"
-    fi
-    export SUGARKUBE_ENV="${env_name}"
-    eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell --app dspace --env "${env_name}")"
-    just --justfile "{{ justfile_directory() }}/justfile" assert-cluster-env "${env_name}" "${KUBECONFIG}" >/dev/null
-
-    deploy_tag="{{ tag }}"
-    default_tag_value=""
-    if [ "${env_name}" = "prod" ]; then
-      if [ -z "${deploy_tag}" ] && [ -f "docs/apps/dspace.prod.tag" ]; then
-        deploy_tag="$(read_prod_tag)"
-      fi
-      if [ -z "${deploy_tag}" ]; then
-        echo "Set tag=<immutable-tag> for prod or populate docs/apps/dspace.prod.tag." >&2
-        exit 1
-      fi
-    else
-      default_tag_value="main-latest"
-    fi
-
-    just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
-      release='dspace' namespace='dspace' \
-      chart='oci://ghcr.io/democratizedspace/charts/dspace' \
-      values="${values_chain}" \
-      version="${SUGARKUBE_VERSION:-}" \
-      version_file="${SUGARKUBE_VERSION_FILE:-}" \
-      tag="${deploy_tag}" \
-      env="${env_name}" default_tag="${default_tag_value}"
-
-    echo "Forcing rollout restart for dspace deployment..."
-    if ! kubectl -n dspace rollout restart deploy/dspace; then
-      echo "ERROR: Failed to trigger rollout restart for dspace." >&2
-      exit 1
-    fi
-
-    echo "Waiting for dspace rollout to complete (timeout: 120s)..."
-    if ! kubectl -n dspace rollout status deploy/dspace --timeout=120s; then
-      echo "ERROR: dspace rollout did not complete successfully." >&2
-      exit 1
-    fi
+    delegate=(just --justfile "{{ justfile_directory() }}/justfile" app-redeploy app=dspace env={{ quote(env) }} tag={{ quote(tag) }})
+    [ -z {{ quote(manifest) }} ] || delegate+=(manifest={{ quote(manifest) }})
+    [ -z {{ quote(evidence) }} ] || delegate+=(evidence={{ quote(evidence) }})
+    "${delegate[@]}"
 
 # Dump dspace and Traefik logs for debugging HTTP 500s.
 dspace-debug-logs namespace='dspace':

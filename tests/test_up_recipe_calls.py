@@ -167,6 +167,12 @@ def test_env_recipes_quote_and_normalize_named_arguments():
     forwarding_recipes = {
         "ha3 env='dev':": "up {{ quote(env) }}",
         "save-logs env='dev':": "up {{ quote(env) }}",
+        "dspace-oci-deploy env='staging' tag='' manifest='' evidence='':": (
+            "app-deploy app=dspace env={{ quote(env) }}"
+        ),
+        "dspace-oci-redeploy env='staging' tag='' manifest='' evidence='':": (
+            "app-redeploy app=dspace env={{ quote(env) }}"
+        ),
     }
     for header, expected_call in forwarding_recipes.items():
         body = _extract_recipe(lines, header)
@@ -179,8 +185,6 @@ def test_env_recipes_quote_and_normalize_named_arguments():
         "kubeconfig env='':",
         "kubeconfig-env env='dev':",
         cloudflare_tunnel_recipe,
-        "dspace-oci-deploy env='staging' tag='':",
-        "dspace-oci-redeploy env='staging' tag='':",
         "dspace-debug-logs-env env='staging' namespace='dspace':",
         "flux-bootstrap env='dev':",
         "platform-apply env='dev':",

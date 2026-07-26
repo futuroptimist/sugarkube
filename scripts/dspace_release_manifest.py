@@ -86,7 +86,9 @@ def _validate_upstream(value: dict[str, Any]) -> None:
         raise ManifestError("applicationVersion must be strict SemVer")
     sha = value["sourceRevision"]
     if not isinstance(sha, str) or not SHA_RE.fullmatch(sha):
-        raise ManifestError("sourceRevision must be a full 40-character lowercase Git SHA")
+        raise ManifestError(
+            "sourceRevision must be a full 40-character lowercase Git SHA"
+        )
     tag = value["imageTag"]
     match = IMAGE_TAG_RE.fullmatch(tag) if isinstance(tag, str) else None
     if not match:
@@ -98,13 +100,17 @@ def _validate_upstream(value: dict[str, Any]) -> None:
     for field in ("imageDigest", "chartDigest"):
         if not isinstance(value[field], str) or not DIGEST_RE.fullmatch(value[field]):
             raise ManifestError(f"{field} must be a lowercase sha256 digest")
-    if not isinstance(value["chartVersion"], str) or not SEMVER_RE.fullmatch(value["chartVersion"]):
+    if not isinstance(value["chartVersion"], str) or not SEMVER_RE.fullmatch(
+        value["chartVersion"]
+    ):
         raise ManifestError("chartVersion must be strict SemVer")
     semantic = value["semanticTag"]
     if semantic is not None and (
         not isinstance(semantic, str) or semantic != f"v{value['applicationVersion']}"
     ):
-        raise ManifestError("semanticTag must be null or v<applicationVersion> evidence")
+        raise ManifestError(
+            "semanticTag must be null or v<applicationVersion> evidence"
+        )
 
 
 def validate(value: dict[str, Any], finalized: bool | None = None) -> dict[str, Any]:
@@ -192,13 +198,31 @@ def _write_new(path: Path, value: dict[str, Any]) -> None:
         try:
             os.link(temporary, path)
         except FileExistsError as exc:
-            raise ManifestError(f"refusing to overwrite existing record: {path}") from exc
+            raise ManifestError(
+                f"refusing to overwrite existing record: {path}"
+            ) from exc
+        # Persist the new directory entry as well as the file contents. Some
+        # filesystems otherwise permit a successful return followed by losing
+        # the link during a power failure.
+        try:
+            directory_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        except OSError:
+            # Directory fsync is not supported on every platform/filesystem.
+            pass
     finally:
         Path(temporary).unlink(missing_ok=True)
 
 
 def candidate(
-    upstream: dict[str, Any], environment: str, provider: str, approved_at: str, approved_by: str
+    upstream: dict[str, Any],
+    environment: str,
+    provider: str,
+    approved_at: str,
+    approved_by: str,
 ) -> dict[str, Any]:
     _exact_fields(upstream, UPSTREAM_FIELDS)
     _validate_upstream(upstream)
@@ -223,15 +247,19 @@ def _run(command: list[str]) -> str:
 
 
 def _oras_evidence(oras: str, reference: str) -> tuple[str, str]:
-    descriptor = json.loads(_run([oras, "manifest", "fetch", "--descriptor", reference]))
+    descriptor = json.loads(
+        _run([oras, "manifest", "fetch", "--descriptor", reference])
+    )
     manifest = json.loads(_run([oras, "manifest", "fetch", reference]))
     digest = descriptor.get("digest")
     annotations = manifest.get("annotations", {})
-    revision = annotations.get(REVISION_ANNOTATION) or descriptor.get("annotations", {}).get(
-        REVISION_ANNOTATION
-    )
+    revision = annotations.get(REVISION_ANNOTATION) or descriptor.get(
+        "annotations", {}
+    ).get(REVISION_ANNOTATION)
     if not isinstance(digest, str) or not isinstance(revision, str):
-        raise ManifestError(f"OCI descriptor for {reference} lacks digest or revision annotation")
+        raise ManifestError(
+            f"OCI descriptor for {reference} lacks digest or revision annotation"
+        )
     return digest, revision
 
 
@@ -253,8 +281,12 @@ def preflight(
     for field, expected in selected:
         if expected is not None and value[field] != expected:
             raise ManifestError(f"selected {field} does not match approved manifest")
-    image_digest, image_revision = _oras_evidence(oras, f"{image_ref}:{value['imageTag']}")
-    chart_digest, chart_revision = _oras_evidence(oras, f"{chart_ref}:{value['chartVersion']}")
+    image_digest, image_revision = _oras_evidence(
+        oras, f"{image_ref}:{value['imageTag']}"
+    )
+    chart_digest, chart_revision = _oras_evidence(
+        oras, f"{chart_ref}:{value['chartVersion']}"
+    )
     checks = (
         ("imageDigest", image_digest, value["imageDigest"]),
         ("chartDigest", chart_digest, value["chartDigest"]),
@@ -283,7 +315,10 @@ def _image_id_digest(image_id: str) -> str:
 
 
 def finalize(
-    value: dict[str, Any], helm_json: dict[str, Any], pods_json: dict[str, Any]
+    value: dict[str, Any],
+    helm_json: dict[str, Any],
+    pods_json: dict[str, Any],
+    preflight_results: list[dict[str, Any]],
 ) -> dict[str, Any]:
     validate(value, False)
     revision = helm_json.get("version")
@@ -291,7 +326,9 @@ def finalize(
     for item in pods_json.get("items", []):
         statuses = item.get("status", {}).get("containerStatuses", [])
         if len(statuses) != 1:
-            raise ManifestError("DSPACE pods must expose exactly one application container imageID")
+            raise ManifestError(
+                "DSPACE pods must expose exactly one application container imageID"
+            )
         pods.append(
             {
                 "name": item.get("metadata", {}).get("name"),
@@ -300,12 +337,10 @@ def finalize(
             }
         )
     pods.sort(key=lambda item: str(item["name"]))
+    if not preflight_results:
+        raise ManifestError("finalization requires fresh OCI preflight results")
     results = [
-        {
-            "check": "ociPreflight",
-            "passed": True,
-            "details": "image and chart digests and revision annotations matched candidate",
-        },
+        *preflight_results,
         {
             "check": "podImageDigests",
             "passed": True,
@@ -340,8 +375,12 @@ def main(argv: list[str] | None = None) -> int:
     flight = sub.add_parser("preflight")
     flight.add_argument("--manifest", type=Path, required=True)
     flight.add_argument("--image-ref", default="ghcr.io/democratizedspace/dspace")
-    flight.add_argument("--chart-ref", default="ghcr.io/democratizedspace/charts/dspace")
-    flight.add_argument("--oras-command", default=os.environ.get("SUGARKUBE_ORAS_COMMAND", "oras"))
+    flight.add_argument(
+        "--chart-ref", default="ghcr.io/democratizedspace/charts/dspace"
+    )
+    flight.add_argument(
+        "--oras-command", default=os.environ.get("SUGARKUBE_ORAS_COMMAND", "oras")
+    )
     flight.add_argument("--environment")
     flight.add_argument("--image-tag")
     flight.add_argument("--chart-version")
@@ -350,6 +389,15 @@ def main(argv: list[str] | None = None) -> int:
     finish.add_argument("--output", type=Path, required=True)
     finish.add_argument("--release", default="dspace")
     finish.add_argument("--namespace", default="dspace")
+    finish.add_argument("--image-ref", default="ghcr.io/democratizedspace/dspace")
+    finish.add_argument(
+        "--chart-ref", default="ghcr.io/democratizedspace/charts/dspace"
+    )
+    finish.add_argument(
+        "--oras-command", default=os.environ.get("SUGARKUBE_ORAS_COMMAND", "oras")
+    )
+    available = sub.add_parser("check-output")
+    available.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
         if args.command == "candidate":
@@ -375,10 +423,23 @@ def main(argv: list[str] | None = None) -> int:
                 args.chart_version,
             )
             sys.stdout.write(_canonical(result))
-        else:
+        elif args.command == "finalize":
             source = _object(args.manifest)
+            results = preflight(
+                source, args.image_ref, args.chart_ref, args.oras_command
+            )
             helm = json.loads(
-                _run(["helm", "status", args.release, "--namespace", args.namespace, "-o", "json"])
+                _run(
+                    [
+                        "helm",
+                        "status",
+                        args.release,
+                        "--namespace",
+                        args.namespace,
+                        "-o",
+                        "json",
+                    ]
+                )
             )
             pods = json.loads(
                 _run(
@@ -395,8 +456,13 @@ def main(argv: list[str] | None = None) -> int:
                     ]
                 )
             )
-            result = finalize(source, helm, pods)
+            result = finalize(source, helm, pods, results)
             _write_new(args.output, result)
+        else:
+            if args.output.exists():
+                raise ManifestError(
+                    f"refusing to overwrite existing record: {args.output}"
+                )
     except (ManifestError, json.JSONDecodeError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
