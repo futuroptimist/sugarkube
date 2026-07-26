@@ -154,6 +154,10 @@ The mutation also carries an opaque description derived from the evidence
 reservation. Finalization requires that description and the Helm revision to
 remain stable across runtime evidence collection, failing closed if another
 upgrade or rollback becomes current.
+Finalization also waits for a bounded period for old release pods undergoing
+graceful rollout termination to disappear. It never filters out a still-running
+release pod: every remaining pod must satisfy the approved image and readiness
+checks.
 
 After staging sign-off, generate a separate `prod` candidate from the **same
 upstream manifest**, approve it independently, and promote it. The image tag,

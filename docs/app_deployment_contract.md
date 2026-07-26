@@ -210,6 +210,8 @@ release tag remains evidence and is never passed to Helm.
 The guarded mutation binds its evidence reservation to Helm's release
 description. Finalization verifies that description and the revision before
 and after runtime evidence collection, and fails closed if either changes.
+It boundedly waits for old release pods in graceful termination to disappear,
+but never ignores a non-terminating release pod with inconsistent coordinates.
 
 After rollout the command writes a new record beneath
 `deployment-evidence/dspace/<environment>/<image-tag>-<approval-time>.json`

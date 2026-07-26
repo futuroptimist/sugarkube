@@ -658,7 +658,10 @@ def test_finalize_cli_collects_bound_evidence_before_consuming_reservation(
         )
         return oci_results
 
+    pod_reads = 0
+
     def run(command):
+        nonlocal pod_reads
         if "cluster_identity.py" in " ".join(command):
             events.append("cluster-identity")
             return "staging\n"
@@ -675,6 +678,11 @@ def test_finalize_cli_collects_bound_evidence_before_consuming_reservation(
         resource = command[command.index("get") + 1]
         if resource == "pods":
             events.append("pod-discovery")
+            pod_reads += 1
+            if pod_reads == 1:
+                old = pod("dspace-old")
+                old["metadata"]["deletionTimestamp"] = "2026-07-26T12:02:00Z"
+                return json.dumps({"items": [pod("dspace-b"), old]})
             return json.dumps({"items": [pod("dspace-b"), pod("dspace-a")]})
         assert resource == "replicasets,deployments"
         events.append("workload-discovery")
@@ -691,6 +699,7 @@ def test_finalize_cli_collects_bound_evidence_before_consuming_reservation(
     monkeypatch.setattr(manifest, "preflight", preflight)
     monkeypatch.setattr(manifest, "_run", run)
     monkeypatch.setattr(manifest, "_write_new", atomic_write)
+    monkeypatch.setattr(manifest.time, "sleep", lambda seconds: None)
 
     assert (
         manifest.main(
@@ -723,6 +732,8 @@ def test_finalize_cli_collects_bound_evidence_before_consuming_reservation(
         "cluster-identity",
         "helm-status",
         "pod-discovery",
+        "pod-discovery",
+        "helm-status",
         "workload-discovery",
         "helm-status",
         "atomic-final-write",
@@ -731,6 +742,50 @@ def test_finalize_cli_collects_bound_evidence_before_consuming_reservation(
     assert final["helmRevision"] == 17
     assert [item["name"] for item in final["pods"]] == ["dspace-a", "dspace-b"]
     assert not sidecar.exists()
+
+
+@pytest.mark.parametrize("failure", ["timeout", "command"])
+def test_finalize_cli_settling_failure_preserves_reservation(
+    tmp_path: Path, monkeypatch, failure: str
+) -> None:
+    source = tmp_path / "candidate.json"
+    output = tmp_path / "evidence.json"
+    source.write_text(manifest._canonical(candidate()), encoding="utf-8")
+    owner = manifest.reserve(output, candidate(), "staging", "dspace", "dspace")
+    old = pod("dspace-old")
+    old["metadata"]["deletionTimestamp"] = "2026-07-26T12:02:00Z"
+    clock = iter([0.0, 0.0, 61.0])
+
+    monkeypatch.setattr(manifest, "preflight", lambda *args, **kwargs: [])
+    monkeypatch.setattr(manifest.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(manifest.time, "sleep", lambda seconds: None)
+
+    def run(command):
+        if "cluster_identity.py" in " ".join(command):
+            return "staging\n"
+        if command[0] == "helm":
+            return json.dumps(
+                helm_status(
+                    info={
+                        "status": "deployed",
+                        "description": f"sugarkube-release-manifest:{owner}",
+                    }
+                )
+            )
+        if failure == "command":
+            raise manifest.ManifestError("pod discovery failed")
+        return json.dumps({"items": [old]})
+
+    monkeypatch.setattr(manifest, "_run", run)
+    args = [
+        "finalize", "--manifest", str(source), "--output", str(output),
+        "--environment", "staging", "--image-tag", "main-abcdef0",
+        "--chart-version", "3.2.0", "--kubeconfig", "kubeconfig",
+        "--release", "dspace", "--namespace", "dspace", "--reservation", owner,
+    ]
+    assert manifest.main(args) == 2
+    assert not output.exists()
+    assert manifest.reservation_path(output).exists()
 
 
 @pytest.mark.parametrize("changed_field", ["version", "description"])

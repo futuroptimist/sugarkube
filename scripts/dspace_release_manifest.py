@@ -13,6 +13,7 @@ import secrets
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -69,6 +70,8 @@ FINAL_FIXED_CHECKS = {
     "podImageDigests",
 }
 PLATFORM_CHECK_RE = re.compile(r"^imagePlatformSourceRevision\[(0|[1-9][0-9]*)\]$")
+POD_SETTLE_TIMEOUT_SECONDS = 60.0
+POD_SETTLE_INTERVAL_SECONDS = 2.0
 
 
 class ManifestError(ValueError):
@@ -503,6 +506,33 @@ def _image_id_digest(image_id: str) -> str:
     return match.group(0)
 
 
+def _settle_release_pods(
+    command: list[str],
+    *,
+    runner: Any = None,
+    monotonic: Any = None,
+    sleeper: Any = None,
+) -> dict[str, Any]:
+    """Wait boundedly for release pods undergoing graceful deletion to disappear."""
+    runner = _run if runner is None else runner
+    monotonic = time.monotonic if monotonic is None else monotonic
+    sleeper = time.sleep if sleeper is None else sleeper
+    deadline = monotonic() + POD_SETTLE_TIMEOUT_SECONDS
+    while True:
+        pods = json.loads(runner(command))
+        terminating = [
+            item
+            for item in pods.get("items", [])
+            if isinstance(item, dict)
+            and item.get("metadata", {}).get("deletionTimestamp") is not None
+        ]
+        if not terminating:
+            return pods
+        if monotonic() >= deadline:
+            raise ManifestError("timed out waiting for terminating release pods")
+        sleeper(POD_SETTLE_INTERVAL_SECONDS)
+
+
 def finalize(
     value: dict[str, Any],
     helm_json: dict[str, Any],
@@ -797,38 +827,33 @@ def main(argv: list[str] | None = None) -> int:
                     args.environment,
                 ]
             ).strip()
-            helm = json.loads(
-                _run(
-                    [
-                        "helm",
-                        "--kubeconfig",
-                        args.kubeconfig,
-                        "status",
-                        args.release,
-                        "--namespace",
-                        args.namespace,
-                        "-o",
-                        "json",
-                    ]
-                )
-            )
-            pods = json.loads(
-                _run(
-                    [
-                        "kubectl",
-                        "--kubeconfig",
-                        args.kubeconfig,
-                        "-n",
-                        args.namespace,
-                        "get",
-                        "pods",
-                        "-l",
-                        f"app.kubernetes.io/name=dspace,app.kubernetes.io/instance={args.release}",
-                        "-o",
-                        "json",
-                    ]
-                )
-            )
+            helm_command = [
+                "helm",
+                "--kubeconfig",
+                args.kubeconfig,
+                "status",
+                args.release,
+                "--namespace",
+                args.namespace,
+                "-o",
+                "json",
+            ]
+            helm = json.loads(_run(helm_command))
+            pod_command = [
+                "kubectl",
+                "--kubeconfig",
+                args.kubeconfig,
+                "-n",
+                args.namespace,
+                "get",
+                "pods",
+                "-l",
+                f"app.kubernetes.io/name=dspace,app.kubernetes.io/instance={args.release}",
+                "-o",
+                "json",
+            ]
+            pods = _settle_release_pods(pod_command)
+            settled_helm = json.loads(_run(helm_command))
             workloads = json.loads(
                 _run(
                     [
@@ -868,21 +893,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.namespace,
                 args.reservation,
             )
-            stable_helm = json.loads(
-                _run(
-                    [
-                        "helm",
-                        "--kubeconfig",
-                        args.kubeconfig,
-                        "status",
-                        args.release,
-                        "--namespace",
-                        args.namespace,
-                        "-o",
-                        "json",
-                    ]
-                )
-            )
+            stable_helm = json.loads(_run(helm_command))
 
             def binding_fields(status: dict[str, Any]) -> tuple[Any, ...]:
                 metadata = status.get("chart", {}).get("metadata", {})
@@ -897,7 +908,10 @@ def main(argv: list[str] | None = None) -> int:
                     metadata.get("version"),
                 )
 
-            if binding_fields(stable_helm) != binding_fields(helm):
+            if (
+                binding_fields(settled_helm) != binding_fields(helm)
+                or binding_fields(stable_helm) != binding_fields(helm)
+            ):
                 raise ManifestError("Helm release changed during evidence collection")
             _write_new(args.output, result)
             sidecar.unlink()
