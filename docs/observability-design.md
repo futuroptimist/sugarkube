@@ -152,7 +152,12 @@ graph TD
 
 ### Persistent storage
 
-- Prometheus and Grafana need persistent volumes in staging/prod.
+- Prometheus needs persistent storage in staging. Grafana persistence remains
+  intentionally disabled for the current staging lifecycle: the first shared
+  dashboard is Helm-provisioned from
+  `clusters/staging/observability/dashboards/sugarkube-staging-observability.json`
+  and is therefore restored after pod replacement. Production storage remains
+  a future design decision.
 - Alerts should treat PV exhaustion and Prometheus write failures as observability-stack risks, not app outages.
 - If the monitoring PV is unavailable, app traffic must continue; the failure mode is loss of visibility, not application rollback.
 

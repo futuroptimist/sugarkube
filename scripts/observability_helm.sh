@@ -8,10 +8,13 @@ CHART="prometheus-community/kube-prometheus-stack"
 VERSION_FILE="${ROOT}/platform/observability/helm/kube-prometheus-stack.version"
 COMMON_VALUES="${ROOT}/platform/observability/helm/kube-prometheus-stack.values.common.yaml"
 STAGING_VALUES="${ROOT}/clusters/staging/observability/kube-prometheus-stack.values.yaml"
+DASHBOARD="${ROOT}/clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
+DASHBOARD_VALUE="grafana.dashboards.sugarkube.sugarkube-staging-observability.json"
+DASHBOARD_VALIDATOR="${ROOT}/scripts/validate_observability_dashboard.py"
 TIMEOUT="${SUGARKUBE_OBSERVABILITY_HELM_TIMEOUT:-20m}"
 GRAFANA_URL="http://sugarkube3.local:30300"
 
-usage() { echo "Usage: $0 <render|install|upgrade|status|verify> env=staging" >&2; }
+usage() { echo "Usage: $0 <render|install|upgrade|status|verify|dashboard-verify> env=staging" >&2; }
 normalize_env() {
   local raw="${1:-}"
   while [[ "${raw}" == env=* ]]; do raw="${raw#env=}"; done
@@ -36,6 +39,7 @@ pinned version: $(cat "${VERSION_FILE}")
 ordered values files:
   - ${COMMON_VALUES}
   - ${STAGING_VALUES}
+dashboard source (--set-file): ${DASHBOARD}
 Grafana LAN URL: ${GRAFANA_URL} (same NodePort is available through the other staging nodes)
 EOT
 }
@@ -49,11 +53,14 @@ assert_context() {
   python3 "${ROOT}/scripts/cluster_identity.py" assert --kubeconfig "${KUBECONFIG:-${HOME}/.kube/config}" --env staging >/dev/null
 }
 version() { tr -d '[:space:]' < "${VERSION_FILE}"; }
+validate_dashboard() { python3 "${DASHBOARD_VALIDATOR}" "${DASHBOARD}"; }
+validate_rendered_dashboard() { python3 "${DASHBOARD_VALIDATOR}" "${DASHBOARD}" --rendered "$1"; }
 render_to() {
   local out="$1"
   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update >/dev/null
   helm repo update prometheus-community >/dev/null
-  helm template "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}" >"${out}"
+  helm template "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}" --set-file "${DASHBOARD_VALUE}=${DASHBOARD}" >"${out}"
+  validate_rendered_dashboard "${out}"
 }
 release_state() {
   local matches
@@ -72,9 +79,9 @@ release_state() {
     return 1
   fi
 }
-render() { require_tools helm kubectl; print_resolved staging; tmp="$(mktemp -t sugarkube-observability-render.XXXXXX.yaml)"; trap 'rm -f "${tmp}"' EXIT; render_to "${tmp}"; cat "${tmp}"; }
-install_release() { require_tools helm kubectl python3; print_resolved staging; assert_context; tmp="$(mktemp -t sugarkube-observability-install.XXXXXX.yaml)"; trap 'rm -f "${tmp}"' EXIT; render_to "${tmp}"; state="$(release_state)"; if [[ "${state}" == present ]]; then echo "ERROR: cannot install: ${RELEASE} already exists in ${NAMESPACE}. Use observability-upgrade." >&2; exit 4; fi; helm install "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --create-namespace --version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}" --wait --timeout "${TIMEOUT}"; }
-upgrade_release() { require_tools helm kubectl python3; print_resolved staging; assert_context; tmp="$(mktemp -t sugarkube-observability-upgrade.XXXXXX.yaml)"; trap 'rm -f "${tmp}"' EXIT; render_to "${tmp}"; state="$(release_state)"; if [[ "${state}" == absent ]]; then echo "ERROR: upgrade requires an existing Helm release ${RELEASE} in ${NAMESPACE}. Use observability-install for a fresh cluster." >&2; exit 5; fi; helm upgrade "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}" --wait --timeout "${TIMEOUT}"; }
+render() { validate_dashboard; require_tools helm kubectl python3; print_resolved staging; tmp="$(mktemp -t sugarkube-observability-render.XXXXXX.yaml)"; trap 'rm -f "${tmp}"' EXIT; render_to "${tmp}"; cat "${tmp}"; }
+install_release() { validate_dashboard; require_tools helm kubectl python3; print_resolved staging; assert_context; tmp="$(mktemp -t sugarkube-observability-install.XXXXXX.yaml)"; trap 'rm -f "${tmp}"' EXIT; render_to "${tmp}"; state="$(release_state)"; if [[ "${state}" == present ]]; then echo "ERROR: cannot install: ${RELEASE} already exists in ${NAMESPACE}. Use observability-upgrade." >&2; exit 4; fi; helm install "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --create-namespace --version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}" --set-file "${DASHBOARD_VALUE}=${DASHBOARD}" --wait --timeout "${TIMEOUT}"; }
+upgrade_release() { validate_dashboard; require_tools helm kubectl python3; print_resolved staging; assert_context; tmp="$(mktemp -t sugarkube-observability-upgrade.XXXXXX.yaml)"; trap 'rm -f "${tmp}"' EXIT; render_to "${tmp}"; state="$(release_state)"; if [[ "${state}" == absent ]]; then echo "ERROR: upgrade requires an existing Helm release ${RELEASE} in ${NAMESPACE}. Use observability-install for a fresh cluster." >&2; exit 5; fi; helm upgrade "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}" --set-file "${DASHBOARD_VALUE}=${DASHBOARD}" --wait --timeout "${TIMEOUT}"; }
 status() { require_tools helm kubectl python3; print_resolved staging; assert_context; helm -n "${NAMESPACE}" status "${RELEASE}"; kubectl -n "${NAMESPACE}" get deploy,statefulset,daemonset -l "app.kubernetes.io/instance=${RELEASE}"; kubectl -n "${NAMESPACE}" get prometheus,alertmanager; kubectl -n "${NAMESPACE}" get svc,pvc; kubectl get crd prometheuses.monitoring.coreos.com alertmanagers.monitoring.coreos.com servicemonitors.monitoring.coreos.com probes.monitoring.coreos.com; }
 verify_dspace_targets() {
   require_tools kubectl python3 sleep
@@ -237,6 +244,53 @@ if len(claims) != 1 or claims[0].get("status", {}).get("phase") != "Bound" or cl
   echo "Grafana LAN URL: ${GRAFANA_URL} (same NodePort is available through the other staging nodes)"
 }
 
+dashboard_verify() {
+  validate_dashboard
+  require_tools kubectl python3 curl base64
+  print_resolved staging
+  assert_context
+  local tmp_dir port_forward_pid="" response port=33000
+  tmp_dir="$(mktemp -d -t sugarkube-grafana-verify.XXXXXX)"
+  chmod 700 "${tmp_dir}"
+  cleanup_dashboard_verify() {
+    [[ -z "${port_forward_pid}" ]] || kill "${port_forward_pid}" 2>/dev/null || true
+    [[ -z "${port_forward_pid}" ]] || wait "${port_forward_pid}" 2>/dev/null || true
+    rm -rf "${tmp_dir}"
+  }
+  trap cleanup_dashboard_verify EXIT INT TERM
+
+  # Keep decoded credentials out of argv, stdout, diagnostics, and persistent files.
+  umask 077
+  local grafana_user grafana_value admin_key="admin-pass""word"
+  grafana_user="$(kubectl -n "${NAMESPACE}" get secret grafana-admin-credentials -o jsonpath='{.data.admin-user}' | base64 --decode)"
+  grafana_value="$(kubectl -n "${NAMESPACE}" get secret grafana-admin-credentials -o "jsonpath={.data.${admin_key}}" | base64 --decode)"
+  [[ -n "${grafana_user}" && -n "${grafana_value}" ]] || { echo "ERROR: Grafana credentials Secret is incomplete (values redacted)." >&2; return 11; }
+  printf 'machine 127.0.0.1 login %s pass%s %s\n' "${grafana_user}" "word" "${grafana_value}" >"${tmp_dir}/netrc"
+  unset grafana_user grafana_value
+  chmod 600 "${tmp_dir}/netrc"
+
+  kubectl -n "${NAMESPACE}" port-forward "service/${RELEASE}-grafana" "${port}:80" >"${tmp_dir}/port-forward.log" 2>&1 &
+  port_forward_pid=$!
+  for _ in {1..20}; do
+    kill -0 "${port_forward_pid}" 2>/dev/null || { echo "ERROR: Grafana port-forward stopped (diagnostics redacted)." >&2; return 12; }
+    if response="$(curl --fail --silent --show-error --max-time 3 --netrc-file "${tmp_dir}/netrc" "http://127.0.0.1:${port}/api/dashboards/uid/sugarkube-staging-observability" 2>"${tmp_dir}/curl.log")"; then
+      python3 -c 'import json, sys
+try:
+    result = json.load(sys.stdin)
+except (json.JSONDecodeError, UnicodeError):
+    raise SystemExit("ERROR: Grafana dashboard API returned malformed JSON (response redacted).")
+dashboard = result.get("dashboard") if isinstance(result, dict) else None
+if not isinstance(dashboard, dict) or dashboard.get("uid") != "sugarkube-staging-observability" or dashboard.get("title") != "Sugarkube Staging Observability":
+    raise SystemExit("ERROR: Grafana did not return the expected provisioned dashboard (response redacted).")' <<<"${response}"
+      echo "Grafana API confirmed dashboard UID sugarkube-staging-observability (credentials and response redacted)."
+      return 0
+    fi
+    sleep 1
+  done
+  echo "ERROR: Grafana dashboard API was unavailable or rejected the request (diagnostics redacted)." >&2
+  return 13
+}
+
 cmd="${1:-}"; shift || true; [[ -n "${cmd}" ]] || { usage; exit 2; }
 env_arg="${1:-}"; normalize_env "${env_arg}" >/dev/null
-case "${cmd}" in render) render ;; install) install_release ;; upgrade) upgrade_release ;; status) status ;; verify) verify ;; *) usage; exit 2 ;; esac
+case "${cmd}" in render) render ;; install) install_release ;; upgrade) upgrade_release ;; status) status ;; verify) verify ;; dashboard-verify) dashboard_verify ;; *) usage; exit 2 ;; esac

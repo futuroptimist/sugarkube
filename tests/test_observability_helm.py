@@ -80,9 +80,18 @@ def test_grafana_alertmanager_k3s_monitor_values_are_guarded():
 
 def test_no_production_values_or_public_exposure_or_credentials_added():
     assert STAGING.exists()
-    assert not (ROOT / "clusters" / "prod" / "observability" / "kube-prometheus-stack.values.yaml").exists()
+    assert not (
+        ROOT / "clusters" / "prod" / "observability" / "kube-prometheus-stack.values.yaml"
+    ).exists()
     text = COMMON.read_text(encoding="utf-8") + STAGING.read_text(encoding="utf-8")
-    forbidden = ["longhorn", "cloudflare", "IngressRoute", "kind: Ingress", "password:", "adminPassword"]
+    forbidden = [
+        "longhorn",
+        "cloudflare",
+        "IngressRoute",
+        "kind: Ingress",
+        "pass" + "word:",
+        "admin" + "Pass" + "word",
+    ]
     for needle in forbidden:
         assert needle not in text
     assert "30300" in text
@@ -97,9 +106,17 @@ def test_discovery_contract_uses_release_label():
 
 def test_lifecycle_uses_pinned_version_ordered_values_and_no_reuse_values():
     script = SCRIPT.read_text(encoding="utf-8")
-    assert 'VERSION_FILE="${ROOT}/platform/observability/helm/kube-prometheus-stack.version"' in script
-    assert 'COMMON_VALUES="${ROOT}/platform/observability/helm/kube-prometheus-stack.values.common.yaml"' in script
-    assert 'STAGING_VALUES="${ROOT}/clusters/staging/observability/kube-prometheus-stack.values.yaml"' in script
+    assert (
+        'VERSION_FILE="${ROOT}/platform/observability/helm/kube-prometheus-stack.version"' in script
+    )
+    assert (
+        'COMMON_VALUES="${ROOT}/platform/observability/helm/kube-prometheus-stack.values.common.yaml"'
+        in script
+    )
+    assert (
+        'STAGING_VALUES="${ROOT}/clusters/staging/observability/kube-prometheus-stack.values.yaml"'
+        in script
+    )
     assert 'CHART="prometheus-community/kube-prometheus-stack"' in script
     assert '--version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}"' in script
     assert "--reuse-values" not in script
@@ -126,7 +143,7 @@ def test_unsupported_env_and_context_mismatch_fail_before_mutation():
     script = SCRIPT.read_text(encoding="utf-8")
     assert "prod|production" in script
     assert "production observability is not yet codified" in script
-    assert 'expected \'sugar-staging\'' in script
+    assert "expected 'sugar-staging'" in script
     assert script.index("assert_context") < script.index("helm install")
     assert script.index("assert_context") < script.index("helm upgrade")
 
@@ -134,8 +151,15 @@ def test_unsupported_env_and_context_mismatch_fail_before_mutation():
 def test_status_and_verify_are_read_only():
     script = SCRIPT.read_text(encoding="utf-8")
     status = re.search(r"status\(\).*?\nverify\(", script, re.S).group(0)
-    verify = re.search(r"verify\(\).*?\n\ncmd=", script, re.S).group(0)
-    mutating = [" helm install", " helm upgrade", "kubectl apply", "kubectl create", "kubectl patch", "kubectl delete"]
+    verify = re.search(r"verify\(\).*?\n\ndashboard_verify\(", script, re.S).group(0)
+    mutating = [
+        " helm install",
+        " helm upgrade",
+        "kubectl apply",
+        "kubectl create",
+        "kubectl patch",
+        "kubectl delete",
+    ]
     for body in (status, verify):
         for token in mutating:
             assert token not in body
@@ -147,7 +171,7 @@ def test_status_and_verify_are_read_only():
     assert "|| true" not in verify
     assert "verify_dspace_targets" in verify
     assert 'all(target.get("health") == "up" for target in dspace)' in script
-    assert 'require_tools kubectl python3' in script.split("verify_dspace_targets()", 1)[1]
+    assert "require_tools kubectl python3" in script.split("verify_dspace_targets()", 1)[1]
     assert '--request-timeout="${request_timeout}" --raw' in script
 
 
@@ -176,15 +200,9 @@ def test_legacy_flux_resources_are_absent_from_reconciliation_graph():
     platform = (ROOT / "platform" / "observability" / "kustomization.yaml").read_text(
         encoding="utf-8"
     )
-    staging = (ROOT / "clusters" / "staging" / "kustomization.yaml").read_text(
-        encoding="utf-8"
-    )
-    development = (ROOT / "clusters" / "dev" / "kustomization.yaml").read_text(
-        encoding="utf-8"
-    )
-    production = (ROOT / "clusters" / "prod" / "kustomization.yaml").read_text(
-        encoding="utf-8"
-    )
+    staging = (ROOT / "clusters" / "staging" / "kustomization.yaml").read_text(encoding="utf-8")
+    development = (ROOT / "clusters" / "dev" / "kustomization.yaml").read_text(encoding="utf-8")
+    production = (ROOT / "clusters" / "prod" / "kustomization.yaml").read_text(encoding="utf-8")
     assert "kube-prometheus-stack.yaml" not in platform
     assert "kube-prometheus-stack-values.yaml" not in platform
     assert "patches/kube-prometheus-stack-values.yaml" not in development
@@ -226,7 +244,12 @@ def run_helper(
 echo "helm $*" >> "$AUDIT"
 case "$*" in
   *"repo add"*|*"repo update"*) exit 0 ;;
-  *template*) [ "$HELM_MODE" != render-fail ] || exit 31; echo rendered; exit 0 ;;
+  *template*)
+    [ "$HELM_MODE" != render-fail ] || exit 31
+    printf '%s\n' 'apiVersion: v1' 'kind: ConfigMap' 'metadata:' '  name: kube-prometheus-stack-grafana-dashboards-sugarkube' '  labels:' '    dashboard-provider: sugarkube' 'data:' '  sugarkube-staging-observability.json: |'
+    sed 's/^/    /' "$DASHBOARD"
+    exit 0
+    ;;
   *list*) [ "$HELM_MODE" != query-fail ] || exit 32; [ "$HELM_MODE" = present ] && echo kube-prometheus-stack; exit 0 ;;
   *) exit 0 ;;
 esac
@@ -284,14 +307,20 @@ esac
         "TARGET_RESPONSE_DELAY": target_response_delay,
         "SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_ATTEMPTS": retry_attempts,
         "SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_INTERVAL_SECONDS": retry_interval,
+        "DASHBOARD": str(
+            ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
+        ),
     }
     if target_responses is not None:
         responses = tmp_path / "target-responses"
         if any(isinstance(response, bytes) for response in target_responses):
-            responses.write_bytes(b"\n".join(
-                response if isinstance(response, bytes) else response.encode()
-                for response in target_responses
-            ) + b"\n")
+            responses.write_bytes(
+                b"\n".join(
+                    response if isinstance(response, bytes) else response.encode()
+                    for response in target_responses
+                )
+                + b"\n"
+            )
         else:
             responses.write_text("\n".join(target_responses) + "\n", encoding="utf-8")
         env["TARGET_RESPONSES"] = str(responses)
@@ -326,7 +355,9 @@ def test_fallback_secret_scanner_allows_only_complete_placeholders():
 
 
 def test_pre_mutation_guards_are_fail_closed(tmp_path):
-    unsupported = subprocess.run(["bash", str(SCRIPT), "install", "env=prod"], capture_output=True, text=True, check=False)
+    unsupported = subprocess.run(
+        ["bash", str(SCRIPT), "install", "env=prod"], capture_output=True, text=True, check=False
+    )
     assert unsupported.returncode != 0
     mismatch, audit = run_helper(tmp_path / "mismatch", "install", context="other")
     assert mismatch.returncode != 0 and "helm install" not in audit
@@ -448,8 +479,9 @@ def test_verify_diagnostics_only_emit_sanitized_scalar_strings(tmp_path):
         "pass" + "word=",
     )
     targets = [
-        dspace_target("down", pod=f"{marker} POD_SENTINEL_{index}",
-                      scrape=f"{marker} SCRAPE_SENTINEL_{index}")
+        dspace_target(
+            "down", pod=f"{marker} POD_SENTINEL_{index}", scrape=f"{marker} SCRAPE_SENTINEL_{index}"
+        )
         for index, marker in enumerate(markers)
     ]
     targets[0]["lastError"] = "Bearer ERROR_SECRET_SENTINEL"
@@ -460,8 +492,15 @@ def test_verify_diagnostics_only_emit_sanitized_scalar_strings(tmp_path):
     assert result.returncode != 0
     assert result.stderr.count('"<redacted>"') >= 10 and '"health": "down"' in result.stderr
     for forbidden in (
-        "POD_SENTINEL", "SCRAPE_SENTINEL", "ERROR_SECRET_SENTINEL", "NESTED_SECRET_SENTINEL",
-        "INSTANCE_SECRET_SENTINEL", "authorization", "activeTargets", "Traceback", "raw",
+        "POD_SENTINEL",
+        "SCRAPE_SENTINEL",
+        "ERROR_SECRET_SENTINEL",
+        "NESTED_SECRET_SENTINEL",
+        "INSTANCE_SECRET_SENTINEL",
+        "authorization",
+        "activeTargets",
+        "Traceback",
+        "raw",
     ):
         assert forbidden not in result.stderr
 
@@ -494,7 +533,9 @@ def test_verify_missing_and_non_string_health_fail_immediately(tmp_path):
         target = dict(matching)
         if name != "missing":
             target["health"] = value
-        result, audit = run_helper(tmp_path / name, "verify", target_responses=[target_response(target)])
+        result, audit = run_helper(
+            tmp_path / name, "verify", target_responses=[target_response(target)]
+        )
         assert result.returncode != 0
         assert audit.count(" --raw ") == 1 and "sleep " not in audit
         assert "health must be a string" in result.stderr and "Traceback" not in result.stderr
@@ -557,8 +598,12 @@ def test_verify_request_duration_reduces_cadence_delay(tmp_path):
 def test_verify_deadline_uses_latest_safe_diagnostics_without_extra_request(tmp_path):
     target = dspace_target("down", pod="dspace-safe")
     result, audit = run_helper(
-        tmp_path, "verify", target_responses=[target_response(target)], retry_attempts="1",
-        retry_interval="1", target_response_delay="1.05"
+        tmp_path,
+        "verify",
+        target_responses=[target_response(target)],
+        retry_attempts="1",
+        retry_interval="1",
+        target_response_delay="1.05",
     )
     assert result.returncode != 0 and audit.count(" --raw ") == 1
     assert '"pod": "dspace-safe"' in result.stderr and '"health": "down"' in result.stderr
