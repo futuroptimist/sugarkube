@@ -143,18 +143,20 @@ def validate_render(path: Path, dashboard_json: str) -> None:
         )
     mount_entries = []
     for match in re.finditer(
-        r"(?m)^(?P<indent>[ \t]*)-[ \t]+mountPath:[ \t]*(?P<path>.+?)\s*$", rendered
+        r"(?m)^(?P<indent>[ \t]*)-[ \t]+(?P<key>\w+):[ \t]*(?P<value>.+?)\s*$",
+        rendered,
     ):
         indent = len(match.group("indent"))
         following = rendered[match.end() :].splitlines()
-        fields = {}
+        fields = {match.group("key"): scalar(match.group("value"))}
         for line in following:
             if line.strip() and len(line) - len(line.lstrip()) <= indent:
                 break
-            field = re.match(r"^[ \t]+(subPath):[ \t]*(.+?)\s*$", line)
+            field = re.match(r"^[ \t]+(\w+):[ \t]*(.+?)\s*$", line)
             if field:
                 fields[field.group(1)] = scalar(field.group(2))
-        mount_entries.append((scalar(match.group("path")), fields.get("subPath")))
+        if "mountPath" in fields or "subPath" in fields:
+            mount_entries.append((fields.get("mountPath"), fields.get("subPath")))
     dashboard_mounts = [
         entry
         for entry in mount_entries

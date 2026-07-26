@@ -144,8 +144,8 @@ def rendered_dashboard_yaml(dashboard, mount_path=None, sub_path=None):
         "          path: /var/lib/grafana/dashboards/sugarkube\n"
         "---\nkind: Deployment\nspec:\n  template:\n    spec:\n      containers:\n"
         "        - volumeMounts:\n"
-        f'            - mountPath: "{mount_path}"\n'
-        "              name: sugarkube-dashboard\n"
+        "            - name: dashboards-sugarkube\n"
+        f'              mountPath: "{mount_path}"\n'
         f'              subPath: "{sub_path}"\n'
     )
 
