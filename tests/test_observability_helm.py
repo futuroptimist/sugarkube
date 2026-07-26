@@ -625,6 +625,7 @@ case "$*" in
   "config current-context") echo "$CONTEXT" ;;
   *"get nodes -o json"*) echo '{"items":[{"metadata":{"name":"n1","labels":{"sugarkube.env":"staging","sugarkube.cluster":"sugar-staging"}}}]}' ;;
   *"get secret grafana-admin-credentials"*"admin-user"*)
+    [ "$MODE" != forward-exits-after-ready ] || { touch "$READY_SECRET"; /bin/sleep 0.2; }
     [ "$MODE" != secret-missing ] || exit 41
     [ "$MODE" != secret-malformed ] || { printf not-base64; exit; }
     printf admin | base64 ;;
@@ -632,7 +633,13 @@ case "$*" in
   *"port-forward"*)
     [ "$MODE" != forward-fail ] || exit 42
     echo 'Forwarding from 127.0.0.1:43127 -> 80'
+    echo $$ > "$FORWARD_PID"
     trap 'echo terminated > "$PID_FILE"; exit 0' TERM INT
+    if [ "$MODE" = forward-exits-after-ready ]; then
+      while [ ! -f "$READY_SECRET" ]; do /bin/sleep 0.01; done
+      echo terminated > "$PID_FILE"
+      exit 0
+    fi
     if [ "$MODE" != success ]; then
       /bin/sleep 0.2
       echo terminated > "$PID_FILE"
@@ -671,6 +678,8 @@ esac
         "MODE": mode,
         "CONTEXT": context,
         "PID_FILE": str(pid_file),
+        "FORWARD_PID": str(tmp_path / "port-forward.pid"),
+        "READY_SECRET": str(tmp_path / "secret-requested"),
         "TMPDIR": str(tmp_path),
         "KUBECONFIG": str(tmp_path / "kubeconfig"),
     }
@@ -688,6 +697,7 @@ def test_dashboard_verifier_runtime_owns_port_and_cleans_up(tmp_path):
     result, audit, pid_file = run_dashboard_verifier(tmp_path)
     assert result.returncode == 0, result.stderr
     assert "port-forward --address=127.0.0.1" in audit
+    assert audit.index("port-forward") < audit.index("get secret") < audit.index("curl ")
     assert "http://127.0.0.1:43127/" in audit
     assert not list(tmp_path.glob("sugarkube-grafana-verify.*"))
     assert pid_file.read_text(encoding="utf-8").strip() == "terminated"
@@ -703,7 +713,8 @@ def test_dashboard_verifier_rejects_missing_and_malformed_credentials(tmp_path):
     for mode in ("secret-missing", "secret-malformed"):
         result, audit, _ = run_dashboard_verifier(tmp_path / mode, mode)
         assert result.returncode != 0
-        assert "port-forward" not in audit and "curl " not in audit
+        assert audit.index("port-forward") < audit.index("get secret")
+        assert "curl " not in audit
         assert "placeholder" not in result.stdout + result.stderr
 
 
@@ -711,6 +722,17 @@ def test_dashboard_verifier_port_forward_failure_never_authenticates(tmp_path):
     failed, audit, _ = run_dashboard_verifier(tmp_path / "forward", "forward-fail")
     assert failed.returncode != 0 and "curl " not in audit
     assert not list((tmp_path / "forward").glob("sugarkube-grafana-verify.*"))
+
+
+def test_dashboard_verifier_rejects_forward_exit_after_readiness(tmp_path):
+    result, audit, pid_file = run_dashboard_verifier(tmp_path, "forward-exits-after-ready")
+    assert result.returncode != 0
+    assert audit.index("port-forward") < audit.index("get secret")
+    assert "curl " not in audit
+    assert pid_file.read_text(encoding="utf-8").strip() == "terminated"
+    forward_pid = int((tmp_path / "port-forward.pid").read_text(encoding="utf-8"))
+    assert not Path(f"/proc/{forward_pid}").exists()
+    assert not list(tmp_path.glob("sugarkube-grafana-verify.*"))
 
 
 def test_dashboard_verifier_auth_failures_are_immediate_and_redacted(tmp_path):

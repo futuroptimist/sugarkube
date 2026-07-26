@@ -272,22 +272,10 @@ dashboard_verify() (
   trap 'exit 130' INT
   trap 'exit 143' TERM
 
-  # Keep decoded credentials out of argv, stdout, diagnostics, and persistent files.
-  umask 077
-  local grafana_user grafana_value admin_key="admin-pass""word"
-  grafana_user="$(kubectl -n "${NAMESPACE}" get secret grafana-admin-credentials -o jsonpath='{.data.admin-user}' | base64 --decode)"
-  grafana_value="$(kubectl -n "${NAMESPACE}" get secret grafana-admin-credentials -o "jsonpath={.data.${admin_key}}" | base64 --decode)"
-  [[ -n "${grafana_user}" && -n "${grafana_value}" && "${grafana_user}" != *$'\n'* && "${grafana_value}" != *$'\n'* ]] || { echo "ERROR: Grafana credentials Secret is missing or malformed (values redacted)." >&2; return 11; }
-  grafana_user="${grafana_user//\\/\\\\}"; grafana_user="${grafana_user//\"/\\\"}"
-  grafana_value="${grafana_value//\\/\\\\}"; grafana_value="${grafana_value//\"/\\\"}"
-  printf 'machine 127.0.0.1 login "%s" pass%s "%s"\n' "${grafana_user}" "word" "${grafana_value}" >"${verify_tmp}/netrc"
-  unset grafana_user grafana_value
-  chmod 600 "${verify_tmp}/netrc"
-
-  # Let kubectl atomically allocate and bind an ephemeral loopback port. This
-  # prevents an unrelated process on a predictable port from receiving the
-  # administrator credentials. Do not authenticate until this kubectl process
-  # has reported the listener it owns.
+  # The operator host and account are trusted. Ephemeral allocation prevents
+  # predictable prebinding and ordinary collisions, and process checks reject
+  # ordinary child failure. This helper does not claim cryptographic protection
+  # against an active same-host rebind between the final check and connection.
   # Do not let the asynchronous child inherit the parent's EXIT cleanup trap.
   : >"${verify_tmp}/port-forward.log"
   trap - EXIT
@@ -307,6 +295,18 @@ dashboard_verify() (
   done
   [[ -n "${port}" ]] || { echo "ERROR: Grafana port-forward did not establish an owned loopback listener (diagnostics redacted)." >&2; return 12; }
   kill -0 "${verify_pid}" 2>/dev/null || port_forward_stopped
+
+  # Keep decoded credentials out of argv, stdout, diagnostics, and persistent files.
+  umask 077
+  local grafana_user grafana_value admin_key="admin-pass""word"
+  grafana_user="$(kubectl -n "${NAMESPACE}" get secret grafana-admin-credentials -o jsonpath='{.data.admin-user}' | base64 --decode)"
+  grafana_value="$(kubectl -n "${NAMESPACE}" get secret grafana-admin-credentials -o "jsonpath={.data.${admin_key}}" | base64 --decode)"
+  [[ -n "${grafana_user}" && -n "${grafana_value}" && "${grafana_user}" != *$'\n'* && "${grafana_value}" != *$'\n'* ]] || { echo "ERROR: Grafana credentials Secret is missing or malformed (values redacted)." >&2; return 11; }
+  grafana_user="${grafana_user//\\/\\\\}"; grafana_user="${grafana_user//\"/\\\"}"
+  grafana_value="${grafana_value//\\/\\\\}"; grafana_value="${grafana_value//\"/\\\"}"
+  printf 'machine 127.0.0.1 login "%s" pass%s "%s"\n' "${grafana_user}" "word" "${grafana_value}" >"${verify_tmp}/netrc"
+  unset grafana_user grafana_value
+  chmod 600 "${verify_tmp}/netrc"
 
   for _ in {1..20}; do
     kill -0 "${verify_pid}" 2>/dev/null || port_forward_stopped
