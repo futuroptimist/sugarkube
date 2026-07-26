@@ -195,6 +195,25 @@ def test_validator_accepts_chart_native_render(tmp_path, dashboard):
     validator.validate_render(rendered, dashboard_json)
 
 
+def test_validator_accepts_single_quoted_render_scalars(tmp_path, dashboard):
+    rendered = tmp_path / "single-quoted.yaml"
+    content = rendered_dashboard_yaml(dashboard).replace(
+        "path: /var/lib/grafana/dashboards/sugarkube",
+        "path: '/var/lib/grafana/dashboards/sugarkube'",
+    )
+    rendered.write_text(content, encoding="utf-8")
+    validator.validate_render(rendered, DASHBOARD.read_text(encoding="utf-8"))
+
+
+def test_validator_main_validates_source_and_render(monkeypatch, tmp_path, dashboard):
+    rendered = tmp_path / "rendered.yaml"
+    rendered.write_text(rendered_dashboard_yaml(dashboard), encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", [str(VALIDATOR), str(DASHBOARD)])
+    validator.main()
+    monkeypatch.setattr(sys, "argv", [str(VALIDATOR), str(DASHBOARD), "--rendered", str(rendered)])
+    validator.main()
+
+
 def test_validator_rejects_raw_urls_and_complete_render_drift(tmp_path, dashboard):
     unsafe = tmp_path / "unsafe.json"
     unsafe_dashboard = json.loads(json.dumps(dashboard))
@@ -271,6 +290,38 @@ def test_validator_directly_rejects_unsafe_dashboard_sources(
     ],
 )
 def test_validator_directly_rejects_unsafe_render_shapes(tmp_path, dashboard, mutation, message):
+    rendered = tmp_path / "rendered.yaml"
+    rendered.write_text(mutation(rendered_dashboard_yaml(dashboard)), encoding="utf-8")
+    with pytest.raises(SystemExit, match=message):
+        validator.validate_render(rendered, DASHBOARD.read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (
+            lambda text: text.replace(
+                'mountPath: "/var/lib/grafana/dashboards/sugarkube/',
+                'mountPath: "/tmp/',
+            ),
+            "dashboard mount must be exactly",
+        ),
+        (
+            lambda text: text.replace(
+                "path: /var/lib/grafana/dashboards/sugarkube", 'path: "unterminated'
+            ),
+            "malformed YAML scalars",
+        ),
+        (lambda text: text.replace("    |-", "  |-", 1), "block scalar is misplaced"),
+        (
+            lambda text: text.replace('"refresh": "30s",', '"refresh": ,'),
+            "contains malformed JSON",
+        ),
+    ],
+)
+def test_validator_directly_rejects_remaining_render_branches(
+    tmp_path, dashboard, mutation, message
+):
     rendered = tmp_path / "rendered.yaml"
     rendered.write_text(mutation(rendered_dashboard_yaml(dashboard)), encoding="utf-8")
     with pytest.raises(SystemExit, match=message):
