@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -10,11 +11,27 @@ DASHBOARD = ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-
 VALIDATOR = ROOT / "scripts/validate_observability_dashboard.py"
 SCRIPT = ROOT / "scripts/observability_helm.sh"
 
+# Import the validator so pytest-cov attributes its execution to the production
+# module. Subprocess-only checks prove the command-line contract, but their
+# coverage data is not collected by the parent pytest process.
+sys.path.insert(0, str(ROOT))
+from scripts import validate_observability_dashboard as validator  # noqa: E402
+
 
 def all_panels(document):
     for panel in document["panels"]:
         yield panel
         yield from panel.get("panels", [])
+
+
+def replace_metric_expression(document, metric, replacement):
+    target = next(
+        target
+        for panel in all_panels(document)
+        for target in panel.get("targets", [])
+        if metric in target.get("expr", "")
+    )
+    target["expr"] = replacement
 
 
 @pytest.fixture
@@ -123,6 +140,14 @@ def test_validator_rejects_malformed_missing_and_changed_identity(tmp_path):
     )
     assert missing.returncode != 0
 
+    for content in ("{", "[]"):
+        candidate = tmp_path / f"direct-{len(content)}.json"
+        candidate.write_text(content, encoding="utf-8")
+        with pytest.raises(SystemExit, match="dashboard JSON"):
+            validator.load_dashboard(candidate)
+    with pytest.raises(SystemExit, match="dashboard JSON"):
+        validator.load_dashboard(tmp_path / "direct-missing.json")
+
 
 def rendered_dashboard_yaml(dashboard, mount_path=None, sub_path=None):
     filename = "sugarkube-staging-observability.json"
@@ -164,6 +189,11 @@ def test_validator_accepts_chart_native_render(tmp_path, dashboard):
     result = run_render_validation(tmp_path, rendered_dashboard_yaml(dashboard))
     assert result.returncode == 0, result.stderr
 
+    rendered = tmp_path / "direct-rendered.yaml"
+    rendered.write_text(rendered_dashboard_yaml(dashboard), encoding="utf-8")
+    dashboard_json = validator.validate_dashboard(DASHBOARD)
+    validator.validate_render(rendered, dashboard_json)
+
 
 def test_validator_rejects_raw_urls_and_complete_render_drift(tmp_path, dashboard):
     unsafe = tmp_path / "unsafe.json"
@@ -193,6 +223,68 @@ def test_validator_rejects_wrong_dashboard_mount(tmp_path, dashboard, mount_path
     )
     assert result.returncode != 0
     assert "dashboard mount must be exactly" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (lambda item: item.update(uid="wrong"), "dashboard title"),
+        (lambda item: item.update(panels=[]), "panel IDs"),
+        (
+            lambda item: replace_metric_expression(item, "process_resident_memory_bytes", "0"),
+            "missing required PromQL metrics",
+        ),
+        (
+            lambda item: replace_metric_expression(
+                item, "dspace_dchat_requests_total", "dspace_dchat_requests_total"
+            ),
+            "must use a safe zero fallback",
+        ),
+        (lambda item: item.update(links=[{"url": "https://example.invalid"}]), "raw URLs"),
+        (lambda item: item.update(description="${DS_PROMETHEUS}"), "datasource placeholder"),
+        (lambda item: item.update(datasource={"uid": "unexpected"}), "datasource references"),
+    ],
+)
+def test_validator_directly_rejects_unsafe_dashboard_sources(
+    tmp_path, dashboard, mutation, message
+):
+    candidate = tmp_path / "candidate.json"
+    mutation(dashboard)
+    candidate.write_text(json.dumps(dashboard), encoding="utf-8")
+    with pytest.raises(SystemExit, match=message):
+        validator.validate_dashboard(candidate)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (lambda text: text.replace("kind: ConfigMap", "kind: Secret", 1), "intended"),
+        (lambda text: text.replace("name: sugarkube", "name: other"), "one Sugarkube"),
+        (
+            lambda text: text.replace(
+                "path: /var/lib/grafana/dashboards/sugarkube", "path: /tmp/dashboard"
+            ),
+            "provider path",
+        ),
+        (lambda text: text.replace("    |-", "    >-", 1), "block scalar is malformed"),
+        (lambda text: text.replace('"refresh": "30s"', '"refresh": "5m"'), "differs"),
+    ],
+)
+def test_validator_directly_rejects_unsafe_render_shapes(tmp_path, dashboard, mutation, message):
+    rendered = tmp_path / "rendered.yaml"
+    rendered.write_text(mutation(rendered_dashboard_yaml(dashboard)), encoding="utf-8")
+    with pytest.raises(SystemExit, match=message):
+        validator.validate_render(rendered, DASHBOARD.read_text(encoding="utf-8"))
+
+
+def test_validator_directly_rejects_missing_or_empty_render(tmp_path):
+    dashboard_json = DASHBOARD.read_text(encoding="utf-8")
+    with pytest.raises(SystemExit, match="rendered Helm output"):
+        validator.validate_render(tmp_path / "missing.yaml", dashboard_json)
+    rendered = tmp_path / "empty.yaml"
+    rendered.write_text("", encoding="utf-8")
+    with pytest.raises(SystemExit, match="exactly one custom dashboard"):
+        validator.validate_render(rendered, dashboard_json)
 
 
 def test_lifecycle_passes_same_dashboard_to_all_helm_paths():
