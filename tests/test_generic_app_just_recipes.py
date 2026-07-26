@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -12,6 +13,7 @@ import pytest
 
 from scripts import app_chart
 from scripts import app_verify
+from scripts import dspace_release_manifest as release_manifest
 from scripts.app_verify import base_url_from_host, tokenplace_meta_failure
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -64,6 +66,15 @@ fi
         f"""#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >> {str(tmp_path / "kubectl.log")!r}
+printf 'kubectl %s\n' "$*" >> {str(tmp_path / "commands.log")!r}
+if [[ "$*" == *"get pods"* && "$*" == *"-o json"* ]]; then
+  printf '{{"items":[{{"metadata":{{"name":"dspace-0","labels":{{"app.kubernetes.io/name":"dspace","app.kubernetes.io/instance":"dspace"}},"ownerReferences":[{{"kind":"ReplicaSet","name":"dspace-rs","uid":"rs-uid","controller":true}}]}},"spec":{{"containers":[{{"name":"dspace","image":"ghcr.io/democratizedspace/dspace:main-abcdef0"}}]}},"status":{{"phase":"Running","startTime":"2026-07-26T12:10:00Z","conditions":[{{"type":"Ready","status":"True"}}],"containerStatuses":[{{"name":"dspace","imageID":"ghcr.io/democratizedspace/dspace@sha256:%s","state":{{"running":{{}}}}}}]}}}}]}}\n' "${{SUGARKUBE_STUB_IMAGE_DIGEST_HEX:-1111111111111111111111111111111111111111111111111111111111111111}}"
+  exit 0
+fi
+if [[ "$*" == *"get replicasets,deployments"* && "$*" == *"-o json"* ]]; then
+  printf '{{"items":[{{"kind":"ReplicaSet","metadata":{{"name":"dspace-rs","uid":"rs-uid","labels":{{"app.kubernetes.io/name":"dspace","app.kubernetes.io/instance":"dspace"}},"ownerReferences":[{{"kind":"Deployment","name":"dspace","uid":"deploy-uid","controller":true}}]}}}},{{"kind":"Deployment","metadata":{{"name":"dspace","uid":"deploy-uid","labels":{{"app.kubernetes.io/name":"dspace","app.kubernetes.io/instance":"dspace","app.kubernetes.io/managed-by":"Helm"}},"annotations":{{"meta.helm.sh/release-name":"dspace","meta.helm.sh/release-namespace":"dspace"}}}}}}]}}\n'
+  exit 0
+fi
 if [[ "$*" == *"get nodes -o json"* ]]; then
   env_label="${{SUGARKUBE_STUB_NODE_ENV:-staging}}"
   cluster_label="${{SUGARKUBE_STUB_CLUSTER:-sugar}}"
@@ -104,6 +115,24 @@ exit 0
         f"""#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >> {str(log_path)!r}
+printf 'helm %s\n' "$*" >> {str(tmp_path / "commands.log")!r}
+if [ "${{1:-}}" = upgrade ]; then
+  previous=""
+  for argument in "$@"; do
+    if [ "$previous" = --description ]; then
+      printf '%s' "$argument" > {str(tmp_path / "helm-description")!r}
+      break
+    fi
+    previous="$argument"
+  done
+fi
+if [[ "$*" == *"status dspace --namespace dspace -o json" ]]; then
+  chart_version=3.1.0
+  [ "${{SUGARKUBE_STUB_NODE_ENV:-staging}}" != prod ] || chart_version=3.0.1
+  description="$(cat {str(tmp_path / "helm-description")!r} 2>/dev/null || true)"
+  printf '{{"name":"dspace","namespace":"dspace","version":7,"info":{{"status":"deployed","description":"%s"}},"chart":{{"metadata":{{"name":"dspace","version":"%s"}}}}}}\n' "$description" "$chart_version"
+  exit 0
+fi
 if [[ "$*" == *"get values"* ]]; then
   if [ "${{SUGARKUBE_STUB_HELM_GET_VALUES_FAIL:-}}" = "1" ]; then
     echo 'Error: Kubernetes cluster unreachable for context sugar-staging' >&2
@@ -113,6 +142,11 @@ if [[ "$*" == *"get values"* ]]; then
   exit 0
 fi
 if [[ "$*" == show\ chart* ]]; then
+  if [[ "$*" == *"charts/dspace"* ]]; then
+    version="${{*: -1}}"
+    printf 'apiVersion: v2\nname: dspace\nversion: %s\nappVersion: main-abcdef0\n' "$version"
+    exit 0
+  fi
   printf 'apiVersion: v2\nname: tokenplace\nversion: 0.1.3\nappVersion: main-deadbee\ndigest: sha256:abc123\n'
   exit 0
 fi
@@ -271,6 +305,39 @@ fi
 printf '%s' "${{status}}"
 exit "${{curl_exit}}"
 """,
+    )
+    _write_executable(
+        bin_dir / "oras",
+        f'''#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+
+image = "sha256:" + os.environ.get("SUGARKUBE_STUB_RESOLVED_IMAGE", "1" * 64)
+chart = "sha256:" + os.environ.get("SUGARKUBE_STUB_RESOLVED_CHART", "2" * 64)
+platform = "sha256:" + "3" * 64
+image_config = "sha256:" + "4" * 64
+chart_config = "sha256:" + "5" * 64
+sha = "abcdef0123456789abcdef0123456789abcdef01"
+args = sys.argv[1:]
+with Path({str(tmp_path / "commands.log")!r}).open("a", encoding="utf-8") as log:
+    log.write("oras " + " ".join(args) + "\\n")
+ref = args[-1]
+if "--descriptor" in args:
+    value = {{"digest": chart if "charts/dspace" in ref else image}}
+elif args[:2] == ["manifest", "fetch"] and ref.endswith("@" + image):
+    value = {{"manifests": [{{"digest": platform}}]}}
+elif args[:2] == ["manifest", "fetch"] and ref.endswith("@" + platform):
+    value = {{"config": {{"digest": image_config}}}}
+elif args[:2] == ["manifest", "fetch"] and ref.endswith("@" + chart):
+    value = {{"config": {{"digest": chart_config}}}}
+elif args[:2] == ["blob", "fetch"]:
+    value = {{"config": {{"Labels": {{"org.opencontainers.image.revision": sha}}}}}}
+else:
+    raise SystemExit("unexpected oras command: " + " ".join(args))
+print(json.dumps(value))
+''',
     )
 
     env = os.environ.copy()
@@ -1082,12 +1149,6 @@ def test_app_deploy_danielsmith_passes_image_tag(generic_app_stub_env: dict[str,
             ],
         ),
         (
-            "dspace",
-            "oci://ghcr.io/democratizedspace/charts/dspace",
-            "dspace",
-            ["docs/examples/dspace.values.dev.yaml", "docs/examples/dspace.values.staging.yaml"],
-        ),
-        (
             "jobbot3000",
             "oci://ghcr.io/futuroptimist/charts/jobbot3000",
             "jobbot3000",
@@ -1200,12 +1261,6 @@ def test_app_redeploy_prints_chart_pin_reminder_without_latest_lookup_or_pin_mut
     ("app", "release", "namespace", "chart"),
     [
         (
-            "dspace",
-            "dspace",
-            "dspace",
-            "oci://ghcr.io/democratizedspace/charts/dspace",
-        ),
-        (
             "tokenplace",
             "tokenplace",
             "tokenplace",
@@ -1292,13 +1347,205 @@ def test_dspace_oci_deploy_wrapper_propagates_inline_chart_pin(
 
     result = _run_just(["dspace-oci-deploy", "env=staging", "tag=main-deadbee"], env)
 
+    assert result.returncode != 0
+    assert "manifest=<approved-candidate.json> is required" in result.stderr
+    assert not Path(env["HELM_LOG"]).exists()
+
+
+def _write_dspace_candidate(path: Path, environment: str, *, image_digest: str | None = None) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "app": "dspace",
+                "applicationVersion": "3.2.0",
+                "sourceRevision": "abcdef0123456789abcdef0123456789abcdef01",
+                "imageTag": "main-abcdef0",
+                "imageDigest": image_digest or "sha256:" + "1" * 64,
+                "chartVersion": "3.1.0" if environment == "staging" else "3.0.1",
+                "chartDigest": "sha256:" + "2" * 64,
+                "semanticTag": "v3.2.0",
+                "recordType": "candidate",
+                "environment": environment,
+                "expectedDefaultChatProvider": "token-place",
+                "approvedAt": "2026-07-26T12:00:00Z",
+                "approvedBy": "synthetic-test-approver",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_dspace_guarded_deploy_orders_preflight_mutation_and_finalization(
+    tmp_path: Path, generic_app_stub_env: dict[str, str]
+) -> None:
+    manifest = tmp_path / "candidate.json"
+    evidence = tmp_path / "evidence.json"
+    _write_dspace_candidate(manifest, "staging")
+
+    result = _run_just(
+        [
+            "app-deploy",
+            "dspace",
+            "staging",
+            "main-abcdef0",
+            "",
+            str(manifest),
+            str(evidence),
+        ],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    final = json.loads(evidence.read_text(encoding="utf-8"))
+    assert final["recordType"] == "final"
+    assert final["helmRevision"] == 7
+    assert "reservation" not in json.dumps(final).lower()
+    assert not Path(str(evidence.resolve()) + ".reservation").exists()
+    coordinate = "oci://ghcr.io/democratizedspace/charts/dspace@sha256:" + "2" * 64
+    installed = next(
+        item for item in final["verificationResults"] if item["check"] == "installedChart"
+    )
+    assert coordinate in installed["details"]
+    helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
+    mutation_line = next(line for line in helm_log.splitlines() if line.startswith("upgrade "))
+    assert coordinate in mutation_line
+    assert "--version" not in mutation_line
+    assert "--description sugarkube-release-manifest:" in mutation_line
+    commands = (tmp_path / "commands.log").read_text(encoding="utf-8").splitlines()
+    preflight = next(i for i, line in enumerate(commands) if line.startswith("oras "))
+    mutation = next(
+        i for i, line in enumerate(commands) if line.startswith("helm upgrade ")
+    )
+    collection = next(i for i, line in enumerate(commands) if " status dspace" in line)
+    pods = next(i for i, line in enumerate(commands) if " -n dspace get pods" in line)
+    assert preflight < mutation < collection < pods
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_dspace_guarded_redeploy_installs_approved_chart_digest(
+    tmp_path: Path, generic_app_stub_env: dict[str, str]
+) -> None:
+    candidate_path = tmp_path / "candidate.json"
+    evidence = tmp_path / "evidence.json"
+    _write_dspace_candidate(candidate_path, "staging")
+
+    result = _run_just(
+        [
+            "app-redeploy",
+            "dspace",
+            "staging",
+            "main-abcdef0",
+            "",
+            str(candidate_path),
+            str(evidence),
+        ],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    coordinate = "oci://ghcr.io/democratizedspace/charts/dspace@sha256:" + "2" * 64
+    mutation_line = next(
+        line
+        for line in Path(generic_app_stub_env["HELM_LOG"])
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.startswith("upgrade ")
+    )
+    assert coordinate in mutation_line
+    assert "--version" not in mutation_line
+    assert "--description sugarkube-release-manifest:" in mutation_line
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+@pytest.mark.parametrize(
+    ("env_override", "manifest_digest", "expected_check"),
+    [
+        ({"SUGARKUBE_STUB_RESOLVED_IMAGE": "9" * 64}, None, "imageDigest"),
+        ({"SUGARKUBE_STUB_RESOLVED_CHART": "9" * 64}, None, "chartDigest"),
+    ],
+)
+def test_dspace_digest_mismatch_stops_before_helm(
+    tmp_path: Path,
+    generic_app_stub_env: dict[str, str],
+    env_override: dict[str, str],
+    manifest_digest: str | None,
+    expected_check: str,
+) -> None:
+    manifest = tmp_path / "candidate.json"
+    _write_dspace_candidate(manifest, "staging", image_digest=manifest_digest)
+    env = generic_app_stub_env.copy()
+    env.update(env_override)
+
+    result = _run_just(
+        ["app-deploy", "dspace", "staging", "main-abcdef0", "", str(manifest)],
+        env,
+    )
+
+    assert result.returncode != 0
+    assert expected_check in result.stderr
+    helm_log = Path(env["HELM_LOG"])
+    assert not helm_log.exists() or "upgrade " not in helm_log.read_text(encoding="utf-8")
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_dspace_reservation_collision_stops_before_helm(
+    tmp_path: Path, generic_app_stub_env: dict[str, str]
+) -> None:
+    candidate_path = tmp_path / "candidate.json"
+    evidence = tmp_path / "evidence.json"
+    _write_dspace_candidate(candidate_path, "staging")
+    candidate_record = json.loads(candidate_path.read_text(encoding="utf-8"))
+    release_manifest.reserve(evidence, candidate_record, "staging", "dspace", "dspace")
+
+    result = _run_just(
+        [
+            "app-deploy",
+            "dspace",
+            "staging",
+            "main-abcdef0",
+            "",
+            str(candidate_path),
+            str(evidence),
+        ],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode != 0
+    assert "already reserved" in result.stderr
+    helm_log = Path(generic_app_stub_env["HELM_LOG"])
+    assert not helm_log.exists() or "upgrade " not in helm_log.read_text(
+        encoding="utf-8"
+    )
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_prod_subdomain_wrapper_preserves_canary_overlay_through_guarded_path(
+    tmp_path: Path, generic_app_stub_env: dict[str, str]
+) -> None:
+    manifest = tmp_path / "candidate.json"
+    evidence = tmp_path / "evidence.json"
+    _write_dspace_candidate(manifest, "prod")
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_NODE_ENV"] = "prod"
+
+    result = _run_just(
+        [
+            "dspace-oci-deploy-prod-subdomain",
+            "main-abcdef0",
+            str(manifest),
+            str(evidence),
+        ],
+        env,
+    )
+
     assert result.returncode == 0, result.stderr + result.stdout
     helm_log = Path(env["HELM_LOG"]).read_text(encoding="utf-8")
-    assert (
-        "show chart oci://ghcr.io/democratizedspace/charts/dspace "
-        "--version 3.1.0-rc.1+build.5"
-    ) in helm_log
-    assert "--version ${SUGARKUBE_VERSION_FILE}" not in helm_log
+    assert "-f docs/examples/dspace.values.prod-subdomain.yaml" in helm_log
+    assert "-f docs/examples/dspace.values.prod.yaml" not in helm_log
+    assert evidence.exists()
 
 
 @pytest.mark.usefixtures("ensure_just_available")
@@ -1307,7 +1554,6 @@ def test_dspace_oci_deploy_wrapper_propagates_inline_chart_pin(
     [
         ("danielsmith-oci-deploy", "danielsmith"),
         ("tokenplace-oci-deploy", "tokenplace"),
-        ("dspace-oci-deploy", "dspace"),
     ],
 )
 def test_existing_app_specific_deploy_wrappers_still_work(
@@ -1330,11 +1576,6 @@ def test_existing_app_specific_deploy_wrappers_still_work(
 @pytest.mark.parametrize(
     ("recipe", "image_heading", "check_heading"),
     [
-        (
-            "dspace-oci-promote-prod",
-            "Resolved deployment image(s):",
-            "Post-deploy verification commands",
-        ),
         (
             "tokenplace-oci-promote-prod",
             "Resolved images for deployment/tokenplace:",
@@ -2632,12 +2873,9 @@ def test_dspace_oci_deploy_wrapper_propagates_env_specific_chart_pin(
 
     result = _run_just(["dspace-oci-deploy", "env=staging", "tag=main-deadbee"], env)
 
-    assert result.returncode == 0, result.stderr + result.stdout
-    helm_log = Path(env["HELM_LOG"]).read_text(encoding="utf-8")
-    assert (
-        "show chart oci://ghcr.io/democratizedspace/charts/dspace "
-        "--version 3.1.0-rc.1+build.5"
-    ) in helm_log
+    assert result.returncode != 0
+    assert "manifest=<approved-candidate.json> is required" in result.stderr
+    assert not Path(env["HELM_LOG"]).exists()
 
 
 def test_direct_helm_oci_helper_matching_env_succeeds(
@@ -2659,6 +2897,32 @@ def test_direct_helm_oci_helper_matching_env_succeeds(
     helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
     assert "show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.3" in helm_log
     assert "upgrade tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace" in helm_log
+    assert "--description" not in helm_log
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_direct_helm_oci_helper_uses_digest_coordinate_without_version(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    coordinate = "oci://ghcr.io/futuroptimist/charts/tokenplace@sha256:" + "a" * 64
+    result = _run_just(
+        [
+            "helm-oci-install",
+            "release=tokenplace",
+            "namespace=tokenplace",
+            f"chart={coordinate}",
+            "version=0.1.3",
+            "env=staging",
+        ],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    lines = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8").splitlines()
+    assert f"show chart {coordinate}" in lines
+    mutation = next(line for line in lines if line.startswith("upgrade "))
+    assert coordinate in mutation
+    assert "--version" not in mutation
 
 
 
@@ -2806,6 +3070,6 @@ def test_dspace_promote_prod_guard_mismatch_fails_before_helm(
     result = _run_just(["dspace-oci-promote-prod", "tag=main-deadbee"], env)
 
     assert result.returncode != 0
-    assert "requested env=prod" in result.stderr
+    assert "manifest=<approved-candidate.json> is required" in result.stderr
     helm_log_path = Path(env["HELM_LOG"])
     assert not helm_log_path.exists() or helm_log_path.read_text(encoding="utf-8") == ""

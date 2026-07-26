@@ -190,6 +190,53 @@ export SUGARKUBE_APP_CONFIG_DIR=apps
 
 ## Generic command surface
 
+### DSPACE release evidence gate
+
+DSPACE is the first application with a compatible producer manifest. Its
+`staging` and `prod` deploy, redeploy, promotion, and compatibility commands
+therefore require `manifest=<approved-candidate.json>`. Other applications are
+not gated. Before any Helm or Kubernetes mutation, Sugarkube validates the
+candidate and uses `oras manifest fetch` to compare both OCI descriptor digests
+then reads the digest-qualified image index, every platform manifest/config,
+and the exact chart artifact/config. Every `org.opencontainers.image.revision`
+value must match the approved full source SHA. The configured DSPACE chart must
+be the canonical `oci://ghcr.io/democratizedspace/charts/dspace` reference, so
+the artifact checked is the artifact Helm deploys. After preflight, the guarded
+mutation passes Helm that chart as
+`oci://ghcr.io/democratizedspace/charts/dspace@<chartDigest>` without
+`--version`; the approved `chartVersion` remains separate display metadata and
+is checked against Helm's installed-chart metadata after rollout. A semantic
+release tag remains evidence and is never passed to Helm.
+The guarded mutation binds its evidence reservation to Helm's release
+description. Finalization verifies that description and the revision before
+and after runtime evidence collection, and fails closed if either changes.
+It boundedly waits for old release pods in graceful termination to disappear,
+but never ignores a non-terminating release pod with inconsistent coordinates.
+
+After rollout the command writes a new record beneath
+`deployment-evidence/dspace/<environment>/<image-tag>-<approval-time>.json`
+(or the explicit `evidence=` path). The approval-qualified default is stable and
+deployment-unique; an occupied destination is rejected before mutation, so a
+repeat operation must supply a new explicit `evidence=` path. It records the Helm revision and every DSPACE pod's name,
+start time, and resolved image ID. Finalization requires the selected
+environment, image tag, chart version, kubeconfig, release, namespace, and chart
+reference; reruns exact-digest OCI provenance and cluster-identity checks; and
+verifies Helm reports that exact release as deployed with the approved DSPACE
+chart. Pod discovery is release-scoped, follows controller references to a
+Helm-owned Deployment, and rejects terminating, non-Running, non-Ready, or
+non-running DSPACE containers. Both the pod-spec image coordinate and resolved
+image ID must match the approval. Existing files are never overwritten.
+
+Immediately before Helm mutation, the guard exclusively creates
+`<evidence-path>.reservation`. It binds the normalized destination, canonical
+candidate fingerprint, environment, release, namespace, and an opaque invocation
+identifier. Finalization requires matching ownership and removes the sidecar only
+after its no-overwrite evidence write succeeds. A post-reservation failure preserves
+the sidecar; reservations never expire or get stolen automatically. Recovery
+requires inspecting and reconciling the cluster, Helm release, candidate, and
+existing evidence before an operator explicitly removes the exact stranded sidecar
+and retries.
+
 These recipes are implemented in the root `justfile` and use the app config
 lookup order above.
 
@@ -206,13 +253,16 @@ validates a public OCI chart and edits the repository pin.
 
 ```bash
 # Deploy or install a specific immutable candidate into an environment.
-just app-deploy app=dspace env=staging tag=main-REPLACE_SHORTSHA
+just app-deploy app=dspace env=staging tag=main-REPLACE_SHORTSHA \
+  manifest=deployment-candidates/dspace/staging.json
 
 # Redeploy an existing release with a specific immutable tag.
-just app-redeploy app=dspace env=staging tag=main-REPLACE_SHORTSHA
+just app-redeploy app=dspace env=staging tag=main-REPLACE_SHORTSHA \
+  manifest=deployment-candidates/dspace/staging.json evidence=deployment-evidence/dspace/staging/redeploy.json
 
 # Promote an approved immutable tag to production.
-just app-promote-prod app=dspace tag=main-REPLACE_SHORTSHA
+just app-promote-prod app=dspace tag=main-REPLACE_SHORTSHA \
+  manifest=deployment-candidates/dspace/prod.json
 
 # Inspect and intentionally bump the chart pin.
 just app-chart-status app=dspace

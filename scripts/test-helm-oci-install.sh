@@ -192,6 +192,24 @@ if ! grep -q "rollout status deployment.apps/dspace" "${kubectl_log}"; then
 fi
 
 rm -f "${helm_log}"
+digest_chart="oci://registry.test/charts/dspace@sha256:$(printf 'a%.0s' {1..64})"
+PATH="${tmp_bin}:${PATH}" HELM_TEST_LOG="${helm_log}" KUBECTL_TEST_LOG="${kubectl_log}" \
+    HELM_STATUS_MODE_FILE="${status_mode_file}" \
+    FAKE_HELM_REGISTRY_CHART="${fixture_registry}" KUBECONFIG="${tmp_bin}/kubeconfig" \
+    just helm-oci-install \
+    release=dspace namespace=dspace chart="${digest_chart}" version=3.1.0 env=staging >/dev/null
+
+if ! grep -Fq "show chart ${digest_chart}" "${helm_log}" || \
+    ! grep -Fq "upgrade dspace ${digest_chart}" "${helm_log}"; then
+    printf 'Digest-qualified chart was not passed unchanged to Helm.\nLog:\n%s\n' "$(cat "${helm_log}")" >&2
+    exit 1
+fi
+if grep -F -- '--version' "${helm_log}" >/dev/null; then
+    printf 'Digest-qualified chart unexpectedly received --version.\nLog:\n%s\n' "$(cat "${helm_log}")" >&2
+    exit 1
+fi
+
+rm -f "${helm_log}"
 if PATH="${tmp_bin}:${PATH}" HELM_TEST_LOG="${helm_log}" KUBECTL_TEST_LOG="${kubectl_log}" \
     HELM_STATUS_MODE_FILE="${status_mode_file}" \
     FAKE_HELM_REGISTRY_CHART="${fixture_registry}" KUBECONFIG="${tmp_bin}/kubeconfig" \

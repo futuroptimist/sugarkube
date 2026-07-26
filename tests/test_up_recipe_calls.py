@@ -179,8 +179,6 @@ def test_env_recipes_quote_and_normalize_named_arguments():
         "kubeconfig env='':",
         "kubeconfig-env env='dev':",
         cloudflare_tunnel_recipe,
-        "dspace-oci-deploy env='staging' tag='':",
-        "dspace-oci-redeploy env='staging' tag='':",
         "dspace-debug-logs-env env='staging' namespace='dspace':",
         "flux-bootstrap env='dev':",
         "platform-apply env='dev':",
@@ -193,6 +191,20 @@ def test_env_recipes_quote_and_normalize_named_arguments():
         assert "env_input={{ quote(env) }}" in joined, header
         assert 'while [ "${env_name#env=}" != "${env_name}" ]; do' in joined, header
         assert 'if [ -z "${env_name}" ]; then' in joined, header
+
+
+@pytest.mark.skipif(shutil.which("just") is None, reason="just is required for this test")
+def test_dspace_wrapper_normalizes_repeated_named_env_argument() -> None:
+    result = subprocess.run(
+        ["just", "dspace-oci-deploy", "env=env=staging", "tag=main-deadbee"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "required for DSPACE staging" in result.stderr
+    assert "DSPACE env=staging" not in result.stderr
 
 
 @pytest.mark.skipif(shutil.which("just") is None, reason="just is required for this test")

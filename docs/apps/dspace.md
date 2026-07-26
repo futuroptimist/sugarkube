@@ -44,7 +44,7 @@ Use these links before changing a deployment so the workflow runs, package versi
   The staging overlay injects `DSPACE_TOKEN_PLACE_URL=https://staging.token.place` and `DSPACE_TOKEN_PLACE_CHAT_MODEL=llama-3.1-8b-instruct`, uses chart `3.1.0`, and persists the authenticated metrics ServiceMonitor configuration discovered by kube-prometheus-stack. The metrics bearer value is not committed; operators manage the existing `dspace-staging-metrics-token` Secret out of band.
 - `env=prod`: HA production on the production Sugarkube cluster with host `democratized.space` and values `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml`.
   The production overlay injects `DSPACE_TOKEN_PLACE_URL=https://token.place` and `DSPACE_TOKEN_PLACE_CHAT_MODEL=llama-3.1-8b-instruct`. Production remains intentionally pinned to the recovered chart `3.0.1` deployment and image `ghcr.io/democratizedspace/dspace:main-1a31a56`; it does not enable metrics or ServiceMonitor settings.
-- Optional legacy/canary host `prod.democratized.space` still has `docs/examples/dspace.values.prod-subdomain.yaml`, but the generic app flow uses the production apex overlay unless a local app config intentionally overrides it.
+- Optional legacy/canary host `prod.democratized.space` uses `docs/examples/dspace.values.prod-subdomain.yaml`. The `dspace-oci-deploy-prod-subdomain` compatibility command selects the secret-free `docs/examples/apps/dspace-prod-subdomain.env` config, preserving that overlay while routing through the same manifest validation, OCI preflight, Helm deployment, and evidence finalization as the generic production path.
 
 ## Find or publish GHCR image
 
@@ -96,18 +96,128 @@ gh workflow run ci-helm.yml --repo democratizedspace/dspace --ref main
 
 ## Deploy staging
 
+### Release-manifest approval and evidence flow
+
+Download the `dspace-release-manifest` artifact from the successful upstream
+image workflow and extract `dspace-release-manifest/dspace-release-manifest.json`.
+Do not copy coordinates from mutable package tags. Create a canonical staging
+candidate with an explicit UTC approval time, approver identity, and one of the
+configuration contract's exact provider values (`token-place` or `openai`):
+
+```bash
+python3 scripts/dspace_release_manifest.py candidate \
+  --upstream dspace-release-manifest/dspace-release-manifest.json \
+  --output deployment-candidates/dspace/staging.json \
+  --environment staging --provider token-place \
+  --approved-at 2026-07-26T12:00:00Z --approved-by '<operator-or-review-record>'
+python3 scripts/dspace_release_manifest.py validate \
+  --manifest deployment-candidates/dspace/staging.json
+```
+
+Inspect and review that file before approval. Deploying performs a read-only OCI
+preflight first. It uses the OCI Distribution API through `oras`, not GitHub's
+Packages REST API, and does not need an ad hoc `read:packages` token for public
+artifacts. If a package is private, use the registry's normal OCI login flow;
+never put credentials in a manifest or command argument. The OCI-native manual
+fallback is:
+
+```bash
+oras manifest fetch --descriptor \
+  ghcr.io/democratizedspace/dspace:"$APP_TAG"
+IMAGE_DIGEST=$(oras manifest fetch --descriptor ghcr.io/democratizedspace/dspace:"$APP_TAG" | jq -r .digest)
+oras manifest fetch ghcr.io/democratizedspace/dspace@"$IMAGE_DIGEST"
+# Fetch each index manifest and its config blob by digest; inspect every config label.
+oras manifest fetch --descriptor \
+  ghcr.io/democratizedspace/charts/dspace:"$CHART_VERSION"
+CHART_DIGEST=$(oras manifest fetch --descriptor ghcr.io/democratizedspace/charts/dspace:"$CHART_VERSION" | jq -r .digest)
+oras manifest fetch ghcr.io/democratizedspace/charts/dspace@"$CHART_DIGEST"
+# Fetch the chart config blob by digest and inspect its revision annotation.
+```
+
+Pass the candidate to staging and preserve the generated final record:
+
+```bash
+just app-deploy app=dspace env=staging tag="$APP_TAG" \
+  manifest=deployment-candidates/dspace/staging.json
+EVIDENCE=$(python3 scripts/dspace_release_manifest.py evidence-path \
+  --manifest deployment-candidates/dspace/staging.json)
+git add "$EVIDENCE"
+# Commit it after review, or attach that exact file to the external promotion record.
+```
+
+The approved `chartVersion` remains the human-readable pin and the Helm metadata
+checked after rollout. The guarded deploy itself passes Helm the immutable
+`oci://ghcr.io/democratizedspace/charts/dspace@<chartDigest>` coordinate emitted
+by the successful preflight, without `--version`, so a tag cannot be resolved
+again between approval and installation.
+The mutation also carries an opaque description derived from the evidence
+reservation. Finalization requires that description and the Helm revision to
+remain stable across runtime evidence collection, failing closed if another
+upgrade or rollback becomes current.
+Finalization also waits for a bounded period for old release pods undergoing
+graceful rollout termination to disappear. It never filters out a still-running
+release pod: every remaining pod must satisfy the approved image and readiness
+checks.
+
+After staging sign-off, generate a separate `prod` candidate from the **same
+upstream manifest**, approve it independently, and promote it. The image tag,
+image digest, chart version, chart digest, and full source SHA must remain the
+same; `semanticTag` must equal `v<applicationVersion>` and is only corroborating evidence.
+
+```bash
+python3 scripts/dspace_release_manifest.py candidate \
+  --upstream dspace-release-manifest/dspace-release-manifest.json \
+  --output deployment-candidates/dspace/prod.json \
+  --environment prod --provider token-place \
+  --approved-at 2026-07-26T13:00:00Z --approved-by '<operator-or-review-record>'
+just app-promote-prod app=dspace tag="$APP_TAG" \
+  manifest=deployment-candidates/dspace/prod.json
+EVIDENCE=$(python3 scripts/dspace_release_manifest.py evidence-path \
+  --manifest deployment-candidates/dspace/prod.json)
+git add "$EVIDENCE"
+```
+
+The finalized JSON is sufficient to reconstruct the release using the recorded
+branch-SHA image tag and digest plus chart version and the exact digest-qualified
+chart deployment coordinate, without resolving
+`latest`, a branch, an environment tag, or the semantic tag. Until DSPACE #4732
+adds direct runtime identity, `runtimeSourceRevisionMethod` is strictly
+`podImageID+ociRevisionAnnotation`: every pod image ID must equal the approved
+digest and that exact OCI artifact's revision annotation must equal the full
+approved SHA. Finalization also reasserts the connected cluster environment,
+requires Helm to report the selected release and namespace as deployed with the
+exact approved DSPACE chart version, and accepts only Running, Ready pods owned
+through the selected Helm release's Deployment and ReplicaSet. Each DSPACE
+container must use the approved repository and immutable image tag before its
+resolved image ID is accepted. No HTTP build-identity check is claimed.
+
+Immediately before Helm changes the release, the guarded recipe atomically creates
+`<evidence-path>.reservation`. This sidecar binds the normalized destination,
+approved-candidate fingerprint, environment, Helm release, and namespace to one
+opaque invocation identifier. A competitor stops before Helm or Kubernetes
+mutation. Only the owner can finalize; success atomically creates the JSON and
+removes the sidecar.
+
+Failures after reservation deliberately leave the sidecar. There is no timeout or
+automatic stale-lock takeover. For recovery, first inspect and reconcile the
+selected cluster, Helm release, pods, intended candidate, and existing evidence. If
+that proves the original invocation cannot resume and its destination must be
+abandoned, explicitly remove that exact sidecar (for example,
+`rm -- deployment-evidence/dspace/staging/<file>.json.reservation`) and rerun the
+guarded command. Never remove a reservation merely because it is old.
+
 This repository change only persists the staging configuration; it does not deploy anything to a cluster. After it is merged, deploy the new immutable, environment-neutral DSPACE image that contains runtime `/config.json` support. The image tag stays the same as it moves between staging and production; the Sugarkube values overlays, not image names, select the token.place origin.
 
 Preferred generic command:
 
 ```bash
-just app-deploy app=dspace env=staging tag="$APP_TAG"
+just app-deploy app=dspace env=staging tag="$APP_TAG" manifest=deployment-candidates/dspace/staging.json
 ```
 
 Compatibility shim while migration is in progress:
 
 ```bash
-just dspace-oci-deploy env=staging tag="$APP_TAG"
+just dspace-oci-deploy env=staging tag="$APP_TAG" manifest=deployment-candidates/dspace/staging.json
 ```
 
 ## Verify staging
@@ -173,13 +283,13 @@ For staging, the browser smoke must show DSPACE calling `https://staging.token.p
 This configuration change does not promote or mutate production. Promote only after staging sign-off. Prefer the generic command; it uses the prod values chain, resolves chart `3.0.1` from `docs/apps/dspace.prod.version`, and can read `docs/apps/dspace.prod.tag` (`main-1a31a56`) when `tag=` is omitted.
 
 ```bash
-just app-promote-prod app=dspace tag="$APP_TAG"
+just app-promote-prod app=dspace tag="$APP_TAG" manifest=deployment-candidates/dspace/prod.json
 ```
 
 Compatibility shim:
 
 ```bash
-just dspace-oci-promote-prod tag="$APP_TAG"
+just dspace-oci-promote-prod tag="$APP_TAG" manifest=deployment-candidates/dspace/prod.json
 ```
 
 ## Verify production
@@ -218,18 +328,22 @@ curl -fsS https://democratized.space/livez
 
 ## Rollback
 
-Rollback by deploying the previous known-good immutable image tag with the generic redeploy command.
+Rollback by deploying the previous known-good immutable image tag with the generic redeploy command and an approved environment-specific candidate for that release. Use a unique `evidence=` path if evidence for the tag already exists; occupied paths are rejected before Helm runs.
+Do not infer or generate a rollback manifest automatically; that future
+automation is tracked in #2327.
 
 ```bash
 APP_TAG=main-REPLACE_PREVIOUS_SHORTSHA
+STAGING_ROLLBACK_MANIFEST=deployment-candidates/dspace/previous-release-staging.json
+PROD_ROLLBACK_MANIFEST=deployment-candidates/dspace/previous-release-prod.json
 ```
 
 ```bash
-just app-redeploy app=dspace env=staging tag="$APP_TAG"
+just app-redeploy app=dspace env=staging tag="$APP_TAG" manifest="$STAGING_ROLLBACK_MANIFEST" evidence=deployment-evidence/dspace/staging/"$APP_TAG"-rollback.json
 ```
 
 ```bash
-just app-redeploy app=dspace env=prod tag="$APP_TAG"
+just app-redeploy app=dspace env=prod tag="$APP_TAG" manifest="$PROD_ROLLBACK_MANIFEST" evidence=deployment-evidence/dspace/prod/"$APP_TAG"-rollback.json
 ```
 
 Rollback by Helm revision is still available through the existing parameterized helper. Set `ROLLBACK_ENV=staging` instead when intentionally rolling back staging.
