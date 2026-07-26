@@ -1632,9 +1632,10 @@ app-deploy app env='staging' tag='' config='' manifest='' evidence='':
       fi
       python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" preflight \
         --manifest "${release_manifest}" --environment "${SUGARKUBE_ENV}" \
-        --image-tag "${SUGARKUBE_TAG}" --chart-version "${chart_version}"
+        --image-tag "${SUGARKUBE_TAG}" --chart-version "${chart_version}" \
+        --chart-ref "${SUGARKUBE_CHART}"
       if [ -z "${evidence_output}" ]; then
-        evidence_output="deployment-evidence/dspace/${SUGARKUBE_ENV}/${SUGARKUBE_TAG}.json"
+        evidence_output="$(python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" evidence-path --manifest "${release_manifest}")"
       fi
       python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" check-output --output "${evidence_output}"
     fi
@@ -1664,7 +1665,8 @@ app-deploy app env='staging' tag='' config='' manifest='' evidence='':
     if [ "${SUGARKUBE_APP}" = dspace ] && { [ "${SUGARKUBE_ENV}" = staging ] || [ "${SUGARKUBE_ENV}" = prod ]; }; then
       python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" finalize \
         --manifest "${release_manifest}" --output "${evidence_output}" \
-        --release "${SUGARKUBE_RELEASE}" --namespace "${SUGARKUBE_NAMESPACE}"
+        --release "${SUGARKUBE_RELEASE}" --namespace "${SUGARKUBE_NAMESPACE}" \
+        --chart-ref "${SUGARKUBE_CHART}"
     fi
 
 # Generic upgrade-only app redeploy backed by app config files.
@@ -1687,8 +1689,9 @@ app-redeploy app env='staging' tag='' config='' manifest='' evidence='':
       if [ -z "${release_manifest}" ]; then echo "ERROR: manifest=<approved-candidate.json> is required for DSPACE ${SUGARKUBE_ENV}." >&2; exit 2; fi
       chart_version="${SUGARKUBE_VERSION:-}"
       if [ -z "${chart_version}" ]; then chart_version="$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' "${SUGARKUBE_VERSION_FILE}" | head -n1)"; fi
-      python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" preflight --manifest "${release_manifest}" --environment "${SUGARKUBE_ENV}" --image-tag "${SUGARKUBE_TAG}" --chart-version "${chart_version}"
-      if [ -z "${evidence_output}" ]; then evidence_output="deployment-evidence/dspace/${SUGARKUBE_ENV}/${SUGARKUBE_TAG}.json"; fi
+      python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" preflight --manifest "${release_manifest}" --environment "${SUGARKUBE_ENV}" --image-tag "${SUGARKUBE_TAG}" --chart-version "${chart_version}" \
+        --chart-ref "${SUGARKUBE_CHART}"
+      if [ -z "${evidence_output}" ]; then evidence_output="$(python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" evidence-path --manifest "${release_manifest}")"; fi
       python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" check-output --output "${evidence_output}"
     fi
 
@@ -1715,7 +1718,8 @@ app-redeploy app env='staging' tag='' config='' manifest='' evidence='':
       tag="${SUGARKUBE_TAG}" \
       env="${SUGARKUBE_ENV}"
     if [ "${SUGARKUBE_APP}" = dspace ] && { [ "${SUGARKUBE_ENV}" = staging ] || [ "${SUGARKUBE_ENV}" = prod ]; }; then
-      python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" finalize --manifest "${release_manifest}" --output "${evidence_output}" --release "${SUGARKUBE_RELEASE}" --namespace "${SUGARKUBE_NAMESPACE}"
+      python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" finalize --manifest "${release_manifest}" --output "${evidence_output}" --release "${SUGARKUBE_RELEASE}" --namespace "${SUGARKUBE_NAMESPACE}" \
+        --chart-ref "${SUGARKUBE_CHART}"
     fi
 
 # Promote an app to prod with an explicit immutable tag, or the configured prod tag file.

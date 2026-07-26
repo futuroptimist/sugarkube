@@ -124,10 +124,14 @@ fallback is:
 ```bash
 oras manifest fetch --descriptor \
   ghcr.io/democratizedspace/dspace:"$APP_TAG"
-oras manifest fetch ghcr.io/democratizedspace/dspace:"$APP_TAG"
+IMAGE_DIGEST=$(oras manifest fetch --descriptor ghcr.io/democratizedspace/dspace:"$APP_TAG" | jq -r .digest)
+oras manifest fetch ghcr.io/democratizedspace/dspace@"$IMAGE_DIGEST"
+# Fetch each index manifest and its config blob by digest; inspect every config label.
 oras manifest fetch --descriptor \
   ghcr.io/democratizedspace/charts/dspace:"$CHART_VERSION"
-oras manifest fetch ghcr.io/democratizedspace/charts/dspace:"$CHART_VERSION"
+CHART_DIGEST=$(oras manifest fetch --descriptor ghcr.io/democratizedspace/charts/dspace:"$CHART_VERSION" | jq -r .digest)
+oras manifest fetch ghcr.io/democratizedspace/charts/dspace@"$CHART_DIGEST"
+# Fetch the chart config blob by digest and inspect its revision annotation.
 ```
 
 Pass the candidate to staging and preserve the generated final record:
@@ -135,14 +139,16 @@ Pass the candidate to staging and preserve the generated final record:
 ```bash
 just app-deploy app=dspace env=staging tag="$APP_TAG" \
   manifest=deployment-candidates/dspace/staging.json
-git add deployment-evidence/dspace/staging/"$APP_TAG".json
+EVIDENCE=$(python3 scripts/dspace_release_manifest.py evidence-path \
+  --manifest deployment-candidates/dspace/staging.json)
+git add "$EVIDENCE"
 # Commit it after review, or attach that exact file to the external promotion record.
 ```
 
 After staging sign-off, generate a separate `prod` candidate from the **same
 upstream manifest**, approve it independently, and promote it. The image tag,
 image digest, chart version, chart digest, and full source SHA must remain the
-same; `semanticTag` is only corroborating evidence.
+same; `semanticTag` must equal `v<applicationVersion>` and is only corroborating evidence.
 
 ```bash
 python3 scripts/dspace_release_manifest.py candidate \
@@ -152,7 +158,9 @@ python3 scripts/dspace_release_manifest.py candidate \
   --approved-at 2026-07-26T13:00:00Z --approved-by '<operator-or-review-record>'
 just app-promote-prod app=dspace tag="$APP_TAG" \
   manifest=deployment-candidates/dspace/prod.json
-git add deployment-evidence/dspace/prod/"$APP_TAG".json
+EVIDENCE=$(python3 scripts/dspace_release_manifest.py evidence-path \
+  --manifest deployment-candidates/dspace/prod.json)
+git add "$EVIDENCE"
 ```
 
 The finalized JSON is sufficient to reconstruct the release using the recorded
@@ -286,6 +294,8 @@ curl -fsS https://democratized.space/livez
 ## Rollback
 
 Rollback by deploying the previous known-good immutable image tag with the generic redeploy command and an approved environment-specific candidate for that release. Use a unique `evidence=` path if evidence for the tag already exists; occupied paths are rejected before Helm runs.
+Do not infer or generate a rollback manifest automatically; that future
+automation is tracked in #2327.
 
 ```bash
 APP_TAG=main-REPLACE_PREVIOUS_SHORTSHA
