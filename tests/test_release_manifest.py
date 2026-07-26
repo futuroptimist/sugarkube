@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -954,3 +955,154 @@ def test_default_evidence_path_is_stable_and_approval_unique() -> None:
     assert str(manifest.evidence_path(candidate())) == (
         "deployment-evidence/dspace/staging/main-abcdef0-20260726T120000Z.json"
     )
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        (lambda value: value.update(schemaVersion=2), "schemaVersion"),
+        (lambda value: value.update(recordType="final"), "recordType"),
+        (lambda value: value.update(approvedAt=1), "approvedAt"),
+        (lambda value: value.update(approvedAt="2026-02-30T12:00:00Z"), "valid UTC"),
+    ],
+)
+def test_candidate_validation_rejects_malformed_schema(change, message) -> None:
+    value = candidate()
+    change(value)
+    with pytest.raises(manifest.ManifestError, match=message):
+        manifest.validate(value, False)
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        (lambda value: value.update(helmRevision=True), "positive integer"),
+        (lambda value: value.update(pods=[]), "non-empty list"),
+        (lambda value: value.update(pods=["pod"]), "pod must be an object"),
+        (lambda value: value["pods"][0].update(name=""), "non-empty strings"),
+        (lambda value: value["pods"].append(dict(value["pods"][0])), "unique"),
+        (lambda value: value.update(runtimeSourceRevision="0" * 40), "must match"),
+        (lambda value: value.update(runtimeSourceRevisionMethod="invented"), "must be"),
+        (lambda value: value.update(verificationResults=[]), "non-empty list"),
+        (lambda value: value.update(verificationResults=["result"]), "must be objects"),
+    ],
+)
+def test_final_validation_rejects_malformed_runtime_schema(change, message) -> None:
+    value = finalize()
+    change(value)
+    with pytest.raises(manifest.ManifestError, match=message):
+        manifest.validate(value, True)
+
+
+def test_reservation_failure_cleanup_and_directory_sync_fallback(
+    tmp_path: Path, monkeypatch
+) -> None:
+    output = tmp_path / "evidence.json"
+    monkeypatch.setattr(manifest.os, "fsync", lambda _fd: (_ for _ in ()).throw(OSError("disk")))
+    with pytest.raises(OSError, match="disk"):
+        manifest.reserve(output, candidate(), "staging", "dspace", "dspace")
+    assert not manifest.reservation_path(output).exists()
+
+    monkeypatch.setattr(
+        manifest.os, "open", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError())
+    )
+    manifest._sync_directory(tmp_path)
+
+
+def test_reservation_rejects_environment_and_late_output_collision(tmp_path: Path) -> None:
+    output = tmp_path / "evidence.json"
+    with pytest.raises(manifest.ManifestError, match="environment"):
+        manifest.reserve(output, candidate(), "prod", "dspace", "dspace")
+    owner = manifest.reserve(output, candidate(), "staging", "dspace", "dspace")
+    output.write_text("collision", encoding="utf-8")
+    with pytest.raises(manifest.ManifestError, match="overwrite"):
+        manifest.verify_reservation(output, candidate(), "staging", "dspace", "dspace", owner)
+
+
+def test_command_and_oci_json_failures(monkeypatch) -> None:
+    monkeypatch.setattr(
+        manifest.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 1, "", "failed"),
+    )
+    with pytest.raises(manifest.ManifestError, match="command failed.*failed"):
+        manifest._run(["oras"])
+    for response, message in (("not-json", "invalid JSON"), ("[]", "non-object")):
+        with pytest.raises(manifest.ManifestError, match=message):
+            manifest._json_run(lambda _command, result=response: result, ["oras"])
+
+
+@pytest.mark.parametrize(
+    ("command_key", "replacement", "message"),
+    [
+        (
+            ("manifest", "fetch", "--descriptor", f"{manifest.IMAGE_REF}:main-abcdef0"),
+            {},
+            "descriptor",
+        ),
+        (("manifest", "fetch", f"{manifest.IMAGE_REF}@{DIGEST}"), {"manifests": []}, "image index"),
+        (
+            ("manifest", "fetch", f"{manifest.IMAGE_REF}@{DIGEST}"),
+            {"manifests": [{}]},
+            "platform digest",
+        ),
+        (("manifest", "fetch", f"{manifest.IMAGE_REF}@{PLATFORM_DIGEST}"), {}, "config digest"),
+        (("blob", "fetch", f"{manifest.IMAGE_REF}@{IMAGE_CONFIG_DIGEST}"), {}, "revision label"),
+        (("manifest", "fetch", f"{manifest.CHART_REF}@{CHART_DIGEST}"), {}, "config digest"),
+        (("blob", "fetch", f"{manifest.CHART_REF}@{CHART_CONFIG_DIGEST}"), {}, "revision metadata"),
+    ],
+)
+def test_preflight_rejects_malformed_oci_evidence(command_key, replacement, message) -> None:
+    runner = oras_runner()
+
+    def malformed(command):
+        if tuple(command[1:]) == command_key:
+            return json.dumps(replacement)
+        return runner(command)
+
+    with pytest.raises(manifest.ManifestError, match=message):
+        manifest.preflight(
+            candidate(), manifest.IMAGE_REF, manifest.CHART_REF, "oras", runner=malformed
+        )
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"image_ref": "example.invalid/dspace"}, "image reference"),
+        ({"environment": "prod"}, "selected environment"),
+    ],
+)
+def test_preflight_rejects_unapproved_selected_coordinates(kwargs, message) -> None:
+    arguments = {
+        "value": candidate(),
+        "image_ref": manifest.IMAGE_REF,
+        "chart_ref": manifest.CHART_REF,
+        "oras": "oras",
+        "runner": oras_runner(),
+    }
+    arguments.update(kwargs)
+    with pytest.raises(manifest.ManifestError, match=message):
+        manifest.preflight(**arguments)
+
+
+@pytest.mark.parametrize("failure", ["object", "labels", "owner", "container"])
+def test_finalize_rejects_malformed_release_objects(failure: str) -> None:
+    discovered = workloads()
+    pods_json = {"items": [pod("dspace-a")]}
+    if failure == "object":
+        discovered["items"][0] = "replicaset"
+    elif failure == "labels":
+        discovered["items"][0]["metadata"]["labels"] = {}
+    elif failure == "owner":
+        pods_json["items"][0]["metadata"]["ownerReferences"] = []
+    else:
+        pods_json["items"][0]["spec"]["containers"] = []
+    with pytest.raises(manifest.ManifestError):
+        finalize(workloads_json=discovered, pods_json=pods_json)
+
+
+def test_finalize_rejects_noncanonical_image_id() -> None:
+    item = pod("dspace-a")
+    item["status"]["containerStatuses"][0]["imageID"] = "not-a-digest"
+    with pytest.raises(manifest.ManifestError, match="non-canonical pod imageID"):
+        finalize(pods_json={"items": [item]})
