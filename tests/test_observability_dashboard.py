@@ -124,6 +124,47 @@ def test_validator_rejects_malformed_missing_and_changed_identity(tmp_path):
     assert missing.returncode != 0
 
 
+def rendered_dashboard_yaml(dashboard, mount_path=None, sub_path=None):
+    filename = "sugarkube-staging-observability.json"
+    mount_path = mount_path or f"/var/lib/grafana/dashboards/sugarkube/{filename}"
+    sub_path = sub_path or filename
+    payload = json.dumps(dashboard, indent=2)
+    return (
+        "kind: ConfigMap\n"
+        "metadata:\n"
+        "  name: kube-prometheus-stack-grafana-dashboards-sugarkube\n"
+        "  labels:\n"
+        "    dashboard-provider: sugarkube\n"
+        "data:\n"
+        f"  {filename}:\n"
+        "    |-\n"
+        + "\n".join(f"      {line}" for line in payload.splitlines())
+        + "\n---\nkind: ConfigMap\ndata:\n  dashboardproviders.yaml: |\n"
+        "    providers:\n      - name: sugarkube\n        options:\n"
+        "          path: /var/lib/grafana/dashboards/sugarkube\n"
+        "---\nkind: Deployment\nspec:\n  template:\n    spec:\n      containers:\n"
+        "        - volumeMounts:\n"
+        f'            - mountPath: "{mount_path}"\n'
+        "              name: sugarkube-dashboard\n"
+        f'              subPath: "{sub_path}"\n'
+    )
+
+
+def run_render_validation(tmp_path, content):
+    rendered = tmp_path / "rendered.yaml"
+    rendered.write_text(content, encoding="utf-8")
+    return subprocess.run(
+        ["python3", str(VALIDATOR), str(DASHBOARD), "--rendered", str(rendered)],
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_validator_accepts_chart_native_render(tmp_path, dashboard):
+    result = run_render_validation(tmp_path, rendered_dashboard_yaml(dashboard))
+    assert result.returncode == 0, result.stderr
+
+
 def test_validator_rejects_raw_urls_and_complete_render_drift(tmp_path, dashboard):
     unsafe = tmp_path / "unsafe.json"
     unsafe_dashboard = json.loads(json.dumps(dashboard))
@@ -132,33 +173,26 @@ def test_validator_rejects_raw_urls_and_complete_render_drift(tmp_path, dashboar
     result = subprocess.run(["python3", str(VALIDATOR), str(unsafe)], capture_output=True)
     assert result.returncode != 0
 
-    rendered = tmp_path / "rendered.yaml"
     changed = json.loads(json.dumps(dashboard))
     changed["refresh"] = "5m"
-    payload = json.dumps(changed, indent=2)
-    rendered.write_text(
-        "kind: ConfigMap\n"
-        "metadata:\n"
-        "  name: kube-prometheus-stack-grafana-dashboards-sugarkube\n"
-        "  labels:\n"
-        "    dashboard-provider: sugarkube\n"
-        "data:\n"
-        "  sugarkube-staging-observability.json: |\n"
-        + "\n".join(f"    {line}" for line in payload.splitlines())
-        + "\n---\nkind: ConfigMap\ndata:\n  dashboardproviders.yaml: |\n"
-        "    providers:\n      - name: sugarkube\n        options:\n"
-        "          path: /var/lib/grafana/dashboards/sugarkube\n"
-        "---\nkind: Deployment\nspec:\n  template:\n    spec:\n      containers:\n"
-        "        - volumeMounts:\n            - mountPath: /var/lib/grafana/dashboards/sugarkube\n",
-        encoding="utf-8",
-    )
-    result = subprocess.run(
-        ["python3", str(VALIDATOR), str(DASHBOARD), "--rendered", str(rendered)],
-        capture_output=True,
-        text=True,
-    )
+    result = run_render_validation(tmp_path, rendered_dashboard_yaml(changed))
     assert result.returncode != 0
     assert "differs from the version-controlled source" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("mount_path", "sub_path"),
+    [
+        ("/var/lib/grafana/dashboards/sugarkube", None),
+        (None, "another-dashboard.json"),
+    ],
+)
+def test_validator_rejects_wrong_dashboard_mount(tmp_path, dashboard, mount_path, sub_path):
+    result = run_render_validation(
+        tmp_path, rendered_dashboard_yaml(dashboard, mount_path, sub_path)
+    )
+    assert result.returncode != 0
+    assert "dashboard mount must be exactly" in result.stderr
 
 
 def test_lifecycle_passes_same_dashboard_to_all_helm_paths():

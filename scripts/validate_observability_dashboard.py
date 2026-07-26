@@ -10,6 +10,8 @@ TITLE = "Sugarkube Staging Observability"
 UID = "sugarkube-staging-observability"
 DATASOURCE_UID = "prometheus"
 DASHBOARD_PATH = "/var/lib/grafana/dashboards/sugarkube"
+DASHBOARD_FILE = f"{UID}.json"
+DASHBOARD_MOUNT = f"{DASHBOARD_PATH}/{DASHBOARD_FILE}"
 REQUIRED_METRICS = {
     "up",
     "dspace_instrumentation_up",
@@ -95,7 +97,7 @@ def validate_render(path: Path, dashboard_json: str) -> None:
         rendered = path.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as error:
         raise SystemExit(f"ERROR: rendered Helm output is missing or malformed: {error}") from error
-    key = f"{UID}.json:"
+    key = f"{DASHBOARD_FILE}:"
     if rendered.count(key) != 1 or rendered.count(f'"uid": "{UID}"') != 1:
         raise SystemExit("ERROR: Helm render must contain exactly one custom dashboard copy.")
     document = next((doc for doc in rendered.split("\n---") if key in doc), "")
@@ -116,32 +118,91 @@ def validate_render(path: Path, dashboard_json: str) -> None:
     ]
     if len(provider_documents) != 1:
         raise SystemExit("ERROR: Helm render must contain exactly one Sugarkube provider.")
-    provider_paths = re.findall(r"(?m)^[ \t]*path:[ \t]*(\S+)[ \t]*$", provider_documents[0])
+
+    def scalar(value: str) -> str:
+        value = value.strip()
+        if value.startswith('"'):
+            try:
+                decoded = json.loads(value)
+            except json.JSONDecodeError as error:
+                raise SystemExit(
+                    "ERROR: rendered Helm output contains malformed YAML scalars."
+                ) from error
+            return decoded if isinstance(decoded, str) else ""
+        if len(value) >= 2 and value[0] == value[-1] == "'":
+            return value[1:-1].replace("''", "'")
+        return value
+
+    provider_paths = [
+        scalar(value)
+        for value in re.findall(r"(?m)^[ \t]*path:[ \t]*(.+?)[ \t]*$", provider_documents[0])
+    ]
     if provider_paths != [DASHBOARD_PATH]:
-        raise SystemExit(f"ERROR: rendered dashboard provider path must be exactly {DASHBOARD_PATH}.")
-    mount_paths = re.findall(r"(?m)^[ \t]*-[ \t]+mountPath:[ \t]*(\S+)[ \t]*$", rendered)
-    if mount_paths.count(DASHBOARD_PATH) != 1:
-        raise SystemExit(f"ERROR: rendered dashboard mount must be exactly {DASHBOARD_PATH}.")
+        raise SystemExit(
+            f"ERROR: rendered dashboard provider path must be exactly {DASHBOARD_PATH}."
+        )
+    mount_entries = []
+    for match in re.finditer(
+        r"(?m)^(?P<indent>[ \t]*)-[ \t]+mountPath:[ \t]*(?P<path>.+?)\s*$", rendered
+    ):
+        indent = len(match.group("indent"))
+        following = rendered[match.end() :].splitlines()
+        fields = {}
+        for line in following:
+            if line.strip() and len(line) - len(line.lstrip()) <= indent:
+                break
+            field = re.match(r"^[ \t]+(subPath):[ \t]*(.+?)\s*$", line)
+            if field:
+                fields[field.group(1)] = scalar(field.group(2))
+        mount_entries.append((scalar(match.group("path")), fields.get("subPath")))
+    dashboard_mounts = [
+        entry
+        for entry in mount_entries
+        if entry[0] == DASHBOARD_MOUNT or entry[1] == DASHBOARD_FILE
+    ]
+    if dashboard_mounts != [(DASHBOARD_MOUNT, DASHBOARD_FILE)]:
+        raise SystemExit(
+            f"ERROR: rendered dashboard mount must be exactly {DASHBOARD_MOUNT} "
+            f"with subPath {DASHBOARD_FILE}."
+        )
     # Decode the ConfigMap block scalar and compare the complete JSON object, so
     # changes to queries, labels, thresholds, or panel options cannot hide behind
     # matching metric-name counts.
     lines = document.splitlines()
-    key_index = next(i for i, line in enumerate(lines) if line.strip() == f"{key} |")
+    key_matches = [i for i, line in enumerate(lines) if line.strip().startswith(key)]
+    if len(key_matches) != 1:
+        raise SystemExit("ERROR: rendered dashboard ConfigMap key is malformed or duplicated.")
+    key_index = key_matches[0]
     key_indent = len(lines[key_index]) - len(lines[key_index].lstrip())
-    payload = []
-    for line in lines[key_index + 1 :]:
+    suffix = lines[key_index].strip()[len(key) :].strip()
+    marker_index = key_index
+    if not suffix:
+        marker_index += 1
+        if marker_index >= len(lines):
+            raise SystemExit("ERROR: rendered dashboard ConfigMap block scalar is missing.")
+        marker_indent = len(lines[marker_index]) - len(lines[marker_index].lstrip())
+        suffix = lines[marker_index].strip()
+        if marker_indent <= key_indent:
+            raise SystemExit("ERROR: rendered dashboard ConfigMap block scalar is misplaced.")
+    if suffix not in {"|", "|-", "|+"}:
+        raise SystemExit("ERROR: rendered dashboard ConfigMap block scalar is malformed.")
+    payload_lines = []
+    for line in lines[marker_index + 1 :]:
         indent = len(line) - len(line.lstrip())
         if line.strip() and indent <= key_indent:
             break
-        payload.append(line[key_indent + 2 :] if line.strip() else "")
+        payload_lines.append(line)
+    content_indents = [len(line) - len(line.lstrip()) for line in payload_lines if line.strip()]
+    if not content_indents or min(content_indents) <= key_indent:
+        raise SystemExit("ERROR: rendered dashboard ConfigMap payload is missing or misplaced.")
+    payload_indent = min(content_indents)
+    payload = [line[payload_indent:] if line.strip() else "" for line in payload_lines]
     try:
         rendered_dashboard = json.loads("\n".join(payload))
     except json.JSONDecodeError as error:
         raise SystemExit("ERROR: rendered dashboard ConfigMap contains malformed JSON.") from error
     if rendered_dashboard != json.loads(dashboard_json):
-        raise SystemExit(
-            "ERROR: rendered dashboard differs from the version-controlled source."
-        )
+        raise SystemExit("ERROR: rendered dashboard differs from the version-controlled source.")
 
 
 def main() -> None:
