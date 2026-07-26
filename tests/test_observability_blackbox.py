@@ -241,7 +241,7 @@ class Scenario:
         args = [str(SCRIPT), command]
         if environment is not None:
             args.append(f"env={environment}")
-        return subprocess.run(args, cwd=ROOT, env=env, text=True, capture_output=True)
+        return subprocess.run(args, cwd=ROOT, env=env, text=True, capture_output=True, check=False)
 
 
 @pytest.fixture
