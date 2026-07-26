@@ -45,7 +45,9 @@ SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 SEMVER_RE = re.compile(
     r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
-    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
+    r"(?:-(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)"
+    r"(?:\.(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
 )
 IMAGE_TAG_RE = re.compile(r"^(?:main|v[0-9]+)-([0-9a-f]{7})$")
 PROVIDERS = {"token-place", "openai"}
@@ -54,6 +56,19 @@ RUNTIME_METHOD = "podImageID+ociRevisionAnnotation"
 IMAGE_REF = "ghcr.io/democratizedspace/dspace"
 CHART_REF = "ghcr.io/democratizedspace/charts/dspace"
 RESERVATION_SUFFIX = ".reservation"
+FINAL_FIXED_CHECKS = {
+    "imageDigest",
+    "chartDigest",
+    "chartSourceRevision",
+    "selectedCoordinates",
+    "clusterEnvironment",
+    "helmRelease",
+    "installedChart",
+    "releaseOwnershipAndReadiness",
+    "podImageCoordinates",
+    "podImageDigests",
+}
+PLATFORM_CHECK_RE = re.compile(r"^imagePlatformSourceRevision\[(0|[1-9][0-9]*)\]$")
 
 
 class ManifestError(ValueError):
@@ -165,6 +180,8 @@ def validate(value: dict[str, Any], finalized: bool | None = None) -> dict[str, 
         results = value["verificationResults"]
         if not isinstance(results, list) or not results:
             raise ManifestError("verificationResults must be a non-empty list")
+        checks: set[str] = set()
+        platform_indices: list[int] = []
         for result in results:
             if not isinstance(result, dict):
                 raise ManifestError("verification results must be objects")
@@ -173,10 +190,30 @@ def validate(value: dict[str, Any], finalized: bool | None = None) -> dict[str, 
                 not isinstance(result["check"], str)
                 or not isinstance(result["passed"], bool)
                 or not isinstance(result["details"], str)
+                or not result["check"]
+                or not result["details"]
             ):
                 raise ManifestError("verification result fields have invalid types")
             if not result["passed"]:
                 raise ManifestError(f"verification failed: {result['check']}")
+            check = result["check"]
+            if check in checks:
+                raise ManifestError(f"duplicate verification result: {check}")
+            checks.add(check)
+            platform_match = PLATFORM_CHECK_RE.fullmatch(check)
+            if platform_match:
+                platform_indices.append(int(platform_match.group(1)))
+            elif check not in FINAL_FIXED_CHECKS:
+                raise ManifestError(f"unknown verification result: {check}")
+        missing = sorted(FINAL_FIXED_CHECKS - checks)
+        if missing:
+            raise ManifestError("missing verification results: " + ", ".join(missing))
+        if sorted(platform_indices) != list(range(len(platform_indices))):
+            raise ManifestError(
+                "image platform verification indices must be contiguous from zero"
+            )
+        if not platform_indices:
+            raise ManifestError("at least one image platform verification result is required")
     return value
 
 

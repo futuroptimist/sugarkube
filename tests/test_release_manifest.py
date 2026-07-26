@@ -105,6 +105,30 @@ def test_rejects_invalid_upstream(change) -> None:
 
 
 @pytest.mark.parametrize(
+    "version",
+    ["3.2.0-01", "3.2.0-alpha.01", "03.2.0", "3.02.0", "3.2.00"],
+)
+def test_rejects_non_strict_semver(version: str) -> None:
+    value = upstream()
+    value["applicationVersion"] = version
+    value["semanticTag"] = f"v{version}"
+    with pytest.raises(manifest.ManifestError, match="strict SemVer"):
+        manifest.candidate(value, "staging", "token-place", "2026-07-26T12:00:00Z", "operator")
+
+
+@pytest.mark.parametrize(
+    "version", ["3.2.0-alpha", "3.2.0-alpha.1", "3.2.0-0", "3.2.0-0A.01a+build.01"]
+)
+def test_accepts_strict_semver_prerelease_and_build(version: str) -> None:
+    value = upstream()
+    value["applicationVersion"] = version
+    value["semanticTag"] = f"v{version}"
+    assert manifest.candidate(
+        value, "staging", "token-place", "2026-07-26T12:00:00Z", "operator"
+    )["applicationVersion"] == version
+
+
+@pytest.mark.parametrize(
     ("environment", "provider", "approver"),
     [
         ("dev", "token-place", "operator"),
@@ -322,6 +346,88 @@ def test_finalize_collects_sorted_multi_pod_identity() -> None:
         "podImageCoordinates",
         "podImageDigests",
     }
+
+
+def test_generated_final_record_validates_through_cli(tmp_path: Path) -> None:
+    output = tmp_path / "final.json"
+    output.write_text(manifest._canonical(finalize()), encoding="utf-8")
+    assert manifest.main(["validate", "--manifest", str(output), "--final"]) == 0
+
+
+def _replace_results(value, checks):
+    value["verificationResults"] = [
+        {"check": check, "passed": True, "details": "observed"} for check in checks
+    ]
+    return value
+
+
+def test_final_validation_rejects_arbitrary_only_result() -> None:
+    with pytest.raises(manifest.ManifestError, match="unknown verification"):
+        manifest.validate(_replace_results(finalize(), ["inventedCheck"]), True)
+
+
+@pytest.mark.parametrize("missing", sorted(manifest.FINAL_FIXED_CHECKS))
+def test_final_validation_requires_every_fixed_check(missing: str) -> None:
+    value = finalize()
+    value["verificationResults"] = [
+        result for result in value["verificationResults"] if result["check"] != missing
+    ]
+    with pytest.raises(manifest.ManifestError, match="missing verification"):
+        manifest.validate(value, True)
+
+
+@pytest.mark.parametrize("invalid", ["unknown", "imagePlatformSourceRevision[x]"])
+def test_final_validation_rejects_unknown_or_malformed_checks(invalid: str) -> None:
+    value = finalize()
+    value["verificationResults"].append(
+        {"check": invalid, "passed": True, "details": "fabricated"}
+    )
+    with pytest.raises(manifest.ManifestError, match="unknown verification"):
+        manifest.validate(value, True)
+
+
+def test_final_validation_rejects_duplicate_and_gapped_platform_checks() -> None:
+    value = finalize()
+    value["verificationResults"].append(dict(value["verificationResults"][0]))
+    with pytest.raises(manifest.ManifestError, match="duplicate verification"):
+        manifest.validate(value, True)
+
+    value = finalize()
+    platform = next(
+        result
+        for result in value["verificationResults"]
+        if result["check"].startswith("imagePlatformSourceRevision")
+    )
+    platform["check"] = "imagePlatformSourceRevision[1]"
+    with pytest.raises(manifest.ManifestError, match="contiguous from zero"):
+        manifest.validate(value, True)
+
+
+def test_final_validation_requires_platform_check() -> None:
+    value = finalize()
+    value["verificationResults"] = [
+        result
+        for result in value["verificationResults"]
+        if not result["check"].startswith("imagePlatformSourceRevision")
+    ]
+    with pytest.raises(manifest.ManifestError, match="at least one image platform"):
+        manifest.validate(value, True)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda result: result.update(passed=False),
+        lambda result: result.update(details=""),
+        lambda result: result.update(check=1),
+        lambda result: result.update(extra="field"),
+    ],
+)
+def test_final_validation_rejects_non_passing_or_malformed_results(change) -> None:
+    value = finalize()
+    change(value["verificationResults"][0])
+    with pytest.raises(manifest.ManifestError):
+        manifest.validate(value, True)
 
 
 def test_finalize_rejects_pod_image_mismatch() -> None:
