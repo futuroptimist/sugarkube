@@ -190,6 +190,21 @@ export SUGARKUBE_APP_CONFIG_DIR=apps
 
 ## Generic command surface
 
+### DSPACE release evidence gate
+
+DSPACE is the first application with a compatible producer manifest. Its
+`staging` and `prod` deploy, redeploy, promotion, and compatibility commands
+therefore require `manifest=<approved-candidate.json>`. Other applications are
+not gated. Before any Helm or Kubernetes mutation, Sugarkube validates the
+candidate and uses `oras manifest fetch` to compare both OCI descriptor digests
+and both `org.opencontainers.image.revision` annotations with the approved full
+source SHA. A semantic release tag remains evidence and is never passed to Helm.
+
+After rollout the command writes a new record beneath
+`deployment-evidence/dspace/<environment>/<image-tag>.json` (or the explicit
+`evidence=` path). It records the Helm revision and every DSPACE pod's name,
+start time, and resolved image ID. Existing files are never overwritten.
+
 These recipes are implemented in the root `justfile` and use the app config
 lookup order above.
 

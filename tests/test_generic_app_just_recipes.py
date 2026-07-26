@@ -1082,12 +1082,6 @@ def test_app_deploy_danielsmith_passes_image_tag(generic_app_stub_env: dict[str,
             ],
         ),
         (
-            "dspace",
-            "oci://ghcr.io/democratizedspace/charts/dspace",
-            "dspace",
-            ["docs/examples/dspace.values.dev.yaml", "docs/examples/dspace.values.staging.yaml"],
-        ),
-        (
             "jobbot3000",
             "oci://ghcr.io/futuroptimist/charts/jobbot3000",
             "jobbot3000",
@@ -1200,12 +1194,6 @@ def test_app_redeploy_prints_chart_pin_reminder_without_latest_lookup_or_pin_mut
     ("app", "release", "namespace", "chart"),
     [
         (
-            "dspace",
-            "dspace",
-            "dspace",
-            "oci://ghcr.io/democratizedspace/charts/dspace",
-        ),
-        (
             "tokenplace",
             "tokenplace",
             "tokenplace",
@@ -1292,13 +1280,9 @@ def test_dspace_oci_deploy_wrapper_propagates_inline_chart_pin(
 
     result = _run_just(["dspace-oci-deploy", "env=staging", "tag=main-deadbee"], env)
 
-    assert result.returncode == 0, result.stderr + result.stdout
-    helm_log = Path(env["HELM_LOG"]).read_text(encoding="utf-8")
-    assert (
-        "show chart oci://ghcr.io/democratizedspace/charts/dspace "
-        "--version 3.1.0-rc.1+build.5"
-    ) in helm_log
-    assert "--version ${SUGARKUBE_VERSION_FILE}" not in helm_log
+    assert result.returncode != 0
+    assert "manifest=<approved-candidate.json> is required" in result.stderr
+    assert not Path(env["HELM_LOG"]).exists()
 
 
 @pytest.mark.usefixtures("ensure_just_available")
@@ -1307,7 +1291,6 @@ def test_dspace_oci_deploy_wrapper_propagates_inline_chart_pin(
     [
         ("danielsmith-oci-deploy", "danielsmith"),
         ("tokenplace-oci-deploy", "tokenplace"),
-        ("dspace-oci-deploy", "dspace"),
     ],
 )
 def test_existing_app_specific_deploy_wrappers_still_work(
@@ -1330,11 +1313,6 @@ def test_existing_app_specific_deploy_wrappers_still_work(
 @pytest.mark.parametrize(
     ("recipe", "image_heading", "check_heading"),
     [
-        (
-            "dspace-oci-promote-prod",
-            "Resolved deployment image(s):",
-            "Post-deploy verification commands",
-        ),
         (
             "tokenplace-oci-promote-prod",
             "Resolved images for deployment/tokenplace:",
@@ -2632,12 +2610,9 @@ def test_dspace_oci_deploy_wrapper_propagates_env_specific_chart_pin(
 
     result = _run_just(["dspace-oci-deploy", "env=staging", "tag=main-deadbee"], env)
 
-    assert result.returncode == 0, result.stderr + result.stdout
-    helm_log = Path(env["HELM_LOG"]).read_text(encoding="utf-8")
-    assert (
-        "show chart oci://ghcr.io/democratizedspace/charts/dspace "
-        "--version 3.1.0-rc.1+build.5"
-    ) in helm_log
+    assert result.returncode != 0
+    assert "manifest=<approved-candidate.json> is required" in result.stderr
+    assert not Path(env["HELM_LOG"]).exists()
 
 
 def test_direct_helm_oci_helper_matching_env_succeeds(
@@ -2806,6 +2781,6 @@ def test_dspace_promote_prod_guard_mismatch_fails_before_helm(
     result = _run_just(["dspace-oci-promote-prod", "tag=main-deadbee"], env)
 
     assert result.returncode != 0
-    assert "requested env=prod" in result.stderr
+    assert "manifest=<approved-candidate.json> is required" in result.stderr
     helm_log_path = Path(env["HELM_LOG"])
     assert not helm_log_path.exists() or helm_log_path.read_text(encoding="utf-8") == ""
