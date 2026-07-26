@@ -1364,8 +1364,17 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
         fi
     fi
 
+    digest_chart=false
+    if [[ "${chart}" == *@* ]]; then
+      if ! [[ "${chart}" =~ ^oci://[^@[:space:]]+@sha256:[0-9a-f]{64}$ ]]; then
+        echo "ERROR: digest-qualified OCI chart must match oci://...@sha256:<64 lowercase hex>." >&2
+        exit 2
+      fi
+      digest_chart=true
+    fi
+
     version_args=()
-    if [ -n "${chart_version}" ]; then
+    if [ -n "${chart_version}" ] && [ "${digest_chart}" = false ]; then
         version_args+=(--version "${chart_version}")
     fi
 
@@ -1383,7 +1392,9 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     echo 'NOTE: chart pins are explicit. `tag=...` changes only the image tag.'
     printf 'Run `just app-chart-status app=%s` before release deploys to check for newer published chart versions.\n' "${release}"
     printf 'Use `just app-chart-bump app=%s version=<version>` to intentionally update %s.\n' "${release}" "${version_file:-docs/apps/${release}.version}"
-    if [ -n "${chart_version}" ]; then
+    if [ "${digest_chart}" = true ]; then
+      helm show chart "${chart}" >/dev/null
+    elif [ -n "${chart_version}" ]; then
       helm show chart "${chart}" --version "${chart_version}" >/dev/null
     fi
 
@@ -1630,10 +1641,10 @@ app-deploy app env='staging' tag='' config='' manifest='' evidence='':
       if [ -z "${chart_version}" ]; then
         chart_version="$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' "${SUGARKUBE_VERSION_FILE}" | head -n1)"
       fi
-      python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" preflight \
+      chart_coordinate="$(python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" preflight \
         --manifest "${release_manifest}" --environment "${SUGARKUBE_ENV}" \
         --image-tag "${SUGARKUBE_TAG}" --chart-version "${chart_version}" \
-        --chart-ref "${SUGARKUBE_CHART}"
+        --chart-ref "${SUGARKUBE_CHART}" --print-chart-coordinate)"
       if [ -z "${evidence_output}" ]; then
         evidence_output="$(python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" evidence-path --manifest "${release_manifest}")"
       fi
@@ -1660,7 +1671,7 @@ app-deploy app env='staging' tag='' config='' manifest='' evidence='':
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
       release="${SUGARKUBE_RELEASE}" \
       namespace="${SUGARKUBE_NAMESPACE}" \
-      chart="${SUGARKUBE_CHART}" \
+      chart="${chart_coordinate:-${SUGARKUBE_CHART}}" \
       values="${SUGARKUBE_VALUES}" \
       version="${SUGARKUBE_VERSION:-}" \
       version_file="${SUGARKUBE_VERSION_FILE:-}" \
@@ -1695,8 +1706,8 @@ app-redeploy app env='staging' tag='' config='' manifest='' evidence='':
       if [ -z "${release_manifest}" ]; then echo "ERROR: manifest=<approved-candidate.json> is required for DSPACE ${SUGARKUBE_ENV}." >&2; exit 2; fi
       chart_version="${SUGARKUBE_VERSION:-}"
       if [ -z "${chart_version}" ]; then chart_version="$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' "${SUGARKUBE_VERSION_FILE}" | head -n1)"; fi
-      python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" preflight --manifest "${release_manifest}" --environment "${SUGARKUBE_ENV}" --image-tag "${SUGARKUBE_TAG}" --chart-version "${chart_version}" \
-        --chart-ref "${SUGARKUBE_CHART}"
+      chart_coordinate="$(python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" preflight --manifest "${release_manifest}" --environment "${SUGARKUBE_ENV}" --image-tag "${SUGARKUBE_TAG}" --chart-version "${chart_version}" \
+        --chart-ref "${SUGARKUBE_CHART}" --print-chart-coordinate)"
       if [ -z "${evidence_output}" ]; then evidence_output="$(python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" evidence-path --manifest "${release_manifest}")"; fi
     fi
 
@@ -1721,7 +1732,7 @@ app-redeploy app env='staging' tag='' config='' manifest='' evidence='':
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
       release="${SUGARKUBE_RELEASE}" \
       namespace="${SUGARKUBE_NAMESPACE}" \
-      chart="${SUGARKUBE_CHART}" \
+      chart="${chart_coordinate:-${SUGARKUBE_CHART}}" \
       values="${SUGARKUBE_VALUES}" \
       version="${SUGARKUBE_VERSION:-}" \
       version_file="${SUGARKUBE_VERSION_FILE:-}" \

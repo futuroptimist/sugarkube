@@ -490,6 +490,12 @@ def preflight(
     return results
 
 
+def chart_coordinate(value: dict[str, Any]) -> str:
+    """Return the immutable Helm coordinate approved by a validated candidate."""
+    validate(value, False)
+    return f"oci://{CHART_REF}@{value['chartDigest']}"
+
+
 def _image_id_digest(image_id: str) -> str:
     match = re.search(r"sha256:[0-9a-f]{64}$", image_id)
     if not match:
@@ -642,7 +648,12 @@ def finalize(
         {
             "check": "installedChart",
             "passed": True,
-            "details": f"chart=dspace; version={chart_version}",
+            # Helm metadata proves name/version, not immutable OCI content. The
+            # guarded mutation therefore installs this approved digest directly.
+            "details": (
+                f"chart=dspace; version={chart_version}; "
+                f"coordinate={chart_coordinate(value)}"
+            ),
         },
         {
             "check": "releaseOwnershipAndReadiness",
@@ -693,6 +704,7 @@ def main(argv: list[str] | None = None) -> int:
     flight.add_argument("--environment")
     flight.add_argument("--image-tag")
     flight.add_argument("--chart-version")
+    flight.add_argument("--print-chart-coordinate", action="store_true")
     finish = sub.add_parser("finalize")
     finish.add_argument("--manifest", type=Path, required=True)
     finish.add_argument("--output", type=Path, required=True)
@@ -733,8 +745,9 @@ def main(argv: list[str] | None = None) -> int:
             result = validate(_object(args.manifest), args.final)
             sys.stdout.write(_canonical(result))
         elif args.command == "preflight":
+            source = _object(args.manifest)
             result = preflight(
-                _object(args.manifest),
+                source,
                 args.image_ref,
                 args.chart_ref,
                 args.oras_command,
@@ -742,7 +755,10 @@ def main(argv: list[str] | None = None) -> int:
                 args.image_tag,
                 args.chart_version,
             )
-            sys.stdout.write(_canonical(result))
+            if args.print_chart_coordinate:
+                sys.stdout.write(chart_coordinate(source) + "\n")
+            else:
+                sys.stdout.write(_canonical(result))
         elif args.command == "finalize":
             source = _object(args.manifest)
             sidecar = verify_reservation(

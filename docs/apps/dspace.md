@@ -145,6 +145,12 @@ git add "$EVIDENCE"
 # Commit it after review, or attach that exact file to the external promotion record.
 ```
 
+The approved `chartVersion` remains the human-readable pin and the Helm metadata
+checked after rollout. The guarded deploy itself passes Helm the immutable
+`oci://ghcr.io/democratizedspace/charts/dspace@<chartDigest>` coordinate emitted
+by the successful preflight, without `--version`, so a tag cannot be resolved
+again between approval and installation.
+
 After staging sign-off, generate a separate `prod` candidate from the **same
 upstream manifest**, approve it independently, and promote it. The image tag,
 image digest, chart version, chart digest, and full source SHA must remain the
@@ -164,7 +170,8 @@ git add "$EVIDENCE"
 ```
 
 The finalized JSON is sufficient to reconstruct the release using the recorded
-branch-SHA image tag and digest plus chart version and digest, without resolving
+branch-SHA image tag and digest plus chart version and the exact digest-qualified
+chart deployment coordinate, without resolving
 `latest`, a branch, an environment tag, or the semantic tag. Until DSPACE #4732
 adds direct runtime identity, `runtimeSourceRevisionMethod` is strictly
 `podImageID+ociRevisionAnnotation`: every pod image ID must equal the approved

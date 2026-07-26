@@ -201,7 +201,12 @@ then reads the digest-qualified image index, every platform manifest/config,
 and the exact chart artifact/config. Every `org.opencontainers.image.revision`
 value must match the approved full source SHA. The configured DSPACE chart must
 be the canonical `oci://ghcr.io/democratizedspace/charts/dspace` reference, so
-the artifact checked is the artifact Helm deploys. A semantic release tag remains evidence and is never passed to Helm.
+the artifact checked is the artifact Helm deploys. After preflight, the guarded
+mutation passes Helm that chart as
+`oci://ghcr.io/democratizedspace/charts/dspace@<chartDigest>` without
+`--version`; the approved `chartVersion` remains separate display metadata and
+is checked against Helm's installed-chart metadata after rollout. A semantic
+release tag remains evidence and is never passed to Helm.
 
 After rollout the command writes a new record beneath
 `deployment-evidence/dspace/<environment>/<image-tag>-<approval-time>.json`

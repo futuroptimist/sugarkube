@@ -1393,6 +1393,15 @@ def test_dspace_guarded_deploy_orders_preflight_mutation_and_finalization(
     assert final["helmRevision"] == 7
     assert "reservation" not in json.dumps(final).lower()
     assert not Path(str(evidence.resolve()) + ".reservation").exists()
+    coordinate = "oci://ghcr.io/democratizedspace/charts/dspace@sha256:" + "2" * 64
+    installed = next(
+        item for item in final["verificationResults"] if item["check"] == "installedChart"
+    )
+    assert coordinate in installed["details"]
+    helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
+    mutation_line = next(line for line in helm_log.splitlines() if line.startswith("upgrade "))
+    assert coordinate in mutation_line
+    assert "--version" not in mutation_line
     commands = (tmp_path / "commands.log").read_text(encoding="utf-8").splitlines()
     preflight = next(i for i, line in enumerate(commands) if line.startswith("oras "))
     mutation = next(
@@ -1401,6 +1410,40 @@ def test_dspace_guarded_deploy_orders_preflight_mutation_and_finalization(
     collection = next(i for i, line in enumerate(commands) if " status dspace" in line)
     pods = next(i for i, line in enumerate(commands) if " -n dspace get pods" in line)
     assert preflight < mutation < collection < pods
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_dspace_guarded_redeploy_installs_approved_chart_digest(
+    tmp_path: Path, generic_app_stub_env: dict[str, str]
+) -> None:
+    candidate_path = tmp_path / "candidate.json"
+    evidence = tmp_path / "evidence.json"
+    _write_dspace_candidate(candidate_path, "staging")
+
+    result = _run_just(
+        [
+            "app-redeploy",
+            "dspace",
+            "staging",
+            "main-abcdef0",
+            "",
+            str(candidate_path),
+            str(evidence),
+        ],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    coordinate = "oci://ghcr.io/democratizedspace/charts/dspace@sha256:" + "2" * 64
+    mutation_line = next(
+        line
+        for line in Path(generic_app_stub_env["HELM_LOG"])
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.startswith("upgrade ")
+    )
+    assert coordinate in mutation_line
+    assert "--version" not in mutation_line
 
 
 @pytest.mark.usefixtures("ensure_just_available")
@@ -2841,6 +2884,31 @@ def test_direct_helm_oci_helper_matching_env_succeeds(
     helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
     assert "show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.3" in helm_log
     assert "upgrade tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace" in helm_log
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_direct_helm_oci_helper_uses_digest_coordinate_without_version(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    coordinate = "oci://ghcr.io/futuroptimist/charts/tokenplace@sha256:" + "a" * 64
+    result = _run_just(
+        [
+            "helm-oci-install",
+            "release=tokenplace",
+            "namespace=tokenplace",
+            f"chart={coordinate}",
+            "version=0.1.3",
+            "env=staging",
+        ],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    lines = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8").splitlines()
+    assert f"show chart {coordinate}" in lines
+    mutation = next(line for line in lines if line.startswith("upgrade "))
+    assert coordinate in mutation
+    assert "--version" not in mutation
 
 
 

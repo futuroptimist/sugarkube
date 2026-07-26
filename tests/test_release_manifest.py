@@ -719,10 +719,18 @@ def test_public_read_only_and_reservation_dispatch(
     source = tmp_path / "candidate.json"
     output = tmp_path / "evidence.json"
     source.write_text(manifest._canonical(candidate()), encoding="utf-8")
-    oci_results = manifest.preflight(
-        candidate(), manifest.IMAGE_REF, manifest.CHART_REF, "oras", runner=oras_runner()
+    real_preflight = manifest.preflight
+    preflight_calls = []
+
+    def checked_preflight(*args, **kwargs):
+        preflight_calls.append(args)
+        return real_preflight(*args, **kwargs, runner=oras_runner())
+
+    oci_results = checked_preflight(
+        candidate(), manifest.IMAGE_REF, manifest.CHART_REF, "oras"
     )
-    monkeypatch.setattr(manifest, "preflight", lambda *args, **kwargs: oci_results)
+    preflight_calls.clear()
+    monkeypatch.setattr(manifest, "preflight", checked_preflight)
 
     assert (
         manifest.main(
@@ -741,6 +749,26 @@ def test_public_read_only_and_reservation_dispatch(
         == 0
     )
     assert json.loads(capsys.readouterr().out) == oci_results
+
+    assert (
+        manifest.main(
+            [
+                "preflight",
+                "--manifest",
+                str(source),
+                "--environment",
+                "staging",
+                "--image-tag",
+                "main-abcdef0",
+                "--chart-version",
+                "3.2.0",
+                "--print-chart-coordinate",
+            ]
+        )
+        == 0
+    )
+    assert capsys.readouterr().out == f"oci://{manifest.CHART_REF}@{CHART_DIGEST}\n"
+    assert len(preflight_calls) == 2
 
     assert manifest.main(["evidence-path", "--manifest", str(source)]) == 0
     assert capsys.readouterr().out.strip() == str(manifest.evidence_path(candidate()))
@@ -768,6 +796,32 @@ def test_public_read_only_and_reservation_dispatch(
     assert manifest.verify_reservation(
         output, candidate(), "staging", "dspace", "dspace", owner
     ) == manifest.reservation_path(output)
+
+
+def test_preflight_chart_coordinate_is_not_printed_after_failed_validation(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    source = tmp_path / "candidate.json"
+    invalid = candidate()
+    invalid["chartDigest"] = "sha256:" + "9" * 64
+    source.write_text(manifest._canonical(invalid), encoding="utf-8")
+    real_preflight = manifest.preflight
+    monkeypatch.setattr(
+        manifest,
+        "preflight",
+        lambda *args, **kwargs: real_preflight(
+            *args, **kwargs, runner=oras_runner()
+        ),
+    )
+    assert (
+        manifest.main(
+            ["preflight", "--manifest", str(source), "--print-chart-coordinate"]
+        )
+        == 2
+    )
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "chartDigest" in captured.err
 
 
 def test_default_evidence_path_is_stable_and_approval_unique() -> None:
