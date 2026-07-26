@@ -4,6 +4,17 @@ This is the canonical, implementation-ready design for Sugarkube observability a
 
 This document is the design contract. The current live staging kube-prometheus-stack lifecycle is the guarded, non-Flux Helm path documented in [`docs/observability-operations.md`](./observability-operations.md). The repository still includes older Flux/Longhorn kube-prometheus-stack manifests for inactive future/legacy work; they are not live deployment evidence, must not be applied to staging or production as currently written, and must not be combined with the manual Helm lifecycle for the same release. See [`docs/observability-blackbox.md`](./observability-blackbox.md) for the runtime blackbox slice.
 
+## Staging dashboard ownership
+
+The first repository-owned Grafana dashboard is **Sugarkube Staging
+Observability** (`sugarkube-staging-observability`). Its readable JSON source is
+`clusters/staging/observability/dashboards/sugarkube-staging-observability.json`.
+The canonical non-Flux Helm lifecycle passes that file through the pinned
+kube-prometheus-stack chart's Grafana dashboard value, and a file provider
+restores it whenever the persistence-free Grafana pod starts. The Prometheus
+datasource UID is the chart-rendered stable UID `prometheus`; the dashboard does
+not depend on import-time datasource placeholders.
+
 ## Audit scope and evidence
 
 Local Sugarkube sources audited:

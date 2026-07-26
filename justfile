@@ -3298,6 +3298,10 @@ observability-status env='':
 observability-verify env='':
     @scripts/observability_helm.sh verify '{{ env }}'
 
+# Verify Grafana loaded the staging dashboard through its API (read-only).
+observability-dashboard-verify env='':
+    @scripts/observability_helm.sh dashboard-verify '{{ env }}'
+
 # Render the pinned staging blackbox exporter and Probe manifests (read-only).
 observability-blackbox-render env='':
     @scripts/observability_blackbox.sh render '{{ env }}'
