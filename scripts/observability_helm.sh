@@ -253,6 +253,8 @@ dashboard_verify() (
   local verify_pid="" verify_tmp
   verify_tmp="$(mktemp -d -t sugarkube-grafana-verify.XXXXXX)"
   chmod 700 "${verify_tmp}"
+  # The EXIT trap invokes this cleanup callback indirectly.
+  # shellcheck disable=SC2317
   cleanup_dashboard_verify() {
     if [[ -n "${verify_pid}" && " $(jobs -pr) " == *" ${verify_pid} "* ]]; then
       kill "${verify_pid}" 2>/dev/null || true
