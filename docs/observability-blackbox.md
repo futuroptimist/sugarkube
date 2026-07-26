@@ -6,8 +6,11 @@ only. The exporter is a `ClusterIP` service; this work adds no Ingress,
 NodePort, public DNS, router rule, credential, or persistence. The lifecycle
 owns one staging-only NetworkPolicy that permits only the canonical
 `kube-prometheus-stack` Prometheus pods to reach only the canonical exporter
-pods on TCP 9115. Existing monitoring DNS and external HTTPS permissions are
-unchanged.
+pods on TCP 9115. The policy selects the exporter and isolates only its ingress;
+it does not select Prometheus or affect Prometheus DNS or any other egress. The
+observed live baseline had no monitoring default-deny policy or
+`allow-monitoring-ingress` policy, so this lifecycle does not assume either one
+exists.
 
 ## Canonical sources
 
@@ -73,22 +76,30 @@ app/route target matrix, `probe_success == 1`, and the duration, HTTP status,
 DNS lookup, and earliest TLS certificate-expiry metric families. It never logs
 raw target payloads or URLs; terminal diagnostics contain bounded labels and
 health/series states only. Before polling Prometheus, verification fails closed
-unless the deployed policy has exactly the required source selector,
-destination selector, Egress policy type, single peer/rule, and TCP 9115 port;
-broad or additional behavior is rejected.
+unless the deployed policy selects exactly the exporter pods and has one
+ingress peer selecting exactly the Prometheus pods, one rule, the sole
+`Ingress` policy type, and exactly TCP 9115; broad or additional behavior is
+rejected.
+The exact policy has a single `Ingress` type and no `egress` field. The former
+policy selected Prometheus for egress, which caused Kubernetes to isolate all
+Prometheus egress on the observed baseline while allowing only exporter TCP
+9115. That blocked DNS and put every scrape path at risk. Selecting only the
+exporter for ingress avoids that failure mode: Prometheus DNS and all other
+egress remain unaffected, while the exporter remains ClusterIP-only.
 
 ## Post-merge rollout
 
 1. Select and independently confirm the staging kubeconfig and cluster identity.
 2. Review `just observability-blackbox-render env=staging` without applying it.
-3. If `helm -n monitoring list --all --filter '^prometheus-blackbox-exporter$'`
-   shows no release, run `just observability-blackbox-install env=staging`; if
-   it shows the release, run `just observability-blackbox-upgrade env=staging`.
+3. The staging exporter release already exists, so run
+   `just observability-blackbox-upgrade env=staging`. Install remains reserved
+   for a genuinely absent release on a fresh staging cluster.
 4. Run status, then verify. Preserve this output as separate live evidence.
 5. Stop and investigate rather than attempting production if any guard fails.
 
-No live deployment was performed as part of this repository change; repository
-state is not evidence of a live rollout.
+Repository tests perform no live mutation. No live deployment was performed as
+part of this repository change; repository state is not evidence of a live
+rollout.
 
 ## Rollback
 

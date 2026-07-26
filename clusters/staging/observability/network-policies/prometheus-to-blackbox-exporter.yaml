@@ -6,15 +6,15 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      operator.prometheus.io/name: kube-prometheus-stack-prometheus
+      app.kubernetes.io/instance: prometheus-blackbox-exporter
+      app.kubernetes.io/name: prometheus-blackbox-exporter
   policyTypes:
-    - Egress
-  egress:
-    - to:
+    - Ingress
+  ingress:
+    - from:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/instance: prometheus-blackbox-exporter
-              app.kubernetes.io/name: prometheus-blackbox-exporter
+              operator.prometheus.io/name: kube-prometheus-stack-prometheus
       ports:
         - protocol: TCP
           port: 9115
