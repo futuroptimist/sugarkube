@@ -10,6 +10,12 @@ remain compatibility shims during migration. They are intentionally not removed
 in this phase and will be deprecated only after downstream runbooks have moved to
 the generic flow.
 
+DSPACE is the first producer release-manifest contract. Its staging and production calls require
+`manifest=<approved-candidate.json>`; generic `app-*` recipes and retained `dspace-oci-*` wrappers
+share the same OCI validation and evidence collector. Other applications are deliberately not
+gated until they publish a compatible contract. See the
+[DSPACE runbook](apps/dspace.md#approved-release-manifest-and-durable-evidence).
+
 ## Ownership boundary
 
 App repositories own build and release artifacts:

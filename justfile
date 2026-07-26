@@ -1606,7 +1606,7 @@ app-config app env='staging' config='':
       --config {{ quote(config) }}
 
 # Generic immutable-tag app deploy backed by docs/examples/apps/*.env or local app configs.
-app-deploy app env='staging' tag='' config='':
+app-deploy app env='staging' tag='' config='' manifest='' record='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -1616,6 +1616,20 @@ app-deploy app env='staging' tag='' config='':
       --config {{ quote(config) }} \
       --tag {{ quote(tag) }} \
       --require-tag)"
+
+    release_manifest={{ quote(manifest) }}
+    if [ "${SUGARKUBE_APP}" = dspace ] && [ "${SUGARKUBE_ENV}" != dev ]; then
+      if [ -z "${release_manifest}" ]; then
+        echo "ERROR: DSPACE ${SUGARKUBE_ENV} deployment requires manifest=<approved-candidate.json>." >&2
+        exit 2
+      fi
+      chart_version="${SUGARKUBE_VERSION:-}"
+      if [ -z "${chart_version}" ]; then
+        chart_version="$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' "${SUGARKUBE_VERSION_FILE}" | head -n1 | tr -d '[:space:]')"
+      fi
+      python3 "{{ justfile_directory() }}/scripts/release_manifest.py" preflight "${release_manifest}" \
+        --environment "${SUGARKUBE_ENV}" --image-tag "${SUGARKUBE_TAG}" --chart-version "${chart_version}"
+    fi
 
     export KUBECONFIG="${HOME}/.kube/config"
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${SUGARKUBE_ENV}"
@@ -1639,6 +1653,19 @@ app-deploy app env='staging' tag='' config='':
       version_file="${SUGARKUBE_VERSION_FILE:-}" \
       tag="${SUGARKUBE_TAG}" \
       env="${SUGARKUBE_ENV}"
+    if [ "${SUGARKUBE_APP}" = dspace ] && [ "${SUGARKUBE_ENV}" != dev ]; then
+      output={{ quote(record) }}
+      if [ -z "${output}" ]; then
+        revision="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["sourceRevision"])' "${release_manifest}")"
+        output="deployment-evidence/dspace/${SUGARKUBE_ENV}/${revision}.json"
+      fi
+      results="$(mktemp)"; trap 'rm -f "${results}"' EXIT
+      printf '%s\n' '[{"details":"Helm completed and all configured rollouts became ready","name":"helm-rollout","passed":true}]' >"${results}"
+      python3 "{{ justfile_directory() }}/scripts/release_manifest.py" finalize "${release_manifest}" \
+        --namespace "${SUGARKUBE_NAMESPACE}" --release "${SUGARKUBE_RELEASE}" \
+        --verification-results "${results}" --output "${output}"
+      echo "Final deployment evidence: ${output}"
+    fi
 
 # Generic upgrade-only app redeploy backed by app config files.
 app-redeploy app env='staging' tag='' config='':
@@ -1676,7 +1703,7 @@ app-redeploy app env='staging' tag='' config='':
       env="${SUGARKUBE_ENV}"
 
 # Promote an app to prod with an explicit immutable tag, or the configured prod tag file.
-app-promote-prod app tag='' config='':
+app-promote-prod app tag='' config='' manifest='' record='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -1687,11 +1714,19 @@ app-promote-prod app tag='' config='':
       --tag {{ quote(tag) }} \
       --prod-tag-fallback \
       --require-tag)"
+    approved_manifest={{ quote(manifest) }}
+    output_record={{ quote(record) }}
+    if [ "${SUGARKUBE_APP}" = dspace ] && [ -z "${approved_manifest}" ]; then
+      echo "ERROR: DSPACE production promotion requires manifest=<approved-candidate.json>." >&2
+      exit 2
+    fi
     just --justfile "{{ justfile_directory() }}/justfile" app-deploy \
       app="${SUGARKUBE_APP}" \
       env=prod \
       tag="${SUGARKUBE_TAG}" \
-      config="${SUGARKUBE_CONFIG_PATH}"
+      config="${SUGARKUBE_CONFIG_PATH}" \
+      manifest="${approved_manifest}" \
+      record="${output_record}"
 
 # Show the pinned chart version and whether a newer semver chart appears published.
 app-chart-status app env='staging' config='':
@@ -1816,9 +1851,19 @@ app-cors-verify app env='staging' config='' origin='https://cors-smoke.invalid' 
 #
 
 # Use this for steady-state release validation flows where explicit image pinning matters.
-dspace-oci-deploy env='staging' tag='':
+dspace-oci-deploy env='staging' tag='' manifest='' record='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
+
+    approved_manifest={{ quote(manifest) }}
+    output_record={{ quote(record) }}
+    if [ -z "${approved_manifest}" ]; then
+      echo "ERROR: DSPACE deployment requires manifest=<approved-candidate.json>." >&2
+      exit 2
+    fi
+    just --justfile "{{ justfile_directory() }}/justfile" app-deploy app=dspace \
+      env={{ quote(env) }} tag={{ quote(tag) }} manifest="${approved_manifest}" record="${output_record}"
+    exit 0
 
     env_input={{ quote(env) }}
     env_name="${env_input}"
@@ -1965,9 +2010,19 @@ dspace-oci-deploy-prod-subdomain tag='':
 # Promote dspace to production apex (democratized.space) using immutable tags.
 
 # If tag is omitted, this reads the pinned value from docs/apps/dspace.prod.tag.
-dspace-oci-promote-prod tag='':
+dspace-oci-promote-prod tag='' manifest='' record='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
+
+    approved_manifest={{ quote(manifest) }}
+    output_record={{ quote(record) }}
+    if [ -z "${approved_manifest}" ]; then
+      echo "ERROR: DSPACE production promotion requires manifest=<approved-candidate.json>." >&2
+      exit 2
+    fi
+    just --justfile "{{ justfile_directory() }}/justfile" app-promote-prod app=dspace \
+      tag={{ quote(tag) }} manifest="${approved_manifest}" record="${output_record}"
+    exit 0
 
     eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell \
       --app dspace \
@@ -1978,9 +2033,19 @@ dspace-oci-promote-prod tag='':
     just --justfile "{{ justfile_directory() }}/justfile" dspace-oci-deploy env=prod tag="${SUGARKUBE_TAG}"
 
 # Fast redeploy of dspace from GHCR (emergency mutable-tag refresh).
-dspace-oci-redeploy env='staging' tag='':
+dspace-oci-redeploy env='staging' tag='' manifest='' record='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
+
+    approved_manifest={{ quote(manifest) }}
+    output_record={{ quote(record) }}
+    if [ -z "${approved_manifest}" ]; then
+      echo "ERROR: DSPACE redeployment requires manifest=<approved-candidate.json>." >&2
+      exit 2
+    fi
+    just --justfile "{{ justfile_directory() }}/justfile" app-deploy app=dspace \
+      env={{ quote(env) }} tag={{ quote(tag) }} manifest="${approved_manifest}" record="${output_record}"
+    exit 0
 
     env_input={{ quote(env) }}
     env_name="${env_input}"

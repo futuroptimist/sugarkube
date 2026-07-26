@@ -96,18 +96,73 @@ gh workflow run ci-helm.yml --repo democratizedspace/dspace --ref main
 
 ## Deploy staging
 
+### Approved release manifest and durable evidence
+
+DSPACE staging and production are fail-closed on the producer's release manifest. Download the
+`dspace-release-manifest/dspace-release-manifest.json` artifact from the successful DSPACE image
+workflow; do not substitute a package-page tag or the release-only `semanticTag`. Generate and
+inspect the canonical candidate (provider values are exactly `token-place` or `openai`):
+
+```bash
+python3 scripts/release_manifest.py candidate \
+  --upstream ~/Downloads/dspace-release-manifest.json --environment staging \
+  --expected-default-chat-provider token-place --approved-at 2026-07-24T12:34:56Z \
+  --approved-by YOUR-APPROVER-IDENTITY --output deployment-candidates/dspace/staging.json
+python3 scripts/release_manifest.py validate deployment-candidates/dspace/staging.json
+```
+
+The deploy performs a read-only OCI preflight **before** kubeconfig, Helm, or Kubernetes mutation.
+`crane digest` and `crane config` verify the image index and revision label; `oras manifest fetch`
+verifies the chart digest and revision annotation. These OCI Distribution API operations are the
+fallback when GitHub Packages REST returns `403`; use the normal OCI credential helper for private
+artifacts. Never put a token in a manifest, command argument, or captured log.
+
+```bash
+just app-deploy app=dspace env=staging tag=main-REPLACE_SHORTSHA \
+  manifest=deployment-candidates/dspace/staging.json
+```
+
+After rollout succeeds, Sugarkube collects Helm and all release pod evidence and atomically creates
+`deployment-evidence/dspace/staging/<FULL_SOURCE_SHA>.json`; it refuses overwrites. Preserve it by
+attaching it to the approval record or explicitly committing it (deployment never commits):
+
+```bash
+python3 scripts/release_manifest.py validate --final deployment-evidence/dspace/staging/FULL_SOURCE_SHA.json
+git add deployment-evidence/dspace/staging/FULL_SOURCE_SHA.json
+git commit -m "Record DSPACE staging deployment evidence"
+```
+
+Generate a fresh `prod` approval from the **same upstream file and immutable coordinates**, then
+promote and preserve the production record:
+
+```bash
+python3 scripts/release_manifest.py candidate \
+  --upstream ~/Downloads/dspace-release-manifest.json --environment prod \
+  --expected-default-chat-provider token-place --approved-at 2026-07-24T15:00:00Z \
+  --approved-by YOUR-PRODUCTION-APPROVER --output deployment-candidates/dspace/prod.json
+python3 scripts/release_manifest.py validate deployment-candidates/dspace/prod.json
+just app-promote-prod app=dspace tag=main-REPLACE_SHORTSHA manifest=deployment-candidates/dspace/prod.json
+python3 scripts/release_manifest.py validate --final deployment-evidence/dspace/prod/FULL_SOURCE_SHA.json
+```
+
+Responders reconstruct a deployment from `imageTag` plus `imageDigest`, `chartVersion` plus
+`chartDigest`, and the full `sourceRevision`, without resolving mutable tags. `semanticTag` is only
+historical evidence. Until DSPACE #4732 exposes runtime build identity, the recorded method proves
+identity only from the exact OCI revision plus every pod's matching image digest; it never claims an
+HTTP runtime identity check.
+
 This repository change only persists the staging configuration; it does not deploy anything to a cluster. After it is merged, deploy the new immutable, environment-neutral DSPACE image that contains runtime `/config.json` support. The image tag stays the same as it moves between staging and production; the Sugarkube values overlays, not image names, select the token.place origin.
 
 Preferred generic command:
 
 ```bash
-just app-deploy app=dspace env=staging tag="$APP_TAG"
+just app-deploy app=dspace env=staging tag="$APP_TAG" manifest="$APPROVED_MANIFEST"
 ```
 
 Compatibility shim while migration is in progress:
 
 ```bash
-just dspace-oci-deploy env=staging tag="$APP_TAG"
+just dspace-oci-deploy env=staging tag="$APP_TAG" manifest="$APPROVED_MANIFEST"
 ```
 
 ## Verify staging
@@ -173,13 +228,13 @@ For staging, the browser smoke must show DSPACE calling `https://staging.token.p
 This configuration change does not promote or mutate production. Promote only after staging sign-off. Prefer the generic command; it uses the prod values chain, resolves chart `3.0.1` from `docs/apps/dspace.prod.version`, and can read `docs/apps/dspace.prod.tag` (`main-1a31a56`) when `tag=` is omitted.
 
 ```bash
-just app-promote-prod app=dspace tag="$APP_TAG"
+just app-promote-prod app=dspace tag="$APP_TAG" manifest="$APPROVED_MANIFEST"
 ```
 
 Compatibility shim:
 
 ```bash
-just dspace-oci-promote-prod tag="$APP_TAG"
+just dspace-oci-promote-prod tag="$APP_TAG" manifest="$APPROVED_MANIFEST"
 ```
 
 ## Verify production
