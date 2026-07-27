@@ -1946,6 +1946,23 @@ dspace-oci-redeploy env='staging' tag='' manifest='' evidence='':
     [ -z {{ quote(evidence) }} ] || delegate+=(evidence={{ quote(evidence) }})
     "${delegate[@]}"
 
+# Restore DSPACE only from previously finalized immutable release evidence.
+dspace-manifest-rollback env='staging' manifest='' evidence='' verifier='' confirm='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    if [ -z {{ quote(manifest) }} ] || [ -z {{ quote(evidence) }} ] || [ -z {{ quote(verifier) }} ]; then
+      echo "ERROR: manifest, evidence, and verifier are required." >&2
+      echo "Usage: just dspace-manifest-rollback env=<staging|prod> manifest=<final.json> evidence=<rollback.json> verifier=<executable> [confirm=<DSPACE:prod:full-source-sha>]" >&2
+      exit 2
+    fi
+    python3 "{{ justfile_directory() }}/scripts/dspace_manifest_rollback.py" \
+      --environment {{ quote(env) }} \
+      --manifest {{ quote(manifest) }} \
+      --evidence {{ quote(evidence) }} \
+      --verifier {{ quote(verifier) }} \
+      --confirmation {{ quote(confirm) }}
+
 # Dump dspace and Traefik logs for debugging HTTP 500s.
 dspace-debug-logs namespace='dspace':
     #!/usr/bin/env bash

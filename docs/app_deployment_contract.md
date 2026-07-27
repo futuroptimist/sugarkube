@@ -291,6 +291,16 @@ follow-up PR. Production promotion wrappers such as
 `just tokenplace-oci-promote-prod tag=main-REPLACE_SHORTSHA` remain documented as
 thin generic shims over the shared production promotion flow.
 
+### DSPACE manifest rollback
+
+DSPACE recovery uses `just dspace-manifest-rollback`, not generic or Tokenplace
+revision rollback helpers. It consumes finalized evidence, reruns OCI and full
+values-chain preflight, performs a digest-qualified Helm upgrade, and writes
+separate immutable rollback evidence after strict cluster and runtime proof.
+Production confirmation is `DSPACE:prod:<target-full-source-sha>`. See the
+[DSPACE rollback runbook](apps/dspace.md#rollback) for the verifier contract and
+the temporary DSPACE #4732/#4733 dependency.
+
 ## Current example configs
 
 The example configs in `docs/examples/apps/` intentionally are not platform
