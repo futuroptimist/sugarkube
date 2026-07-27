@@ -120,9 +120,9 @@ def test_explicit_config_path_precedes_config_dir_and_resolves_env_values(
 
 @pytest.mark.parametrize(
     "tag",
-    ["main-deadbee", "v3-deadbee", "feature-x-deadbee", "v0.1.0", "3.0.1", "3.1.0-rc.1"],
+    ["main-1a31a56", "main-5ca96df16f0f", "v3-deadbee", "feature-x-deadbee"],
 )
-def test_validate_tag_allows_immutable_tags(tag: str) -> None:
+def test_validate_tag_allows_deployment_safe_tags(tag: str) -> None:
     assert app_config.validate_tag(tag) == tag
 
 
@@ -140,11 +140,39 @@ def test_validate_tag_allows_immutable_tags(tag: str) -> None:
         "release",
         "staging-blue",
         "feature-x",
+        "v3.0.1",
+        "3.0.1",
+        "v3.0.1-rc.1",
+        "3.0.1+build.5",
+        "v3.0.1-deadbee",
+        "main-ABCDEF0",
+        "main-latest-deadbee",
+        "main-deadbe",
+        "main-" + "a" * 41,
     ],
 )
-def test_validate_tag_rejects_moving_tags(tag: str) -> None:
+def test_strict_validate_tag_rejects_semantic_movable_and_malformed_tags(tag: str) -> None:
     with pytest.raises(app_config.AppConfigError, match="tag"):
         app_config.validate_tag(tag)
+
+
+def test_validate_tag_semver_exception_requires_explicit_dev() -> None:
+    assert app_config.validate_tag("v3.0.1", "dev") == "v3.0.1"
+    with pytest.raises(app_config.AppConfigError, match="branch-SHA"):
+        app_config.validate_tag("v3.0.1", "int")
+    with pytest.raises(app_config.AppConfigError, match="branch-SHA"):
+        app_config.validate_tag("v3.0.1", "staging")
+    with pytest.raises(app_config.AppConfigError, match="branch-SHA"):
+        app_config.validate_tag("v3.0.1", "prod")
+
+
+def test_validate_tag_cli_defaults_strict_and_supports_explicit_dev(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert app_config.main(["validate-tag", "v3.0.1"]) == 2
+    assert "branch-SHA" in capsys.readouterr().err
+    assert app_config.main(["validate-tag", "v3.0.1", "--env", "dev"]) == 0
+    assert capsys.readouterr().out.strip() == "v3.0.1"
 
 
 def test_rejects_unknown_dotenv_keys(tmp_path: Path) -> None:
@@ -302,12 +330,36 @@ def test_resolve_tag_uses_prod_fallback_file(tmp_path: Path) -> None:
     tag_file.write_text("# promoted digest tag\nmain-deadbee\n", encoding="utf-8")
 
     tag = app_config.resolve_tag(
-        {"SUGARKUBE_PROD_TAG_FILE": str(tag_file)},
+        {"SUGARKUBE_PROD_TAG_FILE": str(tag_file), "SUGARKUBE_ENV": "prod"},
         "",
         prod_fallback=True,
     )
 
     assert tag == "main-deadbee"
+
+
+def test_resolve_tag_rejects_semantic_prod_fallback(tmp_path: Path) -> None:
+    tag_file = tmp_path / "prod-tag.txt"
+    tag_file.write_text("v3.0.1\n", encoding="utf-8")
+
+    with pytest.raises(app_config.AppConfigError, match="branch-SHA"):
+        app_config.resolve_tag(
+            {"SUGARKUBE_PROD_TAG_FILE": str(tag_file), "SUGARKUBE_ENV": "prod"},
+            "",
+            prod_fallback=True,
+        )
+
+
+def test_committed_prod_pins_are_empty_or_deployment_safe() -> None:
+    for path in Path("docs/apps").glob("*.prod.tag"):
+        pins = [
+            line.split("#", 1)[0].strip()
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.split("#", 1)[0].strip()
+        ]
+        assert len(pins) <= 1
+        for tag in pins:
+            assert app_config.validate_tag(tag, "prod") == tag, f"invalid production pin: {path}"
 
 
 def test_shell_emit_quotes_expected_exports(tmp_path: Path) -> None:

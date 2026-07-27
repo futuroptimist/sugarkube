@@ -1319,6 +1319,71 @@ def test_app_deploy_rejects_mutable_tag_before_helm(
 
 
 @pytest.mark.usefixtures("ensure_just_available")
+@pytest.mark.parametrize(
+    ("recipe", "args"),
+    [
+        ("app-deploy", ["app=jobbot3000", "env=staging", "tag=v3.0.1"]),
+        ("app-redeploy", ["app=jobbot3000", "env=int", "tag=v3.0.1"]),
+        ("app-promote-prod", ["app=jobbot3000", "tag=v3.0.1"]),
+        ("dspace-oci-deploy", ["env=staging", "tag=v3.0.1"]),
+        ("dspace-oci-promote-prod", ["tag=v3.0.1"]),
+        ("tokenplace-oci-deploy", ["env=staging", "tag=v3.0.1"]),
+        ("tokenplace-oci-redeploy", ["env=staging", "tag=v3.0.1"]),
+        ("tokenplace-oci-promote-prod", ["tag=v3.0.1"]),
+        ("danielsmith-oci-promote-prod", ["tag=v3.0.1"]),
+    ],
+)
+def test_deployment_entry_points_reject_semantic_tags_before_helm(
+    recipe: str, args: list[str], generic_app_stub_env: dict[str, str]
+) -> None:
+    result = _run_just([recipe, *args], generic_app_stub_env)
+
+    assert result.returncode != 0
+    assert "branch-SHA" in result.stderr
+    helm_log_path = Path(generic_app_stub_env["HELM_LOG"])
+    assert not helm_log_path.exists() or helm_log_path.read_text(encoding="utf-8") == ""
+    command_log = helm_log_path.with_name("commands.log")
+    assert not command_log.exists() or command_log.read_text(encoding="utf-8") == ""
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_app_promote_prod_rejects_semantic_fallback_before_cluster_access(
+    tmp_path: Path, generic_app_stub_env: dict[str, str]
+) -> None:
+    prod_tag = tmp_path / "jobbot3000.prod.tag"
+    prod_tag.write_text("v3.0.1\n", encoding="utf-8")
+    config = tmp_path / "jobbot3000.env"
+    config.write_text(
+        "\n".join(
+            [
+                "SUGARKUBE_APP=jobbot3000",
+                "SUGARKUBE_RELEASE=jobbot3000",
+                "SUGARKUBE_NAMESPACE=jobbot3000",
+                "SUGARKUBE_CHART=oci://ghcr.io/futuroptimist/charts/jobbot3000",
+                "SUGARKUBE_VERSION=1.0.0",
+                f"SUGARKUBE_PROD_TAG_FILE={prod_tag}",
+                "SUGARKUBE_VALUES_DEV=docs/examples/jobbot3000.values.dev.yaml",
+                "SUGARKUBE_VALUES_STAGING=docs/examples/jobbot3000.values.staging.yaml",
+                "SUGARKUBE_VALUES_PROD=docs/examples/jobbot3000.values.prod.yaml",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = _run_just(
+        ["app-promote-prod", "app=jobbot3000", f"config={config}"],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode != 0
+    assert "branch-SHA" in result.stderr
+    for name in ("helm.log", "kubectl.log", "commands.log"):
+        log = tmp_path / name
+        assert not log.exists() or log.read_text(encoding="utf-8") == ""
+
+
+@pytest.mark.usefixtures("ensure_just_available")
 def test_dspace_oci_deploy_wrapper_propagates_inline_chart_pin(
     tmp_path: Path, generic_app_stub_env: dict[str, str]
 ) -> None:
@@ -2798,6 +2863,31 @@ def test_direct_helm_oci_helper_accepts_inline_semver_with_prerelease_and_build(
         "--version 1.2.3-rc.1+build.5"
     ) in helm_log
     assert "upgrade tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace" in helm_log
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+@pytest.mark.parametrize("recipe", ["helm-oci-install", "helm-oci-upgrade"])
+@pytest.mark.parametrize("image_arg", ["tag=v3.0.1", "default_tag=v3.0.1"])
+def test_direct_helm_oci_helpers_reject_semantic_image_tag_before_helm(
+    recipe: str, image_arg: str, generic_app_stub_env: dict[str, str]
+) -> None:
+    result = _run_just(
+        [
+            recipe,
+            "release=tokenplace",
+            "namespace=tokenplace",
+            "chart=oci://ghcr.io/futuroptimist/charts/tokenplace",
+            "version=1.2.3",
+            image_arg,
+            "env=staging",
+        ],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode != 0
+    assert "branch-SHA" in result.stderr
+    helm_log_path = Path(generic_app_stub_env["HELM_LOG"])
+    assert not helm_log_path.exists() or helm_log_path.read_text(encoding="utf-8") == ""
 
 
 @pytest.mark.usefixtures("ensure_just_available")

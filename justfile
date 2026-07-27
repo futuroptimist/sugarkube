@@ -1339,6 +1339,14 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     esac
     export SUGARKUBE_ENV="${requested_env}"
 
+    image_tag="${tag}"
+    if [ -z "${image_tag}" ] && [ -n "${default_tag}" ]; then
+        image_tag="${default_tag}"
+    fi
+    if [ -n "${image_tag}" ]; then
+      image_tag="$(python3 "{{ justfile_directory() }}/scripts/app_config.py" validate-tag "${image_tag}" --env "${requested_env}")"
+    fi
+
     allow_install="$(normalize_prefixed_value allow_install "{{ allow_install }}")"
     reuse_values="$(normalize_prefixed_value reuse_values "{{ reuse_values }}")"
 
@@ -1380,11 +1388,6 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     version_args=()
     if [ -n "${chart_version}" ] && [ "${digest_chart}" = false ]; then
         version_args+=(--version "${chart_version}")
-    fi
-
-    image_tag="${tag}"
-    if [ -z "${image_tag}" ] && [ -n "${default_tag}" ]; then
-        image_tag="${default_tag}"
     fi
 
     echo "app: ${release}"
@@ -1646,12 +1649,13 @@ app-deploy app env='staging' tag='' config='' manifest='' evidence='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell \
+    config_exports="$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell \
       --app {{ quote(app) }} \
       --env {{ quote(env) }} \
       --config {{ quote(config) }} \
       --tag {{ quote(tag) }} \
       --require-tag)"
+    eval "${config_exports}"
 
     release_manifest={{ quote(manifest) }}
     evidence_output={{ quote(evidence) }}
@@ -1718,12 +1722,13 @@ app-redeploy app env='staging' tag='' config='' manifest='' evidence='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell \
+    config_exports="$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell \
       --app {{ quote(app) }} \
       --env {{ quote(env) }} \
       --config {{ quote(config) }} \
       --tag {{ quote(tag) }} \
       --require-tag)"
+    eval "${config_exports}"
 
     release_manifest={{ quote(manifest) }}
     evidence_output={{ quote(evidence) }}
@@ -1779,13 +1784,14 @@ app-promote-prod app tag='' config='' manifest='' evidence='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell \
+    config_exports="$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell \
       --app {{ quote(app) }} \
       --env prod \
       --config {{ quote(config) }} \
       --tag {{ quote(tag) }} \
       --prod-tag-fallback \
       --require-tag)"
+    eval "${config_exports}"
     delegate=(just --justfile "{{ justfile_directory() }}/justfile" app-deploy \
       app="${SUGARKUBE_APP}" env=prod tag="${SUGARKUBE_TAG}" config="${SUGARKUBE_CONFIG_PATH}")
     [ -z {{ quote(manifest) }} ] || delegate+=(manifest={{ quote(manifest) }})
@@ -1942,12 +1948,13 @@ dspace-oci-promote-prod tag='' manifest='' evidence='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell \
+    config_exports="$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell \
       --app dspace \
       --env prod \
       --tag {{ quote(tag) }} \
       --prod-tag-fallback \
       --require-tag)"
+    eval "${config_exports}"
     delegate=(just --justfile "{{ justfile_directory() }}/justfile" dspace-oci-deploy env=prod tag="${SUGARKUBE_TAG}")
     [ -z {{ quote(manifest) }} ] || delegate+=(manifest={{ quote(manifest) }})
     [ -z {{ quote(evidence) }} ] || delegate+=(evidence={{ quote(evidence) }})
@@ -2051,20 +2058,6 @@ tokenplace-oci-deploy env='staging' tag='':
         ;;
     esac
 
-    # Shared immutable-tag guard for deploy/redeploy paths avoids moving-target tags.
-    validate_immutable_tag() {
-      local candidate="${1}"
-      local tag_lc
-      tag_lc="$(echo "${candidate}" | tr '[:upper:]' '[:lower:]')"
-      if [[ "${tag_lc}" == *latest* ]] \
-        || [[ "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)$ ]] \
-        || [[ "${tag_lc}" =~ -(main|master|dev|develop|staging|prod|production|release)$ ]] \
-        || ([[ "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)- ]] && [[ ! "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)-[0-9a-f]{7,}$ ]]); then
-        echo "ERROR: mutable tag '${candidate}' is not allowed. Use an immutable branch-sha tag (example: main-deadbee)." >&2
-        exit 1
-      fi
-    }
-
     resolved_tag="$(echo '{{ tag }}' | xargs)"
     while [ "${resolved_tag#tag=}" != "${resolved_tag}" ]; do
       resolved_tag="${resolved_tag#tag=}"
@@ -2073,7 +2066,7 @@ tokenplace-oci-deploy env='staging' tag='':
       echo "ERROR: tag is required for immutable deploys." >&2
       exit 1
     fi
-    validate_immutable_tag "${resolved_tag}"
+    python3 "{{ justfile_directory() }}/scripts/app_config.py" validate-tag "${resolved_tag}" --env "${env_name}" >/dev/null
     chart_version=""
     if [ -f docs/apps/tokenplace.version ]; then
       chart_version="$(
@@ -2137,12 +2130,13 @@ tokenplace-oci-promote-prod tag='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell \
+    config_exports="$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell \
       --app tokenplace \
       --env prod \
       --tag {{ quote(tag) }} \
       --prod-tag-fallback \
       --require-tag)"
+    eval "${config_exports}"
     just --justfile "{{ justfile_directory() }}/justfile" tokenplace-oci-deploy env=prod tag="${SUGARKUBE_TAG}"
 
 # Upgrade-only token.place OCI redeploy path.
@@ -2163,19 +2157,6 @@ tokenplace-oci-redeploy env='staging' tag='':
         ;;
     esac
 
-    # Shared immutable-tag guard for deploy/redeploy paths avoids moving-target tags.
-    validate_immutable_tag() {
-      local candidate="${1}"
-      local tag_lc
-      tag_lc="$(echo "${candidate}" | tr '[:upper:]' '[:lower:]')"
-      if [[ "${tag_lc}" == *latest* ]] \
-        || [[ "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)$ ]] \
-        || [[ "${tag_lc}" =~ -(main|master|dev|develop|staging|prod|production|release)$ ]] \
-        || ([[ "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)- ]] && [[ ! "${tag_lc}" =~ ^(main|master|dev|develop|staging|prod|production|release)-[0-9a-f]{7,}$ ]]); then
-        echo "ERROR: mutable tag '${candidate}' is not allowed. Use an immutable branch-sha tag (example: main-deadbee)." >&2
-        exit 1
-      fi
-    }
     read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/tokenplace.prod.tag | head -n1 | tr -d '[:space:]'; }
 
     resolved_tag="$(echo '{{ tag }}' | xargs)"
@@ -2191,7 +2172,7 @@ tokenplace-oci-redeploy env='staging' tag='':
       echo "Non-prod redeploy intentionally has no baked-in fallback tag so this path is reproducible and reviewable." >&2
       exit 1
     fi
-    [ -n "${resolved_tag}" ] && validate_immutable_tag "${resolved_tag}"
+    [ -z "${resolved_tag}" ] || python3 "{{ justfile_directory() }}/scripts/app_config.py" validate-tag "${resolved_tag}" --env "${env_name}" >/dev/null
 
     values_chain='docs/examples/tokenplace.values.dev.yaml'
     default_tag=''
@@ -2513,12 +2494,13 @@ danielsmith-oci-promote-prod tag='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell \
+    config_exports="$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell \
       --app danielsmith \
       --env prod \
       --tag {{ quote(tag) }} \
       --prod-tag-fallback \
       --require-tag)"
+    eval "${config_exports}"
     just --justfile "{{ justfile_directory() }}/justfile" danielsmith-oci-deploy env=prod tag="${SUGARKUBE_TAG}"
 
 # Upgrade-only danielsmith OCI redeploy path.
