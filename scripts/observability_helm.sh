@@ -248,7 +248,7 @@ dashboard_verify() (
   require_tools kubectl python3 curl base64 sleep
   print_resolved staging
   assert_context
-  local response body http_status port="" line
+  local response body http_status port="" remote_port line
   local -a port_forward_lines=()
   local verify_pid="" verify_tmp
   verify_tmp="$(mktemp -d -t sugarkube-grafana-verify.XXXXXX)"
@@ -286,8 +286,12 @@ dashboard_verify() (
     kill -0 "${verify_pid}" 2>/dev/null || port_forward_stopped
     mapfile -t port_forward_lines <"${verify_tmp}/port-forward.log"
     for line in "${port_forward_lines[@]}"; do
-      if [[ "${line}" =~ ^Forwarding\ from\ 127\.0\.0\.1:([1-9][0-9]{0,4})\ -\>\ 80$ ]] && ((10#${BASH_REMATCH[1]} <= 65535)); then
+      if [[ "${line}" =~ ^Forwarding\ from\ 127\.0\.0\.1:([1-9][0-9]{0,4})\ -\>\ ([1-9][0-9]{0,4})$ ]]; then
         port="${BASH_REMATCH[1]}"
+        remote_port="${BASH_REMATCH[2]}"
+        if ((10#${port} > 65535 || 10#${remote_port} > 65535)); then
+          port=""
+        fi
       fi
     done
     [[ -z "${port}" ]] || break
