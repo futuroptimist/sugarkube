@@ -125,11 +125,25 @@ is not rollout evidence.
 - Prometheus: one replica, `7d` retention, `15GB` retention size, `local-path` `ReadWriteOnce` PVC requesting `20Gi`, CPU request `200m`, memory request `512Mi`, memory limit `2Gi`, admin API disabled, and external label `cluster=sugarkube-int`.
 - Alertmanager: one replica and no-op receiver named exactly `"null"`.
 - Grafana: persistence disabled, no Ingress, LAN-only NodePort `30300`.
-- The provisioned dashboard defaults to six hours and a 30-second refresh. It
-  covers overall DSPACE and public-probe status, bounded DSPACE HTTP rate/error/
-  latency, runtime and build identity, feature traffic, and blackbox endpoint,
-  duration, HTTP status, and TLS lifetime views. Its staging `environment`,
-  `app`, and `route` variables avoid raw target URLs.
+- The provisioned dashboard defaults to six hours and a 30-second refresh. Its
+  top-level public availability summary reports **Healthy endpoints**, **Failed
+  endpoints**, and a yellow **Missing probe data** count for the selected probe
+  filters. Healthy and failed are current `probe_success` results; missing compares
+  current samples with lifecycle-owned targets discovered through `up` during the
+  seven-day Prometheus retention horizon, so disappeared discovery targets remain
+  visible throughout retained history. Exact long-term target inventory remains
+  verified by `just observability-blackbox-verify env=staging`.
+  `16/0/0` is fully healthy, `15/1/0` has one observed failure, and `15/0/1`
+  identifies one expected target without current probe data. If no expected target
+  data exists, all three values remain `NO DATA` rather than implying health. The
+  detailed endpoint matrix remains the diagnostic view. DSPACE user
+  request rate excludes `/healthz`, `/livez`, and
+  `/metrics`, whose traffic has a separate operational-rate panel. Status-class
+  distribution is an instant categorical summary over the selected time window.
+  The `Probe application` and `Probe route` controls filter blackbox panels while
+  preserving the internal bounded `app` and `route` labels and avoiding raw
+  target URLs. Runtime, build identity, feature traffic, latency, error ratio,
+  probe duration, HTTP status, and TLS lifetime views remain available.
 - dChat and token.place dependency traffic may be absent until those features
   receive requests. Their queries deliberately fall back to zero: **no requests
   observed** is expected and is not an instrumentation failure.

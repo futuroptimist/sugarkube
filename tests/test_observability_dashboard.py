@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DASHBOARD = ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
 VALIDATOR = ROOT / "scripts/validate_observability_dashboard.py"
 SCRIPT = ROOT / "scripts/observability_helm.sh"
+PROMETHEUS_VALUES = ROOT / "platform/observability/helm/kube-prometheus-stack.values.common.yaml"
 
 # Import the validator so pytest-cov attributes its execution to the production
 # module. Subprocess-only checks prove the command-line contract, but their
@@ -57,9 +58,10 @@ def test_dashboard_identity_defaults_rows_and_required_panels(dashboard):
     titles = {panel["title"] for panel in panels}
     for title in (
         "DSPACE scrape availability",
-        "DSPACE instrumentation status",
-        "Public endpoint availability",
-        "Request rate by route and status class",
+        "Instrumentation health",
+        "Public availability summary",
+        "User request rate by route and status class",
+        "Operational request rate",
         "Status-class distribution",
         "5xx error ratio",
         "HTTP latency percentiles",
@@ -110,6 +112,74 @@ def test_snapshot_tables_use_instant_queries(dashboard):
     organize = next(item for item in build["transformations"] if item["id"] == "organize")
     assert organize["options"]["indexByName"] == {"pod": 0, "version": 1, "revision": 2}
     assert organize["options"]["excludeByName"] == {"Time": True, "Value": True}
+
+
+def test_selected_window_traffic_and_availability_semantics(dashboard):
+    panels = {panel["title"]: panel for panel in all_panels(dashboard)}
+
+    distribution = panels["Status-class distribution"]
+    assert distribution["type"] == "piechart"
+    assert all(
+        target.get("instant") is True and target.get("range") is False
+        for target in distribution["targets"]
+    )
+    assert "increase(" in distribution["targets"][0]["expr"]
+    assert "$__range" in distribution["targets"][0]["expr"]
+    colors = {
+        override["matcher"]["options"]: override["properties"][0]["value"]["fixedColor"]
+        for override in distribution["fieldConfig"]["overrides"]
+    }
+    assert colors == {"2xx": "green", "4xx": "orange", "5xx": "red"}
+
+    user_expression = panels["User request rate by route and status class"]["targets"][0]["expr"]
+    operational_expression = panels["Operational request rate"]["targets"][0]["expr"]
+    assert 'route!~"/(healthz|livez|metrics)"' in user_expression
+    assert 'route=~"/(healthz|livez|metrics)"' in operational_expression
+
+    summary = panels["Public availability summary"]
+    assert len(summary["targets"]) == 3
+    assert all(
+        target["instant"] is True and target["range"] is False for target in summary["targets"]
+    )
+    assert {target["legendFormat"] for target in summary["targets"]} == {
+        "Healthy endpoints",
+        "Failed endpoints",
+        "Missing probe data",
+    }
+    summary_expressions = {target["legendFormat"]: target["expr"] for target in summary["targets"]}
+    assert "sum(" in summary_expressions["Healthy endpoints"]
+    assert "== bool 1" in summary_expressions["Healthy endpoints"]
+    failed_expression = summary_expressions["Failed endpoints"]
+    assert "sum(" in failed_expression and "== bool 0" in failed_expression
+    missing_expression = summary_expressions["Missing probe data"]
+    assert "max_over_time(up{" in missing_expression
+    retention = next(
+        line.split(":", 1)[1].strip()
+        for line in PROMETHEUS_VALUES.read_text(encoding="utf-8").splitlines()
+        if line.strip().startswith("retention:")
+    )
+    assert f"[{retention}]" in missing_expression
+    assert ">= bool 0" in missing_expression
+    assert " - (sum(" in missing_expression
+    assert "probe_success{" in missing_expression
+    assert "or vector(0)" in missing_expression
+    assert all(
+        'job=~"probe/monitoring/blackbox-(dspace|tokenplace|danielsmith|jobbot3000)-staging-.*"'
+        in expression
+        for expression in summary_expressions.values()
+    )
+    missing_override = next(
+        override
+        for override in summary["fieldConfig"]["overrides"]
+        if override["matcher"]["options"] == "Missing probe data"
+    )
+    assert missing_override["properties"][0]["value"]["fixedColor"] == "yellow"
+    assert summary["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
+    assert panels["Endpoint matrix"]["type"] == "table"
+
+    variables = {item["name"]: item for item in dashboard["templating"]["list"]}
+    assert variables["app"]["label"] == "Probe application"
+    assert variables["route"]["label"] == "Probe route"
 
 
 def test_blackbox_queries_drop_raw_target_labels(dashboard):
@@ -250,6 +320,36 @@ def test_validator_rejects_wrong_dashboard_mount(tmp_path, dashboard, mount_path
         (lambda item: item.update(uid="wrong"), "dashboard title"),
         (lambda item: item.update(panels=[]), "panel IDs"),
         (
+            lambda item: next(
+                variable for variable in item["templating"]["list"] if variable["name"] == "app"
+            ).update(label="Application"),
+            "probe-specific visible labels",
+        ),
+        (
+            lambda item: next(
+                panel for panel in item["panels"] if panel["title"] == "Status-class distribution"
+            ).update(type="timeseries"),
+            "categorical visualization",
+        ),
+        (
+            lambda item: next(
+                panel for panel in item["panels"] if panel["title"] == "Status-class distribution"
+            )["targets"][0].update(expr="sum(dspace_http_requests_total)"),
+            "summarize the selected window",
+        ),
+        (
+            lambda item: next(
+                panel for panel in item["panels"] if panel["title"] == "Status-class distribution"
+            )["fieldConfig"].update(overrides=[]),
+            "explicit status-class colors",
+        ),
+        (
+            lambda item: next(
+                panel for panel in item["panels"] if panel["title"] == "Operational request rate"
+            )["targets"][0].update(expr="sum(dspace_http_requests_total)"),
+            "retain health and metrics routes",
+        ),
+        (
             lambda item: replace_metric_expression(item, "process_resident_memory_bytes", "0"),
             "missing required PromQL metrics",
         ),
@@ -262,6 +362,130 @@ def test_validator_rejects_wrong_dashboard_mount(tmp_path, dashboard, mount_path
         (lambda item: item.update(links=[{"url": "https://example.invalid"}]), "raw URLs"),
         (lambda item: item.update(description="${DS_PROMETHEUS}"), "datasource placeholder"),
         (lambda item: item.update(datasource={"uid": "unexpected"}), "datasource references"),
+        (
+            lambda item: next(
+                target
+                for panel in item["panels"]
+                if panel["title"] == "Public availability summary"
+                for target in panel["targets"]
+                if target["legendFormat"] == "Missing probe data"
+            ).update(
+                expr=next(
+                    target["expr"]
+                    for panel in item["panels"]
+                    if panel["title"] == "Public availability summary"
+                    for target in panel["targets"]
+                    if target["legendFormat"] == "Missing probe data"
+                ).replace("[7d]", "[5m]")
+            ),
+            "retention-backed discovered probes",
+        ),
+        (
+            lambda item: next(
+                panel for panel in item["panels"] if panel["title"] == "Status-class distribution"
+            )["targets"][0].update(instant=False, range=True),
+            "instant selected-window query",
+        ),
+        (
+            lambda item: next(
+                panel
+                for panel in item["panels"]
+                if panel["title"] == "User request rate by route and status class"
+            )["targets"][0].update(
+                expr='sum(rate(dspace_http_requests_total{environment=~"$environment"}[5m]))'
+            ),
+            "exclude operational routes",
+        ),
+        (
+            lambda item: next(
+                panel for panel in item["panels"] if panel["title"] == "Public availability summary"
+            ).update(targets=[]),
+            "three-value instant aggregate summary",
+        ),
+        (
+            lambda item: next(
+                target
+                for panel in item["panels"]
+                if panel["title"] == "Public availability summary"
+                for target in panel["targets"]
+                if target["legendFormat"] == "Healthy endpoints"
+            ).update(
+                expr=next(
+                    target["expr"]
+                    for panel in item["panels"]
+                    if panel["title"] == "Public availability summary"
+                    for target in panel["targets"]
+                    if target["legendFormat"] == "Healthy endpoints"
+                ).replace("== bool 1", "== 1")
+            ),
+            "boolean healthy and failed sums",
+        ),
+        (
+            lambda item: next(
+                target
+                for panel in item["panels"]
+                if panel["title"] == "Public availability summary"
+                for target in panel["targets"]
+                if target["legendFormat"] == "Healthy endpoints"
+            ).update(expr='count(probe_success{environment=~"$environment"} == 1)'),
+            "three-value instant aggregate summary",
+        ),
+        (
+            lambda item: next(
+                panel for panel in item["panels"] if panel["title"] == "Public availability summary"
+            )["fieldConfig"]["defaults"].update(noValue="0"),
+            "distinguish healthy, failed, and no data",
+        ),
+        (
+            lambda item: next(
+                override
+                for panel in item["panels"]
+                if panel["title"] == "Public availability summary"
+                for override in panel["fieldConfig"]["overrides"]
+                if override["matcher"]["options"] == "Missing probe data"
+            )["properties"][0]["value"].update(fixedColor="green"),
+            "compact yellow summary value",
+        ),
+        (
+            lambda item: next(
+                panel for panel in item["panels"] if panel["title"] == "Endpoint matrix"
+            ).update(type="stat"),
+            "retain the detailed endpoint matrix",
+        ),
+        (
+            lambda item: next(
+                target
+                for panel in item["panels"]
+                if panel["title"] == "Public availability summary"
+                for target in panel["targets"]
+                if target["legendFormat"] == "Missing probe data"
+            ).update(
+                expr=(
+                    "sum(min by (environment, app, route) (probe_success{"
+                    'job=~"probe/monitoring/blackbox-'
+                    '(dspace|tokenplace|danielsmith|jobbot3000)-staging-.*",'
+                    'environment=~"$environment",app=~"$app",route=~"$route"'
+                    "}) == bool 1)"
+                )
+            ),
+            "missing probe data must compare",
+        ),
+        (
+            lambda item: next(
+                target
+                for panel in item["panels"]
+                if panel["title"] == "Public availability summary"
+                for target in panel["targets"]
+                if target["legendFormat"] == "Failed endpoints"
+            ).pop("expr"),
+            "three-value instant aggregate summary",
+        ),
+        (
+            lambda item: next(
+                panel for panel in item["panels"] if panel["title"] == "Endpoint matrix"
+            ).update(title="Removed matrix"),
+            "exactly one 'Endpoint matrix' panel",
+        ),
     ],
 )
 def test_validator_directly_rejects_unsafe_dashboard_sources(
