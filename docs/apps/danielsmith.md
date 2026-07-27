@@ -80,7 +80,7 @@ For production sidecar sign-off, run `just app-verify app=danielsmith env=prod`,
 
 ## Find or publish GHCR image
 
-Find the successful image workflow in the danielsmith.io app repo and copy the immutable branch-SHA or release tag. The GitHub Actions workflow page is where recent builds are found; the GHCR package page is where published image tags are cross-checked. Do not deploy `latest`, a bare branch name, or an environment name.
+Find the successful image workflow in the danielsmith.io app repo and copy the lowercase branch-SHA tag. The GitHub Actions workflow page is where recent builds are found; the GHCR package page is where published image tags are cross-checked. Do not deploy `latest`, a bare branch name, or an environment name.
 
 Web UI shortcuts:
 

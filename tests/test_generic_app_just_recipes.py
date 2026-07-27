@@ -1313,9 +1313,38 @@ def test_app_deploy_rejects_mutable_tag_before_helm(
     )
 
     assert result.returncode != 0
-    assert "mutable tag" in result.stderr
+    assert "movable image tag" in result.stderr
     helm_log_path = Path(generic_app_stub_env["HELM_LOG"])
     assert not helm_log_path.exists() or helm_log_path.read_text(encoding="utf-8") == ""
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+@pytest.mark.parametrize("recipe", ["app-deploy", "app-redeploy"])
+def test_generic_staging_mutations_reject_semver_before_helm(
+    recipe: str, generic_app_stub_env: dict[str, str]
+) -> None:
+    result = _run_just(
+        [recipe, "app=jobbot3000", "env=staging", "tag=v3.0.1"],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode != 0
+    assert "semantic or movable image tag" in result.stderr
+    assert not Path(generic_app_stub_env["HELM_LOG"]).exists()
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_generic_prod_promotion_rejects_semver_before_helm(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    result = _run_just(
+        ["app-promote-prod", "app=jobbot3000", "tag=v3.0.1"],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode != 0
+    assert "semantic or movable image tag" in result.stderr
+    assert not Path(generic_app_stub_env["HELM_LOG"]).exists()
 
 
 @pytest.mark.usefixtures("ensure_just_available")
@@ -2749,6 +2778,30 @@ def test_direct_helm_oci_helpers_require_requested_env_before_helm(
     assert "env is required for helm-oci-install/helm-oci-upgrade" in result.stderr
     helm_log_path = Path(env["HELM_LOG"])
     assert not helm_log_path.exists() or helm_log_path.read_text(encoding="utf-8") == ""
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+@pytest.mark.parametrize("recipe", ["helm-oci-install", "helm-oci-upgrade"])
+@pytest.mark.parametrize("argument", ["tag=v3.0.1", "default_tag=v3.0.1"])
+def test_direct_helm_oci_helpers_reject_semver_before_any_helm(
+    recipe: str, argument: str, generic_app_stub_env: dict[str, str]
+) -> None:
+    result = _run_just(
+        [
+            recipe,
+            "release=tokenplace",
+            "namespace=tokenplace",
+            "chart=oci://ghcr.io/futuroptimist/charts/tokenplace",
+            "version=1.2.3",
+            argument,
+            "env=staging",
+        ],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode != 0
+    assert "semantic or movable image tag" in result.stderr
+    assert not Path(generic_app_stub_env["HELM_LOG"]).exists()
 
 
 @pytest.mark.usefixtures("ensure_just_available")

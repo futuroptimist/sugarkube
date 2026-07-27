@@ -59,7 +59,7 @@ Each Sugarkube-managed app needs the following deployment coordinates:
 | Release name | Stable Helm release name, normally the app slug. |
 | Namespace | Stable Kubernetes namespace, normally the app slug. |
 | Chart version pin file | A repo file containing the chart version Sugarkube should install or upgrade. Apps may provide environment-specific pin files with shared-pin fallback. |
-| Production tag pin file | Required repo file containing the production-approved immutable image tag for production promotion. |
+| Production tag pin file | Required repo file containing the production-approved branch-SHA image tag for production promotion. |
 | Values chain per env | Comma-separated Helm values files, ordered from base to environment overlay. |
 | Validation URLs/paths | Host key plus one or more HTTP paths to check after rollout. |
 
@@ -88,30 +88,23 @@ The current apps map to that model as examples:
 
 ## Standard image tag model
 
-Deployment tags must identify application code and release intent, not mutable
-environments.
+Staging and production deployment tags must be lowercase branch-SHA coordinates:
+a lowercase branch name followed by a dash and a 7–40 character lowercase
+hexadecimal commit suffix. Examples include `main-1a31a56`,
+`main-5ca96df16f0f`, and `v3-deadbee`.
 
-Acceptable deployment tags:
+Semantic image tags such as `v3.0.1` are release and distribution aliases, not
+immutable deployment coordinates. Bare branches, environment names, `latest`,
+`main-latest`, malformed or uppercase SHA suffixes, and semantic-looking tags
+such as `v3.0.1-deadbee` are rejected before Helm or Kubernetes access. An
+explicit `env=dev` local-development flow may use a semantic image tag for
+backward compatibility; omitted environments, `int` (an alias for staging),
+staging, and production always use the strict policy.
 
-- Immutable branch-SHA tags, such as `main-REPLACE_SHORTSHA`.
-- Semver or release tags, such as `v1.2.3`, `3.1.0`, or another documented
-  project-specific stable tag.
-- Mutable branch convenience tags, such as `main-latest`, only when an app
-  runbook explicitly documents that a non-prod bootstrap or iteration flow accepts
-  them. They are an app-specific exception, not a shared guarantee; for example,
-  token.place deploy/redeploy wrappers reject every tag containing `latest`,
-  including `main-latest`.
-
-Unacceptable deployment tags:
-
-- `latest`;
-- bare branch names such as `main`, `master`, `develop`, or `release`; and
-- environment names such as `dev`, `staging`, `prod`, or `production`.
-
-Production promotion must use an immutable tag. The production tag pin file is
-part of the standard app coordinates and must contain the single immutable image
-tag approved for production. Generic production promotion flows should read that
-pin when `tag=` is omitted and should update it only as an explicit approval
+Production promotion must use the same branch-SHA tag that passed staging. The
+production tag pin file is part of the standard app coordinates and must contain
+the single approved branch-SHA image tag. Generic production promotion flows
+read that pin when `tag=` is omitted and update it only as an explicit approval
 step.
 
 ## Standard chart publishing model

@@ -60,7 +60,7 @@ The committed staging overlay is intentionally copy-paste-ready for the first re
 
 ## Find or publish GHCR image
 
-Find the successful image workflow in the jobbot3000 app repo and copy the immutable branch-SHA or release tag. Do not deploy `latest`, `main-latest`, a bare branch name, or an environment name.
+Find the successful image workflow in the jobbot3000 app repo and copy the lowercase branch-SHA tag. Do not deploy `latest`, `main-latest`, a bare branch name, or an environment name.
 
 Web UI shortcuts:
 
