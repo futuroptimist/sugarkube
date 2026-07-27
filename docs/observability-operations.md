@@ -71,8 +71,10 @@ The mutating recipes never use `--reuse-values`; the committed version, both
 values files in order, and the dashboard source are always supplied. Before
 cluster access or mutation, the helper rejects malformed dashboard JSON,
 changed identity, duplicate panel IDs, missing metric families, unsafe
-event-driven queries, or invalid datasource references. It then validates that
-the pinned render contains exactly one copy in the intended Grafana provider.
+event-driven queries, invalid datasource references, or regressions in the
+dashboard's aggregate availability, traffic separation, selected-window status
+distribution, probe filters, and detailed endpoint matrix. It then validates
+that the pinned render contains exactly one copy in the intended Grafana provider.
 The existing staging blackbox exporter release is upgraded after this change
 with `just observability-blackbox-upgrade env=staging`; it is not reinstalled.
 Repository tests do not perform any live cluster mutation, and repository state
@@ -126,10 +128,15 @@ is not rollout evidence.
 - Alertmanager: one replica and no-op receiver named exactly `"null"`.
 - Grafana: persistence disabled, no Ingress, LAN-only NodePort `30300`.
 - The provisioned dashboard defaults to six hours and a 30-second refresh. It
-  covers overall DSPACE and public-probe status, bounded DSPACE HTTP rate/error/
-  latency, runtime and build identity, feature traffic, and blackbox endpoint,
-  duration, HTTP status, and TLS lifetime views. Its staging `environment`,
-  `app`, and `route` variables avoid raw target URLs.
+  covers overall DSPACE status and an instant aggregate of healthy and failed
+  public probes. DSPACE HTTP panels separate user request rates from `/healthz`,
+  `/livez`, and `/metrics` operational traffic, while status classes are an
+  instant categorical total for the selected window rather than a rising time
+  series. Runtime and build identity, feature traffic, and the detailed blackbox
+  endpoint matrix, duration, HTTP status, and TLS lifetime views remain
+  available. The visible **Probe application** and **Probe route** controls
+  affect blackbox panels; their bounded `app` and `route` labels avoid raw target
+  URLs. Missing probe data is not treated as healthy.
 - dChat and token.place dependency traffic may be absent until those features
   receive requests. Their queries deliberately fall back to zero: **no requests
   observed** is expected and is not an instrumentation failure.

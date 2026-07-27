@@ -27,6 +27,22 @@ REQUIRED_METRICS = {
     "probe_ssl_earliest_cert_expiry",
 }
 EVENT_METRICS = {"dspace_dchat_requests_total", "dspace_dependency_requests_total"}
+HEALTH_ROUTES = r"/(healthz|livez|metrics)"
+
+
+def panel_by_title(dashboard: dict, title: str) -> dict:
+    matching = [panel for panel in panels(dashboard) if panel.get("title") == title]
+    if len(matching) != 1:
+        raise SystemExit(f"ERROR: dashboard must contain exactly one {title!r} panel.")
+    return matching[0]
+
+
+def require_instant_targets(panel: dict) -> None:
+    targets = panel.get("targets", [])
+    if not targets or any(
+        target.get("instant") is not True or target.get("range") is not False for target in targets
+    ):
+        raise SystemExit(f"ERROR: {panel['title']} must use instant-only queries.")
 
 
 def load_dashboard(path: Path) -> dict:
@@ -73,6 +89,68 @@ def validate_dashboard(path: Path) -> str:
         matching = [expr for expr in expressions if metric in expr]
         if not matching or any("or on() vector(0)" not in expr for expr in matching):
             raise SystemExit(f"ERROR: event-driven metric {metric} must use a safe zero fallback.")
+
+    distribution = panel_by_title(dashboard, "Status-class distribution")
+    require_instant_targets(distribution)
+    if distribution.get("type") != "bargauge" or distribution["targets"][0].get("expr") != (
+        "sum by (status_class) (increase(dspace_http_requests_total"
+        '{environment=~"$environment"}[$__range]))'
+    ):
+        raise SystemExit(
+            "ERROR: Status-class distribution must be a bounded categorical "
+            "selected-window summary."
+        )
+
+    user_traffic = panel_by_title(dashboard, "User request rate by route and status class")
+    user_expressions = [target.get("expr", "") for target in user_traffic.get("targets", [])]
+    if len(user_expressions) != 1 or f'route!~"{HEALTH_ROUTES}"' not in user_expressions[0]:
+        raise SystemExit("ERROR: user request rate must exclude bounded operational health routes.")
+    operational = panel_by_title(dashboard, "Operational request rate")
+    operational_expressions = [target.get("expr", "") for target in operational.get("targets", [])]
+    if (
+        len(operational_expressions) != 1
+        or f'route=~"{HEALTH_ROUTES}"' not in operational_expressions[0]
+    ):
+        raise SystemExit(
+            "ERROR: operational request rate must retain bounded health-route traffic."
+        )
+
+    summary = panel_by_title(dashboard, "Public availability summary")
+    require_instant_targets(summary)
+    summary_targets = summary.get("targets", [])
+    if (
+        summary.get("type") != "stat"
+        or len(summary_targets) != 2
+        or {target.get("legendFormat") for target in summary_targets}
+        != {"Healthy endpoints", "Failed endpoints"}
+        or any(
+            "count(min by (environment, app, route) (probe_success{" not in target["expr"]
+            for target in summary_targets
+        )
+        or {target["expr"].rsplit(" == ", 1)[-1] for target in summary_targets} != {"0)", "1)"}
+    ):
+        raise SystemExit(
+            "ERROR: public availability must aggregate healthy and failed selected endpoints."
+        )
+
+    matrix = panel_by_title(dashboard, "Endpoint matrix")
+    require_instant_targets(matrix)
+    matrix_expression = matrix["targets"][0].get("expr", "")
+    if matrix.get("type") != "table" or not matrix_expression.startswith(
+        "min by (environment, app, route) (probe_success{"
+    ):
+        raise SystemExit("ERROR: detailed bounded endpoint matrix must be retained.")
+
+    variable_labels = {
+        item.get("name"): item.get("label")
+        for item in dashboard.get("templating", {}).get("list", [])
+    }
+    if (
+        variable_labels.get("app") != "Probe application"
+        or variable_labels.get("route") != "Probe route"
+    ):
+        raise SystemExit("ERROR: blackbox variables must use probe-specific visible labels.")
+    panel_by_title(dashboard, "Instrumentation health")
     serialized = json.dumps(dashboard)
     if re.search(r"https?://", serialized, re.IGNORECASE):
         raise SystemExit("ERROR: dashboard must not contain embedded raw URLs.")

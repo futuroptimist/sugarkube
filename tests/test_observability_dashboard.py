@@ -34,6 +34,37 @@ def replace_metric_expression(document, metric, replacement):
     target["expr"] = replacement
 
 
+def named_panel(document, title):
+    return next(panel for panel in all_panels(document) if panel.get("title") == title)
+
+
+def make_distribution_range_query(document):
+    target = named_panel(document, "Status-class distribution")["targets"][0]
+    target.update(instant=False, range=True)
+
+
+def restore_health_routes_to_user_traffic(document):
+    target = named_panel(document, "User request rate by route and status class")["targets"][0]
+    target["expr"] = target["expr"].replace(',route!~"/(healthz|livez|metrics)"', "")
+
+
+def expand_public_summary_per_endpoint(document):
+    panel = named_panel(document, "Public availability summary")
+    panel["targets"] = [
+        {
+            "expr": 'min by (environment, app, route) (probe_success{environment=~"$environment"})',
+            "instant": True,
+            "range": False,
+        }
+    ]
+
+
+def remove_endpoint_matrix(document):
+    document["panels"] = [
+        panel for panel in document["panels"] if panel.get("title") != "Endpoint matrix"
+    ]
+
+
 @pytest.fixture
 def dashboard():
     return json.loads(DASHBOARD.read_text(encoding="utf-8"))
@@ -57,9 +88,10 @@ def test_dashboard_identity_defaults_rows_and_required_panels(dashboard):
     titles = {panel["title"] for panel in panels}
     for title in (
         "DSPACE scrape availability",
-        "DSPACE instrumentation status",
-        "Public endpoint availability",
-        "Request rate by route and status class",
+        "Instrumentation health",
+        "Public availability summary",
+        "User request rate by route and status class",
+        "Operational request rate",
         "Status-class distribution",
         "5xx error ratio",
         "HTTP latency percentiles",
@@ -97,7 +129,13 @@ def test_queries_use_stable_datasource_bounded_labels_and_safe_zero(dashboard):
 
 
 def test_snapshot_tables_use_instant_queries(dashboard):
-    snapshots = {"Endpoint matrix", "Build identity", "HTTP response status"}
+    snapshots = {
+        "Endpoint matrix",
+        "Build identity",
+        "HTTP response status",
+        "Public availability summary",
+        "Status-class distribution",
+    }
     panels = {panel["title"]: panel for panel in all_panels(dashboard)}
     for title in snapshots:
         assert panels[title]["targets"]
@@ -110,6 +148,41 @@ def test_snapshot_tables_use_instant_queries(dashboard):
     organize = next(item for item in build["transformations"] if item["id"] == "organize")
     assert organize["options"]["indexByName"] == {"pod": 0, "version": 1, "revision": 2}
     assert organize["options"]["excludeByName"] == {"Time": True, "Value": True}
+
+
+def test_dashboard_separates_traffic_and_uses_aggregate_snapshots(dashboard):
+    panels = {panel["title"]: panel for panel in all_panels(dashboard)}
+    user_expression = panels["User request rate by route and status class"]["targets"][0]["expr"]
+    operational_expression = panels["Operational request rate"]["targets"][0]["expr"]
+    assert 'route!~"/(healthz|livez|metrics)"' in user_expression
+    assert 'route=~"/(healthz|livez|metrics)"' in operational_expression
+
+    distribution = panels["Status-class distribution"]
+    assert distribution["type"] == "bargauge"
+    assert distribution["targets"][0]["expr"] == (
+        "sum by (status_class) (increase(dspace_http_requests_total"
+        '{environment=~"$environment"}[$__range]))'
+    )
+    colors = {
+        override["matcher"]["options"]: override["properties"][0]["value"]["fixedColor"]
+        for override in distribution["fieldConfig"]["overrides"]
+    }
+    assert colors == {"^2xx$": "green", "^4xx$": "yellow", "^5xx$": "red"}
+
+    summary = panels["Public availability summary"]
+    assert len(summary["targets"]) == 2
+    assert {target["legendFormat"] for target in summary["targets"]} == {
+        "Healthy endpoints",
+        "Failed endpoints",
+    }
+    assert all(
+        "count(min by (environment, app, route) (probe_success{" in target["expr"]
+        for target in summary["targets"]
+    )
+    assert panels["Endpoint matrix"]["type"] == "table"
+    labels = {item["name"]: item["label"] for item in dashboard["templating"]["list"]}
+    assert labels["app"] == "Probe application"
+    assert labels["route"] == "Probe route"
 
 
 def test_blackbox_queries_drop_raw_target_labels(dashboard):
@@ -262,6 +335,10 @@ def test_validator_rejects_wrong_dashboard_mount(tmp_path, dashboard, mount_path
         (lambda item: item.update(links=[{"url": "https://example.invalid"}]), "raw URLs"),
         (lambda item: item.update(description="${DS_PROMETHEUS}"), "datasource placeholder"),
         (lambda item: item.update(datasource={"uid": "unexpected"}), "datasource references"),
+        (make_distribution_range_query, "instant-only"),
+        (restore_health_routes_to_user_traffic, "exclude bounded operational"),
+        (expand_public_summary_per_endpoint, "aggregate healthy and failed"),
+        (remove_endpoint_matrix, "exactly one 'Endpoint matrix'"),
     ],
 )
 def test_validator_directly_rejects_unsafe_dashboard_sources(
