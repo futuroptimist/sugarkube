@@ -4,6 +4,8 @@ import re
 import subprocess
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = ROOT / "platform" / "observability" / "helm" / "kube-prometheus-stack.version"
 COMMON = ROOT / "platform" / "observability" / "helm" / "kube-prometheus-stack.values.common.yaml"
@@ -613,7 +615,12 @@ def test_verify_deadline_uses_latest_safe_diagnostics_without_extra_request(tmp_
     assert "activeTargets" not in result.stderr and "Traceback" not in result.stderr
 
 
-def run_dashboard_verifier(tmp_path, mode="success", context="sugar-staging"):
+def run_dashboard_verifier(
+    tmp_path,
+    mode="success",
+    context="sugar-staging",
+    forwarding_line="Forwarding from 127.0.0.1:43127 -> 3000",
+):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(parents=True)
     audit = tmp_path / "audit"
@@ -632,7 +639,7 @@ case "$*" in
   *"get secret grafana-admin-credentials"*"admin-pass""word"*) printf placeholder | base64 ;;
   *"port-forward"*)
     [ "$MODE" != forward-fail ] || exit 42
-    echo 'Forwarding from 127.0.0.1:43127 -> 80'
+    printf '%s\n' "$FORWARDING_LINE"
     echo $$ > "$FORWARD_PID"
     trap 'echo terminated > "$PID_FILE"; exit 0' TERM INT
     if [ "$MODE" = forward-exits-after-ready ]; then
@@ -677,6 +684,7 @@ esac
         "AUDIT": str(audit),
         "MODE": mode,
         "CONTEXT": context,
+        "FORWARDING_LINE": forwarding_line,
         "PID_FILE": str(pid_file),
         "FORWARD_PID": str(tmp_path / "port-forward.pid"),
         "READY_SECRET": str(tmp_path / "secret-requested"),
@@ -701,6 +709,51 @@ def test_dashboard_verifier_runtime_owns_port_and_cleans_up(tmp_path):
     assert "http://127.0.0.1:43127/" in audit
     assert not list(tmp_path.glob("sugarkube-grafana-verify.*"))
     assert pid_file.read_text(encoding="utf-8").strip() == "terminated"
+
+
+@pytest.mark.parametrize("remote_port", ["3000", "8443", "80"])
+def test_dashboard_verifier_accepts_resolved_remote_port(tmp_path, remote_port):
+    result, audit, _ = run_dashboard_verifier(
+        tmp_path, forwarding_line=f"Forwarding from 127.0.0.1:43127 -> {remote_port}"
+    )
+    assert result.returncode == 0, result.stderr
+    assert "get secret" in audit
+
+
+@pytest.mark.parametrize(
+    "forwarding_line",
+    [
+        "Forwarding from 127.0.0.1:0 -> 3000",
+        "Forwarding from 127.0.0.1:65536 -> 3000",
+        "Forwarding from 127.0.0.1:43127 -> 0",
+        "Forwarding from 127.0.0.1:43127 -> 65536",
+    ],
+)
+def test_dashboard_verifier_rejects_invalid_ports_before_secret_access(tmp_path, forwarding_line):
+    result, audit, _ = run_dashboard_verifier(tmp_path, forwarding_line=forwarding_line)
+    assert result.returncode != 0
+    assert "get secret" not in audit
+    assert forwarding_line not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    "forwarding_line",
+    [
+        "Forwarding from 0.0.0.0:43127 -> 3000",
+        "Forwarding from [::1]:43127 -> 3000",
+        "Forwarding from localhost:43127 -> 3000",
+        "Forwarding from 127.0.0.1:43127 ->",
+        "prefix Forwarding from 127.0.0.1:43127 -> 3000",
+        "Forwarding from 127.0.0.1:43127 -> 3000 suffix",
+    ],
+)
+def test_dashboard_verifier_rejects_non_loopback_and_malformed_lines_before_secret_access(
+    tmp_path, forwarding_line
+):
+    result, audit, _ = run_dashboard_verifier(tmp_path, forwarding_line=forwarding_line)
+    assert result.returncode != 0
+    assert "get secret" not in audit
+    assert forwarding_line not in result.stdout + result.stderr
 
 
 def test_dashboard_verifier_checks_context_before_secret_access(tmp_path):

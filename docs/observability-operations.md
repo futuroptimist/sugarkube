@@ -149,12 +149,14 @@ is not rollout evidence.
   and cluster identity first, reads the existing Secret without printing it,
   uses a mode-`0600` temporary netrc, and asks this invocation's `kubectl` to
   bind an ephemeral `127.0.0.1` port. Authentication begins only after that
-  child reports the exact owned forwarding endpoint. Success, failure, and
-  interruption all terminate and wait for the child and remove the netrc and
-  temporary directory. HTTP 401/403 responses fail immediately with redacted
-  diagnostics; only connection and readiness failures are retried. It performs
-  no Helm or Kubernetes mutation. A ConfigMap check alone is not acceptance
-  evidence.
+  child reports the exact owned forwarding endpoint. The right side of that
+  message is the pod/container port resolved by kubectl and can differ from the
+  requested Grafana Service port `80`; both reported ports must be valid.
+  Success, failure, and interruption all terminate and wait for the child and
+  remove the netrc and temporary directory. HTTP 401/403 responses fail
+  immediately with redacted diagnostics; only connection and readiness
+  failures are retried. It performs no Helm or Kubernetes mutation. A ConfigMap
+  check alone is not acceptance evidence.
 - **Failed workloads:** use `just observability-status env=staging`, `kubectl -n monitoring describe`, and pod logs to identify image pulls, scheduling, resources, or PVC failures.
 
 ## Rollback
