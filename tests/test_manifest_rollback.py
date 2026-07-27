@@ -288,8 +288,24 @@ def test_just_recipe_has_no_revision_rollback_or_reuse_values() -> None:
     assert "helm rollback" not in block
 
 
-def test_success_uses_digest_chart_complete_values_and_writes_evidence(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("failure", "failed_stage", "may_have_changed"),
+    [
+        (None, None, None),
+        ("pre-mutation", "pre-mutation-revalidation", False),
+        ("helm", "helm-upgrade", True),
+        ("rollout", "rollout-wait", True),
+        ("verifier", "runtime-verification", True),
+        ("revision", "revision-stability-collection", True),
+    ],
+)
+def test_orchestration_preserves_complete_success_and_failure_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str | None,
+    failed_stage: str | None,
+    may_have_changed: bool | None,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     manifest_path = tmp_path / "target.json"
     evidence_path = tmp_path / "rollback.json"
@@ -325,44 +341,27 @@ def test_success_uses_digest_chart_complete_values_and_writes_evidence(
         lambda *_args, **_kwargs: [{"check": "imageDigest", "passed": True, "details": "observed"}],
     )
     monkeypatch.setattr(rollback.release, "finalize", lambda *_args, **_kwargs: {})
-    statuses = iter(
-        [
-            {
-                "name": "dspace",
-                "namespace": "dspace",
-                "version": 7,
-                "info": {"status": "deployed", "description": "old"},
-                "chart": {"metadata": {"name": "dspace", "version": "3.1.0"}},
-            },
-            {
-                "name": "dspace",
-                "namespace": "dspace",
-                "version": 7,
-                "info": {"status": "deployed", "description": "old"},
-                "chart": {"metadata": {"name": "dspace", "version": "3.1.0"}},
-            },
-            {
-                "name": "dspace",
-                "namespace": "dspace",
-                "version": 8,
-                "info": {"status": "deployed", "description": "placeholder"},
-                "chart": {"metadata": {"name": "dspace", "version": "3.2.0"}},
-            },
-            {
-                "name": "dspace",
-                "namespace": "dspace",
-                "version": 8,
-                "info": {"status": "deployed", "description": "placeholder"},
-                "chart": {"metadata": {"name": "dspace", "version": "3.2.0"}},
-            },
-        ]
-    )
+    upgrade_attempted = [False]
+    post_status_calls = [0]
 
     def status(*_args: object) -> dict[str, object]:
-        value = next(statuses)
-        if value["version"] == 8:
-            value["info"]["description"] = description[0]
-        return value
+        if not upgrade_attempted[0]:
+            return {
+                "name": "dspace",
+                "namespace": "dspace",
+                "version": 7,
+                "info": {"status": "deployed", "description": "old"},
+                "chart": {"metadata": {"name": "dspace", "version": "3.1.0"}},
+            }
+        post_status_calls[0] += 1
+        revision = 9 if failure == "revision" and post_status_calls[0] >= 2 else 8
+        return {
+            "name": "dspace",
+            "namespace": "dspace",
+            "version": revision,
+            "info": {"status": "deployed", "description": description[0]},
+            "chart": {"metadata": {"name": "dspace", "version": "3.2.0"}},
+        }
 
     description = [""]
     monkeypatch.setattr(rollback, "helm_status", status)
@@ -378,14 +377,26 @@ def test_success_uses_digest_chart_complete_values_and_writes_evidence(
 
     monkeypatch.setattr(rollback, "pods", pods_stub)
     commands: list[list[str]] = []
+    git_calls = [0]
+    sentinel = "TOP-SECRET-verifier-output"
 
     def runner(command: list[str]) -> str:
         commands.append(command)
         if command[0] == "helm" and "upgrade" in command:
+            upgrade_attempted[0] = True
             description[0] = command[command.index("--description") + 1]
+            if failure == "helm":
+                raise rollback.RollbackError(sentinel)
+        if command[0] == "kubectl" and "rollout" in command and failure == "rollout":
+            raise rollback.RollbackError(sentinel)
         if command[:2] == [str(verifier), "verify"]:
+            if failure == "verifier":
+                raise rollback.RollbackError(sentinel)
             return json.dumps(verifier_result())
         if command[:2] == ["git", "rev-parse"]:
+            git_calls[0] += 1
+            if failure == "pre-mutation" and git_calls[0] == 2:
+                return "e" * 40 + "\n"
             return "f" * 40 + "\n"
         if command[0] == "kubectl" and "replicasets,deployments" in command:
             return '{"items": []}'
@@ -404,6 +415,35 @@ def test_success_uses_digest_chart_complete_values_and_writes_evidence(
         oras="oras",
         timeout="10m",
     )
+    if failure is not None:
+        with pytest.raises(rollback.RollbackError, match="preserved evidence"):
+            rollback.rollback(args, runner)
+        written = json.loads(evidence_path.read_text(encoding="utf-8"))
+        assert written["state"] == "failed"
+        assert written["failedStage"] == failed_stage
+        assert written["failureCode"] == f"{failed_stage}-failed"
+        assert written["failureType"] == "rollback"
+        assert written["clusterMayHaveChanged"] is may_have_changed
+        assert written["sugarkubeRevision"] == "f" * 40
+        assert sentinel not in evidence_path.read_text(encoding="utf-8")
+        assert sentinel not in capsys.readouterr().err
+        observed = written["diagnostics"]
+        assert observed["helm"] == {
+            "release": "dspace",
+            "namespace": "dspace",
+            "revision": 7 if failure == "pre-mutation" else (9 if failure == "revision" else 8),
+            "status": "deployed",
+            "chartName": "dspace",
+            "chartVersion": "3.1.0" if failure == "pre-mutation" else "3.2.0",
+            "invocationDescriptionMatches": failure != "pre-mutation",
+        }
+        assert observed["pods"][0]["uid"] == "2"
+        assert observed["pods"][0]["startTime"]
+        assert observed["pods"][0]["images"]["dspace"]
+        assert observed["pods"][0]["imageIDs"]["dspace"]
+        assert "ownerReferences" in observed["pods"][0]
+        return
+
     result = rollback.rollback(args, runner)
     upgrade = next(command for command in commands if "upgrade" in command)
     assert f"oci://{manifest.CHART_REF}@{'sha256:' + '2' * 64}" in upgrade

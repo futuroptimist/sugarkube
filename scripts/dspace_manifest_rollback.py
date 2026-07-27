@@ -566,6 +566,7 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
         "release": "dspace",
         "namespace": "dspace",
         "startedAt": started,
+        "sugarkubeRevision": sugarkube_revision,
         "target": {
             key: target[key]
             for key in (
@@ -589,10 +590,11 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
     }
     reserve(args.evidence, evidence)
     mutated = False
+    failed_stage = "pre-mutation-revalidation"
+    description = f"sugarkube-dspace-manifest-rollback:{invocation}"
     try:
         if runner(["git", "rev-parse", "HEAD"]).strip() != sugarkube_revision:
             raise RollbackError("Sugarkube revision changed before mutation")
-        description = f"sugarkube-dspace-manifest-rollback:{invocation}"
         command = [
             "helm",
             "--kubeconfig",
@@ -613,8 +615,12 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             "--timeout",
             args.timeout,
         ]
+        failed_stage = "helm-upgrade"
+        # From this point onward Helm may have accepted or partially applied the
+        # request even when the command reports failure.
         mutated = True
         runner(command)
+        failed_stage = "rollout-wait"
         runner(
             [
                 "kubectl",
@@ -629,6 +635,7 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
                 args.timeout,
             ]
         )
+        failed_stage = "pod-settling-and-proof"
         deadline = time.monotonic() + POD_TIMEOUT
         while True:
             after_pods = pods(runner, args.kubeconfig, "dspace", "dspace")
@@ -662,6 +669,7 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
         )
         verify_post_pods(after_pods, before_pods, target, changed)
         # Reuse finalization's strict Deployment/ReplicaSet ownership validator.
+        failed_stage = "ownership-and-finalization-proof"
         workloads = json_command(
             runner,
             [
@@ -729,9 +737,11 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             "--provider",
             target["expectedDefaultChatProvider"],
         ]
+        failed_stage = "runtime-verification"
         verifier = validate_verifier_result(
             json_command(runner, verifier_command, "runtime verifier"), target, args.environment
         )
+        failed_stage = "revision-stability-collection"
         stable = helm_status(runner, args.kubeconfig, "dspace", "dspace")
         if revision(stable) != after_revision:
             raise RollbackError("Helm revision changed concurrently during evidence collection")
@@ -768,28 +778,31 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
         diagnostics: dict[str, Any] = {}
         try:
             observed_helm = helm_status(runner, args.kubeconfig, "dspace", "dspace")
+            observed_info = observed_helm.get("info", {})
+            observed_chart = observed_helm.get("chart", {}).get("metadata", {})
             diagnostics["helm"] = {
+                "release": observed_helm.get("name"),
+                "namespace": observed_helm.get("namespace"),
                 "revision": revision(observed_helm),
-                "status": observed_helm.get("info", {}).get("status"),
+                "status": observed_info.get("status"),
+                "chartName": observed_chart.get("name"),
+                "chartVersion": chart_version(observed_helm),
+                "invocationDescriptionMatches": observed_info.get("description")
+                == description,
             }
         except Exception:
             diagnostics["helm"] = "unavailable"
         try:
-            observed_pods = pods(runner, args.kubeconfig, "dspace", "dspace", require_any=False)
-            diagnostics["pods"] = [
-                {
-                    "name": item["name"],
-                    "phase": item["phase"],
-                    "ready": item["ready"],
-                    "terminating": item["terminating"],
-                }
-                for item in observed_pods
-            ]
+            diagnostics["pods"] = pods(
+                runner, args.kubeconfig, "dspace", "dspace", require_any=False
+            )
         except Exception:
             diagnostics["pods"] = "unavailable"
         evidence.update(
             state="failed",
-            failedStage="mutation-or-verification",
+            failedStage=failed_stage,
+            failureCode=f"{failed_stage}-failed",
+            failureType=("rollback" if isinstance(exc, RollbackError) else "dependency"),
             failedAt=timestamp(),
             clusterMayHaveChanged=mutated,
             diagnostics=diagnostics,
