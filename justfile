@@ -1658,11 +1658,11 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     helm "${helm_args[@]}"
     wait_for_rollouts
 
-helm-oci-install release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' env='' description='' app='' mutation_marker='':
-    @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' '{{ env }}' '{{ description }}' '{{ app }}' allow_install='true' reuse_values='false' mutation_marker='{{ mutation_marker }}'
+helm-oci-install release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' env='' description='' app='':
+    @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' '{{ env }}' '{{ description }}' '{{ app }}' allow_install='true' reuse_values='false'
 
-helm-oci-upgrade release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' env='' description='' app='' mutation_marker='':
-    @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' '{{ env }}' '{{ description }}' '{{ app }}' allow_install='false' reuse_values='true' mutation_marker='{{ mutation_marker }}'
+helm-oci-upgrade release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' env='' description='' app='':
+    @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' '{{ env }}' '{{ description }}' '{{ app }}' allow_install='false' reuse_values='true'
 
 # Print resolved Sugarkube app deployment config for an app/environment.
 app-config app env='staging' config='':
@@ -2145,23 +2145,13 @@ tokenplace-oci-deploy env='staging' tag='':
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
     export SUGARKUBE_ENV="${env_name}"
     echo "Deploying tokenplace env=${env_name} chart=oci://ghcr.io/futuroptimist/charts/tokenplace version=${chart_version} image=ghcr.io/futuroptimist/tokenplace-relay:${resolved_tag}"
-    python3 "{{ justfile_directory() }}/scripts/app_chart.py" preflight \
-      --app tokenplace \
-      --env "${env_name}" \
-      --tag "${resolved_tag}" \
-      --chart 'oci://ghcr.io/futuroptimist/charts/tokenplace' \
-      --version-file 'docs/apps/tokenplace.version' \
-      --values "${values_chain}" \
-      --release tokenplace \
-      --namespace tokenplace
-
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-install \
       release='tokenplace' namespace='tokenplace' \
       chart='oci://ghcr.io/futuroptimist/charts/tokenplace' \
       values="${values_chain}" \
       version_file='docs/apps/tokenplace.version' \
       tag="${resolved_tag}" \
-      env="${env_name}"
+      env="${env_name}" app=tokenplace
 
     scripts/ensure_user_kubeconfig.sh || true
     export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
@@ -2241,23 +2231,13 @@ tokenplace-oci-redeploy env='staging' tag='':
     export KUBECONFIG="${HOME}/.kube/config"
     just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${env_name}"
     export SUGARKUBE_ENV="${env_name}"
-    python3 "{{ justfile_directory() }}/scripts/app_chart.py" preflight \
-      --app tokenplace \
-      --env "${env_name}" \
-      --tag "${resolved_tag}" \
-      --chart 'oci://ghcr.io/futuroptimist/charts/tokenplace' \
-      --version-file 'docs/apps/tokenplace.version' \
-      --values "${values_chain}" \
-      --release tokenplace \
-      --namespace tokenplace
-
     just --justfile "{{ justfile_directory() }}/justfile" helm-oci-upgrade \
       release='tokenplace' namespace='tokenplace' \
       chart='oci://ghcr.io/futuroptimist/charts/tokenplace' \
       values="${values_chain}" \
       version_file='docs/apps/tokenplace.version' \
       tag="${resolved_tag}" \
-      env="${env_name}" default_tag="${default_tag}"
+      env="${env_name}" default_tag="${default_tag}" app=tokenplace
 
     scripts/ensure_user_kubeconfig.sh || true
     export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"

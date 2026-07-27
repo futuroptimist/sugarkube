@@ -172,6 +172,10 @@ if [[ "$*" == show\ chart* ]]; then
   exit 0
 fi
 if [[ "$*" == template* ]]; then
+  if [ "${{SUGARKUBE_STUB_HELM_TEMPLATE_FAIL:-}}" = "1" ]; then
+    echo 'Error: synthetic helm template failure' >&2
+    exit 1
+  fi
   if [ "${{SUGARKUBE_STUB_HELM_TEMPLATE_MISSING_META:-}}" = "1" ]; then
     printf 'apiVersion: apps/v1
 kind: Deployment
@@ -1832,6 +1836,45 @@ def test_dspace_guarded_deploy_orders_preflight_mutation_and_finalization(
 
 
 @pytest.mark.usefixtures("ensure_just_available")
+def test_dspace_render_failure_stops_before_evidence_reservation_or_mutation(
+    tmp_path: Path, generic_app_stub_env: dict[str, str]
+) -> None:
+    manifest = tmp_path / "candidate.json"
+    evidence = tmp_path / "evidence.json"
+    reservation = Path(str(evidence.resolve()) + ".reservation")
+    _write_dspace_candidate(manifest, "staging")
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_HELM_TEMPLATE_FAIL"] = "1"
+
+    result = _run_just(
+        [
+            "app-deploy",
+            "dspace",
+            "staging",
+            "main-abcdef0",
+            "",
+            str(manifest),
+            str(evidence),
+        ],
+        env,
+    )
+
+    assert result.returncode != 0
+    assert "synthetic helm template failure" in result.stderr
+    assert not evidence.exists()
+    assert not reservation.exists()
+    helm_log = Path(env["HELM_LOG"]).read_text(encoding="utf-8")
+    assert "template dspace " in helm_log
+    assert "upgrade " not in helm_log
+    kubectl_log = tmp_path / "kubectl.log"
+    kubectl_commands = kubectl_log.read_text(encoding="utf-8") if kubectl_log.exists() else ""
+    assert " apply " not in kubectl_commands
+    assert " patch " not in kubectl_commands
+    assert " set image " not in kubectl_commands
+    assert "rollout" not in kubectl_commands
+
+
+@pytest.mark.usefixtures("ensure_just_available")
 def test_dspace_guarded_redeploy_installs_approved_chart_digest(
     tmp_path: Path, generic_app_stub_env: dict[str, str]
 ) -> None:
@@ -1973,6 +2016,28 @@ def test_existing_app_specific_deploy_wrappers_still_work(
     if recipe == "tokenplace-oci-deploy":
         _assert_chart_pin_reminder(result.stdout, "tokenplace")
         assert result.stdout.count("NOTE: chart pins are explicit") == 1
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+@pytest.mark.parametrize(
+    "recipe",
+    ["tokenplace-oci-deploy", "tokenplace-oci-redeploy", "tokenplace-oci-promote-prod"],
+)
+def test_tokenplace_oci_paths_render_once_before_single_mutation(
+    recipe: str, generic_app_stub_env: dict[str, str]
+) -> None:
+    if recipe == "tokenplace-oci-promote-prod":
+        generic_app_stub_env["SUGARKUBE_STUB_NODE_ENV"] = "prod"
+
+    result = _run_just([recipe, "tag=main-deadbee"], generic_app_stub_env)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    helm_lines = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8").splitlines()
+    renders = [index for index, line in enumerate(helm_lines) if line.startswith("template ")]
+    mutations = [index for index, line in enumerate(helm_lines) if line.startswith("upgrade ")]
+    assert len(renders) == 1
+    assert len(mutations) == 1
+    assert renders[0] < mutations[0]
 
 
 @pytest.mark.usefixtures("ensure_just_available")
@@ -3337,6 +3402,23 @@ def test_direct_helm_oci_helper_matching_env_succeeds(
     assert "show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.3" in helm_log
     assert "upgrade tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace" in helm_log
     assert "--description" not in helm_log
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+@pytest.mark.parametrize("recipe", ["helm-oci-install", "helm-oci-upgrade"])
+def test_public_helm_helper_rejects_mutation_marker_without_altering_file(
+    recipe: str, tmp_path: Path, generic_app_stub_env: dict[str, str]
+) -> None:
+    marker = tmp_path / "preexisting-marker"
+    marker.write_text("do not alter\n", encoding="utf-8")
+
+    result = _run_just([recipe, f"mutation_marker={marker}"], generic_app_stub_env)
+
+    assert result.returncode != 0
+    assert "mutation_marker" in result.stderr
+    assert marker.read_text(encoding="utf-8") == "do not alter\n"
+    helm_log = Path(generic_app_stub_env["HELM_LOG"])
+    assert not helm_log.exists() or helm_log.read_text(encoding="utf-8") == ""
 
 
 @pytest.mark.usefixtures("ensure_just_available")
