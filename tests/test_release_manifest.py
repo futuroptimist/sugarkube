@@ -124,9 +124,12 @@ def test_accepts_strict_semver_prerelease_and_build(version: str) -> None:
     value = upstream()
     value["applicationVersion"] = version
     value["semanticTag"] = f"v{version}"
-    assert manifest.candidate(
-        value, "staging", "token-place", "2026-07-26T12:00:00Z", "operator"
-    )["applicationVersion"] == version
+    assert (
+        manifest.candidate(value, "staging", "token-place", "2026-07-26T12:00:00Z", "operator")[
+            "applicationVersion"
+        ]
+        == version
+    )
 
 
 @pytest.mark.parametrize(
@@ -331,6 +334,7 @@ def finalize(**changes):
         "namespace": "dspace",
         "cluster_environment": "staging",
         "invocation_description": "sugarkube-release-manifest:test-reservation",
+        "values": [{"path": "values.yaml", "sha256": "3" * 64}],
     }
     arguments.update(changes)
     return manifest.finalize(**arguments)
@@ -384,9 +388,7 @@ def test_final_validation_requires_every_fixed_check(missing: str) -> None:
 @pytest.mark.parametrize("invalid", ["unknown", "imagePlatformSourceRevision[x]"])
 def test_final_validation_rejects_unknown_or_malformed_checks(invalid: str) -> None:
     value = finalize()
-    value["verificationResults"].append(
-        {"check": invalid, "passed": True, "details": "fabricated"}
-    )
+    value["verificationResults"].append({"check": invalid, "passed": True, "details": "fabricated"})
     with pytest.raises(manifest.ManifestError, match="unknown verification"):
         manifest.validate(value, True)
 
@@ -554,9 +556,7 @@ def test_reservation_is_atomic_and_bound_to_owner(tmp_path: Path) -> None:
     )
     metadata = json.loads(sidecar.read_text(encoding="utf-8"))
     assert metadata["output"] == str(output.resolve())
-    assert metadata["candidateFingerprint"] == manifest._candidate_fingerprint(
-        candidate()
-    )
+    assert metadata["candidateFingerprint"] == manifest._candidate_fingerprint(candidate())
 
 
 def test_reservation_rejects_existing_record_or_reservation(tmp_path: Path) -> None:
@@ -590,9 +590,7 @@ def test_reservation_binds_candidate_output_and_coordinates(tmp_path: Path) -> N
             )
 
 
-def test_post_reservation_failure_preserves_ownership(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_post_reservation_failure_preserves_ownership(tmp_path: Path, monkeypatch) -> None:
     source = tmp_path / "candidate.json"
     output = tmp_path / "evidence.json"
     source.write_text(manifest._canonical(candidate()), encoding="utf-8")
@@ -600,9 +598,7 @@ def test_post_reservation_failure_preserves_ownership(
     monkeypatch.setattr(
         manifest,
         "preflight",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            manifest.ManifestError("OCI failed")
-        ),
+        lambda *args, **kwargs: (_ for _ in ()).throw(manifest.ManifestError("OCI failed")),
     )
     assert (
         manifest.main(
@@ -640,6 +636,8 @@ def test_finalize_cli_collects_bound_evidence_before_consuming_reservation(
     source = tmp_path / "candidate.json"
     output = tmp_path / "evidence.json"
     source.write_text(manifest._canonical(candidate()), encoding="utf-8")
+    values = tmp_path / "values.yaml"
+    values.write_text("environment: staging\n", encoding="utf-8")
     owner = manifest.reserve(output, candidate(), "staging", "dspace", "dspace")
     sidecar = manifest.reservation_path(output)
     oci_results = manifest.preflight(
@@ -724,6 +722,8 @@ def test_finalize_cli_collects_bound_evidence_before_consuming_reservation(
                 "dspace",
                 "--reservation",
                 owner,
+                "--values",
+                str(values),
             ]
         )
         == 0
@@ -779,10 +779,25 @@ def test_finalize_cli_settling_failure_preserves_reservation(
 
     monkeypatch.setattr(manifest, "_run", run)
     args = [
-        "finalize", "--manifest", str(source), "--output", str(output),
-        "--environment", "staging", "--image-tag", "main-abcdef0",
-        "--chart-version", "3.2.0", "--kubeconfig", "kubeconfig",
-        "--release", "dspace", "--namespace", "dspace", "--reservation", owner,
+        "finalize",
+        "--manifest",
+        str(source),
+        "--output",
+        str(output),
+        "--environment",
+        "staging",
+        "--image-tag",
+        "main-abcdef0",
+        "--chart-version",
+        "3.2.0",
+        "--kubeconfig",
+        "kubeconfig",
+        "--release",
+        "dspace",
+        "--namespace",
+        "dspace",
+        "--reservation",
+        owner,
     ]
     assert manifest.main(args) == 2
     assert not output.exists()
@@ -824,25 +839,36 @@ def test_finalize_cli_rejects_changed_helm_binding_and_preserves_reservation(
                     status["info"]["description"] = "another invocation"
             return json.dumps(status)
         resource = command[command.index("get") + 1]
-        return json.dumps(
-            {"items": [pod("dspace-a")]} if resource == "pods" else workloads()
-        )
+        return json.dumps({"items": [pod("dspace-a")]} if resource == "pods" else workloads())
 
     monkeypatch.setattr(manifest, "_run", run)
     args = [
-        "finalize", "--manifest", str(source), "--output", str(output),
-        "--environment", "staging", "--image-tag", "main-abcdef0",
-        "--chart-version", "3.2.0", "--kubeconfig", "kubeconfig",
-        "--release", "dspace", "--namespace", "dspace", "--reservation", owner,
+        "finalize",
+        "--manifest",
+        str(source),
+        "--output",
+        str(output),
+        "--environment",
+        "staging",
+        "--image-tag",
+        "main-abcdef0",
+        "--chart-version",
+        "3.2.0",
+        "--kubeconfig",
+        "kubeconfig",
+        "--release",
+        "dspace",
+        "--namespace",
+        "dspace",
+        "--reservation",
+        owner,
     ]
     assert manifest.main(args) == 2
     assert not output.exists()
     assert manifest.reservation_path(output).exists()
 
 
-def test_public_read_only_and_reservation_dispatch(
-    tmp_path: Path, monkeypatch, capsys
-) -> None:
+def test_public_read_only_and_reservation_dispatch(tmp_path: Path, monkeypatch, capsys) -> None:
     source = tmp_path / "candidate.json"
     output = tmp_path / "evidence.json"
     source.write_text(manifest._canonical(candidate()), encoding="utf-8")
@@ -853,9 +879,7 @@ def test_public_read_only_and_reservation_dispatch(
         preflight_calls.append(args)
         return real_preflight(*args, **kwargs, runner=oras_runner())
 
-    oci_results = checked_preflight(
-        candidate(), manifest.IMAGE_REF, manifest.CHART_REF, "oras"
-    )
+    oci_results = checked_preflight(candidate(), manifest.IMAGE_REF, manifest.CHART_REF, "oras")
     preflight_calls.clear()
     monkeypatch.setattr(manifest, "preflight", checked_preflight)
 
@@ -936,16 +960,9 @@ def test_preflight_chart_coordinate_is_not_printed_after_failed_validation(
     monkeypatch.setattr(
         manifest,
         "preflight",
-        lambda *args, **kwargs: real_preflight(
-            *args, **kwargs, runner=oras_runner()
-        ),
+        lambda *args, **kwargs: real_preflight(*args, **kwargs, runner=oras_runner()),
     )
-    assert (
-        manifest.main(
-            ["preflight", "--manifest", str(source), "--print-chart-coordinate"]
-        )
-        == 2
-    )
+    assert manifest.main(["preflight", "--manifest", str(source), "--print-chart-coordinate"]) == 2
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "chartDigest" in captured.err
@@ -955,6 +972,7 @@ def test_default_evidence_path_is_stable_and_approval_unique() -> None:
     assert str(manifest.evidence_path(candidate())) == (
         "deployment-evidence/dspace/staging/main-abcdef0-20260726T120000Z.json"
     )
+
 
 @pytest.mark.parametrize(
     ("change", "message"),

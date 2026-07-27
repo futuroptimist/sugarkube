@@ -36,6 +36,7 @@ CANDIDATE_FIELDS = UPSTREAM_FIELDS + (
     "approvedBy",
 )
 FINAL_FIELDS = CANDIDATE_FIELDS + (
+    "values",
     "helmRevision",
     "pods",
     "runtimeSourceRevision",
@@ -153,6 +154,19 @@ def validate(value: dict[str, Any], finalized: bool | None = None) -> dict[str, 
     except ValueError as exc:
         raise ManifestError("approvedAt is not a valid UTC timestamp") from exc
     if finalized:
+        values = value["values"]
+        if not isinstance(values, list) or not values:
+            raise ManifestError("values must be a non-empty ordered list")
+        for item in values:
+            if not isinstance(item, dict):
+                raise ManifestError("values entries must be objects")
+            _exact_fields(item, ("path", "sha256"))
+            if not isinstance(item["path"], str) or not item["path"]:
+                raise ManifestError("values path must be non-empty")
+            if not isinstance(item["sha256"], str) or not re.fullmatch(
+                r"[0-9a-f]{64}", item["sha256"]
+            ):
+                raise ManifestError("values sha256 must be a lowercase digest")
         if (
             not isinstance(value["helmRevision"], int)
             or isinstance(value["helmRevision"], bool)
@@ -212,9 +226,7 @@ def validate(value: dict[str, Any], finalized: bool | None = None) -> dict[str, 
         if missing:
             raise ManifestError("missing verification results: " + ", ".join(missing))
         if sorted(platform_indices) != list(range(len(platform_indices))):
-            raise ManifestError(
-                "image platform verification indices must be contiguous from zero"
-            )
+            raise ManifestError("image platform verification indices must be contiguous from zero")
         if not platform_indices:
             raise ManifestError("at least one image platform verification result is required")
     return value
@@ -235,9 +247,7 @@ def _write_new(path: Path, value: dict[str, Any]) -> None:
         try:
             os.link(temporary, path)
         except FileExistsError as exc:
-            raise ManifestError(
-                f"refusing to overwrite existing record: {path}"
-            ) from exc
+            raise ManifestError(f"refusing to overwrite existing record: {path}") from exc
         _sync_directory(path.parent)
     finally:
         Path(temporary).unlink(missing_ok=True)
@@ -290,9 +300,7 @@ def reserve(
     try:
         fd = os.open(sidecar, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError as exc:
-        raise ManifestError(
-            f"evidence destination is already reserved: {sidecar}"
-        ) from exc
+        raise ManifestError(f"evidence destination is already reserved: {sidecar}") from exc
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
             stream.write(_canonical(metadata))
@@ -328,9 +336,7 @@ def verify_reservation(
     if not secrets.compare_digest(
         json.dumps(metadata, sort_keys=True), json.dumps(expected, sort_keys=True)
     ):
-        raise ManifestError(
-            "reservation ownership or deployment coordinates do not match"
-        )
+        raise ManifestError("reservation ownership or deployment coordinates do not match")
     if normalized.exists():
         raise ManifestError(f"refusing to overwrite existing record: {normalized}")
     return sidecar
@@ -547,6 +553,7 @@ def finalize(
     namespace: str,
     cluster_environment: str,
     invocation_description: str,
+    values: list[dict[str, str]],
 ) -> dict[str, Any]:
     validate(value, False)
     selected = {
@@ -688,8 +695,7 @@ def finalize(
             # Helm metadata proves name/version, not immutable OCI content. The
             # guarded mutation therefore installs this approved digest directly.
             "details": (
-                f"chart=dspace; version={chart_version}; "
-                f"coordinate={chart_coordinate(value)}"
+                f"chart=dspace; version={chart_version}; " f"coordinate={chart_coordinate(value)}"
             ),
         },
         {
@@ -711,6 +717,7 @@ def finalize(
     result = dict(value)
     result.update(
         recordType="final",
+        values=values,
         helmRevision=revision,
         pods=pods,
         runtimeSourceRevision=value["sourceRevision"],
@@ -754,9 +761,8 @@ def main(argv: list[str] | None = None) -> int:
     finish.add_argument("--image-ref", default=IMAGE_REF)
     finish.add_argument("--chart-ref", default=CHART_REF)
     finish.add_argument("--reservation", required=True)
-    finish.add_argument(
-        "--oras-command", default=os.environ.get("SUGARKUBE_ORAS_COMMAND", "oras")
-    )
+    finish.add_argument("--values", default="")
+    finish.add_argument("--oras-command", default=os.environ.get("SUGARKUBE_ORAS_COMMAND", "oras"))
     available = sub.add_parser("check-output")
     available.add_argument("--output", type=Path, required=True)
     destination = sub.add_parser("evidence-path")
@@ -884,6 +890,15 @@ def main(argv: list[str] | None = None) -> int:
                 namespace=args.namespace,
                 cluster_environment=cluster_environment,
                 invocation_description=invocation_description,
+                values=[
+                    {
+                        "path": str(path),
+                        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                    }
+                    for raw in args.values.split(",")
+                    for path in [Path(raw.strip())]
+                    if raw.strip()
+                ],
             )
             sidecar = verify_reservation(
                 args.output,
@@ -908,19 +923,16 @@ def main(argv: list[str] | None = None) -> int:
                     metadata.get("version"),
                 )
 
-            if (
-                binding_fields(settled_helm) != binding_fields(helm)
-                or binding_fields(stable_helm) != binding_fields(helm)
-            ):
+            if binding_fields(settled_helm) != binding_fields(helm) or binding_fields(
+                stable_helm
+            ) != binding_fields(helm):
                 raise ManifestError("Helm release changed during evidence collection")
             _write_new(args.output, result)
             sidecar.unlink()
             _sync_directory(args.output.expanduser().resolve(strict=False).parent)
         elif args.command == "check-output":
             if args.output.exists():
-                raise ManifestError(
-                    f"refusing to overwrite existing record: {args.output}"
-                )
+                raise ManifestError(f"refusing to overwrite existing record: {args.output}")
         elif args.command == "reserve":
             sys.stdout.write(
                 reserve(

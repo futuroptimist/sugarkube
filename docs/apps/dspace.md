@@ -358,15 +358,18 @@ just dspace-manifest-rollback \
 
 Before reserving evidence or changing Helm/Kubernetes state, the command checks
 cluster identity, validates the strict final manifest and fresh OCI provenance,
-loads and hashes every ordered values file, renders the digest-qualified chart,
+loads and hashes every ordered values file, requires those hashes and paths to
+match the values chain recorded in the finalized target evidence, renders the
+digest-qualified chart,
 checks verifier capabilities, and captures current Helm and pod identity. It
 prints only non-secret current-versus-target coordinates; a current chart digest
 is reported as unknown because Helm status cannot prove it. Exact no-ops and all
 preflight or confirmation failures stop before mutation.
 
 After atomically reserving the unique evidence destination, the operation uses
-`helm upgrade` with the approved chart digest, complete values chain, and
-immutable image tag. It never uses `--reuse-values`, a semantic tag, or
+`helm upgrade` with the approved chart digest, complete values chain, and an
+application image reference pinned by both its immutable tag and approved digest.
+It never uses `--reuse-values`, a semantic tag, or
 `helm rollback <revision>`. It then proves the advanced stable Helm revision,
 chart identity, Deployment/ReplicaSet ownership, replacement pod UIDs and start
 times, readiness, image coordinates and resolved digests, OCI source metadata,

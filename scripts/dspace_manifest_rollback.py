@@ -56,9 +56,8 @@ Runner = Callable[[list[str]], str]
 def run(command: list[str]) -> str:
     completed = subprocess.run(command, check=False, capture_output=True, text=True)
     if completed.returncode:
-        # Verifier output is deliberately never reflected: it may contain credentials.
-        detail = "" if command and Path(command[0]).name not in {"verify", "verifier"} else ""
-        raise RollbackError(f"command failed: {command[0]}{detail}")
+        # Command output is deliberately never reflected: verifier output may contain credentials.
+        raise RollbackError(f"command failed: {command[0]}")
     return completed.stdout
 
 
@@ -188,13 +187,15 @@ def cluster_environment(runner: Runner, kubeconfig: str) -> str:
         ["kubectl", "--kubeconfig", kubeconfig, "get", "nodes", "-o", "json"],
         "cluster nodes",
     )
+    items = nodes.get("items", [])
+    if not isinstance(items, list) or not items:
+        raise RollbackError("cluster nodes do not prove one Sugarkube environment")
     labels = {
         item.get("metadata", {}).get("labels", {}).get("sugarkube.env")
-        for item in nodes.get("items", [])
+        for item in items
         if isinstance(item, dict)
     }
-    labels.discard(None)
-    if len(labels) != 1:
+    if len(labels) != 1 or None in labels:
         raise RollbackError("cluster nodes do not prove one Sugarkube environment")
     return labels.pop()
 
@@ -225,9 +226,15 @@ def pods(
         metadata = item.get("metadata", {})
         status = item.get("status", {})
         declared = {
-            c.get("name"): c.get("image") for c in item.get("spec", {}).get("containers", [])
+            c.get("name"): c.get("image")
+            for c in item.get("spec", {}).get("containers", [])
+            if c.get("name") == "dspace"
         }
-        resolved = {c.get("name"): c.get("imageID") for c in status.get("containerStatuses", [])}
+        resolved = {
+            c.get("name"): c.get("imageID")
+            for c in status.get("containerStatuses", [])
+            if c.get("name") == "dspace"
+        }
         result.append(
             {
                 "name": metadata.get("name"),
@@ -334,10 +341,13 @@ def verify_post_pods(
     for pod in after:
         if not pod["images"] or any(image != expected_image for image in pod["images"].values()):
             raise RollbackError("DSPACE container image coordinate does not match target")
-        if not pod["imageIDs"] or any(
-            release._image_id_digest(image_id or "") != target["imageDigest"]
-            for image_id in pod["imageIDs"].values()
-        ):
+        try:
+            resolved = {
+                release._image_id_digest(image_id or "") for image_id in pod["imageIDs"].values()
+            }
+        except release.ManifestError as exc:
+            raise RollbackError("DSPACE resolved image ID is invalid") from exc
+        if resolved != {target["imageDigest"]}:
             raise RollbackError("DSPACE resolved image ID does not match target digest")
 
 
@@ -362,6 +372,8 @@ def rollback(args: argparse.Namespace, runner: Runner = run) -> dict[str, Any]:
     if config["SUGARKUBE_RELEASE"] != "dspace" or config["SUGARKUBE_NAMESPACE"] != "dspace":
         raise RollbackError("DSPACE release and namespace must both be dspace")
     values, values_proof = values_evidence(config, root)
+    if values_proof != target["values"]:
+        raise RollbackError("configured values chain does not match finalized target evidence")
     environment = cluster_environment(runner, args.kubeconfig)
     if environment != args.environment:
         raise RollbackError("connected cluster environment does not match selected environment")
@@ -383,6 +395,8 @@ def rollback(args: argparse.Namespace, runner: Runner = run) -> dict[str, Any]:
             f"image.repository={release.IMAGE_REF}",
             "--set-string",
             f"image.tag={target['imageTag']}",
+            "--set-string",
+            f"image.digest={target['imageDigest']}",
         ]
     )
     before_helm = helm_status(runner, args.kubeconfig, "dspace", "dspace")
@@ -401,19 +415,17 @@ def rollback(args: argparse.Namespace, runner: Runner = run) -> dict[str, Any]:
     )
     print(summary(before_helm, before_pods, target))
     current_images = {image for pod in before_pods for image in pod["images"].values()}
-    current_ids = {
-        release._image_id_digest(image_id)
-        for pod in before_pods
-        for image_id in pod["imageIDs"].values()
-        if image_id
-    }
-    exact_noop = (
-        chart_version(before_helm) == target["chartVersion"]
-        and current_images == {f"{release.IMAGE_REF}:{target['imageTag']}"}
-        and current_ids == {target["imageDigest"]}
-    )
-    if exact_noop:
-        raise RollbackError("refusing exact no-op rollback")
+    try:
+        current_ids = {
+            release._image_id_digest(image_id)
+            for pod in before_pods
+            for image_id in pod["imageIDs"].values()
+            if image_id
+        }
+    except release.ManifestError as exc:
+        raise RollbackError("current DSPACE image ID is invalid") from exc
+    # Helm status cannot prove the installed OCI chart digest, so matching mutable
+    # metadata is insufficient to reject this recovery as an exact no-op.
     confirmation(args.environment, args.confirm, target)
 
     invocation = uuid.uuid4().hex
@@ -469,6 +481,8 @@ def rollback(args: argparse.Namespace, runner: Runner = run) -> dict[str, Any]:
             f"image.repository={release.IMAGE_REF}",
             "--set-string",
             f"image.tag={target['imageTag']}",
+            "--set-string",
+            f"image.digest={target['imageDigest']}",
             "--wait",
             "--timeout",
             args.timeout,
@@ -568,6 +582,7 @@ def rollback(args: argparse.Namespace, runner: Runner = run) -> dict[str, Any]:
             namespace="dspace",
             cluster_environment=args.environment,
             invocation_description=description,
+            values=target["values"],
         )
         verifier_command = [
             str(args.verifier),

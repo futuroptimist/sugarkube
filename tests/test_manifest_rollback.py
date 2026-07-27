@@ -27,6 +27,7 @@ def target(environment: str = "staging") -> dict[str, object]:
         "chartDigest": "sha256:" + "2" * 64,
         "semanticTag": "v3.2.0",
         "recordType": "final",
+        "values": [{"path": "values.yaml", "sha256": "3" * 64}],
         "environment": environment,
         "expectedDefaultChatProvider": "token-place",
         "approvedAt": "2026-07-26T12:00:00Z",
@@ -185,6 +186,27 @@ def test_post_pod_proof_rejects_unchanged_lingering_and_digest_mismatch() -> Non
     rollback.verify_post_pods([pod("2")], before, target(), True)
 
 
+def test_post_pod_proof_ignores_regular_sidecars() -> None:
+    after = pod("2")
+    after["images"]["metrics"] = "example.invalid/metrics:1"
+    after["imageIDs"]["metrics"] = "example.invalid/metrics@sha256:" + "9" * 64
+    # pods() filters these before proof, mirroring release finalization's named container contract.
+    after["images"] = {"dspace": after["images"]["dspace"]}
+    after["imageIDs"] = {"dspace": after["imageIDs"]["dspace"]}
+    rollback.verify_post_pods([after], [pod("1")], target(), True)
+
+
+def test_cluster_environment_rejects_partially_labeled_nodes() -> None:
+    nodes = {
+        "items": [
+            {"metadata": {"labels": {"sugarkube.env": "staging"}}},
+            {"metadata": {"labels": {}}},
+        ]
+    }
+    with pytest.raises(rollback.RollbackError, match="do not prove"):
+        rollback.cluster_environment(lambda _command: json.dumps(nodes), "kubeconfig")
+
+
 def test_summary_never_invents_current_chart_digest() -> None:
     current = {
         "version": 8,
@@ -220,7 +242,6 @@ def test_success_uses_digest_chart_complete_values_and_writes_evidence(
 ) -> None:
     manifest_path = tmp_path / "target.json"
     evidence_path = tmp_path / "rollback.json"
-    manifest_path.write_text(manifest._canonical(target()), encoding="utf-8")
     verifier = tmp_path / "verifier"
     verifier.write_text("#!/bin/sh\n", encoding="utf-8")
     verifier.chmod(0o755)
@@ -228,6 +249,12 @@ def test_success_uses_digest_chart_complete_values_and_writes_evidence(
     overlay = tmp_path / "staging.yaml"
     base.write_text("base: true\n", encoding="utf-8")
     overlay.write_text("staging: true\n", encoding="utf-8")
+    selected_target = target()
+    selected_target["values"] = [
+        {"path": str(path), "sha256": rollback.hashlib.sha256(path.read_bytes()).hexdigest()}
+        for path in (base, overlay)
+    ]
+    manifest_path.write_text(manifest._canonical(selected_target), encoding="utf-8")
     config = {
         "SUGARKUBE_CHART": f"oci://{manifest.CHART_REF}",
         "SUGARKUBE_RELEASE": "dspace",
@@ -325,6 +352,7 @@ def test_success_uses_digest_chart_complete_values_and_writes_evidence(
     result = rollback.rollback(args, runner)
     upgrade = next(command for command in commands if "upgrade" in command)
     assert f"oci://{manifest.CHART_REF}@{'sha256:' + '2' * 64}" in upgrade
+    assert f"image.digest={DIGEST}" in upgrade
     assert upgrade.count("--values") == 2
     assert str(base) in upgrade and str(overlay) in upgrade
     assert "--reuse-values" not in upgrade
