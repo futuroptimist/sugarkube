@@ -149,7 +149,9 @@ is not rollout evidence.
   and cluster identity first, reads the existing Secret without printing it,
   uses a mode-`0600` temporary netrc, and asks this invocation's `kubectl` to
   bind an ephemeral `127.0.0.1` port. Authentication begins only after that
-  child reports the exact owned forwarding endpoint. Success, failure, and
+  child reports the exact owned forwarding endpoint. The right side of kubectl's
+  forwarding message is the resolved pod or container port, so it may differ
+  from the requested Grafana Service port `80`. Success, failure, and
   interruption all terminate and wait for the child and remove the netrc and
   temporary directory. HTTP 401/403 responses fail immediately with redacted
   diagnostics; only connection and readiness failures are retried. It performs
