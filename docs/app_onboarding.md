@@ -6,6 +6,7 @@ Use this checklist when onboarding the next GHCR-first app to Sugarkube. The goa
 
 - App repositories own build and release artifacts: `Dockerfile`, image workflow, Helm chart, chart workflow, chart version bumps, app defaults, and release notes.
 - Sugarkube owns cluster operations: app config, kubeconfig/environment selection, values overlays, Helm deploy/redeploy/promote commands, status, verification, and logs.
+- Sugarkube also owns observability discovery for the app: blackbox probes for public routes, and `ServiceMonitor`/scrape discovery if the app exposes `/metrics`. See [`docs/observability-design.md`](observability-design.md) §3 for the full boundary.
 - Cloudflare owns public routing outside Helm: DNS records, Tunnel hostname routes to Traefik, and any dashboard/API changes needed before public checks pass.
 
 ## New app onboarding checklist
@@ -22,6 +23,9 @@ Use this checklist when onboarding the next GHCR-first app to Sugarkube. The goa
    when present.
 8. Run the generic Sugarkube deploy.
 9. Add app-specific smoke checks when generic HTTP checks are not enough.
+10. Add blackbox probe coverage for the app's public routes, following the existing
+    per-app/route pattern in [`docs/observability-blackbox.md`](observability-blackbox.md); add a
+    `ServiceMonitor` too once the app exposes `/metrics`.
 
 ## Minimal app config template
 

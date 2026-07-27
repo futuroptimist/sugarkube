@@ -34,6 +34,8 @@ Review the safety notes before working with power components.
 - [observability-design.md](observability-design.md) — canonical Prometheus/Grafana observability
   design across Sugarkube, DSPACE, token.place, and danielsmith.io
 - [observability-operations.md](observability-operations.md) — staging-only non-Flux kube-prometheus-stack operations runbook
+- [observability-blackbox.md](observability-blackbox.md) — staging blackbox exporter and public probe lifecycle runbook
+- [observability-alerting.md](observability-alerting.md) — canonical alerting strategy: PagerDuty/Healthchecks.io target architecture, routing policy, and rollout/drill plan
 - [pi_image_team_notifications.md](pi_image_team_notifications.md) — optional Slack/Matrix progress
   notifications for first boot and SSD cloning
 - [pi_image_cloudflare.md](pi_image_cloudflare.md) — preconfigure Docker and Cloudflare tunnels
@@ -67,6 +69,7 @@ Review the safety notes before working with power components.
 - [hardware/index.md](hardware/index.md) — curated hub for safety notes and hardware build guides
 - [software/index.md](software/index.md) — single stop for automation, playbooks, and contributor tooling
 - [design/tailscale-remote-ops.md](design/tailscale-remote-ops.md) — privacy-preserving Tailscale remote-operations topology
+- [design/app-agnostic-platform.md](design/app-agnostic-platform.md) — forward-looking design for evolving Sugarkube's app-specific engines toward an app-agnostic contract
 
 ## Learn the Fundamentals
 - [solar_basics.md](solar_basics.md) — how photovoltaic panels work

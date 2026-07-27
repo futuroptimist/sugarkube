@@ -27,6 +27,14 @@ Sugarkube owns cluster and environment orchestration:
 - applying the environment values chain; and
 - running status and verification checks against the cluster.
 
+Observability is a related but separate ownership boundary: app repositories own their `/metrics`
+endpoint and instrumentation, while Sugarkube owns `ServiceMonitor`/blackbox target discovery,
+shared dashboards, and alert routing. See
+[`docs/observability-design.md`](observability-design.md) §3 for the full boundary and
+[`docs/observability-operations.md`](observability-operations.md)/[`docs/observability-blackbox.md`](observability-blackbox.md)
+for how DSPACE's staging `ServiceMonitor` and the cross-app blackbox probe matrix are currently
+deployed.
+
 ### DSPACE recovery exception
 
 DSPACE staging and production recovery uses `just dspace-manifest-rollback`,

@@ -38,6 +38,8 @@ and supporting services stay healthy.
   credential rotations and post-maintenance evidence.
 - [design/tailscale-remote-ops.md](../design/tailscale-remote-ops.md) — per-node
   tailnet topology, setup helpers, and remote SSH verification flow.
+- [design/app-agnostic-platform.md](../design/app-agnostic-platform.md) — forward-looking design
+  for moving app-specific hardcoding behind a generic app contract and adapters.
 - [projects-compose.md](../projects-compose.md) — run token.place and dspace via
   Docker Compose.
 - [pi_token_dspace.md](../pi_token_dspace.md) — expose token.place/dspace through
