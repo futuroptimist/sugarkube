@@ -28,6 +28,9 @@ REQUIRED_METRICS = {
 }
 EVENT_METRICS = {"dspace_dchat_requests_total", "dspace_dependency_requests_total"}
 OPERATIONAL_ROUTES = '"/(healthz|livez|metrics)"'
+BLACKBOX_JOB_MATCHER = (
+    'job=~"probe/monitoring/blackbox-(dspace|tokenplace|danielsmith|jobbot3000)-staging-.*"'
+)
 
 
 def load_dashboard(path: Path) -> dict:
@@ -110,47 +113,69 @@ def validate_dashboard_semantics(dashboard: dict) -> None:
 
     summary = panel_named(dashboard, "Public availability summary")
     summary_targets = summary.get("targets", [])
-    if len(summary_targets) != 2 or any(
-        target.get("instant") is not True
-        or target.get("range") is not False
-        or "sum(" not in target.get("expr", "")
-        or "== bool 1" not in target.get("expr", "")
-        or " by (environment, app, route) " not in target.get("expr", "")
+    if (
+        not isinstance(summary_targets, list)
+        or len(summary_targets) != 3
         or any(
-            selector not in target.get("expr", "")
-            for selector in (
-                'environment=~"$environment"',
-                'app=~"$app"',
-                'route=~"$route"',
+            not isinstance(target, dict)
+            or not isinstance(target.get("expr"), str)
+            or target.get("instant") is not True
+            or target.get("range") is not False
+            or "sum(" not in target.get("expr", "")
+            or " by (environment, app, route) " not in target.get("expr", "")
+            or BLACKBOX_JOB_MATCHER not in target.get("expr", "")
+            or any(
+                selector not in target.get("expr", "")
+                for selector in (
+                    'environment=~"$environment"',
+                    'app=~"$app"',
+                    'route=~"$route"',
+                )
             )
+            for target in summary_targets
         )
-        for target in summary_targets
     ):
         raise SystemExit(
-            "ERROR: public availability must be a two-value instant aggregate summary."
+            "ERROR: public availability must be a three-value instant aggregate summary."
         )
     summary_by_legend = {
         target.get("legendFormat"): target.get("expr", "") for target in summary_targets
     }
-    failed_expression = summary_by_legend.get("Failed endpoints", "")
+    healthy_expression = re.sub(r"\s+", " ", summary_by_legend.get("Healthy endpoints", ""))
+    failed_expression = re.sub(r"\s+", " ", summary_by_legend.get("Failed endpoints", ""))
+    missing_expression = re.sub(r"\s+", " ", summary_by_legend.get("Missing probe data", ""))
+    if "== bool 1" not in healthy_expression or "== bool 0" not in failed_expression:
+        raise SystemExit("ERROR: availability counts must use boolean healthy and failed sums.")
     if (
-        "max_over_time(up{" not in failed_expression
-        or "[5m]" not in failed_expression
-        or ">= bool 0" not in failed_expression
-        or " - (sum(" not in failed_expression
-        or "or vector(0)" not in failed_expression
+        "max_over_time(up{" not in missing_expression
+        or "[5m]" not in missing_expression
+        or ">= bool 0" not in missing_expression
+        or " - (sum(" not in missing_expression
+        or "probe_success{" not in missing_expression
+        or "or vector(0)" not in missing_expression
     ):
         raise SystemExit(
-            "ERROR: failed availability must include recently discovered probes "
-            "with missing samples."
+            "ERROR: missing probe data must compare recently discovered probes "
+            "with current samples."
         )
     if {target.get("legendFormat") for target in summary_targets} != {
         "Healthy endpoints",
         "Failed endpoints",
+        "Missing probe data",
     } or summary.get("fieldConfig", {}).get("defaults", {}).get("noValue") != "NO DATA":
         raise SystemExit(
             "ERROR: public availability must distinguish healthy, failed, and no data."
         )
+    missing_colors = [
+        prop.get("value", {}).get("fixedColor")
+        for override in summary.get("fieldConfig", {}).get("overrides", [])
+        if isinstance(override, dict)
+        and override.get("matcher", {}).get("options") == "Missing probe data"
+        for prop in override.get("properties", [])
+        if isinstance(prop, dict) and prop.get("id") == "color"
+    ]
+    if missing_colors != ["yellow"]:
+        raise SystemExit("ERROR: missing probe data must be a compact yellow summary value.")
 
     matrix = panel_named(dashboard, "Endpoint matrix")
     if matrix.get("type") != "table" or not matrix.get("targets"):

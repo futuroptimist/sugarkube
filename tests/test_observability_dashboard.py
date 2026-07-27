@@ -136,27 +136,38 @@ def test_selected_window_traffic_and_availability_semantics(dashboard):
     assert 'route=~"/(healthz|livez|metrics)"' in operational_expression
 
     summary = panels["Public availability summary"]
-    assert len(summary["targets"]) == 2
+    assert len(summary["targets"]) == 3
     assert all(
         target["instant"] is True and target["range"] is False for target in summary["targets"]
     )
     assert {target["legendFormat"] for target in summary["targets"]} == {
         "Healthy endpoints",
         "Failed endpoints",
+        "Missing probe data",
     }
-    summary_expressions = {
-        target["legendFormat"]: target["expr"] for target in summary["targets"]
-    }
+    summary_expressions = {target["legendFormat"]: target["expr"] for target in summary["targets"]}
+    assert "sum(" in summary_expressions["Healthy endpoints"]
+    assert "== bool 1" in summary_expressions["Healthy endpoints"]
+    failed_expression = summary_expressions["Failed endpoints"]
+    assert "sum(" in failed_expression and "== bool 0" in failed_expression
+    missing_expression = summary_expressions["Missing probe data"]
+    assert "max_over_time(up{" in missing_expression
+    assert "[5m]" in missing_expression
+    assert ">= bool 0" in missing_expression
+    assert " - (sum(" in missing_expression
+    assert "probe_success{" in missing_expression
+    assert "or vector(0)" in missing_expression
     assert all(
-        "sum(" in expression and "== bool 1" in expression
+        'job=~"probe/monitoring/blackbox-(dspace|tokenplace|danielsmith|jobbot3000)-staging-.*"'
+        in expression
         for expression in summary_expressions.values()
     )
-    failed_expression = summary_expressions["Failed endpoints"]
-    assert "max_over_time(up{" in failed_expression
-    assert "[5m]" in failed_expression
-    assert ">= bool 0" in failed_expression
-    assert " - (sum(" in failed_expression
-    assert "or vector(0)" in failed_expression
+    missing_override = next(
+        override
+        for override in summary["fieldConfig"]["overrides"]
+        if override["matcher"]["options"] == "Missing probe data"
+    )
+    assert missing_override["properties"][0]["value"]["fixedColor"] == "yellow"
     assert summary["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
     assert panels["Endpoint matrix"]["type"] == "table"
 
@@ -335,7 +346,45 @@ def test_validator_rejects_wrong_dashboard_mount(tmp_path, dashboard, mount_path
             lambda item: next(
                 panel for panel in item["panels"] if panel["title"] == "Public availability summary"
             ).update(targets=[]),
-            "two-value instant aggregate summary",
+            "three-value instant aggregate summary",
+        ),
+        (
+            lambda item: next(
+                target
+                for panel in item["panels"]
+                if panel["title"] == "Public availability summary"
+                for target in panel["targets"]
+                if target["legendFormat"] == "Healthy endpoints"
+            ).update(expr='count(probe_success{environment=~"$environment"} == 1)'),
+            "three-value instant aggregate summary",
+        ),
+        (
+            lambda item: next(
+                target
+                for panel in item["panels"]
+                if panel["title"] == "Public availability summary"
+                for target in panel["targets"]
+                if target["legendFormat"] == "Missing probe data"
+            ).update(
+                expr=(
+                    "sum(min by (environment, app, route) (probe_success{"
+                    'job=~"probe/monitoring/blackbox-'
+                    '(dspace|tokenplace|danielsmith|jobbot3000)-staging-.*",'
+                    'environment=~"$environment",app=~"$app",route=~"$route"'
+                    "}) == bool 1)"
+                )
+            ),
+            "missing probe data must compare",
+        ),
+        (
+            lambda item: next(
+                target
+                for panel in item["panels"]
+                if panel["title"] == "Public availability summary"
+                for target in panel["targets"]
+                if target["legendFormat"] == "Failed endpoints"
+            ).pop("expr"),
+            "three-value instant aggregate summary",
         ),
         (
             lambda item: next(

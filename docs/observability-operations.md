@@ -126,11 +126,15 @@ is not rollout evidence.
 - Alertmanager: one replica and no-op receiver named exactly `"null"`.
 - Grafana: persistence disabled, no Ingress, LAN-only NodePort `30300`.
 - The provisioned dashboard defaults to six hours and a 30-second refresh. Its
-  top-level public availability summary reports current healthy and failed
-  endpoint counts for the selected probe filters. An endpoint discovered in the
-  last five minutes but missing a current probe sample counts as failed; a complete
-  absence of discovered probes remains visibly absent rather than appearing
-  healthy. The detailed endpoint matrix remains the diagnostic view. DSPACE user
+  top-level public availability summary reports **Healthy endpoints**, **Failed
+  endpoints**, and a yellow **Missing probe data** count for the selected probe
+  filters. Healthy and failed are current `probe_success` results; missing compares
+  current samples with lifecycle-owned targets discovered through `up` during the
+  last five minutes, so a briefly disappeared discovery target remains visible.
+  `16/0/0` is fully healthy, `15/1/0` has one observed failure, and `15/0/1`
+  identifies one expected target without current probe data. If no expected target
+  data exists, all three values remain `NO DATA` rather than implying health. The
+  detailed endpoint matrix remains the diagnostic view. DSPACE user
   request rate excludes `/healthz`, `/livez`, and
   `/metrics`, whose traffic has a separate operational-rate panel. Status-class
   distribution is an instant categorical summary over the selected time window.
