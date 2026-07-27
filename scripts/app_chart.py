@@ -123,6 +123,30 @@ def scalar(value: object) -> str:
     return "" if value is None else str(value)
 
 
+def merged_values_document(values: tuple[str, ...]) -> object:
+    """Resolve Helm values files in order using recursive mapping merges."""
+
+    def merge(earlier: object, later: object) -> object:
+        if not isinstance(earlier, dict) or not isinstance(later, dict):
+            return later
+        result = dict(earlier)
+        for key, value in later.items():
+            result[key] = merge(result[key], value) if key in result else value
+        return result
+
+    resolved: object = {}
+    for value_file in values:
+        path = Path(value_file)
+        if not path.is_absolute():
+            path = REPO_ROOT / path
+        try:
+            documents = safe_yaml_documents(path.read_text(encoding="utf-8"))
+        except OSError:
+            continue  # Helm reports missing/unreadable values files with the authoritative error.
+        resolved = merge(resolved, documents[0] if documents else {})
+    return resolved
+
+
 def release_associated(
     document: dict[str, object], release: str, *, allow_name: bool = True
 ) -> bool:
@@ -415,42 +439,19 @@ def print_summary(app: str, env: str, tag: str, chart: str, version: str, pin: s
 def expected_ingress_host(values: tuple[str, ...], explicit: str) -> str:
     if explicit:
         return explicit
-    host = ""
-    enabled = ""
-    for value_file in values:
-        path = Path(value_file)
-        if not path.is_absolute():
-            path = REPO_ROOT / path
-        try:
-            documents = safe_yaml_documents(path.read_text(encoding="utf-8"))
-        except OSError:
-            continue  # Helm reports missing/unreadable values files with the authoritative error.
-        document = documents[0] if documents else {}
-        found, resolved = nested_value(document, ("ingress", "host"))
-        if found:
-            host = scalar(resolved)
-        found, resolved_enabled = nested_value(document, ("ingress", "enabled"))
-        if found:
-            enabled = scalar(resolved_enabled).lower()
+    document = merged_values_document(values)
+    _, resolved_host = nested_value(document, ("ingress", "host"))
+    _, resolved_enabled = nested_value(document, ("ingress", "enabled"))
+    host = scalar(resolved_host)
+    enabled = scalar(resolved_enabled).lower()
     if enabled == "true" and not host:
         raise SystemExit("ERROR: ingress.enabled is true but no nonempty ingress.host was resolved.")
     return host if enabled != "false" else ""
 
 
 def resolved_values_scalar(values: tuple[str, ...], path_parts: tuple[str, ...]) -> str:
-    resolved = ""
-    for value_file in values:
-        path = Path(value_file)
-        if not path.is_absolute():
-            path = REPO_ROOT / path
-        try:
-            documents = safe_yaml_documents(path.read_text(encoding="utf-8"))
-            found, candidate = nested_value(documents[0] if documents else {}, path_parts)
-        except OSError:
-            continue
-        if found:
-            resolved = scalar(candidate)
-    return resolved
+    _, resolved = nested_value(merged_values_document(values), path_parts)
+    return scalar(resolved)
 
 
 def validate_dspace_values(manifest: str, inputs: ReleaseInputs) -> list[str]:

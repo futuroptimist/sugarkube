@@ -842,6 +842,70 @@ def test_values_null_overlay_clears_inherited_scalars(tmp_path: Path) -> None:
     assert app_chart.resolved_values_scalar(values, ("metrics", "auth", "existingSecret")) == ""
 
 
+@pytest.mark.parametrize("null_value", ["null", "~"])
+def test_parent_null_overlay_clears_inherited_ingress(tmp_path: Path, null_value: str) -> None:
+    base = tmp_path / "base.yaml"
+    overlay = tmp_path / "overlay.yaml"
+    base.write_text(
+        "ingress:\n  enabled: true\n  host: inherited.example.test\n", encoding="utf-8"
+    )
+    overlay.write_text(f"ingress: {null_value}\n", encoding="utf-8")
+
+    assert app_chart.expected_ingress_host((str(base), str(overlay)), "") == ""
+
+
+@pytest.mark.parametrize("null_value", ["null", "~"])
+def test_parent_null_overlay_clears_inherited_metrics(tmp_path: Path, null_value: str) -> None:
+    base = tmp_path / "base.yaml"
+    overlay = tmp_path / "overlay.yaml"
+    base.write_text(
+        "metrics:\n  enabled: true\n  auth:\n"
+        "    existingSecret: inherited\n    secretKey: token\n",
+        encoding="utf-8",
+    )
+    overlay.write_text(f"metrics: {null_value}\n", encoding="utf-8")
+    values = (str(base), str(overlay))
+
+    assert app_chart.resolved_values_scalar(values, ("metrics", "enabled")) == ""
+    assert app_chart.resolved_values_scalar(values, ("metrics", "auth", "existingSecret")) == ""
+    assert app_chart.resolved_values_scalar(values, ("metrics", "auth", "secretKey")) == ""
+
+
+def test_later_mapping_repopulates_null_overlay(tmp_path: Path) -> None:
+    base = tmp_path / "base.yaml"
+    cleared = tmp_path / "cleared.yaml"
+    restored = tmp_path / "restored.yaml"
+    base.write_text("ingress:\n  enabled: true\n  host: inherited.example.test\n", encoding="utf-8")
+    cleared.write_text("ingress: null\n", encoding="utf-8")
+    restored.write_text(
+        "ingress:\n  enabled: true\n  host: restored.example.test\n", encoding="utf-8"
+    )
+
+    assert (
+        app_chart.expected_ingress_host((str(base), str(cleared), str(restored)), "")
+        == "restored.example.test"
+    )
+
+
+@pytest.mark.parametrize("null_value", ["null", "~"])
+def test_dspace_null_overlay_metrics_is_render_safe(tmp_path: Path, null_value: str) -> None:
+    base = tmp_path / "base.yaml"
+    overlay = tmp_path / "overlay.yaml"
+    base.write_text(
+        "metrics:\n  enabled: true\n  auth:\n"
+        "    existingSecret: inherited\n    secretKey: token\n"
+        "serviceMonitor:\n  enabled: true\n",
+        encoding="utf-8",
+    )
+    overlay.write_text(f"metrics: {null_value}\n", encoding="utf-8")
+    inputs = app_chart.ReleaseInputs(
+        "dspace", "staging", "dspace", "dspace", "chart", "1.0.0",
+        (str(base), str(overlay)), "main-deadbee",
+    )
+
+    assert app_chart.validate_dspace_values("", inputs) == []
+
+
 def test_enabled_ingress_requires_resolved_host(tmp_path: Path) -> None:
     values = tmp_path / "values.yaml"
     values.write_text("ingress:\n  enabled: true\n", encoding="utf-8")
