@@ -498,16 +498,19 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
     before_pods = pods(runner, args.kubeconfig, "dspace", "dspace", require_any=False)
     # Keep the registry proof fresh: no tag resolution occurs between this
     # exact-digest check and confirmation/reservation/mutation.
-    oci = release.preflight(
-        approved,
-        release.IMAGE_REF,
-        release.CHART_REF,
-        args.oras,
-        environment=args.environment,
-        image_tag=target["imageTag"],
-        chart_version=target["chartVersion"],
-        runner=runner,
-    )
+    try:
+        oci = release.preflight(
+            approved,
+            release.IMAGE_REF,
+            release.CHART_REF,
+            args.oras,
+            environment=args.environment,
+            image_tag=target["imageTag"],
+            chart_version=target["chartVersion"],
+            runner=runner,
+        )
+    except release.ManifestError as exc:
+        raise RollbackError("OCI preflight validation failed") from exc
     print(summary(before_helm, before_pods, target, values_proof))
     current_images = {application_image(pod) for pod in before_pods if application_image(pod)}
     current_ids: set[str] = set()

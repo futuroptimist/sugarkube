@@ -185,6 +185,86 @@ def test_missing_or_candidate_target_fails_before_any_external_command(
     assert not (tmp_path / "rollback.json").exists()
 
 
+@pytest.mark.parametrize(
+    "mismatch",
+    ("image digest", "chart digest", "chart source revision", "image platform revision"),
+)
+def test_oci_preflight_mismatch_is_controlled_before_reservation_or_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    mismatch: str,
+) -> None:
+    manifest_path = tmp_path / "target.json"
+    evidence_path = tmp_path / "rollback.json"
+    verifier = tmp_path / "verifier"
+    values = tmp_path / "values.yaml"
+    manifest_path.write_text(manifest._canonical(target()), encoding="utf-8")
+    verifier.write_text("#!/bin/sh\n", encoding="utf-8")
+    verifier.chmod(0o755)
+    values.write_text("staging: true\n", encoding="utf-8")
+    monkeypatch.setattr(
+        rollback.app_config,
+        "load_config",
+        lambda *_args: {
+            "SUGARKUBE_CHART": f"oci://{manifest.CHART_REF}",
+            "SUGARKUBE_RELEASE": "dspace",
+            "SUGARKUBE_NAMESPACE": "dspace",
+            "SUGARKUBE_VALUES": str(values),
+        },
+    )
+    monkeypatch.setattr(rollback, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(rollback, "cluster_environment", lambda *_args: "staging")
+    monkeypatch.setattr(rollback, "verifier_capabilities", lambda *_args: {})
+    monkeypatch.setattr(
+        rollback,
+        "helm_status",
+        lambda *_args: {
+            "name": "dspace",
+            "namespace": "dspace",
+            "version": 7,
+            "info": {"status": "deployed"},
+            "chart": {"metadata": {"name": "dspace", "version": "3.1.0"}},
+        },
+    )
+    monkeypatch.setattr(rollback, "pods", lambda *_args, **_kwargs: [])
+    sentinel = "TOP-SECRET-oci-output"
+    monkeypatch.setattr(
+        rollback.release,
+        "preflight",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            manifest.ManifestError(f"{mismatch}: {sentinel}")
+        ),
+    )
+    commands: list[list[str]] = []
+
+    def runner(command: list[str]) -> str:
+        commands.append(command)
+        return "rendered"
+
+    original_rollback = rollback.rollback
+    monkeypatch.setattr(rollback, "rollback", lambda args: original_rollback(args, runner))
+    status = rollback.main(
+        [
+            "--environment",
+            "staging",
+            "--manifest",
+            str(manifest_path),
+            "--evidence",
+            str(evidence_path),
+            "--verifier",
+            str(verifier),
+        ]
+    )
+
+    assert status == 2
+    stderr = capsys.readouterr().err
+    assert stderr == "error: OCI preflight validation failed\n"
+    assert sentinel not in stderr
+    assert not evidence_path.exists()
+    assert not any("upgrade" in command or "rollout" in command for command in commands)
+
+
 def test_values_chain_is_ordered_hashed_and_never_contains_contents(tmp_path: Path) -> None:
     first = tmp_path / "base.yaml"
     second = tmp_path / "prod.yaml"
