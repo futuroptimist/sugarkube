@@ -67,11 +67,12 @@ curl -fsS https://staging.token.place/
 
 ## Production promotion, deploy, and rollback
 
-Promote approved staging image tag. Final production promotion after token.place Git tag push should use tag `v0.1.0` (tag only; repository is already set in chart values).
+Promote the approved staging branch-SHA image tag. Semantic release tags such as
+`v0.1.0` are distribution aliases, not production deployment coordinates.
 
 
 ```bash
-TOKENPLACE_TAG=v0.1.0 # use final release tag after token.place Git tag push
+TOKENPLACE_TAG=main-deadbee # replace with the approved staging branch-SHA tag
 just tokenplace-oci-promote-prod tag="$TOKENPLACE_TAG"
 ```
 
@@ -79,7 +80,7 @@ Generic production upgrade with prod overlay:
 
 ```bash
 just kubeconfig-env prod
-TOKENPLACE_TAG=v0.1.0 # use final release tag after token.place Git tag push
+TOKENPLACE_TAG=main-deadbee # replace with the approved staging branch-SHA tag
 just helm-oci-upgrade release=tokenplace namespace=tokenplace chart=oci://ghcr.io/futuroptimist/charts/tokenplace values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml version_file=docs/apps/tokenplace.version default_tag="$TOKENPLACE_TAG" env=prod
 ```
 

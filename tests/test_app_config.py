@@ -146,6 +146,7 @@ def test_validate_tag_allows_deployment_safe_tags(tag: str) -> None:
         "3.0.1+build.5",
         "v3.0.1-deadbee",
         "main-ABCDEF0",
+        "main-latest-deadbee",
         "main-deadbe",
         "main-" + "a" * 41,
     ],
@@ -349,7 +350,7 @@ def test_resolve_tag_rejects_semantic_prod_fallback(tmp_path: Path) -> None:
         )
 
 
-def test_committed_prod_pins_are_empty_or_branch_sha() -> None:
+def test_committed_prod_pins_are_empty_or_deployment_safe() -> None:
     for path in Path("docs/apps").glob("*.prod.tag"):
         pins = [
             line.split("#", 1)[0].strip()
@@ -358,7 +359,7 @@ def test_committed_prod_pins_are_empty_or_branch_sha() -> None:
         ]
         assert len(pins) <= 1
         for tag in pins:
-            assert app_config.BRANCH_SHA_RE.fullmatch(tag), f"invalid production pin: {path}"
+            assert app_config.validate_tag(tag, "prod") == tag, f"invalid production pin: {path}"
 
 
 def test_shell_emit_quotes_expected_exports(tmp_path: Path) -> None:

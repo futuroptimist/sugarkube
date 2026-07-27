@@ -103,9 +103,9 @@ def validate_tag(tag: str, env: str | None = None) -> str:
     normalized_env = normalize_env(env) if env is not None else None
     if normalized_env == "dev" and SEMVER_RE.fullmatch(tag):
         return tag
-    if not SEMVER_RE.fullmatch(tag) and BRANCH_SHA_RE.fullmatch(tag):
-        return tag
     tag_lc = tag.lower()
+    if "latest" not in tag_lc and not SEMVER_RE.fullmatch(tag) and BRANCH_SHA_RE.fullmatch(tag):
+        return tag
     kind = (
         "semantic or mutable"
         if SEMVER_RE.fullmatch(tag) or tag_lc in MOVING_TAGS or "latest" in tag_lc

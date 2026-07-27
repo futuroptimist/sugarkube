@@ -780,7 +780,7 @@ just helm-oci-upgrade \
   chart=oci://ghcr.io/democratizedspace/charts/dspace \
   values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
   version_file=docs/apps/dspace.version \
-  default_tag=main-latest env=staging
+  default_tag=main-<shortsha> env=staging
 ```
 
 For production preview (optional canary), this guide intentionally switches from the generic
@@ -811,7 +811,7 @@ If you prefer a one-liner that bakes in those arguments for dspace, use the help
 recipe (defaults to staging):
 
 ```bash
-just dspace-oci-redeploy
+just dspace-oci-redeploy env=staging tag=main-<shortsha>
 # or explicitly select an environment:
 read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
 just dspace-oci-redeploy env=prod tag="$(read_prod_tag)"
@@ -819,8 +819,7 @@ just dspace-oci-redeploy env=prod tag="$(read_prod_tag)"
 
 Under the hood, both commands call the shared `_helm-oci-deploy` helper via
 `helm-oci-upgrade`, performing `helm upgrade --reuse-values` against the running release
-and then forcing a `kubectl rollout restart deploy/dspace` to ensure pods recycle even
-when `main-latest` is republished with the same tag. The helper waits for the rollout to
+and then forcing a `kubectl rollout restart deploy/dspace` to ensure pods recycle. The helper waits for the rollout to
 finish and exits non-zero if Kubernetes reports a failure.
 
 For immutable RC/stable validation (recommended for staging and prod), use the dedicated
@@ -839,10 +838,8 @@ just dspace-oci-deploy env=prod tag="$(read_prod_tag)"
 `kubectl rollout status`, and prints post-deploy verification commands for `config.json`,
 `/healthz`, and `/livez` using the live ingress host (or `<dspace-host>` when none is discoverable).
 
-When you pass an image tag (including the default `main-latest`), the helper sets
-`image.pullPolicy=Always` so the nodes re-check GHCR for the latest build of that tag on
-each redeploy. For production, prefer immutable tags (for example, `main-<shortsha>`) if you want
-to pin a specific image.
+When you pass the required branch-SHA image tag, the helper sets
+`image.pullPolicy=Always` so the nodes re-check GHCR for that build on each redeploy.
 
 **Emergency redeploy checklist:**
 
@@ -852,8 +849,8 @@ to pin a specific image.
     just cluster-status
     ```
 
-2. Ensure your new image is pushed and `main-latest` (or the tag you pass via `tag=`)
-   points at the desired build (see the dspace repo docs for image build/publish steps).
+2. Ensure your new image is pushed and copy its branch-SHA tag (see the dspace repo docs
+   for image build/publish steps).
 3. Run the redeploy command (`just helm-oci-upgrade ...` or `just dspace-oci-redeploy`).
 4. Verify pods and logs:
 
@@ -983,9 +980,10 @@ As you continue operating your cluster, these recipes will be helpful:
 - **Recover from misconfiguration:** If a node accidentally joins the wrong cluster,
   use `just wipe` to clean it up, then rerun `just ha3 env=dev` to rejoin correctly.
 
-- **Emergency dspace redeploy:** Run `just dspace-oci-redeploy` to pull the latest
-  dspace chart from GHCR and force a rollout restart so pods refresh to the newest
-  `main-latest` image digest without retyping chart arguments.
+- **Emergency dspace redeploy:** Run
+  `just dspace-oci-redeploy env=staging tag=main-<shortsha>` with the intended
+  branch-SHA image coordinate to force a rollout restart without retyping chart
+  arguments.
 
 ### Document outages and incidents
 
