@@ -320,6 +320,36 @@ def test_validator_rejects_wrong_dashboard_mount(tmp_path, dashboard, mount_path
         (lambda item: item.update(uid="wrong"), "dashboard title"),
         (lambda item: item.update(panels=[]), "panel IDs"),
         (
+            lambda item: next(
+                variable for variable in item["templating"]["list"] if variable["name"] == "app"
+            ).update(label="Application"),
+            "probe-specific visible labels",
+        ),
+        (
+            lambda item: next(
+                panel for panel in item["panels"] if panel["title"] == "Status-class distribution"
+            ).update(type="timeseries"),
+            "categorical visualization",
+        ),
+        (
+            lambda item: next(
+                panel for panel in item["panels"] if panel["title"] == "Status-class distribution"
+            )["targets"][0].update(expr="sum(dspace_http_requests_total)"),
+            "summarize the selected window",
+        ),
+        (
+            lambda item: next(
+                panel for panel in item["panels"] if panel["title"] == "Status-class distribution"
+            )["fieldConfig"].update(overrides=[]),
+            "explicit status-class colors",
+        ),
+        (
+            lambda item: next(
+                panel for panel in item["panels"] if panel["title"] == "Operational request rate"
+            )["targets"][0].update(expr="sum(dspace_http_requests_total)"),
+            "retain health and metrics routes",
+        ),
+        (
             lambda item: replace_metric_expression(item, "process_resident_memory_bytes", "0"),
             "missing required PromQL metrics",
         ),
@@ -379,8 +409,48 @@ def test_validator_rejects_wrong_dashboard_mount(tmp_path, dashboard, mount_path
                 if panel["title"] == "Public availability summary"
                 for target in panel["targets"]
                 if target["legendFormat"] == "Healthy endpoints"
+            ).update(
+                expr=next(
+                    target["expr"]
+                    for panel in item["panels"]
+                    if panel["title"] == "Public availability summary"
+                    for target in panel["targets"]
+                    if target["legendFormat"] == "Healthy endpoints"
+                ).replace("== bool 1", "== 1")
+            ),
+            "boolean healthy and failed sums",
+        ),
+        (
+            lambda item: next(
+                target
+                for panel in item["panels"]
+                if panel["title"] == "Public availability summary"
+                for target in panel["targets"]
+                if target["legendFormat"] == "Healthy endpoints"
             ).update(expr='count(probe_success{environment=~"$environment"} == 1)'),
             "three-value instant aggregate summary",
+        ),
+        (
+            lambda item: next(
+                panel for panel in item["panels"] if panel["title"] == "Public availability summary"
+            )["fieldConfig"]["defaults"].update(noValue="0"),
+            "distinguish healthy, failed, and no data",
+        ),
+        (
+            lambda item: next(
+                override
+                for panel in item["panels"]
+                if panel["title"] == "Public availability summary"
+                for override in panel["fieldConfig"]["overrides"]
+                if override["matcher"]["options"] == "Missing probe data"
+            )["properties"][0]["value"].update(fixedColor="green"),
+            "compact yellow summary value",
+        ),
+        (
+            lambda item: next(
+                panel for panel in item["panels"] if panel["title"] == "Endpoint matrix"
+            ).update(type="stat"),
+            "retain the detailed endpoint matrix",
         ),
         (
             lambda item: next(
