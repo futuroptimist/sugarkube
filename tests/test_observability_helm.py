@@ -613,7 +613,12 @@ def test_verify_deadline_uses_latest_safe_diagnostics_without_extra_request(tmp_
     assert "activeTargets" not in result.stderr and "Traceback" not in result.stderr
 
 
-def run_dashboard_verifier(tmp_path, mode="success", context="sugar-staging"):
+def run_dashboard_verifier(
+    tmp_path,
+    mode="success",
+    context="sugar-staging",
+    forwarding_line="Forwarding from 127.0.0.1:43127 -> 3000",
+):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(parents=True)
     audit = tmp_path / "audit"
@@ -632,7 +637,7 @@ case "$*" in
   *"get secret grafana-admin-credentials"*"admin-pass""word"*) printf placeholder | base64 ;;
   *"port-forward"*)
     [ "$MODE" != forward-fail ] || exit 42
-    echo 'Forwarding from 127.0.0.1:43127 -> 80'
+    echo "$FORWARDING_LINE"
     echo $$ > "$FORWARD_PID"
     trap 'echo terminated > "$PID_FILE"; exit 0' TERM INT
     if [ "$MODE" = forward-exits-after-ready ]; then
@@ -679,6 +684,7 @@ esac
         "CONTEXT": context,
         "PID_FILE": str(pid_file),
         "FORWARD_PID": str(tmp_path / "port-forward.pid"),
+        "FORWARDING_LINE": forwarding_line,
         "READY_SECRET": str(tmp_path / "secret-requested"),
         "TMPDIR": str(tmp_path),
         "KUBECONFIG": str(tmp_path / "kubeconfig"),
@@ -701,6 +707,47 @@ def test_dashboard_verifier_runtime_owns_port_and_cleans_up(tmp_path):
     assert "http://127.0.0.1:43127/" in audit
     assert not list(tmp_path.glob("sugarkube-grafana-verify.*"))
     assert pid_file.read_text(encoding="utf-8").strip() == "terminated"
+
+
+def test_dashboard_verifier_accepts_resolved_remote_ports(tmp_path):
+    for remote_port in (3000, 12345, 80):
+        result, audit, _ = run_dashboard_verifier(
+            tmp_path / str(remote_port),
+            forwarding_line=f"Forwarding from 127.0.0.1:43127 -> {remote_port}",
+        )
+        assert result.returncode == 0, result.stderr
+        assert "get secret" in audit
+
+
+def test_dashboard_verifier_rejects_invalid_ports_before_secret_access(tmp_path):
+    lines = (
+        "Forwarding from 127.0.0.1:0 -> 3000",
+        "Forwarding from 127.0.0.1:65536 -> 3000",
+        "Forwarding from 127.0.0.1:43127 -> 0",
+        "Forwarding from 127.0.0.1:43127 -> 65536",
+    )
+    for index, line in enumerate(lines):
+        result, audit, _ = run_dashboard_verifier(tmp_path / str(index), forwarding_line=line)
+        assert result.returncode != 0
+        assert "get secret" not in audit
+
+
+def test_dashboard_verifier_rejects_untrusted_or_malformed_lines_before_secret_access(tmp_path):
+    lines = (
+        "Forwarding from 0.0.0.0:43127 -> 3000",
+        "Forwarding from [::1]:43127 -> 3000",
+        "Forwarding from localhost:43127 -> 3000",
+        "Forwarding from 127.0.0.1: -> 3000",
+        "Forwarding from 127.0.0.1:43127 ->",
+        "Forwarding from 127.0.0.1:port -> 3000",
+        "Forwarding from 127.0.0.1:43127 -> port",
+        "noise Forwarding from 127.0.0.1:43127 -> 3000",
+        "Forwarding from 127.0.0.1:43127 -> 3000 noise",
+    )
+    for index, line in enumerate(lines):
+        result, audit, _ = run_dashboard_verifier(tmp_path / str(index), forwarding_line=line)
+        assert result.returncode != 0
+        assert "get secret" not in audit
 
 
 def test_dashboard_verifier_checks_context_before_secret_access(tmp_path):
