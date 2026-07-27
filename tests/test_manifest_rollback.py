@@ -344,8 +344,172 @@ def test_summary_never_invents_current_chart_digest() -> None:
     text = rollback.summary(
         current, [pod("1")], target(), [{"path": "values.yaml", "sha256": "3" * 64}]
     )
-    assert "helmRevision=8 chartName=dspace chartVersion=3.1.0 chartDigest=unknown" in text
-    assert f"chartDigest={target()['chartDigest']}" in text
+    assert text == "\n".join(
+        [
+            "DSPACE manifest rollback preflight:",
+            "  current: release=dspace namespace=dspace helmStatus=unknown "
+            "helmRevision=8 chartName=dspace chartVersion=3.1.0 chartDigest=unknown",
+            f"           images={manifest.IMAGE_REF}:main-abcdef0@{DIGEST} "
+            f"imageIDs={manifest.IMAGE_REF}@{DIGEST}",
+            f"  target:  release=dspace namespace=dspace sourceRevision={SHA} "
+            "applicationVersion=3.2.0",
+            f"           chartVersion=3.2.0 chartDigest={'sha256:' + '2' * 64}",
+            f"           imageTag=main-abcdef0 imageDigest={DIGEST}",
+            f"           imageCoordinate={manifest.IMAGE_REF}:main-abcdef0@{DIGEST}",
+            "           provider=token-place",
+            f"  values:  values.yaml={'3' * 64}",
+        ]
+    )
+
+
+def pre_reservation_case(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    environment: str = "staging",
+) -> tuple[Namespace, list[list[str]], Path, Path]:
+    manifest_path = tmp_path / "target.json"
+    evidence_path = tmp_path / "rollback.json"
+    verifier = tmp_path / "verifier"
+    values = tmp_path / "values.yaml"
+    manifest_path.write_text(manifest._canonical(target(environment)), encoding="utf-8")
+    verifier.write_text("#!/bin/sh\n", encoding="utf-8")
+    verifier.chmod(0o755)
+    values.write_text("environment: test\n", encoding="utf-8")
+    monkeypatch.setattr(
+        rollback.app_config,
+        "load_config",
+        lambda *_args: {
+            "SUGARKUBE_CHART": f"oci://{manifest.CHART_REF}",
+            "SUGARKUBE_RELEASE": "dspace",
+            "SUGARKUBE_NAMESPACE": "dspace",
+            "SUGARKUBE_VALUES": str(values),
+        },
+    )
+    monkeypatch.setattr(rollback, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(rollback, "cluster_environment", lambda *_args: environment)
+    monkeypatch.setattr(rollback, "verifier_capabilities", lambda *_args: {})
+    monkeypatch.setattr(
+        rollback.release,
+        "preflight",
+        lambda *_args, **_kwargs: [{"check": "oci", "passed": True}],
+    )
+    monkeypatch.setattr(
+        rollback,
+        "helm_status",
+        lambda *_args: {
+            "name": "dspace",
+            "namespace": "dspace",
+            "version": 7,
+            "info": {"status": "deployed"},
+            "chart": {"metadata": {"name": "dspace", "version": "3.1.0"}},
+        },
+    )
+    monkeypatch.setattr(rollback, "pods", lambda *_args, **_kwargs: [])
+    commands: list[list[str]] = []
+
+    args = Namespace(
+        environment=environment,
+        manifest=manifest_path,
+        evidence=evidence_path,
+        verifier=verifier,
+        confirm="",
+        config="",
+        kubeconfig="kubeconfig",
+        oras="oras",
+        timeout="10m",
+    )
+    return args, commands, evidence_path, verifier
+
+
+def assert_no_mutation(commands: list[list[str]]) -> None:
+    assert not any("upgrade" in command or "rollout" in command for command in commands)
+
+
+def test_render_failure_precedes_reservation_and_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    args, commands, evidence, _verifier = pre_reservation_case(tmp_path, monkeypatch)
+
+    def runner(command: list[str]) -> str:
+        commands.append(command)
+        if "template" in command:
+            raise rollback.RollbackError("render failed")
+        return ""
+
+    with pytest.raises(rollback.RollbackError, match="render failed"):
+        rollback.rollback(args, runner)
+    assert not evidence.exists()
+    assert_no_mutation(commands)
+
+
+def test_exact_no_op_is_rejected_before_reservation_and_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    args, commands, evidence, _verifier = pre_reservation_case(tmp_path, monkeypatch)
+    monkeypatch.setattr(rollback, "pods", lambda *_args, **_kwargs: [pod("1")])
+
+    def runner(command: list[str]) -> str:
+        commands.append(command)
+        if "template" in command or ("get" in command and "manifest" in command):
+            return "exact rendered manifest"
+        return ""
+
+    with pytest.raises(rollback.RollbackError, match="already the exact approved target"):
+        rollback.rollback(args, runner)
+    assert not evidence.exists()
+    assert_no_mutation(commands)
+
+
+@pytest.mark.parametrize("gate", ("confirmation", "verifier"))
+def test_confirmation_and_verifier_gates_precede_reservation_and_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, gate: str
+) -> None:
+    environment = "prod" if gate == "confirmation" else "staging"
+    args, commands, evidence, _verifier = pre_reservation_case(
+        tmp_path, monkeypatch, environment=environment
+    )
+    if gate == "verifier":
+        monkeypatch.setattr(
+            rollback,
+            "verifier_capabilities",
+            lambda *_args: (_ for _ in ()).throw(
+                rollback.RollbackError("verifier capabilities are incompatible")
+            ),
+        )
+
+    def runner(command: list[str]) -> str:
+        commands.append(command)
+        return "target render" if "template" in command else "installed render"
+
+    message = "confirmation" if gate == "confirmation" else "incompatible"
+    with pytest.raises(rollback.RollbackError, match=message):
+        rollback.rollback(args, runner)
+    assert not evidence.exists()
+    assert_no_mutation(commands)
+    if gate == "verifier":
+        assert not any("template" in command for command in commands)
+
+
+def test_staging_is_non_interactive_and_reservation_collision_is_immutable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    args, commands, evidence, _verifier = pre_reservation_case(tmp_path, monkeypatch)
+    original = b"pre-existing immutable evidence\n"
+    evidence.write_bytes(original)
+
+    def runner(command: list[str]) -> str:
+        commands.append(command)
+        if command[:3] == ["git", "rev-parse", "HEAD"]:
+            return "f" * 40 + "\n"
+        return "target render" if "template" in command else "installed render"
+
+    with pytest.raises(rollback.RollbackError, match="refusing to overwrite"):
+        rollback.rollback(args, runner)
+    assert evidence.read_bytes() == original
+    assert any("template" in command for command in commands)
+    assert any("get" in command and "manifest" in command for command in commands)
+    assert_no_mutation(commands)
 
 
 def test_reservation_collision_and_failure_record_are_non_secret(tmp_path: Path) -> None:
