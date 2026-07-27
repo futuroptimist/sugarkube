@@ -547,6 +547,7 @@ def finalize(
     namespace: str,
     cluster_environment: str,
     invocation_description: str,
+    expected_image_coordinate: str | None = None,
 ) -> dict[str, Any]:
     validate(value, False)
     selected = {
@@ -632,7 +633,7 @@ def finalize(
         application = [container for container in containers if container.get("name") == "dspace"]
         if len(application) != 1:
             raise ManifestError("pod must contain exactly one dspace application container")
-        expected_image = f"{IMAGE_REF}:{image_tag}"
+        expected_image = expected_image_coordinate or f"{IMAGE_REF}:{image_tag}"
         if application[0].get("image") != expected_image:
             raise ManifestError(
                 "pod application image does not match approved repository and imageTag"

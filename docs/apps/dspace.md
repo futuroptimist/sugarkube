@@ -328,38 +328,86 @@ curl -fsS https://democratized.space/livez
 
 ## Rollback
 
-Rollback by deploying the previous known-good immutable image tag with the generic redeploy command and an approved environment-specific candidate for that release. Use a unique `evidence=` path if evidence for the tag already exists; occupied paths are rejected before Helm runs.
-Do not infer or generate a rollback manifest automatically; that future
-automation is tracked in #2327.
+Use the DSPACE-only manifest rollback command with a **previously finalized**
+release-evidence record. The historical record supplies the chart digest,
+chart version, immutable branch-SHA image tag, image digest, full source SHA,
+application version, and approved provider. There are deliberately no separate
+tag or chart-version arguments.
 
 ```bash
-APP_TAG=main-REPLACE_PREVIOUS_SHORTSHA
-STAGING_ROLLBACK_MANIFEST=deployment-candidates/dspace/previous-release-staging.json
-PROD_ROLLBACK_MANIFEST=deployment-candidates/dspace/previous-release-prod.json
+just dspace-manifest-rollback \
+  env=staging \
+  manifest=deployment-evidence/dspace/staging/previous-finalized-release.json \
+  evidence=deployment-evidence/dspace/staging/rollback-20260727T120000Z.json \
+  verifier=/opt/dspace/bin/sugarkube-runtime-verifier
 ```
+
+Production additionally requires a non-interactive confirmation bound to
+DSPACE, `prod`, and the target record's full source revision. A generic `yes`
+is rejected:
 
 ```bash
-just app-redeploy app=dspace env=staging tag="$APP_TAG" manifest="$STAGING_ROLLBACK_MANIFEST" evidence=deployment-evidence/dspace/staging/"$APP_TAG"-rollback.json
+TARGET_SHA=REPLACE_WITH_THE_40_CHARACTER_TARGET_SOURCE_SHA
+just dspace-manifest-rollback \
+  env=prod \
+  manifest=deployment-evidence/dspace/prod/previous-finalized-release.json \
+  evidence=deployment-evidence/dspace/prod/rollback-20260727T120000Z.json \
+  verifier=/opt/dspace/bin/sugarkube-runtime-verifier \
+  confirm="dspace:prod:${TARGET_SHA}"
 ```
 
-```bash
-just app-redeploy app=dspace env=prod tag="$APP_TAG" manifest="$PROD_ROLLBACK_MANIFEST" evidence=deployment-evidence/dspace/prod/"$APP_TAG"-rollback.json
-```
+Before reserving evidence or changing Helm/Kubernetes state, the command checks
+cluster identity, validates the strict final manifest and fresh OCI provenance,
+resolves the selected environment's complete current values chain, reads each
+file once, records its repository-relative path and SHA-256, and stages those
+exact bytes in a restricted temporary directory for both rendering and upgrade.
+Finalized records created by PR #2350 do not contain historical values
+coordinates. Consequently, rollback restores manifest-approved chart and image
+artifacts using the selected environment's current byte-bound values chain;
+historical-configuration replay is deliberately deferred. The command renders
+the digest-qualified chart,
+checks verifier capabilities, and captures current Helm and pod identity. It
+prints only non-secret current-versus-target coordinates; a current chart digest
+is reported as unknown because Helm status cannot prove it. It rejects an exact
+no-op only when `helm get manifest` and the named `dspace` container identity
+prove equivalence to the digest-bound target render; matching version and image
+metadata alone still proceeds. All preflight or confirmation failures stop
+before mutation.
 
-Rollback by Helm revision is still available through the existing parameterized helper. Set `ROLLBACK_ENV=staging` instead when intentionally rolling back staging.
+After atomically reserving the unique evidence destination, the operation uses
+`helm upgrade` with the approved chart digest, complete values chain, and an
+application image reference pinned by both its immutable tag and approved digest.
+It never uses `--reuse-values`, a semantic tag, or
+`helm rollback <revision>`. It then proves the advanced stable Helm revision,
+chart identity, Deployment/ReplicaSet ownership, replacement pod UIDs and start
+times, readiness, image coordinates and resolved digests, OCI source metadata,
+and the strict runtime/frontend/provider/public-journey result (including
+`/chat`). The successful non-overwritable record contains those proofs and
+values-file hashes; it does not alter the target release record.
 
-```bash
-HELM_REVISION=12
-```
+The verifier is an executable, not a shell fragment. It must support
+`capabilities` and echo the selected environment, release, and namespace with
+schema version 1 and the exact ordered capabilities
+`applicationVersion`, `runtimeSourceRevision`, `frontendSourceRevision`,
+`defaultProvider`, and `publicJourneys`. Its `verify` result must contain exactly
+those target coordinates and identity strings plus a non-empty list of
+`{name, passed}` journey objects,
+including a passing `/chat`. Verifier output and response bodies are not echoed.
+Do not infer frontend identity from the semantic application version.
 
-```bash
-ROLLBACK_ENV=prod
-just kubeconfig-env "$ROLLBACK_ENV"
-```
+Real production rollback remains unavailable until DSPACE
+[#4732](https://github.com/democratizedspace/dspace/issues/4732) supplies runtime
+and frontend identity and [#4733](https://github.com/democratizedspace/dspace/issues/4733)
+supplies the remote public-journey verifier contract. Tests use a stub; operators
+must not substitute an availability-only check.
 
-```bash
-just tokenplace-rollback release=dspace namespace=dspace revision="$HELM_REVISION" env="$ROLLBACK_ENV"
-```
+If anything fails after reservation, the command exits nonzero, leaves a
+redacted failed evidence record, and warns that cluster state may have changed.
+Inspect `helm history dspace --namespace dspace` and the preserved invocation ID,
+then reconcile manually. Never immediately invoke a second rollback. Helm
+history remains useful for investigation, but a Helm revision rollback is not
+the default DSPACE recovery mechanism. The `tokenplace-rollback` helper is for
+Tokenplace and must not be invoked against DSPACE.
 
 ## Troubleshooting
 

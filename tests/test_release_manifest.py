@@ -353,6 +353,17 @@ def test_finalize_collects_sorted_multi_pod_identity() -> None:
     }
 
 
+def test_finalize_optional_digest_coordinate_is_backward_compatible() -> None:
+    assert finalize()["recordType"] == "final"
+    coordinate = f"{manifest.IMAGE_REF}:main-abcdef0@{DIGEST}"
+    selected_pods = {"items": [pod("dspace-a")]}
+    selected_pods["items"][0]["spec"]["containers"][0]["image"] = coordinate
+    assert (
+        finalize(pods_json=selected_pods, expected_image_coordinate=coordinate)["recordType"]
+        == "final"
+    )
+
+
 def test_generated_final_record_validates_through_cli(tmp_path: Path) -> None:
     output = tmp_path / "final.json"
     output.write_text(manifest._canonical(finalize()), encoding="utf-8")
