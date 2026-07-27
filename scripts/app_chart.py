@@ -45,7 +45,167 @@ def run(args: list[str]) -> subprocess.CompletedProcess[str]:
 
 
 def helm_show(chart: str, version: str) -> subprocess.CompletedProcess[str]:
-    return run(["helm", "show", "chart", chart, "--version", version])
+    command = ["helm", "show", "chart", chart]
+    if "@sha256:" not in chart:
+        command += ["--version", version]
+    return run(command)
+
+
+def release_command(args: argparse.Namespace, version: str) -> list[str]:
+    """Build the common, ordered Helm input vector used by render and mutation."""
+    command = ["helm", "template", args.release, args.chart, "--namespace", args.namespace]
+    if "@sha256:" not in args.chart:
+        command += ["--version", version]
+    for value_file in filter(None, (value.strip() for value in args.values.split(","))):
+        command += ["-f", value_file]
+    host = getattr(args, "host", "")
+    pull_policy = getattr(args, "pull_policy", "Always")
+    if host:
+        command += ["--set", f"ingress.host={host}"]
+    command += ["--set", f"image.tag={args.tag}"]
+    if pull_policy:
+        command += ["--set", f"image.pullPolicy={pull_policy}"]
+    return command
+
+
+def _documents(manifest: str) -> list[str]:
+    return [doc for doc in re.split(r"(?m)^---\s*$", manifest) if doc.strip()]
+
+
+def _top_scalar(doc: str, key: str) -> str:
+    match = re.search(rf"(?m)^{re.escape(key)}:\s*([^#\n]+)", doc)
+    return match.group(1).strip().strip("\"'") if match else ""
+
+
+def _metadata_block(doc: str) -> str:
+    match = re.search(r"(?ms)^metadata:\s*\n(.*?)(?=^[^ \n][^:]*:|\Z)", doc)
+    return match.group(1) if match else ""
+
+
+def _metadata_scalar(doc: str, key: str) -> str:
+    match = re.search(rf"(?m)^  {re.escape(key)}:\s*([^#\n]+)", _metadata_block(doc))
+    return match.group(1).strip().strip("\"'") if match else ""
+
+
+def _release_coherent(doc: str, release: str) -> bool:
+    metadata = _metadata_block(doc)
+    supported = (
+        r"app\.kubernetes\.io/instance",
+        r"meta\.helm\.sh/release-name",
+        r"release",
+    )
+    return any(
+        re.search(rf"(?m)^\s+{key}:\s*[\"']?{re.escape(release)}[\"']?\s*(?:#.*)?$", metadata)
+        for key in supported
+    )
+
+
+def _containers(doc: str, field: str = "containers") -> list[tuple[str, str]]:
+    """Extract only pod-spec application containers (never init containers)."""
+    match = re.search(rf"(?ms)^\s{{6}}{field}:\s*\n(.*?)(?=^\s{{6}}\S|\Z)", doc)
+    if not match:
+        return []
+    blocks = re.split(r"(?m)^\s{8}-\s*", match.group(1))[1:]
+    result = []
+    for block in blocks:
+        name = re.search(r"(?m)^\s*(?:name):\s*([^#\n]+)", block)
+        image = re.search(r"(?m)^\s*(?:image):\s*([^#\n]+)", block)
+        result.append(
+            (
+                name.group(1).strip().strip("\"'") if name else "",
+                image.group(1).strip().strip("\"'") if image else "",
+            )
+        )
+    return result
+
+
+def _values_setting(paths: list[str], section: str, key: str) -> str:
+    value = ""
+    for path in paths:
+        try:
+            text = version_file_path(path).read_text(encoding="utf-8")
+        except OSError:
+            continue
+        block = re.search(rf"(?ms)^{re.escape(section)}:\s*\n(.*?)(?=^[^ \n][^:]*:|\Z)", text)
+        if block:
+            found = re.search(rf"(?m)^\s+{re.escape(key)}:\s*([^#\n]+)", block.group(1))
+            if found:
+                value = found.group(1).strip().strip("\"'")
+    return value
+
+
+def validate_generic_manifest(manifest: str, args: argparse.Namespace, version: str) -> str:
+    context = (
+        f"app={args.app} env={args.env} release={args.release} namespace={args.namespace} "
+        f"chart={args.chart} version={version} tag={args.tag}"
+    )
+    docs = _documents(manifest)
+    for doc in docs:
+        namespace = _metadata_scalar(doc, "namespace")
+        if namespace and namespace != args.namespace:
+            return (
+                f"wrong explicit namespace {namespace!r}; expected {args.namespace!r} ({context})"
+            )
+    workloads = [
+        doc
+        for doc in docs
+        if _top_scalar(doc, "kind") in {"Deployment", "StatefulSet", "DaemonSet"}
+    ]
+    if not workloads:
+        return f"no rollout-capable application workload ({context})"
+    coherent = [doc for doc in workloads if _release_coherent(doc, args.release)]
+    if not coherent:
+        return f"no workload has a supported Helm release label or annotation ({context})"
+    candidates = {args.app, args.release, *APP_CONTAINER_NAMES.get(args.app, set())}
+    intended_images = [
+        image for doc in coherent for name, image in _containers(doc) if name in candidates
+    ]
+    if not any(image.rsplit(":", 1)[-1] == args.tag for image in intended_images):
+        return f"intended application container does not use expected tag {args.tag!r} ({context})"
+    values_files = [value.strip() for value in args.values.split(",") if value.strip()]
+    ingress_enabled = _values_setting(values_files, "ingress", "enabled").lower() == "true"
+    expected_host = getattr(args, "host", "") or _values_setting(values_files, "ingress", "host")
+    if ingress_enabled and expected_host:
+        ingresses = [doc for doc in docs if _top_scalar(doc, "kind") == "Ingress"]
+        hosts = [
+            match.group(1).strip().strip("\"'")
+            for doc in ingresses
+            for match in re.finditer(r"(?m)^\s+(?:-\s*)?host:\s*([^#\n]+)", doc)
+        ]
+        if expected_host not in hosts:
+            return f"configured ingress host {expected_host!r} was not rendered exactly ({context})"
+    return ""
+
+
+def validate_dspace_manifest(manifest: str, args: argparse.Namespace, version: str) -> str:
+    docs = _documents(manifest)
+    kinds = [_top_scalar(doc, "kind") for doc in docs]
+    for kind in ("Deployment", "Service"):
+        if kind not in kinds:
+            return f"DSPACE intended {kind} was not rendered"
+    files = [value.strip() for value in args.values.split(",") if value.strip()]
+    ingress_enabled = _values_setting(files, "ingress", "enabled").lower() == "true"
+    if ingress_enabled and "Ingress" not in kinds:
+        return "DSPACE intended Ingress was not rendered"
+    metrics_enabled = _values_setting(files, "metrics", "enabled").lower() == "true"
+    monitors = [doc for doc in docs if _top_scalar(doc, "kind") == "ServiceMonitor"]
+    if monitors and not metrics_enabled:
+        return "DSPACE ServiceMonitor rendered while metrics are disabled"
+    for monitor in monitors:
+        auth = re.findall(r"(?ms)bearerTokenSecret:\s*\n(.*?)(?=^\s{4}\S|\Z)", monitor)
+        if not auth or any(
+            not re.search(r"(?m)^\s+name:\s*\S+", block)
+            or not re.search(r"(?m)^\s+key:\s*\S+", block)
+            for block in auth
+        ):
+            return "DSPACE ServiceMonitor authentication reference is incomplete"
+    if args.env == "staging" and metrics_enabled and not monitors:
+        return "DSPACE staging metrics require an authenticated ServiceMonitor"
+    if args.env == "prod" and any(
+        token in manifest for token in ("dspace-staging-metrics-token", "sugarkube-int")
+    ):
+        return "DSPACE production render contains staging-only metrics authentication"
+    return ""
 
 
 def parse_chart_yaml(text: str) -> dict[str, str]:
@@ -214,7 +374,8 @@ def latest_version(chart: str) -> tuple[str, str]:
         if production_safe_versions
         else (
             "",
-            f"latest unknown: no semver tags found; run: helm show chart {chart} --version <version>",
+            "latest unknown: no semver tags found; run: "
+            f"helm show chart {chart} --version <version>",
         )
     )
 
@@ -292,27 +453,22 @@ def cmd_preflight(args: argparse.Namespace) -> int:
     if show.returncode != 0:
         print(show.stderr or show.stdout, file=sys.stderr)
         return show.returncode or 1
-    req = REQUIRED_ENVS.get(args.app, [])
-    if not req:
-        return 0
-    cmd = [
-        "helm",
-        "template",
-        args.release,
-        args.chart,
-        "--namespace",
-        args.namespace,
-        "--version",
-        version,
-    ]
-    for vf in filter(None, (v.strip() for v in args.values.split(","))):
-        cmd += ["-f", vf]
-    if args.tag:
-        cmd += ["--set", f"image.tag={args.tag}", "--set", "image.pullPolicy=Always"]
-    tmpl = run(cmd)
+    tmpl = run(release_command(args, version))
     if tmpl.returncode != 0:
         print(tmpl.stderr or tmpl.stdout, file=sys.stderr)
         return tmpl.returncode or 1
+    error = validate_generic_manifest(tmpl.stdout, args, version)
+    if error:
+        print(f"ERROR: rendered release contract failed: {error}", file=sys.stderr)
+        return 1
+    if args.app == "dspace":
+        error = validate_dspace_manifest(tmpl.stdout, args, version)
+        if error:
+            print(f"ERROR: {error}", file=sys.stderr)
+            return 1
+    req = REQUIRED_ENVS.get(args.app, [])
+    if not req:
+        return 0
     app_container_env_sets = deployment_app_container_env_sets(tmpl.stdout, args.app, args.release)
     complete_envs = next(
         (
@@ -358,6 +514,8 @@ def main() -> int:
             s.add_argument("--release", required=True)
             s.add_argument("--namespace", required=True)
             s.add_argument("--version", default="")
+            s.add_argument("--host", default="")
+            s.add_argument("--pull-policy", default="Always")
     a = p.parse_args()
     return {"status": cmd_status, "bump": cmd_bump, "preflight": cmd_preflight}[a.cmd](a)
 

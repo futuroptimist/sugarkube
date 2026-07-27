@@ -1218,7 +1218,7 @@ cf-tunnel-route host='':
         '' \
         'Dashboard steps are documented in docs/cloudflare_tunnel.md.'
 
-_helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' env='' description='' allow_install='false' reuse_values='false':
+_helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' env='' description='' app='' allow_install='false' reuse_values='false':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -1237,7 +1237,7 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     fi
     raw_args=(
         "{{ release }}" "{{ namespace }}" "{{ chart }}" "{{ values }}" "{{ host }}" "{{ version }}"
-        "{{ version_file }}" "{{ tag }}" "{{ default_tag }}" "{{ env }}" "{{ description }}"
+        "{{ version_file }}" "{{ tag }}" "{{ default_tag }}" "{{ env }}" "{{ description }}" "{{ app }}"
     )
 
     release=""
@@ -1251,6 +1251,7 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     default_tag=""
     requested_env=""
     description=""
+    app=""
 
     normalize_prefixed_value() {
         local key="${1}"
@@ -1293,6 +1294,7 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
             default_tag=*) default_tag="${raw_arg#default_tag=}" ;;
             env=*) requested_env="${raw_arg#env=}" ;;
             description=*) description="${raw_arg#description=}" ;;
+            app=*) app="${raw_arg#app=}" ;;
             *)
                 case "${raw_index}" in
                     0) assign_if_empty release "${raw_arg}" ;;
@@ -1306,6 +1308,7 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
                     8) assign_if_empty default_tag "${raw_arg}" ;;
                     9) assign_if_empty requested_env "${raw_arg}" ;;
                     10) assign_if_empty description "${raw_arg}" ;;
+                    11) assign_if_empty app "${raw_arg}" ;;
                 esac
                 ;;
         esac
@@ -1322,6 +1325,7 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     default_tag="$(normalize_prefixed_value default_tag "${default_tag}")"
     requested_env="$(normalize_prefixed_value env "${requested_env}")"
     description="$(normalize_prefixed_value description "${description}")"
+    app="$(normalize_prefixed_value app "${app}")"
     if [ -z "${requested_env}" ] && [ -n "${SUGARKUBE_ENV:-}" ]; then
       requested_env="${SUGARKUBE_ENV}"
     fi
@@ -1353,6 +1357,20 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     if [ -z "${release}" ] || [ -z "${namespace}" ] || [ -z "${chart}" ]; then
         echo "Set release, namespace, and chart to deploy." >&2
         exit 1
+    fi
+
+    if [ -z "${app}" ]; then
+      case "${release}" in dspace|tokenplace|danielsmith|jobbot3000) app="${release}" ;; esac
+    fi
+    if [ -n "${app}" ]; then
+      case "${app}" in
+        dspace|tokenplace|danielsmith|jobbot3000) ;;
+        *) echo "ERROR: app=${app} is not an onboarded application." >&2; exit 2 ;;
+      esac
+      if [ -z "${image_tag}" ]; then
+        echo "ERROR: onboarded app ${app} requires a nonempty immutable image tag." >&2
+        exit 2
+      fi
     fi
 
     python3 "{{ justfile_directory() }}/scripts/cluster_identity.py" assert --kubeconfig "${KUBECONFIG}" --env "${requested_env}" >/dev/null
@@ -1428,6 +1446,17 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     if [[ "${chart}" == chart=* ]]; then
         echo "Internal bug: normalized chart still has leading 'chart=': '${chart}'" >&2
         exit 1
+    fi
+
+    if [ -n "${app}" ]; then
+      python3 "{{ justfile_directory() }}/scripts/app_chart.py" preflight \
+        --app "${app}" --env "${requested_env}" --tag "${image_tag}" \
+        --chart "${chart}" --version "${chart_version}" \
+        --version-file "${version_file}" --values "${values}" \
+        --release "${release}" --namespace "${namespace}" \
+        --host "${host}" --pull-policy Always
+    else
+      echo "WARNING: generic non-onboarded chart mode has no Sugarkube application render contract." >&2
     fi
 
     wait_for_rollouts() {
@@ -1611,11 +1640,11 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     helm "${helm_args[@]}"
     wait_for_rollouts
 
-helm-oci-install release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' env='' description='':
-    @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' '{{ env }}' '{{ description }}' allow_install='true' reuse_values='false'
+helm-oci-install release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' env='' description='' app='':
+    @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' '{{ env }}' '{{ description }}' '{{ app }}' allow_install='true' reuse_values='false'
 
-helm-oci-upgrade release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' env='' description='':
-    @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' '{{ env }}' '{{ description }}' allow_install='false' reuse_values='true'
+helm-oci-upgrade release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' env='' description='' app='':
+    @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' '{{ env }}' '{{ description }}' '{{ app }}' allow_install='false' reuse_values='true'
 
 # Print resolved Sugarkube app deployment config for an app/environment.
 app-config app env='staging' config='':
@@ -1686,7 +1715,7 @@ app-deploy app env='staging' tag='' config='' manifest='' evidence='':
       --app "${SUGARKUBE_APP}" \
       --env "${SUGARKUBE_ENV}" \
       --tag "${SUGARKUBE_TAG}" \
-      --chart "${SUGARKUBE_CHART}" \
+      --chart "${chart_coordinate:-${SUGARKUBE_CHART}}" \
       --version "${SUGARKUBE_VERSION:-}" \
       --version-file "${SUGARKUBE_VERSION_FILE:-}" \
       --values "${SUGARKUBE_VALUES}" \
@@ -1707,7 +1736,8 @@ app-deploy app env='staging' tag='' config='' manifest='' evidence='':
       version_file="${SUGARKUBE_VERSION_FILE:-}" \
       tag="${SUGARKUBE_TAG}" \
       env="${SUGARKUBE_ENV}" \
-      description="${helm_description:-}"
+      description="${helm_description:-}" \
+      app="${SUGARKUBE_APP}"
     if [ "${SUGARKUBE_APP}" = dspace ] && { [ "${SUGARKUBE_ENV}" = staging ] || [ "${SUGARKUBE_ENV}" = prod ]; }; then
       python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" finalize \
         --manifest "${release_manifest}" --output "${evidence_output}" \
@@ -1750,7 +1780,7 @@ app-redeploy app env='staging' tag='' config='' manifest='' evidence='':
       --app "${SUGARKUBE_APP}" \
       --env "${SUGARKUBE_ENV}" \
       --tag "${SUGARKUBE_TAG}" \
-      --chart "${SUGARKUBE_CHART}" \
+      --chart "${chart_coordinate:-${SUGARKUBE_CHART}}" \
       --version "${SUGARKUBE_VERSION:-}" \
       --version-file "${SUGARKUBE_VERSION_FILE:-}" \
       --values "${SUGARKUBE_VALUES}" \
@@ -1771,7 +1801,8 @@ app-redeploy app env='staging' tag='' config='' manifest='' evidence='':
       version_file="${SUGARKUBE_VERSION_FILE:-}" \
       tag="${SUGARKUBE_TAG}" \
       env="${SUGARKUBE_ENV}" \
-      description="${helm_description:-}"
+      description="${helm_description:-}" \
+      app="${SUGARKUBE_APP}"
     if [ "${SUGARKUBE_APP}" = dspace ] && { [ "${SUGARKUBE_ENV}" = staging ] || [ "${SUGARKUBE_ENV}" = prod ]; }; then
       python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" finalize --manifest "${release_manifest}" --output "${evidence_output}" \
         --environment "${SUGARKUBE_ENV}" --image-tag "${SUGARKUBE_TAG}" --chart-version "${chart_version}" --kubeconfig "${KUBECONFIG}" \

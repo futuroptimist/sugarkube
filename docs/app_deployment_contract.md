@@ -27,6 +27,35 @@ Sugarkube owns cluster and environment orchestration:
 - applying the environment values chain; and
 - running status and verification checks against the cluster.
 
+## Exact-release render gate
+
+Every onboarded application mutation first renders the proposed Helm release and
+validates the rendered Kubernetes objects. The render uses the same application
+identity, release, namespace, chart coordinate, environment-resolved version,
+ordered values-file chain, explicit ingress-host override, immutable image tag,
+and pull policy that the Helm mutation receives. Digest-qualified OCI charts are
+rendered by digest without `--version`; their separately approved version remains
+release evidence and reporting metadata.
+
+The generic gate requires a release-associated Deployment, StatefulSet, or
+DaemonSet whose intended application container has the exact requested tag. It
+also rejects an explicit wrong namespace and requires an exact configured
+Ingress host when ingress is enabled. Comments, ConfigMaps, init containers, and
+unrelated sidecars cannot satisfy the image contract. Application-specific
+checks, including token.place release metadata and DSPACE resource/metrics
+contracts, run only after the generic checks succeed.
+
+A render or contract failure is terminal: no Helm upgrade/install, rollout,
+`kubectl` mutation, or DSPACE evidence reservation/finalization occurs. Direct
+`helm-oci-install` and `helm-oci-upgrade` calls recognize onboarded releases and
+apply the same gate; their explicitly warned low-level mode is only for charts
+that are not onboarded Sugarkube applications.
+
+The upgrade helper still passes `--reuse-values`. This gate validates the
+repository-controlled proposed inputs but does not claim to reproduce Helm's
+historical merge. Removal of `--reuse-values` remains the separate #2324
+follow-up.
+
 ### DSPACE recovery exception
 
 DSPACE staging and production recovery uses `just dspace-manifest-rollback`,

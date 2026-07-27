@@ -156,6 +156,22 @@ if [[ "$*" == template* ]]; then
 kind: Deployment
 metadata:
   name: tokenplace
+  labels:
+    app.kubernetes.io/instance: tokenplace
+spec:
+  template:
+    spec:
+      containers:
+        - name: relay
+          image: ghcr.io/example/tokenplace:main-deadbee
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tokenplace
+spec:
+  rules:
+    - host: staging.token.place
 '
   elif [ "${{SUGARKUBE_STUB_HELM_TEMPLATE_COMMENT_META:-}}" = "1" ]; then
     printf '# TOKENPLACE_IMAGE_TAG TOKENPLACE_RELEASE_VERSION TOKENPLACE_CHART_VERSION TOKENPLACE_DEPLOY_ENV
@@ -167,6 +183,8 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: tokenplace
+  labels:
+    app.kubernetes.io/instance: tokenplace
 spec:
   template:
     spec:
@@ -179,17 +197,39 @@ spec:
             - name: TOKENPLACE_RELEASE_VERSION
             - name: TOKENPLACE_CHART_VERSION
             - name: TOKENPLACE_DEPLOY_ENV
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tokenplace
+spec:
+  rules:
+    - host: staging.token.place
 '
   else
+    release="$2"
+    tag=main-deadbee
+    previous=""
+    for argument in "$@"; do
+      if [ "$previous" = --set ] && [[ "$argument" == image.tag=* ]]; then
+        tag="${{argument#image.tag=}}"
+      fi
+      previous="$argument"
+    done
+    container="$release"
+    [ "$release" != tokenplace ] || container=relay
     printf 'apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: tokenplace
+  name: %s
+  labels:
+    app.kubernetes.io/instance: %s
 spec:
   template:
     spec:
       containers:
-        - name: relay
+        - name: %s
+          image: ghcr.io/example/%s:%s
           env:
             - name: TOKENPLACE_IMAGE_TAG
             - name: TOKENPLACE_RELEASE_VERSION
@@ -198,7 +238,34 @@ spec:
         - name: metrics-sidecar
           env:
             - name: SIDECAR_ONLY
-'
+' "$release" "$release" "$container" "$release" "$tag"
+    host=""
+    case "$release:$*" in
+      danielsmith:*values.staging*) host=staging.danielsmith.io ;;
+      danielsmith:*values.prod*) host=danielsmith.io ;;
+      tokenplace:*values.staging*) host=staging.token.place ;;
+      tokenplace:*values.prod*) host=token.place ;;
+      jobbot3000:*values.staging*) host=staging.jobbot3000.tech ;;
+      jobbot3000:*values.prod*) host=jobbot3000.example.test ;;
+      jobbot3000:*) host=jobbot3000.dev.example.test ;;
+      dspace:*prod-subdomain*) host=prod.democratized.space ;;
+      dspace:*values.prod*) host=democratized.space ;;
+      dspace:*) host=staging.democratized.space ;;
+    esac
+    previous=""
+    for argument in "$@"; do
+      if [ "$previous" = --set ] && [[ "$argument" == ingress.host=* ]]; then host="${{argument#ingress.host=}}"; fi
+      previous="$argument"
+    done
+    if [ -n "$host" ]; then
+      printf '%s\n' '---' 'apiVersion: networking.k8s.io/v1' 'kind: Ingress' 'metadata:' "  name: $release" 'spec:' '  rules:' "    - host: $host"
+    fi
+    if [ "$release" = dspace ]; then
+      printf '%s\n' '---' 'apiVersion: v1' 'kind: Service' 'metadata:' "  name: $release"
+      if [[ "$*" == *dspace.values.staging.yaml* ]]; then
+        printf '%s\n' '---' 'apiVersion: monitoring.coreos.com/v1' 'kind: ServiceMonitor' 'metadata:' '  name: dspace' 'spec:' '  endpoints:' '    - bearerTokenSecret:' '        name: dspace-staging-metrics-token' '        key: token'
+      fi
+    fi
   fi
   exit 0
 fi
@@ -557,7 +624,7 @@ def test_app_chart_cmd_bump_adds_pin_when_file_has_only_comments(
     assert "just app-deploy app=tokenplace env=staging tag=<APP_TAG>" in capsys.readouterr().out
 
 
-def test_app_chart_cmd_preflight_skips_manifest_render_for_apps_without_required_envs(
+def test_app_chart_cmd_preflight_renders_apps_without_specialized_metadata(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     args = argparse.Namespace(
@@ -580,11 +647,33 @@ def test_app_chart_cmd_preflight_skips_manifest_render_for_apps_without_required
     monkeypatch.setattr(
         app_chart,
         "run",
-        lambda cmd: calls.append(cmd[0]) or subprocess.CompletedProcess(cmd, 0, "", ""),
+        lambda cmd: calls.append(" ".join(cmd))
+        or subprocess.CompletedProcess(
+            cmd,
+            0,
+            """apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/instance: danielsmith
+spec:
+  template:
+    spec:
+      containers:
+        - name: danielsmith
+          image: ghcr.io/example/danielsmith:main-deadbee
+""",
+            "",
+        ),
     )
 
     assert app_chart.cmd_preflight(args) == 0
-    assert calls == []
+    assert len(calls) == 1
+    assert calls[0].startswith(
+        "helm template danielsmith oci://ghcr.io/futuroptimist/charts/danielsmith "
+        "--namespace danielsmith --version 1.0.0"
+    )
+    assert "--set image.tag=main-deadbee --set image.pullPolicy=Always" in calls[0]
     assert "app: danielsmith" in capsys.readouterr().out
 
 
@@ -666,7 +755,7 @@ def test_app_chart_cmd_preflight_reports_missing_app_container_envs(
         lambda cmd: subprocess.CompletedProcess(
             cmd,
             0,
-            "apiVersion: apps/v1\nkind: Deployment\nspec:\n  template:\n    spec:\n      containers:\n        - name: relay\n          env:\n            - name: TOKENPLACE_IMAGE_TAG\n",
+            "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  labels:\n    app.kubernetes.io/instance: tokenplace\nspec:\n  template:\n    spec:\n      containers:\n        - name: relay\n          image: ghcr.io/example/tokenplace:main-deadbee\n          env:\n            - name: TOKENPLACE_IMAGE_TAG\n",
             "",
         ),
     )
@@ -705,11 +794,15 @@ def test_app_chart_cmd_preflight_rejects_envs_split_across_candidate_containers(
             0,
             "apiVersion: apps/v1\n"
             "kind: Deployment\n"
+            "metadata:\n"
+            "  labels:\n"
+            "    app.kubernetes.io/instance: tokenplace\n"
             "spec:\n"
             "  template:\n"
             "    spec:\n"
             "      containers:\n"
             "        - name: relay\n"
+            "          image: ghcr.io/example/tokenplace:main-deadbee\n"
             "          env:\n"
             "            - name: TOKENPLACE_IMAGE_TAG\n"
             "            - name: TOKENPLACE_RELEASE_VERSION\n"
@@ -846,7 +939,7 @@ def test_app_chart_cmd_preflight_passes_when_relay_envs_present(
         lambda cmd: subprocess.CompletedProcess(
             cmd,
             0,
-            "apiVersion: apps/v1\nkind: Deployment\nspec:\n  template:\n    spec:\n      containers:\n        - name: relay\n          env:\n            - name: TOKENPLACE_IMAGE_TAG\n            - name: TOKENPLACE_RELEASE_VERSION\n            - name: TOKENPLACE_CHART_VERSION\n            - name: TOKENPLACE_DEPLOY_ENV\n",
+            "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  labels:\n    app.kubernetes.io/instance: tokenplace\nspec:\n  template:\n    spec:\n      containers:\n        - name: relay\n          image: ghcr.io/example/tokenplace:main-deadbee\n          env:\n            - name: TOKENPLACE_IMAGE_TAG\n            - name: TOKENPLACE_RELEASE_VERSION\n            - name: TOKENPLACE_CHART_VERSION\n            - name: TOKENPLACE_DEPLOY_ENV\n",
             "",
         ),
     )
@@ -2829,6 +2922,7 @@ def test_direct_helm_oci_helper_mismatch_fails_before_any_helm(
             "namespace=tokenplace",
             "chart=oci://ghcr.io/futuroptimist/charts/tokenplace",
             "version_file=docs/apps/tokenplace.version",
+            "tag=main-deadbee",
             "env=prod",
         ],
         env,
@@ -2851,6 +2945,7 @@ def test_direct_helm_oci_helper_accepts_inline_semver_with_prerelease_and_build(
             "namespace=tokenplace",
             "chart=oci://ghcr.io/futuroptimist/charts/tokenplace",
             "version=1.2.3-rc.1+build.5",
+            "tag=main-deadbee",
             "env=staging",
         ],
         generic_app_stub_env,
@@ -2917,6 +3012,7 @@ def test_direct_helm_oci_helper_rejects_selected_pin_file_before_helm(
             "namespace=tokenplace",
             "chart=oci://ghcr.io/futuroptimist/charts/tokenplace",
             f"version_file={pin}",
+            "tag=main-deadbee",
             "env=staging",
         ],
         generic_app_stub_env,
@@ -2978,6 +3074,7 @@ def test_direct_helm_oci_helper_matching_env_succeeds(
             "namespace=tokenplace",
             "chart=oci://ghcr.io/futuroptimist/charts/tokenplace",
             "version_file=docs/apps/tokenplace.version",
+            "tag=main-deadbee",
             "env=staging",
         ],
         generic_app_stub_env,
@@ -3002,6 +3099,7 @@ def test_direct_helm_oci_helper_uses_digest_coordinate_without_version(
             "namespace=tokenplace",
             f"chart={coordinate}",
             "version=0.1.3",
+            "tag=main-deadbee",
             "env=staging",
         ],
         generic_app_stub_env,
