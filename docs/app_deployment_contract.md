@@ -91,25 +91,28 @@ The current apps map to that model as examples:
 Deployment tags must identify application code and release intent, not mutable
 environments.
 
-Acceptable deployment tags:
+Acceptable staging and production deployment tags:
 
-- Immutable branch-SHA tags, such as `main-REPLACE_SHORTSHA`.
-- Semver or release tags, such as `v1.2.3`, `3.1.0`, or another documented
-  project-specific stable tag.
-- Mutable branch convenience tags, such as `main-latest`, only when an app
-  runbook explicitly documents that a non-prod bootstrap or iteration flow accepts
-  them. They are an app-specific exception, not a shared guarantee; for example,
-  token.place deploy/redeploy wrappers reject every tag containing `latest`,
-  including `main-latest`.
+- Lowercase branch-SHA tags with a 7-40 character lowercase hexadecimal suffix,
+  such as `main-1a31a56`, `main-5ca96df16f0f`, or `v3-deadbee`.
 
 Unacceptable deployment tags:
 
 - `latest`;
 - bare branch names such as `main`, `master`, `develop`, or `release`; and
 - environment names such as `dev`, `staging`, `prod`, or `production`.
+- semantic tags such as `v1.2.3`, including prerelease, build, and
+  semantic-looking branch variants; and
+- tags without a valid lowercase branch-SHA suffix.
+
+Semantic image tags are release/distribution aliases, not immutable deployment
+coordinates. For backward compatibility, an explicit `env=dev` local-development
+flow may validate a semantic image tag. That exception never applies when the
+environment is omitted, `int`/staging, or production. Semantic **chart versions**
+remain valid because chart coordinates and image tags are separate types.
 
 Production promotion must use an immutable tag. The production tag pin file is
-part of the standard app coordinates and must contain the single immutable image
+part of the standard app coordinates and must contain the single branch-SHA image
 tag approved for production. Generic production promotion flows should read that
 pin when `tag=` is omitted and should update it only as an explicit approval
 step.

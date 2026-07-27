@@ -148,7 +148,7 @@ command_output="$(
         chart=oci://registry.test/charts/dspace \
         values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
         version_file=docs/apps/dspace.version \
-        default_tag=v3-latest env=staging
+        default_tag=v3-deadbee env=staging
 )"
 
 if ! grep -q "oci://registry.test/charts/dspace" <<<"${command_output}"; then

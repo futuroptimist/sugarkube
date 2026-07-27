@@ -71,7 +71,8 @@ The app repo's `ci-image.yml` should answer yes to each item before Sugarkube st
 - It logs in to GHCR with repository-scoped credentials.
 - It publishes `ghcr.io/OWNER/IMAGE`.
 - It emits immutable branch-SHA tags such as `main-REPLACE_SHORTSHA`.
-- It may emit convenience tags such as `main-latest`, but those are non-prod only unless an app runbook explicitly says otherwise.
+- It may emit convenience or semantic release aliases, but they are distribution
+  aliases rather than staging or production deployment coordinates.
 - It does not require local Docker builds for staging or production deploys.
 - It records enough workflow output for an operator to find the tag to deploy.
 
@@ -126,7 +127,7 @@ Do not invent real configs for future apps such as `wove` until their app repos 
 
 ### I have a successful image build; what tag do I deploy?
 
-- Use the immutable branch-SHA or release tag from the successful image workflow.
+- Use the lowercase branch-SHA tag from the successful image workflow.
 - Prefer tags shaped like `main-REPLACE_SHORTSHA` for staging validation.
 - Do not deploy `latest`, a bare branch name, or an environment name.
 - Deploy staging first.
@@ -166,7 +167,7 @@ git commit -m "Bump appslug chart pin to 0.1.3"
 
 ### Staging works; how do I promote prod?
 
-- Keep the same immutable image tag that passed staging.
+- Keep the same branch-SHA image tag that passed staging.
 - Record or review the approved tag in `docs/apps/APP.prod.tag` when the app uses a committed prod pin.
 - Use the generic production promotion command.
 
