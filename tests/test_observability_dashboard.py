@@ -144,6 +144,19 @@ def test_selected_window_traffic_and_availability_semantics(dashboard):
         "Healthy endpoints",
         "Failed endpoints",
     }
+    summary_expressions = {
+        target["legendFormat"]: target["expr"] for target in summary["targets"]
+    }
+    assert all(
+        "sum(" in expression and "== bool 1" in expression
+        for expression in summary_expressions.values()
+    )
+    failed_expression = summary_expressions["Failed endpoints"]
+    assert "max_over_time(up{" in failed_expression
+    assert "[5m]" in failed_expression
+    assert ">= bool 0" in failed_expression
+    assert " - (sum(" in failed_expression
+    assert "or vector(0)" in failed_expression
     assert summary["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
     assert panels["Endpoint matrix"]["type"] == "table"
 

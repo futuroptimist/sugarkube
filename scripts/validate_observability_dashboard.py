@@ -113,7 +113,8 @@ def validate_dashboard_semantics(dashboard: dict) -> None:
     if len(summary_targets) != 2 or any(
         target.get("instant") is not True
         or target.get("range") is not False
-        or "count(" not in target.get("expr", "")
+        or "sum(" not in target.get("expr", "")
+        or "== bool 1" not in target.get("expr", "")
         or " by (environment, app, route) " not in target.get("expr", "")
         or any(
             selector not in target.get("expr", "")
@@ -127,6 +128,21 @@ def validate_dashboard_semantics(dashboard: dict) -> None:
     ):
         raise SystemExit(
             "ERROR: public availability must be a two-value instant aggregate summary."
+        )
+    summary_by_legend = {
+        target.get("legendFormat"): target.get("expr", "") for target in summary_targets
+    }
+    failed_expression = summary_by_legend.get("Failed endpoints", "")
+    if (
+        "max_over_time(up{" not in failed_expression
+        or "[5m]" not in failed_expression
+        or ">= bool 0" not in failed_expression
+        or " - (sum(" not in failed_expression
+        or "or vector(0)" not in failed_expression
+    ):
+        raise SystemExit(
+            "ERROR: failed availability must include recently discovered probes "
+            "with missing samples."
         )
     if {target.get("legendFormat") for target in summary_targets} != {
         "Healthy endpoints",

@@ -127,9 +127,11 @@ is not rollout evidence.
 - Grafana: persistence disabled, no Ingress, LAN-only NodePort `30300`.
 - The provisioned dashboard defaults to six hours and a 30-second refresh. Its
   top-level public availability summary reports current healthy and failed
-  endpoint counts for the selected probe filters; missing data remains visibly
-  absent rather than appearing healthy. The detailed endpoint matrix remains the
-  diagnostic view. DSPACE user request rate excludes `/healthz`, `/livez`, and
+  endpoint counts for the selected probe filters. An endpoint discovered in the
+  last five minutes but missing a current probe sample counts as failed; a complete
+  absence of discovered probes remains visibly absent rather than appearing
+  healthy. The detailed endpoint matrix remains the diagnostic view. DSPACE user
+  request rate excludes `/healthz`, `/livez`, and
   `/metrics`, whose traffic has a separate operational-rate panel. Status-class
   distribution is an instant categorical summary over the selected time window.
   The `Probe application` and `Probe route` controls filter blackbox panels while
