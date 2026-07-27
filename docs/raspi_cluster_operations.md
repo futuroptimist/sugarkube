@@ -460,7 +460,7 @@ Traefik is available per the section above.
    ```
 
 5. Iterate new builds using your app's upgrade instructions (e.g., the dspace
-   guide covers rolling new `main-<shortsha>` images).
+   guide covers rolling new `main-REPLACE_SHORTSHA` images).
 
 ## Step 1: Verify your 3-node control plane is healthy
 
@@ -780,7 +780,7 @@ just helm-oci-upgrade \
   chart=oci://ghcr.io/democratizedspace/charts/dspace \
   values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
   version_file=docs/apps/dspace.version \
-  default_tag=main-<shortsha> env=staging
+  default_tag=main-REPLACE_SHORTSHA env=staging
 ```
 
 For production preview (optional canary), this guide intentionally switches from the generic
@@ -788,7 +788,7 @@ For production preview (optional canary), this guide intentionally switches from
 post-deploy checks are included by default:
 
 ```bash
-just dspace-oci-deploy-prod-subdomain tag=main-<shortsha>
+just dspace-oci-deploy-prod-subdomain tag=main-REPLACE_SHORTSHA
 ```
 
 For production apex promotion, use `dspace-oci-promote-prod` with a pinned tag (for example the
@@ -811,7 +811,7 @@ If you prefer a one-liner that bakes in those arguments for dspace, use the help
 recipe (defaults to staging):
 
 ```bash
-just dspace-oci-redeploy env=staging tag=main-<shortsha>
+just dspace-oci-redeploy env=staging tag=main-REPLACE_SHORTSHA
 # or explicitly select an environment:
 read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
 just dspace-oci-redeploy env=prod tag="$(read_prod_tag)"
@@ -826,7 +826,7 @@ For immutable RC/stable validation (recommended for staging and prod), use the d
 helper instead:
 
 ```bash
-just dspace-oci-deploy env=staging tag=main-<shortsha>
+just dspace-oci-deploy env=staging tag=main-REPLACE_SHORTSHA
 
 read_prod_tag() { sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/dspace.prod.tag | head -n1 | tr -d '[:space:]'; }
 just dspace-oci-deploy env=prod tag="$(read_prod_tag)"
@@ -981,7 +981,7 @@ As you continue operating your cluster, these recipes will be helpful:
   use `just wipe` to clean it up, then rerun `just ha3 env=dev` to rejoin correctly.
 
 - **Emergency dspace redeploy:** Run
-  `just dspace-oci-redeploy env=staging tag=main-<shortsha>` with the intended
+  `just dspace-oci-redeploy env=staging tag=main-REPLACE_SHORTSHA` with the intended
   branch-SHA image coordinate to force a rollout restart without retyping chart
   arguments.
 
