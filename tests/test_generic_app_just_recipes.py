@@ -2020,16 +2020,20 @@ def test_existing_app_specific_deploy_wrappers_still_work(
 
 @pytest.mark.usefixtures("ensure_just_available")
 @pytest.mark.parametrize(
-    "recipe",
-    ["tokenplace-oci-deploy", "tokenplace-oci-redeploy", "tokenplace-oci-promote-prod"],
+    ("recipe", "arguments"),
+    [
+        ("tokenplace-oci-deploy", ["env=staging", "tag=main-deadbee"]),
+        ("tokenplace-oci-redeploy", ["env=staging", "tag=main-deadbee"]),
+        ("tokenplace-oci-promote-prod", ["tag=main-deadbee"]),
+    ],
 )
 def test_tokenplace_oci_paths_render_once_before_single_mutation(
-    recipe: str, generic_app_stub_env: dict[str, str]
+    recipe: str, arguments: list[str], generic_app_stub_env: dict[str, str]
 ) -> None:
     if recipe == "tokenplace-oci-promote-prod":
         generic_app_stub_env["SUGARKUBE_STUB_NODE_ENV"] = "prod"
 
-    result = _run_just([recipe, "tag=main-deadbee"], generic_app_stub_env)
+    result = _run_just([recipe, *arguments], generic_app_stub_env)
 
     assert result.returncode == 0, result.stderr + result.stdout
     helm_lines = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8").splitlines()
