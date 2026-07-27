@@ -3416,10 +3416,26 @@ def test_public_helm_helper_rejects_mutation_marker_without_altering_file(
     marker = tmp_path / "preexisting-marker"
     marker.write_text("do not alter\n", encoding="utf-8")
 
-    result = _run_just([recipe, f"mutation_marker={marker}"], generic_app_stub_env)
+    public_args = [
+        "release=tokenplace",
+        "namespace=tokenplace",
+        "chart=oci://ghcr.io/futuroptimist/charts/tokenplace",
+        "values=docs/examples/tokenplace.values.staging.yaml",
+        "host=staging.token.place",
+        "version=0.1.3",
+        "version_file=",
+        "tag=main-deadbee",
+        "default_tag=main-deadbee",
+        "env=staging",
+        "description=public helper boundary test",
+        "app=tokenplace",
+    ]
+    result = _run_just(
+        [recipe, *public_args, f"mutation_marker={marker}"], generic_app_stub_env
+    )
 
     assert result.returncode != 0
-    assert "mutation_marker" in result.stderr
+    assert "Justfile does not contain recipe" in result.stderr
     assert marker.read_text(encoding="utf-8") == "do not alter\n"
     helm_log = Path(generic_app_stub_env["HELM_LOG"])
     assert not helm_log.exists() or helm_log.read_text(encoding="utf-8") == ""
