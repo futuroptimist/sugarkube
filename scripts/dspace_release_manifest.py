@@ -220,6 +220,19 @@ def validate(value: dict[str, Any], finalized: bool | None = None) -> dict[str, 
     return value
 
 
+def candidate_from_final(value: dict[str, Any]) -> dict[str, Any]:
+    """Project an immutable finalized record through the candidate validators.
+
+    Rollback deliberately accepts only historical final evidence.  The OCI
+    preflight operates on candidate coordinates, so keep one strict projection
+    here rather than teaching rollback a second, weaker manifest schema.
+    """
+    validate(value, True)
+    projected = {field: value[field] for field in CANDIDATE_FIELDS}
+    projected["recordType"] = "candidate"
+    return validate(projected, False)
+
+
 def _canonical(value: dict[str, Any]) -> str:
     return json.dumps(value, indent=2, ensure_ascii=True) + "\n"
 

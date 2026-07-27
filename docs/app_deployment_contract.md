@@ -240,6 +240,15 @@ and retries.
 These recipes are implemented in the root `justfile` and use the app config
 lookup order above.
 
+DSPACE rollback is deliberately DSPACE-only rather than a new generic app
+primitive. `just dspace-manifest-rollback` accepts historical finalized
+evidence, derives every coordinate from it, and completes cluster, values-chain,
+render, OCI, current-state, verifier-capability, and production-confirmation
+preflight before reserving evidence. It then uses a digest-qualified `helm
+upgrade` and proves the resulting runtime; it never reuses values or invokes
+Helm revision rollback. The DSPACE runbook defines the strict verifier contract
+and its temporary runtime-identity and remote-smoke dependency.
+
 Environment-scoped mutating recipes (`app-deploy`, `app-redeploy`,
 `app-promote-prod`, and the compatibility deploy/redeploy/promote wrappers) guard
 Helm with the connected cluster's Kubernetes-reported identity. The source of
