@@ -38,6 +38,10 @@ preflight precedes the unique evidence reservation and digest-qualified
 the strict runtime/frontend/provider/public-journey verifier described in the
 [DSPACE runbook](apps/dspace.md#rollback). `helm history` remains investigative,
 and `helm rollback <revision>` is not the default DSPACE recovery operation.
+PR #2350 final evidence has no historical values coordinates, so this operation
+byte-binds the selected environment's complete current values chain for render
+and upgrade. It restores manifest-approved artifacts with current configuration;
+historical-configuration replay is outside this recovery exception.
 
 Future onboarding examples such as wove should only get Sugarkube app configs
 after their app repositories have published compatible images and charts.

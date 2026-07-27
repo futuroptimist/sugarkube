@@ -27,7 +27,6 @@ def target(environment: str = "staging") -> dict[str, object]:
         "chartDigest": "sha256:" + "2" * 64,
         "semanticTag": "v3.2.0",
         "recordType": "final",
-        "values": [{"path": "values.yaml", "sha256": "3" * 64}],
         "environment": environment,
         "expectedDefaultChatProvider": "token-place",
         "approvedAt": "2026-07-26T12:00:00Z",
@@ -54,6 +53,9 @@ def target(environment: str = "staging") -> dict[str, object]:
 def verifier_result(**changes: object) -> dict[str, object]:
     value = {
         "schemaVersion": 1,
+        "environment": "staging",
+        "release": "dspace",
+        "namespace": "dspace",
         "applicationVersion": "3.2.0",
         "runtimeSourceRevision": SHA,
         "frontendSourceRevision": SHA,
@@ -78,14 +80,21 @@ def verifier_result(**changes: object) -> dict[str, object]:
 )
 def test_verifier_result_fails_closed(changes: dict[str, object], message: str) -> None:
     with pytest.raises(rollback.RollbackError, match=message):
-        rollback.validate_verifier_result(verifier_result(**changes), target())
+        rollback.validate_verifier_result(verifier_result(**changes), target(), "staging")
 
 
 def test_verifier_result_accepts_exact_identity_and_journeys() -> None:
-    assert rollback.validate_verifier_result(verifier_result(), target())["journeys"][1] == {
+    assert rollback.validate_verifier_result(verifier_result(), target(), "staging")["journeys"][
+        1
+    ] == {
         "name": "/chat",
         "passed": True,
     }
+
+
+def test_verifier_schema_version_rejects_boolean() -> None:
+    with pytest.raises(rollback.RollbackError, match="schemaVersion"):
+        rollback.validate_verifier_result(verifier_result(schemaVersion=True), target(), "staging")
 
 
 def test_capability_probe_is_argv_only_and_exact(tmp_path: Path) -> None:
@@ -97,23 +106,51 @@ def test_capability_probe_is_argv_only_and_exact(tmp_path: Path) -> None:
     def runner(command: list[str]) -> str:
         calls.append(command)
         return json.dumps(
-            {"schemaVersion": 1, "capabilities": list(rollback.REQUIRED_CAPABILITIES)}
+            {
+                "schemaVersion": 1,
+                "environment": "staging",
+                "release": "dspace",
+                "namespace": "dspace",
+                "capabilities": list(rollback.REQUIRED_CAPABILITIES),
+            }
         )
 
-    rollback.verifier_capabilities(executable, runner)
-    assert calls == [[str(executable), "capabilities"]]
+    rollback.verifier_capabilities(executable, "staging", "dspace", "dspace", runner)
+    assert calls == [
+        [
+            str(executable),
+            "capabilities",
+            "--environment",
+            "staging",
+            "--release",
+            "dspace",
+            "--namespace",
+            "dspace",
+        ]
+    ]
 
 
 def test_missing_or_incompatible_verifier_fails(tmp_path: Path) -> None:
     with pytest.raises(rollback.RollbackError, match="existing executable"):
-        rollback.verifier_capabilities(tmp_path / "missing")
+        rollback.verifier_capabilities(tmp_path / "missing", "staging", "dspace", "dspace")
     executable = tmp_path / "verifier"
     executable.write_text("#!/bin/sh\n", encoding="utf-8")
     executable.chmod(0o755)
     with pytest.raises(rollback.RollbackError, match="incompatible"):
         rollback.verifier_capabilities(
             executable,
-            lambda _command: json.dumps({"schemaVersion": 1, "capabilities": ["health"]}),
+            "staging",
+            "dspace",
+            "dspace",
+            lambda _command: json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "environment": "staging",
+                    "release": "dspace",
+                    "namespace": "dspace",
+                    "capabilities": ["health"],
+                }
+            ),
         )
 
 
@@ -169,7 +206,7 @@ def pod(uid: str, *, digest: str = DIGEST, terminating: bool = False) -> dict[st
         "phase": "Running",
         "ready": True,
         "terminating": terminating,
-        "images": {"dspace": f"{manifest.IMAGE_REF}:main-abcdef0"},
+        "images": {"dspace": f"{manifest.IMAGE_REF}:main-abcdef0@{DIGEST}"},
         "imageIDs": {"dspace": f"{manifest.IMAGE_REF}@{digest}"},
         "ownerReferences": [],
     }
@@ -207,13 +244,27 @@ def test_cluster_environment_rejects_partially_labeled_nodes() -> None:
         rollback.cluster_environment(lambda _command: json.dumps(nodes), "kubeconfig")
 
 
+def test_pre_state_pods_may_be_empty() -> None:
+    response = json.dumps({"items": []})
+    assert (
+        rollback.pods(
+            lambda _command: response, "kubeconfig", "dspace", "dspace", require_any=False
+        )
+        == []
+    )
+    with pytest.raises(rollback.RollbackError, match="no release-owned"):
+        rollback.pods(lambda _command: response, "kubeconfig", "dspace", "dspace")
+
+
 def test_summary_never_invents_current_chart_digest() -> None:
     current = {
         "version": 8,
         "chart": {"metadata": {"name": "dspace", "version": "3.1.0"}},
     }
-    text = rollback.summary(current, [pod("1")], target())
-    assert "current: helmRevision=8 chartVersion=3.1.0 chartDigest=unknown" in text
+    text = rollback.summary(
+        current, [pod("1")], target(), [{"path": "values.yaml", "sha256": "3" * 64}]
+    )
+    assert "helmRevision=8 chartName=dspace chartVersion=3.1.0 chartDigest=unknown" in text
     assert f"chartDigest={target()['chartDigest']}" in text
 
 
@@ -250,10 +301,6 @@ def test_success_uses_digest_chart_complete_values_and_writes_evidence(
     base.write_text("base: true\n", encoding="utf-8")
     overlay.write_text("staging: true\n", encoding="utf-8")
     selected_target = target()
-    selected_target["values"] = [
-        {"path": str(path), "sha256": rollback.hashlib.sha256(path.read_bytes()).hexdigest()}
-        for path in (base, overlay)
-    ]
     manifest_path.write_text(manifest._canonical(selected_target), encoding="utf-8")
     config = {
         "SUGARKUBE_CHART": f"oci://{manifest.CHART_REF}",
@@ -262,6 +309,7 @@ def test_success_uses_digest_chart_complete_values_and_writes_evidence(
         "SUGARKUBE_VALUES": f"{base},{overlay}",
     }
     monkeypatch.setattr(rollback.app_config, "load_config", lambda *_args: config)
+    monkeypatch.setattr(rollback, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(rollback, "cluster_environment", lambda *_args: "staging")
     monkeypatch.setattr(
         rollback,
@@ -279,6 +327,13 @@ def test_success_uses_digest_chart_complete_values_and_writes_evidence(
     monkeypatch.setattr(rollback.release, "finalize", lambda *_args, **_kwargs: {})
     statuses = iter(
         [
+            {
+                "name": "dspace",
+                "namespace": "dspace",
+                "version": 7,
+                "info": {"status": "deployed", "description": "old"},
+                "chart": {"metadata": {"name": "dspace", "version": "3.1.0"}},
+            },
             {
                 "name": "dspace",
                 "namespace": "dspace",
@@ -314,7 +369,7 @@ def test_success_uses_digest_chart_complete_values_and_writes_evidence(
     pod_states = iter([[pod("1", digest="sha256:" + "9" * 64)], [pod("2")]])
     latest = [pod("2")]
 
-    def pods_stub(*_args: object) -> list[dict[str, object]]:
+    def pods_stub(*_args: object, **_kwargs: object) -> list[dict[str, object]]:
         try:
             latest[:] = next(pod_states)
         except StopIteration:
@@ -352,9 +407,12 @@ def test_success_uses_digest_chart_complete_values_and_writes_evidence(
     result = rollback.rollback(args, runner)
     upgrade = next(command for command in commands if "upgrade" in command)
     assert f"oci://{manifest.CHART_REF}@{'sha256:' + '2' * 64}" in upgrade
-    assert f"image.digest={DIGEST}" in upgrade
+    assert f"image.tag=main-abcdef0@{DIGEST}" in upgrade
     assert upgrade.count("--values") == 2
-    assert str(base) in upgrade and str(overlay) in upgrade
+    template = next(command for command in commands if "template" in command)
+    assert [upgrade[i + 1] for i, item in enumerate(upgrade) if item == "--values"] == [
+        template[i + 1] for i, item in enumerate(template) if item == "--values"
+    ]
     assert "--reuse-values" not in upgrade
     assert result["state"] == "succeeded"
     written = json.loads(evidence_path.read_text(encoding="utf-8"))

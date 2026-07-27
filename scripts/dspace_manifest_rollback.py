@@ -36,6 +36,9 @@ REQUIRED_CAPABILITIES = (
 )
 VERIFIER_FIELDS = (
     "schemaVersion",
+    "environment",
+    "release",
+    "namespace",
     "applicationVersion",
     "runtimeSourceRevision",
     "frontendSourceRevision",
@@ -81,23 +84,54 @@ def exact_fields(value: dict[str, Any], fields: tuple[str, ...], label: str) -> 
         )
 
 
-def verifier_capabilities(executable: Path, runner: Runner = run) -> dict[str, Any]:
+def verifier_capabilities(
+    executable: Path, environment: str, release_name: str, namespace: str, runner: Runner = run
+) -> dict[str, Any]:
     if not executable.is_file() or not os.access(executable, os.X_OK):
         raise RollbackError("runtime verifier must be an existing executable file")
-    value = json_command(runner, [str(executable), "capabilities"], "runtime verifier")
-    exact_fields(value, ("schemaVersion", "capabilities"), "runtime verifier capabilities")
+    value = json_command(
+        runner,
+        [
+            str(executable),
+            "capabilities",
+            "--environment",
+            environment,
+            "--release",
+            release_name,
+            "--namespace",
+            namespace,
+        ],
+        "runtime verifier",
+    )
+    exact_fields(
+        value,
+        ("schemaVersion", "environment", "release", "namespace", "capabilities"),
+        "runtime verifier capabilities",
+    )
     capabilities = value["capabilities"]
-    if value["schemaVersion"] != 1 or capabilities != list(REQUIRED_CAPABILITIES):
+    if (
+        type(value["schemaVersion"]) is not int
+        or value["schemaVersion"] != 1
+        or value["environment"] != environment
+        or value["release"] != release_name
+        or value["namespace"] != namespace
+        or capabilities != list(REQUIRED_CAPABILITIES)
+    ):
         raise RollbackError("runtime verifier has an incompatible capability contract")
     return value
 
 
-def validate_verifier_result(value: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
+def validate_verifier_result(
+    value: dict[str, Any], target: dict[str, Any], environment: str
+) -> dict[str, Any]:
     """Validate reusable runtime/frontend/provider/journey proof from DSPACE tooling."""
     exact_fields(value, VERIFIER_FIELDS, "runtime verifier result")
-    if value["schemaVersion"] != 1:
+    if type(value["schemaVersion"]) is not int or value["schemaVersion"] != 1:
         raise RollbackError("runtime verifier result schemaVersion must be 1")
     expected = {
+        "environment": environment,
+        "release": "dspace",
+        "namespace": "dspace",
         "applicationVersion": target["applicationVersion"],
         "runtimeSourceRevision": target["sourceRevision"],
         "frontendSourceRevision": target["sourceRevision"],
@@ -137,11 +171,13 @@ def portable(path: Path, root: Path) -> str:
     resolved = path.resolve()
     try:
         return resolved.relative_to(root.resolve()).as_posix()
-    except ValueError:
-        return resolved.as_posix()
+    except ValueError as exc:
+        raise RollbackError("values files must be inside the Sugarkube repository") from exc
 
 
-def values_evidence(config: dict[str, str], root: Path) -> tuple[list[Path], list[dict[str, str]]]:
+def stage_values(
+    config: dict[str, str], root: Path, destination: Path
+) -> tuple[list[Path], list[dict[str, str]]]:
     paths: list[Path] = []
     evidence: list[dict[str, str]] = []
     for raw in config["SUGARKUBE_VALUES"].split(","):
@@ -149,12 +185,38 @@ def values_evidence(config: dict[str, str], root: Path) -> tuple[list[Path], lis
         path = path if path.is_absolute() else root / path
         if not path.is_file() or not os.access(path, os.R_OK):
             raise RollbackError(f"values file is missing or unreadable: {raw.strip()}")
-        paths.append(path)
+        content = path.read_bytes()
+        staged = destination / f"{len(paths):02d}.yaml"
+        fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        paths.append(staged)
         evidence.append(
             {
                 "path": portable(path, root),
-                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "sha256": hashlib.sha256(content).hexdigest(),
             }
+        )
+    if not paths:
+        raise RollbackError("DSPACE values chain is empty")
+    return paths, evidence
+
+
+def values_evidence(config: dict[str, str], root: Path) -> tuple[list[Path], list[dict[str, str]]]:
+    """Compatibility helper for callers that only need current values proof."""
+    paths: list[Path] = []
+    evidence: list[dict[str, str]] = []
+    for raw in config["SUGARKUBE_VALUES"].split(","):
+        path = Path(raw.strip()).expanduser()
+        path = path if path.is_absolute() else root / path
+        if not path.is_file() or not os.access(path, os.R_OK):
+            raise RollbackError(f"values file is missing or unreadable: {raw.strip()}")
+        content = path.read_bytes()
+        paths.append(path)
+        evidence.append(
+            {"path": portable(path, root), "sha256": hashlib.sha256(content).hexdigest()}
         )
     if not paths:
         raise RollbackError("DSPACE values chain is empty")
@@ -201,7 +263,12 @@ def cluster_environment(runner: Runner, kubeconfig: str) -> str:
 
 
 def pods(
-    runner: Runner, kubeconfig: str, namespace: str, release_name: str
+    runner: Runner,
+    kubeconfig: str,
+    namespace: str,
+    release_name: str,
+    *,
+    require_any: bool = True,
 ) -> list[dict[str, Any]]:
     selector = f"app.kubernetes.io/name=dspace,app.kubernetes.io/instance={release_name}"
     value = json_command(
@@ -228,12 +295,12 @@ def pods(
         declared = {
             c.get("name"): c.get("image")
             for c in item.get("spec", {}).get("containers", [])
-            if c.get("name") == "dspace"
+            if isinstance(c, dict)
         }
         resolved = {
             c.get("name"): c.get("imageID")
             for c in status.get("containerStatuses", [])
-            if c.get("name") == "dspace"
+            if isinstance(c, dict)
         }
         result.append(
             {
@@ -248,10 +315,12 @@ def pods(
                 "terminating": metadata.get("deletionTimestamp") is not None,
                 "images": declared,
                 "imageIDs": resolved,
+                "applicationImage": declared.get("dspace"),
+                "applicationImageID": resolved.get("dspace"),
                 "ownerReferences": metadata.get("ownerReferences", []),
             }
         )
-    if not result:
+    if require_any and not result:
         raise RollbackError("no release-owned DSPACE pods were found")
     return sorted(result, key=lambda item: str(item["name"]))
 
@@ -269,16 +338,23 @@ def revision(status: dict[str, Any]) -> int:
 
 
 def summary(
-    current: dict[str, Any], current_pods: list[dict[str, Any]], target: dict[str, Any]
+    current: dict[str, Any],
+    current_pods: list[dict[str, Any]],
+    target: dict[str, Any],
+    values: list[dict[str, str]],
 ) -> str:
-    images = sorted({image for pod in current_pods for image in pod["images"].values() if image})
+    images = sorted({application_image(pod) for pod in current_pods if application_image(pod)})
     image_ids = sorted(
-        {image for pod in current_pods for image in pod["imageIDs"].values() if image}
+        {application_image_id(pod) for pod in current_pods if application_image_id(pod)}
     )
+    info = current.get("info", {})
     lines = [
         "DSPACE manifest rollback preflight:",
         (
-            f"  current: helmRevision={revision(current)} "
+            "  current: release=dspace namespace=dspace "
+            f"helmStatus={info.get('status') or 'unknown'} "
+            f"helmRevision={revision(current)} chartName="
+            f"{current.get('chart', {}).get('metadata', {}).get('name') or 'unknown'} "
             f"chartVersion={chart_version(current) or 'unknown'} chartDigest=unknown"
         ),
         (
@@ -286,11 +362,17 @@ def summary(
             f"imageIDs={','.join(image_ids) or 'unknown'}"
         ),
         (
-            f"  target:  sourceRevision={target['sourceRevision']} "
+            f"  target:  release=dspace namespace=dspace sourceRevision={target['sourceRevision']} "
             f"applicationVersion={target['applicationVersion']}"
         ),
         f"           chartVersion={target['chartVersion']} chartDigest={target['chartDigest']}",
         f"           imageTag={target['imageTag']} imageDigest={target['imageDigest']}",
+        (
+            f"           imageCoordinate={release.IMAGE_REF}:"
+            f"{target['imageTag']}@{target['imageDigest']}"
+        ),
+        f"           provider={target['expectedDefaultChatProvider']}",
+        "  values:  " + ",".join(f"{item['path']}={item['sha256']}" for item in values),
     ]
     return "\n".join(lines)
 
@@ -337,22 +419,37 @@ def verify_post_pods(
     new = {(p["uid"], p["startTime"]) for p in after}
     if changed and (old & new or old == new):
         raise RollbackError("DSPACE pod replacement was not proved")
-    expected_image = f"{release.IMAGE_REF}:{target['imageTag']}"
+    expected_image = f"{release.IMAGE_REF}:{target['imageTag']}@{target['imageDigest']}"
     for pod in after:
-        if not pod["images"] or any(image != expected_image for image in pod["images"].values()):
+        if application_image(pod) != expected_image:
             raise RollbackError("DSPACE container image coordinate does not match target")
         try:
-            resolved = {
-                release._image_id_digest(image_id or "") for image_id in pod["imageIDs"].values()
-            }
+            resolved = release._image_id_digest(application_image_id(pod) or "")
         except release.ManifestError as exc:
             raise RollbackError("DSPACE resolved image ID is invalid") from exc
-        if resolved != {target["imageDigest"]}:
+        if resolved != target["imageDigest"]:
             raise RollbackError("DSPACE resolved image ID does not match target digest")
 
 
+def application_image(pod: dict[str, Any]) -> str | None:
+    return pod.get("applicationImage", pod.get("images", {}).get("dspace"))
+
+
+def application_image_id(pod: dict[str, Any]) -> str | None:
+    return pod.get("applicationImageID", pod.get("imageIDs", {}).get("dspace"))
+
+
 def rollback(args: argparse.Namespace, runner: Runner = run) -> dict[str, Any]:
+    with tempfile.TemporaryDirectory(prefix="dspace-rollback-values-") as temporary:
+        os.chmod(temporary, 0o700)
+        return _rollback(args, runner, Path(temporary))
+
+
+def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) -> dict[str, Any]:
     started = timestamp()
+    args.manifest = args.manifest.expanduser()
+    args.evidence = args.evidence.expanduser()
+    args.verifier = args.verifier.expanduser()
     try:
         target = release.validate(release._object(args.manifest), True)
     except release.ManifestError as exc:
@@ -371,16 +468,16 @@ def rollback(args: argparse.Namespace, runner: Runner = run) -> dict[str, Any]:
         raise RollbackError("DSPACE config chart repository is not canonical")
     if config["SUGARKUBE_RELEASE"] != "dspace" or config["SUGARKUBE_NAMESPACE"] != "dspace":
         raise RollbackError("DSPACE release and namespace must both be dspace")
-    values, values_proof = values_evidence(config, root)
-    if values_proof != target["values"]:
-        raise RollbackError("configured values chain does not match finalized target evidence")
+    values, values_proof = stage_values(config, root, staged_directory)
     environment = cluster_environment(runner, args.kubeconfig)
     if environment != args.environment:
         raise RollbackError("connected cluster environment does not match selected environment")
-    capabilities = verifier_capabilities(args.verifier, runner)
+    capabilities = verifier_capabilities(
+        args.verifier, args.environment, "dspace", "dspace", runner
+    )
     coordinate = release.chart_coordinate(approved)
     helm_values = [part for path in values for part in ("--values", str(path))]
-    runner(
+    rendered_target = runner(
         [
             "helm",
             "--kubeconfig",
@@ -394,13 +491,11 @@ def rollback(args: argparse.Namespace, runner: Runner = run) -> dict[str, Any]:
             "--set-string",
             f"image.repository={release.IMAGE_REF}",
             "--set-string",
-            f"image.tag={target['imageTag']}",
-            "--set-string",
-            f"image.digest={target['imageDigest']}",
+            f"image.tag={target['imageTag']}@{target['imageDigest']}",
         ]
     )
     before_helm = helm_status(runner, args.kubeconfig, "dspace", "dspace")
-    before_pods = pods(runner, args.kubeconfig, "dspace", "dspace")
+    before_pods = pods(runner, args.kubeconfig, "dspace", "dspace", require_any=False)
     # Keep the registry proof fresh: no tag resolution occurs between this
     # exact-digest check and confirmation/reservation/mutation.
     oci = release.preflight(
@@ -413,20 +508,51 @@ def rollback(args: argparse.Namespace, runner: Runner = run) -> dict[str, Any]:
         chart_version=target["chartVersion"],
         runner=runner,
     )
-    print(summary(before_helm, before_pods, target))
-    current_images = {image for pod in before_pods for image in pod["images"].values()}
+    print(summary(before_helm, before_pods, target, values_proof))
+    current_images = {application_image(pod) for pod in before_pods if application_image(pod)}
+    current_ids: set[str] = set()
+    for pod in before_pods:
+        image_id = application_image_id(pod)
+        if not image_id:
+            continue
+        try:
+            current_ids.add(release._image_id_digest(image_id))
+        except release.ManifestError:
+            # Old state is context, not a safety assertion. Preserve malformed
+            # identities in pod evidence and recover rather than crashing.
+            current_ids.clear()
+            break
     try:
-        current_ids = {
-            release._image_id_digest(image_id)
-            for pod in before_pods
-            for image_id in pod["imageIDs"].values()
-            if image_id
-        }
-    except release.ManifestError as exc:
-        raise RollbackError("current DSPACE image ID is invalid") from exc
-    # Helm status cannot prove the installed OCI chart digest, so matching mutable
-    # metadata is insufficient to reject this recovery as an exact no-op.
+        installed_render = runner(
+            [
+                "helm",
+                "--kubeconfig",
+                args.kubeconfig,
+                "get",
+                "manifest",
+                "dspace",
+                "--namespace",
+                "dspace",
+            ]
+        )
+    except RollbackError:
+        installed_render = None
+    expected_image = f"{release.IMAGE_REF}:{target['imageTag']}@{target['imageDigest']}"
+    if (
+        installed_render is not None
+        and installed_render == rendered_target
+        and current_images == {expected_image}
+        and current_ids == {target["imageDigest"]}
+    ):
+        raise RollbackError("current rendered release is already the exact approved target")
+    # Matching chart version and image identity alone is not exact proof: Helm
+    # status cannot establish the installed OCI chart digest.
     confirmation(args.environment, args.confirm, target)
+    sugarkube_revision = runner(["git", "rev-parse", "HEAD"]).strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", sugarkube_revision):
+        raise RollbackError("could not capture the Sugarkube revision")
+    if revision(helm_status(runner, args.kubeconfig, "dspace", "dspace")) != revision(before_helm):
+        raise RollbackError("Helm revision changed during preflight")
 
     invocation = uuid.uuid4().hex
     target_fingerprint = hashlib.sha256(release._canonical(target).encode()).hexdigest()
@@ -464,6 +590,8 @@ def rollback(args: argparse.Namespace, runner: Runner = run) -> dict[str, Any]:
     reserve(args.evidence, evidence)
     mutated = False
     try:
+        if runner(["git", "rev-parse", "HEAD"]).strip() != sugarkube_revision:
+            raise RollbackError("Sugarkube revision changed before mutation")
         description = f"sugarkube-dspace-manifest-rollback:{invocation}"
         command = [
             "helm",
@@ -480,9 +608,7 @@ def rollback(args: argparse.Namespace, runner: Runner = run) -> dict[str, Any]:
             "--set-string",
             f"image.repository={release.IMAGE_REF}",
             "--set-string",
-            f"image.tag={target['imageTag']}",
-            "--set-string",
-            f"image.digest={target['imageDigest']}",
+            f"image.tag={target['imageTag']}@{target['imageDigest']}",
             "--wait",
             "--timeout",
             args.timeout,
@@ -531,7 +657,8 @@ def rollback(args: argparse.Namespace, runner: Runner = run) -> dict[str, Any]:
         changed = (
             chart_version(before_helm) != target["chartVersion"]
             or current_ids != {target["imageDigest"]}
-            or current_images != {f"{release.IMAGE_REF}:{target['imageTag']}"}
+            or current_images
+            != {f"{release.IMAGE_REF}:{target['imageTag']}@{target['imageDigest']}"}
         )
         verify_post_pods(after_pods, before_pods, target, changed)
         # Reuse finalization's strict Deployment/ReplicaSet ownership validator.
@@ -569,7 +696,7 @@ def rollback(args: argparse.Namespace, runner: Runner = run) -> dict[str, Any]:
             ],
             "DSPACE pods",
         )
-        release.finalize(
+        finalizer_proof = release.finalize(
             approved,
             after_helm,
             raw_pods,
@@ -582,13 +709,19 @@ def rollback(args: argparse.Namespace, runner: Runner = run) -> dict[str, Any]:
             namespace="dspace",
             cluster_environment=args.environment,
             invocation_description=description,
-            values=target["values"],
+            expected_image_coordinate=(
+                f"{release.IMAGE_REF}:{target['imageTag']}@{target['imageDigest']}"
+            ),
         )
         verifier_command = [
             str(args.verifier),
             "verify",
             "--environment",
             args.environment,
+            "--release",
+            "dspace",
+            "--namespace",
+            "dspace",
             "--application-version",
             target["applicationVersion"],
             "--source-revision",
@@ -597,12 +730,11 @@ def rollback(args: argparse.Namespace, runner: Runner = run) -> dict[str, Any]:
             target["expectedDefaultChatProvider"],
         ]
         verifier = validate_verifier_result(
-            json_command(runner, verifier_command, "runtime verifier"), target
+            json_command(runner, verifier_command, "runtime verifier"), target, args.environment
         )
         stable = helm_status(runner, args.kubeconfig, "dspace", "dspace")
         if revision(stable) != after_revision:
             raise RollbackError("Helm revision changed concurrently during evidence collection")
-        sugarkube_revision = runner(["git", "rev-parse", "HEAD"]).strip()
         result = {
             **evidence,
             "state": "succeeded",
@@ -620,17 +752,47 @@ def rollback(args: argparse.Namespace, runner: Runner = run) -> dict[str, Any]:
                 "oci": oci,
                 "clusterEnvironment": environment,
                 "verifierCapabilities": capabilities,
-                "runtime": verifier,
+                "finalizerChecks": finalizer_proof.get("verificationResults", []),
+                "runtime": {
+                    "applicationVersion": verifier["applicationVersion"],
+                    "sourceRevision": verifier["runtimeSourceRevision"],
+                },
+                "frontend": {"sourceRevision": verifier["frontendSourceRevision"]},
+                "provider": {"default": verifier["defaultProvider"]},
+                "journeys": verifier["journeys"],
             },
         }
         replace_reserved(args.evidence, result)
         return result
     except Exception as exc:
+        diagnostics: dict[str, Any] = {}
+        try:
+            observed_helm = helm_status(runner, args.kubeconfig, "dspace", "dspace")
+            diagnostics["helm"] = {
+                "revision": revision(observed_helm),
+                "status": observed_helm.get("info", {}).get("status"),
+            }
+        except Exception:
+            diagnostics["helm"] = "unavailable"
+        try:
+            observed_pods = pods(runner, args.kubeconfig, "dspace", "dspace", require_any=False)
+            diagnostics["pods"] = [
+                {
+                    "name": item["name"],
+                    "phase": item["phase"],
+                    "ready": item["ready"],
+                    "terminating": item["terminating"],
+                }
+                for item in observed_pods
+            ]
+        except Exception:
+            diagnostics["pods"] = "unavailable"
         evidence.update(
             state="failed",
+            failedStage="mutation-or-verification",
             failedAt=timestamp(),
             clusterMayHaveChanged=mutated,
-            diagnostic={"type": type(exc).__name__, "message": str(exc)},
+            diagnostics=diagnostics,
         )
         replace_reserved(args.evidence, evidence)
         raise RollbackError(

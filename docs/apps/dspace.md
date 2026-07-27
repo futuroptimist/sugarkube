@@ -358,13 +358,21 @@ just dspace-manifest-rollback \
 
 Before reserving evidence or changing Helm/Kubernetes state, the command checks
 cluster identity, validates the strict final manifest and fresh OCI provenance,
-loads and hashes every ordered values file, requires those hashes and paths to
-match the values chain recorded in the finalized target evidence, renders the
-digest-qualified chart,
+resolves the selected environment's complete current values chain, reads each
+file once, records its repository-relative path and SHA-256, and stages those
+exact bytes in a restricted temporary directory for both rendering and upgrade.
+Finalized records created by PR #2350 do not contain historical values
+coordinates. Consequently, rollback restores manifest-approved chart and image
+artifacts using the selected environment's current byte-bound values chain;
+historical-configuration replay is deliberately deferred. The command renders
+the digest-qualified chart,
 checks verifier capabilities, and captures current Helm and pod identity. It
 prints only non-secret current-versus-target coordinates; a current chart digest
-is reported as unknown because Helm status cannot prove it. Exact no-ops and all
-preflight or confirmation failures stop before mutation.
+is reported as unknown because Helm status cannot prove it. It rejects an exact
+no-op only when `helm get manifest` and the named `dspace` container identity
+prove equivalence to the digest-bound target render; matching version and image
+metadata alone still proceeds. All preflight or confirmation failures stop
+before mutation.
 
 After atomically reserving the unique evidence destination, the operation uses
 `helm upgrade` with the approved chart digest, complete values chain, and an
@@ -378,10 +386,12 @@ and the strict runtime/frontend/provider/public-journey result (including
 values-file hashes; it does not alter the target release record.
 
 The verifier is an executable, not a shell fragment. It must support
-`capabilities` and return schema version 1 with the exact ordered capabilities
+`capabilities` and echo the selected environment, release, and namespace with
+schema version 1 and the exact ordered capabilities
 `applicationVersion`, `runtimeSourceRevision`, `frontendSourceRevision`,
 `defaultProvider`, and `publicJourneys`. Its `verify` result must contain exactly
-those identity strings plus a non-empty list of `{name, passed}` journey objects,
+those target coordinates and identity strings plus a non-empty list of
+`{name, passed}` journey objects,
 including a passing `/chat`. Verifier output and response bodies are not echoed.
 Do not infer frontend identity from the semantic application version.
 

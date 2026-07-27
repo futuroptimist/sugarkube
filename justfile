@@ -1710,8 +1710,7 @@ app-deploy app env='staging' tag='' config='' manifest='' evidence='':
         --environment "${SUGARKUBE_ENV}" --image-tag "${SUGARKUBE_TAG}" \
         --chart-version "${chart_version}" --kubeconfig "${KUBECONFIG}" \
         --release "${SUGARKUBE_RELEASE}" --namespace "${SUGARKUBE_NAMESPACE}" \
-        --chart-ref "${SUGARKUBE_CHART}" --reservation "${evidence_reservation}" \
-        --values "${SUGARKUBE_VALUES}"
+        --chart-ref "${SUGARKUBE_CHART}" --reservation "${evidence_reservation}"
     fi
 
 # Generic upgrade-only app redeploy backed by app config files.
@@ -1772,8 +1771,7 @@ app-redeploy app env='staging' tag='' config='' manifest='' evidence='':
       python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" finalize --manifest "${release_manifest}" --output "${evidence_output}" \
         --environment "${SUGARKUBE_ENV}" --image-tag "${SUGARKUBE_TAG}" --chart-version "${chart_version}" --kubeconfig "${KUBECONFIG}" \
         --release "${SUGARKUBE_RELEASE}" --namespace "${SUGARKUBE_NAMESPACE}" \
-        --chart-ref "${SUGARKUBE_CHART}" --reservation "${evidence_reservation}" \
-        --values "${SUGARKUBE_VALUES}"
+        --chart-ref "${SUGARKUBE_CHART}" --reservation "${evidence_reservation}"
     fi
 
 # Promote an app to prod with an explicit immutable tag, or the configured prod tag file.
