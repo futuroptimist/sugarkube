@@ -80,7 +80,8 @@ class ReleaseInputs:
 
 
 def _scalar(value: str) -> str:
-    return value.split(" #", 1)[0].strip().strip("\"'")
+    scalar = value.split(" #", 1)[0].strip().strip("\"'")
+    return "" if scalar.lower() in {"null", "~"} else scalar
 
 
 def _document_field(document: str, field: str) -> str:
@@ -88,13 +89,14 @@ def _document_field(document: str, field: str) -> str:
     return _scalar(match.group(1)) if match else ""
 
 
-def _metadata(document: str) -> tuple[str, dict[str, str], dict[str, str]]:
+def _metadata(document: str) -> tuple[str, str, dict[str, str], dict[str, str]]:
     """Read the small metadata subset used by the release contract."""
     lines = document.splitlines()
     metadata_index = next((i for i, line in enumerate(lines) if line == "metadata:"), -1)
     if metadata_index < 0:
-        return "", {}, {}
+        return "", "", {}, {}
     name = ""
+    namespace = ""
     maps: dict[str, dict[str, str]] = {"labels": {}, "annotations": {}}
     section = ""
     for line in lines[metadata_index + 1 :]:
@@ -104,6 +106,8 @@ def _metadata(document: str) -> tuple[str, dict[str, str], dict[str, str]]:
         stripped = line.strip()
         if indent == 2 and stripped.startswith("name:"):
             name = _scalar(stripped.split(":", 1)[1])
+        elif indent == 2 and stripped.startswith("namespace:"):
+            namespace = _scalar(stripped.split(":", 1)[1])
         elif indent == 2 and stripped.rstrip(":") in maps:
             section = stripped.rstrip(":")
         elif indent == 4 and section and ":" in stripped:
@@ -111,7 +115,7 @@ def _metadata(document: str) -> tuple[str, dict[str, str], dict[str, str]]:
             maps[section][_scalar(key)] = _scalar(value)
         elif indent <= 2 and stripped:
             section = ""
-    return name, maps["labels"], maps["annotations"]
+    return name, namespace, maps["labels"], maps["annotations"]
 
 
 def _containers(document: str) -> list[tuple[str, str]]:
@@ -144,7 +148,7 @@ def _containers(document: str) -> list[tuple[str, str]]:
     return result
 
 
-def _nested_scalar(document: str, path: tuple[str, ...]) -> str:
+def _nested_scalar_value(document: str, path: tuple[str, ...]) -> tuple[bool, str]:
     lines = document.splitlines()
     position = 0
     minimum_indent = -1
@@ -159,14 +163,18 @@ def _nested_scalar(document: str, path: tuple[str, ...]) -> str:
             if re.match(rf"^{re.escape(component)}:\s*", stripped):
                 value = stripped.split(":", 1)[1]
                 if component == path[-1]:
-                    return _scalar(value)
+                    return True, _scalar(value)
                 position = index + 1
                 minimum_indent = indent
                 found = True
                 break
         if not found and component != path[-1]:
-            return ""
-    return ""
+            return False, ""
+    return False, ""
+
+
+def _nested_scalar(document: str, path: tuple[str, ...]) -> str:
+    return _nested_scalar_value(document, path)[1]
 
 
 def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str]:
@@ -183,8 +191,7 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
     for document in documents:
         kind = _document_field(document, "kind")
         kinds.add(kind)
-        name, labels, annotations = _metadata(document)
-        namespace = _document_field(document, "  namespace")
+        name, namespace, labels, annotations = _metadata(document)
         if namespace and namespace != inputs.namespace:
             errors.append(
                 f"rendered {kind or 'resource'} {name or '<unnamed>'} has namespace {namespace!r}"
@@ -202,7 +209,10 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
                     if container_name in candidates and image.endswith(expected_suffix):
                         correct_image = True
         if kind == "Ingress":
-            ingress_hosts.update(re.findall(r"(?m)^\s+(?:-\s+)?host:\s*([^\s#]+)", document))
+            ingress_hosts.update(
+                _scalar(host)
+                for host in re.findall(r"(?m)^\s+(?:-\s+)?host:\s*([^#]+?)\s*$", document)
+            )
         if kind == "ServiceMonitor":
             service_monitors.append(document)
     if not workloads:
@@ -436,12 +446,14 @@ def expected_ingress_host(values: tuple[str, ...], explicit: str) -> str:
             text = path.read_text(encoding="utf-8")
         except OSError:
             continue  # Helm reports missing/unreadable values files with the authoritative error.
-        resolved = _nested_scalar(text, ("ingress", "host"))
-        if resolved:
+        found, resolved = _nested_scalar_value(text, ("ingress", "host"))
+        if found:
             host = resolved
-        resolved_enabled = _nested_scalar(text, ("ingress", "enabled"))
-        if resolved_enabled:
+        found, resolved_enabled = _nested_scalar_value(text, ("ingress", "enabled"))
+        if found:
             enabled = resolved_enabled.lower()
+    if enabled == "true" and not host:
+        raise SystemExit("ERROR: ingress.enabled is true but no nonempty ingress.host was resolved.")
     return host if enabled != "false" else ""
 
 
@@ -452,10 +464,12 @@ def resolved_values_scalar(values: tuple[str, ...], path_parts: tuple[str, ...])
         if not path.is_absolute():
             path = REPO_ROOT / path
         try:
-            candidate = _nested_scalar(path.read_text(encoding="utf-8"), path_parts)
+            found, candidate = _nested_scalar_value(
+                path.read_text(encoding="utf-8"), path_parts
+            )
         except OSError:
             continue
-        if candidate:
+        if found:
             resolved = candidate
     return resolved
 

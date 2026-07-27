@@ -793,6 +793,51 @@ def test_generic_render_contract_rejects_structural_mismatches(manifest: str, me
     assert any(message in error for error in app_chart.validate_rendered_manifest(manifest, inputs))
 
 
+def test_render_contract_normalizes_quoted_host_and_scopes_namespace_to_metadata() -> None:
+    manifest = _generic_manifest(host='"sample.example.test"')
+    manifest = manifest.replace("spec:\n  template:", "spec:\n  namespace: unrelated\n  template:")
+    inputs = app_chart.ReleaseInputs(
+        "sample",
+        "staging",
+        "sample",
+        "sample",
+        "oci://example/charts/sample",
+        "1.0.0",
+        (),
+        "main-deadbee",
+        "sample.example.test",
+    )
+
+    assert app_chart.validate_rendered_manifest(manifest, inputs) == []
+
+
+def test_values_null_overlay_clears_inherited_scalars(tmp_path: Path) -> None:
+    base = tmp_path / "base.yaml"
+    overlay = tmp_path / "overlay.yaml"
+    base.write_text(
+        "ingress:\n  enabled: true\n  host: inherited.example.test\n"
+        "metrics:\n  auth:\n    existingSecret: inherited\n",
+        encoding="utf-8",
+    )
+    overlay.write_text(
+        "ingress:\n  enabled: false\n  host: null\n"
+        "metrics:\n  auth:\n    existingSecret: ~\n",
+        encoding="utf-8",
+    )
+    values = (str(base), str(overlay))
+
+    assert app_chart.expected_ingress_host(values, "") == ""
+    assert app_chart.resolved_values_scalar(values, ("metrics", "auth", "existingSecret")) == ""
+
+
+def test_enabled_ingress_requires_resolved_host(tmp_path: Path) -> None:
+    values = tmp_path / "values.yaml"
+    values.write_text("ingress:\n  enabled: true\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit, match="no nonempty ingress.host"):
+        app_chart.expected_ingress_host((str(values),), "")
+
+
 def test_dspace_render_contract_requires_resources_and_validates_metrics() -> None:
     inputs = app_chart.ReleaseInputs(
         "dspace",
@@ -3325,6 +3370,7 @@ def test_tokenplace_compat_wrappers_propagate_explicit_matching_env(
             "main-deadbee",
             "",
             "env=staging",
+            "host=example.test",
         ],
         generic_app_stub_env,
     )
@@ -3332,6 +3378,33 @@ def test_tokenplace_compat_wrappers_propagate_explicit_matching_env(
     assert result.returncode == 0, result.stderr + result.stdout
     helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
     assert "upgrade tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace" in helm_log
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_tokenplace_compat_wrapper_custom_release_still_runs_onboarded_preflight(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    result = _run_just(
+        [
+            "tokenplace-deploy",
+            "tokenplace-staging",
+            "tokenplace",
+            "oci://ghcr.io/futuroptimist/charts/tokenplace",
+            "docs/examples/tokenplace.values.dev.yaml",
+            "docs/apps/tokenplace.version",
+            "",
+            "main-deadbee",
+            "",
+            "env=staging",
+            "host=example.test",
+        ],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
+    assert "template tokenplace-staging " in helm_log
+    assert "upgrade tokenplace-staging " in helm_log
 
 
 @pytest.mark.usefixtures("ensure_just_available")
