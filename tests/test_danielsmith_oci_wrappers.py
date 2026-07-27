@@ -59,6 +59,46 @@ printf '%s\n' "$*" >> {str(log_path)!r}
 if [ "${{1:-}}" = "-n" ] && [ "${{3:-}}" = "status" ]; then
   printf 'STATUS: deployed\n'
 fi
+if [ "${{1:-}}" = show ]; then
+  printf 'apiVersion: v2\nname: danielsmith\nversion: 0.1.0\n'
+  exit 0
+fi
+if [ "${{1:-}}" = template ]; then
+  [ "${{SUGARKUBE_STUB_TEMPLATE_FAIL:-}}" != 1 ] || {{ echo 'render failed' >&2; exit 42; }}
+  tag=''
+  host=staging.danielsmith.io
+  previous=''
+  for argument in "$@"; do
+    [ "$previous" != --set ] || {{
+      case "$argument" in image.tag=*) tag="${{argument#image.tag=}}" ;; esac
+    }}
+    [[ "$argument" != *danielsmith.values.prod.yaml ]] || host=danielsmith.io
+    previous="$argument"
+  done
+  cat <<YAML
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: danielsmith
+  labels:
+    app.kubernetes.io/instance: danielsmith
+spec:
+  template:
+    spec:
+      containers:
+        - name: danielsmith
+          image: ghcr.io/futuroptimist/danielsmith:${{tag}}
+---
+kind: Ingress
+metadata:
+  name: danielsmith
+  labels:
+    app.kubernetes.io/instance: danielsmith
+spec:
+  rules:
+    - host: "${{host}}"
+YAML
+fi
 exit 0
 """,
     )
@@ -97,6 +137,7 @@ def test_danielsmith_oci_deploy_normalizes_named_tag(
     helm_log = Path(danielsmith_oci_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
     assert "--set image.tag=main-deadbee" in helm_log
     assert "--set image.tag=tag=main-deadbee" not in helm_log
+    assert helm_log.index("template danielsmith ") < helm_log.index("upgrade danielsmith ")
 
 
 @pytest.mark.usefixtures("ensure_just_available")
@@ -171,3 +212,15 @@ def test_danielsmith_oci_promote_prod_guard_mismatch_fails_before_helm(
     assert "requested env=prod" in result.stderr
     helm_log_path = Path(env["HELM_LOG"])
     assert not helm_log_path.exists() or helm_log_path.read_text(encoding="utf-8") == ""
+
+
+def test_danielsmith_render_failure_is_terminal(
+    danielsmith_oci_stub_env: dict[str, str],
+) -> None:
+    env = danielsmith_oci_stub_env.copy()
+    env["SUGARKUBE_STUB_TEMPLATE_FAIL"] = "1"
+    result = _run_just(["danielsmith-oci-deploy", "env=staging", "tag=main-deadbee"], env)
+    assert result.returncode != 0
+    helm_log = Path(env["HELM_LOG"]).read_text(encoding="utf-8")
+    assert "template danielsmith " in helm_log
+    assert "upgrade danielsmith " not in helm_log

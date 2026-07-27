@@ -42,15 +42,18 @@ adds its single-application-container metadata contract.
 
 A render or structural-validation failure is terminal: no Helm upgrade/install,
 Kubernetes mutation, rollout action, or DSPACE evidence reservation/finalization is
-performed. The generic `helm-oci-install` and `helm-oci-upgrade` helpers infer known
-release names or accept `app=` explicitly, so compatibility wrappers cannot bypass
-the gate. Their isolated non-onboarded-chart compatibility mode prints a warning and
-does not constitute approval of a chart default as an application release.
+performed. The generic `helm-oci-install` and `helm-oci-upgrade` helpers recognize
+canonical onboarded chart coordinates or accept `app=` explicitly, reject conflicting
+identities, and require an immutable tag. Compatibility wrappers always pass their
+identity, including with custom release names; there is no public render-skip mode.
+Standard app paths perform exactly one render. DSPACE orders manifest validation and
+digest resolution, render and validation, evidence reservation, Helm mutation, and
+evidence finalization; no render occurs after reservation.
 
 Upgrade currently retains `--reuse-values`. Therefore this gate validates the
 repository-controlled proposed inputs but does not claim to reproduce Helm's
 historical value merge. Removing `--reuse-values` remains the explicit follow-up in
-issue #2324.
+issue #2324. This PR deliberately does not change or remove `--reuse-values`.
 
 ### DSPACE recovery exception
 

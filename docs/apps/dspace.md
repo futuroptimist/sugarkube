@@ -374,6 +374,14 @@ prove equivalence to the digest-bound target render; matching version and image
 metadata alone still proceeds. All preflight or confirmation failures stop
 before mutation.
 
+The normal guarded deploy and redeploy sequence is likewise strict: approved
+manifest validation and digest resolution, one exact-release render and structural
+validation, evidence reservation, Helm mutation, then evidence finalization. No
+render occurs after reservation. A render or validation failure is terminal and
+creates no reservation, Helm mutation, Kubernetes rollout call, or final evidence.
+Steady-state upgrade still uses `--reuse-values`; removing it is explicitly deferred
+to #2324 and is not part of this change.
+
 After atomically reserving the unique evidence destination, the operation uses
 `helm upgrade` with the approved chart digest, complete values chain, and an
 application image reference pinned by both its immutable tag and approved digest.

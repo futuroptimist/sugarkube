@@ -161,6 +161,10 @@ fi
 if [[ "$*" == show\ chart* ]]; then
   if [[ "$*" == *"charts/dspace"* ]]; then
     version="${{*: -1}}"
+    if [[ "$version" == oci://*@sha256:* ]]; then
+      version=3.1.0
+      [ "${{SUGARKUBE_STUB_NODE_ENV:-staging}}" != prod ] || version=3.0.1
+    fi
     printf 'apiVersion: v2\nname: dspace\nversion: %s\nappVersion: main-abcdef0\n' "$version"
     exit 0
   fi
@@ -515,12 +519,14 @@ def test_tokenplace_meta_failure_rejects_invalid_or_missing_metadata(
 
 def test_app_chart_parse_chart_yaml_strips_quotes_and_ignores_nested_lines() -> None:
     assert app_chart.parse_chart_yaml(
-        "apiVersion: v2\nname: \"tokenplace\"\n  nested: ignored\ndigest: 'sha256:abc'\n"
+        "apiVersion: v2\nname: \"tokenplace\"\ndigest: 'sha256:abc'\n"
     ) == {
         "apiVersion": "v2",
         "name": "tokenplace",
         "digest": "sha256:abc",
     }
+    with pytest.raises(ValueError):
+        app_chart.parse_chart_yaml("name: tokenplace\n  malformed: nesting\n")
 
 
 def test_app_chart_latest_version_reports_unsupported_registry(
@@ -744,6 +750,8 @@ def _generic_manifest(
 kind: Ingress
 metadata:
   name: {release}
+  labels:
+    app.kubernetes.io/instance: {release}
 spec:
   rules:
     - host: {host}
@@ -862,10 +870,14 @@ def test_dspace_render_contract_requires_resources_and_validates_metrics() -> No
 kind: Service
 metadata:
   name: dspace
+  labels:
+    app.kubernetes.io/instance: dspace
 ---
 kind: ServiceMonitor
 metadata:
   name: dspace
+  labels:
+    app.kubernetes.io/instance: dspace
 spec:
   endpoints:
     - port: http
