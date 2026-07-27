@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -22,6 +23,44 @@ REQUIRED_ENVS = {
     ]
 }
 SEMVER_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:-([^+]+))?(?:\+.*)?$")
+WORKLOAD_KINDS = {"Deployment", "StatefulSet", "DaemonSet"}
+
+
+@dataclass(frozen=True)
+class ReleaseInputs:
+    """Normalized inputs shared by the read-only render and Helm mutation paths."""
+
+    app: str
+    env: str
+    release: str
+    namespace: str
+    chart: str
+    version: str
+    values: tuple[str, ...]
+    tag: str
+    host: str = ""
+    pull_policy: str = "Always"
+
+    @property
+    def digest_chart(self) -> bool:
+        return "@sha256:" in self.chart
+
+    def helm_value_args(self) -> list[str]:
+        result: list[str] = []
+        for value_file in self.values:
+            result += ["-f", value_file]
+        if self.host:
+            result += ["--set", f"ingress.host={self.host}"]
+        result += ["--set", f"image.tag={self.tag}"]
+        if self.pull_policy:
+            result += ["--set", f"image.pullPolicy={self.pull_policy}"]
+        return result
+
+    def template_command(self) -> list[str]:
+        result = ["helm", "template", self.release, self.chart, "--namespace", self.namespace]
+        if self.version and not self.digest_chart:
+            result += ["--version", self.version]
+        return result + self.helm_value_args()
 
 
 def version_file_path(path: str) -> Path:
@@ -45,7 +84,141 @@ def run(args: list[str]) -> subprocess.CompletedProcess[str]:
 
 
 def helm_show(chart: str, version: str) -> subprocess.CompletedProcess[str]:
-    return run(["helm", "show", "chart", chart, "--version", version])
+    command = ["helm", "show", "chart", chart]
+    if version and "@sha256:" not in chart:
+        command += ["--version", version]
+    return run(command)
+
+
+def yaml_documents(text: str) -> list[dict[str, object]]:
+    """Parse Helm YAML through Ruby's standard YAML library (already a repo prerequisite)."""
+    parsed = subprocess.run(
+        [
+            "ruby",
+            "-ryaml",
+            "-rjson",
+            "-e",
+            "puts JSON.generate(YAML.load_stream(STDIN.read).compact)",
+        ],
+        input=text,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if parsed.returncode != 0:
+        raise ValueError("rendered output is not valid YAML")
+    value = json.loads(parsed.stdout)
+    return [doc for doc in value if isinstance(doc, dict)]
+
+
+def _release_coherent(doc: dict[str, object], release: str) -> bool:
+    metadata = doc.get("metadata") if isinstance(doc.get("metadata"), dict) else {}
+    labels = metadata.get("labels") if isinstance(metadata.get("labels"), dict) else {}
+    annotations = (
+        metadata.get("annotations") if isinstance(metadata.get("annotations"), dict) else {}
+    )
+    return any(
+        str(value) == release
+        for value in (
+            labels.get("app.kubernetes.io/instance"),
+            labels.get("release"),
+            annotations.get("meta.helm.sh/release-name"),
+        )
+    )
+
+
+def validate_render(docs: list[dict[str, object]], inputs: ReleaseInputs) -> str:
+    context = (
+        f"app={inputs.app} env={inputs.env} release={inputs.release} "
+        f"namespace={inputs.namespace} chart={inputs.chart} version={inputs.version or '<digest>'}"
+    )
+    for doc in docs:
+        metadata = doc.get("metadata") if isinstance(doc.get("metadata"), dict) else {}
+        namespace = metadata.get("namespace")
+        if namespace is not None and str(namespace) != inputs.namespace:
+            return (
+                f"wrong explicit namespace {namespace!r}; expected {inputs.namespace!r} ({context})"
+            )
+    workloads = [doc for doc in docs if doc.get("kind") in WORKLOAD_KINDS]
+    if not workloads:
+        return f"no rollout-capable application workload rendered ({context})"
+    coherent = [doc for doc in workloads if _release_coherent(doc, inputs.release)]
+    if not coherent:
+        return f"no workload is coherently associated with the Helm release ({context})"
+    expected_suffix = ":" + inputs.tag
+    image_matches = False
+    for workload in coherent:
+        spec = workload.get("spec") if isinstance(workload.get("spec"), dict) else {}
+        template = spec.get("template") if isinstance(spec.get("template"), dict) else {}
+        pod_spec = template.get("spec") if isinstance(template.get("spec"), dict) else {}
+        containers = (
+            pod_spec.get("containers") if isinstance(pod_spec.get("containers"), list) else []
+        )
+        candidates = {inputs.app, inputs.release, *APP_CONTAINER_NAMES.get(inputs.app, set())}
+        for container in containers:
+            if not isinstance(container, dict) or str(container.get("name", "")) not in candidates:
+                continue
+            image = str(container.get("image", ""))
+            if image.endswith(expected_suffix) and image.rsplit(":", 1)[-1] == inputs.tag:
+                image_matches = True
+    if not image_matches:
+        return (
+            f"intended application container does not use expected tag {inputs.tag!r} ({context})"
+        )
+    if inputs.host:
+        hosts: list[str] = []
+        for doc in docs:
+            if doc.get("kind") != "Ingress":
+                continue
+            spec = doc.get("spec") if isinstance(doc.get("spec"), dict) else {}
+            for rule in spec.get("rules", []) if isinstance(spec.get("rules"), list) else []:
+                if isinstance(rule, dict) and rule.get("host") is not None:
+                    hosts.append(str(rule["host"]))
+        if inputs.host not in hosts:
+            return f"configured ingress host {inputs.host!r} did not render exactly ({context})"
+    return ""
+
+
+def validate_dspace(docs: list[dict[str, object]], inputs: ReleaseInputs) -> str:
+    kinds = {str(doc.get("kind", "")) for doc in docs}
+    for kind in ("Deployment", "Service"):
+        if kind not in kinds:
+            return f"DSPACE intended {kind} did not render"
+    if inputs.host and "Ingress" not in kinds:
+        return "DSPACE intended Ingress did not render"
+    monitors = [doc for doc in docs if doc.get("kind") == "ServiceMonitor"]
+    for monitor in monitors:
+        spec = monitor.get("spec") if isinstance(monitor.get("spec"), dict) else {}
+        endpoints = spec.get("endpoints") if isinstance(spec.get("endpoints"), list) else []
+        if not endpoints or any(
+            not isinstance(endpoint, dict)
+            or not isinstance(endpoint.get("bearerTokenSecret"), dict)
+            or not str(endpoint["bearerTokenSecret"].get("name", "")).strip()
+            or not str(endpoint["bearerTokenSecret"].get("key", "")).strip()
+            for endpoint in endpoints
+        ):
+            return "DSPACE ServiceMonitor authentication reference is incomplete"
+    rendered = json.dumps(docs)
+    if inputs.env == "prod" and (
+        monitors or "dspace-staging-metrics-token" in rendered or "sugarkube-int" in rendered
+    ):
+        return "DSPACE staging metrics configuration leaked into production"
+    if inputs.env == "staging" and not monitors:
+        return "DSPACE staging authenticated ServiceMonitor did not render"
+    return ""
+
+
+def expected_host(values: tuple[str, ...]) -> str:
+    """Resolve ingress.enabled/host using the ordered repository values chain."""
+    ingress: dict[str, object] = {}
+    for value_file in values:
+        path = version_file_path(value_file)
+        if not path.is_file():
+            continue
+        docs = yaml_documents(path.read_text(encoding="utf-8"))
+        if docs and isinstance(docs[0].get("ingress"), dict):
+            ingress.update(docs[0]["ingress"])
+    return str(ingress.get("host", "")) if ingress.get("enabled") is True else ""
 
 
 def parse_chart_yaml(text: str) -> dict[str, str]:
@@ -292,27 +465,41 @@ def cmd_preflight(args: argparse.Namespace) -> int:
     if show.returncode != 0:
         print(show.stderr or show.stdout, file=sys.stderr)
         return show.returncode or 1
-    req = REQUIRED_ENVS.get(args.app, [])
-    if not req:
-        return 0
-    cmd = [
-        "helm",
-        "template",
+    value_files = tuple(filter(None, (v.strip() for v in args.values.split(","))))
+    resolved_host = getattr(args, "host", "") or expected_host(value_files)
+    inputs = ReleaseInputs(
+        args.app,
+        args.env,
         args.release,
-        args.chart,
-        "--namespace",
         args.namespace,
-        "--version",
+        args.chart,
         version,
-    ]
-    for vf in filter(None, (v.strip() for v in args.values.split(","))):
-        cmd += ["-f", vf]
-    if args.tag:
-        cmd += ["--set", f"image.tag={args.tag}", "--set", "image.pullPolicy=Always"]
-    tmpl = run(cmd)
+        value_files,
+        args.tag,
+        resolved_host,
+        getattr(args, "pull_policy", "Always"),
+    )
+    tmpl = run(inputs.template_command())
     if tmpl.returncode != 0:
         print(tmpl.stderr or tmpl.stdout, file=sys.stderr)
         return tmpl.returncode or 1
+    try:
+        docs = yaml_documents(tmpl.stdout)
+    except (ValueError, json.JSONDecodeError) as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 1
+    generic_error = validate_render(docs, inputs)
+    if generic_error:
+        print(f"ERROR: {generic_error}", file=sys.stderr)
+        return 1
+    if args.app == "dspace":
+        dspace_error = validate_dspace(docs, inputs)
+        if dspace_error:
+            print(f"ERROR: {dspace_error}", file=sys.stderr)
+            return 1
+    req = REQUIRED_ENVS.get(args.app, [])
+    if not req:
+        return 0
     app_container_env_sets = deployment_app_container_env_sets(tmpl.stdout, args.app, args.release)
     complete_envs = next(
         (
@@ -358,6 +545,8 @@ def main() -> int:
             s.add_argument("--release", required=True)
             s.add_argument("--namespace", required=True)
             s.add_argument("--version", default="")
+            s.add_argument("--host", default="")
+            s.add_argument("--pull-policy", default="Always")
     a = p.parse_args()
     return {"status": cmd_status, "bump": cmd_bump, "preflight": cmd_preflight}[a.cmd](a)
 

@@ -270,6 +270,24 @@ roll back a release. Use `just cluster-env-detect` to inspect the current
 read-only identity. `app-chart-bump` remains cluster-independent because it only
 validates a public OCI chart and edits the repository pin.
 
+Every onboarded application mutation also has a terminal, read-only render gate.
+Immediately before mutation, Sugarkube runs `helm template` with the requested
+release and namespace, the environment-resolved chart version (or the approved
+digest-qualified DSPACE chart coordinate without `--version`), the complete
+ordered values-file chain, explicit host override, immutable image tag, and pull
+policy that Helm will consume. It then validates the rendered workload's Helm
+release identity, namespace, intended application-container tag, and configured
+Ingress host; application-specific DSPACE and token.place checks are additive.
+A render or contract failure performs no Helm or kubectl mutation and, for
+DSPACE, occurs before evidence reservation or finalization.
+
+The central `helm-oci-install` and `helm-oci-upgrade` helpers enforce the same
+gate when their release identifies an onboarded app. Their tag-less low-level
+mode is reserved for genuinely generic, non-onboarded charts and must not be
+used by app recipes. This gate renders repository-controlled proposed inputs;
+it does not reproduce historical `--reuse-values` merging. Removing
+`--reuse-values` remains the separate follow-up in #2324.
+
 ```bash
 # Deploy or install a specific immutable candidate into an environment.
 just app-deploy app=dspace env=staging tag=main-REPLACE_SHORTSHA \

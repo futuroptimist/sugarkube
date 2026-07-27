@@ -11,8 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts import app_chart
-from scripts import app_verify
+from scripts import app_chart, app_verify
 from scripts import dspace_release_manifest as release_manifest
 from scripts.app_verify import base_url_from_host, tokenplace_meta_failure
 
@@ -151,11 +150,32 @@ if [[ "$*" == show\ chart* ]]; then
   exit 0
 fi
 if [[ "$*" == template* ]]; then
+  rendered_release="${{2}}"
+  rendered_container="${{rendered_release}}"
+  rendered_tag=main-deadbee
+  [ "${{rendered_release}}" != tokenplace ] || rendered_container=relay
+  [ "${{rendered_release}}" != dspace ] || rendered_tag=main-abcdef0
   if [ "${{SUGARKUBE_STUB_HELM_TEMPLATE_MISSING_META:-}}" = "1" ]; then
     printf 'apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: tokenplace
+  labels:
+    app.kubernetes.io/instance: tokenplace
+spec:
+  template:
+    spec:
+      containers:
+        - name: relay
+          image: ghcr.io/example/tokenplace:main-deadbee
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tokenplace
+spec:
+  rules:
+    - host: staging.token.place
 '
   elif [ "${{SUGARKUBE_STUB_HELM_TEMPLATE_COMMENT_META:-}}" = "1" ]; then
     printf '# TOKENPLACE_IMAGE_TAG TOKENPLACE_RELEASE_VERSION TOKENPLACE_CHART_VERSION TOKENPLACE_DEPLOY_ENV
@@ -167,6 +187,8 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: tokenplace
+  labels:
+    app.kubernetes.io/instance: tokenplace
 spec:
   template:
     spec:
@@ -179,17 +201,28 @@ spec:
             - name: TOKENPLACE_RELEASE_VERSION
             - name: TOKENPLACE_CHART_VERSION
             - name: TOKENPLACE_DEPLOY_ENV
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tokenplace
+spec:
+  rules:
+    - host: staging.token.place
 '
   else
     printf 'apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: tokenplace
+  name: %s
+  labels:
+    app.kubernetes.io/instance: %s
 spec:
   template:
     spec:
       containers:
-        - name: relay
+        - name: %s
+          image: ghcr.io/example/%s:%s
           env:
             - name: TOKENPLACE_IMAGE_TAG
             - name: TOKENPLACE_RELEASE_VERSION
@@ -198,7 +231,14 @@ spec:
         - name: metrics-sidecar
           env:
             - name: SIDECAR_ONLY
-'
+' "${{rendered_release}}" "${{rendered_release}}" "${{rendered_container}}" "${{rendered_release}}" "${{rendered_tag}}"
+    if [ "${{rendered_release}}" = dspace ]; then
+      printf '%s\n' '---' 'apiVersion: v1' 'kind: Service' 'metadata:' '  name: dspace'
+    fi
+    printf '%s\n' '---' 'apiVersion: networking.k8s.io/v1' 'kind: Ingress' 'metadata:' "  name: ${{rendered_release}}" 'spec:' '  rules:' '    - host: staging.danielsmith.io' '    - host: danielsmith.io' '    - host: staging.democratized.space' '    - host: democratized.space' '    - host: prod.democratized.space' '    - host: staging.token.place' '    - host: token.place' '    - host: staging.jobbot3000.tech' '    - host: jobbot3000.example.test'
+    if [ "${{rendered_release}}" = dspace ] && [[ "$*" == *staging.yaml* ]]; then
+      printf '%s\n' '---' 'apiVersion: monitoring.coreos.com/v1' 'kind: ServiceMonitor' 'metadata:' '  name: dspace' 'spec:' '  endpoints:' '    - bearerTokenSecret:' '        name: dspace-staging-metrics-token' '        key: token'
+    fi
   fi
   exit 0
 fi
@@ -308,7 +348,7 @@ exit "${{curl_exit}}"
     )
     _write_executable(
         bin_dir / "oras",
-        f'''#!/usr/bin/env python3
+        f"""#!/usr/bin/env python3
 import json
 import os
 import sys
@@ -337,7 +377,7 @@ elif args[:2] == ["blob", "fetch"]:
 else:
     raise SystemExit("unexpected oras command: " + " ".join(args))
 print(json.dumps(value))
-''',
+""",
     )
 
     env = os.environ.copy()
@@ -557,7 +597,7 @@ def test_app_chart_cmd_bump_adds_pin_when_file_has_only_comments(
     assert "just app-deploy app=tokenplace env=staging tag=<APP_TAG>" in capsys.readouterr().out
 
 
-def test_app_chart_cmd_preflight_skips_manifest_render_for_apps_without_required_envs(
+def test_app_chart_cmd_preflight_renders_apps_without_specialized_metadata(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     args = argparse.Namespace(
@@ -580,11 +620,29 @@ def test_app_chart_cmd_preflight_skips_manifest_render_for_apps_without_required
     monkeypatch.setattr(
         app_chart,
         "run",
-        lambda cmd: calls.append(cmd[0]) or subprocess.CompletedProcess(cmd, 0, "", ""),
+        lambda cmd: calls.append(cmd[1])
+        or subprocess.CompletedProcess(
+            cmd,
+            0,
+            """apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: danielsmith
+  labels:
+    app.kubernetes.io/instance: danielsmith
+spec:
+  template:
+    spec:
+      containers:
+        - name: danielsmith
+          image: ghcr.io/futuroptimist/danielsmith.io:main-deadbee
+""",
+            "",
+        ),
     )
 
     assert app_chart.cmd_preflight(args) == 0
-    assert calls == []
+    assert calls == ["template"]
     assert "app: danielsmith" in capsys.readouterr().out
 
 
@@ -666,7 +724,7 @@ def test_app_chart_cmd_preflight_reports_missing_app_container_envs(
         lambda cmd: subprocess.CompletedProcess(
             cmd,
             0,
-            "apiVersion: apps/v1\nkind: Deployment\nspec:\n  template:\n    spec:\n      containers:\n        - name: relay\n          env:\n            - name: TOKENPLACE_IMAGE_TAG\n",
+            "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  labels:\n    app.kubernetes.io/instance: tokenplace\nspec:\n  template:\n    spec:\n      containers:\n        - name: relay\n          image: ghcr.io/example/tokenplace:main-deadbee\n          env:\n            - name: TOKENPLACE_IMAGE_TAG\n",
             "",
         ),
     )
@@ -705,11 +763,15 @@ def test_app_chart_cmd_preflight_rejects_envs_split_across_candidate_containers(
             0,
             "apiVersion: apps/v1\n"
             "kind: Deployment\n"
+            "metadata:\n"
+            "  labels:\n"
+            "    app.kubernetes.io/instance: tokenplace\n"
             "spec:\n"
             "  template:\n"
             "    spec:\n"
             "      containers:\n"
             "        - name: relay\n"
+            "          image: ghcr.io/example/tokenplace:main-deadbee\n"
             "          env:\n"
             "            - name: TOKENPLACE_IMAGE_TAG\n"
             "            - name: TOKENPLACE_RELEASE_VERSION\n"
@@ -846,7 +908,7 @@ def test_app_chart_cmd_preflight_passes_when_relay_envs_present(
         lambda cmd: subprocess.CompletedProcess(
             cmd,
             0,
-            "apiVersion: apps/v1\nkind: Deployment\nspec:\n  template:\n    spec:\n      containers:\n        - name: relay\n          env:\n            - name: TOKENPLACE_IMAGE_TAG\n            - name: TOKENPLACE_RELEASE_VERSION\n            - name: TOKENPLACE_CHART_VERSION\n            - name: TOKENPLACE_DEPLOY_ENV\n",
+            "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  labels:\n    app.kubernetes.io/instance: tokenplace\nspec:\n  template:\n    spec:\n      containers:\n        - name: relay\n          image: ghcr.io/example/tokenplace:main-deadbee\n          env:\n            - name: TOKENPLACE_IMAGE_TAG\n            - name: TOKENPLACE_RELEASE_VERSION\n            - name: TOKENPLACE_CHART_VERSION\n            - name: TOKENPLACE_DEPLOY_ENV\n",
             "",
         ),
     )
@@ -1417,7 +1479,9 @@ def test_dspace_oci_deploy_wrapper_propagates_inline_chart_pin(
     assert not Path(env["HELM_LOG"]).exists()
 
 
-def _write_dspace_candidate(path: Path, environment: str, *, image_digest: str | None = None) -> None:
+def _write_dspace_candidate(
+    path: Path, environment: str, *, image_digest: str | None = None
+) -> None:
     path.write_text(
         json.dumps(
             {
@@ -1481,9 +1545,7 @@ def test_dspace_guarded_deploy_orders_preflight_mutation_and_finalization(
     assert "--description sugarkube-release-manifest:" in mutation_line
     commands = (tmp_path / "commands.log").read_text(encoding="utf-8").splitlines()
     preflight = next(i for i, line in enumerate(commands) if line.startswith("oras "))
-    mutation = next(
-        i for i, line in enumerate(commands) if line.startswith("helm upgrade ")
-    )
+    mutation = next(i for i, line in enumerate(commands) if line.startswith("helm upgrade "))
     collection = next(i for i, line in enumerate(commands) if " status dspace" in line)
     pods = next(i for i, line in enumerate(commands) if " -n dspace get pods" in line)
     assert preflight < mutation < collection < pods
@@ -1514,9 +1576,7 @@ def test_dspace_guarded_redeploy_installs_approved_chart_digest(
     coordinate = "oci://ghcr.io/democratizedspace/charts/dspace@sha256:" + "2" * 64
     mutation_line = next(
         line
-        for line in Path(generic_app_stub_env["HELM_LOG"])
-        .read_text(encoding="utf-8")
-        .splitlines()
+        for line in Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8").splitlines()
         if line.startswith("upgrade ")
     )
     assert coordinate in mutation_line
@@ -1581,9 +1641,7 @@ def test_dspace_reservation_collision_stops_before_helm(
     assert result.returncode != 0
     assert "already reserved" in result.stderr
     helm_log = Path(generic_app_stub_env["HELM_LOG"])
-    assert not helm_log.exists() or "upgrade " not in helm_log.read_text(
-        encoding="utf-8"
-    )
+    assert not helm_log.exists() or "upgrade " not in helm_log.read_text(encoding="utf-8")
 
 
 @pytest.mark.usefixtures("ensure_just_available")
@@ -1888,8 +1946,7 @@ def test_jobbot3000_example_config_resolves_all_env_values() -> None:
             "docs/examples/jobbot3000.values.staging.yaml"
         ),
         "prod": (
-            "docs/examples/jobbot3000.values.dev.yaml,"
-            "docs/examples/jobbot3000.values.prod.yaml"
+            "docs/examples/jobbot3000.values.dev.yaml," "docs/examples/jobbot3000.values.prod.yaml"
         ),
     }
 
@@ -1939,9 +1996,7 @@ def test_jobbot3000_runbook_first_staging_deploy_is_concrete_and_blocks_prod() -
     assert "http://traefik.kube-system.svc.cluster.local:80" in runbook
     assert "just app-config app=jobbot3000 env=staging" in runbook
     assert "just app-chart-status app=jobbot3000" in runbook
-    assert (
-        "just app-deploy app=jobbot3000 env=staging tag=main-b3e6df1a4f68" in runbook
-    )
+    assert "just app-deploy app=jobbot3000 env=staging tag=main-b3e6df1a4f68" in runbook
     assert "just app-status app=jobbot3000 env=staging" in runbook
     assert "just app-verify app=jobbot3000 env=staging" in runbook
     assert "Production promotion is explicitly blocked until staging is verified" in runbook
@@ -2566,7 +2621,9 @@ def test_app_cors_verify_main_reports_preflight_status_and_header_failures(
     rc, _out, err, _calls = _run_app_cors_main(
         monkeypatch,
         capsys,
-        responses=[(0, "204", {"access-control-allow-origin": ["https://cors-smoke.invalid"]}, b"", "")],
+        responses=[
+            (0, "204", {"access-control-allow-origin": ["https://cors-smoke.invalid"]}, b"", "")
+        ],
     )
 
     assert rc == 1
@@ -2608,7 +2665,13 @@ def test_app_cors_verify_main_reports_actual_cors_and_body_failures(
         capsys,
         responses=[
             (0, "204", _cors_headers(), b"", ""),
-            (0, "400", _cors_headers({"access-control-allow-origin": ["https://evil.test"]}), b'{"error":{}}', ""),
+            (
+                0,
+                "400",
+                _cors_headers({"access-control-allow-origin": ["https://evil.test"]}),
+                b'{"error":{}}',
+                "",
+            ),
         ],
     )
 
@@ -2668,7 +2731,9 @@ def test_app_cors_verify_main_rejects_bad_expected_status_config(
 
     assert excinfo.value.code == 2
     captured = capsys.readouterr()
-    assert "SUGARKUBE_CORS_VERIFY_EXPECTED_STATUSES must be comma-separated integers" in captured.err
+    assert (
+        "SUGARKUBE_CORS_VERIFY_EXPECTED_STATUSES must be comma-separated integers" in captured.err
+    )
 
     with pytest.raises(SystemExit) as excinfo:
         _run_app_cors_main(
@@ -2679,7 +2744,9 @@ def test_app_cors_verify_main_rejects_bad_expected_status_config(
 
     assert excinfo.value.code == 2
     captured = capsys.readouterr()
-    assert "SUGARKUBE_CORS_VERIFY_EXPECTED_STATUSES must include at least one integer" in captured.err
+    assert (
+        "SUGARKUBE_CORS_VERIFY_EXPECTED_STATUSES must include at least one integer" in captured.err
+    )
 
 
 def test_app_cors_verify_header_parsing_helpers() -> None:
@@ -2792,6 +2859,7 @@ def test_app_cors_verify_run_curl_defaults_blank_status_and_missing_files(
     assert body == b""
     assert stderr == ""
 
+
 @pytest.mark.usefixtures("ensure_just_available")
 @pytest.mark.parametrize("recipe", ["helm-oci-install", "helm-oci-upgrade"])
 def test_direct_helm_oci_helpers_require_requested_env_before_helm(
@@ -2851,6 +2919,7 @@ def test_direct_helm_oci_helper_accepts_inline_semver_with_prerelease_and_build(
             "namespace=tokenplace",
             "chart=oci://ghcr.io/futuroptimist/charts/tokenplace",
             "version=1.2.3-rc.1+build.5",
+            "tag=main-deadbee",
             "env=staging",
         ],
         generic_app_stub_env,
@@ -2859,8 +2928,7 @@ def test_direct_helm_oci_helper_accepts_inline_semver_with_prerelease_and_build(
     assert result.returncode == 0, result.stderr + result.stdout
     helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
     assert (
-        "show chart oci://ghcr.io/futuroptimist/charts/tokenplace "
-        "--version 1.2.3-rc.1+build.5"
+        "show chart oci://ghcr.io/futuroptimist/charts/tokenplace " "--version 1.2.3-rc.1+build.5"
     ) in helm_log
     assert "upgrade tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace" in helm_log
 
@@ -2978,6 +3046,7 @@ def test_direct_helm_oci_helper_matching_env_succeeds(
             "namespace=tokenplace",
             "chart=oci://ghcr.io/futuroptimist/charts/tokenplace",
             "version_file=docs/apps/tokenplace.version",
+            "tag=main-deadbee",
             "env=staging",
         ],
         generic_app_stub_env,
@@ -3002,6 +3071,7 @@ def test_direct_helm_oci_helper_uses_digest_coordinate_without_version(
             "namespace=tokenplace",
             f"chart={coordinate}",
             "version=0.1.3",
+            "tag=main-deadbee",
             "env=staging",
         ],
         generic_app_stub_env,
@@ -3013,7 +3083,6 @@ def test_direct_helm_oci_helper_uses_digest_coordinate_without_version(
     mutation = next(line for line in lines if line.startswith("upgrade "))
     assert coordinate in mutation
     assert "--version" not in mutation
-
 
 
 @pytest.mark.usefixtures("ensure_just_available")
@@ -3119,6 +3188,7 @@ def test_tokenplace_rollback_sugarkube_env_invocation_remains_guarded(
     helm_log_path = Path(env["HELM_LOG"])
     assert not helm_log_path.exists() or helm_log_path.read_text(encoding="utf-8") == ""
 
+
 @pytest.mark.usefixtures("ensure_just_available")
 def test_app_deploy_guard_mismatch_fails_before_helm(generic_app_stub_env: dict[str, str]) -> None:
     env = generic_app_stub_env.copy()
@@ -3131,7 +3201,9 @@ def test_app_deploy_guard_mismatch_fails_before_helm(generic_app_stub_env: dict[
 
 
 @pytest.mark.usefixtures("ensure_just_available")
-def test_app_redeploy_guard_staging_requested_prod_detected_fails_before_helm(generic_app_stub_env: dict[str, str]) -> None:
+def test_app_redeploy_guard_staging_requested_prod_detected_fails_before_helm(
+    generic_app_stub_env: dict[str, str],
+) -> None:
     env = generic_app_stub_env.copy()
     env["SUGARKUBE_STUB_NODE_ENV"] = "prod"
     result = _run_just(["app-redeploy", "app=jobbot3000", "env=staging", "tag=main-deadbee"], env)
