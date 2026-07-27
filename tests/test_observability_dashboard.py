@@ -57,9 +57,10 @@ def test_dashboard_identity_defaults_rows_and_required_panels(dashboard):
     titles = {panel["title"] for panel in panels}
     for title in (
         "DSPACE scrape availability",
-        "DSPACE instrumentation status",
-        "Public endpoint availability",
-        "Request rate by route and status class",
+        "Instrumentation health",
+        "Public availability summary",
+        "User request rate by route and status class",
+        "Operational request rate",
         "Status-class distribution",
         "5xx error ratio",
         "HTTP latency percentiles",
@@ -110,6 +111,45 @@ def test_snapshot_tables_use_instant_queries(dashboard):
     organize = next(item for item in build["transformations"] if item["id"] == "organize")
     assert organize["options"]["indexByName"] == {"pod": 0, "version": 1, "revision": 2}
     assert organize["options"]["excludeByName"] == {"Time": True, "Value": True}
+
+
+def test_selected_window_traffic_and_availability_semantics(dashboard):
+    panels = {panel["title"]: panel for panel in all_panels(dashboard)}
+
+    distribution = panels["Status-class distribution"]
+    assert distribution["type"] == "piechart"
+    assert all(
+        target.get("instant") is True and target.get("range") is False
+        for target in distribution["targets"]
+    )
+    assert "increase(" in distribution["targets"][0]["expr"]
+    assert "$__range" in distribution["targets"][0]["expr"]
+    colors = {
+        override["matcher"]["options"]: override["properties"][0]["value"]["fixedColor"]
+        for override in distribution["fieldConfig"]["overrides"]
+    }
+    assert colors == {"2xx": "green", "4xx": "orange", "5xx": "red"}
+
+    user_expression = panels["User request rate by route and status class"]["targets"][0]["expr"]
+    operational_expression = panels["Operational request rate"]["targets"][0]["expr"]
+    assert 'route!~"/(healthz|livez|metrics)"' in user_expression
+    assert 'route=~"/(healthz|livez|metrics)"' in operational_expression
+
+    summary = panels["Public availability summary"]
+    assert len(summary["targets"]) == 2
+    assert all(
+        target["instant"] is True and target["range"] is False for target in summary["targets"]
+    )
+    assert {target["legendFormat"] for target in summary["targets"]} == {
+        "Healthy endpoints",
+        "Failed endpoints",
+    }
+    assert summary["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
+    assert panels["Endpoint matrix"]["type"] == "table"
+
+    variables = {item["name"]: item for item in dashboard["templating"]["list"]}
+    assert variables["app"]["label"] == "Probe application"
+    assert variables["route"]["label"] == "Probe route"
 
 
 def test_blackbox_queries_drop_raw_target_labels(dashboard):
@@ -262,6 +302,34 @@ def test_validator_rejects_wrong_dashboard_mount(tmp_path, dashboard, mount_path
         (lambda item: item.update(links=[{"url": "https://example.invalid"}]), "raw URLs"),
         (lambda item: item.update(description="${DS_PROMETHEUS}"), "datasource placeholder"),
         (lambda item: item.update(datasource={"uid": "unexpected"}), "datasource references"),
+        (
+            lambda item: next(
+                panel for panel in item["panels"] if panel["title"] == "Status-class distribution"
+            )["targets"][0].update(instant=False, range=True),
+            "instant selected-window query",
+        ),
+        (
+            lambda item: next(
+                panel
+                for panel in item["panels"]
+                if panel["title"] == "User request rate by route and status class"
+            )["targets"][0].update(
+                expr='sum(rate(dspace_http_requests_total{environment=~"$environment"}[5m]))'
+            ),
+            "exclude operational routes",
+        ),
+        (
+            lambda item: next(
+                panel for panel in item["panels"] if panel["title"] == "Public availability summary"
+            ).update(targets=[]),
+            "two-value instant aggregate summary",
+        ),
+        (
+            lambda item: next(
+                panel for panel in item["panels"] if panel["title"] == "Endpoint matrix"
+            ).update(title="Removed matrix"),
+            "exactly one 'Endpoint matrix' panel",
+        ),
     ],
 )
 def test_validator_directly_rejects_unsafe_dashboard_sources(
