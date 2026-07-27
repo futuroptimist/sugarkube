@@ -41,7 +41,7 @@
       },
       {
         "name": "app",
-        "label": "Application",
+        "label": "Probe application",
         "type": "query",
         "datasource": {
           "type": "prometheus",
@@ -62,7 +62,7 @@
       },
       {
         "name": "route",
-        "label": "Route",
+        "label": "Probe route",
         "type": "query",
         "datasource": {
           "type": "prometheus",
@@ -153,7 +153,7 @@
     {
       "id": 3,
       "type": "stat",
-      "title": "DSPACE instrumentation status",
+      "title": "Instrumentation health",
       "description": "Application instrumentation self-check.",
       "datasource": {
         "type": "prometheus",
@@ -204,8 +204,8 @@
     {
       "id": 4,
       "type": "stat",
-      "title": "Public endpoint availability",
-      "description": "Latest bounded public probe result.",
+      "title": "Public availability summary",
+      "description": "Aggregate latest probe results for the selected filters. Zero healthy and zero failed indicates missing probe data.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -219,52 +219,69 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "min by (environment, app, route) (probe_success{environment=~\"$environment\",app=~\"$app\",route=~\"$route\"})",
-          "legendFormat": "{{environment}} / {{app}} / {{route}}"
+          "expr": "count(probe_success{environment=~\"$environment\",app=~\"$app\",route=~\"$route\"} == 1)",
+          "legendFormat": "Healthy endpoints",
+          "instant": true,
+          "range": false
+        },
+        {
+          "refId": "B",
+          "expr": "count(probe_success{environment=~\"$environment\",app=~\"$app\",route=~\"$route\"} == 0)",
+          "legendFormat": "Failed endpoints",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "percentunit",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Healthy endpoints"
+            },
+            "properties": [
               {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "green",
-                "value": 1
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
               }
             ]
           },
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "0": {
-                  "text": "FAILED",
-                  "color": "red"
-                },
-                "1": {
-                  "text": "UP",
-                  "color": "green"
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Failed endpoints"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
                 }
               }
-            }
-          ]
-        },
-        "overrides": []
+            ]
+          }
+        ]
       },
       "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom"
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
         },
-        "tooltip": {
-          "mode": "multi"
-        }
+        "orientation": "horizontal",
+        "textMode": "value_and_name",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
       }
     },
     {
@@ -282,22 +299,22 @@
     {
       "id": 6,
       "type": "timeseries",
-      "title": "Request rate by route and status class",
-      "description": "Bounded route templates and status classes only.",
+      "title": "User request rate by route and status class",
+      "description": "Application traffic only; operational health and metrics routes are shown separately.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 8,
         "x": 0,
         "y": 7
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (route, status_class) (rate(dspace_http_requests_total{environment=~\"$environment\"}[$__rate_interval]))",
+          "expr": "sum by (route, status_class) (rate(dspace_http_requests_total{environment=~\"$environment\",route!~\"/healthz|/livez|/metrics\"}[$__rate_interval]))",
           "legendFormat": "{{route}} {{status_class}}"
         }
       ],
@@ -319,7 +336,7 @@
     },
     {
       "id": 7,
-      "type": "barchart",
+      "type": "piechart",
       "title": "Status-class distribution",
       "description": "Requests in the selected range grouped by bounded status class.",
       "datasource": {
@@ -328,20 +345,119 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
+        "w": 8,
+        "x": 8,
         "y": 7
       },
       "targets": [
         {
           "refId": "A",
           "expr": "sum by (status_class) (increase(dspace_http_requests_total{environment=~\"$environment\"}[$__range]))",
-          "legendFormat": "{{status_class}}"
+          "legendFormat": "{{status_class}}",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "2xx"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "4xx"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "5xx"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "pieType": "pie",
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "values": [
+            "value",
+            "percent"
+          ]
+        }
+      }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Operational request rate",
+      "description": "Traffic to bounded health and metrics routes, separated from user activity.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (route, status_class) (rate(dspace_http_requests_total{environment=~\"$environment\",route=~\"/healthz|/livez|/metrics\"}[$__rate_interval]))",
+          "legendFormat": "{{route}} {{status_class}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
         },
         "overrides": []
       },

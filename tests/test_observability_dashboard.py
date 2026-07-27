@@ -57,9 +57,10 @@ def test_dashboard_identity_defaults_rows_and_required_panels(dashboard):
     titles = {panel["title"] for panel in panels}
     for title in (
         "DSPACE scrape availability",
-        "DSPACE instrumentation status",
-        "Public endpoint availability",
-        "Request rate by route and status class",
+        "Instrumentation health",
+        "Public availability summary",
+        "User request rate by route and status class",
+        "Operational request rate",
         "Status-class distribution",
         "5xx error ratio",
         "HTTP latency percentiles",
@@ -110,6 +111,41 @@ def test_snapshot_tables_use_instant_queries(dashboard):
     organize = next(item for item in build["transformations"] if item["id"] == "organize")
     assert organize["options"]["indexByName"] == {"pod": 0, "version": 1, "revision": 2}
     assert organize["options"]["excludeByName"] == {"Time": True, "Value": True}
+
+
+def test_dashboard_separates_traffic_and_uses_aggregate_window_summaries(dashboard):
+    panels = {panel["title"]: panel for panel in all_panels(dashboard)}
+    distribution = panels["Status-class distribution"]
+    assert distribution["type"] == "piechart"
+    assert distribution["targets"][0]["instant"] is True
+    assert distribution["targets"][0]["range"] is False
+    assert "sum by (status_class)" in distribution["targets"][0]["expr"]
+    assert "[$__range]" in distribution["targets"][0]["expr"]
+    colors = {
+        override["matcher"]["options"]: override["properties"][0]["value"]["fixedColor"]
+        for override in distribution["fieldConfig"]["overrides"]
+    }
+    assert colors == {"2xx": "green", "4xx": "orange", "5xx": "red"}
+
+    user_query = panels["User request rate by route and status class"]["targets"][0]["expr"]
+    operational_query = panels["Operational request rate"]["targets"][0]["expr"]
+    assert 'route!~"/healthz|/livez|/metrics"' in user_query
+    assert 'route=~"/healthz|/livez|/metrics"' in operational_query
+
+    summary = panels["Public availability summary"]
+    assert len(summary["targets"]) == 2
+    assert {target["legendFormat"] for target in summary["targets"]} == {
+        "Healthy endpoints",
+        "Failed endpoints",
+    }
+    assert all(
+        target["instant"] is True and target["range"] is False for target in summary["targets"]
+    )
+    assert all(" by (" not in target["expr"] for target in summary["targets"])
+    assert "Endpoint matrix" in panels
+    variables = {item["name"]: item for item in dashboard["templating"]["list"]}
+    assert variables["app"]["label"] == "Probe application"
+    assert variables["route"]["label"] == "Probe route"
 
 
 def test_blackbox_queries_drop_raw_target_labels(dashboard):
@@ -261,6 +297,12 @@ def test_validator_rejects_wrong_dashboard_mount(tmp_path, dashboard, mount_path
         ),
         (lambda item: item.update(links=[{"url": "https://example.invalid"}]), "raw URLs"),
         (lambda item: item.update(description="${DS_PROMETHEUS}"), "datasource placeholder"),
+        (
+            lambda item: replace_metric_expression(
+                item, "process_resident_memory_bytes", 'process_resident_memory_bytes{user=~".*"}'
+            ),
+            "privacy-sensitive or unbounded label",
+        ),
         (lambda item: item.update(datasource={"uid": "unexpected"}), "datasource references"),
     ],
 )

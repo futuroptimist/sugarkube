@@ -27,6 +27,7 @@ REQUIRED_METRICS = {
     "probe_ssl_earliest_cert_expiry",
 }
 EVENT_METRICS = {"dspace_dchat_requests_total", "dspace_dependency_requests_total"}
+PROBE_SELECTOR = 'probe_success{environment=~"$environment",app=~"$app",route=~"$route"}'
 
 
 def load_dashboard(path: Path) -> dict:
@@ -64,6 +65,7 @@ def validate_dashboard(path: Path) -> str:
         if isinstance(target, dict) and isinstance(target.get("expr"), str)
     ]
     expression_text = "\n".join(expressions)
+    panel_by_title = {panel.get("title"): panel for panel in panels(dashboard)}
     missing = sorted(metric for metric in REQUIRED_METRICS if metric not in expression_text)
     if missing:
         raise SystemExit(
@@ -73,6 +75,55 @@ def validate_dashboard(path: Path) -> str:
         matching = [expr for expr in expressions if metric in expr]
         if not matching or any("or on() vector(0)" not in expr for expr in matching):
             raise SystemExit(f"ERROR: event-driven metric {metric} must use a safe zero fallback.")
+    distribution = panel_by_title.get("Status-class distribution", {})
+    distribution_targets = distribution.get("targets", [])
+    if (
+        distribution.get("type") != "piechart"
+        or len(distribution_targets) != 1
+        or distribution_targets[0].get("instant") is not True
+        or distribution_targets[0].get("range") is not False
+        or "sum by (status_class)" not in distribution_targets[0].get("expr", "")
+        or "[$__range]" not in distribution_targets[0].get("expr", "")
+    ):
+        raise SystemExit(
+            "ERROR: status-class distribution must be an instant selected-window "
+            "categorical summary."
+        )
+    user_traffic = panel_by_title.get("User request rate by route and status class", {})
+    user_expressions = [target.get("expr", "") for target in user_traffic.get("targets", [])]
+    if len(user_expressions) != 1 or 'route!~"/healthz|/livez|/metrics"' not in user_expressions[0]:
+        raise SystemExit("ERROR: user request rate must exclude operational health routes.")
+    operational = panel_by_title.get("Operational request rate", {})
+    operational_expressions = [target.get("expr", "") for target in operational.get("targets", [])]
+    if (
+        len(operational_expressions) != 1
+        or 'route=~"/healthz|/livez|/metrics"' not in operational_expressions[0]
+    ):
+        raise SystemExit("ERROR: operational health-route traffic must remain visible separately.")
+    availability = panel_by_title.get("Public availability summary", {})
+    availability_targets = availability.get("targets", [])
+    if (
+        availability.get("type") != "stat"
+        or len(availability_targets) != 2
+        or any(
+            target.get("instant") is not True
+            or target.get("range") is not False
+            or PROBE_SELECTOR not in target.get("expr", "")
+            or " by (" in target.get("expr", "")
+            for target in availability_targets
+        )
+    ):
+        raise SystemExit(
+            "ERROR: public availability must be a two-value instant aggregate using probe filters."
+        )
+    endpoint_matrix = panel_by_title.get("Endpoint matrix", {})
+    if endpoint_matrix.get("type") != "table" or not endpoint_matrix.get("targets"):
+        raise SystemExit("ERROR: detailed endpoint matrix must remain available for diagnosis.")
+    variables = {item.get("name"): item for item in dashboard.get("templating", {}).get("list", [])}
+    if variables.get("app", {}).get("label") != "Probe application" or variables.get(
+        "route", {}
+    ).get("label") != "Probe route":
+        raise SystemExit("ERROR: blackbox variable labels must identify probe filters.")
     serialized = json.dumps(dashboard)
     if re.search(r"https?://", serialized, re.IGNORECASE):
         raise SystemExit("ERROR: dashboard must not contain embedded raw URLs.")
@@ -82,6 +133,12 @@ def validate_dashboard(path: Path) -> str:
         raise SystemExit(
             "ERROR: dashboard contains a datasource placeholder or unsafe raw target label."
         )
+    if re.search(
+        r"(?:\{|,)\s*(?:user|session|request_id|prompt|response|instance)\s*(?:=|=~|!~|!=)"
+        r"|\bby\s*\([^)]*\b(?:user|session|request_id|prompt|response|instance)\b",
+        expression_text,
+    ):
+        raise SystemExit("ERROR: dashboard query uses a privacy-sensitive or unbounded label.")
     datasource_refs = re.findall(r'"uid":\s*"([^"]+)"', serialized)
     if DATASOURCE_UID not in datasource_refs or any(
         uid not in {DATASOURCE_UID, UID} for uid in datasource_refs

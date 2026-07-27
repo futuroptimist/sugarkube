@@ -242,6 +242,14 @@ These are provisional until staging data establishes normal behavior. They are n
 
 DSPACE has `/healthz` and `/livez` support in Docker/Helm/runbooks, release workflows for GHCR image and chart publication, and an app-local `/metrics` implementation and monitoring scaffold in the public repo. Sugarkube currently verifies `/config.json`, `/healthz`, and `/livez` through app runbooks and the shared app contract.
 
+The staging dashboard treats DSPACE request traffic and public probes as separate operator signals.
+The primary request-rate chart excludes `/healthz`, `/livez`, and `/metrics`, while a compact chart
+retains those operational routes. Status classes are an instant categorical total over the selected
+window, not a rising range-query series. Public availability is summarized as aggregate healthy and
+failed endpoint counts for the selected probe filters; zero healthy and zero failed means probe data
+is missing, and the endpoint matrix remains the per-route diagnostic view. The visible probe controls
+are labeled **Probe application** and **Probe route** so they are not mistaken for DSPACE HTTP filters.
+
 ### Design requirements for DSPACE v3.1.0 release gate
 
 Minimum gate for DSPACE v3.1.0:
