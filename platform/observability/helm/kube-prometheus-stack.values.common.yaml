@@ -48,6 +48,18 @@ grafana:
     nodePort: 30300
   serviceMonitor:
     selfMonitor: true
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: sugarkube
+          orgId: 1
+          folder: Sugarkube
+          type: file
+          disableDeletion: true
+          editable: false
+          options:
+            path: /var/lib/grafana/dashboards/sugarkube
 alertmanager:
   service:
     type: ClusterIP

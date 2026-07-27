@@ -9,6 +9,7 @@ VERSION = ROOT / "platform" / "observability" / "helm" / "kube-prometheus-stack.
 COMMON = ROOT / "platform" / "observability" / "helm" / "kube-prometheus-stack.values.common.yaml"
 STAGING = ROOT / "clusters" / "staging" / "observability" / "kube-prometheus-stack.values.yaml"
 SCRIPT = ROOT / "scripts" / "observability_helm.sh"
+DASHBOARD = ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
 JUSTFILE = ROOT / "justfile"
 FLUX_SYNC = ROOT / "flux" / "gotk-sync.yaml"
 LEGACY = [
@@ -80,9 +81,18 @@ def test_grafana_alertmanager_k3s_monitor_values_are_guarded():
 
 def test_no_production_values_or_public_exposure_or_credentials_added():
     assert STAGING.exists()
-    assert not (ROOT / "clusters" / "prod" / "observability" / "kube-prometheus-stack.values.yaml").exists()
+    assert not (
+        ROOT / "clusters" / "prod" / "observability" / "kube-prometheus-stack.values.yaml"
+    ).exists()
     text = COMMON.read_text(encoding="utf-8") + STAGING.read_text(encoding="utf-8")
-    forbidden = ["longhorn", "cloudflare", "IngressRoute", "kind: Ingress", "password:", "adminPassword"]
+    forbidden = [
+        "longhorn",
+        "cloudflare",
+        "IngressRoute",
+        "kind: Ingress",
+        "pass" + "word:",
+        "admin" + "Pass" + "word",
+    ]
     for needle in forbidden:
         assert needle not in text
     assert "30300" in text
@@ -97,9 +107,17 @@ def test_discovery_contract_uses_release_label():
 
 def test_lifecycle_uses_pinned_version_ordered_values_and_no_reuse_values():
     script = SCRIPT.read_text(encoding="utf-8")
-    assert 'VERSION_FILE="${ROOT}/platform/observability/helm/kube-prometheus-stack.version"' in script
-    assert 'COMMON_VALUES="${ROOT}/platform/observability/helm/kube-prometheus-stack.values.common.yaml"' in script
-    assert 'STAGING_VALUES="${ROOT}/clusters/staging/observability/kube-prometheus-stack.values.yaml"' in script
+    assert (
+        'VERSION_FILE="${ROOT}/platform/observability/helm/kube-prometheus-stack.version"' in script
+    )
+    assert (
+        'COMMON_VALUES="${ROOT}/platform/observability/helm/kube-prometheus-stack.values.common.yaml"'
+        in script
+    )
+    assert (
+        'STAGING_VALUES="${ROOT}/clusters/staging/observability/kube-prometheus-stack.values.yaml"'
+        in script
+    )
     assert 'CHART="prometheus-community/kube-prometheus-stack"' in script
     assert '--version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}"' in script
     assert "--reuse-values" not in script
@@ -126,7 +144,7 @@ def test_unsupported_env_and_context_mismatch_fail_before_mutation():
     script = SCRIPT.read_text(encoding="utf-8")
     assert "prod|production" in script
     assert "production observability is not yet codified" in script
-    assert 'expected \'sugar-staging\'' in script
+    assert "expected 'sugar-staging'" in script
     assert script.index("assert_context") < script.index("helm install")
     assert script.index("assert_context") < script.index("helm upgrade")
 
@@ -134,8 +152,15 @@ def test_unsupported_env_and_context_mismatch_fail_before_mutation():
 def test_status_and_verify_are_read_only():
     script = SCRIPT.read_text(encoding="utf-8")
     status = re.search(r"status\(\).*?\nverify\(", script, re.S).group(0)
-    verify = re.search(r"verify\(\).*?\n\ncmd=", script, re.S).group(0)
-    mutating = [" helm install", " helm upgrade", "kubectl apply", "kubectl create", "kubectl patch", "kubectl delete"]
+    verify = re.search(r"verify\(\).*?\n\ndashboard_verify\(", script, re.S).group(0)
+    mutating = [
+        " helm install",
+        " helm upgrade",
+        "kubectl apply",
+        "kubectl create",
+        "kubectl patch",
+        "kubectl delete",
+    ]
     for body in (status, verify):
         for token in mutating:
             assert token not in body
@@ -147,7 +172,7 @@ def test_status_and_verify_are_read_only():
     assert "|| true" not in verify
     assert "verify_dspace_targets" in verify
     assert 'all(target.get("health") == "up" for target in dspace)' in script
-    assert 'require_tools kubectl python3' in script.split("verify_dspace_targets()", 1)[1]
+    assert "require_tools kubectl python3" in script.split("verify_dspace_targets()", 1)[1]
     assert '--request-timeout="${request_timeout}" --raw' in script
 
 
@@ -159,6 +184,7 @@ def test_justfile_exposes_observability_recipes():
         "observability-upgrade",
         "observability-status",
         "observability-verify",
+        "observability-dashboard-verify",
     ):
         assert f"{recipe} env=''" in text
         assert f"scripts/observability_helm.sh {recipe.removeprefix('observability-')}" in text
@@ -176,15 +202,9 @@ def test_legacy_flux_resources_are_absent_from_reconciliation_graph():
     platform = (ROOT / "platform" / "observability" / "kustomization.yaml").read_text(
         encoding="utf-8"
     )
-    staging = (ROOT / "clusters" / "staging" / "kustomization.yaml").read_text(
-        encoding="utf-8"
-    )
-    development = (ROOT / "clusters" / "dev" / "kustomization.yaml").read_text(
-        encoding="utf-8"
-    )
-    production = (ROOT / "clusters" / "prod" / "kustomization.yaml").read_text(
-        encoding="utf-8"
-    )
+    staging = (ROOT / "clusters" / "staging" / "kustomization.yaml").read_text(encoding="utf-8")
+    development = (ROOT / "clusters" / "dev" / "kustomization.yaml").read_text(encoding="utf-8")
+    production = (ROOT / "clusters" / "prod" / "kustomization.yaml").read_text(encoding="utf-8")
     assert "kube-prometheus-stack.yaml" not in platform
     assert "kube-prometheus-stack-values.yaml" not in platform
     assert "patches/kube-prometheus-stack-values.yaml" not in development
@@ -226,7 +246,13 @@ def run_helper(
 echo "helm $*" >> "$AUDIT"
 case "$*" in
   *"repo add"*|*"repo update"*) exit 0 ;;
-  *template*) [ "$HELM_MODE" != render-fail ] || exit 31; echo rendered; exit 0 ;;
+  *template*)
+    [ "$HELM_MODE" != render-fail ] || exit 31
+    printf '%s\n' 'apiVersion: v1' 'kind: ConfigMap' 'metadata:' '  name: kube-prometheus-stack-grafana-dashboards-sugarkube' '  labels:' '    dashboard-provider: sugarkube' 'data:' '  sugarkube-staging-observability.json:' '    |-'
+    sed 's/^/      /' "$DASHBOARD"
+    printf '%s\n' '---' 'kind: ConfigMap' 'data:' '  dashboardproviders.yaml: |' '    providers:' '      - name: sugarkube' '        options:' '          path: /var/lib/grafana/dashboards/sugarkube' '---' 'kind: Deployment' 'spec:' '  template:' '    spec:' '      containers:' '        - volumeMounts:' '            - name: dashboards-sugarkube' '              mountPath: /var/lib/grafana/dashboards/sugarkube/sugarkube-staging-observability.json' '              subPath: sugarkube-staging-observability.json'
+    exit 0
+    ;;
   *list*) [ "$HELM_MODE" != query-fail ] || exit 32; [ "$HELM_MODE" = present ] && echo kube-prometheus-stack; exit 0 ;;
   *) exit 0 ;;
 esac
@@ -284,14 +310,20 @@ esac
         "TARGET_RESPONSE_DELAY": target_response_delay,
         "SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_ATTEMPTS": retry_attempts,
         "SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_INTERVAL_SECONDS": retry_interval,
+        "DASHBOARD": str(
+            ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
+        ),
     }
     if target_responses is not None:
         responses = tmp_path / "target-responses"
         if any(isinstance(response, bytes) for response in target_responses):
-            responses.write_bytes(b"\n".join(
-                response if isinstance(response, bytes) else response.encode()
-                for response in target_responses
-            ) + b"\n")
+            responses.write_bytes(
+                b"\n".join(
+                    response if isinstance(response, bytes) else response.encode()
+                    for response in target_responses
+                )
+                + b"\n"
+            )
         else:
             responses.write_text("\n".join(target_responses) + "\n", encoding="utf-8")
         env["TARGET_RESPONSES"] = str(responses)
@@ -326,7 +358,9 @@ def test_fallback_secret_scanner_allows_only_complete_placeholders():
 
 
 def test_pre_mutation_guards_are_fail_closed(tmp_path):
-    unsupported = subprocess.run(["bash", str(SCRIPT), "install", "env=prod"], capture_output=True, text=True, check=False)
+    unsupported = subprocess.run(
+        ["bash", str(SCRIPT), "install", "env=prod"], capture_output=True, text=True, check=False
+    )
     assert unsupported.returncode != 0
     mismatch, audit = run_helper(tmp_path / "mismatch", "install", context="other")
     assert mismatch.returncode != 0 and "helm install" not in audit
@@ -448,8 +482,9 @@ def test_verify_diagnostics_only_emit_sanitized_scalar_strings(tmp_path):
         "pass" + "word=",
     )
     targets = [
-        dspace_target("down", pod=f"{marker} POD_SENTINEL_{index}",
-                      scrape=f"{marker} SCRAPE_SENTINEL_{index}")
+        dspace_target(
+            "down", pod=f"{marker} POD_SENTINEL_{index}", scrape=f"{marker} SCRAPE_SENTINEL_{index}"
+        )
         for index, marker in enumerate(markers)
     ]
     targets[0]["lastError"] = "Bearer ERROR_SECRET_SENTINEL"
@@ -460,8 +495,15 @@ def test_verify_diagnostics_only_emit_sanitized_scalar_strings(tmp_path):
     assert result.returncode != 0
     assert result.stderr.count('"<redacted>"') >= 10 and '"health": "down"' in result.stderr
     for forbidden in (
-        "POD_SENTINEL", "SCRAPE_SENTINEL", "ERROR_SECRET_SENTINEL", "NESTED_SECRET_SENTINEL",
-        "INSTANCE_SECRET_SENTINEL", "authorization", "activeTargets", "Traceback", "raw",
+        "POD_SENTINEL",
+        "SCRAPE_SENTINEL",
+        "ERROR_SECRET_SENTINEL",
+        "NESTED_SECRET_SENTINEL",
+        "INSTANCE_SECRET_SENTINEL",
+        "authorization",
+        "activeTargets",
+        "Traceback",
+        "raw",
     ):
         assert forbidden not in result.stderr
 
@@ -494,7 +536,9 @@ def test_verify_missing_and_non_string_health_fail_immediately(tmp_path):
         target = dict(matching)
         if name != "missing":
             target["health"] = value
-        result, audit = run_helper(tmp_path / name, "verify", target_responses=[target_response(target)])
+        result, audit = run_helper(
+            tmp_path / name, "verify", target_responses=[target_response(target)]
+        )
         assert result.returncode != 0
         assert audit.count(" --raw ") == 1 and "sleep " not in audit
         assert "health must be a string" in result.stderr and "Traceback" not in result.stderr
@@ -557,9 +601,159 @@ def test_verify_request_duration_reduces_cadence_delay(tmp_path):
 def test_verify_deadline_uses_latest_safe_diagnostics_without_extra_request(tmp_path):
     target = dspace_target("down", pod="dspace-safe")
     result, audit = run_helper(
-        tmp_path, "verify", target_responses=[target_response(target)], retry_attempts="1",
-        retry_interval="1", target_response_delay="1.05"
+        tmp_path,
+        "verify",
+        target_responses=[target_response(target)],
+        retry_attempts="1",
+        retry_interval="1",
+        target_response_delay="1.05",
     )
     assert result.returncode != 0 and audit.count(" --raw ") == 1
     assert '"pod": "dspace-safe"' in result.stderr and '"health": "down"' in result.stderr
     assert "activeTargets" not in result.stderr and "Traceback" not in result.stderr
+
+
+def run_dashboard_verifier(tmp_path, mode="success", context="sugar-staging"):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(parents=True)
+    audit = tmp_path / "audit"
+    pid_file = tmp_path / "port-forward.terminated"
+    (bin_dir / "kubectl").write_text(
+        """#!/bin/sh
+echo "kubectl $*" >> "$AUDIT"
+case "$*" in
+  "config current-context") echo "$CONTEXT" ;;
+  *"get nodes -o json"*) echo '{"items":[{"metadata":{"name":"n1","labels":{"sugarkube.env":"staging","sugarkube.cluster":"sugar-staging"}}}]}' ;;
+  *"get secret grafana-admin-credentials"*"admin-user"*)
+    [ "$MODE" != forward-exits-after-ready ] || { touch "$READY_SECRET"; /bin/sleep 0.2; }
+    [ "$MODE" != secret-missing ] || exit 41
+    [ "$MODE" != secret-malformed ] || { printf not-base64; exit; }
+    printf admin | base64 ;;
+  *"get secret grafana-admin-credentials"*"admin-pass""word"*) printf placeholder | base64 ;;
+  *"port-forward"*)
+    [ "$MODE" != forward-fail ] || exit 42
+    echo 'Forwarding from 127.0.0.1:43127 -> 80'
+    echo $$ > "$FORWARD_PID"
+    trap 'echo terminated > "$PID_FILE"; exit 0' TERM INT
+    if [ "$MODE" = forward-exits-after-ready ]; then
+      while [ ! -f "$READY_SECRET" ]; do /bin/sleep 0.01; done
+      echo terminated > "$PID_FILE"
+      exit 0
+    fi
+    if [ "$MODE" != success ]; then
+      /bin/sleep 0.2
+      echo terminated > "$PID_FILE"
+      exit 0
+    fi
+    while :; do /bin/sleep 1; done
+    ;;
+esac
+""",
+        encoding="utf-8",
+    )
+    (bin_dir / "curl").write_text(
+        """#!/bin/sh
+echo "curl $*" >> "$AUDIT"
+case "$*" in *"http://127.0.0.1:43127/"*) ;; *) exit 51 ;; esac
+[ -f "$TMPDIR"/sugarkube-grafana-verify.*/netrc ] || exit 52
+[ "$MODE" = success ] || /bin/sleep 0.3
+case "$MODE" in
+  auth401) printf '%s\n%s\n' '{"message":"redacted"}' 401 ;;
+  auth403) printf '%s\n%s\n' '{"message":"redacted"}' 403 ;;
+  malformed-api) printf '%s\n%s\n' '{' 200 ;;
+  wrong-api) printf '%s\n%s\n' '{"dashboard":{"uid":"wrong","title":"wrong"}}' 200 ;;
+  interrupt) exit 143 ;;
+  *) printf '%s\n%s\n' '{"dashboard":{"uid":"sugarkube-staging-observability","title":"Sugarkube Staging Observability"}}' 200 ;;
+esac
+""",
+        encoding="utf-8",
+    )
+    for stub in bin_dir.iterdir():
+        stub.chmod(0o755)
+    (bin_dir / "sleep").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    (bin_dir / "sleep").chmod(0o755)
+    env = os.environ | {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "AUDIT": str(audit),
+        "MODE": mode,
+        "CONTEXT": context,
+        "PID_FILE": str(pid_file),
+        "FORWARD_PID": str(tmp_path / "port-forward.pid"),
+        "READY_SECRET": str(tmp_path / "secret-requested"),
+        "TMPDIR": str(tmp_path),
+        "KUBECONFIG": str(tmp_path / "kubeconfig"),
+    }
+    result = subprocess.run(
+        ["bash", str(SCRIPT), "dashboard-verify", "env=staging"],
+        env=env,
+        capture_output=True,
+        text=True,
+        start_new_session=True,
+    )
+    return result, audit.read_text() if audit.exists() else "", pid_file
+
+
+def test_dashboard_verifier_runtime_owns_port_and_cleans_up(tmp_path):
+    result, audit, pid_file = run_dashboard_verifier(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert "port-forward --address=127.0.0.1" in audit
+    assert audit.index("port-forward") < audit.index("get secret") < audit.index("curl ")
+    assert "http://127.0.0.1:43127/" in audit
+    assert not list(tmp_path.glob("sugarkube-grafana-verify.*"))
+    assert pid_file.read_text(encoding="utf-8").strip() == "terminated"
+
+
+def test_dashboard_verifier_checks_context_before_secret_access(tmp_path):
+    result, audit, _ = run_dashboard_verifier(tmp_path, context="wrong-context")
+    assert result.returncode != 0
+    assert "get secret" not in audit
+
+
+def test_dashboard_verifier_rejects_missing_and_malformed_credentials(tmp_path):
+    for mode in ("secret-missing", "secret-malformed"):
+        result, audit, _ = run_dashboard_verifier(tmp_path / mode, mode)
+        assert result.returncode != 0
+        assert audit.index("port-forward") < audit.index("get secret")
+        assert "curl " not in audit
+        assert "placeholder" not in result.stdout + result.stderr
+
+
+def test_dashboard_verifier_port_forward_failure_never_authenticates(tmp_path):
+    failed, audit, _ = run_dashboard_verifier(tmp_path / "forward", "forward-fail")
+    assert failed.returncode != 0 and "curl " not in audit
+    assert not list((tmp_path / "forward").glob("sugarkube-grafana-verify.*"))
+
+
+def test_dashboard_verifier_rejects_forward_exit_after_readiness(tmp_path):
+    result, audit, pid_file = run_dashboard_verifier(tmp_path, "forward-exits-after-ready")
+    assert result.returncode != 0
+    assert audit.index("port-forward") < audit.index("get secret")
+    assert "curl " not in audit
+    assert pid_file.read_text(encoding="utf-8").strip() == "terminated"
+    forward_pid = int((tmp_path / "port-forward.pid").read_text(encoding="utf-8"))
+    assert not Path(f"/proc/{forward_pid}").exists()
+    assert not list(tmp_path.glob("sugarkube-grafana-verify.*"))
+
+
+def test_dashboard_verifier_auth_failures_are_immediate_and_redacted(tmp_path):
+    for mode in ("auth401", "auth403"):
+        result, audit, _ = run_dashboard_verifier(tmp_path / mode, mode)
+        assert result.returncode != 0 and audit.count("curl ") == 1
+        assert "redacted" in result.stderr and "placeholder" not in result.stdout + result.stderr
+        assert not list((tmp_path / mode).glob("sugarkube-grafana-verify.*"))
+
+
+def test_dashboard_verifier_rejects_incorrect_and_malformed_api_json(tmp_path):
+    for mode in ("wrong-api", "malformed-api"):
+        result, _, _ = run_dashboard_verifier(tmp_path / mode, mode)
+        assert result.returncode != 0
+        assert "response redacted" in result.stderr
+        assert not list((tmp_path / mode).glob("sugarkube-grafana-verify.*"))
+
+
+def test_dashboard_verifier_cleans_up_when_interrupted(tmp_path):
+    result, audit, _ = run_dashboard_verifier(tmp_path, "interrupt")
+    assert result.returncode != 0 and "curl " in audit
+    body = SCRIPT.read_text(encoding="utf-8").split("dashboard_verify()", 1)[1]
+    assert "trap 'exit 130' INT" in body and "trap 'exit 143' TERM" in body
+    assert not list(tmp_path.glob("sugarkube-grafana-verify.*"))
