@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -45,7 +46,201 @@ def run(args: list[str]) -> subprocess.CompletedProcess[str]:
 
 
 def helm_show(chart: str, version: str) -> subprocess.CompletedProcess[str]:
-    return run(["helm", "show", "chart", chart, "--version", version])
+    command = ["helm", "show", "chart", chart]
+    if "@sha256:" not in chart:
+        command += ["--version", version]
+    return run(command)
+
+
+@dataclass(frozen=True)
+class ReleaseInputs:
+    app: str
+    env: str
+    release: str
+    namespace: str
+    chart: str
+    version: str
+    values: tuple[str, ...]
+    tag: str
+    host: str = ""
+    pull_policy: str = "Always"
+
+    def helm_template_command(self) -> list[str]:
+        command = ["helm", "template", self.release, self.chart, "--namespace", self.namespace]
+        if "@sha256:" not in self.chart:
+            command += ["--version", self.version]
+        for value_file in self.values:
+            command += ["-f", value_file]
+        if self.host:
+            command += ["--set", f"ingress.host={self.host}"]
+        command += ["--set", f"image.tag={self.tag}"]
+        if self.pull_policy:
+            command += ["--set", f"image.pullPolicy={self.pull_policy}"]
+        return command
+
+
+def _scalar(value: str) -> str:
+    return value.split(" #", 1)[0].strip().strip("\"'")
+
+
+def _document_field(document: str, field: str) -> str:
+    match = re.search(rf"(?m)^{re.escape(field)}:\s*(.*?)\s*$", document)
+    return _scalar(match.group(1)) if match else ""
+
+
+def _metadata(document: str) -> tuple[str, dict[str, str], dict[str, str]]:
+    """Read the small metadata subset used by the release contract."""
+    lines = document.splitlines()
+    metadata_index = next((i for i, line in enumerate(lines) if line == "metadata:"), -1)
+    if metadata_index < 0:
+        return "", {}, {}
+    name = ""
+    maps: dict[str, dict[str, str]] = {"labels": {}, "annotations": {}}
+    section = ""
+    for line in lines[metadata_index + 1 :]:
+        if line and not line.startswith(" "):
+            break
+        indent = len(line) - len(line.lstrip())
+        stripped = line.strip()
+        if indent == 2 and stripped.startswith("name:"):
+            name = _scalar(stripped.split(":", 1)[1])
+        elif indent == 2 and stripped.rstrip(":") in maps:
+            section = stripped.rstrip(":")
+        elif indent == 4 and section and ":" in stripped:
+            key, value = stripped.split(":", 1)
+            maps[section][_scalar(key)] = _scalar(value)
+        elif indent <= 2 and stripped:
+            section = ""
+    return name, maps["labels"], maps["annotations"]
+
+
+def _containers(document: str) -> list[tuple[str, str]]:
+    """Return regular (never init) container names and images."""
+    lines = document.splitlines()
+    start = next((i for i, line in enumerate(lines) if line.strip() == "containers:"), -1)
+    if start < 0:
+        return []
+    base = len(lines[start]) - len(lines[start].lstrip())
+    result: list[tuple[str, str]] = []
+    current: dict[str, str] | None = None
+    item_indent = -1
+    for line in lines[start + 1 :]:
+        stripped = line.strip()
+        indent = len(line) - len(line.lstrip())
+        if stripped and indent <= base:
+            break
+        if re.match(r"^-\s+", stripped) and (item_indent < 0 or indent == item_indent):
+            if current:
+                result.append((current.get("name", ""), current.get("image", "")))
+            current = {}
+            item_indent = indent
+            stripped = stripped[1:].strip()
+        if current is not None and indent <= item_indent + 2 and ":" in stripped:
+            key, value = stripped.split(":", 1)
+            if key in {"name", "image"}:
+                current[key] = _scalar(value)
+    if current:
+        result.append((current.get("name", ""), current.get("image", "")))
+    return result
+
+
+def _nested_scalar(document: str, path: tuple[str, ...]) -> str:
+    lines = document.splitlines()
+    position = 0
+    minimum_indent = -1
+    for component in path:
+        found = False
+        for index in range(position, len(lines)):
+            line = lines[index]
+            stripped = line.strip()
+            indent = len(line) - len(line.lstrip())
+            if minimum_indent >= 0 and stripped and indent <= minimum_indent:
+                break
+            if re.match(rf"^{re.escape(component)}:\s*", stripped):
+                value = stripped.split(":", 1)[1]
+                if component == path[-1]:
+                    return _scalar(value)
+                position = index + 1
+                minimum_indent = indent
+                found = True
+                break
+        if not found and component != path[-1]:
+            return ""
+    return ""
+
+
+def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str]:
+    documents = [doc for doc in re.split(r"(?m)^---\s*$", manifest) if doc.strip()]
+    workloads: list[tuple[str, str]] = []
+    kinds: set[str] = set()
+    ingress_hosts: set[str] = set()
+    service_monitors: list[str] = []
+    candidates = {inputs.app, inputs.release, *APP_CONTAINER_NAMES.get(inputs.app, set())}
+    expected_suffix = f":{inputs.tag}"
+    errors: list[str] = []
+    coherent_workload = False
+    correct_image = False
+    for document in documents:
+        kind = _document_field(document, "kind")
+        kinds.add(kind)
+        name, labels, annotations = _metadata(document)
+        namespace = _document_field(document, "  namespace")
+        if namespace and namespace != inputs.namespace:
+            errors.append(
+                f"rendered {kind or 'resource'} {name or '<unnamed>'} has namespace {namespace!r}"
+            )
+        if kind in {"Deployment", "StatefulSet", "DaemonSet"}:
+            workloads.append((kind, name))
+            coherent = (
+                labels.get("app.kubernetes.io/instance") == inputs.release
+                or labels.get("release") == inputs.release
+                or annotations.get("meta.helm.sh/release-name") == inputs.release
+            )
+            coherent_workload = coherent_workload or coherent
+            if coherent:
+                for container_name, image in _containers(document):
+                    if container_name in candidates and image.endswith(expected_suffix):
+                        correct_image = True
+        if kind == "Ingress":
+            ingress_hosts.update(re.findall(r"(?m)^\s+(?:-\s+)?host:\s*([^\s#]+)", document))
+        if kind == "ServiceMonitor":
+            service_monitors.append(document)
+    if not workloads:
+        errors.append("no rollout-capable application workload rendered")
+    elif not coherent_workload:
+        errors.append("no workload has a supported label or annotation for the requested release")
+    if workloads and not correct_image:
+        errors.append("intended application container does not use the exact requested image tag")
+    if inputs.host and inputs.host not in ingress_hosts:
+        errors.append(f"no Ingress rule exactly matches expected host {inputs.host!r}")
+    if inputs.app == "dspace":
+        for required in ("Deployment", "Service"):
+            if required not in kinds:
+                errors.append(f"DSPACE intended {required} did not render")
+        if inputs.host and "Ingress" not in kinds:
+            errors.append("DSPACE intended Ingress did not render")
+        for monitor in service_monitors:
+            secret_name = _nested_scalar(monitor, ("endpoints", "bearerTokenSecret", "name"))
+            secret_key = _nested_scalar(monitor, ("endpoints", "bearerTokenSecret", "key"))
+            # Lists make a fully generic YAML path reader disproportionate; match the chart's
+            # actual endpoint schema while still requiring structured, nonempty fields.
+            bearer = re.search(
+                r"(?ms)^\s+bearerTokenSecret:\s*\n(?P<body>(?:\s{8,}.+\n?)*)", monitor
+            )
+            body = bearer.group("body") if bearer else ""
+            secret_name = secret_name or _document_field(body, "        name")
+            secret_key = secret_key or _document_field(body, "        key")
+            if not secret_name or not secret_key:
+                errors.append(
+                    "DSPACE ServiceMonitor bearerTokenSecret name and key must be nonempty"
+                )
+        if inputs.env == "prod" and (
+            service_monitors
+            or "dspace-staging-metrics-token" in manifest
+            or "sugarkube-int" in manifest
+        ):
+            errors.append("DSPACE production rendered staging-only metrics configuration")
+    return errors
 
 
 def parse_chart_yaml(text: str) -> dict[str, str]:
@@ -228,6 +423,65 @@ def print_summary(app: str, env: str, tag: str, chart: str, version: str, pin: s
     print(f"chart pin: {pin}")
 
 
+def expected_ingress_host(values: tuple[str, ...], explicit: str) -> str:
+    if explicit:
+        return explicit
+    host = ""
+    enabled = ""
+    for value_file in values:
+        path = Path(value_file)
+        if not path.is_absolute():
+            path = REPO_ROOT / path
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue  # Helm reports missing/unreadable values files with the authoritative error.
+        resolved = _nested_scalar(text, ("ingress", "host"))
+        if resolved:
+            host = resolved
+        resolved_enabled = _nested_scalar(text, ("ingress", "enabled"))
+        if resolved_enabled:
+            enabled = resolved_enabled.lower()
+    return host if enabled != "false" else ""
+
+
+def resolved_values_scalar(values: tuple[str, ...], path_parts: tuple[str, ...]) -> str:
+    resolved = ""
+    for value_file in values:
+        path = Path(value_file)
+        if not path.is_absolute():
+            path = REPO_ROOT / path
+        try:
+            candidate = _nested_scalar(path.read_text(encoding="utf-8"), path_parts)
+        except OSError:
+            continue
+        if candidate:
+            resolved = candidate
+    return resolved
+
+
+def validate_dspace_values(manifest: str, inputs: ReleaseInputs) -> list[str]:
+    metrics_enabled = (
+        resolved_values_scalar(inputs.values, ("metrics", "enabled")).lower() == "true"
+    )
+    monitor_enabled = (
+        resolved_values_scalar(inputs.values, ("serviceMonitor", "enabled")).lower() == "true"
+    )
+    secret = resolved_values_scalar(inputs.values, ("metrics", "auth", "existingSecret"))
+    secret_key = resolved_values_scalar(inputs.values, ("metrics", "auth", "secretKey"))
+    rendered_monitor = bool(re.search(r"(?m)^kind:\s*ServiceMonitor\s*$", manifest))
+    errors: list[str] = []
+    if rendered_monitor and not metrics_enabled:
+        errors.append("DSPACE ServiceMonitor rendered while metrics.enabled is not true")
+    if rendered_monitor and (not secret or not secret_key):
+        errors.append(
+            "DSPACE ServiceMonitor rendered without complete configured metrics authentication"
+        )
+    if monitor_enabled and metrics_enabled and secret and secret_key and not rendered_monitor:
+        errors.append("DSPACE configured ServiceMonitor did not render")
+    return errors
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     version = read_pin(args.version_file)
     show = helm_show(args.chart, version)
@@ -292,27 +546,38 @@ def cmd_preflight(args: argparse.Namespace) -> int:
     if show.returncode != 0:
         print(show.stderr or show.stdout, file=sys.stderr)
         return show.returncode or 1
-    req = REQUIRED_ENVS.get(args.app, [])
-    if not req:
-        return 0
-    cmd = [
-        "helm",
-        "template",
-        args.release,
-        args.chart,
-        "--namespace",
-        args.namespace,
-        "--version",
-        version,
-    ]
-    for vf in filter(None, (v.strip() for v in args.values.split(","))):
-        cmd += ["-f", vf]
-    if args.tag:
-        cmd += ["--set", f"image.tag={args.tag}", "--set", "image.pullPolicy=Always"]
-    tmpl = run(cmd)
+    values = tuple(filter(None, (value.strip() for value in args.values.split(","))))
+    inputs = ReleaseInputs(
+        app=args.app,
+        env=args.env,
+        release=args.release,
+        namespace=args.namespace,
+        chart=args.chart,
+        version=version,
+        values=values,
+        tag=args.tag,
+        host=expected_ingress_host(values, getattr(args, "host", "")),
+        pull_policy=getattr(args, "pull_policy", "Always"),
+    )
+    tmpl = run(inputs.helm_template_command())
     if tmpl.returncode != 0:
         print(tmpl.stderr or tmpl.stdout, file=sys.stderr)
         return tmpl.returncode or 1
+    errors = validate_rendered_manifest(tmpl.stdout, inputs)
+    if inputs.app == "dspace":
+        errors += validate_dspace_values(tmpl.stdout, inputs)
+    if errors:
+        context = (
+            f"app={inputs.app} env={inputs.env} release={inputs.release} "
+            f"namespace={inputs.namespace} chart={inputs.chart} version={inputs.version} "
+            f"tag={inputs.tag}"
+        )
+        for error in errors:
+            print(f"ERROR: render contract failed: {error}; {context}", file=sys.stderr)
+        return 1
+    req = REQUIRED_ENVS.get(args.app, [])
+    if not req:
+        return 0
     app_container_env_sets = deployment_app_container_env_sets(tmpl.stdout, args.app, args.release)
     complete_envs = next(
         (
@@ -358,6 +623,8 @@ def main() -> int:
             s.add_argument("--release", required=True)
             s.add_argument("--namespace", required=True)
             s.add_argument("--version", default="")
+            s.add_argument("--host", default="")
+            s.add_argument("--pull-policy", default="Always")
     a = p.parse_args()
     return {"status": cmd_status, "bump": cmd_bump, "preflight": cmd_preflight}[a.cmd](a)
 

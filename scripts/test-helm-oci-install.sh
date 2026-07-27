@@ -92,6 +92,52 @@ if [ ! -f "${FAKE_HELM_REGISTRY_CHART:-}" ]; then
     exit 1
 fi
 
+if [ "$1" = "template" ]; then
+    cat <<'YAML'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dspace
+  labels:
+    app.kubernetes.io/instance: dspace
+spec:
+  template:
+    spec:
+      containers:
+        - name: dspace
+          image: ghcr.io/democratizedspace/dspace:v3-deadbee
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dspace
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dspace
+spec:
+  rules:
+    - host: staging.democratized.space
+YAML
+    if [[ "$*" == *dspace.values.staging.yaml* ]]; then
+        cat <<'YAML'
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: dspace
+spec:
+  endpoints:
+    - port: http
+      bearerTokenSecret:
+        name: dspace-staging-metrics-token
+        key: token
+YAML
+    fi
+    exit 0
+fi
+
 echo "helm $*" | tee -a "${HELM_TEST_LOG:-/dev/null}"
 SH
 chmod +x "${tmp_bin}/helm"
@@ -197,7 +243,9 @@ PATH="${tmp_bin}:${PATH}" HELM_TEST_LOG="${helm_log}" KUBECTL_TEST_LOG="${kubect
     HELM_STATUS_MODE_FILE="${status_mode_file}" \
     FAKE_HELM_REGISTRY_CHART="${fixture_registry}" KUBECONFIG="${tmp_bin}/kubeconfig" \
     just helm-oci-install \
-    release=dspace namespace=dspace chart="${digest_chart}" version=3.1.0 env=staging >/dev/null
+    release=dspace namespace=dspace chart="${digest_chart}" version=3.1.0 \
+    values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
+    default_tag=v3-deadbee env=staging >/dev/null
 
 if ! grep -Fq "show chart ${digest_chart}" "${helm_log}" || \
     ! grep -Fq "upgrade dspace ${digest_chart}" "${helm_log}"; then
@@ -259,7 +307,7 @@ if PATH="${tmp_bin}:${PATH}" HELM_TEST_LOG="${helm_log}" KUBECTL_TEST_LOG="${kub
     release=dspace namespace=dspace \
     chart=oci://registry.test/charts/dspace \
     values=docs/examples/dspace.values.dev.yaml \
-    version_file=docs/apps/dspace.version env=prod >"${tmp_bin}/install-mismatch.out" 2>&1; then
+    version_file=docs/apps/dspace.version default_tag=v3-deadbee env=prod >"${tmp_bin}/install-mismatch.out" 2>&1; then
     printf 'Expected direct install with prod request against staging-labeled nodes to fail.\n' >&2
     exit 1
 fi
@@ -283,7 +331,7 @@ upgrade_output="$(
         release=release=dspace namespace=namespace=dspace \
         chart=chart=oci://registry.test/charts/dspace \
         values=values=docs/examples/dspace.values.dev.yaml \
-        version_file=version_file=docs/apps/dspace.version env=staging
+        version_file=version_file=docs/apps/dspace.version default_tag=v3-deadbee env=staging
 )"
 
 if ! grep -q "helm upgrade dspace oci://registry.test/charts/dspace --namespace dspace --reuse-values" <<<"${upgrade_output}"; then
@@ -299,7 +347,7 @@ if PATH="${tmp_bin}:${PATH}" HELM_TEST_LOG="${helm_log}" KUBECTL_TEST_LOG="${kub
     release=dspace namespace=dspace \
     chart=oci://registry.test/charts/dspace \
     values=docs/examples/dspace.values.dev.yaml \
-    version_file=docs/apps/dspace.version env=staging >"${tmp_bin}/upgrade-missing.out" 2>&1; then
+    version_file=docs/apps/dspace.version default_tag=v3-deadbee env=staging >"${tmp_bin}/upgrade-missing.out" 2>&1; then
     printf 'Expected upgrade-only path to fail when release is missing.\n' >&2
     exit 1
 fi
@@ -333,7 +381,7 @@ if PATH="${tmp_bin}:${PATH}" HELM_TEST_LOG="${helm_log}" KUBECTL_TEST_LOG="${kub
     release=dspace namespace=dspace \
     chart=oci://registry.test/charts/dspace \
     values=docs/examples/dspace.values.dev.yaml \
-    version_file=docs/apps/dspace.version env=staging >"${tmp_bin}/upgrade-failed-status.out" 2>&1; then
+    version_file=docs/apps/dspace.version default_tag=v3-deadbee env=staging >"${tmp_bin}/upgrade-failed-status.out" 2>&1; then
     printf 'Expected upgrade-only path to fail when release status is not deployed.\n' >&2
     exit 1
 fi
@@ -353,7 +401,7 @@ if grep -q "just helm-oci-install" "${tmp_bin}/upgrade-failed-status.out"; then
     exit 1
 fi
 
-if ! grep -q "just helm-oci-upgrade release=dspace namespace=dspace chart=oci://registry.test/charts/dspace values=docs/examples/dspace.values.dev.yaml version_file=docs/apps/dspace.version env=staging" "${tmp_bin}/upgrade-failed-status.out"; then
+if ! grep -q "just helm-oci-upgrade release=dspace namespace=dspace chart=oci://registry.test/charts/dspace values=docs/examples/dspace.values.dev.yaml version_file=docs/apps/dspace.version default_tag=v3-deadbee env=staging" "${tmp_bin}/upgrade-failed-status.out"; then
     printf 'Non-deployed status guidance should preserve retry arguments.\nOutput:\n%s\n' "$(cat "${tmp_bin}/upgrade-failed-status.out")" >&2
     exit 1
 fi
@@ -364,7 +412,7 @@ if PATH="${tmp_bin}:${PATH}" HELM_TEST_LOG="${helm_log}" KUBECTL_TEST_LOG="${kub
     FAKE_HELM_REGISTRY_CHART="${fixture_registry}" KUBECONFIG="${tmp_bin}/kubeconfig" \
     just helm-oci-upgrade \
     release=dspace namespace=dspace \
-    chart=oci://registry.test/charts/dspace env=staging >"${tmp_bin}/upgrade-status-error.out" 2>&1; then
+    chart=oci://registry.test/charts/dspace version=3.0.1 default_tag=v3-deadbee env=staging >"${tmp_bin}/upgrade-status-error.out" 2>&1; then
     printf 'Expected upgrade-only path to fail on generic helm status error.\n' >&2
     exit 1
 fi
