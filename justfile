@@ -1218,7 +1218,7 @@ cf-tunnel-route host='':
         '' \
         'Dashboard steps are documented in docs/cloudflare_tunnel.md.'
 
-_helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' env='' description='' allow_install='false' reuse_values='false':
+_helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' env='' description='' app='' allow_install='false' reuse_values='false':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -1237,7 +1237,7 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     fi
     raw_args=(
         "{{ release }}" "{{ namespace }}" "{{ chart }}" "{{ values }}" "{{ host }}" "{{ version }}"
-        "{{ version_file }}" "{{ tag }}" "{{ default_tag }}" "{{ env }}" "{{ description }}"
+        "{{ version_file }}" "{{ tag }}" "{{ default_tag }}" "{{ env }}" "{{ description }}" "{{ app }}"
     )
 
     release=""
@@ -1251,6 +1251,7 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     default_tag=""
     requested_env=""
     description=""
+    app=""
 
     normalize_prefixed_value() {
         local key="${1}"
@@ -1293,6 +1294,7 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
             default_tag=*) default_tag="${raw_arg#default_tag=}" ;;
             env=*) requested_env="${raw_arg#env=}" ;;
             description=*) description="${raw_arg#description=}" ;;
+            app=*) app="${raw_arg#app=}" ;;
             *)
                 case "${raw_index}" in
                     0) assign_if_empty release "${raw_arg}" ;;
@@ -1306,6 +1308,7 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
                     8) assign_if_empty default_tag "${raw_arg}" ;;
                     9) assign_if_empty requested_env "${raw_arg}" ;;
                     10) assign_if_empty description "${raw_arg}" ;;
+                    11) assign_if_empty app "${raw_arg}" ;;
                 esac
                 ;;
         esac
@@ -1322,6 +1325,7 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     default_tag="$(normalize_prefixed_value default_tag "${default_tag}")"
     requested_env="$(normalize_prefixed_value env "${requested_env}")"
     description="$(normalize_prefixed_value description "${description}")"
+    app="$(normalize_prefixed_value app "${app}")"
     if [ -z "${requested_env}" ] && [ -n "${SUGARKUBE_ENV:-}" ]; then
       requested_env="${SUGARKUBE_ENV}"
     fi
@@ -1428,6 +1432,29 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     if [[ "${chart}" == chart=* ]]; then
         echo "Internal bug: normalized chart still has leading 'chart=': '${chart}'" >&2
         exit 1
+    fi
+
+    onboarded_app="${app}"
+    if [ -z "${onboarded_app}" ]; then
+      case "${chart}" in
+        oci://ghcr.io/democratizedspace/charts/dspace*) onboarded_app=dspace ;;
+        oci://ghcr.io/futuroptimist/charts/tokenplace*) onboarded_app=tokenplace ;;
+        oci://ghcr.io/futuroptimist/charts/danielsmith*) onboarded_app=danielsmith ;;
+        oci://ghcr.io/futuroptimist/charts/jobbot3000*) onboarded_app=jobbot3000 ;;
+      esac
+    fi
+    if [ -n "${onboarded_app}" ]; then
+      if [ -z "${image_tag}" ]; then
+        echo "ERROR: onboarded app ${onboarded_app} requires an immutable image tag before rendering." >&2
+        exit 2
+      fi
+      python3 "{{ justfile_directory() }}/scripts/app_chart.py" preflight \
+        --app "${onboarded_app}" --env "${requested_env}" --tag "${image_tag}" \
+        --chart "${chart}" --version "${chart_version}" --version-file "${version_file}" \
+        --values "${values}" --release "${release}" --namespace "${namespace}" \
+        --host "${host}" --pull-policy Always
+    else
+      echo "WARNING: generic non-onboarded chart compatibility mode has no Sugarkube application render contract." >&2
     fi
 
     wait_for_rollouts() {
@@ -1611,11 +1638,11 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     helm "${helm_args[@]}"
     wait_for_rollouts
 
-helm-oci-install release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' env='' description='':
-    @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' '{{ env }}' '{{ description }}' allow_install='true' reuse_values='false'
+helm-oci-install release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' env='' description='' app='':
+    @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' '{{ env }}' '{{ description }}' '{{ app }}' allow_install='true' reuse_values='false'
 
-helm-oci-upgrade release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' env='' description='':
-    @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' '{{ env }}' '{{ description }}' allow_install='false' reuse_values='true'
+helm-oci-upgrade release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' env='' description='' app='':
+    @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' '{{ env }}' '{{ description }}' '{{ app }}' allow_install='false' reuse_values='true'
 
 # Print resolved Sugarkube app deployment config for an app/environment.
 app-config app env='staging' config='':
@@ -1686,7 +1713,7 @@ app-deploy app env='staging' tag='' config='' manifest='' evidence='':
       --app "${SUGARKUBE_APP}" \
       --env "${SUGARKUBE_ENV}" \
       --tag "${SUGARKUBE_TAG}" \
-      --chart "${SUGARKUBE_CHART}" \
+      --chart "${chart_coordinate:-${SUGARKUBE_CHART}}" \
       --version "${SUGARKUBE_VERSION:-}" \
       --version-file "${SUGARKUBE_VERSION_FILE:-}" \
       --values "${SUGARKUBE_VALUES}" \
@@ -1750,7 +1777,7 @@ app-redeploy app env='staging' tag='' config='' manifest='' evidence='':
       --app "${SUGARKUBE_APP}" \
       --env "${SUGARKUBE_ENV}" \
       --tag "${SUGARKUBE_TAG}" \
-      --chart "${SUGARKUBE_CHART}" \
+      --chart "${chart_coordinate:-${SUGARKUBE_CHART}}" \
       --version "${SUGARKUBE_VERSION:-}" \
       --version-file "${SUGARKUBE_VERSION_FILE:-}" \
       --values "${SUGARKUBE_VALUES}" \

@@ -259,6 +259,29 @@ and retries.
 These recipes are implemented in the root `justfile` and use the app config
 lookup order above.
 
+## Exact-release render gate
+
+Every onboarded application mutation, including the generic recipes, compatibility
+wrappers, and direct `helm-oci-install` or `helm-oci-upgrade` helpers, first runs
+`helm template` with the proposed release name, namespace, exact chart coordinate,
+resolved chart version, ordered values chain, host override, immutable image tag,
+and pull policy. Digest-qualified OCI coordinates are rendered without
+`--version`, exactly as they are passed to the mutation. The rendered Kubernetes
+objects must contain a Helm-associated rollout workload whose intended application
+container has the exact tag, use no conflicting explicit namespace, and contain
+the configured ingress host when ingress is enabled. Application-specific checks
+run only after this shared contract succeeds.
+
+A render or structural-validation failure is terminal: no Helm upgrade/install,
+rollout action, other Kubernetes mutation, or DSPACE evidence reservation or
+finalization occurs. DSPACE candidate-manifest and OCI validation precedes the
+digest-bound render; evidence reservation follows it.
+
+The upgrade helper still passes `--reuse-values`. The render validates the complete
+repository-controlled proposed values chain but does not reproduce Helm's
+historical value merge. Removing `--reuse-values` and closing that final mismatch
+remains the separate follow-up in issue #2324.
+
 Environment-scoped mutating recipes (`app-deploy`, `app-redeploy`,
 `app-promote-prod`, and the compatibility deploy/redeploy/promote wrappers) guard
 Helm with the connected cluster's Kubernetes-reported identity. The source of

@@ -150,6 +150,12 @@ checked after rollout. The guarded deploy itself passes Helm the immutable
 `oci://ghcr.io/democratizedspace/charts/dspace@<chartDigest>` coordinate emitted
 by the successful preflight, without `--version`, so a tag cannot be resolved
 again between approval and installation.
+Before reserving evidence or invoking that installation, Sugarkube renders the
+same digest-qualified coordinate with the environment's complete ordered values
+chain and proposed immutable image tag. It validates the intended Deployment,
+Service, enabled Ingress and exact host, plus the environment's actual metrics
+and ServiceMonitor authentication shape. A failed render is terminal and leaves
+both the cluster and deployment-evidence paths untouched.
 The mutation also carries an opaque description derived from the evidence
 reservation. Finalization requires that description and the Helm revision to
 remain stable across runtime evidence collection, failing closed if another
@@ -158,6 +164,10 @@ Finalization also waits for a bounded period for old release pods undergoing
 graceful rollout termination to disappear. It never filters out a still-running
 release pod: every remaining pod must satisfy the approved image and readiness
 checks.
+
+Steady-state upgrades still use Helm's historical `--reuse-values` behavior.
+The pre-mutation render covers repository-controlled proposed inputs; removing
+that remaining historical merge mismatch is explicitly deferred to issue #2324.
 
 After staging sign-off, generate a separate `prod` candidate from the **same
 upstream manifest**, approve it independently, and promote it. The image tag,
