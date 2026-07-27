@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -120,7 +121,7 @@ def test_explicit_config_path_precedes_config_dir_and_resolves_env_values(
 
 @pytest.mark.parametrize(
     "tag",
-    ["main-deadbee", "v3-deadbee", "feature-x-deadbee", "v0.1.0", "3.0.1", "3.1.0-rc.1"],
+    ["main-1a31a56", "main-5ca96df16f0f", "v3-deadbee", "feature-x-deadbee"],
 )
 def test_validate_tag_allows_immutable_tags(tag: str) -> None:
     assert app_config.validate_tag(tag) == tag
@@ -140,11 +141,37 @@ def test_validate_tag_allows_immutable_tags(tag: str) -> None:
         "release",
         "staging-blue",
         "feature-x",
+        "v3.0.1",
+        "3.0.1",
+        "3.1.0-rc.1",
+        "v3.0.1+build.2",
+        "v3.0.1-deadbee",
+        "main-ABCDEF0",
+        "main-abcdef",
+        f"main-{'a' * 41}",
     ],
 )
 def test_validate_tag_rejects_moving_tags(tag: str) -> None:
     with pytest.raises(app_config.AppConfigError, match="tag"):
         app_config.validate_tag(tag)
+
+
+def test_validate_tag_allows_semver_only_for_explicit_dev() -> None:
+    assert app_config.validate_tag("v3.0.1", "dev") == "v3.0.1"
+    with pytest.raises(app_config.AppConfigError, match="semantic image tag"):
+        app_config.validate_tag("v3.0.1", "int")
+
+
+def test_validate_tag_cli_defaults_to_strict_policy() -> None:
+    script = Path(app_config.__file__)
+    result = subprocess.run(
+        ["python3", str(script), "validate-tag", "v3.0.1"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 2
+    assert "semantic image tag" in result.stderr
 
 
 def test_rejects_unknown_dotenv_keys(tmp_path: Path) -> None:
@@ -308,6 +335,30 @@ def test_resolve_tag_uses_prod_fallback_file(tmp_path: Path) -> None:
     )
 
     assert tag == "main-deadbee"
+
+
+def test_resolve_tag_rejects_semantic_prod_fallback_file(tmp_path: Path) -> None:
+    tag_file = tmp_path / "prod-tag.txt"
+    tag_file.write_text("v3.0.1\n", encoding="utf-8")
+    with pytest.raises(app_config.AppConfigError, match="semantic image tag"):
+        app_config.resolve_tag(
+            {"SUGARKUBE_ENV": "prod", "SUGARKUBE_PROD_TAG_FILE": str(tag_file)},
+            "",
+            prod_fallback=True,
+        )
+
+
+def test_committed_production_pins_use_strict_branch_sha_policy() -> None:
+    root = Path(app_config.__file__).resolve().parents[1]
+    for pin in (root / "docs" / "apps").glob("*.prod.tag"):
+        values = [
+            line.split("#", 1)[0].strip()
+            for line in pin.read_text(encoding="utf-8").splitlines()
+            if line.split("#", 1)[0].strip()
+        ]
+        assert len(values) <= 1, pin
+        if values:
+            assert app_config.validate_tag(values[0], "prod") == values[0]
 
 
 def test_shell_emit_quotes_expected_exports(tmp_path: Path) -> None:

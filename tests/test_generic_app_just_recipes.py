@@ -2801,6 +2801,29 @@ def test_direct_helm_oci_helper_accepts_inline_semver_with_prerelease_and_build(
 
 
 @pytest.mark.usefixtures("ensure_just_available")
+@pytest.mark.parametrize("recipe", ["helm-oci-install", "helm-oci-upgrade"])
+def test_direct_helm_oci_helper_rejects_semantic_image_tag_before_helm(
+    recipe: str, generic_app_stub_env: dict[str, str]
+) -> None:
+    result = _run_just(
+        [
+            recipe,
+            "release=tokenplace",
+            "namespace=tokenplace",
+            "chart=oci://ghcr.io/futuroptimist/charts/tokenplace",
+            "version=1.2.3",
+            "tag=v3.0.1",
+            "env=staging",
+        ],
+        generic_app_stub_env,
+    )
+    assert result.returncode != 0
+    assert "semantic image tag" in result.stderr
+    helm_log_path = Path(generic_app_stub_env["HELM_LOG"])
+    assert not helm_log_path.exists() or helm_log_path.read_text(encoding="utf-8") == ""
+
+
+@pytest.mark.usefixtures("ensure_just_available")
 @pytest.mark.parametrize(
     ("filename", "contents", "message"),
     [

@@ -91,25 +91,27 @@ The current apps map to that model as examples:
 Deployment tags must identify application code and release intent, not mutable
 environments.
 
-Acceptable deployment tags:
+Acceptable staging and production deployment tags are lowercase branch-SHA tags,
+such as `main-1a31a56`, with a 7–40 character lowercase hexadecimal suffix.
 
-- Immutable branch-SHA tags, such as `main-REPLACE_SHORTSHA`.
-- Semver or release tags, such as `v1.2.3`, `3.1.0`, or another documented
-  project-specific stable tag.
-- Mutable branch convenience tags, such as `main-latest`, only when an app
-  runbook explicitly documents that a non-prod bootstrap or iteration flow accepts
-  them. They are an app-specific exception, not a shared guarantee; for example,
-  token.place deploy/redeploy wrappers reject every tag containing `latest`,
-  including `main-latest`.
+Semantic image tags such as `v1.2.3` are release and distribution aliases, not
+immutable deployment coordinates. They are accepted only when `env=dev` is
+explicitly selected for local-development compatibility. An omitted environment,
+`int`/staging, and production all use the strict branch-SHA policy. This image-tag
+rule is separate from chart versions: pinned chart SemVer such as `3.1.0` remains
+valid.
 
 Unacceptable deployment tags:
 
 - `latest`;
 - bare branch names such as `main`, `master`, `develop`, or `release`; and
-- environment names such as `dev`, `staging`, `prod`, or `production`.
+- environment names such as `dev`, `staging`, `prod`, or `production`;
+- semantic and semantic-looking aliases, including `v3.0.1` and
+  `v3.0.1-deadbee`; and
+- malformed, uppercase, shorter-than-7, or longer-than-40 SHA suffixes.
 
-Production promotion must use an immutable tag. The production tag pin file is
-part of the standard app coordinates and must contain the single immutable image
+Production promotion must use a branch-SHA tag. The production tag pin file is
+part of the standard app coordinates and must contain the single branch-SHA image
 tag approved for production. Generic production promotion flows should read that
 pin when `tag=` is omitted and should update it only as an explicit approval
 step.
