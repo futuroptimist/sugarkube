@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DASHBOARD = ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
 VALIDATOR = ROOT / "scripts/validate_observability_dashboard.py"
 SCRIPT = ROOT / "scripts/observability_helm.sh"
+PROMETHEUS_VALUES = ROOT / "platform/observability/helm/kube-prometheus-stack.values.common.yaml"
 
 # Import the validator so pytest-cov attributes its execution to the production
 # module. Subprocess-only checks prove the command-line contract, but their
@@ -152,7 +153,12 @@ def test_selected_window_traffic_and_availability_semantics(dashboard):
     assert "sum(" in failed_expression and "== bool 0" in failed_expression
     missing_expression = summary_expressions["Missing probe data"]
     assert "max_over_time(up{" in missing_expression
-    assert "[5m]" in missing_expression
+    retention = next(
+        line.split(":", 1)[1].strip()
+        for line in PROMETHEUS_VALUES.read_text(encoding="utf-8").splitlines()
+        if line.strip().startswith("retention:")
+    )
+    assert f"[{retention}]" in missing_expression
     assert ">= bool 0" in missing_expression
     assert " - (sum(" in missing_expression
     assert "probe_success{" in missing_expression
@@ -326,6 +332,24 @@ def test_validator_rejects_wrong_dashboard_mount(tmp_path, dashboard, mount_path
         (lambda item: item.update(links=[{"url": "https://example.invalid"}]), "raw URLs"),
         (lambda item: item.update(description="${DS_PROMETHEUS}"), "datasource placeholder"),
         (lambda item: item.update(datasource={"uid": "unexpected"}), "datasource references"),
+        (
+            lambda item: next(
+                target
+                for panel in item["panels"]
+                if panel["title"] == "Public availability summary"
+                for target in panel["targets"]
+                if target["legendFormat"] == "Missing probe data"
+            ).update(
+                expr=next(
+                    target["expr"]
+                    for panel in item["panels"]
+                    if panel["title"] == "Public availability summary"
+                    for target in panel["targets"]
+                    if target["legendFormat"] == "Missing probe data"
+                ).replace("[7d]", "[5m]")
+            ),
+            "retention-backed discovered probes",
+        ),
         (
             lambda item: next(
                 panel for panel in item["panels"] if panel["title"] == "Status-class distribution"

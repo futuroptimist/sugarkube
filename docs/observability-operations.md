@@ -130,7 +130,9 @@ is not rollout evidence.
   endpoints**, and a yellow **Missing probe data** count for the selected probe
   filters. Healthy and failed are current `probe_success` results; missing compares
   current samples with lifecycle-owned targets discovered through `up` during the
-  last five minutes, so a briefly disappeared discovery target remains visible.
+  seven-day Prometheus retention horizon, so disappeared discovery targets remain
+  visible throughout retained history. Exact long-term target inventory remains
+  verified by `just observability-blackbox-verify env=staging`.
   `16/0/0` is fully healthy, `15/1/0` has one observed failure, and `15/0/1`
   identifies one expected target without current probe data. If no expected target
   data exists, all three values remain `NO DATA` rather than implying health. The

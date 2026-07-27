@@ -205,7 +205,7 @@
       "id": 4,
       "type": "stat",
       "title": "Public availability summary",
-      "description": "Current healthy, failed, and recently missing probe-data counts for the selected filters; complete absence of expected target data is shown as no data.",
+      "description": "Current healthy, failed, and retention-backed missing probe-data counts for the selected filters; complete absence of expected target data is shown as no data.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -233,7 +233,7 @@
         },
         {
           "refId": "C",
-          "expr": "sum(max by (environment, app, route) (max_over_time(up{job=~\"probe/monitoring/blackbox-(dspace|tokenplace|danielsmith|jobbot3000)-staging-.*\",environment=~\"$environment\",app=~\"$app\",route=~\"$route\"}[5m])) >= bool 0) - (sum(min by (environment, app, route) (probe_success{job=~\"probe/monitoring/blackbox-(dspace|tokenplace|danielsmith|jobbot3000)-staging-.*\",environment=~\"$environment\",app=~\"$app\",route=~\"$route\"}) >= bool 0) or vector(0))",
+          "expr": "sum(max by (environment, app, route) (max_over_time(up{job=~\"probe/monitoring/blackbox-(dspace|tokenplace|danielsmith|jobbot3000)-staging-.*\",environment=~\"$environment\",app=~\"$app\",route=~\"$route\"}[7d])) >= bool 0) - (sum(min by (environment, app, route) (probe_success{job=~\"probe/monitoring/blackbox-(dspace|tokenplace|danielsmith|jobbot3000)-staging-.*\",environment=~\"$environment\",app=~\"$app\",route=~\"$route\"}) >= bool 0) or vector(0))",
           "legendFormat": "Missing probe data",
           "instant": true,
           "range": false

@@ -148,15 +148,15 @@ def validate_dashboard_semantics(dashboard: dict) -> None:
         raise SystemExit("ERROR: availability counts must use boolean healthy and failed sums.")
     if (
         "max_over_time(up{" not in missing_expression
-        or "[5m]" not in missing_expression
+        or "[7d]" not in missing_expression
         or ">= bool 0" not in missing_expression
         or " - (sum(" not in missing_expression
         or "probe_success{" not in missing_expression
         or "or vector(0)" not in missing_expression
     ):
         raise SystemExit(
-            "ERROR: missing probe data must compare recently discovered probes "
-            "with current samples."
+            "ERROR: missing probe data must compare retention-backed discovered "
+            "probes with current samples."
         )
     if {target.get("legendFormat") for target in summary_targets} != {
         "Healthy endpoints",
