@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Load Sugarkube app deployment config and validate immutable image tags."""
+"""Load Sugarkube app deployment config and validate image deployment tags."""
 
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ REQUIRED_KEYS = {
     "SUGARKUBE_CHART",
 }
 ASSIGNMENT_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
-BRANCH_SHA_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*-[0-9a-f]{7,}$", re.IGNORECASE)
+BRANCH_SHA_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*-[0-9a-f]{7,40}$")
 SEMVER_RE = re.compile(
     r"^v?[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?(?:\+[0-9A-Za-z][0-9A-Za-z.-]*)?$"
 )
@@ -91,29 +91,32 @@ def validate_app_name(app: str) -> str:
     return app
 
 
-def validate_tag(tag: str) -> str:
+def validate_tag(tag: str, env: str | None = None) -> str:
+    """Validate an image tag for an environment.
+
+    An omitted environment deliberately uses the strict deployment-safe policy.
+    Semantic tags are retained only for explicit local-development compatibility.
+    """
     tag = normalize_named(tag, "tag")
     if not tag:
         raise AppConfigError(
-            "tag must not be empty. Use an immutable tag such as main-deadbee or v0.1.0."
+            "tag must not be empty. Use a branch-SHA tag such as main-deadbee."
         )
-    tag_lc = tag.lower()
-    if tag_lc in MOVING_TAGS or "latest" in tag_lc:
-        raise AppConfigError(
-            f"mutable tag '{tag}' is not allowed. Use an immutable branch-SHA tag "
-            "(example: main-deadbee) or a semver release tag (example: v0.1.0)."
-        )
-    if re.search(r"(^|[-_.])(dev|develop|staging|prod|production|release)([-_.]|$)", tag_lc):
-        if not BRANCH_SHA_RE.fullmatch(tag):
-            raise AppConfigError(
-                f"environment-like moving tag '{tag}' is not allowed. Use an immutable "
-                "branch-SHA tag ending in at least 7 hex characters."
-            )
-    if BRANCH_SHA_RE.fullmatch(tag) or SEMVER_RE.fullmatch(tag):
+    resolved_env = normalize_env(env) if env is not None else None
+    if resolved_env == "dev" and SEMVER_RE.fullmatch(tag):
         return tag
+    if SEMVER_RE.fullmatch(tag):
+        raise AppConfigError(
+            f"semantic image tag '{tag}' is not deployment-safe. Use a branch-SHA tag "
+            "such as main-deadbee."
+        )
+    if BRANCH_SHA_RE.fullmatch(tag):
+        return tag
+    tag_lc = tag.lower()
+    kind = "movable" if tag_lc in MOVING_TAGS or "latest" in tag_lc else "invalid"
     raise AppConfigError(
-        f"invalid tag '{tag}'. Use an immutable branch-SHA tag (main-deadbee) "
-        "or semver release tag."
+        f"{kind} image tag '{tag}' is not deployment-safe. Use a branch-SHA tag "
+        "with a 7-40 character lowercase hexadecimal suffix (example: main-deadbee)."
     )
 
 
@@ -252,7 +255,7 @@ def resolve_tag(config: dict[str, str], raw_tag: str, *, prod_fallback: bool) ->
                     if line:
                         tag = line
                         break
-    return validate_tag(tag)
+    return validate_tag(tag, config.get("SUGARKUBE_ENV"))
 
 
 def shell_emit(config: dict[str, str]) -> str:
@@ -300,12 +303,13 @@ def main(argv: list[str] | None = None) -> int:
         cmd.add_argument("--prod-tag-fallback", action="store_true")
     validate = sub.add_parser("validate-tag")
     validate.add_argument("tag")
+    validate.add_argument("--env", default=None)
     host = sub.add_parser("host-value")
     host.add_argument("host_key")
     args = parser.parse_args(argv)
     try:
         if args.command == "validate-tag":
-            print(validate_tag(args.tag))
+            print(validate_tag(args.tag, args.env))
             return 0
         if args.command == "host-value":
             data = json.load(sys.stdin)

@@ -53,7 +53,7 @@ Check the resolved config before the first deploy.
 just app-config app=appslug env=staging config="$APP_CONFIG"
 ```
 
-Deploy staging with an immutable image tag.
+Deploy staging with a lowercase branch-SHA image tag.
 
 ```bash
 APP_TAG=main-REPLACE_SHORTSHA
@@ -71,7 +71,8 @@ The app repo's `ci-image.yml` should answer yes to each item before Sugarkube st
 - It logs in to GHCR with repository-scoped credentials.
 - It publishes `ghcr.io/OWNER/IMAGE`.
 - It emits immutable branch-SHA tags such as `main-REPLACE_SHORTSHA`.
-- It may emit convenience tags such as `main-latest`, but those are non-prod only unless an app runbook explicitly says otherwise.
+- It may emit convenience or semantic release aliases for distribution, but
+  staging and production never use them as deployment coordinates.
 - It does not require local Docker builds for staging or production deploys.
 - It records enough workflow output for an operator to find the tag to deploy.
 
@@ -126,9 +127,13 @@ Do not invent real configs for future apps such as `wove` until their app repos 
 
 ### I have a successful image build; what tag do I deploy?
 
-- Use the immutable branch-SHA or release tag from the successful image workflow.
-- Prefer tags shaped like `main-REPLACE_SHORTSHA` for staging validation.
+- Use the branch-SHA tag from the successful image workflow.
+- Tags must end in 7 through 40 lowercase hexadecimal characters, as in
+  `main-REPLACE_SHORTSHA` or `v3-deadbee`.
 - Do not deploy `latest`, a bare branch name, or an environment name.
+- Do not deploy a semantic image tag; semantic tags are movable release or
+  distribution aliases. Only explicit `env=dev` local-development flows retain
+  semantic-tag compatibility. Chart versions remain SemVer coordinates.
 - Deploy staging first.
 
 ```bash
@@ -166,7 +171,7 @@ git commit -m "Bump appslug chart pin to 0.1.3"
 
 ### Staging works; how do I promote prod?
 
-- Keep the same immutable image tag that passed staging.
+- Keep the same branch-SHA image tag that passed staging.
 - Record or review the approved tag in `docs/apps/APP.prod.tag` when the app uses a committed prod pin.
 - Use the generic production promotion command.
 

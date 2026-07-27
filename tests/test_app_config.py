@@ -120,9 +120,9 @@ def test_explicit_config_path_precedes_config_dir_and_resolves_env_values(
 
 @pytest.mark.parametrize(
     "tag",
-    ["main-deadbee", "v3-deadbee", "feature-x-deadbee", "v0.1.0", "3.0.1", "3.1.0-rc.1"],
+    ["main-1a31a56", "main-5ca96df16f0f", "v3-deadbee", "feature-x-deadbee"],
 )
-def test_validate_tag_allows_immutable_tags(tag: str) -> None:
+def test_validate_tag_allows_branch_sha_tags(tag: str) -> None:
     assert app_config.validate_tag(tag) == tag
 
 
@@ -140,11 +140,30 @@ def test_validate_tag_allows_immutable_tags(tag: str) -> None:
         "release",
         "staging-blue",
         "feature-x",
+        "v3.0.1",
+        "3.0.1",
+        "3.1.0-rc.1",
+        "v3.0.1+build.5",
+        "v3.0.1-deadbee",
+        "main-latest",
+        "main-DEADBEE",
+        "main-deadbe",
+        "main-" + "a" * 41,
     ],
 )
 def test_validate_tag_rejects_moving_tags(tag: str) -> None:
     with pytest.raises(app_config.AppConfigError, match="tag"):
         app_config.validate_tag(tag)
+
+
+@pytest.mark.parametrize("tag", ["v3.0.1", "3.1.0-rc.1", "v3.0.1+build.5"])
+def test_validate_tag_dev_allows_semantic_release_aliases(tag: str) -> None:
+    assert app_config.validate_tag(tag, "dev") == tag
+
+
+def test_validate_tag_int_uses_strict_staging_policy() -> None:
+    with pytest.raises(app_config.AppConfigError, match="semantic image tag"):
+        app_config.validate_tag("v3.0.1", "int")
 
 
 def test_rejects_unknown_dotenv_keys(tmp_path: Path) -> None:
@@ -302,12 +321,24 @@ def test_resolve_tag_uses_prod_fallback_file(tmp_path: Path) -> None:
     tag_file.write_text("# promoted digest tag\nmain-deadbee\n", encoding="utf-8")
 
     tag = app_config.resolve_tag(
-        {"SUGARKUBE_PROD_TAG_FILE": str(tag_file)},
+        {"SUGARKUBE_ENV": "prod", "SUGARKUBE_PROD_TAG_FILE": str(tag_file)},
         "",
         prod_fallback=True,
     )
 
     assert tag == "main-deadbee"
+
+
+def test_resolve_tag_rejects_semantic_prod_fallback_file(tmp_path: Path) -> None:
+    tag_file = tmp_path / "prod-tag.txt"
+    tag_file.write_text("v3.0.1\n", encoding="utf-8")
+
+    with pytest.raises(app_config.AppConfigError, match="semantic image tag"):
+        app_config.resolve_tag(
+            {"SUGARKUBE_ENV": "prod", "SUGARKUBE_PROD_TAG_FILE": str(tag_file)},
+            "",
+            prod_fallback=True,
+        )
 
 
 def test_shell_emit_quotes_expected_exports(tmp_path: Path) -> None:
@@ -333,6 +364,11 @@ def test_main_supports_json_shell_validate_tag_and_host_value(
 
     assert app_config.main(["validate-tag", "main-deadbee"]) == 0
     assert capsys.readouterr().out.strip() == "main-deadbee"
+
+    assert app_config.main(["validate-tag", "v3.0.1"]) == 2
+    assert "semantic image tag" in capsys.readouterr().err
+    assert app_config.main(["validate-tag", "v3.0.1", "--env", "dev"]) == 0
+    assert capsys.readouterr().out.strip() == "v3.0.1"
 
     monkeypatch.setattr("sys.stdin", io.StringIO('{"ingress":{"host":"example.test"}}'))
     assert app_config.main(["host-value", "ingress.host"]) == 0
@@ -465,3 +501,14 @@ def test_dspace_env_specific_chart_and_prod_tag_pins() -> None:
     assert staging["SUGARKUBE_VERSION_FILE"] == "docs/apps/dspace.staging.version"
     assert prod["SUGARKUBE_VERSION_FILE"] == "docs/apps/dspace.prod.version"
     assert app_config.resolve_tag(prod, "", prod_fallback=True) == "main-1a31a56"
+
+
+def test_committed_production_image_pins_are_empty_or_branch_sha_tags() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    for pin in (repo_root / "docs" / "apps").glob("*.prod.tag"):
+        values = [
+            line.split("#", 1)[0].strip()
+            for line in pin.read_text(encoding="utf-8").splitlines()
+        ]
+        for value in filter(None, values):
+            assert app_config.validate_tag(value, "prod") == value, pin

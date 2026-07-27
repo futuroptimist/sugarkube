@@ -59,7 +59,7 @@ Each Sugarkube-managed app needs the following deployment coordinates:
 | Release name | Stable Helm release name, normally the app slug. |
 | Namespace | Stable Kubernetes namespace, normally the app slug. |
 | Chart version pin file | A repo file containing the chart version Sugarkube should install or upgrade. Apps may provide environment-specific pin files with shared-pin fallback. |
-| Production tag pin file | Required repo file containing the production-approved immutable image tag for production promotion. |
+| Production tag pin file | Required repo file containing the production-approved branch-SHA image tag for production promotion. |
 | Values chain per env | Comma-separated Helm values files, ordered from base to environment overlay. |
 | Validation URLs/paths | Host key plus one or more HTTP paths to check after rollout. |
 
@@ -88,28 +88,33 @@ The current apps map to that model as examples:
 
 ## Standard image tag model
 
-Deployment tags must identify application code and release intent, not mutable
-environments.
+Staging and production deployment tags must identify application code exactly,
+not a movable release or environment alias.
 
-Acceptable deployment tags:
+Acceptable staging and production deployment tags:
 
-- Immutable branch-SHA tags, such as `main-REPLACE_SHORTSHA`.
-- Semver or release tags, such as `v1.2.3`, `3.1.0`, or another documented
-  project-specific stable tag.
-- Mutable branch convenience tags, such as `main-latest`, only when an app
-  runbook explicitly documents that a non-prod bootstrap or iteration flow accepts
-  them. They are an app-specific exception, not a shared guarantee; for example,
-  token.place deploy/redeploy wrappers reject every tag containing `latest`,
-  including `main-latest`.
+- Lowercase branch-SHA tags, such as `main-1a31a56`, `v3-deadbee`, or a tag
+  ending in a longer lowercase commit SHA. The hexadecimal suffix must contain
+  7 through 40 characters.
 
 Unacceptable deployment tags:
 
 - `latest`;
-- bare branch names such as `main`, `master`, `develop`, or `release`; and
-- environment names such as `dev`, `staging`, `prod`, or `production`.
+- bare branch names such as `main`, `master`, `develop`, or `release`;
+- environment names such as `dev`, `staging`, `prod`, or `production`;
+- semantic tags and variants such as `v3.0.1`, `3.0.1-rc.1`, or
+  `v3.0.1-deadbee`; and
+- tags with an uppercase, malformed, shorter-than-7, or longer-than-40 SHA
+  suffix.
 
-Production promotion must use an immutable tag. The production tag pin file is
-part of the standard app coordinates and must contain the single immutable image
+Semantic image tags are release and distribution aliases, not immutable
+deployment coordinates. An explicit `env=dev` local-development flow may accept
+a semantic tag for backward compatibility; omitted environments, `int`
+(normalized to staging), staging, and production always use the strict policy.
+Chart versions remain separate coordinates and continue to use SemVer.
+
+Production promotion must use a branch-SHA tag. The production tag pin file is
+part of the standard app coordinates and must contain the single branch-SHA image
 tag approved for production. Generic production promotion flows should read that
 pin when `tag=` is omitted and should update it only as an explicit approval
 step.
@@ -272,11 +277,11 @@ validates a public OCI chart and edits the repository pin.
 just app-deploy app=dspace env=staging tag=main-REPLACE_SHORTSHA \
   manifest=deployment-candidates/dspace/staging.json
 
-# Redeploy an existing release with a specific immutable tag.
+# Redeploy an existing release with a specific branch-SHA tag.
 just app-redeploy app=dspace env=staging tag=main-REPLACE_SHORTSHA \
   manifest=deployment-candidates/dspace/staging.json evidence=deployment-evidence/dspace/staging/redeploy.json
 
-# Promote an approved immutable tag to production.
+# Promote an approved branch-SHA tag to production.
 just app-promote-prod app=dspace tag=main-REPLACE_SHORTSHA \
   manifest=deployment-candidates/dspace/prod.json
 

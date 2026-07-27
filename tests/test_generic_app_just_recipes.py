@@ -1313,7 +1313,7 @@ def test_app_deploy_rejects_mutable_tag_before_helm(
     )
 
     assert result.returncode != 0
-    assert "mutable tag" in result.stderr
+    assert "movable image tag" in result.stderr
     helm_log_path = Path(generic_app_stub_env["HELM_LOG"])
     assert not helm_log_path.exists() or helm_log_path.read_text(encoding="utf-8") == ""
 
@@ -2898,6 +2898,91 @@ def test_direct_helm_oci_helper_matching_env_succeeds(
     assert "show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.3" in helm_log
     assert "upgrade tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace" in helm_log
     assert "--description" not in helm_log
+
+
+@pytest.mark.parametrize("recipe", ["helm-oci-install", "helm-oci-upgrade"])
+def test_direct_helm_oci_helpers_reject_semantic_tag_before_any_helm(
+    recipe: str, generic_app_stub_env: dict[str, str]
+) -> None:
+    result = _run_just(
+        [
+            recipe,
+            "release=tokenplace",
+            "namespace=tokenplace",
+            "chart=oci://ghcr.io/futuroptimist/charts/tokenplace",
+            "version=0.1.3",
+            "tag=v3.0.1",
+            "env=staging",
+        ],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode != 0
+    assert "semantic image tag" in result.stderr
+    assert not Path(generic_app_stub_env["HELM_LOG"]).exists()
+
+
+@pytest.mark.parametrize("recipe", ["app-deploy", "app-redeploy", "app-promote-prod"])
+def test_generic_mutation_paths_reject_semantic_tag_before_any_helm(
+    recipe: str, generic_app_stub_env: dict[str, str]
+) -> None:
+    args = [recipe, "app=jobbot3000"]
+    if recipe != "app-promote-prod":
+        args.append("env=staging")
+    args.append("tag=v3.0.1")
+    result = _run_just(args, generic_app_stub_env)
+
+    assert result.returncode != 0
+    assert "semantic image tag" in result.stderr
+    assert not Path(generic_app_stub_env["HELM_LOG"]).exists()
+
+
+def test_prod_fallback_semantic_tag_fails_before_any_helm(
+    tmp_path: Path, generic_app_stub_env: dict[str, str]
+) -> None:
+    pin = tmp_path / "custom.prod.tag"
+    pin.write_text("v3.0.1\n", encoding="utf-8")
+    config = tmp_path / "custom.env"
+    config.write_text(
+        "\n".join(
+            [
+                "SUGARKUBE_APP=custom",
+                "SUGARKUBE_RELEASE=custom",
+                "SUGARKUBE_NAMESPACE=custom",
+                "SUGARKUBE_CHART=oci://example.invalid/charts/custom",
+                "SUGARKUBE_VERSION=1.2.3",
+                f"SUGARKUBE_PROD_TAG_FILE={pin}",
+                "SUGARKUBE_VALUES_DEV=dev.yaml",
+                "SUGARKUBE_VALUES_STAGING=staging.yaml",
+                "SUGARKUBE_VALUES_PROD=prod.yaml",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    generic_app_stub_env["SUGARKUBE_STUB_NODE_ENV"] = "prod"
+
+    result = _run_just(
+        ["app-promote-prod", "custom", "", str(config)],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode != 0
+    assert "semantic image tag" in result.stderr
+    assert not Path(generic_app_stub_env["HELM_LOG"]).exists()
+
+
+def test_dspace_compat_deploy_rejects_semantic_tag_before_manifest_or_helm(
+    generic_app_stub_env: dict[str, str]
+) -> None:
+    result = _run_just(
+        ["dspace-oci-deploy", "env=staging", "tag=v3.0.1"], generic_app_stub_env
+    )
+
+    assert result.returncode != 0
+    assert "semantic image tag" in result.stderr
+    assert "manifest=<approved-candidate.json> is required" not in result.stderr
+    assert not Path(generic_app_stub_env["HELM_LOG"]).exists()
 
 
 @pytest.mark.usefixtures("ensure_just_available")

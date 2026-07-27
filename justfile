@@ -1347,6 +1347,15 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
         exit 1
     fi
 
+    image_tag="${tag}"
+    if [ -z "${image_tag}" ] && [ -n "${default_tag}" ]; then
+        image_tag="${default_tag}"
+    fi
+    if [ -n "${image_tag}" ]; then
+        python3 "{{ justfile_directory() }}/scripts/app_config.py" validate-tag \
+          "${image_tag}" --env "${requested_env}" >/dev/null
+    fi
+
     python3 "{{ justfile_directory() }}/scripts/cluster_identity.py" assert --kubeconfig "${KUBECONFIG}" --env "${requested_env}" >/dev/null
 
     chart_version="${version}"
@@ -1380,11 +1389,6 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     version_args=()
     if [ -n "${chart_version}" ] && [ "${digest_chart}" = false ]; then
         version_args+=(--version "${chart_version}")
-    fi
-
-    image_tag="${tag}"
-    if [ -z "${image_tag}" ] && [ -n "${default_tag}" ]; then
-        image_tag="${default_tag}"
     fi
 
     echo "app: ${release}"
