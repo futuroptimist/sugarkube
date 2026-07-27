@@ -27,6 +27,18 @@ Sugarkube owns cluster and environment orchestration:
 - applying the environment values chain; and
 - running status and verification checks against the cluster.
 
+### DSPACE recovery exception
+
+DSPACE staging and production recovery uses `just dspace-manifest-rollback`,
+not the generic Tokenplace revision helper. It accepts a finalized DSPACE
+release-evidence record and derives every chart, image, source, application, and
+provider coordinate from that immutable approval. Its complete read-only
+preflight precedes the unique evidence reservation and digest-qualified
+`helm upgrade`; post-deployment proof requires stable Helm and pod identity plus
+the strict runtime/frontend/provider/public-journey verifier described in the
+[DSPACE runbook](apps/dspace.md#rollback). `helm history` remains investigative,
+and `helm rollback <revision>` is not the default DSPACE recovery operation.
+
 Future onboarding examples such as wove should only get Sugarkube app configs
 after their app repositories have published compatible images and charts.
 jobbot3000 now follows this contract through the generic app config and runbook.

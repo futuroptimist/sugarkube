@@ -1,0 +1,335 @@
+"""Focused fail-closed tests for DSPACE manifest rollback."""
+
+from __future__ import annotations
+
+import json
+from argparse import Namespace
+from pathlib import Path
+
+import pytest
+
+from scripts import dspace_manifest_rollback as rollback
+from scripts import dspace_release_manifest as manifest
+
+SHA = "abcdef0123456789abcdef0123456789abcdef01"
+DIGEST = "sha256:" + "1" * 64
+
+
+def target(environment: str = "staging") -> dict[str, object]:
+    value = {
+        "schemaVersion": 1,
+        "app": "dspace",
+        "applicationVersion": "3.2.0",
+        "sourceRevision": SHA,
+        "imageTag": "main-abcdef0",
+        "imageDigest": DIGEST,
+        "chartVersion": "3.2.0",
+        "chartDigest": "sha256:" + "2" * 64,
+        "semanticTag": "v3.2.0",
+        "recordType": "final",
+        "environment": environment,
+        "expectedDefaultChatProvider": "token-place",
+        "approvedAt": "2026-07-26T12:00:00Z",
+        "approvedBy": "test-approver",
+        "helmRevision": 7,
+        "pods": [
+            {
+                "name": "dspace-old",
+                "startTime": "2026-07-26T12:01:00Z",
+                "imageID": f"{manifest.IMAGE_REF}@{DIGEST}",
+            }
+        ],
+        "runtimeSourceRevision": SHA,
+        "runtimeSourceRevisionMethod": manifest.RUNTIME_METHOD,
+        "verificationResults": [],
+    }
+    checks = sorted(manifest.FINAL_FIXED_CHECKS) + ["imagePlatformSourceRevision[0]"]
+    value["verificationResults"] = [
+        {"check": check, "passed": True, "details": "observed"} for check in checks
+    ]
+    return manifest.validate(value, True)
+
+
+def verifier_result(**changes: object) -> dict[str, object]:
+    value = {
+        "schemaVersion": 1,
+        "applicationVersion": "3.2.0",
+        "runtimeSourceRevision": SHA,
+        "frontendSourceRevision": SHA,
+        "defaultProvider": "token-place",
+        "journeys": [{"name": "/"}, {"name": "/chat"}],
+    }
+    value["journeys"] = [{"name": item["name"], "passed": True} for item in value["journeys"]]
+    value.update(changes)
+    return value
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"runtimeSourceRevision": "0" * 40}, "runtimeSourceRevision"),
+        ({"frontendSourceRevision": "0" * 40}, "frontendSourceRevision"),
+        ({"defaultProvider": "openai"}, "defaultProvider"),
+        ({"journeys": [{"name": "/chat", "passed": False}]}, "failed public journey"),
+        ({"journeys": [{"name": "/", "passed": True}]}, "required /chat"),
+        ({"secret": "must-not-be-accepted"}, "schema mismatch"),
+    ],
+)
+def test_verifier_result_fails_closed(changes: dict[str, object], message: str) -> None:
+    with pytest.raises(rollback.RollbackError, match=message):
+        rollback.validate_verifier_result(verifier_result(**changes), target())
+
+
+def test_verifier_result_accepts_exact_identity_and_journeys() -> None:
+    assert rollback.validate_verifier_result(verifier_result(), target())["journeys"][1] == {
+        "name": "/chat",
+        "passed": True,
+    }
+
+
+def test_capability_probe_is_argv_only_and_exact(tmp_path: Path) -> None:
+    executable = tmp_path / "verifier"
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o755)
+    calls = []
+
+    def runner(command: list[str]) -> str:
+        calls.append(command)
+        return json.dumps(
+            {"schemaVersion": 1, "capabilities": list(rollback.REQUIRED_CAPABILITIES)}
+        )
+
+    rollback.verifier_capabilities(executable, runner)
+    assert calls == [[str(executable), "capabilities"]]
+
+
+def test_missing_or_incompatible_verifier_fails(tmp_path: Path) -> None:
+    with pytest.raises(rollback.RollbackError, match="existing executable"):
+        rollback.verifier_capabilities(tmp_path / "missing")
+    executable = tmp_path / "verifier"
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o755)
+    with pytest.raises(rollback.RollbackError, match="incompatible"):
+        rollback.verifier_capabilities(
+            executable,
+            lambda _command: json.dumps({"schemaVersion": 1, "capabilities": ["health"]}),
+        )
+
+
+def test_production_confirmation_is_bound_to_full_target_sha() -> None:
+    for invalid in ("", "yes", "dspace:prod:deadbee", f"dspace:staging:{SHA}"):
+        with pytest.raises(rollback.RollbackError, match="exactly equal"):
+            rollback.confirmation("prod", invalid, target("prod"))
+    rollback.confirmation("prod", f"dspace:prod:{SHA}", target("prod"))
+    rollback.confirmation("staging", "", target())
+
+
+def test_missing_or_candidate_target_fails_before_any_external_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    called = []
+    monkeypatch.setattr(rollback, "run", lambda command: called.append(command) or "")
+    common = [
+        "--environment",
+        "staging",
+        "--evidence",
+        str(tmp_path / "rollback.json"),
+        "--verifier",
+        str(tmp_path / "verifier"),
+    ]
+    assert rollback.main(["--manifest", str(tmp_path / "missing.json"), *common]) == 2
+    candidate = {field: target()[field] for field in manifest.CANDIDATE_FIELDS}
+    candidate["recordType"] = "candidate"
+    source = tmp_path / "candidate.json"
+    source.write_text(manifest._canonical(candidate), encoding="utf-8")
+    assert rollback.main(["--manifest", str(source), *common]) == 2
+    assert called == []
+    assert not (tmp_path / "rollback.json").exists()
+
+
+def test_values_chain_is_ordered_hashed_and_never_contains_contents(tmp_path: Path) -> None:
+    first = tmp_path / "base.yaml"
+    second = tmp_path / "prod.yaml"
+    first.write_text("privateSetting: do-not-log\n", encoding="utf-8")
+    second.write_text("provider: token-place\n", encoding="utf-8")
+    paths, proof = rollback.values_evidence({"SUGARKUBE_VALUES": "base.yaml,prod.yaml"}, tmp_path)
+    assert paths == [first, second]
+    assert [item["path"] for item in proof] == ["base.yaml", "prod.yaml"]
+    assert "do-not-log" not in json.dumps(proof)
+    with pytest.raises(rollback.RollbackError, match="missing or unreadable"):
+        rollback.values_evidence({"SUGARKUBE_VALUES": "missing.yaml"}, tmp_path)
+
+
+def pod(uid: str, *, digest: str = DIGEST, terminating: bool = False) -> dict[str, object]:
+    return {
+        "name": f"dspace-{uid}",
+        "uid": uid,
+        "startTime": f"2026-07-27T12:00:0{uid[-1]}Z",
+        "phase": "Running",
+        "ready": True,
+        "terminating": terminating,
+        "images": {"dspace": f"{manifest.IMAGE_REF}:main-abcdef0"},
+        "imageIDs": {"dspace": f"{manifest.IMAGE_REF}@{digest}"},
+        "ownerReferences": [],
+    }
+
+
+def test_post_pod_proof_rejects_unchanged_lingering_and_digest_mismatch() -> None:
+    before = [pod("1")]
+    with pytest.raises(rollback.RollbackError, match="replacement"):
+        rollback.verify_post_pods(before, before, target(), True)
+    with pytest.raises(rollback.RollbackError, match="terminating"):
+        rollback.verify_post_pods([pod("2", terminating=True)], before, target(), True)
+    with pytest.raises(rollback.RollbackError, match="resolved image ID"):
+        rollback.verify_post_pods([pod("2", digest="sha256:" + "9" * 64)], before, target(), True)
+    rollback.verify_post_pods([pod("2")], before, target(), True)
+
+
+def test_summary_never_invents_current_chart_digest() -> None:
+    current = {
+        "version": 8,
+        "chart": {"metadata": {"name": "dspace", "version": "3.1.0"}},
+    }
+    text = rollback.summary(current, [pod("1")], target())
+    assert "current: helmRevision=8 chartVersion=3.1.0 chartDigest=unknown" in text
+    assert f"chartDigest={target()['chartDigest']}" in text
+
+
+def test_reservation_collision_and_failure_record_are_non_secret(tmp_path: Path) -> None:
+    evidence = tmp_path / "rollback.json"
+    reservation = {"schemaVersion": 1, "state": "reserved", "invocationId": "safe"}
+    rollback.reserve(evidence, reservation)
+    with pytest.raises(rollback.RollbackError, match="overwrite"):
+        rollback.reserve(evidence, reservation)
+    failed = {**reservation, "state": "failed", "diagnostic": "RollbackError"}
+    rollback.replace_reserved(evidence, failed)
+    assert json.loads(evidence.read_text(encoding="utf-8")) == failed
+    assert "token" not in evidence.read_text(encoding="utf-8").lower()
+
+
+def test_just_recipe_has_no_revision_rollback_or_reuse_values() -> None:
+    recipe = (Path(__file__).parents[1] / "justfile").read_text(encoding="utf-8")
+    block = recipe.split("dspace-manifest-rollback", 1)[1].split("\n# Generic", 1)[0]
+    assert "dspace_manifest_rollback.py" in block
+    assert "--reuse-values" not in block
+    assert "helm rollback" not in block
+
+
+def test_success_uses_digest_chart_complete_values_and_writes_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest_path = tmp_path / "target.json"
+    evidence_path = tmp_path / "rollback.json"
+    manifest_path.write_text(manifest._canonical(target()), encoding="utf-8")
+    verifier = tmp_path / "verifier"
+    verifier.write_text("#!/bin/sh\n", encoding="utf-8")
+    verifier.chmod(0o755)
+    base = tmp_path / "base.yaml"
+    overlay = tmp_path / "staging.yaml"
+    base.write_text("base: true\n", encoding="utf-8")
+    overlay.write_text("staging: true\n", encoding="utf-8")
+    config = {
+        "SUGARKUBE_CHART": f"oci://{manifest.CHART_REF}",
+        "SUGARKUBE_RELEASE": "dspace",
+        "SUGARKUBE_NAMESPACE": "dspace",
+        "SUGARKUBE_VALUES": f"{base},{overlay}",
+    }
+    monkeypatch.setattr(rollback.app_config, "load_config", lambda *_args: config)
+    monkeypatch.setattr(rollback, "cluster_environment", lambda *_args: "staging")
+    monkeypatch.setattr(
+        rollback,
+        "verifier_capabilities",
+        lambda *_args: {
+            "schemaVersion": 1,
+            "capabilities": list(rollback.REQUIRED_CAPABILITIES),
+        },
+    )
+    monkeypatch.setattr(
+        rollback.release,
+        "preflight",
+        lambda *_args, **_kwargs: [{"check": "imageDigest", "passed": True, "details": "observed"}],
+    )
+    monkeypatch.setattr(rollback.release, "finalize", lambda *_args, **_kwargs: {})
+    statuses = iter(
+        [
+            {
+                "name": "dspace",
+                "namespace": "dspace",
+                "version": 7,
+                "info": {"status": "deployed", "description": "old"},
+                "chart": {"metadata": {"name": "dspace", "version": "3.1.0"}},
+            },
+            {
+                "name": "dspace",
+                "namespace": "dspace",
+                "version": 8,
+                "info": {"status": "deployed", "description": "placeholder"},
+                "chart": {"metadata": {"name": "dspace", "version": "3.2.0"}},
+            },
+            {
+                "name": "dspace",
+                "namespace": "dspace",
+                "version": 8,
+                "info": {"status": "deployed", "description": "placeholder"},
+                "chart": {"metadata": {"name": "dspace", "version": "3.2.0"}},
+            },
+        ]
+    )
+
+    def status(*_args: object) -> dict[str, object]:
+        value = next(statuses)
+        if value["version"] == 8:
+            value["info"]["description"] = description[0]
+        return value
+
+    description = [""]
+    monkeypatch.setattr(rollback, "helm_status", status)
+    pod_states = iter([[pod("1", digest="sha256:" + "9" * 64)], [pod("2")]])
+    latest = [pod("2")]
+
+    def pods_stub(*_args: object) -> list[dict[str, object]]:
+        try:
+            latest[:] = next(pod_states)
+        except StopIteration:
+            pass
+        return json.loads(json.dumps(latest))
+
+    monkeypatch.setattr(rollback, "pods", pods_stub)
+    commands: list[list[str]] = []
+
+    def runner(command: list[str]) -> str:
+        commands.append(command)
+        if command[0] == "helm" and "upgrade" in command:
+            description[0] = command[command.index("--description") + 1]
+        if command[:2] == [str(verifier), "verify"]:
+            return json.dumps(verifier_result())
+        if command[:2] == ["git", "rev-parse"]:
+            return "f" * 40 + "\n"
+        if command[0] == "kubectl" and "replicasets,deployments" in command:
+            return '{"items": []}'
+        if command[0] == "kubectl" and "pods" in command:
+            return '{"items": []}'
+        return "rendered"
+
+    args = Namespace(
+        environment="staging",
+        manifest=manifest_path,
+        evidence=evidence_path,
+        verifier=verifier,
+        confirm="",
+        config="",
+        kubeconfig="kubeconfig",
+        oras="oras",
+        timeout="10m",
+    )
+    result = rollback.rollback(args, runner)
+    upgrade = next(command for command in commands if "upgrade" in command)
+    assert f"oci://{manifest.CHART_REF}@{'sha256:' + '2' * 64}" in upgrade
+    assert upgrade.count("--values") == 2
+    assert str(base) in upgrade and str(overlay) in upgrade
+    assert "--reuse-values" not in upgrade
+    assert result["state"] == "succeeded"
+    written = json.loads(evidence_path.read_text(encoding="utf-8"))
+    assert written["targetManifestFingerprint"] == result["targetManifestFingerprint"]
+    assert written["helm"]["beforeRevision"] == 7
+    assert written["helm"]["afterRevision"] == 8

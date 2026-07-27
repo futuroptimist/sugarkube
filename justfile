@@ -1624,6 +1624,23 @@ app-config app env='staging' config='':
       --env {{ quote(env) }} \
       --config {{ quote(config) }}
 
+# DSPACE-only fail-closed recovery from previously finalized immutable evidence.
+dspace-manifest-rollback env manifest evidence verifier confirm='' config='' kubeconfig='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    kubeconfig_path={{ quote(kubeconfig) }}
+    if [ -z "${kubeconfig_path}" ]; then
+      kubeconfig_path="${KUBECONFIG:-${HOME}/.kube/config}"
+    fi
+    python3 "{{ justfile_directory() }}/scripts/dspace_manifest_rollback.py" \
+      --environment {{ quote(env) }} \
+      --manifest {{ quote(manifest) }} \
+      --evidence {{ quote(evidence) }} \
+      --verifier {{ quote(verifier) }} \
+      --confirm {{ quote(confirm) }} \
+      --config {{ quote(config) }} \
+      --kubeconfig "${kubeconfig_path}"
+
 # Generic immutable-tag app deploy backed by docs/examples/apps/*.env or local app configs.
 app-deploy app env='staging' tag='' config='' manifest='' evidence='':
     #!/usr/bin/env bash
