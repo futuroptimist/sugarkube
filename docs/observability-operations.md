@@ -125,11 +125,17 @@ is not rollout evidence.
 - Prometheus: one replica, `7d` retention, `15GB` retention size, `local-path` `ReadWriteOnce` PVC requesting `20Gi`, CPU request `200m`, memory request `512Mi`, memory limit `2Gi`, admin API disabled, and external label `cluster=sugarkube-int`.
 - Alertmanager: one replica and no-op receiver named exactly `"null"`.
 - Grafana: persistence disabled, no Ingress, LAN-only NodePort `30300`.
-- The provisioned dashboard defaults to six hours and a 30-second refresh. It
-  covers overall DSPACE and public-probe status, bounded DSPACE HTTP rate/error/
-  latency, runtime and build identity, feature traffic, and blackbox endpoint,
-  duration, HTTP status, and TLS lifetime views. Its staging `environment`,
-  `app`, and `route` variables avoid raw target URLs.
+- The provisioned dashboard defaults to six hours and a 30-second refresh. Its
+  top-level public availability stat reports aggregate healthy and failed
+  endpoint counts for the selected probe filters; absent probe data remains
+  **No data**, never healthy. The lower endpoint matrix retains per-endpoint
+  diagnosis. The selected-window status-class distribution is an instant
+  categorical summary, while DSPACE user request rate excludes `/healthz`,
+  `/livez`, and `/metrics` and a separate compact panel preserves those
+  operational request rates. The visible **Probe application** and **Probe
+  route** controls apply only to blackbox panels; the internal `app` and `route`
+  variable names remain stable. All queries retain bounded labels and omit raw
+  target URLs.
 - dChat and token.place dependency traffic may be absent until those features
   receive requests. Their queries deliberately fall back to zero: **no requests
   observed** is expected and is not an instrumentation failure.

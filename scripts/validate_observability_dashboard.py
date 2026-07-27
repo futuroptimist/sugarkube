@@ -27,6 +27,7 @@ REQUIRED_METRICS = {
     "probe_ssl_earliest_cert_expiry",
 }
 EVENT_METRICS = {"dspace_dchat_requests_total", "dspace_dependency_requests_total"}
+OPERATIONAL_ROUTES = r"/(healthz|livez|metrics)"
 
 
 def load_dashboard(path: Path) -> dict:
@@ -44,6 +45,13 @@ def panels(dashboard: dict):
         if isinstance(panel, dict):
             yield panel
             yield from panels(panel)
+
+
+def require_panel(panel_by_title: dict, title: str) -> dict:
+    panel = panel_by_title.get(title)
+    if not panel:
+        raise SystemExit(f"ERROR: dashboard is missing required panel {title!r}.")
+    return panel
 
 
 def validate_dashboard(path: Path) -> str:
@@ -73,6 +81,61 @@ def validate_dashboard(path: Path) -> str:
         matching = [expr for expr in expressions if metric in expr]
         if not matching or any("or on() vector(0)" not in expr for expr in matching):
             raise SystemExit(f"ERROR: event-driven metric {metric} must use a safe zero fallback.")
+    panel_by_title = {panel.get("title"): panel for panel in panels(dashboard)}
+    distribution = require_panel(panel_by_title, "Status-class distribution")
+    distribution_targets = distribution.get("targets", [])
+    if (
+        distribution.get("type") not in {"barchart", "piechart"}
+        or len(distribution_targets) != 1
+        or any(
+            target.get("instant") is not True or target.get("range") is not False
+            for target in distribution_targets
+        )
+        or not distribution_targets[0]
+        .get("expr", "")
+        .startswith("sum by (status_class) (increase(dspace_http_requests_total{")
+        or "[$__range]" not in distribution_targets[0].get("expr", "")
+    ):
+        raise SystemExit(
+            "ERROR: status-class distribution must be a categorical instant selected-window query."
+        )
+    user_rate = require_panel(panel_by_title, "User request rate by route and status class")
+    if not user_rate.get("targets") or any(
+        f'route!~"{OPERATIONAL_ROUTES}"' not in target.get("expr", "")
+        for target in user_rate["targets"]
+    ):
+        raise SystemExit("ERROR: user request rate must exclude health and metrics routes.")
+    operational_rate = require_panel(panel_by_title, "Operational request rate")
+    if not operational_rate.get("targets") or any(
+        f'route=~"{OPERATIONAL_ROUTES}"' not in target.get("expr", "")
+        for target in operational_rate["targets"]
+    ):
+        raise SystemExit("ERROR: operational request rate must contain health and metrics routes.")
+    availability = require_panel(panel_by_title, "Public endpoint availability")
+    availability_targets = availability.get("targets", [])
+    if (
+        availability.get("type") != "stat"
+        or len(availability_targets) != 2
+        or {target.get("legendFormat") for target in availability_targets}
+        != {"Healthy endpoints", "Failed endpoints"}
+        or any(
+            target.get("instant") is not True or target.get("range") is not False
+            for target in availability_targets
+        )
+        or any(
+            not target.get("expr", "").startswith(
+                "count((min by (environment, app, route) (probe_success{"
+            )
+            for target in availability_targets
+        )
+        or any("or on() vector" in target.get("expr", "") for target in availability_targets)
+    ):
+        raise SystemExit(
+            "ERROR: public endpoint availability must be an aggregate, fail-closed instant summary."
+        )
+    endpoint_matrix = require_panel(panel_by_title, "Endpoint matrix")
+    if endpoint_matrix.get("type") != "table" or not endpoint_matrix.get("targets"):
+        raise SystemExit("ERROR: detailed endpoint matrix must remain available for diagnosis.")
     serialized = json.dumps(dashboard)
     if re.search(r"https?://", serialized, re.IGNORECASE):
         raise SystemExit("ERROR: dashboard must not contain embedded raw URLs.")
