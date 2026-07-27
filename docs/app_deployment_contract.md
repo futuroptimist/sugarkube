@@ -237,6 +237,20 @@ requires inspecting and reconciling the cluster, Helm release, candidate, and
 existing evidence before an operator explicitly removes the exact stranded sidecar
 and retries.
 
+### DSPACE manifest rollback
+
+`just dspace-manifest-rollback` is the DSPACE-only recovery surface. It accepts a
+previously finalized release-evidence record and a new evidence destination, and
+derives every deployment coordinate from the finalized record. It performs all
+cluster, values-chain, OCI, chart-render, current-state, no-op, production
+confirmation, and verifier-capability checks before reserving evidence. The
+mutation is a digest-qualified `helm upgrade` with the complete values chain and
+without reused values; Helm revision rollback is not the default DSPACE recovery
+path. Post-rollout evidence requires stable Helm state, replacement pod identities,
+exact image IDs, OCI revision metadata, and strict runtime, frontend, provider, and
+public-journey proof. The verifier dependency is fail-closed pending DSPACE #4732
+and #4733; it is not replaced with inferred identity or an availability check.
+
 These recipes are implemented in the root `justfile` and use the app config
 lookup order above.
 

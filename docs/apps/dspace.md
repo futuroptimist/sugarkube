@@ -328,38 +328,71 @@ curl -fsS https://democratized.space/livez
 
 ## Rollback
 
-Rollback by deploying the previous known-good immutable image tag with the generic redeploy command and an approved environment-specific candidate for that release. Use a unique `evidence=` path if evidence for the tag already exists; occupied paths are rejected before Helm runs.
-Do not infer or generate a rollback manifest automatically; that future
-automation is tracked in #2327.
+The primary DSPACE recovery operation restores a previously approved **finalized
+release-evidence** record. It derives the image tag, image digest, chart version,
+chart digest, source revision, application version, and provider from that record;
+there are no independent image or chart overrides. Candidate records and semantic
+or mutable tags are rejected. `semanticTag` is corroborating evidence only.
 
 ```bash
-APP_TAG=main-REPLACE_PREVIOUS_SHORTSHA
-STAGING_ROLLBACK_MANIFEST=deployment-candidates/dspace/previous-release-staging.json
-PROD_ROLLBACK_MANIFEST=deployment-candidates/dspace/previous-release-prod.json
+just dspace-manifest-rollback \
+  env=staging \
+  manifest=deployment-evidence/dspace/staging/previous-final.json \
+  evidence=deployment-evidence/dspace/staging/rollback-20260727T120000Z.json \
+  verifier=/absolute/path/to/dspace-runtime-journey-verifier
 ```
+
+Staging is non-interactive. Production additionally requires the exact confirmation
+`dspace:prod:<full-target-source-SHA>`. A generic `yes`, a short SHA, or a value for
+another release fails before reservation or mutation:
 
 ```bash
-just app-redeploy app=dspace env=staging tag="$APP_TAG" manifest="$STAGING_ROLLBACK_MANIFEST" evidence=deployment-evidence/dspace/staging/"$APP_TAG"-rollback.json
+TARGET_SHA=REPLACE_WITH_40_CHARACTER_SHA_FROM_FINAL_EVIDENCE
+just dspace-manifest-rollback \
+  env=prod \
+  manifest=deployment-evidence/dspace/prod/previous-final.json \
+  evidence=deployment-evidence/dspace/prod/rollback-20260727T120000Z.json \
+  verifier=/absolute/path/to/dspace-runtime-journey-verifier \
+  confirm="dspace:prod:${TARGET_SHA}"
 ```
+
+Before reserving evidence or changing the cluster, the command asserts cluster
+identity, resolves and hashes the complete ordered values chain, checks file
+readability, reruns digest and OCI-revision checks, renders the digest-qualified
+chart, establishes verifier capabilities, captures current Helm and pod identity,
+prints a current-versus-target summary, and rejects a no-op. It never prints values
+contents or verifier response bodies.
+
+Only then does it atomically reserve the new evidence path and run `helm upgrade`
+with the digest-qualified chart, every explicit values file, and the immutable
+target image tag. It does not use `--reuse-values`, a semantic tag, or `helm
+rollback <revision>`. After rollout it proves the Helm revision advanced and stayed
+stable, validates chart and release ownership, requires replacement Running/Ready
+pods with the exact image digest, reruns OCI provenance, and invokes the strict
+runtime/frontend/provider/public-journey verifier (including `/chat`). Success
+creates a non-overwritable rollback-evidence JSON record and removes its reservation.
+
+If anything fails after reservation, stop: cluster state may have changed. The
+reservation remains deliberately. Inspect the release, pods, target evidence, and
+reserved destination, then reconcile manually; the command never attempts a second
+automatic rollback. `helm history` remains useful for investigation, but `helm
+rollback <revision>` is not the default DSPACE recovery mechanism. The
+`tokenplace-rollback` helper is only for Tokenplace and must not be invoked for
+DSPACE.
 
 ```bash
-just app-redeploy app=dspace env=prod tag="$APP_TAG" manifest="$PROD_ROLLBACK_MANIFEST" evidence=deployment-evidence/dspace/prod/"$APP_TAG"-rollback.json
+helm history dspace --namespace dspace
 ```
 
-Rollback by Helm revision is still available through the existing parameterized helper. Set `ROLLBACK_ENV=staging` instead when intentionally rolling back staging.
-
-```bash
-HELM_REVISION=12
-```
-
-```bash
-ROLLBACK_ENV=prod
-just kubeconfig-env "$ROLLBACK_ENV"
-```
-
-```bash
-just tokenplace-rollback release=dspace namespace=dspace revision="$HELM_REVISION" env="$ROLLBACK_ENV"
-```
+The executable verifier contract is intentionally a dependency boundary. Its
+`capabilities` JSON must declare application version, full runtime SHA, frontend
+SHA, provider, and public journeys. Its `verify` result must contain exact typed
+fields and successful named journeys including `/chat`. Real production rollback
+therefore remains unavailable until DSPACE
+[#4732](https://github.com/democratizedspace/dspace/issues/4732) and
+[#4733](https://github.com/democratizedspace/dspace/issues/4733) provide commands
+that satisfy this contract. Sugarkube does not fabricate HTTP build identity,
+derive frontend identity from SemVer, or substitute an availability-only smoke.
 
 ## Troubleshooting
 

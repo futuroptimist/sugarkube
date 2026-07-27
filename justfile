@@ -1946,6 +1946,22 @@ dspace-oci-redeploy env='staging' tag='' manifest='' evidence='':
     [ -z {{ quote(evidence) }} ] || delegate+=(evidence={{ quote(evidence) }})
     "${delegate[@]}"
 
+# Restore DSPACE from immutable finalized evidence; this is intentionally not a Helm revision rollback.
+dspace-manifest-rollback env='staging' manifest='' evidence='' verifier='' confirm='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    if [ -z {{ quote(manifest) }} ] || [ -z {{ quote(evidence) }} ] || [ -z {{ quote(verifier) }} ]; then
+      echo "Usage: just dspace-manifest-rollback env=<staging|prod> manifest=<final.json> evidence=<new.json> verifier=<executable> [confirm=<dspace:prod:FULL_SHA>]" >&2
+      exit 2
+    fi
+    export KUBECONFIG="${HOME}/.kube/config"
+    just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env {{ quote(env) }}
+    python3 "{{ justfile_directory() }}/scripts/dspace_manifest_rollback.py" \
+      --environment {{ quote(env) }} --manifest {{ quote(manifest) }} \
+      --evidence {{ quote(evidence) }} --verifier {{ quote(verifier) }} \
+      --confirm {{ quote(confirm) }}
+
 # Dump dspace and Traefik logs for debugging HTTP 500s.
 dspace-debug-logs namespace='dspace':
     #!/usr/bin/env bash
