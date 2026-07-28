@@ -994,6 +994,118 @@ spec:
     )
 
 
+def test_dspace_resources_require_release_association() -> None:
+    inputs = app_chart.ReleaseInputs(
+        "dspace", "staging", "dspace", "dspace", "chart", "3.1.0", (),
+        "main-deadbee", "staging.democratized.space",
+    )
+    manifest = _generic_manifest(
+        release="dspace",
+        image_container="dspace",
+        labels="    app.kubernetes.io/instance: another-release",
+    ) + """---
+kind: Service
+metadata:
+  name: dspace
+---
+kind: Ingress
+metadata:
+  name: dspace
+spec:
+  rules:
+    - host: staging.democratized.space
+---
+kind: ServiceMonitor
+metadata:
+  name: dspace
+spec:
+  endpoints:
+    - bearerTokenSecret:
+        name: dspace-staging-metrics-token
+        key: token
+"""
+
+    errors = app_chart.validate_rendered_manifest(manifest, inputs)
+    assert "DSPACE intended Service did not render" in errors
+    assert "DSPACE intended Ingress did not render" in errors
+    assert "no Ingress rule exactly matches expected host 'staging.democratized.space'" in errors
+
+
+def test_dspace_servicemonitor_requires_every_endpoint_authentication() -> None:
+    inputs = app_chart.ReleaseInputs(
+        "dspace", "staging", "dspace", "dspace", "chart", "3.1.0", (),
+        "main-deadbee",
+    )
+    manifest = """kind: ServiceMonitor
+metadata:
+  name: dspace
+  labels:
+    app.kubernetes.io/instance: dspace
+spec:
+  endpoints:
+    - bearerTokenSecret:
+        name: dspace-staging-metrics-token
+        key: token
+    - bearerTokenSecret:
+        name: dspace-staging-metrics-token
+"""
+
+    assert any(
+        "bearerTokenSecret" in error
+        for error in app_chart.validate_rendered_manifest(manifest, inputs)
+    )
+
+
+def test_dspace_servicemonitor_uses_rendered_default_token_key(tmp_path: Path) -> None:
+    values = tmp_path / "values.yaml"
+    values.write_text(
+        "metrics:\n  enabled: true\n  auth:\n"
+        "    existingSecret: dspace-staging-metrics-token\n"
+        "serviceMonitor:\n  enabled: true\n",
+        encoding="utf-8",
+    )
+    inputs = app_chart.ReleaseInputs(
+        "dspace", "staging", "dspace", "dspace", "chart", "3.1.0",
+        (str(values),), "main-deadbee",
+    )
+    manifest = """kind: ServiceMonitor
+metadata:
+  labels:
+    app.kubernetes.io/instance: dspace
+spec:
+  endpoints:
+    - bearerTokenSecret:
+        name: dspace-staging-metrics-token
+        key: token
+"""
+
+    assert app_chart.validate_dspace_values(manifest, inputs) == []
+
+
+def test_dspace_values_ignore_unrelated_servicemonitor(tmp_path: Path) -> None:
+    values = tmp_path / "values.yaml"
+    values.write_text(
+        "metrics:\n  enabled: true\n  auth:\n    existingSecret: expected\n"
+        "serviceMonitor:\n  enabled: true\n",
+        encoding="utf-8",
+    )
+    inputs = app_chart.ReleaseInputs(
+        "dspace", "staging", "dspace", "dspace", "chart", "3.1.0",
+        (str(values),), "main-deadbee",
+    )
+    unrelated = """kind: ServiceMonitor
+metadata:
+  labels:
+    app.kubernetes.io/instance: unrelated
+spec:
+  endpoints: []
+"""
+
+    assert app_chart.validate_dspace_values(unrelated, inputs) == [
+        "DSPACE configured ServiceMonitor did not render"
+    ]
+
+
 def test_dspace_production_rejects_staging_metrics_leaks() -> None:
     inputs = app_chart.ReleaseInputs(
         "dspace",
@@ -1017,16 +1129,65 @@ def test_dspace_production_rejects_staging_metrics_leaks() -> None:
 kind: Service
 metadata:
   name: dspace
+  labels:
+    app.kubernetes.io/instance: dspace
 ---
 kind: ConfigMap
 metadata:
   name: dspace
+  labels:
+    app.kubernetes.io/instance: dspace
 data:
   leaked-secret: dspace-staging-metrics-token
 """
     )
     assert "DSPACE production rendered staging-only metrics configuration" in (
         app_chart.validate_rendered_manifest(manifest, inputs)
+    )
+
+
+@pytest.mark.parametrize(
+    "leak", ["METRICS_TOKEN", "dspace-staging-metrics-token", "sugarkube-int"]
+)
+def test_dspace_production_checks_only_release_associated_structure(leak: str) -> None:
+    inputs = app_chart.ReleaseInputs(
+        "dspace", "prod", "dspace", "dspace", "chart", "3.1.0", (),
+        "main-deadbee", "democratized.space",
+    )
+    base = _generic_manifest(
+        release="dspace",
+        image_container="dspace",
+        host="democratized.space",
+        labels="    app.kubernetes.io/instance: dspace",
+    ) + """---
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/instance: dspace
+"""
+    unrelated = base + f"""---
+# {leak}
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/instance: unrelated
+data:
+  value: {leak}
+"""
+    associated = base + f"""---
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/instance: dspace
+data:
+  value: {leak}
+"""
+
+    assert "DSPACE production rendered staging-only metrics configuration" not in (
+        app_chart.validate_rendered_manifest(unrelated, inputs)
+    )
+    assert "DSPACE production rendered staging-only metrics configuration" in (
+        app_chart.validate_rendered_manifest(associated, inputs)
     )
 
 

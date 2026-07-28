@@ -161,6 +161,17 @@ def release_associated(
     )
 
 
+def contains_exact_scalar(value: object, expected: set[str]) -> bool:
+    if isinstance(value, dict):
+        return any(
+            contains_exact_scalar(key, expected) or contains_exact_scalar(item, expected)
+            for key, item in value.items()
+        )
+    if isinstance(value, list):
+        return any(contains_exact_scalar(item, expected) for item in value)
+    return isinstance(value, str) and value in expected
+
+
 def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str]:
     try:
         documents = safe_yaml_documents(manifest)
@@ -187,7 +198,12 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
             metadata.get("annotations") if isinstance(metadata.get("annotations"), dict) else {}
         )
         associated = release_associated(
-            document, inputs.release, allow_name=kind not in {"Deployment", "StatefulSet", "DaemonSet"}
+            document,
+            inputs.release,
+            allow_name=(
+                inputs.app != "dspace"
+                and kind not in {"Deployment", "StatefulSet", "DaemonSet"}
+            ),
         )
         if namespace and namespace != inputs.namespace:
             errors.append(
@@ -234,17 +250,18 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
             if not any(
                 isinstance(doc, dict)
                 and scalar(doc.get("kind")) == required
-                and release_associated(doc, inputs.release)
+                and release_associated(doc, inputs.release, allow_name=False)
                 for doc in documents
             ):
                 errors.append(f"DSPACE intended {required} did not render")
         if inputs.host and not ingress_hosts:
             errors.append("DSPACE intended Ingress did not render")
         for monitor in service_monitors:
-            endpoints = (monitor.get("spec") or {}).get("endpoints")
-            authenticated = False
-            if isinstance(endpoints, list):
-                authenticated = any(
+            spec = monitor.get("spec") if isinstance(monitor.get("spec"), dict) else {}
+            endpoints = spec.get("endpoints")
+            authenticated = bool(endpoints) and isinstance(endpoints, list)
+            if authenticated:
+                authenticated = all(
                     isinstance(endpoint, dict)
                     and isinstance(endpoint.get("bearerTokenSecret"), dict)
                     and scalar(endpoint["bearerTokenSecret"].get("name"))
@@ -255,10 +272,15 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
                 errors.append(
                     "DSPACE ServiceMonitor bearerTokenSecret name and key must be nonempty"
                 )
+        production_leaks = {"METRICS_TOKEN", "dspace-staging-metrics-token", "sugarkube-int"}
         if inputs.env == "prod" and (
             service_monitors
-            or "dspace-staging-metrics-token" in manifest
-            or "sugarkube-int" in manifest
+            or any(
+                isinstance(doc, dict)
+                and release_associated(doc, inputs.release, allow_name=False)
+                and contains_exact_scalar(doc, production_leaks)
+                for doc in documents
+            )
         ):
             errors.append("DSPACE production rendered staging-only metrics configuration")
     return errors
@@ -466,9 +488,11 @@ def validate_dspace_values(manifest: str, inputs: ReleaseInputs) -> list[str]:
         resolved_values_scalar(inputs.values, ("serviceMonitor", "enabled")).lower() == "true"
     )
     secret = resolved_values_scalar(inputs.values, ("metrics", "auth", "existingSecret"))
-    secret_key = resolved_values_scalar(inputs.values, ("metrics", "auth", "secretKey"))
+    secret_key = resolved_values_scalar(inputs.values, ("metrics", "auth", "secretKey")) or "token"
     rendered_monitor = any(
-        isinstance(document, dict) and scalar(document.get("kind")) == "ServiceMonitor"
+        isinstance(document, dict)
+        and scalar(document.get("kind")) == "ServiceMonitor"
+        and release_associated(document, inputs.release, allow_name=False)
         for document in safe_yaml_documents(manifest)
     )
     errors: list[str] = []
