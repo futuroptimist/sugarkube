@@ -123,11 +123,15 @@ apiVersion: v1
 kind: Service
 metadata:
   name: dspace
+  labels:
+    app.kubernetes.io/instance: dspace
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: dspace
+  labels:
+    app.kubernetes.io/instance: dspace
 spec:
   rules:
     - host: staging.democratized.space
@@ -139,6 +143,8 @@ apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: dspace
+  labels:
+    app.kubernetes.io/instance: dspace
 spec:
   endpoints:
     - port: http
