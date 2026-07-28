@@ -11,7 +11,7 @@ Production observability is intentionally unsupported in this slice because no p
 - Staging overrides: `clusters/staging/observability/kube-prometheus-stack.values.yaml`.
 - Staging dashboard: `clusters/staging/observability/dashboards/sugarkube-staging-observability.json`.
 - Helper: `scripts/observability_helm.sh` through `just observability-*` recipes.
-- Alert delivery, routing, and drill strategy: [`docs/observability-alerting.md`](observability-alerting.md) — this runbook covers deploying and verifying the stack, not how (or whether) it pages anyone yet.
+- Alert delivery, routing, and drill strategy: [`docs/observability-alerting.md`](observability-alerting.md). Repository support now includes the staging-only PagerDuty synthetic route and manual drill; deployment and phone delivery remain operator-proven steps.
 
 The dashboard is owned by Sugarkube and provisioned by the pinned Grafana
 subchart. Every render, install, and upgrade passes the same standalone JSON
@@ -46,6 +46,10 @@ The old Flux/Longhorn files under `platform/observability/*.yaml` and `clusters/
   - Secret name: `grafana-admin-credentials`.
   - Username key: `admin-user`.
   - Password key: `admin-password`.
+- Operator-managed PagerDuty Secret exists before an observability install or upgrade:
+  - Namespace: `monitoring`.
+  - Secret name: `alertmanager-pagerduty`.
+  - Key: `routing-key`.
 
 Never put example credentials or plaintext Secret data in commands, logs, docs, commits, or PRs.
 
@@ -120,11 +124,94 @@ is not rollout evidence.
    just observability-dashboard-verify env=staging
    ```
 
+## Staging PagerDuty synthetic drill
+
+Repository support is not evidence that this configuration has been deployed or that a phone has
+received anything. An operator performs this runbook after merge, with the PagerDuty Events API v2
+routing key supplied out of band. No command below displays the key, places it in an argument, or
+writes it to a persistent file.
+
+1. Select the `sugar-staging` context. Create the Secret for the first time with a hidden read and
+   stdin. The pipeline's manifest travels only between the two processes; do not add `tee`, shell
+   tracing, or a command that prints it:
+
+   ```bash
+   just kubeconfig-env env=staging
+   read -rsp 'PagerDuty routing key: ' PD_ROUTING_KEY; printf '\n'
+   printf '%s' "$PD_ROUTING_KEY" |
+     kubectl -n monitoring create secret generic alertmanager-pagerduty \
+       --from-file=routing-key=/dev/stdin --dry-run=client -o yaml |
+     kubectl apply -f - >/dev/null
+   unset PD_ROUTING_KEY
+   kubectl -n monitoring get secret alertmanager-pagerduty -o name
+   ```
+
+   Keep shell history expansion and command tracing disabled. The key is never committed. To rotate
+   it, repeat the same hidden-read pipeline with the replacement value; do not delete the existing
+   Secret first.
+
+2. Render and inspect the proposed resources offline. Confirm the Alertmanager custom resource lists
+   `alertmanager-pagerduty`, the root receiver is `"null"`, the only PagerDuty route has all four
+   synthetic matchers, and the receiver contains only the file path
+   `/etc/alertmanager/secrets/alertmanager-pagerduty/routing-key` with resolved notifications enabled:
+
+   ```bash
+   just observability-render env=staging > /tmp/kube-prometheus-stack.rendered.yaml
+   less /tmp/kube-prometheus-stack.rendered.yaml
+   rm -f /tmp/kube-prometheus-stack.rendered.yaml
+   ```
+
+3. Upgrade and run both standard verifiers. The upgrade fails closed before any Helm command if the
+   Secret or its nonempty key is absent. Verification checks the live custom-resource Secret
+   reference and generated Alertmanager configuration without displaying it:
+
+   ```bash
+   just observability-upgrade env=staging
+   just observability-verify env=staging
+   just observability-dashboard-verify env=staging
+   ```
+
+4. Explicitly fire the synthetic alert. It expires after 30 minutes even if the drill is abandoned:
+
+   ```bash
+   just observability-pagerduty-test env=staging action=fire
+   ```
+
+5. In PagerDuty, manually confirm incident receipt on the expected service and phone, then acknowledge
+   it. The repository deliberately cannot automate or claim this observation.
+
+6. Resolve the same alert and manually confirm that PagerDuty resolves the same incident:
+
+   ```bash
+   just observability-pagerduty-test env=staging action=resolve
+   ```
+
+7. If necessary, roll back to the prior known-good Helm revision, then run the verifier appropriate
+   for that revision:
+
+   ```bash
+   helm -n monitoring history kube-prometheus-stack
+   helm -n monitoring rollback kube-prometheus-stack <prior-revision> --wait --timeout 20m
+   just observability-verify env=staging
+   ```
+
+   Keep `monitoring/alertmanager-pagerduty` until the rollback has completed. Deleting the credential
+   Secret while the current Alertmanager custom resource still mounts it can prevent Alertmanager
+   from starting, which can also make a rollback harder to diagnose.
+
+8. After credential rotation, run `just observability-upgrade env=staging` so the Alertmanager pods
+   reliably consume the replacement, then repeat verification and the explicit fire, manual receipt,
+   resolve, and manual resolution sequence. Retain the old integration until that post-rotation drill
+   succeeds; then revoke it in PagerDuty.
+
 ## Runtime expectations
 
 - Helm release: `kube-prometheus-stack` in namespace `monitoring`.
 - Prometheus: one replica, `7d` retention, `15GB` retention size, `local-path` `ReadWriteOnce` PVC requesting `20Gi`, CPU request `200m`, memory request `512Mi`, memory limit `2Gi`, admin API disabled, and external label `cluster=sugarkube-int`.
-- Alertmanager: one replica and no-op receiver named exactly `"null"`. No real notification receiver (PagerDuty, Healthchecks.io, or otherwise) is configured yet; see [`docs/observability-alerting.md`](observability-alerting.md) for the planned rollout.
+- Alertmanager: one replica with root no-op receiver named exactly `"null"`. Staging adds one
+  file-backed PagerDuty receiver, but only the exact `SugarkubePagerDutyTest` synthetic label set is
+  allowlisted. Bundled chart alerts and all real application, node, and blackbox alerts still fall
+  through to `"null"`.
 - Grafana: persistence disabled, no Ingress, LAN-only NodePort `30300`.
 - The provisioned dashboard defaults to six hours and a 30-second refresh. Its
   top-level public availability summary reports **Healthy endpoints**, **Failed

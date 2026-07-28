@@ -4,9 +4,10 @@ This is the canonical alerting strategy for Sugarkube. It defines the agreed tar
 routing policy, alert inventory, and rollout/drill plan for turning the staging observability stack
 described in [`docs/observability-design.md`](./observability-design.md) and
 [`docs/observability-operations.md`](./observability-operations.md) into something that actually pages
-a human. **Nothing in this document is deployed yet.** Alertmanager currently ships a no-op `"null"`
-receiver in staging (see [`docs/observability-operations.md`](./observability-operations.md)); this
-document records the plan for closing that gap, not evidence that it is closed.
+a human. Repository support now preserves the no-op `"null"` default while adding a staging-only,
+secret-file-backed PagerDuty receiver for one exact operator-triggered synthetic alert. That support
+is not evidence that it has been deployed or that PagerDuty phone delivery and resolution have been
+manually proven; see [`docs/observability-operations.md`](./observability-operations.md) for the drill.
 
 ## 1. Goals and non-goals
 
@@ -117,9 +118,8 @@ What each check detects, and does not:
 - Route only explicitly named, reviewed, and tested Sugarkube alerts to PagerDuty — an allowlist, not
   the chart's entire default rule set. Do not forward `kube-prometheus-stack`'s bundled rules
   wholesale before auditing each one individually.
-- Use Alertmanager's PagerDuty integration with a secret file reference, for example
-  `routing_key_file: /etc/alertmanager/secrets/pagerduty-routing-key`, never an inline key committed to
-  Git.
+- Use Alertmanager's PagerDuty integration with the staging Secret file reference
+  `/etc/alertmanager/secrets/alertmanager-pagerduty/routing-key`, never an inline key committed to Git.
 - Set `send_resolved: true` on the PagerDuty receiver so incidents auto-resolve when the underlying
   alert clears.
 - Define sensible `group_by`, `group_wait`, `group_interval`, and `repeat_interval` values so a single
@@ -202,8 +202,8 @@ Rollback and noise control:
 
 PagerDuty plus an externally hosted Healthchecks.io is the preferred initial direction because it is
 the only combination here that gives both an acknowledgeable phone workflow *and* a dead-man path that
-survives the monitoring stack's own node going down. Nothing about this preference implies any part of
-it is deployed yet — see the rollout plan above for the actual sequencing.
+survives the monitoring stack's own node going down. Repository configuration alone does not imply
+deployment or delivery — see the rollout plan above for the actual sequencing.
 
 ## 8. Status and dependencies
 
@@ -213,5 +213,9 @@ it is deployed yet — see the rollout plan above for the actual sequencing.
 - Shallow public-endpoint blackbox monitoring (`PublicEndpointDown`, `PublicProbeMissing`,
   `TLSExpiringSoon`) is already live in staging today, independently of that dependency — see
   [`docs/observability-blackbox.md`](./observability-blackbox.md).
-- Alert delivery to a phone and node-power-off drills have not yet been performed. Everything in
-  [§6](#6-rollout-and-drill-plan) above is planned, not completed.
+- The repository implements rollout phases 2 and 3 as a secret-safe staging receiver foundation and
+  an explicitly invoked synthetic fire/resolve workflow. Actual staging deployment, PagerDuty phone
+  receipt, acknowledgement, and resolution are still manual post-merge evidence and are not claimed
+  here.
+- Node-power-off drills and all Healthchecks.io work have not been performed. The later phases in
+  [§6](#6-rollout-and-drill-plan) remain planned, not completed.

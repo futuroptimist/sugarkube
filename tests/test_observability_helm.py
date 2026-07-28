@@ -11,6 +11,7 @@ VERSION = ROOT / "platform" / "observability" / "helm" / "kube-prometheus-stack.
 COMMON = ROOT / "platform" / "observability" / "helm" / "kube-prometheus-stack.values.common.yaml"
 STAGING = ROOT / "clusters" / "staging" / "observability" / "kube-prometheus-stack.values.yaml"
 SCRIPT = ROOT / "scripts" / "observability_helm.sh"
+ALERTMANAGER_VALIDATOR = ROOT / "scripts" / "validate_observability_alertmanager.rb"
 DASHBOARD = ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
 JUSTFILE = ROOT / "justfile"
 FLUX_SYNC = ROOT / "flux" / "gotk-sync.yaml"
@@ -59,6 +60,36 @@ def test_chart_version_and_values_match_live_staging_baseline():
     assert pvc["accessModes"] == ["ReadWriteOnce"]
     assert pvc["resources"]["requests"]["storage"] == "20Gi"
     assert staging["prometheus"]["prometheusSpec"]["externalLabels"] == {"cluster": "sugarkube-int"}
+    alertmanager = staging["alertmanager"]
+    assert alertmanager["alertmanagerSpec"]["secrets"] == ["alertmanager-pagerduty"]
+    assert alertmanager["config"]["route"] == {
+        "receiver": "null",
+        "routes": [
+            {
+                "receiver": "pagerduty-synthetic",
+                "matchers": [
+                    'alertname="SugarkubePagerDutyTest"',
+                    'environment="staging"',
+                    'cluster="sugarkube-int"',
+                    'severity="critical"',
+                ],
+            }
+        ],
+    }
+    assert alertmanager["config"]["receivers"] == [
+        {"name": "null"},
+        {
+            "name": "pagerduty-synthetic",
+            "pagerduty_configs": [
+                {
+                    "routing_key_file": (
+                        "/etc/alertmanager/secrets/alertmanager-pagerduty/routing-key"
+                    ),
+                    "send_resolved": True,
+                }
+            ],
+        },
+    ]
 
 
 def test_grafana_alertmanager_k3s_monitor_values_are_guarded():
@@ -190,6 +221,8 @@ def test_justfile_exposes_observability_recipes():
     ):
         assert f"{recipe} env=''" in text
         assert f"scripts/observability_helm.sh {recipe.removeprefix('observability-')}" in text
+    assert "observability-pagerduty-test env action:" in text
+    assert "scripts/observability_helm.sh pagerduty-test" in text
 
 
 def test_legacy_flux_longhorn_files_are_clearly_marked_inactive():
@@ -238,6 +271,7 @@ def run_helper(
     target_response_delay="0",
     retry_attempts="3",
     retry_interval="1",
+    action=None,
 ):
     """Run the lifecycle against deterministic command stubs and return its audit log."""
     bin_dir = tmp_path / "bin"
@@ -253,6 +287,38 @@ case "$*" in
     printf '%s\n' 'apiVersion: v1' 'kind: ConfigMap' 'metadata:' '  name: kube-prometheus-stack-grafana-dashboards-sugarkube' '  labels:' '    dashboard-provider: sugarkube' 'data:' '  sugarkube-staging-observability.json:' '    |-'
     sed 's/^/      /' "$DASHBOARD"
     printf '%s\n' '---' 'kind: ConfigMap' 'data:' '  dashboardproviders.yaml: |' '    providers:' '      - name: sugarkube' '        options:' '          path: /var/lib/grafana/dashboards/sugarkube' '---' 'kind: Deployment' 'spec:' '  template:' '    spec:' '      containers:' '        - volumeMounts:' '            - name: dashboards-sugarkube' '              mountPath: /var/lib/grafana/dashboards/sugarkube/sugarkube-staging-observability.json' '              subPath: sugarkube-staging-observability.json'
+    cat <<'EOF'
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Alertmanager
+metadata:
+  name: kube-prometheus-stack-alertmanager
+spec:
+  secrets:
+    - alertmanager-pagerduty
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alertmanager-kube-prometheus-stack-alertmanager
+stringData:
+  alertmanager.yaml: |
+    route:
+      receiver: "null"
+      routes:
+        - receiver: pagerduty-synthetic
+          matchers:
+            - alertname="SugarkubePagerDutyTest"
+            - environment="staging"
+            - cluster="sugarkube-int"
+            - severity="critical"
+    receivers:
+      - name: "null"
+      - name: pagerduty-synthetic
+        pagerduty_configs:
+          - routing_key_file: /etc/alertmanager/secrets/alertmanager-pagerduty/routing-key
+            send_resolved: true
+EOF
     exit 0
     ;;
   *list*) [ "$HELM_MODE" != query-fail ] || exit 32; [ "$HELM_MODE" = present ] && echo kube-prometheus-stack; exit 0 ;;
@@ -270,7 +336,32 @@ case "$*" in
   *"get daemonset kube-prometheus-stack-prometheus-node-exporter"*) [ "$KUBECTL_MODE" = two-nodes ] && echo '2 2' || echo '3 3' ;;
   *"get pvc -o json"*) printf '%s\n' '{"items":[{"metadata":{"name":"generated-pvc","labels":{"app.kubernetes.io/name":"prometheus"}},"spec":{"storageClassName":"local-path"},"status":{"phase":"Bound"}}]}' ;;
   *"get prometheus kube-prometheus-stack-prometheus"*) echo 1 ;;
+  *"get secret alertmanager-pagerduty -o go-template="*)
+    [ "$KUBECTL_MODE" != missing-pagerduty-secret ] || exit 46
+    [ "$KUBECTL_MODE" != empty-pagerduty-key ] && echo present
+    ;;
+  *"get alertmanager kube-prometheus-stack-alertmanager -o go-template="*) echo alertmanager-pagerduty ;;
+  *"get secret alertmanager-kube-prometheus-stack-alertmanager -o go-template="*)
+    base64 -w0 <<'EOF'
+route:
+  receiver: "null"
+  routes:
+    - receiver: pagerduty-synthetic
+      matchers:
+        - alertname="SugarkubePagerDutyTest"
+        - environment="staging"
+        - cluster="sugarkube-int"
+        - severity="critical"
+receivers:
+  - name: "null"
+  - name: pagerduty-synthetic
+    pagerduty_configs:
+      - routing_key_file: /etc/alertmanager/secrets/alertmanager-pagerduty/routing-key
+        send_resolved: true
+EOF
+    ;;
   *"get alertmanager kube-prometheus-stack-alertmanager"*) echo 1 ;;
+  *"create --raw "*) cat >/dev/null; [ "$KUBECTL_MODE" != alert-post-fail ] ;;
   *"get ingress "*) exit 0 ;;
   *"get svc kube-prometheus-stack-grafana"*) echo 30300 ;;
   *"get servicemonitor dspace"*"metadata.labels.release"*) [ "$KUBECTL_MODE" = wrong-release ] && echo wrong || echo kube-prometheus-stack ;;
@@ -329,8 +420,11 @@ esac
         else:
             responses.write_text("\n".join(target_responses) + "\n", encoding="utf-8")
         env["TARGET_RESPONSES"] = str(responses)
+    args = ["bash", str(SCRIPT), command, "env=staging"]
+    if action is not None:
+        args.append(action)
     result = subprocess.run(
-        ["bash", str(SCRIPT), command, "env=staging"],
+        args,
         text=True,
         capture_output=True,
         env=env,
@@ -370,6 +464,119 @@ def test_pre_mutation_guards_are_fail_closed(tmp_path):
     assert render_fail.returncode != 0 and "helm list" not in audit and "helm install" not in audit
     query_fail, audit = run_helper(tmp_path / "query", "install", helm_mode="query-fail")
     assert query_fail.returncode != 0 and " template " in audit and "helm install" not in audit
+
+
+@pytest.mark.parametrize("mode", ["missing-pagerduty-secret", "empty-pagerduty-key"])
+def test_pagerduty_secret_preflight_fails_before_helm_commands_without_value(tmp_path, mode):
+    marker = "PAGERDUTY_VALUE_MUST_NOT_APPEAR"
+    result, audit = run_helper(tmp_path, "upgrade", helm_mode="present", kubectl_mode=mode)
+    assert result.returncode != 0
+    assert "helm repo" not in audit and "helm template" not in audit and "helm upgrade" not in audit
+    assert "routing-key" in result.stderr and marker not in result.stdout + result.stderr + audit
+
+
+def test_valid_pagerduty_secret_permits_install_and_upgrade(tmp_path):
+    install, install_audit = run_helper(tmp_path / "install", "install", helm_mode="absent")
+    upgrade, upgrade_audit = run_helper(tmp_path / "upgrade", "upgrade", helm_mode="present")
+    assert install.returncode == 0 and "helm install" in install_audit
+    assert upgrade.returncode == 0 and "helm upgrade" in upgrade_audit
+
+
+def test_alertmanager_validator_rejects_mount_path_matcher_inline_and_broad_route_changes(tmp_path):
+    staging = yaml_load(STAGING)["alertmanager"]
+    config = staging["config"]
+    manifest = {
+        "apiVersion": "monitoring.coreos.com/v1",
+        "kind": "Alertmanager",
+        "metadata": {"name": "kube-prometheus-stack-alertmanager"},
+        "spec": {"secrets": staging["alertmanagerSpec"]["secrets"]},
+    }
+
+    def rendered(candidate_config, *, secrets=None):
+        config_yaml = subprocess.run(
+            ["ruby", "-ryaml", "-rjson", "-e", "print YAML.dump(JSON.parse(ARGF.read))"],
+            input=json.dumps(candidate_config),
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout
+        first = manifest | {"spec": {"secrets": secrets or ["alertmanager-pagerduty"]}}
+        return (
+            "---\n"
+            + subprocess.run(
+                ["ruby", "-ryaml", "-rjson", "-e", "print YAML.dump(JSON.parse(ARGF.read))"],
+                input=json.dumps(first),
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout
+            + "---\napiVersion: v1\nkind: Secret\nmetadata:\n"
+            "  name: alertmanager-kube-prometheus-stack-alertmanager\nstringData:\n"
+            "  alertmanager.yaml: |\n"
+            + "".join(f"    {line}\n" for line in config_yaml.splitlines())
+        )
+
+    valid = tmp_path / "valid.yaml"
+    valid.write_text(rendered(config), encoding="utf-8")
+    valid_result = subprocess.run(
+        ["ruby", str(ALERTMANAGER_VALIDATOR), str(valid)], check=False
+    )
+    assert valid_result.returncode == 0
+
+    variants = []
+    for old, new in (
+        ("/etc/alertmanager/secrets/alertmanager-pagerduty/routing-key", "/wrong/path"),
+        ('environment="staging"', 'environment=~".*"'),
+        ("routing_key_file", "routing_key"),
+        ('alertname="SugarkubePagerDutyTest"', 'alertname=~".*"'),
+    ):
+        variants.append(rendered(config).replace(old, new))
+    variants.append(rendered(config, secrets=["wrong-secret"]))
+    for index, text in enumerate(variants):
+        path = tmp_path / f"invalid-{index}.yaml"
+        path.write_text(text, encoding="utf-8")
+        result = subprocess.run(
+            ["ruby", str(ALERTMANAGER_VALIDATOR), str(path)],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=2,
+        )
+        assert result.returncode != 0, index
+
+
+def test_pagerduty_test_requires_action_and_staging_context(tmp_path):
+    missing, audit = run_helper(tmp_path / "missing", "pagerduty-test")
+    assert missing.returncode != 0 and "create --raw" not in audit
+    invalid, audit = run_helper(tmp_path / "invalid", "pagerduty-test", action="page")
+    assert invalid.returncode != 0 and "create --raw" not in audit
+    mismatch, audit = run_helper(
+        tmp_path / "context", "pagerduty-test", action="fire", context="other"
+    )
+    assert mismatch.returncode != 0 and "create --raw" not in audit
+    unsupported = subprocess.run(
+        ["bash", str(SCRIPT), "pagerduty-test", "env=prod", "fire"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert unsupported.returncode != 0
+
+
+def test_pagerduty_fire_and_resolve_submit_same_labels_with_bounded_end_times(tmp_path):
+    for action in ("fire", "resolve"):
+        result, audit = run_helper(tmp_path / action, "pagerduty-test", action=action)
+        assert result.returncode == 0 and f"synthetic {action} accepted" in result.stdout
+        assert "create --raw" in audit
+        # The kubectl stub consumes payloads without retaining or printing them; source inspection
+        # proves the shared immutable label object and distinct end-time branches.
+    script = SCRIPT.read_text(encoding="utf-8")
+    label_block = script.split('"labels": {', 1)[1].split("},", 1)[0]
+    for label in ("SugarkubePagerDutyTest", "staging", "sugarkube-int", "critical"):
+        assert label in label_block
+    assert "date -u -d '+30 minutes'" in script
+    assert "date -u '+%Y-%m-%dT%H:%M:%SZ'" in script
+    assert "pagerduty_test" not in re.search(r"verify\(\).*?\n\}", script, re.S).group(0)
 
 
 def test_install_and_upgrade_require_distinct_release_states(tmp_path):
