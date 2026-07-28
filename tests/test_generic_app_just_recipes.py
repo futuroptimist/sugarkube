@@ -1228,8 +1228,18 @@ def test_app_chart_cmd_preflight_reports_helm_template_failure(
 
 
 def test_app_chart_cmd_preflight_reports_helm_show_failure(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
 ) -> None:
+    values = tmp_path / "values.yaml"
+    values.write_text(
+        "ingress:\n"
+        "  enabled: true\n"
+        "  host: staging.example.test\n"
+        "unrelatedSecret: sentinel-super-secret\n",
+        encoding="utf-8",
+    )
     args = argparse.Namespace(
         app="tokenplace",
         env="staging",
@@ -1239,8 +1249,7 @@ def test_app_chart_cmd_preflight_reports_helm_show_failure(
         version="0.1.3",
         release="tokenplace",
         namespace="tokenplace",
-        values="",
-        host="staging.example.test",
+        values=str(values),
     )
     monkeypatch.setattr(
         app_chart,
@@ -1252,6 +1261,38 @@ def test_app_chart_cmd_preflight_reports_helm_show_failure(
     error = capsys.readouterr().err
     _assert_preflight_failure_context(error, "helm show")
     assert "chart missing" in error
+    assert "<from-values>" not in error
+
+
+def test_app_chart_cmd_preflight_values_parsing_failure_stops_before_helm(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    values = tmp_path / "values.yaml"
+    values.write_text(
+        "ingress: [invalid\nunrelatedSecret: sentinel-super-secret\n",
+        encoding="utf-8",
+    )
+    args = _preflight_args()
+    args.values = str(values)
+    args.host = ""
+    helm_called = False
+
+    def unexpected_helm_show(chart: str, version: str) -> subprocess.CompletedProcess[str]:
+        nonlocal helm_called
+        helm_called = True
+        return subprocess.CompletedProcess([], 0, "", "")
+
+    monkeypatch.setattr(app_chart, "helm_show", unexpected_helm_show)
+
+    assert app_chart.cmd_preflight(args) == 1
+    error = capsys.readouterr().err
+    assert "values parsing failed" in error
+    assert "host=<unresolved>" in error
+    assert "sentinel-super-secret" not in error
+    assert "Traceback" not in error
+    assert not helm_called
 
 
 def _assert_preflight_failure_context(error: str, operation: str) -> None:

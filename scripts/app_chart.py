@@ -535,7 +535,14 @@ def cmd_bump(args: argparse.Namespace) -> int:
 
 def cmd_preflight(args: argparse.Namespace) -> int:
     version = args.version or read_pin(args.version_file)
-    context = preflight_context(args, version, getattr(args, "host", "") or "<from-values>")
+    values = tuple(filter(None, (value.strip() for value in args.values.split(","))))
+    try:
+        host = expected_ingress_host(values, getattr(args, "host", ""))
+    except (ValueError, json.JSONDecodeError) as error:
+        context = preflight_context(args, version, "<unresolved>")
+        print(f"ERROR: values parsing failed; {context}: {error}", file=sys.stderr)
+        return 1
+    context = preflight_context(args, version, host or "<disabled>")
     print_summary(args.app, args.env, args.tag, args.chart, version, args.version_file)
     show = helm_show(args.chart, version)
     if show.returncode != 0:
@@ -557,12 +564,6 @@ def cmd_preflight(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
-    values = tuple(filter(None, (value.strip() for value in args.values.split(","))))
-    try:
-        host = expected_ingress_host(values, getattr(args, "host", ""))
-    except (ValueError, json.JSONDecodeError) as error:
-        print(f"ERROR: values parsing failed; {context}: {error}", file=sys.stderr)
-        return 1
     inputs = ReleaseInputs(
         app=args.app,
         env=args.env,
@@ -575,7 +576,6 @@ def cmd_preflight(args: argparse.Namespace) -> int:
         host=host,
         pull_policy=getattr(args, "pull_policy", "Always"),
     )
-    context = preflight_context(args, version, host or "<disabled>")
     tmpl = run(inputs.helm_template_command())
     if tmpl.returncode != 0:
         print(
