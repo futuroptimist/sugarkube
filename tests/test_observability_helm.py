@@ -2,6 +2,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -238,6 +239,7 @@ def run_helper(
     target_response_delay="0",
     retry_attempts="3",
     retry_interval="1",
+    action=None,
 ):
     """Run the lifecycle against deterministic command stubs and return its audit log."""
     bin_dir = tmp_path / "bin"
@@ -253,6 +255,23 @@ case "$*" in
     printf '%s\n' 'apiVersion: v1' 'kind: ConfigMap' 'metadata:' '  name: kube-prometheus-stack-grafana-dashboards-sugarkube' '  labels:' '    dashboard-provider: sugarkube' 'data:' '  sugarkube-staging-observability.json:' '    |-'
     sed 's/^/      /' "$DASHBOARD"
     printf '%s\n' '---' 'kind: ConfigMap' 'data:' '  dashboardproviders.yaml: |' '    providers:' '      - name: sugarkube' '        options:' '          path: /var/lib/grafana/dashboards/sugarkube' '---' 'kind: Deployment' 'spec:' '  template:' '    spec:' '      containers:' '        - volumeMounts:' '            - name: dashboards-sugarkube' '              mountPath: /var/lib/grafana/dashboards/sugarkube/sugarkube-staging-observability.json' '              subPath: sugarkube-staging-observability.json'
+    config='route:
+  receiver: "null"
+  routes:
+  - receiver: pagerduty-synthetic
+    matchers:
+    - alertname="SugarkubePagerDutyTest"
+    - environment="staging"
+    - cluster="sugarkube-int"
+    - severity="critical"
+receivers:
+- name: "null"
+- name: pagerduty-synthetic
+  pagerduty_configs:
+  - routing_key_file: /etc/alertmanager/secrets/alertmanager-pagerduty/routing-key
+    send_resolved: true'
+    encoded=$(printf '%s' "$config" | base64 | tr -d '\n')
+    printf '%s\n' '---' 'kind: Alertmanager' 'spec:' '  secrets:' '  - alertmanager-pagerduty' '---' 'kind: Secret' 'metadata:' '  name: alertmanager-kube-prometheus-stack-alertmanager' 'data:' "  alertmanager.yaml: $encoded"
     exit 0
     ;;
   *list*) [ "$HELM_MODE" != query-fail ] || exit 32; [ "$HELM_MODE" = present ] && echo kube-prometheus-stack; exit 0 ;;
@@ -270,12 +289,35 @@ case "$*" in
   *"get daemonset kube-prometheus-stack-prometheus-node-exporter"*) [ "$KUBECTL_MODE" = two-nodes ] && echo '2 2' || echo '3 3' ;;
   *"get pvc -o json"*) printf '%s\n' '{"items":[{"metadata":{"name":"generated-pvc","labels":{"app.kubernetes.io/name":"prometheus"}},"spec":{"storageClassName":"local-path"},"status":{"phase":"Bound"}}]}' ;;
   *"get prometheus kube-prometheus-stack-prometheus"*) echo 1 ;;
+  *"get alertmanager kube-prometheus-stack-alertmanager"*"spec.secrets[0]"*) echo alertmanager-pagerduty ;;
   *"get alertmanager kube-prometheus-stack-alertmanager"*) echo 1 ;;
   *"get ingress "*) exit 0 ;;
   *"get svc kube-prometheus-stack-grafana"*) echo 30300 ;;
   *"get servicemonitor dspace"*"metadata.labels.release"*) [ "$KUBECTL_MODE" = wrong-release ] && echo wrong || echo kube-prometheus-stack ;;
   *"get servicemonitor dspace"*"bearerTokenSecret.name"*) [ "$KUBECTL_MODE" != missing-secret-ref ] && echo dspace-token ;;
+  *"get secret alertmanager-pagerduty -o json"*)
+    [ "$KUBECTL_MODE" != missing-pagerduty-secret ] || exit 44
+    [ "$KUBECTL_MODE" = empty-pagerduty-key ] && echo '{"data":{"routing-key":""}}' || echo '{"data":{"routing-key":"c3R1Yg=="}}'
+    ;;
+  *"get secret alertmanager-kube-prometheus-stack-alertmanager -o json"*)
+    config='route:
+  receiver: "null"
+  routes:
+  - receiver: pagerduty-synthetic
+    matchers:
+    - alertname="SugarkubePagerDutyTest"
+    - environment="staging"
+    - cluster="sugarkube-int"
+    - severity="critical"
+receivers:
+- name: "null"
+- name: pagerduty-synthetic
+  pagerduty_configs:
+  - routing_key_file: /etc/alertmanager/secrets/alertmanager-pagerduty/routing-key
+    send_resolved: true'
+    encoded=$(printf '%s' "$config" | base64 | tr -d '\n'); printf '{"data":{"alertmanager.yaml":"%s"}}\n' "$encoded" ;;
   *"get secret dspace-token -o name"*) [ "$KUBECTL_MODE" != missing-secret ] || exit 44; echo secret/dspace-token ;;
+  *"create --raw "*"/api/v2/alerts"*) cat > "$PAYLOAD"; exit 0 ;;
   *"get --request-timeout="*" --raw "*)
     [ "$KUBECTL_MODE" != query-fail ] || exit 45
     [ "$TARGET_RESPONSE_DELAY" = 0 ] || /bin/sleep "$TARGET_RESPONSE_DELAY"
@@ -312,6 +354,7 @@ esac
         "TARGET_RESPONSE_DELAY": target_response_delay,
         "SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_ATTEMPTS": retry_attempts,
         "SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_INTERVAL_SECONDS": retry_interval,
+        "PAYLOAD": str(tmp_path / "payload"),
         "DASHBOARD": str(
             ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
         ),
@@ -330,7 +373,7 @@ esac
             responses.write_text("\n".join(target_responses) + "\n", encoding="utf-8")
         env["TARGET_RESPONSES"] = str(responses)
     result = subprocess.run(
-        ["bash", str(SCRIPT), command, "env=staging"],
+        ["bash", str(SCRIPT), command, "env=staging"] + ([action] if action is not None else []),
         text=True,
         capture_output=True,
         env=env,
@@ -800,3 +843,105 @@ def test_dashboard_verifier_cleans_up_when_interrupted(tmp_path):
     body = SCRIPT.read_text(encoding="utf-8").split("dashboard_verify()", 1)[1]
     assert "trap 'exit 130' INT" in body and "trap 'exit 143' TERM" in body
     assert not list(tmp_path.glob("sugarkube-grafana-verify.*"))
+
+
+def test_staging_pagerduty_contract_is_exact_and_file_backed():
+    staging = yaml_load(STAGING)["alertmanager"]
+    assert staging["alertmanagerSpec"]["secrets"] == ["alertmanager-pagerduty"]
+    config = staging["config"]
+    assert config["route"]["receiver"] == "null"
+    routes = config["route"]["routes"]
+    assert routes == [
+        {
+            "receiver": "pagerduty-synthetic",
+            "matchers": [
+                'alertname="SugarkubePagerDutyTest"',
+                'environment="staging"',
+                'cluster="sugarkube-int"',
+                'severity="critical"',
+            ],
+        }
+    ]
+    receiver = next(item for item in config["receivers"] if item["name"] == "pagerduty-synthetic")
+    pagerduty = receiver["pagerduty_configs"][0]
+    assert pagerduty == {
+        "routing_key_file": "/etc/alertmanager/secrets/alertmanager-pagerduty/routing-key",
+        "send_resolved": True,
+    }
+    assert "routing_key" not in pagerduty and "service_key" not in pagerduty
+
+
+@pytest.mark.parametrize("mutation", ["root", "matcher", "path", "inline", "broad"])
+def test_alertmanager_validator_rejects_unsafe_routing(mutation):
+    sys.path.insert(0, str(ROOT / "scripts"))
+    try:
+        import validate_observability_alertmanager as validator
+    finally:
+        sys.path.pop(0)
+    config = yaml_load(STAGING)["alertmanager"]["config"]
+    if mutation == "root":
+        config["route"]["receiver"] = "pagerduty-synthetic"
+    elif mutation == "matcher":
+        config["route"]["routes"][0]["matchers"].pop()
+    elif mutation == "path":
+        config["receivers"][1]["pagerduty_configs"][0]["routing_key_file"] = "/wrong"
+    elif mutation == "inline":
+        config["receivers"][1]["pagerduty_configs"][0]["routing_key"] = "forbidden"
+    else:
+        config["route"]["routes"].append({"receiver": "pagerduty-synthetic", "matchers": []})
+    with pytest.raises(ValueError):
+        validator.validate_config(config)
+
+
+def test_pagerduty_secret_preflight_fails_before_helm_state_or_mutation(tmp_path):
+    for mode in ("missing-pagerduty-secret", "empty-pagerduty-key"):
+        result, audit = run_helper(
+            tmp_path / mode, "upgrade", helm_mode="present", kubectl_mode=mode
+        )
+        assert result.returncode != 0
+        assert "nonempty routing-key" in result.stderr
+        assert "helm list" not in audit and "helm upgrade" not in audit
+    result, audit = run_helper(tmp_path / "valid", "upgrade", helm_mode="present")
+    assert result.returncode == 0 and "helm upgrade" in audit
+
+
+def test_pagerduty_test_is_explicit_staging_only_and_fire_resolve_share_labels(tmp_path):
+    absent, audit = run_helper(tmp_path / "absent", "pagerduty-test")
+    assert absent.returncode != 0 and "create --raw" not in audit
+    invalid, audit = run_helper(tmp_path / "invalid", "pagerduty-test", action="oops")
+    assert invalid.returncode != 0 and "create --raw" not in audit
+    prod = subprocess.run(
+        ["bash", str(SCRIPT), "pagerduty-test", "env=prod", "fire"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert prod.returncode != 0
+    documents = {}
+    for action in ("fire", "resolve"):
+        path = tmp_path / action
+        result, audit = run_helper(path, "pagerduty-test", action=action)
+        assert result.returncode == 0 and "create --raw" in audit
+        documents[action] = json.loads((path / "payload").read_text())[0]
+    assert documents["fire"]["labels"] == documents["resolve"]["labels"]
+    assert documents["fire"]["annotations"] == documents["resolve"]["annotations"]
+    from datetime import datetime
+
+    def parse(value):
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+    assert (
+        14 * 60
+        <= (
+            parse(documents["fire"]["endsAt"]) - parse(documents["fire"]["startsAt"])
+        ).total_seconds()
+        <= 15 * 60
+    )
+    assert (
+        abs(
+            (
+                parse(documents["resolve"]["endsAt"]) - parse(documents["resolve"]["startsAt"])
+            ).total_seconds()
+        )
+        < 2
+    )

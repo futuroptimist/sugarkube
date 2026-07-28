@@ -4,9 +4,11 @@ This is the canonical alerting strategy for Sugarkube. It defines the agreed tar
 routing policy, alert inventory, and rollout/drill plan for turning the staging observability stack
 described in [`docs/observability-design.md`](./observability-design.md) and
 [`docs/observability-operations.md`](./observability-operations.md) into something that actually pages
-a human. **Nothing in this document is deployed yet.** Alertmanager currently ships a no-op `"null"`
-receiver in staging (see [`docs/observability-operations.md`](./observability-operations.md)); this
-document records the plan for closing that gap, not evidence that it is closed.
+a human. The repository now supports a staging-only, file-backed PagerDuty receiver
+and an exact synthetic test route while retaining the root `"null"` receiver (see
+[`docs/observability-operations.md`](./observability-operations.md)). This is not
+evidence that the change is deployed or that PagerDuty phone delivery and resolution
+have been manually proven.
 
 ## 1. Goals and non-goals
 
@@ -117,9 +119,9 @@ What each check detects, and does not:
 - Route only explicitly named, reviewed, and tested Sugarkube alerts to PagerDuty — an allowlist, not
   the chart's entire default rule set. Do not forward `kube-prometheus-stack`'s bundled rules
   wholesale before auditing each one individually.
-- Use Alertmanager's PagerDuty integration with a secret file reference, for example
-  `routing_key_file: /etc/alertmanager/secrets/pagerduty-routing-key`, never an inline key committed to
-  Git.
+- Use Alertmanager's PagerDuty integration with the implemented Secret-backed file
+  reference `/etc/alertmanager/secrets/alertmanager-pagerduty/routing-key`, never an
+  inline key committed to Git.
 - Set `send_resolved: true` on the PagerDuty receiver so incidents auto-resolve when the underlying
   alert clears.
 - Define sensible `group_by`, `group_wait`, `group_interval`, and `repeat_interval` values so a single
@@ -213,5 +215,6 @@ it is deployed yet — see the rollout plan above for the actual sequencing.
 - Shallow public-endpoint blackbox monitoring (`PublicEndpointDown`, `PublicProbeMissing`,
   `TLSExpiringSoon`) is already live in staging today, independently of that dependency — see
   [`docs/observability-blackbox.md`](./observability-blackbox.md).
-- Alert delivery to a phone and node-power-off drills have not yet been performed. Everything in
-  [§6](#6-rollout-and-drill-plan) above is planned, not completed.
+- The repository supports the synthetic PagerDuty fire/resolve drill. Its staging
+  deployment and phone-delivery/resolution observations have not been claimed or
+  performed by this repository change. Node-power-off drills remain future work.
