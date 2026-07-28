@@ -11,6 +11,7 @@ Production observability is intentionally unsupported in this slice because no p
 - Staging overrides: `clusters/staging/observability/kube-prometheus-stack.values.yaml`.
 - Staging dashboard: `clusters/staging/observability/dashboards/sugarkube-staging-observability.json`.
 - Helper: `scripts/observability_helm.sh` through `just observability-*` recipes.
+- Alert delivery, routing, and drill strategy: [`docs/observability-alerting.md`](observability-alerting.md) — this runbook covers deploying and verifying the stack, not how (or whether) it pages anyone yet.
 
 The dashboard is owned by Sugarkube and provisioned by the pinned Grafana
 subchart. Every render, install, and upgrade passes the same standalone JSON
@@ -123,13 +124,27 @@ is not rollout evidence.
 
 - Helm release: `kube-prometheus-stack` in namespace `monitoring`.
 - Prometheus: one replica, `7d` retention, `15GB` retention size, `local-path` `ReadWriteOnce` PVC requesting `20Gi`, CPU request `200m`, memory request `512Mi`, memory limit `2Gi`, admin API disabled, and external label `cluster=sugarkube-int`.
-- Alertmanager: one replica and no-op receiver named exactly `"null"`.
+- Alertmanager: one replica and no-op receiver named exactly `"null"`. No real notification receiver (PagerDuty, Healthchecks.io, or otherwise) is configured yet; see [`docs/observability-alerting.md`](observability-alerting.md) for the planned rollout.
 - Grafana: persistence disabled, no Ingress, LAN-only NodePort `30300`.
-- The provisioned dashboard defaults to six hours and a 30-second refresh. It
-  covers overall DSPACE and public-probe status, bounded DSPACE HTTP rate/error/
-  latency, runtime and build identity, feature traffic, and blackbox endpoint,
-  duration, HTTP status, and TLS lifetime views. Its staging `environment`,
-  `app`, and `route` variables avoid raw target URLs.
+- The provisioned dashboard defaults to six hours and a 30-second refresh. Its
+  top-level public availability summary reports **Healthy endpoints**, **Failed
+  endpoints**, and a yellow **Missing probe data** count for the selected probe
+  filters. Healthy and failed are current `probe_success` results; missing compares
+  current samples with lifecycle-owned targets discovered through `up` during the
+  seven-day Prometheus retention horizon, so disappeared discovery targets remain
+  visible throughout retained history. Exact long-term target inventory remains
+  verified by `just observability-blackbox-verify env=staging`.
+  `16/0/0` is fully healthy, `15/1/0` has one observed failure, and `15/0/1`
+  identifies one expected target without current probe data. If no expected target
+  data exists, all three values remain `NO DATA` rather than implying health. The
+  detailed endpoint matrix remains the diagnostic view. DSPACE user
+  request rate excludes `/healthz`, `/livez`, and
+  `/metrics`, whose traffic has a separate operational-rate panel. Status-class
+  distribution is an instant categorical summary over the selected time window.
+  The `Probe application` and `Probe route` controls filter blackbox panels while
+  preserving the internal bounded `app` and `route` labels and avoiding raw
+  target URLs. Runtime, build identity, feature traffic, latency, error ratio,
+  probe duration, HTTP status, and TLS lifetime views remain available.
 - dChat and token.place dependency traffic may be absent until those features
   receive requests. Their queries deliberately fall back to zero: **no requests
   observed** is expected and is not an instrumentation failure.
@@ -214,8 +229,27 @@ For rollback, use the existing Helm rollback procedure above. The prior Helm
 revision restores its dashboard ConfigMap; after a forward fix, the standard
 upgrade lifecycle again supplies the complete values chain and dashboard file.
 
+## Manually verified staging observations
+
+The reprovisioning proof above is scripted and repeatable: `observability-dashboard-verify` is the
+acceptance evidence, and it runs the same way every time. The following two observations are not
+scripted or CI-enforced today — they are operator-recorded manual checks, noted here so they aren't
+lost, and distinct from the automated evidence above:
+
+- **Prometheus data/target continuity across a pod restart.** Operators have manually restarted the
+  single Prometheus pod in staging and confirmed that retained series and target discovery survive
+  the restart, backed by the persistent `local-path` PVC described under Runtime expectations. Unlike
+  the Grafana dashboard reprovisioning proof, this is not currently wired into a `just` recipe or test
+  — treat it as a manual drill result, not a guarantee that holds for every future change.
+- **DSPACE `ServiceMonitor` target health.** Operators have manually observed DSPACE's authenticated
+  `ServiceMonitor` reporting two healthy Prometheus targets in staging. `scripts/observability_helm.sh`
+  only asserts "at least one target, all healthy" (`verify_dspace_targets`), so the exact count of two
+  is an observed fact at time of writing, not a value the verification script enforces.
+
 ## Follow-ups intentionally out of scope
 
-Additional dashboards, useful Alertmanager receivers, Grafana persistence,
-central multi-cluster Grafana, and production observability codification are
-separate follow-ups. The existing blackbox NetworkPolicy is unchanged.
+Additional dashboards, Grafana persistence, central multi-cluster Grafana, and production
+observability codification are separate follow-ups. The existing blackbox NetworkPolicy is unchanged.
+Alerting onboarding — real Alertmanager receivers, external heartbeats, and failure drills — is no
+longer undesigned scope creep; it is planned, designed work tracked in
+[`docs/observability-alerting.md`](observability-alerting.md), just not yet executed.

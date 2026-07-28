@@ -27,6 +27,10 @@ REQUIRED_METRICS = {
     "probe_ssl_earliest_cert_expiry",
 }
 EVENT_METRICS = {"dspace_dchat_requests_total", "dspace_dependency_requests_total"}
+OPERATIONAL_ROUTES = '"/(healthz|livez|metrics)"'
+BLACKBOX_JOB_MATCHER = (
+    'job=~"probe/monitoring/blackbox-(dspace|tokenplace|danielsmith|jobbot3000)-staging-.*"'
+)
 
 
 def load_dashboard(path: Path) -> dict:
@@ -46,6 +50,138 @@ def panels(dashboard: dict):
             yield from panels(panel)
 
 
+def panel_named(dashboard: dict, title: str) -> dict:
+    matching = [panel for panel in panels(dashboard) if panel.get("title") == title]
+    if len(matching) != 1:
+        raise SystemExit(f"ERROR: dashboard must contain exactly one {title!r} panel.")
+    return matching[0]
+
+
+def validate_dashboard_semantics(dashboard: dict) -> None:
+    variables = {
+        variable.get("name"): variable
+        for variable in dashboard.get("templating", {}).get("list", [])
+        if isinstance(variable, dict)
+    }
+    expected_labels = {"app": "Probe application", "route": "Probe route"}
+    if any(
+        variables.get(name, {}).get("label") != label for name, label in expected_labels.items()
+    ):
+        raise SystemExit("ERROR: blackbox variables must use probe-specific visible labels.")
+
+    distribution = panel_named(dashboard, "Status-class distribution")
+    if distribution.get("type") not in {"piechart", "bargauge"}:
+        raise SystemExit("ERROR: status-class distribution must use a categorical visualization.")
+    distribution_targets = distribution.get("targets", [])
+    if not distribution_targets or any(
+        target.get("instant") is not True or target.get("range") is not False
+        for target in distribution_targets
+    ):
+        raise SystemExit(
+            "ERROR: status-class distribution must be an instant selected-window query."
+        )
+    if any(
+        "increase(" not in target.get("expr", "")
+        or "$__range" not in target.get("expr", "")
+        or "sum by (status_class)" not in target.get("expr", "")
+        or 'environment=~"$environment"' not in target.get("expr", "")
+        for target in distribution_targets
+    ):
+        raise SystemExit("ERROR: status-class distribution must summarize the selected window.")
+    distribution_colors = {
+        override.get("matcher", {})
+        .get("options"): override.get("properties", [{}])[0]
+        .get("value", {})
+        .get("fixedColor")
+        for override in distribution.get("fieldConfig", {}).get("overrides", [])
+    }
+    if distribution_colors != {"2xx": "green", "4xx": "orange", "5xx": "red"}:
+        raise SystemExit("ERROR: status-class distribution must use explicit status-class colors.")
+
+    user_rate = panel_named(dashboard, "User request rate by route and status class")
+    user_expressions = [target.get("expr", "") for target in user_rate.get("targets", [])]
+    if not user_expressions or any(
+        f"route!~{OPERATIONAL_ROUTES}" not in expression for expression in user_expressions
+    ):
+        raise SystemExit("ERROR: user request rate must exclude operational routes.")
+    operational_rate = panel_named(dashboard, "Operational request rate")
+    if not any(
+        f"route=~{OPERATIONAL_ROUTES}" in target.get("expr", "")
+        for target in operational_rate.get("targets", [])
+    ):
+        raise SystemExit("ERROR: operational request rate must retain health and metrics routes.")
+
+    summary = panel_named(dashboard, "Public availability summary")
+    summary_targets = summary.get("targets", [])
+    if (
+        not isinstance(summary_targets, list)
+        or len(summary_targets) != 3
+        or any(
+            not isinstance(target, dict)
+            or not isinstance(target.get("expr"), str)
+            or target.get("instant") is not True
+            or target.get("range") is not False
+            or "sum(" not in target.get("expr", "")
+            or " by (environment, app, route) " not in target.get("expr", "")
+            or BLACKBOX_JOB_MATCHER not in target.get("expr", "")
+            or any(
+                selector not in target.get("expr", "")
+                for selector in (
+                    'environment=~"$environment"',
+                    'app=~"$app"',
+                    'route=~"$route"',
+                )
+            )
+            for target in summary_targets
+        )
+    ):
+        raise SystemExit(
+            "ERROR: public availability must be a three-value instant aggregate summary."
+        )
+    summary_by_legend = {
+        target.get("legendFormat"): target.get("expr", "") for target in summary_targets
+    }
+    healthy_expression = re.sub(r"\s+", " ", summary_by_legend.get("Healthy endpoints", ""))
+    failed_expression = re.sub(r"\s+", " ", summary_by_legend.get("Failed endpoints", ""))
+    missing_expression = re.sub(r"\s+", " ", summary_by_legend.get("Missing probe data", ""))
+    if "== bool 1" not in healthy_expression or "== bool 0" not in failed_expression:
+        raise SystemExit("ERROR: availability counts must use boolean healthy and failed sums.")
+    if (
+        "max_over_time(up{" not in missing_expression
+        or "[7d]" not in missing_expression
+        or ">= bool 0" not in missing_expression
+        or " - (sum(" not in missing_expression
+        or "probe_success{" not in missing_expression
+        or "or vector(0)" not in missing_expression
+    ):
+        raise SystemExit(
+            "ERROR: missing probe data must compare retention-backed discovered "
+            "probes with current samples."
+        )
+    if {target.get("legendFormat") for target in summary_targets} != {
+        "Healthy endpoints",
+        "Failed endpoints",
+        "Missing probe data",
+    } or summary.get("fieldConfig", {}).get("defaults", {}).get("noValue") != "NO DATA":
+        raise SystemExit(
+            "ERROR: public availability must distinguish healthy, failed, and no data."
+        )
+    missing_colors = [
+        prop.get("value", {}).get("fixedColor")
+        for override in summary.get("fieldConfig", {}).get("overrides", [])
+        if isinstance(override, dict)
+        and override.get("matcher", {}).get("options") == "Missing probe data"
+        for prop in override.get("properties", [])
+        if isinstance(prop, dict) and prop.get("id") == "color"
+    ]
+    if missing_colors != ["yellow"]:
+        raise SystemExit("ERROR: missing probe data must be a compact yellow summary value.")
+
+    matrix = panel_named(dashboard, "Endpoint matrix")
+    if matrix.get("type") != "table" or not matrix.get("targets"):
+        raise SystemExit("ERROR: dashboard must retain the detailed endpoint matrix.")
+
+
 def validate_dashboard(path: Path) -> str:
     dashboard = load_dashboard(path)
     if dashboard.get("uid") != UID or dashboard.get("title") != TITLE:
@@ -57,6 +193,7 @@ def validate_dashboard(path: Path) -> str:
         or len(ids) != len(set(ids))
     ):
         raise SystemExit("ERROR: dashboard panel IDs must be present, integer, and unique.")
+    validate_dashboard_semantics(dashboard)
     expressions = [
         target["expr"]
         for panel in panels(dashboard)
