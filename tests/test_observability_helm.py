@@ -64,15 +64,17 @@ def test_chart_version_and_values_match_live_staging_baseline():
     assert alertmanager["alertmanagerSpec"]["secrets"] == ["alertmanager-pagerduty"]
     route = alertmanager["config"]["route"]
     assert route["receiver"] == "null"
-    assert route["routes"] == [{
-        "receiver": "pagerduty-synthetic-test",
-        "matchers": [
-            'alertname="SugarkubePagerDutyTest"',
-            'environment="staging"',
-            'cluster="sugarkube-int"',
-            'severity="critical"',
-        ],
-    }]
+    assert route["routes"] == [
+        {
+            "receiver": "pagerduty-synthetic-test",
+            "matchers": [
+                'alertname="SugarkubePagerDutyTest"',
+                'environment="staging"',
+                'cluster="sugarkube-int"',
+                'severity="critical"',
+            ],
+        }
+    ]
     pagerduty_receiver = next(
         receiver
         for receiver in alertmanager["config"]["receivers"]
@@ -212,6 +214,83 @@ def test_alertmanager_validator_redacts_malformed_yaml(tmp_path, manifest):
     assert "Psych::" not in result.stderr
 
 
+def test_alertmanager_validator_redacts_invalid_base64(tmp_path):
+    manifest = tmp_path / "invalid-base64.yaml"
+    manifest.write_text(
+        rendered_alertmanager_fixture().replace(
+            "stringData:\n  alertmanager.yaml: |\n" + "    route:",
+            "data:\n  alertmanager.yaml: 'not-base64!'\nunused:\n  value: |\n    route:",
+        ),
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        ["ruby", str(ALERTMANAGER_VALIDATOR), "rendered", str(manifest)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 16
+    assert "sensitive values not printed" in result.stderr
+    assert "not-base64" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda text: text.replace("kind: Alertmanager", "kind: Alertmanager", 1)
+        + text.split("---\napiVersion: v1", 1)[0],
+        lambda text: text.replace(
+            "      routes:\n        - receiver: pagerduty-synthetic-test",
+            "      routes:\n        - receiver: nested\n          routes:\n            - receiver: pagerduty-synthetic-test",
+        ),
+        lambda text: text.replace(
+            "    receivers:\n",
+            "    receivers:\n      - name: alternate\n        pagerduty_configs: []\n",
+        ),
+        lambda text: text.replace(
+            "            send_resolved: true",
+            "            send_resolved: true\n          - routing_key_file: /another/file",
+        ),
+        lambda text: text.replace(
+            "            send_resolved: true",
+            "            send_resolved: true\n        continue: false",
+        ),
+        lambda text: text.replace(
+            "    receivers:",
+            "    routing_" + "key: forbidden-stub\n    receivers:",
+        ),
+        lambda text: text.replace(
+            "      - name: pagerduty-synthetic-test",
+            "      - name: alternate\n        pagerduty_configs:\n          - service_"
+            + "key: forbidden-stub\n      - name: pagerduty-synthetic-test",
+        ).replace(
+            "      routes:",
+            "      routes:\n        - receiver: alternate\n          matchers: ['severity=~\".*\"']",
+        ),
+    ],
+    ids=[
+        "duplicate-resource",
+        "nested-route",
+        "alternate-receiver",
+        "additional-config",
+        "continuation",
+        "recursive-inline-key",
+        "broad-nested-alternate-inline",
+    ],
+)
+def test_alertmanager_validator_rejects_deterministic_contract_mutations(tmp_path, mutation):
+    manifest = tmp_path / "mutation.yaml"
+    manifest.write_text(mutation(rendered_alertmanager_fixture()), encoding="utf-8")
+    result = subprocess.run(
+        ["ruby", str(ALERTMANAGER_VALIDATOR), "rendered", str(manifest)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 16
+    assert "forbidden-stub" not in result.stderr
+
+
 def test_discovery_contract_uses_release_label():
     spec = yaml_load(COMMON)["prometheus"]["prometheusSpec"]
     for selector in ("serviceMonitorSelector", "podMonitorSelector", "probeSelector"):
@@ -244,10 +323,12 @@ def test_install_upgrade_are_distinct_and_render_before_mutation():
     install = re.search(r"install_release\(\).*?\nupgrade_release\(", script, re.S).group(0)
     upgrade = re.search(r"upgrade_release\(\).*?\nstatus\(", script, re.S).group(0)
     assert "render_to" in install and "helm install" in install
+    assert install.index("assert_pagerduty_secret") < install.index("render_to")
     assert install.index("render_to") < install.index("helm install")
     assert 'state="$(release_state)"' in install
     assert "already exists" in install
     assert "render_to" in upgrade and "helm upgrade" in upgrade
+    assert upgrade.index("assert_pagerduty_secret") < upgrade.index("render_to")
     assert upgrade.index("render_to") < upgrade.index("helm upgrade")
     assert 'state="$(release_state)"' in upgrade
     assert "requires an existing Helm release" in upgrade
@@ -393,7 +474,7 @@ case "$*" in
     [ "$KUBECTL_MODE" != malformed-alertmanager ] && sed 's/^/    /' "$ALERTMANAGER_CONFIG" || printf '%s\n' '    route: [unterminated'
     ;;
   *"get secret alertmanager-pagerduty -o go-template="*) [ "$KUBECTL_MODE" != missing-pagerduty ] || exit 44; [ "$KUBECTL_MODE" != empty-pagerduty ] && echo present ;;
-  *"create --raw "*"/api/v2/alerts -f -"*) cat > "$ALERT_PAYLOAD"; [ "$KUBECTL_MODE" != api-fail ] ;;
+  *"create --raw "*"/api/v2/alerts -f -"*) cat > "$ALERT_PAYLOAD"; echo response-sentinel; [ "$KUBECTL_MODE" != api-fail ] ;;
   *"get ingress "*) exit 0 ;;
   *"get svc kube-prometheus-stack-grafana"*) echo 30300 ;;
   *"get servicemonitor dspace"*"metadata.labels.release"*) [ "$KUBECTL_MODE" = wrong-release ] && echo wrong || echo kube-prometheus-stack ;;
@@ -536,10 +617,11 @@ def test_mutation_requires_nonempty_pagerduty_secret_without_exposure(
     result, audit = run_helper(tmp_path, command, helm_mode=helm_mode, kubectl_mode=mode)
     assert result.returncode != 0
     assert f"helm {command}" not in audit
+    assert "helm " not in audit
+    assert "forbidden-secret-sentinel" not in result.stdout + result.stderr + audit
     assert "routing-key" in result.stderr
     assert (
-        "value intentionally not read or printed" in result.stderr
-        or "is absent" in result.stderr
+        "value intentionally not read or printed" in result.stderr or "is absent" in result.stderr
     )
 
 
@@ -578,11 +660,17 @@ def test_pagerduty_test_requires_explicit_action_and_staging(tmp_path):
         check=False,
     )
     assert production.returncode != 0
+    mismatch, audit = run_helper(
+        tmp_path / "mismatch", "pagerduty-test", context="other", action="action=fire"
+    )
+    assert mismatch.returncode != 0 and "create --raw" not in audit
 
 
 def test_pagerduty_fire_and_resolve_share_labels_and_bound_end_times(tmp_path):
-    fired, fire_audit = run_helper(tmp_path / "fire", "pagerduty-test", action="fire")
-    resolved, resolve_audit = run_helper(tmp_path / "resolve", "pagerduty-test", action="resolve")
+    fired, fire_audit = run_helper(tmp_path / "fire", "pagerduty-test", action="action=fire")
+    resolved, resolve_audit = run_helper(
+        tmp_path / "resolve", "pagerduty-test", action="action=resolve"
+    )
     assert fired.returncode == resolved.returncode == 0
     assert "create --raw" in fire_audit and "create --raw" in resolve_audit
     fire = json.loads((tmp_path / "fire" / "alert-payload").read_text())[0]
@@ -600,6 +688,24 @@ def test_pagerduty_fire_and_resolve_share_labels_and_bound_end_times(tmp_path):
     resolve_end = datetime.fromisoformat(resolve["endsAt"].replace("Z", "+00:00"))
     assert 14 * 60 <= (fire_end - resolve_end).total_seconds() <= 16 * 60
     assert set(fire["annotations"]) == {"summary", "description", "runbook_url"}
+
+
+@pytest.mark.parametrize("action", ["fire", "resolve"])
+def test_pagerduty_direct_bare_actions_remain_supported(tmp_path, action):
+    result, audit = run_helper(tmp_path, "pagerduty-test", action=action)
+    assert result.returncode == 0 and "create --raw" in audit
+    assert "response-sentinel" not in result.stdout + result.stderr
+    assert not list(tmp_path.glob("sugarkube-alertmanager-response.*"))
+
+
+def test_pagerduty_api_failure_is_redacted_and_cleans_response(tmp_path):
+    result, _ = run_helper(
+        tmp_path, "pagerduty-test", action="action=fire", kubectl_mode="api-fail"
+    )
+    assert result.returncode == 18
+    assert "response redacted" in result.stderr
+    assert "response-sentinel" not in result.stdout + result.stderr
+    assert not list(tmp_path.glob("sugarkube-alertmanager-response.*"))
 
 
 def test_status_requires_staging_identity(tmp_path):

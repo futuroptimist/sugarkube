@@ -37,8 +37,11 @@ begin
 rescue StandardError
   fail_closed("input manifests are missing or malformed")
 end
-alertmanager = documents.find { |doc| doc["kind"] == "Alertmanager" }
-fail_closed("expected Alertmanager custom resource is missing") unless alertmanager
+alertmanagers = documents.select do |doc|
+  doc["kind"] == "Alertmanager" && doc.dig("metadata", "name") == "kube-prometheus-stack-alertmanager"
+end
+fail_closed("expected exactly one kube-prometheus-stack Alertmanager custom resource") unless alertmanagers.length == 1
+alertmanager = alertmanagers.first
 secrets = alertmanager.dig("spec", "secrets")
 fail_closed("Alertmanager must reference only #{EXPECTED_SECRET}") unless secrets == [EXPECTED_SECRET]
 
@@ -56,26 +59,53 @@ rescue StandardError
   fail_closed("generated Alertmanager configuration is missing or malformed")
 end
 
+fail_closed("generated Alertmanager configuration is malformed") unless config.is_a?(Hash)
+
+inline_credential = lambda do |value|
+  case value
+  when Hash
+    value.key?("routing_key") || value.key?("service_key") || value.any? { |_key, child| inline_credential.call(child) }
+  when Array
+    value.any? { |child| inline_credential.call(child) }
+  else
+    false
+  end
+end
+fail_closed("inline PagerDuty credentials are forbidden") if inline_credential.call(config)
+
 route = config["route"]
 fail_closed('root receiver must remain "null"') unless route.is_a?(Hash) && route["receiver"] == "null"
-routes = route["routes"]
-fail_closed("there must be exactly one PagerDuty route") unless routes.is_a?(Array) && routes.length == 1
-synthetic_route = routes.first
-fail_closed("PagerDuty route receiver changed") unless synthetic_route["receiver"] == EXPECTED_RECEIVER
-fail_closed("PagerDuty route matchers are not the exact synthetic allowlist") unless
-  synthetic_route["matchers"].is_a?(Array) && synthetic_route["matchers"].sort == EXPECTED_MATCHERS.sort
-fail_closed("PagerDuty route must not continue into broader routing") if synthetic_route["continue"] == true
 
 receivers = config["receivers"]
 fail_closed("receiver list is malformed") unless receivers.is_a?(Array)
+fail_closed("receiver list is malformed") unless receivers.all? { |item| item.is_a?(Hash) }
 fail_closed('root "null" receiver is missing') unless receivers.count { |item| item == { "name" => "null" } } == 1
-pagerduty = receivers.select { |item| item["name"] == EXPECTED_RECEIVER }
-fail_closed("there must be exactly one synthetic PagerDuty receiver") unless pagerduty.length == 1
+pagerduty = receivers.select { |item| item.key?("pagerduty_configs") }
+fail_closed("there must be exactly one PagerDuty receiver") unless pagerduty.length == 1
+fail_closed("PagerDuty receiver name changed") unless pagerduty.first["name"] == EXPECTED_RECEIVER
 pd_configs = pagerduty.first["pagerduty_configs"]
 fail_closed("there must be exactly one PagerDuty configuration") unless pd_configs.is_a?(Array) && pd_configs.length == 1
 pd_config = pd_configs.first
+fail_closed("PagerDuty configuration is malformed") unless pd_config.is_a?(Hash)
 fail_closed("PagerDuty must use the exact mounted routing-key file") unless pd_config["routing_key_file"] == EXPECTED_PATH
 fail_closed("PagerDuty resolved notifications must be enabled") unless pd_config["send_resolved"] == true
-fail_closed("inline PagerDuty credentials are forbidden") if pd_config.key?("routing_key") || pd_config.key?("service_key")
+
+all_routes = []
+walk_routes = lambda do |candidate|
+  fail_closed("route tree is malformed") unless candidate.is_a?(Hash)
+  all_routes << candidate
+  children = candidate["routes"]
+  return if children.nil?
+
+  fail_closed("route tree is malformed") unless children.is_a?(Array)
+  children.each { |child| walk_routes.call(child) }
+end
+walk_routes.call(route)
+pagerduty_routes = all_routes.select { |candidate| candidate["receiver"] == EXPECTED_RECEIVER }
+fail_closed("there must be exactly one PagerDuty route") unless pagerduty_routes.length == 1
+synthetic_route = pagerduty_routes.first
+fail_closed("PagerDuty route matchers are not the exact synthetic allowlist") unless
+  synthetic_route["matchers"].is_a?(Array) && synthetic_route["matchers"].sort == EXPECTED_MATCHERS.sort
+fail_closed("PagerDuty route must not specify continuation") if synthetic_route.key?("continue")
 
 warn "Alertmanager PagerDuty structure verified (credential value not accessed)."

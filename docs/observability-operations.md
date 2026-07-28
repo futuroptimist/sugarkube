@@ -208,7 +208,14 @@ Do not use `--reuse-values` for the next forward upgrade; commit the full intend
 Repository support alone is not deployment or delivery evidence. This manual procedure is staging-only; no CI,
 render, install, upgrade, status, or verification command sends an alert.
 
-1. Create or rotate the `monitoring/alertmanager-pagerduty` Secret without putting the routing key in
+1. Select and verify the staging context before creating or rotating anything:
+
+   ```bash
+   just kubeconfig-env env=staging
+   test "$(kubectl config current-context)" = sugar-staging
+   ```
+
+2. Create or rotate the `monitoring/alertmanager-pagerduty` Secret without putting the routing key in
    history, arguments, files, or output. Run this from an interactive terminal (the hidden read is
    intentionally not suitable for a pasted automation transcript):
 
@@ -222,7 +229,7 @@ render, install, upgrade, status, or verification command sends an alert.
    ```
 
    The pipe keeps the value off the process list and disk. Neither command prints the Secret value.
-2. Render and inspect the pinned proposal offline:
+3. Render and inspect the pinned proposal offline:
 
    ```bash
    just observability-render env=staging >/tmp/kube-prometheus-stack.rendered.yaml
@@ -232,37 +239,36 @@ render, install, upgrade, status, or verification command sends an alert.
 
    Confirm the validator reports the exact synthetic route, file reference, and Secret mount contract;
    remove the temporary render after review.
-3. Select the staging kubeconfig, upgrade, and verify:
+4. Upgrade and verify:
 
    ```bash
-   just kubeconfig-env env=staging
    just observability-upgrade env=staging
    just observability-verify env=staging
    ```
 
    Upgrade fails closed before Helm mutation when the credential Secret or its nonempty key is absent.
-4. Explicitly fire the bounded synthetic alert (it auto-ends after 15 minutes if abandoned):
+5. Explicitly fire the bounded synthetic alert (it auto-ends after 15 minutes if abandoned):
 
    ```bash
    just observability-pagerduty-test env=staging action=fire
    ```
 
-5. In PagerDuty, manually confirm phone receipt and acknowledge the incident. The repository cannot
+6. In PagerDuty, manually confirm phone receipt and acknowledge the incident. The repository cannot
    assert this external observation.
-6. Resolve the same alert fingerprint, then manually confirm PagerDuty resolution:
+7. Resolve the same alert fingerprint, then manually confirm PagerDuty resolution:
 
    ```bash
    just observability-pagerduty-test env=staging action=resolve
    ```
 
-7. If necessary, use `helm -n monitoring history kube-prometheus-stack`, roll back to the prior
+8. If necessary, use `helm -n monitoring history kube-prometheus-stack`, roll back to the prior
    known-good revision with the command in [Rollback](#rollback), and run verification from the Git
    revision that produced that Helm revision (or use the configuration-neutral health checks described
    there).
-8. Do **not** delete the credential Secret before rolling back configuration that references its
+9. Do **not** delete the credential Secret before rolling back configuration that references its
    mounted file. A missing mounted Secret can prevent Alertmanager from starting, including during a
    rollback whose configuration still expects it.
-9. For rotation, repeat step 1 with the new value, then reload it deterministically and verify:
+10. For rotation, repeat step 2 with the new value, then reload it deterministically and verify:
 
    ```bash
    kubectl -n monitoring rollout restart \
