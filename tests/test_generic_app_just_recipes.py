@@ -2081,6 +2081,52 @@ def test_app_redeploy_prints_chart_pin_reminder_without_latest_lookup_or_pin_mut
 
 
 @pytest.mark.usefixtures("ensure_just_available")
+@pytest.mark.parametrize("app", ["tokenplace", "danielsmith", "jobbot3000"])
+def test_standard_app_redeploy_has_authoritative_values_and_render_mutation_parity(
+    app: str, generic_app_stub_env: dict[str, str]
+) -> None:
+    result = _run_just(
+        ["app-redeploy", f"app={app}", "env=staging", "tag=main-deadbee"],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    lines = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8").splitlines()
+    rendered = next(line.split() for line in lines if line.startswith("template "))
+    mutated = next(line.split() for line in lines if line.startswith("upgrade "))
+    assert "--reuse-values" not in mutated
+    assert "--reset-values" not in mutated
+    assert rendered[1:4] == mutated[1:4]
+
+    def release_inputs(command: list[str]) -> list[str]:
+        inputs: list[str] = []
+        for flag in ("--namespace", "--version", "-f", "--set"):
+            inputs.extend(
+                argument
+                for index, argument in enumerate(command[:-1])
+                if argument == flag
+                for argument in command[index : index + 2]
+            )
+        return inputs
+
+    assert release_inputs(rendered) == release_inputs(mutated)
+    base = f"docs/examples/{app}.values.dev.yaml"
+    overlay = f"docs/examples/{app}.values.staging.yaml"
+    assert mutated.index(base) < mutated.index(overlay)
+    assert "image.tag=main-deadbee" in mutated
+    assert "image.pullPolicy=Always" in mutated
+
+
+def test_standard_helm_helper_source_cannot_reintroduce_historical_values() -> None:
+    justfile = (REPO_ROOT / "justfile").read_text(encoding="utf-8")
+    helper = justfile.split("_helm-oci-deploy ", 1)[1].split("\nhelm-oci-install ", 1)[0]
+
+    assert "reuse_values" not in helper
+    assert "--reuse-values" not in helper
+    assert "reset-then-reuse-values" not in helper
+
+
+@pytest.mark.usefixtures("ensure_just_available")
 @pytest.mark.parametrize(
     ("app", "release", "namespace", "chart"),
     [
@@ -2301,9 +2347,23 @@ def test_dspace_guarded_deploy_orders_preflight_mutation_and_finalization(
     )
     assert coordinate in installed["details"]
     helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
+    render_line = next(line for line in helm_log.splitlines() if line.startswith("template "))
     mutation_line = next(line for line in helm_log.splitlines() if line.startswith("upgrade "))
+    for expected in (
+        coordinate,
+        "--namespace dspace",
+        "-f docs/examples/dspace.values.dev.yaml",
+        "-f docs/examples/dspace.values.staging.yaml",
+        "--set ingress.host=staging.democratized.space",
+        "--set image.tag=main-abcdef0",
+        "--set image.pullPolicy=Always",
+    ):
+        assert expected in render_line
+        assert expected in mutation_line
     assert coordinate in mutation_line
+    assert "--reuse-values" not in mutation_line
     assert "--version" not in mutation_line
+    assert "--version" not in render_line
     assert "--description sugarkube-release-manifest:" in mutation_line
     commands = (tmp_path / "commands.log").read_text(encoding="utf-8").splitlines()
     preflight = next(i for i, line in enumerate(commands) if line.startswith("oras "))

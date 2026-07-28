@@ -626,11 +626,22 @@ def cmd_preflight(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_resolve_host(args: argparse.Namespace) -> int:
+    """Print the effective ingress host used as an explicit Helm override."""
+    values = tuple(filter(None, (value.strip() for value in args.values.split(","))))
+    print(expected_ingress_host(values, args.host))
+    return 0
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     sub = p.add_subparsers(dest="cmd", required=True)
-    for name in ("status", "bump", "preflight"):
+    for name in ("status", "bump", "preflight", "resolve-host"):
         s = sub.add_parser(name)
+        if name == "resolve-host":
+            s.add_argument("--values", required=True)
+            s.add_argument("--host", default="")
+            continue
         s.add_argument("--app", required=True)
         s.add_argument("--chart", required=True)
         s.add_argument("--version-file", required=True)
@@ -646,7 +657,12 @@ def main() -> int:
             s.add_argument("--host", default="")
             s.add_argument("--pull-policy", default="Always")
     a = p.parse_args()
-    return {"status": cmd_status, "bump": cmd_bump, "preflight": cmd_preflight}[a.cmd](a)
+    return {
+        "status": cmd_status,
+        "bump": cmd_bump,
+        "preflight": cmd_preflight,
+        "resolve-host": cmd_resolve_host,
+    }[a.cmd](a)
 
 
 if __name__ == "__main__":
