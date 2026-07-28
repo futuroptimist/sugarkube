@@ -4,3 +4,23 @@ prometheus:
   prometheusSpec:
     externalLabels:
       cluster: sugarkube-int
+alertmanager:
+  alertmanagerSpec:
+    secrets:
+      - alertmanager-pagerduty
+  config:
+    route:
+      receiver: "null"
+      routes:
+        - receiver: pagerduty-synthetic-test
+          matchers:
+            - alertname="SugarkubePagerDutyTest"
+            - environment="staging"
+            - cluster="sugarkube-int"
+            - severity="critical"
+    receivers:
+      - name: "null"
+      - name: pagerduty-synthetic-test
+        pagerduty_configs:
+          - routing_key_file: /etc/alertmanager/secrets/alertmanager-pagerduty/routing-key
+            send_resolved: true

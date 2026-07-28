@@ -3182,6 +3182,10 @@ observability-install env='':
 observability-upgrade env='':
     @scripts/observability_helm.sh upgrade '{{ env }}'
 
+# Explicitly fire or resolve the staging-only PagerDuty synthetic alert.
+observability-pagerduty-test env='' action='':
+    @scripts/observability_helm.sh pagerduty-test '{{ env }}' '{{ action }}'
+
 # Summarize the canonical non-Flux kube-prometheus-stack release for staging (read-only).
 observability-status env='':
     @scripts/observability_helm.sh status '{{ env }}'

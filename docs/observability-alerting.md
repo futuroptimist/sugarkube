@@ -4,9 +4,11 @@ This is the canonical alerting strategy for Sugarkube. It defines the agreed tar
 routing policy, alert inventory, and rollout/drill plan for turning the staging observability stack
 described in [`docs/observability-design.md`](./observability-design.md) and
 [`docs/observability-operations.md`](./observability-operations.md) into something that actually pages
-a human. **Nothing in this document is deployed yet.** Alertmanager currently ships a no-op `"null"`
-receiver in staging (see [`docs/observability-operations.md`](./observability-operations.md)); this
-document records the plan for closing that gap, not evidence that it is closed.
+a human. The repository now contains a staging-only, secret-file-backed PagerDuty receiver and an
+exactly matched operator-triggered synthetic route, while the root remains the no-op `"null"`
+receiver. This is repository support, not evidence that it has been deployed or that PagerDuty phone
+delivery and resolution have been manually proven. See the drill in
+[`docs/observability-operations.md`](./observability-operations.md#pagerduty-synthetic-delivery-drill).
 
 ## 1. Goals and non-goals
 
@@ -213,5 +215,7 @@ it is deployed yet — see the rollout plan above for the actual sequencing.
 - Shallow public-endpoint blackbox monitoring (`PublicEndpointDown`, `PublicProbeMissing`,
   `TLSExpiringSoon`) is already live in staging today, independently of that dependency — see
   [`docs/observability-blackbox.md`](./observability-blackbox.md).
-- Alert delivery to a phone and node-power-off drills have not yet been performed. Everything in
-  [§6](#6-rollout-and-drill-plan) above is planned, not completed.
+- The secret-safe staging receiver foundation and manual synthetic fire/resolve helper are
+  implemented in this repository. Actual staging deployment, phone delivery, acknowledgement, and
+  resolution remain manual evidence gates and are not claimed here. Node-power-off drills and all
+  later routing phases remain planned.

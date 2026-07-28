@@ -46,8 +46,91 @@ The old Flux/Longhorn files under `platform/observability/*.yaml` and `clusters/
   - Secret name: `grafana-admin-credentials`.
   - Username key: `admin-user`.
   - Password key: `admin-password`.
+- The staging PagerDuty Events API v2 routing key is stored only in
+  `monitoring/alertmanager-pagerduty`, under the `routing-key` key. Install and
+  upgrade fail closed when that contract is absent or empty; rendering remains offline.
 
 Never put example credentials or plaintext Secret data in commands, logs, docs, commits, or PRs.
+
+## PagerDuty synthetic delivery drill
+
+Repository support does not prove that this configuration is deployed or that a phone receives an
+event. The following is an explicitly operator-run staging drill; none of the commands that fire or
+resolve it run from CI, rendering, installation, upgrade, status, or verification.
+
+### Create or rotate the credential
+
+Use a hidden read and stream the value directly to `kubectl`. This keeps it out of shell history,
+process arguments, generated files, and command output. Run this from a trusted terminal after
+selecting the `sugar-staging` context:
+
+```bash
+read -r -s -p 'PagerDuty routing key: ' PAGERDUTY_ROUTING_KEY; printf '\n'
+printf '%s' "$PAGERDUTY_ROUTING_KEY" |
+  kubectl -n monitoring create secret generic alertmanager-pagerduty \
+    --from-file=routing-key=/dev/stdin --dry-run=client -o yaml |
+  kubectl apply -f -
+unset PAGERDUTY_ROUTING_KEY
+```
+
+Do not enable shell tracing. Do not inspect the Secret with YAML/JSON output. For rotation, repeat
+the same pipeline with the replacement key, wait for the Operator-managed Alertmanager pods to
+reload or restart successfully, then repeat the fire/resolve drill below. Keep the old PagerDuty
+integration usable until post-rotation verification succeeds, when the provider permits that.
+
+### Render, upgrade, and verify
+
+1. Render offline and inspect only the Alertmanager resource and generated configuration. Confirm
+   the root receiver is `"null"`, the Alertmanager Secret list contains
+   `alertmanager-pagerduty`, and the only PagerDuty route has the four exact synthetic matchers.
+   Confirm the receiver uses
+   `/etc/alertmanager/secrets/alertmanager-pagerduty/routing-key` and `send_resolved: true`:
+
+   ```bash
+   just observability-render env=staging > /tmp/sugarkube-observability-render.yaml
+   less /tmp/sugarkube-observability-render.yaml
+   rm -f /tmp/sugarkube-observability-render.yaml
+   ```
+
+   The temporary render contains no credential, but remove it after review to avoid stale generated
+   artifacts.
+2. Apply and verify the canonical release:
+
+   ```bash
+   just observability-upgrade env=staging
+   just observability-verify env=staging
+   ```
+
+   The upgrade preflight checks only the fixed Secret/key contract and never returns its value. The
+   verification checks the live Alertmanager custom resource and generated configuration without
+   printing either response.
+3. Fire the bounded synthetic event explicitly:
+
+   ```bash
+   just observability-pagerduty-test env=staging action=fire
+   ```
+
+   Manually confirm PagerDuty receipt and phone notification, and acknowledge the incident. The
+   helper reports only API success or failure; it cannot prove phone delivery.
+4. Resolve the same alert fingerprint explicitly:
+
+   ```bash
+   just observability-pagerduty-test env=staging action=resolve
+   ```
+
+   Manually confirm that PagerDuty marks the same incident resolved. Fire has a 15-minute `endsAt`
+   safety bound; resolve submits the identical complete labels with an immediate `endsAt`.
+
+### Rollback and Secret ordering
+
+If necessary, identify the prior revision with `helm -n monitoring history kube-prometheus-stack`
+and use the repository's established Helm rollback procedure for that revision. Verify the stack
+again after rollback. **Do not delete `monitoring/alertmanager-pagerduty` before rolling back the
+configuration that mounts it.** A missing referenced Secret can prevent Alertmanager pods from
+starting, including during rollback. First roll back and verify that the resulting Alertmanager no
+longer references the Secret; only then remove an obsolete credential. During rotation, retain the
+Secret name and key, update its value through stdin, verify workload health, and repeat both manual
+delivery observations before retiring the old provider-side credential.
 
 ## Read-only preflight and status
 

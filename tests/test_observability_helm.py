@@ -187,6 +187,7 @@ def test_justfile_exposes_observability_recipes():
         "observability-status",
         "observability-verify",
         "observability-dashboard-verify",
+        "observability-pagerduty-test",
     ):
         assert f"{recipe} env=''" in text
         assert f"scripts/observability_helm.sh {recipe.removeprefix('observability-')}" in text
@@ -253,6 +254,28 @@ case "$*" in
     printf '%s\n' 'apiVersion: v1' 'kind: ConfigMap' 'metadata:' '  name: kube-prometheus-stack-grafana-dashboards-sugarkube' '  labels:' '    dashboard-provider: sugarkube' 'data:' '  sugarkube-staging-observability.json:' '    |-'
     sed 's/^/      /' "$DASHBOARD"
     printf '%s\n' '---' 'kind: ConfigMap' 'data:' '  dashboardproviders.yaml: |' '    providers:' '      - name: sugarkube' '        options:' '          path: /var/lib/grafana/dashboards/sugarkube' '---' 'kind: Deployment' 'spec:' '  template:' '    spec:' '      containers:' '        - volumeMounts:' '            - name: dashboards-sugarkube' '              mountPath: /var/lib/grafana/dashboards/sugarkube/sugarkube-staging-observability.json' '              subPath: sugarkube-staging-observability.json'
+    cat <<'YAML'
+---
+kind: Alertmanager
+spec:
+  secrets:
+    - alertmanager-pagerduty
+---
+kind: Secret
+stringData:
+  alertmanager.yaml: |
+    route:
+      receiver: "null"
+      routes:
+        - receiver: pagerduty-synthetic-test
+          matchers: ['alertname="SugarkubePagerDutyTest"', 'environment="staging"', 'cluster="sugarkube-int"', 'severity="critical"']
+    receivers:
+      - name: "null"
+      - name: pagerduty-synthetic-test
+        pagerduty_configs:
+          - routing_key_file: /etc/alertmanager/secrets/alertmanager-pagerduty/routing-key
+            send_resolved: true
+YAML
     exit 0
     ;;
   *list*) [ "$HELM_MODE" != query-fail ] || exit 32; [ "$HELM_MODE" = present ] && echo kube-prometheus-stack; exit 0 ;;
@@ -267,6 +290,9 @@ echo "kubectl $*" >> "$AUDIT"
 case "$*" in
   "config current-context") echo "$CONTEXT" ;;
   *"get nodes -o json"*) printf '%s\n' '{"items":[{"metadata":{"name":"n1","labels":{"sugarkube.env":"staging","sugarkube.cluster":"sugar-staging"}}}]}' ;;
+  *"get secret alertmanager-pagerduty -o go-template="*) [ "$KUBECTL_MODE" != missing-pagerduty ] && [ "$KUBECTL_MODE" != empty-pagerduty ] && printf present ;;
+  *"get alertmanager kube-prometheus-stack-alertmanager -o json") printf '%s\n' '{"spec":{"secrets":["alertmanager-pagerduty"]}}' ;;
+  *"get secret alertmanager-kube-prometheus-stack-alertmanager -o json") printf '%s\n' '{"data":{"alertmanager.yaml":"cm91dGU6CiAgcmVjZWl2ZXI6ICJudWxsIgogIHJvdXRlczoKICAgIC0gcmVjZWl2ZXI6IHBhZ2VyZHV0eS1zeW50aGV0aWMtdGVzdAogICAgICBtYXRjaGVyczogWydhbGVydG5hbWU9IlN1Z2Fya3ViZVBhZ2VyRHV0eVRlc3QiJywgJ2Vudmlyb25tZW50PSJzdGFnaW5nIicsICdjbHVzdGVyPSJzdWdhcmt1YmUtaW50IicsICdzZXZlcml0eT0iY3JpdGljYWwiJ10KcmVjZWl2ZXJzOgogIC0gbmFtZTogIm51bGwiCiAgLSBuYW1lOiBwYWdlcmR1dHktc3ludGhldGljLXRlc3QKICAgIHBhZ2VyZHV0eV9jb25maWdzOgogICAgICAtIHJvdXRpbmdfa2V5X2ZpbGU6IC9ldGMvYWxlcnRtYW5hZ2VyL3NlY3JldHMvYWxlcnRtYW5hZ2VyLXBhZ2VyZHV0eS9yb3V0aW5nLWtleQogICAgICAgIHNlbmRfcmVzb2x2ZWQ6IHRydWUK"}}' ;;
   *"get daemonset kube-prometheus-stack-prometheus-node-exporter"*) [ "$KUBECTL_MODE" = two-nodes ] && echo '2 2' || echo '3 3' ;;
   *"get pvc -o json"*) printf '%s\n' '{"items":[{"metadata":{"name":"generated-pvc","labels":{"app.kubernetes.io/name":"prometheus"}},"spec":{"storageClassName":"local-path"},"status":{"phase":"Bound"}}]}' ;;
   *"get prometheus kube-prometheus-stack-prometheus"*) echo 1 ;;
@@ -276,6 +302,7 @@ case "$*" in
   *"get servicemonitor dspace"*"metadata.labels.release"*) [ "$KUBECTL_MODE" = wrong-release ] && echo wrong || echo kube-prometheus-stack ;;
   *"get servicemonitor dspace"*"bearerTokenSecret.name"*) [ "$KUBECTL_MODE" != missing-secret-ref ] && echo dspace-token ;;
   *"get secret dspace-token -o name"*) [ "$KUBECTL_MODE" != missing-secret ] || exit 44; echo secret/dspace-token ;;
+  *"create --raw "*) cat > "$ALERT_PAYLOAD" ;;
   *"get --request-timeout="*" --raw "*)
     [ "$KUBECTL_MODE" != query-fail ] || exit 45
     [ "$TARGET_RESPONSE_DELAY" = 0 ] || /bin/sleep "$TARGET_RESPONSE_DELAY"
@@ -310,6 +337,7 @@ esac
         "TARGET_RESPONSES": "",
         "TARGET_COUNTER": str(tmp_path / "target-counter"),
         "TARGET_RESPONSE_DELAY": target_response_delay,
+        "ALERT_PAYLOAD": str(tmp_path / "alert-payload"),
         "SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_ATTEMPTS": retry_attempts,
         "SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_INTERVAL_SECONDS": retry_interval,
         "DASHBOARD": str(
@@ -800,3 +828,140 @@ def test_dashboard_verifier_cleans_up_when_interrupted(tmp_path):
     body = SCRIPT.read_text(encoding="utf-8").split("dashboard_verify()", 1)[1]
     assert "trap 'exit 130' INT" in body and "trap 'exit 143' TERM" in body
     assert not list(tmp_path.glob("sugarkube-grafana-verify.*"))
+
+
+def test_staging_pagerduty_route_and_secret_contract_are_exact():
+    staging = yaml_load(STAGING)["alertmanager"]
+    assert staging["alertmanagerSpec"]["secrets"] == ["alertmanager-pagerduty"]
+    config = staging["config"]
+    assert config["route"]["receiver"] == "null"
+    route = config["route"]["routes"]
+    assert route == [
+        {
+            "receiver": "pagerduty-synthetic-test",
+            "matchers": [
+                'alertname="SugarkubePagerDutyTest"',
+                'environment="staging"',
+                'cluster="sugarkube-int"',
+                'severity="critical"',
+            ],
+        }
+    ]
+    pagerduty = config["receivers"][1]["pagerduty_configs"][0]
+    assert pagerduty == {
+        "routing_key_file": "/etc/alertmanager/secrets/alertmanager-pagerduty/routing-key",
+        "send_resolved": True,
+    }
+    assert "routing_key" not in pagerduty and "service_key" not in pagerduty
+
+
+def test_pagerduty_secret_preflight_is_before_helm_mutation(tmp_path):
+    for mode in ("missing-pagerduty", "empty-pagerduty"):
+        result, audit = run_helper(
+            tmp_path / mode, "upgrade", helm_mode="present", kubectl_mode=mode
+        )
+        assert result.returncode != 0
+        assert "value redacted" in result.stderr
+        assert "helm upgrade" not in audit
+    valid, audit = run_helper(tmp_path / "valid", "upgrade", helm_mode="present")
+    assert valid.returncode == 0 and "helm upgrade" in audit
+
+
+def test_pagerduty_test_requires_explicit_staging_action(tmp_path):
+    for action in ("", "page", "FIRE"):
+        result = subprocess.run(
+            ["bash", str(SCRIPT), "pagerduty-test", "env=staging", action],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert result.returncode != 0
+    result = subprocess.run(
+        ["bash", str(SCRIPT), "pagerduty-test", "env=prod", "fire"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode != 0
+
+
+def test_pagerduty_fire_and_resolve_use_same_labels_and_bounded_end(tmp_path):
+    payloads = {}
+    for action in ("fire", "resolve"):
+        result, _ = run_helper(tmp_path / action, "pagerduty-test") if False else (None, None)
+        # The helper's second positional argument is intentionally explicit.
+        bin_path = tmp_path / action
+        run_helper(bin_path, "status")  # create deterministic stubs without sending an alert
+        env = os.environ | {
+            "PATH": f"{bin_path / 'bin'}:{os.environ['PATH']}",
+            "AUDIT": str(bin_path / "audit"),
+            "CONTEXT": "sugar-staging",
+            "KUBECTL_MODE": "healthy",
+            "KUBECONFIG": str(bin_path / "kubeconfig"),
+            "ALERT_PAYLOAD": str(bin_path / "alert-payload"),
+        }
+        result = subprocess.run(
+            ["bash", str(SCRIPT), "pagerduty-test", "env=staging", action],
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert result.returncode == 0
+        payloads[action] = json.loads((bin_path / "alert-payload").read_text())[0]
+    assert payloads["fire"]["labels"] == payloads["resolve"]["labels"]
+    from datetime import datetime
+
+    fire_start = datetime.fromisoformat(payloads["fire"]["startsAt"].replace("Z", "+00:00"))
+    fire_end = datetime.fromisoformat(payloads["fire"]["endsAt"].replace("Z", "+00:00"))
+    resolve_start = datetime.fromisoformat(payloads["resolve"]["startsAt"].replace("Z", "+00:00"))
+    resolve_end = datetime.fromisoformat(payloads["resolve"]["endsAt"].replace("Z", "+00:00"))
+    assert 14 * 60 <= (fire_end - fire_start).total_seconds() <= 15 * 60
+    assert abs((resolve_end - resolve_start).total_seconds()) <= 1
+    assert set(payloads["fire"]["annotations"]) == {"summary", "description", "runbook_url"}
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        lambda text: text.replace("    - alertmanager-pagerduty\n", ""),
+        lambda text: text.replace(
+            "/etc/alertmanager/secrets/alertmanager-pagerduty/routing-key", "/wrong/path"
+        ),
+        lambda text: text.replace("routing_key_file:", "routing_key:"),
+        lambda text: text.replace('severity="critical"', 'severity="warning"'),
+        lambda text: text.replace(
+            "      routes:\n", "      routes:\n        - receiver: pagerduty-synthetic-test\n"
+        ),
+    ),
+)
+def test_alertmanager_validator_rejects_unsafe_render_mutations(mutation):
+    rendered = """kind: Alertmanager
+spec:
+  secrets:
+    - alertmanager-pagerduty
+---
+kind: Secret
+stringData:
+  alertmanager.yaml: |
+    route:
+      receiver: "null"
+      routes:
+        - receiver: pagerduty-synthetic-test
+          matchers: ['alertname="SugarkubePagerDutyTest"', 'environment="staging"', 'cluster="sugarkube-int"', 'severity="critical"']
+    receivers:
+      - name: "null"
+      - name: pagerduty-synthetic-test
+        pagerduty_configs:
+          - routing_key_file: /etc/alertmanager/secrets/alertmanager-pagerduty/routing-key
+            send_resolved: true
+"""
+    result = subprocess.run(
+        ["python3", str(ROOT / "scripts/validate_observability_alertmanager.py"), "rendered"],
+        input=mutation(rendered),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "unsafe staging Alertmanager configuration" in result.stderr
