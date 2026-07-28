@@ -1218,7 +1218,7 @@ cf-tunnel-route host='':
         '' \
         'Dashboard steps are documented in docs/cloudflare_tunnel.md.'
 
-_helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' env='' description='' app='' allow_install='false' reuse_values='false' mutation_marker='' preflight_complete='false':
+_helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' env='' description='' app='' allow_install='false' mutation_marker='' preflight_complete='false':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -1352,7 +1352,6 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     fi
 
     allow_install="$(normalize_prefixed_value allow_install "{{ allow_install }}")"
-    reuse_values="$(normalize_prefixed_value reuse_values "{{ reuse_values }}")"
 
     if [ -z "${release}" ] || [ -z "${namespace}" ] || [ -z "${chart}" ]; then
         echo "Set release, namespace, and chart to deploy." >&2
@@ -1634,10 +1633,6 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
         helm_args+=(--install --create-namespace)
     fi
 
-    if [ "${reuse_values}" = "true" ]; then
-        helm_args+=(--reuse-values)
-    fi
-
     if [ ${#value_args[@]} -gt 0 ]; then
         helm_args+=("${value_args[@]}")
     fi
@@ -1659,10 +1654,10 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     wait_for_rollouts
 
 helm-oci-install release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' env='' description='' app='':
-    @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' '{{ env }}' '{{ description }}' '{{ app }}' allow_install='true' reuse_values='false'
+    @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' '{{ env }}' '{{ description }}' '{{ app }}' allow_install='true'
 
 helm-oci-upgrade release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' env='' description='' app='':
-    @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' '{{ env }}' '{{ description }}' '{{ app }}' allow_install='false' reuse_values='true'
+    @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' '{{ env }}' '{{ description }}' '{{ app }}' allow_install='false'
 
 # Print resolved Sugarkube app deployment config for an app/environment.
 app-config app env='staging' config='':
@@ -1751,7 +1746,7 @@ app-deploy app env='staging' tag='' config='' manifest='' evidence='':
       "${SUGARKUBE_RELEASE}" "${SUGARKUBE_NAMESPACE}" "${chart_coordinate:-${SUGARKUBE_CHART}}" \
       "${SUGARKUBE_VALUES}" '' "${SUGARKUBE_VERSION:-}" "${SUGARKUBE_VERSION_FILE:-}" \
       "${SUGARKUBE_TAG}" '' "${SUGARKUBE_ENV}" "${helm_description:-}" "${SUGARKUBE_APP}" \
-      true false "${mutation_marker:-}" true; then
+      true "${mutation_marker:-}" true; then
       if [ -n "${evidence_reservation:-}" ] && [ ! -e "${mutation_marker}" ]; then
         rm -f "$(realpath -m "${evidence_output}").reservation"
       fi
@@ -1818,7 +1813,7 @@ app-redeploy app env='staging' tag='' config='' manifest='' evidence='':
       "${SUGARKUBE_RELEASE}" "${SUGARKUBE_NAMESPACE}" "${chart_coordinate:-${SUGARKUBE_CHART}}" \
       "${SUGARKUBE_VALUES}" '' "${SUGARKUBE_VERSION:-}" "${SUGARKUBE_VERSION_FILE:-}" \
       "${SUGARKUBE_TAG}" '' "${SUGARKUBE_ENV}" "${helm_description:-}" "${SUGARKUBE_APP}" \
-      false true "${mutation_marker:-}" true; then
+      false "${mutation_marker:-}" true; then
       if [ -n "${evidence_reservation:-}" ] && [ ! -e "${mutation_marker}" ]; then
         rm -f "$(realpath -m "${evidence_output}").reservation"
       fi

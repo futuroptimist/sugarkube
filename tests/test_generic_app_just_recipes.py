@@ -2081,6 +2081,42 @@ def test_app_redeploy_prints_chart_pin_reminder_without_latest_lookup_or_pin_mut
 
 
 @pytest.mark.usefixtures("ensure_just_available")
+@pytest.mark.parametrize("app", ["tokenplace", "danielsmith", "jobbot3000"])
+def test_standard_app_redeploys_use_authoritative_ordered_values_without_history(
+    app: str, generic_app_stub_env: dict[str, str]
+) -> None:
+    result = _run_just(
+        ["app-redeploy", f"app={app}", "env=staging", "tag=main-deadbee"],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    lines = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8").splitlines()
+    template = next(line for line in lines if line.startswith(f"template {app} "))
+    upgrade = next(line for line in lines if line.startswith(f"upgrade {app} "))
+    expected_values = [
+        f"docs/examples/{app}.values.dev.yaml",
+        f"docs/examples/{app}.values.staging.yaml",
+    ]
+    for command in (template, upgrade):
+        assert command.index(f"-f {expected_values[0]}") < command.index(
+            f"-f {expected_values[1]}"
+        )
+        assert "--set image.tag=main-deadbee" in command
+        assert "--set image.pullPolicy=Always" in command
+        assert "--reuse-values" not in command
+
+
+def test_standard_helm_helper_has_no_historical_value_inheritance_switch() -> None:
+    justfile = (REPO_ROOT / "justfile").read_text(encoding="utf-8")
+    helper = justfile.split("_helm-oci-deploy ", 1)[1].split("\nhelm-oci-install ", 1)[0]
+
+    assert "reuse_values" not in helper
+    assert "--reuse-values" not in helper
+    assert "--reset-then-reuse-values" not in helper
+
+
+@pytest.mark.usefixtures("ensure_just_available")
 @pytest.mark.parametrize(
     ("app", "release", "namespace", "chart"),
     [
@@ -3887,6 +3923,51 @@ def test_direct_helm_oci_helper_matching_env_succeeds(
 
 
 @pytest.mark.usefixtures("ensure_just_available")
+def test_semver_upgrade_render_and_mutation_have_identical_release_inputs(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    chart = "oci://ghcr.io/futuroptimist/charts/tokenplace"
+    values = (
+        "docs/examples/tokenplace.values.dev.yaml,"
+        "docs/examples/tokenplace.values.staging.yaml"
+    )
+    result = _run_just(
+        [
+            "helm-oci-upgrade",
+            "release=tokenplace",
+            "namespace=tokenplace",
+            f"chart={chart}",
+            f"values={values}",
+            "host=staging.token.place",
+            "version=0.1.3",
+            "tag=main-deadbee",
+            "env=staging",
+        ],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    lines = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8").splitlines()
+    render = next(line for line in lines if line.startswith("template tokenplace "))
+    mutation = next(line for line in lines if line.startswith("upgrade tokenplace "))
+    release_inputs = [
+        chart,
+        "--namespace tokenplace",
+        "-f docs/examples/tokenplace.values.dev.yaml",
+        "-f docs/examples/tokenplace.values.staging.yaml",
+        "--set ingress.host=staging.token.place",
+        "--set image.tag=main-deadbee",
+        "--set image.pullPolicy=Always",
+        "--version 0.1.3",
+    ]
+    for command in (render, mutation):
+        for value in release_inputs:
+            assert value in command
+        assert command.index(release_inputs[2]) < command.index(release_inputs[3])
+    assert "--reuse-values" not in mutation
+
+
+@pytest.mark.usefixtures("ensure_just_available")
 @pytest.mark.parametrize("recipe", ["helm-oci-install", "helm-oci-upgrade"])
 def test_public_helm_helper_rejects_mutation_marker_without_altering_file(
     recipe: str, tmp_path: Path, generic_app_stub_env: dict[str, str]
@@ -3940,9 +4021,14 @@ def test_direct_helm_oci_helper_uses_digest_coordinate_without_version(
     assert result.returncode == 0, result.stderr + result.stdout
     lines = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8").splitlines()
     assert f"show chart {coordinate}" in lines
+    render = next(line for line in lines if line.startswith("template "))
     mutation = next(line for line in lines if line.startswith("upgrade "))
-    assert coordinate in mutation
-    assert "--version" not in mutation
+    for command in (render, mutation):
+        assert coordinate in command
+        assert "--version" not in command
+        assert "--set image.tag=main-deadbee" in command
+        assert "--set image.pullPolicy=Always" in command
+    assert "--reuse-values" not in mutation
 
 
 @pytest.mark.usefixtures("ensure_just_available")
