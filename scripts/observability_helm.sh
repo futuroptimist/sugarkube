@@ -269,24 +269,44 @@ if len(claims) != 1 or claims[0].get("status", {}).get("phase") != "Bound" or cl
 )
 
 pagerduty_test() (
-  local action="${1:-}" ends_at endpoint response_file=""
+  local action="${1:-}" ends_at http_status="" line port="" remote_port
+  local pagerduty_pid="" pagerduty_tmp
+  local -a port_forward_lines=()
   action="${action#action=}"
   case "${action}" in
     fire|resolve) ;;
     "") echo "ERROR: PagerDuty test requires an explicit action: fire or resolve." >&2; return 17 ;;
     *) echo "ERROR: unsupported PagerDuty test action '${action}'; expected fire or resolve." >&2; return 17 ;;
   esac
-  require_tools kubectl python3
+  require_tools kubectl python3 curl sleep
   assert_context
+  pagerduty_tmp="$(mktemp -d -t sugarkube-pagerduty-test.XXXXXX)"
+  chmod 700 "${pagerduty_tmp}"
+  # The EXIT trap invokes this cleanup callback indirectly.
+  # shellcheck disable=SC2317
+  cleanup_pagerduty_test() {
+    if [[ -n "${pagerduty_pid}" && " $(jobs -pr) " == *" ${pagerduty_pid} "* ]]; then
+      kill "${pagerduty_pid}" 2>/dev/null || true
+    fi
+    [[ -z "${pagerduty_pid}" ]] || wait "${pagerduty_pid}" 2>/dev/null || true
+    rm -rf "${pagerduty_tmp}"
+  }
+  pagerduty_port_forward_stopped() {
+    wait "${pagerduty_pid}" 2>/dev/null || true
+    pagerduty_pid=""
+    echo "ERROR: Alertmanager port-forward stopped (diagnostics redacted)." >&2
+    return 19
+  }
+  trap cleanup_pagerduty_test EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+
   ends_at="$(ACTION="${action}" python3 -c 'from datetime import datetime, timedelta, timezone
 import os
 now = datetime.now(timezone.utc)
 end = now + timedelta(minutes=15) if os.environ["ACTION"] == "fire" else now
 print(end.isoformat(timespec="seconds").replace("+00:00", "Z"))')"
-  endpoint="/api/v1/namespaces/${NAMESPACE}/services/http:${RELEASE}-alertmanager:9093/proxy/api/v2/alerts"
-  trap 'rm -f "${response_file:-}"' EXIT
-  response_file="$(mktemp -t sugarkube-alertmanager-response.XXXXXX)"
-  if ! ENDS_AT="${ends_at}" python3 -c 'import json, os, sys
+  ENDS_AT="${ends_at}" python3 -c 'import json, os, sys
 json.dump([{
   "labels": {
     "alertname": "SugarkubePagerDutyTest",
@@ -301,10 +321,44 @@ json.dump([{
   },
   "startsAt": "2020-01-01T00:00:00Z",
   "endsAt": os.environ["ENDS_AT"]
-}], sys.stdout)' | kubectl create --raw "${endpoint}" -f - >"${response_file}" 2>/dev/null; then
+}], sys.stdout)' >"${pagerduty_tmp}/payload.json"
+
+  : >"${pagerduty_tmp}/port-forward.log"
+  trap - EXIT
+  kubectl -n "${NAMESPACE}" port-forward --address=127.0.0.1 "service/${RELEASE}-alertmanager" :9093 >"${pagerduty_tmp}/port-forward.log" 2>&1 &
+  pagerduty_pid=$!
+  trap cleanup_pagerduty_test EXIT
+  for _ in {1..20}; do
+    kill -0 "${pagerduty_pid}" 2>/dev/null || pagerduty_port_forward_stopped
+    mapfile -t port_forward_lines <"${pagerduty_tmp}/port-forward.log"
+    for line in "${port_forward_lines[@]}"; do
+      if [[ "${line}" =~ ^Forwarding\ from\ 127\.0\.0\.1:([1-9][0-9]{0,4})\ -\>\ ([1-9][0-9]{0,4})$ ]]; then
+        port="${BASH_REMATCH[1]}"
+        remote_port="${BASH_REMATCH[2]}"
+        if ((10#${port} > 65535 || 10#${remote_port} != 9093)); then
+          port=""
+        fi
+      fi
+    done
+    [[ -z "${port}" ]] || break
+    sleep 1
+  done
+  [[ -n "${port}" ]] || { echo "ERROR: Alertmanager port-forward did not establish an owned loopback listener (diagnostics redacted)." >&2; return 19; }
+  kill -0 "${pagerduty_pid}" 2>/dev/null || pagerduty_port_forward_stopped
+
+  if ! curl --silent --show-error --connect-timeout 3 --max-time 10 \
+    --header "Content-Type: application/json" --data-binary "@${pagerduty_tmp}/payload.json" \
+    --output "${pagerduty_tmp}/response" --write-out '%{http_code}' \
+    "http://127.0.0.1:${port}/api/v2/alerts" >"${pagerduty_tmp}/status" 2>"${pagerduty_tmp}/curl.log"; then
     echo "ERROR: Alertmanager v2 API rejected synthetic ${action} request (response redacted)." >&2
     return 18
   fi
+  kill -0 "${pagerduty_pid}" 2>/dev/null || pagerduty_port_forward_stopped
+  IFS= read -r http_status <"${pagerduty_tmp}/status" || true
+  [[ "${http_status}" =~ ^[0-9]{3}$ && "${http_status}" == 200 ]] || {
+    echo "ERROR: Alertmanager v2 API rejected synthetic ${action} request (response redacted)." >&2
+    return 18
+  }
   echo "PagerDuty synthetic ${action} submitted; Alertmanager API status: accepted (response redacted)."
 )
 
