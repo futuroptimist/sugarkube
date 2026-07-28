@@ -818,8 +818,9 @@ just dspace-oci-redeploy env=prod tag="$(read_prod_tag)"
 ```
 
 Under the hood, both commands call the shared `_helm-oci-deploy` helper via
-`helm-oci-upgrade`, performing `helm upgrade --reuse-values` against the running release
-and then forcing a `kubectl rollout restart deploy/dspace` to ensure pods recycle. The helper waits for the rollout to
+`helm-oci-upgrade`, performing `helm upgrade` with the chart defaults, complete ordered
+Git-controlled environment values chain, and explicit host/image overrides rather than
+historical release values. They then force a `kubectl rollout restart deploy/dspace` to ensure pods recycle. The helper waits for the rollout to
 finish and exits non-zero if Kubernetes reports a failure.
 
 For immutable RC/stable validation (recommended for staging and prod), use the dedicated

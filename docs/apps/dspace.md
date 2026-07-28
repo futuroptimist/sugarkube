@@ -379,8 +379,12 @@ manifest validation and digest resolution, one exact-release render and structur
 validation, evidence reservation, Helm mutation, then evidence finalization. No
 render occurs after reservation. A render or validation failure is terminal and
 creates no reservation, Helm mutation, Kubernetes rollout call, or final evidence.
-Steady-state upgrade still uses `--reuse-values`; removing it is explicitly deferred
-to #2324 and is not part of this change.
+Steady-state upgrades do not use `--reuse-values`. The approved chart's defaults,
+complete ordered Git-controlled environment values chain, and explicit host, image,
+and pull-policy overrides are authoritative and identical between render and mutation.
+Treat Helm history as evidence and rollback metadata, not desired-state configuration;
+migrate intentional settings into reviewed values files or existing-Secret references
+before upgrading.
 
 After atomically reserving the unique evidence destination, the operation uses
 `helm upgrade` with the approved chart digest, complete values chain, and an

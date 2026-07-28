@@ -2082,6 +2082,45 @@ def test_app_redeploy_prints_chart_pin_reminder_without_latest_lookup_or_pin_mut
 
 @pytest.mark.usefixtures("ensure_just_available")
 @pytest.mark.parametrize(
+    ("app", "version"),
+    [("tokenplace", "0.1.3"), ("danielsmith", "0.2.6"), ("jobbot3000", "0.1.0")],
+)
+def test_standard_app_redeploy_uses_authoritative_ordered_values_without_history(
+    app: str, version: str, generic_app_stub_env: dict[str, str]
+) -> None:
+    result = _run_just(
+        ["app-redeploy", f"app={app}", "env=staging", "tag=main-deadbee"],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    lines = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8").splitlines()
+    render = next(line for line in lines if line.startswith("template "))
+    mutation = next(line for line in lines if line.startswith("upgrade "))
+    values = (
+        f"-f docs/examples/{app}.values.dev.yaml "
+        f"-f docs/examples/{app}.values.staging.yaml"
+    )
+    for command in (render, mutation):
+        assert f" {values} " in command
+        assert f"--version {version}" in command
+        assert "--set image.tag=main-deadbee" in command
+        assert "--set image.pullPolicy=Always" in command
+        assert "--reuse-values" not in command
+        assert "--reset-values" not in command
+
+
+def test_standard_helm_helper_has_no_historical_value_switch() -> None:
+    source = (REPO_ROOT / "justfile").read_text(encoding="utf-8")
+    helper = source.split("_helm-oci-deploy ", 1)[1].split("\nhelm-oci-install ", 1)[0]
+
+    assert "reuse_values" not in helper
+    assert "--reuse-values" not in helper
+    assert "--reset-then-reuse-values" not in helper
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+@pytest.mark.parametrize(
     ("app", "release", "namespace", "chart"),
     [
         (

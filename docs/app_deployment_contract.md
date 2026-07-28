@@ -58,10 +58,17 @@ Standard app paths perform exactly one render. DSPACE orders manifest validation
 digest resolution, render and validation, evidence reservation, Helm mutation, and
 evidence finalization; no render occurs after reservation.
 
-Upgrade currently retains `--reuse-values`. Therefore this gate validates the
-repository-controlled proposed inputs but does not claim to reproduce Helm's
-historical value merge. Removing `--reuse-values` remains the explicit follow-up in
-issue #2324. This PR deliberately does not change or remove `--reuse-values`.
+Standard upgrades do not use `--reuse-values`. Ordinary `helm upgrade` starts from
+the proposed chart's defaults, after which Sugarkube supplies the complete ordered
+Git-controlled environment values chain and explicit host, immutable image tag, and
+image pull-policy overrides. These are the same release-defining inputs used by the
+successful render preflight; only mutation metadata and rollout handling differ.
+Helm release history is evidence and rollback metadata, not desired-state
+configuration. Before upgrading, migrate every intentional setting into reviewed
+values files or an established existing-Secret reference. Historical inline values
+are not silently retained. `--reset-values` is intentionally unnecessary: Helm's
+default upgrade behavior already provides the required chart-defaults-first merge
+when neither reuse flag is supplied.
 
 ### DSPACE recovery exception
 
