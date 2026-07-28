@@ -85,13 +85,14 @@ Planned checks:
   outside world broke — not that a specific rule fired.
 
 The watchdog route must have an explicit timing contract rather than inheriting the general alert
-route. The initial target is a 1-minute rule evaluation interval, `group_wait: 30s`, and a
-watchdog-specific `repeat_interval: 5m`. Configure the Healthchecks.io check for a 5-minute expected
-period plus at least 2 minutes of grace, allowing for delivery jitter without hiding a sustained
-failure. Keep `group_interval` at or below 5 minutes so grouping changes cannot postpone the next
-watchdog notification beyond the expected ping period. If these values change, preserve the
-invariant that the maximum healthy notification gap is no longer than the Healthchecks.io period,
-with grace reserved for jitter, and update both systems together.
+route. The initial target is a 1-minute rule evaluation interval, `group_wait: 30s`, a watchdog-specific
+`group_interval: 1m`, and `repeat_interval: 5m`. Because the repeat interval is an exact multiple of
+the group interval, the maximum healthy notification gap after the initial notification is 5 minutes.
+Configure the Healthchecks.io check for a 5-minute expected period plus at least 2 minutes of grace,
+allowing for delivery jitter without hiding a sustained failure. If these values change, keep
+`repeat_interval` an exact multiple of `group_interval`, preserve the invariant that the maximum
+healthy notification gap is no longer than the Healthchecks.io period, and update the Alertmanager
+timing, Healthchecks.io period/grace, and drill together.
 
 Node heartbeats are host-level `systemd` timers rather than Kubernetes CronJobs deliberately: a
 CronJob only proves the k3s control plane can still schedule pods somewhere in the cluster, not that a
@@ -192,8 +193,9 @@ Rollback and noise control:
 - **Better Stack** — could provide a more consolidated hosted alternative (uptime monitoring plus
   incident management in one product), but wasn't chosen as the initial direction; worth revisiting if
   PagerDuty + Healthchecks.io proves awkward to operate.
-- **Pushover** — lighter-weight and cheaper than PagerDuty, but has no acknowledgement/escalation/
-  incident-history workflow, which is a stated goal.
+- **Pushover** — lighter-weight and cheaper than PagerDuty. Its emergency-priority notifications can
+  retry until acknowledged and expose receipt and callback state, but it does not provide the chosen
+  PagerDuty-style on-call scheduling, escalation-policy, and incident-management-history workflow.
 - **Self-hosted Healthchecks** — would reduce the external dependency, but if hosted on the same
   cluster it's meant to watch, it loses the independence that makes an external dead-man switch
   useful in the first place.

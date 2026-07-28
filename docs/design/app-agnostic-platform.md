@@ -30,6 +30,10 @@ shell code, not just app-owned configuration:
 - `scripts/verify_blackbox_prometheus.py:8-25` hardcodes a 16-entry `EXPECTED` dict mapping every current probe name to `(app, route)` — a fifth app's probes require editing this Python literal by hand.
 - `scripts/validate_observability_dashboard.py:15-33` hardcodes DSPACE metric names (`REQUIRED_METRICS`) and a 4-app regex (`BLACKBOX_JOB_MATCHER`) into the shared dashboard validator.
 - The `justfile` has DSPACE-only policy inlined directly into the otherwise-generic `app-deploy`/`app-redeploy` recipes (`if [ "${SUGARKUBE_APP}" = dspace ]` blocks), plus a DSPACE-only `dspace-manifest-rollback` recipe with no generic equivalent.
+- The `dspace-oci-deploy`/`dspace-oci-redeploy` recipes are thin delegates to the generic lifecycle,
+  but `tokenplace-oci-*` and `danielsmith-oci-*` still implement environment parsing, values
+  selection, Helm orchestration, and post-deploy behavior directly rather than delegating to
+  `app-deploy`/`app-redeploy`.
 - `scripts/dspace_release_manifest.py` and `scripts/dspace_manifest_rollback.py` implement DSPACE-specific release-evidence and rollback policy, with `dspace`/`chat` hardcoded into validation logic.
 
 None of this is a defect by itself — DSPACE was the first app, and the fastest path to a working
@@ -161,11 +165,14 @@ directory is created in this PR.
    generalizing to "verify every app descriptor that declares a `ServiceMonitor`"; the blackbox/
    dashboard verification scripts reading probe/metric expectations from descriptors instead of
    literals.
-3. **Compatibility shims to deprecate later, not now**: the per-app `justfile` wrapper recipes
-   (`dspace-oci-deploy`, `tokenplace-oci-deploy`, `danielsmith-oci-deploy`, and their siblings) that
-   already just delegate to the generic `app-deploy app=<name>` — these can stay until callers
-   (scripts, CI, muscle memory) migrate off them.
-4. **Legitimate specialized behavior that should become an adapter**: DSPACE's release-evidence
+3. **Thin compatibility shims to deprecate later, not now**: `dspace-oci-deploy` and
+   `dspace-oci-redeploy` already delegate to `app-deploy app=dspace` and `app-redeploy app=dspace`;
+   they can stay until callers (scripts, CI, docs, and muscle memory) migrate off them.
+4. **Bespoke wrappers that still require migration**: `tokenplace-oci-*` and `danielsmith-oci-*`
+   directly own environment parsing, values selection, Helm orchestration, and post-deploy behavior.
+   Move required behavior into the generic contract or explicit capabilities and prove parity before
+   treating these recipes as thin compatibility shims or removing them.
+5. **Legitimate specialized behavior that should become an adapter**: DSPACE's release-evidence
    reservation/finalization (`scripts/dspace_release_manifest.py`) and fail-closed rollback
    (`scripts/dspace_manifest_rollback.py`). The rollback script's existing
    `verifier_capabilities()`/`REQUIRED_CAPABILITIES` pattern (lines 87-121) is the closest existing
@@ -188,12 +195,15 @@ directory is created in this PR.
    `verify_dspace_targets()` to iterate over any app descriptor declaring a `ServiceMonitor`.
 5. **Make dashboard validation data-driven or app-owned**: replace `REQUIRED_METRICS`/
    `BLACKBOX_JOB_MATCHER` literals with descriptor-sourced expectations.
-6. **Thin or remove app-specific `just` wrappers** only after their callers (scripts, CI, docs) have
-   migrated to the generic `app-*` recipes with `app=<name>`.
+6. **Migrate bespoke wrapper behavior into the generic contract or explicit capabilities.** Port the
+   required token.place and danielsmith environment, values, Helm, and post-deploy behavior; prove
+   deploy/redeploy parity before reducing those recipes to delegates.
 7. **Place DSPACE release evidence and rollback behind a declared capability**, generalizing
    `verifier_capabilities()`/`REQUIRED_CAPABILITIES` so a future app could declare the same capability
    without editing `dspace_manifest_rollback.py` itself.
-8. **Delete obsolete hardcoding only after parity and migration tests pass** — never as part of the
+8. **Thin or remove app-specific `just` wrappers** only after the bespoke behavior has migrated and
+   their callers (scripts, CI, docs) use the generic `app-*` recipes with `app=<name>`.
+9. **Delete obsolete hardcoding only after parity and migration tests pass** — never as part of the
    same change that introduces the new data-driven path.
 
 ### Acceptance test
@@ -207,9 +217,9 @@ same bar.
 ## Backward compatibility
 
 Every phase above must leave existing apps (DSPACE, token.place, danielsmith, jobbot3000) working
-identically at each intermediate commit. Compatibility shims (the `justfile` wrappers, the `.env`
-fallback mechanism) are explicitly allowed to persist across multiple phases; nothing in this design
-requires removing them on a deadline.
+identically at each intermediate commit. Thin compatibility shims and the still-bespoke wrappers may
+persist across multiple phases while behavior and callers migrate; nothing in this design requires
+removing them on a deadline.
 
 ## Testing
 
