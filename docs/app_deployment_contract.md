@@ -58,10 +58,19 @@ Standard app paths perform exactly one render. DSPACE orders manifest validation
 digest resolution, render and validation, evidence reservation, Helm mutation, and
 evidence finalization; no render occurs after reservation.
 
-Upgrade currently retains `--reuse-values`. Therefore this gate validates the
-repository-controlled proposed inputs but does not claim to reproduce Helm's
-historical value merge. Removing `--reuse-values` remains the explicit follow-up in
-issue #2324. This PR deliberately does not change or remove `--reuse-values`.
+Standard upgrades do not use `--reuse-values`. Both preflight and mutation start
+with the proposed chart's defaults, then apply only the complete ordered
+Git-controlled environment values chain and the explicit host, immutable image
+tag, and pull-policy overrides. Ordinary `helm upgrade` has these reset semantics
+when `--reuse-values` is absent, so the helpers intentionally do not add the
+redundant `--reset-values` flag. The render and mutation therefore have identical
+release-defining inputs.
+
+Helm release history is evidence and rollback metadata, not desired-state
+configuration. Before a standard upgrade, operators must migrate every intentional
+setting into reviewed values files or established Secret references. The helpers
+do not inspect `helm get values`, replay historical inline values, or copy secret
+material from release history.
 
 ### DSPACE recovery exception
 

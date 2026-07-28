@@ -953,6 +953,47 @@ def test_enabled_ingress_requires_resolved_host(tmp_path: Path) -> None:
         app_chart.expected_ingress_host((str(values),), "")
 
 
+def test_resolve_host_reports_values_parsing_failure(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    values = tmp_path / "values.yaml"
+    values.write_text("ingress: [invalid\n", encoding="utf-8")
+    args = argparse.Namespace(values=str(values), host="")
+
+    assert app_chart.cmd_resolve_host(args) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "ERROR: values parsing failed while resolving ingress host:" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_resolve_host_reports_missing_enabled_ingress_host(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    values = tmp_path / "values.yaml"
+    values.write_text("ingress:\n  enabled: true\n", encoding="utf-8")
+    args = argparse.Namespace(values=str(values), host="")
+
+    assert app_chart.cmd_resolve_host(args) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "no nonempty ingress.host was resolved" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_resolve_host_prints_effective_host(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    values = tmp_path / "values.yaml"
+    values.write_text("ingress:\n  host: values.example.test\n", encoding="utf-8")
+    args = argparse.Namespace(values=f" , {values}, ", host="override.example.test")
+
+    assert app_chart.cmd_resolve_host(args) == 0
+    captured = capsys.readouterr()
+    assert captured.out == "override.example.test\n"
+    assert captured.err == ""
+
+
 def test_dspace_render_contract_requires_resources_and_validates_metrics() -> None:
     inputs = app_chart.ReleaseInputs(
         "dspace",
@@ -2082,6 +2123,175 @@ def test_app_redeploy_prints_chart_pin_reminder_without_latest_lookup_or_pin_mut
 
 @pytest.mark.usefixtures("ensure_just_available")
 @pytest.mark.parametrize(
+    ("app", "staging_host"),
+    [
+        ("tokenplace", "staging.token.place"),
+        ("danielsmith", "staging.danielsmith.io"),
+        ("jobbot3000", "staging.jobbot3000.tech"),
+    ],
+)
+def test_standard_app_redeploy_has_authoritative_values_and_render_mutation_parity(
+    app: str, staging_host: str, generic_app_stub_env: dict[str, str]
+) -> None:
+    result = _run_just(
+        ["app-redeploy", f"app={app}", "env=staging", "tag=main-deadbee"],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    lines = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8").splitlines()
+    rendered = next(line.split() for line in lines if line.startswith("template "))
+    mutated = next(line.split() for line in lines if line.startswith("upgrade "))
+    assert "--reuse-values" not in mutated
+    assert "--reset-values" not in mutated
+    assert rendered[1:4] == mutated[1:4]
+
+    def release_inputs(command: list[str]) -> list[str]:
+        inputs: list[str] = []
+        for flag in ("--namespace", "--version", "-f", "--set"):
+            for index, argument in enumerate(command[:-1]):
+                if argument == flag:
+                    inputs.extend(command[index : index + 2])
+        return inputs
+
+    assert release_inputs(rendered) == release_inputs(mutated)
+    host_override = f"ingress.host={staging_host}"
+    assert host_override in rendered
+    assert host_override in mutated
+    base = f"docs/examples/{app}.values.dev.yaml"
+    overlay = f"docs/examples/{app}.values.staging.yaml"
+    assert mutated.index(base) < mutated.index(overlay)
+    assert "image.tag=main-deadbee" in mutated
+    assert "image.pullPolicy=Always" in mutated
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+@pytest.mark.parametrize(
+    ("values_contents", "diagnostic"),
+    [
+        ("ingress: [invalid\n", "values parsing failed while resolving ingress host"),
+        ("ingress:\n  enabled: true\n", "no nonempty ingress.host was resolved"),
+    ],
+)
+def test_app_redeploy_host_resolution_failure_stops_before_release_activity(
+    tmp_path: Path,
+    values_contents: str,
+    diagnostic: str,
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    values = tmp_path / "values.yaml"
+    values.write_text(values_contents, encoding="utf-8")
+    config = tmp_path / "tokenplace.env"
+    config.write_text(
+        "\n".join(
+            [
+                "SUGARKUBE_APP=tokenplace",
+                "SUGARKUBE_RELEASE=tokenplace",
+                "SUGARKUBE_NAMESPACE=tokenplace",
+                "SUGARKUBE_CHART=oci://ghcr.io/futuroptimist/charts/tokenplace",
+                "SUGARKUBE_VERSION=0.1.3",
+                f"SUGARKUBE_VALUES_STAGING={values}",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    evidence = tmp_path / "evidence.json"
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_APP_CONFIG_DIR"] = str(tmp_path)
+
+    result = _run_just(
+        [
+            "app-redeploy",
+            "app=tokenplace",
+            "env=staging",
+            "tag=main-deadbee",
+            f"evidence={evidence}",
+        ],
+        env,
+    )
+
+    assert result.returncode != 0
+    assert diagnostic in result.stderr
+    assert "Traceback" not in result.stderr
+    helm_log = Path(generic_app_stub_env["HELM_LOG"])
+    assert not helm_log.exists() or helm_log.read_text(encoding="utf-8") == ""
+    commands = (tmp_path / "commands.log").read_text(encoding="utf-8")
+    assert "helm template" not in commands
+    assert "helm upgrade" not in commands
+    assert "rollout" not in commands
+    assert not evidence.exists()
+    assert not Path(f"{evidence}.reservation").exists()
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_helm_oci_install_and_upgrade_keep_authoritative_inputs_identical(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    common_args = [
+        "release=tokenplace",
+        "namespace=tokenplace",
+        "chart=oci://ghcr.io/futuroptimist/charts/tokenplace",
+        "values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml",
+        "host=staging.token.place",
+        "version=0.1.3",
+        "tag=main-deadbee",
+        "env=staging",
+        "app=tokenplace",
+    ]
+    mutations: dict[str, list[str]] = {}
+    helm_log_path = Path(generic_app_stub_env["HELM_LOG"])
+    for recipe in ("helm-oci-install", "helm-oci-upgrade"):
+        helm_log_path.unlink(missing_ok=True)
+        result = _run_just([recipe, *common_args], generic_app_stub_env)
+        assert result.returncode == 0, result.stderr + result.stdout
+        lines = helm_log_path.read_text(encoding="utf-8").splitlines()
+        mutations[recipe] = next(line.split() for line in lines if line.startswith("upgrade "))
+
+    install = mutations["helm-oci-install"]
+    upgrade = mutations["helm-oci-upgrade"]
+    assert "--install" in install
+    assert "--create-namespace" in install
+    assert "--install" not in upgrade
+    assert "--create-namespace" not in upgrade
+    prohibited = {"--reuse-values", "--reset-values", "--reset-then-reuse-values"}
+    assert prohibited.isdisjoint(install)
+    assert prohibited.isdisjoint(upgrade)
+
+    def release_inputs(command: list[str]) -> list[str]:
+        inputs = command[1:3]
+        for flag in ("--namespace", "--version", "-f", "--set"):
+            for index, argument in enumerate(command[:-1]):
+                if argument == flag:
+                    inputs.extend(command[index : index + 2])
+        return inputs
+
+    assert release_inputs(install) == release_inputs(upgrade)
+    for expected in (
+        "docs/examples/tokenplace.values.dev.yaml",
+        "docs/examples/tokenplace.values.staging.yaml",
+        "ingress.host=staging.token.place",
+        "image.tag=main-deadbee",
+        "image.pullPolicy=Always",
+    ):
+        assert expected in install
+        assert expected in upgrade
+    assert install.index("docs/examples/tokenplace.values.dev.yaml") < install.index(
+        "docs/examples/tokenplace.values.staging.yaml"
+    )
+
+
+def test_standard_helm_helper_source_cannot_reintroduce_historical_values() -> None:
+    justfile = (REPO_ROOT / "justfile").read_text(encoding="utf-8")
+    helper = justfile.split("_helm-oci-deploy ", 1)[1].split("\nhelm-oci-install ", 1)[0]
+
+    assert "reuse_values" not in helper
+    assert "--reuse-values" not in helper
+    assert "reset-then-reuse-values" not in helper
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+@pytest.mark.parametrize(
     ("app", "release", "namespace", "chart"),
     [
         (
@@ -2301,9 +2511,23 @@ def test_dspace_guarded_deploy_orders_preflight_mutation_and_finalization(
     )
     assert coordinate in installed["details"]
     helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
+    render_line = next(line for line in helm_log.splitlines() if line.startswith("template "))
     mutation_line = next(line for line in helm_log.splitlines() if line.startswith("upgrade "))
+    for expected in (
+        coordinate,
+        "--namespace dspace",
+        "-f docs/examples/dspace.values.dev.yaml",
+        "-f docs/examples/dspace.values.staging.yaml",
+        "--set ingress.host=staging.democratized.space",
+        "--set image.tag=main-abcdef0",
+        "--set image.pullPolicy=Always",
+    ):
+        assert expected in render_line
+        assert expected in mutation_line
     assert coordinate in mutation_line
+    assert "--reuse-values" not in mutation_line
     assert "--version" not in mutation_line
+    assert "--version" not in render_line
     assert "--description sugarkube-release-manifest:" in mutation_line
     commands = (tmp_path / "commands.log").read_text(encoding="utf-8").splitlines()
     preflight = next(i for i, line in enumerate(commands) if line.startswith("oras "))
