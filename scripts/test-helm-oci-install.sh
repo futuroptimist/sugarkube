@@ -352,7 +352,8 @@ upgrade_output="$(
         version_file=version_file=docs/apps/dspace.version default_tag=v3-deadbee host=staging.democratized.space env=staging app=dspace
 )"
 
-if ! grep -q "helm upgrade dspace oci://registry.test/charts/dspace --namespace dspace --reuse-values" <<<"${upgrade_output}"; then
+if ! grep -q "helm upgrade dspace oci://registry.test/charts/dspace --namespace dspace" <<<"${upgrade_output}" || \
+    grep -q -- "--reuse-values" <<<"${upgrade_output}"; then
     printf 'Upgrade path did not preserve expected behavior and argument normalization.\nOutput:\n%s\n' "${upgrade_output}" >&2
     exit 1
 fi

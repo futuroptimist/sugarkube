@@ -325,9 +325,9 @@ Kustomizations you referenced in `gotk-sync.yaml`.
 - **Scale workloads:** `sudo kubectl scale deployment <name> --replicas=3 -n <ns>`.
 - **Inspect logs:** `sudo kubectl logs <pod> -n <ns>` (use `-c` for multi-container
   pods).
-- **Override Helm values temporarily:** run `helm upgrade <release> <chart> \
-  --namespace <ns> --reuse-values --set key=value` and confirm the change with
-  `sudo kubectl get deployment -n <ns>`.
+- **Change Helm values:** commit the intended setting to the app's complete
+  environment values chain, review it, and use the standard app upgrade recipe.
+  Do not preserve an unreviewed inline override through release history.
 - **Heal a bad join:** `just wipe` remains the fastest way to reset a node
   before re-running `just ha3 env=dev`, but you can also remove k3s manually by
   following the official uninstall script from `/usr/local/bin/k3s-uninstall.sh`.

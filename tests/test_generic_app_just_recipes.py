@@ -1981,6 +1981,15 @@ def test_app_deploy_danielsmith_passes_image_tag(generic_app_stub_env: dict[str,
                 "docs/examples/jobbot3000.values.staging.yaml",
             ],
         ),
+        (
+            "danielsmith",
+            "oci://ghcr.io/futuroptimist/charts/danielsmith",
+            "danielsmith",
+            [
+                "docs/examples/danielsmith.values.dev.yaml",
+                "docs/examples/danielsmith.values.staging.yaml",
+            ],
+        ),
     ],
 )
 def test_app_deploy_uses_app_release_namespace_chart_values(
@@ -1999,8 +2008,11 @@ def test_app_deploy_uses_app_release_namespace_chart_values(
     helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
     assert f"upgrade {app} {chart}" in helm_log
     assert f"--namespace {namespace}" in helm_log
-    for value in values:
-        assert f"-f {value}" in helm_log
+    mutation = next(line for line in helm_log.splitlines() if line.startswith("upgrade "))
+    assert [mutation.index(f"-f {value}") for value in values] == sorted(
+        mutation.index(f"-f {value}") for value in values
+    )
+    assert "--reuse-values" not in mutation
     if app == "tokenplace":
         assert (
             "show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.3" in helm_log
@@ -2078,6 +2090,7 @@ def test_app_redeploy_prints_chart_pin_reminder_without_latest_lookup_or_pin_mut
     assert "upgrade tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace" in helm_log
     assert "--version 0.1.3" in helm_log
     assert "--version 9.9.9" not in helm_log
+    assert "--reuse-values" not in helm_log
 
 
 @pytest.mark.usefixtures("ensure_just_available")
@@ -2302,8 +2315,26 @@ def test_dspace_guarded_deploy_orders_preflight_mutation_and_finalization(
     assert coordinate in installed["details"]
     helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
     mutation_line = next(line for line in helm_log.splitlines() if line.startswith("upgrade "))
+    template_line = next(line for line in helm_log.splitlines() if line.startswith("template "))
     assert coordinate in mutation_line
     assert "--version" not in mutation_line
+    assert "--reuse-values" not in mutation_line
+    for defining_input in (
+        coordinate,
+        "--namespace dspace",
+        "-f docs/examples/dspace.values.dev.yaml",
+        "-f docs/examples/dspace.values.staging.yaml",
+        "--set image.tag=main-abcdef0",
+        "--set image.pullPolicy=Always",
+    ):
+        assert defining_input in template_line
+        assert defining_input in mutation_line
+    assert template_line.index("dspace.values.dev.yaml") < template_line.index(
+        "dspace.values.staging.yaml"
+    )
+    assert mutation_line.index("dspace.values.dev.yaml") < mutation_line.index(
+        "dspace.values.staging.yaml"
+    )
     assert "--description sugarkube-release-manifest:" in mutation_line
     commands = (tmp_path / "commands.log").read_text(encoding="utf-8").splitlines()
     preflight = next(i for i, line in enumerate(commands) if line.startswith("oras "))
@@ -2382,7 +2413,17 @@ def test_dspace_guarded_redeploy_installs_approved_chart_digest(
     )
     assert coordinate in mutation_line
     assert "--version" not in mutation_line
+    assert "--reuse-values" not in mutation_line
     assert "--description sugarkube-release-manifest:" in mutation_line
+
+
+def test_standard_helm_helper_cannot_restore_historical_value_inheritance() -> None:
+    justfile = (REPO_ROOT / "justfile").read_text(encoding="utf-8")
+    helper = justfile.split("_helm-oci-deploy ", 1)[1].split("\nhelm-oci-install ", 1)[0]
+
+    assert "reuse_values" not in helper
+    assert "--reuse-values" not in helper
+    assert "--reset-then-reuse-values" not in helper
 
 
 @pytest.mark.usefixtures("ensure_just_available")
@@ -3884,6 +3925,54 @@ def test_direct_helm_oci_helper_matching_env_succeeds(
     assert "show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.3" in helm_log
     assert "upgrade tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace" in helm_log
     assert "--description" not in helm_log
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+@pytest.mark.parametrize("recipe", ["helm-oci-install", "helm-oci-upgrade"])
+def test_semver_helm_helpers_render_and_mutate_with_identical_release_inputs(
+    recipe: str, generic_app_stub_env: dict[str, str]
+) -> None:
+    result = _run_just(
+        [
+            recipe,
+            "release=tokenplace",
+            "namespace=tokenplace",
+            "chart=oci://ghcr.io/futuroptimist/charts/tokenplace",
+            "values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml",
+            "host=staging.token.place",
+            "version=0.1.3",
+            "tag=main-deadbee",
+            "env=staging",
+            "app=tokenplace",
+        ],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    lines = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8").splitlines()
+    template = next(line for line in lines if line.startswith("template "))
+    mutation = next(line for line in lines if line.startswith("upgrade "))
+    defining_inputs = (
+        "tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace",
+        "--namespace tokenplace",
+        "--version 0.1.3",
+        "-f docs/examples/tokenplace.values.dev.yaml",
+        "-f docs/examples/tokenplace.values.staging.yaml",
+        "--set ingress.host=staging.token.place",
+        "--set image.tag=main-deadbee",
+        "--set image.pullPolicy=Always",
+    )
+    for defining_input in defining_inputs:
+        assert defining_input in template
+        assert defining_input in mutation
+    assert template.index("tokenplace.values.dev.yaml") < template.index(
+        "tokenplace.values.staging.yaml"
+    )
+    assert mutation.index("tokenplace.values.dev.yaml") < mutation.index(
+        "tokenplace.values.staging.yaml"
+    )
+    assert "--reuse-values" not in mutation
+    assert ("--install" in mutation) is (recipe == "helm-oci-install")
 
 
 @pytest.mark.usefixtures("ensure_just_available")
