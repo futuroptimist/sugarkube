@@ -293,6 +293,8 @@ apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: dspace
+  labels:
+    app.kubernetes.io/instance: dspace
 spec:
   endpoints:
     - port: http
