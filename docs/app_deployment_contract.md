@@ -35,6 +35,34 @@ shared dashboards, and alert routing. See
 for how DSPACE's staging `ServiceMonitor` and the cross-app blackbox probe matrix are currently
 deployed.
 
+## Exact-release render gate
+
+Every onboarded application mutation first runs `helm template` with the same
+application identity, release, namespace, chart coordinate, environment-resolved
+chart version, ordered values-file chain, host override, immutable image tag, and
+image pull policy that the Helm mutation will consume. Digest-qualified OCI chart
+coordinates are rendered directly without `--version`; their separately verified
+version remains release metadata. The rendered YAML must contain a release-associated
+rollout workload whose intended application container has the exact tag, coherent
+namespaces, and the configured Ingress host when ingress is enabled. DSPACE adds its
+Deployment, Service, Ingress, and metrics/ServiceMonitor contracts, while token.place
+adds its single-application-container metadata contract.
+
+A render or structural-validation failure is terminal: no Helm upgrade/install,
+Kubernetes mutation, rollout action, or DSPACE evidence reservation/finalization is
+performed. The generic `helm-oci-install` and `helm-oci-upgrade` helpers recognize
+canonical onboarded chart coordinates or accept `app=` explicitly, reject conflicting
+identities, and require an immutable tag. Compatibility wrappers always pass their
+identity, including with custom release names; there is no public render-skip mode.
+Standard app paths perform exactly one render. DSPACE orders manifest validation and
+digest resolution, render and validation, evidence reservation, Helm mutation, and
+evidence finalization; no render occurs after reservation.
+
+Upgrade currently retains `--reuse-values`. Therefore this gate validates the
+repository-controlled proposed inputs but does not claim to reproduce Helm's
+historical value merge. Removing `--reuse-values` remains the explicit follow-up in
+issue #2324. This PR deliberately does not change or remove `--reuse-values`.
+
 ### DSPACE recovery exception
 
 DSPACE staging and production recovery uses `just dspace-manifest-rollback`,
