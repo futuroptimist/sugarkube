@@ -981,6 +981,19 @@ def test_resolve_host_reports_missing_enabled_ingress_host(
     assert "Traceback" not in captured.err
 
 
+def test_resolve_host_prints_effective_host(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    values = tmp_path / "values.yaml"
+    values.write_text("ingress:\n  host: values.example.test\n", encoding="utf-8")
+    args = argparse.Namespace(values=f" , {values}, ", host="override.example.test")
+
+    assert app_chart.cmd_resolve_host(args) == 0
+    captured = capsys.readouterr()
+    assert captured.out == "override.example.test\n"
+    assert captured.err == ""
+
+
 def test_dspace_render_contract_requires_resources_and_validates_metrics() -> None:
     inputs = app_chart.ReleaseInputs(
         "dspace",
