@@ -104,8 +104,12 @@ walk_routes.call(route)
 pagerduty_routes = all_routes.select { |candidate| candidate["receiver"] == EXPECTED_RECEIVER }
 fail_closed("there must be exactly one PagerDuty route") unless pagerduty_routes.length == 1
 synthetic_route = pagerduty_routes.first
+root_children = route["routes"]
+fail_closed("PagerDuty route must be a direct child of the root route") unless
+  root_children.is_a?(Array) && root_children.include?(synthetic_route)
 fail_closed("PagerDuty route matchers are not the exact synthetic allowlist") unless
   synthetic_route["matchers"].is_a?(Array) && synthetic_route["matchers"].sort == EXPECTED_MATCHERS.sort
+fail_closed("PagerDuty route must not contain nested routes") if synthetic_route.key?("routes")
 fail_closed("PagerDuty route must not specify continuation") if synthetic_route.key?("continue")
 
 warn "Alertmanager PagerDuty structure verified (credential value not accessed)."

@@ -142,6 +142,8 @@ def rendered_alertmanager_fixture(
     return f"""---
 apiVersion: monitoring.coreos.com/v1
 kind: Alertmanager
+metadata:
+  name: kube-prometheus-stack-alertmanager
 spec:
   secrets: [{secret}]
 ---
@@ -167,16 +169,16 @@ stringData:
 
 
 @pytest.mark.parametrize(
-    "kwargs",
+    ("kwargs", "diagnostic"),
     [
-        {"secret": "wrong-secret"},
-        {"path": "/wrong/path"},
-        {"matchers": ['severity="critical"']},
-        {"inline": True},
+        ({"secret": "wrong-secret"}, "must reference only"),
+        ({"path": "/wrong/path"}, "exact mounted routing-key file"),
+        ({"matchers": ['severity="critical"']}, "exact synthetic allowlist"),
+        ({"inline": True}, "inline PagerDuty credentials are forbidden"),
     ],
 )
 def test_alertmanager_validator_rejects_missing_mount_wrong_path_inline_and_broad_route(
-    tmp_path, kwargs
+    tmp_path, kwargs, diagnostic
 ):
     manifest = tmp_path / "rendered.yaml"
     manifest.write_text(rendered_alertmanager_fixture(**kwargs), encoding="utf-8")
@@ -186,8 +188,22 @@ def test_alertmanager_validator_rejects_missing_mount_wrong_path_inline_and_broa
         text=True,
         check=False,
     )
-    assert result.returncode != 0
+    assert result.returncode == 16
+    assert diagnostic in result.stderr
     assert "forbidden-stub" not in result.stderr
+
+
+def test_alertmanager_validator_accepts_valid_rendered_fixture(tmp_path):
+    manifest = tmp_path / "rendered.yaml"
+    manifest.write_text(rendered_alertmanager_fixture(), encoding="utf-8")
+    result = subprocess.run(
+        ["ruby", str(ALERTMANAGER_VALIDATOR), "rendered", str(manifest)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "structure verified" in result.stderr
 
 
 @pytest.mark.parametrize(
@@ -235,37 +251,64 @@ def test_alertmanager_validator_redacts_invalid_base64(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "mutation",
+    ("mutation", "diagnostic"),
     [
-        lambda text: text.replace("kind: Alertmanager", "kind: Alertmanager", 1)
-        + text.split("---\napiVersion: v1", 1)[0],
-        lambda text: text.replace(
-            "      routes:\n        - receiver: pagerduty-synthetic-test",
-            "      routes:\n        - receiver: nested\n          routes:\n            - receiver: pagerduty-synthetic-test",
+        (
+            lambda text: text + text.split("---\napiVersion: v1", 1)[0],
+            "expected exactly one kube-prometheus-stack Alertmanager",
         ),
-        lambda text: text.replace(
-            "    receivers:\n",
-            "    receivers:\n      - name: alternate\n        pagerduty_configs: []\n",
+        (
+            lambda text: text.replace(
+                "      routes:\n        - receiver: pagerduty-synthetic-test",
+                "      routes:\n        - receiver: nested\n          routes:\n            - receiver: pagerduty-synthetic-test",
+            ),
+            "direct child of the root route",
         ),
-        lambda text: text.replace(
-            "            send_resolved: true",
-            "            send_resolved: true\n          - routing_key_file: /another/file",
+        (
+            lambda text: text.replace(
+                "    receivers:\n",
+                "    receivers:\n      - name: alternate\n        pagerduty_configs: []\n",
+            ),
+            "exactly one PagerDuty receiver",
         ),
-        lambda text: text.replace(
-            "            send_resolved: true",
-            "            send_resolved: true\n        continue: false",
+        (
+            lambda text: text.replace(
+                "            send_resolved: true",
+                "            send_resolved: true\n          - routing_key_file: /another/file",
+            ),
+            "exactly one PagerDuty configuration",
         ),
-        lambda text: text.replace(
-            "    receivers:",
-            "    routing_" + "key: forbidden-stub\n    receivers:",
+        (
+            lambda text: text.replace(
+                "            - 'severity=\"critical\"'",
+                "            - 'severity=\"critical\"'\n          continue: false",
+            ),
+            "must not specify continuation",
         ),
-        lambda text: text.replace(
-            "      - name: pagerduty-synthetic-test",
-            "      - name: alternate\n        pagerduty_configs:\n          - service_"
-            + "key: forbidden-stub\n      - name: pagerduty-synthetic-test",
-        ).replace(
-            "      routes:",
-            "      routes:\n        - receiver: alternate\n          matchers: ['severity=~\".*\"']",
+        (
+            lambda text: text.replace(
+                "            - 'severity=\"critical\"'",
+                "            - 'severity=\"critical\"'\n          routes: []",
+            ),
+            "must not contain nested routes",
+        ),
+        (
+            lambda text: text.replace(
+                "    receivers:",
+                "    routing_" + "key: forbidden-stub\n    receivers:",
+            ),
+            "inline PagerDuty credentials are forbidden",
+        ),
+        (
+            lambda text: text.replace(
+                "      - name: pagerduty-synthetic-test",
+                "      - name: alternate\n        pagerduty_configs:\n          - service_"
+                + "key: forbidden-stub\n      - name: pagerduty-synthetic-test",
+            ).replace(
+                "      routes:",
+                "      routes:\n        - receiver: alternate\n          matchers: ['severity=~\".*\"']",
+            ),
+            "inline PagerDuty credentials are forbidden",
         ),
     ],
     ids=[
@@ -274,11 +317,14 @@ def test_alertmanager_validator_redacts_invalid_base64(tmp_path):
         "alternate-receiver",
         "additional-config",
         "continuation",
+        "nested-children",
         "recursive-inline-key",
         "broad-nested-alternate-inline",
     ],
 )
-def test_alertmanager_validator_rejects_deterministic_contract_mutations(tmp_path, mutation):
+def test_alertmanager_validator_rejects_deterministic_contract_mutations(
+    tmp_path, mutation, diagnostic
+):
     manifest = tmp_path / "mutation.yaml"
     manifest.write_text(mutation(rendered_alertmanager_fixture()), encoding="utf-8")
     result = subprocess.run(
@@ -288,6 +334,7 @@ def test_alertmanager_validator_rejects_deterministic_contract_mutations(tmp_pat
         check=False,
     )
     assert result.returncode == 16
+    assert diagnostic in result.stderr
     assert "forbidden-stub" not in result.stderr
 
 
