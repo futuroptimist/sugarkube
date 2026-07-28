@@ -13,8 +13,10 @@ DASHBOARD_VALUE="grafana.dashboards.sugarkube.sugarkube-staging-observability.js
 DASHBOARD_VALIDATOR="${ROOT}/scripts/validate_observability_dashboard.py"
 TIMEOUT="${SUGARKUBE_OBSERVABILITY_HELM_TIMEOUT:-20m}"
 GRAFANA_URL="http://sugarkube3.local:30300"
+PAGERDUTY_SECRET="alertmanager-pagerduty"
+ALERTMANAGER_VALIDATOR="${ROOT}/scripts/verify_observability_alertmanager.rb"
 
-usage() { echo "Usage: $0 <render|install|upgrade|status|verify|dashboard-verify> env=staging" >&2; }
+usage() { echo "Usage: $0 <render|install|upgrade|status|verify|dashboard-verify|pagerduty-test> env=staging [fire|resolve]" >&2; }
 normalize_env() {
   local raw="${1:-}"
   while [[ "${raw}" == env=* ]]; do raw="${raw#env=}"; done
@@ -55,12 +57,26 @@ assert_context() {
 version() { tr -d '[:space:]' < "${VERSION_FILE}"; }
 validate_dashboard() { python3 "${DASHBOARD_VALIDATOR}" "${DASHBOARD}"; }
 validate_rendered_dashboard() { python3 "${DASHBOARD_VALIDATOR}" "${DASHBOARD}" --rendered "$1"; }
+validate_rendered_alertmanager() { ruby "${ALERTMANAGER_VALIDATOR}" rendered "$1"; }
 render_to() {
   local out="$1"
   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update >/dev/null
   helm repo update prometheus-community >/dev/null
   helm template "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}" --set-file "${DASHBOARD_VALUE}=${DASHBOARD}" >"${out}"
   validate_rendered_dashboard "${out}"
+  validate_rendered_alertmanager "${out}"
+}
+assert_pagerduty_secret() {
+  local present
+  if ! present="$(kubectl -n "${NAMESPACE}" get secret "${PAGERDUTY_SECRET}" -o 'go-template={{if index .data "routing-key"}}present{{end}}' 2>/dev/null)"; then
+    echo "ERROR: required Secret monitoring/alertmanager-pagerduty is absent; create it with a nonempty routing-key before install or upgrade." >&2
+    return 15
+  fi
+  if [[ "${present}" != present ]]; then
+    echo "ERROR: Secret monitoring/alertmanager-pagerduty must contain a nonempty routing-key (value intentionally not read or printed)." >&2
+    return 15
+  fi
+  echo "PagerDuty Secret contract exists (value intentionally not read or printed)."
 }
 release_state() {
   local matches
@@ -79,9 +95,9 @@ release_state() {
     return 1
   fi
 }
-render() { validate_dashboard; require_tools helm kubectl python3; print_resolved staging; tmp="$(mktemp -t sugarkube-observability-render.XXXXXX.yaml)"; trap 'rm -f "${tmp}"' EXIT; render_to "${tmp}"; cat "${tmp}"; }
-install_release() { validate_dashboard; require_tools helm kubectl python3; print_resolved staging; assert_context; tmp="$(mktemp -t sugarkube-observability-install.XXXXXX.yaml)"; trap 'rm -f "${tmp}"' EXIT; render_to "${tmp}"; state="$(release_state)"; if [[ "${state}" == present ]]; then echo "ERROR: cannot install: ${RELEASE} already exists in ${NAMESPACE}. Use observability-upgrade." >&2; exit 4; fi; helm install "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --create-namespace --version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}" --set-file "${DASHBOARD_VALUE}=${DASHBOARD}" --wait --timeout "${TIMEOUT}"; }
-upgrade_release() { validate_dashboard; require_tools helm kubectl python3; print_resolved staging; assert_context; tmp="$(mktemp -t sugarkube-observability-upgrade.XXXXXX.yaml)"; trap 'rm -f "${tmp}"' EXIT; render_to "${tmp}"; state="$(release_state)"; if [[ "${state}" == absent ]]; then echo "ERROR: upgrade requires an existing Helm release ${RELEASE} in ${NAMESPACE}. Use observability-install for a fresh cluster." >&2; exit 5; fi; helm upgrade "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}" --set-file "${DASHBOARD_VALUE}=${DASHBOARD}" --wait --timeout "${TIMEOUT}"; }
+render() { validate_dashboard; require_tools helm kubectl python3 ruby; print_resolved staging; tmp="$(mktemp -t sugarkube-observability-render.XXXXXX.yaml)"; trap 'rm -f "${tmp}"' EXIT; render_to "${tmp}"; cat "${tmp}"; }
+install_release() { validate_dashboard; require_tools helm kubectl python3 ruby; print_resolved staging; assert_context; tmp="$(mktemp -t sugarkube-observability-install.XXXXXX.yaml)"; trap 'rm -f "${tmp}"' EXIT; render_to "${tmp}"; assert_pagerduty_secret; state="$(release_state)"; if [[ "${state}" == present ]]; then echo "ERROR: cannot install: ${RELEASE} already exists in ${NAMESPACE}. Use observability-upgrade." >&2; exit 4; fi; helm install "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --create-namespace --version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}" --set-file "${DASHBOARD_VALUE}=${DASHBOARD}" --wait --timeout "${TIMEOUT}"; }
+upgrade_release() { validate_dashboard; require_tools helm kubectl python3 ruby; print_resolved staging; assert_context; tmp="$(mktemp -t sugarkube-observability-upgrade.XXXXXX.yaml)"; trap 'rm -f "${tmp}"' EXIT; render_to "${tmp}"; assert_pagerduty_secret; state="$(release_state)"; if [[ "${state}" == absent ]]; then echo "ERROR: upgrade requires an existing Helm release ${RELEASE} in ${NAMESPACE}. Use observability-install for a fresh cluster." >&2; exit 5; fi; helm upgrade "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}" --set-file "${DASHBOARD_VALUE}=${DASHBOARD}" --wait --timeout "${TIMEOUT}"; }
 status() { require_tools helm kubectl python3; print_resolved staging; assert_context; helm -n "${NAMESPACE}" status "${RELEASE}"; kubectl -n "${NAMESPACE}" get deploy,statefulset,daemonset -l "app.kubernetes.io/instance=${RELEASE}"; kubectl -n "${NAMESPACE}" get prometheus,alertmanager; kubectl -n "${NAMESPACE}" get svc,pvc; kubectl get crd prometheuses.monitoring.coreos.com alertmanagers.monitoring.coreos.com servicemonitors.monitoring.coreos.com probes.monitoring.coreos.com; }
 verify_dspace_targets() {
   require_tools kubectl python3 sleep
@@ -206,7 +222,7 @@ raise SystemExit(10)' <<<"${targets_json}" || parser_status=$?
   return 10
 }
 verify() {
-  require_tools kubectl python3
+  require_tools kubectl python3 ruby
   print_resolved staging
   assert_context
   kubectl get crd prometheuses.monitoring.coreos.com alertmanagers.monitoring.coreos.com servicemonitors.monitoring.coreos.com probes.monitoring.coreos.com >/dev/null
@@ -231,6 +247,13 @@ if len(claims) != 1 or claims[0].get("status", {}).get("phase") != "Bound" or cl
     raise SystemExit("ERROR: expected one Bound local-path Prometheus PVC.")'
   [[ "$(kubectl -n "${NAMESPACE}" get prometheus kube-prometheus-stack-prometheus -o jsonpath='{.spec.replicas}')" == 1 ]]
   [[ "$(kubectl -n "${NAMESPACE}" get alertmanager kube-prometheus-stack-alertmanager -o jsonpath='{.spec.replicas}')" == 1 ]]
+  local alertmanager_yaml config_yaml
+  alertmanager_yaml="$(mktemp -t sugarkube-alertmanager-cr.XXXXXX.yaml)"
+  config_yaml="$(mktemp -t sugarkube-alertmanager-config.XXXXXX.yaml)"
+  trap 'rm -f "${alertmanager_yaml}" "${config_yaml}"' RETURN
+  kubectl -n "${NAMESPACE}" get alertmanager kube-prometheus-stack-alertmanager -o yaml >"${alertmanager_yaml}"
+  kubectl -n "${NAMESPACE}" get secret alertmanager-kube-prometheus-stack-alertmanager -o yaml >"${config_yaml}"
+  ruby "${ALERTMANAGER_VALIDATOR}" live "${alertmanager_yaml}" "${config_yaml}"
   [[ -z "$(kubectl -n "${NAMESPACE}" get ingress -l app.kubernetes.io/name=grafana -o name 2>/dev/null)" ]]
   [[ "$(kubectl -n "${NAMESPACE}" get svc kube-prometheus-stack-grafana -o jsonpath='{.spec.ports[?(@.port==80)].nodePort}')" == 30300 ]]
   monitor_release="$(kubectl -n dspace get servicemonitor dspace -o jsonpath='{.metadata.labels.release}')"
@@ -242,6 +265,45 @@ if len(claims) != 1 or claims[0].get("status", {}).get("phase") != "Bound" or cl
 
   verify_dspace_targets
   echo "Grafana LAN URL: ${GRAFANA_URL} (same NodePort is available through the other staging nodes)"
+}
+
+pagerduty_test() {
+  local action="${1:-}" ends_at endpoint response_file
+  case "${action}" in
+    fire|resolve) ;;
+    "") echo "ERROR: PagerDuty test requires an explicit action: fire or resolve." >&2; return 17 ;;
+    *) echo "ERROR: unsupported PagerDuty test action '${action}'; expected fire or resolve." >&2; return 17 ;;
+  esac
+  require_tools kubectl python3
+  assert_context
+  ends_at="$(ACTION="${action}" python3 -c 'from datetime import datetime, timedelta, timezone
+import os
+now = datetime.now(timezone.utc)
+end = now + timedelta(minutes=15) if os.environ["ACTION"] == "fire" else now
+print(end.isoformat(timespec="seconds").replace("+00:00", "Z"))')"
+  endpoint="/api/v1/namespaces/${NAMESPACE}/services/http:${RELEASE}-alertmanager:9093/proxy/api/v2/alerts"
+  response_file="$(mktemp -t sugarkube-alertmanager-response.XXXXXX)"
+  trap 'rm -f "${response_file}"' RETURN
+  if ! ENDS_AT="${ends_at}" python3 -c 'import json, os, sys
+json.dump([{
+  "labels": {
+    "alertname": "SugarkubePagerDutyTest",
+    "environment": "staging",
+    "cluster": "sugarkube-int",
+    "severity": "critical"
+  },
+  "annotations": {
+    "summary": "Sugarkube staging PagerDuty delivery test",
+    "description": "Operator-triggered synthetic alert for the staging PagerDuty fire/resolve drill.",
+    "runbook_url": "https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-operations.md#pagerduty-staging-fire-and-resolve-runbook"
+  },
+  "startsAt": "2020-01-01T00:00:00Z",
+  "endsAt": os.environ["ENDS_AT"]
+}], sys.stdout)' | kubectl create --raw "${endpoint}" -f - >"${response_file}" 2>/dev/null; then
+    echo "ERROR: Alertmanager v2 API rejected synthetic ${action} request (response redacted)." >&2
+    return 18
+  fi
+  echo "PagerDuty synthetic ${action} submitted; Alertmanager API status: accepted (response redacted)."
 }
 
 dashboard_verify() (
@@ -342,4 +404,4 @@ if not isinstance(dashboard, dict) or dashboard.get("uid") != "sugarkube-staging
 cmd="${1:-}"; shift || true; [[ -n "${cmd}" ]] || { usage; exit 2; }
 env_arg="${1:-}"; normalize_env "${env_arg}" >/dev/null
 validate_dashboard
-case "${cmd}" in render) render ;; install) install_release ;; upgrade) upgrade_release ;; status) status ;; verify) verify ;; dashboard-verify) dashboard_verify ;; *) usage; exit 2 ;; esac
+case "${cmd}" in render) render ;; install) install_release ;; upgrade) upgrade_release ;; status) status ;; verify) verify ;; dashboard-verify) dashboard_verify ;; pagerduty-test) pagerduty_test "${2:-${1:-}}" ;; *) usage; exit 2 ;; esac

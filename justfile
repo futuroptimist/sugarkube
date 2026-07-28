@@ -3194,6 +3194,10 @@ observability-verify env='':
 observability-dashboard-verify env='':
     @scripts/observability_helm.sh dashboard-verify '{{ env }}'
 
+# Explicitly fire or resolve the staging-only synthetic PagerDuty alert (manual only).
+observability-pagerduty-test env='' action='':
+    @scripts/observability_helm.sh pagerduty-test '{{ env }}' '{{ action }}'
+
 # Render the pinned staging blackbox exporter and Probe manifests (read-only).
 observability-blackbox-render env='':
     @scripts/observability_blackbox.sh render '{{ env }}'

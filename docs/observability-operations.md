@@ -124,7 +124,10 @@ is not rollout evidence.
 
 - Helm release: `kube-prometheus-stack` in namespace `monitoring`.
 - Prometheus: one replica, `7d` retention, `15GB` retention size, `local-path` `ReadWriteOnce` PVC requesting `20Gi`, CPU request `200m`, memory request `512Mi`, memory limit `2Gi`, admin API disabled, and external label `cluster=sugarkube-int`.
-- Alertmanager: one replica and no-op receiver named exactly `"null"`. No real notification receiver (PagerDuty, Healthchecks.io, or otherwise) is configured yet; see [`docs/observability-alerting.md`](observability-alerting.md) for the planned rollout.
+- Alertmanager: one replica with root/default no-op receiver named exactly `"null"`. Staging values
+  define a secret-file-backed PagerDuty receiver, but route only the exact synthetic test labels to
+  it; bundled and real workload alerts still fall through to `"null"`. Repository configuration is
+  not evidence of staging deployment or manually confirmed delivery.
 - Grafana: persistence disabled, no Ingress, LAN-only NodePort `30300`.
 - The provisioned dashboard defaults to six hours and a 30-second refresh. Its
   top-level public availability summary reports **Healthy endpoints**, **Failed
@@ -191,6 +194,76 @@ dashboard is the expected rollback state: omit `observability-dashboard-verify`
 and use the general `observability-verify` result as acceptance evidence.
 
 Do not use `--reuse-values` for the next forward upgrade; commit the full intended version and values chain first.
+
+## PagerDuty staging fire and resolve runbook
+
+Repository support alone is not deployment or delivery evidence. This manual procedure is staging-only; no CI,
+render, install, upgrade, status, or verification command sends an alert.
+
+1. Create or rotate the `monitoring/alertmanager-pagerduty` Secret without putting the routing key in
+   history, arguments, files, or output. Run this from an interactive terminal (the hidden read is
+   intentionally not suitable for a pasted automation transcript):
+
+   ```bash
+   read -r -s -p 'PagerDuty routing key: ' PAGERDUTY_ROUTING_KEY; printf '\n'
+   printf %s "$PAGERDUTY_ROUTING_KEY" |
+     kubectl -n monitoring create secret generic alertmanager-pagerduty \
+       --from-file=routing-key=/dev/stdin --dry-run=client -o yaml |
+     kubectl apply -f -
+   unset PAGERDUTY_ROUTING_KEY
+   ```
+
+   The pipe keeps the value off the process list and disk. Neither command prints the Secret value.
+2. Render and inspect the pinned proposal offline:
+
+   ```bash
+   just observability-render env=staging >/tmp/kube-prometheus-stack.rendered.yaml
+   ruby scripts/verify_observability_alertmanager.rb rendered \
+     /tmp/kube-prometheus-stack.rendered.yaml
+   ```
+
+   Confirm the validator reports the exact synthetic route, file reference, and Secret mount contract;
+   remove the temporary render after review.
+3. Select the staging kubeconfig, upgrade, and verify:
+
+   ```bash
+   just kubeconfig-env env=staging
+   just observability-upgrade env=staging
+   just observability-verify env=staging
+   ```
+
+   Upgrade fails closed before Helm mutation when the credential Secret or its nonempty key is absent.
+4. Explicitly fire the bounded synthetic alert (it auto-ends after 15 minutes if abandoned):
+
+   ```bash
+   just observability-pagerduty-test env=staging action=fire
+   ```
+
+5. In PagerDuty, manually confirm phone receipt and acknowledge the incident. The repository cannot
+   assert this external observation.
+6. Resolve the same alert fingerprint, then manually confirm PagerDuty resolution:
+
+   ```bash
+   just observability-pagerduty-test env=staging action=resolve
+   ```
+
+7. If necessary, use `helm -n monitoring history kube-prometheus-stack`, roll back to the prior
+   known-good revision with the command in [Rollback](#rollback), and run the applicable verification.
+8. Do **not** delete the credential Secret before rolling back configuration that references its
+   mounted file. A missing mounted Secret can prevent Alertmanager from starting, including during a
+   rollback whose configuration still expects it.
+9. For rotation, repeat step 1 with the new value, then reload it deterministically and verify:
+
+   ```bash
+   kubectl -n monitoring rollout restart \
+     statefulset/alertmanager-kube-prometheus-stack-alertmanager
+   kubectl -n monitoring rollout status \
+     statefulset/alertmanager-kube-prometheus-stack-alertmanager --timeout=20m
+   just observability-verify env=staging
+   ```
+
+   Repeat the explicit fire/acknowledge/resolve confirmations. Revoke the old integration key only
+   after the new path is proven. Keep the Secret present throughout rollback safety windows.
 
 ## Reprovisioning proof and post-merge checklist
 
