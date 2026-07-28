@@ -23,15 +23,19 @@ mode, *paths = ARGV
 fail_closed("expected rendered FILE or live ALERTMANAGER_YAML CONFIG_SECRET_YAML") unless
   (mode == "rendered" && paths.length == 1) || (mode == "live" && paths.length == 2)
 
-documents = paths.flat_map do |path|
-  content = File.read(path)
-  content = content[content.index("---\n")..] if mode == "rendered" && content.index("---\n")
-  content.split(/^---\s*$\n?/).filter_map do |document|
-    relevant = document.match?(/^kind: Alertmanager\s*$/) ||
-      (document.match?(/^kind: Secret\s*$/) &&
-       document.include?("name: alertmanager-kube-prometheus-stack-alertmanager"))
-    YAML.safe_load(document, permitted_classes: [], aliases: false) if relevant
+begin
+  documents = paths.flat_map do |path|
+    content = File.read(path)
+    content = content[content.index("---\n")..] if mode == "rendered" && content.index("---\n")
+    content.split(/^---\s*$\n?/).filter_map do |document|
+      relevant = document.match?(/^kind: Alertmanager\s*$/) ||
+        (document.match?(/^kind: Secret\s*$/) &&
+         document.include?("name: alertmanager-kube-prometheus-stack-alertmanager"))
+      YAML.safe_load(document, permitted_classes: [], aliases: false) if relevant
+    end
   end
+rescue StandardError
+  fail_closed("input manifests are missing or malformed")
 end
 alertmanager = documents.find { |doc| doc["kind"] == "Alertmanager" }
 fail_closed("expected Alertmanager custom resource is missing") unless alertmanager
@@ -44,9 +48,13 @@ end
 fail_closed("generated Alertmanager configuration Secret is missing") unless config_secret
 encoded = config_secret.dig("data", "alertmanager.yaml")
 plain = config_secret.dig("stringData", "alertmanager.yaml")
-config_text = plain || (Base64.strict_decode64(encoded) if encoded)
-fail_closed("generated Alertmanager configuration is missing or malformed") unless config_text
-config = YAML.safe_load(config_text, permitted_classes: [], aliases: false)
+begin
+  config_text = plain || (Base64.strict_decode64(encoded) if encoded)
+  fail_closed("generated Alertmanager configuration is missing or malformed") unless config_text
+  config = YAML.safe_load(config_text, permitted_classes: [], aliases: false)
+rescue StandardError
+  fail_closed("generated Alertmanager configuration is missing or malformed")
+end
 
 route = config["route"]
 fail_closed('root receiver must remain "null"') unless route.is_a?(Hash) && route["receiver"] == "null"

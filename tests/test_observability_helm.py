@@ -73,7 +73,12 @@ def test_chart_version_and_values_match_live_staging_baseline():
             'severity="critical"',
         ],
     }]
-    pagerduty = alertmanager["config"]["receivers"][1]["pagerduty_configs"][0]
+    pagerduty_receiver = next(
+        receiver
+        for receiver in alertmanager["config"]["receivers"]
+        if receiver["name"] == "pagerduty-synthetic-test"
+    )
+    pagerduty = pagerduty_receiver["pagerduty_configs"][0]
     assert pagerduty == {
         "routing_key_file": "/etc/alertmanager/secrets/alertmanager-pagerduty/routing-key",
         "send_resolved": True,
@@ -181,6 +186,30 @@ def test_alertmanager_validator_rejects_missing_mount_wrong_path_inline_and_broa
     )
     assert result.returncode != 0
     assert "forbidden-stub" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    "manifest",
+    [
+        "---\nkind: Alertmanager\nspec: [unterminated\n",
+        rendered_alertmanager_fixture().replace(
+            "alertmanager.yaml: |", "alertmanager.yaml: !!invalid"
+        ),
+    ],
+)
+def test_alertmanager_validator_redacts_malformed_yaml(tmp_path, manifest):
+    path = tmp_path / "malformed.yaml"
+    path.write_text(manifest, encoding="utf-8")
+    result = subprocess.run(
+        ["ruby", str(ALERTMANAGER_VALIDATOR), "rendered", str(path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 16
+    assert "sensitive values not printed" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert "Psych::" not in result.stderr
 
 
 def test_discovery_contract_uses_release_label():
@@ -359,7 +388,10 @@ case "$*" in
   *"get prometheus kube-prometheus-stack-prometheus"*) echo 1 ;;
   *"get alertmanager kube-prometheus-stack-alertmanager -o yaml"*) printf '%s\n' 'apiVersion: monitoring.coreos.com/v1' 'kind: Alertmanager' 'metadata:' '  name: kube-prometheus-stack-alertmanager' 'spec:' '  secrets:' '    - alertmanager-pagerduty' ;;
   *"get alertmanager kube-prometheus-stack-alertmanager"*) echo 1 ;;
-  *"get secret alertmanager-kube-prometheus-stack-alertmanager -o yaml"*) printf '%s\n' 'apiVersion: v1' 'kind: Secret' 'metadata:' '  name: alertmanager-kube-prometheus-stack-alertmanager' 'stringData:' '  alertmanager.yaml: |'; sed 's/^/    /' "$ALERTMANAGER_CONFIG" ;;
+  *"get secret alertmanager-kube-prometheus-stack-alertmanager -o yaml"*)
+    printf '%s\n' 'apiVersion: v1' 'kind: Secret' 'metadata:' '  name: alertmanager-kube-prometheus-stack-alertmanager' 'stringData:' '  alertmanager.yaml: |'
+    [ "$KUBECTL_MODE" != malformed-alertmanager ] && sed 's/^/    /' "$ALERTMANAGER_CONFIG" || printf '%s\n' '    route: [unterminated'
+    ;;
   *"get secret alertmanager-pagerduty -o go-template="*) [ "$KUBECTL_MODE" != missing-pagerduty ] || exit 44; [ "$KUBECTL_MODE" != empty-pagerduty ] && echo present ;;
   *"create --raw "*"/api/v2/alerts -f -"*) cat > "$ALERT_PAYLOAD"; [ "$KUBECTL_MODE" != api-fail ] ;;
   *"get ingress "*) exit 0 ;;
@@ -398,6 +430,7 @@ esac
         "CONTEXT": context,
         "KUBECTL_MODE": kubectl_mode,
         "KUBECONFIG": str(tmp_path / "kubeconfig"),
+        "TMPDIR": str(tmp_path),
         "TARGET_RESPONSES": "",
         "TARGET_COUNTER": str(tmp_path / "target-counter"),
         "TARGET_RESPONSE_DELAY": target_response_delay,
@@ -515,6 +548,22 @@ def test_valid_pagerduty_secret_permits_helm_mutation(tmp_path):
     assert result.returncode == 0
     assert "helm upgrade" in audit
     assert "value intentionally not read or printed" in result.stdout
+
+
+@pytest.mark.parametrize("mode", ["missing-pagerduty", "empty-pagerduty"])
+def test_verify_requires_nonempty_pagerduty_secret_and_cleans_temp_files(tmp_path, mode):
+    result, audit = run_helper(tmp_path, "verify", kubectl_mode=mode)
+    assert result.returncode != 0
+    assert "get secret alertmanager-pagerduty" in audit
+    assert "routing-key" in result.stderr
+    assert not list(tmp_path.glob("sugarkube-alertmanager-*.yaml"))
+
+
+def test_verify_cleans_temp_files_when_live_validator_fails(tmp_path):
+    result, _ = run_helper(tmp_path, "verify", kubectl_mode="malformed-alertmanager")
+    assert result.returncode == 16
+    assert "sensitive values not printed" in result.stderr
+    assert not list(tmp_path.glob("sugarkube-alertmanager-*.yaml"))
 
 
 def test_pagerduty_test_requires_explicit_action_and_staging(tmp_path):

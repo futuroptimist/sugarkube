@@ -184,14 +184,22 @@ Use Helm rollback to the prior known-good revision, then restore the prior compl
 ```bash
 helm -n monitoring history kube-prometheus-stack
 helm -n monitoring rollback kube-prometheus-stack <prior-revision> --wait --timeout 20m
+# From a worktree checked out at the Git commit that produced <prior-revision>:
 just observability-verify env=staging
-# Run this only when <prior-revision> already provisioned the dashboard.
+# Run this only when that revision provisioned the dashboard.
 just observability-dashboard-verify env=staging
 ```
 
-If `<prior-revision>` predates the first dashboard-as-code rollout, a missing
-dashboard is the expected rollback state: omit `observability-dashboard-verify`
-and use the general `observability-verify` result as acceptance evidence.
+The verification helper validates the configuration contract from its own Git
+revision. Do not run the current helper against an older Helm revision: for
+example, a revision from before PagerDuty support correctly lacks the current
+Secret mount and synthetic route. If the matching repository revision is not
+available, use `kubectl -n monitoring rollout status` for each workload shown by
+`just observability-status env=staging`, inspect pod readiness and logs, and
+check the Prometheus and Alertmanager endpoints without treating the current
+configuration validator as rollback acceptance evidence. If `<prior-revision>`
+predates the first dashboard-as-code rollout, a missing dashboard is likewise
+the expected rollback state, so omit `observability-dashboard-verify`.
 
 Do not use `--reuse-values` for the next forward upgrade; commit the full intended version and values chain first.
 
@@ -248,7 +256,9 @@ render, install, upgrade, status, or verification command sends an alert.
    ```
 
 7. If necessary, use `helm -n monitoring history kube-prometheus-stack`, roll back to the prior
-   known-good revision with the command in [Rollback](#rollback), and run the applicable verification.
+   known-good revision with the command in [Rollback](#rollback), and run verification from the Git
+   revision that produced that Helm revision (or use the configuration-neutral health checks described
+   there).
 8. Do **not** delete the credential Secret before rolling back configuration that references its
    mounted file. A missing mounted Secret can prevent Alertmanager from starting, including during a
    rollback whose configuration still expects it.

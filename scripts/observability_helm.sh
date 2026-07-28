@@ -69,7 +69,7 @@ render_to() {
 assert_pagerduty_secret() {
   local present
   if ! present="$(kubectl -n "${NAMESPACE}" get secret "${PAGERDUTY_SECRET}" -o 'go-template={{if index .data "routing-key"}}present{{end}}' 2>/dev/null)"; then
-    echo "ERROR: required Secret monitoring/alertmanager-pagerduty is absent; create it with a nonempty routing-key before install or upgrade." >&2
+    echo "ERROR: required Secret monitoring/alertmanager-pagerduty is absent; create it with a nonempty routing-key before deployment or verification." >&2
     return 15
   fi
   if [[ "${present}" != present ]]; then
@@ -247,13 +247,17 @@ if len(claims) != 1 or claims[0].get("status", {}).get("phase") != "Bound" or cl
     raise SystemExit("ERROR: expected one Bound local-path Prometheus PVC.")'
   [[ "$(kubectl -n "${NAMESPACE}" get prometheus kube-prometheus-stack-prometheus -o jsonpath='{.spec.replicas}')" == 1 ]]
   [[ "$(kubectl -n "${NAMESPACE}" get alertmanager kube-prometheus-stack-alertmanager -o jsonpath='{.spec.replicas}')" == 1 ]]
-  local alertmanager_yaml config_yaml
+  assert_pagerduty_secret
+  local alertmanager_yaml config_yaml cleanup_command
   alertmanager_yaml="$(mktemp -t sugarkube-alertmanager-cr.XXXXXX.yaml)"
   config_yaml="$(mktemp -t sugarkube-alertmanager-config.XXXXXX.yaml)"
-  trap 'rm -f "${alertmanager_yaml}" "${config_yaml}"' RETURN
+  printf -v cleanup_command 'rm -f %q %q' "${alertmanager_yaml}" "${config_yaml}"
+  trap "${cleanup_command}" EXIT
   kubectl -n "${NAMESPACE}" get alertmanager kube-prometheus-stack-alertmanager -o yaml >"${alertmanager_yaml}"
   kubectl -n "${NAMESPACE}" get secret alertmanager-kube-prometheus-stack-alertmanager -o yaml >"${config_yaml}"
   ruby "${ALERTMANAGER_VALIDATOR}" live "${alertmanager_yaml}" "${config_yaml}"
+  rm -f "${alertmanager_yaml}" "${config_yaml}"
+  trap - EXIT
   [[ -z "$(kubectl -n "${NAMESPACE}" get ingress -l app.kubernetes.io/name=grafana -o name 2>/dev/null)" ]]
   [[ "$(kubectl -n "${NAMESPACE}" get svc kube-prometheus-stack-grafana -o jsonpath='{.spec.ports[?(@.port==80)].nodePort}')" == 30300 ]]
   monitor_release="$(kubectl -n dspace get servicemonitor dspace -o jsonpath='{.metadata.labels.release}')"
@@ -268,7 +272,7 @@ if len(claims) != 1 or claims[0].get("status", {}).get("phase") != "Bound" or cl
 }
 
 pagerduty_test() {
-  local action="${1:-}" ends_at endpoint response_file
+  local action="${1:-}" ends_at endpoint response_file cleanup_command
   case "${action}" in
     fire|resolve) ;;
     "") echo "ERROR: PagerDuty test requires an explicit action: fire or resolve." >&2; return 17 ;;
@@ -283,7 +287,8 @@ end = now + timedelta(minutes=15) if os.environ["ACTION"] == "fire" else now
 print(end.isoformat(timespec="seconds").replace("+00:00", "Z"))')"
   endpoint="/api/v1/namespaces/${NAMESPACE}/services/http:${RELEASE}-alertmanager:9093/proxy/api/v2/alerts"
   response_file="$(mktemp -t sugarkube-alertmanager-response.XXXXXX)"
-  trap 'rm -f "${response_file}"' RETURN
+  printf -v cleanup_command 'rm -f %q' "${response_file}"
+  trap "${cleanup_command}" EXIT
   if ! ENDS_AT="${ends_at}" python3 -c 'import json, os, sys
 json.dump([{
   "labels": {
@@ -303,6 +308,8 @@ json.dump([{
     echo "ERROR: Alertmanager v2 API rejected synthetic ${action} request (response redacted)." >&2
     return 18
   fi
+  rm -f "${response_file}"
+  trap - EXIT
   echo "PagerDuty synthetic ${action} submitted; Alertmanager API status: accepted (response redacted)."
 }
 
