@@ -953,6 +953,34 @@ def test_enabled_ingress_requires_resolved_host(tmp_path: Path) -> None:
         app_chart.expected_ingress_host((str(values),), "")
 
 
+def test_resolve_host_reports_values_parsing_failure(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    values = tmp_path / "values.yaml"
+    values.write_text("ingress: [invalid\n", encoding="utf-8")
+    args = argparse.Namespace(values=str(values), host="")
+
+    assert app_chart.cmd_resolve_host(args) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "ERROR: values parsing failed while resolving ingress host:" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_resolve_host_reports_missing_enabled_ingress_host(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    values = tmp_path / "values.yaml"
+    values.write_text("ingress:\n  enabled: true\n", encoding="utf-8")
+    args = argparse.Namespace(values=str(values), host="")
+
+    assert app_chart.cmd_resolve_host(args) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "no nonempty ingress.host was resolved" in captured.err
+    assert "Traceback" not in captured.err
+
+
 def test_dspace_render_contract_requires_resources_and_validates_metrics() -> None:
     inputs = app_chart.ReleaseInputs(
         "dspace",
@@ -2101,12 +2129,9 @@ def test_standard_app_redeploy_has_authoritative_values_and_render_mutation_pari
     def release_inputs(command: list[str]) -> list[str]:
         inputs: list[str] = []
         for flag in ("--namespace", "--version", "-f", "--set"):
-            inputs.extend(
-                argument
-                for index, argument in enumerate(command[:-1])
-                if argument == flag
-                for argument in command[index : index + 2]
-            )
+            for index, argument in enumerate(command[:-1]):
+                if argument == flag:
+                    inputs.extend(command[index : index + 2])
         return inputs
 
     assert release_inputs(rendered) == release_inputs(mutated)

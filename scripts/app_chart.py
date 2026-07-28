@@ -629,7 +629,12 @@ def cmd_preflight(args: argparse.Namespace) -> int:
 def cmd_resolve_host(args: argparse.Namespace) -> int:
     """Print the effective ingress host used as an explicit Helm override."""
     values = tuple(filter(None, (value.strip() for value in args.values.split(","))))
-    print(expected_ingress_host(values, args.host))
+    try:
+        host = expected_ingress_host(values, args.host)
+    except (ValueError, json.JSONDecodeError, SystemExit) as error:
+        print(f"ERROR: values parsing failed while resolving ingress host: {error}", file=sys.stderr)
+        return 1
+    print(host)
     return 0
 
 
