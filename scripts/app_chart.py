@@ -42,7 +42,10 @@ def read_pin(path: str) -> str:
 
 
 def run(args: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(args, cwd=REPO_ROOT, capture_output=True, text=True, check=False)
+    try:
+        return subprocess.run(args, cwd=REPO_ROOT, capture_output=True, text=True, check=False)
+    except OSError as error:
+        return subprocess.CompletedProcess(args, 127, "", f"failed to launch {args[0]}: {error}")
 
 
 def helm_show(chart: str, version: str) -> subprocess.CompletedProcess[str]:
@@ -101,9 +104,12 @@ def convert(node, scanner)
 end
 puts JSON.generate(convert(Psych.parse_stream(STDIN.read), scanner))
 '''
-    parsed = subprocess.run(
-        ["ruby", "-e", ruby], input=text, capture_output=True, text=True, check=False
-    )
+    try:
+        parsed = subprocess.run(
+            ["ruby", "-e", ruby], input=text, capture_output=True, text=True, check=False
+        )
+    except OSError as error:
+        raise ValueError(f"YAML parser launch failed: {error}") from error
     if parsed.returncode != 0:
         raise ValueError((parsed.stderr or "invalid YAML").strip())
     value = json.loads(parsed.stdout)
@@ -461,6 +467,15 @@ def validate_dspace_values(manifest: str, inputs: ReleaseInputs) -> list[str]:
     return errors
 
 
+def preflight_context(args: argparse.Namespace, version: str, host: str) -> str:
+    """Format non-secret release identity for terminal preflight diagnostics."""
+    return (
+        f"app={args.app} env={args.env} release={args.release} "
+        f"namespace={args.namespace} chart={args.chart} version={version} "
+        f"tag={args.tag} host={host}"
+    )
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     version = read_pin(args.version_file)
     show = helm_show(args.chart, version)
@@ -520,21 +535,25 @@ def cmd_bump(args: argparse.Namespace) -> int:
 
 def cmd_preflight(args: argparse.Namespace) -> int:
     version = args.version or read_pin(args.version_file)
+    context = preflight_context(args, version, getattr(args, "host", "") or "<from-values>")
     print_summary(args.app, args.env, args.tag, args.chart, version, args.version_file)
     show = helm_show(args.chart, version)
     if show.returncode != 0:
-        print(show.stderr or show.stdout, file=sys.stderr)
+        print(
+            f"ERROR: helm show failed; {context}: {(show.stderr or show.stdout).strip()}",
+            file=sys.stderr,
+        )
         return show.returncode or 1
     try:
         chart_metadata = parse_chart_yaml(show.stdout)
     except (ValueError, json.JSONDecodeError) as error:
-        print(f"ERROR: helm show chart returned unsafe or invalid YAML: {error}", file=sys.stderr)
+        print(f"ERROR: chart metadata parsing failed; {context}: {error}", file=sys.stderr)
         return 1
     if "@sha256:" in args.chart and chart_metadata.get("version") != version:
         print(
             "ERROR: digest-qualified chart metadata version "
             f"{chart_metadata.get('version', '<missing>')!r} does not match approved version "
-            f"{version!r}.",
+            f"{version!r}; {context}.",
             file=sys.stderr,
         )
         return 1
@@ -542,7 +561,7 @@ def cmd_preflight(args: argparse.Namespace) -> int:
     try:
         host = expected_ingress_host(values, getattr(args, "host", ""))
     except (ValueError, json.JSONDecodeError) as error:
-        print(f"ERROR: values are not safe structural YAML: {error}", file=sys.stderr)
+        print(f"ERROR: values parsing failed; {context}: {error}", file=sys.stderr)
         return 1
     inputs = ReleaseInputs(
         app=args.app,
@@ -556,19 +575,22 @@ def cmd_preflight(args: argparse.Namespace) -> int:
         host=host,
         pull_policy=getattr(args, "pull_policy", "Always"),
     )
+    context = preflight_context(args, version, host or "<disabled>")
     tmpl = run(inputs.helm_template_command())
     if tmpl.returncode != 0:
-        print(tmpl.stderr or tmpl.stdout, file=sys.stderr)
-        return tmpl.returncode or 1
-    errors = validate_rendered_manifest(tmpl.stdout, inputs)
-    if inputs.app == "dspace":
-        errors += validate_dspace_values(tmpl.stdout, inputs)
-    if errors:
-        context = (
-            f"app={inputs.app} env={inputs.env} release={inputs.release} "
-            f"namespace={inputs.namespace} chart={inputs.chart} version={inputs.version} "
-            f"tag={inputs.tag} host={inputs.host or '<disabled>'}"
+        print(
+            f"ERROR: helm template failed; {context}: {(tmpl.stderr or tmpl.stdout).strip()}",
+            file=sys.stderr,
         )
+        return tmpl.returncode or 1
+    try:
+        errors = validate_rendered_manifest(tmpl.stdout, inputs)
+        if inputs.app == "dspace":
+            errors += validate_dspace_values(tmpl.stdout, inputs)
+    except (ValueError, json.JSONDecodeError) as error:
+        print(f"ERROR: rendered-YAML parsing failed; {context}: {error}", file=sys.stderr)
+        return 1
+    if errors:
         for error in errors:
             print(f"ERROR: render contract failed: {error}; {context}", file=sys.stderr)
         return 1
@@ -591,7 +613,8 @@ def cmd_preflight(args: argparse.Namespace) -> int:
     if complete_envs is None:
         print(
             "ERROR: rendered token.place manifest is missing required metadata env vars: "
-            + ", ".join(missing or req),
+            + ", ".join(missing or req)
+            + f"; {context}",
             file=sys.stderr,
         )
         print(f"Pinned chart version: {version} ({args.version_file})", file=sys.stderr)

@@ -1195,7 +1195,7 @@ data:
     )
 
 
-def test_app_chart_cmd_preflight_reports_template_failure(
+def test_app_chart_cmd_preflight_reports_helm_template_failure(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     args = argparse.Namespace(
@@ -1208,6 +1208,7 @@ def test_app_chart_cmd_preflight_reports_template_failure(
         release="tokenplace",
         namespace="tokenplace",
         values="values-a.yaml, values-b.yaml",
+        host="staging.example.test",
     )
     monkeypatch.setattr(
         app_chart,
@@ -1221,7 +1222,9 @@ def test_app_chart_cmd_preflight_reports_template_failure(
     )
 
     assert app_chart.cmd_preflight(args) == 2
-    assert "render failed" in capsys.readouterr().err
+    error = capsys.readouterr().err
+    _assert_preflight_failure_context(error, "helm template")
+    assert "render failed" in error
 
 
 def test_app_chart_cmd_preflight_reports_helm_show_failure(
@@ -1237,6 +1240,7 @@ def test_app_chart_cmd_preflight_reports_helm_show_failure(
         release="tokenplace",
         namespace="tokenplace",
         values="",
+        host="staging.example.test",
     )
     monkeypatch.setattr(
         app_chart,
@@ -1245,7 +1249,77 @@ def test_app_chart_cmd_preflight_reports_helm_show_failure(
     )
 
     assert app_chart.cmd_preflight(args) == 3
-    assert "chart missing" in capsys.readouterr().err
+    error = capsys.readouterr().err
+    _assert_preflight_failure_context(error, "helm show")
+    assert "chart missing" in error
+
+
+def _assert_preflight_failure_context(error: str, operation: str) -> None:
+    for expected in (
+        operation,
+        "app=tokenplace",
+        "env=staging",
+        "release=tokenplace",
+        "namespace=tokenplace",
+        "chart=oci://ghcr.io/futuroptimist/charts/tokenplace",
+        "version=0.1.3",
+        "tag=main-deadbee",
+        "host=staging.example.test",
+    ):
+        assert expected in error
+    assert "sentinel-super-secret" not in error
+
+
+def _preflight_args() -> argparse.Namespace:
+    return argparse.Namespace(
+        app="tokenplace",
+        env="staging",
+        tag="main-deadbee",
+        chart="oci://ghcr.io/futuroptimist/charts/tokenplace",
+        version_file="docs/apps/tokenplace.version",
+        version="0.1.3",
+        release="tokenplace",
+        namespace="tokenplace",
+        values="",
+        host="staging.example.test",
+    )
+
+
+def test_app_chart_cmd_preflight_reports_helm_launch_failure(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def missing_helm(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise FileNotFoundError("helm executable missing")
+
+    monkeypatch.setattr(subprocess, "run", missing_helm)
+
+    assert app_chart.cmd_preflight(_preflight_args()) == 127
+    error = capsys.readouterr().err
+    _assert_preflight_failure_context(error, "helm show")
+    assert "helm executable missing" in error
+    assert "Traceback" not in error
+
+
+def test_app_chart_cmd_preflight_reports_ruby_psych_launch_failure(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(
+        app_chart,
+        "helm_show",
+        lambda chart, version: subprocess.CompletedProcess([], 0, "apiVersion: v2\n", ""),
+    )
+
+    def missing_ruby(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise FileNotFoundError("ruby executable missing")
+
+    monkeypatch.setattr(subprocess, "run", missing_ruby)
+
+    assert app_chart.cmd_preflight(_preflight_args()) == 1
+    error = capsys.readouterr().err
+    _assert_preflight_failure_context(error, "chart metadata parsing")
+    assert "YAML parser launch failed" in error
+    assert "ruby executable missing" in error
+    assert "Traceback" not in error
 
 
 def test_app_chart_cmd_preflight_reports_missing_app_container_envs(
