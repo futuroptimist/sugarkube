@@ -479,6 +479,8 @@ def run_helper(
     retry_attempts="3",
     retry_interval="1",
     action=None,
+    curl_mode="success",
+    forward_line="Forwarding from 127.0.0.1:43127 -> 9093",
 ):
     """Run the lifecycle against deterministic command stubs and return its audit log."""
     bin_dir = tmp_path / "bin"
@@ -521,7 +523,13 @@ case "$*" in
     [ "$KUBECTL_MODE" != malformed-alertmanager ] && sed 's/^/    /' "$ALERTMANAGER_CONFIG" || printf '%s\n' '    route: [unterminated'
     ;;
   *"get secret alertmanager-pagerduty -o go-template="*) [ "$KUBECTL_MODE" != missing-pagerduty ] || exit 44; [ "$KUBECTL_MODE" != empty-pagerduty ] && echo present ;;
-  *"create --raw "*"/api/v2/alerts -f -"*) cat > "$ALERT_PAYLOAD"; echo response-sentinel; [ "$KUBECTL_MODE" != api-fail ] ;;
+  *"port-forward --address=127.0.0.1 service/kube-prometheus-stack-alertmanager :9093"*)
+    echo $$ > "$FORWARD_PID"
+    trap 'echo terminated > "$FORWARD_REAPED"; exit 0' TERM INT
+    [ "$KUBECTL_MODE" != forward-exit ] || { echo port-forward-sentinel >&2; exit 42; }
+    [ "$KUBECTL_MODE" = forward-timeout ] || echo "$FORWARD_LINE"
+    while :; do /bin/sleep 1; done
+    ;;
   *"get ingress "*) exit 0 ;;
   *"get svc kube-prometheus-stack-grafana"*) echo 30300 ;;
   *"get servicemonitor dspace"*"metadata.labels.release"*) [ "$KUBECTL_MODE" = wrong-release ] && echo wrong || echo kube-prometheus-stack ;;
@@ -545,6 +553,40 @@ esac
 """,
         encoding="utf-8",
     )
+    (bin_dir / "curl").write_text(
+        """#!/bin/sh
+echo "curl $*" >> "$AUDIT"
+header= data= output= status_output= url=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --header) header=$2; shift 2 ;;
+    --data-binary) data=$2; shift 2 ;;
+    --output) output=$2; shift 2 ;;
+    --write-out) status_output=$2; shift 2 ;;
+    http://*) url=$1; shift ;;
+    --connect-timeout|--max-time) shift 2 ;;
+    --silent|--show-error) shift ;;
+    *) exit 61 ;;
+  esac
+done
+[ "$header" = "Content-Type: application/json" ] || exit 62
+[ "$status_output" = "%{http_code}" ] || exit 63
+[ "$url" = "http://127.0.0.1:43127/api/v2/alerts" ] || exit 64
+case "$data" in @*) cp "${data#@}" "$ALERT_PAYLOAD" ;; *) exit 65 ;; esac
+printf response-sentinel > "$output"
+case "$CURL_MODE" in
+  premature) kill "$(cat "$FORWARD_PID")"; /bin/sleep 1; printf 200 ;;
+  transport) echo curl-sentinel >&2; exit 7 ;;
+  malformed) printf bad-status ;;
+  http415) printf 415 ;;
+  http404) printf 404 ;;
+  http503) printf 503 ;;
+  http000) printf 000 ;;
+  *) printf 200 ;;
+esac
+""",
+        encoding="utf-8",
+    )
     (bin_dir / "sleep").write_text(
         '#!/bin/sh\necho "sleep $*" >> "$AUDIT"\n',
         encoding="utf-8",
@@ -563,6 +605,10 @@ esac
         "TARGET_COUNTER": str(tmp_path / "target-counter"),
         "TARGET_RESPONSE_DELAY": target_response_delay,
         "ALERT_PAYLOAD": str(tmp_path / "alert-payload"),
+        "CURL_MODE": curl_mode,
+        "FORWARD_LINE": forward_line,
+        "FORWARD_PID": str(tmp_path / "port-forward.pid"),
+        "FORWARD_REAPED": str(tmp_path / "port-forward.reaped"),
         "ALERTMANAGER_CONFIG": str(tmp_path / "alertmanager-config.yaml"),
         "SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_ATTEMPTS": retry_attempts,
         "SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_INTERVAL_SECONDS": retry_interval,
@@ -719,7 +765,15 @@ def test_pagerduty_fire_and_resolve_share_labels_and_bound_end_times(tmp_path):
         tmp_path / "resolve", "pagerduty-test", action="action=resolve"
     )
     assert fired.returncode == resolved.returncode == 0
-    assert "create --raw" in fire_audit and "create --raw" in resolve_audit
+    for audit in (fire_audit, resolve_audit):
+        assert "create --raw" not in audit
+        assert (
+            "port-forward --address=127.0.0.1 "
+            "service/kube-prometheus-stack-alertmanager :9093" in audit
+        )
+        assert "--header Content-Type: application/json" in audit
+        assert "--data-binary @" in audit
+        assert "http://127.0.0.1:43127/api/v2/alerts" in audit
     fire = json.loads((tmp_path / "fire" / "alert-payload").read_text())[0]
     resolve = json.loads((tmp_path / "resolve" / "alert-payload").read_text())[0]
     expected = {
@@ -734,25 +788,85 @@ def test_pagerduty_fire_and_resolve_share_labels_and_bound_end_times(tmp_path):
     fire_end = datetime.fromisoformat(fire["endsAt"].replace("Z", "+00:00"))
     resolve_end = datetime.fromisoformat(resolve["endsAt"].replace("Z", "+00:00"))
     assert 14 * 60 <= (fire_end - resolve_end).total_seconds() <= 16 * 60
-    assert set(fire["annotations"]) == {"summary", "description", "runbook_url"}
+    assert (
+        fire["annotations"]
+        == resolve["annotations"]
+        == {
+            "summary": "Sugarkube staging PagerDuty delivery test",
+            "description": (
+                "Operator-triggered synthetic alert for the staging PagerDuty fire/resolve drill."
+            ),
+            "runbook_url": (
+                "https://github.com/futuroptimist/sugarkube/blob/main/"
+                "docs/observability-operations.md#pagerduty-staging-fire-and-resolve-runbook"
+            ),
+        }
+    )
+    assert fire["startsAt"] == resolve["startsAt"] == "2020-01-01T00:00:00Z"
 
 
 @pytest.mark.parametrize("action", ["fire", "resolve"])
 def test_pagerduty_direct_bare_actions_remain_supported(tmp_path, action):
     result, audit = run_helper(tmp_path, "pagerduty-test", action=action)
-    assert result.returncode == 0 and "create --raw" in audit
+    assert result.returncode == 0 and "create --raw" not in audit and "curl " in audit
     assert "response-sentinel" not in result.stdout + result.stderr
-    assert not list(tmp_path.glob("sugarkube-alertmanager-response.*"))
+    assert not list(tmp_path.glob("sugarkube-alertmanager-test.*"))
+    assert (tmp_path / "port-forward.reaped").read_text().strip() == "terminated"
+    assert not Path(f"/proc/{int((tmp_path / 'port-forward.pid').read_text())}").exists()
 
 
-def test_pagerduty_api_failure_is_redacted_and_cleans_response(tmp_path):
-    result, _ = run_helper(
-        tmp_path, "pagerduty-test", action="action=fire", kubectl_mode="api-fail"
-    )
+@pytest.mark.parametrize(
+    "curl_mode", ["transport", "http000", "malformed", "http415", "http404", "http503"]
+)
+def test_pagerduty_api_failure_is_redacted_and_cleans_response(tmp_path, curl_mode):
+    result, _ = run_helper(tmp_path, "pagerduty-test", action="action=fire", curl_mode=curl_mode)
     assert result.returncode == 18
     assert "response redacted" in result.stderr
     assert "response-sentinel" not in result.stdout + result.stderr
-    assert not list(tmp_path.glob("sugarkube-alertmanager-response.*"))
+    assert "curl-sentinel" not in result.stdout + result.stderr
+    assert not list(tmp_path.glob("sugarkube-alertmanager-test.*"))
+    assert (tmp_path / "port-forward.reaped").read_text().strip() == "terminated"
+    assert not Path(f"/proc/{int((tmp_path / 'port-forward.pid').read_text())}").exists()
+
+
+def test_pagerduty_rejects_port_forward_exit_during_submission(tmp_path):
+    result, _ = run_helper(tmp_path, "pagerduty-test", action="fire", curl_mode="premature")
+    assert result.returncode == 19
+    assert "diagnostics redacted" in result.stderr
+    assert "response-sentinel" not in result.stdout + result.stderr
+    assert not list(tmp_path.glob("sugarkube-alertmanager-test.*"))
+    assert (tmp_path / "port-forward.reaped").read_text().strip() == "terminated"
+    assert not Path(f"/proc/{int((tmp_path / 'port-forward.pid').read_text())}").exists()
+
+
+@pytest.mark.parametrize(
+    ("mode", "forward_line"),
+    [
+        ("forward-exit", "Forwarding from 127.0.0.1:43127 -> 9093"),
+        ("forward-timeout", "Forwarding from 127.0.0.1:43127 -> 9093"),
+        ("healthy", "Forwarding from 127.0.0.1:43127 -> 9094"),
+        ("healthy", "Forwarding from 0.0.0.0:43127 -> 9093"),
+        ("healthy", "noise Forwarding from 127.0.0.1:43127 -> 9093"),
+    ],
+)
+def test_pagerduty_port_forward_failures_are_closed_redacted_and_cleaned(
+    tmp_path, mode, forward_line
+):
+    result, audit = run_helper(
+        tmp_path,
+        "pagerduty-test",
+        action="fire",
+        kubectl_mode=mode,
+        forward_line=forward_line,
+    )
+    assert result.returncode == 19
+    assert "curl " not in audit
+    assert "port-forward-sentinel" not in result.stdout + result.stderr
+    assert forward_line not in result.stdout + result.stderr
+    assert "diagnostics redacted" in result.stderr
+    assert not list(tmp_path.glob("sugarkube-alertmanager-test.*"))
+    if (tmp_path / "port-forward.pid").exists():
+        assert not Path(f"/proc/{int((tmp_path / 'port-forward.pid').read_text())}").exists()
 
 
 def test_status_requires_staging_identity(tmp_path):
