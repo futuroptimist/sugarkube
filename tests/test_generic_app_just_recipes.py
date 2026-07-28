@@ -2109,9 +2109,16 @@ def test_app_redeploy_prints_chart_pin_reminder_without_latest_lookup_or_pin_mut
 
 
 @pytest.mark.usefixtures("ensure_just_available")
-@pytest.mark.parametrize("app", ["tokenplace", "danielsmith", "jobbot3000"])
+@pytest.mark.parametrize(
+    ("app", "staging_host"),
+    [
+        ("tokenplace", "staging.token.place"),
+        ("danielsmith", "staging.danielsmith.io"),
+        ("jobbot3000", "staging.jobbot3000.tech"),
+    ],
+)
 def test_standard_app_redeploy_has_authoritative_values_and_render_mutation_parity(
-    app: str, generic_app_stub_env: dict[str, str]
+    app: str, staging_host: str, generic_app_stub_env: dict[str, str]
 ) -> None:
     result = _run_just(
         ["app-redeploy", f"app={app}", "env=staging", "tag=main-deadbee"],
@@ -2135,11 +2142,130 @@ def test_standard_app_redeploy_has_authoritative_values_and_render_mutation_pari
         return inputs
 
     assert release_inputs(rendered) == release_inputs(mutated)
+    host_override = f"ingress.host={staging_host}"
+    assert host_override in rendered
+    assert host_override in mutated
     base = f"docs/examples/{app}.values.dev.yaml"
     overlay = f"docs/examples/{app}.values.staging.yaml"
     assert mutated.index(base) < mutated.index(overlay)
     assert "image.tag=main-deadbee" in mutated
     assert "image.pullPolicy=Always" in mutated
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+@pytest.mark.parametrize(
+    ("values_contents", "diagnostic"),
+    [
+        ("ingress: [invalid\n", "values parsing failed while resolving ingress host"),
+        ("ingress:\n  enabled: true\n", "no nonempty ingress.host was resolved"),
+    ],
+)
+def test_app_redeploy_host_resolution_failure_stops_before_release_activity(
+    tmp_path: Path,
+    values_contents: str,
+    diagnostic: str,
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    values = tmp_path / "values.yaml"
+    values.write_text(values_contents, encoding="utf-8")
+    config = tmp_path / "tokenplace.env"
+    config.write_text(
+        "\n".join(
+            [
+                "SUGARKUBE_APP=tokenplace",
+                "SUGARKUBE_RELEASE=tokenplace",
+                "SUGARKUBE_NAMESPACE=tokenplace",
+                "SUGARKUBE_CHART=oci://ghcr.io/futuroptimist/charts/tokenplace",
+                "SUGARKUBE_VERSION=0.1.3",
+                f"SUGARKUBE_VALUES_STAGING={values}",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    evidence = tmp_path / "evidence.json"
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_APP_CONFIG_DIR"] = str(tmp_path)
+
+    result = _run_just(
+        [
+            "app-redeploy",
+            "app=tokenplace",
+            "env=staging",
+            "tag=main-deadbee",
+            f"evidence={evidence}",
+        ],
+        env,
+    )
+
+    assert result.returncode != 0
+    assert diagnostic in result.stderr
+    assert "Traceback" not in result.stderr
+    helm_log = Path(generic_app_stub_env["HELM_LOG"])
+    assert not helm_log.exists() or helm_log.read_text(encoding="utf-8") == ""
+    commands = (tmp_path / "commands.log").read_text(encoding="utf-8")
+    assert "helm template" not in commands
+    assert "helm upgrade" not in commands
+    assert "rollout" not in commands
+    assert not evidence.exists()
+    assert not Path(f"{evidence}.reservation").exists()
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_helm_oci_install_and_upgrade_keep_authoritative_inputs_identical(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    common_args = [
+        "release=tokenplace",
+        "namespace=tokenplace",
+        "chart=oci://ghcr.io/futuroptimist/charts/tokenplace",
+        "values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml",
+        "host=staging.token.place",
+        "version=0.1.3",
+        "tag=main-deadbee",
+        "env=staging",
+        "app=tokenplace",
+    ]
+    mutations: dict[str, list[str]] = {}
+    helm_log_path = Path(generic_app_stub_env["HELM_LOG"])
+    for recipe in ("helm-oci-install", "helm-oci-upgrade"):
+        helm_log_path.unlink(missing_ok=True)
+        result = _run_just([recipe, *common_args], generic_app_stub_env)
+        assert result.returncode == 0, result.stderr + result.stdout
+        lines = helm_log_path.read_text(encoding="utf-8").splitlines()
+        mutations[recipe] = next(line.split() for line in lines if line.startswith("upgrade "))
+
+    install = mutations["helm-oci-install"]
+    upgrade = mutations["helm-oci-upgrade"]
+    assert "--install" in install
+    assert "--create-namespace" in install
+    assert "--install" not in upgrade
+    assert "--create-namespace" not in upgrade
+    prohibited = {"--reuse-values", "--reset-values", "--reset-then-reuse-values"}
+    assert prohibited.isdisjoint(install)
+    assert prohibited.isdisjoint(upgrade)
+
+    def release_inputs(command: list[str]) -> list[str]:
+        inputs = command[1:3]
+        for flag in ("--namespace", "--version", "-f", "--set"):
+            for index, argument in enumerate(command[:-1]):
+                if argument == flag:
+                    inputs.extend(command[index : index + 2])
+        return inputs
+
+    assert release_inputs(install) == release_inputs(upgrade)
+    for expected in (
+        "docs/examples/tokenplace.values.dev.yaml",
+        "docs/examples/tokenplace.values.staging.yaml",
+        "ingress.host=staging.token.place",
+        "image.tag=main-deadbee",
+        "image.pullPolicy=Always",
+    ):
+        assert expected in install
+        assert expected in upgrade
+    assert install.index("docs/examples/tokenplace.values.dev.yaml") < install.index(
+        "docs/examples/tokenplace.values.staging.yaml"
+    )
 
 
 def test_standard_helm_helper_source_cannot_reintroduce_historical_values() -> None:

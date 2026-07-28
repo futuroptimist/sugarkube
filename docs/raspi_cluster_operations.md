@@ -819,10 +819,10 @@ just dspace-oci-redeploy env=prod tag="$(read_prod_tag)"
 
 Under the hood, both commands call the shared `_helm-oci-deploy` helper via
 `helm-oci-upgrade`, performing `helm upgrade` against the running release without
-`--reuse-values` and then forcing a `kubectl rollout restart deploy/dspace` to ensure
-pods recycle. The proposed chart defaults plus the complete ordered Git-controlled
-values chain and explicit host/image overrides are authoritative. Move intentional
-configuration into reviewed values files or established Secret references before
+`--reuse-values`. It discovers the release-associated, rollout-tracked workloads and
+waits for each one with `kubectl rollout status`; it does not force a rollout restart.
+The proposed chart defaults plus the complete ordered Git-controlled values chain and explicit
+host/image overrides are authoritative. Move intentional configuration into reviewed values files or established Secret references before
 upgrading; Helm history is evidence and rollback metadata, not desired state. The
 helper waits for the rollout to finish and exits non-zero if Kubernetes reports a
 failure.
