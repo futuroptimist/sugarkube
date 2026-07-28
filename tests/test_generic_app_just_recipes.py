@@ -805,6 +805,41 @@ def test_generic_render_contract_rejects_structural_mismatches(manifest: str, me
     assert any(message in error for error in app_chart.validate_rendered_manifest(manifest, inputs))
 
 
+@pytest.mark.parametrize("wrong_first", [False, True])
+def test_generic_render_contract_rejects_wrong_image_in_any_coherent_workload(
+    wrong_first: bool,
+) -> None:
+    correct = _generic_manifest()
+    wrong = _generic_manifest(release="sample-worker", tag="wrong-deadbee").replace(
+        "app.kubernetes.io/instance: sample-worker",
+        "app.kubernetes.io/instance: sample",
+    )
+    manifest = "\n---\n".join((wrong, correct) if wrong_first else (correct, wrong))
+    inputs = app_chart.ReleaseInputs(
+        "sample", "staging", "sample", "sample", "chart", "1.0.0", (), "main-deadbee", ""
+    )
+
+    errors = app_chart.validate_rendered_manifest(manifest, inputs)
+
+    assert any("Deployment sample-worker container sample" in error for error in errors)
+    assert any("exact requested image tag" in error for error in errors)
+
+
+def test_generic_render_contract_ignores_wrong_image_in_unassociated_workload() -> None:
+    associated = _generic_manifest().replace(
+        "image: example/sample:main-deadbee",
+        "image: example/sample:main-deadbee\n        - name: metrics\n          image: example/metrics:wrong",
+    )
+    unrelated = _generic_manifest(
+        release="other", tag="wrong-deadbee", labels="    app.kubernetes.io/instance: other"
+    )
+    inputs = app_chart.ReleaseInputs(
+        "sample", "staging", "sample", "sample", "chart", "1.0.0", (), "main-deadbee", ""
+    )
+
+    assert app_chart.validate_rendered_manifest(f"{associated}\n---\n{unrelated}", inputs) == []
+
+
 def test_render_contract_normalizes_quoted_host_and_scopes_namespace_to_metadata() -> None:
     manifest = _generic_manifest(host='"sample.example.test"')
     manifest = manifest.replace("spec:\n  template:", "spec:\n  namespace: unrelated\n  template:")

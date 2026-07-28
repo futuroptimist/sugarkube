@@ -174,7 +174,7 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
     expected_suffix = f":{inputs.tag}"
     errors: list[str] = []
     coherent_workload = False
-    correct_image = False
+    intended_container_found = False
     for document in documents:
         if not isinstance(document, dict):
             continue
@@ -205,10 +205,14 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
                     item
                     for item in containers if isinstance(item, dict) and scalar(item.get("name")) in candidates
                 ] if found and isinstance(containers, list) else []
-                if intended and all(
-                    scalar(item.get("image")).endswith(expected_suffix) for item in intended
-                ):
-                    correct_image = True
+                intended_container_found = intended_container_found or bool(intended)
+                for item in intended:
+                    if not scalar(item.get("image")).endswith(expected_suffix):
+                        errors.append(
+                            f"rendered {kind} {name or '<unnamed>'} container "
+                            f"{scalar(item.get('name')) or '<unnamed>'} does not use the exact "
+                            "requested image tag"
+                        )
         if kind == "Ingress" and associated:
             found, rules = nested_value(document, ("spec", "rules"))
             if found and isinstance(rules, list):
@@ -221,7 +225,7 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
         errors.append("no rollout-capable application workload rendered")
     elif not coherent_workload:
         errors.append("no workload has a supported label or annotation for the requested release")
-    if workloads and not correct_image:
+    if workloads and not intended_container_found:
         errors.append("intended application container does not use the exact requested image tag")
     if inputs.host and inputs.host not in ingress_hosts:
         errors.append(f"no Ingress rule exactly matches expected host {inputs.host!r}")
