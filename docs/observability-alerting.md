@@ -117,9 +117,12 @@ What each check detects, and does not:
 - Route only explicitly named, reviewed, and tested Sugarkube alerts to PagerDuty — an allowlist, not
   the chart's entire default rule set. Do not forward `kube-prometheus-stack`'s bundled rules
   wholesale before auditing each one individually.
-- Use Alertmanager's PagerDuty integration with a secret file reference, for example
-  `routing_key_file: /etc/alertmanager/secrets/pagerduty-routing-key`, never an inline key committed to
-  Git.
+- Staging repository support now mounts `monitoring/alertmanager-pagerduty` and reads its
+  `routing-key` key from
+  `/etc/alertmanager/secrets/alertmanager-pagerduty/routing-key`; the credential is never inline.
+  The only PagerDuty route is the exact `SugarkubePagerDutyTest` synthetic allowlist. This is
+  repository support, not evidence that it has been deployed or that phone delivery and resolution
+  have been manually proven.
 - Set `send_resolved: true` on the PagerDuty receiver so incidents auto-resolve when the underlying
   alert clears.
 - Define sensible `group_by`, `group_wait`, `group_interval`, and `repeat_interval` values so a single
@@ -151,9 +154,9 @@ These are the current alert-design candidates, not proof the rules already exist
 A safe, phased sequence — each step depends on the previous one succeeding:
 
 1. Establish PagerDuty and Healthchecks.io accounts and integrations manually (outside this repo).
-2. Add secret-safe Alertmanager receiver configuration (`routing_key_file`, no inline secrets),
-   still routed to nothing by default.
-3. Send and resolve a synthetic PagerDuty test alert to prove the receiver config and phone delivery
+2. Deploy and verify the repository's secret-safe receiver foundation (`routing_key_file`, no inline
+   secrets); the root remains the null receiver and only the synthetic test is allowlisted.
+3. Manually send and resolve the synthetic PagerDuty test alert to prove receiver and phone delivery
    work end-to-end, independent of any real Sugarkube rule.
 4. Add and verify the external node heartbeats and the observability watchdog against Healthchecks.io.
    Confirm the watchdog's dedicated Alertmanager timing and the Healthchecks.io period/grace match
