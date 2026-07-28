@@ -27,6 +27,8 @@ exists.
   `prometheus-to-blackbox-exporter.yaml`.
 - Helper: `scripts/observability_blackbox.sh`, exposed by
   `just observability-blackbox-*`.
+- Alert delivery for the probe signals defined here (`PublicEndpointDown`, `PublicProbeMissing`,
+  `TLSExpiringSoon`): see the canonical [`docs/observability-alerting.md`](observability-alerting.md).
 
 Repository configuration is not evidence that these resources are deployed.
 Live evidence comes only from the separate post-merge rollout and validation.
