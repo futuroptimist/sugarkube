@@ -78,9 +78,20 @@ Planned checks:
   `systemd` timer running directly on that node, pinging its own dedicated Healthchecks.io check.
 - One observability watchdog heartbeat whose successful path traverses Prometheus and Alertmanager
   before reaching Healthchecks.io (for example, a Prometheus rule that is always true, routed through
-  Alertmanager to a webhook receiver that pings Healthchecks.io on every evaluation). A missed ping
-  means either Prometheus stopped evaluating, Alertmanager stopped routing, or the path between them
-  and the outside world broke — not that a specific rule fired.
+  Alertmanager to a webhook receiver that pings Healthchecks.io for each Alertmanager notification).
+  Alertmanager does not notify on every Prometheus rule evaluation: its `group_wait`,
+  `group_interval`, and `repeat_interval` control notification timing. A missed ping means either
+  Prometheus stopped evaluating, Alertmanager stopped routing, or the path between them and the
+  outside world broke — not that a specific rule fired.
+
+The watchdog route must have an explicit timing contract rather than inheriting the general alert
+route. The initial target is a 1-minute rule evaluation interval, `group_wait: 30s`, and a
+watchdog-specific `repeat_interval: 5m`. Configure the Healthchecks.io check for a 5-minute expected
+period plus at least 2 minutes of grace, allowing for delivery jitter without hiding a sustained
+failure. Keep `group_interval` at or below 5 minutes so grouping changes cannot postpone the next
+watchdog notification beyond the expected ping period. If these values change, preserve the
+invariant that the maximum healthy notification gap is no longer than the Healthchecks.io period,
+with grace reserved for jitter, and update both systems together.
 
 Node heartbeats are host-level `systemd` timers rather than Kubernetes CronJobs deliberately: a
 CronJob only proves the k3s control plane can still schedule pods somewhere in the cluster, not that a
@@ -144,6 +155,8 @@ A safe, phased sequence — each step depends on the previous one succeeding:
 3. Send and resolve a synthetic PagerDuty test alert to prove the receiver config and phone delivery
    work end-to-end, independent of any real Sugarkube rule.
 4. Add and verify the external node heartbeats and the observability watchdog against Healthchecks.io.
+   Confirm the watchdog's dedicated Alertmanager timing and the Healthchecks.io period/grace match
+   the contract in §3; observe multiple repeat notifications before declaring the path healthy.
 5. Audit the existing `kube-prometheus-stack` bundled node rules (starting with `KubeNodeNotReady`).
 6. Enable the node-down route in Alertmanager's allowlist.
 7. Identify which staging nodes currently host Prometheus and Alertmanager.
@@ -154,9 +167,13 @@ A safe, phased sequence — each step depends on the previous one succeeding:
 10. Only after that external-redundancy path is proven, intentionally power down the node hosting
     Prometheus/Alertmanager and confirm Healthchecks.io — not PagerDuty via Alertmanager — detects the
     missing heartbeat and still reaches a phone.
-11. Add custom application and blackbox alerts one at a time, each with its own drill before the next
+11. Drill the watchdog timing separately: stop its Alertmanager receiver immediately after a
+    successful ping and confirm Healthchecks.io declares it late after the 5-minute period plus grace,
+    then restore it and confirm the next notification recovers the check. Record observed notification
+    gaps and detection latency; fail the drill if a healthy gap exceeds the configured period.
+12. Add custom application and blackbox alerts one at a time, each with its own drill before the next
     is added.
-12. Return to `DspaceChatSyntheticFailed` once token.place staging inference is operational again
+13. Return to `DspaceChatSyntheticFailed` once token.place staging inference is operational again
     (see [§8](#8-status-and-dependencies)).
 
 Rollback and noise control:

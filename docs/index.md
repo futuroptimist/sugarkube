@@ -32,7 +32,7 @@ Review the safety notes before working with power components.
 - [pi_support_bundles.md](pi_support_bundles.md) — collect diagnostics into shareable archives
 - [pi_image_telemetry.md](pi_image_telemetry.md) — opt-in anonymized telemetry for fleet dashboards
 - [observability-design.md](observability-design.md) — canonical Prometheus/Grafana observability
-  design across Sugarkube, DSPACE, token.place, and danielsmith.io
+  design across Sugarkube, DSPACE, token.place, danielsmith.io, and jobbot3000
 - [observability-operations.md](observability-operations.md) — staging-only non-Flux kube-prometheus-stack operations runbook
 - [observability-blackbox.md](observability-blackbox.md) — staging blackbox exporter and public probe lifecycle runbook
 - [observability-alerting.md](observability-alerting.md) — canonical alerting strategy: PagerDuty/Healthchecks.io target architecture, routing policy, and rollout/drill plan
