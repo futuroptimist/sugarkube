@@ -575,6 +575,8 @@ def test_app_chart_deployment_env_parser_accepts_quoted_release_container() -> N
 kind: Deployment
 metadata:
   name: custom-release
+  labels:
+    app.kubernetes.io/instance: custom-release
 spec:
   template:
     spec:
@@ -1287,7 +1289,6 @@ def test_app_chart_cmd_preflight_reports_missing_app_container_envs(
 def test_app_chart_cmd_preflight_rejects_envs_split_across_candidate_containers(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(app_chart, "validate_rendered_manifest", lambda manifest, inputs: [])
     args = argparse.Namespace(
         app="tokenplace",
         env="staging",
@@ -1312,15 +1313,21 @@ def test_app_chart_cmd_preflight_rejects_envs_split_across_candidate_containers(
             0,
             "apiVersion: apps/v1\n"
             "kind: Deployment\n"
+            "metadata:\n"
+            "  name: tokenplace\n"
+            "  labels:\n"
+            "    app.kubernetes.io/instance: tokenplace\n"
             "spec:\n"
             "  template:\n"
             "    spec:\n"
             "      containers:\n"
             "        - name: relay\n"
+            "          image: ghcr.io/example/tokenplace:main-deadbee\n"
             "          env:\n"
             "            - name: TOKENPLACE_IMAGE_TAG\n"
             "            - name: TOKENPLACE_RELEASE_VERSION\n"
             "        - name: tokenplace\n"
+            "          image: ghcr.io/example/tokenplace:main-deadbee\n"
             "          env:\n"
             "            - name: TOKENPLACE_CHART_VERSION\n"
             "            - name: TOKENPLACE_DEPLOY_ENV\n",
@@ -1338,6 +1345,9 @@ def test_app_chart_cmd_preflight_rejects_envs_split_across_candidate_containers(
 def test_deployment_app_container_env_sets_handles_container_name_after_image() -> None:
     manifest = """apiVersion: apps/v1
 kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/instance: tokenplace
 spec:
   template:
     spec:
@@ -1367,6 +1377,9 @@ spec:
 def test_deployment_app_container_env_sets_ignores_nested_names_before_container_name() -> None:
     manifest = """apiVersion: apps/v1
 kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/instance: tokenplace
 spec:
   template:
     spec:
@@ -1402,6 +1415,9 @@ spec:
 def test_deployment_app_container_env_sets_handles_env_before_container_name() -> None:
     manifest = """apiVersion: apps/v1
 kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/instance: tokenplace
 spec:
   template:
     spec:
@@ -1428,10 +1444,88 @@ spec:
     ]
 
 
+def test_deployment_app_container_env_sets_rejects_name_only_association() -> None:
+    manifest = """apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tokenplace
+spec:
+  template:
+    spec:
+      containers:
+        - name: relay
+          env:
+            - name: TOKENPLACE_IMAGE_TAG
+"""
+
+    assert app_chart.deployment_app_container_env_sets(
+        manifest, "tokenplace", "tokenplace"
+    ) == []
+
+
+def test_app_chart_cmd_preflight_rejects_metadata_from_unrelated_deployment(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    args = argparse.Namespace(
+        app="tokenplace",
+        env="staging",
+        tag="main-deadbee",
+        chart="oci://ghcr.io/futuroptimist/charts/tokenplace",
+        version_file="docs/apps/tokenplace.version",
+        version="0.1.3",
+        release="tokenplace",
+        namespace="tokenplace",
+        values="",
+    )
+    monkeypatch.setattr(
+        app_chart,
+        "helm_show",
+        lambda chart, version: subprocess.CompletedProcess([], 0, "apiVersion: v2\n", ""),
+    )
+    manifest = """apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tokenplace
+  labels:
+    app.kubernetes.io/instance: tokenplace
+spec:
+  template:
+    spec:
+      containers:
+        - name: relay
+          image: ghcr.io/example/tokenplace:main-deadbee
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: unrelated
+  labels:
+    app.kubernetes.io/instance: unrelated
+spec:
+  template:
+    spec:
+      containers:
+        - name: relay
+          image: ghcr.io/example/tokenplace:main-deadbee
+          env:
+            - name: TOKENPLACE_IMAGE_TAG
+            - name: TOKENPLACE_RELEASE_VERSION
+            - name: TOKENPLACE_CHART_VERSION
+            - name: TOKENPLACE_DEPLOY_ENV
+"""
+    monkeypatch.setattr(
+        app_chart,
+        "run",
+        lambda cmd: subprocess.CompletedProcess(cmd, 0, manifest, ""),
+    )
+
+    assert app_chart.cmd_preflight(args) == 1
+    assert "missing required metadata env vars" in capsys.readouterr().err
+
+
 def test_app_chart_cmd_preflight_passes_when_relay_envs_present(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(app_chart, "validate_rendered_manifest", lambda manifest, inputs: [])
     args = argparse.Namespace(
         app="tokenplace",
         env="staging",
@@ -1454,7 +1548,14 @@ def test_app_chart_cmd_preflight_passes_when_relay_envs_present(
         lambda cmd: subprocess.CompletedProcess(
             cmd,
             0,
-            "apiVersion: apps/v1\nkind: Deployment\nspec:\n  template:\n    spec:\n      containers:\n        - name: relay\n          env:\n            - name: TOKENPLACE_IMAGE_TAG\n            - name: TOKENPLACE_RELEASE_VERSION\n            - name: TOKENPLACE_CHART_VERSION\n            - name: TOKENPLACE_DEPLOY_ENV\n",
+            "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  annotations:\n"
+            "    meta.helm.sh/release-name: tokenplace\nspec:\n  template:\n    spec:\n"
+            "      containers:\n        - name: relay\n"
+            "          image: ghcr.io/example/tokenplace:main-deadbee\n          env:\n"
+            "            - name: TOKENPLACE_IMAGE_TAG\n"
+            "            - name: TOKENPLACE_RELEASE_VERSION\n"
+            "            - name: TOKENPLACE_CHART_VERSION\n"
+            "            - name: TOKENPLACE_DEPLOY_ENV\n",
             "",
         ),
     )

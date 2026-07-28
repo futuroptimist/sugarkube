@@ -337,83 +337,37 @@ def deployment_app_container_env_sets(
     """Return env var names for each candidate Deployment application container."""
     candidates = {app, release, *APP_CONTAINER_NAMES.get(app, set())}
     found: list[tuple[str, set[str]]] = []
-
-    def scalar_value(value: str) -> str:
-        return value.split("#", 1)[0].strip().strip("\"'")
-
-    def parse_container_block(block: list[str]) -> tuple[str, set[str]]:
-        container_name = ""
-        envs: set[str] = set()
-        in_env = False
-        env_indent = -1
-        item_indent = len(block[0]) - len(block[0].lstrip(" ")) if block else -1
-        field_indent = item_indent + 2
-        for line in block:
-            stripped = line.strip()
-            indent = len(line) - len(line.lstrip(" "))
-            if in_env and indent <= env_indent and stripped:
-                in_env = False
-            if in_env and indent == field_indent and re.match(r"^[A-Za-z0-9_.-]+:\s*", stripped):
-                in_env = False
-            item_name_match = re.match(r"^\s*-\s*name:\s*(.+)$", line)
-            field_name_match = re.match(r"^\s*name:\s*(.+)$", line)
-            if not in_env and not container_name:
-                if item_name_match and indent == item_indent:
-                    container_name = scalar_value(item_name_match.group(1))
-                    continue
-                if field_name_match and indent == field_indent:
-                    container_name = scalar_value(field_name_match.group(1))
-                    continue
-            if (stripped == "env:" and indent == field_indent) or (
-                stripped == "- env:" and indent == item_indent
-            ):
-                in_env = True
-                env_indent = indent
-                continue
-            if in_env:
-                env_match = re.match(r"^\s*-\s*name:\s*(.+)$", line)
-                if env_match and indent > env_indent:
-                    envs.add(scalar_value(env_match.group(1)))
-        return container_name, envs
-
-    def flush_block(block: list[str]) -> None:
-        container_name, envs = parse_container_block(block)
-        if container_name in candidates:
-            found.append((container_name, envs))
-
-    for doc in re.split(r"(?m)^---\s*$", manifest):
-        if not re.search(r"(?m)^kind:\s*Deployment\s*$", doc):
+    for document in safe_yaml_documents(manifest):
+        if (
+            not isinstance(document, dict)
+            or scalar(document.get("kind")) != "Deployment"
+            or not release_associated(document, release, allow_name=False)
+        ):
             continue
-        in_containers = False
-        containers_indent = -1
-        container_item_indent = -1
-        current_block: list[str] = []
-        for line in doc.splitlines():
-            stripped = line.strip()
-            indent = len(line) - len(line.lstrip(" "))
-            if not in_containers:
-                if stripped == "containers:":
-                    in_containers = True
-                    containers_indent = indent
+        has_containers, containers = nested_value(
+            document, ("spec", "template", "spec", "containers")
+        )
+        if not has_containers or not isinstance(containers, list):
+            continue
+        for container in containers:
+            if not isinstance(container, dict):
                 continue
-            if indent <= containers_indent and stripped:
-                if current_block:
-                    flush_block(current_block)
-                break
-            item_match = re.match(r"^\s*-\s+", line)
-            if item_match and indent > containers_indent:
-                if container_item_indent == -1:
-                    container_item_indent = indent
-                if indent == container_item_indent:
-                    if current_block:
-                        flush_block(current_block)
-                    current_block = [line]
-                    continue
-            if current_block:
-                current_block.append(line)
-        else:
-            if current_block:
-                flush_block(current_block)
+            container_name = scalar(container.get("name"))
+            if container_name not in candidates:
+                continue
+            envs = container.get("env")
+            found.append(
+                (
+                    container_name,
+                    {
+                        scalar(item.get("name"))
+                        for item in envs
+                        if isinstance(item, dict) and scalar(item.get("name"))
+                    }
+                    if isinstance(envs, list)
+                    else set(),
+                )
+            )
     return found
 
 
