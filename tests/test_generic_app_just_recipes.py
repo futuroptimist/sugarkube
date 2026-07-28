@@ -3697,7 +3697,7 @@ def test_public_helm_helper_rejects_mutation_marker_without_altering_file(
     )
 
     assert result.returncode != 0
-    assert "Justfile does not contain recipe" in result.stderr
+    assert "justfile does not contain recipe" in result.stderr.casefold()
     assert marker.read_text(encoding="utf-8") == "do not alter\n"
     helm_log = Path(generic_app_stub_env["HELM_LOG"])
     assert not helm_log.exists() or helm_log.read_text(encoding="utf-8") == ""
