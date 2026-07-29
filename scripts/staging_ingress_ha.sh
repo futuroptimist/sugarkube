@@ -25,17 +25,22 @@ d.pop("status",None); print(json.dumps(d,sort_keys=True,indent=2))'
 render() { normalize_env "$1"; need kubectl; need python3; cat "$TRAEFIK_CONFIG"; printf '%s\n' '---'; render_coredns; }
 status() { normalize_env "$1"; need kubectl; printf 'Context: %s (read-only)\n' "$(context)"; kubectl -n kube-system get deploy coredns traefik -o wide; kubectl -n kube-system get deploy coredns-ha -o wide --ignore-not-found=true; kubectl -n kube-system get endpoints kube-dns traefik; kubectl get deployment -A -l app.kubernetes.io/name=cloudflare-tunnel -o wide; }
 assert_owned_or_absent() {
-  local kind="$1" name="$2" value error_file
+  local kind="$1" name="$2" value error_file resource_file
   error_file="$(mktemp -t sugarkube-ownership.XXXXXX)"
-  if ! value="$(kubectl -n kube-system get "${kind}/${name}" -o "jsonpath={.metadata.labels['${OWNER_LABEL}']}" 2>"$error_file")"; then
+  resource_file="$(mktemp -t sugarkube-resource.XXXXXX.json)"
+  if ! kubectl -n kube-system get "${kind}/${name}" -o json >"$resource_file" 2>"$error_file"; then
     if grep -q '(NotFound)' "$error_file"; then
-      rm -f "$error_file"
+      rm -f "$error_file" "$resource_file"
       return 0
     fi
-    rm -f "$error_file"
+    rm -f "$error_file" "$resource_file"
     die "unable to inspect ownership of ${kind}/${name}"
   fi
-  rm -f "$error_file"
+  if ! value="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("metadata",{}).get("labels",{}).get(sys.argv[1], ""), end="")' "$OWNER_LABEL" <"$resource_file" 2>/dev/null)"; then
+    rm -f "$error_file" "$resource_file"
+    die "unable to inspect ownership of ${kind}/${name}"
+  fi
+  rm -f "$error_file" "$resource_file"
   [[ "$value" == "$OWNER_VALUE" ]] || die "refusing to modify existing ${kind}/${name}: resource is not owned by this lifecycle"
 }
 apply() {
@@ -73,7 +78,13 @@ nodes={p.get("spec",{}).get("nodeName") for p in pods if ready(p)}-{None}
 print(f"{sys.argv[1]}: ready nodes={sorted(nodes)}")
 if len(nodes)<2: raise SystemExit(f"ERROR: fewer than two ready, hostname-spread {sys.argv[1]} pods")' "$name"
   }
-  kubectl -n kube-system get pods -l k8s-app=kube-dns -o json | check_spread CoreDNS
+  kubectl -n kube-system get endpoints kube-dns -o json | python3 -c '
+import json,sys
+endpoint=json.load(sys.stdin)
+addresses=[a for subset in endpoint.get("subsets",[]) for a in subset.get("addresses",[])]
+nodes={a.get("nodeName") for a in addresses if a.get("nodeName")}
+print(f"CoreDNS: ready endpoint nodes={sorted(nodes)}")
+if len(addresses)<2 or len(nodes)<2: raise SystemExit("ERROR: fewer than two ready, hostname-spread CoreDNS endpoints")'
   kubectl -n kube-system get pods -l app.kubernetes.io/name=traefik -o json | check_spread Traefik
   local tunnel_namespace
   tunnel_namespace="$(kubectl get deployment -A -l app.kubernetes.io/name=cloudflare-tunnel -o json | python3 -c '
@@ -89,10 +100,9 @@ print(items[0]["metadata"]["namespace"])')"
   targets="$(kubectl get probes -A -l environment=staging,criticality=critical -o json | python3 -c '
 import json,sys
 items=json.load(sys.stdin)["items"]
-urls=[item.get("spec",{}).get("url","") for item in items]
-urls=[url for url in urls if url.startswith("https://")]
+urls={url for item in items for url in item.get("spec",{}).get("targets",{}).get("staticConfig",{}).get("static",[]) if isinstance(url,str) and url.startswith("https://")}
 if not urls: raise SystemExit("ERROR: no critical staging HTTPS Probe targets found")
-print("\n".join(urls))')"
+print("\n".join(sorted(urls)))')"
   while IFS= read -r url; do
     curl --fail --silent --max-time 15 --retry 2 --output /dev/null "$url" 2>/dev/null || die "critical staging HTTPS Probe target failed (target redacted)"
   done <<<"$targets"
