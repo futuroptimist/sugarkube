@@ -524,6 +524,7 @@ just app-promote-prod \
   tag=main-REPLACE_SHORTSHA \
   manifest=deployment-candidates/dspace/prod.json \
   staging_evidence=deployment-evidence/dspace/staging/<finalized-record>.json \
+  staging_config=/etc/sugarkube/apps/dspace-staging.env \
   staging_kubeconfig="$HOME/.kube/config-dspace-staging" \
   smoke_runner="$DSPACE_SMOKE_RUNNER"
 ```
@@ -531,8 +532,8 @@ just app-promote-prod \
 Before production rendering, reservation, or mutation, the command validates
 that staging evidence is finalized, compares all immutable release coordinates,
 rechecks the recorded live Helm revision, and reruns the full verifier against
-staging through the explicitly supplied `staging_kubeconfig` (and optional
-`staging_config`). It runs the same verifier after production rollout and before
+staging through the explicitly supplied `staging_config` and
+`staging_kubeconfig`. It runs the same verifier after production rollout and before
 the final production evidence is written. A post-mutation failure leaves the reservation
 for the existing reconciliation procedure; it never writes successful evidence,
 retries, downgrades, or automatically rolls back. Use the reservation recovery

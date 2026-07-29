@@ -741,7 +741,9 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             "--provider",
             target["expectedDefaultChatProvider"],
         ]
-        if getattr(args, "smoke_runner", None) is not None:
+        if args.verifier.expanduser().resolve() == Path(__file__).with_name(
+            "dspace_runtime_verifier.py"
+        ).resolve():
             verifier_command.extend(
                 (
                     "--image-tag",
@@ -858,10 +860,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if (
         args.verifier.expanduser().resolve() == default_verifier.resolve()
-        and args.smoke_runner is None
+        and (
+            args.smoke_runner is None
+            or not args.smoke_runner.expanduser().is_file()
+            or not os.access(args.smoke_runner.expanduser(), os.X_OK)
+        )
     ):
         print(
-            "error: --smoke-runner is required when using the default runtime verifier",
+            "error: --smoke-runner must be an existing executable when using the default runtime verifier",
             file=sys.stderr,
         )
         return 2

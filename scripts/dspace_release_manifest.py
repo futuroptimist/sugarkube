@@ -742,41 +742,17 @@ def finalize(
         },
     ]
     if runtime_verification is not None:
-        _exact_fields(
-            runtime_verification,
-            (
-                "schemaVersion",
-                "environment",
-                "release",
-                "namespace",
-                "applicationVersion",
-                "runtimeSourceRevision",
-                "frontendSourceRevision",
-                "defaultProvider",
-                "journeys",
-            ),
+        # Keep rollback and deployment evidence on one exact verifier contract.
+        from scripts.dspace_manifest_rollback import (  # pylint: disable=import-outside-toplevel
+            RollbackError,
+            validate_verifier_result,
         )
-        expected_runtime = {
-            "schemaVersion": 1,
-            "environment": environment,
-            "release": release,
-            "namespace": namespace,
-            "applicationVersion": value["applicationVersion"],
-            "runtimeSourceRevision": value["sourceRevision"],
-            "frontendSourceRevision": value["sourceRevision"],
-            "defaultProvider": value["expectedDefaultChatProvider"],
-        }
-        if any(
-            runtime_verification.get(key) != expected for key, expected in expected_runtime.items()
-        ):
-            raise ManifestError("runtime verification does not match approved release")
-        journeys = runtime_verification.get("journeys")
-        if (
-            not isinstance(journeys, list)
-            or not all(isinstance(item, dict) and item.get("passed") is True for item in journeys)
-            or not any(item.get("name") == "/chat" for item in journeys)
-        ):
-            raise ManifestError("runtime verification lacks successful public journeys")
+
+        try:
+            validate_verifier_result(runtime_verification, value, environment)
+        except RollbackError as exc:
+            raise ManifestError(f"invalid runtime verification: {exc}") from exc
+        journey_names = ",".join(item["name"] for item in runtime_verification["journeys"])
         results.extend(
             {"check": check, "passed": True, "details": details}
             for check, details in (
@@ -788,7 +764,10 @@ def finalize(
                     "defaultProvider",
                     f"approved default provider={value['expectedDefaultChatProvider']}",
                 ),
-                ("remoteChatSmoke", "isolated /chat journey and provider safety checks passed"),
+                (
+                    "remoteChatSmoke",
+                    f"successful public journeys={journey_names}; provider safety checks passed",
+                ),
             )
         )
     result = dict(value)

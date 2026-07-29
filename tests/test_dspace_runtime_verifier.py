@@ -89,7 +89,12 @@ def test_smoke_is_exact_argv_and_child_output_is_suppressed(
     build = json.dumps({"version": "3.2.0", "revision": SHA, "shortRevision": SHA[:7]}).encode()
     html = f'<meta name="dspace-build-revision" content="{SHA}">'.encode()
     pod = {
-        "metadata": {"name": "dspace-0"},
+        "metadata": {
+            "name": "dspace-0",
+            "ownerReferences": [
+                {"kind": "ReplicaSet", "name": "dspace-rs", "controller": True}
+            ],
+        },
         "spec": {
             "containers": [
                 {"name": "dspace", "image": "ghcr.io/democratizedspace/dspace:main-abcdef0"}
@@ -105,10 +110,37 @@ def test_smoke_is_exact_argv_and_child_output_is_suppressed(
     def runner(command: list[str]) -> str:
         if command[0] == "helm":
             return json.dumps(
-                {"version": 7, "chart": {"metadata": {"name": "dspace", "version": "3.2.0"}}}
+                {
+                    "name": "dspace",
+                    "namespace": "dspace",
+                    "version": 7,
+                    "info": {"status": "deployed"},
+                    "chart": {"metadata": {"name": "dspace", "version": "3.2.0"}},
+                }
             )
         if "pods" in command:
             return json.dumps({"items": [pod]})
+        if "replicasets,deployments" in command:
+            return json.dumps(
+                {
+                    "items": [
+                        {"kind": "Deployment", "metadata": {"name": "dspace"}},
+                        {
+                            "kind": "ReplicaSet",
+                            "metadata": {
+                                "name": "dspace-rs",
+                                "ownerReferences": [
+                                    {
+                                        "kind": "Deployment",
+                                        "name": "dspace",
+                                        "controller": True,
+                                    }
+                                ],
+                            },
+                        },
+                    ]
+                }
+            )
         if "deployment" in command:
             return json.dumps(
                 {

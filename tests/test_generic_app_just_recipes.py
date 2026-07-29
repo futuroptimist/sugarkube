@@ -46,6 +46,26 @@ def generic_app_stub_env(tmp_path: Path, ensure_just_available: Path) -> dict[st
     assert ensure_just_available.exists()
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
+    smoke_runner = tmp_path / "smoke-runner"
+    _write_executable(smoke_runner, "#!/usr/bin/env bash\nexit 0\n")
+    runtime_verifier = tmp_path / "runtime-verifier"
+    _write_executable(
+        runtime_verifier,
+        """#!/usr/bin/env python3
+import json
+import sys
+args = sys.argv[1:]
+def value(flag):
+    return args[args.index(flag) + 1]
+print(json.dumps({"schemaVersion": 1, "environment": value("--environment"),
+  "release": value("--release"), "namespace": value("--namespace"),
+  "applicationVersion": value("--application-version"),
+  "runtimeSourceRevision": value("--source-revision"),
+  "frontendSourceRevision": value("--source-revision"),
+  "defaultProvider": value("--provider"),
+  "journeys": [{"name": "/", "passed": True}, {"name": "/chat", "passed": True}]}))
+""",
+    )
     log_path = tmp_path / "helm.log"
     kubeconfig = """apiVersion: v1
 clusters:
@@ -451,6 +471,8 @@ print(json.dumps(value))
     env["HELM_LOG"] = str(log_path)
     env["KUBECTL_LOG"] = str(tmp_path / "kubectl.log")
     env["CURL_LOG"] = str(tmp_path / "curl.log")
+    env["DSPACE_SMOKE_RUNNER"] = str(smoke_runner)
+    env["SUGARKUBE_DSPACE_RUNTIME_VERIFIER"] = str(runtime_verifier)
     return env
 
 
@@ -2495,6 +2517,8 @@ def test_dspace_guarded_deploy_orders_preflight_mutation_and_finalization(
             "",
             str(manifest),
             str(evidence),
+            "",
+            generic_app_stub_env["DSPACE_SMOKE_RUNNER"],
         ],
         generic_app_stub_env,
     )
@@ -2557,6 +2581,8 @@ def test_dspace_render_failure_stops_before_evidence_reservation_or_mutation(
             "",
             str(manifest),
             str(evidence),
+            "",
+            env["DSPACE_SMOKE_RUNNER"],
         ],
         env,
     )
@@ -2593,6 +2619,8 @@ def test_dspace_guarded_redeploy_installs_approved_chart_digest(
             "",
             str(candidate_path),
             str(evidence),
+            "",
+            generic_app_stub_env["DSPACE_SMOKE_RUNNER"],
         ],
         generic_app_stub_env,
     )
@@ -2630,7 +2658,10 @@ def test_dspace_digest_mismatch_stops_before_helm(
     env.update(env_override)
 
     result = _run_just(
-        ["app-deploy", "dspace", "staging", "main-abcdef0", "", str(manifest)],
+        [
+            "app-deploy", "dspace", "staging", "main-abcdef0", "", str(manifest),
+            "", "", env["DSPACE_SMOKE_RUNNER"],
+        ],
         env,
     )
 
@@ -2659,6 +2690,8 @@ def test_dspace_reservation_collision_stops_before_helm(
             "",
             str(candidate_path),
             str(evidence),
+            "",
+            generic_app_stub_env["DSPACE_SMOKE_RUNNER"],
         ],
         generic_app_stub_env,
     )
@@ -2670,7 +2703,7 @@ def test_dspace_reservation_collision_stops_before_helm(
 
 
 @pytest.mark.usefixtures("ensure_just_available")
-def test_prod_subdomain_wrapper_preserves_canary_overlay_through_guarded_path(
+def test_prod_subdomain_wrapper_reaches_guard_before_any_mutation(
     tmp_path: Path, generic_app_stub_env: dict[str, str]
 ) -> None:
     manifest = tmp_path / "candidate.json"
@@ -2689,11 +2722,11 @@ def test_prod_subdomain_wrapper_preserves_canary_overlay_through_guarded_path(
         env,
     )
 
-    assert result.returncode == 0, result.stderr + result.stdout
-    helm_log = Path(env["HELM_LOG"]).read_text(encoding="utf-8")
-    assert "-f docs/examples/dspace.values.prod-subdomain.yaml" in helm_log
-    assert "-f docs/examples/dspace.values.prod.yaml" not in helm_log
-    assert evidence.exists()
+    assert result.returncode != 0
+    assert "smoke_runner=<executable>" in result.stderr
+    helm_log = Path(env["HELM_LOG"])
+    assert not helm_log.exists() or "upgrade " not in helm_log.read_text(encoding="utf-8")
+    assert not evidence.exists()
 
 
 @pytest.mark.usefixtures("ensure_just_available")

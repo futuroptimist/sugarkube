@@ -15,6 +15,13 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable
 
+# Support the documented direct-script invocation from any working directory.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.dspace_release_manifest import ManifestError, _image_id_digest
+
 CAPABILITIES = (
     "applicationVersion",
     "runtimeSourceRevision",
@@ -152,6 +159,12 @@ def verify(args: argparse.Namespace, runner: Runner = run, public_fetch=fetch) -
     chart = (
         helm_before.get("chart", {}).get("metadata", {}) if isinstance(helm_before, dict) else {}
     )
+    if not isinstance(helm_before, dict) or (
+        helm_before.get("name") != args.release
+        or helm_before.get("namespace") != args.namespace
+        or helm_before.get("info", {}).get("status") != "deployed"
+    ):
+        raise VerificationError("cluster identity: Helm release is not the expected deployment")
     if args.helm_revision is not None and helm_before.get("version") != args.helm_revision:
         raise VerificationError("concurrent Helm change: revision differs from approved evidence")
     if chart.get("name") != "dspace" or chart.get("version") != args.chart_version:
@@ -184,6 +197,40 @@ def verify(args: argparse.Namespace, runner: Runner = run, public_fetch=fetch) -
     items = pods.get("items", []) if isinstance(pods, dict) else []
     if not items:
         raise VerificationError("pod/replica identity: no serving replicas")
+    workloads = json_run(
+        runner,
+        [
+            "kubectl",
+            "--kubeconfig",
+            args.kubeconfig,
+            "-n",
+            args.namespace,
+            "get",
+            "replicasets,deployments",
+            "-l",
+            f"app.kubernetes.io/name=dspace,app.kubernetes.io/instance={args.release}",
+            "-o",
+            "json",
+        ],
+        "pod/replica identity",
+    )
+    workload_items = workloads.get("items", []) if isinstance(workloads, dict) else []
+    deployments = {
+        item.get("metadata", {}).get("name")
+        for item in workload_items
+        if item.get("kind") == "Deployment"
+    }
+    owned_replicasets = {
+        item.get("metadata", {}).get("name")
+        for item in workload_items
+        if item.get("kind") == "ReplicaSet"
+        and any(
+            owner.get("kind") == "Deployment"
+            and owner.get("controller") is True
+            and owner.get("name") in deployments
+            for owner in item.get("metadata", {}).get("ownerReferences", [])
+        )
+    }
     pod_names: list[str] = []
     for pod in items:
         metadata, status = pod.get("metadata", {}), pod.get("status", {})
@@ -198,19 +245,33 @@ def verify(args: argparse.Namespace, runner: Runner = run, public_fetch=fetch) -
             )
         ):
             raise VerificationError("pod/replica identity: stale, terminating, or unready replica")
+        if not any(
+            owner.get("kind") == "ReplicaSet"
+            and owner.get("controller") is True
+            and owner.get("name") in owned_replicasets
+            for owner in metadata.get("ownerReferences", [])
+        ):
+            raise VerificationError("pod/replica identity: replica is not owned by the release")
         container, container_status = application_container(pod)
         expected_image = f"{IMAGE_REF}:{args.image_tag}"
         if container.get("image") not in {expected_image, f"{expected_image}@{args.image_digest}"}:
             raise VerificationError("pod/replica identity: image coordinate mismatch")
-        if not str(container_status.get("imageID", "")).endswith(args.image_digest):
+        try:
+            observed_digest = _image_id_digest(container_status.get("imageID", ""))
+        except (ManifestError, TypeError) as exc:
+            raise VerificationError("pod/replica identity: image digest mismatch") from exc
+        if observed_digest != args.image_digest:
             raise VerificationError("pod/replica identity: image digest mismatch")
         base = f"/api/v1/namespaces/{args.namespace}/pods/{name}:{args.pod_port}/proxy"
-        raw_info = runner(
-            ["kubectl", "--kubeconfig", args.kubeconfig, "get", "--raw", base + "/build-info.json"]
-        ).encode()
-        raw_html = runner(
-            ["kubectl", "--kubeconfig", args.kubeconfig, "get", "--raw", base + "/"]
-        ).encode()
+        try:
+            raw_info = runner(
+                ["kubectl", "--kubeconfig", args.kubeconfig, "get", "--raw", base + "/build-info.json"]
+            ).encode()
+            raw_html = runner(
+                ["kubectl", "--kubeconfig", args.kubeconfig, "get", "--raw", base + "/"]
+            ).encode()
+        except (OSError, VerificationError) as exc:
+            raise VerificationError("direct identity: endpoint was unreachable") from exc
         identity(
             raw_info,
             args.application_version,
@@ -290,7 +351,7 @@ def verify(args: argparse.Namespace, runner: Runner = run, public_fetch=fetch) -
     if smoke_result.returncode:
         raise VerificationError("provider/chat smoke: non-destructive /chat proof failed")
     helm_after = json_run(runner, helm_command, "concurrent Helm change")
-    if helm_after.get("version") != helm_before.get("version"):
+    if helm_after != helm_before:
         raise VerificationError("concurrent Helm change: revision changed during verification")
     return {
         "schemaVersion": 1,

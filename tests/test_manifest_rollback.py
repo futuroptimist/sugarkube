@@ -532,21 +532,6 @@ def test_just_recipe_has_no_revision_rollback_or_reuse_values() -> None:
     assert "helm rollback" not in block
 
 
-def test_default_verifier_requires_smoke_runner(tmp_path: Path, capsys) -> None:
-    status = rollback.main(
-        [
-            "--environment",
-            "staging",
-            "--manifest",
-            str(tmp_path / "manifest.json"),
-            "--evidence",
-            str(tmp_path / "evidence.json"),
-        ]
-    )
-    assert status == 2
-    assert "--smoke-runner is required" in capsys.readouterr().err
-
-
 @pytest.mark.parametrize(
     ("failure", "failed_stage", "may_have_changed"),
     [

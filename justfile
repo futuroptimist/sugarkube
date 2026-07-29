@@ -1670,7 +1670,7 @@ app-config app env='staging' config='':
       --config {{ quote(config) }}
 
 # DSPACE-only fail-closed recovery from previously finalized immutable evidence.
-dspace-manifest-rollback env manifest evidence smoke_runner verifier='' confirm='' config='' kubeconfig='':
+dspace-manifest-rollback env manifest evidence smoke_runner='' verifier='' confirm='' config='' kubeconfig='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
     kubeconfig_path={{ quote(kubeconfig) }}
@@ -1678,20 +1678,25 @@ dspace-manifest-rollback env manifest evidence smoke_runner verifier='' confirm=
       kubeconfig_path="${KUBECONFIG:-${HOME}/.kube/config}"
     fi
     verifier_path={{ quote(verifier) }}
-    python3 "{{ justfile_directory() }}/scripts/dspace_manifest_rollback.py" \
+    command=(python3 "{{ justfile_directory() }}/scripts/dspace_manifest_rollback.py" \
       --environment {{ quote(env) }} \
       --manifest {{ quote(manifest) }} \
       --evidence {{ quote(evidence) }} \
       --verifier "${verifier_path:-{{ justfile_directory() }}/scripts/dspace_runtime_verifier.py}" \
-      --smoke-runner {{ quote(smoke_runner) }} \
       --confirm {{ quote(confirm) }} \
       --config {{ quote(config) }} \
-      --kubeconfig "${kubeconfig_path}"
+      --kubeconfig "${kubeconfig_path}")
+    [ -z {{ quote(smoke_runner) }} ] || command+=(--smoke-runner {{ quote(smoke_runner) }})
+    "${command[@]}"
 
 # Prove DSPACE public and per-replica identity plus the isolated /chat journey.
 dspace-release-verify env manifest smoke_runner config='' kubeconfig='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
+    manifest_path={{ quote(manifest) }}
+    while [ "${manifest_path#manifest=}" != "${manifest_path}" ]; do manifest_path="${manifest_path#manifest=}"; done
+    smoke_runner_path={{ quote(smoke_runner) }}
+    while [ "${smoke_runner_path#smoke_runner=}" != "${smoke_runner_path}" ]; do smoke_runner_path="${smoke_runner_path#smoke_runner=}"; done
     eval "$(python3 "{{ justfile_directory() }}/scripts/app_config.py" shell \
       --app dspace --env {{ quote(env) }} --config {{ quote(config) }})"
     kubeconfig_path={{ quote(kubeconfig) }}
@@ -1703,13 +1708,20 @@ dspace-release-verify env manifest smoke_runner config='' kubeconfig='':
     just --justfile "{{ justfile_directory() }}/justfile" assert-cluster-env "${SUGARKUBE_ENV}" "${kubeconfig_path}" >/dev/null
     resolved_host="$(python3 "{{ justfile_directory() }}/scripts/app_chart.py" resolve-host --values "${SUGARKUBE_VALUES}")"
     IFS=$'\t' read -r application_version source_revision image_tag image_digest provider approved_chart_version approved_helm_revision < <(
-      python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" runtime-args --manifest {{ quote(manifest) }})
-    command=("{{ justfile_directory() }}/scripts/dspace_runtime_verifier.py" verify
+      python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" runtime-args --manifest "${manifest_path}")
+    verifier_path="${SUGARKUBE_DSPACE_RUNTIME_VERIFIER:-{{ justfile_directory() }}/scripts/dspace_runtime_verifier.py}"
+    if [ ! -f "${smoke_runner_path}" ] || [ ! -x "${smoke_runner_path}" ]; then
+      echo "ERROR: smoke_runner must be an existing executable file." >&2; exit 2
+    fi
+    if [ ! -f "${verifier_path}" ] || [ ! -x "${verifier_path}" ]; then
+      echo "ERROR: runtime verifier must be an existing executable file." >&2; exit 2
+    fi
+    command=("${verifier_path}" verify
       --environment "${SUGARKUBE_ENV}" --release "${SUGARKUBE_RELEASE}" --namespace "${SUGARKUBE_NAMESPACE}"
       --application-version "${application_version}" --source-revision "${source_revision}"
       --image-tag "${image_tag}" --image-digest "${image_digest}" --provider "${provider}"
       --chart-version "${approved_chart_version}"
-      --host "${resolved_host}" --smoke-runner {{ quote(smoke_runner) }} --kubeconfig "${kubeconfig_path}")
+      --host "${resolved_host}" --smoke-runner "${smoke_runner_path}" --kubeconfig "${kubeconfig_path}")
     [ -z "${approved_helm_revision}" ] || command+=(--helm-revision "${approved_helm_revision}")
     IFS=',' read -ra values_files <<< "${SUGARKUBE_VALUES}"
     for values_file in "${values_files[@]}"; do command+=(--values "${values_file}"); done
@@ -1741,8 +1753,8 @@ app-deploy app env='staging' tag='' config='' manifest='' evidence='' staging_ev
         echo "ERROR: manifest=<approved-candidate.json> is required for DSPACE ${SUGARKUBE_ENV}." >&2
         exit 2
       fi
-      if [ -z "${dspace_smoke_runner}" ]; then
-        echo "ERROR: smoke_runner=<executable> is required for DSPACE ${SUGARKUBE_ENV}." >&2
+      if [ ! -f "${dspace_smoke_runner}" ] || [ ! -x "${dspace_smoke_runner}" ]; then
+        echo "ERROR: smoke_runner=<executable> must be an existing executable for DSPACE ${SUGARKUBE_ENV}." >&2
         exit 2
       fi
       if [ "${SUGARKUBE_ENV}" = prod ]; then
@@ -1750,8 +1762,8 @@ app-deploy app env='staging' tag='' config='' manifest='' evidence='' staging_ev
           echo "ERROR: staging_evidence=<finalized-staging.json> is required for DSPACE prod." >&2
           exit 2
         fi
-        if [ -z "${dspace_staging_kubeconfig}" ]; then
-          echo "ERROR: staging_kubeconfig=<path> is required for DSPACE prod verification." >&2
+        if [ -z "${dspace_staging_config}" ] || [ -z "${dspace_staging_kubeconfig}" ]; then
+          echo "ERROR: staging_config=<path> and staging_kubeconfig=<path> are required for DSPACE prod verification." >&2
           exit 2
         fi
         recorded_revision="$(python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" staging-gate \
@@ -1852,10 +1864,10 @@ app-redeploy app env='staging' tag='' config='' manifest='' evidence='' staging_
     while [ "${evidence_output#evidence=}" != "${evidence_output}" ]; do evidence_output="${evidence_output#evidence=}"; done
     if [ "${SUGARKUBE_APP}" = dspace ] && { [ "${SUGARKUBE_ENV}" = staging ] || [ "${SUGARKUBE_ENV}" = prod ]; }; then
       if [ -z "${release_manifest}" ]; then echo "ERROR: manifest=<approved-candidate.json> is required for DSPACE ${SUGARKUBE_ENV}." >&2; exit 2; fi
-      if [ -z "${dspace_smoke_runner}" ]; then echo "ERROR: smoke_runner=<executable> is required for DSPACE ${SUGARKUBE_ENV}." >&2; exit 2; fi
+      if [ ! -f "${dspace_smoke_runner}" ] || [ ! -x "${dspace_smoke_runner}" ]; then echo "ERROR: smoke_runner=<executable> must be an existing executable for DSPACE ${SUGARKUBE_ENV}." >&2; exit 2; fi
       if [ "${SUGARKUBE_ENV}" = prod ]; then
         if [ -z "${staging_record}" ]; then echo "ERROR: staging_evidence=<finalized-staging.json> is required for DSPACE prod." >&2; exit 2; fi
-        if [ -z "${dspace_staging_kubeconfig}" ]; then echo "ERROR: staging_kubeconfig=<path> is required for DSPACE prod verification." >&2; exit 2; fi
+        if [ -z "${dspace_staging_config}" ] || [ -z "${dspace_staging_kubeconfig}" ]; then echo "ERROR: staging_config=<path> and staging_kubeconfig=<path> are required for DSPACE prod verification." >&2; exit 2; fi
         recorded_revision="$(python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" staging-gate --manifest "${release_manifest}" --staging-evidence "${staging_record}")"
         just --justfile "{{ justfile_directory() }}/justfile" dspace-release-verify env=staging manifest="${staging_record}" smoke_runner="${dspace_smoke_runner}" config="${dspace_staging_config}" kubeconfig="${dspace_staging_kubeconfig}"
         live_revision="$(helm --kubeconfig "${dspace_staging_kubeconfig}" status dspace --namespace dspace -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')"
