@@ -37,7 +37,7 @@ operator workstation with the `just`, `flux`, `kubectl`, and `sops` CLIs install
 4. Confirm the contacted API server and its etcd dependency are ready:
 
    ```bash
-   kubectl get --raw='/readyz?verbose' | rg 'etcd|readyz check passed'
+   kubectl get --raw='/readyz?verbose' | grep -E 'etcd|readyz check passed'
    ```
 
    This proves readiness only for the contacted API server and that server's etcd dependency. It

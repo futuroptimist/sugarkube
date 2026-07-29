@@ -74,6 +74,12 @@ def describe(key):
     return f"node={node or '<none>'},addresses={len(addresses)}:{family_text},target={target_text}"
 
 
+def endpoint_sort_key(key):
+    """Order endpoints by their full identity without exposing addresses."""
+    node, addresses, target = key
+    return node or "", addresses, target
+
+
 def summarize(document, service, minimum_nodes):
     if not isinstance(document, dict) or not isinstance(document.get("items"), list):
         fail("input must be an EndpointSliceList object with an items array")
@@ -85,7 +91,10 @@ def summarize(document, service, minimum_nodes):
     for item in items:
         if not isinstance(item, dict):
             fail("EndpointSlice item must be an object")
-        labels = item.get("metadata", {}).get("labels", {})
+        metadata = item.get("metadata", {})
+        if not isinstance(metadata, dict):
+            fail("EndpointSlice metadata must be an object when present")
+        labels = metadata.get("labels", {})
         if not isinstance(labels, dict) or labels.get("kubernetes.io/service-name") != service:
             fail(f"EndpointSlice does not belong to Service {service}")
         endpoints = item.get("endpoints")
@@ -101,7 +110,7 @@ def summarize(document, service, minimum_nodes):
 
     healthy = []
     unhealthy = []
-    for key in sorted(grouped, key=describe):
+    for key in sorted(grouped, key=endpoint_sort_key):
         states = grouped[key]
         # Conflicting duplicate observations fail closed until every copy is healthy.
         if all(ready and serving and not terminating for ready, serving, terminating in states):

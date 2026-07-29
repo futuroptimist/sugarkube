@@ -253,6 +253,21 @@ def test_status_is_read_only_and_optional_companion_may_be_absent(tmp_path):
     assert all(word not in text for word in ("apply", "patch", "delete", " run "))
 
 
+def test_status_reports_all_components_before_failing_for_unhealthy_slices(tmp_path):
+    documents = {
+        "kube-dns": _slices("kube-dns", []),
+        "traefik": _slices("traefik"),
+    }
+    env, calls = _stub(tmp_path, endpoint_documents=documents)
+    result = _run(env, "status")
+    assert result.returncode
+    assert "contain no endpoints" in result.stderr
+    assert "traefik: slices=1" in result.stdout
+    assert (
+        "get deployment -A -l app.kubernetes.io/name=cloudflare-tunnel -o wide" in calls.read_text()
+    )
+
+
 def test_apply_idempotent_ordered_and_owned_rollback(tmp_path):
     env, calls = _stub(tmp_path)
     for _ in range(2):
@@ -443,6 +458,15 @@ def test_no_slices_malformed_json_and_malformed_endpoint_fail_safely(tmp_path):
                 "traefik": _slices("traefik"),
             },
             "addresses must be",
+        ),
+        (
+            {
+                "kube-dns": {
+                    "items": [{"metadata": [], "endpoints": []}],
+                },
+                "traefik": _slices("traefik"),
+            },
+            "metadata must be an object",
         ),
     ]
     for index, (documents, expected) in enumerate(cases):

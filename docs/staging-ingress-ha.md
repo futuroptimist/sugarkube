@@ -122,7 +122,7 @@ ssh sugarkube3 'sudo systemctl poweroff'
 kubectl get nodes --watch
 # Restore power to sugarkube3 using the normal host power procedure.
 kubectl wait --for=condition=Ready node/sugarkube3 --timeout=10m
-kubectl get --raw='/readyz?verbose' | rg 'etcd|readyz check passed'
+kubectl get --raw='/readyz?verbose' | grep -E 'etcd|readyz check passed'
 ```
 
 This default check proves that the contacted API server is ready and that its etcd dependency is
