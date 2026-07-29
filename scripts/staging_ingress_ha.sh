@@ -52,6 +52,7 @@ apply() {
   kubectl apply -f "$tmp"
   kubectl -n kube-system rollout status deployment/coredns-ha --timeout="$TIMEOUT" || die "CoreDNS HA rollout timed out; run staging-ingress-ha-status (no credentials are logged)"
   kubectl apply -f "$TRAEFIK_CONFIG"
+  kubectl -n kube-system wait --for=jsonpath='{.spec.replicas}'=2 deployment/traefik --timeout="$TIMEOUT" || die "Traefik did not reconcile to the expected two-replica specification before timeout (resource details redacted)"
   kubectl -n kube-system rollout status deployment/traefik --timeout="$TIMEOUT" || die "Traefik rollout timed out; run staging-ingress-ha-status"
 }
 rollback() {
@@ -59,6 +60,7 @@ rollback() {
   assert_owned_or_absent deployment coredns-ha
   assert_owned_or_absent helmchartconfig traefik
   kubectl delete -f "$TRAEFIK_CONFIG" --ignore-not-found=true
+  kubectl -n kube-system wait --for=jsonpath='{.spec.replicas}'=1 deployment/traefik --timeout="$TIMEOUT" || die "packaged Traefik did not reconcile to the expected one-replica specification before timeout (resource details redacted)"
   kubectl -n kube-system delete deployment coredns-ha --ignore-not-found=true
   kubectl -n kube-system rollout status deployment/coredns --timeout="$TIMEOUT" || die "packaged CoreDNS did not become ready during rollback"
   kubectl -n kube-system rollout status deployment/traefik --timeout="$TIMEOUT" || die "packaged Traefik did not become ready during rollback"

@@ -40,7 +40,8 @@ def _pod(node):
 
 def _stub(tmp_path, *, context="sugar-staging", nodes="node1,node2", workload_nodes=None, tunnels=1,
           owner="staging-ingress-ha", probes=True, probe_mode="canonical", endpoint_nodes="node1,node2",
-          resource_absent=False, lookup_error=False, fail_wait="", fail_curl=False):
+          resource_absent=False, lookup_error=False, fail_wait="", fail_curl=False,
+          fail_reconcile=False):
     calls = tmp_path / "calls"
     kubectl = tmp_path / "kubectl"
     kubectl.write_text(f'''#!/usr/bin/env python3
@@ -69,7 +70,16 @@ elif joined == "get probes -A -l environment=staging,criticality=critical -o jso
 elif "get endpoints" in joined and "-o json" in joined:
     nodes=os.environ["ENDPOINT_NODES"].split(",") if "kube-dns" in joined else ["node1"]
     print(json.dumps({{"subsets":[{{"addresses":[{{"ip":f"10.0.0.{{i+1}}","nodeName":n}} for i,n in enumerate(nodes) if n]}}]}}))
-elif os.environ.get("FAIL_WAIT") and os.environ["FAIL_WAIT"] in joined and ("wait" in args or "rollout status" in joined): sys.exit(1)
+elif "wait" in args:
+    if os.environ.get("FAIL_WAIT") and os.environ["FAIL_WAIT"] in joined: sys.exit(1)
+    if "deployment/traefik" in joined and "jsonpath={{.spec.replicas}}" in joined:
+        if os.environ["FAIL_RECONCILE"] == "1": sys.exit(1)
+        calls=open({str(calls)!r}).read()
+        expected = "=2" if "=2" in joined else "=1"
+        prerequisite = "apply -f" if expected == "=2" else "delete -f"
+        if prerequisite not in calls: sys.exit(1)
+    elif "pod/sugarkube" not in joined: sys.exit(1)
+elif "rollout status" in joined and os.environ.get("FAIL_WAIT") and os.environ["FAIL_WAIT"] in joined: sys.exit(1)
 ''')
     kubectl.chmod(0o755)
     curl = tmp_path / "curl"
@@ -85,6 +95,7 @@ elif os.environ.get("FAIL_WAIT") and os.environ["FAIL_WAIT"] in joined and ("wai
         "PROBE_MODE": probe_mode, "ENDPOINT_NODES": endpoint_nodes,
         "RESOURCE_ABSENT": "1" if resource_absent else "0", "LOOKUP_ERROR": "1" if lookup_error else "0",
         "FAIL_WAIT": fail_wait, "FAIL_CURL": "1" if fail_curl else "0",
+        "FAIL_RECONCILE": "1" if fail_reconcile else "0",
     }, calls
 
 
@@ -160,6 +171,33 @@ def test_apply_idempotent_ordered_and_owned_rollback(tmp_path):
     absent = tmp_path / "absent"; absent.mkdir()
     env, _ = _stub(absent, resource_absent=True)
     assert _run(env, "apply").returncode == 0
+
+
+def test_traefik_reconciliation_precedes_rollout_and_fails_closed(tmp_path):
+    env, calls = _stub(tmp_path)
+    assert _run(env, "apply").returncode == 0
+    text = calls.read_text()
+    apply_pos = text.rindex("apply -f", 0, text.index("traefik-helmchartconfig.yaml") + 1)
+    apply_wait = text.index("jsonpath={.spec.replicas}=2")
+    apply_rollout = text.index("rollout status deployment/traefik")
+    assert apply_pos < apply_wait < apply_rollout
+
+    calls.write_text("")
+    assert _run(env, "rollback").returncode == 0
+    text = calls.read_text()
+    delete_pos = text.index("delete -f")
+    rollback_wait = text.index("jsonpath={.spec.replicas}=1")
+    rollback_rollout = text.index("rollout status deployment/traefik")
+    assert delete_pos < rollback_wait < rollback_rollout
+
+    for action in ("apply", "rollback"):
+        case = tmp_path / f"never-{action}"; case.mkdir()
+        failed_env, failed_calls = _stub(case, fail_reconcile=True)
+        result = _run(failed_env, action)
+        assert result.returncode and "reconcile" in result.stderr
+        assert "resource details redacted" in result.stderr
+        text = failed_calls.read_text()
+        assert "rollout status deployment/traefik" not in text
 
 
 def test_unowned_resources_are_never_modified_or_disclosed(tmp_path):

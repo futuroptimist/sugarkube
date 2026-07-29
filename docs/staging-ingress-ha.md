@@ -71,11 +71,16 @@ one-node availability guarantee. It does not disable or replace K3s components.
 
 ## One-node power-off drill
 
-After apply and verify, run verification continuously from a different server, power off exactly
-one server, observe it, restore it, wait for readiness, and inspect three-member etcd health:
+After apply and verify, run verification continuously from a different server in its own terminal:
 
 ```bash
 while true; do just staging-ingress-ha-verify env=staging; sleep 5; done
+```
+
+In a second terminal, power off exactly one server, observe it, restore it, wait for readiness, and
+inspect three-member etcd health:
+
+```bash
 ssh sugarkube3 'sudo systemctl poweroff'
 kubectl get nodes --watch
 # Restore power to sugarkube3 using the normal host power procedure.
