@@ -3232,6 +3232,22 @@ observability-dashboard-verify env='':
 observability-pagerduty-test env='' action='':
     @scripts/observability_helm.sh pagerduty-test '{{ env }}' '{{ action }}'
 
+# Install or rotate this staging Pi's secret host-level heartbeat.
+observability-node-heartbeat-install env='':
+    sudo python3 scripts/observability_node_heartbeat.py install --env {{ quote(env) }}
+
+# Show sanitized heartbeat state without reading its credential.
+observability-node-heartbeat-status env='':
+    python3 scripts/observability_node_heartbeat.py status --env {{ quote(env) }}
+
+# Trigger one bounded heartbeat and leave the recurring timer enabled.
+observability-node-heartbeat-verify env='':
+    sudo python3 scripts/observability_node_heartbeat.py verify --env {{ quote(env) }}
+
+# Remove only this feature's local assets; confirmation must equal the hostname.
+observability-node-heartbeat-uninstall env='' confirm='':
+    sudo python3 scripts/observability_node_heartbeat.py uninstall --env {{ quote(env) }} --confirm {{ quote(confirm) }}
+
 # Render the pinned staging blackbox exporter and Probe manifests (read-only).
 observability-blackbox-render env='':
     @scripts/observability_blackbox.sh render '{{ env }}'

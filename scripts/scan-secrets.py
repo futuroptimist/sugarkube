@@ -19,6 +19,7 @@ from typing import Iterable
 SCAN_SCRIPT_PATH = "scripts/scan-secrets.py"
 
 PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"https://hc-ping\.com/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"),
     re.compile(r"aws(.{0,20})?(?:secret|access)_key", re.IGNORECASE),
     re.compile(r"api[_-]?key", re.IGNORECASE),
     re.compile(r"token\s*[:=]", re.IGNORECASE),

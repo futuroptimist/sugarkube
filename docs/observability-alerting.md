@@ -72,10 +72,12 @@ flowchart LR
 
 ## 3. External heartbeats
 
-Planned checks:
+Current node-heartbeat slice and planned watchdog:
 
-- One host-level heartbeat per staging node — `sugarkube3`, `sugarkube4`, `sugarkube5` — each a
-  `systemd` timer running directly on that node, pinging its own dedicated Healthchecks.io check.
+- Repository-owned installation, verification, status, and rollback support now exists for one
+  host-level heartbeat per staging node — `sugarkube3`, `sugarkube4`, `sugarkube5`. Each uses a
+  one-minute `systemd` timer and its own systemd credential. Post-merge installation on the Pis is
+  still required; repository support is not a claim that a check has received its first ping.
 - One observability watchdog heartbeat whose successful path traverses Prometheus and Alertmanager
   before reaching Healthchecks.io (for example, a Prometheus rule that is always true, routed through
   Alertmanager to a webhook receiver that pings Healthchecks.io for each Alertmanager notification).
@@ -99,9 +101,14 @@ CronJob only proves the k3s control plane can still schedule pods somewhere in t
 particular physical node is powered on and reachable. A `systemd` timer running on the node itself is
 the only check that actually proves that node is alive.
 
-Each Healthchecks.io check gets its own unique ping URL. These URLs must be stored outside Git — in
-root-readable local configuration on the node (e.g. an `EnvironmentFile` read by the timer's unit) or
-in a suitable secret store, never committed to this repository.
+Each Healthchecks.io check gets its own unique ping URL. The installer stores it only in a root-owned,
+mode-`0600` node-local file and systemd exposes it to the oneshot with `LoadCredential=`. Debian
+Bookworm's systemd baseline supports this mechanism, so an environment file is neither needed nor
+permitted. The URL never belongs in Git, shell arguments, exported variables, logs, or documentation.
+
+The checks expect a ping every minute and allow two minutes of grace. A sustained node failure should
+therefore page through Healthchecks.io to PagerDuty after approximately three minutes (one period plus
+grace), subject to external delivery latency.
 
 What each check detects, and does not:
 
@@ -120,9 +127,10 @@ What each check detects, and does not:
 - Staging repository support now mounts `monitoring/alertmanager-pagerduty` and reads its
   `routing-key` key from
   `/etc/alertmanager/secrets/alertmanager-pagerduty/routing-key`; the credential is never inline.
-  The only PagerDuty route is the exact `SugarkubePagerDutyTest` synthetic allowlist. This is
-  repository support, not evidence that it has been deployed or that phone delivery and resolution
-  have been manually proven.
+  The only PagerDuty route is the exact `SugarkubePagerDutyTest` synthetic allowlist. Its staging
+  fire, phone receipt, acknowledgement, resolve submission, and eventual PagerDuty resolution have
+  been manually proven. Alertmanager's default `resolve_timeout: 5m` can make the final resolved
+  transition take approximately five minutes after the explicit resolve submission.
 - Set `send_resolved: true` on the PagerDuty receiver so incidents auto-resolve when the underlying
   alert clears.
 - Define sensible `group_by`, `group_wait`, `group_interval`, and `repeat_interval` values so a single

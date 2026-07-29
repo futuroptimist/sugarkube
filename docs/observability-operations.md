@@ -208,6 +208,10 @@ Do not use `--reuse-values` for the next forward upgrade; commit the full intend
 Repository support alone is not deployment or delivery evidence. This manual procedure is staging-only; no CI,
 render, install, upgrade, status, or verification command sends an alert.
 
+The synthetic drill has now been successfully proven in staging: fire, phone receipt,
+acknowledgement, explicit resolve, and PagerDuty resolution all completed. The last transition may
+take about five minutes because of Alertmanager's default `resolve_timeout: 5m`.
+
 1. Select and verify the staging context before creating or rotating anything:
 
    ```bash
@@ -280,6 +284,46 @@ render, install, upgrade, status, or verification command sends an alert.
 
    Repeat the explicit fire/acknowledge/resolve confirmations. Revoke the old integration key only
    after the new path is proven. Keep the Secret present throughout rollback safety windows.
+
+## Per-node Healthchecks.io heartbeats
+
+This is host/platform observability only; it does not mutate Kubernetes or Helm and has no
+application-specific behavior. Debian Bookworm provides the systemd credentials support used to
+keep the node-local URL out of the unit command line, environment, journal, and normal status.
+
+After this change is merged, perform these steps **separately** on `sugarkube3`, `sugarkube4`, and
+`sugarkube5`:
+
+1. SSH to the node, run `git checkout main && git pull --ff-only`, and confirm `hostname -s` is
+   that node's canonical name.
+2. Run `just observability-node-heartbeat-install env=staging`. At the controlling-terminal prompt,
+   paste only that physical node's rotated `<HEALTHCHECKS_IO_PING_URL>`; input is hidden. Never pass
+   it as an argument, environment variable, pipe, or redirected stdin.
+3. Run `just observability-node-heartbeat-status env=staging`, then
+   `just observability-node-heartbeat-verify env=staging`. Verification deliberately sends one ping,
+   waits at most 40 seconds for success, and leaves the minute timer enabled.
+4. In the `Sugarkube Staging` Healthchecks.io project, confirm only the corresponding check changes
+   from **New** to **Up**. Do not paste its URL into an issue, log, transcript, or PR.
+
+Re-running install silently accepts a newly rotated URL and atomically replaces the mode-`0600`,
+`root:root` credential. Status never reads it. For rollback, type the canonical hostname explicitly:
+
+```bash
+just observability-node-heartbeat-uninstall env=staging confirm="$(hostname -s)"
+```
+
+Uninstall disables the timer and deletes only this feature's units, executable, and local credential.
+Deleting the credential is destructive; it does **not** delete or disable any Healthchecks.io check,
+project, integration, or PagerDuty service.
+
+Once all three checks are Up, perform the first safe failure drill on a node that is not hosting the
+observability stack: power it down, confirm the check becomes late/down after approximately the
+one-minute period plus two-minute grace and that PagerDuty pages, then restore power and confirm the
+next ping recovers the check and resolves the incident. Do not power down the observability node for
+this first drill.
+
+The Prometheus/Alertmanager watchdog and in-cluster `KubeNodeNotReady` PagerDuty route remain later
+tasks, as do application alerts. This slice implements none of them.
 
 ## Reprovisioning proof and post-merge checklist
 
