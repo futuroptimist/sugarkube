@@ -1716,7 +1716,7 @@ dspace-release-verify env manifest smoke_runner config='' kubeconfig='':
     "${command[@]}"
 
 # Generic immutable-tag app deploy backed by docs/examples/apps/*.env or local app configs.
-app-deploy app env='staging' tag='' config='' manifest='' evidence='' staging_evidence='' smoke_runner='':
+app-deploy app env='staging' tag='' config='' manifest='' evidence='' staging_evidence='' smoke_runner='' staging_config='' staging_kubeconfig='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -1732,6 +1732,8 @@ app-deploy app env='staging' tag='' config='' manifest='' evidence='' staging_ev
     evidence_output={{ quote(evidence) }}
     staging_record={{ quote(staging_evidence) }}
     dspace_smoke_runner={{ quote(smoke_runner) }}
+    dspace_staging_config={{ quote(staging_config) }}
+    dspace_staging_kubeconfig={{ quote(staging_kubeconfig) }}
     while [ "${release_manifest#manifest=}" != "${release_manifest}" ]; do release_manifest="${release_manifest#manifest=}"; done
     while [ "${evidence_output#evidence=}" != "${evidence_output}" ]; do evidence_output="${evidence_output#evidence=}"; done
     if [ "${SUGARKUBE_APP}" = dspace ] && { [ "${SUGARKUBE_ENV}" = staging ] || [ "${SUGARKUBE_ENV}" = prod ]; }; then
@@ -1748,11 +1750,16 @@ app-deploy app env='staging' tag='' config='' manifest='' evidence='' staging_ev
           echo "ERROR: staging_evidence=<finalized-staging.json> is required for DSPACE prod." >&2
           exit 2
         fi
+        if [ -z "${dspace_staging_kubeconfig}" ]; then
+          echo "ERROR: staging_kubeconfig=<path> is required for DSPACE prod verification." >&2
+          exit 2
+        fi
         recorded_revision="$(python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" staging-gate \
           --manifest "${release_manifest}" --staging-evidence "${staging_record}")"
         just --justfile "{{ justfile_directory() }}/justfile" dspace-release-verify env=staging \
-          manifest="${staging_record}" smoke_runner="${dspace_smoke_runner}"
-        live_revision="$(helm --kubeconfig "${HOME}/.kube/config-sugarkube-staging" status dspace --namespace dspace -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')"
+          manifest="${staging_record}" smoke_runner="${dspace_smoke_runner}" \
+          config="${dspace_staging_config}" kubeconfig="${dspace_staging_kubeconfig}"
+        live_revision="$(helm --kubeconfig "${dspace_staging_kubeconfig}" status dspace --namespace dspace -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')"
         if [ "${live_revision}" != "${recorded_revision}" ]; then
           echo "ERROR: staging drift: Helm revision changed after evidence capture." >&2
           exit 2
@@ -1823,7 +1830,7 @@ app-deploy app env='staging' tag='' config='' manifest='' evidence='' staging_ev
     fi
 
 # Generic upgrade-only app redeploy backed by app config files.
-app-redeploy app env='staging' tag='' config='' manifest='' evidence='' staging_evidence='' smoke_runner='':
+app-redeploy app env='staging' tag='' config='' manifest='' evidence='' staging_evidence='' smoke_runner='' staging_config='' staging_kubeconfig='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -1839,6 +1846,8 @@ app-redeploy app env='staging' tag='' config='' manifest='' evidence='' staging_
     evidence_output={{ quote(evidence) }}
     staging_record={{ quote(staging_evidence) }}
     dspace_smoke_runner={{ quote(smoke_runner) }}
+    dspace_staging_config={{ quote(staging_config) }}
+    dspace_staging_kubeconfig={{ quote(staging_kubeconfig) }}
     while [ "${release_manifest#manifest=}" != "${release_manifest}" ]; do release_manifest="${release_manifest#manifest=}"; done
     while [ "${evidence_output#evidence=}" != "${evidence_output}" ]; do evidence_output="${evidence_output#evidence=}"; done
     if [ "${SUGARKUBE_APP}" = dspace ] && { [ "${SUGARKUBE_ENV}" = staging ] || [ "${SUGARKUBE_ENV}" = prod ]; }; then
@@ -1846,9 +1855,10 @@ app-redeploy app env='staging' tag='' config='' manifest='' evidence='' staging_
       if [ -z "${dspace_smoke_runner}" ]; then echo "ERROR: smoke_runner=<executable> is required for DSPACE ${SUGARKUBE_ENV}." >&2; exit 2; fi
       if [ "${SUGARKUBE_ENV}" = prod ]; then
         if [ -z "${staging_record}" ]; then echo "ERROR: staging_evidence=<finalized-staging.json> is required for DSPACE prod." >&2; exit 2; fi
+        if [ -z "${dspace_staging_kubeconfig}" ]; then echo "ERROR: staging_kubeconfig=<path> is required for DSPACE prod verification." >&2; exit 2; fi
         recorded_revision="$(python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" staging-gate --manifest "${release_manifest}" --staging-evidence "${staging_record}")"
-        just --justfile "{{ justfile_directory() }}/justfile" dspace-release-verify env=staging manifest="${staging_record}" smoke_runner="${dspace_smoke_runner}"
-        live_revision="$(helm --kubeconfig "${HOME}/.kube/config-sugarkube-staging" status dspace --namespace dspace -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')"
+        just --justfile "{{ justfile_directory() }}/justfile" dspace-release-verify env=staging manifest="${staging_record}" smoke_runner="${dspace_smoke_runner}" config="${dspace_staging_config}" kubeconfig="${dspace_staging_kubeconfig}"
+        live_revision="$(helm --kubeconfig "${dspace_staging_kubeconfig}" status dspace --namespace dspace -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')"
         if [ "${live_revision}" != "${recorded_revision}" ]; then echo "ERROR: staging drift: Helm revision changed after evidence capture." >&2; exit 2; fi
       fi
       chart_version="${SUGARKUBE_VERSION:-}"
@@ -1906,7 +1916,7 @@ app-redeploy app env='staging' tag='' config='' manifest='' evidence='' staging_
     fi
 
 # Promote an app to prod with an explicit immutable tag, or the configured prod tag file.
-app-promote-prod app tag='' config='' manifest='' evidence='' staging_evidence='' smoke_runner='':
+app-promote-prod app tag='' config='' manifest='' evidence='' staging_evidence='' smoke_runner='' staging_config='' staging_kubeconfig='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -1924,6 +1934,8 @@ app-promote-prod app tag='' config='' manifest='' evidence='' staging_evidence='
     [ -z {{ quote(evidence) }} ] || delegate+=(evidence={{ quote(evidence) }})
     [ -z {{ quote(staging_evidence) }} ] || delegate+=(staging_evidence={{ quote(staging_evidence) }})
     [ -z {{ quote(smoke_runner) }} ] || delegate+=(smoke_runner={{ quote(smoke_runner) }})
+    [ -z {{ quote(staging_config) }} ] || delegate+=(staging_config={{ quote(staging_config) }})
+    [ -z {{ quote(staging_kubeconfig) }} ] || delegate+=(staging_kubeconfig={{ quote(staging_kubeconfig) }})
     "${delegate[@]}"
 
 # Show the pinned chart version and whether a newer semver chart appears published.
@@ -2049,7 +2061,7 @@ app-cors-verify app env='staging' config='' origin='https://cors-smoke.invalid' 
 #
 
 # Use this for steady-state release validation flows where explicit image pinning matters.
-dspace-oci-deploy env='staging' tag='' manifest='' evidence='' staging_evidence='' smoke_runner='':
+dspace-oci-deploy env='staging' tag='' manifest='' evidence='' staging_evidence='' smoke_runner='' staging_config='' staging_kubeconfig='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -2058,10 +2070,12 @@ dspace-oci-deploy env='staging' tag='' manifest='' evidence='' staging_evidence=
     [ -z {{ quote(evidence) }} ] || delegate+=(evidence={{ quote(evidence) }})
     [ -z {{ quote(staging_evidence) }} ] || delegate+=(staging_evidence={{ quote(staging_evidence) }})
     [ -z {{ quote(smoke_runner) }} ] || delegate+=(smoke_runner={{ quote(smoke_runner) }})
+    [ -z {{ quote(staging_config) }} ] || delegate+=(staging_config={{ quote(staging_config) }})
+    [ -z {{ quote(staging_kubeconfig) }} ] || delegate+=(staging_kubeconfig={{ quote(staging_kubeconfig) }})
     "${delegate[@]}"
 
 # Use this for optional canary/smoke testing before or alongside apex promotion workflows.
-dspace-oci-deploy-prod-subdomain tag='' manifest='' evidence='' staging_evidence='' smoke_runner='':
+dspace-oci-deploy-prod-subdomain tag='' manifest='' evidence='' staging_evidence='' smoke_runner='' staging_config='' staging_kubeconfig='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -2071,12 +2085,14 @@ dspace-oci-deploy-prod-subdomain tag='' manifest='' evidence='' staging_evidence
     [ -z {{ quote(evidence) }} ] || delegate+=(evidence={{ quote(evidence) }})
     [ -z {{ quote(staging_evidence) }} ] || delegate+=(staging_evidence={{ quote(staging_evidence) }})
     [ -z {{ quote(smoke_runner) }} ] || delegate+=(smoke_runner={{ quote(smoke_runner) }})
+    [ -z {{ quote(staging_config) }} ] || delegate+=(staging_config={{ quote(staging_config) }})
+    [ -z {{ quote(staging_kubeconfig) }} ] || delegate+=(staging_kubeconfig={{ quote(staging_kubeconfig) }})
     "${delegate[@]}"
 
 # Promote dspace to production apex (democratized.space) using immutable tags.
 
 # If tag is omitted, this reads the pinned value from docs/apps/dspace.prod.tag.
-dspace-oci-promote-prod tag='' manifest='' evidence='' staging_evidence='' smoke_runner='':
+dspace-oci-promote-prod tag='' manifest='' evidence='' staging_evidence='' smoke_runner='' staging_config='' staging_kubeconfig='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -2092,10 +2108,12 @@ dspace-oci-promote-prod tag='' manifest='' evidence='' staging_evidence='' smoke
     [ -z {{ quote(evidence) }} ] || delegate+=(evidence={{ quote(evidence) }})
     [ -z {{ quote(staging_evidence) }} ] || delegate+=(staging_evidence={{ quote(staging_evidence) }})
     [ -z {{ quote(smoke_runner) }} ] || delegate+=(smoke_runner={{ quote(smoke_runner) }})
+    [ -z {{ quote(staging_config) }} ] || delegate+=(staging_config={{ quote(staging_config) }})
+    [ -z {{ quote(staging_kubeconfig) }} ] || delegate+=(staging_kubeconfig={{ quote(staging_kubeconfig) }})
     "${delegate[@]}"
 
 # Fast redeploy of dspace from GHCR (emergency mutable-tag refresh).
-dspace-oci-redeploy env='staging' tag='' manifest='' evidence='' staging_evidence='' smoke_runner='':
+dspace-oci-redeploy env='staging' tag='' manifest='' evidence='' staging_evidence='' smoke_runner='' staging_config='' staging_kubeconfig='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -2104,6 +2122,8 @@ dspace-oci-redeploy env='staging' tag='' manifest='' evidence='' staging_evidenc
     [ -z {{ quote(evidence) }} ] || delegate+=(evidence={{ quote(evidence) }})
     [ -z {{ quote(staging_evidence) }} ] || delegate+=(staging_evidence={{ quote(staging_evidence) }})
     [ -z {{ quote(smoke_runner) }} ] || delegate+=(smoke_runner={{ quote(smoke_runner) }})
+    [ -z {{ quote(staging_config) }} ] || delegate+=(staging_config={{ quote(staging_config) }})
+    [ -z {{ quote(staging_kubeconfig) }} ] || delegate+=(staging_kubeconfig={{ quote(staging_kubeconfig) }})
     "${delegate[@]}"
 
 # Dump dspace and Traefik logs for debugging HTTP 500s.

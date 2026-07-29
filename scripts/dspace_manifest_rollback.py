@@ -839,6 +839,7 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
 
 
 def main(argv: list[str] | None = None) -> int:
+    default_verifier = Path(__file__).with_name("dspace_runtime_verifier.py")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--environment", choices=("staging", "prod"), required=True)
     parser.add_argument("--manifest", type=Path, required=True)
@@ -846,7 +847,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--verifier",
         type=Path,
-        default=Path(__file__).with_name("dspace_runtime_verifier.py"),
+        default=default_verifier,
     )
     parser.add_argument("--smoke-runner", type=Path)
     parser.add_argument("--confirm", default="")
@@ -855,6 +856,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--oras", default=os.environ.get("SUGARKUBE_ORAS_COMMAND", "oras"))
     parser.add_argument("--timeout", default="10m")
     args = parser.parse_args(argv)
+    if (
+        args.verifier.expanduser().resolve() == default_verifier.resolve()
+        and args.smoke_runner is None
+    ):
+        print(
+            "error: --smoke-runner is required when using the default runtime verifier",
+            file=sys.stderr,
+        )
+        return 2
     try:
         rollback(args)
     except (RollbackError, app_config.AppConfigError) as exc:

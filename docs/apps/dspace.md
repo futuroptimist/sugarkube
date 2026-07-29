@@ -339,6 +339,7 @@ just dspace-manifest-rollback \
   env=staging \
   manifest=deployment-evidence/dspace/staging/previous-finalized-release.json \
   evidence=deployment-evidence/dspace/staging/rollback-20260727T120000Z.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER" \
   verifier=/opt/dspace/bin/sugarkube-runtime-verifier
 ```
 
@@ -352,6 +353,7 @@ just dspace-manifest-rollback \
   env=prod \
   manifest=deployment-evidence/dspace/prod/previous-finalized-release.json \
   evidence=deployment-evidence/dspace/prod/rollback-20260727T120000Z.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER" \
   verifier=/opt/dspace/bin/sugarkube-runtime-verifier \
   confirm="dspace:prod:${TARGET_SHA}"
 ```
@@ -522,14 +524,16 @@ just app-promote-prod \
   tag=main-REPLACE_SHORTSHA \
   manifest=deployment-candidates/dspace/prod.json \
   staging_evidence=deployment-evidence/dspace/staging/<finalized-record>.json \
+  staging_kubeconfig="$HOME/.kube/config-dspace-staging" \
   smoke_runner="$DSPACE_SMOKE_RUNNER"
 ```
 
 Before production rendering, reservation, or mutation, the command validates
 that staging evidence is finalized, compares all immutable release coordinates,
 rechecks the recorded live Helm revision, and reruns the full verifier against
-staging. It runs the same verifier after production rollout and before the final
-production evidence is written. A post-mutation failure leaves the reservation
+staging through the explicitly supplied `staging_kubeconfig` (and optional
+`staging_config`). It runs the same verifier after production rollout and before
+the final production evidence is written. A post-mutation failure leaves the reservation
 for the existing reconciliation procedure; it never writes successful evidence,
 retries, downgrades, or automatically rolls back. Use the reservation recovery
 instructions above after investigating the bounded failure category.

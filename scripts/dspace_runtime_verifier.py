@@ -108,7 +108,12 @@ def environment_values(paths: list[Path]) -> dict[str, str]:
         for line in lines:
             found_name = re.match(r"^\s*-\s+name:\s*([A-Z0-9_]+)\s*$", line)
             if found_name:
-                name = found_name.group(1)
+                candidate = found_name.group(1)
+                name = (
+                    candidate
+                    if candidate in {"DSPACE_TOKEN_PLACE_URL", "DSPACE_TOKEN_PLACE_CHAT_MODEL"}
+                    else None
+                )
                 continue
             found_value = re.match(r"^\s+value:\s*[\"']?([^\"'#]+?)[\"']?\s*(?:#.*)?$", line)
             if found_value and name:
@@ -147,7 +152,7 @@ def verify(args: argparse.Namespace, runner: Runner = run, public_fetch=fetch) -
     chart = (
         helm_before.get("chart", {}).get("metadata", {}) if isinstance(helm_before, dict) else {}
     )
-    if helm_before.get("version") != args.helm_revision if args.helm_revision else False:
+    if args.helm_revision is not None and helm_before.get("version") != args.helm_revision:
         raise VerificationError("concurrent Helm change: revision differs from approved evidence")
     if chart.get("name") != "dspace" or chart.get("version") != args.chart_version:
         raise VerificationError("cluster identity: installed chart identity mismatch")

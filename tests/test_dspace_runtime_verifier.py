@@ -53,7 +53,8 @@ def test_values_chain_uses_last_reviewed_token_place_values(tmp_path: Path) -> N
     )
     overlay.write_text(
         "env:\n  - name: DSPACE_TOKEN_PLACE_URL\n    value: https://staging.token.place\n"
-        "  - name: DSPACE_TOKEN_PLACE_CHAT_MODEL\n    value: reviewed-model\n",
+        "  - name: DSPACE_TOKEN_PLACE_CHAT_MODEL\n    value: reviewed-model\n"
+        "  - name: UNRELATED_SETTING\n    value: ignored-value\n",
         encoding="utf-8",
     )
     assert verifier.environment_values([base, overlay]) == {
