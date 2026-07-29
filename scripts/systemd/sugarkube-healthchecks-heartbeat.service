@@ -1,0 +1,26 @@
+[Unit]
+Description=Sugarkube node availability heartbeat
+Documentation=https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-operations.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+LoadCredential=ping-url:/etc/sugarkube/healthchecks-heartbeat.url
+ExecStart=/usr/local/libexec/sugarkube-healthchecks-heartbeat
+DynamicUser=yes
+NoNewPrivileges=yes
+PrivateDevices=yes
+PrivateTmp=yes
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectHome=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectSystem=strict
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+UMask=0077

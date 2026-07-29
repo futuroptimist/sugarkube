@@ -1,6 +1,6 @@
 # Observability operations runbook
 
-This runbook covers the current live **staging-only** kube-prometheus-stack lifecycle. It is intentionally non-Flux: operators use guarded Helm commands from this repository, with the chart version and full values chain committed in Git.
+This runbook covers the current live **staging-only** kube-prometheus-stack lifecycle and the repository-owned, host-level Healthchecks.io node heartbeat lifecycle. The stack is intentionally non-Flux: operators use guarded commands from this repository.
 
 Production observability is intentionally unsupported in this slice because no production live baseline has been proven yet.
 
@@ -48,6 +48,66 @@ The old Flux/Longhorn files under `platform/observability/*.yaml` and `clusters/
   - Password key: `admin-password`.
 
 Never put example credentials or plaintext Secret data in commands, logs, docs, commits, or PRs.
+
+## Host-level staging node heartbeats
+
+Each of `sugarkube3`, `sugarkube4`, and `sugarkube5` runs one app-agnostic
+systemd timer. The service uses systemd's `LoadCredential=` support (available
+in Debian Bookworm's systemd baseline) to expose a root-owned mode-`0600` file
+only in the service credential directory. The delivery program passes the URL
+to curl through standard-input configuration, never in `ExecStart`, argv, or
+normal status output. It accepts only an HTTPS `hc-ping.com` UUID success URL;
+alternate hosts, suffixes, queries, fragments, and multiline values fail
+closed with redacted diagnostics.
+
+The four guarded commands are:
+
+```bash
+just observability-node-heartbeat-install env=staging
+just observability-node-heartbeat-status env=staging
+just observability-node-heartbeat-verify env=staging
+SUGARKUBE_HEARTBEAT_CONFIRM=REMOVE \
+  just observability-node-heartbeat-uninstall env=staging
+```
+
+Missing, production, and unknown environments fail before mutation, as does a
+hostname outside the canonical staging inventory. Installation requires a
+controlling terminal and reads the rotated URL silently; it deliberately does
+not accept the secret as an argument, environment variable, or piped stdin.
+Re-running it atomically rotates the credential, reloads systemd, and leaves
+the minute timer enabled across reboot. Status never reads the credential.
+Verify triggers a heartbeat, waits at most 15 seconds for a successful unit
+result, and confirms the recurring timer remains enabled.
+
+Uninstall is destructive: the explicit confirmation deletes the local
+credential and only this feature's executable and units. It does **not** delete
+or change Healthchecks.io checks, PagerDuty services, Kubernetes, or Helm.
+
+### Post-merge activation (run separately on every Pi)
+
+On `sugarkube3`, then `sugarkube4`, then `sugarkube5`:
+
+1. Run `cd ~/sugarkube && git pull --ff-only main`.
+2. Run `just observability-node-heartbeat-install env=staging` and paste only
+   that physical node's rotated URL at the hidden prompt. Use a value supplied
+   out of band; `<ROTATED-URL-FOR-THIS-NODE>` is a placeholder, not a command
+   argument.
+3. Run `just observability-node-heartbeat-status env=staging` and
+   `just observability-node-heartbeat-verify env=staging`.
+4. In the **Sugarkube Staging** Healthchecks.io project, confirm that this
+   node's corresponding check changes from **New** to **Up** before proceeding
+   to the next node.
+
+Each check expects a ping every minute with two minutes of grace. Consequently,
+a stopped node should transition late and page the connected Sugarkube Staging
+PagerDuty service after approximately the one-minute period plus two-minute
+grace (provider processing can add a small delay).
+
+For the first failure drill, identify a node that is not currently hosting
+Prometheus/Alertmanager, power down only that node, confirm its Healthchecks.io
+transition and PagerDuty page, then restore it and confirm the next heartbeat
+returns the check to **Up** and the incident resolves. The Alertmanager
+watchdog and in-cluster `KubeNodeNotReady` routing remain later tasks.
 
 ## Read-only preflight and status
 
@@ -339,6 +399,7 @@ lost, and distinct from the automated evidence above:
 
 Additional dashboards, Grafana persistence, central multi-cluster Grafana, and production
 observability codification are separate follow-ups. The existing blackbox NetworkPolicy is unchanged.
-Alerting onboarding — real Alertmanager receivers, external heartbeats, and failure drills — is no
-longer undesigned scope creep; it is planned, designed work tracked in
-[`docs/observability-alerting.md`](observability-alerting.md), just not yet executed.
+Per-node heartbeat activation and failure drills are post-merge operator work. The observability
+watchdog, in-cluster `KubeNodeNotReady` routing, and application alerts are designed follow-ups
+tracked in [`docs/observability-alerting.md`](observability-alerting.md); they are not implemented by
+this host-level slice.

@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the Sugarkube node availability heartbeat every minute
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=1min
+AccuracySec=5s
+Persistent=true
+Unit=sugarkube-healthchecks-heartbeat.service
+
+[Install]
+WantedBy=timers.target

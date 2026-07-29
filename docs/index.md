@@ -35,7 +35,8 @@ Review the safety notes before working with power components.
   design across Sugarkube, DSPACE, token.place, danielsmith.io, and jobbot3000
 - [observability-operations.md](observability-operations.md) — staging-only non-Flux kube-prometheus-stack operations runbook
 - [observability-blackbox.md](observability-blackbox.md) — staging blackbox exporter and public probe lifecycle runbook
-- [observability-alerting.md](observability-alerting.md) — canonical alerting strategy: PagerDuty/Healthchecks.io target architecture, routing policy, and rollout/drill plan
+- [observability-alerting.md](observability-alerting.md) — canonical PagerDuty/Healthchecks.io strategy, proven synthetic delivery, and deferred routing work
+- [observability-operations.md](observability-operations.md) — guarded staging stack operations and secret-safe per-node heartbeat lifecycle
 - [pi_image_team_notifications.md](pi_image_team_notifications.md) — optional Slack/Matrix progress
   notifications for first boot and SSD cloning
 - [pi_image_cloudflare.md](pi_image_cloudflare.md) — preconfigure Docker and Cloudflare tunnels

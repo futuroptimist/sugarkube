@@ -156,11 +156,15 @@ A safe, phased sequence — each step depends on the previous one succeeding:
 1. Establish PagerDuty and Healthchecks.io accounts and integrations manually (outside this repo).
 2. Deploy and verify the repository's secret-safe receiver foundation (`routing_key_file`, no inline
    secrets); the root remains the null receiver and only the synthetic test is allowlisted.
-3. Manually send and resolve the synthetic PagerDuty test alert to prove receiver and phone delivery
-   work end-to-end, independent of any real Sugarkube rule.
-4. Add and verify the external node heartbeats and the observability watchdog against Healthchecks.io.
-   Confirm the watchdog's dedicated Alertmanager timing and the Healthchecks.io period/grace match
-   the contract in §3; observe multiple repeat notifications before declaring the path healthy.
+3. **Completed:** the synthetic Alertmanager → PagerDuty alert was fired, received and acknowledged
+   on the phone, then resolved. The resolved notification arrived after Alertmanager's expected
+   default resolution delay (approximately five minutes) rather than immediately.
+   This proves the receiver and phone workflow end-to-end, independent of any real Sugarkube rule.
+4. Install and verify the repository-owned one-minute external node heartbeat separately on each
+   staging Pi, following [`docs/observability-operations.md`](observability-operations.md). The checks
+   use two minutes of grace. The observability watchdog remains a separate later task; when added,
+   confirm its dedicated Alertmanager timing and Healthchecks.io period/grace match the contract in
+   §3 and observe multiple repeat notifications before declaring that path healthy.
 5. Audit the existing `kube-prometheus-stack` bundled node rules (starting with `KubeNodeNotReady`).
 6. Enable the node-down route in Alertmanager's allowlist.
 7. Identify which staging nodes currently host Prometheus and Alertmanager.
@@ -216,5 +220,7 @@ it is deployed yet — see the rollout plan above for the actual sequencing.
 - Shallow public-endpoint blackbox monitoring (`PublicEndpointDown`, `PublicProbeMissing`,
   `TLSExpiringSoon`) is already live in staging today, independently of that dependency — see
   [`docs/observability-blackbox.md`](./observability-blackbox.md).
-- Alert delivery to a phone and node-power-off drills have not yet been performed. Everything in
-  [§6](#6-rollout-and-drill-plan) above is planned, not completed.
+- The synthetic Alertmanager → PagerDuty fire/acknowledge/resolve drill has been successfully proven,
+  including the expected approximately five-minute Alertmanager resolution delay. Host heartbeat activation and the
+  node-power-off drill remain post-merge operator work; repository tests perform no live mutation.
+- The observability watchdog, `KubeNodeNotReady` routing, and application alerts remain later slices.

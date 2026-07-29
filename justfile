@@ -3232,6 +3232,22 @@ observability-dashboard-verify env='':
 observability-pagerduty-test env='' action='':
     @scripts/observability_helm.sh pagerduty-test '{{ env }}' '{{ action }}'
 
+# Silently configure/rotate this staging node's Healthchecks.io heartbeat.
+observability-node-heartbeat-install env='':
+    @scripts/observability_node_heartbeat.sh install '{{ env }}'
+
+# Show only sanitized local heartbeat state.
+observability-node-heartbeat-status env='':
+    @scripts/observability_node_heartbeat.sh status '{{ env }}'
+
+# Trigger one heartbeat and prove successful completion.
+observability-node-heartbeat-verify env='':
+    @scripts/observability_node_heartbeat.sh verify '{{ env }}'
+
+# Remove local heartbeat assets after explicit destructive confirmation.
+observability-node-heartbeat-uninstall env='':
+    @scripts/observability_node_heartbeat.sh uninstall '{{ env }}'
+
 # Render the pinned staging blackbox exporter and Probe manifests (read-only).
 observability-blackbox-render env='':
     @scripts/observability_blackbox.sh render '{{ env }}'

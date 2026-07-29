@@ -374,6 +374,11 @@ Prometheus or Grafana should not be listed as production skills until evidence e
 
 - Which cluster names should distinguish staging and production if both run on Sugarkube-managed hardware?
 - Should app metrics endpoints use bearer tokens, network policy only, or both?
-- The Alertmanager receiver question is answered at the design level: PagerDuty plus Healthchecks.io, per [`docs/observability-alerting.md`](./observability-alerting.md). What remains open is execution — accounts, secret-safe config, and drills, none of which are done yet.
+- PagerDuty plus Healthchecks.io remains the alerting design. The synthetic Alertmanager → PagerDuty
+  fire/acknowledge/resolve path has been manually proven, and repository-owned secret-safe host
+  heartbeat assets now cover the three staging nodes. Per-node activation and the first power-off
+  drill remain operator work; the Alertmanager watchdog, `KubeNodeNotReady` route, and application
+  alerts remain later slices. See [`docs/observability-alerting.md`](./observability-alerting.md) and
+  [`docs/observability-operations.md`](./observability-operations.md).
 - What Prometheus PV size is realistic after a one-week staging soak on the target Pi hardware?
 - Should Loki remain entirely deferred, or should minimal log labels be designed now without deploying Loki?

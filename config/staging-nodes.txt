@@ -1,0 +1,4 @@
+# Canonical physical-node inventory for staging host operations.
+sugarkube3
+sugarkube4
+sugarkube5
