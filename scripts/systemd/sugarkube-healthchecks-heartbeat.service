@@ -1,0 +1,24 @@
+[Unit]
+Description=Sugarkube host heartbeat
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+LoadCredential=healthchecks-url:/etc/sugarkube/healthchecks-url
+ExecStart=/usr/local/lib/sugarkube/healthchecks-heartbeat
+TimeoutStartSec=35s
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native

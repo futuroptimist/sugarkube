@@ -156,9 +156,11 @@ A safe, phased sequence — each step depends on the previous one succeeding:
 1. Establish PagerDuty and Healthchecks.io accounts and integrations manually (outside this repo).
 2. Deploy and verify the repository's secret-safe receiver foundation (`routing_key_file`, no inline
    secrets); the root remains the null receiver and only the synthetic test is allowlisted.
-3. Manually send and resolve the synthetic PagerDuty test alert to prove receiver and phone delivery
-   work end-to-end, independent of any real Sugarkube rule.
-4. Add and verify the external node heartbeats and the observability watchdog against Healthchecks.io.
+3. **Proven in staging:** the synthetic PagerDuty test alert was fired, acknowledged, and resolved,
+   proving receiver and phone delivery independently of a real Sugarkube rule. The resolved
+   notification arrived after Alertmanager's expected default resolution delay (about five minutes),
+   rather than immediately when the synthetic alert was removed.
+4. Add and verify the external node heartbeats. Add the observability watchdog in a later slice.
    Confirm the watchdog's dedicated Alertmanager timing and the Healthchecks.io period/grace match
    the contract in §3; observe multiple repeat notifications before declaring the path healthy.
 5. Audit the existing `kube-prometheus-stack` bundled node rules (starting with `KubeNodeNotReady`).
@@ -216,5 +218,7 @@ it is deployed yet — see the rollout plan above for the actual sequencing.
 - Shallow public-endpoint blackbox monitoring (`PublicEndpointDown`, `PublicProbeMissing`,
   `TLSExpiringSoon`) is already live in staging today, independently of that dependency — see
   [`docs/observability-blackbox.md`](./observability-blackbox.md).
-- Alert delivery to a phone and node-power-off drills have not yet been performed. Everything in
-  [§6](#6-rollout-and-drill-plan) above is planned, not completed.
+- Synthetic Alertmanager-to-PagerDuty fire, acknowledge, and resolve delivery is proven. The
+  host-heartbeat rollout and node-power-off drill below still require post-merge execution.
+- This slice does not add the Alertmanager watchdog, route `KubeNodeNotReady`, or add application
+  alerts; those remain later tasks.

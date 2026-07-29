@@ -1,0 +1,4 @@
+# Canonical physical staging node inventory (one hostname per line).
+sugarkube3
+sugarkube4
+sugarkube5

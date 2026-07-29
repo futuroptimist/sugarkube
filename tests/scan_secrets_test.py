@@ -26,6 +26,12 @@ def test_regex_scan_detects_patterns(scan_secrets, line):
     assert scan_secrets.regex_scan(diff)
 
 
+def test_regex_scan_detects_healthchecks_uuid_url(scan_secrets):
+    # Assemble the credential-shaped canary so the repository itself never contains it contiguously.
+    value = "https://hc-ping.com/" + "12345678-1234-4123-8123-123456789abc"
+    assert scan_secrets.regex_scan(["+++ b/accidental.txt", "+" + value])
+
+
 def test_regex_scan_prints_warning(scan_secrets, capsys):
     diff = ["+++ b/file.txt", "+token" ": abc"]
     assert scan_secrets.regex_scan(diff)

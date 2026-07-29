@@ -6,6 +6,7 @@ such as API keys or tokens. If `ripsecrets` is available it will be used for a
 more thorough scan; otherwise a lightweight regex-based fallback is used. Any
 findings are printed to stderr so they don't pollute stdout.
 """
+
 from __future__ import annotations
 
 import os
@@ -19,6 +20,11 @@ from typing import Iterable
 SCAN_SCRIPT_PATH = "scripts/scan-secrets.py"
 
 PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(
+        r"https://hc-ping\.com/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+        r"[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+        re.IGNORECASE,
+    ),
     re.compile(r"aws(.{0,20})?(?:secret|access)_key", re.IGNORECASE),
     re.compile(r"api[_-]?key", re.IGNORECASE),
     re.compile(r"token\s*[:=]", re.IGNORECASE),

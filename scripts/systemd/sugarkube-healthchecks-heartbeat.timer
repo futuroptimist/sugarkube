@@ -1,0 +1,12 @@
+[Unit]
+Description=Send the Sugarkube host heartbeat every minute
+
+[Timer]
+OnBootSec=20s
+OnUnitActiveSec=1min
+AccuracySec=5s
+Persistent=true
+Unit=sugarkube-healthchecks-heartbeat.service
+
+[Install]
+WantedBy=timers.target

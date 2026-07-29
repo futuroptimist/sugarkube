@@ -339,6 +339,42 @@ lost, and distinct from the automated evidence above:
 
 Additional dashboards, Grafana persistence, central multi-cluster Grafana, and production
 observability codification are separate follow-ups. The existing blackbox NetworkPolicy is unchanged.
-Alerting onboarding — real Alertmanager receivers, external heartbeats, and failure drills — is no
-longer undesigned scope creep; it is planned, designed work tracked in
-[`docs/observability-alerting.md`](observability-alerting.md), just not yet executed.
+The Alertmanager watchdog, in-cluster `KubeNodeNotReady` routing, application alerts, and production
+observability remain separate follow-ups.
+
+## Staging host heartbeats (post-merge)
+
+The repository owns a host-level systemd oneshot and timer for each physical staging Pi. It is
+app-agnostic, does not touch Kubernetes or Helm, and uses systemd's `LoadCredential=` support from
+the Debian Bookworm systemd baseline. The local credential is root-owned mode `0600`; the URL is read
+from the credential file and passed to curl over stdin, never in `ExecStart` or command arguments.
+
+Run these steps **separately on each of `sugarkube3`, `sugarkube4`, and `sugarkube5`**:
+
+```bash
+cd ~/sugarkube
+git checkout main
+git pull --ff-only
+just observability-heartbeat-install env=staging
+# At the hidden prompt, paste only this physical node's rotated URL.
+just observability-heartbeat-status env=staging
+just observability-heartbeat-verify env=staging
+```
+
+Never put the URL in shell history, an environment variable, a pipe, documentation, logs, or a Just
+argument. The installer requires a controlling terminal and hidden input. After verification, open
+the `Sugarkube Staging` Healthchecks.io project and confirm that the check corresponding to that
+hostname changes from **New** to **Up** before proceeding to the next Pi. Use only a visibly
+non-credential placeholder such as `<ROTATED-URL-FOR-THIS-NODE>` in operator notes.
+
+The timer runs 20 seconds after boot and every minute thereafter. With each hosted check configured
+for a one-minute period and two minutes of grace, expect a page approximately three minutes after the
+last successful ping. Network scheduling can add a small amount of latency.
+
+For the safe first drill, identify a node that is not hosting the observability stack, power it down,
+confirm its Healthchecks.io check transitions through late/down and PagerDuty pages, then restore the
+node and confirm the next ping produces recovery/resolution. Do not begin with the observability node.
+
+To roll back, run `just observability-heartbeat-uninstall env=staging` and type the displayed hostname
+at the confirmation prompt. This destructively deletes the local credential and only the unit, timer,
+and helper owned by this feature. It does **not** delete Healthchecks.io checks or PagerDuty settings.
