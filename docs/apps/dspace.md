@@ -477,3 +477,39 @@ just helm-oci-install release=dspace namespace=dspace chart=oci://ghcr.io/democr
 ```bash
 just helm-oci-upgrade release=dspace namespace=dspace chart=oci://ghcr.io/democratizedspace/charts/dspace values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml version_file=docs/apps/dspace.staging.version tag="$APP_TAG" env=staging
 ```
+# Release source-integrity gate
+
+DSPACE staging and production releases require the upstream, non-destructive remote chat
+runner. In a DSPACE checkout run `pnpm install` and `pnpm exec playwright install chromium`,
+then provide the executable itself (never a shell command):
+
+```bash
+DSPACE_SMOKE_RUNNER="$HOME/dspace/scripts/run-remote-chat-smoke.mjs"
+
+just dspace-release-verify \
+  env=staging \
+  manifest=deployment-evidence/dspace/staging/<finalized-record>.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER"
+```
+
+A staging deployment uses an approved staging candidate and creates finalized evidence under
+`deployment-evidence/dspace/staging/` only after public identity, every direct replica, and the
+isolated `/chat` journey pass. Production additionally requires that exact finalized staging
+artifact:
+
+```bash
+just app-promote-prod \
+  app=dspace \
+  tag=main-REPLACE_SHORTSHA \
+  manifest=deployment-candidates/dspace/prod.json \
+  staging_evidence=deployment-evidence/dspace/staging/<finalized-record>.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER"
+```
+
+The gate rechecks the recorded staging Helm revision before any production reservation or
+mutation, then verifies production before finalizing its record under
+`deployment-evidence/dspace/prod/`. A post-mutation failure leaves the reservation for explicit
+reconciliation and never triggers an automatic rollback. Token.place-default releases derive
+the expected origin and model from the ordered environment values; OpenAI-default releases omit
+those arguments. The runner mocks provider transport: real provider credentials are neither
+required nor accepted, and child output is never stored in evidence.

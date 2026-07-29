@@ -379,3 +379,19 @@ Current values chains:
 | token.place | `docs/examples/tokenplace.values.dev.yaml` | `docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml` | `docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml` | `/,/livez,/healthz,/relay/diagnostics` |
 | danielsmith.io | `docs/examples/danielsmith.values.dev.yaml` | `docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.staging.yaml` | `docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.prod.yaml` | `/,/livez,/healthz` |
 | jobbot3000 | `docs/examples/jobbot3000.values.dev.yaml` | `docs/examples/jobbot3000.values.dev.yaml,docs/examples/jobbot3000.values.staging.yaml` | `docs/examples/jobbot3000.values.dev.yaml,docs/examples/jobbot3000.values.prod.yaml` | `/,/healthz,/livez` |
+# DSPACE production verification
+
+Standard DSPACE deploy, redeploy, promotion, and compatibility recipes share a fail-closed
+guard. Production requires a finalized staging evidence record whose version, source SHA,
+immutable image and chart coordinates, semantic tag, and default provider match the production
+candidate. Live staging verification precedes production render, evidence reservation, and Helm
+mutation. After rollout, fresh OCI, Helm, replica, public/direct frontend identity, and isolated
+`/chat` proof precede evidence finalization. Historical finalized evidence without the newer
+bounded runtime checks remains valid for rollback; newly finalized records include the complete
+runtime check set. Candidate approvals are never rewritten.
+
+Use `just dspace-release-verify env=<staging|prod> manifest=<record.json>
+smoke_runner=<executable>` for a standalone read-only check. Verification uses Kubernetes API
+pod proxies and does not modify Services, Ingresses, Deployments, or pods. Failure diagnostics
+identify the failed stage without response bodies, headers, browser storage, credentials, or
+child-process output.

@@ -739,6 +739,14 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             target["sourceRevision"],
             "--provider",
             target["expectedDefaultChatProvider"],
+            "--manifest",
+            str(args.manifest),
+            "--smoke-runner",
+            str(getattr(args, "smoke_runner", args.verifier)),
+            "--config",
+            args.config,
+            "--kubeconfig",
+            args.kubeconfig,
         ]
         failed_stage = "runtime-verification"
         verifier = validate_verifier_result(
@@ -790,8 +798,7 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
                 "status": observed_info.get("status"),
                 "chartName": observed_chart.get("name"),
                 "chartVersion": chart_version(observed_helm),
-                "invocationDescriptionMatches": observed_info.get("description")
-                == description,
+                "invocationDescriptionMatches": observed_info.get("description") == description,
             }
         except Exception:
             diagnostics["helm"] = "unavailable"
@@ -822,13 +829,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--environment", choices=("staging", "prod"), required=True)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--evidence", type=Path, required=True)
-    parser.add_argument("--verifier", type=Path, required=True)
+    parser.add_argument(
+        "--verifier", type=Path, default=Path(__file__).with_name("dspace_runtime_verifier.py")
+    )
+    parser.add_argument("--smoke-runner", type=Path)
     parser.add_argument("--confirm", default="")
     parser.add_argument("--config", default="")
     parser.add_argument("--kubeconfig", default=str(Path.home() / ".kube" / "config-sugarkube"))
     parser.add_argument("--oras", default=os.environ.get("SUGARKUBE_ORAS_COMMAND", "oras"))
     parser.add_argument("--timeout", default="10m")
     args = parser.parse_args(argv)
+    if args.smoke_runner is None:
+        # Backward-compatible programmatic callers supplied one executable under
+        # the legacy verifier option. Public recipes always pass the smoke runner.
+        args.smoke_runner = args.verifier
     try:
         rollback(args)
     except (RollbackError, app_config.AppConfigError) as exc:
