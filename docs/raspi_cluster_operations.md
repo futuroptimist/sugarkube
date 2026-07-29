@@ -38,7 +38,11 @@ logs, preparing Helm, and rolling out real workloads like
 ## Golden path: HA dev cluster → Helm → Traefik → workloads
 
 For the canonical staging CoreDNS, Traefik, and Cloudflare connector availability lifecycle and
-one-server power-off drill, see [Staging DNS and public-ingress high availability](staging-ingress-ha.md).
+the dated July 29, 2026 evidence from its one-server power-off drill, see
+[Staging DNS and public-ingress high availability](staging-ingress-ha.md). The deployed staging
+topology now has node-spread CoreDNS coverage, two node-separated Traefik replicas, and two
+Cloudflare Tunnel replicas. That evidence demonstrates shared DNS/ingress continuity; it does not
+promise fast rescheduling for singleton applications.
 
 Follow this sequence after imaging and booting the Pis:
 

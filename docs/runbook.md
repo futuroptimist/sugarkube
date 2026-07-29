@@ -2,7 +2,7 @@
 
 This runbook documents the expected flow for bringing a three-node Raspberry Pi 5 k3s cluster
 online, keeping it healthy, and restoring service after failures. All commands assume an
-operator workstation with the `just`, `flux`, `kubectl`, and `sops` CLIs installed.
+operator workstation with the `just`, `flux`, `kubectl`, `rg` (ripgrep), and `sops` CLIs installed.
 
 ## 1. Bootstrap the first server
 
@@ -34,11 +34,17 @@ operator workstation with the `just`, `flux`, `kubectl`, and `sops` CLIs install
    sudo k3s kubectl get nodes -o wide
    ```
 
-4. Confirm the embedded etcd cluster is healthy:
+4. Confirm the contacted API server and its etcd dependency are ready:
 
    ```bash
-   sudo k3s etcdctl endpoint status --cluster --write-out=table
+   kubectl get --raw='/readyz?verbose' | rg 'etcd|readyz check passed'
    ```
+
+   This proves readiness only for the contacted API server and that server's etcd dependency. It
+   is not a complete per-member etcd health, consistency, or latency report. Optional deeper
+   inspection requires a separately installed compatible `etcdctl` using the official K3s-managed
+   endpoints and client-certificate paths. Never print certificate, private-key, or Secret
+   contents.
 
 ## 2. Deploy kube-vip and verify the virtual IP
 
