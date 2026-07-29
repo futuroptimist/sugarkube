@@ -328,10 +328,8 @@ json.dump([{
 }], sys.stdout)' >"${test_tmp}/payload.json"
 
   : >"${test_tmp}/port-forward.log"
-  trap - EXIT
   kubectl -n "${NAMESPACE}" port-forward --address=127.0.0.1 "service/${RELEASE}-alertmanager" :9093 >"${test_tmp}/port-forward.log" 2>&1 &
   test_pid=$!
-  trap cleanup_pagerduty_test EXIT
   for _ in {1..20}; do
     port_forward_running || port_forward_stopped
     mapfile -t port_forward_lines <"${test_tmp}/port-forward.log"
@@ -347,7 +345,7 @@ json.dump([{
   [[ -n "${port}" ]] || { echo "ERROR: Alertmanager port-forward did not establish an owned loopback listener (diagnostics redacted)." >&2; return 19; }
   port_forward_running || port_forward_stopped
 
-  if ! curl --silent --show-error --connect-timeout 3 --max-time 10 \
+  if ! curl --silent --show-error --noproxy '*' --connect-timeout 3 --max-time 10 \
     --header 'Content-Type: application/json' --data-binary "@${test_tmp}/payload.json" \
     --output "${test_tmp}/response" --write-out '%{http_code}' \
     "http://127.0.0.1:${port}/api/v2/alerts" >"${test_tmp}/status" 2>"${test_tmp}/curl.log"; then

@@ -760,6 +760,7 @@ def test_pagerduty_fire_and_resolve_share_labels_and_bound_end_times(tmp_path):
         assert (
             "port-forward --address=127.0.0.1 " "service/kube-prometheus-stack-alertmanager :9093"
         ) in audit
+        assert "--noproxy *" in audit
         assert "--header Content-Type: application/json" in audit
         assert "--data-binary @" in audit
         assert "http://127.0.0.1:43128/api/v2/alerts" in audit
@@ -792,6 +793,14 @@ def test_pagerduty_fire_and_resolve_share_labels_and_bound_end_times(tmp_path):
     for directory in (tmp_path / "fire", tmp_path / "resolve"):
         assert (directory / "pagerduty.reaped").read_text().strip() == "reaped"
         assert not list(directory.glob("sugarkube-alertmanager-test.*"))
+
+
+def test_pagerduty_cleanup_trap_remains_installed_before_port_forward_starts():
+    script = SCRIPT.read_text(encoding="utf-8")
+    pagerduty = script.split("pagerduty_test() (", 1)[1].split("\n)\n\ndashboard_verify()", 1)[0]
+    start = pagerduty.index('kubectl -n "${NAMESPACE}" port-forward')
+    assert "trap cleanup_pagerduty_test EXIT" in pagerduty[:start]
+    assert "trap - EXIT" not in pagerduty
 
 
 @pytest.mark.parametrize("action", ["fire", "resolve"])
