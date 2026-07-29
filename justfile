@@ -1709,7 +1709,7 @@ dspace-release-verify env manifest smoke_runner config='' kubeconfig='':
     resolved_host="$(python3 "{{ justfile_directory() }}/scripts/app_chart.py" resolve-host --values "${SUGARKUBE_VALUES}")"
     IFS=$'\t' read -r application_version source_revision image_tag image_digest provider approved_chart_version approved_helm_revision < <(
       python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" runtime-args --manifest "${manifest_path}")
-    verifier_path="${SUGARKUBE_DSPACE_RUNTIME_VERIFIER:-{{ justfile_directory() }}/scripts/dspace_runtime_verifier.py}"
+    verifier_path="{{ justfile_directory() }}/scripts/dspace_runtime_verifier.py"
     if [ ! -f "${smoke_runner_path}" ] || [ ! -x "${smoke_runner_path}" ]; then
       echo "ERROR: smoke_runner must be an existing executable file." >&2; exit 2
     fi

@@ -48,22 +48,28 @@ def generic_app_stub_env(tmp_path: Path, ensure_just_available: Path) -> dict[st
     bin_dir.mkdir()
     smoke_runner = tmp_path / "smoke-runner"
     _write_executable(smoke_runner, "#!/usr/bin/env bash\nexit 0\n")
-    runtime_verifier = tmp_path / "runtime-verifier"
+    verifier_log = tmp_path / "runtime-verifier.log"
     _write_executable(
-        runtime_verifier,
-        """#!/usr/bin/env python3
+        bin_dir / "python3",
+        f"""#!{sys.executable}
 import json
+import os
 import sys
+verifier = {str(REPO_ROOT / "scripts/dspace_runtime_verifier.py")!r}
+if len(sys.argv) < 2 or sys.argv[1] != verifier:
+    os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
+with open(os.environ["SUGARKUBE_RUNTIME_VERIFIER_LOG"], "a", encoding="utf-8") as log:
+    log.write(sys.argv[1] + "\\n")
 args = sys.argv[1:]
 def value(flag):
     return args[args.index(flag) + 1]
-print(json.dumps({"schemaVersion": 1, "environment": value("--environment"),
+print(json.dumps({{"schemaVersion": 1, "environment": value("--environment"),
   "release": value("--release"), "namespace": value("--namespace"),
   "applicationVersion": value("--application-version"),
   "runtimeSourceRevision": value("--source-revision"),
   "frontendSourceRevision": value("--source-revision"),
   "defaultProvider": value("--provider"),
-  "journeys": [{"name": "/", "passed": True}, {"name": "/chat", "passed": True}]}))
+  "journeys": [{{"name": "/", "passed": True}}, {{"name": "/chat", "passed": True}}]}}))
 """,
     )
     log_path = tmp_path / "helm.log"
@@ -472,7 +478,7 @@ print(json.dumps(value))
     env["KUBECTL_LOG"] = str(tmp_path / "kubectl.log")
     env["CURL_LOG"] = str(tmp_path / "curl.log")
     env["DSPACE_SMOKE_RUNNER"] = str(smoke_runner)
-    env["SUGARKUBE_DSPACE_RUNTIME_VERIFIER"] = str(runtime_verifier)
+    env["SUGARKUBE_RUNTIME_VERIFIER_LOG"] = str(verifier_log)
     return env
 
 
@@ -2498,6 +2504,38 @@ def _write_dspace_candidate(
         + "\n",
         encoding="utf-8",
     )
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_dspace_release_verify_ignores_forged_verifier_override(
+    tmp_path: Path, generic_app_stub_env: dict[str, str]
+) -> None:
+    manifest = tmp_path / "candidate.json"
+    marker = tmp_path / "forged-verifier-ran"
+    forged_verifier = tmp_path / "forged-verifier"
+    _write_dspace_candidate(manifest, "staging")
+    _write_executable(
+        forged_verifier,
+        f"#!/usr/bin/env bash\ntouch {str(marker)!r}\nexit 0\n",
+    )
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_DSPACE_RUNTIME_VERIFIER"] = str(forged_verifier)
+
+    result = _run_just(
+        [
+            "dspace-release-verify",
+            "env=staging",
+            f"manifest={manifest}",
+            f"smoke_runner={env['DSPACE_SMOKE_RUNNER']}",
+        ],
+        env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert Path(env["SUGARKUBE_RUNTIME_VERIFIER_LOG"]).read_text(
+        encoding="utf-8"
+    ).splitlines() == [str(REPO_ROOT / "scripts/dspace_runtime_verifier.py")]
+    assert not marker.exists()
 
 
 @pytest.mark.usefixtures("ensure_just_available")
