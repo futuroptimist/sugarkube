@@ -44,6 +44,40 @@ def candidate() -> dict[str, object]:
     )
 
 
+def test_promotion_requires_matching_finalized_staging_evidence() -> None:
+    staging = candidate()
+    staging.update(
+        recordType="final",
+        helmRevision=7,
+        pods=[
+            {
+                "name": "dspace-0",
+                "startTime": "2026-07-26T12:01:00Z",
+                "imageID": f"repo@{DIGEST}",
+            }
+        ],
+        runtimeSourceRevision=SHA,
+        runtimeSourceRevisionMethod=manifest.RUNTIME_METHOD,
+        verificationResults=[
+            {"check": check, "passed": True, "details": "bounded"}
+            for check in sorted(manifest.FINAL_FIXED_CHECKS)
+        ]
+        + [
+            {
+                "check": "imagePlatformSourceRevision[0]",
+                "passed": True,
+                "details": "bounded",
+            }
+        ],
+    )
+    production = candidate()
+    production["environment"] = "prod"
+    manifest.validate_promotion(production, staging)
+    production["chartDigest"] = "sha256:" + "9" * 64
+    with pytest.raises(manifest.ManifestError, match="chartDigest"):
+        manifest.validate_promotion(production, staging)
+
+
 def test_upstream_import_is_canonical_and_round_trips(tmp_path: Path) -> None:
     source = tmp_path / "upstream.json"
     output = tmp_path / "candidate.json"
@@ -966,6 +1000,7 @@ def test_default_evidence_path_is_stable_and_approval_unique() -> None:
     assert str(manifest.evidence_path(candidate())) == (
         "deployment-evidence/dspace/staging/main-abcdef0-20260726T120000Z.json"
     )
+
 
 @pytest.mark.parametrize(
     ("change", "message"),

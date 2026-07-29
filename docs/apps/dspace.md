@@ -477,3 +477,54 @@ just helm-oci-install release=dspace namespace=dspace chart=oci://ghcr.io/democr
 ```bash
 just helm-oci-upgrade release=dspace namespace=dspace chart=oci://ghcr.io/democratizedspace/charts/dspace values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml version_file=docs/apps/dspace.staging.version tag="$APP_TAG" env=staging
 ```
+
+## Mandatory source-integrity and `/chat` proof
+
+Use a DSPACE checkout whose dependencies have been installed with `pnpm install`, then install the
+browser with `pnpm exec playwright install chromium`. The smoke runner must be the executable file
+from that checkout; Sugarkube invokes it directly as argv and captures, but never records or prints,
+its output. No token.place or OpenAI credential is required or accepted: the runner uses an isolated
+browser context and mocked provider transport.
+
+```bash
+DSPACE_SMOKE_RUNNER="$HOME/dspace/scripts/run-remote-chat-smoke.mjs"
+chmod +x "$DSPACE_SMOKE_RUNNER"
+
+just dspace-release-verify \
+  env=staging \
+  manifest=deployment-evidence/dspace/staging/<finalized-record>.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER"
+```
+
+The verifier derives the public host and token.place origin/model from the selected, ordered values
+chain, then cross-checks every Running, Ready release replica through the read-only Kubernetes API
+pod proxy. It verifies `/build-info.json`, the shared-layout revision marker, immutable pod image
+coordinates and digests, replica agreement, and the isolated `/chat` journey. For a token.place
+release, origin and model expectations are passed to the runner; for an OpenAI-default release they
+are omitted. Public redirects to another origin fail closed.
+
+Create finalized staging evidence through the standard manifest-backed staging deployment. A
+production promotion must use the matching production candidate and that finalized staging record:
+
+```bash
+just app-deploy app=dspace env=staging tag=main-REPLACE_SHORTSHA \
+  manifest=deployment-candidates/dspace/staging.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER"
+
+just app-promote-prod \
+  app=dspace \
+  tag=main-REPLACE_SHORTSHA \
+  manifest=deployment-candidates/dspace/prod.json \
+  staging_evidence=deployment-evidence/dspace/staging/<finalized-record>.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER"
+```
+
+Successful records remain under `deployment-evidence/dspace/<environment>/`. Runtime verification
+adds only bounded booleans and identity summaries; it never stores HTTP bodies, HTML, child output,
+browser artifacts, headers, cookies, payloads, keys, or provider ciphertext. Historical finalized
+schema-version 1 evidence remains valid because the newer runtime checks are additive.
+
+A failure before mutation removes an owned reservation. A failure after Helm mutation preserves the
+reservation for explicit reconciliation and never finalizes success, retries, downgrades, or rolls
+back automatically. Inspect the cluster and reserved destination, then either complete reconciliation
+or remove only the confirmed stale `.reservation` sidecar before a deliberate retry.

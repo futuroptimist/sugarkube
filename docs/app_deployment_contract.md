@@ -379,3 +379,21 @@ Current values chains:
 | token.place | `docs/examples/tokenplace.values.dev.yaml` | `docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml` | `docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml` | `/,/livez,/healthz,/relay/diagnostics` |
 | danielsmith.io | `docs/examples/danielsmith.values.dev.yaml` | `docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.staging.yaml` | `docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.prod.yaml` | `/,/livez,/healthz` |
 | jobbot3000 | `docs/examples/jobbot3000.values.dev.yaml` | `docs/examples/jobbot3000.values.dev.yaml,docs/examples/jobbot3000.values.staging.yaml` | `docs/examples/jobbot3000.values.dev.yaml,docs/examples/jobbot3000.values.prod.yaml` | `/,/healthz,/livez` |
+
+### DSPACE runtime promotion gate
+
+DSPACE alone adds a mandatory source-integrity and remote `/chat` gate to the shared contract.
+`just dspace-release-verify` consumes an approved candidate or finalized record, an executable DSPACE
+`run-remote-chat-smoke.mjs`, the resolved app config, and kubeconfig. Standard staging operations run
+it after rollout and before final evidence is written. Production additionally requires finalized
+staging evidence for identical application/source/image/chart/semantic/provider coordinates and
+re-verifies live staging before any production reservation, render, Helm command, or Kubernetes
+mutation. The live Helm revision must still equal staging evidence, and production verification must
+finish before successful evidence finalization. Other applications retain the generic ordering.
+
+The DSPACE harness is argv-only, mocks provider transport, and requires no real provider credentials.
+Token.place defaults use origin/model expectations from the ordered environment values chain;
+OpenAI defaults omit both token.place arguments while still proving OpenAI discoverability and
+missing-key gating. Verification evidence is bounded identity/journey metadata, never response or
+child-process content. Existing finalized records without the additive runtime checks remain valid
+for historical audit and rollback.

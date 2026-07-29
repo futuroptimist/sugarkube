@@ -444,6 +444,26 @@ print(json.dumps(value))
 """,
     )
 
+    smoke_runner = bin_dir / "dspace-smoke"
+    _write_executable(smoke_runner, "#!/usr/bin/env bash\nexit 0\n")
+    runtime_verifier = bin_dir / "dspace-runtime-verifier"
+    _write_executable(
+        runtime_verifier,
+        """#!/usr/bin/env python3
+import json, sys
+args = sys.argv[1:]
+def option(name): return args[args.index(name) + 1]
+manifest = json.load(open(option("--manifest"), encoding="utf-8"))
+print(json.dumps({"schemaVersion": 1, "environment": option("--environment"),
+ "release": option("--release"), "namespace": option("--namespace"),
+ "applicationVersion": manifest["applicationVersion"],
+ "runtimeSourceRevision": manifest["sourceRevision"],
+ "frontendSourceRevision": manifest["sourceRevision"],
+ "defaultProvider": manifest["expectedDefaultChatProvider"],
+ "journeys": [{"name": "/", "passed": True}, {"name": "/chat", "passed": True}]}))
+""",
+    )
+
     env = os.environ.copy()
     env["HOME"] = str(tmp_path / "home")
     env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
@@ -451,6 +471,8 @@ print(json.dumps(value))
     env["HELM_LOG"] = str(log_path)
     env["KUBECTL_LOG"] = str(tmp_path / "kubectl.log")
     env["CURL_LOG"] = str(tmp_path / "curl.log")
+    env["DSPACE_SMOKE_RUNNER"] = str(smoke_runner)
+    env["SUGARKUBE_DSPACE_RUNTIME_VERIFIER"] = str(runtime_verifier)
     return env
 
 
@@ -4344,6 +4366,6 @@ def test_dspace_promote_prod_guard_mismatch_fails_before_helm(
     result = _run_just(["dspace-oci-promote-prod", "tag=main-deadbee"], env)
 
     assert result.returncode != 0
-    assert "manifest=<approved-candidate.json> is required" in result.stderr
+    assert "staging_evidence=<finalized-staging.json>" in result.stderr
     helm_log_path = Path(env["HELM_LOG"])
     assert not helm_log_path.exists() or helm_log_path.read_text(encoding="utf-8") == ""
