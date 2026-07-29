@@ -37,6 +37,9 @@ logs, preparing Helm, and rolling out real workloads like
 
 ## Golden path: HA dev cluster → Helm → Traefik → workloads
 
+For the canonical staging CoreDNS, Traefik, and Cloudflare connector availability lifecycle and
+one-server power-off drill, see [Staging DNS and public-ingress high availability](staging-ingress-ha.md).
+
 Follow this sequence after imaging and booting the Pis:
 
 1. **Form or re-run the HA cluster:** From each node, use the quick-start flow in

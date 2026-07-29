@@ -3267,3 +3267,22 @@ observability-node-heartbeat-verify env='':
 # Disable the heartbeat and destructively remove only its local owned assets.
 observability-node-heartbeat-uninstall env='':
     @scripts/observability_node_heartbeat.sh uninstall '{{ env }}'
+
+# Render the staging-only DNS/ingress HA resources without applying them.
+staging-ingress-ha-render env='staging':
+    scripts/staging_ingress_ha.sh render "{{ env }}"
+
+staging-ingress-ha-status env='staging':
+    scripts/staging_ingress_ha.sh status "{{ env }}"
+
+staging-ingress-ha-apply env='staging':
+    scripts/staging_ingress_ha.sh apply "{{ env }}"
+
+staging-ingress-ha-upgrade env='staging':
+    scripts/staging_ingress_ha.sh upgrade "{{ env }}"
+
+staging-ingress-ha-verify env='staging':
+    scripts/staging_ingress_ha.sh verify "{{ env }}"
+
+staging-ingress-ha-rollback env='staging':
+    scripts/staging_ingress_ha.sh rollback "{{ env }}"
