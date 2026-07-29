@@ -39,6 +39,9 @@ logs, preparing Helm, and rolling out real workloads like
 
 For the canonical staging CoreDNS, Traefik, and Cloudflare connector availability lifecycle and
 one-server power-off drill, see [Staging DNS and public-ingress high availability](staging-ingress-ha.md).
+The deployed staging topology has node-spread CoreDNS coverage, two node-separated Traefik replicas,
+and two Cloudflare Tunnel replicas. The [2026-07-29 staging node-failure drill](drills/2026-07-29-staging-node-failure.md)
+records the measured continuity and its important singleton-workload and sampling limitations.
 
 Follow this sequence after imaging and booting the Pis:
 

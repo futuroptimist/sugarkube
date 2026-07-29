@@ -23,7 +23,82 @@ for k in ("creationTimestamp","resourceVersion","uid","generation","managedField
 d.pop("status",None); print(json.dumps(d,sort_keys=True,indent=2))'
 }
 render() { normalize_env "$1"; need kubectl; need python3; cat "$TRAEFIK_CONFIG"; printf '%s\n' '---'; render_coredns; }
-status() { normalize_env "$1"; need kubectl; printf 'Context: %s (read-only)\n' "$(context)"; kubectl -n kube-system get deploy coredns traefik -o wide; kubectl -n kube-system get deploy coredns-ha -o wide --ignore-not-found=true; kubectl -n kube-system get endpoints kube-dns traefik; kubectl get deployment -A -l app.kubernetes.io/name=cloudflare-tunnel -o wide; }
+endpoint_slices() {
+  local service="$1" mode="${2:-backend}"
+  kubectl -n kube-system get endpointslices.discovery.k8s.io \
+    -l "kubernetes.io/service-name=${service}" -o json | python3 -c '
+import json,sys
+
+service,mode=sys.argv[1:]
+try:
+    document=json.load(sys.stdin)
+except (ValueError, TypeError) as exc:
+    raise SystemExit(f"ERROR: malformed EndpointSlice JSON for {service}: {exc}")
+if not isinstance(document,dict) or not isinstance(document.get("items"),list):
+    raise SystemExit(f"ERROR: malformed EndpointSlice list for {service}")
+if not document["items"]:
+    raise SystemExit(f"ERROR: no EndpointSlices found for Service {service}")
+
+endpoints={}
+for slice_ in document["items"]:
+    if not isinstance(slice_,dict) or not isinstance(slice_.get("endpoints"),list):
+        raise SystemExit(f"ERROR: malformed EndpointSlice data for Service {service}")
+    for endpoint in slice_["endpoints"]:
+        if not isinstance(endpoint,dict):
+            raise SystemExit(f"ERROR: malformed endpoint data for Service {service}")
+        addresses=endpoint.get("addresses")
+        conditions=endpoint.get("conditions",{})
+        node=endpoint.get("nodeName")
+        target=endpoint.get("targetRef")
+        if (not isinstance(addresses,list) or not addresses or
+            any(not isinstance(address,str) or not address for address in addresses) or
+            not isinstance(conditions,dict) or
+            (node is not None and not isinstance(node,str)) or
+            (target is not None and not isinstance(target,dict))):
+            raise SystemExit(f"ERROR: malformed endpoint data for Service {service}")
+        for field in ("ready","serving","terminating"):
+            if field in conditions and not isinstance(conditions[field],bool):
+                raise SystemExit(f"ERROR: malformed endpoint condition {field} for Service {service}")
+        ready=conditions.get("ready",True)
+        serving=conditions.get("serving",ready)
+        terminating=conditions.get("terminating",False)
+        target_key=json.dumps(target,sort_keys=True,separators=(",",":")) if target is not None else ""
+        key=(node or "",tuple(sorted(set(addresses))),target_key)
+        if key in endpoints:
+            _,old_ready,old_serving,old_terminating=endpoints[key]
+            ready=ready and old_ready
+            serving=serving and old_serving
+            terminating=terminating or old_terminating
+        endpoints[key]=(node,ready,serving,terminating)
+
+healthy=[]
+unhealthy=[]
+for key,(node,ready,serving,terminating) in sorted(endpoints.items()):
+    addresses=",".join(key[1])
+    target=key[2] or "-"
+    node_text=node or "<none>"
+    description=f"node={node_text} addresses={addresses} targetRef={target} ready={str(ready).lower()} serving={str(serving).lower()} terminating={str(terminating).lower()}"
+    (healthy if ready and serving and not terminating else unhealthy).append((node,description))
+print(f"{service}: healthy endpoints={len(healthy)} nodes={sorted({node for node,_ in healthy if node})}")
+for _,description in unhealthy:
+    print(f"{service}: unhealthy endpoint: {description}",file=sys.stderr)
+if not healthy:
+    raise SystemExit(f"ERROR: Service {service} has no healthy EndpointSlice backend")
+if mode == "spread":
+    nodes={node for node,_ in healthy if node}
+    if len(healthy)<2 or len(nodes)<2:
+        raise SystemExit(f"ERROR: fewer than two healthy, hostname-spread {service} EndpointSlice endpoints")
+' "$service" "$mode"
+}
+status() {
+  normalize_env "$1"; need kubectl; need python3
+  printf 'Context: %s (read-only)\n' "$(context)"
+  kubectl -n kube-system get deploy coredns traefik -o wide
+  kubectl -n kube-system get deploy coredns-ha -o wide --ignore-not-found=true
+  endpoint_slices kube-dns spread
+  endpoint_slices traefik backend
+  kubectl get deployment -A -l app.kubernetes.io/name=cloudflare-tunnel -o wide
+}
 assert_owned_or_absent() {
   local kind="$1" name="$2" value error_file resource_file
   error_file="$(mktemp -t sugarkube-ownership.XXXXXX)"
@@ -80,13 +155,7 @@ nodes={p.get("spec",{}).get("nodeName") for p in pods if ready(p)}-{None}
 print(f"{sys.argv[1]}: ready nodes={sorted(nodes)}")
 if len(nodes)<2: raise SystemExit(f"ERROR: fewer than two ready, hostname-spread {sys.argv[1]} pods")' "$name"
   }
-  kubectl -n kube-system get endpoints kube-dns -o json | python3 -c '
-import json,sys
-endpoint=json.load(sys.stdin)
-addresses=[a for subset in endpoint.get("subsets",[]) for a in subset.get("addresses",[])]
-nodes={a.get("nodeName") for a in addresses if a.get("nodeName")}
-print(f"CoreDNS: ready endpoint nodes={sorted(nodes)}")
-if len(addresses)<2 or len(nodes)<2: raise SystemExit("ERROR: fewer than two ready, hostname-spread CoreDNS endpoints")'
+  endpoint_slices kube-dns spread
   kubectl -n kube-system get pods -l app.kubernetes.io/name=traefik -o json | check_spread Traefik
   local tunnel_namespace
   tunnel_namespace="$(kubectl get deployment -A -l app.kubernetes.io/name=cloudflare-tunnel -o json | python3 -c '
@@ -95,7 +164,7 @@ items=json.load(sys.stdin)["items"]
 if len(items) != 1: raise SystemExit(f"ERROR: expected exactly one Cloudflare tunnel Deployment; found {len(items)}")
 print(items[0]["metadata"]["namespace"])')"
   kubectl -n "$tunnel_namespace" get pods -l app.kubernetes.io/name=cloudflare-tunnel -o json | check_spread 'Cloudflare tunnel'
-  for svc in kube-dns traefik; do kubectl -n kube-system get endpoints "$svc" -o json | python3 -c 'import json,sys; e=json.load(sys.stdin); assert any(x.get("addresses") for x in e.get("subsets",[])), "ERROR: Service has no ready backend"'; done
+  endpoint_slices traefik backend
   kubectl -n default run "$probe" --image="${SUGARKUBE_DNS_TEST_IMAGE:-busybox:1.36}" --restart=Never --command -- nslookup kubernetes.default.svc.cluster.local >/dev/null
   kubectl -n default wait --for=jsonpath='{.status.phase}'=Succeeded "pod/$probe" --timeout="$TIMEOUT" || die "bounded in-cluster DNS probe failed"
   local targets url
