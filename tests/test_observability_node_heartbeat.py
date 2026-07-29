@@ -202,6 +202,29 @@ def test_delivery_keeps_secret_out_of_argv_output_and_bounds_failure(tmp_path):
     assert "--retry 2" in args
 
 
+def test_delivery_accepts_single_line_credential_without_trailing_newline(tmp_path):
+    url, _ = canary()
+    credential_dir = tmp_path / "credentials"
+    credential_dir.mkdir()
+    (credential_dir / "ping-url").write_text(url)
+    curl = tmp_path / "curl"
+    curl.write_text("#!/bin/sh\ncat >/dev/null\n")
+    curl.chmod(0o755)
+    result = subprocess.run(
+        [str(DELIVERY)],
+        text=True,
+        capture_output=True,
+        env=os.environ
+        | {
+            "CREDENTIALS_DIRECTORY": str(credential_dir),
+            "PATH": f"{tmp_path}:{os.environ['PATH']}",
+        },
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "delivered successfully" in result.stdout
+
+
 def test_delivery_rejects_multiline_credential_without_running_curl(tmp_path):
     url, uuid = canary()
     credential_dir = tmp_path / "credentials"
@@ -218,6 +241,22 @@ def test_delivery_rejects_multiline_credential_without_running_curl(tmp_path):
     assert "format is invalid" in result.stderr
     assert url not in result.stdout + result.stderr
     assert uuid not in result.stdout + result.stderr
+
+
+def test_delivery_rejects_second_line_without_trailing_newline(tmp_path):
+    url, _ = canary()
+    credential_dir = tmp_path / "credentials"
+    credential_dir.mkdir()
+    (credential_dir / "ping-url").write_text(url + "\nextra")
+    result = subprocess.run(
+        [str(DELIVERY)],
+        text=True,
+        capture_output=True,
+        env=os.environ | {"CREDENTIALS_DIRECTORY": str(credential_dir)},
+        check=False,
+    )
+    assert result.returncode
+    assert "format is invalid" in result.stderr
 
 
 def test_missing_systemctl_is_actionable(harness):

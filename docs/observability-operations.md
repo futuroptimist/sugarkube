@@ -305,8 +305,8 @@ not text to paste.
 1. Log in to the node, pull `main`, and review the checked-out commit.
 2. From an interactive terminal run `sudo just observability-node-heartbeat-install env=staging`.
    At the hidden prompt, paste that node's `<ROTATED-NODE-PING-URL>` and press Enter.
-3. Run `just observability-node-heartbeat-status env=staging`, then
-   `just observability-node-heartbeat-verify env=staging`. Verification explicitly starts one
+3. Run `sudo just observability-node-heartbeat-status env=staging`, then
+   `sudo just observability-node-heartbeat-verify env=staging`. Verification explicitly starts one
    oneshot, waits at most 25 seconds for a successful result, and leaves the recurring timer enabled.
 4. In the **Sugarkube Staging** Healthchecks.io project, confirm only the corresponding node check
    changes from **New** to **Up**. Repeat on the next physical node with its distinct URL.

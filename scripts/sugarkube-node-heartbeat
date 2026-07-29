@@ -13,9 +13,13 @@ credential="${credential_dir}/ping-url"
 
 # Read exactly one line without ever passing it in argv or emitting it. Healthchecks.io's
 # hosted ping endpoint uses a canonical UUID path; action suffixes and URL extras are forbidden.
-IFS= read -r ping_url <"${credential}" || fail "credential is empty"
+exec 3<"${credential}"
+IFS= read -r ping_url <&3 || [[ -n "${ping_url}" ]] || fail "credential is empty"
 [[ -n "${ping_url}" ]] || fail "credential is empty"
-[[ "$(wc -l <"${credential}")" -eq 1 ]] || fail "credential format is invalid"
+if IFS= read -r extra <&3 || [[ -n "${extra}" ]]; then
+  fail "credential format is invalid"
+fi
+exec 3<&-
 uuid='[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}'
 [[ "${ping_url}" =~ ^https://hc-ping\.com/${uuid}$ ]] || fail "credential format is invalid"
 

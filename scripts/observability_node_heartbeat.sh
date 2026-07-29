@@ -27,7 +27,7 @@ hostname_checked() {
 }
 require_root() {
   if [[ -z "${ROOT}" && "${EUID}" -ne 0 ]]; then
-    die "this mutation must run as root (use sudo)."
+    die "this action must run as root (use sudo)."
   fi
 }
 require_tty() {
@@ -99,7 +99,7 @@ status_heartbeat() {
 }
 verify_heartbeat() {
   local host deadline state
-  require_tool "${SYSTEMCTL}"; host="$(hostname_checked)"
+  require_root; require_tool "${SYSTEMCTL}"; host="$(hostname_checked)"
   "${SYSTEMCTL}" is-enabled --quiet "${TIMER}" || die "timer is not enabled."
   "${SYSTEMCTL}" is-active --quiet "${TIMER}" || die "timer is not active."
   "${SYSTEMCTL}" start "${SERVICE}" || die "heartbeat trigger failed (credential and URL redacted)."
