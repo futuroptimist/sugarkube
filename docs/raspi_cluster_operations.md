@@ -17,6 +17,68 @@ logs, preparing Helm, and rolling out real workloads like
 [token.place](https://github.com/futuroptimist/token.place) and
 [democratized.space (dspace)](https://github.com/democratizedspace/dspace).
 
+## Staging DNS and ingress high availability
+
+### Failure mode and active ownership
+
+Staging has three k3s servers (`sugarkube3`, `sugarkube4`, and `sugarkube5`). During a controlled loss of `sugarkube3`, embedded etcd and the API remained available because the other two voting members retained quorum. Public traffic nevertheless failed for about six minutes: the sole CoreDNS pod was on the stopped node, and Kubernetes did not evict it until the default approximately five-minute `NodeNotReady` toleration expired. The application on `sugarkube4` stayed healthy; service recovered when replacement DNS became ready. This baseline deliberately does **not** change cluster-wide monitoring or eviction timing.
+
+The active ownership model is:
+
+* K3s owns packaged CoreDNS (including its Service identity and ClusterIP, Corefile, RBAC, service account, and probes). Sugarkube owns only the staging replica/required hostname anti-affinity patch in `clusters/staging/platform-ha/coredns-patch.yaml`. K3s rewrites its manifest at startup, so a post-start systemd hook on every server reapplies this narrow idempotent patch. It does not replace CoreDNS or create a continuous controller.
+* K3s owns packaged Traefik. Sugarkube uses K3s's supported `HelmChartConfig` extension for two replicas with required hostname anti-affinity. ServiceLB, ports, ingress classes, TLS, and all unspecified chart values remain unchanged.
+* The active Cloudflare connector is the existing `cloudflare-tunnel` Helm release installed by `just cf-tunnel-install`, currently in namespace `cloudflare`. Its existing two node-spread replicas are already HA. Verification discovers pods across namespaces by stable application label; it neither duplicates the release nor reads credentials.
+
+The Flux resources under `platform/` and `clusters/staging/patches/` are an inactive legacy/future path, not live staging ownership. Do not apply them alongside this lifecycle. Never edit `/var/lib/rancher/k3s/server/manifests`, use a transient scale/patch as the source of truth, or add another reconciler for these fields.
+
+### Post-merge apply, verification, and rollback
+
+Render/plan is offline. Then select the exact context and apply with bounded rollouts:
+
+```bash
+just staging-ingress-ha-render
+kubectl config use-context sugar-staging
+just staging-ingress-ha-status
+just staging-ingress-ha-apply env=staging
+just staging-ingress-ha-verify env=staging
+```
+
+Install the restart hook once on **each** server (it fails closed unless the preserved kubeconfig context is exactly `sugar-staging`, and does not restart k3s):
+
+```bash
+for node in sugarkube3 sugarkube4 sugarkube5; do
+  ssh "$node" 'cd ~/sugarkube && sudo --preserve-env=KUBECONFIG just staging-ingress-ha-hook install staging'
+done
+```
+
+Verification requires two Ready, node-spread pods for each of CoreDNS, Traefik, and the existing Cloudflare tunnel; ready `kube-dns` and `traefik` Service backends; in-cluster DNS resolution from a temporary BusyBox pod; and all canonical staging public URLs declared by the blackbox Probe manifest. The temporary pod is cleaned up on failure. Errors identify resources and placement but never expose tunnel credentials.
+
+Remove the durable hook from every server first, then rollback. Rollback restores one packaged CoreDNS replica without required anti-affinity and deletes only the Traefik customization so K3s chart defaults resume:
+
+```bash
+for node in sugarkube3 sugarkube4 sugarkube5; do
+  ssh "$node" 'cd ~/sugarkube && sudo --preserve-env=KUBECONFIG just staging-ingress-ha-hook remove staging'
+done
+just staging-ingress-ha-rollback env=staging
+```
+
+### One-node power-off drill
+
+After apply succeeds, continuously verify in one terminal, then power off exactly one server and watch scheduling in another:
+
+```bash
+while sleep 2; do just staging-ingress-ha-verify env=staging || break; done
+```
+
+```bash
+ssh sugarkube3 sudo poweroff
+kubectl --context sugar-staging get nodes,pods -A -o wide --watch
+```
+
+Public health endpoints should remain continuously reachable. Healthchecks.io and PagerDuty should still report the powered-off node; that expected alert must not be disabled. **Do not test another node until the first is back `Ready`, etcd three-member redundancy is restored, and HA verification passes.**
+
+This is app agnostic. token.place application-level HA remains separate work because relay registration and default rate-limit state are process-local; this change does not scale any application.
+
 > **Note**
 > If you've copied the k3s kubeconfig to `/home/pi/.kube/config` and set
 > `KUBECONFIG=$HOME/.kube/config` for the `pi` user (see the setup guide), you can omit `sudo`

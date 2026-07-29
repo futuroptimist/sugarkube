@@ -14,6 +14,28 @@ export SUGARKUBE_MDNS_ABSENCE_DBUS := env('SUGARKUBE_MDNS_ABSENCE_DBUS', '1')
 default: up
     @true
 
+# Render the staging-only DNS/ingress HA desired state without cluster access.
+staging-ingress-ha-render:
+    python3 scripts/staging_ingress_ha.py render
+
+# Read-only staging DNS/ingress HA inventory.
+staging-ingress-ha-status:
+    python3 scripts/staging_ingress_ha.py status
+
+staging-ingress-ha-verify env='':
+    python3 scripts/staging_ingress_ha.py verify "{{ env }}"
+
+# Mutations fail closed unless env=staging and the context is exactly sugar-staging.
+staging-ingress-ha-apply env='':
+    python3 scripts/staging_ingress_ha.py apply "{{ env }}"
+
+staging-ingress-ha-rollback env='':
+    python3 scripts/staging_ingress_ha.py rollback "{{ env }}"
+
+# Run on every staging server so a K3s manifest rewrite is followed by reconciliation.
+staging-ingress-ha-hook action env='':
+    scripts/install_staging_ingress_ha_hook.sh "{{ action }}" "{{ env }}"
+
 up-dev:
     just --justfile "{{ justfile_directory() }}/justfile" up env=dev
 

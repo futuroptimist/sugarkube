@@ -1,0 +1,6 @@
+spec:
+  replicas: 1
+  template:
+    spec:
+      affinity:
+        podAntiAffinity: null
