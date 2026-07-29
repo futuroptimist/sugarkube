@@ -3,6 +3,8 @@ kind: HelmChartConfig
 metadata:
   name: traefik
   namespace: kube-system
+  labels:
+    sugarkube.dev/managed-by: staging-ingress-ha
 spec:
   valuesContent: |-
     deployment:

@@ -5,122 +5,205 @@ import subprocess
 
 ROOT = pathlib.Path(__file__).parents[1]
 SCRIPT = ROOT / "scripts/staging_ingress_ha.sh"
+OWNER = "sugarkube.dev/managed-by"
 
-
-def test_sources_encode_two_replicas_and_required_hostname_spread():
-    manifest = (ROOT / "clusters/staging/ingress-ha/traefik-helmchartconfig.yaml").read_text()
-    script = SCRIPT.read_text()
-    assert "replicas: 2" in manifest
-    assert "requiredDuringSchedulingIgnoredDuringExecution" in manifest
-    assert "topologyKey: kubernetes.io/hostname" in manifest
-    assert 'd["spec"]["replicas"]=2' in script
-    assert '"k8s-app":"kube-dns"' in script
-    assert '"topologyKey":"kubernetes.io/hostname"' in script
-
-
-def _stub(tmp_path, pods=None, context="sugar-staging"):
-    calls = tmp_path / "calls"
-    kubectl = tmp_path / "kubectl"
-    pods = pods or []
-    deployment = {
-        "apiVersion": "apps/v1",
-        "kind": "Deployment",
-        "metadata": {"name": "coredns"},
-        "spec": {
-            "replicas": 1,
-            "selector": {"matchLabels": {"k8s-app": "kube-dns"}},
-            "template": {
-                "metadata": {"labels": {"k8s-app": "kube-dns"}},
-                "spec": {
-                    "serviceAccountName": "coredns",
-                    "containers": [{"name": "coredns", "image": "example.invalid/coredns"}],
-                },
+DEPLOYMENT = {
+    "apiVersion": "apps/v1",
+    "kind": "Deployment",
+    "metadata": {"name": "coredns"},
+    "spec": {
+        "replicas": 1,
+        "selector": {"matchLabels": {"k8s-app": "kube-dns"}},
+        "template": {
+            "metadata": {"labels": {"k8s-app": "kube-dns"}},
+            "spec": {
+                "serviceAccountName": "coredns",
+                "containers": [{
+                    "name": "coredns", "image": "registry.invalid/coredns:v1",
+                    "args": ["-conf", "/etc/coredns/Corefile"],
+                    "readinessProbe": {"httpGet": {"path": "/ready", "port": 8181}},
+                    "livenessProbe": {"httpGet": {"path": "/health", "port": 8080}},
+                    "volumeMounts": [{"name": "config-volume", "mountPath": "/etc/coredns"}],
+                }],
+                "volumes": [{"name": "config-volume", "configMap": {"name": "coredns"}}],
             },
         },
-    }
-    kubectl.write_text(f"""#!/bin/sh
-echo "$*" >>"{calls}"
-case "$*" in
-"config current-context") echo "{context}";;
-"-n kube-system get deployment coredns -o json") cat <<'JSON'
-{json.dumps(deployment)}
-JSON
-;;
-"get pods -A -o json") cat <<'JSON'
-{json.dumps({'items': pods})}
-JSON
-;;
-*"get endpoints "*" -o json") echo '{{"subsets":[{{"addresses":[{{"ip":"10.0.0.1"}}]}}]}}';;
-*) :;;
-esac
-""")
+    },
+}
+
+
+def _pod(node):
+    return {"metadata": {}, "spec": {"nodeName": node}, "status": {
+        "phase": "Running", "containerStatuses": [{"ready": True}]
+    }}
+
+
+def _stub(tmp_path, *, context="sugar-staging", nodes="node1,node2", workload_nodes=None, tunnels=1,
+          owner="staging-ingress-ha", probes=True, fail_wait="", fail_curl=False):
+    calls = tmp_path / "calls"
+    kubectl = tmp_path / "kubectl"
+    kubectl.write_text(f'''#!/usr/bin/env python3
+import json, os, sys
+args=sys.argv[1:]
+with open({str(calls)!r}, "a") as f: f.write(" ".join(args)+"\\n")
+joined=" ".join(args)
+if args == ["config", "current-context"]: print(os.environ["FAKE_CONTEXT"])
+elif joined == "-n kube-system get deployment coredns -o json": print(os.environ["DEPLOYMENT"])
+elif " get " in f" {{joined}} " and "jsonpath=" in joined:
+    if os.environ.get("RESOURCE_ABSENT") == "1": sys.exit(1)
+    print(os.environ.get("OWNER", ""), end="")
+elif "get pods" in joined and "-o json" in joined:
+    key = "TUNNEL_NODES" if "cloudflare-tunnel" in joined else ("TRAEFIK_NODES" if "traefik" in joined else "COREDNS_NODES")
+    print(json.dumps({{"items":[{{"metadata":{{}},"spec":{{"nodeName":n}},"status":{{"phase":"Running","containerStatuses":[{{"ready":True}}]}}}} for n in os.environ[key].split(",") if n]}}))
+elif joined == "get deployment -A -l app.kubernetes.io/name=cloudflare-tunnel -o json":
+    print(json.dumps({{"items":[{{"metadata":{{"namespace":f"tunnel-{{i}}"}}}} for i in range(int(os.environ["TUNNELS"]))]}}))
+elif joined == "get probes -A -l environment=staging,criticality=critical -o json":
+    items=[{{"spec":{{"url":"https://private.example/health"}}}}] if os.environ["PROBES"] == "1" else []
+    print(json.dumps({{"items":items}}))
+elif "get endpoints" in joined and "-o json" in joined: print('{{"subsets":[{{"addresses":[{{"ip":"10.0.0.1"}}]}}]}}')
+elif os.environ.get("FAIL_WAIT") and os.environ["FAIL_WAIT"] in joined and ("wait" in args or "rollout status" in joined): sys.exit(1)
+''')
     kubectl.chmod(0o755)
     curl = tmp_path / "curl"
-    curl.write_text("#!/bin/sh\nexit 0\n")
+    curl.write_text('#!/bin/sh\necho "$*" >>"$CALLS"\necho "sensitive-url-output" >&2\nexit "${FAIL_CURL:-0}"\n')
     curl.chmod(0o755)
     return {
-        **os.environ,
-        "PATH": f"{tmp_path}:{os.environ['PATH']}",
-        "SUGARKUBE_STAGING_HEALTH_URLS": "https://example.invalid/healthz",
+        **os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}", "CALLS": str(calls),
+        "FAKE_CONTEXT": context, "DEPLOYMENT": json.dumps(DEPLOYMENT),
+        "COREDNS_NODES": (workload_nodes or {}).get("CoreDNS", nodes),
+        "TRAEFIK_NODES": (workload_nodes or {}).get("Traefik", nodes),
+        "TUNNEL_NODES": (workload_nodes or {}).get("Cloudflare tunnel", nodes),
+        "TUNNELS": str(tunnels), "OWNER": owner, "PROBES": "1" if probes else "0",
+        "FAIL_WAIT": fail_wait, "FAIL_CURL": "1" if fail_curl else "0",
     }, calls
 
 
-def _pod(label, node):
-    return {
-        "metadata": {"labels": label},
-        "spec": {"nodeName": node},
-        "status": {"phase": "Running", "containerStatuses": [{"ready": True}]},
-    }
+def _run(env, action, stage="staging"):
+    return subprocess.run([SCRIPT, action, stage], env=env, text=True, capture_output=True)
 
 
-def test_mutation_guards_wrong_environment_and_context(tmp_path):
-    env, calls = _stub(tmp_path, context="not-staging")
-    result = subprocess.run([SCRIPT, "apply", "prod"], env=env, text=True, capture_output=True)
-    assert result.returncode and "staging-only" in result.stderr
-    assert not calls.exists()
-    result = subprocess.run([SCRIPT, "apply", "staging"], env=env, text=True, capture_output=True)
-    assert result.returncode and "exactly sugar-staging" in result.stderr
-    assert "apply -f" not in calls.read_text()
-    calls.unlink()
-    result = subprocess.run([SCRIPT, "verify", "staging"], env=env, text=True, capture_output=True)
-    assert result.returncode and "exactly sugar-staging" in result.stderr
-    assert "get pods" not in calls.read_text()
-    assert "run sugarkube-ingress-ha-verify-" not in calls.read_text()
+def test_rendered_contracts_and_coredns_clone(tmp_path):
+    env, _ = _stub(tmp_path)
+    result = _run(env, "render")
+    assert result.returncode == 0, result.stderr
+    traefik_text, coredns_text = result.stdout.split("\n---\n")
+    # Parse the small manifest into its semantically relevant key/value records
+    # rather than merely searching the complete source for disconnected strings.
+    records = {}
+    path = []
+    for raw in traefik_text.splitlines():
+        if not raw.strip() or raw.lstrip().startswith("-") or raw.strip().endswith("|-"):
+            continue
+        indent = len(raw) - len(raw.lstrip())
+        key, _, value = raw.strip().partition(":")
+        while path and path[-1][0] >= indent:
+            path.pop()
+        if value.strip():
+            records[tuple(x[1] for x in path) + (key,)] = value.strip()
+        else:
+            path.append((indent, key))
+    assert records[("metadata", "name")] == "traefik"
+    assert records[("metadata", "labels", OWNER)] == "staging-ingress-ha"
+    assert records[("spec", "deployment", "replicas")] == "2"
+    assert records[("spec", "affinity", "podAntiAffinity", "requiredDuringSchedulingIgnoredDuringExecution", "topologyKey")] == "kubernetes.io/hostname"
+    coredns = json.loads(coredns_text)
+    assert coredns["spec"]["replicas"] == 2
+    assert coredns["metadata"]["labels"][OWNER] == "staging-ingress-ha"
+    assert coredns["spec"]["template"]["spec"] == DEPLOYMENT["spec"]["template"]["spec"] | {"affinity": coredns["spec"]["template"]["spec"]["affinity"]}
+    term = coredns["spec"]["template"]["spec"]["affinity"]["podAntiAffinity"]["requiredDuringSchedulingIgnoredDuringExecution"][0]
+    assert term["topologyKey"] == "kubernetes.io/hostname"
+    assert term["labelSelector"]["matchLabels"] == {"k8s-app": "kube-dns"}
 
 
-def test_apply_is_idempotent_ordered_and_rollback_owned_only(tmp_path):
+def test_every_mutation_guard_precedes_cluster_operations(tmp_path):
+    for action in ("apply", "upgrade", "verify", "rollback"):
+        case = tmp_path / action; case.mkdir()
+        env, calls = _stub(case, context="production")
+        assert "staging-only" in _run(env, action, "prod").stderr
+        assert not calls.exists()
+        result = _run(env, action)
+        assert result.returncode and "exactly sugar-staging" in result.stderr
+        text = calls.read_text()
+        assert all(word not in text for word in ("apply", " run ", "delete"))
+
+
+def test_status_is_read_only_and_optional_companion_may_be_absent(tmp_path):
     env, calls = _stub(tmp_path)
-    for _ in range(2):
-        assert subprocess.run([SCRIPT, "apply", "staging"], env=env).returncode == 0
-    text = calls.read_text()
-    assert text.count("apply -f") == 4
-    assert text.index("deployment/coredns-ha") < text.index("traefik-helmchartconfig.yaml")
-    assert subprocess.run([SCRIPT, "rollback", "staging"], env=env).returncode == 0
-    text = calls.read_text()
-    assert "delete deployment coredns-ha --ignore-not-found=true" in text
-    assert "delete deployment coredns --ignore-not-found" not in text
-
-
-def test_verify_rejects_singleton_and_same_node_and_cleans_up(tmp_path):
-    labels = [
-        {"k8s-app": "kube-dns"},
-        {"app.kubernetes.io/name": "traefik"},
-        {"app.kubernetes.io/name": "cloudflare-tunnel"},
-    ]
-    pods = [_pod(label, "sugarkube4") for label in labels for _ in range(2)]
-    env, calls = _stub(tmp_path, pods)
-    result = subprocess.run([SCRIPT, "verify", "staging"], env=env, text=True, capture_output=True)
-    assert result.returncode and "fewer than two" in result.stderr
-    assert "delete pod sugarkube-ingress-ha-verify-" in calls.read_text()
-
-
-def test_status_is_read_only_and_errors_do_not_expose_credentials(tmp_path):
-    env, calls = _stub(tmp_path)
-    assert subprocess.run([SCRIPT, "status", "staging"], env=env).returncode == 0
+    assert _run(env, "status").returncode == 0
     text = calls.read_text()
     assert "get deploy coredns traefik -o wide" in text
     assert "get deploy coredns-ha -o wide --ignore-not-found=true" in text
-    assert "get deploy coredns coredns-ha traefik" not in text
-    assert all(word not in text for word in ("apply", "patch", "delete", "secret"))
-    source = SCRIPT.read_text().lower()
-    assert "get secret" not in source and "logs" not in source
+    assert all(word not in text for word in ("apply", "patch", "delete", " run "))
+
+
+def test_apply_idempotent_ordered_and_owned_rollback(tmp_path):
+    env, calls = _stub(tmp_path)
+    for _ in range(2): assert _run(env, "apply").returncode == 0
+    text = calls.read_text()
+    assert text.count("apply -f") == 4
+    assert text.index("deployment/coredns-ha") < text.index("traefik-helmchartconfig.yaml")
+    assert _run(env, "rollback").returncode == 0
+    text = calls.read_text()
+    assert "delete deployment coredns-ha" in text
+    assert "delete deployment coredns " not in text
+
+
+def test_unowned_resources_are_never_modified_or_disclosed(tmp_path):
+    for action in ("apply", "rollback"):
+        case = tmp_path / action; case.mkdir()
+        env, calls = _stub(case, owner="someone-else")
+        result = _run(env, action)
+        assert result.returncode and "not owned" in result.stderr
+        assert "someone-else" not in result.stdout + result.stderr
+        assert all(word not in calls.read_text() for word in ("apply -f", "delete"))
+
+
+def test_each_workload_rejects_singleton_and_same_node_and_healthy_spread_passes(tmp_path):
+    for nodes in ("node1", "node1,node1"):
+        for expected in ("CoreDNS", "Traefik", "Cloudflare tunnel"):
+            case = tmp_path / f"{nodes.replace(',', '-')}-{expected.split()[0]}"; case.mkdir()
+            env, calls = _stub(case, workload_nodes={expected: nodes})
+            result = _run(env, "verify")
+            assert result.returncode
+            assert f"hostname-spread {expected} pods" in result.stderr
+            assert "delete pod sugarkube-ingress-ha-verify-" in calls.read_text()
+
+
+def test_healthy_verify_and_unique_tunnel_discovery(tmp_path):
+    env, calls = _stub(tmp_path)
+    result = _run(env, "verify")
+    assert result.returncode == 0, result.stderr
+    text = calls.read_text()
+    assert "get deployment -A -l app.kubernetes.io/name=cloudflare-tunnel -o json" in text
+    assert "-n tunnel-0 get pods -l app.kubernetes.io/name=cloudflare-tunnel" in text
+    assert "delete pod sugarkube-ingress-ha-verify-" in text
+
+
+def test_zero_or_multiple_tunnel_deployments_fail_and_cleanup(tmp_path):
+    for count in (0, 2):
+        case = tmp_path / str(count); case.mkdir()
+        env, calls = _stub(case, tunnels=count)
+        result = _run(env, "verify")
+        assert result.returncode and f"found {count}" in result.stderr
+        assert "delete pod sugarkube-ingress-ha-verify-" in calls.read_text()
+
+
+def test_probe_discovery_required_and_curl_failure_redacted(tmp_path):
+    none = tmp_path / "none"; none.mkdir(); env, calls = _stub(none, probes=False)
+    result = _run(env, "verify")
+    assert result.returncode and "no critical staging HTTPS Probe targets" in result.stderr
+    assert "delete pod sugarkube-ingress-ha-verify-" in calls.read_text()
+    failed = tmp_path / "failed"; failed.mkdir(); env, calls = _stub(failed, fail_curl=True)
+    result = _run(env, "verify")
+    assert result.returncode and "target redacted" in result.stderr
+    assert "private.example" not in result.stdout + result.stderr
+    assert "sensitive-url-output" not in result.stdout + result.stderr
+
+
+def test_rollout_and_dns_probe_timeouts_cleanup(tmp_path):
+    rollout = tmp_path / "rollout"; rollout.mkdir(); env, _ = _stub(rollout, fail_wait="deployment/coredns-ha")
+    assert "rollout timed out" in _run(env, "apply").stderr
+    dns = tmp_path / "dns"; dns.mkdir(); env, calls = _stub(dns, fail_wait="pod/sugarkube")
+    result = _run(env, "verify")
+    assert result.returncode and "DNS probe failed" in result.stderr
+    assert "delete pod sugarkube-ingress-ha-verify-" in calls.read_text()
