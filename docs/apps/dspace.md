@@ -477,3 +477,59 @@ just helm-oci-install release=dspace namespace=dspace chart=oci://ghcr.io/democr
 ```bash
 just helm-oci-upgrade release=dspace namespace=dspace chart=oci://ghcr.io/democratizedspace/charts/dspace values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml version_file=docs/apps/dspace.staging.version tag="$APP_TAG" env=staging
 ```
+
+## Mandatory release identity and `/chat` gate
+
+A DSPACE checkout supplies the non-destructive browser harness. In that checkout,
+run `pnpm install` and `pnpm exec playwright install chromium`, then provide the
+executable itself—not a shell command or fragment:
+
+```bash
+DSPACE_SMOKE_RUNNER="$HOME/dspace/scripts/run-remote-chat-smoke.mjs"
+
+just dspace-release-verify \
+  env=staging \
+  manifest=deployment-evidence/dspace/staging/<finalized-record>.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER"
+```
+
+The verifier checks the public build identity and frontend marker, then checks
+all ready, release-owned replicas directly through the read-only Kubernetes API
+pod proxy. It proves the approved image digest, full source revision, replica
+agreement, public/direct agreement, and the isolated `/chat` journey. The
+harness mocks provider transport; real token.place or OpenAI credentials are
+neither required nor accepted. For a token.place-default manifest the origin and
+model come from the selected, ordered values chain. For an OpenAI-default
+manifest those token.place arguments are omitted, while OpenAI discoverability
+and missing-key gating remain part of the harness proof.
+
+Create staging evidence by deploying the approved staging candidate with the
+same executable:
+
+```bash
+just app-deploy app=dspace env=staging tag=main-REPLACE_SHORTSHA \
+  manifest=deployment-candidates/dspace/staging.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER"
+```
+
+Only after the post-rollout verifier succeeds is the non-overwriting finalized
+record written under `deployment-evidence/dspace/staging/`. Production requires
+that record as an additional gate:
+
+```bash
+just app-promote-prod \
+  app=dspace \
+  tag=main-REPLACE_SHORTSHA \
+  manifest=deployment-candidates/dspace/prod.json \
+  staging_evidence=deployment-evidence/dspace/staging/<finalized-record>.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER"
+```
+
+Before production rendering, reservation, or mutation, the command validates
+that staging evidence is finalized, compares all immutable release coordinates,
+rechecks the recorded live Helm revision, and reruns the full verifier against
+staging. It runs the same verifier after production rollout and before the final
+production evidence is written. A post-mutation failure leaves the reservation
+for the existing reconciliation procedure; it never writes successful evidence,
+retries, downgrades, or automatically rolls back. Use the reservation recovery
+instructions above after investigating the bounded failure category.

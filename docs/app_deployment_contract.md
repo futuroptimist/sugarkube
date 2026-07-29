@@ -379,3 +379,20 @@ Current values chains:
 | token.place | `docs/examples/tokenplace.values.dev.yaml` | `docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml` | `docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml` | `/,/livez,/healthz,/relay/diagnostics` |
 | danielsmith.io | `docs/examples/danielsmith.values.dev.yaml` | `docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.staging.yaml` | `docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.prod.yaml` | `/,/livez,/healthz` |
 | jobbot3000 | `docs/examples/jobbot3000.values.dev.yaml` | `docs/examples/jobbot3000.values.dev.yaml,docs/examples/jobbot3000.values.staging.yaml` | `docs/examples/jobbot3000.values.dev.yaml,docs/examples/jobbot3000.values.prod.yaml` | `/,/healthz,/livez` |
+
+### DSPACE source-integrity gate
+
+DSPACE staging and production mutations require an approved manifest and an
+executable DSPACE remote-chat smoke runner. Verification uses argv execution and
+captures, but never records or prints, child output. It records only bounded
+identity, replica-agreement, provider, and public-journey success facts.
+Historical schema-version 1 finalized evidence remains valid: the added runtime
+gate does not rewrite candidate approvals or require historical records to gain
+new fields.
+
+A production DSPACE promotion additionally requires finalized staging evidence
+for the identical application version, full source revision, image tag/digest,
+chart version/digest, semantic tag, and expected default provider. The staging
+evidence and its live Helm revision are validated, and staging is reverified,
+before production preflight, evidence reservation, or mutation. Generic recipes
+for other applications retain their existing behavior.

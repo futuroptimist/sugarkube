@@ -69,6 +69,24 @@ FINAL_FIXED_CHECKS = {
     "podImageCoordinates",
     "podImageDigests",
 }
+RUNTIME_EVIDENCE_CHECKS = {
+    "runtimeIdentity",
+    "frontendIdentity",
+    "replicaAgreement",
+    "publicDirectAgreement",
+    "defaultProvider",
+    "remoteChatSmoke",
+}
+IMMUTABLE_PROMOTION_FIELDS = (
+    "applicationVersion",
+    "sourceRevision",
+    "imageTag",
+    "imageDigest",
+    "chartVersion",
+    "chartDigest",
+    "semanticTag",
+    "expectedDefaultChatProvider",
+)
 PLATFORM_CHECK_RE = re.compile(r"^imagePlatformSourceRevision\[(0|[1-9][0-9]*)\]$")
 POD_SETTLE_TIMEOUT_SECONDS = 60.0
 POD_SETTLE_INTERVAL_SECONDS = 2.0
@@ -206,15 +224,13 @@ def validate(value: dict[str, Any], finalized: bool | None = None) -> dict[str, 
             platform_match = PLATFORM_CHECK_RE.fullmatch(check)
             if platform_match:
                 platform_indices.append(int(platform_match.group(1)))
-            elif check not in FINAL_FIXED_CHECKS:
+            elif check not in FINAL_FIXED_CHECKS | RUNTIME_EVIDENCE_CHECKS:
                 raise ManifestError(f"unknown verification result: {check}")
         missing = sorted(FINAL_FIXED_CHECKS - checks)
         if missing:
             raise ManifestError("missing verification results: " + ", ".join(missing))
         if sorted(platform_indices) != list(range(len(platform_indices))):
-            raise ManifestError(
-                "image platform verification indices must be contiguous from zero"
-            )
+            raise ManifestError("image platform verification indices must be contiguous from zero")
         if not platform_indices:
             raise ManifestError("at least one image platform verification result is required")
     return value
@@ -235,9 +251,7 @@ def _write_new(path: Path, value: dict[str, Any]) -> None:
         try:
             os.link(temporary, path)
         except FileExistsError as exc:
-            raise ManifestError(
-                f"refusing to overwrite existing record: {path}"
-            ) from exc
+            raise ManifestError(f"refusing to overwrite existing record: {path}") from exc
         _sync_directory(path.parent)
     finally:
         Path(temporary).unlink(missing_ok=True)
@@ -290,9 +304,7 @@ def reserve(
     try:
         fd = os.open(sidecar, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError as exc:
-        raise ManifestError(
-            f"evidence destination is already reserved: {sidecar}"
-        ) from exc
+        raise ManifestError(f"evidence destination is already reserved: {sidecar}") from exc
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
             stream.write(_canonical(metadata))
@@ -328,9 +340,7 @@ def verify_reservation(
     if not secrets.compare_digest(
         json.dumps(metadata, sort_keys=True), json.dumps(expected, sort_keys=True)
     ):
-        raise ManifestError(
-            "reservation ownership or deployment coordinates do not match"
-        )
+        raise ManifestError("reservation ownership or deployment coordinates do not match")
     if normalized.exists():
         raise ManifestError(f"refusing to overwrite existing record: {normalized}")
     return sidecar
@@ -499,6 +509,26 @@ def chart_coordinate(value: dict[str, Any]) -> str:
     return f"oci://{CHART_REF}@{value['chartDigest']}"
 
 
+def staging_gate(candidate_record: dict[str, Any], staging_record: dict[str, Any]) -> int:
+    """Validate finalized staging proof for the exact production artifact."""
+    candidate_record = validate(candidate_record, False)
+    staging_record = validate(staging_record, True)
+    if candidate_record["environment"] != "prod":
+        raise ManifestError("manifest/evidence mismatch: candidate environment must be prod")
+    if staging_record["environment"] != "staging":
+        raise ManifestError("manifest/evidence mismatch: evidence environment must be staging")
+    mismatched = [
+        field
+        for field in IMMUTABLE_PROMOTION_FIELDS
+        if candidate_record[field] != staging_record[field]
+    ]
+    if mismatched:
+        raise ManifestError(
+            "manifest/evidence mismatch: immutable coordinates differ: " + ", ".join(mismatched)
+        )
+    return staging_record["helmRevision"]
+
+
 def _image_id_digest(image_id: str) -> str:
     match = re.search(r"sha256:[0-9a-f]{64}$", image_id)
     if not match:
@@ -548,6 +578,7 @@ def finalize(
     cluster_environment: str,
     invocation_description: str,
     expected_image_coordinate: str | None = None,
+    runtime_verification: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     validate(value, False)
     selected = {
@@ -668,7 +699,9 @@ def finalize(
         {
             "check": "selectedCoordinates",
             "passed": True,
-            "details": f"environment={environment}; imageTag={image_tag}; chartVersion={chart_version}",
+            "details": (
+                f"environment={environment}; imageTag={image_tag}; chartVersion={chart_version}"
+            ),
         },
         {
             "check": "clusterEnvironment",
@@ -689,8 +722,7 @@ def finalize(
             # Helm metadata proves name/version, not immutable OCI content. The
             # guarded mutation therefore installs this approved digest directly.
             "details": (
-                f"chart=dspace; version={chart_version}; "
-                f"coordinate={chart_coordinate(value)}"
+                f"chart=dspace; version={chart_version}; " f"coordinate={chart_coordinate(value)}"
             ),
         },
         {
@@ -709,6 +741,56 @@ def finalize(
             "details": "every running pod imageID matched approved image digest",
         },
     ]
+    if runtime_verification is not None:
+        _exact_fields(
+            runtime_verification,
+            (
+                "schemaVersion",
+                "environment",
+                "release",
+                "namespace",
+                "applicationVersion",
+                "runtimeSourceRevision",
+                "frontendSourceRevision",
+                "defaultProvider",
+                "journeys",
+            ),
+        )
+        expected_runtime = {
+            "schemaVersion": 1,
+            "environment": environment,
+            "release": release,
+            "namespace": namespace,
+            "applicationVersion": value["applicationVersion"],
+            "runtimeSourceRevision": value["sourceRevision"],
+            "frontendSourceRevision": value["sourceRevision"],
+            "defaultProvider": value["expectedDefaultChatProvider"],
+        }
+        if any(
+            runtime_verification.get(key) != expected for key, expected in expected_runtime.items()
+        ):
+            raise ManifestError("runtime verification does not match approved release")
+        journeys = runtime_verification.get("journeys")
+        if (
+            not isinstance(journeys, list)
+            or not all(isinstance(item, dict) and item.get("passed") is True for item in journeys)
+            or not any(item.get("name") == "/chat" for item in journeys)
+        ):
+            raise ManifestError("runtime verification lacks successful public journeys")
+        results.extend(
+            {"check": check, "passed": True, "details": details}
+            for check, details in (
+                ("runtimeIdentity", "approved application version and full source revision"),
+                ("frontendIdentity", "approved full frontend source revision marker"),
+                ("replicaAgreement", "all serving replicas reported the approved identity"),
+                ("publicDirectAgreement", "public and direct-origin identities agreed"),
+                (
+                    "defaultProvider",
+                    f"approved default provider={value['expectedDefaultChatProvider']}",
+                ),
+                ("remoteChatSmoke", "isolated /chat journey and provider safety checks passed"),
+            )
+        )
     result = dict(value)
     result.update(
         recordType="final",
@@ -755,9 +837,8 @@ def main(argv: list[str] | None = None) -> int:
     finish.add_argument("--image-ref", default=IMAGE_REF)
     finish.add_argument("--chart-ref", default=CHART_REF)
     finish.add_argument("--reservation", required=True)
-    finish.add_argument(
-        "--oras-command", default=os.environ.get("SUGARKUBE_ORAS_COMMAND", "oras")
-    )
+    finish.add_argument("--oras-command", default=os.environ.get("SUGARKUBE_ORAS_COMMAND", "oras"))
+    finish.add_argument("--runtime-verification", type=Path)
     available = sub.add_parser("check-output")
     available.add_argument("--output", type=Path, required=True)
     destination = sub.add_parser("evidence-path")
@@ -768,6 +849,11 @@ def main(argv: list[str] | None = None) -> int:
     claim.add_argument("--environment", required=True)
     claim.add_argument("--release", required=True)
     claim.add_argument("--namespace", required=True)
+    staging = sub.add_parser("staging-gate")
+    staging.add_argument("--manifest", type=Path, required=True)
+    staging.add_argument("--staging-evidence", type=Path, required=True)
+    inspect = sub.add_parser("runtime-args")
+    inspect.add_argument("--manifest", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
         if args.command == "candidate":
@@ -885,6 +971,9 @@ def main(argv: list[str] | None = None) -> int:
                 namespace=args.namespace,
                 cluster_environment=cluster_environment,
                 invocation_description=invocation_description,
+                runtime_verification=(
+                    _object(args.runtime_verification) if args.runtime_verification else None
+                ),
             )
             sidecar = verify_reservation(
                 args.output,
@@ -909,19 +998,16 @@ def main(argv: list[str] | None = None) -> int:
                     metadata.get("version"),
                 )
 
-            if (
-                binding_fields(settled_helm) != binding_fields(helm)
-                or binding_fields(stable_helm) != binding_fields(helm)
-            ):
+            if binding_fields(settled_helm) != binding_fields(helm) or binding_fields(
+                stable_helm
+            ) != binding_fields(helm):
                 raise ManifestError("Helm release changed during evidence collection")
             _write_new(args.output, result)
             sidecar.unlink()
             _sync_directory(args.output.expanduser().resolve(strict=False).parent)
         elif args.command == "check-output":
             if args.output.exists():
-                raise ManifestError(
-                    f"refusing to overwrite existing record: {args.output}"
-                )
+                raise ManifestError(f"refusing to overwrite existing record: {args.output}")
         elif args.command == "reserve":
             sys.stdout.write(
                 reserve(
@@ -931,6 +1017,28 @@ def main(argv: list[str] | None = None) -> int:
                     args.release,
                     args.namespace,
                 )
+                + "\n"
+            )
+        elif args.command == "staging-gate":
+            sys.stdout.write(
+                str(staging_gate(_object(args.manifest), _object(args.staging_evidence))) + "\n"
+            )
+        elif args.command == "runtime-args":
+            record = validate(_object(args.manifest), None)
+            sys.stdout.write(
+                "\t".join(
+                    str(record[field])
+                    for field in (
+                        "applicationVersion",
+                        "sourceRevision",
+                        "imageTag",
+                        "imageDigest",
+                        "expectedDefaultChatProvider",
+                        "chartVersion",
+                    )
+                )
+                + "\t"
+                + str(record.get("helmRevision", ""))
                 + "\n"
             )
         else:
