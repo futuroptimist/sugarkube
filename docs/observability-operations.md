@@ -302,12 +302,22 @@ After this change merges, perform these steps **separately on each of `sugarkube
 `sugarkube5`**. Use that physical node's own rotated URL; `<ROTATED-NODE-PING-URL>` below is a label,
 not text to paste.
 
-1. Log in to the node, pull `main`, and review the checked-out commit.
+1. Log in to the node, update `main`, and confirm that you are operating on the intended host:
+
+   ```bash
+   cd ~/sugarkube
+   git switch main
+   git pull --ff-only
+   hostname -s
+   ```
+
+   Confirm that the output is the node currently being installed before continuing.
 2. From an interactive terminal run `sudo just observability-node-heartbeat-install env=staging`.
    At the hidden prompt, paste that node's `<ROTATED-NODE-PING-URL>` and press Enter.
 3. Run `sudo just observability-node-heartbeat-status env=staging`, then
    `sudo just observability-node-heartbeat-verify env=staging`. Verification explicitly starts one
-   oneshot, waits at most 25 seconds for a successful result, and leaves the recurring timer enabled.
+   oneshot, waits for a successful result within its configured finite timeout, and leaves the
+   recurring timer enabled.
 4. In the **Sugarkube Staging** Healthchecks.io project, confirm only the corresponding node check
    changes from **New** to **Up**. Repeat on the next physical node with its distinct URL.
 

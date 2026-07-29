@@ -32,11 +32,22 @@ def test_regex_scan_detects_healthchecks_uuid_url(scan_secrets):
     assert scan_secrets.regex_scan(["+++ b/docs/example.md", line])
 
 
+def test_regex_scan_redacts_healthchecks_finding(scan_secrets, capsys):
+    uuid = "12345678" + "-1234-4123-8123-123456789abc"
+    url = "https://" + "hc-ping.com/" + uuid
+    assert scan_secrets.regex_scan(["+++ b/docs/example.md", "+" + url])
+    diagnostic = capsys.readouterr().err
+    assert "b/docs/example.md" in diagnostic
+    assert url not in diagnostic
+    assert uuid not in diagnostic
+
+
 def test_regex_scan_prints_warning(scan_secrets, capsys):
     diff = ["+++ b/file.txt", "+token" ": abc"]
     assert scan_secrets.regex_scan(diff)
     captured = capsys.readouterr()
-    assert "Possible secret: +tok" "en: abc" in captured.err
+    assert "Possible secret detected in b/file.txt (value redacted)." in captured.err
+    assert "abc" not in captured.err
 
 
 def test_regex_scan_ignores_self(scan_secrets):
@@ -152,6 +163,26 @@ def test_run_ripsecrets_logs_to_stderr(monkeypatch, scan_secrets, capsys):
     )
     assert scan_secrets.run_ripsecrets("diff") is True
     assert "leak" in capsys.readouterr().err
+
+
+def test_run_ripsecrets_redacts_healthchecks_diagnostics(
+    monkeypatch, scan_secrets, capsys
+):
+    monkeypatch.setattr(scan_secrets.shutil, "which", lambda _: "/bin/ripsecrets")
+    uuid = "12345678" + "-1234-4123-8123-123456789abc"
+    url = "https://" + "hc-ping.com/" + uuid
+
+    class Result:
+        returncode = 1
+        stdout = f"secret at b/file: +{url} ({uuid})"
+        stderr = ""
+
+    monkeypatch.setattr(scan_secrets.subprocess, "run", lambda *a, **k: Result)
+    assert scan_secrets.run_ripsecrets("diff") is True
+    diagnostic = capsys.readouterr().err
+    assert url not in diagnostic
+    assert uuid not in diagnostic
+    assert "b/file" in diagnostic
 
 
 def test_run_ripsecrets_clean(monkeypatch, scan_secrets):

@@ -202,11 +202,12 @@ def test_delivery_keeps_secret_out_of_argv_output_and_bounds_failure(tmp_path):
     assert "--retry 2" in args
 
 
-def test_delivery_accepts_single_line_credential_without_trailing_newline(tmp_path):
+@pytest.mark.parametrize("trailing_newline", [False, True])
+def test_delivery_accepts_single_line_credential(tmp_path, trailing_newline):
     url, _ = canary()
     credential_dir = tmp_path / "credentials"
     credential_dir.mkdir()
-    (credential_dir / "ping-url").write_text(url)
+    (credential_dir / "ping-url").write_text(url + ("\n" if trailing_newline else ""))
     curl = tmp_path / "curl"
     curl.write_text("#!/bin/sh\ncat >/dev/null\n")
     curl.chmod(0o755)
@@ -243,6 +244,23 @@ def test_delivery_rejects_multiline_credential_without_running_curl(tmp_path):
     assert uuid not in result.stdout + result.stderr
 
 
+def test_delivery_rejects_blank_extra_line_without_leaking_canary(tmp_path):
+    url, uuid = canary()
+    credential_dir = tmp_path / "credentials"
+    credential_dir.mkdir()
+    (credential_dir / "ping-url").write_text(url + "\n\n")
+    result = subprocess.run(
+        [str(DELIVERY)],
+        text=True,
+        capture_output=True,
+        env=os.environ | {"CREDENTIALS_DIRECTORY": str(credential_dir)},
+        check=False,
+    )
+    assert result.returncode
+    assert url not in result.stdout + result.stderr
+    assert uuid not in result.stdout + result.stderr
+
+
 def test_delivery_rejects_second_line_without_trailing_newline(tmp_path):
     url, _ = canary()
     credential_dir = tmp_path / "credentials"
@@ -259,6 +277,45 @@ def test_delivery_rejects_second_line_without_trailing_newline(tmp_path):
     assert "format is invalid" in result.stderr
 
 
+@pytest.mark.parametrize("content", ["", "\n", "\n\n"])
+def test_delivery_rejects_empty_or_blank_credentials(tmp_path, content):
+    credential_dir = tmp_path / "credentials"
+    credential_dir.mkdir()
+    (credential_dir / "ping-url").write_text(content)
+    result = subprocess.run(
+        [str(DELIVERY)],
+        text=True,
+        capture_output=True,
+        env=os.environ | {"CREDENTIALS_DIRECTORY": str(credential_dir)},
+        check=False,
+    )
+    assert result.returncode
+    assert "credential" in result.stderr
+
+
+def test_delivery_rejects_trailing_bytes_without_leaking_canary(tmp_path):
+    url, uuid = canary()
+    credential_dir = tmp_path / "credentials"
+    credential_dir.mkdir()
+    (credential_dir / "ping-url").write_text(url + " ")
+    result = subprocess.run(
+        [str(DELIVERY)],
+        text=True,
+        capture_output=True,
+        env=os.environ | {"CREDENTIALS_DIRECTORY": str(credential_dir)},
+        check=False,
+    )
+    assert result.returncode
+    assert url not in result.stdout + result.stderr
+    assert uuid not in result.stdout + result.stderr
+
+
+def test_verify_requires_root_before_systemctl_mutation():
+    script = LIFECYCLE.read_text()
+    verify_body = script.split("verify_heartbeat() {", 1)[1].split("\n}", 1)[0]
+    assert verify_body.index("require_root") < verify_body.index('"${SYSTEMCTL}" start')
+
+
 def test_missing_systemctl_is_actionable(harness):
     result = run_lifecycle(harness, "status", SYSTEMCTL_BIN="definitely-not-a-tool")
     assert result.returncode
@@ -269,3 +326,10 @@ def test_justfile_exposes_node_heartbeat_recipes():
     text = (ROOT / "justfile").read_text()
     for action in ("install", "status", "verify", "uninstall"):
         assert f"observability-node-heartbeat-{action} env=''" in text
+
+
+def test_operations_runbook_uses_privilege_for_all_lifecycle_commands():
+    operations = (ROOT / "docs/observability-operations.md").read_text()
+    for action in ("install", "status", "verify", "uninstall"):
+        command = f"sudo just observability-node-heartbeat-{action} env=staging"
+        assert command in operations
