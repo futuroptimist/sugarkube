@@ -7,6 +7,7 @@ import subprocess
 import urllib.error
 from argparse import Namespace
 from pathlib import Path
+from typing import Callable
 
 import pytest
 
@@ -14,6 +15,142 @@ from scripts import dspace_runtime_verifier as verifier
 
 SHA = "abcdef0123456789abcdef0123456789abcdef01"
 DIGEST = "sha256:" + "1" * 64
+
+
+def helm_metadata(uid: str) -> dict:
+    return {
+        "uid": uid,
+        "labels": {
+            "app.kubernetes.io/name": "dspace",
+            "app.kubernetes.io/instance": "dspace",
+            "app.kubernetes.io/managed-by": "Helm",
+        },
+        "annotations": {
+            "meta.helm.sh/release-name": "dspace",
+            "meta.helm.sh/release-namespace": "dspace",
+        },
+    }
+
+
+def runtime_fixture(
+    tmp_path: Path,
+) -> tuple[Namespace, dict, list[list[str]], Callable[[list[str]], str]]:
+    smoke = tmp_path / "smoke"
+    smoke.write_text("#!/bin/sh\n", encoding="utf-8")
+    smoke.chmod(0o755)
+    metadata = helm_metadata("deployment-uid")
+    metadata.update({"name": "dspace", "generation": 4})
+    deployment = {
+        "metadata": metadata,
+        "spec": {
+            "replicas": 1,
+            "template": {
+                "spec": {
+                    "containers": [
+                        {
+                            "name": "dspace",
+                            "image": f"{verifier.IMAGE_REF}:main-abcdef0",
+                            "ports": [{"name": "http", "containerPort": 8080, "protocol": "TCP"}],
+                            "env": [],
+                        }
+                    ]
+                }
+            },
+        },
+        "status": {
+            "observedGeneration": 4,
+            "updatedReplicas": 1,
+            "readyReplicas": 1,
+            "availableReplicas": 1,
+            "unavailableReplicas": 0,
+        },
+    }
+    rs_metadata = helm_metadata("rs-uid")
+    rs_metadata.update(
+        {
+            "name": "dspace-rs",
+            "ownerReferences": [
+                {
+                    "kind": "Deployment",
+                    "name": "dspace",
+                    "uid": "deployment-uid",
+                    "controller": True,
+                }
+            ],
+        }
+    )
+    pod_metadata = helm_metadata("pod-uid")
+    pod_metadata.update(
+        {
+            "name": "dspace-0",
+            "ownerReferences": [
+                {
+                    "kind": "ReplicaSet",
+                    "name": "dspace-rs",
+                    "uid": "rs-uid",
+                    "controller": True,
+                }
+            ],
+        }
+    )
+    pod = {
+        "metadata": pod_metadata,
+        "spec": {"containers": [{"name": "dspace", "image": f"{verifier.IMAGE_REF}:main-abcdef0"}]},
+        "status": {
+            "phase": "Running",
+            "conditions": [{"type": "Ready", "status": "True"}],
+            "containerStatuses": [{"name": "dspace", "imageID": "repo@" + DIGEST}],
+        },
+    }
+    state = {
+        "deployment": deployment,
+        "replicasets": [{"kind": "ReplicaSet", "metadata": rs_metadata}],
+        "pods": [pod],
+    }
+    calls: list[list[str]] = []
+    build = json.dumps({"version": "3.2.0", "revision": SHA, "shortRevision": SHA[:7]})
+
+    def runner(command: list[str]) -> str:
+        calls.append(command)
+        if command[0] == "helm":
+            return json.dumps(
+                {
+                    "name": "dspace",
+                    "namespace": "dspace",
+                    "version": 7,
+                    "info": {"status": "deployed"},
+                    "chart": {"metadata": {"name": "dspace", "version": "3.2.0"}},
+                }
+            )
+        if "deployment" in command:
+            return json.dumps(state["deployment"])
+        if "pods" in command:
+            return json.dumps({"items": state["pods"]})
+        if "replicasets" in command:
+            return json.dumps({"items": state["replicasets"]})
+        return (
+            build
+            if command[-1].endswith("build-info.json")
+            else f'<meta name="dspace-build-revision" content="{SHA}">'
+        )
+
+    args = Namespace(
+        environment="staging",
+        release="dspace",
+        namespace="dspace",
+        application_version="3.2.0",
+        source_revision=SHA,
+        provider="openai",
+        image_tag="main-abcdef0",
+        image_digest=DIGEST,
+        host="example.test",
+        chart_version="3.2.0",
+        helm_revision=7,
+        values=[],
+        smoke_runner=smoke,
+        kubeconfig="fixture",
+    )
+    return args, state, calls, runner
 
 
 def test_capabilities_schema_and_order(capsys: pytest.CaptureFixture[str]) -> None:
@@ -79,6 +216,7 @@ def test_smoke_is_exact_argv_and_child_output_is_suppressed(
         encoding="utf-8",
     )
     calls: list[list[str]] = []
+    runner_calls: list[list[str]] = []
 
     class Completed:
         returncode = 0
@@ -92,8 +230,16 @@ def test_smoke_is_exact_argv_and_child_output_is_suppressed(
     html = f'<meta name="dspace-build-revision" content="{SHA}">'.encode()
     pod = {
         "metadata": {
+            **helm_metadata("pod-uid"),
             "name": "dspace-0",
-            "ownerReferences": [{"kind": "ReplicaSet", "name": "dspace-rs", "controller": True}],
+            "ownerReferences": [
+                {
+                    "kind": "ReplicaSet",
+                    "name": "dspace-rs",
+                    "uid": "rs-uid",
+                    "controller": True,
+                }
+            ],
         },
         "spec": {
             "containers": [
@@ -108,6 +254,7 @@ def test_smoke_is_exact_argv_and_child_output_is_suppressed(
     }
 
     def runner(command: list[str]) -> str:
+        runner_calls.append(command)
         if command[0] == "helm":
             return json.dumps(
                 {
@@ -120,19 +267,20 @@ def test_smoke_is_exact_argv_and_child_output_is_suppressed(
             )
         if "pods" in command:
             return json.dumps({"items": [pod]})
-        if "replicasets,deployments" in command:
+        if "replicasets" in command:
             return json.dumps(
                 {
                     "items": [
-                        {"kind": "Deployment", "metadata": {"name": "dspace"}},
                         {
                             "kind": "ReplicaSet",
                             "metadata": {
+                                **helm_metadata("rs-uid"),
                                 "name": "dspace-rs",
                                 "ownerReferences": [
                                     {
                                         "kind": "Deployment",
                                         "name": "dspace",
+                                        "uid": "deployment-uid",
                                         "controller": True,
                                     }
                                 ],
@@ -144,12 +292,20 @@ def test_smoke_is_exact_argv_and_child_output_is_suppressed(
         if "deployment" in command:
             return json.dumps(
                 {
+                    "metadata": {
+                        **helm_metadata("deployment-uid"),
+                        "name": "dspace",
+                        "generation": 4,
+                    },
                     "spec": {
+                        "replicas": 1,
                         "template": {
                             "spec": {
                                 "containers": [
                                     {
                                         "name": "dspace",
+                                        "image": "ghcr.io/democratizedspace/dspace:main-abcdef0",
+                                        "ports": [{"name": "http", "containerPort": 8080}],
                                         "env": [
                                             {
                                                 "name": "DSPACE_TOKEN_PLACE_URL",
@@ -163,8 +319,15 @@ def test_smoke_is_exact_argv_and_child_output_is_suppressed(
                                     }
                                 ]
                             }
-                        }
-                    }
+                        },
+                    },
+                    "status": {
+                        "observedGeneration": 4,
+                        "updatedReplicas": 1,
+                        "readyReplicas": 1,
+                        "availableReplicas": 1,
+                        "unavailableReplicas": 0,
+                    },
                 }
             )
         return (
@@ -188,7 +351,6 @@ def test_smoke_is_exact_argv_and_child_output_is_suppressed(
         values=[values],
         smoke_runner=smoke,
         kubeconfig="fixture",
-        pod_port=3000,
     )
     result = verifier.verify(
         args, runner, lambda url, _origin: build if url.endswith(".json") else html
@@ -196,6 +358,11 @@ def test_smoke_is_exact_argv_and_child_output_is_suppressed(
     assert result["journeys"][-1] == {"name": "/chat", "passed": True}
     smoke_call = calls[-1]
     assert smoke_call[0] == str(smoke)
+    proxy_calls = [call for call in runner_calls if "--raw" in call]
+    assert len(proxy_calls) == 2
+    assert all("--request-timeout=15s" in call for call in proxy_calls)
+    assert all(":8080/proxy" in call[-1] for call in proxy_calls)
+    assert all(":3000/proxy" not in call[-1] for call in proxy_calls)
     if provider == "token-place":
         assert smoke_call[-4:] == [
             "--expected-token-place-origin",
@@ -219,6 +386,97 @@ def test_identity_and_frontend_mismatches_are_bounded() -> None:
         )
     with pytest.raises(verifier.VerificationError, match="frontend revision marker mismatch"):
         verifier.marker(b"secret response without marker", SHA, "direct identity")
+
+
+@pytest.mark.parametrize(
+    "ports",
+    [
+        [],
+        [{"name": "other", "containerPort": 8080}],
+        [{"name": "http", "containerPort": "8080"}],
+        [{"name": "http", "containerPort": 8080, "protocol": "UDP"}],
+        [
+            {"name": "http", "containerPort": 8080},
+            {"name": "http", "containerPort": 8081},
+        ],
+    ],
+)
+def test_live_http_port_shapes_fail_closed(tmp_path: Path, monkeypatch, ports) -> None:
+    args, state, _calls, runner = runtime_fixture(tmp_path)
+    state["deployment"]["spec"]["template"]["spec"]["containers"][0]["ports"] = ports
+    monkeypatch.setattr(
+        verifier.subprocess, "run", lambda *_args, **_kwargs: pytest.fail("smoke executed")
+    )
+    with pytest.raises(verifier.VerificationError, match="invalid named http port"):
+        verifier.verify(args, runner, lambda url, _origin: _public_body(url))
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "message"),
+    [
+        (("spec", "replicas"), 0, "rollout"),
+        (("status", "observedGeneration"), 3, "rollout"),
+        (("status", "updatedReplicas"), 0, "rollout"),
+        (("status", "readyReplicas"), 0, "rollout"),
+        (("status", "availableReplicas"), 0, "rollout"),
+        (("status", "unavailableReplicas"), 1, "rollout"),
+        (
+            ("spec", "template", "spec", "containers", 0, "image"),
+            f"{verifier.IMAGE_REF}:wrong",
+            "image identity",
+        ),
+    ],
+)
+def test_deployment_drift_and_incomplete_rollout_fail_closed(
+    tmp_path: Path, path, value, message
+) -> None:
+    args, state, _calls, runner = runtime_fixture(tmp_path)
+    target = state["deployment"]
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+    with pytest.raises(verifier.VerificationError, match=message):
+        verifier.verify(args, runner, lambda url, _origin: _public_body(url))
+
+
+@pytest.mark.parametrize("owner_level", ["deployment", "replicaset", "pod"])
+def test_forged_owner_uids_fail_closed(tmp_path: Path, owner_level: str) -> None:
+    args, state, _calls, runner = runtime_fixture(tmp_path)
+    if owner_level == "deployment":
+        state["deployment"]["metadata"]["annotations"]["meta.helm.sh/release-name"] = "forged"
+    elif owner_level == "replicaset":
+        state["replicasets"][0]["metadata"]["ownerReferences"][0]["uid"] = "forged"
+    else:
+        state["pods"][0]["metadata"]["ownerReferences"][0]["uid"] = "forged"
+    with pytest.raises(verifier.VerificationError, match="unowned|not owned"):
+        verifier.verify(args, runner, lambda url, _origin: _public_body(url))
+
+
+def test_missing_observed_replica_fails_closed(tmp_path: Path) -> None:
+    args, state, _calls, runner = runtime_fixture(tmp_path)
+    state["pods"] = []
+    with pytest.raises(verifier.VerificationError, match="replica count"):
+        verifier.verify(args, runner, lambda url, _origin: _public_body(url))
+
+
+def test_direct_proxy_failure_is_bounded_and_classified(tmp_path: Path) -> None:
+    args, _state, calls, base_runner = runtime_fixture(tmp_path)
+
+    def runner(command: list[str]) -> str:
+        if "--raw" in command:
+            raise OSError("SENTINEL_SECRET")
+        return base_runner(command)
+
+    with pytest.raises(verifier.VerificationError, match="^direct identity: endpoint") as caught:
+        verifier.verify(args, runner, lambda url, _origin: _public_body(url))
+    assert "SENTINEL_SECRET" not in str(caught.value)
+    assert not any(":3000/proxy" in part for call in calls for part in call)
+
+
+def _public_body(url: str) -> bytes:
+    if url.endswith(".json"):
+        return json.dumps({"version": "3.2.0", "revision": SHA, "shortRevision": SHA[:7]}).encode()
+    return f'<meta name="dspace-build-revision" content="{SHA}">'.encode()
 
 
 def test_command_adapters_return_bounded_errors(monkeypatch: pytest.MonkeyPatch) -> None:

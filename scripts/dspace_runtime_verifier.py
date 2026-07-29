@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import os
 import re
@@ -20,7 +21,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.dspace_release_manifest import ManifestError, _image_id_digest
+_manifest = importlib.import_module("scripts.dspace_release_manifest")
+ManifestError = _manifest.ManifestError
+_image_id_digest = _manifest._image_id_digest
 
 CAPABILITIES = (
     "applicationVersion",
@@ -139,6 +142,31 @@ def application_container(pod: dict[str, Any]) -> tuple[dict[str, Any], dict[str
     return containers[0], statuses[0]
 
 
+def release_owned(metadata: dict[str, Any], release: str, namespace: str) -> bool:
+    """Return whether metadata has the complete Helm release identity."""
+    labels = metadata.get("labels", {})
+    annotations = metadata.get("annotations", {})
+    return (
+        labels.get("app.kubernetes.io/name") == "dspace"
+        and labels.get("app.kubernetes.io/instance") == release
+        and labels.get("app.kubernetes.io/managed-by") == "Helm"
+        and annotations.get("meta.helm.sh/release-name") == release
+        and annotations.get("meta.helm.sh/release-namespace") == namespace
+    )
+
+
+def controller_owner(metadata: dict[str, Any], kind: str) -> tuple[str, str] | None:
+    owners = [
+        owner
+        for owner in metadata.get("ownerReferences", [])
+        if owner.get("kind") == kind and owner.get("controller") is True
+    ]
+    if len(owners) != 1:
+        return None
+    name, uid = owners[0].get("name"), owners[0].get("uid")
+    return (name, uid) if isinstance(name, str) and isinstance(uid, str) and uid else None
+
+
 def verify(args: argparse.Namespace, runner: Runner = run, public_fetch=fetch) -> dict[str, Any]:
     smoke = args.smoke_runner.expanduser()
     if not smoke.is_file() or not os.access(smoke, os.X_OK):
@@ -177,6 +205,65 @@ def verify(args: argparse.Namespace, runner: Runner = run, public_fetch=fetch) -
         "public identity",
     )
     marker(public_fetch(origin + "/", origin), args.source_revision, "public identity")
+    deployment = json_run(
+        runner,
+        [
+            "kubectl",
+            "--kubeconfig",
+            args.kubeconfig,
+            "-n",
+            args.namespace,
+            "get",
+            "deployment",
+            args.release,
+            "-o",
+            "json",
+        ],
+        "cluster identity",
+    )
+    deployment_metadata = deployment.get("metadata", {}) if isinstance(deployment, dict) else {}
+    deployment_uid = deployment_metadata.get("uid")
+    containers = (
+        deployment.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
+        if isinstance(deployment, dict)
+        else []
+    )
+    deployed_containers = [item for item in containers if item.get("name") == "dspace"]
+    expected_image = f"{IMAGE_REF}:{args.image_tag}"
+    if len(deployed_containers) != 1 or deployed_containers[0].get("image") not in {
+        expected_image,
+        f"{expected_image}@{args.image_digest}",
+    }:
+        raise VerificationError("cluster identity: live Deployment image identity mismatch")
+    http_ports = [
+        port for port in deployed_containers[0].get("ports", []) if port.get("name") == "http"
+    ]
+    if (
+        len(http_ports) != 1
+        or http_ports[0].get("protocol", "TCP") != "TCP"
+        or not isinstance(http_ports[0].get("containerPort"), int)
+        or isinstance(http_ports[0].get("containerPort"), bool)
+        or not 1 <= http_ports[0]["containerPort"] <= 65535
+    ):
+        raise VerificationError("cluster identity: live Deployment has invalid named http port")
+    pod_port = http_ports[0]["containerPort"]
+    spec, status = deployment.get("spec", {}), deployment.get("status", {})
+    desired = spec.get("replicas")
+    generation = deployment_metadata.get("generation")
+    if (
+        not release_owned(deployment_metadata, args.release, args.namespace)
+        or not isinstance(deployment_uid, str)
+        or not deployment_uid
+        or not isinstance(desired, int)
+        or isinstance(desired, bool)
+        or desired <= 0
+        or status.get("observedGeneration") != generation
+        or status.get("updatedReplicas") != desired
+        or status.get("readyReplicas") != desired
+        or status.get("availableReplicas") != desired
+        or status.get("unavailableReplicas", 0) != 0
+    ):
+        raise VerificationError("cluster identity: Deployment rollout is incomplete or unowned")
     pods = json_run(
         runner,
         [
@@ -195,8 +282,8 @@ def verify(args: argparse.Namespace, runner: Runner = run, public_fetch=fetch) -
         "pod/replica identity",
     )
     items = pods.get("items", []) if isinstance(pods, dict) else []
-    if not items:
-        raise VerificationError("pod/replica identity: no serving replicas")
+    if len(items) != desired:
+        raise VerificationError("pod/replica identity: observed replica count is incomplete")
     workloads = json_run(
         runner,
         [
@@ -206,7 +293,7 @@ def verify(args: argparse.Namespace, runner: Runner = run, public_fetch=fetch) -
             "-n",
             args.namespace,
             "get",
-            "replicasets,deployments",
+            "replicasets",
             "-l",
             f"app.kubernetes.io/name=dspace,app.kubernetes.io/instance={args.release}",
             "-o",
@@ -215,21 +302,13 @@ def verify(args: argparse.Namespace, runner: Runner = run, public_fetch=fetch) -
         "pod/replica identity",
     )
     workload_items = workloads.get("items", []) if isinstance(workloads, dict) else []
-    deployments = {
-        item.get("metadata", {}).get("name")
-        for item in workload_items
-        if item.get("kind") == "Deployment"
-    }
     owned_replicasets = {
-        item.get("metadata", {}).get("name")
+        (item.get("metadata", {}).get("name"), item.get("metadata", {}).get("uid"))
         for item in workload_items
         if item.get("kind") == "ReplicaSet"
-        and any(
-            owner.get("kind") == "Deployment"
-            and owner.get("controller") is True
-            and owner.get("name") in deployments
-            for owner in item.get("metadata", {}).get("ownerReferences", [])
-        )
+        and release_owned(item.get("metadata", {}), args.release, args.namespace)
+        and controller_owner(item.get("metadata", {}), "Deployment")
+        == (args.release, deployment_uid)
     }
     pod_names: list[str] = []
     for pod in items:
@@ -245,15 +324,12 @@ def verify(args: argparse.Namespace, runner: Runner = run, public_fetch=fetch) -
             )
         ):
             raise VerificationError("pod/replica identity: stale, terminating, or unready replica")
-        if not any(
-            owner.get("kind") == "ReplicaSet"
-            and owner.get("controller") is True
-            and owner.get("name") in owned_replicasets
-            for owner in metadata.get("ownerReferences", [])
+        if (
+            not release_owned(metadata, args.release, args.namespace)
+            or controller_owner(metadata, "ReplicaSet") not in owned_replicasets
         ):
             raise VerificationError("pod/replica identity: replica is not owned by the release")
         container, container_status = application_container(pod)
-        expected_image = f"{IMAGE_REF}:{args.image_tag}"
         if container.get("image") not in {expected_image, f"{expected_image}@{args.image_digest}"}:
             raise VerificationError("pod/replica identity: image coordinate mismatch")
         try:
@@ -262,13 +338,29 @@ def verify(args: argparse.Namespace, runner: Runner = run, public_fetch=fetch) -
             raise VerificationError("pod/replica identity: image digest mismatch") from exc
         if observed_digest != args.image_digest:
             raise VerificationError("pod/replica identity: image digest mismatch")
-        base = f"/api/v1/namespaces/{args.namespace}/pods/{name}:{args.pod_port}/proxy"
+        base = f"/api/v1/namespaces/{args.namespace}/pods/{name}:{pod_port}/proxy"
         try:
             raw_info = runner(
-                ["kubectl", "--kubeconfig", args.kubeconfig, "get", "--raw", base + "/build-info.json"]
+                [
+                    "kubectl",
+                    "--kubeconfig",
+                    args.kubeconfig,
+                    "--request-timeout=15s",
+                    "get",
+                    "--raw",
+                    base + "/build-info.json",
+                ]
             ).encode()
             raw_html = runner(
-                ["kubectl", "--kubeconfig", args.kubeconfig, "get", "--raw", base + "/"]
+                [
+                    "kubectl",
+                    "--kubeconfig",
+                    args.kubeconfig,
+                    "--request-timeout=15s",
+                    "get",
+                    "--raw",
+                    base + "/",
+                ]
             ).encode()
         except (OSError, VerificationError) as exc:
             raise VerificationError("direct identity: endpoint was unreachable") from exc
@@ -282,32 +374,6 @@ def verify(args: argparse.Namespace, runner: Runner = run, public_fetch=fetch) -
         marker(raw_html, args.source_revision, "direct identity")
         pod_names.append(name)
     values = environment_values(args.values)
-    deployment = json_run(
-        runner,
-        [
-            "kubectl",
-            "--kubeconfig",
-            args.kubeconfig,
-            "-n",
-            args.namespace,
-            "get",
-            "deployment",
-            args.release,
-            "-o",
-            "json",
-        ],
-        "cluster identity",
-    )
-    deployed_containers = [
-        item
-        for item in deployment.get("spec", {})
-        .get("template", {})
-        .get("spec", {})
-        .get("containers", [])
-        if item.get("name") == "dspace"
-    ]
-    if len(deployed_containers) != 1:
-        raise VerificationError("cluster identity: live Deployment lacks named dspace container")
     deployed_env = {
         item.get("name"): item.get("value")
         for item in deployed_containers[0].get("env", [])
@@ -386,7 +452,6 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("--values", type=Path, action="append", default=[])
             command.add_argument("--smoke-runner", type=Path, required=True)
             command.add_argument("--kubeconfig", required=True)
-            command.add_argument("--pod-port", type=int, default=3000)
     return root
 
 
