@@ -557,10 +557,13 @@ esac
         """#!/bin/sh
 echo "curl $*" >> "$AUDIT"
 data=""
+noproxy=""
 while [ "$#" -gt 0 ]; do
   [ "$1" != --data-binary ] || { shift; data=${1#@}; }
+  [ "$1" != --noproxy ] || { shift; noproxy=$1; }
   shift
 done
+[ "$noproxy" = '*' ] || exit 64
 [ -z "$data" ] || cp "$data" "$ALERT_PAYLOAD"
 case "$PAGERDUTY_MODE" in
   transport) echo CURL_RESPONSE_SENTINEL >&2; exit 7 ;;
