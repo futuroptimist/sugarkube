@@ -37,8 +37,10 @@ logs, preparing Helm, and rolling out real workloads like
 
 ## Golden path: HA dev cluster → Helm → Traefik → workloads
 
-For the canonical staging CoreDNS, Traefik, and Cloudflare connector availability lifecycle and
-one-server power-off drill, see [Staging DNS and public-ingress high availability](staging-ingress-ha.md).
+For the canonical node-spread staging CoreDNS and Traefik topology, Cloudflare connector
+availability lifecycle, safe one-server power-off procedure, and dated July 29, 2026 drill evidence,
+see [Staging DNS and public-ingress high availability](staging-ingress-ha.md). That drill establishes
+shared ingress/DNS continuity, not rapid recovery of every singleton workload.
 
 Follow this sequence after imaging and booting the Pis:
 

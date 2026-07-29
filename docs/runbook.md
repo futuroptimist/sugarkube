@@ -34,11 +34,17 @@ operator workstation with the `just`, `flux`, `kubectl`, and `sops` CLIs install
    sudo k3s kubectl get nodes -o wide
    ```
 
-4. Confirm the embedded etcd cluster is healthy:
+4. Confirm the contacted API server and its etcd dependency are ready:
 
    ```bash
-   sudo k3s etcdctl endpoint status --cluster --write-out=table
+   kubectl get --raw='/readyz?verbose' | rg 'etcd|readyz check passed'
    ```
+
+   This built-in check proves the contacted API server is ready and that API server's etcd
+   dependency is ready. It is not a complete per-member etcd health, consistency, or latency
+   report. For optional deeper inspection, install a separately packaged, K3s-version-compatible
+   `etcdctl` and use the official K3s-managed endpoints and client-certificate paths. Never print
+   certificate, private-key, or Secret contents; K3s does not provide a `k3s etcdctl` subcommand.
 
 ## 2. Deploy kube-vip and verify the virtual IP
 
