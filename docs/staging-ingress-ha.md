@@ -2,11 +2,16 @@
 
 ## Incident and ownership
 
-When `sugarkube3` was powered off, the other two `control-plane,etcd` servers retained the
+Before PR #2400, when `sugarkube3` was powered off, the other two `control-plane,etcd` servers
+retained the
 two-member majority of the three-member etcd cluster, so etcd and the API remained available.
 Public service nevertheless failed for about six minutes: the sole packaged CoreDNS pod was on the
 lost node. Kubernetes waited its default roughly five-minute `NodeNotReady` eviction interval before
 `TaintManagerEviction` replaced it; the application itself remained running on `sugarkube4`.
+The completed post-change exercise and its limitations are recorded in the
+[July 29, 2026 drill report](drills/2026-07-29-staging-node-failure.md). Deployed staging now has
+node-spread CoreDNS coverage, two node-separated Traefik replicas, and two Cloudflare Tunnel
+replicas.
 
 The active staging lifecycle is deliberately non-Flux:
 
@@ -53,7 +58,14 @@ configuration. Verification requires two ready CoreDNS and Traefik pods on disti
 discovers exactly one Cloudflare tunnel Deployment cluster-wide by the
 `app.kubernetes.io/name=cloudflare-tunnel` label, then checks only matching pods in its namespace;
 zero or multiple releases fail closed. It never queries tunnel Secrets or logs. Verification also
-checks ready `kube-dns` and Traefik Service backends and an in-cluster DNS lookup. Public HTTPS
+aggregates every `discovery.k8s.io/v1` EndpointSlice selected by
+`kubernetes.io/service-name` for `kube-dns` and Traefik, then checks healthy, distinct-node
+backends and an in-cluster DNS lookup. It deterministically deduplicates endpoints across slices,
+including their IPv4/IPv6 addresses, node name, and target reference. Healthy means ready, serving,
+and non-terminating. Per the EndpointSlice consumer contract, absent `ready` is unknown/usable,
+absent `serving` follows `ready`, and absent `terminating` means non-terminating. Unhealthy or
+unnamed-node endpoints remain diagnostic but do not satisfy the distinct-node count. No slices or
+malformed data fail closed. Public HTTPS
 targets are discovered from live Probe resources labeled
 `environment=staging,criticality=critical`, and at least one is required. Curl timeouts are bounded,
 and failures redact the target and curl diagnostics. The temporary DNS pod is removed on success,
@@ -78,20 +90,23 @@ while true; do just staging-ingress-ha-verify env=staging; sleep 5; done
 ```
 
 In a second terminal, power off exactly one server, observe it, restore it, wait for readiness, and
-inspect three-member etcd health:
+check API readiness. This is a manual procedure only; do not automate a shutdown:
 
 ```bash
 ssh sugarkube3 'sudo systemctl poweroff'
 kubectl get nodes --watch
 # Restore power to sugarkube3 using the normal host power procedure.
 kubectl wait --for=condition=Ready node/sugarkube3 --timeout=10m
-ssh sugarkube4 'sudo k3s etcdctl endpoint status --cluster --write-out=table'
+kubectl get --raw='/readyz?verbose' | rg 'etcd|readyz check passed'
 ```
 
 Public endpoints should remain continuously available. Healthchecks.io and PagerDuty should still
 report the intentionally powered-off node; those alerts prove host monitoring works and are not a
-reason to suppress it. Do not test another node until `sugarkube3` is `Ready` **and** the command
-above confirms all three etcd members have recovered. Never remove a second server while etcd
+reason to suppress it. The request proves the contacted API server is ready and that API server's
+etcd dependency is
+ready. It is not a complete per-member etcd health, consistency, or latency report. Do not test
+another node until `sugarkube3` and API readiness have recovered. Never remove a second server
+while etcd
 redundancy is reduced.
 
 This baseline is platform/app agnostic. It does not alter eviction or node-monitor timing, scale

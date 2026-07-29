@@ -39,6 +39,20 @@ logs, preparing Helm, and rolling out real workloads like
 
 For the canonical staging CoreDNS, Traefik, and Cloudflare connector availability lifecycle and
 one-server power-off drill, see [Staging DNS and public-ingress high availability](staging-ingress-ha.md).
+Deployed staging has node-spread CoreDNS coverage and two node-separated Traefik replicas. The
+[July 29, 2026 drill record](drills/2026-07-29-staging-node-failure.md) preserves the evidence and
+sampling limitations.
+
+The default API/etcd-dependency readiness check is:
+
+```bash
+kubectl get --raw='/readyz?verbose' | rg 'etcd|readyz check passed'
+```
+
+It proves the contacted API server is ready and its etcd dependency is ready, not complete
+per-member etcd health, consistency, or latency. Optional deeper inspection requires a separately
+installed compatible `etcdctl` using official K3s-managed endpoints and client-certificate paths.
+Never print certificate or private-key contents.
 
 Follow this sequence after imaging and booting the Pis:
 

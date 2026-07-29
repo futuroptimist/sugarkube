@@ -5,6 +5,7 @@ import subprocess
 
 ROOT = pathlib.Path(__file__).parents[1]
 SCRIPT = ROOT / "scripts/staging_ingress_ha.sh"
+ENDPOINT_HELPER = ROOT / "scripts/endpoint_slice_health.py"
 OWNER = "sugarkube.dev/managed-by"
 
 DEPLOYMENT = {
@@ -38,10 +39,20 @@ def _pod(node):
     }}
 
 
+def _slices(nodes=("node1", "node2")):
+    return {"apiVersion": "discovery.k8s.io/v1", "kind": "EndpointSliceList", "items": [{
+        "metadata": {"name": "fixture-1"},
+        "endpoints": [{"addresses": [f"192.0.2.{index + 1}"], "nodeName": node,
+                       "conditions": {"ready": True, "serving": True, "terminating": False},
+                       "targetRef": {"kind": "Pod", "namespace": "kube-system", "name": f"pod-{index}"}}
+                      for index, node in enumerate(nodes) if node],
+    }]}
+
+
 def _stub(tmp_path, *, context="sugar-staging", nodes="node1,node2", workload_nodes=None, tunnels=1,
           owner="staging-ingress-ha", probes=True, probe_mode="canonical", endpoint_nodes="node1,node2",
           resource_absent=False, lookup_error=False, fail_wait="", fail_curl=False,
-          fail_reconcile=False):
+          fail_reconcile=False, endpoint_slices=None):
     calls = tmp_path / "calls"
     kubectl = tmp_path / "kubectl"
     kubectl.write_text(f'''#!/usr/bin/env python3
@@ -67,9 +78,8 @@ elif joined == "get probes -A -l environment=staging,criticality=critical -o jso
     elif os.environ["PROBE_MODE"] == "legacy": items=[{{"spec":{{"url":"https://legacy.example/health"}}}}]
     else: items=[{{"spec":{{"targets":{{"staticConfig":{{"static":["https://private.example/health", "http://ignored.example", "https://private.example/health"]}}}}}}}}]
     print(json.dumps({{"items":items}}))
-elif "get endpoints" in joined and "-o json" in joined:
-    nodes=os.environ["ENDPOINT_NODES"].split(",") if "kube-dns" in joined else ["node1"]
-    print(json.dumps({{"subsets":[{{"addresses":[{{"ip":f"10.0.0.{{i+1}}","nodeName":n}} for i,n in enumerate(nodes) if n]}}]}}))
+elif "get endpointslices.discovery.k8s.io" in joined and "-o json" in joined:
+    print(os.environ["ENDPOINT_SLICES"])
 elif "wait" in args:
     if os.environ.get("FAIL_WAIT") and os.environ["FAIL_WAIT"] in joined: sys.exit(1)
     if "deployment/traefik" in joined and "jsonpath={{.spec.replicas}}" in joined:
@@ -92,7 +102,8 @@ elif "rollout status" in joined and os.environ.get("FAIL_WAIT") and os.environ["
         "TRAEFIK_NODES": (workload_nodes or {}).get("Traefik", nodes),
         "TUNNEL_NODES": (workload_nodes or {}).get("Cloudflare tunnel", nodes),
         "TUNNELS": str(tunnels), "OWNER": owner, "PROBES": "1" if probes else "0",
-        "PROBE_MODE": probe_mode, "ENDPOINT_NODES": endpoint_nodes,
+        "PROBE_MODE": probe_mode,
+        "ENDPOINT_SLICES": json.dumps(endpoint_slices or _slices(endpoint_nodes.split(","))),
         "RESOURCE_ABSENT": "1" if resource_absent else "0", "LOOKUP_ERROR": "1" if lookup_error else "0",
         "FAIL_WAIT": fail_wait, "FAIL_CURL": "1" if fail_curl else "0",
         "FAIL_RECONCILE": "1" if fail_reconcile else "0",
@@ -101,6 +112,11 @@ elif "rollout status" in joined and os.environ.get("FAIL_WAIT") and os.environ["
 
 def _run(env, action, stage="staging"):
     return subprocess.run([SCRIPT, action, stage], env=env, text=True, capture_output=True)
+
+
+def _endpoint_run(document, *args):
+    return subprocess.run([ENDPOINT_HELPER, "fixture", *args], input=json.dumps(document),
+                          text=True, capture_output=True)
 
 
 def test_rendered_contracts_and_coredns_clone(tmp_path):
@@ -154,6 +170,7 @@ def test_status_is_read_only_and_optional_companion_may_be_absent(tmp_path):
     text = calls.read_text()
     assert "get deploy coredns traefik -o wide" in text
     assert "get deploy coredns-ha -o wide --ignore-not-found=true" in text
+    assert text.count("get endpointslices.discovery.k8s.io -l kubernetes.io/service-name=") == 2
     assert all(word not in text for word in ("apply", "patch", "delete", " run "))
 
 
@@ -232,7 +249,7 @@ def test_coredns_requires_two_ready_endpoints_on_distinct_nodes(tmp_path):
         case = tmp_path / str(i); case.mkdir()
         env, calls = _stub(case, endpoint_nodes=nodes)
         result = _run(env, "verify")
-        assert result.returncode and "hostname-spread CoreDNS endpoints" in result.stderr
+        assert result.returncode and "distinct named nodes" in result.stderr
         assert "delete pod sugarkube-ingress-ha-verify-" in calls.read_text()
     healthy = tmp_path / "healthy"; healthy.mkdir()
     env, _ = _stub(healthy, endpoint_nodes="node1,node2")
@@ -247,6 +264,72 @@ def test_healthy_verify_and_unique_tunnel_discovery(tmp_path):
     assert "get deployment -A -l app.kubernetes.io/name=cloudflare-tunnel -o json" in text
     assert "-n tunnel-0 get pods -l app.kubernetes.io/name=cloudflare-tunnel" in text
     assert "delete pod sugarkube-ingress-ha-verify-" in text
+    assert "get endpoints " not in text
+
+
+def test_endpoint_slice_aggregation_dedup_conditions_and_determinism():
+    duplicate = {"addresses": ["2001:db8::2", "192.0.2.2"], "nodeName": "node-b",
+                 "conditions": {"ready": True, "serving": True, "terminating": False},
+                 "targetRef": {"kind": "Pod", "namespace": "ns", "name": "pod-b"}}
+    document = {"items": [
+        {"endpoints": [duplicate, {"addresses": ["192.0.2.1"], "nodeName": "node-a",
+                                  "conditions": {"ready": False, "serving": False}}]},
+        {"endpoints": [dict(duplicate, addresses=list(reversed(duplicate["addresses"]))),
+                       {"addresses": ["2001:db8::3"], "nodeName": "node-c",
+                        "conditions": {"ready": True, "serving": True, "terminating": True}}]},
+    ]}
+    first = _endpoint_run(document, "--minimum-healthy", "1", "--minimum-nodes", "1")
+    second = _endpoint_run({"items": list(reversed(document["items"]))},
+                           "--minimum-healthy", "1", "--minimum-nodes", "1")
+    assert first.returncode == 0, first.stderr
+    assert first.stdout == second.stdout
+    assert first.stdout.count("healthy: addresses=192.0.2.2,2001:db8::2") == 1
+    assert first.stdout.count("UNHEALTHY:") == 2
+    assert "terminating=true" in first.stdout and "ready=false" in first.stdout
+
+
+def test_endpoint_slice_absent_conditions_and_unnamed_nodes():
+    # EndpointSlice says absent conditions are unknown. The verifier follows the consumer contract:
+    # absent ready/serving are usable and absent terminating is non-terminating.
+    result = _endpoint_run({"items": [{"endpoints": [
+        {"addresses": ["2001:db8::1", "192.0.2.1"], "targetRef": None}
+    ]}]}, "--minimum-healthy", "1")
+    assert result.returncode == 0, result.stderr
+    assert "healthy endpoints=1 nodes=[]" in result.stdout
+    assert "node=<none>" in result.stdout
+    assert "ready=absent,serving=absent,terminating=absent" in result.stdout
+    spread = _endpoint_run({"items": [{"endpoints": [
+        {"addresses": ["192.0.2.1"]}, {"addresses": ["192.0.2.2"]}
+    ]}]}, "--minimum-healthy", "2", "--minimum-nodes", "2")
+    assert spread.returncode == 1 and "distinct named nodes" in spread.stderr
+
+
+def test_endpoint_slice_no_slices_and_malformed_input_fail_safely():
+    empty = _endpoint_run({"items": []})
+    assert empty.returncode == 2 and "no EndpointSlices" in empty.stderr
+    malformed_cases = [
+        {}, {"items": [{}]}, {"items": [{"endpoints": [None]}]},
+        {"items": [{"endpoints": [{"addresses": []}]}]},
+        {"items": [{"endpoints": [{"addresses": ["192.0.2.1"], "nodeName": 3}]}]},
+        {"items": [{"endpoints": [{"addresses": ["192.0.2.1"], "conditions": {"ready": "yes"}}]}]},
+        {"items": [{"endpoints": [{"addresses": ["192.0.2.1"], "targetRef": "pod"}]}]},
+    ]
+    for document in malformed_cases:
+        result = _endpoint_run(document)
+        assert result.returncode == 2 and "malformed" in result.stderr
+    raw = subprocess.run([ENDPOINT_HELPER, "fixture"], input="not json", text=True,
+                         capture_output=True)
+    assert raw.returncode == 2 and "malformed EndpointSlice JSON" in raw.stderr
+
+
+def test_unhealthy_endpoint_slices_fail_verify_and_cleanup(tmp_path):
+    document = _slices(("node1", "node2"))
+    document["items"][0]["endpoints"][1]["conditions"]["serving"] = False
+    env, calls = _stub(tmp_path, endpoint_slices=document)
+    result = _run(env, "verify")
+    assert result.returncode and "need at least 2 healthy endpoints" in result.stderr
+    assert "UNHEALTHY" in result.stdout
+    assert "delete pod sugarkube-ingress-ha-verify-" in calls.read_text()
 
 
 def test_zero_or_multiple_tunnel_deployments_fail_and_cleanup(tmp_path):
