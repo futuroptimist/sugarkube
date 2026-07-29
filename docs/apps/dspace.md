@@ -222,6 +222,57 @@ just dspace-oci-deploy env=staging tag="$APP_TAG" manifest=deployment-candidates
 
 ## Verify staging
 
+The release-integrity gate requires a DSPACE checkout with its dependencies installed and the
+remote smoke executable available. The browser is isolated, provider transport is mocked, and real
+token.place or OpenAI credentials are neither required nor accepted:
+
+```bash
+cd "$HOME/dspace"
+pnpm install
+pnpm exec playwright install chromium
+export DSPACE_SMOKE_RUNNER="$HOME/dspace/scripts/run-remote-chat-smoke.mjs"
+test -x "$DSPACE_SMOKE_RUNNER"
+```
+
+After a guarded staging deployment finalizes its no-overwrite record, rerun the same read-only
+runtime, frontend, per-replica, image-digest, provider, and `/chat` proof independently:
+
+```bash
+just app-deploy app=dspace env=staging tag="$APP_TAG" \
+  manifest=deployment-candidates/dspace/staging.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER"
+
+just dspace-release-verify \
+  env=staging \
+  manifest=deployment-evidence/dspace/staging/<finalized-record>.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER"
+```
+
+Production promotion additionally requires that finalized staging evidence. Its immutable
+application, source, image, chart, semantic-evidence, and provider coordinates must equal the
+production candidate. The gate confirms that staging's recorded Helm revision is still current and
+reruns live staging verification before production render, evidence reservation, or mutation:
+
+```bash
+just app-promote-prod \
+  app=dspace \
+  tag=main-REPLACE_SHORTSHA \
+  manifest=deployment-candidates/dspace/prod.json \
+  staging_evidence=deployment-evidence/dspace/staging/<finalized-record>.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER"
+```
+
+Successful post-rollout verification is saved in the new file under
+`deployment-evidence/dspace/<environment>/`. A failure after mutation leaves the reservation for
+explicit reconciliation and never writes successful final evidence, retries, downgrades, or rolls
+back automatically. Inspect the cluster and candidate before removing the exact `.reservation`
+sidecar as described above.
+
+For a `token-place` default, the smoke expectations come from the approved provider plus the exact
+ordered environment values chain and are checked against every live pod. For an `openai` default,
+token.place origin/model arguments are omitted; the harness still proves OpenAI discoverability and
+missing-key gating without a real key or provider request.
+
 Generic verification discovers the host from Helm values or Ingress, executes the configured DSPACE paths, prints a per-path body preview, and exits non-zero if any HTTP check fails. It does not validate the `/config.json` body, so staging sign-off also requires the explicit `curl | jq` routing gate below. Use `print_only=1` when you only want the curl commands for docs or troubleshooting.
 
 ```bash
@@ -407,11 +458,9 @@ those target coordinates and identity strings plus a non-empty list of
 including a passing `/chat`. Verifier output and response bodies are not echoed.
 Do not infer frontend identity from the semantic application version.
 
-Real production rollback remains unavailable until DSPACE
-[#4732](https://github.com/democratizedspace/dspace/issues/4732) supplies runtime
-and frontend identity and [#4733](https://github.com/democratizedspace/dspace/issues/4733)
-supplies the remote public-journey verifier contract. Tests use a stub; operators
-must not substitute an availability-only check.
+The default rollback verifier is Sugarkube's real runtime verifier and therefore
+requires the same executable DSPACE remote-chat harness described above. Tests use
+a hermetic stub; operators must not substitute an availability-only check.
 
 If anything fails after reservation, the command exits nonzero, leaves a
 redacted failed evidence record, and warns that cluster state may have changed.

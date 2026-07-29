@@ -443,6 +443,31 @@ else:
 print(json.dumps(value))
 """,
     )
+    _write_executable(
+        bin_dir / "dspace-runtime-verifier",
+        """#!/usr/bin/env python3
+import json
+import sys
+args = sys.argv[1:]
+environment = args[args.index("--environment") + 1]
+if args[0] == "capabilities":
+    capabilities = ["applicationVersion", "runtimeSourceRevision", "frontendSourceRevision",
+                    "defaultProvider", "publicJourneys"]
+    print(json.dumps({"schemaVersion": 1, "environment": environment, "release": "dspace",
+                      "namespace": "dspace", "capabilities": capabilities}))
+else:
+    manifest = json.load(open(args[args.index("--manifest") + 1], encoding="utf-8"))
+    result = {"schemaVersion": 1, "environment": environment, "release": "dspace",
+              "namespace": "dspace", "applicationVersion": manifest["applicationVersion"],
+              "runtimeSourceRevision": manifest["sourceRevision"],
+              "frontendSourceRevision": manifest["sourceRevision"],
+              "defaultProvider": manifest["expectedDefaultChatProvider"],
+              "journeys": [{"name": "/", "passed": True},
+                           {"name": "/chat", "passed": True}]}
+    print(json.dumps(result))
+""",
+    )
+    _write_executable(bin_dir / "dspace-smoke", "#!/usr/bin/env bash\nexit 0\n")
 
     env = os.environ.copy()
     env["HOME"] = str(tmp_path / "home")
@@ -451,6 +476,8 @@ print(json.dumps(value))
     env["HELM_LOG"] = str(log_path)
     env["KUBECTL_LOG"] = str(tmp_path / "kubectl.log")
     env["CURL_LOG"] = str(tmp_path / "curl.log")
+    env["SUGARKUBE_DSPACE_RUNTIME_VERIFIER"] = str(bin_dir / "dspace-runtime-verifier")
+    env["SUGARKUBE_DSPACE_SMOKE_RUNNER"] = str(bin_dir / "dspace-smoke")
     return env
 
 
@@ -2670,7 +2697,7 @@ def test_dspace_reservation_collision_stops_before_helm(
 
 
 @pytest.mark.usefixtures("ensure_just_available")
-def test_prod_subdomain_wrapper_preserves_canary_overlay_through_guarded_path(
+def test_prod_subdomain_wrapper_requires_finalized_staging_gate(
     tmp_path: Path, generic_app_stub_env: dict[str, str]
 ) -> None:
     manifest = tmp_path / "candidate.json"
@@ -2689,11 +2716,10 @@ def test_prod_subdomain_wrapper_preserves_canary_overlay_through_guarded_path(
         env,
     )
 
-    assert result.returncode == 0, result.stderr + result.stdout
-    helm_log = Path(env["HELM_LOG"]).read_text(encoding="utf-8")
-    assert "-f docs/examples/dspace.values.prod-subdomain.yaml" in helm_log
-    assert "-f docs/examples/dspace.values.prod.yaml" not in helm_log
-    assert evidence.exists()
+    assert result.returncode != 0
+    assert "staging_evidence=<finalized-staging.json> is required" in result.stderr
+    assert not Path(env["HELM_LOG"]).exists()
+    assert not evidence.exists()
 
 
 @pytest.mark.usefixtures("ensure_just_available")

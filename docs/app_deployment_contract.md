@@ -72,6 +72,20 @@ setting into reviewed values files or established Secret references. The helpers
 do not inspect `helm get values`, replay historical inline values, or copy secret
 material from release history.
 
+For DSPACE staging and production, finalization is additionally conditional on the executable
+runtime verifier. It proves the approved `/build-info.json` full revision, shared-layout frontend
+marker, every Running and Ready release replica through the read-only Kubernetes API proxy, exact
+image digest, public/direct agreement, approved provider, and the isolated remote `/chat` journey.
+Only bounded pass metadata is appended to new final evidence; response bodies, HTML, command output,
+browser artifacts, headers, cookies, payloads, and credentials are never evidence. Historical final
+records remain schema-valid and usable for rollback because these additional named checks are
+optional when reading older evidence.
+
+A standard DSPACE production deploy, redeploy, promotion, or compatibility wrapper requires a
+finalized staging record for the identical immutable artifact. Validation and a fresh live staging
+verification (including stable recorded Helm revision) happen before production OCI preflight,
+render, reservation, or mutation. Other applications retain the generic ordering and inputs.
+
 ### DSPACE recovery exception
 
 DSPACE staging and production recovery uses `just dspace-manifest-rollback`,
