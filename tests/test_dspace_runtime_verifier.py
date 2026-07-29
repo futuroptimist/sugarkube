@@ -32,6 +32,16 @@ def helm_metadata(uid: str) -> dict:
     }
 
 
+def workload_metadata(uid: str) -> dict:
+    return {
+        "uid": uid,
+        "labels": {
+            "app.kubernetes.io/name": "dspace",
+            "app.kubernetes.io/instance": "dspace",
+        },
+    }
+
+
 def runtime_fixture(
     tmp_path: Path,
 ) -> tuple[Namespace, dict, list[list[str]], Callable[[list[str]], str]]:
@@ -65,7 +75,7 @@ def runtime_fixture(
             "unavailableReplicas": 0,
         },
     }
-    rs_metadata = helm_metadata("rs-uid")
+    rs_metadata = workload_metadata("rs-uid")
     rs_metadata.update(
         {
             "name": "dspace-rs",
@@ -79,7 +89,7 @@ def runtime_fixture(
             ],
         }
     )
-    pod_metadata = helm_metadata("pod-uid")
+    pod_metadata = workload_metadata("pod-uid")
     pod_metadata.update(
         {
             "name": "dspace-0",
@@ -230,7 +240,7 @@ def test_smoke_is_exact_argv_and_child_output_is_suppressed(
     html = f'<meta name="dspace-build-revision" content="{SHA}">'.encode()
     pod = {
         "metadata": {
-            **helm_metadata("pod-uid"),
+            **workload_metadata("pod-uid"),
             "name": "dspace-0",
             "ownerReferences": [
                 {
@@ -274,7 +284,7 @@ def test_smoke_is_exact_argv_and_child_output_is_suppressed(
                         {
                             "kind": "ReplicaSet",
                             "metadata": {
-                                **helm_metadata("rs-uid"),
+                                **workload_metadata("rs-uid"),
                                 "name": "dspace-rs",
                                 "ownerReferences": [
                                     {
@@ -449,6 +459,55 @@ def test_forged_owner_uids_fail_closed(tmp_path: Path, owner_level: str) -> None
     else:
         state["pods"][0]["metadata"]["ownerReferences"][0]["uid"] = "forged"
     with pytest.raises(verifier.VerificationError, match="unowned|not owned"):
+        verifier.verify(args, runner, lambda url, _origin: _public_body(url))
+
+
+@pytest.mark.parametrize("workload", ["replicaset", "pod"])
+def test_workload_selector_labels_fail_closed(tmp_path: Path, workload: str) -> None:
+    args, state, _calls, runner = runtime_fixture(tmp_path)
+    key = "replicasets" if workload == "replicaset" else "pods"
+    state[key][0]["metadata"]["labels"]["app.kubernetes.io/instance"] = "forged"
+    with pytest.raises(verifier.VerificationError, match="not owned"):
+        verifier.verify(args, runner, lambda url, _origin: _public_body(url))
+
+
+@pytest.mark.parametrize("workload", ["replicaset", "pod"])
+@pytest.mark.parametrize("owner_shape", [[], "malformed", None])
+def test_missing_or_malformed_controller_reference_is_bounded(
+    tmp_path: Path, workload: str, owner_shape
+) -> None:
+    args, state, _calls, runner = runtime_fixture(tmp_path)
+    key = "replicasets" if workload == "replicaset" else "pods"
+    state[key][0]["metadata"]["ownerReferences"] = owner_shape
+    with pytest.raises(verifier.VerificationError, match="not owned"):
+        verifier.verify(args, runner, lambda url, _origin: _public_body(url))
+
+
+@pytest.mark.parametrize("workload", ["replicaset", "pod"])
+def test_duplicate_controller_reference_fails_closed(tmp_path: Path, workload: str) -> None:
+    args, state, _calls, runner = runtime_fixture(tmp_path)
+    key = "replicasets" if workload == "replicaset" else "pods"
+    references = state[key][0]["metadata"]["ownerReferences"]
+    references.append(dict(references[0]))
+    with pytest.raises(verifier.VerificationError, match="not owned"):
+        verifier.verify(args, runner, lambda url, _origin: _public_body(url))
+
+
+@pytest.mark.parametrize("workload", ["replicaset", "pod"])
+def test_wrong_controller_name_fails_closed(tmp_path: Path, workload: str) -> None:
+    args, state, _calls, runner = runtime_fixture(tmp_path)
+    key = "replicasets" if workload == "replicaset" else "pods"
+    state[key][0]["metadata"]["ownerReferences"][0]["name"] = "forged"
+    with pytest.raises(verifier.VerificationError, match="not owned"):
+        verifier.verify(args, runner, lambda url, _origin: _public_body(url))
+
+
+def test_pod_owned_by_unknown_replicaset_fails_closed(tmp_path: Path) -> None:
+    args, state, _calls, runner = runtime_fixture(tmp_path)
+    state["pods"][0]["metadata"]["ownerReferences"][0].update(
+        {"name": "unknown", "uid": "unknown-uid"}
+    )
+    with pytest.raises(verifier.VerificationError, match="not owned"):
         verifier.verify(args, runner, lambda url, _origin: _public_body(url))
 
 

@@ -155,11 +155,25 @@ def release_owned(metadata: dict[str, Any], release: str, namespace: str) -> boo
     )
 
 
+def selector_owned(metadata: dict[str, Any], release: str) -> bool:
+    """Return whether workload metadata has the chart's selector labels."""
+    labels = metadata.get("labels", {})
+    return isinstance(labels, dict) and (
+        labels.get("app.kubernetes.io/name") == "dspace"
+        and labels.get("app.kubernetes.io/instance") == release
+    )
+
+
 def controller_owner(metadata: dict[str, Any], kind: str) -> tuple[str, str] | None:
+    references = metadata.get("ownerReferences", [])
+    if not isinstance(references, list):
+        return None
     owners = [
         owner
-        for owner in metadata.get("ownerReferences", [])
-        if owner.get("kind") == kind and owner.get("controller") is True
+        for owner in references
+        if isinstance(owner, dict)
+        and owner.get("kind") == kind
+        and owner.get("controller") is True
     ]
     if len(owners) != 1:
         return None
@@ -222,6 +236,7 @@ def verify(args: argparse.Namespace, runner: Runner = run, public_fetch=fetch) -
         "cluster identity",
     )
     deployment_metadata = deployment.get("metadata", {}) if isinstance(deployment, dict) else {}
+    deployment_name = deployment_metadata.get("name")
     deployment_uid = deployment_metadata.get("uid")
     containers = (
         deployment.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
@@ -252,6 +267,8 @@ def verify(args: argparse.Namespace, runner: Runner = run, public_fetch=fetch) -
     generation = deployment_metadata.get("generation")
     if (
         not release_owned(deployment_metadata, args.release, args.namespace)
+        or not isinstance(deployment_name, str)
+        or not deployment_name
         or not isinstance(deployment_uid, str)
         or not deployment_uid
         or not isinstance(desired, int)
@@ -302,14 +319,24 @@ def verify(args: argparse.Namespace, runner: Runner = run, public_fetch=fetch) -
         "pod/replica identity",
     )
     workload_items = workloads.get("items", []) if isinstance(workloads, dict) else []
-    owned_replicasets = {
-        (item.get("metadata", {}).get("name"), item.get("metadata", {}).get("uid"))
-        for item in workload_items
-        if item.get("kind") == "ReplicaSet"
-        and release_owned(item.get("metadata", {}), args.release, args.namespace)
-        and controller_owner(item.get("metadata", {}), "Deployment")
-        == (args.release, deployment_uid)
-    }
+    owned_replicasets: set[tuple[str, str]] = set()
+    for item in workload_items:
+        metadata = item.get("metadata", {}) if isinstance(item, dict) else {}
+        name, uid = metadata.get("name"), metadata.get("uid")
+        if (
+            not isinstance(item, dict)
+            or item.get("kind") != "ReplicaSet"
+            or not selector_owned(metadata, args.release)
+            or not isinstance(name, str)
+            or not name
+            or not isinstance(uid, str)
+            or not uid
+            or controller_owner(metadata, "Deployment") != (deployment_name, deployment_uid)
+        ):
+            raise VerificationError("pod/replica identity: ReplicaSet is not owned by Deployment")
+        if (name, uid) in owned_replicasets:
+            raise VerificationError("pod/replica identity: duplicate ReplicaSet identity")
+        owned_replicasets.add((name, uid))
     pod_names: list[str] = []
     for pod in items:
         metadata, status = pod.get("metadata", {}), pod.get("status", {})
@@ -325,7 +352,7 @@ def verify(args: argparse.Namespace, runner: Runner = run, public_fetch=fetch) -
         ):
             raise VerificationError("pod/replica identity: stale, terminating, or unready replica")
         if (
-            not release_owned(metadata, args.release, args.namespace)
+            not selector_owned(metadata, args.release)
             or controller_owner(metadata, "ReplicaSet") not in owned_replicasets
         ):
             raise VerificationError("pod/replica identity: replica is not owned by the release")
