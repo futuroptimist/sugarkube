@@ -2,6 +2,11 @@ import json
 import os
 import pathlib
 import subprocess
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
+from unittest.mock import patch
+
+from scripts import staging_ingress_ha_endpoints
 
 ROOT = pathlib.Path(__file__).parents[1]
 SCRIPT = ROOT / "scripts/staging_ingress_ha.sh"
@@ -458,11 +463,80 @@ def test_no_slices_malformed_json_and_malformed_endpoint_fail_safely(tmp_path):
         assert "delete pod sugarkube-ingress-ha-verify-" in calls.read_text()
 
 
-def _summarize(document, service="kube-dns"):
-    return subprocess.run(
-        ["python3", str(ENDPOINT_SUMMARY), service],
-        input=json.dumps(document), text=True, capture_output=True, check=False,
+def _summarize(document, service="kube-dns", minimum_nodes=0):
+    stdin = StringIO(json.dumps(document))
+    stdout = StringIO()
+    stderr = StringIO()
+    argv = [str(ENDPOINT_SUMMARY), service]
+    if minimum_nodes:
+        argv.extend(["--minimum-nodes", str(minimum_nodes)])
+    with (
+        patch("sys.argv", argv),
+        patch("sys.stdin", stdin),
+        redirect_stdout(stdout),
+        redirect_stderr(stderr),
+    ):
+        returncode = staging_ingress_ha_endpoints.main()
+    return subprocess.CompletedProcess(
+        [str(ENDPOINT_SUMMARY), service], returncode, stdout.getvalue(), stderr.getvalue()
     )
+
+
+def test_endpoint_summarizer_is_covered_in_process():
+    healthy = {
+        "addresses": ["not-an-ip", "10.0.0.1", "10.0.0.1"],
+        "nodeName": "node1",
+        "targetRef": {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "namespace": "kube-system",
+            "name": "dns-a",
+            "uid": "1",
+        },
+        "conditions": {},
+    }
+    result = _summarize(_slices("kube-dns", [healthy]), minimum_nodes=2)
+    assert result.returncode
+    assert "unique=1 healthy=1" in result.stdout
+    assert "fewer than 2 healthy" in result.stderr
+
+    malformed_endpoints = [
+        None,
+        {"addresses": []},
+        {"addresses": [1]},
+        {"addresses": ["10.0.0.1"], "nodeName": ""},
+        {"addresses": ["10.0.0.1"], "targetRef": []},
+        {"addresses": ["10.0.0.1"], "targetRef": {"uid": 1}},
+        {"addresses": ["10.0.0.1"], "conditions": []},
+        {"addresses": ["10.0.0.1"], "conditions": {"ready": "yes"}},
+    ]
+    malformed_documents = [
+        None,
+        {},
+        {"items": []},
+        {"items": [None]},
+        {"items": [{"metadata": None, "endpoints": []}]},
+        {"items": [{"metadata": {"labels": None}, "endpoints": []}]},
+        {
+            "items": [
+                {
+                    "metadata": {"labels": {"kubernetes.io/service-name": "other"}},
+                    "endpoints": [],
+                }
+            ]
+        },
+        {
+            "items": [
+                {"metadata": {"labels": {"kubernetes.io/service-name": "kube-dns"}}}
+            ]
+        },
+    ]
+    malformed_documents.extend(_slices("kube-dns", [endpoint]) for endpoint in malformed_endpoints)
+    for document in malformed_documents:
+        result = _summarize(document)
+        assert result.returncode
+        assert "ERROR: invalid EndpointSlice data:" in result.stderr
+        assert "Traceback" not in result.stderr
 
 
 def test_endpoint_output_is_stable_when_redacted_descriptions_collide():
