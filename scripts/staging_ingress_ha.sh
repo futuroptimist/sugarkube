@@ -33,11 +33,11 @@ status() {
   normalize_env "$1"; need kubectl; need python3
   local result=0
   printf 'Context: %s (read-only)\n' "$(context)"
-  kubectl -n kube-system get deploy coredns traefik -o wide
-  kubectl -n kube-system get deploy coredns-ha -o wide --ignore-not-found=true
+  kubectl -n kube-system get deploy coredns traefik -o wide || result=1
+  kubectl -n kube-system get deploy coredns-ha -o wide --ignore-not-found=true || result=1
   endpoint_slices kube-dns || result=1
   endpoint_slices traefik || result=1
-  kubectl get deployment -A -l app.kubernetes.io/name=cloudflare-tunnel -o wide
+  kubectl get deployment -A -l app.kubernetes.io/name=cloudflare-tunnel -o wide || result=1
   return "$result"
 }
 assert_owned_or_absent() {

@@ -107,7 +107,8 @@ one-node availability guarantee. It does not disable or replace K3s components.
 ## Manual one-node power-off drill procedure
 
 This is a guarded manual procedure for a future authorized maintenance window. Do not automate a
-shutdown, and never remove another node while redundancy is reduced. After apply and verify, run
+shutdown, and never remove another node while redundancy is reduced. The operator workstation must
+have `rg` (ripgrep) installed for the readiness command below. After apply and verify, run
 verification continuously from a different server in its own terminal:
 
 ```bash
@@ -122,7 +123,7 @@ ssh sugarkube3 'sudo systemctl poweroff'
 kubectl get nodes --watch
 # Restore power to sugarkube3 using the normal host power procedure.
 kubectl wait --for=condition=Ready node/sugarkube3 --timeout=10m
-kubectl get --raw='/readyz?verbose' | grep -E 'etcd|readyz check passed'
+kubectl get --raw='/readyz?verbose' | rg 'etcd|readyz check passed'
 ```
 
 This default check proves that the contacted API server is ready and that its etcd dependency is

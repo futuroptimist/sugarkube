@@ -5,6 +5,7 @@ import subprocess
 
 ROOT = pathlib.Path(__file__).parents[1]
 SCRIPT = ROOT / "scripts/staging_ingress_ha.sh"
+ENDPOINT_SUMMARY = ROOT / "scripts/staging_ingress_ha_endpoints.py"
 OWNER = "sugarkube.dev/managed-by"
 
 DEPLOYMENT = {
@@ -18,16 +19,13 @@ DEPLOYMENT = {
             "metadata": {"labels": {"k8s-app": "kube-dns"}},
             "spec": {
                 "serviceAccountName": "coredns",
-                "containers": [
-                    {
-                        "name": "coredns",
-                        "image": "registry.invalid/coredns:v1",
-                        "args": ["-conf", "/etc/coredns/Corefile"],
-                        "readinessProbe": {"httpGet": {"path": "/ready", "port": 8181}},
-                        "livenessProbe": {"httpGet": {"path": "/health", "port": 8080}},
-                        "volumeMounts": [{"name": "config-volume", "mountPath": "/etc/coredns"}],
-                    }
-                ],
+                "containers": [{
+                    "name": "coredns", "image": "registry.invalid/coredns:v1",
+                    "args": ["-conf", "/etc/coredns/Corefile"],
+                    "readinessProbe": {"httpGet": {"path": "/ready", "port": 8181}},
+                    "livenessProbe": {"httpGet": {"path": "/health", "port": 8080}},
+                    "volumeMounts": [{"name": "config-volume", "mountPath": "/etc/coredns"}],
+                }],
                 "volumes": [{"name": "config-volume", "configMap": {"name": "coredns"}}],
             },
         },
@@ -36,11 +34,9 @@ DEPLOYMENT = {
 
 
 def _pod(node):
-    return {
-        "metadata": {},
-        "spec": {"nodeName": node},
-        "status": {"phase": "Running", "containerStatuses": [{"ready": True}]},
-    }
+    return {"metadata": {}, "spec": {"nodeName": node}, "status": {
+        "phase": "Running", "containerStatuses": [{"ready": True}]
+    }}
 
 
 def _slices(service, endpoints=None):
@@ -73,24 +69,10 @@ def _slices(service, endpoints=None):
     }
 
 
-def _stub(
-    tmp_path,
-    *,
-    context="sugar-staging",
-    nodes="node1,node2",
-    workload_nodes=None,
-    tunnels=1,
-    owner="staging-ingress-ha",
-    probes=True,
-    probe_mode="canonical",
-    endpoint_nodes="node1,node2",
-    endpoint_documents=None,
-    resource_absent=False,
-    lookup_error=False,
-    fail_wait="",
-    fail_curl=False,
-    fail_reconcile=False,
-):
+def _stub(tmp_path, *, context="sugar-staging", nodes="node1,node2", workload_nodes=None, tunnels=1,
+          owner="staging-ingress-ha", probes=True, probe_mode="canonical", endpoint_nodes="node1,node2",
+          endpoint_documents=None, resource_absent=False, lookup_error=False, fail_wait="", fail_curl=False,
+          fail_reconcile=False):
     calls = tmp_path / "calls"
     kubectl = tmp_path / "kubectl"
     kubectl.write_text(f"""#!/usr/bin/env python3
@@ -132,9 +114,7 @@ elif "rollout status" in joined and os.environ.get("FAIL_WAIT") and os.environ["
 """)
     kubectl.chmod(0o755)
     curl = tmp_path / "curl"
-    curl.write_text(
-        '#!/bin/sh\necho "$*" >>"$CALLS"\necho "sensitive-url-output" >&2\nexit "${FAIL_CURL:-0}"\n'
-    )
+    curl.write_text('#!/bin/sh\necho "$*" >>"$CALLS"\necho "sensitive-url-output" >&2\nexit "${FAIL_CURL:-0}"\n')
     curl.chmod(0o755)
     endpoint_documents = endpoint_documents or {
         "kube-dns": _slices(
@@ -152,28 +132,16 @@ elif "rollout status" in joined and os.environ.get("FAIL_WAIT") and os.environ["
         "traefik": _slices("traefik"),
     }
     return {
-        **os.environ,
-        "PATH": f"{tmp_path}:{os.environ['PATH']}",
-        "CALLS": str(calls),
-        "FAKE_CONTEXT": context,
-        "DEPLOYMENT": json.dumps(DEPLOYMENT),
+        **os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}", "CALLS": str(calls),
+        "FAKE_CONTEXT": context, "DEPLOYMENT": json.dumps(DEPLOYMENT),
         "COREDNS_NODES": (workload_nodes or {}).get("CoreDNS", nodes),
         "TRAEFIK_NODES": (workload_nodes or {}).get("Traefik", nodes),
         "TUNNEL_NODES": (workload_nodes or {}).get("Cloudflare tunnel", nodes),
-        "TUNNELS": str(tunnels),
-        "OWNER": owner,
-        "PROBES": "1" if probes else "0",
-        "PROBE_MODE": probe_mode,
-        "ENDPOINT_NODES": endpoint_nodes,
-        "ENDPOINT_DOCUMENTS": (
-            endpoint_documents
-            if isinstance(endpoint_documents, str)
-            else json.dumps(endpoint_documents)
-        ),
-        "RESOURCE_ABSENT": "1" if resource_absent else "0",
-        "LOOKUP_ERROR": "1" if lookup_error else "0",
-        "FAIL_WAIT": fail_wait,
-        "FAIL_CURL": "1" if fail_curl else "0",
+        "TUNNELS": str(tunnels), "OWNER": owner, "PROBES": "1" if probes else "0",
+        "PROBE_MODE": probe_mode, "ENDPOINT_NODES": endpoint_nodes,
+        "ENDPOINT_DOCUMENTS": endpoint_documents if isinstance(endpoint_documents, str) else json.dumps(endpoint_documents),
+        "RESOURCE_ABSENT": "1" if resource_absent else "0", "LOOKUP_ERROR": "1" if lookup_error else "0",
+        "FAIL_WAIT": fail_wait, "FAIL_CURL": "1" if fail_curl else "0",
         "FAIL_RECONCILE": "1" if fail_reconcile else "0",
     }, calls
 
@@ -205,35 +173,19 @@ def test_rendered_contracts_and_coredns_clone(tmp_path):
     assert records[("metadata", "name")] == "traefik"
     assert records[("metadata", "labels", OWNER)] == "staging-ingress-ha"
     assert records[("spec", "deployment", "replicas")] == "2"
-    assert (
-        records[
-            (
-                "spec",
-                "affinity",
-                "podAntiAffinity",
-                "requiredDuringSchedulingIgnoredDuringExecution",
-                "topologyKey",
-            )
-        ]
-        == "kubernetes.io/hostname"
-    )
+    assert records[("spec", "affinity", "podAntiAffinity", "requiredDuringSchedulingIgnoredDuringExecution", "topologyKey")] == "kubernetes.io/hostname"
     coredns = json.loads(coredns_text)
     assert coredns["spec"]["replicas"] == 2
     assert coredns["metadata"]["labels"][OWNER] == "staging-ingress-ha"
-    assert coredns["spec"]["template"]["spec"] == DEPLOYMENT["spec"]["template"]["spec"] | {
-        "affinity": coredns["spec"]["template"]["spec"]["affinity"]
-    }
-    term = coredns["spec"]["template"]["spec"]["affinity"]["podAntiAffinity"][
-        "requiredDuringSchedulingIgnoredDuringExecution"
-    ][0]
+    assert coredns["spec"]["template"]["spec"] == DEPLOYMENT["spec"]["template"]["spec"] | {"affinity": coredns["spec"]["template"]["spec"]["affinity"]}
+    term = coredns["spec"]["template"]["spec"]["affinity"]["podAntiAffinity"]["requiredDuringSchedulingIgnoredDuringExecution"][0]
     assert term["topologyKey"] == "kubernetes.io/hostname"
     assert term["labelSelector"]["matchLabels"] == {"k8s-app": "kube-dns"}
 
 
 def test_every_mutation_guard_precedes_cluster_operations(tmp_path):
     for action in ("apply", "upgrade", "verify", "rollback"):
-        case = tmp_path / action
-        case.mkdir()
+        case = tmp_path / action; case.mkdir()
         env, calls = _stub(case, context="production")
         assert "staging-only" in _run(env, action, "prod").stderr
         assert not calls.exists()
@@ -270,8 +222,7 @@ def test_status_reports_all_components_before_failing_for_unhealthy_slices(tmp_p
 
 def test_apply_idempotent_ordered_and_owned_rollback(tmp_path):
     env, calls = _stub(tmp_path)
-    for _ in range(2):
-        assert _run(env, "apply").returncode == 0
+    for _ in range(2): assert _run(env, "apply").returncode == 0
     text = calls.read_text()
     assert text.count("apply -f") == 4
     assert text.index("deployment/coredns-ha") < text.index("traefik-helmchartconfig.yaml")
@@ -280,10 +231,23 @@ def test_apply_idempotent_ordered_and_owned_rollback(tmp_path):
     assert "delete deployment coredns-ha" in text
     assert "delete deployment coredns " not in text
 
-    absent = tmp_path / "absent"
-    absent.mkdir()
+    absent = tmp_path / "absent"; absent.mkdir()
     env, _ = _stub(absent, resource_absent=True)
     assert _run(env, "apply").returncode == 0
+
+
+def test_status_accepts_singleton_slices_after_rollback(tmp_path):
+    singleton = [{"addresses": ["10.0.0.1"], "nodeName": "node1", "conditions": {}}]
+    documents = {
+        "kube-dns": _slices("kube-dns", singleton),
+        "traefik": _slices("traefik", singleton),
+    }
+    env, _ = _stub(tmp_path, endpoint_documents=documents)
+    assert _run(env, "rollback").returncode == 0
+    result = _run(env, "status")
+    assert result.returncode == 0, result.stderr
+    assert "kube-dns: slices=1 unique=1 healthy=1" in result.stdout
+    assert "traefik: slices=1 unique=1 healthy=1" in result.stdout
 
 
 def test_traefik_reconciliation_precedes_rollout_and_fails_closed(tmp_path):
@@ -304,8 +268,7 @@ def test_traefik_reconciliation_precedes_rollout_and_fails_closed(tmp_path):
     assert delete_pos < rollback_wait < rollback_rollout
 
     for action in ("apply", "rollback"):
-        case = tmp_path / f"never-{action}"
-        case.mkdir()
+        case = tmp_path / f"never-{action}"; case.mkdir()
         failed_env, failed_calls = _stub(case, fail_reconcile=True)
         result = _run(failed_env, action)
         assert result.returncode and "reconcile" in result.stderr
@@ -316,15 +279,13 @@ def test_traefik_reconciliation_precedes_rollout_and_fails_closed(tmp_path):
 
 def test_unowned_resources_are_never_modified_or_disclosed(tmp_path):
     for action in ("apply", "rollback"):
-        case = tmp_path / action
-        case.mkdir()
+        case = tmp_path / action; case.mkdir()
         env, calls = _stub(case, owner="someone-else")
         result = _run(env, action)
         assert result.returncode and "not owned" in result.stderr
         assert "someone-else" not in result.stdout + result.stderr
         assert all(word not in calls.read_text() for word in ("apply -f", "delete"))
-    failed = tmp_path / "lookup"
-    failed.mkdir()
+    failed = tmp_path / "lookup"; failed.mkdir()
     env, calls = _stub(failed, lookup_error=True)
     result = _run(env, "apply")
     assert result.returncode and "unable to inspect ownership" in result.stderr
@@ -335,8 +296,7 @@ def test_unowned_resources_are_never_modified_or_disclosed(tmp_path):
 def test_each_pod_workload_rejects_singleton_and_same_node(tmp_path):
     for nodes in ("node1", "node1,node1"):
         for expected in ("Traefik", "Cloudflare tunnel"):
-            case = tmp_path / f"{nodes.replace(',', '-')}-{expected.split()[0]}"
-            case.mkdir()
+            case = tmp_path / f"{nodes.replace(',', '-')}-{expected.split()[0]}"; case.mkdir()
             env, calls = _stub(case, workload_nodes={expected: nodes})
             result = _run(env, "verify")
             assert result.returncode
@@ -346,14 +306,12 @@ def test_each_pod_workload_rejects_singleton_and_same_node(tmp_path):
 
 def test_coredns_requires_two_ready_endpoints_on_distinct_nodes(tmp_path):
     for i, nodes in enumerate(("node1", "node1,node1")):
-        case = tmp_path / str(i)
-        case.mkdir()
+        case = tmp_path / str(i); case.mkdir()
         env, calls = _stub(case, endpoint_nodes=nodes)
         result = _run(env, "verify")
         assert result.returncode and "hostname-spread CoreDNS endpoints" in result.stderr
         assert "delete pod sugarkube-ingress-ha-verify-" in calls.read_text()
-    healthy = tmp_path / "healthy"
-    healthy.mkdir()
+    healthy = tmp_path / "healthy"; healthy.mkdir()
     env, _ = _stub(healthy, endpoint_nodes="node1,node2")
     assert _run(env, "verify").returncode == 0
 
@@ -468,6 +426,27 @@ def test_no_slices_malformed_json_and_malformed_endpoint_fail_safely(tmp_path):
             },
             "metadata must be an object",
         ),
+        (
+            {
+                "kube-dns": {"items": [{"metadata": None, "endpoints": []}]},
+                "traefik": _slices("traefik"),
+            },
+            "metadata must be an object",
+        ),
+        (
+            {
+                "kube-dns": {"items": [{"metadata": {"labels": []}, "endpoints": []}]},
+                "traefik": _slices("traefik"),
+            },
+            "does not belong to Service",
+        ),
+        (
+            {
+                "kube-dns": {"items": [{"metadata": {"labels": None}, "endpoints": []}]},
+                "traefik": _slices("traefik"),
+            },
+            "does not belong to Service",
+        ),
     ]
     for index, (documents, expected) in enumerate(cases):
         case = tmp_path / str(index)
@@ -475,7 +454,44 @@ def test_no_slices_malformed_json_and_malformed_endpoint_fail_safely(tmp_path):
         env, calls = _stub(case, endpoint_documents=documents)
         result = _run(env, "verify")
         assert result.returncode and expected in result.stderr
+        assert "Traceback" not in result.stderr
         assert "delete pod sugarkube-ingress-ha-verify-" in calls.read_text()
+
+
+def _summarize(document, service="kube-dns"):
+    return subprocess.run(
+        ["python3", str(ENDPOINT_SUMMARY), service],
+        input=json.dumps(document), text=True, capture_output=True, check=False,
+    )
+
+
+def test_endpoint_output_is_stable_when_redacted_descriptions_collide():
+    endpoints = [
+        {"addresses": [address], "nodeName": "node1", "conditions": conditions}
+        for address, conditions in (
+            ("10.0.0.2", {"ready": False}),
+            ("10.0.0.1", {"serving": False}),
+        )
+    ]
+    forward = _summarize(_slices("kube-dns", endpoints))
+    reverse = _summarize(_slices("kube-dns", list(reversed(endpoints))))
+    assert (forward.returncode, forward.stdout, forward.stderr) == (
+        reverse.returncode, reverse.stdout, reverse.stderr
+    )
+    assert "10.0.0" not in forward.stdout + forward.stderr
+
+
+def test_conflicting_duplicate_endpoint_is_conservatively_unhealthy():
+    identity = {"addresses": ["10.0.0.1"], "nodeName": "node1"}
+    endpoints = [
+        identity | {"conditions": {"ready": True, "serving": True}},
+        identity | {"conditions": {"ready": False, "serving": False}},
+    ]
+    result = _summarize(_slices("kube-dns", endpoints))
+    assert result.returncode
+    assert "unique=1 healthy=0" in result.stdout
+    assert result.stdout.count("kube-dns: unhealthy ") == 1
+    assert "non-serving,not-ready" in result.stdout
 
 
 def test_healthy_verify_and_unique_tunnel_discovery(tmp_path):
@@ -490,8 +506,7 @@ def test_healthy_verify_and_unique_tunnel_discovery(tmp_path):
 
 def test_zero_or_multiple_tunnel_deployments_fail_and_cleanup(tmp_path):
     for count in (0, 2):
-        case = tmp_path / str(count)
-        case.mkdir()
+        case = tmp_path / str(count); case.mkdir()
         env, calls = _stub(case, tunnels=count)
         result = _run(env, "verify")
         assert result.returncode and f"found {count}" in result.stderr
@@ -499,22 +514,16 @@ def test_zero_or_multiple_tunnel_deployments_fail_and_cleanup(tmp_path):
 
 
 def test_probe_discovery_required_and_curl_failure_redacted(tmp_path):
-    none = tmp_path / "none"
-    none.mkdir()
-    env, calls = _stub(none, probes=False)
+    none = tmp_path / "none"; none.mkdir(); env, calls = _stub(none, probes=False)
     result = _run(env, "verify")
     assert result.returncode and "no critical staging HTTPS Probe targets" in result.stderr
     assert "delete pod sugarkube-ingress-ha-verify-" in calls.read_text()
-    failed = tmp_path / "failed"
-    failed.mkdir()
-    env, calls = _stub(failed, fail_curl=True)
+    failed = tmp_path / "failed"; failed.mkdir(); env, calls = _stub(failed, fail_curl=True)
     result = _run(env, "verify")
     assert result.returncode and "target redacted" in result.stderr
     assert "private.example" not in result.stdout + result.stderr
     assert "sensitive-url-output" not in result.stdout + result.stderr
-    legacy = tmp_path / "legacy"
-    legacy.mkdir()
-    env, calls = _stub(legacy, probe_mode="legacy")
+    legacy = tmp_path / "legacy"; legacy.mkdir(); env, calls = _stub(legacy, probe_mode="legacy")
     result = _run(env, "verify")
     assert result.returncode and "no critical staging HTTPS Probe targets" in result.stderr
     assert "legacy.example" not in calls.read_text()
@@ -522,13 +531,9 @@ def test_probe_discovery_required_and_curl_failure_redacted(tmp_path):
 
 
 def test_rollout_and_dns_probe_timeouts_cleanup(tmp_path):
-    rollout = tmp_path / "rollout"
-    rollout.mkdir()
-    env, _ = _stub(rollout, fail_wait="deployment/coredns-ha")
+    rollout = tmp_path / "rollout"; rollout.mkdir(); env, _ = _stub(rollout, fail_wait="deployment/coredns-ha")
     assert "rollout timed out" in _run(env, "apply").stderr
-    dns = tmp_path / "dns"
-    dns.mkdir()
-    env, calls = _stub(dns, fail_wait="pod/sugarkube")
+    dns = tmp_path / "dns"; dns.mkdir(); env, calls = _stub(dns, fail_wait="pod/sugarkube")
     result = _run(env, "verify")
     assert result.returncode and "DNS probe failed" in result.stderr
     assert "delete pod sugarkube-ingress-ha-verify-" in calls.read_text()
