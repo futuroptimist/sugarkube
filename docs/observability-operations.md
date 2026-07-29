@@ -11,7 +11,10 @@ Production observability is intentionally unsupported in this slice because no p
 - Staging overrides: `clusters/staging/observability/kube-prometheus-stack.values.yaml`.
 - Staging dashboard: `clusters/staging/observability/dashboards/sugarkube-staging-observability.json`.
 - Helper: `scripts/observability_helm.sh` through `just observability-*` recipes.
-- Alert delivery, routing, and drill strategy: [`docs/observability-alerting.md`](observability-alerting.md) — this runbook covers deploying and verifying the stack, not how (or whether) it pages anyone yet.
+- Alert delivery, routing, and drill strategy: [`docs/observability-alerting.md`](observability-alerting.md).
+- Canonical staging node inventory: `clusters/staging/nodes.txt`.
+- Host-heartbeat helper and assets: `scripts/observability_node_heartbeat.sh`,
+  `scripts/sugarkube-node-heartbeat`, and `scripts/systemd/sugarkube-node-heartbeat.*`.
 
 The dashboard is owned by Sugarkube and provisioned by the pinned Grafana
 subchart. Every render, install, and upgrade passes the same standalone JSON
@@ -127,7 +130,8 @@ is not rollout evidence.
 - Alertmanager: one replica with root/default no-op receiver named exactly `"null"`. Staging values
   define a secret-file-backed PagerDuty receiver, but route only the exact synthetic test labels to
   it; bundled and real workload alerts still fall through to `"null"`. Repository configuration is
-  not evidence of staging deployment or manually confirmed delivery.
+  is deployed, and its manual fire/acknowledge/resolve drill has been proven. Bundled and real
+  workload alerts still fall through to `"null"`.
 - Grafana: persistence disabled, no Ingress, LAN-only NodePort `30300`.
 - The provisioned dashboard defaults to six hours and a 30-second refresh. Its
   top-level public availability summary reports **Healthy endpoints**, **Failed
@@ -208,6 +212,10 @@ Do not use `--reuse-values` for the next forward upgrade; commit the full intend
 Repository support alone is not deployment or delivery evidence. This manual procedure is staging-only; no CI,
 render, install, upgrade, status, or verification command sends an alert.
 
+This drill has been successfully completed end to end: phone receipt and acknowledgement were
+confirmed, and resolution arrived after the expected default Alertmanager delay of approximately
+five minutes. Retain the procedure below for regression drills.
+
 1. Select and verify the staging context before creating or rotating anything:
 
    ```bash
@@ -280,6 +288,47 @@ render, install, upgrade, status, or verification command sends an alert.
 
    Repeat the explicit fire/acknowledge/resolve confirmations. Revoke the old integration key only
    after the new path is proven. Keep the Secret present throughout rollback safety windows.
+
+## Per-node Healthchecks.io heartbeat rollout
+
+The heartbeat is platform/node observability and does not inspect Kubernetes, Helm, DSPACE, or any
+other application. Debian Bookworm's systemd baseline supports `LoadCredential=`; the root-owned
+mode-`0600` source credential is exposed only to the service's private runtime credential directory.
+Installation refuses every environment except explicit `env=staging`, checks the local short
+hostname against `clusters/staging/nodes.txt`, and reads only from the controlling terminal with echo
+disabled. Do not pass a URL as an argument, environment variable, pipe, transcript, or command.
+
+After this change merges, perform these steps **separately on each of `sugarkube3`, `sugarkube4`, and
+`sugarkube5`**. Use that physical node's own rotated URL; `<ROTATED-NODE-PING-URL>` below is a label,
+not text to paste.
+
+1. Log in to the node, pull `main`, and review the checked-out commit.
+2. From an interactive terminal run `sudo just observability-node-heartbeat-install env=staging`.
+   At the hidden prompt, paste that node's `<ROTATED-NODE-PING-URL>` and press Enter.
+3. Run `just observability-node-heartbeat-status env=staging`, then
+   `just observability-node-heartbeat-verify env=staging`. Verification explicitly starts one
+   oneshot, waits at most 25 seconds for a successful result, and leaves the recurring timer enabled.
+4. In the **Sugarkube Staging** Healthchecks.io project, confirm only the corresponding node check
+   changes from **New** to **Up**. Repeat on the next physical node with its distinct URL.
+
+The timer runs 30 seconds after boot and every minute thereafter, with no more than five seconds of
+randomized delay. Each check has two minutes of grace, so a sustained outage should page PagerDuty
+after approximately one minute plus two minutes of grace.
+
+For the safe first drill, identify a node that does **not** host Prometheus or Alertmanager, power it
+down, confirm its Healthchecks.io check transitions late/down and the existing integration pages
+PagerDuty, acknowledge the incident, restore power, then confirm the next heartbeat returns the check
+to **Up** and the PagerDuty incident recovers/resolves. Do not start with the observability-hosting
+node.
+
+Rollback is destructive locally: run
+`sudo just observability-node-heartbeat-uninstall env=staging`, then type `uninstall` at the terminal
+confirmation. This disables the timer and removes only this feature's unit, executable, and local
+credential. It does **not** delete or change Healthchecks.io checks, integrations, or PagerDuty
+configuration. Deleting the credential means reinstall requires the node's rotated URL again.
+
+The Alertmanager-driven observability watchdog, in-cluster `KubeNodeNotReady` routing, and all
+application alert rules explicitly remain later tasks.
 
 ## Reprovisioning proof and post-merge checklist
 

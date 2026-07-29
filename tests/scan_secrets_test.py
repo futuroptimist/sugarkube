@@ -26,6 +26,12 @@ def test_regex_scan_detects_patterns(scan_secrets, line):
     assert scan_secrets.regex_scan(diff)
 
 
+def test_regex_scan_detects_healthchecks_uuid_url(scan_secrets):
+    uuid = "12345678" + "-1234-4123-8123-123456789abc"
+    line = "+https://" + "hc-ping.com/" + uuid
+    assert scan_secrets.regex_scan(["+++ b/docs/example.md", line])
+
+
 def test_regex_scan_prints_warning(scan_secrets, capsys):
     diff = ["+++ b/file.txt", "+token" ": abc"]
     assert scan_secrets.regex_scan(diff)

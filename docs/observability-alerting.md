@@ -4,9 +4,10 @@ This is the canonical alerting strategy for Sugarkube. It defines the agreed tar
 routing policy, alert inventory, and rollout/drill plan for turning the staging observability stack
 described in [`docs/observability-design.md`](./observability-design.md) and
 [`docs/observability-operations.md`](./observability-operations.md) into something that actually pages
-a human. **Nothing in this document is deployed yet.** Alertmanager currently ships a no-op `"null"`
-receiver in staging (see [`docs/observability-operations.md`](./observability-operations.md)); this
-document records the plan for closing that gap, not evidence that it is closed.
+a human. The secret-file-backed synthetic Alertmanager → PagerDuty path has now been manually proven
+through fire, phone receipt, acknowledgement, and resolution. The host-heartbeat assets in this
+repository are ready for a separate post-merge install on each staging node; that install is not live
+deployment evidence. Real workload routes and the external observability watchdog remain deferred.
 
 ## 1. Goals and non-goals
 
@@ -99,9 +100,16 @@ CronJob only proves the k3s control plane can still schedule pods somewhere in t
 particular physical node is powered on and reachable. A `systemd` timer running on the node itself is
 the only check that actually proves that node is alive.
 
-Each Healthchecks.io check gets its own unique ping URL. These URLs must be stored outside Git — in
-root-readable local configuration on the node (e.g. an `EnvironmentFile` read by the timer's unit) or
-in a suitable secret store, never committed to this repository.
+Each Healthchecks.io check gets its own unique ping URL. The repository-owned service uses systemd's
+`LoadCredential=` support from the Debian Bookworm systemd baseline and a root-owned, mode-`0600`
+file. The delivery process reads the runtime credential and supplies it to curl through its config
+stdin, so the URL is absent from the unit command, process arguments, status, and normal journal
+output. Never commit or transcribe the value.
+
+The three existing **Sugarkube Staging** checks expect a ping every minute and allow two minutes of
+grace. A continuously missing node heartbeat should therefore page through the existing
+Healthchecks.io → PagerDuty integration after approximately the one-minute period plus two-minute
+grace (allowing modest scheduling and delivery jitter).
 
 What each check detects, and does not:
 
@@ -121,8 +129,8 @@ What each check detects, and does not:
   `routing-key` key from
   `/etc/alertmanager/secrets/alertmanager-pagerduty/routing-key`; the credential is never inline.
   The only PagerDuty route is the exact `SugarkubePagerDutyTest` synthetic allowlist. This is
-  repository support, not evidence that it has been deployed or that phone delivery and resolution
-  have been manually proven.
+  repository support is deployed in staging, and its synthetic fire/acknowledge/resolve path has
+  been manually proven. No real workload alert is routed by that evidence.
 - Set `send_resolved: true` on the PagerDuty receiver so incidents auto-resolve when the underlying
   alert clears.
 - Define sensible `group_by`, `group_wait`, `group_interval`, and `repeat_interval` values so a single
@@ -156,9 +164,11 @@ A safe, phased sequence — each step depends on the previous one succeeding:
 1. Establish PagerDuty and Healthchecks.io accounts and integrations manually (outside this repo).
 2. Deploy and verify the repository's secret-safe receiver foundation (`routing_key_file`, no inline
    secrets); the root remains the null receiver and only the synthetic test is allowlisted.
-3. Manually send and resolve the synthetic PagerDuty test alert to prove receiver and phone delivery
-   work end-to-end, independent of any real Sugarkube rule.
-4. Add and verify the external node heartbeats and the observability watchdog against Healthchecks.io.
+3. **Proven:** manually fire the synthetic PagerDuty test alert, receive and acknowledge the phone
+   incident, resolve the alert, and observe resolution after Alertmanager's expected default
+   resolution delay (about five minutes).
+4. Install and verify the external node heartbeats against Healthchecks.io. Implement and verify the
+   observability watchdog only in a later slice.
    Confirm the watchdog's dedicated Alertmanager timing and the Healthchecks.io period/grace match
    the contract in §3; observe multiple repeat notifications before declaring the path healthy.
 5. Audit the existing `kube-prometheus-stack` bundled node rules (starting with `KubeNodeNotReady`).
@@ -216,5 +226,8 @@ it is deployed yet — see the rollout plan above for the actual sequencing.
 - Shallow public-endpoint blackbox monitoring (`PublicEndpointDown`, `PublicProbeMissing`,
   `TLSExpiringSoon`) is already live in staging today, independently of that dependency — see
   [`docs/observability-blackbox.md`](./observability-blackbox.md).
-- Alert delivery to a phone and node-power-off drills have not yet been performed. Everything in
-  [§6](#6-rollout-and-drill-plan) above is planned, not completed.
+- The synthetic Alertmanager → PagerDuty fire/acknowledge/resolve drill succeeded, including the
+  expected roughly five-minute Alertmanager resolution delay.
+- Per-node heartbeat assets are repository-ready but have not been installed on the Pis. The
+  node-power-off drill, watchdog, `KubeNodeNotReady` routing, and application alerts remain later
+  work.

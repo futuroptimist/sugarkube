@@ -3251,3 +3251,19 @@ observability-blackbox-status env='':
 # Verify exporter readiness, Probe discovery, and successful series (read-only).
 observability-blackbox-verify env='':
     @scripts/observability_blackbox.sh verify '{{ env }}'
+
+# Silently configure and enable this staging node's Healthchecks.io heartbeat.
+observability-node-heartbeat-install env='':
+    @scripts/observability_node_heartbeat.sh install '{{ env }}'
+
+# Show sanitized host heartbeat state without reading its credential.
+observability-node-heartbeat-status env='':
+    @scripts/observability_node_heartbeat.sh status '{{ env }}'
+
+# Trigger one heartbeat and prove success while leaving its timer enabled.
+observability-node-heartbeat-verify env='':
+    @scripts/observability_node_heartbeat.sh verify '{{ env }}'
+
+# Disable the heartbeat and destructively remove only its local owned assets.
+observability-node-heartbeat-uninstall env='':
+    @scripts/observability_node_heartbeat.sh uninstall '{{ env }}'
