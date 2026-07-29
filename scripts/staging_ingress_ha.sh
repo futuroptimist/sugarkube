@@ -21,7 +21,7 @@ for k in ("creationTimestamp","resourceVersion","uid","generation","managedField
 d.pop("status",None); print(json.dumps(d,sort_keys=True,indent=2))'
 }
 render() { normalize_env "$1"; need kubectl; need python3; cat "$TRAEFIK_CONFIG"; printf '%s\n' '---'; render_coredns; }
-status() { normalize_env "$1"; need kubectl; printf 'Context: %s (read-only)\n' "$(context)"; kubectl -n kube-system get deploy coredns coredns-ha traefik -o wide; kubectl -n kube-system get endpoints kube-dns traefik; kubectl get deployment -A -l app.kubernetes.io/name=cloudflare-tunnel -o wide; }
+status() { normalize_env "$1"; need kubectl; printf 'Context: %s (read-only)\n' "$(context)"; kubectl -n kube-system get deploy coredns traefik -o wide; kubectl -n kube-system get deploy coredns-ha -o wide --ignore-not-found=true; kubectl -n kube-system get endpoints kube-dns traefik; kubectl get deployment -A -l app.kubernetes.io/name=cloudflare-tunnel -o wide; }
 apply() {
   guard "$1"; need kubectl; need python3
   local tmp; tmp="$(mktemp -t sugarkube-coredns-ha.XXXXXX.json)"; trap 'rm -f "${tmp:-}"' EXIT
@@ -39,7 +39,7 @@ rollback() {
   kubectl -n kube-system rollout status deployment/traefik --timeout="$TIMEOUT" || die "packaged Traefik did not become ready during rollback"
 }
 verify() {
-  normalize_env "$1"; need kubectl; need python3; need curl
+  guard "$1"; need kubectl; need python3; need curl
   probe="sugarkube-ingress-ha-verify-$$"
   cleanup() { kubectl -n default delete pod "$probe" --ignore-not-found=true --wait=false >/dev/null 2>&1 || true; }
   trap cleanup EXIT INT TERM

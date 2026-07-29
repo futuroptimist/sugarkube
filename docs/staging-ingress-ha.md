@@ -33,8 +33,9 @@ companion Deployment and reconcile the HelmChartConfig.
 ## Post-merge rollout and rollback
 
 Use a kubeconfig whose context is exactly `sugar-staging`. Render/status are read-only. Apply,
-upgrade, and rollback additionally fail closed for every environment except staging and for every
-other context. Rollout waits are bounded at 180 seconds by default.
+upgrade, verify, and rollback fail closed for every environment except staging and for every other
+context. Verification creates a temporary DNS probe pod, so it receives the same exact-context
+guard as the other mutating commands. Rollout waits are bounded at 180 seconds by default.
 
 ```bash
 just staging-ingress-ha-render env=staging

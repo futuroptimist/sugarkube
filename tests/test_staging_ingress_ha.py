@@ -81,6 +81,11 @@ def test_mutation_guards_wrong_environment_and_context(tmp_path):
     result = subprocess.run([SCRIPT, "apply", "staging"], env=env, text=True, capture_output=True)
     assert result.returncode and "exactly sugar-staging" in result.stderr
     assert "apply -f" not in calls.read_text()
+    calls.unlink()
+    result = subprocess.run([SCRIPT, "verify", "staging"], env=env, text=True, capture_output=True)
+    assert result.returncode and "exactly sugar-staging" in result.stderr
+    assert "get pods" not in calls.read_text()
+    assert "run sugarkube-ingress-ha-verify-" not in calls.read_text()
 
 
 def test_apply_is_idempotent_ordered_and_rollback_owned_only(tmp_path):
@@ -113,6 +118,9 @@ def test_status_is_read_only_and_errors_do_not_expose_credentials(tmp_path):
     env, calls = _stub(tmp_path)
     assert subprocess.run([SCRIPT, "status", "staging"], env=env).returncode == 0
     text = calls.read_text()
+    assert "get deploy coredns traefik -o wide" in text
+    assert "get deploy coredns-ha -o wide --ignore-not-found=true" in text
+    assert "get deploy coredns coredns-ha traefik" not in text
     assert all(word not in text for word in ("apply", "patch", "delete", "secret"))
     source = SCRIPT.read_text().lower()
     assert "get secret" not in source and "logs" not in source
