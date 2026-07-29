@@ -1,5 +1,10 @@
 # Observability operations runbook
 
+The staging DNS/ingress dependency lifecycle and single-node failure drill are
+documented in [Staging DNS and ingress high availability](staging-ingress-ha.md).
+It complements this observability lifecycle without changing Prometheus,
+Alertmanager, PagerDuty, or Healthchecks.io configuration.
+
 This runbook covers the current live **staging-only** kube-prometheus-stack lifecycle. It is intentionally non-Flux: operators use guarded Helm commands from this repository, with the chart version and full values chain committed in Git.
 
 Production observability is intentionally unsupported in this slice because no production live baseline has been proven yet.

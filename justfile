@@ -3267,3 +3267,23 @@ observability-node-heartbeat-verify env='':
 # Disable the heartbeat and destructively remove only its local owned assets.
 observability-node-heartbeat-uninstall env='':
     @scripts/observability_node_heartbeat.sh uninstall '{{ env }}'
+
+# Render the durable K3s CoreDNS and Traefik staging HA customizations (local/read-only).
+staging-ingress-ha-render env='':
+    @scripts/staging_ingress_ha.sh render '{{ env }}'
+
+# Show active DNS, ingress, and tunnel resources without changing them.
+staging-ingress-ha-status env='':
+    @scripts/staging_ingress_ha.sh status '{{ env }}'
+
+# Apply the guarded staging-only K3s packaged-chart customizations.
+staging-ingress-ha-apply env='':
+    @scripts/staging_ingress_ha.sh apply '{{ env }}'
+
+# Verify replica spread, service backends, in-cluster DNS, and public health.
+staging-ingress-ha-verify env='':
+    @scripts/staging_ingress_ha.sh verify '{{ env }}'
+
+# Remove owned customizations and restore the K3s packaged chart defaults.
+staging-ingress-ha-rollback env='':
+    @scripts/staging_ingress_ha.sh rollback '{{ env }}'
