@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+fail() {
+  printf 'ERROR: node heartbeat %s (secret redacted).\n' "$1" >&2
+  exit 1
+}
+
+credential_dir="${CREDENTIALS_DIRECTORY:-}"
+[[ -n "${credential_dir}" ]] || fail "credential is unavailable"
+credential="${credential_dir}/ping-url"
+[[ -r "${credential}" && -f "${credential}" ]] || fail "credential is unavailable"
+
+# Read exactly one line without ever passing it in argv or emitting it. Healthchecks.io's
+# hosted ping endpoint uses a canonical UUID path; action suffixes and URL extras are forbidden.
+exec 3<"${credential}"
+IFS= read -r ping_url <&3 || [[ -n "${ping_url}" ]] || fail "credential is empty"
+[[ -n "${ping_url}" ]] || fail "credential is empty"
+if IFS= read -r extra <&3 || [[ -n "${extra}" ]]; then
+  fail "credential format is invalid"
+fi
+exec 3<&-
+uuid='[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}'
+[[ "${ping_url}" =~ ^https://hc-ping\.com/${uuid}$ ]] || fail "credential format is invalid"
+
+# --config - keeps the credential out of the process argument vector. Suppress curl's
+# potentially URL-bearing diagnostics and replace them with the fixed message below.
+if ! printf 'url = "%s"\n' "${ping_url}" | curl --config - --silent --fail \
+  --connect-timeout 5 --max-time 15 --retry 2 --retry-delay 1 --retry-max-time 20 \
+  --output /dev/null; then
+  fail "delivery failed"
+fi
+printf 'Node heartbeat delivered successfully.\n'

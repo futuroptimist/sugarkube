@@ -19,10 +19,26 @@ from typing import Iterable
 SCAN_SCRIPT_PATH = "scripts/scan-secrets.py"
 
 PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(
+        r"https://hc-ping\.com/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+        r"[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+        re.IGNORECASE,
+    ),
     re.compile(r"aws(.{0,20})?(?:secret|access)_key", re.IGNORECASE),
     re.compile(r"api[_-]?key", re.IGNORECASE),
     re.compile(r"token\s*[:=]", re.IGNORECASE),
     re.compile(r"password", re.IGNORECASE),
+)
+
+HEALTHCHECKS_URL = re.compile(
+    r"https://hc-ping\.com/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+    r"[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+    re.IGNORECASE,
+)
+HEALTHCHECKS_UUID = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+    r"[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+    re.IGNORECASE,
 )
 
 # Exact metadata placeholders are identifiers, not credential values. Keep this
@@ -59,7 +75,10 @@ def run_ripsecrets(diff_text: str) -> bool | None:
             os.unlink(tmp_path)
     if result.returncode != 0:
         # ripsecrets prints findings to stdout; non-zero means potential secret
-        print(result.stdout or result.stderr, file=sys.stderr)
+        diagnostic = result.stdout or result.stderr
+        diagnostic = HEALTHCHECKS_URL.sub("[REDACTED HEALTHCHECKS URL]", diagnostic)
+        diagnostic = HEALTHCHECKS_UUID.sub("[REDACTED HEALTHCHECKS UUID]", diagnostic)
+        print(diagnostic, file=sys.stderr)
         return True
     return False
 
@@ -78,7 +97,11 @@ def regex_scan(lines: Iterable[str]) -> bool:
         if not any(pattern.fullmatch(line) for pattern in SAFE_PLACEHOLDERS):
             for pattern in PATTERNS:
                 if pattern.search(line):
-                    print(f"Possible secret: {line.rstrip()}", file=sys.stderr)
+                    print(
+                        f"Possible secret detected in {file_path or 'unknown path'} "
+                        "(value redacted).",
+                        file=sys.stderr,
+                    )
                     return True
     return False
 

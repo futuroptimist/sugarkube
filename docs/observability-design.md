@@ -348,8 +348,13 @@ Do not page on symptoms without a response path, such as low traffic, GitHub sta
 3. **Blackbox monitoring**: *implemented in staging.* 16 public probes across all four apps plus TLS expiry are live and scripted-verified, per [`docs/observability-blackbox.md`](./observability-blackbox.md).
 4. **Application scrape integration**: app repos expose safe metrics and chart scrape hooks; Sugarkube enables discovery per environment. DSPACE's authenticated `ServiceMonitor` is live in staging (§7); token.place and danielsmith.io app metrics remain future work per each app's release gate.
 5. **Dashboards**: *implemented in staging* for the currently live signals — see §10. Additional per-app dashboard rows arrive as each app's metrics land.
-6. **Alerts**: enable only actionable alerts with runbook links and tested delivery. See [`docs/observability-alerting.md`](./observability-alerting.md) for the chosen architecture, routing policy, and rollout sequence — none of it is deployed yet.
-7. **Staging failure drills**: rehearse endpoint down, crash loop, scrape down, TLS warning, token.place no-compute-node, and Alertmanager delivery checks. See [`docs/observability-alerting.md`](./observability-alerting.md) §6 for the specific drill sequence, including node-power-off and monitoring-node-power-off drills — not yet performed.
+6. **Alerts**: the staging synthetic Alertmanager → PagerDuty route is deployed and delivery-tested;
+   enable real alerts only when actionable and linked to tested runbooks. See
+   [`docs/observability-alerting.md`](./observability-alerting.md) for the rollout sequence.
+7. **Staging failure drills**: the synthetic Alertmanager → PagerDuty fire, acknowledgement, and
+   resolution path is proven. Per-node Healthchecks.io installation and power-off drills are next;
+   the watchdog, `KubeNodeNotReady` route, and application drills remain later work. See
+   [`docs/observability-alerting.md`](./observability-alerting.md) §6.
 8. **Production rollout**: promote the monitoring stack and app scrape hooks after staging soak and drill evidence.
 9. **Post-release baseline review**: after at least one production week, adjust thresholds, retention, dashboard rows, and noisy alerts based on measured data.
 
