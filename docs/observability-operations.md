@@ -401,3 +401,106 @@ observability codification are separate follow-ups. The existing blackbox Networ
 Alerting onboarding — real Alertmanager receivers, external heartbeats, and failure drills — is no
 longer undesigned scope creep; it is planned, designed work tracked in
 [`docs/observability-alerting.md`](observability-alerting.md), just not yet executed.
+
+## Staging public ingress high availability
+
+### Failure mode and ownership audit
+
+During a controlled shutdown of `sugarkube3`, the three-server embedded-etcd
+control plane retained quorum: `sugarkube4` and `sugarkube5` were still a
+majority, so etcd and the API remained available. The public path nevertheless
+failed for about six minutes. Its only CoreDNS pod was on the powered-off node;
+the default `NoExecute` toleration kept that unavailable pod bound for roughly
+five minutes. Only after `TaintManagerEviction` removed it did a replacement
+start on `sugarkube4`, immediately restoring the public service. The application
+itself had remained running on `sugarkube4`. This is a data-plane singleton
+failure, not slow quorum formation, and this baseline intentionally does not
+change cluster-wide node monitoring or eviction timers.
+
+The active ownership model is:
+
+- **CoreDNS and Traefik:** K3s owns the packaged `HelmChart` objects and rewrites
+  their generated server manifests at startup. Sugarkube's durable staging
+  customization is exactly the two `HelmChartConfig` overlays in
+  `clusters/staging/ingress-ha/`, applied with `scripts/staging_ingress_ha.sh`.
+  They request two replicas with required hostname anti-affinity, while leaving
+  the packaged charts to retain the existing Services, cluster IP, Corefile,
+  RBAC, service accounts, probes, ports, ingress classes, TLS, and ServiceLB
+  settings. Never edit `/var/lib/rancher/k3s/server/manifests` or use an
+  unrecorded scale/patch as the source of truth.
+- **Cloudflare tunnel:** the active, token-mode Helm deployment is discovered
+  cluster-wide by its stable `app.kubernetes.io/name` label. Its observed live
+  namespace is `cloudflare`, with two ready replicas already spread across
+  `sugarkube4` and `sugarkube5`; this lifecycle verifies it but does not install,
+  patch, render, log, or read its credentials.
+- **Inactive Flux tree:** `clusters/staging/kustomization.yaml` and
+  `platform/cloudflared/` describe a legacy/future Flux path (including the
+  historical `cloudflared` namespace). They are not in the active staging
+  lifecycle and do not own these HA fields. Do not add the ingress HA overlays
+  to that graph unless staging is deliberately migrated to Flux and the old
+  controller is retired first.
+
+### Post-merge apply, verify, and rollback
+
+Select the exact staging context, inspect without mutation, and then apply. The
+apply is staged: CoreDNS must finish its bounded rollout before Traefik is
+changed, preventing a DNS gap. Reapplication is idempotent.
+
+```bash
+just kubeconfig-env env=staging
+just staging-ingress-ha-render env=staging
+just staging-ingress-ha-plan env=staging
+just staging-ingress-ha-status env=staging
+just staging-ingress-ha-apply env=staging
+just staging-ingress-ha-verify env=staging
+```
+
+`apply`, `verify` (which creates and always removes a temporary DNS pod), and
+`rollback` fail closed unless the current context is exactly `sugar-staging`.
+`render`, `plan`, and `status` are read-only. Verification requires two ready
+CoreDNS pods, two ready Traefik pods, and two ready tunnel pods, with each pair
+on distinct hostnames; ready Service backends; in-cluster DNS; and every
+critical staging public health URL discovered from the active blackbox `Probe`
+resources. Diagnostics never print tunnel data or public target URLs.
+
+To restore the previous singleton packaged-chart settings without disabling
+either packaged component, run:
+
+```bash
+just kubeconfig-env env=staging
+just staging-ingress-ha-rollback env=staging
+just staging-ingress-ha-status env=staging
+```
+
+The checked-in rollback overlays set both components back to one replica and
+remove the added affinity. A subsequent forward apply restores the HA baseline.
+
+### One-node power-off drill
+
+Start continuous external observation in one terminal, then power off exactly
+one server in another. Substitute the selected server only after confirming it
+is currently Ready; the example deliberately uses `sugarkube3`.
+
+```bash
+# Terminal 1: external observation must remain successful throughout.
+while sleep 2; do just staging-ingress-ha-verify env=staging || break; done
+
+# Terminal 2: controlled loss of one server.
+ssh sugarkube3 'sudo systemctl poweroff'
+
+# After powering sugarkube3 back on, do not proceed until both checks pass.
+kubectl wait --for=condition=Ready node/sugarkube3 --timeout=10m
+kubectl get nodes -l node-role.kubernetes.io/etcd -o wide
+just staging-ingress-ha-verify env=staging
+```
+
+Healthchecks.io and PagerDuty should still report the intentionally powered-off
+node: this change does not suppress node-loss monitoring. Public endpoints
+should remain continuously available because DNS, ingress, and the tunnel each
+retain an endpoint on another node. **Do not test another node until the first
+node is Ready and etcd redundancy is restored.** Losing a second server before
+then removes the embedded-etcd majority.
+
+token.place application-level HA remains separate work. Relay registration and
+default rate-limit state are process-local, so this baseline neither scales nor
+changes any application chart.
