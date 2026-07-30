@@ -2886,6 +2886,7 @@ def test_dspace_production_orders_staging_gate_through_finalization(
         "manifest staging-gate",
         "verifier staging",
         "oras ",
+        "helm template ",
         "manifest reserve",
         "helm upgrade ",
         "verifier prod",
@@ -2896,6 +2897,7 @@ def test_dspace_production_orders_staging_gate_through_finalization(
         for stage in stages
     ]
     assert positions == sorted(positions)
+    assert sum(line.startswith("helm template ") for line in commands) == 1
     assert sum(line.startswith("helm upgrade ") for line in commands) == 1
     final = json.loads(evidence.read_text(encoding="utf-8"))
     runtime_checks = {
@@ -3005,7 +3007,7 @@ def test_dspace_production_entry_points_share_staging_evidence_guard(
     commands = commands_log.read_text(encoding="utf-8") if commands_log.exists() else ""
     assert "oras " not in commands
     assert "manifest reserve" not in commands
-    assert "helm upgrade " not in commands
+    assert not any(line.startswith("helm ") for line in commands.splitlines())
     assert "kubectl apply " not in commands
     assert "kubectl patch " not in commands
     assert "manifest finalize" not in commands
