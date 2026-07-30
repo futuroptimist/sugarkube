@@ -1941,13 +1941,9 @@ app-promote-prod app tag='' config='' manifest='' evidence='' staging_evidence='
       --require-tag)"
     eval "${config_exports}"
     delegate=(just --justfile "{{ justfile_directory() }}/justfile" app-deploy \
-      app="${SUGARKUBE_APP}" env=prod tag="${SUGARKUBE_TAG}" config="${SUGARKUBE_CONFIG_PATH}")
-    [ -z {{ quote(manifest) }} ] || delegate+=(manifest={{ quote(manifest) }})
-    [ -z {{ quote(evidence) }} ] || delegate+=(evidence={{ quote(evidence) }})
-    [ -z {{ quote(staging_evidence) }} ] || delegate+=(staging_evidence={{ quote(staging_evidence) }})
-    [ -z {{ quote(smoke_runner) }} ] || delegate+=(smoke_runner={{ quote(smoke_runner) }})
-    [ -z {{ quote(staging_config) }} ] || delegate+=(staging_config={{ quote(staging_config) }})
-    [ -z {{ quote(staging_kubeconfig) }} ] || delegate+=(staging_kubeconfig={{ quote(staging_kubeconfig) }})
+      "${SUGARKUBE_APP}" prod "${SUGARKUBE_TAG}" "${SUGARKUBE_CONFIG_PATH}" \
+      {{ quote(manifest) }} {{ quote(evidence) }} {{ quote(staging_evidence) }} \
+      {{ quote(smoke_runner) }} {{ quote(staging_config) }} {{ quote(staging_kubeconfig) }})
     "${delegate[@]}"
 
 # Show the pinned chart version and whether a newer semver chart appears published.
@@ -2077,13 +2073,7 @@ dspace-oci-deploy env='staging' tag='' manifest='' evidence='' staging_evidence=
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    delegate=(just --justfile "{{ justfile_directory() }}/justfile" app-deploy app=dspace env={{ quote(env) }} tag={{ quote(tag) }})
-    [ -z {{ quote(manifest) }} ] || delegate+=(manifest={{ quote(manifest) }})
-    [ -z {{ quote(evidence) }} ] || delegate+=(evidence={{ quote(evidence) }})
-    [ -z {{ quote(staging_evidence) }} ] || delegate+=(staging_evidence={{ quote(staging_evidence) }})
-    [ -z {{ quote(smoke_runner) }} ] || delegate+=(smoke_runner={{ quote(smoke_runner) }})
-    [ -z {{ quote(staging_config) }} ] || delegate+=(staging_config={{ quote(staging_config) }})
-    [ -z {{ quote(staging_kubeconfig) }} ] || delegate+=(staging_kubeconfig={{ quote(staging_kubeconfig) }})
+    delegate=(just --justfile "{{ justfile_directory() }}/justfile" app-deploy dspace {{ quote(env) }} {{ quote(tag) }} '' {{ quote(manifest) }} {{ quote(evidence) }} {{ quote(staging_evidence) }} {{ quote(smoke_runner) }} {{ quote(staging_config) }} {{ quote(staging_kubeconfig) }})
     "${delegate[@]}"
 
 # Use this for optional canary/smoke testing before or alongside apex promotion workflows.
@@ -2091,14 +2081,8 @@ dspace-oci-deploy-prod-subdomain tag='' manifest='' evidence='' staging_evidence
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    delegate=(just --justfile "{{ justfile_directory() }}/justfile" app-deploy app=dspace env=prod tag={{ quote(tag) }} \
-      "{{ justfile_directory() }}/docs/examples/apps/dspace-prod-subdomain.env")
-    [ -z {{ quote(manifest) }} ] || delegate+=(manifest={{ quote(manifest) }})
-    [ -z {{ quote(evidence) }} ] || delegate+=(evidence={{ quote(evidence) }})
-    [ -z {{ quote(staging_evidence) }} ] || delegate+=(staging_evidence={{ quote(staging_evidence) }})
-    [ -z {{ quote(smoke_runner) }} ] || delegate+=(smoke_runner={{ quote(smoke_runner) }})
-    [ -z {{ quote(staging_config) }} ] || delegate+=(staging_config={{ quote(staging_config) }})
-    [ -z {{ quote(staging_kubeconfig) }} ] || delegate+=(staging_kubeconfig={{ quote(staging_kubeconfig) }})
+    delegate=(just --justfile "{{ justfile_directory() }}/justfile" app-deploy dspace prod {{ quote(tag) }} \
+      "{{ justfile_directory() }}/docs/examples/apps/dspace-prod-subdomain.env" {{ quote(manifest) }} {{ quote(evidence) }} {{ quote(staging_evidence) }} {{ quote(smoke_runner) }} {{ quote(staging_config) }} {{ quote(staging_kubeconfig) }})
     "${delegate[@]}"
 
 # Promote dspace to production apex (democratized.space) using immutable tags.
@@ -2115,13 +2099,7 @@ dspace-oci-promote-prod tag='' manifest='' evidence='' staging_evidence='' smoke
       --prod-tag-fallback \
       --require-tag)"
     eval "${config_exports}"
-    delegate=(just --justfile "{{ justfile_directory() }}/justfile" dspace-oci-deploy env=prod tag="${SUGARKUBE_TAG}")
-    [ -z {{ quote(manifest) }} ] || delegate+=(manifest={{ quote(manifest) }})
-    [ -z {{ quote(evidence) }} ] || delegate+=(evidence={{ quote(evidence) }})
-    [ -z {{ quote(staging_evidence) }} ] || delegate+=(staging_evidence={{ quote(staging_evidence) }})
-    [ -z {{ quote(smoke_runner) }} ] || delegate+=(smoke_runner={{ quote(smoke_runner) }})
-    [ -z {{ quote(staging_config) }} ] || delegate+=(staging_config={{ quote(staging_config) }})
-    [ -z {{ quote(staging_kubeconfig) }} ] || delegate+=(staging_kubeconfig={{ quote(staging_kubeconfig) }})
+    delegate=(just --justfile "{{ justfile_directory() }}/justfile" dspace-oci-deploy prod "${SUGARKUBE_TAG}" {{ quote(manifest) }} {{ quote(evidence) }} {{ quote(staging_evidence) }} {{ quote(smoke_runner) }} {{ quote(staging_config) }} {{ quote(staging_kubeconfig) }})
     "${delegate[@]}"
 
 # Fast redeploy of dspace from GHCR (emergency mutable-tag refresh).
@@ -2129,13 +2107,7 @@ dspace-oci-redeploy env='staging' tag='' manifest='' evidence='' staging_evidenc
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    delegate=(just --justfile "{{ justfile_directory() }}/justfile" app-redeploy app=dspace env={{ quote(env) }} tag={{ quote(tag) }})
-    [ -z {{ quote(manifest) }} ] || delegate+=(manifest={{ quote(manifest) }})
-    [ -z {{ quote(evidence) }} ] || delegate+=(evidence={{ quote(evidence) }})
-    [ -z {{ quote(staging_evidence) }} ] || delegate+=(staging_evidence={{ quote(staging_evidence) }})
-    [ -z {{ quote(smoke_runner) }} ] || delegate+=(smoke_runner={{ quote(smoke_runner) }})
-    [ -z {{ quote(staging_config) }} ] || delegate+=(staging_config={{ quote(staging_config) }})
-    [ -z {{ quote(staging_kubeconfig) }} ] || delegate+=(staging_kubeconfig={{ quote(staging_kubeconfig) }})
+    delegate=(just --justfile "{{ justfile_directory() }}/justfile" app-redeploy dspace {{ quote(env) }} {{ quote(tag) }} '' {{ quote(manifest) }} {{ quote(evidence) }} {{ quote(staging_evidence) }} {{ quote(smoke_runner) }} {{ quote(staging_config) }} {{ quote(staging_kubeconfig) }})
     "${delegate[@]}"
 
 # Dump dspace and Traefik logs for debugging HTTP 500s.
