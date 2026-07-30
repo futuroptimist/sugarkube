@@ -462,6 +462,42 @@ just cf-tunnel-route host=democratized.space
 
 ## App-specific notes
 
+### Runtime and chat integrity gate
+
+Prepare a DSPACE checkout once with `pnpm install` and `pnpm exec playwright
+install chromium`, then point Sugarkube at the checked-in executable. The smoke
+harness creates an isolated browser profile and mocks provider transport: real
+token.place or OpenAI credentials are neither required nor accepted.
+
+```bash
+DSPACE_SMOKE_RUNNER="$HOME/dspace/scripts/run-remote-chat-smoke.mjs"
+
+just dspace-release-verify env=staging \
+  manifest=deployment-evidence/dspace/staging/<finalized-record>.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER"
+
+just app-deploy app=dspace env=staging tag=main-REPLACE_SHORTSHA \
+  manifest=deployment-candidates/dspace/staging.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER"
+
+just app-promote-prod app=dspace tag=main-REPLACE_SHORTSHA \
+  manifest=deployment-candidates/dspace/prod.json \
+  staging_evidence=deployment-evidence/dspace/staging/<finalized-record>.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER"
+```
+
+Production promotion first validates the finalized staging evidence, proves its
+Helm revision is still live, and reruns replica, frontend, and `/chat` checks.
+The same checks run after each staging or production mutation and before the
+final record is written under `deployment-evidence/dspace/<environment>/`.
+Failures after reservation leave the reservation for explicit reconciliation;
+they neither finalize success evidence nor roll back automatically.
+
+For a token.place-default manifest, origin and model expectations come from the
+ordered environment values overlays. For an OpenAI-default manifest those two
+arguments are omitted; the harness instead proves opt-in discoverability and
+missing-key gating without making provider requests.
+
 - DSPACE serves `/config.json`; verify it with `jq` before production promotion and before opening `/chat`.
 - Keep release lineage separate from environment routing: image tags identify app code, values overlays identify `staging` or `prod` hostnames and token.place origins.
 - The optional `prod.democratized.space` overlay is not the default production path in the generic config.

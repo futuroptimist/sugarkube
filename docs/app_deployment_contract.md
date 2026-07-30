@@ -256,6 +256,15 @@ export SUGARKUBE_APP_CONFIG_DIR=apps
 
 ### DSPACE release evidence gate
 
+In addition to immutable artifact checks, DSPACE mutations require an executable
+`smoke_runner=`. Production also requires `staging_evidence=` naming a finalized
+staging record for the identical version, source, image, chart, semantic tag,
+and default provider. The centralized guard validates that record and its live
+Helm revision, then verifies live staging before production rendering,
+reservation, or mutation. Post-rollout runtime verification precedes evidence
+finalization. Existing schema-version-1 finalized records remain valid inputs;
+candidate approval files are never modified.
+
 DSPACE is the first application with a compatible producer manifest. Its
 `staging` and `prod` deploy, redeploy, promotion, and compatibility commands
 therefore require `manifest=<approved-candidate.json>`. Other applications are
