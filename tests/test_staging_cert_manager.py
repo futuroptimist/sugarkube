@@ -118,6 +118,74 @@ def test_inventory_rejects_missing_issuer_reference(monkeypatch):
         MODULE.inventory("example", "broken")
 
 
+@pytest.mark.parametrize(
+    "stdout,expected",
+    [(b"secret/site-tls\n", True), (b"", False)],
+)
+def test_secret_present_distinguishes_present_and_missing(monkeypatch, stdout, expected):
+    commands = []
+    monkeypatch.setattr(
+        MODULE,
+        "run",
+        lambda command, **_kwargs: commands.append(command)
+        or subprocess.CompletedProcess(command, 0, stdout, b""),
+    )
+
+    assert MODULE.secret_present("example", "site-tls") is expected
+    assert commands == [
+        [
+            "kubectl",
+            "--context",
+            "sugar-staging",
+            "-n",
+            "example",
+            "get",
+            "secret",
+            "site-tls",
+            "--ignore-not-found=true",
+            "-o",
+            "name",
+        ]
+    ]
+
+
+def test_inventory_propagates_redacted_secret_lookup_failure(monkeypatch):
+    certificate = resource(
+        "site-tls",
+        spec={
+            "secretName": "site-tls",
+            "issuerRef": {"name": "issuer", "kind": "ClusterIssuer"},
+        },
+    )
+    responses = {
+        "certificate": certificate,
+        "clusterissuer": resource("issuer"),
+        "certificaterequests": {"items": []},
+        "orders": {"items": []},
+        "challenges": {"items": []},
+    }
+    monkeypatch.setattr(
+        MODULE,
+        "kubectl_json",
+        lambda args: responses[next(item for item in responses if item in args)],
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(
+            command, 1, b"", b"Forbidden: Bearer sensitive-rbac-token"
+        ),
+    )
+
+    with pytest.raises(
+        MODULE.OperationError, match="kubectl failed while checking Secret"
+    ) as caught:
+        MODULE.inventory("example", "site-tls")
+
+    assert "sensitive-rbac-token" not in str(caught.value)
+    assert "<redacted>" in str(caught.value)
+
+
 @pytest.mark.parametrize("environment,context", [("prod", "sugar-staging"), ("staging", "prod")])
 def test_staging_guard_rejects_wrong_environment_or_context(monkeypatch, environment, context):
     monkeypatch.setenv("SUGARKUBE_ENV", environment)

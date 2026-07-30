@@ -48,6 +48,19 @@ def kubectl_json(args: list[str]) -> dict[str, Any]:
         raise OperationError("kubectl returned invalid JSON") from error
 
 
+def secret_present(namespace: str, name: str) -> bool:
+    result = run(
+        kubectl_command(
+            ["-n", namespace, "get", "secret", name, "--ignore-not-found=true", "-o", "name"]
+        )
+    )
+    if result.returncode:
+        detail = safe_message(result.stderr.decode(errors="replace")).strip()
+        message = "kubectl failed while checking Secret"
+        raise OperationError(f"{message}: {detail}" if detail else message)
+    return bool(result.stdout.strip())
+
+
 def staging_guard() -> None:
     if os.environ.get("SUGARKUBE_ENV") != "staging":
         raise OperationError("refusing operation: export SUGARKUBE_ENV=staging")
@@ -118,12 +131,9 @@ def inventory(namespace: str, certificate_name: str) -> dict[str, Any]:
     challenges = [item for item in challenges if owner_name(item, {"Order"}) in order_names]
 
     secret_name = spec.get("secretName")
-    secret_present = False
+    serving_secret_present = False
     if secret_name:
-        result = run(kubectl_command(["-n", namespace, "get", "secret", secret_name, "-o", "name"]))
-        if result.returncode not in {0, 1}:
-            raise OperationError("kubectl failed while checking serving Secret")
-        secret_present = result.returncode == 0
+        serving_secret_present = secret_present(namespace, secret_name)
 
     related = {
         ("Certificate", certificate_name),
@@ -151,7 +161,7 @@ def inventory(namespace: str, certificate_name: str) -> dict[str, Any]:
             "notAfter": certificate.get("status", {}).get("notAfter"),
             "renewalTime": certificate.get("status", {}).get("renewalTime"),
             "revision": certificate.get("status", {}).get("revision"),
-            "secret": {"name": secret_name, "present": secret_present},
+            "secret": {"name": secret_name, "present": serving_secret_present},
         },
         "issuer": {
             "name": issuer_ref["name"],
