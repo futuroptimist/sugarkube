@@ -8,6 +8,7 @@ import getpass
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -275,6 +276,10 @@ def install_token() -> None:
 
 
 def recover(namespace: str, certificate_name: str, host: str, timeout: int) -> None:
+    if shutil.which("cmctl") is None:
+        raise OperationError(
+            "cmctl is required for recovery; install it and verify with 'cmctl version --client'"
+        )
     report = verify_authorization(namespace, certificate_name)
     normalized_host = host.rstrip(".").lower()
     dns_names = {

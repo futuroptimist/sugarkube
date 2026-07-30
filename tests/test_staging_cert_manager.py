@@ -356,6 +356,7 @@ def test_recover_reports_bounded_failure_without_curl(monkeypatch):
         }
     ]
     monkeypatch.setattr(MODULE, "verify_authorization", lambda *_args: states[0])
+    monkeypatch.setattr(MODULE.shutil, "which", lambda _name: "/usr/bin/cmctl")
     monkeypatch.setattr(MODULE, "inventory", lambda *_args: states[0])
     commands = []
 
@@ -375,6 +376,7 @@ def test_recover_reports_bounded_failure_without_curl(monkeypatch):
 
 
 def test_recover_rejects_host_not_named_by_certificate(monkeypatch):
+    monkeypatch.setattr(MODULE.shutil, "which", lambda _name: "/usr/bin/cmctl")
     monkeypatch.setattr(
         MODULE,
         "verify_authorization",
@@ -485,6 +487,7 @@ def test_recover_success_checks_each_https_path(monkeypatch, capsys):
     }
     commands = []
     monkeypatch.setattr(MODULE, "verify_authorization", lambda *_args: before)
+    monkeypatch.setattr(MODULE.shutil, "which", lambda _name: "/usr/bin/cmctl")
     monkeypatch.setattr(MODULE, "inventory", lambda *_args: after)
     monkeypatch.setattr(
         MODULE,
@@ -518,6 +521,7 @@ def test_recover_propagates_command_failures(monkeypatch, failure):
     }
     after = {"certificate": {**report["certificate"], "revision": 2}}
     monkeypatch.setattr(MODULE, "verify_authorization", lambda *_args: report)
+    monkeypatch.setattr(MODULE.shutil, "which", lambda _name: "/usr/bin/cmctl")
     monkeypatch.setattr(MODULE, "inventory", lambda *_args: after)
     monkeypatch.setattr(MODULE.time, "monotonic", lambda: 0)
 
@@ -537,6 +541,40 @@ def test_recover_propagates_command_failures(monkeypatch, failure):
     with pytest.raises(MODULE.OperationError, match=expected) as caught:
         MODULE.recover("example", "site-tls", "staging.example.test", 60)
     assert "command-marker" not in str(caught.value)
+
+
+def test_recover_missing_cmctl_fails_without_subprocess_or_traceback(monkeypatch, capsys):
+    monkeypatch.setattr(MODULE.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(
+        MODULE,
+        "verify_authorization",
+        lambda *_args: pytest.fail("missing cmctl must fail before cluster authorization"),
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail("missing cmctl must not start a subprocess"),
+    )
+    monkeypatch.setattr(
+        MODULE.sys,
+        "argv",
+        [
+            "tool",
+            "recover",
+            "--namespace",
+            "example",
+            "--certificate",
+            "site-tls",
+            "--host",
+            "staging.example.test",
+        ],
+    )
+
+    assert MODULE.main() == 1
+    error = capsys.readouterr().err
+    assert "cmctl is required for recovery" in error
+    assert "cmctl version --client" in error
+    assert "Traceback" not in error
 
 
 @pytest.mark.parametrize(
