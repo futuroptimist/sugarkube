@@ -134,13 +134,31 @@ oras manifest fetch ghcr.io/democratizedspace/charts/dspace@"$CHART_DIGEST"
 # Fetch the chart config blob by digest and inspect its revision annotation.
 ```
 
-Pass the candidate to staging and preserve the generated final record:
+Prepare the upstream smoke runner once before any guarded deployment or
+verification. The upstream file is checked in with mode `100644`, so make it
+executable after installing its dependencies:
+
+```bash
+cd "$HOME/dspace"
+pnpm install
+pnpm exec playwright install chromium
+chmod +x "$HOME/dspace/scripts/run-remote-chat-smoke.mjs"
+export DSPACE_SMOKE_RUNNER="$HOME/dspace/scripts/run-remote-chat-smoke.mjs"
+```
+
+The smoke harness mocks provider transport. Real token.place or OpenAI
+credentials are neither required nor accepted.
+
+Pass the candidate and executable runner to staging, then preserve the generated
+final record:
 
 ```bash
 just app-deploy app=dspace env=staging tag="$APP_TAG" \
-  manifest=deployment-candidates/dspace/staging.json
+  manifest=deployment-candidates/dspace/staging.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER"
 EVIDENCE=$(python3 scripts/dspace_release_manifest.py evidence-path \
   --manifest deployment-candidates/dspace/staging.json)
+STAGING_EVIDENCE="$EVIDENCE"
 git add "$EVIDENCE"
 # Commit it after review, or attach that exact file to the external promotion record.
 ```
@@ -171,7 +189,11 @@ python3 scripts/dspace_release_manifest.py candidate \
   --environment prod --provider token-place \
   --approved-at 2026-07-26T13:00:00Z --approved-by '<operator-or-review-record>'
 just app-promote-prod app=dspace tag="$APP_TAG" \
-  manifest=deployment-candidates/dspace/prod.json
+  manifest=deployment-candidates/dspace/prod.json \
+  staging_evidence="$STAGING_EVIDENCE" \
+  smoke_runner="$DSPACE_SMOKE_RUNNER" \
+  staging_config=/etc/sugarkube/apps/dspace-staging.env \
+  staging_kubeconfig="$HOME/.kube/config-dspace-staging"
 EVIDENCE=$(python3 scripts/dspace_release_manifest.py evidence-path \
   --manifest deployment-candidates/dspace/prod.json)
 git add "$EVIDENCE"
@@ -180,16 +202,17 @@ git add "$EVIDENCE"
 The finalized JSON is sufficient to reconstruct the release using the recorded
 branch-SHA image tag and digest plus chart version and the exact digest-qualified
 chart deployment coordinate, without resolving
-`latest`, a branch, an environment tag, or the semantic tag. Until DSPACE #4732
-adds direct runtime identity, `runtimeSourceRevisionMethod` is strictly
-`podImageID+ociRevisionAnnotation`: every pod image ID must equal the approved
-digest and that exact OCI artifact's revision annotation must equal the full
-approved SHA. Finalization also reasserts the connected cluster environment,
-requires Helm to report the selected release and namespace as deployed with the
-exact approved DSPACE chart version, and accepts only Running, Ready pods owned
-through the selected Helm release's Deployment and ReplicaSet. Each DSPACE
-container must use the approved repository and immutable image tag before its
-resolved image ID is accepted. No HTTP build-identity check is claimed.
+`latest`, a branch, an environment tag, or the semantic tag. The runtime contract
+delivered by DSPACE [PR #4759](https://github.com/democratizedspace/dspace/pull/4759)
+and the remote smoke harness delivered by
+[PR #4763](https://github.com/democratizedspace/dspace/pull/4763) let Sugarkube
+verify the public build identity, frontend source marker, and isolated `/chat`
+journey. Verification also reasserts the connected cluster environment; the
+exact deployed Helm release, namespace, chart, and stable revision; complete
+rollout counts; and every Running, Ready replica linked by controller UIDs. Each
+DSPACE container must use the approved repository, immutable image tag, and
+resolved digest, and every direct pod response must agree with the bounded public
+identity response.
 
 Immediately before Helm changes the release, the guarded recipe atomically creates
 `<evidence-path>.reservation`. This sidecar binds the normalized destination,
@@ -211,13 +234,17 @@ This repository change only persists the staging configuration; it does not depl
 Preferred generic command:
 
 ```bash
-just app-deploy app=dspace env=staging tag="$APP_TAG" manifest=deployment-candidates/dspace/staging.json
+just app-deploy app=dspace env=staging tag="$APP_TAG" \
+  manifest=deployment-candidates/dspace/staging.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER"
 ```
 
 Compatibility shim while migration is in progress:
 
 ```bash
-just dspace-oci-deploy env=staging tag="$APP_TAG" manifest=deployment-candidates/dspace/staging.json
+just dspace-oci-deploy env=staging tag="$APP_TAG" \
+  manifest=deployment-candidates/dspace/staging.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER"
 ```
 
 ## Verify staging
@@ -283,13 +310,23 @@ For staging, the browser smoke must show DSPACE calling `https://staging.token.p
 This configuration change does not promote or mutate production. Promote only after staging sign-off. Prefer the generic command; it uses the prod values chain, resolves chart `3.0.1` from `docs/apps/dspace.prod.version`, and can read `docs/apps/dspace.prod.tag` (`main-1a31a56`) when `tag=` is omitted.
 
 ```bash
-just app-promote-prod app=dspace tag="$APP_TAG" manifest=deployment-candidates/dspace/prod.json
+just app-promote-prod app=dspace tag="$APP_TAG" \
+  manifest=deployment-candidates/dspace/prod.json \
+  staging_evidence="$STAGING_EVIDENCE" \
+  smoke_runner="$DSPACE_SMOKE_RUNNER" \
+  staging_config=/etc/sugarkube/apps/dspace-staging.env \
+  staging_kubeconfig="$HOME/.kube/config-dspace-staging"
 ```
 
 Compatibility shim:
 
 ```bash
-just dspace-oci-promote-prod tag="$APP_TAG" manifest=deployment-candidates/dspace/prod.json
+just dspace-oci-promote-prod tag="$APP_TAG" \
+  manifest=deployment-candidates/dspace/prod.json \
+  staging_evidence="$STAGING_EVIDENCE" \
+  smoke_runner="$DSPACE_SMOKE_RUNNER" \
+  staging_config=/etc/sugarkube/apps/dspace-staging.env \
+  staging_kubeconfig="$HOME/.kube/config-dspace-staging"
 ```
 
 ## Verify production
@@ -339,8 +376,7 @@ just dspace-manifest-rollback \
   env=staging \
   manifest=deployment-evidence/dspace/staging/previous-finalized-release.json \
   evidence=deployment-evidence/dspace/staging/rollback-20260727T120000Z.json \
-  smoke_runner="$DSPACE_SMOKE_RUNNER" \
-  verifier=/opt/dspace/bin/sugarkube-runtime-verifier
+  smoke_runner="$DSPACE_SMOKE_RUNNER"
 ```
 
 Production additionally requires a non-interactive confirmation bound to
@@ -354,7 +390,6 @@ just dspace-manifest-rollback \
   manifest=deployment-evidence/dspace/prod/previous-finalized-release.json \
   evidence=deployment-evidence/dspace/prod/rollback-20260727T120000Z.json \
   smoke_runner="$DSPACE_SMOKE_RUNNER" \
-  verifier=/opt/dspace/bin/sugarkube-runtime-verifier \
   confirm="dspace:prod:${TARGET_SHA}"
 ```
 
@@ -399,7 +434,11 @@ and the strict runtime/frontend/provider/public-journey result (including
 `/chat`). The successful non-overwritable record contains those proofs and
 values-file hashes; it does not alter the target release record.
 
-The verifier is an executable, not a shell fragment. It must support
+The standard operator path always uses the checked-in
+`scripts/dspace_runtime_verifier.py`; do not substitute an availability-only
+check. The separate rollback `verifier=` option exists only for exceptional
+compatibility with a legacy executable implementing the older verifier contract.
+Such a verifier is an executable, not a shell fragment, and must support
 `capabilities` and echo the selected environment, release, and namespace with
 schema version 1 and the exact ordered capabilities
 `applicationVersion`, `runtimeSourceRevision`, `frontendSourceRevision`,
@@ -409,11 +448,12 @@ those target coordinates and identity strings plus a non-empty list of
 including a passing `/chat`. Verifier output and response bodies are not echoed.
 Do not infer frontend identity from the semantic application version.
 
-Real production rollback remains unavailable until DSPACE
-[#4732](https://github.com/democratizedspace/dspace/issues/4732) supplies runtime
-and frontend identity and [#4733](https://github.com/democratizedspace/dspace/issues/4733)
-supplies the remote public-journey verifier contract. Tests use a stub; operators
-must not substitute an availability-only check.
+The checked-in verifier uses the runtime/frontend identity from DSPACE
+[PR #4759](https://github.com/democratizedspace/dspace/pull/4759) and the remote
+public-journey harness from
+[PR #4763](https://github.com/democratizedspace/dspace/pull/4763), so staging and
+production rollback use the same runtime, replica, provider, and `/chat` proof as
+normal deployment finalization.
 
 If anything fails after reservation, the command exits nonzero, leaves a
 redacted failed evidence record, and warns that cluster state may have changed.
@@ -482,17 +522,31 @@ just helm-oci-upgrade release=dspace namespace=dspace chart=oci://ghcr.io/democr
 
 ## Mandatory release identity and `/chat` gate
 
-A DSPACE checkout supplies the non-destructive browser harness. In that checkout,
-run `pnpm install` and `pnpm exec playwright install chromium`, then provide the
+A DSPACE checkout supplies the non-destructive browser harness. If the setup in
+the deployment section has not already been completed, install its dependencies
+and make the upstream mode-`100644` script executable. Always provide the
 executable itself—not a shell command or fragment:
 
 ```bash
-DSPACE_SMOKE_RUNNER="$HOME/dspace/scripts/run-remote-chat-smoke.mjs"
+cd "$HOME/dspace"
+pnpm install
+pnpm exec playwright install chromium
+chmod +x "$HOME/dspace/scripts/run-remote-chat-smoke.mjs"
+export DSPACE_SMOKE_RUNNER="$HOME/dspace/scripts/run-remote-chat-smoke.mjs"
 
 just dspace-release-verify \
   env=staging \
   manifest=deployment-evidence/dspace/staging/<finalized-record>.json \
-  smoke_runner="$DSPACE_SMOKE_RUNNER"
+  smoke_runner="$DSPACE_SMOKE_RUNNER" \
+  config=/etc/sugarkube/apps/dspace-staging.env \
+  kubeconfig="$HOME/.kube/config-dspace-staging"
+
+just dspace-release-verify \
+  env=prod \
+  manifest=deployment-evidence/dspace/prod/<finalized-record>.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER" \
+  config=/etc/sugarkube/apps/dspace-prod.env \
+  kubeconfig="$HOME/.kube/config-dspace-prod"
 ```
 
 The verifier checks the public build identity and frontend marker, then checks
@@ -514,16 +568,19 @@ just app-deploy app=dspace env=staging tag=main-REPLACE_SHORTSHA \
   smoke_runner="$DSPACE_SMOKE_RUNNER"
 ```
 
-Only after the post-rollout verifier succeeds is the non-overwriting finalized
-record written under `deployment-evidence/dspace/staging/`. Production requires
-that record as an additional gate:
+Only after the post-rollout verifier succeeds is the non-overwriting staging
+record written under `deployment-evidence/dspace/staging/`; production records
+are written under `deployment-evidence/dspace/prod/`. Production requires the
+finalized staging record as an additional gate. Assign its exact path, rather
+than a candidate or reservation path:
 
 ```bash
+STAGING_EVIDENCE=deployment-evidence/dspace/staging/<finalized-record>.json
 just app-promote-prod \
   app=dspace \
   tag=main-REPLACE_SHORTSHA \
   manifest=deployment-candidates/dspace/prod.json \
-  staging_evidence=deployment-evidence/dspace/staging/<finalized-record>.json \
+  staging_evidence="$STAGING_EVIDENCE" \
   staging_config=/etc/sugarkube/apps/dspace-staging.env \
   staging_kubeconfig="$HOME/.kube/config-dspace-staging" \
   smoke_runner="$DSPACE_SMOKE_RUNNER"
@@ -538,3 +595,9 @@ the final production evidence is written. A post-mutation failure leaves the res
 for the existing reconciliation procedure; it never writes successful evidence,
 retries, downgrades, or automatically rolls back. Use the reservation recovery
 instructions above after investigating the bounded failure category.
+
+For `provider=token-place`, verification derives the expected token.place URL
+and model from the selected ordered values chain. For `provider=openai`, it
+omits token.place arguments and verifies the OpenAI-default missing-key behavior.
+In both modes the isolated harness rejects real provider credentials; none are
+needed for staging, production, promotion, or rollback verification.

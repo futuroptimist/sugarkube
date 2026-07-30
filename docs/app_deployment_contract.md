@@ -318,15 +318,22 @@ validates a public OCI chart and edits the repository pin.
 ```bash
 # Deploy or install a specific immutable candidate into an environment.
 just app-deploy app=dspace env=staging tag=main-REPLACE_SHORTSHA \
-  manifest=deployment-candidates/dspace/staging.json
+  manifest=deployment-candidates/dspace/staging.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER"
 
 # Redeploy an existing release with a specific immutable tag.
 just app-redeploy app=dspace env=staging tag=main-REPLACE_SHORTSHA \
-  manifest=deployment-candidates/dspace/staging.json evidence=deployment-evidence/dspace/staging/redeploy.json
+  manifest=deployment-candidates/dspace/staging.json \
+  evidence=deployment-evidence/dspace/staging/redeploy.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER"
 
 # Promote an approved immutable tag to production.
 just app-promote-prod app=dspace tag=main-REPLACE_SHORTSHA \
-  manifest=deployment-candidates/dspace/prod.json
+  manifest=deployment-candidates/dspace/prod.json \
+  staging_evidence=deployment-evidence/dspace/staging/REPLACE_FINALIZED.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER" \
+  staging_config=/etc/sugarkube/apps/dspace-staging.env \
+  staging_kubeconfig="$HOME/.kube/config-dspace-staging"
 
 # Inspect and intentionally bump the chart pin.
 just app-chart-status app=dspace
