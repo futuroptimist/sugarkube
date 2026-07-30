@@ -493,6 +493,21 @@ def test_duplicate_controller_reference_fails_closed(tmp_path: Path, workload: s
         verifier.verify(args, runner, lambda url, _origin: _public_body(url))
 
 
+@pytest.mark.parametrize(
+    ("workload", "other_kind"), [("replicaset", "StatefulSet"), ("pod", "Deployment")]
+)
+def test_different_kind_duplicate_controller_fails_closed(
+    tmp_path: Path, workload: str, other_kind: str
+) -> None:
+    args, state, _calls, runner = runtime_fixture(tmp_path)
+    key = "replicasets" if workload == "replicaset" else "pods"
+    state[key][0]["metadata"]["ownerReferences"].append(
+        {"kind": other_kind, "name": "other", "uid": "other-uid", "controller": True}
+    )
+    with pytest.raises(verifier.VerificationError, match="not owned"):
+        verifier.verify(args, runner, lambda url, _origin: _public_body(url))
+
+
 @pytest.mark.parametrize("workload", ["replicaset", "pod"])
 def test_wrong_controller_name_fails_closed(tmp_path: Path, workload: str) -> None:
     args, state, _calls, runner = runtime_fixture(tmp_path)
@@ -555,6 +570,53 @@ def test_command_adapters_return_bounded_errors(monkeypatch: pytest.MonkeyPatch)
 
     with pytest.raises(verifier.VerificationError, match="valid JSON"):
         verifier.json_run(lambda _command: "not-json secret", ["helm"], "cluster identity")
+
+
+@pytest.mark.parametrize("resource", ["pods", "replicasets"])
+def test_discovery_adapter_failure_uses_pod_replica_stage(
+    tmp_path: Path, resource: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    args, _state, _calls, base_runner = runtime_fixture(tmp_path)
+
+    def runner(command: list[str]) -> str:
+        if resource in command:
+            raise verifier.VerificationError("cluster identity: SENTINEL_SECRET")
+        return base_runner(command)
+
+    with pytest.raises(verifier.VerificationError, match="^pod/replica identity:") as caught:
+        verifier.verify(args, runner, lambda url, _origin: _public_body(url))
+    captured = capsys.readouterr()
+    assert "SENTINEL_SECRET" not in str(caught.value)
+    assert "SENTINEL_SECRET" not in captured.out + captured.err
+
+
+def test_final_helm_adapter_failure_uses_concurrent_change_stage(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    args, _state, _calls, base_runner = runtime_fixture(tmp_path)
+    helm_reads = 0
+
+    def runner(command: list[str]) -> str:
+        nonlocal helm_reads
+        if command[0] == "helm":
+            helm_reads += 1
+            if helm_reads == 2:
+                raise verifier.VerificationError("cluster identity: SENTINEL_SECRET")
+        return base_runner(command)
+
+    with pytest.raises(verifier.VerificationError, match="^concurrent Helm change:") as caught:
+        verifier.verify(args, runner, lambda url, _origin: _public_body(url))
+    captured = capsys.readouterr()
+    assert "SENTINEL_SECRET" not in str(caught.value)
+    assert "SENTINEL_SECRET" not in captured.out + captured.err
+
+
+def test_json_run_malformed_json_retains_caller_stage() -> None:
+    with pytest.raises(
+        verifier.VerificationError,
+        match="^pod/replica identity: command did not return valid JSON$",
+    ):
+        verifier.json_run(lambda _command: "{SENTINEL_SECRET", ["kubectl"], "pod/replica identity")
 
 
 class _Response:

@@ -59,8 +59,8 @@ def run(command: list[str]) -> str:
 def json_run(runner: Runner, command: list[str], stage: str) -> Any:
     try:
         return json.loads(runner(command))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise VerificationError(f"{stage}: command did not return valid JSON") from exc
+    except (OSError, VerificationError, json.JSONDecodeError):
+        raise VerificationError(f"{stage}: command did not return valid JSON") from None
 
 
 def fetch(url: str, expected_origin: str, opener=urllib.request.urlopen) -> bytes:
@@ -171,14 +171,21 @@ def controller_owner(metadata: dict[str, Any], kind: str) -> tuple[str, str] | N
     owners = [
         owner
         for owner in references
-        if isinstance(owner, dict)
-        and owner.get("kind") == kind
-        and owner.get("controller") is True
+        if isinstance(owner, dict) and owner.get("controller") is True
     ]
     if len(owners) != 1:
         return None
-    name, uid = owners[0].get("name"), owners[0].get("uid")
-    return (name, uid) if isinstance(name, str) and isinstance(uid, str) and uid else None
+    owner = owners[0]
+    name, uid = owner.get("name"), owner.get("uid")
+    return (
+        (name, uid)
+        if owner.get("kind") == kind
+        and isinstance(name, str)
+        and name
+        and isinstance(uid, str)
+        and uid
+        else None
+    )
 
 
 def verify(args: argparse.Namespace, runner: Runner = run, public_fetch=fetch) -> dict[str, Any]:
