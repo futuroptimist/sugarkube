@@ -790,30 +790,24 @@ cert-manager-install version='v1.14.4':
 
     kubectl -n cert-manager wait --for=condition=Available deployment/cert-manager deployment/cert-manager-webhook deployment/cert-manager-cainjector --timeout=300s
 
-# Create/update the Cloudflare DNS API token Secret used by cert-manager DNS-01.
-cert-manager-cloudflare-token-secret token='':
+# Create/update the staging Cloudflare DNS API token Secret from hidden input or stdin.
+cert-manager-cloudflare-token-secret env='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
+    export SUGARKUBE_ENV="{{ env }}"
+    python3 "{{ justfile_directory() }}/scripts/staging_cert_manager.py" install-token
 
-    export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
-    token="{{ token }}"
-    : "${token:=${CF_DNS_API_TOKEN:-}}"
-    token="$(printf '%s' "${token}" | tr -d '\r\n' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-    case "${token}" in
-        token=*|CF_DNS_API_TOKEN=*|CLOUDFLARE_DNS_API_TOKEN=*)
-            token="${token#*=}"
-            token="$(printf '%s' "${token}" | tr -d '\r\n' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-            ;;
-    esac
-    if [ -z "${token}" ]; then
-        echo "Set CF_DNS_API_TOKEN or pass token=<cloudflare-dns-api-token>." >&2
-        exit 1
-    fi
+# Report one staging certificate and its complete redacted ACME resource chain.
+cert-manager-certificate-status namespace certificate env='staging':
+    SUGARKUBE_ENV="{{ env }}" python3 "{{ justfile_directory() }}/scripts/staging_cert_manager.py" status --namespace "{{ namespace }}" --certificate "{{ certificate }}"
 
-    kubectl get namespace cert-manager >/dev/null 2>&1 || kubectl create namespace cert-manager
-    kubectl -n cert-manager create secret generic cloudflare-api-token \
-        --from-literal=api-token="${token}" \
-        --dry-run=client -o yaml | kubectl apply -f -
+# Fail-closed structural authorization checks before attempting a staging renewal.
+cert-manager-certificate-verify-authorization namespace certificate env='staging':
+    SUGARKUBE_ENV="{{ env }}" python3 "{{ justfile_directory() }}/scripts/staging_cert_manager.py" verify-authorization --namespace "{{ namespace }}" --certificate "{{ certificate }}"
+
+# Renew and verify exactly one staging certificate with a bounded wait and HTTPS checks.
+cert-manager-certificate-recover namespace certificate host env='staging' timeout='600':
+    SUGARKUBE_ENV="{{ env }}" python3 "{{ justfile_directory() }}/scripts/staging_cert_manager.py" recover --namespace "{{ namespace }}" --certificate "{{ certificate }}" --host "{{ host }}" --timeout "{{ timeout }}"
 
 # Apply non-Flux ClusterIssuers with an explicit email (no kustomize vars).
 cert-manager-issuers-apply email:
