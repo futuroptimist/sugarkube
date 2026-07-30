@@ -618,7 +618,13 @@ def test_orchestration_preserves_complete_success_and_failure_evidence(
         "preflight",
         lambda *_args, **_kwargs: [{"check": "imageDigest", "passed": True, "details": "observed"}],
     )
-    monkeypatch.setattr(rollback.release, "finalize", lambda *_args, **_kwargs: {})
+    finalizations: list[dict[str, object]] = []
+
+    def finalize_stub(*_args: object, **kwargs: object) -> dict[str, object]:
+        finalizations.append(kwargs)
+        return {}
+
+    monkeypatch.setattr(rollback.release, "finalize", finalize_stub)
     upgrade_attempted = [False]
     post_status_calls = [0]
 
@@ -720,9 +726,12 @@ def test_orchestration_preserves_complete_success_and_failure_evidence(
         assert observed["pods"][0]["images"]["dspace"]
         assert observed["pods"][0]["imageIDs"]["dspace"]
         assert "ownerReferences" in observed["pods"][0]
+        if failure == "verifier":
+            assert finalizations == []
         return
 
     result = rollback.rollback(args, runner)
+    assert finalizations[0]["runtime_verification"] == verifier_result()
     upgrade = next(command for command in commands if "upgrade" in command)
     assert f"oci://{manifest.CHART_REF}@{'sha256:' + '2' * 64}" in upgrade
     assert f"image.tag=main-abcdef0@{DIGEST}" in upgrade

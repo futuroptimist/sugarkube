@@ -708,23 +708,6 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             ],
             "DSPACE pods",
         )
-        finalizer_proof = release.finalize(
-            approved,
-            after_helm,
-            raw_pods,
-            workloads,
-            oci,
-            environment=args.environment,
-            image_tag=target["imageTag"],
-            chart_version=target["chartVersion"],
-            release="dspace",
-            namespace="dspace",
-            cluster_environment=args.environment,
-            invocation_description=description,
-            expected_image_coordinate=(
-                f"{release.IMAGE_REF}:{target['imageTag']}@{target['imageDigest']}"
-            ),
-        )
         verifier_command = [
             str(args.verifier),
             "verify",
@@ -741,9 +724,10 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             "--provider",
             target["expectedDefaultChatProvider"],
         ]
-        if args.verifier.expanduser().resolve() == Path(__file__).with_name(
-            "dspace_runtime_verifier.py"
-        ).resolve():
+        if (
+            args.verifier.expanduser().resolve()
+            == Path(__file__).with_name("dspace_runtime_verifier.py").resolve()
+        ):
             verifier_command.extend(
                 (
                     "--image-tag",
@@ -767,6 +751,25 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
         failed_stage = "runtime-verification"
         verifier = validate_verifier_result(
             json_command(runner, verifier_command, "runtime verifier"), target, args.environment
+        )
+        failed_stage = "ownership-and-finalization-proof"
+        finalizer_proof = release.finalize(
+            approved,
+            after_helm,
+            raw_pods,
+            workloads,
+            oci,
+            environment=args.environment,
+            image_tag=target["imageTag"],
+            chart_version=target["chartVersion"],
+            release="dspace",
+            namespace="dspace",
+            cluster_environment=args.environment,
+            invocation_description=description,
+            expected_image_coordinate=(
+                f"{release.IMAGE_REF}:{target['imageTag']}@{target['imageDigest']}"
+            ),
+            runtime_verification=verifier,
         )
         failed_stage = "revision-stability-collection"
         stable = helm_status(runner, args.kubeconfig, "dspace", "dspace")
@@ -858,16 +861,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--oras", default=os.environ.get("SUGARKUBE_ORAS_COMMAND", "oras"))
     parser.add_argument("--timeout", default="10m")
     args = parser.parse_args(argv)
-    if (
-        args.verifier.expanduser().resolve() == default_verifier.resolve()
-        and (
-            args.smoke_runner is None
-            or not args.smoke_runner.expanduser().is_file()
-            or not os.access(args.smoke_runner.expanduser(), os.X_OK)
-        )
+    if args.verifier.expanduser().resolve() == default_verifier.resolve() and (
+        args.smoke_runner is None
+        or not args.smoke_runner.expanduser().is_file()
+        or not os.access(args.smoke_runner.expanduser(), os.X_OK)
     ):
         print(
-            "error: --smoke-runner must be an existing executable when using the default runtime verifier",
+            "error: --smoke-runner must be an existing executable when using the "
+            "default runtime verifier",
             file=sys.stderr,
         )
         return 2

@@ -517,6 +517,13 @@ def staging_gate(candidate_record: dict[str, Any], staging_record: dict[str, Any
         raise ManifestError("manifest/evidence mismatch: candidate environment must be prod")
     if staging_record["environment"] != "staging":
         raise ManifestError("manifest/evidence mismatch: evidence environment must be staging")
+    checks = {result["check"] for result in staging_record["verificationResults"]}
+    missing_runtime = sorted(RUNTIME_EVIDENCE_CHECKS - checks)
+    if missing_runtime:
+        raise ManifestError(
+            "manifest/evidence mismatch: staging evidence lacks runtime verification: "
+            + ", ".join(missing_runtime)
+        )
     mismatched = [
         field
         for field in IMMUTABLE_PROMOTION_FIELDS
@@ -581,6 +588,8 @@ def finalize(
     runtime_verification: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     validate(value, False)
+    if runtime_verification is None:
+        raise ManifestError("finalization requires runtime verification")
     selected = {
         "environment": environment,
         "imageTag": image_tag,
@@ -741,35 +750,34 @@ def finalize(
             "details": "every running pod imageID matched approved image digest",
         },
     ]
-    if runtime_verification is not None:
-        # Keep rollback and deployment evidence on one exact verifier contract.
-        from scripts.dspace_manifest_rollback import (  # pylint: disable=import-outside-toplevel
-            RollbackError,
-            validate_verifier_result,
-        )
+    # Keep rollback and deployment evidence on one exact verifier contract.
+    from scripts.dspace_manifest_rollback import (  # pylint: disable=import-outside-toplevel
+        RollbackError,
+        validate_verifier_result,
+    )
 
-        try:
-            validate_verifier_result(runtime_verification, value, environment)
-        except RollbackError as exc:
-            raise ManifestError(f"invalid runtime verification: {exc}") from exc
-        journey_names = ",".join(item["name"] for item in runtime_verification["journeys"])
-        results.extend(
-            {"check": check, "passed": True, "details": details}
-            for check, details in (
-                ("runtimeIdentity", "approved application version and full source revision"),
-                ("frontendIdentity", "approved full frontend source revision marker"),
-                ("replicaAgreement", "all serving replicas reported the approved identity"),
-                ("publicDirectAgreement", "public and direct-origin identities agreed"),
-                (
-                    "defaultProvider",
-                    f"approved default provider={value['expectedDefaultChatProvider']}",
-                ),
-                (
-                    "remoteChatSmoke",
-                    f"successful public journeys={journey_names}; provider safety checks passed",
-                ),
-            )
+    try:
+        validate_verifier_result(runtime_verification, value, environment)
+    except RollbackError as exc:
+        raise ManifestError(f"invalid runtime verification: {exc}") from exc
+    journey_names = ",".join(item["name"] for item in runtime_verification["journeys"])
+    results.extend(
+        {"check": check, "passed": True, "details": details}
+        for check, details in (
+            ("runtimeIdentity", "approved application version and full source revision"),
+            ("frontendIdentity", "approved full frontend source revision marker"),
+            ("replicaAgreement", "all serving replicas reported the approved identity"),
+            ("publicDirectAgreement", "public and direct-origin identities agreed"),
+            (
+                "defaultProvider",
+                f"approved default provider={value['expectedDefaultChatProvider']}",
+            ),
+            (
+                "remoteChatSmoke",
+                f"successful public journeys={journey_names}; provider safety checks passed",
+            ),
         )
+    )
     result = dict(value)
     result.update(
         recordType="final",
@@ -817,7 +825,7 @@ def main(argv: list[str] | None = None) -> int:
     finish.add_argument("--chart-ref", default=CHART_REF)
     finish.add_argument("--reservation", required=True)
     finish.add_argument("--oras-command", default=os.environ.get("SUGARKUBE_ORAS_COMMAND", "oras"))
-    finish.add_argument("--runtime-verification", type=Path)
+    finish.add_argument("--runtime-verification", type=Path, required=True)
     available = sub.add_parser("check-output")
     available.add_argument("--output", type=Path, required=True)
     destination = sub.add_parser("evidence-path")
@@ -950,9 +958,7 @@ def main(argv: list[str] | None = None) -> int:
                 namespace=args.namespace,
                 cluster_environment=cluster_environment,
                 invocation_description=invocation_description,
-                runtime_verification=(
-                    _object(args.runtime_verification) if args.runtime_verification else None
-                ),
+                runtime_verification=_object(args.runtime_verification),
             )
             sidecar = verify_reservation(
                 args.output,
