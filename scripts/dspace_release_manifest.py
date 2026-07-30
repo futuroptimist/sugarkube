@@ -42,6 +42,7 @@ FINAL_FIELDS = CANDIDATE_FIELDS + (
     "runtimeSourceRevisionMethod",
     "verificationResults",
 )
+OPTIONAL_FINAL_FIELDS = ("runtimeVerification",)
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 SEMVER_RE = re.compile(
@@ -133,6 +134,8 @@ def validate(value: dict[str, Any], finalized: bool | None = None) -> dict[str, 
     if finalized is None:
         finalized = record_type == "final"
     expected = FINAL_FIELDS if finalized else CANDIDATE_FIELDS
+    if finalized and "runtimeVerification" in value:
+        expected += OPTIONAL_FINAL_FIELDS
     _exact_fields(value, expected)
     _validate_upstream(value)
     if record_type != ("final" if finalized else "candidate"):
@@ -180,6 +183,48 @@ def validate(value: dict[str, Any], finalized: bool | None = None) -> dict[str, 
             raise ManifestError("runtimeSourceRevision must match sourceRevision")
         if value["runtimeSourceRevisionMethod"] != RUNTIME_METHOD:
             raise ManifestError(f"runtimeSourceRevisionMethod must be {RUNTIME_METHOD}")
+        if "runtimeVerification" in value:
+            proof = value["runtimeVerification"]
+            fields = {
+                "schemaVersion",
+                "environment",
+                "release",
+                "namespace",
+                "applicationVersion",
+                "runtimeSourceRevision",
+                "frontendSourceRevision",
+                "defaultProvider",
+                "journeys",
+            }
+            if not isinstance(proof, dict) or set(proof) != fields:
+                raise ManifestError("runtimeVerification has an incompatible verifier schema")
+            if proof["schemaVersion"] != 1 or any(
+                proof[field] != expected_value
+                for field, expected_value in {
+                    "environment": value["environment"],
+                    "release": "dspace",
+                    "namespace": "dspace",
+                    "applicationVersion": value["applicationVersion"],
+                    "runtimeSourceRevision": value["sourceRevision"],
+                    "frontendSourceRevision": value["sourceRevision"],
+                    "defaultProvider": value["expectedDefaultChatProvider"],
+                }.items()
+            ):
+                raise ManifestError("runtimeVerification does not match approved release")
+            journeys = proof["journeys"]
+            if (
+                not isinstance(journeys, list)
+                or not journeys
+                or any(
+                    not isinstance(item, dict)
+                    or set(item) != {"name", "passed"}
+                    or not isinstance(item["name"], str)
+                    or item["passed"] is not True
+                    for item in journeys
+                )
+                or "/chat" not in {item["name"] for item in journeys}
+            ):
+                raise ManifestError("runtimeVerification lacks successful bounded journeys")
         results = value["verificationResults"]
         if not isinstance(results, list) or not results:
             raise ManifestError("verificationResults must be a non-empty list")
@@ -212,9 +257,7 @@ def validate(value: dict[str, Any], finalized: bool | None = None) -> dict[str, 
         if missing:
             raise ManifestError("missing verification results: " + ", ".join(missing))
         if sorted(platform_indices) != list(range(len(platform_indices))):
-            raise ManifestError(
-                "image platform verification indices must be contiguous from zero"
-            )
+            raise ManifestError("image platform verification indices must be contiguous from zero")
         if not platform_indices:
             raise ManifestError("at least one image platform verification result is required")
     return value
@@ -235,9 +278,7 @@ def _write_new(path: Path, value: dict[str, Any]) -> None:
         try:
             os.link(temporary, path)
         except FileExistsError as exc:
-            raise ManifestError(
-                f"refusing to overwrite existing record: {path}"
-            ) from exc
+            raise ManifestError(f"refusing to overwrite existing record: {path}") from exc
         _sync_directory(path.parent)
     finally:
         Path(temporary).unlink(missing_ok=True)
@@ -290,9 +331,7 @@ def reserve(
     try:
         fd = os.open(sidecar, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError as exc:
-        raise ManifestError(
-            f"evidence destination is already reserved: {sidecar}"
-        ) from exc
+        raise ManifestError(f"evidence destination is already reserved: {sidecar}") from exc
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
             stream.write(_canonical(metadata))
@@ -328,9 +367,7 @@ def verify_reservation(
     if not secrets.compare_digest(
         json.dumps(metadata, sort_keys=True), json.dumps(expected, sort_keys=True)
     ):
-        raise ManifestError(
-            "reservation ownership or deployment coordinates do not match"
-        )
+        raise ManifestError("reservation ownership or deployment coordinates do not match")
     if normalized.exists():
         raise ManifestError(f"refusing to overwrite existing record: {normalized}")
     return sidecar
@@ -548,6 +585,7 @@ def finalize(
     cluster_environment: str,
     invocation_description: str,
     expected_image_coordinate: str | None = None,
+    runtime_verification: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     validate(value, False)
     selected = {
@@ -689,8 +727,7 @@ def finalize(
             # Helm metadata proves name/version, not immutable OCI content. The
             # guarded mutation therefore installs this approved digest directly.
             "details": (
-                f"chart=dspace; version={chart_version}; "
-                f"coordinate={chart_coordinate(value)}"
+                f"chart=dspace; version={chart_version}; " f"coordinate={chart_coordinate(value)}"
             ),
         },
         {
@@ -718,7 +755,32 @@ def finalize(
         runtimeSourceRevisionMethod=RUNTIME_METHOD,
         verificationResults=results,
     )
+    if runtime_verification is not None:
+        result["runtimeVerification"] = runtime_verification
     return validate(result, True)
+
+
+def staging_gate(candidate_value: dict[str, Any], evidence_value: dict[str, Any]) -> int:
+    """Validate finalized staging proof and return its recorded Helm revision."""
+    validate(candidate_value, False)
+    validate(evidence_value, True)
+    if candidate_value["environment"] != "prod" or evidence_value["environment"] != "staging":
+        raise ManifestError("staging gate requires prod candidate and staging final evidence")
+    coordinates = (
+        "applicationVersion",
+        "sourceRevision",
+        "imageTag",
+        "imageDigest",
+        "chartVersion",
+        "chartDigest",
+        "semanticTag",
+        "expectedDefaultChatProvider",
+    )
+    if any(candidate_value[field] != evidence_value[field] for field in coordinates):
+        raise ManifestError("manifest/evidence mismatch: staging and prod coordinates differ")
+    if "runtimeVerification" not in evidence_value:
+        raise ManifestError("staging evidence lacks mandatory runtime verification")
+    return evidence_value["helmRevision"]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -755,9 +817,11 @@ def main(argv: list[str] | None = None) -> int:
     finish.add_argument("--image-ref", default=IMAGE_REF)
     finish.add_argument("--chart-ref", default=CHART_REF)
     finish.add_argument("--reservation", required=True)
-    finish.add_argument(
-        "--oras-command", default=os.environ.get("SUGARKUBE_ORAS_COMMAND", "oras")
-    )
+    finish.add_argument("--oras-command", default=os.environ.get("SUGARKUBE_ORAS_COMMAND", "oras"))
+    finish.add_argument("--runtime-verification", type=Path)
+    gate = sub.add_parser("staging-gate")
+    gate.add_argument("--manifest", type=Path, required=True)
+    gate.add_argument("--staging-evidence", type=Path, required=True)
     available = sub.add_parser("check-output")
     available.add_argument("--output", type=Path, required=True)
     destination = sub.add_parser("evidence-path")
@@ -885,6 +949,9 @@ def main(argv: list[str] | None = None) -> int:
                 namespace=args.namespace,
                 cluster_environment=cluster_environment,
                 invocation_description=invocation_description,
+                runtime_verification=(
+                    _object(args.runtime_verification) if args.runtime_verification else None
+                ),
             )
             sidecar = verify_reservation(
                 args.output,
@@ -909,19 +976,18 @@ def main(argv: list[str] | None = None) -> int:
                     metadata.get("version"),
                 )
 
-            if (
-                binding_fields(settled_helm) != binding_fields(helm)
-                or binding_fields(stable_helm) != binding_fields(helm)
-            ):
+            if binding_fields(settled_helm) != binding_fields(helm) or binding_fields(
+                stable_helm
+            ) != binding_fields(helm):
                 raise ManifestError("Helm release changed during evidence collection")
             _write_new(args.output, result)
             sidecar.unlink()
             _sync_directory(args.output.expanduser().resolve(strict=False).parent)
+        elif args.command == "staging-gate":
+            print(staging_gate(_object(args.manifest), _object(args.staging_evidence)))
         elif args.command == "check-output":
             if args.output.exists():
-                raise ManifestError(
-                    f"refusing to overwrite existing record: {args.output}"
-                )
+                raise ManifestError(f"refusing to overwrite existing record: {args.output}")
         elif args.command == "reserve":
             sys.stdout.write(
                 reserve(

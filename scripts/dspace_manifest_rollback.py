@@ -739,7 +739,15 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             target["sourceRevision"],
             "--provider",
             target["expectedDefaultChatProvider"],
+            "--manifest",
+            str(args.manifest),
+            "--smoke-runner",
+            str(getattr(args, "smoke_runner", "")),
+            "--kubeconfig",
+            str(args.kubeconfig),
         ]
+        if args.config:
+            verifier_command.extend(("--config", str(args.config)))
         failed_stage = "runtime-verification"
         verifier = validate_verifier_result(
             json_command(runner, verifier_command, "runtime verifier"), target, args.environment
@@ -790,8 +798,7 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
                 "status": observed_info.get("status"),
                 "chartName": observed_chart.get("name"),
                 "chartVersion": chart_version(observed_helm),
-                "invocationDescriptionMatches": observed_info.get("description")
-                == description,
+                "invocationDescriptionMatches": observed_info.get("description") == description,
             }
         except Exception:
             diagnostics["helm"] = "unavailable"
@@ -823,6 +830,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--evidence", type=Path, required=True)
     parser.add_argument("--verifier", type=Path, required=True)
+    parser.add_argument("--smoke-runner", type=Path, default=Path(""))
     parser.add_argument("--confirm", default="")
     parser.add_argument("--config", default="")
     parser.add_argument("--kubeconfig", default=str(Path.home() / ".kube" / "config-sugarkube"))

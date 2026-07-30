@@ -5,6 +5,21 @@ identified by a small local config file and deployed with shared `just` recipes.
 This page is the contract that app repositories and local operator configs should
 follow.
 
+## DSPACE promotion integrity gate
+
+Standard DSPACE staging and production deploy, redeploy, promotion, and compatibility recipes
+require an approved manifest and executable DSPACE smoke runner. Production also requires finalized
+staging evidence for the identical application version, full source revision, immutable image
+tag/digest, chart version/digest, semantic tag, and expected provider. Approval metadata may differ.
+Staging is validated and reverified before production preflight, evidence reservation, or mutation.
+After rollout, fresh OCI, stable Helm identity, replica image/source agreement, public/direct
+frontend identity, and `/chat` must pass before evidence finalization.
+
+Historical finalized records remain valid for validation and rollback. New records add the
+optional, strictly validated `runtimeVerification` proof; only a staging record with this proof can
+authorize production. Candidate approval records are never modified. Failures retain the existing
+reservation/reconciliation behavior and never trigger automatic rollback.
+
 The existing app-specific recipes for dspace, token.place, and danielsmith.io
 remain compatibility shims during migration. They are intentionally not removed
 in this phase and will be deprecated only after downstream runbooks have moved to

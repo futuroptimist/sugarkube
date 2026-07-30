@@ -2,6 +2,58 @@
 
 This is the canonical runbook for deploying DSPACE from GHCR artifacts to Sugarkube. The generic `just app-*` recipes are the preferred future path. The `dspace-oci-*` recipes remain compatibility shims and are scheduled for later removal only after the generic flow has been exercised across routine releases.
 
+## Mandatory release verification
+
+DSPACE staging and production releases are verified against an approved immutable release
+manifest. The verifier checks public build identity and frontend marker, every ready serving
+replica's image coordinate, digest, build identity, and frontend marker, then invokes DSPACE's
+non-destructive remote `/chat` harness. It uses read-only Kubernetes API pod proxies. Successful
+bounded results are included in finalized evidence as `runtimeVerification`; response bodies,
+child output, browser artifacts, headers, cookies, credentials, and request payloads are not saved.
+
+Prepare a DSPACE checkout with `pnpm install` and `pnpm exec playwright install chromium`. The
+runner must be executable. It mocks provider transport, so no token.place or OpenAI credentials
+are required or accepted:
+
+```bash
+DSPACE_SMOKE_RUNNER="$HOME/dspace/scripts/run-remote-chat-smoke.mjs"
+chmod +x "$DSPACE_SMOKE_RUNNER"
+
+just dspace-release-verify \
+  env=staging \
+  manifest=deployment-evidence/dspace/staging/<finalized-record>.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER"
+```
+
+Deploy staging from its approved candidate; finalized evidence is created only after post-rollout
+verification succeeds:
+
+```bash
+just app-deploy app=dspace env=staging tag=main-REPLACE_SHORTSHA \
+  manifest=deployment-candidates/dspace/staging.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER"
+```
+
+Production promotion additionally requires finalized staging evidence. Before production render,
+reservation, or mutation, Sugarkube compares immutable coordinates, checks the recorded staging
+Helm revision remains live, and reruns complete staging verification:
+
+```bash
+just app-promote-prod \
+  app=dspace \
+  tag=main-REPLACE_SHORTSHA \
+  manifest=deployment-candidates/dspace/prod.json \
+  staging_evidence=deployment-evidence/dspace/staging/<finalized-record>.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER"
+```
+
+Final records are written below `deployment-evidence/dspace/<environment>/`, unless `evidence=` is
+explicit. A post-mutation failure exits nonzero, preserves the reservation for reconciliation, and
+does not finalize success, retry, downgrade, or roll back. For a `token-place` default, origin and
+model expectations come from the ordered values chain. For `openai`, those arguments are omitted;
+OpenAI remains discoverable and missing-key gated without a real key. Standalone production
+verification uses the same command with `env=prod` and a production candidate or final record.
+
 ## Artifact model
 
 - App repository responsibilities: build `ghcr.io/democratizedspace/dspace`, publish immutable image tags, maintain the Helm chart, and publish immutable chart versions to `oci://ghcr.io/democratizedspace/charts/dspace`.
