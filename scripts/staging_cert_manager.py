@@ -8,6 +8,7 @@ import getpass
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -61,9 +62,13 @@ def secret_present(namespace: str, name: str) -> bool:
     return bool(result.stdout.strip())
 
 
-def staging_guard() -> None:
+def staging_environment_guard() -> None:
     if os.environ.get("SUGARKUBE_ENV") != "staging":
         raise OperationError("refusing operation: export SUGARKUBE_ENV=staging")
+
+
+def staging_guard() -> None:
+    staging_environment_guard()
     result = run(["kubectl", "config", "current-context"])
     context = result.stdout.decode(errors="replace").strip()
     if result.returncode or context != STAGING_CONTEXT:
@@ -275,6 +280,12 @@ def install_token() -> None:
 
 
 def recover(namespace: str, certificate_name: str, host: str, timeout: int) -> None:
+    staging_environment_guard()
+    if shutil.which("cmctl") is None:
+        raise OperationError(
+            "cmctl is required for recovery; install it from "
+            "https://cert-manager.io/docs/reference/cmctl/ and verify with cmctl version --client"
+        )
     report = verify_authorization(namespace, certificate_name)
     normalized_host = host.rstrip(".").lower()
     dns_names = {

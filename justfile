@@ -1,5 +1,5 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
-set export := true
+set export
 
 export SUGARKUBE_CLUSTER := env('SUGARKUBE_CLUSTER', 'sugar')
 export SUGARKUBE_SERVERS := env('SUGARKUBE_SERVERS', '1')
@@ -794,20 +794,53 @@ cert-manager-install version='v1.14.4':
 cert-manager-cloudflare-token-secret env='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
-    export SUGARKUBE_ENV="{{ env }}"
+    normalize_argument() {
+        local key="$1" value="$2"
+        if [[ "${value}" == "${key}="* ]]; then value="${value#*=}"; fi
+        if [[ -z "${value}" || "${value}" == *=* ]]; then
+            printf 'ERROR: %s must be a non-empty value or %s=<value>; got %q\n' "${key}" "${key}" "${value}" >&2
+            exit 2
+        fi
+        printf '%s' "${value}"
+    }
+    env_name="$(normalize_argument env {{ quote(env) }})"
+    export SUGARKUBE_ENV="${env_name}"
     python3 "{{ justfile_directory() }}/scripts/staging_cert_manager.py" install-token
 
 # Report one staging certificate and its complete redacted ACME resource chain.
-cert-manager-certificate-status namespace certificate env='staging':
-    SUGARKUBE_ENV="{{ env }}" python3 "{{ justfile_directory() }}/scripts/staging_cert_manager.py" status --namespace "{{ namespace }}" --certificate "{{ certificate }}"
+cert-manager-certificate-status namespace certificate env:
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    normalize_argument() { local key="$1" value="$2"; if [[ "${value}" == "${key}="* ]]; then value="${value#*=}"; fi; if [[ -z "${value}" || "${value}" == *=* ]]; then printf 'ERROR: %s must be a non-empty value or %s=<value>; got %q\n' "${key}" "${key}" "${value}" >&2; exit 2; fi; printf '%s' "${value}"; }
+    env_name="$(normalize_argument env {{ quote(env) }})"
+    namespace_name="$(normalize_argument namespace {{ quote(namespace) }})"
+    certificate_name="$(normalize_argument certificate {{ quote(certificate) }})"
+    export SUGARKUBE_ENV="${env_name}"
+    python3 "{{ justfile_directory() }}/scripts/staging_cert_manager.py" status --namespace "${namespace_name}" --certificate "${certificate_name}"
 
 # Fail-closed structural authorization checks before attempting a staging renewal.
-cert-manager-certificate-verify-authorization namespace certificate env='staging':
-    SUGARKUBE_ENV="{{ env }}" python3 "{{ justfile_directory() }}/scripts/staging_cert_manager.py" verify-authorization --namespace "{{ namespace }}" --certificate "{{ certificate }}"
+cert-manager-certificate-verify-authorization namespace certificate env:
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    normalize_argument() { local key="$1" value="$2"; if [[ "${value}" == "${key}="* ]]; then value="${value#*=}"; fi; if [[ -z "${value}" || "${value}" == *=* ]]; then printf 'ERROR: %s must be a non-empty value or %s=<value>; got %q\n' "${key}" "${key}" "${value}" >&2; exit 2; fi; printf '%s' "${value}"; }
+    env_name="$(normalize_argument env {{ quote(env) }})"
+    namespace_name="$(normalize_argument namespace {{ quote(namespace) }})"
+    certificate_name="$(normalize_argument certificate {{ quote(certificate) }})"
+    export SUGARKUBE_ENV="${env_name}"
+    python3 "{{ justfile_directory() }}/scripts/staging_cert_manager.py" verify-authorization --namespace "${namespace_name}" --certificate "${certificate_name}"
 
 # Renew and verify exactly one staging certificate with a bounded wait and HTTPS checks.
-cert-manager-certificate-recover namespace certificate host env='staging' timeout='600':
-    SUGARKUBE_ENV="{{ env }}" python3 "{{ justfile_directory() }}/scripts/staging_cert_manager.py" recover --namespace "{{ namespace }}" --certificate "{{ certificate }}" --host "{{ host }}" --timeout "{{ timeout }}"
+cert-manager-certificate-recover namespace certificate host env timeout='600':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    normalize_argument() { local key="$1" value="$2"; if [[ "${value}" == "${key}="* ]]; then value="${value#*=}"; fi; if [[ -z "${value}" || "${value}" == *=* ]]; then printf 'ERROR: %s must be a non-empty value or %s=<value>; got %q\n' "${key}" "${key}" "${value}" >&2; exit 2; fi; printf '%s' "${value}"; }
+    env_name="$(normalize_argument env {{ quote(env) }})"
+    namespace_name="$(normalize_argument namespace {{ quote(namespace) }})"
+    certificate_name="$(normalize_argument certificate {{ quote(certificate) }})"
+    host_name="$(normalize_argument host {{ quote(host) }})"
+    timeout_seconds="$(normalize_argument timeout {{ quote(timeout) }})"
+    export SUGARKUBE_ENV="${env_name}"
+    python3 "{{ justfile_directory() }}/scripts/staging_cert_manager.py" recover --namespace "${namespace_name}" --certificate "${certificate_name}" --host "${host_name}" --timeout "${timeout_seconds}"
 
 # Apply non-Flux ClusterIssuers with an explicit email (no kustomize vars).
 cert-manager-issuers-apply email:
