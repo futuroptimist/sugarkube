@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Guarded, redacted cert-manager staging operations.
-
-The program deliberately reads only Kubernetes resource metadata and status.  It never
-requests Secret data and accepts the Cloudflare token only from a TTY or standard input.
-"""
+"""Fail-closed, redacted cert-manager operations for the staging cluster."""
 
 from __future__ import annotations
 
@@ -17,9 +13,14 @@ import sys
 import time
 from typing import Any
 
+STAGING_CONTEXT = "sugar-staging"
+TOKEN_SECRET_NAMESPACE = "cert-manager"
+TOKEN_SECRET_NAME = "cloudflare-api-token"
+TOKEN_SECRET_KEY = "api-token"
 REDACT = re.compile(
-    r"(?i)(api[-_ ]?token|secret)(\s*[:=]\s*|\s+)[^\s,;]+"
-    r"|(?i:(authorization\s*[:=]?\s*bearer|bearer))\s+[^\s,;]+"
+    r"(?i)\b(authorization\s*[:=]?\s*bearer|bearer|api[-_ ]?(?:token|key)|credential|pass"
+    r"word|secret)"
+    r"(\s*[:=]?\s+|\s*[:=]\s*)[^\s,;]+"
 )
 
 
@@ -31,11 +32,20 @@ def run(command: list[str], *, stdin: bytes | None = None) -> subprocess.Complet
     return subprocess.run(command, input=stdin, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 
+def kubectl_command(args: list[str]) -> list[str]:
+    return ["kubectl", "--context", STAGING_CONTEXT, *args]
+
+
 def kubectl_json(args: list[str]) -> dict[str, Any]:
-    result = run(["kubectl", *args, "-o", "json"])
+    result = run(kubectl_command([*args, "-o", "json"]))
     if result.returncode:
-        raise OperationError(result.stderr.decode(errors="replace").strip())
-    return json.loads(result.stdout)
+        raise OperationError(
+            "kubectl failed: " + safe_message(result.stderr.decode(errors="replace"))
+        )
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        raise OperationError("kubectl returned invalid JSON") from error
 
 
 def staging_guard() -> None:
@@ -43,8 +53,10 @@ def staging_guard() -> None:
         raise OperationError("refusing operation: export SUGARKUBE_ENV=staging")
     result = run(["kubectl", "config", "current-context"])
     context = result.stdout.decode(errors="replace").strip()
-    if result.returncode or "staging" not in context.lower():
-        raise OperationError(f"refusing non-staging kubectl context: {context or '(unavailable)'}")
+    if result.returncode or context != STAGING_CONTEXT:
+        raise OperationError(
+            f"refusing kubectl context: expected {STAGING_CONTEXT!r}, got {context or '(unavailable)'!r}"
+        )
 
 
 def condition(resource: dict[str, Any], kind: str = "Ready") -> dict[str, Any]:
@@ -59,8 +71,7 @@ def condition(resource: dict[str, Any], kind: str = "Ready") -> dict[str, Any]:
 
 
 def safe_message(value: Any) -> str:
-    text = str(value or "")
-    return REDACT.sub(lambda match: f"{match.group(1) or match.group(3)}<redacted>", text)
+    return REDACT.sub(lambda match: f"{match.group(1)} <redacted>", str(value or ""))
 
 
 def owner_name(resource: dict[str, Any], kinds: set[str]) -> str | None:
@@ -68,6 +79,17 @@ def owner_name(resource: dict[str, Any], kinds: set[str]) -> str | None:
         if owner.get("kind") in kinds:
             return owner.get("name")
     return None
+
+
+def resource_state(resource: dict[str, Any]) -> dict[str, Any]:
+    status = resource.get("status", {})
+    ready = condition(resource)
+    return {
+        "name": resource.get("metadata", {}).get("name"),
+        "state": status.get("state") or ready.get("status") or "Unknown",
+        "reason": safe_message(ready.get("reason") or status.get("reason")),
+        "message": safe_message(ready.get("message") or status.get("message")),
+    }
 
 
 def inventory(namespace: str, certificate_name: str) -> dict[str, Any]:
@@ -79,50 +101,45 @@ def inventory(namespace: str, certificate_name: str) -> dict[str, Any]:
     issuer_kind = issuer_ref.get("kind", "Issuer")
     issuer_args = ["get", "clusterissuer" if issuer_kind == "ClusterIssuer" else "issuer"]
     if issuer_kind != "ClusterIssuer":
-        issuer_args[0:0] = ["-n", namespace]
+        issuer_args[:0] = ["-n", namespace]
     issuer = kubectl_json([*issuer_args, issuer_ref["name"]])
     token_refs = []
     for solver in issuer.get("spec", {}).get("acme", {}).get("solvers", []):
-        token_ref = solver.get("dns01", {}).get("cloudflare", {}).get("apiTokenSecretRef")
-        if token_ref:
-            token_refs.append({"name": token_ref.get("name"), "key": token_ref.get("key")})
+        ref = solver.get("dns01", {}).get("cloudflare", {}).get("apiTokenSecretRef")
+        if ref:
+            token_refs.append({"name": ref.get("name"), "key": ref.get("key")})
     requests = kubectl_json(["-n", namespace, "get", "certificaterequests"]).get("items", [])
-    requests = [r for r in requests if owner_name(r, {"Certificate"}) == certificate_name]
-    request_names = {r.get("metadata", {}).get("name") for r in requests}
+    requests = [item for item in requests if owner_name(item, {"Certificate"}) == certificate_name]
+    request_names = {item.get("metadata", {}).get("name") for item in requests}
     orders = kubectl_json(["-n", namespace, "get", "orders"]).get("items", [])
-    orders = [o for o in orders if owner_name(o, {"CertificateRequest"}) in request_names]
-    order_names = {o.get("metadata", {}).get("name") for o in orders}
+    orders = [item for item in orders if owner_name(item, {"CertificateRequest"}) in request_names]
+    order_names = {item.get("metadata", {}).get("name") for item in orders}
     challenges = kubectl_json(["-n", namespace, "get", "challenges"]).get("items", [])
-    challenges = [c for c in challenges if owner_name(c, {"Order"}) in order_names]
+    challenges = [item for item in challenges if owner_name(item, {"Order"}) in order_names]
+
     secret_name = spec.get("secretName")
     secret_present = False
     if secret_name:
-        secret_result = run(
-            ["kubectl", "-n", namespace, "get", "secret", secret_name, "-o", "name"]
-        )
-        secret_present = secret_result.returncode == 0
-    events = kubectl_json(
-        [
-            "-n",
-            namespace,
-            "get",
-            "events",
-            "--field-selector",
-            f"involvedObject.name={certificate_name}",
-        ]
-    ).get("items", [])
+        result = run(kubectl_command(["-n", namespace, "get", "secret", secret_name, "-o", "name"]))
+        if result.returncode not in {0, 1}:
+            raise OperationError("kubectl failed while checking serving Secret")
+        secret_present = result.returncode == 0
+
+    related = {
+        ("Certificate", certificate_name),
+        *(("CertificateRequest", item.get("metadata", {}).get("name")) for item in requests),
+        *(("Order", item.get("metadata", {}).get("name")) for item in orders),
+        *(("Challenge", item.get("metadata", {}).get("name")) for item in challenges),
+    }
+    events = kubectl_json(["-n", namespace, "get", "events"]).get("items", [])
+    events = [
+        item
+        for item in events
+        if (item.get("involvedObject", {}).get("kind"), item.get("involvedObject", {}).get("name"))
+        in related
+    ]
     ready = condition(certificate)
-
-    def state(resource: dict[str, Any]) -> dict[str, Any]:
-        status = resource.get("status", {})
-        ready_condition = condition(resource)
-        return {
-            "name": resource.get("metadata", {}).get("name"),
-            "state": status.get("state") or ready_condition.get("status") or "Unknown",
-            "reason": safe_message(ready_condition.get("reason") or status.get("reason")),
-            "message": safe_message(ready_condition.get("message") or status.get("message")),
-        }
-
+    expected_ref = {"name": TOKEN_SECRET_NAME, "key": TOKEN_SECRET_KEY}
     return {
         "certificate": {
             "namespace": namespace,
@@ -142,33 +159,58 @@ def inventory(namespace: str, certificate_name: str) -> dict[str, Any]:
             "ready": condition(issuer).get("status", "Unknown"),
             "reason": safe_message(condition(issuer).get("reason")),
             "cloudflareTokenSecretRefs": token_refs,
-            "expectedTokenSecretRefConfigured": {
-                "name": "cloudflare-api-token",
-                "key": "api-token",
-            }
-            in token_refs,
+            "expectedTokenSecretRefConfigured": expected_ref in token_refs,
         },
-        "certificateRequests": [state(item) for item in requests],
-        "orders": [state(item) for item in orders],
+        "certificateRequests": [resource_state(item) for item in requests],
+        "orders": [resource_state(item) for item in orders],
         "challenges": [
             {
-                **state(item),
+                **resource_state(item),
                 "dnsName": item.get("spec", {}).get("dnsName"),
-                "active": not bool(
-                    item.get("status", {}).get("state") in {"valid", "expired", "invalid"}
-                ),
+                "active": item.get("status", {}).get("state")
+                not in {"valid", "expired", "invalid"},
             }
             for item in challenges
         ],
         "events": [
             {
+                "object": item.get("involvedObject", {}).get("kind"),
+                "name": item.get("involvedObject", {}).get("name"),
                 "type": item.get("type"),
                 "reason": safe_message(item.get("reason")),
                 "message": safe_message(item.get("message")),
             }
-            for item in events[-10:]
+            for item in events[-40:]
         ],
     }
+
+
+def verify_authorization(namespace: str, certificate_name: str) -> dict[str, Any]:
+    staging_guard()
+    report = inventory(namespace, certificate_name)
+    if report["issuer"]["ready"] != "True":
+        raise OperationError("referenced issuer is not Ready=True")
+    if not report["issuer"]["expectedTokenSecretRefConfigured"]:
+        raise OperationError(
+            f"Cloudflare solver must reference {TOKEN_SECRET_NAMESPACE}/{TOKEN_SECRET_NAME} key {TOKEN_SECRET_KEY}"
+        )
+    exists = run(
+        kubectl_command(
+            ["-n", TOKEN_SECRET_NAMESPACE, "get", "secret", TOKEN_SECRET_NAME, "-o", "name"]
+        )
+    )
+    if exists.returncode:
+        raise OperationError(
+            f"required Secret {TOKEN_SECRET_NAMESPACE}/{TOKEN_SECRET_NAME} is missing or inaccessible"
+        )
+    for challenge in report["challenges"]:
+        detail = f"{challenge['reason']} {challenge['message']}"
+        if challenge["active"] and "found no zones" in detail.lower():
+            raise OperationError("active Challenge reports Found no Zones")
+    print(
+        "authorization structure verified; a successful DNS-01 Challenge is still required to prove dashboard scope"
+    )
+    return report
 
 
 def install_token() -> None:
@@ -182,25 +224,26 @@ def install_token() -> None:
     if not credential or b"\n" in credential or b"\r" in credential:
         raise OperationError("token input is empty or malformed")
     create = subprocess.Popen(
-        [
-            "kubectl",
-            "-n",
-            "cert-manager",
-            "create",
-            "secret",
-            "generic",
-            "cloudflare-api-token",
-            "--from-file=api-token=/dev/stdin",
-            "--dry-run=client",
-            "-o",
-            "yaml",
-        ],
+        kubectl_command(
+            [
+                "-n",
+                TOKEN_SECRET_NAMESPACE,
+                "create",
+                "secret",
+                "generic",
+                TOKEN_SECRET_NAME,
+                f"--from-file={TOKEN_SECRET_KEY}=/dev/stdin",
+                "--dry-run=client",
+                "-o",
+                "yaml",
+            ]
+        ),
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
     apply = subprocess.Popen(
-        ["kubectl", "apply", "-f", "-"],
+        kubectl_command(["apply", "-f", "-"]),
         stdin=create.stdout,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -209,7 +252,7 @@ def install_token() -> None:
     create.stdout.close()
     create.stdin.write(credential)
     create.stdin.close()
-    _apply_stdout, apply_stderr = apply.communicate()
+    _, apply_stderr = apply.communicate()
     create_stderr = create.stderr.read() if create.stderr else b""
     create_code = create.wait()
     del credential
@@ -218,19 +261,20 @@ def install_token() -> None:
             "Secret installation failed (credential output suppressed): "
             + safe_message((create_stderr + apply_stderr).decode(errors="replace"))
         )
-    print("cloudflare-api-token installed; Secret value was not displayed")
+    print(f"{TOKEN_SECRET_NAME} installed; Secret value was not displayed")
 
 
 def recover(namespace: str, certificate_name: str, host: str, timeout: int) -> None:
-    staging_guard()
-    before = inventory(namespace, certificate_name)
+    report = verify_authorization(namespace, certificate_name)
     normalized_host = host.rstrip(".").lower()
     dns_names = {
-        str(name).rstrip(".").lower() for name in before["certificate"].get("dnsNames", [])
+        str(name).rstrip(".").lower() for name in report["certificate"].get("dnsNames", [])
     }
     if normalized_host not in dns_names:
         raise OperationError(f"verification host {host!r} is not listed in Certificate DNS names")
-    result = run(["cmctl", "renew", "-n", namespace, certificate_name])
+    result = run(
+        ["cmctl", "--context", STAGING_CONTEXT, "renew", "-n", namespace, certificate_name]
+    )
     if result.returncode:
         raise OperationError(
             "cmctl renew failed: " + safe_message(result.stderr.decode(errors="replace"))
@@ -238,8 +282,7 @@ def recover(namespace: str, certificate_name: str, host: str, timeout: int) -> N
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         after = inventory(namespace, certificate_name)
-        old = before["certificate"]
-        new = after["certificate"]
+        old, new = report["certificate"], after["certificate"]
         changed = new["revision"] != old["revision"] or new["notAfter"] != old["notAfter"]
         if new["ready"] == "True" and new["secret"]["present"] and changed:
             break
@@ -268,12 +311,13 @@ def recover(namespace: str, certificate_name: str, host: str, timeout: int) -> N
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    subparsers = parser.add_subparsers(dest="command", required=True)
-    status = subparsers.add_parser("status")
-    status.add_argument("--namespace", required=True)
-    status.add_argument("--certificate", required=True)
-    subparsers.add_parser("install-token")
-    recovery = subparsers.add_parser("recover")
+    commands = parser.add_subparsers(dest="command", required=True)
+    for name in ("status", "verify-authorization"):
+        command = commands.add_parser(name)
+        command.add_argument("--namespace", required=True)
+        command.add_argument("--certificate", required=True)
+    commands.add_parser("install-token")
+    recovery = commands.add_parser("recover")
     recovery.add_argument("--namespace", required=True)
     recovery.add_argument("--certificate", required=True)
     recovery.add_argument("--host", required=True)
@@ -283,11 +327,13 @@ def main() -> int:
         if args.command == "status":
             staging_guard()
             print(json.dumps(inventory(args.namespace, args.certificate), indent=2, sort_keys=True))
+        elif args.command == "verify-authorization":
+            verify_authorization(args.namespace, args.certificate)
         elif args.command == "install-token":
             install_token()
         else:
             recover(args.namespace, args.certificate, args.host, args.timeout)
-    except (OperationError, json.JSONDecodeError) as error:
+    except OperationError as error:
         print(f"ERROR: {safe_message(error)}", file=sys.stderr)
         return 1
     return 0

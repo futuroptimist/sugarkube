@@ -6,7 +6,6 @@ such as API keys or tokens. If `ripsecrets` is available it will be used for a
 more thorough scan; otherwise a lightweight regex-based fallback is used. Any
 findings are printed to stderr so they don't pollute stdout.
 """
-
 from __future__ import annotations
 
 import os
@@ -37,7 +36,8 @@ HEALTHCHECKS_URL = re.compile(
     re.IGNORECASE,
 )
 HEALTHCHECKS_UUID = re.compile(
-    r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-" r"[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+    r"[89ab][0-9a-f]{3}-[0-9a-f]{12}",
     re.IGNORECASE,
 )
 
@@ -47,11 +47,6 @@ SAFE_PLACEHOLDERS = (
     re.compile(r"^\+\s*passwordKey:\s*admin-password\s*$"),
     re.compile(r"^\+\s*-\s*Password key:\s*`admin-password`\.\s*$"),
 )
-
-# Remove only this fixed kubectl metadata fragment before applying the normal
-# patterns.  Unlike exempting the entire line, this still detects a credential
-# accidentally added beside the stdin source.
-SAFE_FRAGMENTS = (re.compile(r"--from-file=api-token=/dev/stdin"),)
 
 
 def run_ripsecrets(diff_text: str) -> bool | None:
@@ -100,11 +95,8 @@ def regex_scan(lines: Iterable[str]) -> bool:
         if file_path and file_path.endswith(SCAN_SCRIPT_PATH):
             continue
         if not any(pattern.fullmatch(line) for pattern in SAFE_PLACEHOLDERS):
-            candidate = line
-            for fragment in SAFE_FRAGMENTS:
-                candidate = fragment.sub("", candidate)
             for pattern in PATTERNS:
-                if pattern.search(candidate):
+                if pattern.search(line):
                     print(
                         f"Possible secret detected in {file_path or 'unknown path'} "
                         "(value redacted).",

@@ -801,6 +801,10 @@ cert-manager-cloudflare-token-secret env='':
 cert-manager-certificate-status namespace certificate env='staging':
     SUGARKUBE_ENV="{{ env }}" python3 "{{ justfile_directory() }}/scripts/staging_cert_manager.py" status --namespace "{{ namespace }}" --certificate "{{ certificate }}"
 
+# Fail-closed structural authorization checks before attempting a staging renewal.
+cert-manager-certificate-verify-authorization namespace certificate env='staging':
+    SUGARKUBE_ENV="{{ env }}" python3 "{{ justfile_directory() }}/scripts/staging_cert_manager.py" verify-authorization --namespace "{{ namespace }}" --certificate "{{ certificate }}"
+
 # Renew and verify exactly one staging certificate with a bounded wait and HTTPS checks.
 cert-manager-certificate-recover namespace certificate host env='staging' timeout='600':
     SUGARKUBE_ENV="{{ env }}" python3 "{{ justfile_directory() }}/scripts/staging_cert_manager.py" recover --namespace "{{ namespace }}" --certificate "{{ certificate }}" --host "{{ host }}" --timeout "{{ timeout }}"

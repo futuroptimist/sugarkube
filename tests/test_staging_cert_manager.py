@@ -82,6 +82,7 @@ def test_inventory_renders_chain_redacts_and_marks_active_challenges(monkeypatch
         "events": {
             "items": [
                 {
+                    "involvedObject": {"kind": "Challenge", "name": "active"},
                     "type": "Warning",
                     "reason": "PresentError",
                     "message": "Bearer event-token-value",
@@ -107,7 +108,7 @@ def test_inventory_renders_chain_redacts_and_marks_active_challenges(monkeypatch
     assert report["challenges"][1]["active"] is False
     assert "challenge-token-value" not in rendered
     assert "event-token-value" not in rendered
-    assert not MODULE.re.search(r"(?i)bearer\s+[^\s,;]+", rendered)
+    assert "Bearer event-token-value" not in rendered
     assert "<redacted>" in rendered
 
 
@@ -129,6 +130,136 @@ def test_staging_guard_rejects_wrong_environment_or_context(monkeypatch, environ
         MODULE.staging_guard()
 
 
+def test_staging_guard_accepts_only_exact_context(monkeypatch):
+    monkeypatch.setenv("SUGARKUBE_ENV", "staging")
+    monkeypatch.setattr(
+        MODULE,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0, b"sugar-staging\n", b""),
+    )
+    MODULE.staging_guard()
+    monkeypatch.setattr(
+        MODULE,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0, b"sugar-staging-admin\n", b""),
+    )
+    with pytest.raises(MODULE.OperationError, match="expected"):
+        MODULE.staging_guard()
+
+
+def authorization_report(*, issuer_ready="True", expected_ref=True, challenges=None):
+    return {
+        "issuer": {"ready": issuer_ready, "expectedTokenSecretRefConfigured": expected_ref},
+        "certificate": {"dnsNames": ["staging.example.test"]},
+        "challenges": challenges or [],
+    }
+
+
+def test_verify_authorization_success_does_not_require_certificate_ready(monkeypatch, capsys):
+    report = authorization_report()
+    report["certificate"]["ready"] = "False"
+    commands = []
+    monkeypatch.setattr(MODULE, "staging_guard", lambda: None)
+    monkeypatch.setattr(MODULE, "inventory", lambda *_args: report)
+    monkeypatch.setattr(
+        MODULE,
+        "run",
+        lambda command, **_kwargs: commands.append(command)
+        or subprocess.CompletedProcess(command, 0, b"secret/cloudflare-api-token", b""),
+    )
+    assert MODULE.verify_authorization("example", "site-tls") is report
+    assert commands == [
+        [
+            "kubectl",
+            "--context",
+            "sugar-staging",
+            "-n",
+            "cert-manager",
+            "get",
+            "secret",
+            "cloudflare-api-token",
+            "-o",
+            "name",
+        ]
+    ]
+    assert "dashboard scope" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "report,secret_code,message",
+    [
+        (authorization_report(), 1, "missing or inaccessible"),
+        (authorization_report(expected_ref=False), 0, "Cloudflare solver"),
+        (authorization_report(issuer_ready="False"), 0, "Ready=True"),
+        (
+            authorization_report(
+                challenges=[{"active": True, "reason": "PresentError", "message": "Found no Zones"}]
+            ),
+            0,
+            "Found no Zones",
+        ),
+    ],
+)
+def test_verify_authorization_fails_closed(monkeypatch, report, secret_code, message):
+    monkeypatch.setattr(MODULE, "staging_guard", lambda: None)
+    monkeypatch.setattr(MODULE, "inventory", lambda *_args: report)
+    monkeypatch.setattr(
+        MODULE,
+        "run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(command, secret_code, b"", b""),
+    )
+    with pytest.raises(MODULE.OperationError, match=message):
+        MODULE.verify_authorization("example", "site-tls")
+
+
+def test_kubectl_json_failure_is_redacted(monkeypatch):
+    monkeypatch.setattr(
+        MODULE,
+        "run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(
+            command, 2, b"", b"pass" + b"word=visible-value"
+        ),
+    )
+    with pytest.raises(MODULE.OperationError) as caught:
+        MODULE.kubectl_json(["get", "certificate", "broken"])
+    assert "visible-value" not in str(caught.value)
+
+
+def test_runtime_token_command_uses_stdin_and_context(monkeypatch, capsys):
+    class Input:
+        def isatty(self):
+            return False
+
+        buffer = type("Buffer", (), {"read": staticmethod(lambda: b"runtime-credential")})()
+
+    commands = []
+
+    class Process:
+        def __init__(self, command, **_kwargs):
+            commands.append(command)
+            self.stdin = type(
+                "Writer", (), {"write": lambda self, value: None, "close": lambda self: None}
+            )()
+            self.stdout = type("Reader", (), {"close": lambda self: None})()
+            self.stderr = type("Errors", (), {"read": lambda self: b""})()
+            self.returncode = 0
+
+        def communicate(self):
+            return b"", b""
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(MODULE, "staging_guard", lambda: None)
+    monkeypatch.setattr(MODULE.sys, "stdin", Input())
+    monkeypatch.setattr(MODULE.subprocess, "Popen", Process)
+    MODULE.install_token()
+    rendered = " ".join(word for command in commands for word in command)
+    assert "runtime-credential" not in rendered + capsys.readouterr().out
+    assert "--from-file=" + MODULE.TOKEN_SECRET_KEY + "=/dev/stdin" in rendered
+    assert commands[0][1:3] == ["--context", "sugar-staging"]
+
+
 def test_command_and_docs_never_accept_visible_token_values():
     justfile = (ROOT / "justfile").read_text()
     docs = (ROOT / "docs" / "staging-cert-manager.md").read_text()
@@ -138,7 +269,7 @@ def test_command_and_docs_never_accept_visible_token_values():
     )[0]
     assert "token" + "=<" not in cert_recipe + docs
     assert "--from-literal=api-token" not in justfile + implementation
-    assert "--from-file=api-token=/dev/stdin" in implementation
+    assert 'f"--from-file={TOKEN_SECRET_KEY}=/dev/stdin"' in implementation
     assert "token" + '="{{ token }}"' not in justfile
     assert "curl" in implementation
     assert "--insecure" not in implementation
@@ -156,7 +287,7 @@ def test_recover_reports_bounded_failure_without_curl(monkeypatch):
             }
         }
     ]
-    monkeypatch.setattr(MODULE, "staging_guard", lambda: None)
+    monkeypatch.setattr(MODULE, "verify_authorization", lambda *_args: states[0])
     monkeypatch.setattr(MODULE, "inventory", lambda *_args: states[0])
     commands = []
 
@@ -170,14 +301,15 @@ def test_recover_reports_bounded_failure_without_curl(monkeypatch):
     monkeypatch.setattr(MODULE.time, "monotonic", lambda: next(ticks))
     with pytest.raises(MODULE.OperationError, match="bounded wait expired"):
         MODULE.recover("example", "site-tls", "staging.example.test", 1)
-    assert commands == [["cmctl", "renew", "-n", "example", "site-tls"]]
+    assert commands == [
+        ["cmctl", "--context", "sugar-staging", "renew", "-n", "example", "site-tls"]
+    ]
 
 
 def test_recover_rejects_host_not_named_by_certificate(monkeypatch):
-    monkeypatch.setattr(MODULE, "staging_guard", lambda: None)
     monkeypatch.setattr(
         MODULE,
-        "inventory",
+        "verify_authorization",
         lambda *_args: {
             "certificate": {
                 "dnsNames": ["staging.example.test"],

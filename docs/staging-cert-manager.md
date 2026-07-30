@@ -46,8 +46,9 @@ token resource scope. A malformed token or wrong Secret/key can resemble missing
 
 ## Install or rotate the token safely
 
-Select the staging kube context first and verify it yourself. The recipe additionally refuses to
-run unless `env=staging` is explicit and the current context name contains `staging`.
+Select the staging kube context first and verify it yourself. Every cluster-facing command refuses
+to run unless `env=staging` is explicit and the current context is exactly `sugar-staging`. Every
+subsequent `kubectl` and `cmctl` invocation also pins that context explicitly.
 
 For hidden interactive input (preferred):
 
@@ -70,8 +71,18 @@ puts the credential in argv, shell history, logs, tests, or Git. Confirm only me
 kubectl -n cert-manager get secret cloudflare-api-token -o name
 ```
 
-Authorization is verified by observing a single controlled DNS-01 recovery complete without
-`Found no Zones`; do not call Cloudflare APIs in a way that risks logging request headers.
+Before recovery, run the guarded structural verifier:
+
+```bash
+just cert-manager-certificate-verify-authorization namespace=danielsmith certificate=danielsmith-staging-tls env=staging
+```
+
+It requires the referenced issuer to be `Ready=True`, its Cloudflare solver to reference
+`cert-manager/cloudflare-api-token` key `api-token`, that Secret to exist, and no related active
+Challenge to report `Found no Zones`. It checks only Secret existence and never retrieves, decodes,
+or prints its value. These structural checks cannot prove the token's Cloudflare dashboard scope;
+only a successfully completed DNS-01 Challenge can do that. Do not call Cloudflare APIs in a way
+that risks logging request headers.
 
 ## One certificate at a time
 
@@ -81,7 +92,8 @@ Inspect first, make one attempt, and stop on failure. Prefer the ACME staging is
 these existing Ingress-managed staging Certificates currently reference the production issuer, so
 do not silently change issuer or Helm/Flux ownership here.
 
-1. Capture the redacted status above.
+1. Capture the redacted status above, then run `cert-manager-certificate-verify-authorization`.
+   The Certificate itself need not already be Ready: recovery exists to repair that condition.
 2. Run **one** recovery with the matching namespace, Certificate, and DNS name. The command uses
    `cmctl renew`, bounds its wait (default ten minutes), requires `Ready=True`, Secret creation,
    and a revision or expiry change, then uses normal TLS verification for `/`, `/healthz`, and

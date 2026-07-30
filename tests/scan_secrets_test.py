@@ -65,23 +65,6 @@ def test_regex_scan_ignores_removed_lines(scan_secrets):
     assert not scan_secrets.regex_scan(diff)
 
 
-def test_regex_scan_allows_stdin_token_source(scan_secrets):
-    diff = [
-        "+++ b/justfile",
-        "+    kubectl create secret generic cloudflare-api-token "
-        "--from-file=api-token=/dev/stdin",
-    ]
-    assert not scan_secrets.regex_scan(diff)
-
-
-def test_regex_scan_checks_content_beside_stdin_token_source(scan_secrets):
-    diff = [
-        "+++ b/justfile",
-        "+    pass" "word=actual-secret --from-file=api-token=/dev/stdin",
-    ]
-    assert scan_secrets.regex_scan(diff)
-
-
 def test_main_exit_codes(monkeypatch, scan_secrets):
     monkeypatch.setattr(scan_secrets, "run_ripsecrets", lambda diff_text: None)
     monkeypatch.setattr(
@@ -182,7 +165,9 @@ def test_run_ripsecrets_logs_to_stderr(monkeypatch, scan_secrets, capsys):
     assert "leak" in capsys.readouterr().err
 
 
-def test_run_ripsecrets_redacts_healthchecks_diagnostics(monkeypatch, scan_secrets, capsys):
+def test_run_ripsecrets_redacts_healthchecks_diagnostics(
+    monkeypatch, scan_secrets, capsys
+):
     monkeypatch.setattr(scan_secrets.shutil, "which", lambda _: "/bin/ripsecrets")
     uuid = "12345678" + "-1234-4123-8123-123456789abc"
     url = "https://" + "hc-ping.com/" + uuid
