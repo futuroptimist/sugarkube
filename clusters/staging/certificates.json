@@ -1,0 +1,9 @@
+{
+  "context": "sugar-staging",
+  "issuerSecret": {"namespace": "cert-manager", "name": "cloudflare-api-token", "key": "api-token"},
+  "certificates": [
+    {"namespace": "danielsmith", "name": "danielsmith-staging-tls", "dnsNames": ["staging.danielsmith.io"], "zone": "danielsmith.io"},
+    {"namespace": "jobbot3000", "name": "jobbot3000-staging-tls", "dnsNames": ["staging.jobbot3000.tech"], "zone": "jobbot3000.tech"},
+    {"namespace": "tokenplace", "name": "tokenplace-staging-tls", "dnsNames": ["staging.token.place"], "zone": "token.place"}
+  ]
+}

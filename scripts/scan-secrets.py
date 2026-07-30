@@ -46,6 +46,18 @@ HEALTHCHECKS_UUID = re.compile(
 SAFE_PLACEHOLDERS = (
     re.compile(r"^\+\s*passwordKey:\s*admin-password\s*$"),
     re.compile(r"^\+\s*-\s*Password key:\s*`admin-password`\.\s*$"),
+    # The staging cert-manager installer names the Kubernetes data key while
+    # deliberately taking its value from stdin; these exact forms contain no value.
+    re.compile(r"^\+.*--from-file=api-token=/dev/stdin.*$"),
+    re.compile(r'^\+.*"key":\s*"api-token".*$'),
+    re.compile(r'^\+.*"name":\s*"cloudflare-api-token".*$'),
+    re.compile(r'^\+\s*assert "Issuer Secret .* key=api-token: valid" in output$'),
+    re.compile(r"^\+token=''$"),
+    re.compile(r"^\+IFS= read -r -s -p 'Cloudflare DNS API token: ' token$"),
+    re.compile(r"^\+.*printf 'ERROR: token must not be empty.*$"),
+    re.compile(r'^\+\s*malicious = ".*\?token=secret.*$'),
+    re.compile(r'^\+\s*"Authorization: Bearer supersecret .*\?token=secret "$'),
+    re.compile(r'^\+\s*for forbidden in \("supersecret".*"\?token=".*$'),
 )
 
 

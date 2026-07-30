@@ -790,30 +790,25 @@ cert-manager-install version='v1.14.4':
 
     kubectl -n cert-manager wait --for=condition=Available deployment/cert-manager deployment/cert-manager-webhook deployment/cert-manager-cainjector --timeout=300s
 
-# Create/update the Cloudflare DNS API token Secret used by cert-manager DNS-01.
-cert-manager-cloudflare-token-secret token='':
-    #!/usr/bin/env bash
-    set -Eeuo pipefail
+# Interactively create/update the staging Cloudflare token without argv or files.
+cert-manager-cloudflare-token-secret env='':
+    @scripts/install_staging_cloudflare_token.sh '{{ env }}'
 
-    export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
-    token="{{ token }}"
-    : "${token:=${CF_DNS_API_TOKEN:-}}"
-    token="$(printf '%s' "${token}" | tr -d '\r\n' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-    case "${token}" in
-        token=*|CF_DNS_API_TOKEN=*|CLOUDFLARE_DNS_API_TOKEN=*)
-            token="${token#*=}"
-            token="$(printf '%s' "${token}" | tr -d '\r\n' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-            ;;
-    esac
-    if [ -z "${token}" ]; then
-        echo "Set CF_DNS_API_TOKEN or pass token=<cloudflare-dns-api-token>." >&2
-        exit 1
-    fi
+# Redacted, read-only status for every inventoried staging certificate.
+staging-cert-status env='':
+    @scripts/staging_certificate_ops.sh status '{{ env }}'
 
-    kubectl get namespace cert-manager >/dev/null 2>&1 || kubectl create namespace cert-manager
-    kubectl -n cert-manager create secret generic cloudflare-api-token \
-        --from-literal=api-token="${token}" \
-        --dry-run=client -o yaml | kubectl apply -f -
+# Observe existing issuance for one certificate; never initiates issuance.
+staging-cert-wait env='' certificate='' timeout='300':
+    @scripts/staging_certificate_ops.sh wait '{{ env }}' '{{ certificate }}' '{{ timeout }}'
+
+# Request renewal of exactly one certificate, after a bounded observation period.
+staging-cert-renew env='' certificate='' timeout='300':
+    @scripts/staging_certificate_ops.sh renew '{{ env }}' '{{ certificate }}' '{{ timeout }}'
+
+# Inspect only tls.crt for one Ready certificate (never tls.key).
+staging-cert-verify env='' certificate='':
+    @scripts/staging_certificate_ops.sh verify '{{ env }}' '{{ certificate }}'
 
 # Apply non-Flux ClusterIssuers with an explicit email (no kustomize vars).
 cert-manager-issuers-apply email:
