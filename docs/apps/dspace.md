@@ -139,11 +139,14 @@ verification. The upstream file is checked in with mode `100644`, so make it
 executable after installing its dependencies:
 
 ```bash
-cd "$HOME/dspace"
-pnpm install
-pnpm exec playwright install chromium
-chmod +x "$HOME/dspace/scripts/run-remote-chat-smoke.mjs"
+(
+  cd "$HOME/dspace"
+  pnpm install
+  pnpm exec playwright install chromium
+  chmod +x scripts/run-remote-chat-smoke.mjs
+)
 export DSPACE_SMOKE_RUNNER="$HOME/dspace/scripts/run-remote-chat-smoke.mjs"
+test -x "$DSPACE_SMOKE_RUNNER"
 ```
 
 The smoke harness mocks provider transport. Real token.place or OpenAI
@@ -528,11 +531,14 @@ and make the upstream mode-`100644` script executable. Always provide the
 executable itself—not a shell command or fragment:
 
 ```bash
-cd "$HOME/dspace"
-pnpm install
-pnpm exec playwright install chromium
-chmod +x "$HOME/dspace/scripts/run-remote-chat-smoke.mjs"
+(
+  cd "$HOME/dspace"
+  pnpm install
+  pnpm exec playwright install chromium
+  chmod +x scripts/run-remote-chat-smoke.mjs
+)
 export DSPACE_SMOKE_RUNNER="$HOME/dspace/scripts/run-remote-chat-smoke.mjs"
+test -x "$DSPACE_SMOKE_RUNNER"
 
 just dspace-release-verify \
   env=staging \
