@@ -612,8 +612,11 @@ def test_recover_missing_cmctl_fails_before_authorization_or_subprocess(monkeypa
         MODULE, "run", lambda *_args, **_kwargs: pytest.fail("no subprocess may be started")
     )
 
-    with pytest.raises(MODULE.OperationError, match="cmctl is required.*cmctl version --client"):
+    with pytest.raises(MODULE.OperationError) as exc_info:
         MODULE.recover("example", "site-tls", "staging.example.test", 60)
+    assert "cmctl is required" in str(exc_info.value)
+    assert "command -v cmctl" in str(exc_info.value)
+    assert "cmctl version --client" in str(exc_info.value)
 
 
 def test_main_reports_missing_cmctl_without_traceback(monkeypatch, capsys):
@@ -636,4 +639,6 @@ def test_main_reports_missing_cmctl_without_traceback(monkeypatch, capsys):
     assert MODULE.main() == 1
     error = capsys.readouterr().err
     assert "cmctl is required" in error
+    assert "command -v cmctl" in error
+    assert "cmctl version --client" in error
     assert "Traceback" not in error
