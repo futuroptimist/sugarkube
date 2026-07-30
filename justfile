@@ -1692,6 +1692,10 @@ dspace-release-verify env manifest smoke_runner config='' kubeconfig='' expected
     while [ "${manifest_path#manifest=}" != "${manifest_path}" ]; do manifest_path="${manifest_path#manifest=}"; done
     while [ "${selected_env#env=}" != "${selected_env}" ]; do selected_env="${selected_env#env=}"; done
     while [ "${smoke_path#smoke_runner=}" != "${smoke_path}" ]; do smoke_path="${smoke_path#smoke_runner=}"; done
+    if [ ! -f "${smoke_path}" ] || [ ! -x "${smoke_path}" ]; then
+      echo "ERROR: smoke_runner must be an existing executable file." >&2
+      exit 2
+    fi
     while [ "${config_path#config=}" != "${config_path}" ]; do config_path="${config_path#config=}"; done
     kubeconfig_path={{ quote(kubeconfig) }}
     if [ -z "${kubeconfig_path}" ]; then
@@ -1743,6 +1747,10 @@ app-deploy app env='staging' tag='' config='' manifest='' evidence='' staging_ev
       fi
       if [ -z "${runtime_smoke}" ]; then
         echo "ERROR: smoke_runner=<executable> is required for DSPACE ${SUGARKUBE_ENV}." >&2
+        exit 2
+      fi
+      if [ ! -f "${runtime_smoke}" ] || [ ! -x "${runtime_smoke}" ]; then
+        echo "ERROR: smoke_runner must be an existing executable file for DSPACE ${SUGARKUBE_ENV}." >&2
         exit 2
       fi
       if [ "${SUGARKUBE_ENV}" = prod ]; then

@@ -356,7 +356,14 @@ def parser() -> argparse.ArgumentParser:
         item.add_argument("--environment", required=True, choices=("staging", "prod"))
         item.add_argument("--release", required=True)
         item.add_argument("--namespace", required=True)
-        if name == "verify":
+        if name == "capabilities":
+            # Accepted but deliberately unused so callers can negotiate the
+            # extended verify argv before a deployment or rollback mutation.
+            item.add_argument("--manifest", type=Path)
+            item.add_argument("--smoke-runner")
+            item.add_argument("--config", type=Path)
+            item.add_argument("--kubeconfig")
+        else:
             item.add_argument("--manifest", type=Path, required=True)
             item.add_argument("--smoke-runner")
             item.add_argument("--config", type=Path)

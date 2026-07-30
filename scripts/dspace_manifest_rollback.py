@@ -121,6 +121,41 @@ def verifier_capabilities(
     return value
 
 
+def verifier_accepts_runtime_arguments(
+    executable: Path,
+    environment: str,
+    manifest: Path,
+    smoke_runner: Path | None,
+    kubeconfig: str,
+    config: str,
+    runner: Runner = run,
+) -> bool:
+    """Negotiate the extended verify argv before any cluster mutation."""
+    command = [
+        str(executable),
+        "capabilities",
+        "--environment",
+        environment,
+        "--release",
+        "dspace",
+        "--namespace",
+        "dspace",
+        "--manifest",
+        str(manifest),
+        "--kubeconfig",
+        kubeconfig,
+    ]
+    if smoke_runner:
+        command.extend(("--smoke-runner", str(smoke_runner)))
+    if config:
+        command.extend(("--config", config))
+    try:
+        runner(command)
+    except (OSError, RollbackError):
+        return False
+    return True
+
+
 def validate_verifier_result(
     value: dict[str, Any], target: dict[str, Any], environment: str
 ) -> dict[str, Any]:
@@ -472,9 +507,30 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
     environment = cluster_environment(runner, args.kubeconfig)
     if environment != args.environment:
         raise RollbackError("connected cluster environment does not match selected environment")
+    bundled_verifier = (
+        args.verifier.resolve() == (REPO_ROOT / "scripts/dspace_runtime_verifier.py").resolve()
+    )
+    if bundled_verifier:
+        configured_smoke = getattr(args, "smoke_runner", None) or os.environ.get(
+            "DSPACE_SMOKE_RUNNER", ""
+        )
+        smoke_path = Path(configured_smoke).expanduser() if configured_smoke else None
+        if smoke_path is None or not smoke_path.is_file() or not os.access(smoke_path, os.X_OK):
+            raise RollbackError("smoke runner must be an existing executable file")
     capabilities = verifier_capabilities(
         args.verifier, args.environment, "dspace", "dspace", runner
     )
+    extended_verifier = verifier_accepts_runtime_arguments(
+        args.verifier,
+        args.environment,
+        args.manifest,
+        getattr(args, "smoke_runner", None),
+        args.kubeconfig,
+        args.config,
+        runner,
+    )
+    if bundled_verifier and not extended_verifier:
+        raise RollbackError("repository runtime verifier rejected its required arguments")
     coordinate = release.chart_coordinate(approved)
     helm_values = [part for path in values for part in ("--values", str(path))]
     rendered_target = runner(
@@ -739,15 +795,18 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             target["sourceRevision"],
             "--provider",
             target["expectedDefaultChatProvider"],
-            "--manifest",
-            str(args.manifest),
-            "--smoke-runner",
-            str(getattr(args, "smoke_runner", "")),
-            "--kubeconfig",
-            str(args.kubeconfig),
         ]
-        if args.config:
-            verifier_command.extend(("--config", str(args.config)))
+        # The repository verifier owns these extended arguments.  Preserve the
+        # original verify contract for compatible third-party verifiers rather
+        # than discovering that they reject new flags after Helm has mutated.
+        if extended_verifier:
+            verifier_command.extend(("--manifest", str(args.manifest)))
+            smoke_runner = getattr(args, "smoke_runner", None)
+            if smoke_runner:
+                verifier_command.extend(("--smoke-runner", str(smoke_runner)))
+            verifier_command.extend(("--kubeconfig", str(args.kubeconfig)))
+            if args.config:
+                verifier_command.extend(("--config", str(args.config)))
         failed_stage = "runtime-verification"
         verifier = validate_verifier_result(
             json_command(runner, verifier_command, "runtime verifier"), target, args.environment
@@ -830,7 +889,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--evidence", type=Path, required=True)
     parser.add_argument("--verifier", type=Path, required=True)
-    parser.add_argument("--smoke-runner", type=Path, default=Path(""))
+    parser.add_argument("--smoke-runner", type=Path)
     parser.add_argument("--confirm", default="")
     parser.add_argument("--config", default="")
     parser.add_argument("--kubeconfig", default=str(Path.home() / ".kube" / "config-sugarkube"))

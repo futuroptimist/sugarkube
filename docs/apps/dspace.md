@@ -391,6 +391,7 @@ just dspace-manifest-rollback \
   env=staging \
   manifest=deployment-evidence/dspace/staging/previous-finalized-release.json \
   evidence=deployment-evidence/dspace/staging/rollback-20260727T120000Z.json \
+  smoke_runner=/opt/dspace/bin/chat-smoke \
   verifier=/opt/dspace/bin/sugarkube-runtime-verifier
 ```
 
@@ -404,6 +405,7 @@ just dspace-manifest-rollback \
   env=prod \
   manifest=deployment-evidence/dspace/prod/previous-finalized-release.json \
   evidence=deployment-evidence/dspace/prod/rollback-20260727T120000Z.json \
+  smoke_runner=/opt/dspace/bin/chat-smoke \
   verifier=/opt/dspace/bin/sugarkube-runtime-verifier \
   confirm="dspace:prod:${TARGET_SHA}"
 ```
