@@ -69,6 +69,10 @@ FINAL_FIXED_CHECKS = {
     "podImageCoordinates",
     "podImageDigests",
 }
+RUNTIME_CHECKS = {
+    "runtimeIdentity", "frontendIdentity", "replicaAgreement",
+    "publicDirectAgreement", "defaultProvider", "remoteChatSmoke",
+}
 PLATFORM_CHECK_RE = re.compile(r"^imagePlatformSourceRevision\[(0|[1-9][0-9]*)\]$")
 POD_SETTLE_TIMEOUT_SECONDS = 60.0
 POD_SETTLE_INTERVAL_SECONDS = 2.0
@@ -206,7 +210,7 @@ def validate(value: dict[str, Any], finalized: bool | None = None) -> dict[str, 
             platform_match = PLATFORM_CHECK_RE.fullmatch(check)
             if platform_match:
                 platform_indices.append(int(platform_match.group(1)))
-            elif check not in FINAL_FIXED_CHECKS:
+            elif check not in FINAL_FIXED_CHECKS | RUNTIME_CHECKS:
                 raise ManifestError(f"unknown verification result: {check}")
         missing = sorted(FINAL_FIXED_CHECKS - checks)
         if missing:
@@ -548,6 +552,7 @@ def finalize(
     cluster_environment: str,
     invocation_description: str,
     expected_image_coordinate: str | None = None,
+    runtime_verification: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     validate(value, False)
     selected = {
@@ -668,7 +673,10 @@ def finalize(
         {
             "check": "selectedCoordinates",
             "passed": True,
-            "details": f"environment={environment}; imageTag={image_tag}; chartVersion={chart_version}",
+            "details": (
+                f"environment={environment}; imageTag={image_tag}; "
+                f"chartVersion={chart_version}"
+            ),
         },
         {
             "check": "clusterEnvironment",
@@ -709,6 +717,32 @@ def finalize(
             "details": "every running pod imageID matched approved image digest",
         },
     ]
+    if runtime_verification is not None:
+        expected = {
+            "applicationVersion": value["applicationVersion"],
+            "runtimeSourceRevision": value["sourceRevision"],
+            "frontendSourceRevision": value["sourceRevision"],
+            "defaultProvider": value["expectedDefaultChatProvider"],
+        }
+        if any(runtime_verification.get(key) != wanted for key, wanted in expected.items()):
+            raise ManifestError("runtime verification does not match approved manifest")
+        if {"name": "/chat", "passed": True} not in runtime_verification.get("journeys", []):
+            raise ManifestError("runtime verification did not prove /chat")
+        bounded = (
+            (
+                "runtimeIdentity",
+                f"version={value['applicationVersion']}; revision={value['sourceRevision']}",
+            ),
+            ("frontendIdentity", f"revision={value['sourceRevision']}"),
+            ("replicaAgreement", f"{len(pods)} serving replica(s) agreed"),
+            ("publicDirectAgreement", "public and direct origins agreed"),
+            ("defaultProvider", f"provider={value['expectedDefaultChatProvider']}"),
+            ("remoteChatSmoke", "isolated /chat journey passed"),
+        )
+        results.extend(
+            {"check": check, "passed": True, "details": details}
+            for check, details in bounded
+        )
     result = dict(value)
     result.update(
         recordType="final",
@@ -758,6 +792,7 @@ def main(argv: list[str] | None = None) -> int:
     finish.add_argument(
         "--oras-command", default=os.environ.get("SUGARKUBE_ORAS_COMMAND", "oras")
     )
+    finish.add_argument("--runtime-verification", type=Path)
     available = sub.add_parser("check-output")
     available.add_argument("--output", type=Path, required=True)
     destination = sub.add_parser("evidence-path")
@@ -885,6 +920,9 @@ def main(argv: list[str] | None = None) -> int:
                 namespace=args.namespace,
                 cluster_environment=cluster_environment,
                 invocation_description=invocation_description,
+                runtime_verification=(
+                    _object(args.runtime_verification) if args.runtime_verification else None
+                ),
             )
             sidecar = verify_reservation(
                 args.output,

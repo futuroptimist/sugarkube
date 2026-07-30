@@ -256,6 +256,18 @@ export SUGARKUBE_APP_CONFIG_DIR=apps
 
 ### DSPACE release evidence gate
 
+DSPACE adds a source-integrity gate to the generic ordering. Production requires a
+finalized staging record for the identical version, source SHA, image tag/digest, chart
+version/digest, semantic tag, and default provider. The guard verifies the recorded Helm
+revision and reruns replica, public frontend, runtime identity, and isolated `/chat`
+checks before production render, reservation, or mutation. The verifier then runs again
+after mutation and before evidence finalization.
+
+Final records may include the bounded `runtimeIdentity`, `frontendIdentity`,
+`replicaAgreement`, `publicDirectAgreement`, `defaultProvider`, and `remoteChatSmoke`
+checks. Older genuine finalized records without these additive checks remain valid for
+rollback; candidate approval records are never rewritten.
+
 DSPACE is the first application with a compatible producer manifest. Its
 `staging` and `prod` deploy, redeploy, promotion, and compatibility commands
 therefore require `manifest=<approved-candidate.json>`. Other applications are

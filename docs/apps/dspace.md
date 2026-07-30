@@ -222,6 +222,28 @@ just dspace-oci-deploy env=staging tag="$APP_TAG" manifest=deployment-candidates
 
 ## Verify staging
 
+### Mandatory source-integrity and `/chat` proof
+
+Use a DSPACE checkout whose dependencies are installed with `pnpm install` and whose
+Playwright Chromium browser is installed. The runner must be the executable upstream
+`scripts/run-remote-chat-smoke.mjs` file, not a shell command:
+
+```bash
+DSPACE_SMOKE_RUNNER="$HOME/dspace/scripts/run-remote-chat-smoke.mjs"
+
+just dspace-release-verify \
+  env=staging \
+  manifest=deployment-evidence/dspace/staging/<finalized-record>.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER"
+```
+
+The verifier derives the host and token.place origin/model from the ordered environment
+values chain, checks those values against the live Deployment, and checks every Ready
+replica directly through the read-only Kubernetes pod proxy. For an OpenAI-default
+manifest it omits token.place arguments. The isolated harness mocks provider transport;
+real provider credentials are neither required nor accepted, and child output is not
+recorded.
+
 Generic verification discovers the host from Helm values or Ingress, executes the configured DSPACE paths, prints a per-path body preview, and exits non-zero if any HTTP check fails. It does not validate the `/config.json` body, so staging sign-off also requires the explicit `curl | jq` routing gate below. Use `print_only=1` when you only want the curl commands for docs or troubleshooting.
 
 ```bash
@@ -279,6 +301,27 @@ When a DSPACE release depends on browser calls to token.place API v1, keep the p
 For staging, the browser smoke must show DSPACE calling `https://staging.token.place/api/v1/chat/completions`; for production it must show `https://token.place/api/v1/chat/completions`. Confirm the `OPTIONS` preflight succeeds, the `POST` succeeds or returns a readable API-owned error, no `Authorization` header is sent, no token.place credentials are sent, fetch `credentials` are omitted, and the request does not set `stream: true`.
 
 ## Promote production
+
+A DSPACE production promotion additionally requires the finalized staging evidence for
+the same immutable release. Live staging is reverified before production preflight,
+evidence reservation, or mutation:
+
+```bash
+just app-promote-prod \
+  app=dspace \
+  tag=main-REPLACE_SHORTSHA \
+  manifest=deployment-candidates/dspace/prod.json \
+  staging_evidence=deployment-evidence/dspace/staging/<finalized-record>.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER"
+```
+
+The same verification runs after staging and production mutations and before finalized
+evidence is written. A post-mutation failure leaves the reservation for the existing
+reconciliation procedure; it does not finalize success, retry, downgrade, or roll back.
+Successful records remain under `deployment-evidence/dspace/<environment>/`.
+
+Production can also be checked without mutation by changing `env` and `manifest` in
+`dspace-release-verify` to `prod` and the production finalized record.
 
 This configuration change does not promote or mutate production. Promote only after staging sign-off. Prefer the generic command; it uses the prod values chain, resolves chart `3.0.1` from `docs/apps/dspace.prod.version`, and can read `docs/apps/dspace.prod.tag` (`main-1a31a56`) when `tag=` is omitted.
 
