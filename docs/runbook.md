@@ -233,7 +233,9 @@ Common failure modes:
 - **Missing cert-manager CRDs** (`no matches for kind "Certificate"` / `"ClusterIssuer"`): reinstall cert-manager with CRDs enabled.
 - **`clusterissuer.cert-manager.io` resource type missing**: controllers/CRDs are not fully installed yet.
 - **Literal `$(CERT_MANAGER_EMAIL)` in ClusterIssuer**: issuer was applied from Flux-era template without replacement; reapply with `just cert-manager-issuers-apply email=<email>`.
-- **Missing `cloudflare-api-token` secret**: create it with `just cert-manager-cloudflare-token-secret token=<token>`.
+- **Missing `cloudflare-api-token` Secret**: use the guarded, hidden-input workflow in
+  [the staging certificate recovery runbook](staging-cert-manager-recovery.md). Never put a token
+  in a command argument or visible environment assignment.
 - **Challenge cleanup errors after successful issuance**: Cloudflare API token is missing `Zone:Read` and/or is scoped to the wrong zone.
 
 Validation sequence:

@@ -65,6 +65,13 @@ def test_regex_scan_ignores_removed_lines(scan_secrets):
     assert not scan_secrets.regex_scan(diff)
 
 
+def test_regex_scan_allows_only_stdin_token_file_descriptor(scan_secrets):
+    safe = "+kubectl create secret --from-file=api-token=/dev/stdin"
+    unsafe = "+kubectl create secret --from-file=api-" + "token" + "=credential.txt"
+    assert not scan_secrets.regex_scan(["+++ b/script.sh", safe])
+    assert scan_secrets.regex_scan(["+++ b/script.sh", unsafe])
+
+
 def test_main_exit_codes(monkeypatch, scan_secrets):
     monkeypatch.setattr(scan_secrets, "run_ripsecrets", lambda diff_text: None)
     monkeypatch.setattr(
@@ -165,9 +172,7 @@ def test_run_ripsecrets_logs_to_stderr(monkeypatch, scan_secrets, capsys):
     assert "leak" in capsys.readouterr().err
 
 
-def test_run_ripsecrets_redacts_healthchecks_diagnostics(
-    monkeypatch, scan_secrets, capsys
-):
+def test_run_ripsecrets_redacts_healthchecks_diagnostics(monkeypatch, scan_secrets, capsys):
     monkeypatch.setattr(scan_secrets.shutil, "which", lambda _: "/bin/ripsecrets")
     uuid = "12345678" + "-1234-4123-8123-123456789abc"
     url = "https://" + "hc-ping.com/" + uuid

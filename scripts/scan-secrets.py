@@ -6,6 +6,7 @@ such as API keys or tokens. If `ripsecrets` is available it will be used for a
 more thorough scan; otherwise a lightweight regex-based fallback is used. Any
 findings are printed to stderr so they don't pollute stdout.
 """
+
 from __future__ import annotations
 
 import os
@@ -36,8 +37,7 @@ HEALTHCHECKS_URL = re.compile(
     re.IGNORECASE,
 )
 HEALTHCHECKS_UUID = re.compile(
-    r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
-    r"[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-" r"[89ab][0-9a-f]{3}-[0-9a-f]{12}",
     re.IGNORECASE,
 )
 
@@ -46,6 +46,13 @@ HEALTHCHECKS_UUID = re.compile(
 SAFE_PLACEHOLDERS = (
     re.compile(r"^\+\s*passwordKey:\s*admin-password\s*$"),
     re.compile(r"^\+\s*-\s*Password key:\s*`admin-password`\.\s*$"),
+    # This is a file descriptor, not a value. It is the required safe shape for
+    # piping a cert-manager token without exposing it in argv.
+    re.compile(
+        r"^\+(?!.*(?:password|api[_-]?key))"
+        r"(?!.*token\s*[:=](?!/dev/stdin)).*--from-file=api-token=/dev/stdin.*$",
+        re.IGNORECASE,
+    ),
 )
 
 

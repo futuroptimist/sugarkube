@@ -791,29 +791,13 @@ cert-manager-install version='v1.14.4':
     kubectl -n cert-manager wait --for=condition=Available deployment/cert-manager deployment/cert-manager-webhook deployment/cert-manager-cainjector --timeout=300s
 
 # Create/update the Cloudflare DNS API token Secret used by cert-manager DNS-01.
-cert-manager-cloudflare-token-secret token='':
+cert-manager-cloudflare-token-secret:
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
     export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
-    token="{{ token }}"
-    : "${token:=${CF_DNS_API_TOKEN:-}}"
-    token="$(printf '%s' "${token}" | tr -d '\r\n' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-    case "${token}" in
-        token=*|CF_DNS_API_TOKEN=*|CLOUDFLARE_DNS_API_TOKEN=*)
-            token="${token#*=}"
-            token="$(printf '%s' "${token}" | tr -d '\r\n' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-            ;;
-    esac
-    if [ -z "${token}" ]; then
-        echo "Set CF_DNS_API_TOKEN or pass token=<cloudflare-dns-api-token>." >&2
-        exit 1
-    fi
-
-    kubectl get namespace cert-manager >/dev/null 2>&1 || kubectl create namespace cert-manager
-    kubectl -n cert-manager create secret generic cloudflare-api-token \
-        --from-literal=api-token="${token}" \
-        --dry-run=client -o yaml | kubectl apply -f -
+    printf 'This compatibility recipe is staging-only.\n' >&2
+    scripts/staging_cert_manager.sh install-token staging
 
 # Apply non-Flux ClusterIssuers with an explicit email (no kustomize vars).
 cert-manager-issuers-apply email:
@@ -3286,3 +3270,16 @@ staging-ingress-ha-verify env='staging':
 
 staging-ingress-ha-rollback env='staging':
     scripts/staging_ingress_ha.sh rollback "{{ env }}"
+
+# Redacted staging certificate inventory and recovery lifecycle.
+staging-cert-status env='staging':
+    scripts/staging_cert_manager.sh status "{{ env }}"
+
+staging-cert-token-install env='staging':
+    scripts/staging_cert_manager.sh install-token "{{ env }}"
+
+staging-cert-authorization-verify env='staging':
+    scripts/staging_cert_manager.sh verify-authorization "{{ env }}"
+
+staging-cert-recover certificate env='staging':
+    scripts/staging_cert_manager.sh recover "{{ env }}" "{{ certificate }}"
