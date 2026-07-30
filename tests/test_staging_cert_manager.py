@@ -46,7 +46,7 @@ def test_inventory_renders_chain_redacts_and_marks_active_challenges(monkeypatch
         owner_kind="Order",
         owner_name="site-tls-2-order",
         spec={"dnsName": "staging.example.test"},
-        status={"state": "pending", "reason": "authorization Bearer should-not-appear"},
+        status={"state": "pending", "reason": "authorization Bearer challenge-token-value"},
     )
     stale = resource(
         "stale",
@@ -84,7 +84,7 @@ def test_inventory_renders_chain_redacts_and_marks_active_challenges(monkeypatch
                 {
                     "type": "Warning",
                     "reason": "PresentError",
-                    "message": "Bearer should-not-appear",
+                    "message": "Bearer event-token-value",
                 }
             ]
         },
@@ -105,7 +105,9 @@ def test_inventory_renders_chain_redacts_and_marks_active_challenges(monkeypatch
     assert report["issuer"]["expectedTokenSecretRefConfigured"] is True
     assert report["challenges"][0]["active"] is True
     assert report["challenges"][1]["active"] is False
-    assert "should-not-appear" not in rendered
+    assert "challenge-token-value" not in rendered
+    assert "event-token-value" not in rendered
+    assert not MODULE.re.search(r"(?i)bearer\s+[^\s,;]+", rendered)
     assert "<redacted>" in rendered
 
 
@@ -146,6 +148,7 @@ def test_recover_reports_bounded_failure_without_curl(monkeypatch):
     states = [
         {
             "certificate": {
+                "dnsNames": ["staging.example.test"],
                 "revision": 1,
                 "notAfter": "old",
                 "ready": "True",
@@ -168,3 +171,27 @@ def test_recover_reports_bounded_failure_without_curl(monkeypatch):
     with pytest.raises(MODULE.OperationError, match="bounded wait expired"):
         MODULE.recover("example", "site-tls", "staging.example.test", 1)
     assert commands == [["cmctl", "renew", "-n", "example", "site-tls"]]
+
+
+def test_recover_rejects_host_not_named_by_certificate(monkeypatch):
+    monkeypatch.setattr(MODULE, "staging_guard", lambda: None)
+    monkeypatch.setattr(
+        MODULE,
+        "inventory",
+        lambda *_args: {
+            "certificate": {
+                "dnsNames": ["staging.example.test"],
+                "revision": 1,
+                "notAfter": "old",
+                "ready": "True",
+                "secret": {"present": True},
+            }
+        },
+    )
+    commands = []
+    monkeypatch.setattr(MODULE, "run", lambda command, **_kwargs: commands.append(command))
+
+    with pytest.raises(MODULE.OperationError, match="not listed in Certificate DNS names"):
+        MODULE.recover("example", "site-tls", "other.example.test", 60)
+
+    assert commands == []

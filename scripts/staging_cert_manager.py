@@ -209,7 +209,7 @@ def install_token() -> None:
     create.stdout.close()
     create.stdin.write(credential)
     create.stdin.close()
-    apply_stdout, apply_stderr = apply.communicate()
+    _apply_stdout, apply_stderr = apply.communicate()
     create_stderr = create.stderr.read() if create.stderr else b""
     create_code = create.wait()
     del credential
@@ -224,6 +224,12 @@ def install_token() -> None:
 def recover(namespace: str, certificate_name: str, host: str, timeout: int) -> None:
     staging_guard()
     before = inventory(namespace, certificate_name)
+    normalized_host = host.rstrip(".").lower()
+    dns_names = {
+        str(name).rstrip(".").lower() for name in before["certificate"].get("dnsNames", [])
+    }
+    if normalized_host not in dns_names:
+        raise OperationError(f"verification host {host!r} is not listed in Certificate DNS names")
     result = run(["cmctl", "renew", "-n", namespace, certificate_name])
     if result.returncode:
         raise OperationError(
