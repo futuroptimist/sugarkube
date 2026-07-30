@@ -13,6 +13,11 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 
+@pytest.fixture(autouse=True)
+def cmctl_is_available(monkeypatch):
+    monkeypatch.setattr(MODULE.shutil, "which", lambda executable: f"/usr/bin/{executable}")
+
+
 def resource(name, *, owner_kind=None, owner_name=None, status=None, spec=None, conditions=None):
     metadata = {"name": name}
     if owner_kind:
@@ -186,7 +191,10 @@ def test_inventory_propagates_redacted_secret_lookup_failure(monkeypatch):
     assert "<redacted>" in str(caught.value)
 
 
-@pytest.mark.parametrize("environment,context", [("prod", "sugar-staging"), ("staging", "prod")])
+@pytest.mark.parametrize(
+    "environment,context",
+    [("prod", "sugar-staging"), ("qa", "sugar-staging"), ("staging", "prod")],
+)
 def test_staging_guard_rejects_wrong_environment_or_context(monkeypatch, environment, context):
     monkeypatch.setenv("SUGARKUBE_ENV", environment)
     monkeypatch.setattr(
@@ -372,6 +380,44 @@ def test_recover_reports_bounded_failure_without_curl(monkeypatch):
     assert commands == [
         ["cmctl", "--context", "sugar-staging", "renew", "-n", "example", "site-tls"]
     ]
+
+
+def test_recover_missing_cmctl_fails_before_cluster_or_renewal(monkeypatch):
+    monkeypatch.setattr(MODULE.shutil, "which", lambda _executable: None)
+    monkeypatch.setattr(
+        MODULE,
+        "verify_authorization",
+        lambda *_args: pytest.fail("missing cmctl must fail before cluster access"),
+    )
+    monkeypatch.setattr(
+        MODULE, "run", lambda *_args, **_kwargs: pytest.fail("no subprocess may be started")
+    )
+
+    with pytest.raises(MODULE.OperationError, match="cmctl is required.*cmctl version --client"):
+        MODULE.recover("example", "site-tls", "staging.example.test", 60)
+
+
+def test_main_reports_missing_cmctl_without_traceback(monkeypatch, capsys):
+    monkeypatch.setattr(MODULE.shutil, "which", lambda _executable: None)
+    monkeypatch.setattr(
+        MODULE.sys,
+        "argv",
+        [
+            "tool",
+            "recover",
+            "--namespace",
+            "example",
+            "--certificate",
+            "site-tls",
+            "--host",
+            "staging.example.test",
+        ],
+    )
+
+    assert MODULE.main() == 1
+    captured = capsys.readouterr()
+    assert "ERROR: cmctl is required" in captured.err
+    assert "Traceback" not in captured.err
 
 
 def test_recover_rejects_host_not_named_by_certificate(monkeypatch):
