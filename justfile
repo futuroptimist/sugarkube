@@ -790,30 +790,21 @@ cert-manager-install version='v1.14.4':
 
     kubectl -n cert-manager wait --for=condition=Available deployment/cert-manager deployment/cert-manager-webhook deployment/cert-manager-cainjector --timeout=300s
 
-# Create/update the Cloudflare DNS API token Secret used by cert-manager DNS-01.
-cert-manager-cloudflare-token-secret token='':
-    #!/usr/bin/env bash
-    set -Eeuo pipefail
+# Interactively create/update the staging Cloudflare token without argv or files.
+cert-manager-cloudflare-token-secret env='staging':
+    scripts/install_staging_cloudflare_token.sh "{{ env }}"
 
-    export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
-    token="{{ token }}"
-    : "${token:=${CF_DNS_API_TOKEN:-}}"
-    token="$(printf '%s' "${token}" | tr -d '\r\n' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-    case "${token}" in
-        token=*|CF_DNS_API_TOKEN=*|CLOUDFLARE_DNS_API_TOKEN=*)
-            token="${token#*=}"
-            token="$(printf '%s' "${token}" | tr -d '\r\n' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-            ;;
-    esac
-    if [ -z "${token}" ]; then
-        echo "Set CF_DNS_API_TOKEN or pass token=<cloudflare-dns-api-token>." >&2
-        exit 1
-    fi
+# Read-only, deterministic staging certificate inventory and ACME status.
+staging-certificate-status env='staging':
+    python3 scripts/staging_certificate_ops.py status --env "{{ env }}"
 
-    kubectl get namespace cert-manager >/dev/null 2>&1 || kubectl create namespace cert-manager
-    kubectl -n cert-manager create secret generic cloudflare-api-token \
-        --from-literal=api-token="${token}" \
-        --dry-run=client -o yaml | kubectl apply -f -
+# Observe one certificate for a bounded interval; never initiates issuance.
+staging-certificate-wait namespace certificate timeout='300' env='staging':
+    python3 scripts/staging_certificate_ops.py wait --env "{{ env }}" --namespace "{{ namespace }}" --certificate "{{ certificate }}" --timeout "{{ timeout }}"
+
+# Observe existing Challenges first, then renew exactly one certificate if needed.
+staging-certificate-renew namespace certificate timeout='300' env='staging':
+    python3 scripts/staging_certificate_ops.py renew --env "{{ env }}" --namespace "{{ namespace }}" --certificate "{{ certificate }}" --timeout "{{ timeout }}"
 
 # Apply non-Flux ClusterIssuers with an explicit email (no kustomize vars).
 cert-manager-issuers-apply email:

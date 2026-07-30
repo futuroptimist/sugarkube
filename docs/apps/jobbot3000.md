@@ -180,11 +180,13 @@ kubectl --context sugar-staging get svc,endpoints -n jobbot3000
 kubectl --context sugar-staging logs -n kube-system -l app.kubernetes.io/name=traefik --tail=200
 ```
 
+Use the bounded, redacted status and recovery procedure in [Staging certificate
+operations](../staging-certificate-operations.md). Do not describe raw ACME
+resources or dump controller logs when diagnosing authorization failures.
+
 ```bash
-# Confirm cert-manager issued the staging certificate.
-kubectl --context sugar-staging get certificate,challenge,order -n jobbot3000
-kubectl --context sugar-staging describe certificate -n jobbot3000 jobbot3000-staging-tls
-kubectl --context sugar-staging logs -n cert-manager deploy/cert-manager --tail=200
+just staging-certificate-status env=staging
+just staging-certificate-wait namespace=jobbot3000 certificate=jobbot3000-staging-tls timeout=300 env=staging
 ```
 
 ```bash

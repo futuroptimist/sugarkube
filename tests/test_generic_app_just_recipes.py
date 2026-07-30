@@ -3060,9 +3060,9 @@ def test_jobbot3000_runbook_troubleshooting_pins_staging_context() -> None:
     assert "kubectl --context sugar-staging describe ingress" in runbook
     assert "kubectl --context sugar-staging get svc,endpoints" in runbook
     assert "kubectl --context sugar-staging logs -n kube-system" in runbook
-    assert "kubectl --context sugar-staging get certificate,challenge,order" in runbook
-    assert "kubectl --context sugar-staging describe certificate" in runbook
-    assert "kubectl --context sugar-staging logs -n cert-manager" in runbook
+    assert "just staging-certificate-status env=staging" in runbook
+    assert "just staging-certificate-wait namespace=jobbot3000" in runbook
+    assert "kubectl --context sugar-staging get certificate,challenge,order" not in runbook
     assert "helm --kube-context sugar-staging -n jobbot3000 get values jobbot3000" in runbook
     assert "helm --kube-context sugar-staging -n jobbot3000 status jobbot3000" in runbook
     assert "kubectl --context sugar-staging get deploy" in runbook
