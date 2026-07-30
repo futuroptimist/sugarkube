@@ -791,23 +791,61 @@ cert-manager-install version='v1.14.4':
     kubectl -n cert-manager wait --for=condition=Available deployment/cert-manager deployment/cert-manager-webhook deployment/cert-manager-cainjector --timeout=300s
 
 # Create/update the staging Cloudflare DNS API token Secret from hidden input or stdin.
-cert-manager-cloudflare-token-secret env='':
+cert-manager-cloudflare-token-secret env:
     #!/usr/bin/env bash
     set -Eeuo pipefail
-    export SUGARKUBE_ENV="{{ env }}"
+    env_input={{ quote(env) }}
+    if [[ "${env_input}" == env=* ]]; then env_input="${env_input#env=}"; fi
+    if [[ -z "${env_input}" || "${env_input}" == *=* ]]; then
+        printf 'ERROR: env must be a non-empty value (for example, env=staging).\n' >&2
+        exit 2
+    fi
+    export SUGARKUBE_ENV="${env_input}"
     python3 "{{ justfile_directory() }}/scripts/staging_cert_manager.py" install-token
 
 # Report one staging certificate and its complete redacted ACME resource chain.
-cert-manager-certificate-status namespace certificate env='staging':
-    SUGARKUBE_ENV="{{ env }}" python3 "{{ justfile_directory() }}/scripts/staging_cert_manager.py" status --namespace "{{ namespace }}" --certificate "{{ certificate }}"
+cert-manager-certificate-status namespace certificate env:
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    namespace_input={{ quote(namespace) }}; certificate_input={{ quote(certificate) }}; env_input={{ quote(env) }}
+    if [[ "${namespace_input}" == namespace=* ]]; then namespace_input="${namespace_input#namespace=}"; fi
+    if [[ "${certificate_input}" == certificate=* ]]; then certificate_input="${certificate_input#certificate=}"; fi
+    if [[ "${env_input}" == env=* ]]; then env_input="${env_input#env=}"; fi
+    for entry in "namespace:${namespace_input}" "certificate:${certificate_input}" "env:${env_input}"; do
+        key="${entry%%:*}"; value="${entry#*:}"
+        if [[ -z "${value}" || "${value}" == *=* ]]; then printf 'ERROR: %s must be a non-empty value (for example, %s=<value>).\n' "${key}" "${key}" >&2; exit 2; fi
+    done
+    SUGARKUBE_ENV="${env_input}" python3 "{{ justfile_directory() }}/scripts/staging_cert_manager.py" status --namespace "${namespace_input}" --certificate "${certificate_input}"
 
 # Fail-closed structural authorization checks before attempting a staging renewal.
-cert-manager-certificate-verify-authorization namespace certificate env='staging':
-    SUGARKUBE_ENV="{{ env }}" python3 "{{ justfile_directory() }}/scripts/staging_cert_manager.py" verify-authorization --namespace "{{ namespace }}" --certificate "{{ certificate }}"
+cert-manager-certificate-verify-authorization namespace certificate env:
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    namespace_input={{ quote(namespace) }}; certificate_input={{ quote(certificate) }}; env_input={{ quote(env) }}
+    if [[ "${namespace_input}" == namespace=* ]]; then namespace_input="${namespace_input#namespace=}"; fi
+    if [[ "${certificate_input}" == certificate=* ]]; then certificate_input="${certificate_input#certificate=}"; fi
+    if [[ "${env_input}" == env=* ]]; then env_input="${env_input#env=}"; fi
+    for entry in "namespace:${namespace_input}" "certificate:${certificate_input}" "env:${env_input}"; do
+        key="${entry%%:*}"; value="${entry#*:}"
+        if [[ -z "${value}" || "${value}" == *=* ]]; then printf 'ERROR: %s must be a non-empty value (for example, %s=<value>).\n' "${key}" "${key}" >&2; exit 2; fi
+    done
+    SUGARKUBE_ENV="${env_input}" python3 "{{ justfile_directory() }}/scripts/staging_cert_manager.py" verify-authorization --namespace "${namespace_input}" --certificate "${certificate_input}"
 
 # Renew and verify exactly one staging certificate with a bounded wait and HTTPS checks.
-cert-manager-certificate-recover namespace certificate host env='staging' timeout='600':
-    SUGARKUBE_ENV="{{ env }}" python3 "{{ justfile_directory() }}/scripts/staging_cert_manager.py" recover --namespace "{{ namespace }}" --certificate "{{ certificate }}" --host "{{ host }}" --timeout "{{ timeout }}"
+cert-manager-certificate-recover namespace certificate host env timeout='600':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    namespace_input={{ quote(namespace) }}; certificate_input={{ quote(certificate) }}; host_input={{ quote(host) }}; env_input={{ quote(env) }}; timeout_input={{ quote(timeout) }}
+    if [[ "${namespace_input}" == namespace=* ]]; then namespace_input="${namespace_input#namespace=}"; fi
+    if [[ "${certificate_input}" == certificate=* ]]; then certificate_input="${certificate_input#certificate=}"; fi
+    if [[ "${host_input}" == host=* ]]; then host_input="${host_input#host=}"; fi
+    if [[ "${env_input}" == env=* ]]; then env_input="${env_input#env=}"; fi
+    if [[ "${timeout_input}" == timeout=* ]]; then timeout_input="${timeout_input#timeout=}"; fi
+    for entry in "namespace:${namespace_input}" "certificate:${certificate_input}" "host:${host_input}" "env:${env_input}" "timeout:${timeout_input}"; do
+        key="${entry%%:*}"; value="${entry#*:}"
+        if [[ -z "${value}" || "${value}" == *=* ]]; then printf 'ERROR: %s must be a non-empty value (for example, %s=<value>).\n' "${key}" "${key}" >&2; exit 2; fi
+    done
+    SUGARKUBE_ENV="${env_input}" python3 "{{ justfile_directory() }}/scripts/staging_cert_manager.py" recover --namespace "${namespace_input}" --certificate "${certificate_input}" --host "${host_input}" --timeout "${timeout_input}"
 
 # Apply non-Flux ClusterIssuers with an explicit email (no kustomize vars).
 cert-manager-issuers-apply email:
