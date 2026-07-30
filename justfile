@@ -229,6 +229,33 @@ status:
     if ! command -v k3s >/dev/null 2>&1; then printf '%s\n' 'k3s is not installed yet.' 'Visit https://github.com/futuroptimist/sugarkube/blob/main/docs/raspi_cluster_setup.md.' 'Follow the instructions in that guide before rerunning this command.'; exit 0; fi
     sudo k3s kubectl get nodes -o wide
 
+# Redacted, read-only staging cert-manager inventory.
+cert-status env='staging':
+    python3 scripts/staging_certificates.py status --env "{{ env }}"
+
+# Observe exactly one existing issuance for a bounded interval (maximum 15 minutes).
+cert-wait certificate timeout='300' env='staging':
+    python3 scripts/staging_certificates.py wait --env "{{ env }}" --certificate "{{ certificate }}" --timeout "{{ timeout }}"
+
+# Interactive stdin-only replacement of the shared staging credential.
+cert-token-install env='staging':
+    scripts/install_staging_cloudflare_token.sh "{{ env }}"
+
+# Request one renewal only after cert-wait has expired and an operator confirms it is needed.
+cert-renew certificate timeout='300' env='staging':
+    # Existing Challenges get this bounded convergence window before any new Order is requested.
+    if python3 scripts/staging_certificates.py wait --env "{{ env }}" --certificate "{{ certificate }}" --timeout "{{ timeout }}"; then printf 'Certificate converged; renewal was not requested.\n'; exit 0; else wait_status=$?; fi
+    test "$wait_status" -eq 3 || exit "$wait_status"
+    test "{{ env }}" = staging && test "$(kubectl config current-context)" = sugar-staging
+    case "{{ certificate }}" in */*) ;; *) printf 'certificate must be namespace/name\n' >&2; exit 2;; esac
+    cmctl renew --context sugar-staging --namespace "${certificate%%/*}" "${certificate#*/}"
+
+# Decode only the public certificate and print its SAN, issuer, serial, and dates.
+cert-verify certificate env='staging':
+    test "{{ env }}" = staging && test "$(kubectl config current-context)" = sugar-staging
+    case "{{ certificate }}" in */*) ;; *) printf 'certificate must be namespace/name\n' >&2; exit 2;; esac
+    kubectl --context sugar-staging get secret "${certificate#*/}" -n "${certificate%%/*}" -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -noout -subject -ext subjectAltName -issuer -serial -dates
+
 # Show a summarized status of the HA cluster, Helm CLI, and Traefik ingress.
 
 # This is a read-only health dashboard for debugging and quick checks.
@@ -790,30 +817,9 @@ cert-manager-install version='v1.14.4':
 
     kubectl -n cert-manager wait --for=condition=Available deployment/cert-manager deployment/cert-manager-webhook deployment/cert-manager-cainjector --timeout=300s
 
-# Create/update the Cloudflare DNS API token Secret used by cert-manager DNS-01.
-cert-manager-cloudflare-token-secret token='':
-    #!/usr/bin/env bash
-    set -Eeuo pipefail
-
-    export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
-    token="{{ token }}"
-    : "${token:=${CF_DNS_API_TOKEN:-}}"
-    token="$(printf '%s' "${token}" | tr -d '\r\n' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-    case "${token}" in
-        token=*|CF_DNS_API_TOKEN=*|CLOUDFLARE_DNS_API_TOKEN=*)
-            token="${token#*=}"
-            token="$(printf '%s' "${token}" | tr -d '\r\n' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-            ;;
-    esac
-    if [ -z "${token}" ]; then
-        echo "Set CF_DNS_API_TOKEN or pass token=<cloudflare-dns-api-token>." >&2
-        exit 1
-    fi
-
-    kubectl get namespace cert-manager >/dev/null 2>&1 || kubectl create namespace cert-manager
-    kubectl -n cert-manager create secret generic cloudflare-api-token \
-        --from-literal=api-token="${token}" \
-        --dry-run=client -o yaml | kubectl apply -f -
+# Compatibility name for the guarded, staging-only interactive installer.
+cert-manager-cloudflare-token-secret env='staging':
+    scripts/install_staging_cloudflare_token.sh "{{ env }}"
 
 # Apply non-Flux ClusterIssuers with an explicit email (no kustomize vars).
 cert-manager-issuers-apply email:
