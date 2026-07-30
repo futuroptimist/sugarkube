@@ -791,29 +791,20 @@ cert-manager-install version='v1.14.4':
     kubectl -n cert-manager wait --for=condition=Available deployment/cert-manager deployment/cert-manager-webhook deployment/cert-manager-cainjector --timeout=300s
 
 # Create/update the Cloudflare DNS API token Secret used by cert-manager DNS-01.
-cert-manager-cloudflare-token-secret token='':
-    #!/usr/bin/env bash
-    set -Eeuo pipefail
+cert-manager-cloudflare-token-secret file='':
+    scripts/staging_certificates.py install-token {{ if file != '' { '--file ' + quote(file) } else { '' } }}
 
-    export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
-    token="{{ token }}"
-    : "${token:=${CF_DNS_API_TOKEN:-}}"
-    token="$(printf '%s' "${token}" | tr -d '\r\n' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-    case "${token}" in
-        token=*|CF_DNS_API_TOKEN=*|CLOUDFLARE_DNS_API_TOKEN=*)
-            token="${token#*=}"
-            token="$(printf '%s' "${token}" | tr -d '\r\n' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-            ;;
-    esac
-    if [ -z "${token}" ]; then
-        echo "Set CF_DNS_API_TOKEN or pass token=<cloudflare-dns-api-token>." >&2
-        exit 1
-    fi
+# Redacted, read-only cert-manager inventory; repeat certificate= through the script for subsets.
+staging-certificates-status:
+    scripts/staging_certificates.py status
 
-    kubectl get namespace cert-manager >/dev/null 2>&1 || kubectl create namespace cert-manager
-    kubectl -n cert-manager create secret generic cloudflare-api-token \
-        --from-literal=api-token="${token}" \
-        --dry-run=client -o yaml | kubectl apply -f -
+# Guarded check of issuer readiness and Secret name/key presence (never its value).
+staging-certificates-verify-authorization:
+    scripts/staging_certificates.py verify-authorization
+
+# Renew exactly one staging certificate and verify bounded readiness plus public HTTPS.
+staging-certificate-renew certificate hostname timeout='10m':
+    scripts/staging_certificates.py renew --certificate {{ quote(certificate) }} --hostname {{ quote(hostname) }} --timeout {{ quote(timeout) }}
 
 # Apply non-Flux ClusterIssuers with an explicit email (no kustomize vars).
 cert-manager-issuers-apply email:
