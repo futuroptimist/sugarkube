@@ -336,6 +336,25 @@ def finalize(**changes):
     return manifest.finalize(**arguments)
 
 
+def runtime_verification(**changes):
+    value = {
+        "schemaVersion": 1,
+        "environment": "staging",
+        "release": "dspace",
+        "namespace": "dspace",
+        "applicationVersion": "3.2.0",
+        "runtimeSourceRevision": SHA,
+        "frontendSourceRevision": SHA,
+        "defaultProvider": "token-place",
+        "journeys": [
+            {"name": "/", "passed": True},
+            {"name": "/chat", "passed": True},
+        ],
+    }
+    value.update(changes)
+    return value
+
+
 def test_finalize_collects_sorted_multi_pod_identity() -> None:
     final = finalize()
     assert final["helmRevision"] == 17
@@ -353,6 +372,26 @@ def test_finalize_collects_sorted_multi_pod_identity() -> None:
     }
 
 
+def test_finalize_records_validated_bounded_runtime_proof() -> None:
+    final = finalize(runtime_verification=runtime_verification())
+    results = {item["check"]: item["details"] for item in final["verificationResults"]}
+    assert {
+        "runtimeIdentity",
+        "frontendIdentity",
+        "replicaAgreement",
+        "publicDirectAgreement",
+        "defaultProvider",
+        "remoteChatSmoke",
+    } <= results.keys()
+    assert "successful public journeys=/,/chat" in results["remoteChatSmoke"]
+
+
+def test_finalize_rejects_runtime_proof_that_does_not_match_candidate() -> None:
+    proof = runtime_verification(runtimeSourceRevision="0" * 40)
+    with pytest.raises(manifest.ManifestError, match="invalid runtime verification"):
+        finalize(runtime_verification=proof)
+
+
 def test_finalize_optional_digest_coordinate_is_backward_compatible() -> None:
     assert finalize()["recordType"] == "final"
     coordinate = f"{manifest.IMAGE_REF}:main-abcdef0@{DIGEST}"
@@ -368,6 +407,37 @@ def test_generated_final_record_validates_through_cli(tmp_path: Path) -> None:
     output = tmp_path / "final.json"
     output.write_text(manifest._canonical(finalize()), encoding="utf-8")
     assert manifest.main(["validate", "--manifest", str(output), "--final"]) == 0
+
+
+def test_staging_gate_returns_revision_for_matching_promoted_artifact() -> None:
+    production = candidate()
+    production["environment"] = "prod"
+    staging = finalize()
+    assert manifest.staging_gate(production, staging) == 17
+
+
+@pytest.mark.parametrize(
+    ("candidate_environment", "evidence_environment", "changed_field", "message"),
+    [
+        ("staging", "staging", None, "candidate environment must be prod"),
+        ("prod", "prod", None, "evidence environment must be staging"),
+        ("prod", "staging", "imageDigest", "immutable coordinates differ: imageDigest"),
+    ],
+)
+def test_staging_gate_rejects_wrong_cluster_or_artifact(
+    candidate_environment: str,
+    evidence_environment: str,
+    changed_field: str | None,
+    message: str,
+) -> None:
+    production = candidate()
+    production["environment"] = candidate_environment
+    staging = finalize()
+    staging["environment"] = evidence_environment
+    if changed_field is not None:
+        production[changed_field] = "sha256:" + "9" * 64
+    with pytest.raises(manifest.ManifestError, match=message):
+        manifest.staging_gate(production, staging)
 
 
 def _replace_results(value, checks):
@@ -966,6 +1036,7 @@ def test_default_evidence_path_is_stable_and_approval_unique() -> None:
     assert str(manifest.evidence_path(candidate())) == (
         "deployment-evidence/dspace/staging/main-abcdef0-20260726T120000Z.json"
     )
+
 
 @pytest.mark.parametrize(
     ("change", "message"),

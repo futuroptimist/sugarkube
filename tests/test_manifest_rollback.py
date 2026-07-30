@@ -185,6 +185,40 @@ def test_missing_or_candidate_target_fails_before_any_external_command(
     assert not (tmp_path / "rollback.json").exists()
 
 
+@pytest.mark.parametrize("runner_state", ["missing", "non-executable"])
+def test_default_verifier_requires_executable_smoke_runner_before_rollback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    runner_state: str,
+) -> None:
+    smoke_runner = tmp_path / "smoke-runner"
+    if runner_state == "non-executable":
+        smoke_runner.write_text("#!/bin/sh\n", encoding="utf-8")
+    called = False
+
+    def refuse_rollback(_args: Namespace) -> None:
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(rollback, "rollback", refuse_rollback)
+    result = rollback.main(
+        [
+            "--environment",
+            "staging",
+            "--manifest",
+            str(tmp_path / "manifest.json"),
+            "--evidence",
+            str(tmp_path / "evidence.json"),
+            "--smoke-runner",
+            str(smoke_runner),
+        ]
+    )
+    assert result == 2
+    assert not called
+    assert "--smoke-runner must be an existing executable" in capsys.readouterr().err
+
+
 @pytest.mark.parametrize(
     "mismatch",
     ("image digest", "chart digest", "chart source revision", "image platform revision"),
