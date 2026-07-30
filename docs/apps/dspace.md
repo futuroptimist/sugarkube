@@ -1,5 +1,56 @@
 # democratized.space (dspace) on Sugarkube
 
+## Mandatory source-integrity and `/chat` gate
+
+Standard staging and production operations require the DSPACE checkout's
+non-destructive remote smoke runner. In that checkout, run `pnpm install` and
+`pnpm exec playwright install chromium`, then point Sugarkube at the executable
+itself (not at a shell command):
+
+```bash
+DSPACE_SMOKE_RUNNER="$HOME/dspace/scripts/run-remote-chat-smoke.mjs"
+
+just dspace-release-verify \
+  env=staging \
+  manifest=deployment-evidence/dspace/staging/<finalized-record>.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER"
+```
+
+The verifier reads the public host and token.place origin/model from the exact
+environment values chain, checks every live DSPACE replica, and proves the
+public build identity, frontend marker, and isolated `/chat` journey. It
+invokes the runner directly and discards its output. The runner mocks provider
+transport: real token.place or OpenAI credentials are neither required nor
+accepted. For an OpenAI-default manifest, token.place arguments are omitted;
+for a token.place-default manifest, both values come from the selected chain.
+
+Deploy staging with its approved candidate to create finalized evidence:
+
+```bash
+just app-deploy app=dspace env=staging tag=main-REPLACE_SHORTSHA \
+  manifest=deployment-candidates/dspace/staging.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER"
+```
+
+Production promotion additionally requires that finalized staging record. The
+live staging gate runs before production rendering, evidence reservation, or
+mutation and rejects stale Helm revisions or differing immutable coordinates:
+
+```bash
+just app-promote-prod \
+  app=dspace \
+  tag=main-REPLACE_SHORTSHA \
+  manifest=deployment-candidates/dspace/prod.json \
+  staging_evidence=deployment-evidence/dspace/staging/<finalized-record>.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER"
+```
+
+After mutation the same checks run before the record is finalized under
+`deployment-evidence/dspace/<environment>/`. Failure leaves a post-mutation
+reservation for the existing reconciliation workflow, writes no success
+record, and never automatically retries or rolls back. Standalone production
+verification uses the same command with `env=prod`.
+
 This is the canonical runbook for deploying DSPACE from GHCR artifacts to Sugarkube. The generic `just app-*` recipes are the preferred future path. The `dspace-oci-*` recipes remain compatibility shims and are scheduled for later removal only after the generic flow has been exercised across routine releases.
 
 ## Artifact model

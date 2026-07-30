@@ -1,5 +1,23 @@
 # Sugarkube app deployment contract
 
+## DSPACE promotion verification
+
+DSPACE is the only application with an additional source-integrity gate. Every
+standard deploy, redeploy, promotion, and compatibility wrapper requires an
+executable `smoke_runner`. Production also requires `staging_evidence`: a
+finalized staging record whose application version, full source revision,
+image tag/digest, chart version/digest, semantic tag, and approved default
+provider equal the production candidate. Approval metadata may differ.
+
+The enforced order is finalized staging evidence validation, live staging
+Helm/replica/runtime/frontend/chat verification, production preflight and
+render, evidence reservation, Helm mutation, production verification, then
+evidence finalization. Verification is read-only and uses Kubernetes API pod
+proxies. Finalized records add bounded identity, replica-agreement, provider,
+and chat checks without storing HTTP bodies, child output, browser state,
+credentials, or request data. Historical schema-version-1 finalized records
+remain valid and available to the explicit rollback path.
+
 Sugarkube now exposes a generic app deployment surface where each app is
 identified by a small local config file and deployed with shared `just` recipes.
 This page is the contract that app repositories and local operator configs should
