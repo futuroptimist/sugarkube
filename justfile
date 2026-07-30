@@ -790,30 +790,22 @@ cert-manager-install version='v1.14.4':
 
     kubectl -n cert-manager wait --for=condition=Available deployment/cert-manager deployment/cert-manager-webhook deployment/cert-manager-cainjector --timeout=300s
 
-# Create/update the Cloudflare DNS API token Secret used by cert-manager DNS-01.
-cert-manager-cloudflare-token-secret token='':
-    #!/usr/bin/env bash
-    set -Eeuo pipefail
+# Interactively create/update the staging Cloudflare token without argv or files.
+cert-manager-cloudflare-token-secret env='staging':
+    test "{{ env }}" = staging || { echo 'ERROR: only env=staging is permitted.' >&2; exit 1; }
+    scripts/install_staging_cloudflare_token.sh
 
-    export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
-    token="{{ token }}"
-    : "${token:=${CF_DNS_API_TOKEN:-}}"
-    token="$(printf '%s' "${token}" | tr -d '\r\n' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-    case "${token}" in
-        token=*|CF_DNS_API_TOKEN=*|CLOUDFLARE_DNS_API_TOKEN=*)
-            token="${token#*=}"
-            token="$(printf '%s' "${token}" | tr -d '\r\n' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-            ;;
-    esac
-    if [ -z "${token}" ]; then
-        echo "Set CF_DNS_API_TOKEN or pass token=<cloudflare-dns-api-token>." >&2
-        exit 1
-    fi
+cert-status namespace certificate env='staging':
+    scripts/staging_certificate_ops.py status --env "{{ env }}" --namespace "{{ namespace }}" --certificate "{{ certificate }}"
 
-    kubectl get namespace cert-manager >/dev/null 2>&1 || kubectl create namespace cert-manager
-    kubectl -n cert-manager create secret generic cloudflare-api-token \
-        --from-literal=api-token="${token}" \
-        --dry-run=client -o yaml | kubectl apply -f -
+cert-wait namespace certificate timeout='300' env='staging':
+    scripts/staging_certificate_ops.py wait --env "{{ env }}" --namespace "{{ namespace }}" --certificate "{{ certificate }}" --timeout "{{ timeout }}"
+
+cert-renew namespace certificate timeout='300' env='staging':
+    scripts/staging_certificate_ops.py renew --env "{{ env }}" --namespace "{{ namespace }}" --certificate "{{ certificate }}" --timeout "{{ timeout }}"
+
+cert-verify namespace certificate env='staging':
+    scripts/staging_certificate_ops.py verify --env "{{ env }}" --namespace "{{ namespace }}" --certificate "{{ certificate }}"
 
 # Apply non-Flux ClusterIssuers with an explicit email (no kustomize vars).
 cert-manager-issuers-apply email:
