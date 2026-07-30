@@ -233,7 +233,7 @@ Common failure modes:
 - **Missing cert-manager CRDs** (`no matches for kind "Certificate"` / `"ClusterIssuer"`): reinstall cert-manager with CRDs enabled.
 - **`clusterissuer.cert-manager.io` resource type missing**: controllers/CRDs are not fully installed yet.
 - **Literal `$(CERT_MANAGER_EMAIL)` in ClusterIssuer**: issuer was applied from Flux-era template without replacement; reapply with `just cert-manager-issuers-apply email=<email>`.
-- **Missing `cloudflare-api-token` secret**: create it with `just cert-manager-cloudflare-token-secret token=<token>`.
+- **Missing `cloudflare-api-token` secret**: install it with the hidden-input workflow below.
 - **Challenge cleanup errors after successful issuance**: Cloudflare API token is missing `Zone:Read` and/or is scoped to the wrong zone.
 
 Validation sequence:
@@ -245,6 +245,112 @@ kubectl get certificate --all-namespaces
 kubectl -n cert-manager get secret cloudflare-api-token
 kubectl -n cert-manager logs deploy/cert-manager --tail=100
 ```
+
+### Staging Cloudflare DNS-01 recovery
+
+The shared operator token used by cert-manager must have **Zone / Zone / Read** and
+**Zone / DNS / Edit**. Restrict its resources to the authoritative zones that
+intentionally share it: `token.place`, `danielsmith.io`, and `jobbot3000.tech`.
+Do not grant every-zone access merely to work around `Found no Zones`, and confirm
+the token belongs to the Cloudflare account that owns all three zones. The token is
+not the Cloudflare Tunnel connector token. This procedure does not change the
+remotely managed Tunnel or its current HTTP connection to Traefik.
+
+All recipes below fail closed unless the current context is exactly
+`sugar-staging` and every node reports `sugarkube.env=staging`. They preserve Flux
+and Helm ownership: they neither modify Ingresses/Certificates nor reconcile
+production resources.
+
+Start with a redacted inventory. It reports each Certificate, Ready condition,
+issuer, target Secret presence, revision, validity/renewal timestamps and DNS
+names; its active CertificateRequests, Orders and Challenges; and relevant events.
+It checks Secret object presence and reports the configured key name without retrieving or decoding its value.
+
+```bash
+just cert-manager-staging-status
+```
+
+As observed on 2026-07-29, `letsencrypt-production` and
+`tokenplace/tokenplace-staging-tls` were Ready (token.place revision 1).
+`danielsmith/danielsmith-staging-tls` and
+`jobbot3000/jobbot3000-staging-tls` were `False/DoesNotExist`, their TLS Secrets
+were absent, and their pending Challenges reported `Found no Zones`. Public HTTPS
+still terminated successfully at Cloudflare's edge; that does not prove the
+Kubernetes origin Secrets exist.
+
+In the Cloudflare dashboard, an authorized operator must correct the permission,
+zone-resource, and account scope. This repository does not automate dashboard
+changes. Then install or rotate the Secret without putting the token in argv,
+shell history, rendered terminal output, logs, tests, or Git:
+
+```bash
+just cert-manager-cloudflare-token-secret
+```
+
+The recipe uses hidden input on a terminal. For an operator-controlled protected
+file, use `just cert-manager-cloudflare-token-secret file=/secure/path/token`
+and securely remove that file afterward. A secret manager may provide the value on
+stdin: `secret-manager-read | just cert-manager-cloudflare-token-secret`. Do not
+use a visible environment assignment, positional token, checked-in values file, or
+shell tracing. Verify metadata and authorization without viewing Secret data:
+
+```bash
+kubectl --context sugar-staging -n cert-manager get secret cloudflare-api-token
+just cert-manager-staging-verify-authorization
+```
+
+The verifier exits nonzero while any active Challenge reports `Found no Zones`.
+Also confirm the production issuer remains Ready before renewal:
+
+```bash
+kubectl --context sugar-staging wait --for=condition=Ready \
+  clusterissuer/letsencrypt-production --timeout=60s
+```
+
+#### One-certificate-at-a-time recovery
+
+Let's Encrypt applies duplicate-certificate and other issuance rate limits. Stop
+after any failure; do not loop, repeatedly delete Secrets, Certificates,
+CertificateRequests, Orders or Challenges, or renew both applications together.
+Capture `just cert-manager-staging-status` first, choose one Helm-managed
+Certificate, and use the bounded workflow:
+
+```bash
+just cert-manager-staging-renew namespace=danielsmith \
+  certificate=danielsmith-staging-tls hostname=staging.danielsmith.io timeout=300
+just cert-manager-staging-status
+```
+
+The recipe runs `cmctl renew` for exactly that Certificate, waits at most ten
+minutes (five by default) for `Ready=True`, requires its revision or expiry to
+change, then performs TLS-verified HTTPS requests to `/`, `/healthz`, and `/livez`.
+It does not use `--insecure`. Inspect the new Request, Order, Challenge, events and
+Secret presence in the status output. Independently compare the externally served
+certificate's hostname and expiry when needed:
+
+```bash
+echo | openssl s_client -connect staging.danielsmith.io:443 \
+  -servername staging.danielsmith.io -verify_return_error 2>/dev/null |
+  openssl x509 -noout -subject -issuer -dates -ext subjectAltName
+```
+
+Only after the first certificate and all three public endpoints pass, repeat the
+same workflow once for `jobbot3000/jobbot3000-staging-tls` and
+`staging.jobbot3000.tech`. These are arguments rather than app-specific branches,
+so the tooling remains reusable.
+
+#### Rollback and residual risk
+
+If authorization or issuance fails, stop renewal attempts, retain any current
+serving TLS Secret, and inspect the redacted inventory and cert-manager controller
+logs before considering destructive cleanup. Restore the prior known-good token
+through the same hidden-input/stdin recipe if it is available in the operator's
+secret manager; then verify authorization again. Never retrieve a prior token from
+Kubernetes for display. Cloudflare edge HTTPS can remain healthy while an origin
+Certificate is absent or stale, so it is not sufficient evidence by itself.
+
+Changing the Cloudflare Tunnel's HTTP origin transport is a separate hardening issue and explicitly outside this recovery. Production, Flux-managed resources,
+Helm-managed Ingresses and Cloudflare dashboard configuration remain untouched.
 
 ### Verifier summary block and tests
 
