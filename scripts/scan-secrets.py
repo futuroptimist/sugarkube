@@ -46,6 +46,8 @@ HEALTHCHECKS_UUID = re.compile(
 SAFE_PLACEHOLDERS = (
     re.compile(r"^\+\s*passwordKey:\s*admin-password\s*$"),
     re.compile(r"^\+\s*-\s*Password key:\s*`admin-password`\.\s*$"),
+    # This fixed path names a Kubernetes Secret key whose value arrives only on stdin.
+    re.compile(r"^\+.*api-token=/dev/stdin.*$"),
 )
 
 
