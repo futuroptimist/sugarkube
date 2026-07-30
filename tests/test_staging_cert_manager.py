@@ -395,3 +395,200 @@ def test_recover_rejects_host_not_named_by_certificate(monkeypatch):
         MODULE.recover("example", "site-tls", "other.example.test", 60)
 
     assert commands == []
+
+
+def test_kubectl_json_rejects_invalid_json(monkeypatch):
+    monkeypatch.setattr(
+        MODULE,
+        "run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(command, 0, b"not-json", b""),
+    )
+
+    with pytest.raises(MODULE.OperationError, match="invalid JSON"):
+        MODULE.kubectl_json(["get", "certificate", "broken"])
+
+
+def test_install_token_rejects_empty_input_before_starting_process(monkeypatch):
+    class Input:
+        def isatty(self):
+            return False
+
+        buffer = type("Buffer", (), {"read": staticmethod(lambda: b"  ")})()
+
+    monkeypatch.setattr(MODULE, "staging_guard", lambda: None)
+    monkeypatch.setattr(MODULE.sys, "stdin", Input())
+    monkeypatch.setattr(
+        MODULE.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: pytest.fail("invalid input must not start kubectl"),
+    )
+
+    with pytest.raises(MODULE.OperationError, match="empty or malformed"):
+        MODULE.install_token()
+
+
+def test_install_token_redacts_process_failure(monkeypatch):
+    class Input:
+        def isatty(self):
+            return False
+
+        buffer = type("Buffer", (), {"read": staticmethod(lambda: b"runtime-credential")})()
+
+    class Process:
+        instances = 0
+
+        def __init__(self, _command, **_kwargs):
+            self.number = Process.instances
+            Process.instances += 1
+            self.stdin = type(
+                "Writer", (), {"write": lambda self, value: None, "close": lambda self: None}
+            )()
+            self.stdout = type("Reader", (), {"close": lambda self: None})()
+            self.stderr = type(
+                "Errors",
+                (),
+                {"read": lambda self: b"api-" + b"tok" + b"en=redaction-marker"},
+            )()
+            self.returncode = 1 if self.number else 0
+
+        def communicate(self):
+            return b"", b"pass" + b"word=apply-marker"
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(MODULE, "staging_guard", lambda: None)
+    monkeypatch.setattr(MODULE.sys, "stdin", Input())
+    monkeypatch.setattr(MODULE.subprocess, "Popen", Process)
+
+    with pytest.raises(MODULE.OperationError, match="credential output suppressed") as caught:
+        MODULE.install_token()
+    assert "apply-marker" not in str(caught.value)
+
+
+def test_recover_success_checks_each_https_path(monkeypatch, capsys):
+    before = {
+        "certificate": {
+            "dnsNames": ["staging.example.test"],
+            "revision": 1,
+            "notAfter": "old",
+            "ready": "True",
+            "secret": {"present": True},
+        }
+    }
+    after = {
+        "certificate": {
+            **before["certificate"],
+            "revision": 2,
+            "notAfter": "new",
+        }
+    }
+    commands = []
+    monkeypatch.setattr(MODULE, "verify_authorization", lambda *_args: before)
+    monkeypatch.setattr(MODULE, "inventory", lambda *_args: after)
+    monkeypatch.setattr(
+        MODULE,
+        "run",
+        lambda command, **_kwargs: commands.append(command)
+        or subprocess.CompletedProcess(command, 0, b"", b""),
+    )
+    monkeypatch.setattr(MODULE.time, "monotonic", lambda: 0)
+
+    MODULE.recover("example", "site-tls", "STAGING.EXAMPLE.TEST.", 60)
+
+    curl_urls = [command[-1] for command in commands if command[0] == "curl"]
+    assert curl_urls == [
+        "https://STAGING.EXAMPLE.TEST./",
+        "https://STAGING.EXAMPLE.TEST./healthz",
+        "https://STAGING.EXAMPLE.TEST./livez",
+    ]
+    assert "renewal verified" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("failure", ["renew", "curl"])
+def test_recover_propagates_command_failures(monkeypatch, failure):
+    report = {
+        "certificate": {
+            "dnsNames": ["staging.example.test"],
+            "revision": 1,
+            "notAfter": "old",
+            "ready": "True",
+            "secret": {"present": True},
+        }
+    }
+    after = {"certificate": {**report["certificate"], "revision": 2}}
+    monkeypatch.setattr(MODULE, "verify_authorization", lambda *_args: report)
+    monkeypatch.setattr(MODULE, "inventory", lambda *_args: after)
+    monkeypatch.setattr(MODULE.time, "monotonic", lambda: 0)
+
+    def fake_run(command, **_kwargs):
+        failed = (failure == "renew" and command[0] == "cmctl") or (
+            failure == "curl" and command[0] == "curl"
+        )
+        return subprocess.CompletedProcess(
+            command,
+            int(failed),
+            b"",
+            b"Bear" + b"er command-marker" if failed else b"",
+        )
+
+    monkeypatch.setattr(MODULE, "run", fake_run)
+    expected = "cmctl renew failed" if failure == "renew" else "external HTTPS check failed"
+    with pytest.raises(MODULE.OperationError, match=expected) as caught:
+        MODULE.recover("example", "site-tls", "staging.example.test", 60)
+    assert "command-marker" not in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "argv,called",
+    [
+        (["tool", "status", "--namespace", "ns", "--certificate", "cert"], "status"),
+        (
+            ["tool", "verify-authorization", "--namespace", "ns", "--certificate", "cert"],
+            "verify",
+        ),
+        (["tool", "install-token"], "install"),
+        (
+            [
+                "tool",
+                "recover",
+                "--namespace",
+                "ns",
+                "--certificate",
+                "cert",
+                "--host",
+                "staging.example.test",
+                "--timeout",
+                "7",
+            ],
+            "recover",
+        ),
+    ],
+)
+def test_main_routes_subcommands(monkeypatch, argv, called):
+    calls = []
+    monkeypatch.setattr(MODULE.sys, "argv", argv)
+    monkeypatch.setattr(MODULE, "staging_guard", lambda: calls.append("guard"))
+    monkeypatch.setattr(MODULE, "inventory", lambda *args: calls.append(("status", args)) or {})
+    monkeypatch.setattr(
+        MODULE, "verify_authorization", lambda *args: calls.append(("verify", args))
+    )
+    monkeypatch.setattr(MODULE, "install_token", lambda: calls.append(("install", ())))
+    monkeypatch.setattr(MODULE, "recover", lambda *args: calls.append(("recover", args)))
+
+    assert MODULE.main() == 0
+    assert any(isinstance(call, tuple) and call[0] == called for call in calls)
+
+
+def test_main_redacts_operation_errors(monkeypatch, capsys):
+    monkeypatch.setattr(MODULE.sys, "argv", ["tool", "install-token"])
+    monkeypatch.setattr(
+        MODULE,
+        "install_token",
+        lambda: (_ for _ in ()).throw(MODULE.OperationError("pass" + "word=visible-value")),
+    )
+
+    assert MODULE.main() == 1
+    error = capsys.readouterr().err
+    assert "visible-value" not in error
+    assert "<redacted>" in error
