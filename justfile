@@ -3264,6 +3264,30 @@ observability-dashboard-verify env='':
 observability-pagerduty-test env='' action='':
     @scripts/observability_helm.sh pagerduty-test '{{ env }}' '{{ action }}'
 
+# Install or rotate the staging watchdog ping URL using hidden terminal input.
+observability-watchdog-secret-install env='':
+    @scripts/observability_watchdog.sh secret-install '{{ env }}'
+
+# Check the watchdog Secret/key contract without reading the credential.
+observability-watchdog-secret-check env='':
+    @scripts/observability_watchdog.sh secret-check '{{ env }}'
+
+# Verify the live watchdog rule, alert, receiver mount, and recent delivery health.
+observability-watchdog-verify env='':
+    @scripts/observability_watchdog.sh verify '{{ env }}'
+
+# Create the exact, automatically expiring controlled-drill silence.
+observability-watchdog-drill-create env='':
+    @scripts/observability_watchdog.sh drill-create '{{ env }}'
+
+# Inspect only the controlled-drill silence owned by this helper.
+observability-watchdog-drill-status env='':
+    @scripts/observability_watchdog.sh drill-status '{{ env }}'
+
+# Remove only the controlled-drill silence owned by this helper.
+observability-watchdog-drill-clear env='':
+    @scripts/observability_watchdog.sh drill-clear '{{ env }}'
+
 # Render the pinned staging blackbox exporter and Probe manifests (read-only).
 observability-blackbox-render env='':
     @scripts/observability_blackbox.sh render '{{ env }}'

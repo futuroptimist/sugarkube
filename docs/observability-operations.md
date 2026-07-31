@@ -401,3 +401,61 @@ observability codification are separate follow-ups. The existing blackbox Networ
 Alerting onboarding — real Alertmanager receivers, external heartbeats, and failure drills — is no
 longer undesigned scope creep; it is planned, designed work tracked in
 [`docs/observability-alerting.md`](observability-alerting.md), just not yet executed.
+
+## Observability watchdog
+
+The staging dead-man path is deliberately narrow. Prometheus continuously fires
+`SugarkubeObservabilityWatchdog` from `vector(1)` with the fixed `staging`, `sugarkube-int`, and
+`observability-watchdog` labels. Alertmanager sends that alert every five minutes to one
+Healthchecks URL read from the mounted `alertmanager-healthchecks-watchdog/ping-url` Secret. It does
+not send resolved notifications. The null receiver remains the default; ordinary alerts are not
+paged, and the existing synthetic PagerDuty allowlist remains separate.
+
+Configure the external Healthchecks check manually with a **five-minute period** and **two-minute
+grace**, and connect that check to PagerDuty in the Healthchecks dashboard. No Healthchecks account
+credential belongs in this repository. Install or rotate the ping URL using hidden terminal input,
+then inspect only its Kubernetes key contract:
+
+```bash
+just observability-watchdog-secret-install env=staging
+just observability-watchdog-secret-check env=staging
+just observability-render env=staging >/dev/null
+just observability-upgrade env=staging
+just observability-watchdog-verify env=staging
+```
+
+The installer rejects URL arguments and environment variables, requires the `sugar-staging` context
+and staging cluster identity, and streams the Secret through stdin. Rendering is cluster-independent
+and contains only `url_file`; installation and upgrade fail before Helm mutation unless both the
+PagerDuty `routing-key` and watchdog `ping-url` contracts are nonempty. After verification, manually
+confirm that the Healthchecks **last ping** advanced. Expected steady-state delivery is about every
+five minutes; with the configured grace, loss should become Down and page through the external
+Healthchecks → PagerDuty integration in roughly seven minutes, plus provider delivery latency.
+
+### Controlled failure drill
+
+**MANUAL CHECKPOINT:** before creating the silence, confirm Healthchecks is Up, its last ping is
+recent, the Healthchecks → PagerDuty integration is enabled, and an operator is ready to acknowledge
+the incident. The helper never shuts down a node and never directly pings the URL.
+
+```bash
+just observability-watchdog-drill-create env=staging
+just observability-watchdog-drill-status env=staging
+# Optional early recovery:
+just observability-watchdog-drill-clear env=staging
+```
+
+The owned silence matches exactly `alertname`, `environment`, `cluster`, and `purpose`, and expires
+automatically after eight minutes—slightly longer than the five-minute period plus two-minute grace.
+Thus recovery is automatic if the operator disconnects. Do not make automated tests wait through the
+drill. Manually confirm Healthchecks transitions Down, a Healthchecks-generated PagerDuty incident
+arrives, and acknowledge it. At silence expiry (or after the optional early clear), confirm a new ping,
+the Healthchecks transition to Up, and PagerDuty recovery/resolution.
+
+### Watchdog rollback
+
+**Before any rollback that removes the watchdog receiver, pause the Healthchecks check or disable its
+PagerDuty integration; otherwise the rollback itself can generate a page.** Then roll back the Helm
+release, verify the prior revision, and only remove `alertmanager-healthchecks-watchdog` after the
+Alertmanager custom resource no longer mounts it. Keep the external check paused until the dead-man
+sender has been restored or intentionally retired.

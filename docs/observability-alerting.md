@@ -231,3 +231,17 @@ it is deployed yet — see the rollout plan above for the actual sequencing.
 - Per-node heartbeat assets are repository-ready but have not been installed on the Pis. The
   node-power-off drill, watchdog, `KubeNodeNotReady` routing, and application alerts remain later
   work.
+
+## Staging observability watchdog routing
+
+The staging implementation now separates four signals: node heartbeats prove each machine can reach
+an external service; the observability watchdog proves Prometheus, Alertmanager, and outbound webhook
+delivery remain alive; ordinary Prometheus alerts still fall through to the null receiver unless
+explicitly allowlisted; and blackbox probes test externally reachable application endpoints without
+proving the monitoring stack itself can deliver a page.
+
+Only the exact watchdog labels route to the secret-file-backed Healthchecks webhook. Healthchecks is
+configured externally for a five-minute period and two-minute grace and owns the PagerDuty
+integration. The existing exact synthetic PagerDuty route is unchanged and remains first. See the
+[observability watchdog runbook](observability-operations.md#observability-watchdog) for secret
+installation, deployment, live checks, failure drill, recovery, latency, and rollback.
