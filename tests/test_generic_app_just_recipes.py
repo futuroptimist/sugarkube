@@ -189,7 +189,7 @@ if [ "${{1:-}}" = upgrade ]; then
 fi
 if [[ "$*" == *"status dspace --namespace dspace -o json" ]]; then
   chart_version="${{SUGARKUBE_STUB_CHART_VERSION:-3.1.0}}"
-  if [ -z "${{SUGARKUBE_STUB_CHART_VERSION:-}}" ] && [ "${{SUGARKUBE_STUB_NODE_ENV:-staging}}" = prod ]; then chart_version=3.0.1; fi
+  if [ -z "${{SUGARKUBE_STUB_CHART_VERSION:-}}" ] && [ "${{SUGARKUBE_STUB_NODE_ENV:-staging}}" = prod ]; then chart_version=3.0.2; fi
   description="$(cat {str(tmp_path / "helm-description")!r} 2>/dev/null || true)"
   revision=7
   if [[ "$*" == *"staging-kubeconfig"* ]]; then
@@ -211,7 +211,7 @@ if [[ "$*" == show\ chart* ]]; then
     version="${{*: -1}}"
     if [[ "$version" == oci://*@sha256:* ]]; then
       version="${{SUGARKUBE_STUB_CHART_VERSION:-3.1.0}}"
-      if [ -z "${{SUGARKUBE_STUB_CHART_VERSION:-}}" ] && [ "${{SUGARKUBE_STUB_NODE_ENV:-staging}}" = prod ]; then version=3.0.1; fi
+      if [ -z "${{SUGARKUBE_STUB_CHART_VERSION:-}}" ] && [ "${{SUGARKUBE_STUB_NODE_ENV:-staging}}" = prod ]; then version=3.0.2; fi
     fi
     printf 'apiVersion: v2\nname: dspace\nversion: %s\nappVersion: main-abcdef0\n' "$version"
     exit 0
@@ -1208,7 +1208,7 @@ def test_dspace_production_rejects_staging_metrics_leaks() -> None:
         "dspace",
         "dspace",
         "oci://example/charts/dspace",
-        "3.0.1",
+        "3.0.2",
         (),
         "main-deadbee",
         "democratized.space",
@@ -2513,7 +2513,7 @@ def _write_dspace_candidate(
                 "sourceRevision": "abcdef0123456789abcdef0123456789abcdef01",
                 "imageTag": "main-abcdef0",
                 "imageDigest": image_digest or "sha256:" + "1" * 64,
-                "chartVersion": "3.1.0" if environment == "staging" else "3.0.1",
+                "chartVersion": "3.1.0" if environment == "staging" else "3.0.2",
                 "chartDigest": "sha256:" + "2" * 64,
                 "semanticTag": "v3.2.0",
                 "recordType": "candidate",
@@ -2542,6 +2542,53 @@ def _run_dspace_manifest_rollback(
     env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
     result = _run_just(["dspace-manifest-rollback", *args], env)
     return result, log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_dspace_recovery_staging_config_uses_production_chart_pin(
+    tmp_path: Path, generic_app_stub_env: dict[str, str]
+) -> None:
+    source = (REPO_ROOT / "docs/examples/apps/dspace.env").read_text(encoding="utf-8")
+    staging_pin = "SUGARKUBE_VERSION_FILE_STAGING=docs/apps/dspace.staging.version"
+    assert source.count(staging_pin) == 1
+    recovery_config = tmp_path / "recovery-staging.env"
+    recovery_config.write_text(
+        source.replace(
+            staging_pin,
+            "SUGARKUBE_VERSION_FILE_STAGING=docs/apps/dspace.prod.version",
+        ),
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "recovery-staging.json"
+    evidence = tmp_path / "recovery-staging-evidence.json"
+    _write_dspace_candidate(manifest, "staging")
+    candidate = json.loads(manifest.read_text(encoding="utf-8"))
+    candidate["chartVersion"] = "3.0.2"
+    manifest.write_text(json.dumps(candidate) + "\n", encoding="utf-8")
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_CHART_VERSION"] = "3.0.2"
+
+    result = _run_just(
+        [
+            "app-deploy",
+            "app=dspace",
+            "env=staging",
+            "tag=main-abcdef0",
+            f"config={recovery_config}",
+            f"manifest={manifest}",
+            f"evidence={evidence}",
+            f"smoke_runner={env['DSPACE_SMOKE_RUNNER']}",
+        ],
+        env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    commands = (tmp_path / "commands.log").read_text(encoding="utf-8")
+    assert "release-manifest preflight" in commands
+    assert "helm template " in commands
+    assert "charts/dspace:3.0.2" in commands
+    assert "docs/examples/dspace.values.staging.yaml" in commands
+    assert "main-abcdef0" in commands
 
 
 @pytest.mark.usefixtures("ensure_just_available")
@@ -3112,12 +3159,12 @@ def test_dspace_prod_verifier_failure_preserves_post_mutation_reservation(
     )
     assert staged.returncode == 0, staged.stderr + staged.stdout
     staging_record = json.loads(staging_evidence.read_text(encoding="utf-8"))
-    staging_record["chartVersion"] = "3.0.1"
+    staging_record["chartVersion"] = "3.0.2"
     staging_evidence.write_text(json.dumps(staging_record) + "\n", encoding="utf-8")
     _write_dspace_candidate(prod_manifest, "prod")
     env = generic_app_stub_env.copy()
     env["SUGARKUBE_STUB_NODE_ENV"] = "prod"
-    env["SUGARKUBE_STUB_CHART_VERSION"] = "3.0.1"
+    env["SUGARKUBE_STUB_CHART_VERSION"] = "3.0.2"
     env["SUGARKUBE_STUB_PROD_VERIFIER_FAIL"] = "1"
     for name in ("helm.log", "commands.log", "runtime-verifier.log"):
         (tmp_path / name).write_text("", encoding="utf-8")
