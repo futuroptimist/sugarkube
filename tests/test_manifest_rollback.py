@@ -50,6 +50,17 @@ def target(environment: str = "staging") -> dict[str, object]:
     return manifest.validate(value, True)
 
 
+def test_schema_v2_final_target_projects_split_provenance_for_rollback() -> None:
+    value = target()
+    value["schemaVersion"] = 2
+    value["chartSourceRevision"] = "1234567890abcdef1234567890abcdef12345678"
+    validated = manifest.validate(value, True)
+    projected = {field: validated[field] for field in manifest.candidate_fields(validated)}
+    projected["recordType"] = "candidate"
+
+    assert manifest.validate(projected, False)["chartSourceRevision"] != projected["sourceRevision"]
+
+
 def verifier_result(**changes: object) -> dict[str, object]:
     value = {
         "schemaVersion": 1,
