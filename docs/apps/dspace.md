@@ -165,6 +165,134 @@ If the chart changed, bump the chart version in the DSPACE app repo and publish 
 gh workflow run ci-helm.yml --repo democratizedspace/dspace --ref main
 ```
 
+## Production 3.0.2 chart reconciliation (Refs #2325)
+
+This section **prepares** the first reconciliation; it does not authorize or execute it and does
+not lift the production Helm freeze. The immutable input is
+`docs/apps/dspace.recovery-3.0.2.coordinates.json`. Its schema-version-2
+`sourceRevision` identifies application/image `3.0.1`, while `chartSourceRevision` identifies the
+independently built recovery chart `3.0.2`. The `semanticTag` is corroborating metadata only;
+never deploy or republish `v3.0.1`. The downloaded archive checksum is not an OCI manifest digest.
+
+### 1. Repository preparation and operator approval
+
+Start from a reviewed commit, install `oras`, `helm`, `kubectl`, and `jq`, and set distinct
+kubeconfigs plus an executable remote smoke runner. Do not put credentials in these variables.
+Before supplying approval metadata, inspect the immutable application contract at source revision
+`1a31a569aff2dbeb238e8c2688b9e85140d2077d`. Application `3.0.1` must be OpenAI-first; stop if its
+documented/configured default contradicts `openai`.
+
+```bash
+export COORDINATES=docs/apps/dspace.recovery-3.0.2.coordinates.json
+export STAGING_KUBECONFIG=/absolute/path/to/staging.kubeconfig
+export PROD_KUBECONFIG=/absolute/path/to/prod.kubeconfig
+export DSPACE_SMOKE_RUNNER=/absolute/path/to/executable-dspace-chat-smoke
+test "$STAGING_KUBECONFIG" != "$PROD_KUBECONFIG"
+test -r "$STAGING_KUBECONFIG" && test -r "$PROD_KUBECONFIG"
+test -x "$DSPACE_SMOKE_RUNNER"
+
+# Operator-supplied values; use the real approval record, never these placeholders.
+export STAGING_APPROVED_AT='<YYYY-MM-DDTHH:MM:SSZ>' STAGING_APPROVED_BY='<identity-or-record>'
+export PROD_APPROVED_AT='<YYYY-MM-DDTHH:MM:SSZ>' PROD_APPROVED_BY='<identity-or-record>'
+mkdir -p deployment-candidates/dspace
+python3 scripts/dspace_release_manifest.py candidate --upstream "$COORDINATES" \
+  --output deployment-candidates/dspace/recovery-3.0.2-staging.json \
+  --environment staging --provider openai \
+  --approved-at "$STAGING_APPROVED_AT" --approved-by "$STAGING_APPROVED_BY"
+python3 scripts/dspace_release_manifest.py candidate --upstream "$COORDINATES" \
+  --output deployment-candidates/dspace/recovery-3.0.2-prod.json \
+  --environment prod --provider openai \
+  --approved-at "$PROD_APPROVED_AT" --approved-by "$PROD_APPROVED_BY"
+```
+
+### 2. Staging proof for the exact recovery pair
+
+Preflight resolves both OCI descriptors and independently checks image and chart revision
+annotations. Render validation happens inside the guarded recipe before evidence reservation.
+
+```bash
+STAGING_CANDIDATE=deployment-candidates/dspace/recovery-3.0.2-staging.json
+PROD_CANDIDATE=deployment-candidates/dspace/recovery-3.0.2-prod.json
+python3 scripts/dspace_release_manifest.py preflight --manifest "$STAGING_CANDIDATE" \
+  --environment staging --image-tag main-1a31a56 --chart-version 3.0.2
+just app-deploy app=dspace env=staging tag=main-1a31a56 manifest="$STAGING_CANDIDATE" \
+  smoke_runner="$DSPACE_SMOKE_RUNNER" kubeconfig="$STAGING_KUBECONFIG"
+export STAGING_EVIDENCE="$(python3 scripts/dspace_release_manifest.py evidence-path \
+  --manifest "$STAGING_CANDIDATE")"
+python3 scripts/dspace_release_manifest.py validate --manifest "$STAGING_EVIDENCE" --final
+python3 scripts/dspace_release_manifest.py staging-gate --manifest "$PROD_CANDIDATE" \
+  --staging-evidence "$STAGING_EVIDENCE"
+```
+
+The finalized staging record must cover application `3.0.1`, image tag/digest, chart
+version/digest, both source revisions, runtime/frontend application revision, OpenAI provider, and
+the remote `/chat` journey. A staging record is never production evidence.
+
+### 3. Read-only production capture and guarded mutation
+
+Create a timestamped operator evidence directory outside the repository. The following bounded
+capture records identities, not Secret bodies. Review `helm get values` locally and redact any
+unexpected literal secret before preserving it; legitimate `secretKeyRef` names may remain.
+
+```bash
+export CAPTURE="operator-evidence/dspace-reconcile-$(date -u +%Y%m%dT%H%M%SZ)"
+install -d -m 0700 "$CAPTURE"
+helm --kubeconfig "$PROD_KUBECONFIG" history dspace -n dspace -o json --max 10 >"$CAPTURE/helm-history.json"
+helm --kubeconfig "$PROD_KUBECONFIG" status dspace -n dspace -o json >"$CAPTURE/helm-status.json"
+kubectl --kubeconfig "$PROD_KUBECONFIG" -n dspace get deployment dspace \
+  -o jsonpath='{.metadata.uid}{"\n"}{.spec.template.spec.containers[?(@.name=="dspace")].image}{"\n"}' \
+  >"$CAPTURE/deployment-identity.txt"
+kubectl --kubeconfig "$PROD_KUBECONFIG" -n dspace get pods \
+  -l app.kubernetes.io/name=dspace,app.kubernetes.io/instance=dspace \
+  -o custom-columns=NAME:.metadata.name,UID:.metadata.uid,START:.status.startTime,IMAGE_ID:.status.containerStatuses[0].imageID \
+  >"$CAPTURE/pods.txt"
+just dspace-release-verify prod "$PROD_CANDIDATE" "$DSPACE_SMOKE_RUNNER" \
+  kubeconfig="$PROD_KUBECONFIG" >"$CAPTURE/prechange-runtime.json" || true
+python3 scripts/dspace_release_manifest.py preflight --manifest "$PROD_CANDIDATE" \
+  --environment prod --image-tag main-1a31a56 --chart-version 3.0.2
+
+# Maintenance approval is a separate human gate. Only then run the guarded recipe; never use raw
+# helm upgrade, helm rollback, --reuse-values, or kubectl apply.
+just app-promote-prod app=dspace tag=main-1a31a56 manifest="$PROD_CANDIDATE" \
+  staging_evidence="$STAGING_EVIDENCE" smoke_runner="$DSPACE_SMOKE_RUNNER" \
+  kubeconfig="$PROD_KUBECONFIG" staging_kubeconfig="$STAGING_KUBECONFIG"
+export PROD_EVIDENCE="$(python3 scripts/dspace_release_manifest.py evidence-path \
+  --manifest "$PROD_CANDIDATE")"
+python3 scripts/dspace_release_manifest.py validate --manifest "$PROD_EVIDENCE" --final
+just dspace-release-verify prod "$PROD_EVIDENCE" "$DSPACE_SMOKE_RUNNER" \
+  kubeconfig="$PROD_KUBECONFIG" >"$CAPTURE/postchange-runtime.json"
+```
+
+Review the finalized evidence and bounded capture together. Helm stored values, the installed
+chart, Deployment, every serving pod, resolved image digest, application/runtime/frontend
+revision, chart provenance, public/direct identity, health paths, configuration, provider, and
+`/chat` must agree. Keep all timestamped evidence. Lift the freeze only after the production final
+record exists, every check passed, and the operator approval/review is recorded; otherwise keep it.
+
+### 4. Failure reconciliation and initial rollback
+
+On a post-reservation failure, preserve the bounded failed evidence and capture current Helm/pod
+identity before doing anything else. Do not fabricate a final record for revision 8 and do not use
+its obsolete values. For this first reconciliation, the only immutable recovery target available
+is the newly finalized **production** record created above. If it exists and is independently
+reviewed, reconcile back to it with the general digest-qualified rollback primitive and explicit
+production confirmation:
+
+```bash
+test -f "$PROD_EVIDENCE"
+python3 scripts/dspace_release_manifest.py validate --manifest "$PROD_EVIDENCE" --final
+just dspace-manifest-rollback env=prod manifest="$PROD_EVIDENCE" \
+  evidence="$CAPTURE/rollback-$(date -u +%Y%m%dT%H%M%SZ).json" \
+  verifier=scripts/dspace_runtime_verifier.py smoke_runner="$DSPACE_SMOKE_RUNNER" \
+  kubeconfig="$PROD_KUBECONFIG" \
+  confirm='dspace:prod:1a31a569aff2dbeb238e8c2688b9e85140d2077d'
+```
+
+If no finalized production record exists, stop and reconcile manually under the freeze: there is
+no truthful automated rollback target. Never substitute staging evidence, semantic `v3.0.1`, a
+mutable tag, `helm rollback <revision>`, or `--reuse-values`. A failed rollback also stops for
+review; do not chain another mutation.
+
 ## Deploy staging
 
 ### Release-manifest approval and evidence flow

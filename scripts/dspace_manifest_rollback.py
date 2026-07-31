@@ -627,16 +627,22 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
         "startedAt": started,
         "sugarkubeRevision": sugarkube_revision,
         "target": {
-            key: target[key]
+            key: (
+                release.chart_source_revision(target)
+                if key == "chartSourceRevision"
+                else target[key]
+            )
             for key in (
                 "chartVersion",
                 "chartDigest",
                 "imageTag",
                 "imageDigest",
                 "sourceRevision",
+                "chartSourceRevision",
                 "applicationVersion",
                 "expectedDefaultChatProvider",
             )
+            if key in target or key == "chartSourceRevision"
         },
         "values": values_proof,
         "before": {

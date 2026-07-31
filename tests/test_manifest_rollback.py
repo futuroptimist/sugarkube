@@ -12,6 +12,7 @@ from scripts import dspace_manifest_rollback as rollback
 from scripts import dspace_release_manifest as manifest
 
 SHA = "abcdef0123456789abcdef0123456789abcdef01"
+CHART_SHA = "1234567890abcdef1234567890abcdef12345678"
 DIGEST = "sha256:" + "1" * 64
 
 
@@ -48,6 +49,15 @@ def target(environment: str = "staging") -> dict[str, object]:
         {"check": check, "passed": True, "details": "observed"} for check in checks
     ]
     return manifest.validate(value, True)
+
+
+def test_schema_v2_split_provenance_is_valid_for_rollback_and_evidence_target() -> None:
+    value = target()
+    value["schemaVersion"] = 2
+    value["chartSourceRevision"] = CHART_SHA
+    validated = manifest.validate(value, True)
+    assert validated["sourceRevision"] == SHA
+    assert manifest.chart_source_revision(validated) == CHART_SHA
 
 
 def verifier_result(**changes: object) -> dict[str, object]:
