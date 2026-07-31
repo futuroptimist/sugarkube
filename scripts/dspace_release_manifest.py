@@ -279,7 +279,9 @@ def validate(value: dict[str, Any], finalized: bool | None = None) -> dict[str, 
         elif checks & RUNTIME_VERIFICATION_CHECKS:
             raise ManifestError("runtime verification results require runtimeVerification proof")
         if sorted(platform_indices) != list(range(len(platform_indices))):
-            raise ManifestError("image platform verification indices must be contiguous from zero")
+            raise ManifestError(
+                "image platform verification indices must be contiguous from zero"
+            )
         if not platform_indices:
             raise ManifestError("at least one image platform verification result is required")
     return value
@@ -300,7 +302,9 @@ def _write_new(path: Path, value: dict[str, Any]) -> None:
         try:
             os.link(temporary, path)
         except FileExistsError as exc:
-            raise ManifestError(f"refusing to overwrite existing record: {path}") from exc
+            raise ManifestError(
+                f"refusing to overwrite existing record: {path}"
+            ) from exc
         _sync_directory(path.parent)
     finally:
         Path(temporary).unlink(missing_ok=True)
@@ -353,7 +357,9 @@ def reserve(
     try:
         fd = os.open(sidecar, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError as exc:
-        raise ManifestError(f"evidence destination is already reserved: {sidecar}") from exc
+        raise ManifestError(
+            f"evidence destination is already reserved: {sidecar}"
+        ) from exc
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
             stream.write(_canonical(metadata))
@@ -389,7 +395,9 @@ def verify_reservation(
     if not secrets.compare_digest(
         json.dumps(metadata, sort_keys=True), json.dumps(expected, sort_keys=True)
     ):
-        raise ManifestError("reservation ownership or deployment coordinates do not match")
+        raise ManifestError(
+            "reservation ownership or deployment coordinates do not match"
+        )
     if normalized.exists():
         raise ManifestError(f"refusing to overwrite existing record: {normalized}")
     return sidecar
@@ -749,7 +757,8 @@ def finalize(
             # Helm metadata proves name/version, not immutable OCI content. The
             # guarded mutation therefore installs this approved digest directly.
             "details": (
-                f"chart=dspace; version={chart_version}; " f"coordinate={chart_coordinate(value)}"
+                f"chart=dspace; version={chart_version}; "
+                f"coordinate={chart_coordinate(value)}"
             ),
         },
         {
@@ -851,7 +860,9 @@ def main(argv: list[str] | None = None) -> int:
     finish.add_argument("--image-ref", default=IMAGE_REF)
     finish.add_argument("--chart-ref", default=CHART_REF)
     finish.add_argument("--reservation", required=True)
-    finish.add_argument("--oras-command", default=os.environ.get("SUGARKUBE_ORAS_COMMAND", "oras"))
+    finish.add_argument(
+        "--oras-command", default=os.environ.get("SUGARKUBE_ORAS_COMMAND", "oras")
+    )
     finish.add_argument("--runtime-verification", type=Path)
     gate = sub.add_parser("staging-gate")
     gate.add_argument("--manifest", type=Path, required=True)
@@ -1010,9 +1021,10 @@ def main(argv: list[str] | None = None) -> int:
                     metadata.get("version"),
                 )
 
-            if binding_fields(settled_helm) != binding_fields(helm) or binding_fields(
-                stable_helm
-            ) != binding_fields(helm):
+            if (
+                binding_fields(settled_helm) != binding_fields(helm)
+                or binding_fields(stable_helm) != binding_fields(helm)
+            ):
                 raise ManifestError("Helm release changed during evidence collection")
             _write_new(args.output, result)
             sidecar.unlink()
@@ -1021,7 +1033,9 @@ def main(argv: list[str] | None = None) -> int:
             print(staging_gate(_object(args.manifest), _object(args.staging_evidence)))
         elif args.command == "check-output":
             if args.output.exists():
-                raise ManifestError(f"refusing to overwrite existing record: {args.output}")
+                raise ManifestError(
+                    f"refusing to overwrite existing record: {args.output}"
+                )
         elif args.command == "reserve":
             sys.stdout.write(
                 reserve(
