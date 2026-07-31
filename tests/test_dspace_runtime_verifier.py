@@ -1,4 +1,5 @@
 import json
+import subprocess
 from argparse import Namespace
 from pathlib import Path
 
@@ -71,19 +72,29 @@ def test_values_expectations_use_ordered_overlay(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("provider,has_token_args", [("token-place", True), ("openai", False)])
+@pytest.mark.parametrize("rollback", [False, True], ids=("standard", "rollback"))
 def test_verify_uses_safe_exact_smoke_argv(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, provider: str, has_token_args: bool
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    provider: str,
+    has_token_args: bool,
+    rollback: bool,
 ) -> None:
     smoke = tmp_path / "smoke"
     smoke.write_text("#!/bin/sh\nexit 0\n")
     smoke.chmod(0o700)
+    canonical_image = "ghcr.io/democratizedspace/dspace:main-abcdef0"
+    declared_image = f"{canonical_image}@{DIGEST}" if rollback else canonical_image
     pod = {
-        "metadata": {"name": "dspace-1"},
+        "metadata": {
+            "name": "dspace-1",
+            "ownerReferences": [{"kind": "ReplicaSet", "name": "dspace-rs", "uid": "rs-1"}],
+        },
         "spec": {
             "containers": [
                 {
                     "name": "dspace",
-                    "image": "ghcr.io/democratizedspace/dspace:main-abcdef0@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+                    "image": declared_image,
                 }
             ]
         },
@@ -98,26 +109,36 @@ def test_verify_uses_safe_exact_smoke_argv(
             "version": "3.1.0",
             "revision": SHA,
             "shortRevision": "abcdef0",
-            "image": "ghcr.io/democratizedspace/dspace:main-abcdef0@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            "image": canonical_image,
         }
     )
     html = f'<meta name="dspace-build-revision" content="{SHA}">'
 
     def command(argv: list[str]) -> str:
         if argv and argv[0] == "helm":
-            return json.dumps({"chart": "dspace-1.2.3", "version": 7})
+            return json.dumps(
+                {"chart": {"metadata": {"name": "dspace", "version": "3.1.0"}}, "version": 7}
+            )
         if "pods" in argv:
             return json.dumps({"items": [pod]})
         if "deployment" in argv:
             return json.dumps(
                 {
+                    "metadata": {
+                        "name": "dspace",
+                        "uid": "deploy-1",
+                        "labels": {
+                            "app.kubernetes.io/managed-by": "Helm",
+                            "app.kubernetes.io/instance": "dspace",
+                        },
+                    },
                     "spec": {
                         "template": {
                             "spec": {
                                 "containers": [
                                     {
                                         "name": "dspace",
-                                        "image": "ghcr.io/democratizedspace/dspace:main-abcdef0@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+                                        "image": declared_image,
                                         "env": [
                                             {
                                                 "name": "DSPACE_TOKEN_PLACE_URL",
@@ -132,6 +153,18 @@ def test_verify_uses_safe_exact_smoke_argv(
                                 ]
                             }
                         }
+                    },
+                }
+            )
+        if "replicaset" in argv:
+            return json.dumps(
+                {
+                    "metadata": {
+                        "name": "dspace-rs",
+                        "uid": "rs-1",
+                        "ownerReferences": [
+                            {"kind": "Deployment", "name": "dspace", "uid": "deploy-1"}
+                        ],
                     }
                 }
             )
@@ -174,6 +207,7 @@ def test_verify_uses_safe_exact_smoke_argv(
         host=None,
         smoke_runner=str(smoke),
         kubeconfig="kubeconfig",
+        expected_helm_revision=None,
     )
     result = verifier.verify(args)
     assert list(result) == list(verifier.RESULT_FIELDS)
@@ -213,4 +247,122 @@ def test_cli_rejects_unknown_fields() -> None:
                 "dspace",
                 "--unknown",
             ]
+        )
+
+
+def test_main_never_echoes_unknown_argument_value(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert (
+        verifier.main(
+            [
+                "capabilities",
+                "--environment",
+                "staging",
+                "--release",
+                "dspace",
+                "--namespace",
+                "dspace",
+                "--unknown",
+                "SENTINEL_SECRET",
+            ]
+        )
+        == 2
+    )
+    captured = capsys.readouterr()
+    assert "SENTINEL_SECRET" not in captured.out + captured.err
+
+
+@pytest.mark.parametrize(
+    "status,expected_revision,category",
+    [
+        (
+            {"chart": {"metadata": {"name": "other", "version": "3.1.0"}}, "version": 7},
+            None,
+            "cluster identity",
+        ),
+        (
+            {"chart": {"metadata": {"name": "dspace", "version": "3.0.0"}}, "version": 7},
+            None,
+            "cluster identity",
+        ),
+        (
+            {"chart": {"metadata": {"name": "dspace", "version": "3.1.0"}}, "version": 0},
+            None,
+            "cluster identity",
+        ),
+        (
+            {"chart": {"metadata": {"name": "dspace", "version": "3.1.0"}}, "version": 7},
+            6,
+            "staging drift",
+        ),
+    ],
+)
+def test_helm_identity_rejects_wrong_real_status_fields(
+    monkeypatch: pytest.MonkeyPatch,
+    status: dict[str, object],
+    expected_revision: int | None,
+    category: str,
+) -> None:
+    monkeypatch.setattr(verifier, "command", lambda argv: json.dumps(status))
+    args = Namespace(
+        kubeconfig="k",
+        release="dspace",
+        namespace="dspace",
+        expected_helm_revision=expected_revision,
+    )
+    with pytest.raises(verifier.VerificationError, match=category):
+        verifier.helm_identity(args, "3.1.0")
+
+
+def test_helm_identity_accepts_real_status_schema(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        verifier,
+        "command",
+        lambda argv: json.dumps(
+            {"chart": {"metadata": {"name": "dspace", "version": "3.1.0"}}, "version": 7}
+        ),
+    )
+    args = Namespace(kubeconfig="k", release="dspace", namespace="dspace", expected_helm_revision=7)
+    assert verifier.helm_identity(args, "3.1.0") == ("dspace", "3.1.0", 7)
+
+
+def test_command_timeout_is_bounded_and_redacted(monkeypatch: pytest.MonkeyPatch) -> None:
+    def timeout(*args: object, **kwargs: object) -> None:
+        raise subprocess.TimeoutExpired(["kubectl", "SENTINEL_SECRET"], 15)
+
+    monkeypatch.setattr(verifier.subprocess, "run", timeout)
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.command(["kubectl", "SENTINEL_SECRET"])
+    assert str(raised.value) == "cluster identity"
+    assert "SENTINEL_SECRET" not in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    "payload,category",
+    [
+        ({"version": "wrong", "revision": SHA, "shortRevision": "abcdef0"}, "public identity"),
+        ({"version": "3.1.0", "revision": "wrong", "shortRevision": "abcdef0"}, "public identity"),
+        ({"version": "3.1.0", "revision": SHA, "shortRevision": "wrong"}, "public identity"),
+        (
+            {
+                "version": "3.1.0",
+                "revision": SHA,
+                "shortRevision": "abcdef0",
+                "image": f"ghcr.io/democratizedspace/dspace:main-abcdef0@{DIGEST}",
+            },
+            "public identity",
+        ),
+    ],
+)
+def test_build_identity_requires_canonical_coordinates(
+    payload: dict[str, str], category: str
+) -> None:
+    with pytest.raises(verifier.VerificationError, match=category):
+        verifier.identity(
+            json.dumps(payload).encode(),
+            "3.1.0",
+            SHA,
+            "ghcr.io/democratizedspace/dspace:main-abcdef0",
+            category,
         )

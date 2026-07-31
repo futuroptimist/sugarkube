@@ -57,7 +57,10 @@ def fail(category: str) -> None:
 
 
 def command(argv: list[str]) -> str:
-    completed = subprocess.run(argv, text=True, capture_output=True, check=False)
+    try:
+        completed = subprocess.run(argv, text=True, capture_output=True, check=False, timeout=15)
+    except subprocess.TimeoutExpired:
+        fail("cluster identity")
     if completed.returncode:
         fail("cluster identity")
     return completed.stdout
@@ -169,6 +172,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         "provider": manifest["expectedDefaultChatProvider"],
         "image_tag": manifest["imageTag"],
         "digest": manifest["imageDigest"],
+        "chart_version": manifest["chartVersion"],
     }
     for field, supplied in (
         ("version", args.application_version),
@@ -215,7 +219,9 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
     if not pods:
         fail("pod/replica identity")
 
-    approved_image = f"{release_manifest.IMAGE_REF}:{expected['image_tag']}@{expected['digest']}"
+    canonical_image = f"{release_manifest.IMAGE_REF}:{expected['image_tag']}"
+    rollback_image = f"{canonical_image}@{expected['digest']}"
+    permitted_images = {canonical_image, rollback_image}
     token_values = values_expectations(values) if expected["provider"] == "token-place" else None
     try:
         deployment = json.loads(
@@ -234,11 +240,22 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
                 ]
             )
         )
+        deployment_metadata = deployment["metadata"]
         containers = deployment["spec"]["template"]["spec"]["containers"]
         applications = [item for item in containers if item.get("name") == "dspace"]
     except (json.JSONDecodeError, KeyError, TypeError):
         fail("cluster identity")
-    if len(applications) != 1 or applications[0].get("image") != approved_image:
+    deployment_uid = deployment_metadata.get("uid")
+    deployment_labels = deployment_metadata.get("labels", {})
+    declared_image = applications[0].get("image") if len(applications) == 1 else None
+    if (
+        deployment_metadata.get("name") != args.release
+        or not isinstance(deployment_uid, str)
+        or not deployment_uid
+        or deployment_labels.get("app.kubernetes.io/managed-by") != "Helm"
+        or deployment_labels.get("app.kubernetes.io/instance") != args.release
+        or declared_image not in permitted_images
+    ):
         fail("cluster identity")
     if token_values is not None:
         live_env = {item.get("name"): item.get("value") for item in applications[0].get("env", [])}
@@ -248,7 +265,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         ):
             fail("cluster identity")
 
-    helm_before = helm_identity(args)
+    helm_before = helm_identity(args, expected["chart_version"])
 
     direct_names = []
     for pod in pods:
@@ -260,13 +277,48 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
             for c in status.get("conditions", [])
         ):
             fail("pod/replica identity")
+        owners = metadata.get("ownerReferences", [])
+        if len(owners) != 1 or owners[0].get("kind") != "ReplicaSet":
+            fail("pod/replica identity")
+        replica_set_name, replica_set_uid = owners[0].get("name"), owners[0].get("uid")
+        if not isinstance(replica_set_name, str) or not isinstance(replica_set_uid, str):
+            fail("pod/replica identity")
+        try:
+            replica_set = json.loads(
+                command(
+                    [
+                        "kubectl",
+                        "--kubeconfig",
+                        args.kubeconfig,
+                        "-n",
+                        args.namespace,
+                        "get",
+                        "replicaset",
+                        replica_set_name,
+                        "-o",
+                        "json",
+                    ]
+                )
+            )
+            rs_metadata = replica_set["metadata"]
+            rs_owners = rs_metadata["ownerReferences"]
+        except (json.JSONDecodeError, KeyError, TypeError, VerificationError):
+            fail("pod/replica identity")
+        if (
+            rs_metadata.get("name") != replica_set_name
+            or rs_metadata.get("uid") != replica_set_uid
+            or len(rs_owners) != 1
+            or rs_owners[0].get("kind") != "Deployment"
+            or rs_owners[0].get("name") != args.release
+            or rs_owners[0].get("uid") != deployment_uid
+        ):
+            fail("pod/replica identity")
         containers = [c for c in spec.get("containers", []) if c.get("name") == "dspace"]
         statuses = [c for c in status.get("containerStatuses", []) if c.get("name") == "dspace"]
-        if len(containers) != 1 or containers[0].get("image") != approved_image:
+        if len(containers) != 1 or containers[0].get("image") != declared_image:
             fail("pod/replica identity")
-        if len(statuses) != 1 or not str(statuses[0].get("imageID", "")).endswith(
-            expected["digest"]
-        ):
+        image_id = statuses[0].get("imageID") if len(statuses) == 1 else None
+        if not isinstance(image_id, str) or image_id.rsplit("@", 1)[-1] != expected["digest"]:
             fail("pod/replica identity")
         name = metadata.get("name")
         if not isinstance(name, str) or not name:
@@ -283,7 +335,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
             direct_build,
             expected["version"],
             expected["revision"],
-            approved_image,
+            canonical_image,
             "direct identity",
         )
         if direct_names and "replica_identity" in locals() and direct_identity != replica_identity:
@@ -295,7 +347,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         fetch(base_url + "/build-info.json", origin),
         expected["version"],
         expected["revision"],
-        approved_image,
+        canonical_image,
         "public identity",
     )
     if public_identity != replica_identity:
@@ -322,11 +374,24 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
             "--expected-token-place-model",
             token_model,
         ]
-    if helm_identity(args) != helm_before:
-        fail("cluster identity")
-    completed = subprocess.run(smoke_argv, text=True, capture_output=True, check=False)
+    try:
+        completed = subprocess.run(
+            smoke_argv, text=True, capture_output=True, check=False, timeout=300
+        )
+    except subprocess.TimeoutExpired:
+        fail("provider/chat smoke")
     if completed.returncode:
         fail("provider/chat smoke")
+    if (
+        helm_identity(
+            args,
+            expected["chart_version"],
+            validation_category="concurrent Helm change",
+            enforce_expected_revision=False,
+        )
+        != helm_before
+    ):
+        fail("concurrent Helm change")
     return {
         "schemaVersion": 1,
         "environment": args.environment,
@@ -344,7 +409,12 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-def helm_identity(args: argparse.Namespace) -> tuple[str, str, int]:
+def helm_identity(
+    args: argparse.Namespace,
+    chart_version: str,
+    validation_category: str = "cluster identity",
+    enforce_expected_revision: bool = True,
+) -> tuple[str, str, int]:
     try:
         status = json.loads(
             command(
@@ -361,18 +431,21 @@ def helm_identity(args: argparse.Namespace) -> tuple[str, str, int]:
                 ]
             )
         )
-        chart = status["chart"]
+        chart = status["chart"]["metadata"]
+        name = chart["name"]
+        version = chart["version"]
         revision = status["version"]
     except (json.JSONDecodeError, KeyError, TypeError):
-        fail("cluster identity")
-    if not isinstance(chart, str) or not chart.startswith("dspace-") or type(revision) is not int:
-        fail("cluster identity")
+        fail(validation_category)
+    if name != "dspace" or version != chart_version or type(revision) is not int or revision < 1:
+        fail(validation_category)
     if (
-        getattr(args, "expected_helm_revision", None) is not None
+        enforce_expected_revision
+        and getattr(args, "expected_helm_revision", None) is not None
         and revision != args.expected_helm_revision
     ):
-        fail("cluster identity")
-    return chart.rsplit("-", 1)[0], chart.rsplit("-", 1)[-1], revision
+        fail("staging drift")
+    return name, version, revision
 
 
 def _resolve_host(paths: list[Path]) -> str:
