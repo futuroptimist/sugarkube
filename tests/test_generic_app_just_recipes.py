@@ -65,6 +65,18 @@ else:
     print(json.dumps({"schemaVersion": 1, "environment": value("--environment"), "release": value("--release"), "namespace": value("--namespace"), "applicationVersion": manifest["applicationVersion"], "runtimeSourceRevision": manifest["sourceRevision"], "frontendSourceRevision": manifest["sourceRevision"], "defaultProvider": manifest["expectedDefaultChatProvider"], "journeys": [{"name": "/build-info.json", "passed": True}, {"name": "/", "passed": True}, {"name": "/chat", "passed": True}]}))
 """,
     )
+    runtime_verifier_log = tmp_path / "runtime-verifier.log"
+    _write_executable(
+        bin_dir / "python3",
+        f"""#!/bin/sh
+if [ "${{1:-}}" = {str(REPO_ROOT / 'scripts/dspace_runtime_verifier.py')!r} ]; then
+  printf '%s\\n' "$*" >> {str(runtime_verifier_log)!r}
+  shift
+  exec {sys.executable!r} {str(runtime_verifier)!r} "$@"
+fi
+exec {sys.executable!r} "$@"
+""",
+    )
     kubeconfig = """apiVersion: v1
 clusters:
 - cluster:
@@ -467,8 +479,8 @@ print(json.dumps(value))
     env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
     env["SUGARKUBE_HELM_ROLLOUT_TIMEOUT"] = "1s"
     env["DSPACE_SMOKE_RUNNER"] = str(smoke)
-    env["SUGARKUBE_DSPACE_RUNTIME_VERIFIER"] = str(runtime_verifier)
     env["HELM_LOG"] = str(log_path)
+    env["RUNTIME_VERIFIER_LOG"] = str(runtime_verifier_log)
     env["KUBECTL_LOG"] = str(tmp_path / "kubectl.log")
     env["CURL_LOG"] = str(tmp_path / "curl.log")
     return env
@@ -2532,6 +2544,39 @@ def _write_dspace_candidate(
         )
         + "\n",
         encoding="utf-8",
+    )
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_dspace_release_verify_ignores_runtime_verifier_override(
+    tmp_path: Path, generic_app_stub_env: dict[str, str]
+) -> None:
+    manifest = tmp_path / "candidate.json"
+    marker = tmp_path / "override-ran"
+    override = tmp_path / "runtime-verifier-override"
+    _write_dspace_candidate(manifest, "staging")
+    _write_executable(override, f"#!/bin/sh\ntouch {str(marker)!r}\n")
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_DSPACE_RUNTIME_VERIFIER"] = str(override)
+
+    result = _run_just(
+        [
+            "dspace-release-verify",
+            "staging",
+            str(manifest),
+            env["DSPACE_SMOKE_RUNNER"],
+            "",
+            str(tmp_path / "kubeconfig"),
+        ],
+        env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert not marker.exists()
+    invocations = Path(env["RUNTIME_VERIFIER_LOG"]).read_text(encoding="utf-8").splitlines()
+    assert len(invocations) == 1
+    assert invocations[0].startswith(
+        f"{REPO_ROOT / 'scripts/dspace_runtime_verifier.py'} verify "
     )
 
 

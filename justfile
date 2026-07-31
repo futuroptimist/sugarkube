@@ -1712,14 +1712,13 @@ dspace-release-verify env manifest smoke_runner config='' kubeconfig='' expected
         exit 2
       fi
     fi
-    verifier_path="${SUGARKUBE_DSPACE_RUNTIME_VERIFIER:-{{ justfile_directory() }}/scripts/dspace_runtime_verifier.py}"
     verifier_args=( \
       --environment "${selected_env}" --release dspace --namespace dspace \
       --manifest "${manifest_path}" --smoke-runner "${smoke_path}" \
       --kubeconfig "${kubeconfig_path}" )
     [ -z "${config_path}" ] || verifier_args+=(--config "${config_path}")
     [ -z "${expected_revision}" ] || verifier_args+=(--expected-helm-revision "${expected_revision}")
-    "${verifier_path}" verify "${verifier_args[@]}"
+    "{{ justfile_directory() }}/scripts/dspace_runtime_verifier.py" verify "${verifier_args[@]}"
 
 # Generic immutable-tag app deploy backed by docs/examples/apps/*.env or local app configs.
 app-deploy app env='staging' tag='' config='' manifest='' evidence='' staging_evidence='' smoke_runner='' kubeconfig='' staging_config='' staging_kubeconfig='':
