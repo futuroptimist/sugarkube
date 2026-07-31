@@ -401,3 +401,50 @@ observability codification are separate follow-ups. The existing blackbox Networ
 Alerting onboarding — real Alertmanager receivers, external heartbeats, and failure drills — is no
 longer undesigned scope creep; it is planned, designed work tracked in
 [`docs/observability-alerting.md`](observability-alerting.md), just not yet executed.
+
+## Observability watchdog
+
+The staging-only `SugarkubeObservabilityWatchdog` rule evaluates `vector(1)` every minute. Its exact
+`staging`/`sugarkube-int`/`observability-watchdog` labels route only to the secret-file-backed
+Healthchecks receiver. Alertmanager waits 30 seconds, groups by alert name, cluster, and environment,
+and repeats every five minutes; configure the Healthchecks check for a **five-minute period and
+two-minute grace**. Keep “last ping” confirmation manual: no Healthchecks account credential belongs
+in this repository.
+
+### Install, deploy, and verify
+
+1. Select the `sugar-staging` context and run
+   `just observability-watchdog-secret-install env=staging`. Input is hidden and must not be supplied
+   in argv or environment variables. Check only its contract with
+   `just observability-watchdog-secret-check env=staging`.
+2. Run `just observability-render env=staging >/dev/null`, then
+   `just observability-upgrade env=staging`. Install and upgrade refuse mutation unless both the
+   PagerDuty `routing-key` and watchdog `ping-url` Secret contracts are nonempty.
+3. Run `just observability-watchdog-verify env=staging`, then manually confirm Healthchecks **Last
+   Ping** advances. The command checks the firing rule and exact labels, active Alertmanager alert,
+   live CR/generated configuration, mount contract, and a bounded six-minute delivery-log window;
+   it accesses neither credential.
+
+Expected first delivery is within roughly 90 seconds (one-minute evaluation plus 30-second group
+wait), repeats are five minutes apart, and Healthchecks should become late after the five-minute
+period plus two-minute grace and normal delivery jitter.
+
+### Controlled failure drill and recovery
+
+First manually confirm a recent successful Healthchecks ping. Run
+`just observability-watchdog-drill-start env=staging`. It creates only an eight-minute Alertmanager
+silence with the watchdog's exact four labels; automatic expiry preserves recovery if the operator
+disconnects. It never shuts down a node and never manually pings the URL. Inspect it with
+`just observability-watchdog-drill-status env=staging`, or remove only that owned silence early with
+`just observability-watchdog-drill-clear env=staging`. Automated tests inspect the payload and do not
+wait eight minutes.
+
+During the drill, manually confirm Healthchecks transitions to late/down, the Healthchecks-managed
+PagerDuty integration creates an incident, and the incident can be acknowledged. After automatic
+expiry (or early clear), confirm a new Alertmanager delivery returns Healthchecks to up and the
+PagerDuty incident recovers and resolves. Re-run live verification.
+
+> **ROLLBACK CHECKPOINT:** Before rolling back to any revision that removes the watchdog receiver,
+> pause the Healthchecks check or its PagerDuty integration. Otherwise rollback itself generates a
+> page. After pausing, perform the documented Helm rollback, verify the intended prior structure,
+> and retain or remove the Kubernetes Secret only according to that revision's contract.

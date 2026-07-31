@@ -382,3 +382,13 @@ Prometheus or Grafana should not be listed as production skills until evidence e
 - The Alertmanager receiver question is answered at the design level: PagerDuty plus Healthchecks.io, per [`docs/observability-alerting.md`](./observability-alerting.md). What remains open is execution — accounts, secret-safe config, and drills, none of which are done yet.
 - What Prometheus PV size is realistic after a one-week staging soak on the target Pi hardware?
 - Should Loki remain entirely deferred, or should minimal log labels be designed now without deploying Loki?
+
+### Staging dead-man watchdog boundary
+
+The staging watchdog is an always-firing `vector(1)` rule delivered through a dedicated,
+Secret-mounted Healthchecks webhook. It proves rule evaluation and outbound Alertmanager routing;
+it does not prove any individual node is alive, replace ordinary Prometheus alerts, or probe public
+endpoints. Those remain, respectively, the node-heartbeat timer, null-by-default reviewed alert
+allowlists, and blackbox probes. The watchdog has no production configuration. Its exact routing and
+five-minute Healthchecks cadence are operated through the
+[watchdog runbook](./observability-operations.md#observability-watchdog).
