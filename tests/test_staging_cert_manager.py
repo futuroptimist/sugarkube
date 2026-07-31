@@ -118,6 +118,109 @@ def test_inventory_rejects_missing_issuer_reference(monkeypatch):
         MODULE.inventory("example", "broken")
 
 
+def inventory_with_challenges(monkeypatch, challenges):
+    certificate = resource(
+        "site-tls",
+        spec={
+            "dnsNames": ["staging.example.test"],
+            "issuerRef": {"name": "letsencrypt-staging", "kind": "ClusterIssuer"},
+        },
+    )
+    request = resource("site-tls-1", owner_kind="Certificate", owner_name="site-tls")
+    order = resource("site-tls-1-order", owner_kind="CertificateRequest", owner_name="site-tls-1")
+    for challenge in challenges:
+        challenge["metadata"]["ownerReferences"] = [{"kind": "Order", "name": "site-tls-1-order"}]
+    responses = {
+        "certificate": certificate,
+        "clusterissuer": resource(
+            "letsencrypt-staging",
+            spec={
+                "acme": {
+                    "solvers": [
+                        {
+                            "dns01": {
+                                "cloudflare": {
+                                    "apiTokenSecretRef": {
+                                        "name": "cloudflare-api-token",
+                                        "key": "api-token",
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                }
+            },
+            conditions=[{"type": "Ready", "status": "True"}],
+        ),
+        "certificaterequests": {"items": [request]},
+        "orders": {"items": [order]},
+        "challenges": {"items": challenges},
+        "events": {"items": []},
+    }
+    monkeypatch.setattr(
+        MODULE,
+        "kubectl_json",
+        lambda args: responses[next(item for item in responses if item in args)],
+    )
+    return MODULE.inventory("example", "site-tls")
+
+
+@pytest.mark.parametrize("state", sorted(MODULE.TERMINAL_CHALLENGE_STATES))
+def test_inventory_marks_every_terminal_challenge_state_inactive(monkeypatch, state):
+    report = inventory_with_challenges(
+        monkeypatch, [resource("challenge", status={"state": state})]
+    )
+
+    assert report["challenges"][0]["active"] is False
+
+
+@pytest.mark.parametrize("state", ["errored", "revoked"])
+@pytest.mark.parametrize(
+    "detail", ["Error: 9109", "Error: 10502: Too many authentication failures", "Found no Zones"]
+)
+def test_terminal_challenge_auth_text_does_not_block_authorization(monkeypatch, state, detail):
+    report = inventory_with_challenges(
+        monkeypatch,
+        [resource("terminal", status={"state": state, "reason": detail})],
+    )
+    assert report["challenges"][0]["active"] is False
+
+    monkeypatch.setattr(MODULE, "staging_guard", lambda: None)
+    monkeypatch.setattr(MODULE, "inventory", lambda *_args: report)
+    monkeypatch.setattr(
+        MODULE,
+        "run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(command, 0, b"secret/name", b""),
+    )
+
+    assert MODULE.verify_authorization("example", "site-tls") is report
+
+
+@pytest.mark.parametrize("detail", ["Error: 9109", "Error: 10502"])
+def test_pending_auth_challenge_blocks_verification_and_recovery(monkeypatch, detail):
+    report = inventory_with_challenges(
+        monkeypatch,
+        [resource("pending", status={"state": "pending", "message": detail})],
+    )
+    assert report["challenges"][0]["active"] is True
+
+    monkeypatch.setattr(MODULE, "staging_guard", lambda: None)
+    monkeypatch.setattr(MODULE, "inventory", lambda *_args: report)
+    monkeypatch.setattr(MODULE.shutil, "which", lambda _name: "/usr/bin/cmctl")
+
+    def secret_lookup_only(command, **_kwargs):
+        if command[0] == "cmctl":
+            pytest.fail("cmctl renew must not be invoked")
+        return subprocess.CompletedProcess(command, 0, b"secret/name", b"")
+
+    monkeypatch.setattr(MODULE, "run", secret_lookup_only)
+
+    with pytest.raises(MODULE.OperationError, match="active Challenge blocked"):
+        MODULE.verify_authorization("example", "site-tls")
+    with pytest.raises(MODULE.OperationError, match="active Challenge blocked"):
+        MODULE.recover("example", "site-tls", "staging.example.test", 60)
+
+
 @pytest.mark.parametrize(
     "stdout,expected",
     [(b"secret/site-tls\n", True), (b"", False)],

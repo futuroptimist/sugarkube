@@ -34,6 +34,7 @@ AUTHORIZATION_BLOCKERS = (
     ),
     (re.compile(r"(?i)\bfound no zones\b"), "zone authorization; check Zone.read and zone scope"),
 )
+TERMINAL_CHALLENGE_STATES = {"valid", "invalid", "expired", "revoked", "errored"}
 
 
 class OperationError(RuntimeError):
@@ -189,8 +190,7 @@ def inventory(namespace: str, certificate_name: str) -> dict[str, Any]:
             {
                 **resource_state(item),
                 "dnsName": item.get("spec", {}).get("dnsName"),
-                "active": item.get("status", {}).get("state")
-                not in {"valid", "expired", "invalid"},
+                "active": item.get("status", {}).get("state") not in TERMINAL_CHALLENGE_STATES,
             }
             for item in challenges
         ],
