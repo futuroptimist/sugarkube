@@ -491,6 +491,11 @@ def test_justfile_exposes_observability_recipes():
 
 def test_watchdog_documentation_timing_matches_configuration():
     operations = (ROOT / "docs" / "observability-operations.md").read_text(encoding="utf-8")
+    assert not re.search(
+        r"The Alertmanager-driven observability watchdog,.{0,200}remain later tasks",
+        operations,
+        re.DOTALL,
+    )
     for recipe in (
         "secret-install",
         "secret-check",

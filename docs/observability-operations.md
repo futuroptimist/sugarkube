@@ -337,8 +337,9 @@ confirmation. This disables the timer and removes only this feature's unit, exec
 credential. It does **not** delete or change Healthchecks.io checks, integrations, or PagerDuty
 configuration. Deleting the credential means reinstall requires the node's rotated URL again.
 
-The Alertmanager-driven observability watchdog, in-cluster `KubeNodeNotReady` routing, and all
-application alert rules explicitly remain later tasks.
+The Alertmanager-driven observability watchdog configuration and operator workflows are
+repository-ready, but await post-merge installation, deployment, and proof. In-cluster
+`KubeNodeNotReady` routing and all application alert rules explicitly remain later tasks.
 
 ## Reprovisioning proof and post-merge checklist
 
