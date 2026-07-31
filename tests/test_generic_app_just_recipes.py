@@ -2547,6 +2547,88 @@ def _write_dspace_candidate(
     )
 
 
+def _run_dspace_manifest_rollback(
+    tmp_path: Path, args: list[str]
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    bin_dir = tmp_path / "rollback-bin"
+    bin_dir.mkdir()
+    log = tmp_path / "rollback-argv.log"
+    _write_executable(
+        bin_dir / "python3",
+        f"#!/bin/sh\nprintf '%s\\n' \"$@\" > {str(log)!r}\n",
+    )
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+    result = _run_just(["dspace-manifest-rollback", *args], env)
+    return result, log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_dspace_manifest_rollback_preserves_legacy_positional_verifier(
+    tmp_path: Path,
+) -> None:
+    result, argv = _run_dspace_manifest_rollback(
+        tmp_path,
+        [
+            "staging",
+            "/tmp/manifest.json",
+            "/tmp/evidence.json",
+            "/tmp/legacy-verifier",
+        ],
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert argv[argv.index("--verifier") + 1] == "/tmp/legacy-verifier"
+    assert "--smoke-runner" not in argv
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_dspace_manifest_rollback_forwards_named_smoke_runner_once(
+    tmp_path: Path,
+) -> None:
+    result, argv = _run_dspace_manifest_rollback(
+        tmp_path,
+        [
+            "staging",
+            "/tmp/manifest.json",
+            "/tmp/evidence.json",
+            "smoke_runner=/tmp/smoke-runner",
+        ],
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert argv[argv.index("--verifier") + 1] == str(
+        REPO_ROOT / "scripts/dspace_runtime_verifier.py"
+    )
+    assert argv.count("--smoke-runner") == 1
+    assert argv[argv.index("--smoke-runner") + 1] == "/tmp/smoke-runner"
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_dspace_manifest_rollback_preserves_named_options(tmp_path: Path) -> None:
+    result, argv = _run_dspace_manifest_rollback(
+        tmp_path,
+        [
+            "prod",
+            "/tmp/manifest.json",
+            "/tmp/evidence.json",
+            "verifier=/tmp/verifier",
+            "confirm=prod",
+            "config=/tmp/config",
+            "kubeconfig=/tmp/kubeconfig",
+        ],
+    )
+
+    assert result.returncode == 0, result.stderr
+    for option, expected in (
+        ("--verifier", "/tmp/verifier"),
+        ("--confirm", "prod"),
+        ("--config", "/tmp/config"),
+        ("--kubeconfig", "/tmp/kubeconfig"),
+    ):
+        assert argv[argv.index(option) + 1] == expected
+
+
 @pytest.mark.usefixtures("ensure_just_available")
 def test_dspace_release_verify_ignores_runtime_verifier_override(
     tmp_path: Path, generic_app_stub_env: dict[str, str]

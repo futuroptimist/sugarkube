@@ -1664,22 +1664,41 @@ app-config app env='staging' config='':
       --config {{ quote(config) }}
 
 # DSPACE-only fail-closed recovery from previously finalized immutable evidence.
-dspace-manifest-rollback env manifest evidence smoke_runner verifier="{{ justfile_directory() }}/scripts/dspace_runtime_verifier.py" confirm='' config='' kubeconfig='':
+dspace-manifest-rollback env manifest evidence verifier="{{ justfile_directory() }}/scripts/dspace_runtime_verifier.py" confirm='' config='' kubeconfig='' smoke_runner='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
     kubeconfig_path={{ quote(kubeconfig) }}
     if [ -z "${kubeconfig_path}" ]; then
       kubeconfig_path="${KUBECONFIG:-${HOME}/.kube/config}"
     fi
-    python3 "{{ justfile_directory() }}/scripts/dspace_manifest_rollback.py" \
-      --environment {{ quote(env) }} \
-      --manifest {{ quote(manifest) }} \
-      --evidence {{ quote(evidence) }} \
-      --verifier {{ quote(verifier) }} \
-      --smoke-runner {{ quote(smoke_runner) }} \
-      --confirm {{ quote(confirm) }} \
-      --config {{ quote(config) }} \
+    verifier={{ quote(verifier) }}
+    confirm={{ quote(confirm) }}
+    config={{ quote(config) }}
+    smoke_runner={{ quote(smoke_runner) }}
+    if [[ "${verifier}" == smoke_runner=* ]]; then
+      smoke_runner="${verifier#smoke_runner=}"
+      verifier="{{ justfile_directory() }}/scripts/dspace_runtime_verifier.py"
+    else
+      verifier="${verifier#verifier=}"
+    fi
+    confirm="${confirm#confirm=}"
+    config="${config#config=}"
+    kubeconfig_path="${kubeconfig_path#kubeconfig=}"
+    smoke_runner="${smoke_runner#smoke_runner=}"
+    rollback_command=(
+      python3 "{{ justfile_directory() }}/scripts/dspace_manifest_rollback.py"
+      --environment {{ quote(env) }}
+      --manifest {{ quote(manifest) }}
+      --evidence {{ quote(evidence) }}
+      --verifier "${verifier}"
+      --confirm "${confirm}"
+      --config "${config}"
       --kubeconfig "${kubeconfig_path}"
+    )
+    if [ -n "${smoke_runner}" ]; then
+      rollback_command+=(--smoke-runner "${smoke_runner}")
+    fi
+    "${rollback_command[@]}"
 
 # Read-only DSPACE runtime, frontend, replica, and remote /chat proof.
 dspace-release-verify env manifest smoke_runner config='' kubeconfig='' expected_helm_revision='':
