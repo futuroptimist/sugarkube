@@ -124,6 +124,7 @@ if [[ "$*" == *"get replicasets,deployments"* && "$*" == *"-o json"* ]]; then
 fi
 if [[ "$*" == *"get nodes -o json"* ]]; then
   env_label="${{SUGARKUBE_STUB_NODE_ENV:-staging}}"
+  [[ "$*" != *"staging-kubeconfig"* ]] || env_label=staging
   cluster_label="${{SUGARKUBE_STUB_CLUSTER:-sugar}}"
   printf '{{"items":[{{"metadata":{{"name":"sugarkube3","labels":{{"sugarkube.env":"%s","sugarkube.cluster":"%s"}}}}}},{{"metadata":{{"name":"sugarkube4","labels":{{"sugarkube.env":"%s","sugarkube.cluster":"%s"}}}}}}]}}\n' "$env_label" "$cluster_label" "$env_label" "$cluster_label"
   exit 0
@@ -174,8 +175,8 @@ if [ "${{1:-}}" = upgrade ]; then
   done
 fi
 if [[ "$*" == *"status dspace --namespace dspace -o json" ]]; then
-  chart_version=3.1.0
-  [ "${{SUGARKUBE_STUB_NODE_ENV:-staging}}" != prod ] || chart_version=3.0.1
+  chart_version="${{SUGARKUBE_STUB_CHART_VERSION:-3.1.0}}"
+  if [ -z "${{SUGARKUBE_STUB_CHART_VERSION:-}}" ] && [ "${{SUGARKUBE_STUB_NODE_ENV:-staging}}" = prod ]; then chart_version=3.0.1; fi
   description="$(cat {str(tmp_path / "helm-description")!r} 2>/dev/null || true)"
   printf '{{"name":"dspace","namespace":"dspace","version":7,"info":{{"status":"deployed","description":"%s"}},"chart":{{"metadata":{{"name":"dspace","version":"%s"}}}}}}\n' "$description" "$chart_version"
   exit 0
@@ -192,8 +193,8 @@ if [[ "$*" == show\ chart* ]]; then
   if [[ "$*" == *"charts/dspace"* ]]; then
     version="${{*: -1}}"
     if [[ "$version" == oci://*@sha256:* ]]; then
-      version=3.1.0
-      [ "${{SUGARKUBE_STUB_NODE_ENV:-staging}}" != prod ] || version=3.0.1
+      version="${{SUGARKUBE_STUB_CHART_VERSION:-3.1.0}}"
+      if [ -z "${{SUGARKUBE_STUB_CHART_VERSION:-}}" ] && [ "${{SUGARKUBE_STUB_NODE_ENV:-staging}}" = prod ]; then version=3.0.1; fi
     fi
     printf 'apiVersion: v2\nname: dspace\nversion: %s\nappVersion: main-abcdef0\n' "$version"
     exit 0
@@ -2778,6 +2779,168 @@ def test_dspace_guarded_deploy_orders_preflight_mutation_and_finalization(
     collection = next(i for i, line in enumerate(commands) if " status dspace" in line)
     pods = next(i for i, line in enumerate(commands) if " -n dspace get pods" in line)
     assert preflight < mutation < collection < pods
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_dspace_deploy_routes_documented_sparse_named_arguments(
+    tmp_path: Path, generic_app_stub_env: dict[str, str]
+) -> None:
+    manifest = tmp_path / "candidate.json"
+    evidence = tmp_path / "evidence.json"
+    _write_dspace_candidate(manifest, "staging")
+
+    result = _run_just(
+        [
+            "app-deploy",
+            "app=dspace",
+            "env=staging",
+            "tag=main-abcdef0",
+            f"manifest={manifest}",
+            f"smoke_runner={generic_app_stub_env['DSPACE_SMOKE_RUNNER']}",
+            f"evidence={evidence}",
+        ],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    verifier = Path(generic_app_stub_env["RUNTIME_VERIFIER_LOG"]).read_text(encoding="utf-8")
+    assert f"--manifest {manifest}" in verifier
+    assert f"--smoke-runner {generic_app_stub_env['DSPACE_SMOKE_RUNNER']}" in verifier
+    assert "manifest=manifest=" not in verifier
+    helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
+    assert helm_log.count("upgrade ") == 1
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+@pytest.mark.parametrize("recipe", ["dspace-oci-deploy", "dspace-oci-redeploy"])
+def test_dspace_staging_wrappers_route_sparse_named_arguments_once(
+    recipe: str, tmp_path: Path, generic_app_stub_env: dict[str, str]
+) -> None:
+    manifest = tmp_path / f"{recipe}.json"
+    evidence = tmp_path / f"{recipe}-evidence.json"
+    _write_dspace_candidate(manifest, "staging")
+
+    result = _run_just(
+        [
+            recipe,
+            "env=staging",
+            "tag=main-abcdef0",
+            f"manifest={manifest}",
+            f"smoke_runner={generic_app_stub_env['DSPACE_SMOKE_RUNNER']}",
+            f"evidence={evidence}",
+        ],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    verifier_lines = Path(generic_app_stub_env["RUNTIME_VERIFIER_LOG"]).read_text(
+        encoding="utf-8"
+    ).splitlines()
+    assert len(verifier_lines) == 1
+    assert verifier_lines[0].count(f"--manifest {manifest}") == 1
+    assert verifier_lines[0].count(
+        f"--smoke-runner {generic_app_stub_env['DSPACE_SMOKE_RUNNER']}"
+    ) == 1
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_dspace_promote_prod_routes_sparse_named_arguments_through_both_gates(
+    tmp_path: Path, generic_app_stub_env: dict[str, str]
+) -> None:
+    staging_manifest = tmp_path / "staging-candidate.json"
+    staging_evidence = tmp_path / "staging-evidence.json"
+    prod_manifest = tmp_path / "prod-candidate.json"
+    prod_evidence = tmp_path / "prod-evidence.json"
+    _write_dspace_candidate(staging_manifest, "staging")
+    env = generic_app_stub_env.copy()
+    staged = _run_just(
+        [
+            "app-deploy",
+            "app=dspace",
+            "env=staging",
+            "tag=main-abcdef0",
+            f"manifest={staging_manifest}",
+            f"evidence={staging_evidence}",
+            f"smoke_runner={env['DSPACE_SMOKE_RUNNER']}",
+        ],
+        env,
+    )
+    assert staged.returncode == 0, staged.stderr + staged.stdout
+
+    _write_dspace_candidate(prod_manifest, "prod")
+    prod_record = json.loads(prod_manifest.read_text(encoding="utf-8"))
+    prod_record["chartVersion"] = "3.1.0"
+    prod_manifest.write_text(json.dumps(prod_record) + "\n", encoding="utf-8")
+    config = tmp_path / "dspace.env"
+    config.write_text(
+        "\n".join(
+            [
+                "SUGARKUBE_APP=dspace",
+                "SUGARKUBE_RELEASE=dspace",
+                "SUGARKUBE_NAMESPACE=dspace",
+                "SUGARKUBE_CHART=oci://ghcr.io/democratizedspace/charts/dspace",
+                "SUGARKUBE_VERSION=3.1.0",
+                "SUGARKUBE_PROD_TAG_FILE=docs/apps/dspace.prod.tag",
+                "SUGARKUBE_VALUES_DEV=docs/examples/dspace.values.dev.yaml",
+                "SUGARKUBE_VALUES_STAGING=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml",
+                "SUGARKUBE_VALUES_PROD=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    env["SUGARKUBE_STUB_CHART_VERSION"] = "3.1.0"
+    env["SUGARKUBE_STUB_NODE_ENV"] = "prod"
+    runtime_log = Path(env["RUNTIME_VERIFIER_LOG"])
+    runtime_log.write_text("", encoding="utf-8")
+    Path(env["HELM_LOG"]).write_text("", encoding="utf-8")
+    result = _run_just(
+        [
+            "app-promote-prod",
+            "app=dspace",
+            "tag=main-abcdef0",
+            f"config={config}",
+            f"manifest={prod_manifest}",
+            f"staging_evidence={staging_evidence}",
+            f"smoke_runner={env['DSPACE_SMOKE_RUNNER']}",
+            f"kubeconfig={tmp_path / 'prod-kubeconfig'}",
+            f"staging_kubeconfig={tmp_path / 'staging-kubeconfig'}",
+            f"evidence={prod_evidence}",
+        ],
+        env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    verifier_lines = runtime_log.read_text(encoding="utf-8").splitlines()
+    assert len(verifier_lines) == 2
+    assert "--environment staging" in verifier_lines[0]
+    assert f"--manifest {staging_evidence}" in verifier_lines[0]
+    assert "--environment prod" in verifier_lines[1]
+    assert f"--manifest {prod_manifest}" in verifier_lines[1]
+    assert json.loads(prod_evidence.read_text(encoding="utf-8"))["recordType"] == "final"
+    helm_lines = Path(env["HELM_LOG"]).read_text(encoding="utf-8").splitlines()
+    assert sum(line.startswith("upgrade ") for line in helm_lines) == 1
+
+    Path(env["HELM_LOG"]).write_text("", encoding="utf-8")
+    identical = tmp_path / "same-kubeconfig"
+    rejected = _run_just(
+        [
+            "app-promote-prod",
+            "app=dspace",
+            "tag=main-abcdef0",
+            f"config={config}",
+            f"manifest={prod_manifest}",
+            f"staging_evidence={staging_evidence}",
+            f"smoke_runner={env['DSPACE_SMOKE_RUNNER']}",
+            f"kubeconfig={identical}",
+            f"staging_kubeconfig={identical}",
+            f"evidence={tmp_path / 'rejected-evidence.json'}",
+        ],
+        env,
+    )
+    assert rejected.returncode != 0
+    assert "kubeconfigs must be distinct" in rejected.stderr
+    assert "upgrade " not in Path(env["HELM_LOG"]).read_text(encoding="utf-8")
 
 
 @pytest.mark.usefixtures("ensure_just_available")
