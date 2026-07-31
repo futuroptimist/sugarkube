@@ -23,6 +23,17 @@ REDACT = re.compile(
     r"word|secret)"
     r"(\s*[:=]?\s+|\s*[:=]\s*)[^\s,;]+"
 )
+AUTHORIZATION_BLOCKERS = (
+    (
+        re.compile(r"(?i)\b(?:9109|invalid access token)\b"),
+        "invalid credentials; reinstall the Cloudflare token",
+    ),
+    (
+        re.compile(r"(?i)\b(?:10502|too many authentication failures)\b"),
+        "authentication throttling; stop retries and wait for Cloudflare to clear it",
+    ),
+    (re.compile(r"(?i)\bfound no zones\b"), "zone authorization; check Zone.read and zone scope"),
+)
 
 
 class OperationError(RuntimeError):
@@ -216,8 +227,10 @@ def verify_authorization(namespace: str, certificate_name: str) -> dict[str, Any
         )
     for challenge in report["challenges"]:
         detail = f"{challenge['reason']} {challenge['message']}"
-        if challenge["active"] and "found no zones" in detail.lower():
-            raise OperationError("active Challenge reports Found no Zones")
+        if challenge["active"]:
+            for pattern, action in AUTHORIZATION_BLOCKERS:
+                if pattern.search(detail):
+                    raise OperationError(f"active Challenge blocked by Cloudflare {action}")
     print(
         "authorization structure verified; a successful DNS-01 Challenge is still required to prove dashboard scope"
     )
@@ -232,7 +245,16 @@ def install_token() -> None:
         else sys.stdin.buffer.read()
     )
     credential = credential.strip()
-    if not credential or b"\n" in credential or b"\r" in credential:
+    quoted = (
+        len(credential) >= 2
+        and credential[:1] == credential[-1:]
+        and credential[:1]
+        in {
+            b"'",
+            b'"',
+        }
+    )
+    if not credential or re.search(rb"\s", credential) or quoted:
         raise OperationError("token input is empty or malformed")
     create = subprocess.Popen(
         kubectl_command(
