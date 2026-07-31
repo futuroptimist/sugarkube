@@ -24,6 +24,11 @@ LEGACY = [
 ]
 
 
+def watchdog_canary():
+    uuid = "12345678" + "-1234-4123-8123-123456789abc"
+    return "https://" + "hc-ping.com/" + uuid, uuid
+
+
 def yaml_load(path: Path):
     result = subprocess.run(
         [
@@ -519,6 +524,9 @@ def run_helper(
     action=None,
     pagerduty_mode="success",
     pagerduty_forward_line="Forwarding from 127.0.0.1:43128 -> 9093",
+    watchdog_tty_text=None,
+    command_args=(),
+    extra_env=None,
 ):
     """Run the lifecycle against deterministic command stubs and return its audit log."""
     bin_dir = tmp_path / "bin"
@@ -550,7 +558,11 @@ esac
 echo "kubectl $*" >> "$AUDIT"
 case "$*" in
   "config current-context") echo "$CONTEXT" ;;
-  *"get nodes -o json"*) printf '%s\n' '{"items":[{"metadata":{"name":"n1","labels":{"sugarkube.env":"staging","sugarkube.cluster":"sugar-staging"}}}]}' ;;
+  *"get nodes -o json"*)
+    environment=staging
+    [ "$KUBECTL_MODE" != watchdog-cluster-mismatch ] || environment=prod
+    printf '%s\n' '{"items":[{"metadata":{"name":"n1","labels":{"sugarkube.env":"'"$environment"'","sugarkube.cluster":"sugar-staging"}}}]}'
+    ;;
   *"get daemonset kube-prometheus-stack-prometheus-node-exporter"*) [ "$KUBECTL_MODE" = two-nodes ] && echo '2 2' || echo '3 3' ;;
   *"get pvc -o json"*) printf '%s\n' '{"items":[{"metadata":{"name":"generated-pvc","labels":{"app.kubernetes.io/name":"prometheus"}},"spec":{"storageClassName":"local-path"},"status":{"phase":"Bound"}}]}' ;;
   *"get prometheus kube-prometheus-stack-prometheus"*) echo 1 ;;
@@ -562,6 +574,15 @@ case "$*" in
     ;;
   *"get secret alertmanager-pagerduty -o go-template="*) [ "$KUBECTL_MODE" != missing-pagerduty ] || exit 44; [ "$KUBECTL_MODE" != empty-pagerduty ] && echo present ;;
   *"get secret alertmanager-healthchecks-watchdog -o go-template="*) [ "$KUBECTL_MODE" != missing-watchdog ] || exit 44; [ "$KUBECTL_MODE" != empty-watchdog ] && echo present ;;
+  *"create secret generic alertmanager-healthchecks-watchdog --from-file=ping-url=/dev/stdin --dry-run=client -o yaml"*)
+    cat > "$WATCHDOG_CREATE_STDIN"
+    [ "$KUBECTL_MODE" != watchdog-create-fail ] || exit 46
+    printf '%s\n' 'apiVersion: v1' 'kind: Secret' 'metadata:' '  name: alertmanager-healthchecks-watchdog' 'data:' '  ping-url: REDACTED_TEST_DATA'
+    ;;
+  *"apply -f -"*)
+    cat > "$WATCHDOG_APPLY_STDIN"
+    [ "$KUBECTL_MODE" != watchdog-apply-fail ] || exit 47
+    ;;
   *"proxy/api/v1/rules"*)
     extra=''
     [ "$KUBECTL_MODE" != watchdog-extra-rule-label ] || extra=',"sentinel":"REJECTED_RULE_PAYLOAD_SENTINEL"'
@@ -654,10 +675,17 @@ printf '%s' "$code"
         "SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_INTERVAL_SECONDS": retry_interval,
         "SUGARKUBE_WATCHDOG_OBSERVATION_SECONDS": "0",
         "SUGARKUBE_WATCHDOG_TEST_ALLOW_SHORT_OBSERVATION": "1",
+        "SUGARKUBE_WATCHDOG_TTY": str(tmp_path / "watchdog-tty"),
+        "SUGARKUBE_WATCHDOG_TEST_NONTTY": "1",
+        "WATCHDOG_CREATE_STDIN": str(tmp_path / "watchdog-create-stdin"),
+        "WATCHDOG_APPLY_STDIN": str(tmp_path / "watchdog-apply-stdin"),
         "DASHBOARD": str(
             ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
         ),
     }
+    (tmp_path / "watchdog-tty").write_text(watchdog_tty_text or "", encoding="utf-8")
+    if extra_env:
+        env.update(extra_env)
     (tmp_path / "alertmanager-config.yaml").write_text(
         """route:
   receiver: "null"
@@ -708,7 +736,14 @@ receivers:
             responses.write_text("\n".join(target_responses) + "\n", encoding="utf-8")
         env["TARGET_RESPONSES"] = str(responses)
     result = subprocess.run(
-        ["bash", str(SCRIPT), command, "env=staging", *([action] if action is not None else [])],
+        [
+            "bash",
+            str(SCRIPT),
+            command,
+            "env=staging",
+            *([action] if action is not None else []),
+            *command_args,
+        ],
         text=True,
         capture_output=True,
         env=env,
@@ -778,9 +813,7 @@ def test_mutation_requires_nonempty_pagerduty_secret_without_exposure(
 
 
 @pytest.mark.parametrize("mode", ["missing-watchdog", "empty-watchdog"])
-@pytest.mark.parametrize(
-    ("command", "helm_mode"), [("install", "absent"), ("upgrade", "present")]
-)
+@pytest.mark.parametrize(("command", "helm_mode"), [("install", "absent"), ("upgrade", "present")])
 def test_mutation_requires_nonempty_watchdog_secret_without_helm_mutation(
     tmp_path, mode, command, helm_mode
 ):
@@ -1417,6 +1450,157 @@ def test_watchdog_operator_contract_is_hidden_bounded_and_staging_only():
     assert "sugar-staging" in script
     assert "node shutdown" not in script.lower()
     assert "hc-ping\\.com" in script
+
+
+def test_watchdog_secret_install_uses_hidden_tty_and_stdin_only_kubernetes(tmp_path):
+    url, uuid = watchdog_canary()
+    result, audit = run_helper(tmp_path, "watchdog-secret-install", watchdog_tty_text=url + "\n")
+
+    assert result.returncode == 0, result.stderr
+    assert "create secret generic alertmanager-healthchecks-watchdog" in audit
+    assert "--from-file=ping-url=/dev/stdin --dry-run=client -o yaml" in audit
+    assert "apply -f -" in audit
+    assert (tmp_path / "watchdog-create-stdin").read_text(encoding="utf-8") == url
+    manifest = (tmp_path / "watchdog-apply-stdin").read_text(encoding="utf-8")
+    assert "kind: Secret" in manifest
+    assert "name: alertmanager-healthchecks-watchdog" in manifest
+
+    public = result.stdout + result.stderr + audit + manifest
+    assert url not in public and uuid not in public
+    expected_secret_files = {"watchdog-tty", "watchdog-create-stdin"}
+    unexpected_files = [
+        path
+        for path in tmp_path.rglob("*")
+        if path.is_file() and path.name not in expected_secret_files
+    ]
+    assert all(
+        url not in path.read_text(encoding="utf-8", errors="replace")
+        and uuid not in path.read_text(encoding="utf-8", errors="replace")
+        for path in unexpected_files
+    )
+
+
+@pytest.mark.parametrize(
+    "variation",
+    [
+        "unhyphenated-uuid",
+        "nonhex-uuid",
+        "wrong-scheme",
+        "wrong-host",
+        "suffix",
+        "query",
+        "fragment",
+    ],
+)
+def test_watchdog_secret_install_rejects_noncanonical_urls_before_mutation(tmp_path, variation):
+    url, uuid = watchdog_canary()
+    values = {
+        "unhyphenated-uuid": url.replace(uuid, uuid.replace("-", "")),
+        "nonhex-uuid": url[:-1] + "z",
+        "wrong-scheme": url.replace("https://", "http://"),
+        "wrong-host": url.replace("hc-ping.com", "example.invalid"),
+        "suffix": url + "/fail",
+        "query": url + "?next=1",
+        "fragment": url + "#fragment",
+    }
+    value = values[variation]
+    result, audit = run_helper(tmp_path, "watchdog-secret-install", watchdog_tty_text=value + "\n")
+
+    assert result.returncode != 0
+    assert "create secret" not in audit and "apply -f -" not in audit
+    assert value not in result.stdout + result.stderr + audit
+
+
+@pytest.mark.parametrize(
+    "variable",
+    ["HEALTHCHECKS_PING_URL", "HEALTHCHECK_PING_URL", "PING_URL", "WATCHDOG_PING_URL"],
+)
+def test_watchdog_secret_install_refuses_credential_environment_before_mutation(tmp_path, variable):
+    url, uuid = watchdog_canary()
+    result, audit = run_helper(
+        tmp_path,
+        "watchdog-secret-install",
+        watchdog_tty_text=url + "\n",
+        extra_env={variable: url},
+    )
+
+    assert result.returncode != 0
+    assert "environment variables are refused" in result.stderr
+    assert "create secret" not in audit and "apply -f -" not in audit
+    assert url not in result.stdout + result.stderr + audit
+    assert uuid not in result.stdout + result.stderr + audit
+
+
+def test_watchdog_secret_install_refuses_credential_argument_before_mutation(tmp_path):
+    url, uuid = watchdog_canary()
+    result, audit = run_helper(
+        tmp_path,
+        "watchdog-secret-install",
+        watchdog_tty_text=url + "\n",
+        command_args=(url,),
+    )
+
+    assert result.returncode != 0
+    assert "credential arguments are refused" in result.stderr
+    assert "create secret" not in audit and "apply -f -" not in audit
+    assert url not in result.stdout + result.stderr + audit
+    assert uuid not in result.stdout + result.stderr + audit
+
+
+@pytest.mark.parametrize(
+    ("context", "mode"),
+    [("another-context", "healthy"), ("sugar-staging", "watchdog-cluster-mismatch")],
+)
+def test_watchdog_secret_install_staging_mismatch_prevents_mutation(tmp_path, context, mode):
+    url, _ = watchdog_canary()
+    result, audit = run_helper(
+        tmp_path,
+        "watchdog-secret-install",
+        context=context,
+        kubectl_mode=mode,
+        watchdog_tty_text=url + "\n",
+    )
+
+    assert result.returncode != 0
+    assert "create secret" not in audit and "apply -f -" not in audit
+    assert url not in result.stdout + result.stderr + audit
+
+
+@pytest.mark.parametrize("mode", ["watchdog-create-fail", "watchdog-apply-fail"])
+def test_watchdog_secret_install_kubernetes_failures_are_sanitized(tmp_path, mode):
+    url, uuid = watchdog_canary()
+    result, audit = run_helper(
+        tmp_path,
+        "watchdog-secret-install",
+        kubectl_mode=mode,
+        watchdog_tty_text=url + "\n",
+    )
+
+    assert result.returncode != 0
+    assert "installation failed" in result.stderr
+    assert "value redacted" in result.stderr
+    assert url not in result.stdout + result.stderr + audit
+    assert uuid not in result.stdout + result.stderr + audit
+
+
+def test_watchdog_secret_check_reads_only_the_key_contract(tmp_path):
+    result, audit = run_helper(tmp_path, "watchdog-secret-check")
+
+    assert result.returncode == 0, result.stderr
+    assert "get secret alertmanager-healthchecks-watchdog -o go-template=" in audit
+    assert "ping-url" in audit
+    assert "value intentionally not read or printed" in result.stdout
+    assert not (tmp_path / "watchdog-create-stdin").exists()
+    assert "apply -f -" not in audit
+
+
+@pytest.mark.parametrize("mode", ["missing-watchdog", "empty-watchdog"])
+def test_watchdog_secret_check_rejects_missing_or_empty_ping_url(tmp_path, mode):
+    result, audit = run_helper(tmp_path, "watchdog-secret-check", kubectl_mode=mode)
+
+    assert result.returncode != 0
+    assert "ping-url" in result.stderr
+    assert "create secret" not in audit and "apply -f -" not in audit
 
 
 def test_watchdog_live_check_accepts_exact_rule_labels_and_external_alert_labels(tmp_path):
