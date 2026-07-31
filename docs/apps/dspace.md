@@ -51,6 +51,12 @@ APPROVED_AT='<YYYY-MM-DDTHH:MM:SSZ-from-approval>'
 APPROVED_BY='<operator-or-review-record>'
 EXPECTED_PROVIDER=openai
 mkdir -p deployment-candidates/dspace
+# Keep the routine staging 3.1.0 pin unchanged while testing this recovery's
+# independently approved 3.0.2 chart. app_config gives this explicit version
+# precedence over the environment's version-file setting.
+RECOVERY_STAGING_CONFIG=deployment-candidates/dspace/recovery-staging.env
+cp docs/examples/apps/dspace.env "$RECOVERY_STAGING_CONFIG"
+printf '\nSUGARKUBE_VERSION=3.0.2\n' >>"$RECOVERY_STAGING_CONFIG"
 python3 scripts/dspace_release_manifest.py candidate --upstream "$RECOVERY" \
   --output deployment-candidates/dspace/recovery-staging.json --environment staging \
   --provider "$EXPECTED_PROVIDER" --approved-at "$APPROVED_AT" --approved-by "$APPROVED_BY"
@@ -67,6 +73,7 @@ Use the guarded staging recipe, then retain and review its non-overwritable fina
 
 ```bash
 just app-deploy app=dspace env=staging tag=main-1a31a56 \
+  config="$RECOVERY_STAGING_CONFIG" \
   manifest=deployment-candidates/dspace/recovery-staging.json \
   smoke_runner="$DSPACE_SMOKE_RUNNER" kubeconfig="$STAGING_KUBECONFIG"
 STAGING_EVIDENCE=$(python3 scripts/dspace_release_manifest.py evidence-path \
@@ -97,7 +104,7 @@ kubectl --kubeconfig "$PROD_KUBECONFIG" -n dspace get deployment dspace \
   >"$CAPTURE/deployment-identity.txt"
 kubectl --kubeconfig "$PROD_KUBECONFIG" -n dspace get pods \
   -l app.kubernetes.io/name=dspace,app.kubernetes.io/instance=dspace \
-  -o custom-columns=NAME:.metadata.name,UID:.metadata.uid,START:.status.startTime,IMAGE_ID:.status.containerStatuses[?\(@.name==\"dspace\"\)].imageID \
+  -o 'custom-columns=NAME:.metadata.name,UID:.metadata.uid,START:.status.startTime,IMAGE_ID:.status.containerStatuses[?(@.name=="dspace")].imageID' \
   >"$CAPTURE/pods.txt"
 python3 scripts/dspace_release_manifest.py preflight \
   --manifest deployment-candidates/dspace/recovery-prod.json --environment prod \
