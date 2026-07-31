@@ -207,7 +207,7 @@ for x in json.load(sys.stdin):
  if x.get("createdBy")=="sugarkube-observability-watchdog-drill" and x.get("comment")=="Owned staging watchdog failure drill" and x.get("status",{}).get("state") in ("active","pending") and exact: out.append(x["id"])
 print("\\n".join(out))'
 }
-watchdog_silence_status() { assert_context; local ids; ids="$(watchdog_owned_silences)"; [[ -n "${ids}" ]] && printf 'Owned active/pending watchdog drill silence IDs:\n%s\n' "${ids}" || echo "No owned active/pending watchdog drill silence."; }
+watchdog_silence_list() { assert_context; local ids; ids="$(watchdog_owned_silences)"; [[ -n "${ids}" ]] && printf 'Owned active/pending watchdog drill silence IDs:\n%s\n' "${ids}" || echo "No owned active/pending watchdog drill silence."; }
 watchdog_silence_clear() { assert_context; local ids; ids="$(watchdog_owned_silences)"; [[ -n "${ids}" ]] || { echo "No owned active/pending watchdog drill silence to clear."; return; }; while IFS= read -r id; do kubectl delete --raw "${WATCHDOG_API}/silence/${id}" >/dev/null; done <<<"${ids}"; echo "Owned watchdog drill silence cleared."; }
 
 status() { require_tools helm kubectl python3; print_resolved staging; assert_context; helm -n "${NAMESPACE}" status "${RELEASE}"; kubectl -n "${NAMESPACE}" get deploy,statefulset,daemonset -l "app.kubernetes.io/instance=${RELEASE}"; kubectl -n "${NAMESPACE}" get prometheus,alertmanager; kubectl -n "${NAMESPACE}" get svc,pvc; kubectl get crd prometheuses.monitoring.coreos.com alertmanagers.monitoring.coreos.com servicemonitors.monitoring.coreos.com probes.monitoring.coreos.com; }
@@ -571,4 +571,4 @@ if not isinstance(dashboard, dict) or dashboard.get("uid") != "sugarkube-staging
 cmd="${1:-}"; shift || true; [[ -n "${cmd}" ]] || { usage; exit 2; }
 env_arg="${1:-}"; normalize_env "${env_arg}" >/dev/null
 validate_dashboard
-case "${cmd}" in render) render ;; install) install_release ;; upgrade) upgrade_release ;; status) status ;; verify) verify ;; dashboard-verify) dashboard_verify ;; pagerduty-test) pagerduty_test "${2:-${1:-}}" ;; watchdog-secret-install) watchdog_secret_install "${@:2}" ;; watchdog-secret-check) watchdog_secret_check ;; watchdog-verify) watchdog_verify ;; watchdog-drill-create) watchdog_silence_create ;; watchdog-drill-status) watchdog_silence_status ;; watchdog-drill-clear) watchdog_silence_clear ;; *) usage; exit 2 ;; esac
+case "${cmd}" in render) render ;; install) install_release ;; upgrade) upgrade_release ;; status) status ;; verify) verify ;; dashboard-verify) dashboard_verify ;; pagerduty-test) pagerduty_test "${2:-${1:-}}" ;; watchdog-secret-install) watchdog_secret_install "${@:2}" ;; watchdog-secret-check) watchdog_secret_check ;; watchdog-verify) watchdog_verify ;; watchdog-drill-create) watchdog_silence_create ;; watchdog-drill-status) watchdog_silence_list ;; watchdog-drill-clear) watchdog_silence_clear ;; *) usage; exit 2 ;; esac
