@@ -331,17 +331,28 @@ read-only identity. `app-chart-bump` remains cluster-independent because it only
 validates a public OCI chart and edits the repository pin.
 
 ```bash
+# DSPACE examples use distinct cluster credentials and an executable remote smoke runner.
+DSPACE_SMOKE_RUNNER="$HOME/dspace/scripts/run-remote-chat-smoke.mjs"
+STAGING_KUBECONFIG="$HOME/.kube/config-sugarkube-staging"
+PROD_KUBECONFIG="$HOME/.kube/config-sugarkube-prod"
+
 # Deploy or install a specific immutable candidate into an environment.
 just app-deploy app=dspace env=staging tag=main-REPLACE_SHORTSHA \
-  manifest=deployment-candidates/dspace/staging.json
+  manifest=deployment-candidates/dspace/staging.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER" kubeconfig="$STAGING_KUBECONFIG"
 
 # Redeploy an existing release with a specific immutable tag.
 just app-redeploy app=dspace env=staging tag=main-REPLACE_SHORTSHA \
-  manifest=deployment-candidates/dspace/staging.json evidence=deployment-evidence/dspace/staging/redeploy.json
+  manifest=deployment-candidates/dspace/staging.json \
+  evidence=deployment-evidence/dspace/staging/redeploy.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER" kubeconfig="$STAGING_KUBECONFIG"
 
 # Promote an approved immutable tag to production.
 just app-promote-prod app=dspace tag=main-REPLACE_SHORTSHA \
-  manifest=deployment-candidates/dspace/prod.json
+  manifest=deployment-candidates/dspace/prod.json \
+  staging_evidence=deployment-evidence/dspace/staging/<finalized-record>.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER" kubeconfig="$PROD_KUBECONFIG" \
+  staging_kubeconfig="$STAGING_KUBECONFIG"
 
 # Inspect and intentionally bump the chart pin.
 just app-chart-status app=dspace
