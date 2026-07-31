@@ -61,20 +61,35 @@ def test_chart_version_and_values_match_live_staging_baseline():
     assert pvc["resources"]["requests"]["storage"] == "20Gi"
     assert staging["prometheus"]["prometheusSpec"]["externalLabels"] == {"cluster": "sugarkube-int"}
     alertmanager = staging["alertmanager"]
-    assert alertmanager["alertmanagerSpec"]["secrets"] == ["alertmanager-pagerduty"]
+    assert alertmanager["alertmanagerSpec"]["secrets"] == [
+        "alertmanager-pagerduty",
+        "alertmanager-healthchecks-watchdog",
+    ]
     route = alertmanager["config"]["route"]
     assert route["receiver"] == "null"
-    assert route["routes"] == [
-        {
-            "receiver": "pagerduty-synthetic-test",
-            "matchers": [
-                'alertname="SugarkubePagerDutyTest"',
-                'environment="staging"',
-                'cluster="sugarkube-int"',
-                'severity="critical"',
-            ],
-        }
-    ]
+    assert route["routes"][0] == {
+        "receiver": "pagerduty-synthetic-test",
+        "matchers": [
+            'alertname="SugarkubePagerDutyTest"',
+            'environment="staging"',
+            'cluster="sugarkube-int"',
+            'severity="critical"',
+        ],
+    }
+    assert route["routes"][1] == {
+        "receiver": "healthchecks-watchdog",
+        "matchers": [
+            'alertname="SugarkubeObservabilityWatchdog"',
+            'environment="staging"',
+            'cluster="sugarkube-int"',
+            'purpose="observability-watchdog"',
+        ],
+        "group_by": ["alertname", "cluster", "environment"],
+        "group_wait": "30s",
+        "group_interval": "1m",
+        "repeat_interval": "5m",
+        "continue": False,
+    }
     pagerduty_receiver = next(
         receiver
         for receiver in alertmanager["config"]["receivers"]
@@ -85,6 +100,29 @@ def test_chart_version_and_values_match_live_staging_baseline():
         "routing_key_file": "/etc/alertmanager/secrets/alertmanager-pagerduty/routing-key",
         "send_resolved": True,
     }
+    watchdog = alertmanager["config"]["receivers"][2]["webhook_configs"][0]
+    assert watchdog["url_file"].endswith("/alertmanager-healthchecks-watchdog/ping-url")
+    assert watchdog["send_resolved"] is False
+    assert watchdog["timeout"] == "10s"
+    assert watchdog["max_alerts"] == 1
+
+    rule = staging["additionalPrometheusRulesMap"]["sugarkube-observability-watchdog"]["groups"][0]
+    assert rule["interval"] == "1m"
+    assert rule["rules"] == [
+        {
+            "alert": "SugarkubeObservabilityWatchdog",
+            "expr": "vector(1)",
+            "labels": {
+                "environment": "staging",
+                "cluster": "sugarkube-int",
+                "purpose": "observability-watchdog",
+            },
+            "annotations": {
+                "summary": "Sugarkube staging observability watchdog",
+                "runbook_url": "https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-operations.md#observability-watchdog",
+            },
+        }
+    ]
 
 
 def test_grafana_alertmanager_k3s_monitor_values_are_guarded():
@@ -128,7 +166,11 @@ def test_no_production_values_or_public_exposure_or_credentials_added():
 
 
 def rendered_alertmanager_fixture(
-    *, secret="alertmanager-pagerduty", path=None, matchers=None, inline=False
+    *,
+    secret="alertmanager-pagerduty, alertmanager-healthchecks-watchdog",
+    path=None,
+    matchers=None,
+    inline=False,
 ):
     path = path or "/etc/alertmanager/secrets/alertmanager-pagerduty/routing-key"
     matchers = matchers or [
@@ -159,22 +201,41 @@ stringData:
         - receiver: pagerduty-synthetic-test
           matchers:
 {matcher_yaml}
+        - receiver: healthchecks-watchdog
+          matchers:
+            - 'alertname="SugarkubeObservabilityWatchdog"'
+            - 'environment="staging"'
+            - 'cluster="sugarkube-int"'
+            - 'purpose="observability-watchdog"'
+          group_by: [alertname, cluster, environment]
+          group_wait: 30s
+          group_interval: 1m
+          repeat_interval: 5m
+          continue: false
     receivers:
       - name: "null"
       - name: pagerduty-synthetic-test
         pagerduty_configs:
           - routing_key_file: {path}
             send_resolved: true{inline_field}
+      - name: healthchecks-watchdog
+        webhook_configs:
+          - url_file: /etc/alertmanager/secrets/alertmanager-healthchecks-watchdog/ping-url
+            send_resolved: false
+            http_config:
+              follow_redirects: true
+            max_alerts: 1
+            timeout: 10s
 """
 
 
 @pytest.mark.parametrize(
     ("kwargs", "diagnostic"),
     [
-        ({"secret": "wrong-secret"}, "must reference only"),
+        ({"secret": "wrong-secret"}, "exactly the two expected"),
         ({"path": "/wrong/path"}, "exact mounted routing-key file"),
         ({"matchers": ['severity="critical"']}, "exact synthetic allowlist"),
-        ({"inline": True}, "inline PagerDuty credentials are forbidden"),
+        ({"inline": True}, "inline credentials or webhook URLs are forbidden"),
     ],
 )
 def test_alertmanager_validator_rejects_missing_mount_wrong_path_inline_and_broad_route(
@@ -262,42 +323,42 @@ def test_alertmanager_validator_redacts_invalid_base64(tmp_path):
                 "      routes:\n        - receiver: pagerduty-synthetic-test",
                 "      routes:\n        - receiver: nested\n          routes:\n            - receiver: pagerduty-synthetic-test",
             ),
-            "direct child of the root route",
+            "first direct child",
         ),
         (
             lambda text: text.replace(
                 "    receivers:\n",
                 "    receivers:\n      - name: alternate\n        pagerduty_configs: []\n",
             ),
-            "exactly one PagerDuty receiver",
+            "receiver list must contain exactly",
         ),
         (
             lambda text: text.replace(
                 "            send_resolved: true",
                 "            send_resolved: true\n          - routing_key_file: /another/file",
             ),
-            "exactly one PagerDuty configuration",
+            "exactly one PagerDuty receiver",
         ),
         (
             lambda text: text.replace(
                 "            - 'severity=\"critical\"'",
                 "            - 'severity=\"critical\"'\n          continue: false",
             ),
-            "must not specify continuation",
+            "exact synthetic allowlist",
         ),
         (
             lambda text: text.replace(
                 "            - 'severity=\"critical\"'",
                 "            - 'severity=\"critical\"'\n          routes: []",
             ),
-            "must not contain nested routes",
+            "exact synthetic allowlist",
         ),
         (
             lambda text: text.replace(
                 "    receivers:",
                 "    routing_" + "key: forbidden-stub\n    receivers:",
             ),
-            "inline PagerDuty credentials are forbidden",
+            "inline credentials or webhook URLs are forbidden",
         ),
         (
             lambda text: text.replace(
@@ -308,7 +369,7 @@ def test_alertmanager_validator_redacts_invalid_base64(tmp_path):
                 "      routes:",
                 "      routes:\n        - receiver: alternate\n          matchers: ['severity=~\".*\"']",
             ),
-            "inline PagerDuty credentials are forbidden",
+            "inline credentials or webhook URLs are forbidden",
         ),
     ],
     ids=[
@@ -370,12 +431,12 @@ def test_install_upgrade_are_distinct_and_render_before_mutation():
     install = re.search(r"install_release\(\).*?\nupgrade_release\(", script, re.S).group(0)
     upgrade = re.search(r"upgrade_release\(\).*?\nstatus\(", script, re.S).group(0)
     assert "render_to" in install and "helm install" in install
-    assert install.index("assert_pagerduty_secret") < install.index("render_to")
+    assert install.index("assert_integration_secrets") < install.index("render_to")
     assert install.index("render_to") < install.index("helm install")
     assert 'state="$(release_state)"' in install
     assert "already exists" in install
     assert "render_to" in upgrade and "helm upgrade" in upgrade
-    assert upgrade.index("assert_pagerduty_secret") < upgrade.index("render_to")
+    assert upgrade.index("assert_integration_secrets") < upgrade.index("render_to")
     assert upgrade.index("render_to") < upgrade.index("helm upgrade")
     assert 'state="$(release_state)"' in upgrade
     assert "requires an existing Helm release" in upgrade
@@ -496,7 +557,7 @@ case "$*" in
     printf '%s\n' 'apiVersion: v1' 'kind: ConfigMap' 'metadata:' '  name: kube-prometheus-stack-grafana-dashboards-sugarkube' '  labels:' '    dashboard-provider: sugarkube' 'data:' '  sugarkube-staging-observability.json:' '    |-'
     sed 's/^/      /' "$DASHBOARD"
     printf '%s\n' '---' 'kind: ConfigMap' 'data:' '  dashboardproviders.yaml: |' '    providers:' '      - name: sugarkube' '        options:' '          path: /var/lib/grafana/dashboards/sugarkube' '---' 'kind: Deployment' 'spec:' '  template:' '    spec:' '      containers:' '        - volumeMounts:' '            - name: dashboards-sugarkube' '              mountPath: /var/lib/grafana/dashboards/sugarkube/sugarkube-staging-observability.json' '              subPath: sugarkube-staging-observability.json'
-    printf '%s\n' '---' 'apiVersion: monitoring.coreos.com/v1' 'kind: Alertmanager' 'metadata:' '  name: kube-prometheus-stack-alertmanager' 'spec:' '  secrets:' '    - alertmanager-pagerduty'
+    printf '%s\n' '---' 'apiVersion: monitoring.coreos.com/v1' 'kind: Alertmanager' 'metadata:' '  name: kube-prometheus-stack-alertmanager' 'spec:' '  secrets:' '    - alertmanager-pagerduty' '    - alertmanager-healthchecks-watchdog'
     printf '%s\n' '---' 'apiVersion: v1' 'kind: Secret' 'metadata:' '  name: alertmanager-kube-prometheus-stack-alertmanager' 'stringData:' '  alertmanager.yaml: |'
     sed 's/^/    /' "$ALERTMANAGER_CONFIG"
     exit 0
@@ -516,13 +577,14 @@ case "$*" in
   *"get daemonset kube-prometheus-stack-prometheus-node-exporter"*) [ "$KUBECTL_MODE" = two-nodes ] && echo '2 2' || echo '3 3' ;;
   *"get pvc -o json"*) printf '%s\n' '{"items":[{"metadata":{"name":"generated-pvc","labels":{"app.kubernetes.io/name":"prometheus"}},"spec":{"storageClassName":"local-path"},"status":{"phase":"Bound"}}]}' ;;
   *"get prometheus kube-prometheus-stack-prometheus"*) echo 1 ;;
-  *"get alertmanager kube-prometheus-stack-alertmanager -o yaml"*) printf '%s\n' 'apiVersion: monitoring.coreos.com/v1' 'kind: Alertmanager' 'metadata:' '  name: kube-prometheus-stack-alertmanager' 'spec:' '  secrets:' '    - alertmanager-pagerduty' ;;
+  *"get alertmanager kube-prometheus-stack-alertmanager -o yaml"*) printf '%s\n' 'apiVersion: monitoring.coreos.com/v1' 'kind: Alertmanager' 'metadata:' '  name: kube-prometheus-stack-alertmanager' 'spec:' '  secrets:' '    - alertmanager-pagerduty' '    - alertmanager-healthchecks-watchdog' ;;
   *"get alertmanager kube-prometheus-stack-alertmanager"*) echo 1 ;;
   *"get secret alertmanager-kube-prometheus-stack-alertmanager -o yaml"*)
     printf '%s\n' 'apiVersion: v1' 'kind: Secret' 'metadata:' '  name: alertmanager-kube-prometheus-stack-alertmanager' 'stringData:' '  alertmanager.yaml: |'
     [ "$KUBECTL_MODE" != malformed-alertmanager ] && sed 's/^/    /' "$ALERTMANAGER_CONFIG" || printf '%s\n' '    route: [unterminated'
     ;;
   *"get secret alertmanager-pagerduty -o go-template="*) [ "$KUBECTL_MODE" != missing-pagerduty ] || exit 44; [ "$KUBECTL_MODE" != empty-pagerduty ] && echo present ;;
+  *"get secret alertmanager-healthchecks-watchdog -o go-template="*) [ "$KUBECTL_MODE" != missing-watchdog ] || exit 44; [ "$KUBECTL_MODE" != empty-watchdog ] && echo present ;;
   *"port-forward"*"service/kube-prometheus-stack-alertmanager"*":9093"*)
     [ "$PAGERDUTY_MODE" != forward-exit ] || { echo PORT_FORWARD_SENTINEL; exit 42; }
     echo "$PAGERDUTY_FORWARD_LINE"
@@ -619,12 +681,31 @@ printf '%s' "$code"
         - environment="staging"
         - cluster="sugarkube-int"
         - severity="critical"
+    - receiver: healthchecks-watchdog
+      matchers:
+        - alertname="SugarkubeObservabilityWatchdog"
+        - environment="staging"
+        - cluster="sugarkube-int"
+        - purpose="observability-watchdog"
+      group_by: [alertname, cluster, environment]
+      group_wait: 30s
+      group_interval: 1m
+      repeat_interval: 5m
+      continue: false
 receivers:
   - name: "null"
   - name: pagerduty-synthetic-test
     pagerduty_configs:
       - routing_key_file: /etc/alertmanager/secrets/alertmanager-pagerduty/routing-key
         send_resolved: true
+  - name: healthchecks-watchdog
+    webhook_configs:
+      - url_file: /etc/alertmanager/secrets/alertmanager-healthchecks-watchdog/ping-url
+        send_resolved: false
+        http_config:
+          follow_redirects: true
+        max_alerts: 1
+        timeout: 10s
 """,
         encoding="utf-8",
     )
@@ -706,6 +787,21 @@ def test_mutation_requires_nonempty_pagerduty_secret_without_exposure(
     assert "helm " not in audit
     assert "forbidden-secret-sentinel" not in result.stdout + result.stderr + audit
     assert "routing-key" in result.stderr
+    assert (
+        "value intentionally not read or printed" in result.stderr or "is absent" in result.stderr
+    )
+
+
+@pytest.mark.parametrize("mode", ["missing-watchdog", "empty-watchdog"])
+@pytest.mark.parametrize(("command", "helm_mode"), [("install", "absent"), ("upgrade", "present")])
+def test_mutation_requires_nonempty_watchdog_secret_without_exposure(
+    tmp_path, mode, command, helm_mode
+):
+    result, audit = run_helper(tmp_path, command, helm_mode=helm_mode, kubectl_mode=mode)
+    assert result.returncode != 0
+    assert f"helm {command}" not in audit
+    assert "helm " not in audit
+    assert "ping-url" in result.stderr
     assert (
         "value intentionally not read or printed" in result.stderr or "is absent" in result.stderr
     )

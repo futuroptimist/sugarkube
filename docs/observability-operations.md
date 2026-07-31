@@ -127,11 +127,10 @@ is not rollout evidence.
 
 - Helm release: `kube-prometheus-stack` in namespace `monitoring`.
 - Prometheus: one replica, `7d` retention, `15GB` retention size, `local-path` `ReadWriteOnce` PVC requesting `20Gi`, CPU request `200m`, memory request `512Mi`, memory limit `2Gi`, admin API disabled, and external label `cluster=sugarkube-int`.
-- Alertmanager: one replica with root/default no-op receiver named exactly `"null"`. Staging values
-  define a secret-file-backed PagerDuty receiver, but route only the exact synthetic test labels to
-  it; bundled and real workload alerts still fall through to `"null"`. Repository configuration is
-  is deployed, and its manual fire/acknowledge/resolve drill has been proven. Bundled and real
-  workload alerts still fall through to `"null"`.
+- Alertmanager: one replica with root/default no-op receiver named exactly `"null"`. Its two exact
+  direct-child allowlists send only `SugarkubePagerDutyTest` to the file-backed PagerDuty receiver
+  and `SugarkubeObservabilityWatchdog` to the file-backed Healthchecks webhook. All ordinary alerts
+  still fall through only to `"null"`; neither route continues.
 - Grafana: persistence disabled, no Ingress, LAN-only NodePort `30300`.
 - The provisioned dashboard defaults to six hours and a 30-second refresh. Its
   top-level public availability summary reports **Healthy endpoints**, **Failed
@@ -182,6 +181,9 @@ is not rollout evidence.
 - **Failed workloads:** use `just observability-status env=staging`, `kubectl -n monitoring describe`, and pod logs to identify image pulls, scheduling, resources, or PVC failures.
 
 ## Rollback
+
+> **Before rolling back to any revision that removes the watchdog receiver, pause the Healthchecks
+> check or its PagerDuty integration. Otherwise the intentional loss of pings can create a page.**
 
 Use Helm rollback to the prior known-good revision, then restore the prior complete Git values/version before the next upgrade attempt:
 
@@ -289,6 +291,65 @@ five minutes. Retain the procedure below for regression drills.
    Repeat the explicit fire/acknowledge/resolve confirmations. Revoke the old integration key only
    after the new path is proven. Keep the Secret present throughout rollback safety windows.
 
+## Observability watchdog
+
+The staging-only `SugarkubeObservabilityWatchdog` rule evaluates `vector(1)` every minute with fixed
+`environment=staging`, `cluster=sugarkube-int`, and `purpose=observability-watchdog` labels. The
+dedicated Alertmanager route waits 30 seconds, groups by alert name/cluster/environment, and repeats
+the file-backed Healthchecks webhook every five minutes. Configure its Healthchecks check for a
+**five-minute period and two-minute grace**; normal detection is therefore about seven minutes plus
+network and PagerDuty processing time. Alertmanager sends no resolved webhook and at most one alert.
+
+### Install, deploy, and verify
+
+1. Select `sugar-staging`, then run `just observability-watchdog-install env=staging` interactively.
+   The helper rejects URL arguments and credential environment variables, reads hidden input only
+   from `/dev/tty`, validates it without echoing it, and streams
+   `monitoring/alertmanager-healthchecks-watchdog` key `ping-url` through stdin. It creates no
+   credential file and prints only sanitized results.
+2. Check the contract without reading or decoding it with
+   `just observability-watchdog-status env=staging`.
+3. Run `just observability-render env=staging >/dev/null`, then
+   `just observability-upgrade env=staging`. Install and upgrade fail before Helm mutation unless
+   both `alertmanager-pagerduty/routing-key` and
+   `alertmanager-healthchecks-watchdog/ping-url` exist and are nonempty; rendering is offline and
+   contains only file paths.
+4. Run `just observability-verify env=staging` and
+   `just observability-watchdog-verify env=staging`. The latter checks the exact firing rule and
+   labels, active Alertmanager alert, live custom resource and generated configuration, Secret
+   mount, and a bounded log observation without accessing either credential. **Manually confirm the
+   Healthchecks dashboard's last-ping time advances**; no account credential belongs here.
+
+### Safe silence drill, recovery, and rollback
+
+**Manual checkpoint:** before disruption, confirm the check is Up, its last ping is recent, and an
+operator is ready to acknowledge PagerDuty. Run
+`just observability-watchdog-drill-create env=staging`. This creates only an Alertmanager silence
+with the watchdog's exact four labels and an eight-minute expiry. It does not shut down a node or
+manually ping Healthchecks. Disconnection is safe because Alertmanager owns the expiry. Inspect the
+sanitized state with `just observability-watchdog-drill-status env=staging`; optionally remove only
+that owned silence early with `just observability-watchdog-drill-clear env=staging`.
+
+Manually confirm Healthchecks becomes late/down after the five-minute period plus two-minute grace,
+its existing integration creates a PagerDuty incident, and the incident can be acknowledged. After
+the silence expires (or is cleared), confirm the next Alertmanager notification returns Healthchecks
+to Up and PagerDuty recovers/resolves. Automated tests inspect the bounded expiry but never wait for
+the real drill. If recovery fails, clear the owned silence, inspect sanitized Alertmanager status and
+logs, restore the last known-good values, and repeat live verification. Before rollback removes the
+receiver, pause the external check/integration as warned above; retain both Secrets while any active
+or rollback configuration mounts them.
+
+### Signal boundaries
+
+- A **node heartbeat failure** means one physical Pi stopped sending its host-local check; it remains
+  independent of Kubernetes and may survive failure of the monitoring stack.
+- An **observability-watchdog failure** means Prometheus, Alertmanager, its route, egress, or the
+  monitoring host stopped delivering this always-firing alert.
+- **Ordinary Prometheus alerts** describe scraped cluster/application symptoms and continue to the
+  null receiver unless separately and exactly allowlisted.
+- **External endpoint probes** test public DNS/TLS/HTTP from blackbox exporter; they do not prove the
+  internal alert-delivery path or physical-node liveness.
+
 ## Per-node Healthchecks.io heartbeat rollout
 
 The heartbeat is platform/node observability and does not inspect Kubernetes, Helm, DSPACE, or any
@@ -337,8 +398,8 @@ confirmation. This disables the timer and removes only this feature's unit, exec
 credential. It does **not** delete or change Healthchecks.io checks, integrations, or PagerDuty
 configuration. Deleting the credential means reinstall requires the node's rotated URL again.
 
-The Alertmanager-driven observability watchdog, in-cluster `KubeNodeNotReady` routing, and all
-application alert rules explicitly remain later tasks.
+The in-cluster `KubeNodeNotReady` route and application alert rules remain later tasks; they are
+deliberately distinct from both node heartbeats and the Alertmanager-driven watchdog above.
 
 ## Reprovisioning proof and post-merge checklist
 

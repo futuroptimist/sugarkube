@@ -334,6 +334,7 @@ the canonical [`docs/observability-alerting.md`](./observability-alerting.md).
 | `TLSExpiringSoon` | warning/critical | cert expiry | <14d / <3d | 1h | cert-manager, Cloudflare DNS/API | `docs/cloudflare_tunnel.md`, cert-manager docs | renew/fix issuer/DNS; no app rollback |
 | `PrometheusScrapeDown` | warning | `up == 0` | scrape down | 10m | ServiceMonitor mismatch, app metrics disabled | this design + app runbook | fix scrape hook; do not page if app is healthy |
 | `AlertmanagerDeliveryFailed` | warning | notification failures | >0 sustained | 15m | receiver secret/config/network | future `docs/runbooks/alertmanager.md` | fix receiver; verify test alert |
+| `SugarkubeObservabilityWatchdog` | none | always-firing `vector(1)` | missing for five minutes plus two-minute grace | continuous | Prometheus, Alertmanager, egress, or monitoring-node failure | `docs/observability-operations.md#observability-watchdog` | restore delivery path; pause external check before receiver rollback |
 | `DspaceDchatDependencyFailures` | warning | dChat outcome | dependency failures above baseline | 15m | token.place/downstream failures | `docs/apps/dspace.md`, `docs/apps/tokenplace.md` | fallback path or rollback related release |
 | `TokenplaceNoHealthyComputeNodes` | critical when demand exists | healthy nodes and queued work | healthy nodes 0 and queue >0 | 5m | compute nodes offline, relay registration broken | `docs/apps/tokenplace.md` | restart/register compute node; rollback relay if release-related |
 | `TokenplaceQueueBacklog` | warning | queue age/depth | p95 age >60s or depth above staging baseline | 15m | insufficient compute, upstream slow | `docs/apps/tokenplace.md` | add/restart compute; rate-limit; rollback if regression |
@@ -344,7 +345,7 @@ Do not page on symptoms without a response path, such as low traffic, GitHub sta
 ## 12. Phased rollout
 
 1. **Inventory and naming contract**: finalize metric names, labels, privacy rules, and app release gates. Can proceed in parallel with app repo implementation planning.
-2. **Cluster monitoring foundation**: *implemented in staging.* kube-prometheus-stack is deployed and scripted-verified in staging, with resource requests, retention, PV, and Grafana provisioned as documented in [`docs/observability-operations.md`](./observability-operations.md); Alertmanager still runs the no-op `"null"` receiver. Production rollout remains future work.
+2. **Cluster monitoring foundation**: *implemented in staging.* kube-prometheus-stack is deployed and scripted-verified in staging, with resource requests, retention, PV, and Grafana provisioned as documented in [`docs/observability-operations.md`](./observability-operations.md); the null root has exact synthetic PagerDuty and watchdog children only. Production rollout remains future work.
 3. **Blackbox monitoring**: *implemented in staging.* 16 public probes across all four apps plus TLS expiry are live and scripted-verified, per [`docs/observability-blackbox.md`](./observability-blackbox.md).
 4. **Application scrape integration**: app repos expose safe metrics and chart scrape hooks; Sugarkube enables discovery per environment. DSPACE's authenticated `ServiceMonitor` is live in staging (§7); token.place and danielsmith.io app metrics remain future work per each app's release gate.
 5. **Dashboards**: *implemented in staging* for the currently live signals — see §10. Additional per-app dashboard rows arrive as each app's metrics land.
@@ -353,7 +354,7 @@ Do not page on symptoms without a response path, such as low traffic, GitHub sta
    [`docs/observability-alerting.md`](./observability-alerting.md) for the rollout sequence.
 7. **Staging failure drills**: the synthetic Alertmanager → PagerDuty fire, acknowledgement, and
    resolution path is proven. Per-node Healthchecks.io installation and power-off drills are next;
-   the watchdog, `KubeNodeNotReady` route, and application drills remain later work. See
+   live watchdog proof, `KubeNodeNotReady` route, and application drills remain later work. See
    [`docs/observability-alerting.md`](./observability-alerting.md) §6.
 8. **Production rollout**: promote the monitoring stack and app scrape hooks after staging soak and drill evidence.
 9. **Post-release baseline review**: after at least one production week, adjust thresholds, retention, dashboard rows, and noisy alerts based on measured data.
@@ -379,6 +380,6 @@ Prometheus or Grafana should not be listed as production skills until evidence e
 
 - Which cluster names should distinguish staging and production if both run on Sugarkube-managed hardware?
 - Should app metrics endpoints use bearer tokens, network policy only, or both?
-- The Alertmanager receiver question is answered at the design level: PagerDuty plus Healthchecks.io, per [`docs/observability-alerting.md`](./observability-alerting.md). What remains open is execution — accounts, secret-safe config, and drills, none of which are done yet.
+- The staging receiver model is PagerDuty plus Healthchecks.io, per [`docs/observability-alerting.md`](./observability-alerting.md). Secret-safe configuration is codified; external account setup and live drills remain operator work.
 - What Prometheus PV size is realistic after a one-week staging soak on the target Pi hardware?
 - Should Loki remain entirely deferred, or should minimal log labels be designed now without deploying Loki?

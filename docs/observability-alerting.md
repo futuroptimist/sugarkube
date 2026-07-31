@@ -162,13 +162,14 @@ These are the current alert-design candidates, not proof the rules already exist
 A safe, phased sequence — each step depends on the previous one succeeding:
 
 1. Establish PagerDuty and Healthchecks.io accounts and integrations manually (outside this repo).
-2. Deploy and verify the repository's secret-safe receiver foundation (`routing_key_file`, no inline
-   secrets); the root remains the null receiver and only the synthetic test is allowlisted.
+2. Deploy and verify the two-integration secret-safe receiver foundation (`routing_key_file` and
+   `url_file`, no inline secrets); the root remains null and only the synthetic test and watchdog are
+   exactly allowlisted.
 3. **Proven:** manually fire the synthetic PagerDuty test alert, receive and acknowledge the phone
    incident, resolve the alert, and observe resolution after Alertmanager's expected default
    resolution delay (about five minutes).
-4. Install and verify the external node heartbeats against Healthchecks.io. Implement and verify the
-   observability watchdog only in a later slice.
+4. Install and verify the external node heartbeats and the Alertmanager-driven observability
+   watchdog against distinct Healthchecks.io checks.
    Confirm the watchdog's dedicated Alertmanager timing and the Healthchecks.io period/grace match
    the contract in §3; observe multiple repeat notifications before declaring the path healthy.
 5. Audit the existing `kube-prometheus-stack` bundled node rules (starting with `KubeNodeNotReady`).
@@ -181,10 +182,10 @@ A safe, phased sequence — each step depends on the previous one succeeding:
 10. Only after that external-redundancy path is proven, intentionally power down the node hosting
     Prometheus/Alertmanager and confirm Healthchecks.io — not PagerDuty via Alertmanager — detects the
     missing heartbeat and still reaches a phone.
-11. Drill the watchdog timing separately: stop its Alertmanager receiver immediately after a
-    successful ping and confirm Healthchecks.io declares it late after the 5-minute period plus grace,
-    then restore it and confirm the next notification recovers the check. Record observed notification
-    gaps and detection latency; fail the drill if a healthy gap exceeds the configured period.
+11. Drill the watchdog timing with the repository-owned, exact-label, eight-minute Alertmanager
+    silence; never stop a node or ping the URL manually. Confirm Healthchecks.io declares it late
+    after the five-minute period plus two-minute grace, then confirm automatic ping and incident
+    recovery. Record observed latency.
 12. Add custom application and blackbox alerts one at a time, each with its own drill before the next
     is added.
 13. Return to `DspaceChatSyntheticFailed` once token.place staging inference is operational again
@@ -213,10 +214,10 @@ Rollback and noise control:
   cluster it's meant to watch, it loses the independence that makes an external dead-man switch
   useful in the first place.
 
-PagerDuty plus an externally hosted Healthchecks.io is the preferred initial direction because it is
+PagerDuty plus an externally hosted Healthchecks.io is the implemented staging direction because it is
 the only combination here that gives both an acknowledgeable phone workflow *and* a dead-man path that
 survives the monitoring stack's own node going down. Nothing about this preference implies any part of
-it is deployed yet — see the rollout plan above for the actual sequencing.
+it is production-ready — live staging verification and drills remain required after changes merge.
 
 ## 8. Status and dependencies
 
@@ -228,6 +229,10 @@ it is deployed yet — see the rollout plan above for the actual sequencing.
   [`docs/observability-blackbox.md`](./observability-blackbox.md).
 - The synthetic Alertmanager → PagerDuty fire/acknowledge/resolve drill succeeded, including the
   expected roughly five-minute Alertmanager resolution delay.
-- Per-node heartbeat assets are repository-ready but have not been installed on the Pis. The
-  node-power-off drill, watchdog, `KubeNodeNotReady` routing, and application alerts remain later
-  work.
+- Per-node heartbeat assets and the staging watchdog configuration are repository-ready. Live
+  installation/proof, node-power-off drills, `KubeNodeNotReady` routing, and application alerts are
+  tracked separately.
+
+Node heartbeats detect a physical host's absence independently; the watchdog detects loss of the
+Prometheus-to-Alertmanager delivery chain; ordinary Prometheus alerts describe internal symptoms;
+external blackbox probes describe public endpoint/DNS/TLS behavior. None substitutes for another.
