@@ -86,7 +86,7 @@ verification uses the same command with `env=prod` and a production candidate or
 | Release | `dspace` |
 | Namespace | `dspace` |
 | App config | `docs/examples/apps/dspace.env` |
-| Chart version pins | Shared/default `docs/apps/dspace.version`; staging `docs/apps/dspace.staging.version` (`3.1.0`); production `docs/apps/dspace.prod.version` (`3.0.1`) |
+| Chart version pins | Shared/default `docs/apps/dspace.version`; staging `docs/apps/dspace.staging.version` (`3.1.0`); production `docs/apps/dspace.prod.version` (`3.0.2`) |
 | Production tag pin | `docs/apps/dspace.prod.tag` |
 | Verify paths | `/config.json`, `/healthz`, `/livez` |
 
@@ -114,7 +114,7 @@ Use these links before changing a deployment so the workflow runs, package versi
 - `env=staging`: HA staging on the staging Sugarkube cluster with host `staging.democratized.space` and values `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml`.
   The staging overlay injects `DSPACE_TOKEN_PLACE_URL=https://staging.token.place` and `DSPACE_TOKEN_PLACE_CHAT_MODEL=llama-3.1-8b-instruct`, uses chart `3.1.0`, and persists the authenticated metrics ServiceMonitor configuration discovered by kube-prometheus-stack. The metrics bearer value is not committed; operators manage the existing `dspace-staging-metrics-token` Secret out of band.
 - `env=prod`: HA production on the production Sugarkube cluster with host `democratized.space` and values `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml`.
-  The production overlay injects `DSPACE_TOKEN_PLACE_URL=https://token.place` and `DSPACE_TOKEN_PLACE_CHAT_MODEL=llama-3.1-8b-instruct`. Production remains intentionally pinned to the recovered chart `3.0.1` deployment and image `ghcr.io/democratizedspace/dspace:main-1a31a56`; it does not enable metrics or ServiceMonitor settings.
+  The production overlay injects `DSPACE_TOKEN_PLACE_URL=https://token.place` and `DSPACE_TOKEN_PLACE_CHAT_MODEL=llama-3.1-8b-instruct`. Production remains intentionally pinned to recovery chart `3.0.2` and image `ghcr.io/democratizedspace/dspace:main-1a31a56`; it does not enable metrics or ServiceMonitor settings.
 - Optional legacy/canary host `prod.democratized.space` uses `docs/examples/dspace.values.prod-subdomain.yaml`. The `dspace-oci-deploy-prod-subdomain` compatibility command selects the secret-free `docs/examples/apps/dspace-prod-subdomain.env` config, preserving that overlay while routing through the same manifest validation, OCI preflight, Helm deployment, and evidence finalization as the generic production path.
 
 ## Find or publish GHCR image
@@ -571,3 +571,90 @@ just helm-oci-install release=dspace namespace=dspace chart=oci://ghcr.io/democr
 ```bash
 just helm-oci-upgrade release=dspace namespace=dspace chart=oci://ghcr.io/democratizedspace/charts/dspace values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml version_file=docs/apps/dspace.staging.version tag="$APP_TAG" env=staging
 ```
+
+## Production Helm-state reconciliation (Refs #2325)
+
+This section **prepares but does not execute** the maintenance operation. The Helm freeze remains
+in force. `docs/apps/dspace.recovery-coordinates.json` is immutable coordinate input, not approval
+or deployment evidence. Its schema 2 fields deliberately bind the 3.0.1 application image to its
+source and the 3.0.2 recovery chart to a different source. The semantic `v3.0.1` field is
+corroborating metadata only: never deploy or republish it. The package checksum is not the OCI
+manifest digest.
+
+### 1. Repository preparation and operator approval
+
+Use distinct cluster credentials and an executable upstream smoke runner. First inspect the
+3.0.1 application's immutable configuration contract and confirm that `openai` is its default;
+stop if it contradicts the expected OpenAI-first recovery behavior. Supply real approval metadata
+only after that review:
+
+```bash
+export STAGING_KUBECONFIG="$HOME/.kube/config-sugarkube-staging"
+export PROD_KUBECONFIG="$HOME/.kube/config-sugarkube-prod"
+export DSPACE_SMOKE_RUNNER="$HOME/dspace/scripts/run-remote-chat-smoke.mjs"
+test "$STAGING_KUBECONFIG" != "$PROD_KUBECONFIG"
+test -x "$DSPACE_SMOKE_RUNNER"
+COORDINATES=docs/apps/dspace.recovery-coordinates.json
+APPROVED_AT='<YYYY-MM-DDTHH:MM:SSZ>' APPROVED_BY='<operator identity>'
+python3 scripts/dspace_release_manifest.py candidate --upstream "$COORDINATES" \
+  --output deployment-candidates/dspace/staging.json --environment staging --provider openai \
+  --approved-at "$APPROVED_AT" --approved-by "$APPROVED_BY"
+python3 scripts/dspace_release_manifest.py candidate --upstream "$COORDINATES" \
+  --output deployment-candidates/dspace/prod.json --environment prod --provider openai \
+  --approved-at "$APPROVED_AT" --approved-by "$APPROVED_BY"
+```
+
+### 2. Stage and prove the exact release
+
+Preflight resolves image and chart OCI provenance independently and prints the digest-qualified
+chart. Render and inspect the production values chain before reserving anything: metrics and its
+staging Secret must be absent, no Secret value may be printed, and legitimate production
+`secretKeyRef` references remain.
+
+```bash
+python3 scripts/dspace_release_manifest.py preflight --manifest deployment-candidates/dspace/staging.json --print-chart-coordinate
+python3 scripts/app_config.py json --app dspace --env prod
+just app-deploy app=dspace env=staging tag=main-1a31a56 \
+  manifest=deployment-candidates/dspace/staging.json smoke_runner="$DSPACE_SMOKE_RUNNER" \
+  kubeconfig="$STAGING_KUBECONFIG"
+just dspace-release-verify env=staging \
+  manifest=deployment-evidence/dspace/staging/<finalized-record>.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER" kubeconfig="$STAGING_KUBECONFIG"
+python3 scripts/dspace_release_manifest.py staging-gate \
+  --manifest deployment-candidates/dspace/prod.json \
+  --staging-evidence deployment-evidence/dspace/staging/<finalized-record>.json
+```
+
+### 3. Read-only production capture, guarded mutation, and review
+
+Before mutation, save timestamped, access-restricted output from bounded `helm history`/`status`
+and `kubectl get` queries covering Deployment image/identity, serving pod UIDs, start times and
+image IDs, plus public/direct runtime identity. Do not capture Secret objects or rendered Secret
+values. Run production preflight and digest-qualified render verification before evidence
+reservation. Then use only the guarded promotion recipe:
+
+```bash
+python3 scripts/dspace_release_manifest.py preflight --manifest deployment-candidates/dspace/prod.json --print-chart-coordinate
+just app-promote-prod app=dspace tag=main-1a31a56 \
+  manifest=deployment-candidates/dspace/prod.json \
+  staging_evidence=deployment-evidence/dspace/staging/<finalized-record>.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER" kubeconfig="$PROD_KUBECONFIG" \
+  staging_kubeconfig="$STAGING_KUBECONFIG"
+```
+
+Review the timestamped finalized production evidence and independently confirm Helm stored values,
+Deployment and every serving pod, image digest, application/runtime/frontend revision, chart
+version/digest/source revision, public/direct identity, health paths, configuration, and `/chat`.
+Lift the freeze only when finalized production evidence exists and every check passes.
+
+### 4. Failure reconciliation and immutable rollback
+
+On failure, retain the reservation and bounded failure evidence; do not claim success or use
+`helm rollback`, `--reuse-values`, a semantic image tag, mutable coordinates, or staging evidence
+as production proof. Because the drifted revision 8 has no truthful finalized production record,
+it is not a rollback target. Stop traffic-changing work and reconcile manually until an explicitly
+approved, immutable **production** target with complete production values is available. Then invoke
+`just dspace-manifest-rollback` with exact production confirmation and that finalized production
+record; it performs a fresh digest-qualified upgrade and mandatory post-mutation verification.
+Until such a record exists, the safe initial-reconciliation response is to preserve the failed
+state/evidence and keep the freeze, not manufacture historical evidence.

@@ -1292,3 +1292,80 @@ def test_finalize_rejects_noncanonical_image_id() -> None:
     item["status"]["containerStatuses"][0]["imageID"] = "not-a-digest"
     with pytest.raises(manifest.ManifestError, match="non-canonical pod imageID"):
         finalize(pods_json={"items": [item]})
+
+CHART_SHA = "fedcba9876543210fedcba9876543210fedcba98"
+
+
+def split_upstream() -> dict[str, object]:
+    value = upstream()
+    value["schemaVersion"] = 2
+    value["chartSourceRevision"] = CHART_SHA
+    return value
+
+
+def test_schema_v2_split_provenance_round_trips_and_gates() -> None:
+    staging = manifest.candidate(
+        split_upstream(), "staging", "openai", "2026-07-26T12:00:00Z", "operator"
+    )
+    prod = dict(staging, environment="prod")
+    assert staging["sourceRevision"] == SHA
+    assert staging["chartSourceRevision"] == CHART_SHA
+    final = dict(
+        staging,
+        recordType="final",
+        helmRevision=9,
+        pods=[{"name": "dspace-0", "startTime": "2026-07-26T12:01:00Z", "imageID": f"{manifest.IMAGE_REF}@{DIGEST}"}],
+        runtimeSourceRevision=SHA,
+        runtimeSourceRevisionMethod=manifest.RUNTIME_METHOD,
+        verificationResults=[
+            {"check": check, "passed": True, "details": "observed"}
+            for check in sorted(manifest.FINAL_FIXED_CHECKS | manifest.RUNTIME_VERIFICATION_CHECKS)
+            + ["imagePlatformSourceRevision[0]"]
+        ],
+        runtimeVerification={
+            "schemaVersion": 1, "environment": "staging", "release": "dspace", "namespace": "dspace",
+            "applicationVersion": "3.2.0", "runtimeSourceRevision": SHA,
+            "frontendSourceRevision": SHA, "defaultProvider": "openai",
+            "journeys": [{"name": "/chat", "passed": True}],
+        },
+    )
+    assert manifest.validate(final, True)["chartSourceRevision"] == CHART_SHA
+    assert manifest.staging_gate(prod, final) == 9
+    with pytest.raises(manifest.ManifestError, match="coordinates differ"):
+        manifest.staging_gate(dict(prod, chartSourceRevision="0" * 40), final)
+
+
+def test_schema_v2_preflight_uses_independent_revisions() -> None:
+    value = manifest.candidate(
+        split_upstream(), "staging", "openai", "2026-07-26T12:00:00Z", "operator"
+    )
+    manifest.preflight(value, manifest.IMAGE_REF, manifest.CHART_REF, "oras", runner=oras_runner(chart_revision=CHART_SHA))
+    with pytest.raises(manifest.ManifestError, match="chartSourceRevision"):
+        manifest.preflight(value, manifest.IMAGE_REF, manifest.CHART_REF, "oras", runner=oras_runner(image_revision=CHART_SHA, chart_revision=SHA))
+
+
+@pytest.mark.parametrize("change", [
+    lambda x: x.pop("chartSourceRevision"),
+    lambda x: x.update(chartSourceRevision="abc"),
+    lambda x: x.update(extraRevision=SHA),
+])
+def test_schema_v2_rejects_missing_malformed_or_unknown_provenance(change) -> None:
+    value = split_upstream()
+    change(value)
+    with pytest.raises(manifest.ManifestError):
+        manifest.candidate(value, "staging", "openai", "2026-07-26T12:00:00Z", "operator")
+
+
+def test_recovery_coordinate_file_is_exact_and_candidate_consumable() -> None:
+    value = json.loads(Path("docs/apps/dspace.recovery-coordinates.json").read_text())
+    assert value == {
+        "schemaVersion": 2, "app": "dspace", "applicationVersion": "3.0.1",
+        "sourceRevision": "1a31a569aff2dbeb238e8c2688b9e85140d2077d",
+        "chartSourceRevision": "63063e287adb92a4158ce2c8e7d378b73f52c1c5",
+        "imageTag": "main-1a31a56",
+        "imageDigest": "sha256:23dbc573377549136c1f10b05706b3c176ffbabaf04a3194381a24752104a401",
+        "chartVersion": "3.0.2",
+        "chartDigest": "sha256:8b862135e52146f301a41259d6dabb053ed891d798fc1c8c95ca775b2b8e9575",
+        "semanticTag": "v3.0.1",
+    }
+    assert manifest.candidate(value, "prod", "openai", "2026-07-31T00:00:00Z", "operator")["chartSourceRevision"] == value["chartSourceRevision"]

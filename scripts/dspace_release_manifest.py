@@ -28,6 +28,7 @@ UPSTREAM_FIELDS = (
     "chartDigest",
     "semanticTag",
 )
+UPSTREAM_V2_FIELDS = UPSTREAM_FIELDS[:4] + ("chartSourceRevision",) + UPSTREAM_FIELDS[4:]
 CANDIDATE_FIELDS = UPSTREAM_FIELDS + (
     "recordType",
     "environment",
@@ -35,6 +36,7 @@ CANDIDATE_FIELDS = UPSTREAM_FIELDS + (
     "approvedAt",
     "approvedBy",
 )
+CANDIDATE_V2_FIELDS = UPSTREAM_V2_FIELDS + CANDIDATE_FIELDS[len(UPSTREAM_FIELDS) :]
 FINAL_FIELDS = CANDIDATE_FIELDS + (
     "helmRevision",
     "pods",
@@ -42,6 +44,7 @@ FINAL_FIELDS = CANDIDATE_FIELDS + (
     "runtimeSourceRevisionMethod",
     "verificationResults",
 )
+FINAL_V2_FIELDS = CANDIDATE_V2_FIELDS + FINAL_FIELDS[len(CANDIDATE_FIELDS) :]
 OPTIONAL_FINAL_FIELDS = ("runtimeVerification",)
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -122,8 +125,10 @@ def _exact_fields(value: dict[str, Any], expected: tuple[str, ...]) -> None:
 
 
 def _validate_upstream(value: dict[str, Any]) -> None:
-    if value["schemaVersion"] != 1 or value["app"] != "dspace":
-        raise ManifestError("schemaVersion must be 1 and app must be 'dspace'")
+    if type(value["schemaVersion"]) is not int or value["schemaVersion"] not in {1, 2}:
+        raise ManifestError("schemaVersion must be integer 1 or 2")
+    if value["app"] != "dspace":
+        raise ManifestError("app must be 'dspace'")
     if not isinstance(value["applicationVersion"], str) or not SEMVER_RE.fullmatch(
         value["applicationVersion"]
     ):
@@ -131,6 +136,12 @@ def _validate_upstream(value: dict[str, Any]) -> None:
     sha = value["sourceRevision"]
     if not isinstance(sha, str) or not SHA_RE.fullmatch(sha):
         raise ManifestError("sourceRevision must be a full 40-character lowercase Git SHA")
+    if value["schemaVersion"] == 2:
+        chart_sha = value["chartSourceRevision"]
+        if not isinstance(chart_sha, str) or not SHA_RE.fullmatch(chart_sha):
+            raise ManifestError(
+                "chartSourceRevision must be a full 40-character lowercase Git SHA"
+            )
     tag = value["imageTag"]
     match = IMAGE_TAG_RE.fullmatch(tag) if isinstance(tag, str) else None
     if not match:
@@ -153,7 +164,12 @@ def validate(value: dict[str, Any], finalized: bool | None = None) -> dict[str, 
     record_type = value.get("recordType")
     if finalized is None:
         finalized = record_type == "final"
-    expected = FINAL_FIELDS if finalized else CANDIDATE_FIELDS
+    schema = value.get("schemaVersion")
+    if schema == 2 and "chartSourceRevision" not in value:
+        raise ManifestError("schemaVersion 2 requires chartSourceRevision")
+    expected = (FINAL_V2_FIELDS if finalized else CANDIDATE_V2_FIELDS) if schema == 2 else (
+        FINAL_FIELDS if finalized else CANDIDATE_FIELDS
+    )
     if finalized and "runtimeVerification" in value:
         expected += OPTIONAL_FINAL_FIELDS
     _exact_fields(value, expected)
@@ -410,9 +426,10 @@ def candidate(
     approved_at: str,
     approved_by: str,
 ) -> dict[str, Any]:
-    _exact_fields(upstream, UPSTREAM_FIELDS)
+    fields = UPSTREAM_V2_FIELDS if upstream.get("schemaVersion") == 2 else UPSTREAM_FIELDS
+    _exact_fields(upstream, fields)
     _validate_upstream(upstream)
-    result = {field: upstream[field] for field in UPSTREAM_FIELDS}
+    result = {field: upstream[field] for field in fields}
     result.update(
         recordType="candidate",
         environment=environment,
@@ -536,7 +553,11 @@ def preflight(
     checks = (
         ("imageDigest", image_digest, value["imageDigest"]),
         ("chartDigest", chart_digest, value["chartDigest"]),
-        ("chartSourceRevision", chart_revision, value["sourceRevision"]),
+        (
+            "chartSourceRevision",
+            chart_revision,
+            value.get("chartSourceRevision", value["sourceRevision"]),
+        ),
     )
     results = [
         {
@@ -819,6 +840,10 @@ def staging_gate(candidate_value: dict[str, Any], evidence_value: dict[str, Any]
         "semanticTag",
         "expectedDefaultChatProvider",
     )
+    if candidate_value["schemaVersion"] != evidence_value["schemaVersion"]:
+        raise ManifestError("manifest/evidence mismatch: schema versions differ")
+    if candidate_value["schemaVersion"] == 2:
+        coordinates += ("chartSourceRevision",)
     if any(candidate_value[field] != evidence_value[field] for field in coordinates):
         raise ManifestError("manifest/evidence mismatch: staging and prod coordinates differ")
     if "runtimeVerification" not in evidence_value:
