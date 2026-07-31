@@ -1667,29 +1667,45 @@ app-config app env='staging' config='':
 dspace-manifest-rollback env manifest evidence verifier="{{ justfile_directory() }}/scripts/dspace_runtime_verifier.py" confirm='' config='' kubeconfig='' smoke_runner='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
-    kubeconfig_path={{ quote(kubeconfig) }}
+    selected_env={{ quote(env) }}
+    manifest_path={{ quote(manifest) }}
+    evidence_path={{ quote(evidence) }}
+    selected_env="${selected_env#env=}"
+    manifest_path="${manifest_path#manifest=}"
+    evidence_path="${evidence_path#evidence=}"
+    verifier="{{ justfile_directory() }}/scripts/dspace_runtime_verifier.py"
+    confirm=''
+    config=''
+    kubeconfig_path=''
+    smoke_runner=''
+    optional_values=(
+      {{ quote(verifier) }}
+      {{ quote(confirm) }}
+      {{ quote(config) }}
+      {{ quote(kubeconfig) }}
+      {{ quote(smoke_runner) }}
+    )
+    optional_names=(verifier confirm config kubeconfig_path smoke_runner)
+    for index in "${!optional_values[@]}"; do
+      value="${optional_values[index]}"
+      [ -n "${value}" ] || continue
+      case "${value}" in
+        verifier=*) verifier="${value#verifier=}" ;;
+        confirm=*) confirm="${value#confirm=}" ;;
+        config=*) config="${value#config=}" ;;
+        kubeconfig=*) kubeconfig_path="${value#kubeconfig=}" ;;
+        smoke_runner=*) smoke_runner="${value#smoke_runner=}" ;;
+        *) printf -v "${optional_names[index]}" '%s' "${value}" ;;
+      esac
+    done
     if [ -z "${kubeconfig_path}" ]; then
       kubeconfig_path="${KUBECONFIG:-${HOME}/.kube/config}"
     fi
-    verifier={{ quote(verifier) }}
-    confirm={{ quote(confirm) }}
-    config={{ quote(config) }}
-    smoke_runner={{ quote(smoke_runner) }}
-    if [[ "${verifier}" == smoke_runner=* ]]; then
-      smoke_runner="${verifier#smoke_runner=}"
-      verifier="{{ justfile_directory() }}/scripts/dspace_runtime_verifier.py"
-    else
-      verifier="${verifier#verifier=}"
-    fi
-    confirm="${confirm#confirm=}"
-    config="${config#config=}"
-    kubeconfig_path="${kubeconfig_path#kubeconfig=}"
-    smoke_runner="${smoke_runner#smoke_runner=}"
     rollback_command=(
       python3 "{{ justfile_directory() }}/scripts/dspace_manifest_rollback.py"
-      --environment {{ quote(env) }}
-      --manifest {{ quote(manifest) }}
-      --evidence {{ quote(evidence) }}
+      --environment "${selected_env}"
+      --manifest "${manifest_path}"
+      --evidence "${evidence_path}"
       --verifier "${verifier}"
       --confirm "${confirm}"
       --config "${config}"

@@ -2629,6 +2629,65 @@ def test_dspace_manifest_rollback_preserves_named_options(tmp_path: Path) -> Non
         assert argv[argv.index(option) + 1] == expected
 
 
+@pytest.mark.parametrize(
+    ("environment", "optional_args", "expected_confirm"),
+    [
+        (
+            "staging",
+            ["smoke_runner=/tmp/smoke-runner", "verifier=/tmp/verifier"],
+            "",
+        ),
+        (
+            "prod",
+            [
+                "smoke_runner=/tmp/smoke-runner",
+                "verifier=/tmp/verifier",
+                "confirm=dspace:prod:0123456789abcdef0123456789abcdef01234567",
+            ],
+            "dspace:prod:0123456789abcdef0123456789abcdef01234567",
+        ),
+    ],
+)
+@pytest.mark.usefixtures("ensure_just_available")
+def test_dspace_manifest_rollback_normalizes_documented_named_form(
+    tmp_path: Path,
+    environment: str,
+    optional_args: list[str],
+    expected_confirm: str,
+) -> None:
+    result, argv = _run_dspace_manifest_rollback(
+        tmp_path,
+        [
+            f"env={environment}",
+            "manifest=/tmp/manifest.json",
+            "evidence=/tmp/evidence.json",
+            *optional_args,
+        ],
+    )
+
+    assert result.returncode == 0, result.stderr
+    expected = {
+        "--environment": environment,
+        "--manifest": "/tmp/manifest.json",
+        "--evidence": "/tmp/evidence.json",
+        "--smoke-runner": "/tmp/smoke-runner",
+        "--verifier": "/tmp/verifier",
+        "--confirm": expected_confirm,
+    }
+    for option, value in expected.items():
+        assert argv.count(option) == 1
+        assert argv[argv.index(option) + 1] == value
+    prefixes = (
+        "env=",
+        "manifest=",
+        "evidence=",
+        "smoke_runner=",
+        "verifier=",
+        "confirm=",
+    )
+    assert not any(value.startswith(prefixes) for value in argv)
+
+
 @pytest.mark.usefixtures("ensure_just_available")
 def test_dspace_release_verify_ignores_runtime_verifier_override(
     tmp_path: Path, generic_app_stub_env: dict[str, str]
