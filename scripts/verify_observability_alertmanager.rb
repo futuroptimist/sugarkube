@@ -62,6 +62,7 @@ fail_closed("inline credentials or webhook URLs are forbidden") if forbidden.cal
 
 route = config["route"]
 fail_closed('root receiver must remain "null"') unless route.is_a?(Hash) && route["receiver"] == "null"
+fail_closed("root route must contain only its receiver and exact child routes") unless route.keys.sort == %w[receiver routes]
 children = route["routes"]
 fail_closed("root must have exactly the two allowlisted direct-child routes") unless children.is_a?(Array) && children.length == 2
 receivers = config["receivers"]

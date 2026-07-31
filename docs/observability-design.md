@@ -385,7 +385,7 @@ Prometheus or Grafana should not be listed as production skills until evidence e
 
 ### Staging dead-man watchdog boundary
 
-The staging watchdog is an always-firing `vector(1)` rule delivered through a dedicated,
+The staging watchdog is designed as an always-firing `vector(1)` rule delivered through a dedicated,
 Secret-mounted Healthchecks webhook. It proves rule evaluation and outbound Alertmanager routing;
 it does not prove any individual node is alive, replace ordinary Prometheus alerts, or probe public
 endpoints. Those remain, respectively, the node-heartbeat timer, null-by-default reviewed alert

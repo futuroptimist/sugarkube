@@ -404,7 +404,8 @@ longer undesigned scope creep; it is planned, designed work tracked in
 
 ## Observability watchdog
 
-The staging-only `SugarkubeObservabilityWatchdog` rule evaluates `vector(1)` every minute. Its exact
+The staging-only `SugarkubeObservabilityWatchdog` rule is configured to evaluate `vector(1)` every
+minute after deployment. Its exact
 `staging`/`sugarkube-int`/`observability-watchdog` labels route only to the secret-file-backed
 Healthchecks receiver. Alertmanager waits 30 seconds, groups by alert name, cluster, and environment,
 and repeats every five minutes; configure the Healthchecks check for a **five-minute period and
@@ -425,9 +426,12 @@ in this repository.
    live CR/generated configuration, mount contract, and a bounded six-minute delivery-log window;
    it accesses neither credential.
 
-Expected first delivery is within roughly 90 seconds (one-minute evaluation plus 30-second group
-wait), repeats are five minutes apart, and Healthchecks should become late after the five-minute
-period plus two-minute grace and normal delivery jitter.
+Expected first delivery after deployment is within roughly 90 seconds (one-minute evaluation plus
+30-second group wait), and repeats are five minutes apart. After a delivery stops, Healthchecks
+should become late and page after its five-minute period plus two-minute grace. After the silence
+expires or is cleared, recovery is expected on the next five-minute repeat; manually confirm both
+the new Healthchecks ping and the PagerDuty incident's resolution. These are post-merge staging
+checks, not deployment evidence from this change.
 
 ### Controlled failure drill and recovery
 

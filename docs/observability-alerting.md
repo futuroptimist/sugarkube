@@ -234,7 +234,7 @@ it is deployed yet — see the rollout plan above for the actual sequencing.
 
 ## Staging observability watchdog delivery
 
-The deployed staging dead-man path is distinct from the per-node heartbeat: Prometheus continuously
+The planned staging dead-man path is distinct from the per-node heartbeat: Prometheus continuously
 fires `SugarkubeObservabilityWatchdog`, Alertmanager sends it to a Healthchecks `url_file` receiver,
 and the external Healthchecks-to-PagerDuty integration detects missing deliveries. Ordinary
 Prometheus alerts still reach the null receiver unless explicitly allowlisted; the existing exact
