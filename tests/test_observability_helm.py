@@ -562,6 +562,14 @@ case "$*" in
     ;;
   *"get secret alertmanager-pagerduty -o go-template="*) [ "$KUBECTL_MODE" != missing-pagerduty ] || exit 44; [ "$KUBECTL_MODE" != empty-pagerduty ] && echo present ;;
   *"get secret alertmanager-healthchecks-watchdog -o go-template="*) [ "$KUBECTL_MODE" != missing-watchdog ] || exit 44; [ "$KUBECTL_MODE" != empty-watchdog ] && echo present ;;
+  *"proxy/api/v1/rules"*)
+    extra=''
+    [ "$KUBECTL_MODE" != watchdog-extra-rule-label ] || extra=',"sentinel":"REJECTED_RULE_PAYLOAD_SENTINEL"'
+    printf '%s\n' '{"data":{"groups":[{"rules":[{"name":"SugarkubeObservabilityWatchdog","state":"firing","query":"vector(1)","labels":{"environment":"staging","cluster":"sugarkube-int","purpose":"observability-watchdog"'"$extra"'}}]}]}}'
+    ;;
+  *"/api/v2/alerts"*) printf '%s\n' '[{"status":{"state":"active"},"labels":{"alertname":"SugarkubeObservabilityWatchdog","environment":"staging","cluster":"sugarkube-int","purpose":"observability-watchdog","prometheus":"platform-added"}}]' ;;
+  *"get pods -l app.kubernetes.io/name=alertmanager -o json"*) printf '%s\n' '{"items":[{"status":{"phase":"Running"},"spec":{"volumes":[{"name":"watchdog","secret":{"secretName":"alertmanager-healthchecks-watchdog"}}],"containers":[{"volumeMounts":[{"name":"watchdog","mountPath":"/etc/alertmanager/secrets/alertmanager-healthchecks-watchdog","readOnly":true}]}]}}]}' ;;
+  *"logs statefulset/kube-prometheus-stack-alertmanager"*) : ;;
   *"port-forward"*"service/kube-prometheus-stack-alertmanager"*":9093"*)
     [ "$PAGERDUTY_MODE" != forward-exit ] || { echo PORT_FORWARD_SENTINEL; exit 42; }
     echo "$PAGERDUTY_FORWARD_LINE"
@@ -644,6 +652,8 @@ printf '%s' "$code"
         "ALERTMANAGER_CONFIG": str(tmp_path / "alertmanager-config.yaml"),
         "SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_ATTEMPTS": retry_attempts,
         "SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_INTERVAL_SECONDS": retry_interval,
+        "SUGARKUBE_WATCHDOG_OBSERVATION_SECONDS": "0",
+        "SUGARKUBE_WATCHDOG_TEST_ALLOW_SHORT_OBSERVATION": "1",
         "DASHBOARD": str(
             ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
         ),
@@ -1407,3 +1417,22 @@ def test_watchdog_operator_contract_is_hidden_bounded_and_staging_only():
     assert "sugar-staging" in script
     assert "node shutdown" not in script.lower()
     assert "hc-ping\\.com" in script
+
+
+def test_watchdog_live_check_accepts_exact_rule_labels_and_external_alert_labels(tmp_path):
+    result, audit = run_helper(tmp_path, "watchdog-verify")
+
+    assert result.returncode == 0, result.stderr
+    assert "bounded repeat observation verified" in result.stdout
+    assert "proxy/api/v1/rules" in audit
+    assert "/api/v2/alerts" in audit
+    assert "get pods -l app.kubernetes.io/name=alertmanager -o json" in audit
+    assert "logs statefulset/kube-prometheus-stack-alertmanager" in audit
+
+
+def test_watchdog_live_check_rejects_extra_rule_label_without_printing_payload(tmp_path):
+    result, _ = run_helper(tmp_path, "watchdog-verify", kubectl_mode="watchdog-extra-rule-label")
+
+    assert result.returncode != 0
+    assert "required labels" in result.stderr
+    assert "REJECTED_RULE_PAYLOAD_SENTINEL" not in result.stdout + result.stderr

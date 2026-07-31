@@ -146,12 +146,13 @@ watchdog_live_check() (
   python3 - "${tmp}/rules" "${tmp}/alerts" <<'PY'
 import json, sys
 wanted={"alertname":"SugarkubeObservabilityWatchdog","environment":"staging","cluster":"sugarkube-int","purpose":"observability-watchdog"}
+expected_rule_labels={k:v for k,v in wanted.items() if k!="alertname"}
 try:
     rules_doc, alerts = (json.load(open(path, encoding="utf-8")) for path in sys.argv[1:])
 except (OSError, UnicodeError, json.JSONDecodeError):
     raise SystemExit("ERROR: watchdog APIs returned malformed data (responses redacted).")
 rules=[r for g in rules_doc.get("data",{}).get("groups",[]) for r in g.get("rules",[]) if r.get("name")==wanted["alertname"]]
-if len(rules)!=1 or rules[0].get("state")!="firing" or rules[0].get("query")!="vector(1)" or any(rules[0].get("labels",{}).get(k)!=v for k,v in wanted.items() if k!="alertname"):
+if len(rules)!=1 or rules[0].get("state")!="firing" or rules[0].get("query")!="vector(1)" or rules[0].get("labels")!=expected_rule_labels:
     raise SystemExit("ERROR: unique vector(1) watchdog rule is not firing with required labels (response redacted).")
 matching=[a for a in alerts if a.get("status",{}).get("state")=="active" and all(a.get("labels",{}).get(k)==v for k,v in wanted.items())]
 if len(matching)!=1:
