@@ -70,6 +70,26 @@ FINAL_FIXED_CHECKS = {
     "podImageCoordinates",
     "podImageDigests",
 }
+RUNTIME_VERIFICATION_FIELDS = (
+    "schemaVersion",
+    "environment",
+    "release",
+    "namespace",
+    "applicationVersion",
+    "runtimeSourceRevision",
+    "frontendSourceRevision",
+    "defaultProvider",
+    "journeys",
+)
+RUNTIME_VERIFICATION_CHECKS = {
+    "runtimeIdentity",
+    "frontendIdentity",
+    "replicaAgreement",
+    "publicDirectAgreement",
+    "defaultProvider",
+    "remoteChatSmoke",
+}
+PUBLIC_PATH_RE = re.compile(r"/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*")
 PLATFORM_CHECK_RE = re.compile(r"^imagePlatformSourceRevision\[(0|[1-9][0-9]*)\]$")
 POD_SETTLE_TIMEOUT_SECONDS = 60.0
 POD_SETTLE_INTERVAL_SECONDS = 2.0
@@ -185,20 +205,11 @@ def validate(value: dict[str, Any], finalized: bool | None = None) -> dict[str, 
             raise ManifestError(f"runtimeSourceRevisionMethod must be {RUNTIME_METHOD}")
         if "runtimeVerification" in value:
             proof = value["runtimeVerification"]
-            fields = {
-                "schemaVersion",
-                "environment",
-                "release",
-                "namespace",
-                "applicationVersion",
-                "runtimeSourceRevision",
-                "frontendSourceRevision",
-                "defaultProvider",
-                "journeys",
-            }
-            if not isinstance(proof, dict) or set(proof) != fields:
+            if not isinstance(proof, dict) or set(proof) != set(RUNTIME_VERIFICATION_FIELDS):
                 raise ManifestError("runtimeVerification has an incompatible verifier schema")
-            if proof["schemaVersion"] != 1 or any(
+            if type(proof["schemaVersion"]) is not int or proof["schemaVersion"] != 1:
+                raise ManifestError("runtimeVerification schemaVersion must be integer 1")
+            if any(
                 proof[field] != expected_value
                 for field, expected_value in {
                     "environment": value["environment"],
@@ -212,18 +223,21 @@ def validate(value: dict[str, Any], finalized: bool | None = None) -> dict[str, 
             ):
                 raise ManifestError("runtimeVerification does not match approved release")
             journeys = proof["journeys"]
-            if (
-                not isinstance(journeys, list)
-                or not journeys
-                or any(
+            if not isinstance(journeys, list) or not journeys:
+                raise ManifestError("runtimeVerification lacks successful bounded journeys")
+            journey_names: set[str] = set()
+            for item in journeys:
+                if (
                     not isinstance(item, dict)
                     or set(item) != {"name", "passed"}
                     or not isinstance(item["name"], str)
+                    or not PUBLIC_PATH_RE.fullmatch(item["name"])
+                    or item["name"] in journey_names
                     or item["passed"] is not True
-                    for item in journeys
-                )
-                or "/chat" not in {item["name"] for item in journeys}
-            ):
+                ):
+                    raise ManifestError("runtimeVerification lacks successful bounded journeys")
+                journey_names.add(item["name"])
+            if "/chat" not in journey_names:
                 raise ManifestError("runtimeVerification lacks successful bounded journeys")
         results = value["verificationResults"]
         if not isinstance(results, list) or not results:
@@ -251,32 +265,19 @@ def validate(value: dict[str, Any], finalized: bool | None = None) -> dict[str, 
             platform_match = PLATFORM_CHECK_RE.fullmatch(check)
             if platform_match:
                 platform_indices.append(int(platform_match.group(1)))
-            elif check not in FINAL_FIXED_CHECKS | {
-                "runtimeIdentity",
-                "frontendIdentity",
-                "replicaAgreement",
-                "publicDirectAgreement",
-                "defaultProvider",
-                "remoteChatSmoke",
-            }:
+            elif check not in FINAL_FIXED_CHECKS | RUNTIME_VERIFICATION_CHECKS:
                 raise ManifestError(f"unknown verification result: {check}")
         missing = sorted(FINAL_FIXED_CHECKS - checks)
         if missing:
             raise ManifestError("missing verification results: " + ", ".join(missing))
         if "runtimeVerification" in value:
-            runtime_checks = {
-                "runtimeIdentity",
-                "frontendIdentity",
-                "replicaAgreement",
-                "publicDirectAgreement",
-                "defaultProvider",
-                "remoteChatSmoke",
-            }
-            missing_runtime = sorted(runtime_checks - checks)
+            missing_runtime = sorted(RUNTIME_VERIFICATION_CHECKS - checks)
             if missing_runtime:
                 raise ManifestError(
                     "missing runtime verification results: " + ", ".join(missing_runtime)
                 )
+        elif checks & RUNTIME_VERIFICATION_CHECKS:
+            raise ManifestError("runtime verification results require runtimeVerification proof")
         if sorted(platform_indices) != list(range(len(platform_indices))):
             raise ManifestError("image platform verification indices must be contiguous from zero")
         if not platform_indices:
