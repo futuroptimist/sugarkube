@@ -528,6 +528,7 @@ def run_helper(
     command_args=(),
     extra_env=None,
     watchdog_silences=None,
+    watchdog_log_text="",
 ):
     """Run the lifecycle against deterministic command stubs and return its audit log."""
     bin_dir = tmp_path / "bin"
@@ -590,8 +591,29 @@ case "$*" in
     printf '%s\n' '{"data":{"groups":[{"rules":[{"name":"SugarkubeObservabilityWatchdog","state":"firing","query":"vector(1)","labels":{"environment":"staging","cluster":"sugarkube-int","purpose":"observability-watchdog"'"$extra"'}}]}]}}'
     ;;
   *"/api/v2/alerts"*) printf '%s\n' '[{"status":{"state":"active"},"labels":{"alertname":"SugarkubeObservabilityWatchdog","environment":"staging","cluster":"sugarkube-int","purpose":"observability-watchdog","prometheus":"platform-added"}}]' ;;
-  *"get pods -l app.kubernetes.io/name=alertmanager -o json"*) printf '%s\n' '{"items":[{"status":{"phase":"Running"},"spec":{"volumes":[{"name":"watchdog","secret":{"secretName":"alertmanager-healthchecks-watchdog"}}],"containers":[{"volumeMounts":[{"name":"watchdog","mountPath":"/etc/alertmanager/secrets/alertmanager-healthchecks-watchdog","readOnly":true}]}]}}]}' ;;
-  *"logs statefulset/kube-prometheus-stack-alertmanager"*) : ;;
+  *"get pods -l app.kubernetes.io/name=alertmanager -o json"*)
+    phase=Running
+    secret=alertmanager-healthchecks-watchdog
+    volume=watchdog
+    mount=/etc/alertmanager/secrets/alertmanager-healthchecks-watchdog
+    readonly=true
+    case "$KUBECTL_MODE" in
+      watchdog-no-pods) printf '%s\n' '{"items":[],"private":"POD_FIXTURE_SENTINEL"}'; exit 0 ;;
+      watchdog-pod-not-running) phase=Pending ;;
+      watchdog-missing-volume) volume=unmounted ;;
+      watchdog-wrong-secret-volume) secret=another-secret ;;
+      watchdog-missing-mount) volume=mounted-under-another-name ;;
+      watchdog-wrong-mount-path) mount=/etc/alertmanager/secrets/wrong ;;
+      watchdog-mount-not-readonly) readonly=false ;;
+    esac
+    printf '%s\n' '{"items":[{"status":{"phase":"'"$phase"'"},"spec":{"volumes":[{"name":"'"$volume"'","secret":{"secretName":"'"$secret"'"}}],"containers":[{"volumeMounts":[{"name":"watchdog","mountPath":"'"$mount"'","readOnly":'"$readonly"'}]}]},"private":"POD_FIXTURE_SENTINEL"}]}'
+    ;;
+  *"logs statefulset/kube-prometheus-stack-alertmanager"*)
+    case "$KUBECTL_MODE" in
+      watchdog-logs-fail) echo 'PRIVATE_LOG_RETRIEVAL_SENTINEL' >&2; exit 51 ;;
+    esac
+    printf '%s' "$WATCHDOG_LOG_TEXT"
+    ;;
   *"create --raw /api/v1/namespaces/monitoring/services/http:kube-prometheus-stack-alertmanager:9093/proxy/api/v2/silences -f -"*)
     cat > "$WATCHDOG_SILENCE_PAYLOAD"
     [ "$KUBECTL_MODE" != watchdog-silence-create-fail ] || exit 48
@@ -698,6 +720,7 @@ printf '%s' "$code"
         "WATCHDOG_SILENCE_PAYLOAD": str(tmp_path / "watchdog-silence-payload"),
         "WATCHDOG_SILENCE_DELETIONS": str(tmp_path / "watchdog-silence-deletions"),
         "WATCHDOG_SILENCES": str(tmp_path / "watchdog-silences.json"),
+        "WATCHDOG_LOG_TEXT": watchdog_log_text,
         "DASHBOARD": str(
             ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
         ),
@@ -1642,6 +1665,66 @@ def test_watchdog_live_check_rejects_extra_rule_label_without_printing_payload(t
     assert result.returncode != 0
     assert "required labels" in result.stderr
     assert "REJECTED_RULE_PAYLOAD_SENTINEL" not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    "mode",
+    [
+        "watchdog-no-pods",
+        "watchdog-pod-not-running",
+        "watchdog-missing-volume",
+        "watchdog-wrong-secret-volume",
+        "watchdog-missing-mount",
+        "watchdog-wrong-mount-path",
+        "watchdog-mount-not-readonly",
+    ],
+)
+def test_watchdog_mount_contract_fails_closed_and_redacts_pod_data(tmp_path, mode):
+    result, _ = run_helper(tmp_path, "watchdog-verify", kubectl_mode=mode)
+
+    assert result.returncode != 0
+    assert "running Alertmanager pods do not have the exact watchdog Secret mount" in result.stderr
+    assert "POD_FIXTURE_SENTINEL" not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    ("receiver", "diagnostic"),
+    [
+        (receiver, diagnostic)
+        for receiver in (
+            "healthchecks-watchdog",
+            "alertmanager-healthchecks-watchdog",
+        )
+        for diagnostic in ("error", "failed", "failure", "timeout", "refused")
+    ],
+)
+def test_watchdog_delivery_errors_attributable_to_receiver_fail_closed(
+    tmp_path, receiver, diagnostic
+):
+    private_log = f"{receiver} delivery {diagnostic} LOG_FIXTURE_SENTINEL"
+    result, _ = run_helper(tmp_path, "watchdog-verify", watchdog_log_text=private_log)
+
+    assert result.returncode != 0
+    assert "watchdog receiver delivery error observed" in result.stderr
+    assert private_log not in result.stdout + result.stderr
+    assert "LOG_FIXTURE_SENTINEL" not in result.stdout + result.stderr
+
+
+def test_watchdog_delivery_ignores_unrelated_alertmanager_errors(tmp_path):
+    private_log = "error loading unrelated template LOG_FIXTURE_SENTINEL"
+    result, _ = run_helper(tmp_path, "watchdog-verify", watchdog_log_text=private_log)
+
+    assert result.returncode == 0, result.stderr
+    assert "bounded repeat observation verified" in result.stdout
+    assert private_log not in result.stdout + result.stderr
+
+
+def test_watchdog_delivery_log_retrieval_failure_is_sanitized(tmp_path):
+    result, _ = run_helper(tmp_path, "watchdog-verify", kubectl_mode="watchdog-logs-fail")
+
+    assert result.returncode != 0
+    assert "Alertmanager logs could not be retrieved (details redacted)" in result.stderr
+    assert "PRIVATE_LOG_RETRIEVAL_SENTINEL" not in result.stdout + result.stderr
 
 
 def watchdog_silence_fixture():

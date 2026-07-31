@@ -179,7 +179,7 @@ PY
     echo "ERROR: watchdog observation must cover at least one five-minute repeat." >&2; return 2
   fi
   sleep "${observation}"
-  if ! kubectl -n "${NAMESPACE}" logs "statefulset/${RELEASE}-alertmanager" --since="$((observation + 60))s" >"${tmp}/logs"; then
+  if ! kubectl -n "${NAMESPACE}" logs "statefulset/${RELEASE}-alertmanager" --since="$((observation + 60))s" >"${tmp}/logs" 2>"${tmp}/logs.stderr"; then
     echo "ERROR: Alertmanager logs could not be retrieved (details redacted)." >&2; return 1
   fi
   python3 - "${tmp}/logs" <<'PY'
