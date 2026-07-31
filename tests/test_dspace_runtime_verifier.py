@@ -720,3 +720,184 @@ def test_build_identity_requires_canonical_coordinates(
             "ghcr.io/democratizedspace/dspace:main-abcdef0",
             category,
         )
+
+
+def test_command_success_and_nonzero_failure_are_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        verifier.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "safe output", ""),
+    )
+    assert verifier.command(["kubectl", "get", "pods"]) == "safe output"
+
+    monkeypatch.setattr(
+        verifier.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args[0], 1, SENTINEL.encode(), SENTINEL.encode()
+        ),
+    )
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.command(["kubectl", SENTINEL])
+    assert str(raised.value) == "cluster identity"
+    assert SENTINEL not in str(raised.value)
+
+
+class _Response:
+    def __enter__(self) -> "_Response":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def read(self, limit: int) -> bytes:
+        assert limit == 1024 * 1024 + 1
+        return b"bounded"
+
+
+@pytest.mark.parametrize(
+    ("origin", "category"),
+    [(None, "direct identity"), (("https", "dspace.example"), "public identity")],
+)
+def test_fetch_success_and_network_failures_are_bounded(
+    monkeypatch: pytest.MonkeyPatch,
+    origin: tuple[str, str] | None,
+    category: str,
+) -> None:
+    class Opener:
+        def open(self, url: str, timeout: int) -> _Response:
+            assert timeout == 15
+            return _Response()
+
+    monkeypatch.setattr(verifier.urllib.request, "build_opener", lambda *args: Opener())
+    assert verifier.fetch("https://dspace.example/build-info.json", origin) == b"bounded"
+
+    class BrokenOpener:
+        def open(self, url: str, timeout: int) -> _Response:
+            raise verifier.urllib.error.URLError(SENTINEL)
+
+    monkeypatch.setattr(verifier.urllib.request, "build_opener", lambda *args: BrokenOpener())
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.fetch("https://dspace.example/build-info.json", origin)
+    assert str(raised.value) == category
+    assert SENTINEL not in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    ("call", "category"),
+    [
+        (
+            lambda: verifier.identity(b"x" * (1024 * 1024 + 1), "v", SHA, "image", "identity"),
+            "identity",
+        ),
+        (
+            lambda: verifier.identity(
+                json.dumps(
+                    {"version": "v", "revision": SHA, "shortRevision": SHA[:7], "extra": SENTINEL}
+                ).encode(),
+                "v",
+                SHA,
+                "image",
+                "identity",
+            ),
+            "identity",
+        ),
+        (lambda: verifier.marker(b"x" * (1024 * 1024 + 1), SHA, "frontend"), "frontend"),
+        (lambda: verifier.marker(b"\xff", SHA, "frontend"), "frontend"),
+    ],
+)
+def test_identity_payload_bounds_are_redacted(call: object, category: str) -> None:
+    with pytest.raises(verifier.VerificationError) as raised:
+        call()  # type: ignore[operator]
+    assert str(raised.value) == category
+    assert SENTINEL not in str(raised.value)
+
+
+@pytest.mark.parametrize("contents", ["{", "env: []\n"])
+def test_values_expectations_rejects_invalid_or_incomplete_values(
+    tmp_path: Path, contents: str
+) -> None:
+    values = tmp_path / "values.yaml"
+    values.write_text(contents)
+    with pytest.raises(verifier.VerificationError, match="manifest/evidence mismatch"):
+        verifier.values_expectations([values])
+
+
+def test_load_manifest_and_helm_status_fail_with_bounded_categories(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    invalid = tmp_path / "manifest.json"
+    invalid.write_text(SENTINEL)
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.load_manifest(invalid)
+    assert str(raised.value) == "manifest/evidence mismatch"
+    assert SENTINEL not in str(raised.value)
+
+    monkeypatch.setattr(verifier, "command", lambda argv: SENTINEL)
+    args = Namespace(kubeconfig="k", release="dspace", namespace="dspace")
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.helm_identity(args, "3.1.0")
+    assert str(raised.value) == "cluster identity"
+    assert SENTINEL not in str(raised.value)
+
+
+def test_resolve_host_accepts_only_a_bounded_hostname(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(verifier, "command", lambda argv: "dspace.example\n")
+    assert verifier._resolve_host([]) == "dspace.example"
+
+    monkeypatch.setattr(verifier, "command", lambda argv: f"bad/{SENTINEL}")
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier._resolve_host([])
+    assert str(raised.value) == "manifest/evidence mismatch"
+    assert SENTINEL not in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    ("call", "category"),
+    [
+        (lambda: verifier.controller_owner(None, "ReplicaSet"), "pod/replica identity"),
+        (lambda: verifier.helm_deployment_uid(None, "dspace", "dspace"), "cluster identity"),
+    ],
+)
+def test_kubernetes_metadata_types_fail_closed(call: object, category: str) -> None:
+    with pytest.raises(verifier.VerificationError, match=category):
+        call()  # type: ignore[operator]
+
+
+def test_fetch_preserves_bounded_redirect_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Opener:
+        def open(self, url: str, timeout: int) -> _Response:
+            raise verifier.VerificationError("public identity")
+
+    monkeypatch.setattr(verifier.urllib.request, "build_opener", lambda *args: Opener())
+    with pytest.raises(verifier.VerificationError, match="public identity"):
+        verifier.fetch("https://dspace.example/build-info.json", ("https", "dspace.example"))
+
+
+def test_main_maps_config_errors_to_bounded_failure(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(
+        verifier,
+        "verify",
+        lambda args: (_ for _ in ()).throw(verifier.app_config.AppConfigError(SENTINEL)),
+    )
+    result = verifier.main(
+        [
+            "verify",
+            "--environment",
+            "staging",
+            "--release",
+            "dspace",
+            "--namespace",
+            "dspace",
+            "--manifest",
+            "manifest.json",
+            "--kubeconfig",
+            "kubeconfig",
+        ]
+    )
+    assert result == 2
+    captured = capsys.readouterr()
+    assert "manifest/evidence mismatch" in captured.err
+    assert SENTINEL not in captured.out + captured.err
