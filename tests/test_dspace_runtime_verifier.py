@@ -73,12 +73,18 @@ def test_values_expectations_use_ordered_overlay(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("provider,has_token_args", [("token-place", True), ("openai", False)])
 @pytest.mark.parametrize("rollback", [False, True], ids=("standard", "rollback"))
+@pytest.mark.parametrize(
+    "runtime_image_id",
+    ["containerd://" + DIGEST, "ghcr.io/democratizedspace/dspace@" + DIGEST],
+    ids=("containerd", "pullable"),
+)
 def test_verify_uses_safe_exact_smoke_argv(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     provider: str,
     has_token_args: bool,
     rollback: bool,
+    runtime_image_id: str,
 ) -> None:
     smoke = tmp_path / "smoke"
     smoke.write_text("#!/bin/sh\nexit 0\n")
@@ -88,7 +94,14 @@ def test_verify_uses_safe_exact_smoke_argv(
     pod = {
         "metadata": {
             "name": "dspace-1",
-            "ownerReferences": [{"kind": "ReplicaSet", "name": "dspace-rs", "uid": "rs-1"}],
+            "ownerReferences": [
+                {
+                    "kind": "ReplicaSet",
+                    "name": "dspace-rs",
+                    "uid": "rs-1",
+                    "controller": True,
+                }
+            ],
         },
         "spec": {
             "containers": [
@@ -101,7 +114,7 @@ def test_verify_uses_safe_exact_smoke_argv(
         "status": {
             "phase": "Running",
             "conditions": [{"type": "Ready", "status": "True"}],
-            "containerStatuses": [{"name": "dspace", "imageID": "containerd://x@" + DIGEST}],
+            "containerStatuses": [{"name": "dspace", "imageID": runtime_image_id}],
         },
     }
     build = json.dumps(
@@ -130,6 +143,10 @@ def test_verify_uses_safe_exact_smoke_argv(
                         "labels": {
                             "app.kubernetes.io/managed-by": "Helm",
                             "app.kubernetes.io/instance": "dspace",
+                        },
+                        "annotations": {
+                            "meta.helm.sh/release-name": "dspace",
+                            "meta.helm.sh/release-namespace": "dspace",
                         },
                     },
                     "spec": {
@@ -163,7 +180,12 @@ def test_verify_uses_safe_exact_smoke_argv(
                         "name": "dspace-rs",
                         "uid": "rs-1",
                         "ownerReferences": [
-                            {"kind": "Deployment", "name": "dspace", "uid": "deploy-1"}
+                            {
+                                "kind": "Deployment",
+                                "name": "dspace",
+                                "uid": "deploy-1",
+                                "controller": True,
+                            }
                         ],
                     }
                 }
@@ -336,6 +358,74 @@ def test_command_timeout_is_bounded_and_redacted(monkeypatch: pytest.MonkeyPatch
         verifier.command(["kubectl", "SENTINEL_SECRET"])
     assert str(raised.value) == "cluster identity"
     assert "SENTINEL_SECRET" not in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    "image_id",
+    ["containerd://" + DIGEST, "registry.example/dspace@" + DIGEST],
+)
+def test_image_id_digest_accepts_established_runtime_forms(image_id: str) -> None:
+    assert verifier.image_id_digest(image_id) == DIGEST
+
+
+@pytest.mark.parametrize(
+    "image_id",
+    [
+        "containerd://sha256:" + "1" * 63,
+        "containerd://sha256:" + "A" * 64,
+        "containerd://" + DIGEST + "-extra",
+        "containerd://sha512:" + "1" * 64,
+        None,
+    ],
+)
+def test_image_id_digest_rejects_malformed_values_without_leaking(image_id: object) -> None:
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.image_id_digest(image_id)
+    assert str(raised.value) == "pod/replica identity"
+    assert str(image_id) not in str(raised.value)
+
+
+def test_image_id_digest_rejects_wrong_digest() -> None:
+    assert verifier.image_id_digest("containerd://sha256:" + "2" * 64) != DIGEST
+
+
+@pytest.mark.parametrize("controller", [None, False])
+def test_controller_owner_requires_true_controller(controller: bool | None) -> None:
+    owner = {"kind": "ReplicaSet", "name": "dspace-rs", "uid": "rs-1"}
+    if controller is not None:
+        owner["controller"] = controller
+    with pytest.raises(verifier.VerificationError, match="pod/replica identity"):
+        verifier.controller_owner([owner], "ReplicaSet")
+
+
+@pytest.mark.parametrize(
+    "annotation,value",
+    [
+        ("meta.helm.sh/release-name", None),
+        ("meta.helm.sh/release-name", "other"),
+        ("meta.helm.sh/release-namespace", None),
+        ("meta.helm.sh/release-namespace", "other"),
+    ],
+)
+def test_deployment_requires_matching_helm_annotations(annotation: str, value: str | None) -> None:
+    metadata = {
+        "name": "dspace",
+        "uid": "deploy-1",
+        "labels": {
+            "app.kubernetes.io/managed-by": "Helm",
+            "app.kubernetes.io/instance": "dspace",
+        },
+        "annotations": {
+            "meta.helm.sh/release-name": "dspace",
+            "meta.helm.sh/release-namespace": "dspace",
+        },
+    }
+    if value is None:
+        del metadata["annotations"][annotation]
+    else:
+        metadata["annotations"][annotation] = value
+    with pytest.raises(verifier.VerificationError, match="cluster identity"):
+        verifier.helm_deployment_uid(metadata, "dspace", "dspace")
 
 
 @pytest.mark.parametrize(

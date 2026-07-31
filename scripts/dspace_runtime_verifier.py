@@ -46,6 +46,7 @@ META_RE = re.compile(
     r'<meta\s+[^>]*name=["\']dspace-build-revision["\'][^>]*content=["\']([^"\']+)',
     re.IGNORECASE,
 )
+IMAGE_ID_RE = re.compile(r"sha256:[0-9a-f]{64}$")
 
 
 class VerificationError(ValueError):
@@ -54,6 +55,52 @@ class VerificationError(ValueError):
 
 def fail(category: str) -> None:
     raise VerificationError(category)
+
+
+def image_id_digest(image_id: object) -> str:
+    """Return a canonical trailing runtime digest without exposing bad input."""
+    if not isinstance(image_id, str):
+        fail("pod/replica identity")
+    match = IMAGE_ID_RE.search(image_id)
+    if match is None:
+        fail("pod/replica identity")
+    return match.group(0)
+
+
+def controller_owner(owners: object, kind: str) -> dict[str, Any]:
+    """Select the sole controller owner of ``kind`` from Kubernetes metadata."""
+    if not isinstance(owners, list):
+        fail("pod/replica identity")
+    matches = [
+        owner
+        for owner in owners
+        if isinstance(owner, dict) and owner.get("kind") == kind and owner.get("controller") is True
+    ]
+    if len(matches) != 1:
+        fail("pod/replica identity")
+    return matches[0]
+
+
+def helm_deployment_uid(metadata: object, release: str, namespace: str) -> str:
+    """Validate that Deployment metadata belongs to the selected Helm release."""
+    if not isinstance(metadata, dict):
+        fail("cluster identity")
+    uid = metadata.get("uid")
+    labels = metadata.get("labels", {})
+    annotations = metadata.get("annotations", {})
+    if (
+        metadata.get("name") != release
+        or not isinstance(uid, str)
+        or not uid
+        or not isinstance(labels, dict)
+        or labels.get("app.kubernetes.io/managed-by") != "Helm"
+        or labels.get("app.kubernetes.io/instance") != release
+        or not isinstance(annotations, dict)
+        or annotations.get("meta.helm.sh/release-name") != release
+        or annotations.get("meta.helm.sh/release-namespace") != namespace
+    ):
+        fail("cluster identity")
+    return uid
 
 
 def command(argv: list[str]) -> str:
@@ -245,17 +292,9 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         applications = [item for item in containers if item.get("name") == "dspace"]
     except (json.JSONDecodeError, KeyError, TypeError):
         fail("cluster identity")
-    deployment_uid = deployment_metadata.get("uid")
-    deployment_labels = deployment_metadata.get("labels", {})
+    deployment_uid = helm_deployment_uid(deployment_metadata, args.release, args.namespace)
     declared_image = applications[0].get("image") if len(applications) == 1 else None
-    if (
-        deployment_metadata.get("name") != args.release
-        or not isinstance(deployment_uid, str)
-        or not deployment_uid
-        or deployment_labels.get("app.kubernetes.io/managed-by") != "Helm"
-        or deployment_labels.get("app.kubernetes.io/instance") != args.release
-        or declared_image not in permitted_images
-    ):
+    if declared_image not in permitted_images:
         fail("cluster identity")
     if token_values is not None:
         live_env = {item.get("name"): item.get("value") for item in applications[0].get("env", [])}
@@ -277,10 +316,8 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
             for c in status.get("conditions", [])
         ):
             fail("pod/replica identity")
-        owners = metadata.get("ownerReferences", [])
-        if len(owners) != 1 or owners[0].get("kind") != "ReplicaSet":
-            fail("pod/replica identity")
-        replica_set_name, replica_set_uid = owners[0].get("name"), owners[0].get("uid")
+        owner = controller_owner(metadata.get("ownerReferences", []), "ReplicaSet")
+        replica_set_name, replica_set_uid = owner.get("name"), owner.get("uid")
         if not isinstance(replica_set_name, str) or not isinstance(replica_set_uid, str):
             fail("pod/replica identity")
         try:
@@ -304,21 +341,17 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
             rs_owners = rs_metadata["ownerReferences"]
         except (json.JSONDecodeError, KeyError, TypeError, VerificationError):
             fail("pod/replica identity")
-        if (
-            rs_metadata.get("name") != replica_set_name
-            or rs_metadata.get("uid") != replica_set_uid
-            or len(rs_owners) != 1
-            or rs_owners[0].get("kind") != "Deployment"
-            or rs_owners[0].get("name") != args.release
-            or rs_owners[0].get("uid") != deployment_uid
-        ):
+        if rs_metadata.get("name") != replica_set_name or rs_metadata.get("uid") != replica_set_uid:
+            fail("pod/replica identity")
+        rs_owner = controller_owner(rs_owners, "Deployment")
+        if rs_owner.get("name") != args.release or rs_owner.get("uid") != deployment_uid:
             fail("pod/replica identity")
         containers = [c for c in spec.get("containers", []) if c.get("name") == "dspace"]
         statuses = [c for c in status.get("containerStatuses", []) if c.get("name") == "dspace"]
         if len(containers) != 1 or containers[0].get("image") != declared_image:
             fail("pod/replica identity")
         image_id = statuses[0].get("imageID") if len(statuses) == 1 else None
-        if not isinstance(image_id, str) or image_id.rsplit("@", 1)[-1] != expected["digest"]:
+        if image_id_digest(image_id) != expected["digest"]:
             fail("pod/replica identity")
         name = metadata.get("name")
         if not isinstance(name, str) or not name:
