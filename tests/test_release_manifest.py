@@ -336,6 +336,29 @@ def finalize(**changes):
     return manifest.finalize(**arguments)
 
 
+def runtime_proof(**changes) -> dict[str, object]:
+    proof = {
+        "schemaVersion": 1,
+        "environment": "staging",
+        "release": "dspace",
+        "namespace": "dspace",
+        "applicationVersion": "3.2.0",
+        "runtimeSourceRevision": SHA,
+        "frontendSourceRevision": SHA,
+        "defaultProvider": "token-place",
+        "journeys": [
+            {"name": "/build-info.json", "passed": True},
+            {"name": "/chat", "passed": True},
+        ],
+    }
+    proof.update(changes)
+    return proof
+
+
+def runtime_final(**proof_changes) -> dict[str, object]:
+    return finalize(runtime_verification=runtime_proof(**proof_changes))
+
+
 def test_finalize_collects_sorted_multi_pod_identity() -> None:
     final = finalize()
     assert final["helmRevision"] == 17
@@ -368,6 +391,158 @@ def test_generated_final_record_validates_through_cli(tmp_path: Path) -> None:
     output = tmp_path / "final.json"
     output.write_text(manifest._canonical(finalize()), encoding="utf-8")
     assert manifest.main(["validate", "--manifest", str(output), "--final"]) == 0
+
+
+def test_runtime_proof_and_complete_runtime_checks_validate() -> None:
+    value = runtime_final()
+    assert manifest.validate(value, True) == value
+    assert manifest.RUNTIME_VERIFICATION_CHECKS <= {
+        result["check"] for result in value["verificationResults"]
+    }
+
+
+@pytest.mark.parametrize("schema_version", [True, False, 0, 2, "1"])
+def test_runtime_proof_requires_exact_schema_version(schema_version) -> None:
+    with pytest.raises(manifest.ManifestError, match="schemaVersion"):
+        runtime_final(schemaVersion=schema_version)
+
+
+@pytest.mark.parametrize("field", manifest.RUNTIME_VERIFICATION_FIELDS)
+def test_runtime_proof_rejects_missing_fields(field: str) -> None:
+    value = runtime_final()
+    value["runtimeVerification"].pop(field)
+    with pytest.raises(manifest.ManifestError, match="incompatible verifier schema"):
+        manifest.validate(value, True)
+
+
+def test_runtime_proof_rejects_unknown_fields() -> None:
+    value = runtime_final()
+    value["runtimeVerification"]["unexpected"] = "field"
+    with pytest.raises(manifest.ManifestError, match="incompatible verifier schema"):
+        manifest.validate(value, True)
+
+
+@pytest.mark.parametrize(
+    ("field", "wrong"),
+    [
+        ("environment", "prod"),
+        ("release", "other"),
+        ("namespace", "other"),
+        ("applicationVersion", "3.2.1"),
+        ("runtimeSourceRevision", "0" * 40),
+        ("frontendSourceRevision", "0" * 40),
+        ("defaultProvider", "openai"),
+    ],
+)
+def test_runtime_proof_rejects_coordinate_mismatches(field: str, wrong: str) -> None:
+    with pytest.raises(manifest.ManifestError, match="does not match approved release"):
+        runtime_final(**{field: wrong})
+
+
+@pytest.mark.parametrize(
+    "journeys",
+    [
+        [],
+        ["/chat"],
+        [{"name": "/chat", "passed": True, "extra": True}],
+        [{"name": "chat", "passed": True}],
+        [{"name": "/bad path", "passed": True}],
+        [{"name": "/chat", "passed": True}, {"name": "/chat", "passed": True}],
+        [{"name": "/chat", "passed": False}],
+        [{"name": "/", "passed": True}],
+    ],
+)
+def test_runtime_proof_rejects_invalid_journeys(journeys) -> None:
+    with pytest.raises(manifest.ManifestError, match="successful bounded journeys"):
+        runtime_final(journeys=journeys)
+
+
+def test_runtime_checks_require_corresponding_proof() -> None:
+    value = finalize()
+    value["verificationResults"].append(
+        {"check": "runtimeIdentity", "passed": True, "details": "unproven"}
+    )
+    with pytest.raises(manifest.ManifestError, match="require runtimeVerification proof"):
+        manifest.validate(value, True)
+
+
+def test_runtime_proof_requires_every_runtime_check() -> None:
+    value = runtime_final()
+    value["verificationResults"] = [
+        result for result in value["verificationResults"] if result["check"] != "remoteChatSmoke"
+    ]
+    with pytest.raises(manifest.ManifestError, match="missing runtime verification results"):
+        manifest.validate(value, True)
+
+
+def test_backward_compatible_historical_final_without_runtime_proof() -> None:
+    value = finalize()
+    assert "runtimeVerification" not in value
+    assert manifest.validate(value, True) == value
+
+
+def prod_candidate() -> dict[str, object]:
+    value = candidate()
+    value["environment"] = "prod"
+    return value
+
+
+def test_staging_gate_returns_revision_despite_approval_metadata_difference() -> None:
+    production = prod_candidate()
+    production.update(approvedAt="2026-07-27T12:00:00Z", approvedBy="production-approver")
+    assert manifest.staging_gate(production, runtime_final()) == 17
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "applicationVersion",
+        "sourceRevision",
+        "imageTag",
+        "imageDigest",
+        "chartVersion",
+        "chartDigest",
+        "semanticTag",
+        "expectedDefaultChatProvider",
+    ],
+)
+def test_staging_gate_compares_every_immutable_coordinate(field: str) -> None:
+    production = prod_candidate()
+    production[field] = "mismatch"
+    with pytest.raises(manifest.ManifestError):
+        manifest.staging_gate(production, runtime_final())
+
+
+def test_staging_gate_rejects_wrong_environments_and_candidate_evidence() -> None:
+    with pytest.raises(manifest.ManifestError, match="requires prod candidate"):
+        manifest.staging_gate(candidate(), runtime_final())
+    production_evidence = runtime_final()
+    production_evidence["environment"] = "prod"
+    production_evidence["runtimeVerification"]["environment"] = "prod"
+    assert manifest.validate(production_evidence, True) == production_evidence
+    with pytest.raises(manifest.ManifestError, match="requires prod candidate"):
+        manifest.staging_gate(prod_candidate(), production_evidence)
+    with pytest.raises(manifest.ManifestError):
+        manifest.staging_gate(prod_candidate(), candidate())
+
+
+def test_staging_gate_requires_runtime_proof_but_historical_final_stays_valid() -> None:
+    historical = finalize()
+    assert manifest.validate(historical, True) == historical
+    with pytest.raises(manifest.ManifestError, match="mandatory runtime verification"):
+        manifest.staging_gate(prod_candidate(), historical)
+
+
+def test_staging_gate_rejects_malformed_or_release_mismatched_runtime_proof() -> None:
+    malformed = runtime_final()
+    malformed["runtimeVerification"]["journeys"] = []
+    with pytest.raises(manifest.ManifestError, match="bounded journeys"):
+        manifest.staging_gate(prod_candidate(), malformed)
+
+    mismatched = runtime_final()
+    mismatched["runtimeVerification"]["release"] = "other"
+    with pytest.raises(manifest.ManifestError, match="approved release"):
+        manifest.staging_gate(prod_candidate(), mismatched)
 
 
 def _replace_results(value, checks):

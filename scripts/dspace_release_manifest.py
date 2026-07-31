@@ -42,6 +42,7 @@ FINAL_FIELDS = CANDIDATE_FIELDS + (
     "runtimeSourceRevisionMethod",
     "verificationResults",
 )
+OPTIONAL_FINAL_FIELDS = ("runtimeVerification",)
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 SEMVER_RE = re.compile(
@@ -69,6 +70,26 @@ FINAL_FIXED_CHECKS = {
     "podImageCoordinates",
     "podImageDigests",
 }
+RUNTIME_VERIFICATION_FIELDS = (
+    "schemaVersion",
+    "environment",
+    "release",
+    "namespace",
+    "applicationVersion",
+    "runtimeSourceRevision",
+    "frontendSourceRevision",
+    "defaultProvider",
+    "journeys",
+)
+RUNTIME_VERIFICATION_CHECKS = {
+    "runtimeIdentity",
+    "frontendIdentity",
+    "replicaAgreement",
+    "publicDirectAgreement",
+    "defaultProvider",
+    "remoteChatSmoke",
+}
+PUBLIC_PATH_RE = re.compile(r"/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*")
 PLATFORM_CHECK_RE = re.compile(r"^imagePlatformSourceRevision\[(0|[1-9][0-9]*)\]$")
 POD_SETTLE_TIMEOUT_SECONDS = 60.0
 POD_SETTLE_INTERVAL_SECONDS = 2.0
@@ -133,6 +154,8 @@ def validate(value: dict[str, Any], finalized: bool | None = None) -> dict[str, 
     if finalized is None:
         finalized = record_type == "final"
     expected = FINAL_FIELDS if finalized else CANDIDATE_FIELDS
+    if finalized and "runtimeVerification" in value:
+        expected += OPTIONAL_FINAL_FIELDS
     _exact_fields(value, expected)
     _validate_upstream(value)
     if record_type != ("final" if finalized else "candidate"):
@@ -180,6 +203,42 @@ def validate(value: dict[str, Any], finalized: bool | None = None) -> dict[str, 
             raise ManifestError("runtimeSourceRevision must match sourceRevision")
         if value["runtimeSourceRevisionMethod"] != RUNTIME_METHOD:
             raise ManifestError(f"runtimeSourceRevisionMethod must be {RUNTIME_METHOD}")
+        if "runtimeVerification" in value:
+            proof = value["runtimeVerification"]
+            if not isinstance(proof, dict) or set(proof) != set(RUNTIME_VERIFICATION_FIELDS):
+                raise ManifestError("runtimeVerification has an incompatible verifier schema")
+            if type(proof["schemaVersion"]) is not int or proof["schemaVersion"] != 1:
+                raise ManifestError("runtimeVerification schemaVersion must be integer 1")
+            if any(
+                proof[field] != expected_value
+                for field, expected_value in {
+                    "environment": value["environment"],
+                    "release": "dspace",
+                    "namespace": "dspace",
+                    "applicationVersion": value["applicationVersion"],
+                    "runtimeSourceRevision": value["sourceRevision"],
+                    "frontendSourceRevision": value["sourceRevision"],
+                    "defaultProvider": value["expectedDefaultChatProvider"],
+                }.items()
+            ):
+                raise ManifestError("runtimeVerification does not match approved release")
+            journeys = proof["journeys"]
+            if not isinstance(journeys, list) or not journeys:
+                raise ManifestError("runtimeVerification lacks successful bounded journeys")
+            journey_names: set[str] = set()
+            for item in journeys:
+                if (
+                    not isinstance(item, dict)
+                    or set(item) != {"name", "passed"}
+                    or not isinstance(item["name"], str)
+                    or not PUBLIC_PATH_RE.fullmatch(item["name"])
+                    or item["name"] in journey_names
+                    or item["passed"] is not True
+                ):
+                    raise ManifestError("runtimeVerification lacks successful bounded journeys")
+                journey_names.add(item["name"])
+            if "/chat" not in journey_names:
+                raise ManifestError("runtimeVerification lacks successful bounded journeys")
         results = value["verificationResults"]
         if not isinstance(results, list) or not results:
             raise ManifestError("verificationResults must be a non-empty list")
@@ -206,11 +265,19 @@ def validate(value: dict[str, Any], finalized: bool | None = None) -> dict[str, 
             platform_match = PLATFORM_CHECK_RE.fullmatch(check)
             if platform_match:
                 platform_indices.append(int(platform_match.group(1)))
-            elif check not in FINAL_FIXED_CHECKS:
+            elif check not in FINAL_FIXED_CHECKS | RUNTIME_VERIFICATION_CHECKS:
                 raise ManifestError(f"unknown verification result: {check}")
         missing = sorted(FINAL_FIXED_CHECKS - checks)
         if missing:
             raise ManifestError("missing verification results: " + ", ".join(missing))
+        if "runtimeVerification" in value:
+            missing_runtime = sorted(RUNTIME_VERIFICATION_CHECKS - checks)
+            if missing_runtime:
+                raise ManifestError(
+                    "missing runtime verification results: " + ", ".join(missing_runtime)
+                )
+        elif checks & RUNTIME_VERIFICATION_CHECKS:
+            raise ManifestError("runtime verification results require runtimeVerification proof")
         if sorted(platform_indices) != list(range(len(platform_indices))):
             raise ManifestError(
                 "image platform verification indices must be contiguous from zero"
@@ -548,6 +615,7 @@ def finalize(
     cluster_environment: str,
     invocation_description: str,
     expected_image_coordinate: str | None = None,
+    runtime_verification: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     validate(value, False)
     selected = {
@@ -709,6 +777,18 @@ def finalize(
             "details": "every running pod imageID matched approved image digest",
         },
     ]
+    if runtime_verification is not None:
+        runtime_checks = (
+            ("runtimeIdentity", "approved runtime source and image identity verified"),
+            ("frontendIdentity", "approved frontend revision marker verified"),
+            ("replicaAgreement", "all ready serving replicas agreed"),
+            ("publicDirectAgreement", "public and direct build identities agreed"),
+            ("defaultProvider", "approved default provider verified"),
+            ("remoteChatSmoke", "bounded remote /chat journey passed"),
+        )
+        results.extend(
+            {"check": name, "passed": True, "details": details} for name, details in runtime_checks
+        )
     result = dict(value)
     result.update(
         recordType="final",
@@ -718,7 +798,32 @@ def finalize(
         runtimeSourceRevisionMethod=RUNTIME_METHOD,
         verificationResults=results,
     )
+    if runtime_verification is not None:
+        result["runtimeVerification"] = runtime_verification
     return validate(result, True)
+
+
+def staging_gate(candidate_value: dict[str, Any], evidence_value: dict[str, Any]) -> int:
+    """Validate finalized staging proof and return its recorded Helm revision."""
+    validate(candidate_value, False)
+    validate(evidence_value, True)
+    if candidate_value["environment"] != "prod" or evidence_value["environment"] != "staging":
+        raise ManifestError("staging gate requires prod candidate and staging final evidence")
+    coordinates = (
+        "applicationVersion",
+        "sourceRevision",
+        "imageTag",
+        "imageDigest",
+        "chartVersion",
+        "chartDigest",
+        "semanticTag",
+        "expectedDefaultChatProvider",
+    )
+    if any(candidate_value[field] != evidence_value[field] for field in coordinates):
+        raise ManifestError("manifest/evidence mismatch: staging and prod coordinates differ")
+    if "runtimeVerification" not in evidence_value:
+        raise ManifestError("staging evidence lacks mandatory runtime verification")
+    return evidence_value["helmRevision"]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -758,6 +863,10 @@ def main(argv: list[str] | None = None) -> int:
     finish.add_argument(
         "--oras-command", default=os.environ.get("SUGARKUBE_ORAS_COMMAND", "oras")
     )
+    finish.add_argument("--runtime-verification", type=Path)
+    gate = sub.add_parser("staging-gate")
+    gate.add_argument("--manifest", type=Path, required=True)
+    gate.add_argument("--staging-evidence", type=Path, required=True)
     available = sub.add_parser("check-output")
     available.add_argument("--output", type=Path, required=True)
     destination = sub.add_parser("evidence-path")
@@ -885,6 +994,9 @@ def main(argv: list[str] | None = None) -> int:
                 namespace=args.namespace,
                 cluster_environment=cluster_environment,
                 invocation_description=invocation_description,
+                runtime_verification=(
+                    _object(args.runtime_verification) if args.runtime_verification else None
+                ),
             )
             sidecar = verify_reservation(
                 args.output,
@@ -917,6 +1029,8 @@ def main(argv: list[str] | None = None) -> int:
             _write_new(args.output, result)
             sidecar.unlink()
             _sync_directory(args.output.expanduser().resolve(strict=False).parent)
+        elif args.command == "staging-gate":
+            print(staging_gate(_object(args.manifest), _object(args.staging_evidence)))
         elif args.command == "check-output":
             if args.output.exists():
                 raise ManifestError(

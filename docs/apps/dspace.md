@@ -2,6 +2,77 @@
 
 This is the canonical runbook for deploying DSPACE from GHCR artifacts to Sugarkube. The generic `just app-*` recipes are the preferred future path. The `dspace-oci-*` recipes remain compatibility shims and are scheduled for later removal only after the generic flow has been exercised across routine releases.
 
+## Mandatory release verification
+
+DSPACE staging and production releases are verified against an approved immutable release
+manifest. The verifier checks public build identity and frontend marker, every ready serving
+replica's image coordinate, digest, build identity, and frontend marker, then invokes DSPACE's
+non-destructive remote `/chat` harness. It uses read-only Kubernetes API pod proxies. Successful
+bounded results are included in finalized evidence as `runtimeVerification`; response bodies,
+child output, browser artifacts, headers, cookies, credentials, and request payloads are not saved.
+
+Prepare a DSPACE checkout with `pnpm install` and `pnpm exec playwright install chromium`. The
+runner must be executable. It mocks provider transport, so no token.place or OpenAI credentials
+are required or accepted:
+
+```bash
+DSPACE_SMOKE_RUNNER="$HOME/dspace/scripts/run-remote-chat-smoke.mjs"
+STAGING_KUBECONFIG="$HOME/.kube/config-sugarkube-staging"
+PROD_KUBECONFIG="$HOME/.kube/config-sugarkube-prod"
+chmod +x "$DSPACE_SMOKE_RUNNER"
+
+just dspace-release-verify \
+  env=staging \
+  manifest=deployment-evidence/dspace/staging/<finalized-record>.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER" \
+  kubeconfig="$STAGING_KUBECONFIG"
+
+just dspace-release-verify \
+  env=prod \
+  manifest=deployment-candidates/dspace/prod.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER" \
+  kubeconfig="$PROD_KUBECONFIG"
+```
+
+Add `config=<nondefault-environment-config>` when verification must use a
+nondefault app config.
+
+Deploy staging from its approved candidate; finalized evidence is created only after post-rollout
+verification succeeds:
+
+```bash
+just app-deploy app=dspace env=staging tag=main-REPLACE_SHORTSHA \
+  manifest=deployment-candidates/dspace/staging.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER" \
+  kubeconfig="$STAGING_KUBECONFIG"
+```
+
+Production promotion additionally requires finalized staging evidence. Before production render,
+reservation, or mutation, Sugarkube compares immutable coordinates, checks the recorded staging
+Helm revision remains live, and reruns complete staging verification:
+
+```bash
+just app-promote-prod \
+  app=dspace \
+  tag=main-REPLACE_SHORTSHA \
+  manifest=deployment-candidates/dspace/prod.json \
+  staging_evidence=deployment-evidence/dspace/staging/<finalized-record>.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER" \
+  kubeconfig="$PROD_KUBECONFIG" \
+  staging_kubeconfig="$STAGING_KUBECONFIG"
+```
+
+If staging used a nondefault app config, pass that distinct path as
+`staging_config=<staging-config>` during promotion. Do not pass the production
+`config=` value as `staging_config=`.
+
+Final records are written below `deployment-evidence/dspace/<environment>/`, unless `evidence=` is
+explicit. A post-mutation failure exits nonzero, preserves the reservation for reconciliation, and
+does not finalize success, retry, downgrade, or roll back. For a `token-place` default, origin and
+model expectations come from the ordered values chain. For `openai`, those arguments are omitted;
+OpenAI remains discoverable and missing-key gated without a real key. Standalone production
+verification uses the same command with `env=prod` and a production candidate or final record.
+
 ## Artifact model
 
 - App repository responsibilities: build `ghcr.io/democratizedspace/dspace`, publish immutable image tags, maintain the Helm chart, and publish immutable chart versions to `oci://ghcr.io/democratizedspace/charts/dspace`.
@@ -138,7 +209,9 @@ Pass the candidate to staging and preserve the generated final record:
 
 ```bash
 just app-deploy app=dspace env=staging tag="$APP_TAG" \
-  manifest=deployment-candidates/dspace/staging.json
+  manifest=deployment-candidates/dspace/staging.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER" \
+  kubeconfig="$STAGING_KUBECONFIG"
 EVIDENCE=$(python3 scripts/dspace_release_manifest.py evidence-path \
   --manifest deployment-candidates/dspace/staging.json)
 git add "$EVIDENCE"
@@ -171,7 +244,11 @@ python3 scripts/dspace_release_manifest.py candidate \
   --environment prod --provider token-place \
   --approved-at 2026-07-26T13:00:00Z --approved-by '<operator-or-review-record>'
 just app-promote-prod app=dspace tag="$APP_TAG" \
-  manifest=deployment-candidates/dspace/prod.json
+  manifest=deployment-candidates/dspace/prod.json \
+  staging_evidence=deployment-evidence/dspace/staging/<finalized-record>.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER" \
+  kubeconfig="$PROD_KUBECONFIG" \
+  staging_kubeconfig="$STAGING_KUBECONFIG"
 EVIDENCE=$(python3 scripts/dspace_release_manifest.py evidence-path \
   --manifest deployment-candidates/dspace/prod.json)
 git add "$EVIDENCE"
@@ -180,16 +257,19 @@ git add "$EVIDENCE"
 The finalized JSON is sufficient to reconstruct the release using the recorded
 branch-SHA image tag and digest plus chart version and the exact digest-qualified
 chart deployment coordinate, without resolving
-`latest`, a branch, an environment tag, or the semantic tag. Until DSPACE #4732
-adds direct runtime identity, `runtimeSourceRevisionMethod` is strictly
-`podImageID+ociRevisionAnnotation`: every pod image ID must equal the approved
+`latest`, a branch, an environment tag, or the semantic tag.
+`runtimeSourceRevisionMethod` remains `podImageID+ociRevisionAnnotation` as the
+persisted source-provenance method: every pod image ID must equal the approved
 digest and that exact OCI artifact's revision annotation must equal the full
-approved SHA. Finalization also reasserts the connected cluster environment,
+approved SHA. Current verification additionally checks public and direct
+`/build-info.json`, frontend revision markers, agreement across serving replicas,
+provider expectations, and the non-destructive `/chat` journey. Finalization also
+reasserts the connected cluster environment,
 requires Helm to report the selected release and namespace as deployed with the
 exact approved DSPACE chart version, and accepts only Running, Ready pods owned
 through the selected Helm release's Deployment and ReplicaSet. Each DSPACE
 container must use the approved repository and immutable image tag before its
-resolved image ID is accepted. No HTTP build-identity check is claimed.
+resolved image ID is accepted.
 
 Immediately before Helm changes the release, the guarded recipe atomically creates
 `<evidence-path>.reservation`. This sidecar binds the normalized destination,
@@ -211,13 +291,17 @@ This repository change only persists the staging configuration; it does not depl
 Preferred generic command:
 
 ```bash
-just app-deploy app=dspace env=staging tag="$APP_TAG" manifest=deployment-candidates/dspace/staging.json
+just app-deploy app=dspace env=staging tag="$APP_TAG" \
+  manifest=deployment-candidates/dspace/staging.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER" kubeconfig="$STAGING_KUBECONFIG"
 ```
 
 Compatibility shim while migration is in progress:
 
 ```bash
-just dspace-oci-deploy env=staging tag="$APP_TAG" manifest=deployment-candidates/dspace/staging.json
+just dspace-oci-deploy env=staging tag="$APP_TAG" \
+  manifest=deployment-candidates/dspace/staging.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER" kubeconfig="$STAGING_KUBECONFIG"
 ```
 
 ## Verify staging
@@ -283,13 +367,21 @@ For staging, the browser smoke must show DSPACE calling `https://staging.token.p
 This configuration change does not promote or mutate production. Promote only after staging sign-off. Prefer the generic command; it uses the prod values chain, resolves chart `3.0.1` from `docs/apps/dspace.prod.version`, and can read `docs/apps/dspace.prod.tag` (`main-1a31a56`) when `tag=` is omitted.
 
 ```bash
-just app-promote-prod app=dspace tag="$APP_TAG" manifest=deployment-candidates/dspace/prod.json
+just app-promote-prod app=dspace tag="$APP_TAG" \
+  manifest=deployment-candidates/dspace/prod.json \
+  staging_evidence=deployment-evidence/dspace/staging/<finalized-record>.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER" \
+  kubeconfig="$PROD_KUBECONFIG" staging_kubeconfig="$STAGING_KUBECONFIG"
 ```
 
 Compatibility shim:
 
 ```bash
-just dspace-oci-promote-prod tag="$APP_TAG" manifest=deployment-candidates/dspace/prod.json
+just dspace-oci-promote-prod tag="$APP_TAG" \
+  manifest=deployment-candidates/dspace/prod.json \
+  staging_evidence=deployment-evidence/dspace/staging/<finalized-record>.json \
+  smoke_runner="$DSPACE_SMOKE_RUNNER" \
+  kubeconfig="$PROD_KUBECONFIG" staging_kubeconfig="$STAGING_KUBECONFIG"
 ```
 
 ## Verify production
@@ -339,6 +431,7 @@ just dspace-manifest-rollback \
   env=staging \
   manifest=deployment-evidence/dspace/staging/previous-finalized-release.json \
   evidence=deployment-evidence/dspace/staging/rollback-20260727T120000Z.json \
+  smoke_runner=/opt/dspace/bin/chat-smoke \
   verifier=/opt/dspace/bin/sugarkube-runtime-verifier
 ```
 
@@ -352,6 +445,7 @@ just dspace-manifest-rollback \
   env=prod \
   manifest=deployment-evidence/dspace/prod/previous-finalized-release.json \
   evidence=deployment-evidence/dspace/prod/rollback-20260727T120000Z.json \
+  smoke_runner=/opt/dspace/bin/chat-smoke \
   verifier=/opt/dspace/bin/sugarkube-runtime-verifier \
   confirm="dspace:prod:${TARGET_SHA}"
 ```
