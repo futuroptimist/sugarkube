@@ -28,6 +28,7 @@ UPSTREAM_FIELDS = (
     "chartDigest",
     "semanticTag",
 )
+UPSTREAM_FIELDS_V2 = UPSTREAM_FIELDS[:4] + ("chartSourceRevision",) + UPSTREAM_FIELDS[4:]
 CANDIDATE_FIELDS = UPSTREAM_FIELDS + (
     "recordType",
     "environment",
@@ -35,6 +36,7 @@ CANDIDATE_FIELDS = UPSTREAM_FIELDS + (
     "approvedAt",
     "approvedBy",
 )
+CANDIDATE_FIELDS_V2 = UPSTREAM_FIELDS_V2 + CANDIDATE_FIELDS[len(UPSTREAM_FIELDS) :]
 FINAL_FIELDS = CANDIDATE_FIELDS + (
     "helmRevision",
     "pods",
@@ -42,6 +44,7 @@ FINAL_FIELDS = CANDIDATE_FIELDS + (
     "runtimeSourceRevisionMethod",
     "verificationResults",
 )
+FINAL_FIELDS_V2 = CANDIDATE_FIELDS_V2 + FINAL_FIELDS[len(CANDIDATE_FIELDS) :]
 OPTIONAL_FINAL_FIELDS = ("runtimeVerification",)
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -121,9 +124,29 @@ def _exact_fields(value: dict[str, Any], expected: tuple[str, ...]) -> None:
         raise ManifestError("; ".join(parts))
 
 
+def _fields(schema_version: Any, finalized: bool | None = None) -> tuple[str, ...]:
+    if type(schema_version) is not int or schema_version not in {1, 2}:
+        raise ManifestError("schemaVersion must be integer 1 or 2")
+    if finalized is None:
+        return UPSTREAM_FIELDS if schema_version == 1 else UPSTREAM_FIELDS_V2
+    if finalized:
+        return FINAL_FIELDS if schema_version == 1 else FINAL_FIELDS_V2
+    return CANDIDATE_FIELDS if schema_version == 1 else CANDIDATE_FIELDS_V2
+
+
+def chart_source_revision(value: dict[str, Any]) -> str:
+    """Return explicit v2 chart provenance or the implicit v1 same-source value."""
+    return value["sourceRevision"] if value["schemaVersion"] == 1 else value["chartSourceRevision"]
+
+
+def candidate_fields(value: dict[str, Any]) -> tuple[str, ...]:
+    """Return the canonical candidate fields for a validated schema version."""
+    return _fields(value.get("schemaVersion"), False)
+
+
 def _validate_upstream(value: dict[str, Any]) -> None:
-    if value["schemaVersion"] != 1 or value["app"] != "dspace":
-        raise ManifestError("schemaVersion must be 1 and app must be 'dspace'")
+    if value["app"] != "dspace":
+        raise ManifestError("app must be 'dspace'")
     if not isinstance(value["applicationVersion"], str) or not SEMVER_RE.fullmatch(
         value["applicationVersion"]
     ):
@@ -131,6 +154,9 @@ def _validate_upstream(value: dict[str, Any]) -> None:
     sha = value["sourceRevision"]
     if not isinstance(sha, str) or not SHA_RE.fullmatch(sha):
         raise ManifestError("sourceRevision must be a full 40-character lowercase Git SHA")
+    chart_sha = chart_source_revision(value)
+    if not isinstance(chart_sha, str) or not SHA_RE.fullmatch(chart_sha):
+        raise ManifestError("chartSourceRevision must be a full 40-character lowercase Git SHA")
     tag = value["imageTag"]
     match = IMAGE_TAG_RE.fullmatch(tag) if isinstance(tag, str) else None
     if not match:
@@ -153,7 +179,9 @@ def validate(value: dict[str, Any], finalized: bool | None = None) -> dict[str, 
     record_type = value.get("recordType")
     if finalized is None:
         finalized = record_type == "final"
-    expected = FINAL_FIELDS if finalized else CANDIDATE_FIELDS
+    expected = _fields(value.get("schemaVersion"), finalized)
+    if value["schemaVersion"] == 2 and "chartSourceRevision" not in value:
+        raise ManifestError("schemaVersion 2 requires chartSourceRevision")
     if finalized and "runtimeVerification" in value:
         expected += OPTIONAL_FINAL_FIELDS
     _exact_fields(value, expected)
@@ -279,9 +307,7 @@ def validate(value: dict[str, Any], finalized: bool | None = None) -> dict[str, 
         elif checks & RUNTIME_VERIFICATION_CHECKS:
             raise ManifestError("runtime verification results require runtimeVerification proof")
         if sorted(platform_indices) != list(range(len(platform_indices))):
-            raise ManifestError(
-                "image platform verification indices must be contiguous from zero"
-            )
+            raise ManifestError("image platform verification indices must be contiguous from zero")
         if not platform_indices:
             raise ManifestError("at least one image platform verification result is required")
     return value
@@ -302,9 +328,7 @@ def _write_new(path: Path, value: dict[str, Any]) -> None:
         try:
             os.link(temporary, path)
         except FileExistsError as exc:
-            raise ManifestError(
-                f"refusing to overwrite existing record: {path}"
-            ) from exc
+            raise ManifestError(f"refusing to overwrite existing record: {path}") from exc
         _sync_directory(path.parent)
     finally:
         Path(temporary).unlink(missing_ok=True)
@@ -357,9 +381,7 @@ def reserve(
     try:
         fd = os.open(sidecar, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError as exc:
-        raise ManifestError(
-            f"evidence destination is already reserved: {sidecar}"
-        ) from exc
+        raise ManifestError(f"evidence destination is already reserved: {sidecar}") from exc
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
             stream.write(_canonical(metadata))
@@ -395,9 +417,7 @@ def verify_reservation(
     if not secrets.compare_digest(
         json.dumps(metadata, sort_keys=True), json.dumps(expected, sort_keys=True)
     ):
-        raise ManifestError(
-            "reservation ownership or deployment coordinates do not match"
-        )
+        raise ManifestError("reservation ownership or deployment coordinates do not match")
     if normalized.exists():
         raise ManifestError(f"refusing to overwrite existing record: {normalized}")
     return sidecar
@@ -410,9 +430,10 @@ def candidate(
     approved_at: str,
     approved_by: str,
 ) -> dict[str, Any]:
-    _exact_fields(upstream, UPSTREAM_FIELDS)
+    fields = _fields(upstream.get("schemaVersion"))
+    _exact_fields(upstream, fields)
     _validate_upstream(upstream)
-    result = {field: upstream[field] for field in UPSTREAM_FIELDS}
+    result = {field: upstream[field] for field in fields}
     result.update(
         recordType="candidate",
         environment=environment,
@@ -536,7 +557,7 @@ def preflight(
     checks = (
         ("imageDigest", image_digest, value["imageDigest"]),
         ("chartDigest", chart_digest, value["chartDigest"]),
-        ("chartSourceRevision", chart_revision, value["sourceRevision"]),
+        ("chartSourceRevision", chart_revision, chart_source_revision(value)),
     )
     results = [
         {
@@ -736,7 +757,10 @@ def finalize(
         {
             "check": "selectedCoordinates",
             "passed": True,
-            "details": f"environment={environment}; imageTag={image_tag}; chartVersion={chart_version}",
+            "details": (
+                f"environment={environment}; imageTag={image_tag}; "
+                f"chartVersion={chart_version}"
+            ),
         },
         {
             "check": "clusterEnvironment",
@@ -757,8 +781,7 @@ def finalize(
             # Helm metadata proves name/version, not immutable OCI content. The
             # guarded mutation therefore installs this approved digest directly.
             "details": (
-                f"chart=dspace; version={chart_version}; "
-                f"coordinate={chart_coordinate(value)}"
+                f"chart=dspace; version={chart_version}; " f"coordinate={chart_coordinate(value)}"
             ),
         },
         {
@@ -819,6 +842,10 @@ def staging_gate(candidate_value: dict[str, Any], evidence_value: dict[str, Any]
         "semanticTag",
         "expectedDefaultChatProvider",
     )
+    if candidate_value["schemaVersion"] != evidence_value["schemaVersion"]:
+        raise ManifestError("manifest/evidence mismatch: schema versions differ")
+    if chart_source_revision(candidate_value) != chart_source_revision(evidence_value):
+        raise ManifestError("manifest/evidence mismatch: chart source revisions differ")
     if any(candidate_value[field] != evidence_value[field] for field in coordinates):
         raise ManifestError("manifest/evidence mismatch: staging and prod coordinates differ")
     if "runtimeVerification" not in evidence_value:
@@ -860,9 +887,7 @@ def main(argv: list[str] | None = None) -> int:
     finish.add_argument("--image-ref", default=IMAGE_REF)
     finish.add_argument("--chart-ref", default=CHART_REF)
     finish.add_argument("--reservation", required=True)
-    finish.add_argument(
-        "--oras-command", default=os.environ.get("SUGARKUBE_ORAS_COMMAND", "oras")
-    )
+    finish.add_argument("--oras-command", default=os.environ.get("SUGARKUBE_ORAS_COMMAND", "oras"))
     finish.add_argument("--runtime-verification", type=Path)
     gate = sub.add_parser("staging-gate")
     gate.add_argument("--manifest", type=Path, required=True)
@@ -1021,10 +1046,9 @@ def main(argv: list[str] | None = None) -> int:
                     metadata.get("version"),
                 )
 
-            if (
-                binding_fields(settled_helm) != binding_fields(helm)
-                or binding_fields(stable_helm) != binding_fields(helm)
-            ):
+            if binding_fields(settled_helm) != binding_fields(helm) or binding_fields(
+                stable_helm
+            ) != binding_fields(helm):
                 raise ManifestError("Helm release changed during evidence collection")
             _write_new(args.output, result)
             sidecar.unlink()
@@ -1033,9 +1057,7 @@ def main(argv: list[str] | None = None) -> int:
             print(staging_gate(_object(args.manifest), _object(args.staging_evidence)))
         elif args.command == "check-output":
             if args.output.exists():
-                raise ManifestError(
-                    f"refusing to overwrite existing record: {args.output}"
-                )
+                raise ManifestError(f"refusing to overwrite existing record: {args.output}")
         elif args.command == "reserve":
             sys.stdout.write(
                 reserve(

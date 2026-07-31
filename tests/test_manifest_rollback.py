@@ -50,6 +50,13 @@ def target(environment: str = "staging") -> dict[str, object]:
     return manifest.validate(value, True)
 
 
+def test_schema_v2_final_target_preserves_split_chart_provenance() -> None:
+    value = target()
+    value["schemaVersion"] = 2
+    value["chartSourceRevision"] = "0123456789abcdef0123456789abcdef01234567"
+    assert manifest.validate(value, True)["chartSourceRevision"] != value["sourceRevision"]
+
+
 def verifier_result(**changes: object) -> dict[str, object]:
     value = {
         "schemaVersion": 1,

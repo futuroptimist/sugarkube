@@ -13,6 +13,7 @@ import pytest
 from scripts import dspace_release_manifest as manifest
 
 SHA = "abcdef0123456789abcdef0123456789abcdef01"
+CHART_SHA = "0123456789abcdef0123456789abcdef01234567"
 DIGEST = "sha256:" + "1" * 64
 CHART_DIGEST = "sha256:" + "2" * 64
 PLATFORM_DIGEST = "sha256:" + "3" * 64
@@ -42,6 +43,69 @@ def candidate() -> dict[str, object]:
         "2026-07-26T12:00:00Z",
         "synthetic-test-approver",
     )
+
+
+def split_upstream() -> dict[str, object]:
+    value = upstream()
+    value["schemaVersion"] = 2
+    value["chartSourceRevision"] = CHART_SHA
+    return value
+
+
+def split_candidate(environment: str = "staging") -> dict[str, object]:
+    return manifest.candidate(
+        split_upstream(), environment, "openai", "2026-07-26T12:00:00Z", "test-approver"
+    )
+
+
+def test_schema_v1_implicitly_retains_same_source_provenance() -> None:
+    value = candidate()
+    assert manifest.validate(value) == value
+    assert manifest.chart_source_revision(value) == SHA
+    assert "chartSourceRevision" not in value
+
+
+def test_schema_v2_split_provenance_is_canonical_and_preserved() -> None:
+    value = split_candidate()
+    assert manifest.validate(value) == value
+    assert list(value) == list(manifest.CANDIDATE_FIELDS_V2)
+    assert value["sourceRevision"] == SHA
+    assert manifest.chart_source_revision(value) == CHART_SHA
+
+
+def test_version_controlled_production_recovery_coordinates_are_exact() -> None:
+    path = Path(__file__).parents[1] / "docs/apps/dspace.prod-recovery-coordinates.json"
+    value = json.loads(path.read_text(encoding="utf-8"))
+    assert value == {
+        "schemaVersion": 2,
+        "app": "dspace",
+        "applicationVersion": "3.0.1",
+        "sourceRevision": "1a31a569aff2dbeb238e8c2688b9e85140d2077d",
+        "chartSourceRevision": "63063e287adb92a4158ce2c8e7d378b73f52c1c5",
+        "imageTag": "main-1a31a56",
+        "imageDigest": "sha256:23dbc573377549136c1f10b05706b3c176ffbabaf04a3194381a24752104a401",
+        "chartVersion": "3.0.2",
+        "chartDigest": "sha256:8b862135e52146f301a41259d6dabb053ed891d798fc1c8c95ca775b2b8e9575",
+        "semanticTag": "v3.0.1",
+    }
+    generated = manifest.candidate(value, "prod", "openai", "2026-07-31T12:00:00Z", "test-approver")
+    assert generated["imageTag"] == "main-1a31a56"
+    assert generated["chartVersion"] == "3.0.2"
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda x: x.pop("chartSourceRevision"),
+        lambda x: x.update(chartSourceRevision="bad"),
+        lambda x: x.update(schemaVersion=3),
+    ],
+)
+def test_schema_v2_rejects_missing_malformed_unknown_or_swapped_provenance(change) -> None:
+    value = split_upstream()
+    change(value)
+    with pytest.raises(manifest.ManifestError):
+        manifest.candidate(value, "staging", "openai", "2026-07-26T12:00:00Z", "operator")
 
 
 def test_upstream_import_is_canonical_and_round_trips(tmp_path: Path) -> None:
@@ -124,9 +188,12 @@ def test_accepts_strict_semver_prerelease_and_build(version: str) -> None:
     value = upstream()
     value["applicationVersion"] = version
     value["semanticTag"] = f"v{version}"
-    assert manifest.candidate(
-        value, "staging", "token-place", "2026-07-26T12:00:00Z", "operator"
-    )["applicationVersion"] == version
+    assert (
+        manifest.candidate(value, "staging", "token-place", "2026-07-26T12:00:00Z", "operator")[
+            "applicationVersion"
+        ]
+        == version
+    )
 
 
 @pytest.mark.parametrize(
@@ -200,6 +267,25 @@ def test_preflight_checks_exact_descriptors_and_digest_qualified_metadata() -> N
     assert runner.calls[0][-1].endswith(":main-abcdef0")
     assert runner.calls[1][-1] == f"{manifest.IMAGE_REF}@{DIGEST}"
     assert all(":main-abcdef0" not in call[-1] for call in runner.calls[1:])
+
+
+def test_split_preflight_compares_image_and_chart_to_independent_sources() -> None:
+    results = manifest.preflight(
+        split_candidate(),
+        manifest.IMAGE_REF,
+        manifest.CHART_REF,
+        "oras",
+        runner=oras_runner(image_revision=SHA, chart_revision=CHART_SHA),
+    )
+    assert all(item["passed"] for item in results)
+    with pytest.raises(manifest.ManifestError, match="chartSourceRevision"):
+        manifest.preflight(
+            split_candidate(),
+            manifest.IMAGE_REF,
+            manifest.CHART_REF,
+            "oras",
+            runner=oras_runner(image_revision=SHA, chart_revision=SHA),
+        )
 
 
 @pytest.mark.parametrize(
@@ -374,6 +460,30 @@ def test_finalize_collects_sorted_multi_pod_identity() -> None:
         "podImageCoordinates",
         "podImageDigests",
     }
+
+
+def test_schema_v2_split_sources_survive_finalization_and_production_gate() -> None:
+    staging = split_candidate()
+    proof = runtime_proof(defaultProvider="openai")
+    final = finalize(
+        value=staging,
+        preflight_results=manifest.preflight(
+            staging,
+            manifest.IMAGE_REF,
+            manifest.CHART_REF,
+            "oras",
+            runner=oras_runner(image_revision=SHA, chart_revision=CHART_SHA),
+        ),
+        runtime_verification=proof,
+    )
+    assert final["sourceRevision"] == SHA
+    assert final["chartSourceRevision"] == CHART_SHA
+    production = split_candidate("prod")
+    assert manifest.staging_gate(production, final) == 17
+
+    production["chartSourceRevision"] = "0" * 40
+    with pytest.raises(manifest.ManifestError, match="chart source revisions"):
+        manifest.staging_gate(production, final)
 
 
 def test_finalize_optional_digest_coordinate_is_backward_compatible() -> None:
@@ -570,9 +680,7 @@ def test_final_validation_requires_every_fixed_check(missing: str) -> None:
 @pytest.mark.parametrize("invalid", ["unknown", "imagePlatformSourceRevision[x]"])
 def test_final_validation_rejects_unknown_or_malformed_checks(invalid: str) -> None:
     value = finalize()
-    value["verificationResults"].append(
-        {"check": invalid, "passed": True, "details": "fabricated"}
-    )
+    value["verificationResults"].append({"check": invalid, "passed": True, "details": "fabricated"})
     with pytest.raises(manifest.ManifestError, match="unknown verification"):
         manifest.validate(value, True)
 
@@ -740,9 +848,7 @@ def test_reservation_is_atomic_and_bound_to_owner(tmp_path: Path) -> None:
     )
     metadata = json.loads(sidecar.read_text(encoding="utf-8"))
     assert metadata["output"] == str(output.resolve())
-    assert metadata["candidateFingerprint"] == manifest._candidate_fingerprint(
-        candidate()
-    )
+    assert metadata["candidateFingerprint"] == manifest._candidate_fingerprint(candidate())
 
 
 def test_reservation_rejects_existing_record_or_reservation(tmp_path: Path) -> None:
@@ -776,9 +882,7 @@ def test_reservation_binds_candidate_output_and_coordinates(tmp_path: Path) -> N
             )
 
 
-def test_post_reservation_failure_preserves_ownership(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_post_reservation_failure_preserves_ownership(tmp_path: Path, monkeypatch) -> None:
     source = tmp_path / "candidate.json"
     output = tmp_path / "evidence.json"
     source.write_text(manifest._canonical(candidate()), encoding="utf-8")
@@ -786,9 +890,7 @@ def test_post_reservation_failure_preserves_ownership(
     monkeypatch.setattr(
         manifest,
         "preflight",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            manifest.ManifestError("OCI failed")
-        ),
+        lambda *args, **kwargs: (_ for _ in ()).throw(manifest.ManifestError("OCI failed")),
     )
     assert (
         manifest.main(
@@ -965,10 +1067,25 @@ def test_finalize_cli_settling_failure_preserves_reservation(
 
     monkeypatch.setattr(manifest, "_run", run)
     args = [
-        "finalize", "--manifest", str(source), "--output", str(output),
-        "--environment", "staging", "--image-tag", "main-abcdef0",
-        "--chart-version", "3.2.0", "--kubeconfig", "kubeconfig",
-        "--release", "dspace", "--namespace", "dspace", "--reservation", owner,
+        "finalize",
+        "--manifest",
+        str(source),
+        "--output",
+        str(output),
+        "--environment",
+        "staging",
+        "--image-tag",
+        "main-abcdef0",
+        "--chart-version",
+        "3.2.0",
+        "--kubeconfig",
+        "kubeconfig",
+        "--release",
+        "dspace",
+        "--namespace",
+        "dspace",
+        "--reservation",
+        owner,
     ]
     assert manifest.main(args) == 2
     assert not output.exists()
@@ -1010,25 +1127,36 @@ def test_finalize_cli_rejects_changed_helm_binding_and_preserves_reservation(
                     status["info"]["description"] = "another invocation"
             return json.dumps(status)
         resource = command[command.index("get") + 1]
-        return json.dumps(
-            {"items": [pod("dspace-a")]} if resource == "pods" else workloads()
-        )
+        return json.dumps({"items": [pod("dspace-a")]} if resource == "pods" else workloads())
 
     monkeypatch.setattr(manifest, "_run", run)
     args = [
-        "finalize", "--manifest", str(source), "--output", str(output),
-        "--environment", "staging", "--image-tag", "main-abcdef0",
-        "--chart-version", "3.2.0", "--kubeconfig", "kubeconfig",
-        "--release", "dspace", "--namespace", "dspace", "--reservation", owner,
+        "finalize",
+        "--manifest",
+        str(source),
+        "--output",
+        str(output),
+        "--environment",
+        "staging",
+        "--image-tag",
+        "main-abcdef0",
+        "--chart-version",
+        "3.2.0",
+        "--kubeconfig",
+        "kubeconfig",
+        "--release",
+        "dspace",
+        "--namespace",
+        "dspace",
+        "--reservation",
+        owner,
     ]
     assert manifest.main(args) == 2
     assert not output.exists()
     assert manifest.reservation_path(output).exists()
 
 
-def test_public_read_only_and_reservation_dispatch(
-    tmp_path: Path, monkeypatch, capsys
-) -> None:
+def test_public_read_only_and_reservation_dispatch(tmp_path: Path, monkeypatch, capsys) -> None:
     source = tmp_path / "candidate.json"
     output = tmp_path / "evidence.json"
     source.write_text(manifest._canonical(candidate()), encoding="utf-8")
@@ -1039,9 +1167,7 @@ def test_public_read_only_and_reservation_dispatch(
         preflight_calls.append(args)
         return real_preflight(*args, **kwargs, runner=oras_runner())
 
-    oci_results = checked_preflight(
-        candidate(), manifest.IMAGE_REF, manifest.CHART_REF, "oras"
-    )
+    oci_results = checked_preflight(candidate(), manifest.IMAGE_REF, manifest.CHART_REF, "oras")
     preflight_calls.clear()
     monkeypatch.setattr(manifest, "preflight", checked_preflight)
 
@@ -1122,16 +1248,9 @@ def test_preflight_chart_coordinate_is_not_printed_after_failed_validation(
     monkeypatch.setattr(
         manifest,
         "preflight",
-        lambda *args, **kwargs: real_preflight(
-            *args, **kwargs, runner=oras_runner()
-        ),
+        lambda *args, **kwargs: real_preflight(*args, **kwargs, runner=oras_runner()),
     )
-    assert (
-        manifest.main(
-            ["preflight", "--manifest", str(source), "--print-chart-coordinate"]
-        )
-        == 2
-    )
+    assert manifest.main(["preflight", "--manifest", str(source), "--print-chart-coordinate"]) == 2
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "chartDigest" in captured.err
@@ -1141,6 +1260,7 @@ def test_default_evidence_path_is_stable_and_approval_unique() -> None:
     assert str(manifest.evidence_path(candidate())) == (
         "deployment-evidence/dspace/staging/main-abcdef0-20260726T120000Z.json"
     )
+
 
 @pytest.mark.parametrize(
     ("change", "message"),

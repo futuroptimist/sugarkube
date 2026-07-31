@@ -189,7 +189,7 @@ if [ "${{1:-}}" = upgrade ]; then
 fi
 if [[ "$*" == *"status dspace --namespace dspace -o json" ]]; then
   chart_version="${{SUGARKUBE_STUB_CHART_VERSION:-3.1.0}}"
-  if [ -z "${{SUGARKUBE_STUB_CHART_VERSION:-}}" ] && [ "${{SUGARKUBE_STUB_NODE_ENV:-staging}}" = prod ]; then chart_version=3.0.1; fi
+  if [ -z "${{SUGARKUBE_STUB_CHART_VERSION:-}}" ] && [ "${{SUGARKUBE_STUB_NODE_ENV:-staging}}" = prod ]; then chart_version=3.0.2; fi
   description="$(cat {str(tmp_path / "helm-description")!r} 2>/dev/null || true)"
   revision=7
   if [[ "$*" == *"staging-kubeconfig"* ]]; then
@@ -211,7 +211,7 @@ if [[ "$*" == show\ chart* ]]; then
     version="${{*: -1}}"
     if [[ "$version" == oci://*@sha256:* ]]; then
       version="${{SUGARKUBE_STUB_CHART_VERSION:-3.1.0}}"
-      if [ -z "${{SUGARKUBE_STUB_CHART_VERSION:-}}" ] && [ "${{SUGARKUBE_STUB_NODE_ENV:-staging}}" = prod ]; then version=3.0.1; fi
+      if [ -z "${{SUGARKUBE_STUB_CHART_VERSION:-}}" ] && [ "${{SUGARKUBE_STUB_NODE_ENV:-staging}}" = prod ]; then version=3.0.2; fi
     fi
     printf 'apiVersion: v2\nname: dspace\nversion: %s\nappVersion: main-abcdef0\n' "$version"
     exit 0
@@ -921,8 +921,7 @@ def test_values_null_overlay_clears_inherited_scalars(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     overlay.write_text(
-        "ingress:\n  enabled: false\n  host: null\n"
-        "metrics:\n  auth:\n    existingSecret: ~\n",
+        "ingress:\n  enabled: false\n  host: null\n" "metrics:\n  auth:\n    existingSecret: ~\n",
         encoding="utf-8",
     )
     values = (str(base), str(overlay))
@@ -935,9 +934,7 @@ def test_values_null_overlay_clears_inherited_scalars(tmp_path: Path) -> None:
 def test_parent_null_overlay_clears_inherited_ingress(tmp_path: Path, null_value: str) -> None:
     base = tmp_path / "base.yaml"
     overlay = tmp_path / "overlay.yaml"
-    base.write_text(
-        "ingress:\n  enabled: true\n  host: inherited.example.test\n", encoding="utf-8"
-    )
+    base.write_text("ingress:\n  enabled: true\n  host: inherited.example.test\n", encoding="utf-8")
     overlay.write_text(f"ingress: {null_value}\n", encoding="utf-8")
 
     assert app_chart.expected_ingress_host((str(base), str(overlay)), "") == ""
@@ -988,8 +985,14 @@ def test_dspace_null_overlay_metrics_is_render_safe(tmp_path: Path, null_value: 
     )
     overlay.write_text(f"metrics: {null_value}\n", encoding="utf-8")
     inputs = app_chart.ReleaseInputs(
-        "dspace", "staging", "dspace", "dspace", "chart", "1.0.0",
-        (str(base), str(overlay)), "main-deadbee",
+        "dspace",
+        "staging",
+        "dspace",
+        "dspace",
+        "chart",
+        "1.0.0",
+        (str(base), str(overlay)),
+        "main-deadbee",
     )
 
     assert app_chart.validate_dspace_values("", inputs) == []
@@ -1091,14 +1094,23 @@ spec:
 
 def test_dspace_resources_require_release_association() -> None:
     inputs = app_chart.ReleaseInputs(
-        "dspace", "staging", "dspace", "dspace", "chart", "3.1.0", (),
-        "main-deadbee", "staging.democratized.space",
+        "dspace",
+        "staging",
+        "dspace",
+        "dspace",
+        "chart",
+        "3.1.0",
+        (),
+        "main-deadbee",
+        "staging.democratized.space",
     )
-    manifest = _generic_manifest(
-        release="dspace",
-        image_container="dspace",
-        labels="    app.kubernetes.io/instance: another-release",
-    ) + """---
+    manifest = (
+        _generic_manifest(
+            release="dspace",
+            image_container="dspace",
+            labels="    app.kubernetes.io/instance: another-release",
+        )
+        + """---
 kind: Service
 metadata:
   name: dspace
@@ -1119,6 +1131,7 @@ spec:
         name: dspace-staging-metrics-token
         key: token
 """
+    )
 
     errors = app_chart.validate_rendered_manifest(manifest, inputs)
     assert "DSPACE intended Service did not render" in errors
@@ -1128,7 +1141,13 @@ spec:
 
 def test_dspace_servicemonitor_requires_every_endpoint_authentication() -> None:
     inputs = app_chart.ReleaseInputs(
-        "dspace", "staging", "dspace", "dspace", "chart", "3.1.0", (),
+        "dspace",
+        "staging",
+        "dspace",
+        "dspace",
+        "chart",
+        "3.1.0",
+        (),
         "main-deadbee",
     )
     manifest = """kind: ServiceMonitor
@@ -1160,8 +1179,14 @@ def test_dspace_servicemonitor_uses_rendered_default_token_key(tmp_path: Path) -
         encoding="utf-8",
     )
     inputs = app_chart.ReleaseInputs(
-        "dspace", "staging", "dspace", "dspace", "chart", "3.1.0",
-        (str(values),), "main-deadbee",
+        "dspace",
+        "staging",
+        "dspace",
+        "dspace",
+        "chart",
+        "3.1.0",
+        (str(values),),
+        "main-deadbee",
     )
     manifest = """kind: ServiceMonitor
 metadata:
@@ -1185,8 +1210,14 @@ def test_dspace_values_ignore_unrelated_servicemonitor(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     inputs = app_chart.ReleaseInputs(
-        "dspace", "staging", "dspace", "dspace", "chart", "3.1.0",
-        (str(values),), "main-deadbee",
+        "dspace",
+        "staging",
+        "dspace",
+        "dspace",
+        "chart",
+        "3.1.0",
+        (str(values),),
+        "main-deadbee",
     )
     unrelated = """kind: ServiceMonitor
 metadata:
@@ -1208,7 +1239,7 @@ def test_dspace_production_rejects_staging_metrics_leaks() -> None:
         "dspace",
         "dspace",
         "oci://example/charts/dspace",
-        "3.0.1",
+        "3.0.2",
         (),
         "main-deadbee",
         "democratized.space",
@@ -1241,25 +1272,33 @@ data:
     )
 
 
-@pytest.mark.parametrize(
-    "leak", ["METRICS_TOKEN", "dspace-staging-metrics-token", "sugarkube-int"]
-)
+@pytest.mark.parametrize("leak", ["METRICS_TOKEN", "dspace-staging-metrics-token", "sugarkube-int"])
 def test_dspace_production_checks_only_release_associated_structure(leak: str) -> None:
     inputs = app_chart.ReleaseInputs(
-        "dspace", "prod", "dspace", "dspace", "chart", "3.1.0", (),
-        "main-deadbee", "democratized.space",
+        "dspace",
+        "prod",
+        "dspace",
+        "dspace",
+        "chart",
+        "3.1.0",
+        (),
+        "main-deadbee",
+        "democratized.space",
     )
-    base = _generic_manifest(
-        release="dspace",
-        image_container="dspace",
-        host="democratized.space",
-        labels="    app.kubernetes.io/instance: dspace",
-    ) + """---
+    base = (
+        _generic_manifest(
+            release="dspace",
+            image_container="dspace",
+            host="democratized.space",
+            labels="    app.kubernetes.io/instance: dspace",
+        )
+        + """---
 kind: Service
 metadata:
   labels:
     app.kubernetes.io/instance: dspace
 """
+    )
     unrelated = base + f"""---
 # {leak}
 kind: ConfigMap
@@ -1664,9 +1703,7 @@ spec:
             - name: TOKENPLACE_IMAGE_TAG
 """
 
-    assert app_chart.deployment_app_container_env_sets(
-        manifest, "tokenplace", "tokenplace"
-    ) == []
+    assert app_chart.deployment_app_container_env_sets(manifest, "tokenplace", "tokenplace") == []
 
 
 def test_app_chart_cmd_preflight_rejects_metadata_from_unrelated_deployment(
@@ -2513,7 +2550,7 @@ def _write_dspace_candidate(
                 "sourceRevision": "abcdef0123456789abcdef0123456789abcdef01",
                 "imageTag": "main-abcdef0",
                 "imageDigest": image_digest or "sha256:" + "1" * 64,
-                "chartVersion": "3.1.0" if environment == "staging" else "3.0.1",
+                "chartVersion": "3.1.0" if environment == "staging" else "3.0.2",
                 "chartDigest": "sha256:" + "2" * 64,
                 "semanticTag": "v3.2.0",
                 "recordType": "candidate",
@@ -2697,9 +2734,7 @@ def test_dspace_release_verify_ignores_runtime_verifier_override(
     assert not marker.exists()
     invocations = Path(env["RUNTIME_VERIFIER_LOG"]).read_text(encoding="utf-8").splitlines()
     assert len(invocations) == 1
-    assert invocations[0].startswith(
-        f"{REPO_ROOT / 'scripts/dspace_runtime_verifier.py'} verify "
-    )
+    assert invocations[0].startswith(f"{REPO_ROOT / 'scripts/dspace_runtime_verifier.py'} verify ")
 
 
 @pytest.mark.parametrize(
@@ -2765,9 +2800,7 @@ def test_dspace_release_verify_normalizes_public_arguments(
     result = _run_just(["dspace-release-verify", *arguments], generic_app_stub_env)
 
     assert result.returncode == 0, result.stderr + result.stdout
-    invocation = Path(generic_app_stub_env["RUNTIME_VERIFIER_LOG"]).read_text(
-        encoding="utf-8"
-    )
+    invocation = Path(generic_app_stub_env["RUNTIME_VERIFIER_LOG"]).read_text(encoding="utf-8")
     argv = invocation.split()
     required = {
         "--environment": values["env"],
@@ -2901,14 +2934,15 @@ def test_dspace_staging_wrappers_route_sparse_named_arguments_once(
     )
 
     assert result.returncode == 0, result.stderr + result.stdout
-    verifier_lines = Path(generic_app_stub_env["RUNTIME_VERIFIER_LOG"]).read_text(
-        encoding="utf-8"
-    ).splitlines()
+    verifier_lines = (
+        Path(generic_app_stub_env["RUNTIME_VERIFIER_LOG"]).read_text(encoding="utf-8").splitlines()
+    )
     assert len(verifier_lines) == 1
     assert verifier_lines[0].count(f"--manifest {manifest}") == 1
-    assert verifier_lines[0].count(
-        f"--smoke-runner {generic_app_stub_env['DSPACE_SMOKE_RUNNER']}"
-    ) == 1
+    assert (
+        verifier_lines[0].count(f"--smoke-runner {generic_app_stub_env['DSPACE_SMOKE_RUNNER']}")
+        == 1
+    )
 
 
 @pytest.mark.usefixtures("ensure_just_available")
@@ -3107,7 +3141,15 @@ def test_dspace_prod_verifier_failure_preserves_post_mutation_reservation(
     prod_evidence = tmp_path / "prod-evidence.json"
     _write_dspace_candidate(staging_manifest, "staging")
     staged = _run_just(
-        ["app-deploy", "dspace", "staging", "main-abcdef0", "", str(staging_manifest), str(staging_evidence)],
+        [
+            "app-deploy",
+            "dspace",
+            "staging",
+            "main-abcdef0",
+            "",
+            str(staging_manifest),
+            str(staging_evidence),
+        ],
         generic_app_stub_env,
     )
     assert staged.returncode == 0, staged.stderr + staged.stdout
@@ -3147,9 +3189,7 @@ def test_dspace_prod_verifier_failure_preserves_post_mutation_reservation(
     assert not prod_evidence.exists()
     assert Path(str(prod_evidence.resolve()) + ".reservation").exists()
     assert not any(
-        word in line.lower()
-        for line in commands
-        for word in ("rollback", "downgrade", "retry")
+        word in line.lower() for line in commands for word in ("rollback", "downgrade", "retry")
     )
 
 
@@ -4797,9 +4837,7 @@ def test_public_helm_helper_rejects_mutation_marker_without_altering_file(
         "description=public helper boundary test",
         "app=tokenplace",
     ]
-    result = _run_just(
-        [recipe, *public_args, f"mutation_marker={marker}"], generic_app_stub_env
-    )
+    result = _run_just([recipe, *public_args, f"mutation_marker={marker}"], generic_app_stub_env)
 
     assert result.returncode != 0
     assert "justfile does not contain recipe" in result.stderr.casefold()
