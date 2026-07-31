@@ -267,7 +267,7 @@ def test_verify_authorization_success_does_not_require_certificate_ready(monkeyp
                 challenges=[{"active": True, "reason": "PresentError", "message": "Found no Zones"}]
             ),
             0,
-            "Found no Zones",
+            "zone authorization",
         ),
     ],
 )
@@ -281,6 +281,55 @@ def test_verify_authorization_fails_closed(monkeypatch, report, secret_code, mes
     )
     with pytest.raises(MODULE.OperationError, match=message):
         MODULE.verify_authorization("example", "site-tls")
+
+
+@pytest.mark.parametrize(
+    "reason,message,blocker",
+    [
+        ("PresentError", "Error: 9109: Invalid access token", "invalid credentials"),
+        (
+            "PresentError",
+            "Error: 10502: Too many authentication failures. Please try again later.",
+            "authentication throttling",
+        ),
+    ],
+)
+def test_verify_authorization_rejects_active_cloudflare_authentication_blockers(
+    monkeypatch, reason, message, blocker
+):
+    report = authorization_report(
+        challenges=[{"active": True, "reason": reason, "message": message}]
+    )
+    monkeypatch.setattr(MODULE, "staging_guard", lambda: None)
+    monkeypatch.setattr(MODULE, "inventory", lambda *_args: report)
+    monkeypatch.setattr(
+        MODULE,
+        "run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(command, 0, b"secret/name", b""),
+    )
+
+    with pytest.raises(MODULE.OperationError, match=blocker) as caught:
+        MODULE.verify_authorization("example", "site-tls")
+    assert "access token" not in str(caught.value).lower()
+
+
+def test_verify_authorization_ignores_terminal_errors_and_historical_events(monkeypatch):
+    report = authorization_report(
+        challenges=[
+            {"active": False, "reason": "Failed", "message": "Error: 9109"},
+            {"active": True, "reason": "Presented", "message": "DNS record presented"},
+        ]
+    )
+    report["events"] = [{"message": "Error: 10502: historical"}]
+    monkeypatch.setattr(MODULE, "staging_guard", lambda: None)
+    monkeypatch.setattr(MODULE, "inventory", lambda *_args: report)
+    monkeypatch.setattr(
+        MODULE,
+        "run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(command, 0, b"secret/name", b""),
+    )
+
+    assert MODULE.verify_authorization("example", "site-tls") is report
 
 
 def test_kubectl_json_failure_is_redacted(monkeypatch):
@@ -430,6 +479,90 @@ def test_install_token_rejects_empty_input_before_starting_process(monkeypatch):
 
     with pytest.raises(MODULE.OperationError, match="empty or malformed"):
         MODULE.install_token()
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        b"Bearer" + b" " + b"wrapped-value",
+        b"embedded" + b"\t" + b"whitespace",
+        b"'quoted-value'",
+        b'"quoted-value"',
+    ],
+)
+def test_install_token_rejects_wrappers_and_whitespace_before_kubectl(monkeypatch, value):
+    class Input:
+        def isatty(self):
+            return False
+
+        buffer = type("Buffer", (), {"read": staticmethod(lambda: value)})()
+
+    monkeypatch.setattr(MODULE, "staging_guard", lambda: None)
+    monkeypatch.setattr(MODULE.sys, "stdin", Input())
+    monkeypatch.setattr(
+        MODULE.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: pytest.fail("malformed input must not start kubectl"),
+    )
+
+    with pytest.raises(MODULE.OperationError, match="empty or malformed") as caught:
+        MODULE.install_token()
+    assert value.decode() not in str(caught.value)
+
+
+@pytest.mark.parametrize("value", [b"legacy-token-shape", b"v1.0-prefixed_token-shape"])
+def test_install_token_accepts_legacy_and_prefixed_shapes_without_disclosure(
+    monkeypatch, capsys, value
+):
+    class Input:
+        def isatty(self):
+            return False
+
+        buffer = type("Buffer", (), {"read": staticmethod(lambda: value + b"\n")})()
+
+    commands = []
+
+    class Process:
+        def __init__(self, command, **_kwargs):
+            commands.append(command)
+            self.stdin = type(
+                "Writer", (), {"write": lambda self, _value: None, "close": lambda self: None}
+            )()
+            self.stdout = type("Reader", (), {"close": lambda self: None})()
+            self.stderr = type("Errors", (), {"read": lambda self: b""})()
+            self.returncode = 0
+
+        def communicate(self):
+            return b"", b""
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(MODULE, "staging_guard", lambda: None)
+    monkeypatch.setattr(MODULE.sys, "stdin", Input())
+    monkeypatch.setattr(MODULE.subprocess, "Popen", Process)
+
+    MODULE.install_token()
+    output = capsys.readouterr()
+    rendered = repr(commands) + output.out + output.err
+    assert value.decode() not in rendered
+
+
+def test_recover_does_not_renew_when_active_authentication_blocker_exists(monkeypatch):
+    monkeypatch.setattr(MODULE.shutil, "which", lambda _name: "/usr/bin/cmctl")
+    monkeypatch.setattr(
+        MODULE,
+        "verify_authorization",
+        lambda *_args: (_ for _ in ()).throw(
+            MODULE.OperationError("active Challenge has a Cloudflare invalid credentials blocker")
+        ),
+    )
+    monkeypatch.setattr(
+        MODULE, "run", lambda *_args, **_kwargs: pytest.fail("cmctl renew must not be invoked")
+    )
+
+    with pytest.raises(MODULE.OperationError, match="invalid credentials"):
+        MODULE.recover("example", "site-tls", "staging.example.test", 60)
 
 
 def test_install_token_redacts_process_failure(monkeypatch):

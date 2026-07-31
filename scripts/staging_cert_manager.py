@@ -23,6 +23,17 @@ REDACT = re.compile(
     r"word|secret)"
     r"(\s*[:=]?\s+|\s*[:=]\s*)[^\s,;]+"
 )
+AUTHORIZATION_BLOCKERS = (
+    (
+        re.compile(r"(?:error\s*:\s*)?9109\b|invalid access token", re.IGNORECASE),
+        "invalid credentials",
+    ),
+    (
+        re.compile(r"(?:error\s*:\s*)?10502\b|too many authentication failures", re.IGNORECASE),
+        "authentication throttling",
+    ),
+    (re.compile(r"found no zones", re.IGNORECASE), "zone authorization"),
+)
 
 
 class OperationError(RuntimeError):
@@ -216,8 +227,13 @@ def verify_authorization(namespace: str, certificate_name: str) -> dict[str, Any
         )
     for challenge in report["challenges"]:
         detail = f"{challenge['reason']} {challenge['message']}"
-        if challenge["active"] and "found no zones" in detail.lower():
-            raise OperationError("active Challenge reports Found no Zones")
+        if challenge["active"]:
+            for pattern, blocker in AUTHORIZATION_BLOCKERS:
+                if pattern.search(detail):
+                    raise OperationError(
+                        f"active Challenge has a Cloudflare {blocker} blocker; "
+                        "stop retries and resolve it before renewal"
+                    )
     print(
         "authorization structure verified; a successful DNS-01 Challenge is still required to prove dashboard scope"
     )
@@ -232,7 +248,12 @@ def install_token() -> None:
         else sys.stdin.buffer.read()
     )
     credential = credential.strip()
-    if not credential or b"\n" in credential or b"\r" in credential:
+    if (
+        not credential
+        or any(byte in b" \t\r\n\v\f" for byte in credential)
+        or credential[:1] in {b"'", b'"'}
+        or credential[-1:] in {b"'", b'"'}
+    ):
         raise OperationError("token input is empty or malformed")
     create = subprocess.Popen(
         kubectl_command(
