@@ -65,7 +65,9 @@ just cert-manager-cloudflare-token-secret env=staging < /operator/private/cloudf
 
 The recipe sends bytes to `kubectl create secret --from-file=api-token=/dev/stdin` and pipes its
 client-side manifest directly to `kubectl apply -f -`. It suppresses rendered content and never
-puts the credential in argv, shell history, logs, tests, or Git. Confirm only metadata:
+puts the credential in argv, shell history, logs, tests, or Git. It rejects pasted `Bearer …`
+wrappers, embedded whitespace, and surrounding quote wrappers before running `kubectl`; paste or
+stream only the token itself. Confirm only metadata:
 
 ```bash
 kubectl -n cert-manager get secret cloudflare-api-token -o name
@@ -79,8 +81,11 @@ just cert-manager-certificate-verify-authorization namespace=danielsmith certifi
 
 It requires the referenced issuer to be `Ready=True`, its Cloudflare solver to reference
 `cert-manager/cloudflare-api-token` key `api-token`, that Secret to exist, and no related active
-Challenge to report `Found no Zones`. It checks only Secret existence and never retrieves, decodes,
-or prints its value. These structural checks cannot prove the token's Cloudflare dashboard scope;
+Challenge to report `Found no Zones`, Cloudflare error 9109 (`Invalid access token`), or Cloudflare
+error 10502 (`Too many authentication failures`). Terminal Challenges and historical Events remain
+visible in status for diagnosis but do not independently block a healthy current state. The gate
+checks only Secret existence and never retrieves, decodes, or prints its value. These structural
+checks cannot prove the token's Cloudflare dashboard scope;
 only a successfully completed DNS-01 Challenge can do that. Do not call Cloudflare APIs in a way
 that risks logging request headers.
 
@@ -107,6 +112,12 @@ do not silently change issuer or Helm/Flux ownership here.
 
 1. Capture the redacted status above, then run `cert-manager-certificate-verify-authorization`.
    The Certificate itself need not already be Ready: recovery exists to repair that condition.
+   If the active Challenge reports 9109 or 10502, stop manual retries. Correct and reinstall an
+   invalid credential through the hidden-input recipe when needed. For authentication throttling,
+   wait for Cloudflare throttling to clear before retrying this read-only gate; do not assume a
+   fixed cooldown. Treat `Found no Zones` as a zone authorization problem and correct account,
+   zone, or token scope before retrying the gate. Recovery will not call `cmctl renew` while any of
+   these blockers is active.
 2. Run **one** recovery with the matching namespace, Certificate, and DNS name. The command uses
    `cmctl renew`, bounds its wait (default ten minutes), requires `Ready=True`, Secret creation,
    and a revision or expiry change, then uses normal TLS verification for `/`, `/healthz`, and
@@ -117,9 +128,9 @@ do not silently change issuer or Helm/Flux ownership here.
    ```
 
 3. Review the final redacted resource chain. Confirm the new Order and Challenge are valid and no
-   active Challenge reports `Found no Zones`. Confirm the externally served certificate identity
-   and dates independently if Cloudflare edge termination makes them differ from the Kubernetes
-   Secret; never disable TLS verification.
+   active Challenge reports a Cloudflare authentication or zone-authorization blocker. Confirm the
+   externally served certificate identity and dates independently if Cloudflare edge termination
+   makes them differ from the Kubernetes Secret; never disable TLS verification.
 4. Only after the first certificate passes, repeat for Jobbot3000:
 
    ```bash
