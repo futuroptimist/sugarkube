@@ -2739,6 +2739,94 @@ def test_dspace_release_verify_ignores_runtime_verifier_override(
     )
 
 
+@pytest.mark.parametrize(
+    ("named_arguments", "expected_options"),
+    [
+        (
+            True,
+            {},
+        ),
+        (
+            True,
+            {"--kubeconfig": "staging-kubeconfig"},
+        ),
+        (
+            True,
+            {
+                "--config": "dspace.env",
+                "--kubeconfig": "staging-kubeconfig",
+                "--expected-helm-revision": "7",
+            },
+        ),
+        (
+            False,
+            {
+                "--config": "dspace.env",
+                "--kubeconfig": "staging-kubeconfig",
+                "--expected-helm-revision": "7",
+            },
+        ),
+    ],
+)
+def test_dspace_release_verify_normalizes_public_arguments(
+    tmp_path: Path,
+    generic_app_stub_env: dict[str, str],
+    named_arguments: bool,
+    expected_options: dict[str, str],
+) -> None:
+    manifest = tmp_path / "candidate.json"
+    _write_dspace_candidate(manifest, "staging")
+    values = {
+        "env": "staging",
+        "manifest": str(manifest),
+        "smoke_runner": generic_app_stub_env["DSPACE_SMOKE_RUNNER"],
+        "config": str(tmp_path / "dspace.env"),
+        "kubeconfig": str(tmp_path / "staging-kubeconfig"),
+        "expected_helm_revision": "7",
+    }
+    arguments = [values["env"], values["manifest"], values["smoke_runner"]]
+    for option in ("config", "kubeconfig", "expected_helm_revision"):
+        cli_option = "--" + option.replace("_", "-")
+        if cli_option in expected_options:
+            expected_options[cli_option] = values[option]
+            arguments.append(f"{option}={values[option]}" if named_arguments else values[option])
+        elif named_arguments and option == "config" and expected_options:
+            continue
+    if named_arguments:
+        arguments[:3] = [
+            f"env={values['env']}",
+            f"manifest={values['manifest']}",
+            f"smoke_runner={values['smoke_runner']}",
+        ]
+
+    result = _run_just(["dspace-release-verify", *arguments], generic_app_stub_env)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    invocation = Path(generic_app_stub_env["RUNTIME_VERIFIER_LOG"]).read_text(
+        encoding="utf-8"
+    )
+    argv = invocation.split()
+    required = {
+        "--environment": values["env"],
+        "--manifest": values["manifest"],
+        "--smoke-runner": values["smoke_runner"],
+        **expected_options,
+    }
+    for option, value in required.items():
+        assert argv.count(option) == 1
+        assert argv[argv.index(option) + 1] == value
+    assert not any("=" in argument for argument in argv)
+    if "--kubeconfig" in expected_options:
+        kubeconfig = values["kubeconfig"]
+        assert f"--kubeconfig {kubeconfig} get nodes" in Path(
+            generic_app_stub_env["KUBECTL_LOG"]
+        ).read_text(encoding="utf-8")
+        if "--expected-helm-revision" in expected_options:
+            assert f"--kubeconfig {kubeconfig} status dspace" in Path(
+                generic_app_stub_env["HELM_LOG"]
+            ).read_text(encoding="utf-8")
+
+
 @pytest.mark.usefixtures("ensure_just_available")
 def test_dspace_guarded_deploy_orders_preflight_mutation_and_finalization(
     tmp_path: Path, generic_app_stub_env: dict[str, str]

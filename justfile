@@ -1723,23 +1723,44 @@ dspace-release-verify env manifest smoke_runner config='' kubeconfig='' expected
     selected_env={{ quote(env) }}
     manifest_path={{ quote(manifest) }}
     smoke_path={{ quote(smoke_runner) }}
-    config_path={{ quote(config) }}
+    config_path=''
+    kubeconfig_path=''
+    expected_revision=''
     while [ "${manifest_path#manifest=}" != "${manifest_path}" ]; do manifest_path="${manifest_path#manifest=}"; done
     while [ "${selected_env#env=}" != "${selected_env}" ]; do selected_env="${selected_env#env=}"; done
     while [ "${smoke_path#smoke_runner=}" != "${smoke_path}" ]; do smoke_path="${smoke_path#smoke_runner=}"; done
+    config_arg={{ quote(config) }}
+    kubeconfig_arg={{ quote(kubeconfig) }}
+    expected_revision_arg={{ quote(expected_helm_revision) }}
+    optional_arguments=("${config_arg}" "${kubeconfig_arg}" "${expected_revision_arg}")
+    for index in "${!optional_arguments[@]}"; do
+      argument="${optional_arguments[${index}]}"
+      [ -n "${argument}" ] || continue
+      case "${argument}" in
+        config=*) config_path="${argument#config=}" ;;
+        kubeconfig=*) kubeconfig_path="${argument#kubeconfig=}" ;;
+        expected_helm_revision=*) expected_revision="${argument#expected_helm_revision=}" ;;
+        *)
+          if [ "${index}" = 0 ]; then
+            config_path="${argument}"
+          elif [ "${index}" = 1 ]; then
+            kubeconfig_path="${argument}"
+          else
+            expected_revision="${argument}"
+          fi
+          ;;
+      esac
+    done
     if [ ! -f "${smoke_path}" ] || [ ! -x "${smoke_path}" ]; then
       echo "ERROR: smoke_runner must be an existing executable file." >&2
       exit 2
     fi
-    while [ "${config_path#config=}" != "${config_path}" ]; do config_path="${config_path#config=}"; done
-    kubeconfig_path={{ quote(kubeconfig) }}
     if [ -z "${kubeconfig_path}" ]; then
       export KUBECONFIG="${HOME}/.kube/config"
       just --justfile "{{ justfile_directory() }}/justfile" kubeconfig-env "${selected_env}"
       kubeconfig_path="${KUBECONFIG}"
     fi
     just --justfile "{{ justfile_directory() }}/justfile" assert-cluster-env "${selected_env}" "${kubeconfig_path}" >/dev/null
-    expected_revision={{ quote(expected_helm_revision) }}
     if [ -n "${expected_revision}" ]; then
       live_revision="$(helm --kubeconfig "${kubeconfig_path}" status dspace --namespace dspace -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')"
       if [ "${live_revision}" != "${expected_revision}" ]; then
