@@ -7,7 +7,7 @@ described in [`docs/observability-design.md`](./observability-design.md) and
 a human. The secret-file-backed synthetic Alertmanager → PagerDuty path has now been manually proven
 through fire, phone receipt, acknowledgement, and resolution. The host-heartbeat assets in this
 repository are ready for a separate post-merge install on each staging node; that install is not live
-deployment evidence. Real workload routes and the external observability watchdog remain deferred.
+deployment evidence. Real workload routes remain deferred; the staging observability watchdog is implemented.
 
 ## 1. Goals and non-goals
 
@@ -168,7 +168,7 @@ A safe, phased sequence — each step depends on the previous one succeeding:
    incident, resolve the alert, and observe resolution after Alertmanager's expected default
    resolution delay (about five minutes).
 4. Install and verify the external node heartbeats against Healthchecks.io. Implement and verify the
-   observability watchdog only in a later slice.
+   observability watchdog through the implemented exact Healthchecks route.
    Confirm the watchdog's dedicated Alertmanager timing and the Healthchecks.io period/grace match
    the contract in §3; observe multiple repeat notifications before declaring the path healthy.
 5. Audit the existing `kube-prometheus-stack` bundled node rules (starting with `KubeNodeNotReady`).
@@ -231,3 +231,12 @@ it is deployed yet — see the rollout plan above for the actual sequencing.
 - Per-node heartbeat assets are repository-ready but have not been installed on the Pis. The
   node-power-off drill, watchdog, `KubeNodeNotReady` routing, and application alerts remain later
   work.
+
+## Implemented staging observability watchdog
+
+The staging dead-man path is now Prometheus `vector(1)` → an exact four-label Alertmanager route → a
+Secret-file-backed Healthchecks webhook repeating every five minutes. It is distinct from the
+per-node host heartbeat (node/timer failure), ordinary Prometheus alerts (internal conditions, still
+routed to `null` unless explicitly allowlisted), and blackbox endpoint probes (application reachability
+from inside the cluster). Installation, live proof, the eight-minute silence drill, recovery, and
+page-safe rollback are in the [observability watchdog runbook](observability-operations.md#observability-watchdog).

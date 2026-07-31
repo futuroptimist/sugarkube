@@ -398,6 +398,66 @@ lost, and distinct from the automated evidence above:
 
 Additional dashboards, Grafana persistence, central multi-cluster Grafana, and production
 observability codification are separate follow-ups. The existing blackbox NetworkPolicy is unchanged.
-Alerting onboarding — real Alertmanager receivers, external heartbeats, and failure drills — is no
-longer undesigned scope creep; it is planned, designed work tracked in
-[`docs/observability-alerting.md`](observability-alerting.md), just not yet executed.
+Alerting onboarding is tracked in [`docs/observability-alerting.md`](observability-alerting.md). The
+staging watchdog slice below is implemented; broader ordinary-alert paging remains future work.
+
+## Observability watchdog
+
+The staging-only `SugarkubeObservabilityWatchdog` rule evaluates `vector(1)` every minute. Its fixed
+`environment=staging`, `cluster=sugarkube-int`, and `purpose=observability-watchdog` labels select one
+exact Alertmanager child route. That route waits 30 seconds, groups by alert name, cluster, and
+environment, and repeats every five minutes to the `healthchecks-watchdog` webhook. The webhook reads
+its URL only from the mounted `monitoring/alertmanager-healthchecks-watchdog` Secret's `ping-url` key,
+uses a ten-second timeout, sends at most one alert, and does not send resolved notifications. The root
+receiver remains `null`; the preceding exact synthetic PagerDuty route is unchanged, so ordinary
+Prometheus alerts are still discarded.
+
+Configure the Healthchecks check for a **five-minute period** and **two-minute grace**. The expected
+failure latency is therefore about seven minutes after the last delivered repeat, plus provider and
+PagerDuty processing time. Healthchecks “last ping” is deliberately a manual dashboard checkpoint;
+no Healthchecks account credential belongs in this repository.
+
+### Install, deploy, and verify
+
+```bash
+just kubeconfig-env env=staging
+just observability-watchdog-install env=staging
+just observability-watchdog-secret-check env=staging
+just observability-render env=staging >/dev/null
+just observability-upgrade env=staging
+just observability-watchdog-verify env=staging
+```
+
+The installer accepts no URL argument or environment variable, reads hidden input from `/dev/tty`,
+and streams the Secret manifest through stdin. Render is cluster-independent and contains neither
+integration credential. Install and upgrade fail before Helm mutation unless both the PagerDuty
+`routing-key` and watchdog `ping-url` Secret contracts are nonempty. After verification, manually
+confirm that Healthchecks shows a recent last ping.
+
+### Controlled failure drill and recovery
+
+First confirm manually that Healthchecks is healthy and PagerDuty is ready. Then create only the
+owned, exact four-label silence; it has an automatic eight-minute expiry, so recovery does not
+depend on the operator remaining connected:
+
+```bash
+SUGARKUBE_WATCHDOG_DRILL_CONFIRM=confirmed just observability-watchdog-drill-create env=staging
+just observability-watchdog-drill-status env=staging
+# Optional early recovery:
+just observability-watchdog-drill-clear env=staging
+```
+
+Do **not** stop a node and do **not** manually call the ping URL. During the drill, manually confirm the
+Healthchecks transition after its five-minute period plus two-minute grace, the Healthchecks-generated
+PagerDuty incident, and acknowledgement. After silence expiry (or the owned early-clear), confirm the
+next repeat restores Healthchecks, then confirm PagerDuty recovery and resolution. Automated tests do
+not wait for this real interval.
+
+### Rollback
+
+> **PAGE-SAFETY CHECKPOINT:** pause the Healthchecks check or its PagerDuty integration before any
+> rollback that removes the watchdog receiver. Otherwise rollback itself can generate a page.
+
+After pausing it, roll back Helm by the established guarded staging procedure and run
+`just observability-verify env=staging`. Resume or remove the external check only after its intended
+state is confirmed. Never delete or print either Secret as part of rollback.

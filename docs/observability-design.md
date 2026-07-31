@@ -344,7 +344,7 @@ Do not page on symptoms without a response path, such as low traffic, GitHub sta
 ## 12. Phased rollout
 
 1. **Inventory and naming contract**: finalize metric names, labels, privacy rules, and app release gates. Can proceed in parallel with app repo implementation planning.
-2. **Cluster monitoring foundation**: *implemented in staging.* kube-prometheus-stack is deployed and scripted-verified in staging, with resource requests, retention, PV, and Grafana provisioned as documented in [`docs/observability-operations.md`](./observability-operations.md); Alertmanager still runs the no-op `"null"` receiver. Production rollout remains future work.
+2. **Cluster monitoring foundation**: *implemented in staging.* kube-prometheus-stack is deployed and scripted-verified in staging, with resource requests, retention, PV, and Grafana provisioned as documented in [`docs/observability-operations.md`](./observability-operations.md); Alertmanager retains the `"null"` root while exact staging PagerDuty-test and watchdog child routes are allowlisted. Production rollout remains future work.
 3. **Blackbox monitoring**: *implemented in staging.* 16 public probes across all four apps plus TLS expiry are live and scripted-verified, per [`docs/observability-blackbox.md`](./observability-blackbox.md).
 4. **Application scrape integration**: app repos expose safe metrics and chart scrape hooks; Sugarkube enables discovery per environment. DSPACE's authenticated `ServiceMonitor` is live in staging (§7); token.place and danielsmith.io app metrics remain future work per each app's release gate.
 5. **Dashboards**: *implemented in staging* for the currently live signals — see §10. Additional per-app dashboard rows arrive as each app's metrics land.
@@ -379,6 +379,15 @@ Prometheus or Grafana should not be listed as production skills until evidence e
 
 - Which cluster names should distinguish staging and production if both run on Sugarkube-managed hardware?
 - Should app metrics endpoints use bearer tokens, network policy only, or both?
-- The Alertmanager receiver question is answered at the design level: PagerDuty plus Healthchecks.io, per [`docs/observability-alerting.md`](./observability-alerting.md). What remains open is execution — accounts, secret-safe config, and drills, none of which are done yet.
+- The Alertmanager receiver question is answered at the design level: PagerDuty plus Healthchecks.io, per [`docs/observability-alerting.md`](./observability-alerting.md). The staging watchdog now has secret-safe configuration and drill automation; live staging proof and broader alert routing remain open.
 - What Prometheus PV size is realistic after a one-week staging soak on the target Pi hardware?
 - Should Loki remain entirely deferred, or should minimal log labels be designed now without deploying Loki?
+
+## Staging dead-man coverage
+
+Staging now has an observability-watchdog signal whose successful path crosses Prometheus rule
+evaluation, Alertmanager routing, and a Secret-backed Healthchecks delivery. Its five-minute repeat is
+independent of the per-node Healthchecks heartbeat, ordinary Prometheus condition alerts, and in-cluster
+blackbox endpoint probes. The exact routing and operational boundaries are documented in the
+[observability watchdog runbook](observability-operations.md#observability-watchdog); production remains
+unsupported by this staging-only lifecycle.

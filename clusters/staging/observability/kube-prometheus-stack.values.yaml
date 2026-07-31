@@ -4,10 +4,26 @@ prometheus:
   prometheusSpec:
     externalLabels:
       cluster: sugarkube-int
+additionalPrometheusRulesMap:
+  sugarkube-observability-watchdog:
+    groups:
+      - name: sugarkube-observability-watchdog
+        interval: 1m
+        rules:
+          - alert: SugarkubeObservabilityWatchdog
+            expr: vector(1)
+            labels:
+              environment: staging
+              cluster: sugarkube-int
+              purpose: observability-watchdog
+            annotations:
+              summary: Sugarkube staging observability watchdog
+              runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-operations.md#observability-watchdog
 alertmanager:
   alertmanagerSpec:
     secrets:
       - alertmanager-pagerduty
+      - alertmanager-healthchecks-watchdog
   config:
     route:
       receiver: "null"
@@ -18,9 +34,25 @@ alertmanager:
             - environment="staging"
             - cluster="sugarkube-int"
             - severity="critical"
+        - receiver: healthchecks-watchdog
+          matchers:
+            - alertname="SugarkubeObservabilityWatchdog"
+            - environment="staging"
+            - cluster="sugarkube-int"
+            - purpose="observability-watchdog"
+          group_wait: 30s
+          group_interval: 1m
+          repeat_interval: 5m
+          group_by: [alertname, cluster, environment]
     receivers:
       - name: "null"
       - name: pagerduty-synthetic-test
         pagerduty_configs:
           - routing_key_file: /etc/alertmanager/secrets/alertmanager-pagerduty/routing-key
             send_resolved: true
+      - name: healthchecks-watchdog
+        webhook_configs:
+          - url_file: /etc/alertmanager/secrets/alertmanager-healthchecks-watchdog/ping-url
+            send_resolved: false
+            max_alerts: 1
+            timeout: 10s

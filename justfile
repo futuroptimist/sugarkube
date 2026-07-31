@@ -3284,6 +3284,30 @@ observability-blackbox-status env='':
 observability-blackbox-verify env='':
     @scripts/observability_blackbox.sh verify '{{ env }}'
 
+# Install or rotate the staging observability watchdog URL from hidden TTY input.
+observability-watchdog-install env='':
+    @scripts/observability_watchdog.sh install '{{ env }}'
+
+# Check both the Secret and key without reading or decoding the value.
+observability-watchdog-secret-check env='':
+    @scripts/observability_watchdog.sh check '{{ env }}'
+
+# Verify the live rule, active alert, generated configuration, mount, and delivery logs.
+observability-watchdog-verify env='':
+    @scripts/observability_watchdog.sh verify '{{ env }}'
+
+# Create the exact-label, automatically expiring controlled drill silence.
+observability-watchdog-drill-create env='':
+    @scripts/observability_watchdog.sh drill-create '{{ env }}'
+
+# Inspect sanitized owned drill-silence status.
+observability-watchdog-drill-status env='':
+    @scripts/observability_watchdog.sh drill-status '{{ env }}'
+
+# Remove only an exact matching owned drill silence before its expiry.
+observability-watchdog-drill-clear env='':
+    @scripts/observability_watchdog.sh drill-clear '{{ env }}'
+
 # Silently configure and enable this staging node's Healthchecks.io heartbeat.
 observability-node-heartbeat-install env='':
     @scripts/observability_node_heartbeat.sh install '{{ env }}'
