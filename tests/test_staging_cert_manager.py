@@ -186,7 +186,10 @@ def test_inventory_propagates_redacted_secret_lookup_failure(monkeypatch):
     assert "<redacted>" in str(caught.value)
 
 
-@pytest.mark.parametrize("environment,context", [("prod", "sugar-staging"), ("staging", "prod")])
+@pytest.mark.parametrize(
+    "environment,context",
+    [("prod", "sugar-staging"), ("unknown", "sugar-staging"), ("staging", "prod")],
+)
 def test_staging_guard_rejects_wrong_environment_or_context(monkeypatch, environment, context):
     monkeypatch.setenv("SUGARKUBE_ENV", environment)
     monkeypatch.setattr(
@@ -356,6 +359,7 @@ def test_recover_reports_bounded_failure_without_curl(monkeypatch):
         }
     ]
     monkeypatch.setattr(MODULE, "verify_authorization", lambda *_args: states[0])
+    monkeypatch.setattr(MODULE.shutil, "which", lambda _name: "/usr/bin/cmctl")
     monkeypatch.setattr(MODULE, "inventory", lambda *_args: states[0])
     commands = []
 
@@ -375,6 +379,7 @@ def test_recover_reports_bounded_failure_without_curl(monkeypatch):
 
 
 def test_recover_rejects_host_not_named_by_certificate(monkeypatch):
+    monkeypatch.setattr(MODULE.shutil, "which", lambda _name: "/usr/bin/cmctl")
     monkeypatch.setattr(
         MODULE,
         "verify_authorization",
@@ -467,6 +472,7 @@ def test_install_token_redacts_process_failure(monkeypatch):
 
 
 def test_recover_success_checks_each_https_path(monkeypatch, capsys):
+    monkeypatch.setattr(MODULE.shutil, "which", lambda _name: "/usr/bin/cmctl")
     before = {
         "certificate": {
             "dnsNames": ["staging.example.test"],
@@ -507,6 +513,7 @@ def test_recover_success_checks_each_https_path(monkeypatch, capsys):
 
 @pytest.mark.parametrize("failure", ["renew", "curl"])
 def test_recover_propagates_command_failures(monkeypatch, failure):
+    monkeypatch.setattr(MODULE.shutil, "which", lambda _name: "/usr/bin/cmctl")
     report = {
         "certificate": {
             "dnsNames": ["staging.example.test"],
@@ -592,3 +599,46 @@ def test_main_redacts_operation_errors(monkeypatch, capsys):
     error = capsys.readouterr().err
     assert "visible-value" not in error
     assert "<redacted>" in error
+
+
+def test_recover_missing_cmctl_fails_before_authorization_or_subprocess(monkeypatch):
+    monkeypatch.setattr(MODULE.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(
+        MODULE,
+        "verify_authorization",
+        lambda *_args: pytest.fail("missing cmctl must fail before cluster authorization"),
+    )
+    monkeypatch.setattr(
+        MODULE, "run", lambda *_args, **_kwargs: pytest.fail("no subprocess may be started")
+    )
+
+    with pytest.raises(MODULE.OperationError) as exc_info:
+        MODULE.recover("example", "site-tls", "staging.example.test", 60)
+    assert "cmctl is required" in str(exc_info.value)
+    assert "command -v cmctl" in str(exc_info.value)
+    assert "cmctl version --client" in str(exc_info.value)
+
+
+def test_main_reports_missing_cmctl_without_traceback(monkeypatch, capsys):
+    monkeypatch.setattr(
+        MODULE.sys,
+        "argv",
+        [
+            "tool",
+            "recover",
+            "--namespace",
+            "example",
+            "--certificate",
+            "site-tls",
+            "--host",
+            "staging.example.test",
+        ],
+    )
+    monkeypatch.setattr(MODULE.shutil, "which", lambda _name: None)
+
+    assert MODULE.main() == 1
+    error = capsys.readouterr().err
+    assert "cmctl is required" in error
+    assert "command -v cmctl" in error
+    assert "cmctl version --client" in error
+    assert "Traceback" not in error

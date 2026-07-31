@@ -36,8 +36,8 @@ Secret metadata/presence, and relevant Events. It reports readiness/reason, DNS 
 credential-shaped event text. It never requests Secret data.
 
 ```bash
-just cert-manager-certificate-status namespace=danielsmith certificate=danielsmith-staging-tls
-just cert-manager-certificate-status namespace=jobbot3000 certificate=jobbot3000-staging-tls
+just cert-manager-certificate-status namespace=danielsmith certificate=danielsmith-staging-tls env=staging
+just cert-manager-certificate-status namespace=jobbot3000 certificate=jobbot3000-staging-tls env=staging
 ```
 
 Check whether an error belongs to an active Challenge rather than a completed/stale one. Confirm
@@ -83,6 +83,19 @@ Challenge to report `Found no Zones`. It checks only Secret existence and never 
 or prints its value. These structural checks cannot prove the token's Cloudflare dashboard scope;
 only a successfully completed DNS-01 Challenge can do that. Do not call Cloudflare APIs in a way
 that risks logging request headers.
+
+Status and structural authorization verification require `kubectl`, but do not require `cmctl`.
+Recovery additionally requires [`cmctl`](https://cert-manager.io/docs/reference/cmctl/). Install it
+using the official guidance, then confirm that the executable and client are available before the
+controlled recovery:
+
+```bash
+command -v cmctl
+cmctl version --client
+```
+
+The recovery command fails before authorization or renewal when `cmctl` is unavailable; it does
+not fall back to another renewal mechanism.
 
 ## One certificate at a time
 
