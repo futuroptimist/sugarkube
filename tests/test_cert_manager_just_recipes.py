@@ -1,12 +1,17 @@
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+pytestmark = pytest.mark.skipif(
+    shutil.which("just") is None, reason="just is required for this test"
+)
 
 
 def run_recipe(tmp_path, *arguments):
@@ -21,7 +26,7 @@ def run_recipe(tmp_path, *arguments):
     stub.chmod(0o755)
     environment = {
         **os.environ,
-        "PATH": f"{tmp_path}:{os.environ['PATH']}",
+        "PATH": os.pathsep.join((str(tmp_path), os.environ.get("PATH", os.defpath))),
         "CAPTURE": str(capture),
     }
     result = subprocess.run(
@@ -137,3 +142,37 @@ def test_missing_empty_or_mismatched_arguments_fail_before_python(tmp_path, argu
     assert result.returncode != 0
     assert payload is None
     assert "error" in result.stderr.lower()
+
+
+@pytest.mark.parametrize("environment", ["prod", "unknown"])
+def test_non_staging_status_fails_before_kubectl(tmp_path, environment):
+    marker = tmp_path / "kubectl-invoked"
+    kubectl = tmp_path / "kubectl"
+    kubectl.write_text("#!/bin/sh\n" f"touch {str(marker)!r}\n" "exit 99\n")
+    kubectl.chmod(0o755)
+    command_environment = {
+        **os.environ,
+        "PATH": os.pathsep.join((str(tmp_path), os.environ.get("PATH", os.defpath))),
+    }
+
+    result = subprocess.run(
+        [
+            "just",
+            "--justfile",
+            str(ROOT / "justfile"),
+            "cert-manager-certificate-status",
+            "namespace=danielsmith",
+            "certificate=danielsmith-staging-tls",
+            f"env={environment}",
+        ],
+        cwd=ROOT,
+        env=command_environment,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    assert result.returncode != 0
+    assert "refusing operation: export SUGARKUBE_ENV=staging" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert not marker.exists()
