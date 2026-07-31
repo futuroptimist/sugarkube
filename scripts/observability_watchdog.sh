@@ -16,7 +16,7 @@ install_secret() {
   exec 3<"$TTY"; [[ "${SUGARKUBE_WATCHDOG_TEST_NONTTY:-0}" == 1 || -t 3 ]] || die "an interactive controlling terminal is required."
   printf 'Enter the Healthchecks watchdog ping URL (input hidden): ' >&2
   IFS= read -r -s value <&3 || die "could not read the ping URL (value redacted)."; printf '\n' >&2
-  [[ "$value" =~ ^https://hc-ping\.com/[0-9a-fA-F-]{36}$ && "$value" != *$'\n'* ]] || die "ping URL is invalid (value redacted)."
+  [[ "$value" =~ ^https://hc-ping\.com/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ && "$value" != *$'\n'* ]] || die "ping URL is invalid (value redacted)."
   if ! kubectl -n "$NAMESPACE" create secret generic "$SECRET" --from-file=ping-url=/dev/stdin --dry-run=client -o yaml <<<"$value" | kubectl apply -f - >/dev/null; then
     unset value; die "watchdog Secret installation failed (value redacted)."
   fi

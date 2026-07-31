@@ -72,6 +72,7 @@ pd_receivers = receivers.select { |x| x.key?("pagerduty_configs") }
 fail_closed("there must be exactly one PagerDuty receiver") unless pd_receivers.length == 1
 pd = pd_receivers.first
 fail_closed("PagerDuty receiver name changed") unless pd["name"] == PD_RECEIVER
+fail_closed("PagerDuty receiver is malformed") unless pd.keys.sort == %w[name pagerduty_configs]
 pd_configs = pd["pagerduty_configs"]
 fail_closed("there must be exactly one PagerDuty configuration") unless pd_configs.is_a?(Array) && pd_configs.length == 1
 fail_closed("PagerDuty configuration is malformed") unless pd_configs.first == { "routing_key_file" => PD_PATH, "send_resolved" => true }
@@ -80,6 +81,7 @@ webhook_receivers = receivers.select { |x| x.key?("webhook_configs") }
 fail_closed("there must be exactly one webhook receiver") unless webhook_receivers.length == 1
 hc = webhook_receivers.first
 fail_closed("Healthchecks receiver name changed") unless hc["name"] == HC_RECEIVER
+fail_closed("Healthchecks receiver is malformed") unless hc.keys.sort == %w[name webhook_configs]
 webhooks = hc["webhook_configs"]
 expected_webhook = { "url_file" => HC_PATH, "send_resolved" => false, "max_alerts" => 1, "timeout" => "10s" }
 fail_closed("Healthchecks webhook must use the exact file, resolution, timeout, and alert limit") unless webhooks == [expected_webhook]

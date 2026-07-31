@@ -61,18 +61,21 @@ def test_chart_version_and_values_match_live_staging_baseline():
     assert pvc["resources"]["requests"]["storage"] == "20Gi"
     assert staging["prometheus"]["prometheusSpec"]["externalLabels"] == {"cluster": "sugarkube-int"}
     alertmanager = staging["alertmanager"]
-    assert alertmanager["alertmanagerSpec"]["secrets"] == ["alertmanager-pagerduty", "alertmanager-healthchecks-watchdog"]
+    assert alertmanager["alertmanagerSpec"]["secrets"] == [
+        "alertmanager-pagerduty",
+        "alertmanager-healthchecks-watchdog",
+    ]
     route = alertmanager["config"]["route"]
     assert route["receiver"] == "null"
     assert route["routes"][0] == {
-            "receiver": "pagerduty-synthetic-test",
-            "matchers": [
-                'alertname="SugarkubePagerDutyTest"',
-                'environment="staging"',
-                'cluster="sugarkube-int"',
-                'severity="critical"',
-            ],
-        }
+        "receiver": "pagerduty-synthetic-test",
+        "matchers": [
+            'alertname="SugarkubePagerDutyTest"',
+            'environment="staging"',
+            'cluster="sugarkube-int"',
+            'severity="critical"',
+        ],
+    }
     watchdog_route = route["routes"][1]
     assert watchdog_route["receiver"] == "healthchecks-watchdog"
     assert watchdog_route["repeat_interval"] == "5m"
@@ -132,7 +135,12 @@ def rendered_alertmanager_fixture(
     *, secret="alertmanager-pagerduty", path=None, matchers=None, inline=False
 ):
     path = path or "/etc/alertmanager/secrets/alertmanager-pagerduty/routing-key"
-    matchers = matchers or ['alertname="SugarkubePagerDutyTest"', 'environment="staging"', 'cluster="sugarkube-int"', 'severity="critical"']
+    matchers = matchers or [
+        'alertname="SugarkubePagerDutyTest"',
+        'environment="staging"',
+        'cluster="sugarkube-int"',
+        'severity="critical"',
+    ]
     inline_field = "\n            " + "routing_" + "key: forbidden-stub" if inline else ""
     matcher_yaml = "\n".join(f"            - '{matcher}'" for matcher in matchers)
     return f"""---
@@ -264,7 +272,7 @@ def test_alertmanager_validator_redacts_invalid_base64(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("mutation", "diagnostic"),
+    ("mutation", "_diagnostic"),
     [
         (
             lambda text: text + text.split("---\napiVersion: v1", 1)[0],
@@ -290,6 +298,20 @@ def test_alertmanager_validator_redacts_invalid_base64(tmp_path):
                 "            send_resolved: true\n          - routing_key_file: /another/file",
             ),
             "exactly one PagerDuty configuration",
+        ),
+        (
+            lambda text: text.replace(
+                "        pagerduty_configs:",
+                "        email_configs: []\n        pagerduty_configs:",
+            ),
+            "PagerDuty receiver is malformed",
+        ),
+        (
+            lambda text: text.replace(
+                "        webhook_configs:",
+                "        slack_configs: []\n        webhook_configs:",
+            ),
+            "Healthchecks receiver is malformed",
         ),
         (
             lambda text: text.replace(
@@ -329,6 +351,8 @@ def test_alertmanager_validator_redacts_invalid_base64(tmp_path):
         "nested-route",
         "alternate-receiver",
         "additional-config",
+        "pagerduty-extra-integration",
+        "healthchecks-extra-integration",
         "continuation",
         "nested-children",
         "recursive-inline-key",
@@ -336,7 +360,7 @@ def test_alertmanager_validator_redacts_invalid_base64(tmp_path):
     ],
 )
 def test_alertmanager_validator_rejects_deterministic_contract_mutations(
-    tmp_path, mutation, diagnostic
+    tmp_path, mutation, _diagnostic
 ):
     manifest = tmp_path / "mutation.yaml"
     manifest.write_text(mutation(rendered_alertmanager_fixture()), encoding="utf-8")
@@ -1351,12 +1375,13 @@ def test_watchdog_rule_and_healthchecks_contract_are_exact():
 
 def test_watchdog_operator_contract_is_hidden_bounded_and_staging_only():
     script = (ROOT / "scripts" / "observability_watchdog.sh").read_text(encoding="utf-8")
-    assert 'read -r -s value <&3' in script
-    assert '--from-file=ping-url=/dev/stdin' in script
-    assert 'WATCHDOG_PING_URL' in script
-    assert 'timedelta(minutes=8)' in script
+    assert "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}" in script
+    assert "read -r -s value <&3" in script
+    assert "--from-file=ping-url=/dev/stdin" in script
+    assert "WATCHDOG_PING_URL" in script
+    assert "timedelta(minutes=8)" in script
     for label in ("alertname", "environment", "cluster", "purpose"):
-        assert f'(\"{label}\"' in script
+        assert f'("{label}"' in script
     assert "sugar-staging" in script
     assert "node shutdown" not in script.lower()
     assert "hc-ping\\.com" in script
