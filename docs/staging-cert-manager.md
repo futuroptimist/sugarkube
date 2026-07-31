@@ -79,10 +79,19 @@ just cert-manager-certificate-verify-authorization namespace=danielsmith certifi
 
 It requires the referenced issuer to be `Ready=True`, its Cloudflare solver to reference
 `cert-manager/cloudflare-api-token` key `api-token`, that Secret to exist, and no related active
-Challenge to report `Found no Zones`. It checks only Secret existence and never retrieves, decodes,
-or prints its value. These structural checks cannot prove the token's Cloudflare dashboard scope;
-only a successfully completed DNS-01 Challenge can do that. Do not call Cloudflare APIs in a way
-that risks logging request headers.
+Challenge to report `Found no Zones`, error 9109 (`Invalid access token`), or error 10502
+(`Too many authentication failures`). Current active Challenge status blocks the gate; terminal
+Challenges and historical Events remain diagnostic and do not independently block recovery. The
+verifier checks only Secret existence and never retrieves, decodes, or prints its value. These
+structural checks cannot prove the token's Cloudflare dashboard scope; only a successfully
+completed DNS-01 Challenge can do that. Do not call Cloudflare APIs in a way that risks logging
+request headers.
+
+If 9109 or 10502 is active, stop manual retries. For 9109, correct the credential or its scope and
+reinstall it through the hidden-input recipe above. For 10502, wait for Cloudflare's authentication
+throttling to clear without assuming a fixed cooldown. Then retry the read-only authorization gate
+before attempting recovery. A `Found no Zones` blocker requires correcting `Zone.read`, the
+account, or explicit zone scope before rerunning the gate.
 
 Status and structural authorization verification require `kubectl`, but do not require `cmctl`.
 Recovery additionally requires [`cmctl`](https://cert-manager.io/docs/reference/cmctl/). Install it
@@ -117,9 +126,9 @@ do not silently change issuer or Helm/Flux ownership here.
    ```
 
 3. Review the final redacted resource chain. Confirm the new Order and Challenge are valid and no
-   active Challenge reports `Found no Zones`. Confirm the externally served certificate identity
-   and dates independently if Cloudflare edge termination makes them differ from the Kubernetes
-   Secret; never disable TLS verification.
+   active Challenge reports `Found no Zones`, 9109, or 10502. Confirm the externally served
+   certificate identity and dates independently if Cloudflare edge termination makes them differ
+   from the Kubernetes Secret; never disable TLS verification.
 4. Only after the first certificate passes, repeat for Jobbot3000:
 
    ```bash
