@@ -26,6 +26,10 @@ alertmanager:
       - alertmanager-healthchecks-watchdog
   config:
     route:
+      group_by: null
+      group_wait: null
+      group_interval: null
+      repeat_interval: null
       receiver: "null"
       routes:
         - receiver: pagerduty-synthetic-test

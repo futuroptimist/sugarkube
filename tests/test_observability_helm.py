@@ -72,6 +72,14 @@ def test_chart_version_and_values_match_live_staging_baseline():
     ]
     route = alertmanager["config"]["route"]
     assert route["receiver"] == "null"
+    assert {
+        key: route[key] for key in ("group_by", "group_wait", "group_interval", "repeat_interval")
+    } == {
+        "group_by": None,
+        "group_wait": None,
+        "group_interval": None,
+        "repeat_interval": None,
+    }
     assert route["routes"][0] == {
         "receiver": "pagerduty-synthetic-test",
         "matchers": [
