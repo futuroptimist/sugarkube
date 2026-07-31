@@ -81,7 +81,10 @@ def test_verify_uses_safe_exact_smoke_argv(
         "metadata": {"name": "dspace-1"},
         "spec": {
             "containers": [
-                {"name": "dspace", "image": "ghcr.io/democratizedspace/dspace:main-abcdef0"}
+                {
+                    "name": "dspace",
+                    "image": "ghcr.io/democratizedspace/dspace:main-abcdef0@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+                }
             ]
         },
         "status": {
@@ -91,11 +94,18 @@ def test_verify_uses_safe_exact_smoke_argv(
         },
     }
     build = json.dumps(
-        {"version": "3.1.0", "revision": SHA, "shortRevision": "abcdef0", "image": "main-abcdef0"}
+        {
+            "version": "3.1.0",
+            "revision": SHA,
+            "shortRevision": "abcdef0",
+            "image": "ghcr.io/democratizedspace/dspace:main-abcdef0@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        }
     )
     html = f'<meta name="dspace-build-revision" content="{SHA}">'
 
     def command(argv: list[str]) -> str:
+        if argv and argv[0] == "helm":
+            return json.dumps({"chart": "dspace-1.2.3", "version": 7})
         if "pods" in argv:
             return json.dumps({"items": [pod]})
         if "deployment" in argv:
@@ -107,6 +117,7 @@ def test_verify_uses_safe_exact_smoke_argv(
                                 "containers": [
                                     {
                                         "name": "dspace",
+                                        "image": "ghcr.io/democratizedspace/dspace:main-abcdef0@sha256:1111111111111111111111111111111111111111111111111111111111111111",
                                         "env": [
                                             {
                                                 "name": "DSPACE_TOKEN_PLACE_URL",
@@ -190,7 +201,7 @@ def test_missing_or_nonexecutable_runner_fails_safely(tmp_path: Path) -> None:
 
 
 def test_cli_rejects_unknown_fields() -> None:
-    with pytest.raises(SystemExit):
+    with pytest.raises(verifier.VerificationError):
         verifier.parser().parse_args(
             [
                 "capabilities",

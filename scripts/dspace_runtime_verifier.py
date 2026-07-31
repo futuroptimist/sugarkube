@@ -19,6 +19,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from scripts import app_chart  # noqa: E402
 from scripts import app_config  # noqa: E402
 from scripts import dspace_release_manifest as release_manifest  # noqa: E402
 
@@ -89,7 +90,9 @@ def fetch(url: str, public_origin: tuple[str, str] | None = None) -> bytes:
     raise AssertionError("unreachable")
 
 
-def identity(raw: bytes, version: str, revision: str, image_tag: str, category: str) -> None:
+def identity(
+    raw: bytes, version: str, revision: str, image: str, category: str
+) -> tuple[str, str, str]:
     if len(raw) > 1024 * 1024:
         fail(category)
     try:
@@ -104,9 +107,10 @@ def identity(raw: bytes, version: str, revision: str, image_tag: str, category: 
         or value.get("shortRevision") != revision[:7]
     ):
         fail(category)
-    image = value.get("image")
-    if image is not None and image not in {image_tag, f"{release_manifest.IMAGE_REF}:{image_tag}"}:
+    runtime_image = value.get("image")
+    if runtime_image is not None and runtime_image != image:
         fail(category)
+    return version, revision, runtime_image or image
 
 
 def marker(raw: bytes, revision: str, category: str) -> None:
@@ -121,31 +125,31 @@ def marker(raw: bytes, revision: str, category: str) -> None:
 
 
 def values_expectations(paths: list[Path]) -> tuple[str, str]:
-    """Resolve the two non-secret token.place settings from the ordered values chain."""
-    wanted = {
-        "DSPACE_TOKEN_PLACE_URL": None,
-        "DSPACE_TOKEN_PLACE_CHAT_MODEL": None,
-    }
-    item = re.compile(r"^\s*-?\s*name:\s*([A-Z0-9_]+)\s*(?:#.*)?$")
-    scalar = re.compile(r"^\s*value:\s*([^#]+?)\s*(?:#.*)?$")
-    for path in paths:
-        pending = None
-        try:
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except OSError:
-            fail("manifest/evidence mismatch")
-        for line in lines:
-            named = item.match(line)
-            if named:
-                pending = named.group(1) if named.group(1) in wanted else None
-                continue
-            valued = scalar.match(line)
-            if pending and valued:
-                wanted[pending] = valued.group(1).strip().strip("\"'")
-                pending = None
-    if not all(wanted.values()):
+    """Resolve token.place settings through the same ordered merge used by app_chart."""
+    try:
+        document = app_chart.merged_values_document(tuple(str(path) for path in paths))
+    except (ValueError, json.JSONDecodeError):
         fail("manifest/evidence mismatch")
-    return str(wanted["DSPACE_TOKEN_PLACE_URL"]), str(wanted["DSPACE_TOKEN_PLACE_CHAT_MODEL"])
+    found: dict[str, str] = {}
+
+    def visit(value: object) -> None:
+        if isinstance(value, dict):
+            name = value.get("name")
+            scalar = value.get("value")
+            if name in {"DSPACE_TOKEN_PLACE_URL", "DSPACE_TOKEN_PLACE_CHAT_MODEL"} and isinstance(
+                scalar, str
+            ):
+                found[str(name)] = scalar
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+
+    visit(document)
+    if set(found) != {"DSPACE_TOKEN_PLACE_URL", "DSPACE_TOKEN_PLACE_CHAT_MODEL"}:
+        fail("manifest/evidence mismatch")
+    return found["DSPACE_TOKEN_PLACE_URL"], found["DSPACE_TOKEN_PLACE_CHAT_MODEL"]
 
 
 def load_manifest(path: Path) -> dict[str, Any]:
@@ -211,36 +215,40 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
     if not pods:
         fail("pod/replica identity")
 
-    token_values = None
-    if expected["provider"] == "token-place":
-        token_values = values_expectations(values)
-        try:
-            deployment = json.loads(
-                command(
-                    [
-                        "kubectl",
-                        "--kubeconfig",
-                        args.kubeconfig,
-                        "-n",
-                        args.namespace,
-                        "get",
-                        "deployment",
-                        args.release,
-                        "-o",
-                        "json",
-                    ]
-                )
+    approved_image = f"{release_manifest.IMAGE_REF}:{expected['image_tag']}@{expected['digest']}"
+    token_values = values_expectations(values) if expected["provider"] == "token-place" else None
+    try:
+        deployment = json.loads(
+            command(
+                [
+                    "kubectl",
+                    "--kubeconfig",
+                    args.kubeconfig,
+                    "-n",
+                    args.namespace,
+                    "get",
+                    "deployment",
+                    args.release,
+                    "-o",
+                    "json",
+                ]
             )
-            containers = deployment["spec"]["template"]["spec"]["containers"]
-            application = next(item for item in containers if item.get("name") == "dspace")
-            live_env = {item.get("name"): item.get("value") for item in application.get("env", [])}
-        except (json.JSONDecodeError, KeyError, StopIteration, TypeError):
-            fail("cluster identity")
+        )
+        containers = deployment["spec"]["template"]["spec"]["containers"]
+        applications = [item for item in containers if item.get("name") == "dspace"]
+    except (json.JSONDecodeError, KeyError, TypeError):
+        fail("cluster identity")
+    if len(applications) != 1 or applications[0].get("image") != approved_image:
+        fail("cluster identity")
+    if token_values is not None:
+        live_env = {item.get("name"): item.get("value") for item in applications[0].get("env", [])}
         if (
             live_env.get("DSPACE_TOKEN_PLACE_URL") != token_values[0]
             or live_env.get("DSPACE_TOKEN_PLACE_CHAT_MODEL") != token_values[1]
         ):
             fail("cluster identity")
+
+    helm_before = helm_identity(args)
 
     direct_names = []
     for pod in pods:
@@ -254,11 +262,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
             fail("pod/replica identity")
         containers = [c for c in spec.get("containers", []) if c.get("name") == "dspace"]
         statuses = [c for c in status.get("containerStatuses", []) if c.get("name") == "dspace"]
-        approved_image = f"{release_manifest.IMAGE_REF}:{expected['image_tag']}"
-        if len(containers) != 1 or containers[0].get("image") not in {
-            approved_image,
-            f"{approved_image}@{expected['digest']}",
-        }:
+        if len(containers) != 1 or containers[0].get("image") != approved_image:
             fail("pod/replica identity")
         if len(statuses) != 1 or not str(statuses[0].get("imageID", "")).endswith(
             expected["digest"]
@@ -275,22 +279,27 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
             direct_html = command(proxy + [prefix + "/"]).encode()
         except VerificationError:
             fail("direct identity")
-        identity(
+        direct_identity = identity(
             direct_build,
             expected["version"],
             expected["revision"],
-            expected["image_tag"],
+            approved_image,
             "direct identity",
         )
+        if direct_names and "replica_identity" in locals() and direct_identity != replica_identity:
+            fail("pod/replica identity")
+        replica_identity = direct_identity
         marker(direct_html, expected["revision"], "direct identity")
 
-    identity(
+    public_identity = identity(
         fetch(base_url + "/build-info.json", origin),
         expected["version"],
         expected["revision"],
-        expected["image_tag"],
+        approved_image,
         "public identity",
     )
+    if public_identity != replica_identity:
+        fail("public identity")
     marker(fetch(base_url + "/", origin), expected["revision"], "public identity")
 
     smoke_argv = [
@@ -313,6 +322,8 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
             "--expected-token-place-model",
             token_model,
         ]
+    if helm_identity(args) != helm_before:
+        fail("cluster identity")
     completed = subprocess.run(smoke_argv, text=True, capture_output=True, check=False)
     if completed.returncode:
         fail("provider/chat smoke")
@@ -333,6 +344,37 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def helm_identity(args: argparse.Namespace) -> tuple[str, str, int]:
+    try:
+        status = json.loads(
+            command(
+                [
+                    "helm",
+                    "--kubeconfig",
+                    args.kubeconfig,
+                    "status",
+                    args.release,
+                    "--namespace",
+                    args.namespace,
+                    "-o",
+                    "json",
+                ]
+            )
+        )
+        chart = status["chart"]
+        revision = status["version"]
+    except (json.JSONDecodeError, KeyError, TypeError):
+        fail("cluster identity")
+    if not isinstance(chart, str) or not chart.startswith("dspace-") or type(revision) is not int:
+        fail("cluster identity")
+    if (
+        getattr(args, "expected_helm_revision", None) is not None
+        and revision != args.expected_helm_revision
+    ):
+        fail("cluster identity")
+    return chart.rsplit("-", 1)[0], chart.rsplit("-", 1)[-1], revision
+
+
 def _resolve_host(paths: list[Path]) -> str:
     result = command(
         [
@@ -348,8 +390,13 @@ def _resolve_host(paths: list[Path]) -> str:
     return result
 
 
+class SafeParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        raise VerificationError("invalid arguments")
+
+
 def parser() -> argparse.ArgumentParser:
-    result = argparse.ArgumentParser()
+    result = SafeParser()
     sub = result.add_subparsers(dest="command", required=True)
     for name in ("capabilities", "verify"):
         item = sub.add_parser(name)
@@ -372,12 +419,13 @@ def parser() -> argparse.ArgumentParser:
             item.add_argument("--application-version")
             item.add_argument("--source-revision")
             item.add_argument("--provider", choices=("token-place", "openai"))
+            item.add_argument("--expected-helm-revision", type=int)
     return result
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parser().parse_args(argv)
     try:
+        args = parser().parse_args(argv)
         value = (
             {
                 "schemaVersion": 1,

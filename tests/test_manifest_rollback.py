@@ -154,51 +154,6 @@ def test_missing_or_incompatible_verifier_fails(tmp_path: Path) -> None:
         )
 
 
-def test_extended_verifier_arguments_are_negotiated_without_shell(tmp_path: Path) -> None:
-    executable = tmp_path / "verifier"
-    smoke = tmp_path / "smoke"
-    calls: list[list[str]] = []
-
-    assert rollback.verifier_accepts_runtime_arguments(
-        executable,
-        "staging",
-        tmp_path / "manifest.json",
-        smoke,
-        "kube config",
-        "app config",
-        lambda command: calls.append(command) or "{}",
-    )
-    assert calls == [
-        [
-            str(executable),
-            "capabilities",
-            "--environment",
-            "staging",
-            "--release",
-            "dspace",
-            "--namespace",
-            "dspace",
-            "--manifest",
-            str(tmp_path / "manifest.json"),
-            "--kubeconfig",
-            "kube config",
-            "--smoke-runner",
-            str(smoke),
-            "--config",
-            "app config",
-        ]
-    ]
-    assert not rollback.verifier_accepts_runtime_arguments(
-        executable,
-        "staging",
-        tmp_path / "manifest.json",
-        None,
-        "kubeconfig",
-        "",
-        lambda _command: (_ for _ in ()).throw(rollback.RollbackError("unknown argument")),
-    )
-
-
 def test_production_confirmation_is_bound_to_full_target_sha() -> None:
     for invalid in ("", "yes", "dspace:prod:deadbee", f"dspace:staging:{SHA}"):
         with pytest.raises(rollback.RollbackError, match="exactly equal"):

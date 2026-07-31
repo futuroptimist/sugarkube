@@ -251,11 +251,32 @@ def validate(value: dict[str, Any], finalized: bool | None = None) -> dict[str, 
             platform_match = PLATFORM_CHECK_RE.fullmatch(check)
             if platform_match:
                 platform_indices.append(int(platform_match.group(1)))
-            elif check not in FINAL_FIXED_CHECKS:
+            elif check not in FINAL_FIXED_CHECKS | {
+                "runtimeIdentity",
+                "frontendIdentity",
+                "replicaAgreement",
+                "publicDirectAgreement",
+                "defaultProvider",
+                "remoteChatSmoke",
+            }:
                 raise ManifestError(f"unknown verification result: {check}")
         missing = sorted(FINAL_FIXED_CHECKS - checks)
         if missing:
             raise ManifestError("missing verification results: " + ", ".join(missing))
+        if "runtimeVerification" in value:
+            runtime_checks = {
+                "runtimeIdentity",
+                "frontendIdentity",
+                "replicaAgreement",
+                "publicDirectAgreement",
+                "defaultProvider",
+                "remoteChatSmoke",
+            }
+            missing_runtime = sorted(runtime_checks - checks)
+            if missing_runtime:
+                raise ManifestError(
+                    "missing runtime verification results: " + ", ".join(missing_runtime)
+                )
         if sorted(platform_indices) != list(range(len(platform_indices))):
             raise ManifestError("image platform verification indices must be contiguous from zero")
         if not platform_indices:
@@ -746,6 +767,18 @@ def finalize(
             "details": "every running pod imageID matched approved image digest",
         },
     ]
+    if runtime_verification is not None:
+        runtime_checks = (
+            ("runtimeIdentity", "approved runtime source and image identity verified"),
+            ("frontendIdentity", "approved frontend revision marker verified"),
+            ("replicaAgreement", "all ready serving replicas agreed"),
+            ("publicDirectAgreement", "public and direct build identities agreed"),
+            ("defaultProvider", "approved default provider verified"),
+            ("remoteChatSmoke", "bounded remote /chat journey passed"),
+        )
+        results.extend(
+            {"check": name, "passed": True, "details": details} for name, details in runtime_checks
+        )
     result = dict(value)
     result.update(
         recordType="final",
