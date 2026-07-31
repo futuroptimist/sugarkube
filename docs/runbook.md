@@ -240,8 +240,11 @@ Common failure modes:
   --from-file=api-token=/dev/stdin`; never put the token in a command argument or visible shell
   environment assignment.
   In staging, run the guarded `cert-manager-certificate-verify-authorization` recipe before one
-  recovery attempt; it requires the exact `sugar-staging` context. Structural checks do not prove
-  Cloudflare dashboard scope until a DNS-01 Challenge succeeds.
+  recovery attempt; it requires the exact `sugar-staging` context and blocks active Cloudflare
+  `9109`, `10502`, and `Found no Zones` errors. Stop retries, correct credentials through the
+  hidden-input workflow when needed, and wait for authentication throttling to clear before
+  rerunning the read-only gate. Structural checks do not prove Cloudflare dashboard scope until a
+  DNS-01 Challenge succeeds.
 - **Challenge cleanup errors after successful issuance**: Cloudflare API token is missing `Zone:Read` and/or is scoped to the wrong zone.
 
 Validation sequence:

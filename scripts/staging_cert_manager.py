@@ -23,6 +23,23 @@ REDACT = re.compile(
     r"word|secret)"
     r"(\s*[:=]?\s+|\s*[:=]\s*)[^\s,;]+"
 )
+AUTHORIZATION_BLOCKERS = (
+    (
+        ("9109", "invalid access token"),
+        "invalid Cloudflare credentials",
+        "reinstall the credential with the hidden-input recipe",
+    ),
+    (
+        ("10502", "too many authentication failures"),
+        "Cloudflare authentication throttling",
+        "stop retries and wait for throttling to clear",
+    ),
+    (
+        ("found no zones",),
+        "Cloudflare zone authorization",
+        "correct the credential's account and zone scope",
+    ),
+)
 
 
 class OperationError(RuntimeError):
@@ -215,9 +232,15 @@ def verify_authorization(namespace: str, certificate_name: str) -> dict[str, Any
             f"required Secret {TOKEN_SECRET_NAMESPACE}/{TOKEN_SECRET_NAME} is missing or inaccessible"
         )
     for challenge in report["challenges"]:
-        detail = f"{challenge['reason']} {challenge['message']}"
-        if challenge["active"] and "found no zones" in detail.lower():
-            raise OperationError("active Challenge reports Found no Zones")
+        if not challenge["active"]:
+            continue
+        detail = f"{challenge['reason']} {challenge['message']}".lower()
+        for indicators, blocker, action in AUTHORIZATION_BLOCKERS:
+            if any(indicator in detail for indicator in indicators):
+                raise OperationError(
+                    f"active Challenge blocked by {blocker}; {action}, then retry authorization "
+                    "verification"
+                )
     print(
         "authorization structure verified; a successful DNS-01 Challenge is still required to prove dashboard scope"
     )
@@ -232,7 +255,12 @@ def install_token() -> None:
         else sys.stdin.buffer.read()
     )
     credential = credential.strip()
-    if not credential or b"\n" in credential or b"\r" in credential:
+    quoted = (
+        len(credential) >= 2
+        and credential[:1] == credential[-1:]
+        and credential[:1] in {b"'", b'"'}
+    )
+    if not credential or any(chr(byte).isspace() for byte in credential) or quoted:
         raise OperationError("token input is empty or malformed")
     create = subprocess.Popen(
         kubectl_command(
