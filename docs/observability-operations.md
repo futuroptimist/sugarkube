@@ -398,9 +398,10 @@ lost, and distinct from the automated evidence above:
 
 Additional dashboards, Grafana persistence, central multi-cluster Grafana, and production
 observability codification are separate follow-ups. The existing blackbox NetworkPolicy is unchanged.
-Alerting onboarding — real Alertmanager receivers, external heartbeats, and failure drills — is no
-longer undesigned scope creep; it is planned, designed work tracked in
-[`docs/observability-alerting.md`](observability-alerting.md), just not yet executed.
+The synthetic Alertmanager → PagerDuty route is deployed and delivery-tested. External node-heartbeat
+assets and the watchdog's secret-safe configuration and operator workflows are repository-ready, as
+tracked in [`docs/observability-alerting.md`](observability-alerting.md). Their installation,
+deployment, live confirmation, and failure-drill evidence remain post-merge operator work.
 
 ## Observability watchdog
 

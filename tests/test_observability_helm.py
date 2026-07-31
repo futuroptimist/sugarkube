@@ -474,6 +474,39 @@ def test_justfile_exposes_observability_recipes():
         assert f"{recipe} env=''" in text
         assert f"scripts/observability_helm.sh {recipe.removeprefix('observability-')}" in text
 
+    watchdog_recipes = {
+        "observability-watchdog-secret-install": "watchdog-secret-install",
+        "observability-watchdog-secret-check": "watchdog-secret-check",
+        "observability-watchdog-verify": "watchdog-verify",
+        "observability-watchdog-drill-start": "watchdog-drill-create",
+        "observability-watchdog-drill-status": "watchdog-drill-status",
+        "observability-watchdog-drill-clear": "watchdog-drill-clear",
+    }
+    for recipe, subcommand in watchdog_recipes.items():
+        recipe_block = text.split(f"{recipe} env='':", 1)[1].split("\n\n", 1)[0]
+        assert f"scripts/observability_helm.sh {subcommand} '{{{{ env }}}}'" in recipe_block
+        assert "env=staging" not in recipe_block
+        assert "env={{ env }}" not in recipe_block
+
+
+def test_watchdog_documentation_timing_matches_configuration():
+    operations = (ROOT / "docs" / "observability-operations.md").read_text(encoding="utf-8")
+    for recipe in (
+        "secret-install",
+        "secret-check",
+        "verify",
+        "drill-start",
+        "drill-status",
+        "drill-clear",
+    ):
+        assert f"just observability-watchdog-{recipe} env=staging" in operations
+
+    staging = yaml_load(STAGING)
+    route = staging["alertmanager"]["config"]["route"]["routes"][1]
+    assert route["repeat_interval"] == "5m"
+    assert re.search(r"five-minute period and\s+two-minute grace", operations)
+    assert re.search(r"eight-minute Alertmanager\s+silence", operations)
+
 
 def test_legacy_flux_longhorn_files_are_clearly_marked_inactive():
     for path in LEGACY:
