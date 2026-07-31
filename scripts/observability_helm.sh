@@ -135,7 +135,7 @@ watchdog_secret_install() {
   echo "Watchdog Secret installed or rotated (value not displayed)."
 }
 
-function watchdog_verify (
+watchdog_verify() (
   require_tools kubectl python3 ruby sleep
   assert_context
   assert_watchdog_secret
@@ -207,7 +207,7 @@ for x in json.load(sys.stdin):
  if x.get("createdBy")=="sugarkube-observability-watchdog-drill" and x.get("comment")=="Owned staging watchdog failure drill" and x.get("status",{}).get("state") in ("active","pending") and exact: out.append(x["id"])
 print("\\n".join(out))'
 }
-function watchdog_silence_status { assert_context; local ids; ids="$(watchdog_owned_silences)"; [[ -n "${ids}" ]] && printf 'Owned active/pending watchdog drill silence IDs:\n%s\n' "${ids}" || echo "No owned active/pending watchdog drill silence."; }
+watchdog_silence_status() { assert_context; local ids; ids="$(watchdog_owned_silences)"; [[ -n "${ids}" ]] && printf 'Owned active/pending watchdog drill silence IDs:\n%s\n' "${ids}" || echo "No owned active/pending watchdog drill silence."; }
 watchdog_silence_clear() { assert_context; local ids; ids="$(watchdog_owned_silences)"; [[ -n "${ids}" ]] || { echo "No owned active/pending watchdog drill silence to clear."; return; }; while IFS= read -r id; do kubectl delete --raw "${WATCHDOG_API}/silence/${id}" >/dev/null; done <<<"${ids}"; echo "Owned watchdog drill silence cleared."; }
 
 status() { require_tools helm kubectl python3; print_resolved staging; assert_context; helm -n "${NAMESPACE}" status "${RELEASE}"; kubectl -n "${NAMESPACE}" get deploy,statefulset,daemonset -l "app.kubernetes.io/instance=${RELEASE}"; kubectl -n "${NAMESPACE}" get prometheus,alertmanager; kubectl -n "${NAMESPACE}" get svc,pvc; kubectl get crd prometheuses.monitoring.coreos.com alertmanagers.monitoring.coreos.com servicemonitors.monitoring.coreos.com probes.monitoring.coreos.com; }
