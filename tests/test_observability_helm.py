@@ -527,6 +527,7 @@ def run_helper(
     watchdog_tty_text=None,
     command_args=(),
     extra_env=None,
+    watchdog_silences=None,
 ):
     """Run the lifecycle against deterministic command stubs and return its audit log."""
     bin_dir = tmp_path / "bin"
@@ -591,6 +592,21 @@ case "$*" in
   *"/api/v2/alerts"*) printf '%s\n' '[{"status":{"state":"active"},"labels":{"alertname":"SugarkubeObservabilityWatchdog","environment":"staging","cluster":"sugarkube-int","purpose":"observability-watchdog","prometheus":"platform-added"}}]' ;;
   *"get pods -l app.kubernetes.io/name=alertmanager -o json"*) printf '%s\n' '{"items":[{"status":{"phase":"Running"},"spec":{"volumes":[{"name":"watchdog","secret":{"secretName":"alertmanager-healthchecks-watchdog"}}],"containers":[{"volumeMounts":[{"name":"watchdog","mountPath":"/etc/alertmanager/secrets/alertmanager-healthchecks-watchdog","readOnly":true}]}]}}]}' ;;
   *"logs statefulset/kube-prometheus-stack-alertmanager"*) : ;;
+  *"create --raw /api/v1/namespaces/monitoring/services/http:kube-prometheus-stack-alertmanager:9093/proxy/api/v2/silences -f -"*)
+    cat > "$WATCHDOG_SILENCE_PAYLOAD"
+    [ "$KUBECTL_MODE" != watchdog-silence-create-fail ] || exit 48
+    [ "$KUBECTL_MODE" != watchdog-silence-create-malformed ] || { printf '%s\n' '{malformed'; exit 0; }
+    printf '%s\n' '{"silenceID":"created-owned-silence"}'
+    ;;
+  *"get --raw /api/v1/namespaces/monitoring/services/http:kube-prometheus-stack-alertmanager:9093/proxy/api/v2/silences"*)
+    [ "$KUBECTL_MODE" != watchdog-silences-fail ] || exit 49
+    [ "$KUBECTL_MODE" != watchdog-silences-malformed ] || { printf '%s\n' '{malformed'; exit 0; }
+    cat "$WATCHDOG_SILENCES"
+    ;;
+  *"delete --raw /api/v1/namespaces/monitoring/services/http:kube-prometheus-stack-alertmanager:9093/proxy/api/v2/silence/"*)
+    printf '%s\n' "${3##*/}" >> "$WATCHDOG_SILENCE_DELETIONS"
+    [ "$KUBECTL_MODE" != watchdog-silence-delete-fail ] || exit 50
+    ;;
   *"port-forward"*"service/kube-prometheus-stack-alertmanager"*":9093"*)
     [ "$PAGERDUTY_MODE" != forward-exit ] || { echo PORT_FORWARD_SENTINEL; exit 42; }
     echo "$PAGERDUTY_FORWARD_LINE"
@@ -679,11 +695,17 @@ printf '%s' "$code"
         "SUGARKUBE_WATCHDOG_TEST_NONTTY": "1",
         "WATCHDOG_CREATE_STDIN": str(tmp_path / "watchdog-create-stdin"),
         "WATCHDOG_APPLY_STDIN": str(tmp_path / "watchdog-apply-stdin"),
+        "WATCHDOG_SILENCE_PAYLOAD": str(tmp_path / "watchdog-silence-payload"),
+        "WATCHDOG_SILENCE_DELETIONS": str(tmp_path / "watchdog-silence-deletions"),
+        "WATCHDOG_SILENCES": str(tmp_path / "watchdog-silences.json"),
         "DASHBOARD": str(
             ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
         ),
     }
     (tmp_path / "watchdog-tty").write_text(watchdog_tty_text or "", encoding="utf-8")
+    (tmp_path / "watchdog-silences.json").write_text(
+        json.dumps(watchdog_silences or []), encoding="utf-8"
+    )
     if extra_env:
         env.update(extra_env)
     (tmp_path / "alertmanager-config.yaml").write_text(
@@ -1620,3 +1642,134 @@ def test_watchdog_live_check_rejects_extra_rule_label_without_printing_payload(t
     assert result.returncode != 0
     assert "required labels" in result.stderr
     assert "REJECTED_RULE_PAYLOAD_SENTINEL" not in result.stdout + result.stderr
+
+
+def watchdog_silence_fixture():
+    matchers = [
+        {"name": "alertname", "value": "SugarkubeObservabilityWatchdog", "isRegex": False},
+        {"name": "environment", "value": "staging", "isRegex": False},
+        {"name": "cluster", "value": "sugarkube-int", "isRegex": False},
+        {"name": "purpose", "value": "observability-watchdog", "isRegex": False},
+    ]
+
+    def silence(
+        identifier,
+        state,
+        *,
+        created_by="sugarkube-observability-watchdog-drill",
+        comment="Owned staging watchdog failure drill",
+        selected_matchers=None,
+    ):
+        return {
+            "id": identifier,
+            "status": {"state": state},
+            "createdBy": created_by,
+            "comment": comment,
+            "matchers": matchers if selected_matchers is None else selected_matchers,
+            "fixtureDetail": f"private-detail-{identifier}",
+        }
+
+    return [
+        silence("owned-active", "active"),
+        silence("owned-pending", "pending"),
+        silence("owned-expired", "expired"),
+        silence("foreign-author", "active", created_by="another-operator"),
+        silence("foreign-comment", "active", comment="another drill"),
+        silence(
+            "regex-matcher",
+            "active",
+            selected_matchers=[matchers[0] | {"isRegex": True}, *matchers[1:]],
+        ),
+        silence(
+            "extra-matcher",
+            "active",
+            selected_matchers=[*matchers, {"name": "node", "value": "all", "isRegex": False}],
+        ),
+        silence("missing-matcher", "active", selected_matchers=matchers[:-1]),
+        silence(
+            "broad-matcher",
+            "active",
+            selected_matchers=[matchers[0] | {"value": ".*"}, *matchers[1:]],
+        ),
+        silence("malformed", "active", selected_matchers={"not": "a list"}),
+    ]
+
+
+def test_watchdog_drill_create_submits_exact_bounded_sanitized_payload(tmp_path):
+    result, audit = run_helper(tmp_path, "watchdog-drill-create")
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads((tmp_path / "watchdog-silence-payload").read_text(encoding="utf-8"))
+    assert payload["matchers"] == [
+        {"name": "alertname", "value": "SugarkubeObservabilityWatchdog", "isRegex": False},
+        {"name": "environment", "value": "staging", "isRegex": False},
+        {"name": "cluster", "value": "sugarkube-int", "isRegex": False},
+        {"name": "purpose", "value": "observability-watchdog", "isRegex": False},
+    ]
+    assert payload["createdBy"] == "sugarkube-observability-watchdog-drill"
+    assert payload["comment"] == "Owned staging watchdog failure drill"
+    starts_at = __import__("datetime").datetime.fromisoformat(
+        payload["startsAt"].replace("Z", "+00:00")
+    )
+    ends_at = __import__("datetime").datetime.fromisoformat(
+        payload["endsAt"].replace("Z", "+00:00")
+    )
+    assert (ends_at - starts_at).total_seconds() == 8 * 60
+    assert "MANUAL CHECKPOINT" in result.stderr
+    assert (
+        result.stdout
+        == "Owned watchdog drill silence created; id=created-owned-silence; automatic expiry=8m.\n"
+    )
+    assert "shutdown" not in audit.lower() and "hc-ping" not in audit
+
+
+def test_watchdog_silence_status_reports_only_exact_owned_active_or_pending(tmp_path):
+    fixture = watchdog_silence_fixture()
+    result, _ = run_helper(tmp_path, "watchdog-drill-status", watchdog_silences=fixture)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.endswith(
+        "Owned active/pending watchdog drill silence IDs:\nowned-active\nowned-pending\n"
+    )
+    for silence in fixture[2:]:
+        assert silence["id"] not in result.stdout
+        assert silence["fixtureDetail"] not in result.stdout + result.stderr
+
+
+def test_watchdog_silence_clear_deletes_only_exact_owned_active_or_pending(tmp_path):
+    fixture = watchdog_silence_fixture()
+    result, _ = run_helper(tmp_path, "watchdog-drill-clear", watchdog_silences=fixture)
+
+    assert result.returncode == 0, result.stderr
+    deleted = (tmp_path / "watchdog-silence-deletions").read_text(encoding="utf-8").splitlines()
+    assert deleted == ["owned-active", "owned-pending"]
+    assert result.stdout.endswith("Owned watchdog drill silence cleared.\n")
+    assert all(item["fixtureDetail"] not in result.stdout + result.stderr for item in fixture)
+
+
+def test_watchdog_silence_clear_is_noop_without_owned_silences(tmp_path):
+    fixture = watchdog_silence_fixture()[2:]
+    result, audit = run_helper(tmp_path, "watchdog-drill-clear", watchdog_silences=fixture)
+
+    assert result.returncode == 0, result.stderr
+    assert "No owned active/pending watchdog drill silence to clear." in result.stdout
+    assert "delete --raw" not in audit
+    assert not (tmp_path / "watchdog-silence-deletions").exists()
+
+
+@pytest.mark.parametrize(
+    ("command", "mode"),
+    [
+        ("watchdog-drill-create", "watchdog-silence-create-fail"),
+        ("watchdog-drill-create", "watchdog-silence-create-malformed"),
+        ("watchdog-drill-status", "watchdog-silences-fail"),
+        ("watchdog-drill-status", "watchdog-silences-malformed"),
+    ],
+)
+def test_watchdog_silence_api_failures_do_not_expose_fixture_contents(tmp_path, command, mode):
+    fixture = watchdog_silence_fixture()
+    result, _ = run_helper(tmp_path, command, kubectl_mode=mode, watchdog_silences=fixture)
+
+    assert result.returncode != 0
+    output = result.stdout + result.stderr
+    assert all(item["fixtureDetail"] not in output for item in fixture)

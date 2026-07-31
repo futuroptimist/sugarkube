@@ -206,7 +206,7 @@ watchdog_owned_silences() {
 for x in json.load(sys.stdin):
  m=x.get("matchers"); exact=isinstance(m,list) and len(m)==4 and sorted((a.get("name"),a.get("value")) for a in m if isinstance(a,dict) and a.get("isRegex") is False and set(a)=={"name","value","isRegex"})==sorted(wanted)
  if x.get("createdBy")=="sugarkube-observability-watchdog-drill" and x.get("comment")=="Owned staging watchdog failure drill" and x.get("status",{}).get("state") in ("active","pending") and exact: out.append(x["id"])
-print("\\n".join(out))'
+print("\n".join(out))'
 }
 watchdog_silence_list() { assert_context; local ids; ids="$(watchdog_owned_silences)"; [[ -n "${ids}" ]] && printf 'Owned active/pending watchdog drill silence IDs:\n%s\n' "${ids}" || echo "No owned active/pending watchdog drill silence."; }
 watchdog_silence_clear() { assert_context; local ids; ids="$(watchdog_owned_silences)"; [[ -n "${ids}" ]] || { echo "No owned active/pending watchdog drill silence to clear."; return; }; while IFS= read -r id; do kubectl delete --raw "${WATCHDOG_API}/silence/${id}" >/dev/null; done <<<"${ids}"; echo "Owned watchdog drill silence cleared."; }
