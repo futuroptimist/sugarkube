@@ -472,8 +472,6 @@ if not isinstance(dashboard, dict) or dashboard.get("uid") != "sugarkube-staging
 )
 
 WATCHDOG_TTY="${SUGARKUBE_WATCHDOG_TTY:-/dev/tty}"
-WATCHDOG_CREATED_BY="sugarkube-observability-watchdog-drill"
-WATCHDOG_COMMENT="Owned staging watchdog failure drill"
 WATCHDOG_API="/api/v1/namespaces/${NAMESPACE}/services/http:${RELEASE}-alertmanager:9093/proxy/api/v2"
 
 watchdog_secret_check() { assert_context; assert_watchdog_secret; }
