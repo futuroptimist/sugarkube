@@ -673,8 +673,16 @@ case "$*" in
     case "$KUBECTL_MODE" in
       watchdog-unrelated-pod) pod='{"metadata":{"name":"unrelated-alertmanager-0","labels":{"alertmanager":"another-resource"}},"status":{"phase":"Running"},"spec":{}}' ;;
       watchdog-malformed-status) pod="$(printf '%s' "$pod" | sed 's/"status":{"phase":"Running"}/"status":"PRIVATE_MALFORMED_POD_FIXTURE"/')" ;;
-      watchdog-malformed-volumes) pod="$(printf '%s' "$pod" | sed 's/"volumes":\[/"volumes":"PRIVATE_MALFORMED_POD_FIXTURE","ignored":\[/')" ;;
-      watchdog-malformed-containers) pod="$(printf '%s' "$pod" | sed 's/"containers":\[/"containers":"PRIVATE_MALFORMED_POD_FIXTURE","ignoredContainers":\[/')" ;;
+      watchdog-malformed-metadata) pod="$(printf '%s' "$pod" | sed 's/"metadata":{/"metadata":"PRIVATE_MALFORMED_POD_FIXTURE","ignored":{/')" ;;
+      watchdog-malformed-labels) pod="$(printf '%s' "$pod" | sed 's/"labels":{/"labels":"PRIVATE_MALFORMED_POD_FIXTURE","ignoredLabels":{/')" ;;
+      watchdog-malformed-name) pod="$(printf '%s' "$pod" | sed 's|alertmanager-kube-prometheus-stack-alertmanager-0|PRIVATE_MALFORMED_POD_FIXTURE\\nhttps://fixture.invalid/user:credential@example|')" ;;
+      watchdog-malformed-spec) pod="$(printf '%s' "$pod" | sed 's/"spec":{/"spec":"PRIVATE_MALFORMED_POD_FIXTURE","ignoredSpec":{/')" ;;
+      watchdog-malformed-volumes) pod="$(printf '%s' "$pod" | sed 's/"volumes":\\[/"volumes":"PRIVATE_MALFORMED_POD_FIXTURE","ignored":[/')" ;;
+      watchdog-malformed-volume) pod="$(printf '%s' "$pod" | sed 's/{"name":"watchdog","secret"/"PRIVATE_MALFORMED_POD_FIXTURE",{"name":"watchdog","secret"/')" ;;
+      watchdog-malformed-containers) pod="$(printf '%s' "$pod" | sed 's/"containers":\\[/"containers":"PRIVATE_MALFORMED_POD_FIXTURE","ignoredContainers":[/')" ;;
+      watchdog-malformed-container) pod="$(printf '%s' "$pod" | sed 's/{"volumeMounts"/"PRIVATE_MALFORMED_POD_FIXTURE",{"volumeMounts"/')" ;;
+      watchdog-malformed-mounts) pod="$(printf '%s' "$pod" | sed 's/"volumeMounts":\\[/"volumeMounts":"PRIVATE_MALFORMED_POD_FIXTURE","ignoredMounts":[/')" ;;
+      watchdog-malformed-mount) pod="$(printf '%s' "$pod" | sed 's/{"name":"watchdog","mountPath"/"PRIVATE_MALFORMED_POD_FIXTURE",{"name":"watchdog","mountPath"/')" ;;
       watchdog-multiple-pods|watchdog-second-log-fails) pod="$pod,$(printf '%s' "$pod" | sed 's/alertmanager-0/alertmanager-1/')" ;;
     esac
     printf '%s\n' '{"items":['"$pod"']}'
@@ -684,7 +692,10 @@ case "$*" in
       watchdog-logs-fail) echo 'PRIVATE_LOG_RETRIEVAL_SENTINEL' >&2; exit 51 ;;
       watchdog-second-log-fails) case "$*" in *"-1 -c alertmanager"*) echo 'PRIVATE_LOG_RETRIEVAL_SENTINEL' >&2; exit 51 ;; esac ;;
     esac
-    printf '%s' "$WATCHDOG_LOG_TEXT"
+    case "$*" in
+      *"alertmanager-0 -c alertmanager"*) printf '%s' "${WATCHDOG_LOG_TEXT_0:-$WATCHDOG_LOG_TEXT}" ;;
+      *"alertmanager-1 -c alertmanager"*) printf '%s' "${WATCHDOG_LOG_TEXT_1:-$WATCHDOG_LOG_TEXT}" ;;
+    esac
     ;;
   *"create --raw /api/v1/namespaces/monitoring/services/http:kube-prometheus-stack-alertmanager:9093/proxy/api/v2/silences -f -"*)
     cat > "$WATCHDOG_SILENCE_PAYLOAD"
@@ -1750,23 +1761,38 @@ def test_watchdog_live_check_fails_closed_without_matching_resource_pods(tmp_pat
     assert result.returncode != 0
     assert "no operator-managed Alertmanager pods matched the expected resource" in result.stderr
     assert " logs " not in audit
+    assert "POD_FIXTURE_SENTINEL" not in result.stdout + result.stderr + audit
+    assert not list(tmp_path.glob("sugarkube-watchdog-verify.*"))
 
 
 @pytest.mark.parametrize(
     "mode",
     [
         "watchdog-malformed-pods",
+        "watchdog-malformed-metadata",
+        "watchdog-malformed-labels",
+        "watchdog-malformed-name",
         "watchdog-malformed-status",
+        "watchdog-malformed-spec",
         "watchdog-malformed-volumes",
+        "watchdog-malformed-volume",
         "watchdog-malformed-containers",
+        "watchdog-malformed-container",
+        "watchdog-malformed-mounts",
+        "watchdog-malformed-mount",
     ],
 )
 def test_watchdog_live_check_fails_closed_on_malformed_pod_inventory(tmp_path, mode):
-    result, _ = run_helper(tmp_path, "watchdog-verify", kubectl_mode=mode)
+    result, audit = run_helper(tmp_path, "watchdog-verify", kubectl_mode=mode)
 
     assert result.returncode != 0
     assert "pod data is malformed (response redacted)" in result.stderr
-    assert "PRIVATE_MALFORMED_POD_FIXTURE" not in result.stdout + result.stderr
+    exposed = result.stdout + result.stderr + audit
+    assert "Traceback" not in exposed
+    assert "PRIVATE_MALFORMED_POD_FIXTURE" not in exposed
+    assert "fixture.invalid" not in exposed
+    assert "credential@example" not in exposed
+    assert not list(tmp_path.glob("sugarkube-watchdog-verify.*"))
 
 
 def test_watchdog_live_check_rejects_extra_rule_label_without_printing_payload(tmp_path):
@@ -1826,6 +1852,38 @@ def test_watchdog_delivery_ignores_unrelated_alertmanager_errors(tmp_path):
     assert result.returncode == 0, result.stderr
     assert "bounded repeat observation verified" in result.stdout
     assert private_log not in result.stdout + result.stderr
+
+
+def test_watchdog_delivery_does_not_join_separate_pod_logs(tmp_path):
+    result, _ = run_helper(
+        tmp_path,
+        "watchdog-verify",
+        kubectl_mode="watchdog-multiple-pods",
+        extra_env={
+            "WATCHDOG_LOG_TEXT_0": "healthchecks-watchdog",
+            "WATCHDOG_LOG_TEXT_1": "error LOG_FIXTURE_SENTINEL",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "bounded repeat observation verified" in result.stdout
+    assert "LOG_FIXTURE_SENTINEL" not in result.stdout + result.stderr
+    assert not list(tmp_path.glob("sugarkube-watchdog-verify.*"))
+
+
+def test_watchdog_delivery_same_pod_receiver_error_still_fails(tmp_path):
+    private_log = "healthchecks-watchdog error LOG_FIXTURE_SENTINEL"
+    result, _ = run_helper(
+        tmp_path,
+        "watchdog-verify",
+        kubectl_mode="watchdog-multiple-pods",
+        extra_env={"WATCHDOG_LOG_TEXT_0": private_log, "WATCHDOG_LOG_TEXT_1": "healthy"},
+    )
+
+    assert result.returncode != 0
+    assert "watchdog receiver delivery error observed" in result.stderr
+    assert private_log not in result.stdout + result.stderr
+    assert not list(tmp_path.glob("sugarkube-watchdog-verify.*"))
 
 
 def test_watchdog_delivery_log_retrieval_failure_is_sanitized(tmp_path):
