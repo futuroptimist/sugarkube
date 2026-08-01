@@ -5,11 +5,10 @@ routing policy, alert inventory, and rollout/drill plan for turning the staging 
 described in [`docs/observability-design.md`](./observability-design.md) and
 [`docs/observability-operations.md`](./observability-operations.md) into something that actually pages
 a human. The secret-file-backed synthetic Alertmanager → PagerDuty path has now been manually proven
-through fire, phone receipt, acknowledgement, and resolution. The host-heartbeat assets in this
-repository are ready for a separate post-merge install on each staging node; that install is not live
-deployment evidence. The watchdog configuration and operator workflows are also repository-ready,
-while their Secret installation, deployment, and live delivery proof remain post-merge work. Real
-workload routes remain deferred.
+through fire, phone receipt, acknowledgement, and resolution. The host-heartbeat timers are installed
+on `sugarkube3`, `sugarkube4`, and `sugarkube5`. The watchdog configuration and operator workflows
+are repository-ready, while their Secret installation, deployment, and live delivery proof remain
+post-merge work. Real workload routes remain deferred.
 
 ## 1. Goals and non-goals
 
@@ -169,8 +168,9 @@ A safe, phased sequence — each step depends on the previous one succeeding:
 3. **Proven:** manually fire the synthetic PagerDuty test alert, receive and acknowledge the phone
    incident, resolve the alert, and observe resolution after Alertmanager's expected default
    resolution delay (about five minutes).
-4. Install and verify the external node heartbeats against Healthchecks.io. Deploy and verify the
-   repository-ready observability watchdog in the same post-merge rollout.
+4. Maintain the installed external node heartbeats on `sugarkube3`, `sugarkube4`, and `sugarkube5`,
+   and complete their node-power-off drill. Deploy and verify the repository-ready observability
+   watchdog in a post-merge rollout.
    Confirm the watchdog's dedicated Alertmanager timing and the Healthchecks.io period/grace match
    the contract in §3; observe multiple repeat notifications before declaring the path healthy.
 5. Audit the existing `kube-prometheus-stack` bundled node rules (starting with `KubeNodeNotReady`).
@@ -230,11 +230,11 @@ it is deployed yet — see the rollout plan above for the actual sequencing.
   [`docs/observability-blackbox.md`](./observability-blackbox.md).
 - The synthetic Alertmanager → PagerDuty fire/acknowledge/resolve drill succeeded, including the
   expected roughly five-minute Alertmanager resolution delay.
-- Per-node heartbeat assets are repository-ready and await separate post-merge installation on the
-  Pis. The watchdog configuration and workflows are repository-ready too, but its Secret
+- Per-node heartbeat timers are installed on `sugarkube3`, `sugarkube4`, and `sugarkube5`; their
+  node-power-off drill remains outstanding. The watchdog configuration and workflows are
+  repository-ready too, but its Secret
   installation, Helm deployment, live Last Ping confirmation, and PagerDuty failure/recovery drill
-  remain post-merge. The node-power-off drill, `KubeNodeNotReady` routing, and application alerts
-  remain later work.
+  remain post-merge. `KubeNodeNotReady` routing and application alerts remain later work.
 
 ## Staging observability watchdog delivery
 

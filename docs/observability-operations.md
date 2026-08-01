@@ -298,9 +298,10 @@ Installation refuses every environment except explicit `env=staging`, checks the
 hostname against `clusters/staging/nodes.txt`, and reads only from the controlling terminal with echo
 disabled. Do not pass a URL as an argument, environment variable, pipe, transcript, or command.
 
-After this change merges, perform these steps **separately on each of `sugarkube3`, `sugarkube4`, and
-`sugarkube5`**. Use that physical node's own rotated URL; `<ROTATED-NODE-PING-URL>` below is a label,
-not text to paste.
+The heartbeat timers are installed on `sugarkube3`, `sugarkube4`, and `sugarkube5`. Use the following
+procedure only for initial provisioning of another staging node, reprovisioning, or URL rotation.
+Perform it on the affected physical node with its own rotated URL; `<ROTATED-NODE-PING-URL>` below is
+a label, not text to paste.
 
 1. Log in to the node, update `main`, and confirm that you are operating on the intended host:
 
@@ -400,9 +401,11 @@ lost, and distinct from the automated evidence above:
 Additional dashboards, Grafana persistence, central multi-cluster Grafana, and production
 observability codification are separate follow-ups. The existing blackbox NetworkPolicy is unchanged.
 The synthetic Alertmanager → PagerDuty route is deployed and delivery-tested. External node-heartbeat
-assets and the watchdog's secret-safe configuration and operator workflows are repository-ready, as
-tracked in [`docs/observability-alerting.md`](observability-alerting.md). Their installation,
-deployment, live confirmation, and failure-drill evidence remain post-merge operator work.
+timers are installed on `sugarkube3`, `sugarkube4`, and `sugarkube5`; their node-power-off drill
+remains outstanding. The watchdog's secret-safe configuration and operator workflows are
+repository-ready, as tracked in [`docs/observability-alerting.md`](observability-alerting.md). Its
+Secret installation, deployment, live confirmation, and failure-drill evidence remain post-merge
+operator work.
 
 ## Observability watchdog
 

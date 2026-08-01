@@ -521,6 +521,22 @@ def test_watchdog_documentation_timing_matches_configuration():
     assert re.search(r"eight-minute Alertmanager\s+silence", operations)
 
 
+def test_observability_docs_match_linked_issue_heartbeat_status():
+    alerting = (ROOT / "docs" / "observability-alerting.md").read_text(encoding="utf-8")
+    operations = (ROOT / "docs" / "observability-operations.md").read_text(encoding="utf-8")
+    installed = "installed on `sugarkube3`, `sugarkube4`, and `sugarkube5`"
+
+    assert installed in alerting
+    assert installed in operations
+    for stale_claim in (
+        "ready for a separate post-merge install",
+        "await separate post-merge installation",
+        "After this change merges, perform these steps",
+    ):
+        assert stale_claim not in alerting
+        assert stale_claim not in operations
+
+
 def test_legacy_flux_longhorn_files_are_clearly_marked_inactive():
     for path in LEGACY:
         text = path.read_text(encoding="utf-8")
