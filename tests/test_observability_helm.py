@@ -672,6 +672,9 @@ case "$*" in
     pod='{"metadata":{"name":"alertmanager-kube-prometheus-stack-alertmanager-0","labels":{"alertmanager":"kube-prometheus-stack-alertmanager"}},"status":{"phase":"'"$phase"'"},"spec":{"volumes":[{"name":"'"$volume"'","secret":{"secretName":"'"$secret"'"}}],"containers":[{"volumeMounts":[{"name":"watchdog","mountPath":"'"$mount"'","readOnly":'"$readonly"'}]}]},"private":"POD_FIXTURE_SENTINEL"}'
     case "$KUBECTL_MODE" in
       watchdog-unrelated-pod) pod='{"metadata":{"name":"unrelated-alertmanager-0","labels":{"alertmanager":"another-resource"}},"status":{"phase":"Running"},"spec":{}}' ;;
+      watchdog-malformed-status) pod="$(printf '%s' "$pod" | sed 's/"status":{"phase":"Running"}/"status":"PRIVATE_MALFORMED_POD_FIXTURE"/')" ;;
+      watchdog-malformed-volumes) pod="$(printf '%s' "$pod" | sed 's/"volumes":\[/"volumes":"PRIVATE_MALFORMED_POD_FIXTURE","ignored":\[/')" ;;
+      watchdog-malformed-containers) pod="$(printf '%s' "$pod" | sed 's/"containers":\[/"containers":"PRIVATE_MALFORMED_POD_FIXTURE","ignoredContainers":\[/')" ;;
       watchdog-multiple-pods|watchdog-second-log-fails) pod="$pod,$(printf '%s' "$pod" | sed 's/alertmanager-0/alertmanager-1/')" ;;
     esac
     printf '%s\n' '{"items":['"$pod"']}'
@@ -1745,12 +1748,21 @@ def test_watchdog_live_check_fails_closed_without_matching_resource_pods(tmp_pat
     result, audit = run_helper(tmp_path, "watchdog-verify", kubectl_mode=mode)
 
     assert result.returncode != 0
-    assert "exact watchdog Secret mount" in result.stderr
+    assert "no operator-managed Alertmanager pods matched the expected resource" in result.stderr
     assert " logs " not in audit
 
 
-def test_watchdog_live_check_fails_closed_on_malformed_pod_inventory(tmp_path):
-    result, _ = run_helper(tmp_path, "watchdog-verify", kubectl_mode="watchdog-malformed-pods")
+@pytest.mark.parametrize(
+    "mode",
+    [
+        "watchdog-malformed-pods",
+        "watchdog-malformed-status",
+        "watchdog-malformed-volumes",
+        "watchdog-malformed-containers",
+    ],
+)
+def test_watchdog_live_check_fails_closed_on_malformed_pod_inventory(tmp_path, mode):
+    result, _ = run_helper(tmp_path, "watchdog-verify", kubectl_mode=mode)
 
     assert result.returncode != 0
     assert "pod data is malformed (response redacted)" in result.stderr
@@ -1768,7 +1780,6 @@ def test_watchdog_live_check_rejects_extra_rule_label_without_printing_payload(t
 @pytest.mark.parametrize(
     "mode",
     [
-        "watchdog-no-pods",
         "watchdog-pod-not-running",
         "watchdog-missing-volume",
         "watchdog-wrong-secret-volume",

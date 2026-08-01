@@ -166,19 +166,35 @@ PY
 import json, sys
 try:
  doc=json.load(open(sys.argv[1], encoding="utf-8"))
+ if not isinstance(doc,dict): raise TypeError
  pods=doc["items"]
- if not isinstance(doc,dict) or not isinstance(pods,list): raise TypeError
+ if not isinstance(pods,list): raise TypeError
 except (OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError): raise SystemExit("ERROR: Alertmanager pod data is malformed (response redacted).")
-def mounted(p):
- spec=p.get("spec",{}); vols=spec.get("volumes",[])
- names={v.get("name") for v in vols if v.get("secret",{}).get("secretName")=="alertmanager-healthchecks-watchdog"}
- return names and any(m.get("name") in names and m.get("mountPath")=="/etc/alertmanager/secrets/alertmanager-healthchecks-watchdog" and m.get("readOnly") is True for c in spec.get("containers",[]) for m in c.get("volumeMounts",[]))
 try:
- selected=[p for p in pods if p.get("metadata",{}).get("labels",{}).get("alertmanager")==sys.argv[2]]
+ def mapping(value):
+  if not isinstance(value,dict): raise TypeError
+  return value
+ def sequence(value):
+  if not isinstance(value,list): raise TypeError
+  return value
+ def mounted(p):
+  spec=mapping(p.get("spec",{}))
+  vols=sequence(spec.get("volumes",[]))
+  names={mapping(v).get("name") for v in vols if mapping(mapping(v).get("secret",{})).get("secretName")=="alertmanager-healthchecks-watchdog"}
+  containers=sequence(spec.get("containers",[]))
+  mounts=[mapping(m) for c in containers for m in sequence(mapping(c).get("volumeMounts",[]))]
+  return bool(names) and any(m.get("name") in names and m.get("mountPath")=="/etc/alertmanager/secrets/alertmanager-healthchecks-watchdog" and m.get("readOnly") is True for m in mounts)
+ selected=[]
+ for pod in pods:
+  pod=mapping(pod); metadata=mapping(pod.get("metadata",{})); labels=mapping(metadata.get("labels",{}))
+  if labels.get("alertmanager")==sys.argv[2]: selected.append(pod)
  names=[p["metadata"]["name"] for p in selected]
- if any(not isinstance(p,dict) for p in pods) or any(not isinstance(n,str) or not n for n in names): raise TypeError
+ if any(not isinstance(n,str) or not n for n in names): raise TypeError
+ valid=all(mapping(p.get("status",{})).get("phase")=="Running" and mounted(p) for p in selected)
 except (AttributeError, KeyError, TypeError): raise SystemExit("ERROR: Alertmanager pod data is malformed (response redacted).")
-if not selected or any(p.get("status",{}).get("phase")!="Running" or not mounted(p) for p in selected):
+if not selected:
+ raise SystemExit("ERROR: no operator-managed Alertmanager pods matched the expected resource (response redacted).")
+if not valid:
  raise SystemExit("ERROR: running Alertmanager pods do not have the exact watchdog Secret mount (response redacted).")
 print(*names, sep="\n")
 PY
