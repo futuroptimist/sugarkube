@@ -298,9 +298,10 @@ Installation refuses every environment except explicit `env=staging`, checks the
 hostname against `clusters/staging/nodes.txt`, and reads only from the controlling terminal with echo
 disabled. Do not pass a URL as an argument, environment variable, pipe, transcript, or command.
 
-After this change merges, perform these steps **separately on each of `sugarkube3`, `sugarkube4`, and
-`sugarkube5`**. Use that physical node's own rotated URL; `<ROTATED-NODE-PING-URL>` below is a label,
-not text to paste.
+The heartbeat timers are installed on `sugarkube3`, `sugarkube4`, and `sugarkube5`. Use the following
+procedure only for initial provisioning of another staging node, reprovisioning, or URL rotation.
+Perform it on the affected physical node with its own rotated URL; `<ROTATED-NODE-PING-URL>` below is
+a label, not text to paste.
 
 1. Log in to the node, update `main`, and confirm that you are operating on the intended host:
 
@@ -337,8 +338,9 @@ confirmation. This disables the timer and removes only this feature's unit, exec
 credential. It does **not** delete or change Healthchecks.io checks, integrations, or PagerDuty
 configuration. Deleting the credential means reinstall requires the node's rotated URL again.
 
-The Alertmanager-driven observability watchdog, in-cluster `KubeNodeNotReady` routing, and all
-application alert rules explicitly remain later tasks.
+The Alertmanager-driven observability watchdog configuration and operator workflows are
+repository-ready, but await post-merge installation, deployment, and proof. In-cluster
+`KubeNodeNotReady` routing and all application alert rules explicitly remain later tasks.
 
 ## Reprovisioning proof and post-merge checklist
 
@@ -398,6 +400,60 @@ lost, and distinct from the automated evidence above:
 
 Additional dashboards, Grafana persistence, central multi-cluster Grafana, and production
 observability codification are separate follow-ups. The existing blackbox NetworkPolicy is unchanged.
-Alerting onboarding — real Alertmanager receivers, external heartbeats, and failure drills — is no
-longer undesigned scope creep; it is planned, designed work tracked in
-[`docs/observability-alerting.md`](observability-alerting.md), just not yet executed.
+The synthetic Alertmanager → PagerDuty route is deployed and delivery-tested. External node-heartbeat
+timers are installed on `sugarkube3`, `sugarkube4`, and `sugarkube5`; their node-power-off drill
+remains outstanding. The watchdog's secret-safe configuration and operator workflows are
+repository-ready, as tracked in [`docs/observability-alerting.md`](observability-alerting.md). Its
+Secret installation, deployment, live confirmation, and failure-drill evidence remain post-merge
+operator work.
+
+## Observability watchdog
+
+The staging-only `SugarkubeObservabilityWatchdog` rule is configured to evaluate `vector(1)` every
+minute after deployment. Its exact
+`staging`/`sugarkube-int`/`observability-watchdog` labels route only to the secret-file-backed
+Healthchecks receiver. Alertmanager waits 30 seconds, groups by alert name, cluster, and environment,
+and repeats every five minutes; configure the Healthchecks check for a **five-minute period and
+two-minute grace**. Keep “last ping” confirmation manual: no Healthchecks account credential belongs
+in this repository.
+
+### Install, deploy, and verify
+
+1. Select the `sugar-staging` context and run
+   `just observability-watchdog-secret-install env=staging`. Input is hidden and must not be supplied
+   in argv or environment variables. Check only its contract with
+   `just observability-watchdog-secret-check env=staging`.
+2. Run `just observability-render env=staging >/dev/null`, then
+   `just observability-upgrade env=staging`. Install and upgrade refuse mutation unless both the
+   PagerDuty `routing-key` and watchdog `ping-url` Secret contracts are nonempty.
+3. Run `just observability-watchdog-verify env=staging`, then manually confirm Healthchecks **Last
+   Ping** advances. The command checks the firing rule and exact labels, active Alertmanager alert,
+   live CR/generated configuration, mount contract, and a bounded six-minute delivery-log window;
+   it accesses neither credential.
+
+Expected first delivery after deployment is within roughly 90 seconds (one-minute evaluation plus
+30-second group wait), and repeats are five minutes apart. After a delivery stops, Healthchecks
+should become late and page after its five-minute period plus two-minute grace. After the silence
+expires or is cleared, recovery is expected on the next five-minute repeat; manually confirm both
+the new Healthchecks ping and the PagerDuty incident's resolution. These are post-merge staging
+checks, not deployment evidence from this change.
+
+### Controlled failure drill and recovery
+
+First manually confirm a recent successful Healthchecks ping. Run
+`just observability-watchdog-drill-start env=staging`. It creates only an eight-minute Alertmanager
+silence with the watchdog's exact four labels; automatic expiry preserves recovery if the operator
+disconnects. It never shuts down a node and never manually pings the URL. Inspect it with
+`just observability-watchdog-drill-status env=staging`, or remove only that owned silence early with
+`just observability-watchdog-drill-clear env=staging`. Automated tests inspect the payload and do not
+wait eight minutes.
+
+During the drill, manually confirm Healthchecks transitions to late/down, the Healthchecks-managed
+PagerDuty integration creates an incident, and the incident can be acknowledged. After automatic
+expiry (or early clear), confirm a new Alertmanager delivery returns Healthchecks to up and the
+PagerDuty incident recovers and resolves. Re-run live verification.
+
+> **ROLLBACK CHECKPOINT:** Before rolling back to any revision that removes the watchdog receiver,
+> pause the Healthchecks check or its PagerDuty integration. Otherwise rollback itself generates a
+> page. After pausing, perform the documented Helm rollback, verify the intended prior structure,
+> and retain or remove the Kubernetes Secret only according to that revision's contract.

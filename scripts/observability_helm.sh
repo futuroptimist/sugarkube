@@ -14,9 +14,10 @@ DASHBOARD_VALIDATOR="${ROOT}/scripts/validate_observability_dashboard.py"
 TIMEOUT="${SUGARKUBE_OBSERVABILITY_HELM_TIMEOUT:-20m}"
 GRAFANA_URL="http://sugarkube3.local:30300"
 PAGERDUTY_SECRET="alertmanager-pagerduty"
+WATCHDOG_SECRET="alertmanager-healthchecks-watchdog"
 ALERTMANAGER_VALIDATOR="${ROOT}/scripts/verify_observability_alertmanager.rb"
 
-usage() { echo "Usage: $0 <render|install|upgrade|status|verify|dashboard-verify|pagerduty-test> env=staging [fire|resolve]" >&2; }
+usage() { echo "Usage: $0 <render|install|upgrade|status|verify|dashboard-verify|pagerduty-test|watchdog-secret-install|watchdog-secret-check|watchdog-verify|watchdog-drill-create|watchdog-drill-status|watchdog-drill-clear> env=staging [fire|resolve]" >&2; }
 normalize_env() {
   local raw="${1:-}"
   while [[ "${raw}" == env=* ]]; do raw="${raw#env=}"; done
@@ -30,7 +31,8 @@ normalize_env() {
 require_tools() { for t in "$@"; do command -v "$t" >/dev/null 2>&1 || { echo "ERROR: required tool missing: $t" >&2; exit 127; }; done; }
 current_context() { kubectl config current-context 2>/dev/null || true; }
 print_resolved() {
-  local env="$1" ctx; ctx="$(current_context)"
+  local env="$1" ctx
+  if (($# >= 2)); then ctx="$2"; else ctx="$(current_context)"; fi
   cat <<EOT
 observability environment: ${env}
 current Kubernetes context: ${ctx:-<unknown>}
@@ -78,6 +80,19 @@ assert_pagerduty_secret() {
   fi
   echo "PagerDuty Secret contract exists (value intentionally not read or printed)."
 }
+assert_watchdog_secret() {
+  local present
+  if ! present="$(kubectl -n "${NAMESPACE}" get secret "${WATCHDOG_SECRET}" -o 'go-template={{if index .data "ping-url"}}present{{end}}' 2>/dev/null)"; then
+    echo "ERROR: required Secret monitoring/alertmanager-healthchecks-watchdog is absent; install a nonempty ping-url before deployment or verification." >&2
+    return 15
+  fi
+  if [[ "${present}" != present ]]; then
+    echo "ERROR: Secret monitoring/alertmanager-healthchecks-watchdog must contain a nonempty ping-url (value intentionally not read or printed)." >&2
+    return 15
+  fi
+  echo "Watchdog Secret contract exists (value intentionally not read or printed)."
+}
+assert_integration_secrets() { assert_pagerduty_secret && assert_watchdog_secret; }
 release_state() {
   local matches
   # Do not infer absence from `helm status`: transport and authorization errors
@@ -95,9 +110,107 @@ release_state() {
     return 1
   fi
 }
-render() { validate_dashboard; require_tools helm kubectl python3 ruby; print_resolved staging; tmp="$(mktemp -t sugarkube-observability-render.XXXXXX.yaml)"; trap 'rm -f "${tmp}"' EXIT; render_to "${tmp}"; cat "${tmp}"; }
-install_release() { validate_dashboard; require_tools helm kubectl python3 ruby; print_resolved staging; assert_context; assert_pagerduty_secret; tmp="$(mktemp -t sugarkube-observability-install.XXXXXX.yaml)"; trap 'rm -f "${tmp:-}"' EXIT; render_to "${tmp}"; state="$(release_state)"; if [[ "${state}" == present ]]; then echo "ERROR: cannot install: ${RELEASE} already exists in ${NAMESPACE}. Use observability-upgrade." >&2; exit 4; fi; helm install "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --create-namespace --version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}" --set-file "${DASHBOARD_VALUE}=${DASHBOARD}" --wait --timeout "${TIMEOUT}"; }
-upgrade_release() { validate_dashboard; require_tools helm kubectl python3 ruby; print_resolved staging; assert_context; assert_pagerduty_secret; tmp="$(mktemp -t sugarkube-observability-upgrade.XXXXXX.yaml)"; trap 'rm -f "${tmp:-}"' EXIT; render_to "${tmp}"; state="$(release_state)"; if [[ "${state}" == absent ]]; then echo "ERROR: upgrade requires an existing Helm release ${RELEASE} in ${NAMESPACE}. Use observability-install for a fresh cluster." >&2; exit 5; fi; helm upgrade "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}" --set-file "${DASHBOARD_VALUE}=${DASHBOARD}" --wait --timeout "${TIMEOUT}"; }
+render() { validate_dashboard; require_tools helm python3 ruby; print_resolved staging '<not queried: offline render>'; tmp="$(mktemp -t sugarkube-observability-render.XXXXXX.yaml)"; trap 'rm -f "${tmp}"' EXIT; render_to "${tmp}"; cat "${tmp}"; }
+install_release() { validate_dashboard; require_tools helm kubectl python3 ruby; print_resolved staging; assert_context; assert_integration_secrets; tmp="$(mktemp -t sugarkube-observability-install.XXXXXX.yaml)"; trap 'rm -f "${tmp:-}"' EXIT; render_to "${tmp}"; state="$(release_state)"; if [[ "${state}" == present ]]; then echo "ERROR: cannot install: ${RELEASE} already exists in ${NAMESPACE}. Use observability-upgrade." >&2; exit 4; fi; helm install "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --create-namespace --version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}" --set-file "${DASHBOARD_VALUE}=${DASHBOARD}" --wait --timeout "${TIMEOUT}"; }
+upgrade_release() { validate_dashboard; require_tools helm kubectl python3 ruby; print_resolved staging; assert_context; assert_integration_secrets; tmp="$(mktemp -t sugarkube-observability-upgrade.XXXXXX.yaml)"; trap 'rm -f "${tmp:-}"' EXIT; render_to "${tmp}"; state="$(release_state)"; if [[ "${state}" == absent ]]; then echo "ERROR: upgrade requires an existing Helm release ${RELEASE} in ${NAMESPACE}. Use observability-install for a fresh cluster." >&2; exit 5; fi; helm upgrade "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}" --set-file "${DASHBOARD_VALUE}=${DASHBOARD}" --wait --timeout "${TIMEOUT}"; }
+WATCHDOG_TTY="${SUGARKUBE_WATCHDOG_TTY:-/dev/tty}"
+WATCHDOG_API="/api/v1/namespaces/${NAMESPACE}/services/http:${RELEASE}-alertmanager:9093/proxy/api/v2"
+
+watchdog_secret_check() { assert_context; assert_watchdog_secret; }
+watchdog_secret_install() {
+  assert_context
+  [[ -z "${HEALTHCHECKS_PING_URL:-}${HEALTHCHECK_PING_URL:-}${PING_URL:-}${WATCHDOG_PING_URL:-}" ]] || { echo "ERROR: credential environment variables are refused." >&2; return 2; }
+  [[ $# == 0 ]] || { echo "ERROR: credential arguments are refused." >&2; return 2; }
+  local value
+  exec 3<"${WATCHDOG_TTY}"
+  [[ "${SUGARKUBE_WATCHDOG_TEST_NONTTY:-0}" == 1 || -t 3 ]] || { echo "ERROR: an interactive controlling terminal is required." >&2; return 2; }
+  printf 'Enter the Healthchecks watchdog ping URL (input hidden): ' >&2
+  IFS= read -r -s value <&3 || { echo "ERROR: could not read the ping URL (value redacted)." >&2; return 2; }
+  printf '\n' >&2
+  [[ "${value}" =~ ^https://hc-ping\.com/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ && "${value}" != *$'\n'* ]] || { unset value; echo "ERROR: ping URL is invalid (value redacted)." >&2; return 2; }
+  if ! printf '%s' "${value}" | kubectl -n "${NAMESPACE}" create secret generic "${WATCHDOG_SECRET}" --from-file=ping-url=/dev/stdin --dry-run=client -o yaml | kubectl apply -f - >/dev/null; then
+    unset value; echo "ERROR: watchdog Secret installation failed (value redacted)." >&2; return 1
+  fi
+  unset value
+  echo "Watchdog Secret installed or rotated (value not displayed)."
+}
+
+watchdog_live_check() (
+  require_tools kubectl python3 ruby sleep
+  assert_context
+  assert_watchdog_secret
+  local tmp observation
+  tmp="$(mktemp -d -t sugarkube-watchdog-verify.XXXXXX)"; chmod 700 "${tmp}"; trap 'rm -rf "${tmp}"' EXIT
+  kubectl get --raw "/api/v1/namespaces/${NAMESPACE}/services/http:${RELEASE}-prometheus:9090/proxy/api/v1/rules" >"${tmp}/rules"
+  kubectl get --raw "${WATCHDOG_API}/alerts" >"${tmp}/alerts"
+  python3 - "${tmp}/rules" "${tmp}/alerts" <<'PY'
+import json, sys
+wanted={"alertname":"SugarkubeObservabilityWatchdog","environment":"staging","cluster":"sugarkube-int","purpose":"observability-watchdog"}
+expected_rule_labels={k:v for k,v in wanted.items() if k!="alertname"}
+try:
+    rules_doc, alerts = (json.load(open(path, encoding="utf-8")) for path in sys.argv[1:])
+except (OSError, UnicodeError, json.JSONDecodeError):
+    raise SystemExit("ERROR: watchdog APIs returned malformed data (responses redacted).")
+rules=[r for g in rules_doc.get("data",{}).get("groups",[]) for r in g.get("rules",[]) if r.get("name")==wanted["alertname"]]
+if len(rules)!=1 or rules[0].get("state")!="firing" or rules[0].get("query")!="vector(1)" or rules[0].get("labels")!=expected_rule_labels:
+    raise SystemExit("ERROR: unique vector(1) watchdog rule is not firing with required labels (response redacted).")
+matching=[a for a in alerts if a.get("status",{}).get("state")=="active" and all(a.get("labels",{}).get(k)==v for k,v in wanted.items())]
+if len(matching)!=1:
+    raise SystemExit("ERROR: unique watchdog alert is not active with required routing labels (response redacted).")
+PY
+  kubectl -n "${NAMESPACE}" get alertmanager "${RELEASE}-alertmanager" -o yaml >"${tmp}/cr"
+  kubectl -n "${NAMESPACE}" get secret "alertmanager-${RELEASE}-alertmanager" -o yaml >"${tmp}/config"
+  ruby "${ALERTMANAGER_VALIDATOR}" live "${tmp}/cr" "${tmp}/config"
+  kubectl -n "${NAMESPACE}" get pods -l 'app.kubernetes.io/name=alertmanager' -o json >"${tmp}/pods"
+  python3 - "${tmp}/pods" <<'PY'
+import json, sys
+try: pods=json.load(open(sys.argv[1], encoding="utf-8")).get("items",[])
+except (OSError, UnicodeError, json.JSONDecodeError): raise SystemExit("ERROR: Alertmanager pod data is malformed (response redacted).")
+def mounted(p):
+ spec=p.get("spec",{}); vols=spec.get("volumes",[])
+ names={v.get("name") for v in vols if v.get("secret",{}).get("secretName")=="alertmanager-healthchecks-watchdog"}
+ return names and any(m.get("name") in names and m.get("mountPath")=="/etc/alertmanager/secrets/alertmanager-healthchecks-watchdog" and m.get("readOnly") is True for c in spec.get("containers",[]) for m in c.get("volumeMounts",[]))
+if not pods or any(p.get("status",{}).get("phase")!="Running" or not mounted(p) for p in pods):
+ raise SystemExit("ERROR: running Alertmanager pods do not have the exact watchdog Secret mount (response redacted).")
+PY
+  observation="${SUGARKUBE_WATCHDOG_OBSERVATION_SECONDS:-310}"
+  [[ "${observation}" =~ ^[0-9]+$ ]] || { echo "ERROR: watchdog observation duration must be an integer." >&2; return 2; }
+  if ((observation < 300)) && [[ "${SUGARKUBE_WATCHDOG_TEST_ALLOW_SHORT_OBSERVATION:-0}" != 1 ]]; then
+    echo "ERROR: watchdog observation must cover at least one five-minute repeat." >&2; return 2
+  fi
+  sleep "${observation}"
+  if ! kubectl -n "${NAMESPACE}" logs "statefulset/${RELEASE}-alertmanager" --since="$((observation + 60))s" >"${tmp}/logs" 2>"${tmp}/logs.stderr"; then
+    echo "ERROR: Alertmanager logs could not be retrieved (details redacted)." >&2; return 1
+  fi
+  python3 - "${tmp}/logs" <<'PY'
+import re,sys
+try: text=open(sys.argv[1], encoding="utf-8", errors="replace").read()
+except OSError: raise SystemExit("ERROR: Alertmanager logs could not be inspected (details redacted).")
+receiver=r'(?:healthchecks-watchdog|alertmanager-healthchecks-watchdog)'
+error=r'(?:error|failed|failure|timeout|refused)'
+if re.search(fr'(?i)(?:{receiver}).{{0,240}}{error}|{error}.{{0,240}}(?:{receiver})', text):
+ raise SystemExit("ERROR: watchdog receiver delivery error observed (details redacted).")
+PY
+  echo "Watchdog rule, active alert, live configuration, pod mount, and bounded repeat observation verified; delivery must be confirmed at Healthchecks."
+)
+
+watchdog_silence_create() {
+  assert_context
+  cat >&2 <<'EOF2'
+MANUAL CHECKPOINT: confirm Healthchecks has a recent watchdog ping before disruption and confirm the PagerDuty resolution after recovery. This creates only an eight-minute silence.
+EOF2
+  python3 -c 'import json; from datetime import datetime,timedelta,timezone; n=datetime.now(timezone.utc); f=lambda d:d.isoformat(timespec="seconds").replace("+00:00","Z"); print(json.dumps({"matchers":[{"name":k,"value":v,"isRegex":False} for k,v in [("alertname","SugarkubeObservabilityWatchdog"),("environment","staging"),("cluster","sugarkube-int"),("purpose","observability-watchdog")]],"startsAt":f(n),"endsAt":f(n+timedelta(minutes=8)),"createdBy":"sugarkube-observability-watchdog-drill","comment":"Owned staging watchdog failure drill"}))' | kubectl create --raw "${WATCHDOG_API}/silences" -f - | python3 -c 'import json,sys; d=json.load(sys.stdin); print("Owned watchdog drill silence created; id="+d["silenceID"]+"; automatic expiry=8m.")'
+}
+watchdog_owned_silences() {
+  kubectl get --raw "${WATCHDOG_API}/silences" | python3 -c 'import json,sys; wanted=[("alertname","SugarkubeObservabilityWatchdog"),("environment","staging"),("cluster","sugarkube-int"),("purpose","observability-watchdog")]; out=[]
+for x in json.load(sys.stdin):
+ m=x.get("matchers"); exact=isinstance(m,list) and len(m)==4 and sorted((a.get("name"),a.get("value")) for a in m if isinstance(a,dict) and a.get("isRegex") is False and set(a)=={"name","value","isRegex"})==sorted(wanted)
+ if x.get("createdBy")=="sugarkube-observability-watchdog-drill" and x.get("comment")=="Owned staging watchdog failure drill" and x.get("status",{}).get("state") in ("active","pending") and exact: out.append(x["id"])
+print("\n".join(out))'
+}
+watchdog_silence_list() { assert_context; local ids; ids="$(watchdog_owned_silences)"; [[ -n "${ids}" ]] && printf 'Owned active/pending watchdog drill silence IDs:\n%s\n' "${ids}" || echo "No owned active/pending watchdog drill silence."; }
+watchdog_silence_clear() { assert_context; local ids; ids="$(watchdog_owned_silences)"; [[ -n "${ids}" ]] || { echo "No owned active/pending watchdog drill silence to clear."; return; }; while IFS= read -r id; do kubectl delete --raw "${WATCHDOG_API}/silence/${id}" >/dev/null; done <<<"${ids}"; echo "Owned watchdog drill silence cleared."; }
+
 status() { require_tools helm kubectl python3; print_resolved staging; assert_context; helm -n "${NAMESPACE}" status "${RELEASE}"; kubectl -n "${NAMESPACE}" get deploy,statefulset,daemonset -l "app.kubernetes.io/instance=${RELEASE}"; kubectl -n "${NAMESPACE}" get prometheus,alertmanager; kubectl -n "${NAMESPACE}" get svc,pvc; kubectl get crd prometheuses.monitoring.coreos.com alertmanagers.monitoring.coreos.com servicemonitors.monitoring.coreos.com probes.monitoring.coreos.com; }
 verify_dspace_targets() {
   require_tools kubectl python3 sleep
@@ -247,7 +360,7 @@ if len(claims) != 1 or claims[0].get("status", {}).get("phase") != "Bound" or cl
     raise SystemExit("ERROR: expected one Bound local-path Prometheus PVC.")'
   [[ "$(kubectl -n "${NAMESPACE}" get prometheus kube-prometheus-stack-prometheus -o jsonpath='{.spec.replicas}')" == 1 ]]
   [[ "$(kubectl -n "${NAMESPACE}" get alertmanager kube-prometheus-stack-alertmanager -o jsonpath='{.spec.replicas}')" == 1 ]]
-  assert_pagerduty_secret
+  assert_integration_secrets
   local alertmanager_yaml="" config_yaml=""
   trap 'rm -f "${alertmanager_yaml:-}" "${config_yaml:-}"' EXIT
   alertmanager_yaml="$(mktemp -t sugarkube-alertmanager-cr.XXXXXX.yaml)"
@@ -459,4 +572,4 @@ if not isinstance(dashboard, dict) or dashboard.get("uid") != "sugarkube-staging
 cmd="${1:-}"; shift || true; [[ -n "${cmd}" ]] || { usage; exit 2; }
 env_arg="${1:-}"; normalize_env "${env_arg}" >/dev/null
 validate_dashboard
-case "${cmd}" in render) render ;; install) install_release ;; upgrade) upgrade_release ;; status) status ;; verify) verify ;; dashboard-verify) dashboard_verify ;; pagerduty-test) pagerduty_test "${2:-${1:-}}" ;; *) usage; exit 2 ;; esac
+case "${cmd}" in render) render ;; install) install_release ;; upgrade) upgrade_release ;; status) status ;; verify) verify ;; dashboard-verify) dashboard_verify ;; pagerduty-test) pagerduty_test "${2:-${1:-}}" ;; watchdog-secret-install) watchdog_secret_install "${@:2}" ;; watchdog-secret-check) watchdog_secret_check ;; watchdog-verify) watchdog_live_check ;; watchdog-drill-create) watchdog_silence_create ;; watchdog-drill-status) watchdog_silence_list ;; watchdog-drill-clear) watchdog_silence_clear ;; *) usage; exit 2 ;; esac

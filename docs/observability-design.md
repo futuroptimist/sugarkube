@@ -352,8 +352,10 @@ Do not page on symptoms without a response path, such as low traffic, GitHub sta
    enable real alerts only when actionable and linked to tested runbooks. See
    [`docs/observability-alerting.md`](./observability-alerting.md) for the rollout sequence.
 7. **Staging failure drills**: the synthetic Alertmanager → PagerDuty fire, acknowledgement, and
-   resolution path is proven. Per-node Healthchecks.io installation and power-off drills are next;
-   the watchdog, `KubeNodeNotReady` route, and application drills remain later work. See
+   resolution path is proven. Per-node Healthchecks.io installation and power-off drills are next.
+   The watchdog configuration and workflows are repository-ready, while Secret installation,
+   deployment, live Last Ping confirmation, and its PagerDuty drill remain post-merge;
+   `KubeNodeNotReady` routing and application drills remain later work. See
    [`docs/observability-alerting.md`](./observability-alerting.md) §6.
 8. **Production rollout**: promote the monitoring stack and app scrape hooks after staging soak and drill evidence.
 9. **Post-release baseline review**: after at least one production week, adjust thresholds, retention, dashboard rows, and noisy alerts based on measured data.
@@ -379,6 +381,19 @@ Prometheus or Grafana should not be listed as production skills until evidence e
 
 - Which cluster names should distinguish staging and production if both run on Sugarkube-managed hardware?
 - Should app metrics endpoints use bearer tokens, network policy only, or both?
-- The Alertmanager receiver question is answered at the design level: PagerDuty plus Healthchecks.io, per [`docs/observability-alerting.md`](./observability-alerting.md). What remains open is execution — accounts, secret-safe config, and drills, none of which are done yet.
+- The Alertmanager receiver question is implemented for the proven synthetic PagerDuty route and the
+  repository-ready, secret-file-backed Healthchecks watchdog, per
+  [`docs/observability-alerting.md`](./observability-alerting.md). The watchdog's post-merge Secret
+  installation, deployment, live Last Ping confirmation, and PagerDuty drill evidence remain open.
 - What Prometheus PV size is realistic after a one-week staging soak on the target Pi hardware?
 - Should Loki remain entirely deferred, or should minimal log labels be designed now without deploying Loki?
+
+### Staging dead-man watchdog boundary
+
+The repository-ready staging watchdog is an always-firing `vector(1)` rule delivered through a
+dedicated, Secret-mounted Healthchecks webhook. It proves rule evaluation and outbound Alertmanager
+routing; it does not prove any individual node is alive, replace ordinary Prometheus alerts, or probe public
+endpoints. Those remain, respectively, the node-heartbeat timer, null-by-default reviewed alert
+allowlists, and blackbox probes. The watchdog has no production configuration. Its exact routing and
+five-minute Healthchecks cadence are operated through the
+[watchdog runbook](./observability-operations.md#observability-watchdog).

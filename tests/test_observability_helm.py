@@ -24,6 +24,11 @@ LEGACY = [
 ]
 
 
+def watchdog_canary():
+    uuid = "12345678" + "-1234-4123-8123-123456789abc"
+    return "https://" + "hc-ping.com/" + uuid, uuid
+
+
 def yaml_load(path: Path):
     result = subprocess.run(
         [
@@ -61,20 +66,32 @@ def test_chart_version_and_values_match_live_staging_baseline():
     assert pvc["resources"]["requests"]["storage"] == "20Gi"
     assert staging["prometheus"]["prometheusSpec"]["externalLabels"] == {"cluster": "sugarkube-int"}
     alertmanager = staging["alertmanager"]
-    assert alertmanager["alertmanagerSpec"]["secrets"] == ["alertmanager-pagerduty"]
+    assert alertmanager["alertmanagerSpec"]["secrets"] == [
+        "alertmanager-pagerduty",
+        "alertmanager-healthchecks-watchdog",
+    ]
     route = alertmanager["config"]["route"]
     assert route["receiver"] == "null"
-    assert route["routes"] == [
-        {
-            "receiver": "pagerduty-synthetic-test",
-            "matchers": [
-                'alertname="SugarkubePagerDutyTest"',
-                'environment="staging"',
-                'cluster="sugarkube-int"',
-                'severity="critical"',
-            ],
-        }
-    ]
+    assert {
+        key: route[key] for key in ("group_by", "group_wait", "group_interval", "repeat_interval")
+    } == {
+        "group_by": None,
+        "group_wait": None,
+        "group_interval": None,
+        "repeat_interval": None,
+    }
+    assert route["routes"][0] == {
+        "receiver": "pagerduty-synthetic-test",
+        "matchers": [
+            'alertname="SugarkubePagerDutyTest"',
+            'environment="staging"',
+            'cluster="sugarkube-int"',
+            'severity="critical"',
+        ],
+    }
+    watchdog_route = route["routes"][1]
+    assert watchdog_route["receiver"] == "healthchecks-watchdog"
+    assert watchdog_route["repeat_interval"] == "5m"
     pagerduty_receiver = next(
         receiver
         for receiver in alertmanager["config"]["receivers"]
@@ -145,7 +162,7 @@ kind: Alertmanager
 metadata:
   name: kube-prometheus-stack-alertmanager
 spec:
-  secrets: [{secret}]
+  secrets: [{secret}, alertmanager-healthchecks-watchdog]
 ---
 apiVersion: v1
 kind: Secret
@@ -159,22 +176,39 @@ stringData:
         - receiver: pagerduty-synthetic-test
           matchers:
 {matcher_yaml}
+        - receiver: healthchecks-watchdog
+          matchers:
+            - 'alertname="SugarkubeObservabilityWatchdog"'
+            - 'environment="staging"'
+            - 'cluster="sugarkube-int"'
+            - 'purpose="observability-watchdog"'
+          group_by: [alertname, cluster, environment]
+          group_wait: 30s
+          group_interval: 1m
+          repeat_interval: 5m
+          continue: false
     receivers:
       - name: "null"
       - name: pagerduty-synthetic-test
         pagerduty_configs:
           - routing_key_file: {path}
             send_resolved: true{inline_field}
+      - name: healthchecks-watchdog
+        webhook_configs:
+          - url_file: /etc/alertmanager/secrets/alertmanager-healthchecks-watchdog/ping-url
+            send_resolved: false
+            max_alerts: 1
+            timeout: 10s
 """
 
 
 @pytest.mark.parametrize(
     ("kwargs", "diagnostic"),
     [
-        ({"secret": "wrong-secret"}, "must reference only"),
-        ({"path": "/wrong/path"}, "exact mounted routing-key file"),
+        ({"secret": "wrong-secret"}, "exactly the two expected"),
+        ({"path": "/wrong/path"}, "PagerDuty configuration is malformed"),
         ({"matchers": ['severity="critical"']}, "exact synthetic allowlist"),
-        ({"inline": True}, "inline PagerDuty credentials are forbidden"),
+        ({"inline": True}, "inline credentials or webhook URLs are forbidden"),
     ],
 )
 def test_alertmanager_validator_rejects_missing_mount_wrong_path_inline_and_broad_route(
@@ -262,14 +296,14 @@ def test_alertmanager_validator_redacts_invalid_base64(tmp_path):
                 "      routes:\n        - receiver: pagerduty-synthetic-test",
                 "      routes:\n        - receiver: nested\n          routes:\n            - receiver: pagerduty-synthetic-test",
             ),
-            "direct child of the root route",
+            "PagerDuty route ordering or receiver changed",
         ),
         (
             lambda text: text.replace(
                 "    receivers:\n",
                 "    receivers:\n      - name: alternate\n        pagerduty_configs: []\n",
             ),
-            "exactly one PagerDuty receiver",
+            "receiver list must contain exactly",
         ),
         (
             lambda text: text.replace(
@@ -280,24 +314,38 @@ def test_alertmanager_validator_redacts_invalid_base64(tmp_path):
         ),
         (
             lambda text: text.replace(
+                "        pagerduty_configs:",
+                "        email_configs: []\n        pagerduty_configs:",
+            ),
+            "PagerDuty receiver is malformed",
+        ),
+        (
+            lambda text: text.replace(
+                "        webhook_configs:",
+                "        slack_configs: []\n        webhook_configs:",
+            ),
+            "Healthchecks receiver is malformed",
+        ),
+        (
+            lambda text: text.replace(
                 "            - 'severity=\"critical\"'",
                 "            - 'severity=\"critical\"'\n          continue: false",
             ),
-            "must not specify continuation",
+            "PagerDuty route must contain only receiver and exact matchers",
         ),
         (
             lambda text: text.replace(
                 "            - 'severity=\"critical\"'",
                 "            - 'severity=\"critical\"'\n          routes: []",
             ),
-            "must not contain nested routes",
+            "PagerDuty route must contain only receiver and exact matchers",
         ),
         (
             lambda text: text.replace(
                 "    receivers:",
                 "    routing_" + "key: forbidden-stub\n    receivers:",
             ),
-            "inline PagerDuty credentials are forbidden",
+            "inline credentials or webhook URLs are forbidden",
         ),
         (
             lambda text: text.replace(
@@ -308,7 +356,7 @@ def test_alertmanager_validator_redacts_invalid_base64(tmp_path):
                 "      routes:",
                 "      routes:\n        - receiver: alternate\n          matchers: ['severity=~\".*\"']",
             ),
-            "inline PagerDuty credentials are forbidden",
+            "inline credentials or webhook URLs are forbidden",
         ),
     ],
     ids=[
@@ -316,6 +364,8 @@ def test_alertmanager_validator_redacts_invalid_base64(tmp_path):
         "nested-route",
         "alternate-receiver",
         "additional-config",
+        "pagerduty-extra-integration",
+        "healthchecks-extra-integration",
         "continuation",
         "nested-children",
         "recursive-inline-key",
@@ -335,6 +385,7 @@ def test_alertmanager_validator_rejects_deterministic_contract_mutations(
     )
     assert result.returncode == 16
     assert diagnostic in result.stderr
+    assert "structure invalid" in result.stderr
     assert "forbidden-stub" not in result.stderr
 
 
@@ -370,12 +421,12 @@ def test_install_upgrade_are_distinct_and_render_before_mutation():
     install = re.search(r"install_release\(\).*?\nupgrade_release\(", script, re.S).group(0)
     upgrade = re.search(r"upgrade_release\(\).*?\nstatus\(", script, re.S).group(0)
     assert "render_to" in install and "helm install" in install
-    assert install.index("assert_pagerduty_secret") < install.index("render_to")
+    assert install.index("assert_integration_secrets") < install.index("render_to")
     assert install.index("render_to") < install.index("helm install")
     assert 'state="$(release_state)"' in install
     assert "already exists" in install
     assert "render_to" in upgrade and "helm upgrade" in upgrade
-    assert upgrade.index("assert_pagerduty_secret") < upgrade.index("render_to")
+    assert upgrade.index("assert_integration_secrets") < upgrade.index("render_to")
     assert upgrade.index("render_to") < upgrade.index("helm upgrade")
     assert 'state="$(release_state)"' in upgrade
     assert "requires an existing Helm release" in upgrade
@@ -431,6 +482,60 @@ def test_justfile_exposes_observability_recipes():
         assert f"{recipe} env=''" in text
         assert f"scripts/observability_helm.sh {recipe.removeprefix('observability-')}" in text
 
+    watchdog_recipes = {
+        "observability-watchdog-secret-install": "watchdog-secret-install",
+        "observability-watchdog-secret-check": "watchdog-secret-check",
+        "observability-watchdog-verify": "watchdog-verify",
+        "observability-watchdog-drill-start": "watchdog-drill-create",
+        "observability-watchdog-drill-status": "watchdog-drill-status",
+        "observability-watchdog-drill-clear": "watchdog-drill-clear",
+    }
+    for recipe, subcommand in watchdog_recipes.items():
+        recipe_block = text.split(f"{recipe} env='':", 1)[1].split("\n\n", 1)[0]
+        assert f"scripts/observability_helm.sh {subcommand} '{{{{ env }}}}'" in recipe_block
+        assert "env=staging" not in recipe_block
+        assert "env={{ env }}" not in recipe_block
+
+
+def test_watchdog_documentation_timing_matches_configuration():
+    operations = (ROOT / "docs" / "observability-operations.md").read_text(encoding="utf-8")
+    assert not re.search(
+        r"The Alertmanager-driven observability watchdog,.{0,200}remain later tasks",
+        operations,
+        re.DOTALL,
+    )
+    for recipe in (
+        "secret-install",
+        "secret-check",
+        "verify",
+        "drill-start",
+        "drill-status",
+        "drill-clear",
+    ):
+        assert f"just observability-watchdog-{recipe} env=staging" in operations
+
+    staging = yaml_load(STAGING)
+    route = staging["alertmanager"]["config"]["route"]["routes"][1]
+    assert route["repeat_interval"] == "5m"
+    assert re.search(r"five-minute period and\s+two-minute grace", operations)
+    assert re.search(r"eight-minute Alertmanager\s+silence", operations)
+
+
+def test_observability_docs_match_linked_issue_heartbeat_status():
+    alerting = (ROOT / "docs" / "observability-alerting.md").read_text(encoding="utf-8")
+    operations = (ROOT / "docs" / "observability-operations.md").read_text(encoding="utf-8")
+    installed = "installed on `sugarkube3`, `sugarkube4`, and `sugarkube5`"
+
+    assert installed in alerting
+    assert installed in operations
+    for stale_claim in (
+        "ready for a separate post-merge install",
+        "await separate post-merge installation",
+        "After this change merges, perform these steps",
+    ):
+        assert stale_claim not in alerting
+        assert stale_claim not in operations
+
 
 def test_legacy_flux_longhorn_files_are_clearly_marked_inactive():
     for path in LEGACY:
@@ -481,6 +586,11 @@ def run_helper(
     action=None,
     pagerduty_mode="success",
     pagerduty_forward_line="Forwarding from 127.0.0.1:43128 -> 9093",
+    watchdog_tty_text=None,
+    command_args=(),
+    extra_env=None,
+    watchdog_silences=None,
+    watchdog_log_text="",
 ):
     """Run the lifecycle against deterministic command stubs and return its audit log."""
     bin_dir = tmp_path / "bin"
@@ -496,7 +606,7 @@ case "$*" in
     printf '%s\n' 'apiVersion: v1' 'kind: ConfigMap' 'metadata:' '  name: kube-prometheus-stack-grafana-dashboards-sugarkube' '  labels:' '    dashboard-provider: sugarkube' 'data:' '  sugarkube-staging-observability.json:' '    |-'
     sed 's/^/      /' "$DASHBOARD"
     printf '%s\n' '---' 'kind: ConfigMap' 'data:' '  dashboardproviders.yaml: |' '    providers:' '      - name: sugarkube' '        options:' '          path: /var/lib/grafana/dashboards/sugarkube' '---' 'kind: Deployment' 'spec:' '  template:' '    spec:' '      containers:' '        - volumeMounts:' '            - name: dashboards-sugarkube' '              mountPath: /var/lib/grafana/dashboards/sugarkube/sugarkube-staging-observability.json' '              subPath: sugarkube-staging-observability.json'
-    printf '%s\n' '---' 'apiVersion: monitoring.coreos.com/v1' 'kind: Alertmanager' 'metadata:' '  name: kube-prometheus-stack-alertmanager' 'spec:' '  secrets:' '    - alertmanager-pagerduty'
+    printf '%s\n' '---' 'apiVersion: monitoring.coreos.com/v1' 'kind: Alertmanager' 'metadata:' '  name: kube-prometheus-stack-alertmanager' 'spec:' '  secrets:' '    - alertmanager-pagerduty' '    - alertmanager-healthchecks-watchdog'
     printf '%s\n' '---' 'apiVersion: v1' 'kind: Secret' 'metadata:' '  name: alertmanager-kube-prometheus-stack-alertmanager' 'stringData:' '  alertmanager.yaml: |'
     sed 's/^/    /' "$ALERTMANAGER_CONFIG"
     exit 0
@@ -512,17 +622,75 @@ esac
 echo "kubectl $*" >> "$AUDIT"
 case "$*" in
   "config current-context") echo "$CONTEXT" ;;
-  *"get nodes -o json"*) printf '%s\n' '{"items":[{"metadata":{"name":"n1","labels":{"sugarkube.env":"staging","sugarkube.cluster":"sugar-staging"}}}]}' ;;
+  *"get nodes -o json"*)
+    environment=staging
+    [ "$KUBECTL_MODE" != watchdog-cluster-mismatch ] || environment=prod
+    printf '%s\n' '{"items":[{"metadata":{"name":"n1","labels":{"sugarkube.env":"'"$environment"'","sugarkube.cluster":"sugar-staging"}}}]}'
+    ;;
   *"get daemonset kube-prometheus-stack-prometheus-node-exporter"*) [ "$KUBECTL_MODE" = two-nodes ] && echo '2 2' || echo '3 3' ;;
   *"get pvc -o json"*) printf '%s\n' '{"items":[{"metadata":{"name":"generated-pvc","labels":{"app.kubernetes.io/name":"prometheus"}},"spec":{"storageClassName":"local-path"},"status":{"phase":"Bound"}}]}' ;;
   *"get prometheus kube-prometheus-stack-prometheus"*) echo 1 ;;
-  *"get alertmanager kube-prometheus-stack-alertmanager -o yaml"*) printf '%s\n' 'apiVersion: monitoring.coreos.com/v1' 'kind: Alertmanager' 'metadata:' '  name: kube-prometheus-stack-alertmanager' 'spec:' '  secrets:' '    - alertmanager-pagerduty' ;;
+  *"get alertmanager kube-prometheus-stack-alertmanager -o yaml"*) printf '%s\n' 'apiVersion: monitoring.coreos.com/v1' 'kind: Alertmanager' 'metadata:' '  name: kube-prometheus-stack-alertmanager' 'spec:' '  secrets:' '    - alertmanager-pagerduty' '    - alertmanager-healthchecks-watchdog' ;;
   *"get alertmanager kube-prometheus-stack-alertmanager"*) echo 1 ;;
   *"get secret alertmanager-kube-prometheus-stack-alertmanager -o yaml"*)
     printf '%s\n' 'apiVersion: v1' 'kind: Secret' 'metadata:' '  name: alertmanager-kube-prometheus-stack-alertmanager' 'stringData:' '  alertmanager.yaml: |'
     [ "$KUBECTL_MODE" != malformed-alertmanager ] && sed 's/^/    /' "$ALERTMANAGER_CONFIG" || printf '%s\n' '    route: [unterminated'
     ;;
   *"get secret alertmanager-pagerduty -o go-template="*) [ "$KUBECTL_MODE" != missing-pagerduty ] || exit 44; [ "$KUBECTL_MODE" != empty-pagerduty ] && echo present ;;
+  *"get secret alertmanager-healthchecks-watchdog -o go-template="*) [ "$KUBECTL_MODE" != missing-watchdog ] || exit 44; [ "$KUBECTL_MODE" != empty-watchdog ] && echo present ;;
+  *"create secret generic alertmanager-healthchecks-watchdog --from-file=ping-url=/dev/stdin --dry-run=client -o yaml"*)
+    cat > "$WATCHDOG_CREATE_STDIN"
+    [ "$KUBECTL_MODE" != watchdog-create-fail ] || exit 46
+    printf '%s\n' 'apiVersion: v1' 'kind: Secret' 'metadata:' '  name: alertmanager-healthchecks-watchdog' 'data:' '  ping-url: REDACTED_TEST_DATA'
+    ;;
+  *"apply -f -"*)
+    cat > "$WATCHDOG_APPLY_STDIN"
+    [ "$KUBECTL_MODE" != watchdog-apply-fail ] || exit 47
+    ;;
+  *"proxy/api/v1/rules"*)
+    extra=''
+    [ "$KUBECTL_MODE" != watchdog-extra-rule-label ] || extra=',"sentinel":"REJECTED_RULE_PAYLOAD_SENTINEL"'
+    printf '%s\n' '{"data":{"groups":[{"rules":[{"name":"SugarkubeObservabilityWatchdog","state":"firing","query":"vector(1)","labels":{"environment":"staging","cluster":"sugarkube-int","purpose":"observability-watchdog"'"$extra"'}}]}]}}'
+    ;;
+  *"/api/v2/alerts"*) printf '%s\n' '[{"status":{"state":"active"},"labels":{"alertname":"SugarkubeObservabilityWatchdog","environment":"staging","cluster":"sugarkube-int","purpose":"observability-watchdog","prometheus":"platform-added"}}]' ;;
+  *"get pods -l app.kubernetes.io/name=alertmanager -o json"*)
+    phase=Running
+    secret=alertmanager-healthchecks-watchdog
+    volume=watchdog
+    mount=/etc/alertmanager/secrets/alertmanager-healthchecks-watchdog
+    readonly=true
+    case "$KUBECTL_MODE" in
+      watchdog-no-pods) printf '%s\n' '{"items":[],"private":"POD_FIXTURE_SENTINEL"}'; exit 0 ;;
+      watchdog-pod-not-running) phase=Pending ;;
+      watchdog-missing-volume) volume=unmounted ;;
+      watchdog-wrong-secret-volume) secret=another-secret ;;
+      watchdog-missing-mount) volume=mounted-under-another-name ;;
+      watchdog-wrong-mount-path) mount=/etc/alertmanager/secrets/wrong ;;
+      watchdog-mount-not-readonly) readonly=false ;;
+    esac
+    printf '%s\n' '{"items":[{"status":{"phase":"'"$phase"'"},"spec":{"volumes":[{"name":"'"$volume"'","secret":{"secretName":"'"$secret"'"}}],"containers":[{"volumeMounts":[{"name":"watchdog","mountPath":"'"$mount"'","readOnly":'"$readonly"'}]}]},"private":"POD_FIXTURE_SENTINEL"}]}'
+    ;;
+  *"logs statefulset/kube-prometheus-stack-alertmanager"*)
+    case "$KUBECTL_MODE" in
+      watchdog-logs-fail) echo 'PRIVATE_LOG_RETRIEVAL_SENTINEL' >&2; exit 51 ;;
+    esac
+    printf '%s' "$WATCHDOG_LOG_TEXT"
+    ;;
+  *"create --raw /api/v1/namespaces/monitoring/services/http:kube-prometheus-stack-alertmanager:9093/proxy/api/v2/silences -f -"*)
+    cat > "$WATCHDOG_SILENCE_PAYLOAD"
+    [ "$KUBECTL_MODE" != watchdog-silence-create-fail ] || exit 48
+    [ "$KUBECTL_MODE" != watchdog-silence-create-malformed ] || { printf '%s\n' '{malformed'; exit 0; }
+    printf '%s\n' '{"silenceID":"created-owned-silence"}'
+    ;;
+  *"get --raw /api/v1/namespaces/monitoring/services/http:kube-prometheus-stack-alertmanager:9093/proxy/api/v2/silences"*)
+    [ "$KUBECTL_MODE" != watchdog-silences-fail ] || exit 49
+    [ "$KUBECTL_MODE" != watchdog-silences-malformed ] || { printf '%s\n' '{malformed'; exit 0; }
+    cat "$WATCHDOG_SILENCES"
+    ;;
+  *"delete --raw /api/v1/namespaces/monitoring/services/http:kube-prometheus-stack-alertmanager:9093/proxy/api/v2/silence/"*)
+    printf '%s\n' "${3##*/}" >> "$WATCHDOG_SILENCE_DELETIONS"
+    [ "$KUBECTL_MODE" != watchdog-silence-delete-fail ] || exit 50
+    ;;
   *"port-forward"*"service/kube-prometheus-stack-alertmanager"*":9093"*)
     [ "$PAGERDUTY_MODE" != forward-exit ] || { echo PORT_FORWARD_SENTINEL; exit 42; }
     echo "$PAGERDUTY_FORWARD_LINE"
@@ -605,10 +773,26 @@ printf '%s' "$code"
         "ALERTMANAGER_CONFIG": str(tmp_path / "alertmanager-config.yaml"),
         "SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_ATTEMPTS": retry_attempts,
         "SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_INTERVAL_SECONDS": retry_interval,
+        "SUGARKUBE_WATCHDOG_OBSERVATION_SECONDS": "0",
+        "SUGARKUBE_WATCHDOG_TEST_ALLOW_SHORT_OBSERVATION": "1",
+        "SUGARKUBE_WATCHDOG_TTY": str(tmp_path / "watchdog-tty"),
+        "SUGARKUBE_WATCHDOG_TEST_NONTTY": "1",
+        "WATCHDOG_CREATE_STDIN": str(tmp_path / "watchdog-create-stdin"),
+        "WATCHDOG_APPLY_STDIN": str(tmp_path / "watchdog-apply-stdin"),
+        "WATCHDOG_SILENCE_PAYLOAD": str(tmp_path / "watchdog-silence-payload"),
+        "WATCHDOG_SILENCE_DELETIONS": str(tmp_path / "watchdog-silence-deletions"),
+        "WATCHDOG_SILENCES": str(tmp_path / "watchdog-silences.json"),
+        "WATCHDOG_LOG_TEXT": watchdog_log_text,
         "DASHBOARD": str(
             ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
         ),
     }
+    (tmp_path / "watchdog-tty").write_text(watchdog_tty_text or "", encoding="utf-8")
+    (tmp_path / "watchdog-silences.json").write_text(
+        json.dumps(watchdog_silences or []), encoding="utf-8"
+    )
+    if extra_env:
+        env.update(extra_env)
     (tmp_path / "alertmanager-config.yaml").write_text(
         """route:
   receiver: "null"
@@ -619,12 +803,29 @@ printf '%s' "$code"
         - environment="staging"
         - cluster="sugarkube-int"
         - severity="critical"
+    - receiver: healthchecks-watchdog
+      matchers:
+        - alertname="SugarkubeObservabilityWatchdog"
+        - environment="staging"
+        - cluster="sugarkube-int"
+        - purpose="observability-watchdog"
+      group_by: [alertname, cluster, environment]
+      group_wait: 30s
+      group_interval: 1m
+      repeat_interval: 5m
+      continue: false
 receivers:
   - name: "null"
   - name: pagerduty-synthetic-test
     pagerduty_configs:
       - routing_key_file: /etc/alertmanager/secrets/alertmanager-pagerduty/routing-key
         send_resolved: true
+  - name: healthchecks-watchdog
+    webhook_configs:
+      - url_file: /etc/alertmanager/secrets/alertmanager-healthchecks-watchdog/ping-url
+        send_resolved: false
+        max_alerts: 1
+        timeout: 10s
 """,
         encoding="utf-8",
     )
@@ -642,7 +843,14 @@ receivers:
             responses.write_text("\n".join(target_responses) + "\n", encoding="utf-8")
         env["TARGET_RESPONSES"] = str(responses)
     result = subprocess.run(
-        ["bash", str(SCRIPT), command, "env=staging", *([action] if action is not None else [])],
+        [
+            "bash",
+            str(SCRIPT),
+            command,
+            "env=staging",
+            *([action] if action is not None else []),
+            *command_args,
+        ],
         text=True,
         capture_output=True,
         env=env,
@@ -709,6 +917,25 @@ def test_mutation_requires_nonempty_pagerduty_secret_without_exposure(
     assert (
         "value intentionally not read or printed" in result.stderr or "is absent" in result.stderr
     )
+
+
+@pytest.mark.parametrize("mode", ["missing-watchdog", "empty-watchdog"])
+@pytest.mark.parametrize(("command", "helm_mode"), [("install", "absent"), ("upgrade", "present")])
+def test_mutation_requires_nonempty_watchdog_secret_without_helm_mutation(
+    tmp_path, mode, command, helm_mode
+):
+    result, audit = run_helper(tmp_path, command, helm_mode=helm_mode, kubectl_mode=mode)
+    assert result.returncode != 0
+    assert "helm " not in audit
+    assert "ping-url" in result.stderr
+    assert "forbidden-secret-sentinel" not in result.stdout + result.stderr + audit
+
+
+def test_render_is_offline_and_never_invokes_kubectl(tmp_path):
+    result, audit = run_helper(tmp_path, "render", context="unavailable")
+    assert result.returncode == 0, result.stderr
+    assert "kubectl" not in audit
+    assert "not queried: offline render" in result.stdout
 
 
 def test_valid_pagerduty_secret_permits_helm_mutation(tmp_path):
@@ -1287,3 +1514,407 @@ def test_dashboard_verifier_cleans_up_when_interrupted(tmp_path):
     body = SCRIPT.read_text(encoding="utf-8").split("dashboard_verify()", 1)[1]
     assert "trap 'exit 130' INT" in body and "trap 'exit 143' TERM" in body
     assert not list(tmp_path.glob("sugarkube-grafana-verify.*"))
+
+
+def test_watchdog_rule_and_healthchecks_contract_are_exact():
+    staging = yaml_load(STAGING)
+    group = staging["additionalPrometheusRulesMap"]["sugarkube-observability-watchdog"]["groups"][0]
+    assert group["interval"] == "1m"
+    assert group["rules"] == [
+        {
+            "alert": "SugarkubeObservabilityWatchdog",
+            "expr": "vector(1)",
+            "labels": {
+                "environment": "staging",
+                "cluster": "sugarkube-int",
+                "purpose": "observability-watchdog",
+            },
+            "annotations": {
+                "summary": "Sugarkube staging observability watchdog",
+                "runbook_url": "https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-operations.md#observability-watchdog",
+            },
+        }
+    ]
+    webhook = staging["alertmanager"]["config"]["receivers"][2]["webhook_configs"][0]
+    assert webhook == {
+        "url_file": "/etc/alertmanager/secrets/alertmanager-healthchecks-watchdog/ping-url",
+        "send_resolved": False,
+        "max_alerts": 1,
+        "timeout": "10s",
+    }
+    assert "url" not in webhook
+
+
+def test_watchdog_operator_contract_is_hidden_bounded_and_staging_only():
+    script = SCRIPT.read_text(encoding="utf-8")
+    assert "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}" in script
+    assert "read -r -s value <&3" in script
+    assert "--from-file=ping-url=/dev/stdin" in script
+    assert "WATCHDOG_PING_URL" in script
+    assert "timedelta(minutes=8)" in script
+    for label in ("alertname", "environment", "cluster", "purpose"):
+        assert f'("{label}"' in script
+    assert "sugar-staging" in script
+    assert "node shutdown" not in script.lower()
+    assert "hc-ping\\.com" in script
+
+
+def test_watchdog_secret_install_uses_hidden_tty_and_stdin_only_kubernetes(tmp_path):
+    url, uuid = watchdog_canary()
+    result, audit = run_helper(tmp_path, "watchdog-secret-install", watchdog_tty_text=url + "\n")
+
+    assert result.returncode == 0, result.stderr
+    assert "create secret generic alertmanager-healthchecks-watchdog" in audit
+    assert "--from-file=ping-url=/dev/stdin --dry-run=client -o yaml" in audit
+    assert "apply -f -" in audit
+    assert (tmp_path / "watchdog-create-stdin").read_text(encoding="utf-8") == url
+    manifest = (tmp_path / "watchdog-apply-stdin").read_text(encoding="utf-8")
+    assert "kind: Secret" in manifest
+    assert "name: alertmanager-healthchecks-watchdog" in manifest
+
+    public = result.stdout + result.stderr + audit + manifest
+    assert url not in public and uuid not in public
+    expected_secret_files = {"watchdog-tty", "watchdog-create-stdin"}
+    unexpected_files = [
+        path
+        for path in tmp_path.rglob("*")
+        if path.is_file() and path.name not in expected_secret_files
+    ]
+    assert all(
+        url not in path.read_text(encoding="utf-8", errors="replace")
+        and uuid not in path.read_text(encoding="utf-8", errors="replace")
+        for path in unexpected_files
+    )
+
+
+@pytest.mark.parametrize(
+    "variation",
+    [
+        "unhyphenated-uuid",
+        "nonhex-uuid",
+        "wrong-scheme",
+        "wrong-host",
+        "suffix",
+        "query",
+        "fragment",
+    ],
+)
+def test_watchdog_secret_install_rejects_noncanonical_urls_before_mutation(tmp_path, variation):
+    url, uuid = watchdog_canary()
+    values = {
+        "unhyphenated-uuid": url.replace(uuid, uuid.replace("-", "")),
+        "nonhex-uuid": url[:-1] + "z",
+        "wrong-scheme": url.replace("https://", "http://"),
+        "wrong-host": url.replace("hc-ping.com", "example.invalid"),
+        "suffix": url + "/fail",
+        "query": url + "?next=1",
+        "fragment": url + "#fragment",
+    }
+    value = values[variation]
+    result, audit = run_helper(tmp_path, "watchdog-secret-install", watchdog_tty_text=value + "\n")
+
+    assert result.returncode != 0
+    assert "create secret" not in audit and "apply -f -" not in audit
+    assert value not in result.stdout + result.stderr + audit
+
+
+@pytest.mark.parametrize(
+    "variable",
+    ["HEALTHCHECKS_PING_URL", "HEALTHCHECK_PING_URL", "PING_URL", "WATCHDOG_PING_URL"],
+)
+def test_watchdog_secret_install_refuses_credential_environment_before_mutation(tmp_path, variable):
+    url, uuid = watchdog_canary()
+    result, audit = run_helper(
+        tmp_path,
+        "watchdog-secret-install",
+        watchdog_tty_text=url + "\n",
+        extra_env={variable: url},
+    )
+
+    assert result.returncode != 0
+    assert "environment variables are refused" in result.stderr
+    assert "create secret" not in audit and "apply -f -" not in audit
+    assert url not in result.stdout + result.stderr + audit
+    assert uuid not in result.stdout + result.stderr + audit
+
+
+def test_watchdog_secret_install_refuses_credential_argument_before_mutation(tmp_path):
+    url, uuid = watchdog_canary()
+    result, audit = run_helper(
+        tmp_path,
+        "watchdog-secret-install",
+        watchdog_tty_text=url + "\n",
+        command_args=(url,),
+    )
+
+    assert result.returncode != 0
+    assert "credential arguments are refused" in result.stderr
+    assert "create secret" not in audit and "apply -f -" not in audit
+    assert url not in result.stdout + result.stderr + audit
+    assert uuid not in result.stdout + result.stderr + audit
+
+
+@pytest.mark.parametrize(
+    ("context", "mode"),
+    [("another-context", "healthy"), ("sugar-staging", "watchdog-cluster-mismatch")],
+)
+def test_watchdog_secret_install_staging_mismatch_prevents_mutation(tmp_path, context, mode):
+    url, _ = watchdog_canary()
+    result, audit = run_helper(
+        tmp_path,
+        "watchdog-secret-install",
+        context=context,
+        kubectl_mode=mode,
+        watchdog_tty_text=url + "\n",
+    )
+
+    assert result.returncode != 0
+    assert "create secret" not in audit and "apply -f -" not in audit
+    assert url not in result.stdout + result.stderr + audit
+
+
+@pytest.mark.parametrize("mode", ["watchdog-create-fail", "watchdog-apply-fail"])
+def test_watchdog_secret_install_kubernetes_failures_are_sanitized(tmp_path, mode):
+    url, uuid = watchdog_canary()
+    result, audit = run_helper(
+        tmp_path,
+        "watchdog-secret-install",
+        kubectl_mode=mode,
+        watchdog_tty_text=url + "\n",
+    )
+
+    assert result.returncode != 0
+    assert "installation failed" in result.stderr
+    assert "value redacted" in result.stderr
+    assert url not in result.stdout + result.stderr + audit
+    assert uuid not in result.stdout + result.stderr + audit
+
+
+def test_watchdog_secret_check_reads_only_the_key_contract(tmp_path):
+    result, audit = run_helper(tmp_path, "watchdog-secret-check")
+
+    assert result.returncode == 0, result.stderr
+    assert "get secret alertmanager-healthchecks-watchdog -o go-template=" in audit
+    assert "ping-url" in audit
+    assert "value intentionally not read or printed" in result.stdout
+    assert not (tmp_path / "watchdog-create-stdin").exists()
+    assert "apply -f -" not in audit
+
+
+@pytest.mark.parametrize("mode", ["missing-watchdog", "empty-watchdog"])
+def test_watchdog_secret_check_rejects_missing_or_empty_ping_url(tmp_path, mode):
+    result, audit = run_helper(tmp_path, "watchdog-secret-check", kubectl_mode=mode)
+
+    assert result.returncode != 0
+    assert "ping-url" in result.stderr
+    assert "create secret" not in audit and "apply -f -" not in audit
+
+
+def test_watchdog_live_check_accepts_exact_rule_labels_and_external_alert_labels(tmp_path):
+    result, audit = run_helper(tmp_path, "watchdog-verify")
+
+    assert result.returncode == 0, result.stderr
+    assert "bounded repeat observation verified" in result.stdout
+    assert "proxy/api/v1/rules" in audit
+    assert "/api/v2/alerts" in audit
+    assert "get pods -l app.kubernetes.io/name=alertmanager -o json" in audit
+    assert "logs statefulset/kube-prometheus-stack-alertmanager" in audit
+
+
+def test_watchdog_live_check_rejects_extra_rule_label_without_printing_payload(tmp_path):
+    result, _ = run_helper(tmp_path, "watchdog-verify", kubectl_mode="watchdog-extra-rule-label")
+
+    assert result.returncode != 0
+    assert "required labels" in result.stderr
+    assert "REJECTED_RULE_PAYLOAD_SENTINEL" not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    "mode",
+    [
+        "watchdog-no-pods",
+        "watchdog-pod-not-running",
+        "watchdog-missing-volume",
+        "watchdog-wrong-secret-volume",
+        "watchdog-missing-mount",
+        "watchdog-wrong-mount-path",
+        "watchdog-mount-not-readonly",
+    ],
+)
+def test_watchdog_mount_contract_fails_closed_and_redacts_pod_data(tmp_path, mode):
+    result, _ = run_helper(tmp_path, "watchdog-verify", kubectl_mode=mode)
+
+    assert result.returncode != 0
+    assert "running Alertmanager pods do not have the exact watchdog Secret mount" in result.stderr
+    assert "POD_FIXTURE_SENTINEL" not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    ("receiver", "diagnostic"),
+    [
+        (receiver, diagnostic)
+        for receiver in (
+            "healthchecks-watchdog",
+            "alertmanager-healthchecks-watchdog",
+        )
+        for diagnostic in ("error", "failed", "failure", "timeout", "refused")
+    ],
+)
+def test_watchdog_delivery_errors_attributable_to_receiver_fail_closed(
+    tmp_path, receiver, diagnostic
+):
+    private_log = f"{receiver} delivery {diagnostic} LOG_FIXTURE_SENTINEL"
+    result, _ = run_helper(tmp_path, "watchdog-verify", watchdog_log_text=private_log)
+
+    assert result.returncode != 0
+    assert "watchdog receiver delivery error observed" in result.stderr
+    assert private_log not in result.stdout + result.stderr
+    assert "LOG_FIXTURE_SENTINEL" not in result.stdout + result.stderr
+
+
+def test_watchdog_delivery_ignores_unrelated_alertmanager_errors(tmp_path):
+    private_log = "error loading unrelated template LOG_FIXTURE_SENTINEL"
+    result, _ = run_helper(tmp_path, "watchdog-verify", watchdog_log_text=private_log)
+
+    assert result.returncode == 0, result.stderr
+    assert "bounded repeat observation verified" in result.stdout
+    assert private_log not in result.stdout + result.stderr
+
+
+def test_watchdog_delivery_log_retrieval_failure_is_sanitized(tmp_path):
+    result, _ = run_helper(tmp_path, "watchdog-verify", kubectl_mode="watchdog-logs-fail")
+
+    assert result.returncode != 0
+    assert "Alertmanager logs could not be retrieved (details redacted)" in result.stderr
+    assert "PRIVATE_LOG_RETRIEVAL_SENTINEL" not in result.stdout + result.stderr
+
+
+def watchdog_silence_fixture():
+    matchers = [
+        {"name": "alertname", "value": "SugarkubeObservabilityWatchdog", "isRegex": False},
+        {"name": "environment", "value": "staging", "isRegex": False},
+        {"name": "cluster", "value": "sugarkube-int", "isRegex": False},
+        {"name": "purpose", "value": "observability-watchdog", "isRegex": False},
+    ]
+
+    def silence(
+        identifier,
+        state,
+        *,
+        created_by="sugarkube-observability-watchdog-drill",
+        comment="Owned staging watchdog failure drill",
+        selected_matchers=None,
+    ):
+        return {
+            "id": identifier,
+            "status": {"state": state},
+            "createdBy": created_by,
+            "comment": comment,
+            "matchers": matchers if selected_matchers is None else selected_matchers,
+            "fixtureDetail": f"private-detail-{identifier}",
+        }
+
+    return [
+        silence("owned-active", "active"),
+        silence("owned-pending", "pending"),
+        silence("owned-expired", "expired"),
+        silence("foreign-author", "active", created_by="another-operator"),
+        silence("foreign-comment", "active", comment="another drill"),
+        silence(
+            "regex-matcher",
+            "active",
+            selected_matchers=[matchers[0] | {"isRegex": True}, *matchers[1:]],
+        ),
+        silence(
+            "extra-matcher",
+            "active",
+            selected_matchers=[*matchers, {"name": "node", "value": "all", "isRegex": False}],
+        ),
+        silence("missing-matcher", "active", selected_matchers=matchers[:-1]),
+        silence(
+            "broad-matcher",
+            "active",
+            selected_matchers=[matchers[0] | {"value": ".*"}, *matchers[1:]],
+        ),
+        silence("malformed", "active", selected_matchers={"not": "a list"}),
+    ]
+
+
+def test_watchdog_drill_create_submits_exact_bounded_sanitized_payload(tmp_path):
+    result, audit = run_helper(tmp_path, "watchdog-drill-create")
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads((tmp_path / "watchdog-silence-payload").read_text(encoding="utf-8"))
+    assert payload["matchers"] == [
+        {"name": "alertname", "value": "SugarkubeObservabilityWatchdog", "isRegex": False},
+        {"name": "environment", "value": "staging", "isRegex": False},
+        {"name": "cluster", "value": "sugarkube-int", "isRegex": False},
+        {"name": "purpose", "value": "observability-watchdog", "isRegex": False},
+    ]
+    assert payload["createdBy"] == "sugarkube-observability-watchdog-drill"
+    assert payload["comment"] == "Owned staging watchdog failure drill"
+    starts_at = __import__("datetime").datetime.fromisoformat(
+        payload["startsAt"].replace("Z", "+00:00")
+    )
+    ends_at = __import__("datetime").datetime.fromisoformat(
+        payload["endsAt"].replace("Z", "+00:00")
+    )
+    assert (ends_at - starts_at).total_seconds() == 8 * 60
+    assert "MANUAL CHECKPOINT" in result.stderr
+    assert (
+        result.stdout
+        == "Owned watchdog drill silence created; id=created-owned-silence; automatic expiry=8m.\n"
+    )
+    assert "shutdown" not in audit.lower() and "hc-ping" not in audit
+
+
+def test_watchdog_silence_status_reports_only_exact_owned_active_or_pending(tmp_path):
+    fixture = watchdog_silence_fixture()
+    result, _ = run_helper(tmp_path, "watchdog-drill-status", watchdog_silences=fixture)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.endswith(
+        "Owned active/pending watchdog drill silence IDs:\nowned-active\nowned-pending\n"
+    )
+    for silence in fixture[2:]:
+        assert silence["id"] not in result.stdout
+        assert silence["fixtureDetail"] not in result.stdout + result.stderr
+
+
+def test_watchdog_silence_clear_deletes_only_exact_owned_active_or_pending(tmp_path):
+    fixture = watchdog_silence_fixture()
+    result, _ = run_helper(tmp_path, "watchdog-drill-clear", watchdog_silences=fixture)
+
+    assert result.returncode == 0, result.stderr
+    deleted = (tmp_path / "watchdog-silence-deletions").read_text(encoding="utf-8").splitlines()
+    assert deleted == ["owned-active", "owned-pending"]
+    assert result.stdout.endswith("Owned watchdog drill silence cleared.\n")
+    assert all(item["fixtureDetail"] not in result.stdout + result.stderr for item in fixture)
+
+
+def test_watchdog_silence_clear_is_noop_without_owned_silences(tmp_path):
+    fixture = watchdog_silence_fixture()[2:]
+    result, audit = run_helper(tmp_path, "watchdog-drill-clear", watchdog_silences=fixture)
+
+    assert result.returncode == 0, result.stderr
+    assert "No owned active/pending watchdog drill silence to clear." in result.stdout
+    assert "delete --raw" not in audit
+    assert not (tmp_path / "watchdog-silence-deletions").exists()
+
+
+@pytest.mark.parametrize(
+    ("command", "mode"),
+    [
+        ("watchdog-drill-create", "watchdog-silence-create-fail"),
+        ("watchdog-drill-create", "watchdog-silence-create-malformed"),
+        ("watchdog-drill-status", "watchdog-silences-fail"),
+        ("watchdog-drill-status", "watchdog-silences-malformed"),
+    ],
+)
+def test_watchdog_silence_api_failures_do_not_expose_fixture_contents(tmp_path, command, mode):
+    fixture = watchdog_silence_fixture()
+    result, _ = run_helper(tmp_path, command, kubectl_mode=mode, watchdog_silences=fixture)
+
+    assert result.returncode != 0
+    output = result.stdout + result.stderr
+    assert all(item["fixtureDetail"] not in output for item in fixture)
