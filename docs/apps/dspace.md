@@ -101,8 +101,10 @@ and the remote `/chat` journey. A staging candidate or unfinalized result is not
 
 ### 3. Read-only production capture and preflight
 
-Create a restricted, timestamped evidence directory. Capture bounded metadata only; do not run
-`helm get values --all`, dump Secrets, or record response bodies:
+Create a restricted, timestamped evidence directory. Capture bounded metadata only; do not manually
+record `helm get values --all`, dump Secrets, or record response bodies. Schema-v2 finalization reads
+the release's computed Helm values transiently and records only the bounded `helmStoredValues` pass
+result after verifying the image repository, immutable tag, pull policy, and production isolation:
 
 ```bash
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)

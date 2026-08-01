@@ -211,6 +211,10 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
                 and kind not in {"Deployment", "StatefulSet", "DaemonSet"}
             ),
         )
+        if inputs.app == "dspace" and kind == "Secret":
+            errors.append(
+                f"DSPACE rendered Secret {name or '<unnamed>'}; literal Secret resources are forbidden"
+            )
         if namespace and namespace != inputs.namespace:
             errors.append(
                 f"rendered {kind or 'resource'} {name or '<unnamed>'} has namespace {namespace!r}"

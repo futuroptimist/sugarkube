@@ -95,6 +95,13 @@ def test_schema_v2_split_provenance_is_canonical_and_preserved() -> None:
     assert manifest.validate(value) == value
 
 
+def test_invalid_upstream_app_fails_closed() -> None:
+    value = upstream()
+    value["app"] = "another-app"
+    with pytest.raises(manifest.ManifestError, match="app must be 'dspace'"):
+        manifest.candidate(value, "staging", "token-place", "2026-07-26T12:00:00Z", "operator")
+
+
 def test_versioned_recovery_coordinates_are_exact_and_candidate_consumable() -> None:
     path = Path("docs/apps/dspace.prod-recovery-coordinates.json")
     value = json.loads(path.read_text(encoding="utf-8"))
@@ -585,6 +592,17 @@ def test_schema_v2_finalization_and_staging_gate_preserve_chart_provenance() -> 
             runner=oras_runner(image_revision=SHA, chart_revision=CHART_SHA),
         ),
         runtime_verification=runtime_proof(),
+        helm_stored_values_result=manifest.verify_helm_stored_values(
+            staging,
+            {
+                "image": {
+                    "repository": manifest.IMAGE_REF,
+                    "tag": staging["imageTag"],
+                    "pullPolicy": "Always",
+                }
+            },
+            "staging",
+        ),
     )
     assert final["chartSourceRevision"] == CHART_SHA
     assert manifest.staging_gate(split_candidate("prod"), final) == 17
@@ -592,6 +610,64 @@ def test_schema_v2_finalization_and_staging_gate_preserve_chart_provenance() -> 
     production["chartSourceRevision"] = "0" * 40
     with pytest.raises(manifest.ManifestError, match="coordinates differ"):
         manifest.staging_gate(production, final)
+
+
+def test_schema_v2_requires_and_round_trips_helm_stored_values_check() -> None:
+    value = split_candidate()
+    with pytest.raises(manifest.ManifestError, match="Helm stored-values verification"):
+        finalize(value=value)
+    final = finalize(
+        value=value,
+        helm_stored_values_result=manifest.verify_helm_stored_values(
+            value,
+            {
+                "image": {
+                    "repository": manifest.IMAGE_REF,
+                    "tag": value["imageTag"],
+                    "pullPolicy": "Always",
+                }
+            },
+            "staging",
+        ),
+    )
+    assert manifest.validate(json.loads(manifest._canonical(final)), True) == final
+
+
+@pytest.mark.parametrize(
+    ("field", "wrong"),
+    [("repository", "example.invalid/dspace"), ("tag", "v3.2.0"), ("pullPolicy", "IfNotPresent")],
+)
+def test_helm_stored_values_reject_image_mismatch(field: str, wrong: str) -> None:
+    value = split_candidate("prod")
+    image = {"repository": manifest.IMAGE_REF, "tag": value["imageTag"], "pullPolicy": "Always"}
+    image[field] = wrong
+    with pytest.raises(manifest.ManifestError, match="stored image values"):
+        manifest.verify_helm_stored_values(value, {"image": image}, "prod")
+
+
+@pytest.mark.parametrize(
+    "leak",
+    [
+        {"metrics": {"enabled": True}},
+        {"serviceMonitor": {"enabled": True}},
+        {"metrics": {"auth": {"existingSecret": "dspace-staging-metrics-token"}}},
+    ],
+)
+def test_helm_stored_values_reject_production_staging_leaks_secret_safely(
+    leak: dict[str, object],
+) -> None:
+    value = split_candidate("prod")
+    stored = {
+        "image": {
+            "repository": manifest.IMAGE_REF,
+            "tag": value["imageTag"],
+            "pullPolicy": "Always",
+        },
+        **leak,
+    }
+    with pytest.raises(manifest.ManifestError, match="staging-only settings") as raised:
+        manifest.verify_helm_stored_values(value, stored, "prod")
+    assert "dspace-staging-metrics-token" not in str(raised.value)
 
 
 @pytest.mark.parametrize(

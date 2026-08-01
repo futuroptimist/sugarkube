@@ -203,7 +203,11 @@ if [[ "$*" == *"get values"* ]]; then
     echo 'Error: Kubernetes cluster unreachable for context sugar-staging' >&2
     exit 1
   fi
-  printf '{{"ingress":{{"host":"%s"}}}}\n' "${{SUGARKUBE_STUB_HELM_HOST:-example.test}}"
+  printf '{{"image":{{"repository":"%s","tag":"%s","pullPolicy":"%s"}},"metrics":{{"enabled":false}},"serviceMonitor":{{"enabled":false}},"ingress":{{"host":"%s"}}}}\n' \
+    "${{SUGARKUBE_STUB_HELM_REPOSITORY:-ghcr.io/democratizedspace/dspace}}" \
+    "${{SUGARKUBE_STUB_HELM_TAG:-main-abcdef0}}" \
+    "${{SUGARKUBE_STUB_HELM_PULL_POLICY:-Always}}" \
+    "${{SUGARKUBE_STUB_HELM_HOST:-example.test}}"
   exit 0
 fi
 if [[ "$*" == show\ chart* ]]; then
@@ -1087,6 +1091,42 @@ spec:
         "bearerTokenSecret" in error
         for error in app_chart.validate_rendered_manifest(invalid_monitor, inputs)
     )
+
+
+@pytest.mark.parametrize("payload", ["data:\n  example: eA==", "stringData:\n  example: synthetic"])
+def test_dspace_render_contract_rejects_secret_resources_without_exposing_contents(
+    payload: str,
+) -> None:
+    inputs = app_chart.ReleaseInputs(
+        "dspace", "prod", "dspace", "dspace", "chart", "3.0.2", (), "main-deadbee", ""
+    )
+    rendered = f"kind: Secret\nmetadata:\n  name: rendered-credentials\n{payload}\n"
+    errors = app_chart.validate_rendered_manifest(rendered, inputs)
+    assert any("DSPACE rendered Secret rendered-credentials" in error for error in errors)
+    assert "secret" not in " ".join(errors).replace("Secret", "")
+
+
+def test_dspace_render_contract_allows_secret_references_in_deployment() -> None:
+    inputs = app_chart.ReleaseInputs(
+        "dspace", "prod", "dspace", "dspace", "chart", "3.0.2", (), "main-deadbee", ""
+    )
+    rendered = _release_deployment(
+        "dspace",
+        """          env:
+          - name: API_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: dspace-production
+                key: token
+---
+kind: Service
+metadata:
+  name: dspace
+  labels:
+    app.kubernetes.io/instance: dspace
+""",
+    )
+    assert app_chart.validate_rendered_manifest(rendered, inputs) == []
 
 
 def test_dspace_resources_require_release_association() -> None:
@@ -2502,30 +2542,27 @@ def test_dspace_oci_deploy_wrapper_propagates_inline_chart_pin(
 
 
 def _write_dspace_candidate(
-    path: Path, environment: str, *, image_digest: str | None = None
+    path: Path, environment: str, *, image_digest: str | None = None, schema_version: int = 1
 ) -> None:
-    path.write_text(
-        json.dumps(
-            {
-                "schemaVersion": 1,
-                "app": "dspace",
-                "applicationVersion": "3.2.0",
-                "sourceRevision": "abcdef0123456789abcdef0123456789abcdef01",
-                "imageTag": "main-abcdef0",
-                "imageDigest": image_digest or "sha256:" + "1" * 64,
-                "chartVersion": "3.1.0" if environment == "staging" else "3.0.2",
-                "chartDigest": "sha256:" + "2" * 64,
-                "semanticTag": "v3.2.0",
-                "recordType": "candidate",
-                "environment": environment,
-                "expectedDefaultChatProvider": "token-place",
-                "approvedAt": "2026-07-26T12:00:00Z",
-                "approvedBy": "synthetic-test-approver",
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
+    record = {
+        "schemaVersion": schema_version,
+        "app": "dspace",
+        "applicationVersion": "3.2.0",
+        "sourceRevision": "abcdef0123456789abcdef0123456789abcdef01",
+        "imageTag": "main-abcdef0",
+        "imageDigest": image_digest or "sha256:" + "1" * 64,
+        "chartVersion": "3.1.0" if environment == "staging" else "3.0.2",
+        "chartDigest": "sha256:" + "2" * 64,
+        "semanticTag": "v3.2.0",
+        "recordType": "candidate",
+        "environment": environment,
+        "expectedDefaultChatProvider": "token-place",
+        "approvedAt": "2026-07-26T12:00:00Z",
+        "approvedBy": "synthetic-test-approver",
+    }
+    if schema_version == 2:
+        record["chartSourceRevision"] = record["sourceRevision"]
+    path.write_text(json.dumps(record) + "\n", encoding="utf-8")
 
 
 def _run_dspace_manifest_rollback(
@@ -2894,6 +2931,26 @@ def test_dspace_guarded_deploy_orders_preflight_mutation_and_finalization(
     collection = next(i for i, line in enumerate(commands) if " status dspace" in line)
     pods = next(i for i, line in enumerate(commands) if " -n dspace get pods" in line)
     assert preflight < mutation < collection < pods
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_dspace_schema_v2_stored_value_mismatch_preserves_post_mutation_reservation(
+    tmp_path: Path, generic_app_stub_env: dict[str, str]
+) -> None:
+    candidate = tmp_path / "candidate.json"
+    evidence = tmp_path / "evidence.json"
+    _write_dspace_candidate(candidate, "staging", schema_version=2)
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_HELM_TAG"] = "v3.2.0"
+    result = _run_just(
+        ["app-deploy", "dspace", "staging", "main-abcdef0", "", str(candidate), str(evidence)],
+        env,
+    )
+    assert result.returncode != 0
+    assert "Helm stored image values do not match approved coordinates" in result.stderr
+    assert "upgrade " in Path(env["HELM_LOG"]).read_text(encoding="utf-8")
+    assert not evidence.exists()
+    assert Path(str(evidence.resolve()) + ".reservation").exists()
 
 
 @pytest.mark.usefixtures("ensure_just_available")

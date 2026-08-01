@@ -75,6 +75,7 @@ FINAL_FIXED_CHECKS = {
     "podImageCoordinates",
     "podImageDigests",
 }
+SCHEMA_V2_FINAL_CHECKS = {"helmStoredValues"}
 RUNTIME_VERIFICATION_FIELDS = (
     "schemaVersion",
     "environment",
@@ -144,6 +145,14 @@ def _final_fields(value: dict[str, Any]) -> tuple[str, ...]:
 def chart_source_revision(value: dict[str, Any]) -> str:
     """Return explicit v2 chart provenance or the schema-v1 same-source invariant."""
     return value["sourceRevision"] if value["schemaVersion"] == 1 else value["chartSourceRevision"]
+
+
+def required_final_checks(value: dict[str, Any]) -> set[str]:
+    """Return the evidence checks required by this record's schema."""
+    checks = set(FINAL_FIXED_CHECKS)
+    if value["schemaVersion"] == 2:
+        checks.update(SCHEMA_V2_FINAL_CHECKS)
+    return checks
 
 
 def _validate_upstream(value: dict[str, Any]) -> None:
@@ -294,9 +303,9 @@ def validate(value: dict[str, Any], finalized: bool | None = None) -> dict[str, 
             platform_match = PLATFORM_CHECK_RE.fullmatch(check)
             if platform_match:
                 platform_indices.append(int(platform_match.group(1)))
-            elif check not in FINAL_FIXED_CHECKS | RUNTIME_VERIFICATION_CHECKS:
+            elif check not in required_final_checks(value) | RUNTIME_VERIFICATION_CHECKS:
                 raise ManifestError(f"unknown verification result: {check}")
-        missing = sorted(FINAL_FIXED_CHECKS - checks)
+        missing = sorted(required_final_checks(value) - checks)
         if missing:
             raise ManifestError("missing verification results: " + ", ".join(missing))
         if "runtimeVerification" in value:
@@ -638,6 +647,7 @@ def finalize(
     invocation_description: str,
     expected_image_coordinate: str | None = None,
     runtime_verification: dict[str, Any] | None = None,
+    helm_stored_values_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     validate(value, False)
     selected = {
@@ -798,6 +808,10 @@ def finalize(
             "details": "every running pod imageID matched approved image digest",
         },
     ]
+    if value["schemaVersion"] == 2:
+        if helm_stored_values_result is None:
+            raise ManifestError("schema-v2 finalization requires Helm stored-values verification")
+        results.append(helm_stored_values_result)
     if runtime_verification is not None:
         runtime_checks = (
             ("runtimeIdentity", "approved runtime source and image identity verified"),
@@ -822,6 +836,56 @@ def finalize(
     if runtime_verification is not None:
         result["runtimeVerification"] = runtime_verification
     return validate(result, True)
+
+
+def verify_helm_stored_values(
+    value: dict[str, Any], stored_values: object, environment: str
+) -> dict[str, Any]:
+    """Verify selected non-secret Helm values without retaining or reporting the raw values."""
+    validate(value, False)
+    if not isinstance(stored_values, dict):
+        raise ManifestError("Helm stored values must be a JSON object")
+
+    image = stored_values.get("image")
+    if not isinstance(image, dict):
+        raise ManifestError("Helm stored image values do not match approved coordinates")
+    expected = {
+        "repository": IMAGE_REF,
+        "tag": value["imageTag"],
+        "pullPolicy": "Always",
+    }
+    if any(image.get(field) != expected_value for field, expected_value in expected.items()):
+        raise ManifestError("Helm stored image values do not match approved coordinates")
+
+    if environment == "prod":
+        metrics = stored_values.get("metrics", {})
+        service_monitor = stored_values.get("serviceMonitor", {})
+        if (
+            not isinstance(metrics, dict)
+            or not isinstance(service_monitor, dict)
+            or metrics.get("enabled") is True
+            or service_monitor.get("enabled") is True
+            or contains_staging_reference(stored_values)
+        ):
+            raise ManifestError("Helm stored production values contain staging-only settings")
+    return {
+        "check": "helmStoredValues",
+        "passed": True,
+        "details": "stored image coordinates, pull policy, and environment isolation matched approval",
+    }
+
+
+def contains_staging_reference(value: object) -> bool:
+    """Detect known staging-only scalar values without reflecting them in diagnostics."""
+    forbidden = {"METRICS_TOKEN", "dspace-staging-metrics-token", "sugarkube-int"}
+    if isinstance(value, dict):
+        return any(
+            contains_staging_reference(key) or contains_staging_reference(item)
+            for key, item in value.items()
+        )
+    if isinstance(value, list):
+        return any(contains_staging_reference(item) for item in value)
+    return isinstance(value, str) and value in forbidden
 
 
 def staging_gate(candidate_value: dict[str, Any], evidence_value: dict[str, Any]) -> int:
@@ -981,6 +1045,28 @@ def main(argv: list[str] | None = None) -> int:
                 "json",
             ]
             helm = json.loads(_run(helm_command))
+            stored_values_result = None
+            if source["schemaVersion"] == 2:
+                stored_values = json.loads(
+                    _run(
+                        [
+                            "helm",
+                            "--kubeconfig",
+                            args.kubeconfig,
+                            "get",
+                            "values",
+                            args.release,
+                            "--namespace",
+                            args.namespace,
+                            "--all",
+                            "-o",
+                            "json",
+                        ]
+                    )
+                )
+                stored_values_result = verify_helm_stored_values(
+                    source, stored_values, args.environment
+                )
             pod_command = [
                 "kubectl",
                 "--kubeconfig",
@@ -1029,6 +1115,7 @@ def main(argv: list[str] | None = None) -> int:
                 runtime_verification=(
                     _object(args.runtime_verification) if args.runtime_verification else None
                 ),
+                helm_stored_values_result=stored_values_result,
             )
             sidecar = verify_reservation(
                 args.output,
