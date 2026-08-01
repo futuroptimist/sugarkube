@@ -161,17 +161,25 @@ PY
   kubectl -n "${NAMESPACE}" get alertmanager "${RELEASE}-alertmanager" -o yaml >"${tmp}/cr"
   kubectl -n "${NAMESPACE}" get secret "alertmanager-${RELEASE}-alertmanager" -o yaml >"${tmp}/config"
   ruby "${ALERTMANAGER_VALIDATOR}" live "${tmp}/cr" "${tmp}/config"
-  kubectl -n "${NAMESPACE}" get pods -l 'app.kubernetes.io/name=alertmanager' -o json >"${tmp}/pods"
-  python3 - "${tmp}/pods" <<'PY'
+  kubectl -n "${NAMESPACE}" get pods -l "app.kubernetes.io/name=alertmanager,alertmanager=${RELEASE}-alertmanager" -o json >"${tmp}/pods"
+  python3 - "${tmp}/pods" "${tmp}/pod-names" <<'PY'
 import json, sys
-try: pods=json.load(open(sys.argv[1], encoding="utf-8")).get("items",[])
-except (OSError, UnicodeError, json.JSONDecodeError): raise SystemExit("ERROR: Alertmanager pod data is malformed (response redacted).")
+try:
+ doc=json.load(open(sys.argv[1], encoding="utf-8")); pods=doc.get("items")
+ if not isinstance(doc,dict) or not isinstance(pods,list) or any(not isinstance(p,dict) for p in pods): raise ValueError
+except (OSError, UnicodeError, json.JSONDecodeError, AttributeError, ValueError): raise SystemExit("ERROR: Alertmanager pod data is malformed (response redacted).")
 def mounted(p):
  spec=p.get("spec",{}); vols=spec.get("volumes",[])
  names={v.get("name") for v in vols if v.get("secret",{}).get("secretName")=="alertmanager-healthchecks-watchdog"}
  return names and any(m.get("name") in names and m.get("mountPath")=="/etc/alertmanager/secrets/alertmanager-healthchecks-watchdog" and m.get("readOnly") is True for c in spec.get("containers",[]) for m in c.get("volumeMounts",[]))
+try: names=[p["metadata"]["name"] for p in pods]
+except (KeyError, TypeError): raise SystemExit("ERROR: Alertmanager pod data is malformed (response redacted).")
+if any(not isinstance(n,str) or not n for n in names): raise SystemExit("ERROR: Alertmanager pod data is malformed (response redacted).")
 if not pods or any(p.get("status",{}).get("phase")!="Running" or not mounted(p) for p in pods):
  raise SystemExit("ERROR: running Alertmanager pods do not have the exact watchdog Secret mount (response redacted).")
+try:
+ with open(sys.argv[2], "w", encoding="utf-8") as output: output.write("\n".join(names)+"\n")
+except OSError: raise SystemExit("ERROR: Alertmanager pod data could not be inspected (details redacted).")
 PY
   observation="${SUGARKUBE_WATCHDOG_OBSERVATION_SECONDS:-310}"
   [[ "${observation}" =~ ^[0-9]+$ ]] || { echo "ERROR: watchdog observation duration must be an integer." >&2; return 2; }
@@ -179,12 +187,16 @@ PY
     echo "ERROR: watchdog observation must cover at least one five-minute repeat." >&2; return 2
   fi
   sleep "${observation}"
-  if ! kubectl -n "${NAMESPACE}" logs "statefulset/${RELEASE}-alertmanager" --since="$((observation + 60))s" >"${tmp}/logs" 2>"${tmp}/logs.stderr"; then
-    echo "ERROR: Alertmanager logs could not be retrieved (details redacted)." >&2; return 1
-  fi
+  local pod log_index=0
+  while IFS= read -r pod; do
+    log_index=$((log_index + 1))
+    if ! kubectl -n "${NAMESPACE}" logs "pod/${pod}" -c alertmanager --since="$((observation + 60))s" >"${tmp}/logs.${log_index}" 2>"${tmp}/logs.${log_index}.stderr"; then
+      echo "ERROR: Alertmanager logs could not be retrieved (details redacted)." >&2; return 1
+    fi
+  done <"${tmp}/pod-names"
   python3 - "${tmp}/logs" <<'PY'
-import re,sys
-try: text=open(sys.argv[1], encoding="utf-8", errors="replace").read()
+import glob,re,sys
+try: text="".join(open(path, encoding="utf-8", errors="replace").read() for path in glob.glob(sys.argv[1]+".*") if not path.endswith(".stderr"))
 except OSError: raise SystemExit("ERROR: Alertmanager logs could not be inspected (details redacted).")
 receiver=r'(?:healthchecks-watchdog|alertmanager-healthchecks-watchdog)'
 error=r'(?:error|failed|failure|timeout|refused)'
