@@ -15,9 +15,9 @@ SHA = "abcdef0123456789abcdef0123456789abcdef01"
 DIGEST = "sha256:" + "1" * 64
 
 
-def target(environment: str = "staging") -> dict[str, object]:
+def target(environment: str = "staging", schema_version: int = 1) -> dict[str, object]:
     value = {
-        "schemaVersion": 1,
+        "schemaVersion": schema_version,
         "app": "dspace",
         "applicationVersion": "3.2.0",
         "sourceRevision": SHA,
@@ -43,11 +43,23 @@ def target(environment: str = "staging") -> dict[str, object]:
         "runtimeSourceRevisionMethod": manifest.RUNTIME_METHOD,
         "verificationResults": [],
     }
-    checks = sorted(manifest.FINAL_FIXED_CHECKS) + ["imagePlatformSourceRevision[0]"]
+    if schema_version == 2:
+        value["chartSourceRevision"] = "1234567890abcdef1234567890abcdef12345678"
+    checks = sorted(manifest.required_final_checks(value)) + [
+        "imagePlatformSourceRevision[0]"
+    ]
     value["verificationResults"] = [
         {"check": check, "passed": True, "details": "observed"} for check in checks
     ]
     return manifest.validate(value, True)
+
+
+def test_schema_v2_final_target_projects_split_provenance_for_rollback() -> None:
+    validated = target(schema_version=2)
+    projected = {field: validated[field] for field in manifest.candidate_fields(validated)}
+    projected["recordType"] = "candidate"
+
+    assert manifest.validate(projected, False)["chartSourceRevision"] != projected["sourceRevision"]
 
 
 def verifier_result(**changes: object) -> dict[str, object]:

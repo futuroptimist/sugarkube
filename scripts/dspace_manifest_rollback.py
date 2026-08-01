@@ -494,7 +494,7 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
     # The manifest module's OCI and cluster proof functions deliberately accept
     # candidate records. Project the exact candidate portion of the validated
     # final record rather than reimplementing or weakening those validators.
-    approved = {field: target[field] for field in release.CANDIDATE_FIELDS}
+    approved = {field: target[field] for field in release.candidate_fields(target)}
     approved["recordType"] = "candidate"
     release.validate(approved, False)
     root = REPO_ROOT
@@ -634,9 +634,11 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
                 "imageTag",
                 "imageDigest",
                 "sourceRevision",
+                "chartSourceRevision",
                 "applicationVersion",
                 "expectedDefaultChatProvider",
             )
+            if key in target
         },
         "values": values_proof,
         "before": {
