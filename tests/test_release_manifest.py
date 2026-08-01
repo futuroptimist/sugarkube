@@ -633,6 +633,19 @@ def test_schema_v2_requires_and_round_trips_helm_stored_values_check() -> None:
     assert manifest.validate(json.loads(manifest._canonical(final)), True) == final
 
 
+@pytest.mark.parametrize("stored_values", [[], None, "not-an-object"])
+def test_helm_stored_values_reject_non_object_values(stored_values: object) -> None:
+    with pytest.raises(manifest.ManifestError, match="must be a JSON object"):
+        manifest.verify_helm_stored_values(split_candidate("prod"), stored_values, "prod")
+
+
+@pytest.mark.parametrize("image", [None, "not-an-object", []])
+def test_helm_stored_values_reject_missing_or_non_object_image(image: object) -> None:
+    stored_values = {} if image is None else {"image": image}
+    with pytest.raises(manifest.ManifestError, match="stored image values"):
+        manifest.verify_helm_stored_values(split_candidate("prod"), stored_values, "prod")
+
+
 @pytest.mark.parametrize(
     ("field", "wrong"),
     [("repository", "example.invalid/dspace"), ("tag", "v3.2.0"), ("pullPolicy", "IfNotPresent")],
@@ -651,6 +664,7 @@ def test_helm_stored_values_reject_image_mismatch(field: str, wrong: str) -> Non
         {"metrics": {"enabled": True}},
         {"serviceMonitor": {"enabled": True}},
         {"metrics": {"auth": {"existingSecret": "dspace-staging-metrics-token"}}},
+        {"additionalEnv": [{"value": "dspace-staging-metrics-token"}]},
     ],
 )
 def test_helm_stored_values_reject_production_staging_leaks_secret_safely(
@@ -989,16 +1003,22 @@ def test_post_reservation_failure_preserves_ownership(tmp_path: Path, monkeypatc
     assert manifest.reservation_path(output).exists()
 
 
+@pytest.mark.parametrize("schema_version", [1, 2])
 def test_finalize_cli_collects_bound_evidence_before_consuming_reservation(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, schema_version: int
 ) -> None:
     source = tmp_path / "candidate.json"
     output = tmp_path / "evidence.json"
-    source.write_text(manifest._canonical(candidate()), encoding="utf-8")
-    owner = manifest.reserve(output, candidate(), "staging", "dspace", "dspace")
+    selected = split_candidate() if schema_version == 2 else candidate()
+    source.write_text(manifest._canonical(selected), encoding="utf-8")
+    owner = manifest.reserve(output, selected, "staging", "dspace", "dspace")
     sidecar = manifest.reservation_path(output)
     oci_results = manifest.preflight(
-        candidate(), manifest.IMAGE_REF, manifest.CHART_REF, "oras", runner=oras_runner()
+        selected,
+        manifest.IMAGE_REF,
+        manifest.CHART_REF,
+        "oras",
+        runner=oras_runner(chart_revision=CHART_SHA if schema_version == 2 else SHA),
     )
     events = []
 
@@ -1022,6 +1042,17 @@ def test_finalize_cli_collects_bound_evidence_before_consuming_reservation(
             events.append("cluster-identity")
             return "staging\n"
         if command[0] == "helm":
+            if "get" in command:
+                events.append("helm-stored-values")
+                return json.dumps(
+                    {
+                        "image": {
+                            "repository": manifest.IMAGE_REF,
+                            "tag": selected["imageTag"],
+                            "pullPolicy": "Always",
+                        }
+                    }
+                )
             events.append("helm-status")
             return json.dumps(
                 helm_status(
@@ -1083,10 +1114,14 @@ def test_finalize_cli_collects_bound_evidence_before_consuming_reservation(
         )
         == 0
     )
-    assert events == [
+    expected_events = [
         "oci-preflight",
         "cluster-identity",
         "helm-status",
+    ]
+    if schema_version == 2:
+        expected_events.append("helm-stored-values")
+    expected_events += [
         "pod-discovery",
         "pod-discovery",
         "helm-status",
@@ -1094,9 +1129,12 @@ def test_finalize_cli_collects_bound_evidence_before_consuming_reservation(
         "helm-status",
         "atomic-final-write",
     ]
+    assert events == expected_events
     final = manifest.validate(json.loads(output.read_text(encoding="utf-8")), True)
     assert final["helmRevision"] == 17
     assert [item["name"] for item in final["pods"]] == ["dspace-a", "dspace-b"]
+    checks = {item["check"] for item in final["verificationResults"]}
+    assert ("helmStoredValues" in checks) is (schema_version == 2)
     assert not sidecar.exists()
 
 
