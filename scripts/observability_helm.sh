@@ -162,16 +162,45 @@ PY
   kubectl -n "${NAMESPACE}" get secret "alertmanager-${RELEASE}-alertmanager" -o yaml >"${tmp}/config"
   ruby "${ALERTMANAGER_VALIDATOR}" live "${tmp}/cr" "${tmp}/config"
   kubectl -n "${NAMESPACE}" get pods -l 'app.kubernetes.io/name=alertmanager' -o json >"${tmp}/pods"
-  python3 - "${tmp}/pods" <<'PY'
-import json, sys
-try: pods=json.load(open(sys.argv[1], encoding="utf-8")).get("items",[])
-except (OSError, UnicodeError, json.JSONDecodeError): raise SystemExit("ERROR: Alertmanager pod data is malformed (response redacted).")
-def mounted(p):
- spec=p.get("spec",{}); vols=spec.get("volumes",[])
- names={v.get("name") for v in vols if v.get("secret",{}).get("secretName")=="alertmanager-healthchecks-watchdog"}
- return names and any(m.get("name") in names and m.get("mountPath")=="/etc/alertmanager/secrets/alertmanager-healthchecks-watchdog" and m.get("readOnly") is True for c in spec.get("containers",[]) for m in c.get("volumeMounts",[]))
-if not pods or any(p.get("status",{}).get("phase")!="Running" or not mounted(p) for p in pods):
+  python3 - "${tmp}/pods" "${RELEASE}-alertmanager" >"${tmp}/pod-names" <<'PY'
+import json, re, sys
+try:
+ doc=json.load(open(sys.argv[1], encoding="utf-8"))
+ def mapping(value):
+  if not isinstance(value,dict): raise TypeError
+  return value
+ def sequence(value):
+  if not isinstance(value,list): raise TypeError
+  return value
+ mapping(doc)
+ pods=sequence(doc["items"])
+ selected=[]
+ for pod in pods:
+  pod=mapping(pod)
+  metadata=mapping(pod["metadata"])
+  labels=mapping(metadata["labels"])
+  name=metadata["name"]
+  if not isinstance(name,str) or len(name)>253 or not re.fullmatch(r'[a-z0-9](?:[-a-z0-9.]*[a-z0-9])?',name): raise TypeError
+  mapping(pod["status"])
+  spec=mapping(pod["spec"])
+  vols=sequence(spec.get("volumes",[]))
+  names=set()
+  for volume in vols:
+   volume=mapping(volume)
+   secret=volume.get("secret")
+   if secret is not None and mapping(secret).get("secretName")=="alertmanager-healthchecks-watchdog": names.add(volume.get("name"))
+  containers=sequence(spec.get("containers",[]))
+  mounts=[]
+  for container in containers:
+   container=mapping(container)
+   mounts.extend(mapping(mount) for mount in sequence(container.get("volumeMounts",[])))
+  if labels.get("alertmanager")==sys.argv[2]: selected.append((name,pod["status"].get("phase"),bool(names) and any(m.get("name") in names and m.get("mountPath")=="/etc/alertmanager/secrets/alertmanager-healthchecks-watchdog" and m.get("readOnly") is True for m in mounts)))
+except (OSError, UnicodeError, json.JSONDecodeError, AttributeError, KeyError, TypeError): raise SystemExit("ERROR: Alertmanager pod data is malformed (response redacted).")
+if not selected:
+ raise SystemExit("ERROR: no operator-managed Alertmanager pods matched the expected resource (response redacted).")
+if not all(phase=="Running" and mounted for _,phase,mounted in selected):
  raise SystemExit("ERROR: running Alertmanager pods do not have the exact watchdog Secret mount (response redacted).")
+print(*(name for name,_,_ in selected), sep="\n")
 PY
   observation="${SUGARKUBE_WATCHDOG_OBSERVATION_SECONDS:-310}"
   [[ "${observation}" =~ ^[0-9]+$ ]] || { echo "ERROR: watchdog observation duration must be an integer." >&2; return 2; }
@@ -179,10 +208,16 @@ PY
     echo "ERROR: watchdog observation must cover at least one five-minute repeat." >&2; return 2
   fi
   sleep "${observation}"
-  if ! kubectl -n "${NAMESPACE}" logs "statefulset/${RELEASE}-alertmanager" --since="$((observation + 60))s" >"${tmp}/logs" 2>"${tmp}/logs.stderr"; then
-    echo "ERROR: Alertmanager logs could not be retrieved (details redacted)." >&2; return 1
-  fi
-  python3 - "${tmp}/logs" <<'PY'
+  local log_index=0
+  while IFS= read -r pod; do
+    if ! kubectl -n "${NAMESPACE}" logs "pod/${pod}" -c alertmanager --since="$((observation + 60))s" >"${tmp}/logs.${log_index}" 2>"${tmp}/logs.${log_index}.stderr"; then
+      echo "ERROR: Alertmanager logs could not be retrieved (details redacted)." >&2; return 1
+    fi
+    log_index=$((log_index + 1))
+  done <"${tmp}/pod-names"
+  local log_count=${log_index}
+  for ((log_index=0; log_index<log_count; log_index++)); do
+  python3 - "${tmp}/logs.${log_index}" <<'PY'
 import re,sys
 try: text=open(sys.argv[1], encoding="utf-8", errors="replace").read()
 except OSError: raise SystemExit("ERROR: Alertmanager logs could not be inspected (details redacted).")
@@ -191,6 +226,7 @@ error=r'(?:error|failed|failure|timeout|refused)'
 if re.search(fr'(?i)(?:{receiver}).{{0,240}}{error}|{error}.{{0,240}}(?:{receiver})', text):
  raise SystemExit("ERROR: watchdog receiver delivery error observed (details redacted).")
 PY
+  done
   echo "Watchdog rule, active alert, live configuration, pod mount, and bounded repeat observation verified; delivery must be confirmed at Healthchecks."
 )
 
