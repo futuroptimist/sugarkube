@@ -661,6 +661,10 @@ case "$*" in
     readonly=true
     case "$KUBECTL_MODE" in
       watchdog-no-pods) printf '%s\n' '{"items":[],"private":"POD_FIXTURE_SENTINEL"}'; exit 0 ;;
+      watchdog-malformed-pods) printf '%s\n' '{"items":"private malformed inventory"}'; exit 0 ;;
+      watchdog-multiple-pods|watchdog-second-log-fails)
+        printf '%s\n' '{"items":[{"metadata":{"name":"alertmanager-kube-prometheus-stack-alertmanager-0","labels":{"app.kubernetes.io/name":"alertmanager","alertmanager":"kube-prometheus-stack-alertmanager"}},"status":{"phase":"Running"},"spec":{"volumes":[{"name":"watchdog","secret":{"secretName":"alertmanager-healthchecks-watchdog"}}],"containers":[{"name":"alertmanager","volumeMounts":[{"name":"watchdog","mountPath":"/etc/alertmanager/secrets/alertmanager-healthchecks-watchdog","readOnly":true}]}]}},{"metadata":{"name":"alertmanager-kube-prometheus-stack-alertmanager-1","labels":{"app.kubernetes.io/name":"alertmanager","alertmanager":"kube-prometheus-stack-alertmanager"}},"status":{"phase":"Running"},"spec":{"volumes":[{"name":"watchdog","secret":{"secretName":"alertmanager-healthchecks-watchdog"}}],"containers":[{"name":"alertmanager","volumeMounts":[{"name":"watchdog","mountPath":"/etc/alertmanager/secrets/alertmanager-healthchecks-watchdog","readOnly":true}]}]}},{"metadata":{"name":"alertmanager-unrelated-0","labels":{"app.kubernetes.io/name":"alertmanager","alertmanager":"unrelated"}},"status":{"phase":"Pending"},"spec":{}}],"private":"POD_FIXTURE_SENTINEL"}'
+        exit 0 ;;
       watchdog-pod-not-running) phase=Pending ;;
       watchdog-missing-volume) volume=unmounted ;;
       watchdog-wrong-secret-volume) secret=another-secret ;;
@@ -668,11 +672,12 @@ case "$*" in
       watchdog-wrong-mount-path) mount=/etc/alertmanager/secrets/wrong ;;
       watchdog-mount-not-readonly) readonly=false ;;
     esac
-    printf '%s\n' '{"items":[{"status":{"phase":"'"$phase"'"},"spec":{"volumes":[{"name":"'"$volume"'","secret":{"secretName":"'"$secret"'"}}],"containers":[{"volumeMounts":[{"name":"watchdog","mountPath":"'"$mount"'","readOnly":'"$readonly"'}]}]},"private":"POD_FIXTURE_SENTINEL"}]}'
+    printf '%s\n' '{"items":[{"metadata":{"name":"alertmanager-kube-prometheus-stack-alertmanager-0","labels":{"app.kubernetes.io/name":"alertmanager","alertmanager":"kube-prometheus-stack-alertmanager"}},"status":{"phase":"'"$phase"'"},"spec":{"volumes":[{"name":"'"$volume"'","secret":{"secretName":"'"$secret"'"}}],"containers":[{"name":"alertmanager","volumeMounts":[{"name":"watchdog","mountPath":"'"$mount"'","readOnly":'"$readonly"'}]}]}}],"private":"POD_FIXTURE_SENTINEL"}'
     ;;
-  *"logs statefulset/kube-prometheus-stack-alertmanager"*)
+  *"logs pod/alertmanager-kube-prometheus-stack-alertmanager-"*" -c alertmanager "*)
     case "$KUBECTL_MODE" in
       watchdog-logs-fail) echo 'PRIVATE_LOG_RETRIEVAL_SENTINEL' >&2; exit 51 ;;
+      watchdog-second-log-fails) case "$*" in *alertmanager-1*) echo 'PRIVATE_LOG_RETRIEVAL_SENTINEL' >&2; exit 51 ;; esac ;;
     esac
     printf '%s' "$WATCHDOG_LOG_TEXT"
     ;;
@@ -1718,7 +1723,19 @@ def test_watchdog_live_check_accepts_exact_rule_labels_and_external_alert_labels
     assert "proxy/api/v1/rules" in audit
     assert "/api/v2/alerts" in audit
     assert "get pods -l app.kubernetes.io/name=alertmanager -o json" in audit
-    assert "logs statefulset/kube-prometheus-stack-alertmanager" in audit
+    assert "logs pod/alertmanager-kube-prometheus-stack-alertmanager-0 -c alertmanager" in audit
+    assert "statefulset/kube-prometheus-stack-alertmanager" not in audit
+    assert not list(tmp_path.glob("sugarkube-watchdog-verify.*"))
+
+
+def test_watchdog_live_check_inspects_every_matching_operator_pod(tmp_path):
+    result, audit = run_helper(tmp_path, "watchdog-verify", kubectl_mode="watchdog-multiple-pods")
+
+    assert result.returncode == 0, result.stderr
+    assert audit.count(" -c alertmanager ") == 2
+    assert "alertmanager-kube-prometheus-stack-alertmanager-0" in audit
+    assert "alertmanager-kube-prometheus-stack-alertmanager-1" in audit
+    assert "alertmanager-unrelated-0" not in audit
 
 
 def test_watchdog_live_check_rejects_extra_rule_label_without_printing_payload(tmp_path):
@@ -1747,6 +1764,14 @@ def test_watchdog_mount_contract_fails_closed_and_redacts_pod_data(tmp_path, mod
     assert result.returncode != 0
     assert "running Alertmanager pods do not have the exact watchdog Secret mount" in result.stderr
     assert "POD_FIXTURE_SENTINEL" not in result.stdout + result.stderr
+
+
+def test_watchdog_malformed_pod_inventory_fails_closed_and_redacts_data(tmp_path):
+    result, _ = run_helper(tmp_path, "watchdog-verify", kubectl_mode="watchdog-malformed-pods")
+
+    assert result.returncode != 0
+    assert "Alertmanager pod data is malformed (response redacted)" in result.stderr
+    assert "private malformed inventory" not in result.stdout + result.stderr
 
 
 @pytest.mark.parametrize(
@@ -1787,6 +1812,18 @@ def test_watchdog_delivery_log_retrieval_failure_is_sanitized(tmp_path):
     assert result.returncode != 0
     assert "Alertmanager logs could not be retrieved (details redacted)" in result.stderr
     assert "PRIVATE_LOG_RETRIEVAL_SENTINEL" not in result.stdout + result.stderr
+
+
+def test_watchdog_delivery_one_of_multiple_log_retrievals_failing_is_sanitized(tmp_path):
+    result, audit = run_helper(
+        tmp_path, "watchdog-verify", kubectl_mode="watchdog-second-log-fails"
+    )
+
+    assert result.returncode != 0
+    assert audit.count(" -c alertmanager ") == 2
+    assert "Alertmanager logs could not be retrieved (details redacted)" in result.stderr
+    assert "PRIVATE_LOG_RETRIEVAL_SENTINEL" not in result.stdout + result.stderr
+    assert not list(tmp_path.glob("sugarkube-watchdog-verify.*"))
 
 
 def watchdog_silence_fixture():
