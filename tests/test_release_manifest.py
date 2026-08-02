@@ -228,7 +228,7 @@ def oras_runner(*, image_revision: str = SHA, chart_revision: str = SHA):
             "config": {"digest": IMAGE_CONFIG_DIGEST},
             "layers": [],
         },
-        ("blob", "fetch", f"{manifest.IMAGE_REF}@{IMAGE_CONFIG_DIGEST}"): {
+        ("blob", "fetch", "--output", "-", f"{manifest.IMAGE_REF}@{IMAGE_CONFIG_DIGEST}"): {
             "config": {"Labels": {manifest.REVISION_ANNOTATION: image_revision}}
         },
         ("manifest", "fetch", "--descriptor", f"{manifest.CHART_REF}:3.2.0"): {
@@ -240,7 +240,7 @@ def oras_runner(*, image_revision: str = SHA, chart_revision: str = SHA):
             "config": {"digest": CHART_CONFIG_DIGEST},
             "layers": [],
         },
-        ("blob", "fetch", f"{manifest.CHART_REF}@{CHART_CONFIG_DIGEST}"): {
+        ("blob", "fetch", "--output", "-", f"{manifest.CHART_REF}@{CHART_CONFIG_DIGEST}"): {
             "annotations": {manifest.REVISION_ANNOTATION: chart_revision}
         },
     }
@@ -268,6 +268,24 @@ def test_preflight_checks_exact_descriptors_and_digest_qualified_metadata() -> N
     assert runner.calls[0][-1].endswith(":main-abcdef0")
     assert runner.calls[1][-1] == f"{manifest.IMAGE_REF}@{DIGEST}"
     assert all(":main-abcdef0" not in call[-1] for call in runner.calls[1:])
+    assert [call for call in runner.calls if call[1:3] == ["blob", "fetch"]] == [
+        [
+            "oras-stub",
+            "blob",
+            "fetch",
+            "--output",
+            "-",
+            f"{manifest.IMAGE_REF}@{IMAGE_CONFIG_DIGEST}",
+        ],
+        [
+            "oras-stub",
+            "blob",
+            "fetch",
+            "--output",
+            "-",
+            f"{manifest.CHART_REF}@{CHART_CONFIG_DIGEST}",
+        ],
+    ]
 
 
 def test_schema_v2_preflight_checks_image_and_chart_provenance_independently() -> None:
@@ -1457,9 +1475,17 @@ def test_command_and_oci_json_failures(monkeypatch) -> None:
             "platform digest",
         ),
         (("manifest", "fetch", f"{manifest.IMAGE_REF}@{PLATFORM_DIGEST}"), {}, "config digest"),
-        (("blob", "fetch", f"{manifest.IMAGE_REF}@{IMAGE_CONFIG_DIGEST}"), {}, "revision label"),
+        (
+            ("blob", "fetch", "--output", "-", f"{manifest.IMAGE_REF}@{IMAGE_CONFIG_DIGEST}"),
+            {},
+            "revision label",
+        ),
         (("manifest", "fetch", f"{manifest.CHART_REF}@{CHART_DIGEST}"), {}, "config digest"),
-        (("blob", "fetch", f"{manifest.CHART_REF}@{CHART_CONFIG_DIGEST}"), {}, "revision metadata"),
+        (
+            ("blob", "fetch", "--output", "-", f"{manifest.CHART_REF}@{CHART_CONFIG_DIGEST}"),
+            {},
+            "revision metadata",
+        ),
     ],
 )
 def test_preflight_rejects_malformed_oci_evidence(command_key, replacement, message) -> None:

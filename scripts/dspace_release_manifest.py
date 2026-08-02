@@ -516,7 +516,9 @@ def _image_evidence(oras: str, repository: str, tag: str, runner) -> tuple[str, 
         config_digest = image_manifest.get("config", {}).get("digest")
         if not isinstance(config_digest, str) or not DIGEST_RE.fullmatch(config_digest):
             raise ManifestError("image manifest lacks a canonical config digest")
-        config = _json_run(runner, [oras, "blob", "fetch", f"{repository}@{config_digest}"])
+        config = _json_run(
+            runner, [oras, "blob", "fetch", "--output", "-", f"{repository}@{config_digest}"]
+        )
         revision = _revision(config)
         if not isinstance(revision, str):
             raise ManifestError("image config lacks OCI revision label")
@@ -530,7 +532,9 @@ def _chart_evidence(oras: str, repository: str, version: str, runner) -> tuple[s
     config_digest = artifact.get("config", {}).get("digest")
     if not isinstance(config_digest, str) or not DIGEST_RE.fullmatch(config_digest):
         raise ManifestError("chart artifact lacks a canonical config digest")
-    config = _json_run(runner, [oras, "blob", "fetch", f"{repository}@{config_digest}"])
+    config = _json_run(
+        runner, [oras, "blob", "fetch", "--output", "-", f"{repository}@{config_digest}"]
+    )
     revision = _revision(config)
     if not isinstance(revision, str):
         raise ManifestError("chart config lacks OCI revision metadata")
@@ -768,7 +772,9 @@ def finalize(
         {
             "check": "selectedCoordinates",
             "passed": True,
-            "details": f"environment={environment}; imageTag={image_tag}; chartVersion={chart_version}",
+            "details": (
+                f"environment={environment}; imageTag={image_tag}; chartVersion={chart_version}"
+            ),
         },
         {
             "check": "clusterEnvironment",
@@ -871,7 +877,9 @@ def verify_helm_stored_values(
     return {
         "check": "helmStoredValues",
         "passed": True,
-        "details": "stored image coordinates, pull policy, and environment isolation matched approval",
+        "details": (
+            "stored image coordinates, pull policy, and environment isolation matched approval"
+        ),
     }
 
 
