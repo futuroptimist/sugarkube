@@ -1952,12 +1952,13 @@ def test_watchdog_delivery_one_of_multiple_log_retrievals_fails_closed(tmp_path)
 
 
 def watchdog_silence_fixture():
-    matchers = [
+    legacy_matchers = [
         {"name": "alertname", "value": "SugarkubeObservabilityWatchdog", "isRegex": False},
         {"name": "environment", "value": "staging", "isRegex": False},
         {"name": "cluster", "value": "sugarkube-int", "isRegex": False},
         {"name": "purpose", "value": "observability-watchdog", "isRegex": False},
     ]
+    normalized_matchers = [matcher | {"isEqual": True} for matcher in legacy_matchers]
 
     def silence(
         identifier,
@@ -1965,40 +1966,80 @@ def watchdog_silence_fixture():
         *,
         created_by="sugarkube-observability-watchdog-drill",
         comment="Owned staging watchdog failure drill",
-        selected_matchers=None,
+        selected_matchers=normalized_matchers,
     ):
         return {
             "id": identifier,
             "status": {"state": state},
             "createdBy": created_by,
             "comment": comment,
-            "matchers": matchers if selected_matchers is None else selected_matchers,
+            "matchers": selected_matchers,
             "fixtureDetail": f"private-detail-{identifier}",
         }
 
     return [
         silence("owned-active", "active"),
-        silence("owned-pending", "pending"),
+        silence("owned-pending-legacy", "pending", selected_matchers=legacy_matchers),
         silence("owned-expired", "expired"),
         silence("foreign-author", "active", created_by="another-operator"),
         silence("foreign-comment", "active", comment="another drill"),
         silence(
             "regex-matcher",
             "active",
-            selected_matchers=[matchers[0] | {"isRegex": True}, *matchers[1:]],
+            selected_matchers=[
+                normalized_matchers[0] | {"isRegex": True},
+                *normalized_matchers[1:],
+            ],
+        ),
+        silence(
+            "not-equal-matcher",
+            "active",
+            selected_matchers=[
+                normalized_matchers[0] | {"isEqual": False},
+                *normalized_matchers[1:],
+            ],
+        ),
+        silence(
+            "non-boolean-equality",
+            "active",
+            selected_matchers=[
+                normalized_matchers[0] | {"isEqual": "true"},
+                *normalized_matchers[1:],
+            ],
+        ),
+        silence(
+            "unexpected-matcher-key",
+            "active",
+            selected_matchers=[
+                normalized_matchers[0] | {"unexpected": False},
+                *normalized_matchers[1:],
+            ],
         ),
         silence(
             "extra-matcher",
             "active",
-            selected_matchers=[*matchers, {"name": "node", "value": "all", "isRegex": False}],
+            selected_matchers=[
+                *normalized_matchers,
+                {"name": "node", "value": "all", "isRegex": False, "isEqual": True},
+            ],
         ),
-        silence("missing-matcher", "active", selected_matchers=matchers[:-1]),
+        silence("missing-matcher", "active", selected_matchers=normalized_matchers[:-1]),
+        silence(
+            "duplicate-matcher",
+            "active",
+            selected_matchers=[
+                normalized_matchers[0],
+                normalized_matchers[0],
+                *normalized_matchers[2:],
+            ],
+        ),
         silence(
             "broad-matcher",
             "active",
-            selected_matchers=[matchers[0] | {"value": ".*"}, *matchers[1:]],
+            selected_matchers=[normalized_matchers[0] | {"value": ".*"}, *normalized_matchers[1:]],
         ),
         silence("malformed", "active", selected_matchers={"not": "a list"}),
+        silence("malformed-object", "active", selected_matchers=[None, *normalized_matchers[1:]]),
     ]
 
 
@@ -2115,7 +2156,9 @@ def test_watchdog_silence_status_reports_only_exact_owned_active_or_pending(tmp_
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.endswith(
-        "Owned active/pending watchdog drill silence IDs:\nowned-active\nowned-pending\n"
+        "Owned active/pending watchdog drill silence IDs:\n"
+        "owned-active\n"
+        "owned-pending-legacy\n"
     )
     for silence in fixture[2:]:
         assert silence["id"] not in result.stdout
@@ -2128,7 +2171,7 @@ def test_watchdog_silence_clear_deletes_only_exact_owned_active_or_pending(tmp_p
 
     assert result.returncode == 0, result.stderr
     deleted = (tmp_path / "watchdog-silence-deletions").read_text(encoding="utf-8").splitlines()
-    assert deleted == ["owned-active", "owned-pending"]
+    assert deleted == ["owned-active", "owned-pending-legacy"]
     assert result.stdout.endswith("Owned watchdog drill silence cleared.\n")
     assert all(item["fixtureDetail"] not in result.stdout + result.stderr for item in fixture)
 
@@ -2148,6 +2191,8 @@ def test_watchdog_silence_clear_is_noop_without_owned_silences(tmp_path):
     [
         ("watchdog-drill-status", "watchdog-silences-fail"),
         ("watchdog-drill-status", "watchdog-silences-malformed"),
+        ("watchdog-drill-clear", "watchdog-silences-fail"),
+        ("watchdog-drill-clear", "watchdog-silences-malformed"),
     ],
 )
 def test_watchdog_silence_api_failures_do_not_expose_fixture_contents(tmp_path, command, mode):
@@ -2157,3 +2202,5 @@ def test_watchdog_silence_api_failures_do_not_expose_fixture_contents(tmp_path, 
     assert result.returncode != 0
     output = result.stdout + result.stderr
     assert all(item["fixtureDetail"] not in output for item in fixture)
+    assert "credential" not in output
+    assert "Traceback" not in output
