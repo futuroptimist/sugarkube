@@ -747,13 +747,17 @@ esac
 echo "curl $*" >> "$AUDIT"
 data=""
 noproxy=""
+output=""
+url=""
 while [ "$#" -gt 0 ]; do
   [ "$1" != --data-binary ] || { shift; data=${1#@}; }
   [ "$1" != --noproxy ] || { shift; noproxy=$1; }
+  [ "$1" != --output ] || { shift; output=$1; }
+  case "$1" in http://*) url=$1 ;; esac
   shift
 done
 [ "$noproxy" = '*' ] || exit 64
-[ -z "$data" ] || cp "$data" "$ALERT_PAYLOAD"
+[ -z "$data" ] || { case "$url" in */api/v2/silences) cp "$data" "$WATCHDOG_SILENCE_PAYLOAD" ;; *) cp "$data" "$ALERT_PAYLOAD" ;; esac; }
 case "$PAGERDUTY_MODE" in
   transport) echo CURL_RESPONSE_SENTINEL >&2; exit 7 ;;
   forward-exit-during-curl) kill -9 "$(cat "$PAGERDUTY_PID")"; /bin/sleep 0.1; code=200 ;;
@@ -764,7 +768,13 @@ case "$PAGERDUTY_MODE" in
   malformed) code=not-a-status ;;
   *) code=200 ;;
 esac
-printf RESPONSE_SENTINEL > "$TMPDIR"/sugarkube-alertmanager-test.*/response
+case "$PAGERDUTY_MODE:$url" in
+  malformed-json:*/api/v2/silences) printf RESPONSE_SENTINEL > "$output" ;;
+  missing-id:*/api/v2/silences) printf '%s' '{"private":"RESPONSE_BODY_SENTINEL"}' > "$output" ;;
+  invalid-id:*/api/v2/silences) printf '%s' '{"silenceID":"bad\\nRESPONSE_BODY_SENTINEL"}' > "$output" ;;
+  *:*/api/v2/silences) printf '%s' '{"silenceID":"created-owned-silence"}' > "$output" ;;
+  *) printf RESPONSE_SENTINEL > "$output" ;;
+esac
 printf '%s' "$code"
 """,
         encoding="utf-8",
@@ -1979,10 +1989,65 @@ def test_watchdog_drill_create_submits_exact_bounded_sanitized_payload(tmp_path)
     assert (ends_at - starts_at).total_seconds() == 8 * 60
     assert "MANUAL CHECKPOINT" in result.stderr
     assert (
+        "port-forward --address=127.0.0.1 " "service/kube-prometheus-stack-alertmanager :9093"
+    ) in audit
+    assert "--header Content-Type: application/json" in audit
+    assert "http://127.0.0.1:43128/api/v2/silences" in audit
+    assert (
         result.stdout
         == "Owned watchdog drill silence created; id=created-owned-silence; automatic expiry=8m.\n"
     )
     assert "shutdown" not in audit.lower() and "hc-ping" not in audit
+    assert (tmp_path / "pagerduty.reaped").read_text(encoding="utf-8").strip() == "reaped"
+    assert not list(tmp_path.glob("sugarkube-watchdog-drill.*"))
+
+
+@pytest.mark.parametrize(
+    ("mode", "forward_line"),
+    [("forward-exit", None), ("success", "")],
+)
+def test_watchdog_drill_port_forward_failures_are_redacted_and_cleaned_up(
+    tmp_path, mode, forward_line
+):
+    kwargs = {"pagerduty_mode": mode}
+    if forward_line is not None:
+        kwargs["pagerduty_forward_line"] = forward_line
+    result, _ = run_helper(tmp_path, "watchdog-drill-create", **kwargs)
+
+    assert result.returncode != 0
+    output = result.stdout + result.stderr
+    assert "diagnostics redacted" in output
+    assert "PORT_FORWARD_SENTINEL" not in output
+    assert "Traceback" not in output
+    assert not list(tmp_path.glob("sugarkube-watchdog-drill.*"))
+
+
+@pytest.mark.parametrize(
+    "mode",
+    [
+        "transport",
+        "http415",
+        "http400",
+        "http503",
+        "http000",
+        "malformed",
+        "malformed-json",
+        "missing-id",
+        "invalid-id",
+    ],
+)
+def test_watchdog_drill_transport_and_response_failures_are_redacted_and_cleaned_up(tmp_path, mode):
+    result, _ = run_helper(tmp_path, "watchdog-drill-create", pagerduty_mode=mode)
+
+    assert result.returncode != 0
+    output = result.stdout + result.stderr
+    assert "redacted" in output
+    for sentinel in ("CURL_RESPONSE_SENTINEL", "RESPONSE_SENTINEL", "RESPONSE_BODY_SENTINEL"):
+        assert sentinel not in output
+    assert "credential" not in output.lower()
+    assert "Traceback" not in output
+    assert (tmp_path / "pagerduty.reaped").read_text(encoding="utf-8").strip() == "reaped"
+    assert not list(tmp_path.glob("sugarkube-watchdog-drill.*"))
 
 
 def test_watchdog_silence_status_reports_only_exact_owned_active_or_pending(tmp_path):
@@ -2022,8 +2087,6 @@ def test_watchdog_silence_clear_is_noop_without_owned_silences(tmp_path):
 @pytest.mark.parametrize(
     ("command", "mode"),
     [
-        ("watchdog-drill-create", "watchdog-silence-create-fail"),
-        ("watchdog-drill-create", "watchdog-silence-create-malformed"),
         ("watchdog-drill-status", "watchdog-silences-fail"),
         ("watchdog-drill-status", "watchdog-silences-malformed"),
     ],
