@@ -443,7 +443,9 @@ checks, not deployment evidence from this change.
 First manually confirm a recent successful Healthchecks ping. Run
 `just observability-watchdog-drill-start env=staging`. It creates only an eight-minute Alertmanager
 silence with the watchdog's exact four labels; automatic expiry preserves recovery if the operator
-disconnects. It never shuts down a node and never manually pings the URL. Inspect it with
+disconnects. The command sends JSON directly to Alertmanager through a temporary, automatically
+allocated `127.0.0.1` port-forward and removes that listener when it finishes. It never shuts down a
+node and never manually pings the URL. Inspect it with
 `just observability-watchdog-drill-status env=staging`, or remove only that owned silence early with
 `just observability-watchdog-drill-clear env=staging`. Automated tests inspect the payload and do not
 wait eight minutes.
