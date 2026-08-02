@@ -165,9 +165,12 @@ def _verify_setup(
     direct_builds = override.get("direct_builds", {})
     direct_html = override.get("direct_html", {})
     public_build = override.get("public_build", build())
-    public_html = override.get(
-        "public_html", f'<meta name="dspace-build-revision" content="{SHA}">'
+    default_html = (
+        "<!doctype html><html><head><title>DSPACE</title></head><body></body></html>"
+        if legacy
+        else f'<meta name="dspace-build-revision" content="{SHA}">'
     )
+    public_html = override.get("public_html", default_html)
     legacy_build = json.dumps(
         {"gitSha": revision, "generatedAt": "2026-08-01T12:00:00Z", "source": "dspace"}
     )
@@ -247,7 +250,7 @@ def _verify_setup(
             return override.get("direct_meta", {}).get(pod_name, legacy_build)
         if argv[-1].endswith("build-info.json"):
             return direct_builds.get(pod_name, build())
-        return direct_html.get(pod_name, f'<meta name="dspace-build-revision" content="{SHA}">')
+        return direct_html.get(pod_name, default_html)
 
     monkeypatch.setattr(verifier, "command", command)
     monkeypatch.setattr(
@@ -428,12 +431,14 @@ def test_modern_identity_failure_never_requests_legacy_surface(
 @pytest.mark.parametrize(
     "payload",
     [
-        "{",
-        "x" * (1024 * 1024 + 1),
-        json.dumps({"gitSha": "wrong", "generatedAt": "2026-08-01T12:00:00Z", "source": "x"}),
-        json.dumps({"gitSha": RECOVERY_SHA, "generatedAt": "", "source": "x"}),
-        json.dumps({"gitSha": RECOVERY_SHA, "generatedAt": "not-a-date", "source": "x"}),
-        json.dumps({"gitSha": RECOVERY_SHA, "generatedAt": "2026-08-01T12:00:00Z", "source": ""}),
+        b"{",
+        b"x" * (1024 * 1024 + 1),
+        b"\xff" + SENTINEL.encode(),
+        b"[" * 2000 + SENTINEL.encode() + b"]" * 2000,
+        json.dumps({"gitSha": "wrong", "generatedAt": "2026-08-01T12:00:00Z", "source": "x"}).encode(),
+        json.dumps({"gitSha": RECOVERY_SHA, "generatedAt": "", "source": "x"}).encode(),
+        json.dumps({"gitSha": RECOVERY_SHA, "generatedAt": "not-a-date", "source": "x"}).encode(),
+        json.dumps({"gitSha": RECOVERY_SHA, "generatedAt": "2026-08-01T12:00:00Z", "source": ""}).encode(),
         json.dumps(
             {
                 "gitSha": RECOVERY_SHA,
@@ -441,11 +446,13 @@ def test_modern_identity_failure_never_requests_legacy_surface(
                 "source": "x",
                 "extra": SENTINEL,
             }
-        ),
+        ).encode(),
     ],
     ids=(
         "malformed",
         "oversized",
+        "invalid-utf8",
+        "deeply-nested",
         "wrong-sha",
         "empty-time",
         "bad-time",
@@ -453,9 +460,9 @@ def test_modern_identity_failure_never_requests_legacy_surface(
         "unsafe-shape",
     ),
 )
-def test_legacy_identity_rejects_bad_payloads_without_leaking(payload: str) -> None:
+def test_legacy_identity_rejects_bad_payloads_without_leaking(payload: bytes) -> None:
     with pytest.raises(verifier.VerificationError) as raised:
-        verifier.legacy_identity(payload.encode(), RECOVERY_SHA, "direct identity")
+        verifier.legacy_identity(payload, RECOVERY_SHA, "direct identity")
     assert str(raised.value) == "direct identity"
     assert SENTINEL not in str(raised.value)
 
@@ -491,8 +498,21 @@ def test_legacy_identity_rejects_bad_payloads_without_leaking(payload: str) -> N
         ),
         ({"direct_html": {"dspace-1": ""}}, "direct identity"),
         ({"public_html": ""}, "public identity"),
+        ({"direct_html": {"dspace-1": '{"status":"ok"}'}}, "direct identity"),
+        ({"direct_html": {"dspace-1": "DSPACE is running"}}, "direct identity"),
+        ({"public_html": '{"status":"ok"}'}, "public identity"),
+        ({"public_html": "DSPACE is running"}, "public identity"),
     ],
-    ids=("replica-disagreement", "public-disagreement", "empty-direct-root", "empty-public-root"),
+    ids=(
+        "replica-disagreement",
+        "public-disagreement",
+        "empty-direct-root",
+        "empty-public-root",
+        "json-direct-root",
+        "plain-text-direct-root",
+        "json-public-root",
+        "plain-text-public-root",
+    ),
 )
 def test_legacy_agreement_and_root_evidence_fail_closed(
     monkeypatch: pytest.MonkeyPatch,

@@ -63,6 +63,7 @@ META_RE = re.compile(
     re.IGNORECASE,
 )
 IMAGE_ID_RE = re.compile(r"sha256:[0-9a-f]{64}$")
+HTML_DOCUMENT_RE = re.compile(r"^\s*(?:<!doctype\s+html\b|<html\b)", re.IGNORECASE)
 
 
 class VerificationError(ValueError):
@@ -218,7 +219,7 @@ def legacy_identity(raw: bytes, revision: str, category: str) -> tuple[str, str,
         fail(category)
     try:
         value = json.loads(raw)
-    except (UnicodeDecodeError, json.JSONDecodeError):
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError):
         fail(category)
     if not isinstance(value, dict) or set(value) != LEGACY_BUILD_FIELDS:
         fail(category)
@@ -237,14 +238,14 @@ def legacy_identity(raw: bytes, revision: str, category: str) -> tuple[str, str,
 
 
 def root_document(raw: bytes, category: str) -> None:
-    """Require bounded, non-empty UTF-8 root evidence without inferring identity."""
+    """Require a bounded UTF-8 HTML root document without inferring identity."""
     if len(raw) > 1024 * 1024:
         fail(category)
     try:
         value = raw.decode("utf-8")
     except UnicodeDecodeError:
         fail(category)
-    if not value.strip():
+    if HTML_DOCUMENT_RE.search(value) is None:
         fail(category)
 
 
@@ -288,6 +289,9 @@ def load_manifest(path: Path) -> dict[str, Any]:
 def verify(args: argparse.Namespace) -> dict[str, Any]:
     manifest = load_manifest(args.manifest)
     contract = identity_contract(manifest)
+    identity_path = (
+        "/build-meta.json" if contract == LEGACY_IDENTITY_CONTRACT else "/build-info.json"
+    )
     expected = {
         "version": manifest["applicationVersion"],
         "revision": manifest["sourceRevision"],
@@ -437,17 +441,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         proxy = ["kubectl", "--kubeconfig", args.kubeconfig, "get", "--raw"]
         prefix = f"/api/v1/namespaces/{args.namespace}/pods/{name}:{proxy_port}/proxy"
         try:
-            direct_build = command(
-                proxy
-                + [
-                    prefix
-                    + (
-                        "/build-meta.json"
-                        if contract == LEGACY_IDENTITY_CONTRACT
-                        else "/build-info.json"
-                    )
-                ]
-            ).encode()
+            direct_build = command(proxy + [prefix + identity_path]).encode()
             direct_html = command(proxy + [prefix + "/"]).encode()
         except VerificationError:
             fail("direct identity")
@@ -472,13 +466,13 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
 
     public_identity = (
         legacy_identity(
-            fetch(base_url + "/build-meta.json", origin),
+            fetch(base_url + identity_path, origin),
             expected["revision"],
             "public identity",
         )
         if contract == LEGACY_IDENTITY_CONTRACT
         else identity(
-            fetch(base_url + "/build-info.json", origin),
+            fetch(base_url + identity_path, origin),
             expected["version"],
             expected["revision"],
             canonical_image,
@@ -544,11 +538,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         "defaultProvider": expected["provider"],
         "journeys": [
             {
-                "name": (
-                    "/build-meta.json"
-                    if contract == LEGACY_IDENTITY_CONTRACT
-                    else "/build-info.json"
-                ),
+                "name": identity_path,
                 "passed": True,
             },
             {"name": "/", "passed": True},
