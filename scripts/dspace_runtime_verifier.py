@@ -437,10 +437,17 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         proxy = ["kubectl", "--kubeconfig", args.kubeconfig, "get", "--raw"]
         prefix = f"/api/v1/namespaces/{args.namespace}/pods/{name}:{proxy_port}/proxy"
         try:
-            identity_path = (
-                "/build-meta.json" if contract == LEGACY_IDENTITY_CONTRACT else "/build-info.json"
-            )
-            direct_build = command(proxy + [prefix + identity_path]).encode()
+            direct_build = command(
+                proxy
+                + [
+                    prefix
+                    + (
+                        "/build-meta.json"
+                        if contract == LEGACY_IDENTITY_CONTRACT
+                        else "/build-info.json"
+                    )
+                ]
+            ).encode()
             direct_html = command(proxy + [prefix + "/"]).encode()
         except VerificationError:
             fail("direct identity")
@@ -536,7 +543,14 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         "frontendSourceRevision": expected["revision"],
         "defaultProvider": expected["provider"],
         "journeys": [
-            {"name": identity_path, "passed": True},
+            {
+                "name": (
+                    "/build-meta.json"
+                    if contract == LEGACY_IDENTITY_CONTRACT
+                    else "/build-info.json"
+                ),
+                "passed": True,
+            },
             {"name": "/", "passed": True},
             {"name": "/chat", "passed": True},
         ],
