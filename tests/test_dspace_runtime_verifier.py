@@ -53,7 +53,13 @@ def test_capabilities_schema_and_order(capsys: pytest.CaptureFixture[str]) -> No
         == 0
     )
     value = json.loads(capsys.readouterr().out)
-    assert list(value) == ["schemaVersion", "environment", "release", "namespace", "capabilities"]
+    assert list(value) == [
+        "schemaVersion",
+        "environment",
+        "release",
+        "namespace",
+        "capabilities",
+    ]
     assert value["capabilities"] == verifier.CAPABILITIES
 
 
@@ -114,7 +120,15 @@ def _verify_setup(
                         }
                     ],
                 },
-                "spec": {"containers": [{"name": "dspace", "image": declared}]},
+                "spec": {
+                    "containers": [
+                        {
+                            "name": "dspace",
+                            "image": declared,
+                            "ports": [{"name": "http", "containerPort": 8080}],
+                        }
+                    ]
+                },
                 "status": {
                     "phase": "Running",
                     "conditions": [{"type": "Ready", "status": "True"}],
@@ -127,8 +141,14 @@ def _verify_setup(
         override.get(
             "helm_statuses",
             [
-                {"chart": {"metadata": {"name": "dspace", "version": "3.1.0"}}, "version": 7},
-                {"chart": {"metadata": {"name": "dspace", "version": "3.1.0"}}, "version": 7},
+                {
+                    "chart": {"metadata": {"name": "dspace", "version": "3.1.0"}},
+                    "version": 7,
+                },
+                {
+                    "chart": {"metadata": {"name": "dspace", "version": "3.1.0"}},
+                    "version": 7,
+                },
             ],
         )
     )
@@ -166,6 +186,10 @@ def _verify_setup(
                                     {
                                         "name": "dspace",
                                         "image": override.get("deployment_image", declared),
+                                        "ports": override.get(
+                                            "deployment_ports",
+                                            [{"name": "http", "containerPort": 8080}],
+                                        ),
                                         "env": [
                                             {
                                                 "name": "DSPACE_TOKEN_PLACE_URL",
@@ -206,7 +230,7 @@ def _verify_setup(
         failure = override.get("direct_failure")
         if failure == pod_name:
             raise verifier.VerificationError(SENTINEL)
-        if argv[-1].endswith("build-info.json"):
+        if argv[-1].endswith(("build-info.json", "build-meta.json")):
             return direct_builds.get(pod_name, build())
         return direct_html.get(pod_name, f'<meta name="dspace-build-revision" content="{SHA}">')
 
@@ -217,11 +241,15 @@ def _verify_setup(
         lambda url, origin: str(public_build if url.endswith(".json") else public_html).encode(),
     )
     monkeypatch.setattr(
-        verifier.app_config, "load_config", lambda *args: {"SUGARKUBE_VALUES": "values.yaml"}
+        verifier.app_config,
+        "load_config",
+        lambda *args: {"SUGARKUBE_VALUES": "values.yaml"},
     )
     monkeypatch.setattr(verifier, "_resolve_host", lambda paths: "staging.example")
     monkeypatch.setattr(
-        verifier, "values_expectations", lambda paths: ("https://token.example", "model-a")
+        verifier,
+        "values_expectations",
+        lambda paths: ("https://token.example", "model-a"),
     )
     seen: list[list[str]] = []
 
@@ -272,8 +300,10 @@ def test_verify_uses_safe_exact_smoke_argv(
     args, seen = _verify_setup(monkeypatch, tmp_path, provider=provider, rollback=rollback)
     # Exercise both supported imageID spellings through the complete verifier.
     original = verifier.command
+    commands: list[list[str]] = []
 
     def command(argv: list[str]) -> str:
+        commands.append(argv)
         value = original(argv)
         if "pods" in argv:
             payload = json.loads(value)
@@ -287,7 +317,81 @@ def test_verify_uses_safe_exact_smoke_argv(
     assert list(result) == list(verifier.RESULT_FIELDS)
     assert result["journeys"][-1] == {"name": "/chat", "passed": True}
     assert ("--expected-token-place-origin" in seen[-1]) is has_token_args
+    assert seen[-1][seen[-1].index("--identity-contract") + 1] == "build-info-v1"
+    proxy_urls = [argv[-1] for argv in commands if argv[:1] == ["kubectl"] and "--raw" in argv]
+    assert any(":8080/proxy/build-info.json" in url for url in proxy_urls)
+    assert not any(":3000/proxy" in url for url in proxy_urls)
     assert SENTINEL not in json.dumps(result)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        [],
+        [{"name": "other", "containerPort": 8080}],
+        [{"name": "http", "containerPort": True}],
+        [{"name": "http", "containerPort": "8080"}],
+        [{"name": "http", "containerPort": 0}],
+        [{"name": "http", "containerPort": 65536}],
+        [{"name": "http", "containerPort": 1}, {"name": "http", "containerPort": 2}],
+    ],
+)
+def test_named_http_port_fails_closed(value: object) -> None:
+    container = {} if value is None else {"ports": value}
+    with pytest.raises(verifier.VerificationError, match="cluster identity"):
+        verifier.named_http_port(container, "cluster identity")
+
+
+def test_known_recovery_named_http_port_is_derived() -> None:
+    assert (
+        verifier.named_http_port(
+            {"ports": [{"name": "http", "containerPort": 8080}]}, "cluster identity"
+        )
+        == 8080
+    )
+
+
+def test_identity_contract_requires_every_recovery_coordinate() -> None:
+    recovery = dict(verifier.LEGACY_RECOVERY_COORDINATES)
+    assert verifier.identity_contract(recovery) == "legacy-build-meta-v1"
+    for key in recovery:
+        drifted = dict(recovery)
+        drifted[key] = "different"
+        assert verifier.identity_contract(drifted) == "build-info-v1"
+    assert verifier.identity_contract({}) == "build-info-v1"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"not-json",
+        b"x" * (1024 * 1024 + 1),
+        json.dumps(
+            {
+                "gitSha": "wrong",
+                "generatedAt": "2026-08-02T00:00:00Z",
+                "source": "build",
+            }
+        ).encode(),
+        json.dumps({"gitSha": SHA, "generatedAt": "", "source": "build"}).encode(),
+        json.dumps({"gitSha": SHA, "generatedAt": "not-a-date", "source": "build"}).encode(),
+        json.dumps({"gitSha": SHA, "generatedAt": "2026-08-02T00:00:00Z", "source": ""}).encode(),
+    ],
+)
+def test_legacy_identity_fails_closed(payload: bytes) -> None:
+    with pytest.raises(verifier.VerificationError, match="direct identity"):
+        verifier.legacy_identity(payload, SHA, "direct identity")
+
+
+def test_legacy_identity_accepts_expected_public_shape() -> None:
+    assert verifier.legacy_identity(
+        json.dumps(
+            {"gitSha": SHA, "generatedAt": "2026-08-02T00:00:00Z", "source": "build"}
+        ).encode(),
+        SHA,
+        "direct identity",
+    ) == (SHA, "2026-08-02T00:00:00Z", "build")
 
 
 @pytest.mark.parametrize(
@@ -352,7 +456,15 @@ def _pod_overrides(mutator) -> dict[str, object]:  # noqa: ANN001
                     }
                 ],
             },
-            "spec": {"containers": [{"name": "dspace", "image": canonical}]},
+            "spec": {
+                "containers": [
+                    {
+                        "name": "dspace",
+                        "image": canonical,
+                        "ports": [{"name": "http", "containerPort": 8080}],
+                    }
+                ]
+            },
             "status": {
                 "phase": "Running",
                 "conditions": [{"type": "Ready", "status": "True"}],
@@ -383,13 +495,23 @@ def _pod_overrides(mutator) -> dict[str, object]:  # noqa: ANN001
             ),
             "pod/replica identity",
         ),
-        ({"deployment_image": "ghcr.io/democratizedspace/dspace:wrong"}, "cluster identity"),
+        (
+            _pod_overrides(
+                lambda pod: pod["spec"]["containers"][0]["ports"][0].update({"containerPort": 8081})
+            ),
+            "pod/replica identity",
+        ),
+        (
+            {"deployment_image": "ghcr.io/democratizedspace/dspace:wrong"},
+            "cluster identity",
+        ),
         ({"direct_failure": "dspace-2"}, "direct identity"),
     ],
     ids=(
         "one-unhealthy",
         "declared-image",
         "resolved-digest",
+        "named-port-mismatch",
         "deployment-image",
         "direct-unreachable",
     ),
@@ -441,7 +563,11 @@ def test_verify_redacts_nonzero_chat_output(
     args, _ = _verify_setup(
         monkeypatch,
         tmp_path,
-        overrides={"chat_returncode": 9, "chat_stdout": SENTINEL, "chat_stderr": SENTINEL},
+        overrides={
+            "chat_returncode": 9,
+            "chat_stdout": SENTINEL,
+            "chat_stderr": SENTINEL,
+        },
     )
     with pytest.raises(verifier.VerificationError) as raised:
         verifier.verify(args)
@@ -494,7 +620,10 @@ def test_main_failure_record_redacts_http_and_chat_content(
 def test_verify_detects_helm_change_during_chat(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    status = {"chart": {"metadata": {"name": "dspace", "version": "3.1.0"}}, "version": 7}
+    status = {
+        "chart": {"metadata": {"name": "dspace", "version": "3.1.0"}},
+        "version": 7,
+    }
     changed = {**status, "version": 8}
     args, _ = _verify_setup(monkeypatch, tmp_path, overrides={"helm_statuses": [status, changed]})
     with pytest.raises(verifier.VerificationError) as raised:
@@ -563,22 +692,34 @@ def test_main_never_echoes_unknown_argument_value(
     "status,expected_revision,category",
     [
         (
-            {"chart": {"metadata": {"name": "other", "version": "3.1.0"}}, "version": 7},
+            {
+                "chart": {"metadata": {"name": "other", "version": "3.1.0"}},
+                "version": 7,
+            },
             None,
             "cluster identity",
         ),
         (
-            {"chart": {"metadata": {"name": "dspace", "version": "3.0.0"}}, "version": 7},
+            {
+                "chart": {"metadata": {"name": "dspace", "version": "3.0.0"}},
+                "version": 7,
+            },
             None,
             "cluster identity",
         ),
         (
-            {"chart": {"metadata": {"name": "dspace", "version": "3.1.0"}}, "version": 0},
+            {
+                "chart": {"metadata": {"name": "dspace", "version": "3.1.0"}},
+                "version": 0,
+            },
             None,
             "cluster identity",
         ),
         (
-            {"chart": {"metadata": {"name": "dspace", "version": "3.1.0"}}, "version": 7},
+            {
+                "chart": {"metadata": {"name": "dspace", "version": "3.1.0"}},
+                "version": 7,
+            },
             6,
             "staging drift",
         ),
@@ -601,19 +742,26 @@ def test_helm_identity_rejects_wrong_real_status_fields(
         verifier.helm_identity(args, "3.1.0")
 
 
-def test_helm_identity_accepts_real_status_schema(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_helm_identity_accepts_real_status_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         verifier,
         "command",
         lambda argv: json.dumps(
-            {"chart": {"metadata": {"name": "dspace", "version": "3.1.0"}}, "version": 7}
+            {
+                "chart": {"metadata": {"name": "dspace", "version": "3.1.0"}},
+                "version": 7,
+            }
         ),
     )
     args = Namespace(kubeconfig="k", release="dspace", namespace="dspace", expected_helm_revision=7)
     assert verifier.helm_identity(args, "3.1.0") == ("dspace", "3.1.0", 7)
 
 
-def test_command_timeout_is_bounded_and_redacted(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_command_timeout_is_bounded_and_redacted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     def timeout(*args: object, **kwargs: object) -> None:
         raise subprocess.TimeoutExpired(["kubectl", "SENTINEL_SECRET"], 15)
 
@@ -642,7 +790,9 @@ def test_image_id_digest_accepts_established_runtime_forms(image_id: str) -> Non
         None,
     ],
 )
-def test_image_id_digest_rejects_malformed_values_without_leaking(image_id: object) -> None:
+def test_image_id_digest_rejects_malformed_values_without_leaking(
+    image_id: object,
+) -> None:
     with pytest.raises(verifier.VerificationError) as raised:
         verifier.image_id_digest(image_id)
     assert str(raised.value) == "pod/replica identity"
@@ -695,9 +845,18 @@ def test_deployment_requires_matching_helm_annotations(annotation: str, value: s
 @pytest.mark.parametrize(
     "payload,category",
     [
-        ({"version": "wrong", "revision": SHA, "shortRevision": "abcdef0"}, "public identity"),
-        ({"version": "3.1.0", "revision": "wrong", "shortRevision": "abcdef0"}, "public identity"),
-        ({"version": "3.1.0", "revision": SHA, "shortRevision": "wrong"}, "public identity"),
+        (
+            {"version": "wrong", "revision": SHA, "shortRevision": "abcdef0"},
+            "public identity",
+        ),
+        (
+            {"version": "3.1.0", "revision": "wrong", "shortRevision": "abcdef0"},
+            "public identity",
+        ),
+        (
+            {"version": "3.1.0", "revision": SHA, "shortRevision": "wrong"},
+            "public identity",
+        ),
         (
             {
                 "version": "3.1.0",
@@ -722,7 +881,9 @@ def test_build_identity_requires_canonical_coordinates(
         )
 
 
-def test_command_success_and_nonzero_failure_are_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_command_success_and_nonzero_failure_are_bounded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         verifier.subprocess,
         "run",
@@ -793,7 +954,12 @@ def test_fetch_success_and_network_failures_are_bounded(
         (
             lambda: verifier.identity(
                 json.dumps(
-                    {"version": "v", "revision": SHA, "shortRevision": SHA[:7], "extra": SENTINEL}
+                    {
+                        "version": "v",
+                        "revision": SHA,
+                        "shortRevision": SHA[:7],
+                        "extra": SENTINEL,
+                    }
                 ).encode(),
                 "v",
                 SHA,
@@ -802,7 +968,10 @@ def test_fetch_success_and_network_failures_are_bounded(
             ),
             "identity",
         ),
-        (lambda: verifier.marker(b"x" * (1024 * 1024 + 1), SHA, "frontend"), "frontend"),
+        (
+            lambda: verifier.marker(b"x" * (1024 * 1024 + 1), SHA, "frontend"),
+            "frontend",
+        ),
         (lambda: verifier.marker(b"\xff", SHA, "frontend"), "frontend"),
     ],
 )
@@ -841,7 +1010,9 @@ def test_load_manifest_and_helm_status_fail_with_bounded_categories(
     assert SENTINEL not in str(raised.value)
 
 
-def test_resolve_host_accepts_only_a_bounded_hostname(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resolve_host_accepts_only_a_bounded_hostname(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(verifier, "command", lambda argv: "dspace.example\n")
     assert verifier._resolve_host([]) == "dspace.example"
 
@@ -856,7 +1027,10 @@ def test_resolve_host_accepts_only_a_bounded_hostname(monkeypatch: pytest.Monkey
     ("call", "category"),
     [
         (lambda: verifier.controller_owner(None, "ReplicaSet"), "pod/replica identity"),
-        (lambda: verifier.helm_deployment_uid(None, "dspace", "dspace"), "cluster identity"),
+        (
+            lambda: verifier.helm_deployment_uid(None, "dspace", "dspace"),
+            "cluster identity",
+        ),
     ],
 )
 def test_kubernetes_metadata_types_fail_closed(call: object, category: str) -> None:
@@ -864,7 +1038,9 @@ def test_kubernetes_metadata_types_fail_closed(call: object, category: str) -> N
         call()  # type: ignore[operator]
 
 
-def test_fetch_preserves_bounded_redirect_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fetch_preserves_bounded_redirect_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     class Opener:
         def open(self, url: str, timeout: int) -> _Response:
             raise verifier.VerificationError("public identity")

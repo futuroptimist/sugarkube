@@ -487,6 +487,22 @@ through the selected Helm release's Deployment and ReplicaSet. Each DSPACE
 container must use the approved repository and immutable image tag before its
 resolved image ID is accepted.
 
+The runtime verifier derives its pod-proxy port from the unique port named `http`
+on the validated `dspace` Deployment container and requires every verified pod to
+declare that same named port; it does not assume a numeric application port.
+`build-info-v1` remains the default identity contract. The sole exception is the
+complete immutable DSPACE 3.0.1 recovery tuple in
+`docs/apps/dspace.prod-recovery-coordinates.json`, together with its approved image,
+chart, source, semantic tag, and OpenAI-provider coordinates. For that exact tuple,
+the verifier proves matching public and direct `/build-meta.json` values (full
+`gitSha`, valid non-empty `generatedAt`, and non-empty `source`) while still checking
+bounded, non-empty root documents. Sugarkube passes the selected contract explicitly
+to the DSPACE smoke runner as `--identity-contract build-info-v1` or
+`--identity-contract legacy-build-meta-v1`. This is not a fallback: coordinate drift
+uses the modern contract, and a modern identity failure cannot switch contracts.
+The exception changes neither the immutable recovery coordinates nor candidate
+approval or finalized-evidence schemas.
+
 Immediately before Helm changes the release, the guarded recipe atomically creates
 `<evidence-path>.reservation`. This sidecar binds the normalized destination,
 approved-candidate fingerprint, environment, Helm release, and namespace to one
