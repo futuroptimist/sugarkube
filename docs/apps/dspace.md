@@ -125,22 +125,25 @@ PUBLIC_BUILD=$(mktemp)
 DIRECT_BUILD=$(mktemp)
 trap 'rm -f "$RECOVERY_CONFIG" "$PUBLIC_BUILD" "$DIRECT_BUILD"' EXIT
 curl --fail --silent --show-error --max-time 10 --max-filesize 16384 \
-  "https://$PROD_HOST/build-info.json" >"$PUBLIC_BUILD"
-jq -e '{version, revision, shortRevision, image}' "$PUBLIC_BUILD" \
+  "https://$PROD_HOST/build-meta.json" >"$PUBLIC_BUILD"
+jq -e '{gitSha, generatedAt, source}' "$PUBLIC_BUILD" \
   >"$CAPTURE/public-build-identity.json"
 POD=$(kubectl --kubeconfig "$PROD_KUBECONFIG" -n dspace get pods \
   -l app.kubernetes.io/name=dspace,app.kubernetes.io/instance=dspace \
   -o jsonpath='{.items[0].metadata.name}')
+HTTP_PORT=$(kubectl --kubeconfig "$PROD_KUBECONFIG" -n dspace get deployment dspace -o json \
+  | jq -er '[.spec.template.spec.containers[] | select(.name == "dspace")
+    | .ports[] | select(.name == "http") | .containerPort] | if length == 1 then .[0] else error("expected one http port") end')
 timeout 10s kubectl --kubeconfig "$PROD_KUBECONFIG" get --raw \
-  "/api/v1/namespaces/dspace/pods/$POD:3000/proxy/build-info.json" \
+  "/api/v1/namespaces/dspace/pods/$POD:$HTTP_PORT/proxy/build-meta.json" \
   | head -c 16384 >"$DIRECT_BUILD"
-jq -e '{version, revision, shortRevision, image}' "$DIRECT_BUILD" \
+jq -e '{gitSha, generatedAt, source}' "$DIRECT_BUILD" \
   >"$CAPTURE/direct-build-identity.json"
 ```
 
 Do not run `dspace-release-verify` against the pre-change 3.0.2 candidate: the full verifier
 correctly rejects the currently installed 3.0.1 chart. The bounded captures above retain only the
-four allowlisted identity fields and cap each response at 16 KiB. Before evidence reservation or
+three allowlisted identity fields and cap each response at 16 KiB. Before evidence reservation or
 mutation, run the existing recipe's exact read-only digest-qualified render and structural
 validation sequence:
 
@@ -221,11 +224,27 @@ requires complete post-mutation finalization before the freeze can be reconsider
 ## Mandatory release verification
 
 DSPACE staging and production releases are verified against an approved immutable release
-manifest. The verifier checks public build identity and frontend marker, every ready serving
-replica's image coordinate, digest, build identity, and frontend marker, then invokes DSPACE's
-non-destructive remote `/chat` harness. It uses read-only Kubernetes API pod proxies. Successful
+manifest. By default, the verifier uses the strict `build-info-v1` contract: public and direct
+`/build-info.json`, exact public and direct HTML revision markers, and agreement across replicas.
+It derives the proxy port from the unique `http` port on the unique Deployment `dspace` container
+and requires every pod's unique `dspace` container to declare that same valid port. It then invokes
+DSPACE's non-destructive remote `/chat` harness with an explicit `--identity-contract
+build-info-v1`. It uses read-only Kubernetes API pod proxies. Successful
 bounded results are included in finalized evidence as `runtimeVerification`; response bodies,
 child output, browser artifacts, headers, cookies, credentials, and request payloads are not saved.
+
+The sole exception is the complete coordinate tuple in
+`docs/apps/dspace.prod-recovery-coordinates.json`, augmented by candidate provider `openai`: schema
+2, application `3.0.1`, source revision `1a31a569aff2dbeb238e8c2688b9e85140d2077d`, chart source
+revision `63063e287adb92a4158ce2c8e7d378b73f52c1c5`, image tag `main-1a31a56`, image digest
+`sha256:23dbc573377549136c1f10b05706b3c176ffbabaf04a3194381a24752104a401`, chart `3.0.2` with digest
+`sha256:8b862135e52146f301a41259d6dabb053ed891d798fc1c8c95ca775b2b8e9575`, and semantic tag
+`v3.0.1`. Only that exact candidate uses `legacy-build-meta-v1`. The verifier proves identical
+`gitSha`, valid non-empty `generatedAt`, and non-empty `source` through public and every direct
+`/build-meta.json`, while still validating bounded non-empty root documents, and passes the legacy
+contract explicitly to the smoke runner. This is not a fallback: any coordinate drift uses the
+modern contract and a modern identity failure remains fatal. The exception changes neither the
+immutable recovery coordinates nor candidate approval.
 
 Prepare a DSPACE checkout with `pnpm install` and `pnpm exec playwright install chromium`. The
 runner must be executable. It mocks provider transport, so no token.place or OpenAI credentials
