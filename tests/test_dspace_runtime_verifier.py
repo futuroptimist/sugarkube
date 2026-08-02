@@ -378,6 +378,13 @@ def test_deployment_http_port_fails_closed(
         verifier.verify(args)
 
 
+@pytest.mark.parametrize("container", [None, {}, {"ports": None}])
+def test_named_http_port_rejects_malformed_container(container: object) -> None:
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.named_http_port(container, "cluster identity")
+    assert str(raised.value) == "cluster identity"
+
+
 def test_pod_http_port_must_match_deployment(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -438,6 +445,13 @@ def test_modern_identity_failure_never_requests_legacy_surface(
         json.dumps({"gitSha": "wrong", "generatedAt": "2026-08-01T12:00:00Z", "source": "x"}).encode(),
         json.dumps({"gitSha": RECOVERY_SHA, "generatedAt": "", "source": "x"}).encode(),
         json.dumps({"gitSha": RECOVERY_SHA, "generatedAt": "not-a-date", "source": "x"}).encode(),
+        json.dumps(
+            {
+                "gitSha": RECOVERY_SHA,
+                "generatedAt": "2026-08-01T12:00:00",
+                "source": SENTINEL,
+            }
+        ).encode(),
         json.dumps({"gitSha": RECOVERY_SHA, "generatedAt": "2026-08-01T12:00:00Z", "source": ""}).encode(),
         json.dumps(
             {
@@ -456,6 +470,7 @@ def test_modern_identity_failure_never_requests_legacy_surface(
         "wrong-sha",
         "empty-time",
         "bad-time",
+        "timezone-naive",
         "empty-source",
         "unsafe-shape",
     ),
@@ -464,6 +479,21 @@ def test_legacy_identity_rejects_bad_payloads_without_leaking(payload: bytes) ->
     with pytest.raises(verifier.VerificationError) as raised:
         verifier.legacy_identity(payload, RECOVERY_SHA, "direct identity")
     assert str(raised.value) == "direct identity"
+    assert SENTINEL not in str(raised.value)
+
+
+@pytest.mark.parametrize("category", ["direct identity", "public identity"])
+@pytest.mark.parametrize(
+    "payload",
+    [b"<html>" + b"x" * (1024 * 1024) + SENTINEL.encode(), b"\xff" + SENTINEL.encode()],
+    ids=("oversized", "invalid-utf8"),
+)
+def test_root_document_rejects_unsafe_payload_without_leaking(
+    payload: bytes, category: str
+) -> None:
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.root_document(payload, category)
+    assert str(raised.value) == category
     assert SENTINEL not in str(raised.value)
 
 
