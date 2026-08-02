@@ -1007,8 +1007,9 @@ def test_post_reservation_failure_preserves_ownership(tmp_path: Path, monkeypatc
 
 
 @pytest.mark.parametrize("schema_version", [1, 2])
+@pytest.mark.parametrize("chartless_status", [False, True])
 def test_finalize_cli_collects_bound_evidence_before_consuming_reservation(
-    tmp_path: Path, monkeypatch, schema_version: int
+    tmp_path: Path, monkeypatch, schema_version: int, chartless_status: bool
 ) -> None:
     source = tmp_path / "candidate.json"
     output = tmp_path / "evidence.json"
@@ -1056,15 +1057,30 @@ def test_finalize_cli_collects_bound_evidence_before_consuming_reservation(
                         }
                     }
                 )
-            events.append("helm-status")
-            return json.dumps(
-                helm_status(
-                    info={
-                        "status": "deployed",
-                        "description": f"sugarkube-release-manifest:{owner}",
-                    }
+            if "history" in command:
+                events.append("helm-history")
+                return json.dumps(
+                    [
+                        {
+                            "revision": 17,
+                            "chart": "dspace-3.2.0",
+                            "app_version": "3.2.0",
+                            "status": "deployed",
+                            "description": f"sugarkube-release-manifest:{owner}",
+                        }
+                    ]
                 )
+            events.append("helm-status")
+            status = helm_status(
+                info={
+                    "status": "deployed",
+                    "description": f"sugarkube-release-manifest:{owner}",
+                }
             )
+            if chartless_status:
+                status.pop("chart")
+                status.update(config={}, manifest="redacted")
+            return json.dumps(status)
         resource = command[command.index("get") + 1]
         if resource == "pods":
             events.append("pod-discovery")
@@ -1122,16 +1138,21 @@ def test_finalize_cli_collects_bound_evidence_before_consuming_reservation(
         "cluster-identity",
         "helm-status",
     ]
+    if chartless_status:
+        expected_events.append("helm-history")
     if schema_version == 2:
         expected_events.append("helm-stored-values")
     expected_events += [
         "pod-discovery",
         "pod-discovery",
         "helm-status",
-        "workload-discovery",
-        "helm-status",
-        "atomic-final-write",
     ]
+    if chartless_status:
+        expected_events.append("helm-history")
+    expected_events += ["workload-discovery", "helm-status"]
+    if chartless_status:
+        expected_events.append("helm-history")
+    expected_events.append("atomic-final-write")
     assert events == expected_events
     final = manifest.validate(json.loads(output.read_text(encoding="utf-8")), True)
     assert final["helmRevision"] == 17
@@ -1200,9 +1221,68 @@ def test_finalize_cli_settling_failure_preserves_reservation(
     assert manifest.reservation_path(output).exists()
 
 
+def test_finalize_cli_history_failure_is_redacted_and_preserves_reservation(
+    tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = tmp_path / "candidate.json"
+    output = tmp_path / "evidence.json"
+    source.write_text(manifest._canonical(candidate()), encoding="utf-8")
+    owner = manifest.reserve(output, candidate(), "staging", "dspace", "dspace")
+    monkeypatch.setattr(manifest, "preflight", lambda *args, **kwargs: [])
+
+    def run(command):
+        if "cluster_identity.py" in " ".join(command):
+            return "staging\n"
+        if command[0] == "helm" and "history" in command:
+            raise manifest.ManifestError("SENTINEL_SECRET")
+        if command[0] == "helm":
+            status = helm_status(
+                info={
+                    "status": "deployed",
+                    "description": f"sugarkube-release-manifest:{owner}",
+                }
+            )
+            status.pop("chart")
+            return json.dumps(status)
+        raise AssertionError("unexpected command")
+
+    monkeypatch.setattr(manifest, "_run", run)
+    assert (
+        manifest.main(
+            [
+                "finalize",
+                "--manifest",
+                str(source),
+                "--output",
+                str(output),
+                "--environment",
+                "staging",
+                "--image-tag",
+                "main-abcdef0",
+                "--chart-version",
+                "3.2.0",
+                "--kubeconfig",
+                "kubeconfig",
+                "--release",
+                "dspace",
+                "--namespace",
+                "dspace",
+                "--reservation",
+                owner,
+            ]
+        )
+        == 2
+    )
+    captured = capsys.readouterr()
+    assert "SENTINEL_SECRET" not in captured.out + captured.err
+    assert not output.exists()
+    assert manifest.reservation_path(output).exists()
+
+
 @pytest.mark.parametrize("changed_field", ["version", "description"])
+@pytest.mark.parametrize("chartless_status", [False, True])
 def test_finalize_cli_rejects_changed_helm_binding_and_preserves_reservation(
-    tmp_path: Path, monkeypatch, changed_field: str
+    tmp_path: Path, monkeypatch, changed_field: str, chartless_status: bool
 ) -> None:
     source = tmp_path / "candidate.json"
     output = tmp_path / "evidence.json"
@@ -1225,6 +1305,17 @@ def test_finalize_cli_rejects_changed_helm_binding_and_preserves_reservation(
         if "cluster_identity.py" in " ".join(command):
             return "staging\n"
         if command[0] == "helm":
+            if "history" in command:
+                return json.dumps(
+                    [
+                        {
+                            "revision": (
+                                18 if changed_field == "version" and status_reads == 2 else 17
+                            ),
+                            "chart": "dspace-3.2.0",
+                        }
+                    ]
+                )
             status_reads += 1
             info = {"status": "deployed", "description": description}
             status = helm_status(info=info)
@@ -1233,6 +1324,8 @@ def test_finalize_cli_rejects_changed_helm_binding_and_preserves_reservation(
                     status["version"] = 18
                 else:
                     status["info"]["description"] = "another invocation"
+            if chartless_status:
+                status.pop("chart")
             return json.dumps(status)
         resource = command[command.index("get") + 1]
         return json.dumps({"items": [pod("dspace-a")]} if resource == "pods" else workloads())
