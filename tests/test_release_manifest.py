@@ -95,6 +95,26 @@ def test_schema_v2_split_provenance_is_canonical_and_preserved() -> None:
     assert manifest.validate(value) == value
 
 
+@pytest.mark.parametrize("revision", [None, 0, -1, True, "26"])
+def test_chartless_helm_identity_rejects_malformed_status_revision(revision: object) -> None:
+    with pytest.raises(manifest.ManifestError, match="invalid Helm release identity"):
+        manifest.resolve_helm_chart_identity(
+            {"version": revision}, [{"revision": 26, "chart": "dspace-3.0.2"}], "dspace", "3.0.2"
+        )
+
+
+def test_status_chart_metadata_remains_the_primary_helm_identity_path() -> None:
+    status = {
+        "version": 26,
+        "chart": {"metadata": {"name": "dspace", "version": "3.0.2"}},
+    }
+    assert manifest.resolve_helm_chart_identity(status, {"malformed": True}, "dspace", "3.0.2") == (
+        "dspace",
+        "3.0.2",
+        26,
+    )
+
+
 def test_invalid_upstream_app_fails_closed() -> None:
     value = upstream()
     value["app"] = "another-app"
@@ -1007,8 +1027,9 @@ def test_post_reservation_failure_preserves_ownership(tmp_path: Path, monkeypatc
 
 
 @pytest.mark.parametrize("schema_version", [1, 2])
+@pytest.mark.parametrize("chartless_status", [False, True])
 def test_finalize_cli_collects_bound_evidence_before_consuming_reservation(
-    tmp_path: Path, monkeypatch, schema_version: int
+    tmp_path: Path, monkeypatch, schema_version: int, chartless_status: bool
 ) -> None:
     source = tmp_path / "candidate.json"
     output = tmp_path / "evidence.json"
@@ -1056,15 +1077,29 @@ def test_finalize_cli_collects_bound_evidence_before_consuming_reservation(
                         }
                     }
                 )
-            events.append("helm-status")
-            return json.dumps(
-                helm_status(
-                    info={
-                        "status": "deployed",
-                        "description": f"sugarkube-release-manifest:{owner}",
-                    }
+            if "history" in command:
+                events.append("helm-history")
+                return json.dumps(
+                    [
+                        {
+                            "revision": 17,
+                            "chart": "dspace-3.2.0",
+                            "app_version": "3.2.0",
+                            "status": "deployed",
+                            "description": f"sugarkube-release-manifest:{owner}",
+                        }
+                    ]
                 )
+            events.append("helm-status")
+            status = helm_status(
+                info={
+                    "status": "deployed",
+                    "description": f"sugarkube-release-manifest:{owner}",
+                }
             )
+            if chartless_status:
+                status.pop("chart")
+            return json.dumps(status)
         resource = command[command.index("get") + 1]
         if resource == "pods":
             events.append("pod-discovery")
@@ -1122,16 +1157,21 @@ def test_finalize_cli_collects_bound_evidence_before_consuming_reservation(
         "cluster-identity",
         "helm-status",
     ]
+    if chartless_status:
+        expected_events.append("helm-history")
     if schema_version == 2:
         expected_events.append("helm-stored-values")
     expected_events += [
         "pod-discovery",
         "pod-discovery",
         "helm-status",
-        "workload-discovery",
-        "helm-status",
-        "atomic-final-write",
     ]
+    if chartless_status:
+        expected_events.append("helm-history")
+    expected_events += ["workload-discovery", "helm-status"]
+    if chartless_status:
+        expected_events.append("helm-history")
+    expected_events.append("atomic-final-write")
     assert events == expected_events
     final = manifest.validate(json.loads(output.read_text(encoding="utf-8")), True)
     assert final["helmRevision"] == 17
@@ -1201,8 +1241,9 @@ def test_finalize_cli_settling_failure_preserves_reservation(
 
 
 @pytest.mark.parametrize("changed_field", ["version", "description"])
+@pytest.mark.parametrize("chartless_status", [False, True])
 def test_finalize_cli_rejects_changed_helm_binding_and_preserves_reservation(
-    tmp_path: Path, monkeypatch, changed_field: str
+    tmp_path: Path, monkeypatch, changed_field: str, chartless_status: bool
 ) -> None:
     source = tmp_path / "candidate.json"
     output = tmp_path / "evidence.json"
@@ -1225,6 +1266,17 @@ def test_finalize_cli_rejects_changed_helm_binding_and_preserves_reservation(
         if "cluster_identity.py" in " ".join(command):
             return "staging\n"
         if command[0] == "helm":
+            if "history" in command:
+                return json.dumps(
+                    [
+                        {
+                            "revision": (
+                                18 if status_reads == 2 and changed_field == "version" else 17
+                            ),
+                            "chart": "dspace-3.2.0",
+                        }
+                    ]
+                )
             status_reads += 1
             info = {"status": "deployed", "description": description}
             status = helm_status(info=info)
@@ -1233,6 +1285,8 @@ def test_finalize_cli_rejects_changed_helm_binding_and_preserves_reservation(
                     status["version"] = 18
                 else:
                     status["info"]["description"] = "another invocation"
+            if chartless_status:
+                status.pop("chart")
             return json.dumps(status)
         resource = command[command.index("get") + 1]
         return json.dumps({"items": [pod("dspace-a")]} if resource == "pods" else workloads())

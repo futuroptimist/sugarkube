@@ -569,13 +569,27 @@ def helm_identity(
                 ]
             )
         )
-        chart = status["chart"]["metadata"]
-        name = chart["name"]
-        version = chart["version"]
-        revision = status["version"]
-    except (json.JSONDecodeError, KeyError, TypeError):
-        fail(validation_category)
-    if name != "dspace" or version != chart_version or type(revision) is not int or revision < 1:
+        history = None
+        if release_manifest.helm_status_needs_history(status):
+            history = json.loads(
+                command(
+                    [
+                        "helm",
+                        "--kubeconfig",
+                        args.kubeconfig,
+                        "history",
+                        args.release,
+                        "--namespace",
+                        args.namespace,
+                        "-o",
+                        "json",
+                    ]
+                )
+            )
+        name, version, revision = release_manifest.resolve_helm_chart_identity(
+            status, history, "dspace", chart_version
+        )
+    except (json.JSONDecodeError, release_manifest.ManifestError):
         fail(validation_category)
     if (
         enforce_expected_revision
