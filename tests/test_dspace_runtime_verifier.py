@@ -10,6 +10,7 @@ from scripts import dspace_runtime_verifier as verifier
 SHA = "abcdef0123456789abcdef0123456789abcdef01"
 DIGEST = "sha256:" + "1" * 64
 SENTINEL = "SENTINEL_SECRET"
+RECOVERY_SHA = "1a31a569aff2dbeb238e8c2688b9e85140d2077d"
 
 
 def manifest(tmp_path: Path, provider: str = "token-place") -> Path:
@@ -34,6 +35,21 @@ def manifest(tmp_path: Path, provider: str = "token-place") -> Path:
             }
         )
     )
+    return path
+
+
+def recovery_manifest(tmp_path: Path, **changes: object) -> Path:
+    value = {
+        **verifier.LEGACY_RECOVERY_COORDINATES,
+        "app": "dspace",
+        "recordType": "candidate",
+        "environment": "prod",
+        "approvedAt": "2026-07-30T00:00:00Z",
+        "approvedBy": "release-test",
+        **changes,
+    }
+    path = tmp_path / "recovery.json"
+    path.write_text(json.dumps(value))
     return path
 
 
@@ -79,19 +95,25 @@ def _verify_setup(
     provider: str = "token-place",
     rollback: bool = False,
     overrides: dict[str, object] | None = None,
+    legacy: bool = False,
 ) -> tuple[Namespace, list[list[str]]]:
     """Install a complete, mutable fake cluster and return verifier arguments."""
     override = overrides or {}
     smoke = tmp_path / "smoke"
     smoke.write_text("#!/bin/sh\nexit 0\n")
     smoke.chmod(0o700)
-    canonical = "ghcr.io/democratizedspace/dspace:main-abcdef0"
-    declared = f"{canonical}@{DIGEST}" if rollback else canonical
+    revision = RECOVERY_SHA if legacy else SHA
+    digest = str(verifier.LEGACY_RECOVERY_COORDINATES["imageDigest"]) if legacy else DIGEST
+    image_tag = "main-1a31a56" if legacy else "main-abcdef0"
+    version = "3.0.1" if legacy else "3.1.0"
+    chart_version = "3.0.2" if legacy else "3.1.0"
+    canonical = f"ghcr.io/democratizedspace/dspace:{image_tag}"
+    declared = f"{canonical}@{digest}" if rollback else canonical
 
     def build(image: str = canonical, revision: str = SHA) -> str:
         return json.dumps(
             {
-                "version": "3.1.0",
+                "version": version,
                 "revision": revision,
                 "shortRevision": revision[:7],
                 "image": image,
@@ -114,11 +136,19 @@ def _verify_setup(
                         }
                     ],
                 },
-                "spec": {"containers": [{"name": "dspace", "image": declared}]},
+                "spec": {
+                    "containers": [
+                        {
+                            "name": "dspace",
+                            "image": declared,
+                            "ports": [{"name": "http", "containerPort": 8080}],
+                        }
+                    ]
+                },
                 "status": {
                     "phase": "Running",
                     "conditions": [{"type": "Ready", "status": "True"}],
-                    "containerStatuses": [{"name": "dspace", "imageID": "containerd://" + DIGEST}],
+                    "containerStatuses": [{"name": "dspace", "imageID": "containerd://" + digest}],
                 },
             }
         )
@@ -127,8 +157,8 @@ def _verify_setup(
         override.get(
             "helm_statuses",
             [
-                {"chart": {"metadata": {"name": "dspace", "version": "3.1.0"}}, "version": 7},
-                {"chart": {"metadata": {"name": "dspace", "version": "3.1.0"}}, "version": 7},
+                {"chart": {"metadata": {"name": "dspace", "version": chart_version}}, "version": 7},
+                {"chart": {"metadata": {"name": "dspace", "version": chart_version}}, "version": 7},
             ],
         )
     )
@@ -137,6 +167,9 @@ def _verify_setup(
     public_build = override.get("public_build", build())
     public_html = override.get(
         "public_html", f'<meta name="dspace-build-revision" content="{SHA}">'
+    )
+    legacy_build = json.dumps(
+        {"gitSha": revision, "generatedAt": "2026-08-01T12:00:00Z", "source": "dspace"}
     )
 
     def command(argv: list[str]) -> str:
@@ -166,6 +199,10 @@ def _verify_setup(
                                     {
                                         "name": "dspace",
                                         "image": override.get("deployment_image", declared),
+                                        "ports": override.get(
+                                            "deployment_ports",
+                                            [{"name": "http", "containerPort": 8080}],
+                                        ),
                                         "env": [
                                             {
                                                 "name": "DSPACE_TOKEN_PLACE_URL",
@@ -206,6 +243,8 @@ def _verify_setup(
         failure = override.get("direct_failure")
         if failure == pod_name:
             raise verifier.VerificationError(SENTINEL)
+        if argv[-1].endswith("build-meta.json"):
+            return override.get("direct_meta", {}).get(pod_name, legacy_build)
         if argv[-1].endswith("build-info.json"):
             return direct_builds.get(pod_name, build())
         return direct_html.get(pod_name, f'<meta name="dspace-build-revision" content="{SHA}">')
@@ -214,7 +253,11 @@ def _verify_setup(
     monkeypatch.setattr(
         verifier,
         "fetch",
-        lambda url, origin: str(public_build if url.endswith(".json") else public_html).encode(),
+        lambda url, origin: str(
+            override.get("public_meta", legacy_build)
+            if url.endswith("build-meta.json")
+            else public_build if url.endswith(".json") else public_html
+        ).encode(),
     )
     monkeypatch.setattr(
         verifier.app_config, "load_config", lambda *args: {"SUGARKUBE_VALUES": "values.yaml"}
@@ -240,7 +283,7 @@ def _verify_setup(
             environment="staging",
             release="dspace",
             namespace="dspace",
-            manifest=manifest(tmp_path, provider),
+            manifest=recovery_manifest(tmp_path) if legacy else manifest(tmp_path, provider),
             application_version=None,
             source_revision=None,
             provider=None,
@@ -286,8 +329,180 @@ def test_verify_uses_safe_exact_smoke_argv(
     result = verifier.verify(args)
     assert list(result) == list(verifier.RESULT_FIELDS)
     assert result["journeys"][-1] == {"name": "/chat", "passed": True}
+    contract_index = seen[-1].index("--identity-contract")
+    assert seen[-1][contract_index + 1] == verifier.MODERN_IDENTITY_CONTRACT
     assert ("--expected-token-place-origin" in seen[-1]) is has_token_args
     assert SENTINEL not in json.dumps(result)
+
+
+def test_derived_http_port_is_used_for_every_direct_request(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    args, _ = _verify_setup(monkeypatch, tmp_path)
+    original = verifier.command
+    proxy_urls: list[str] = []
+
+    def command(argv: list[str]) -> str:
+        if "--raw" in argv:
+            proxy_urls.append(argv[-1])
+        return original(argv)
+
+    monkeypatch.setattr(verifier, "command", command)
+    verifier.verify(args)
+    assert len(proxy_urls) == 4
+    assert all(":8080/proxy/" in url for url in proxy_urls)
+    assert all(":3000/" not in url for url in proxy_urls)
+
+
+@pytest.mark.parametrize(
+    "ports",
+    [
+        [],
+        [{"name": "other", "containerPort": 8080}],
+        [{"name": "http", "containerPort": 8080}, {"name": "http", "containerPort": 8081}],
+        [{"name": "http", "containerPort": "8080"}],
+        [{"name": "http", "containerPort": True}],
+        [{"name": "http", "containerPort": 0}],
+        [{"name": "http", "containerPort": 65536}],
+    ],
+    ids=("missing", "wrong-name", "duplicate", "string", "boolean", "zero", "too-large"),
+)
+def test_deployment_http_port_fails_closed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, ports: list[dict[str, object]]
+) -> None:
+    args, _ = _verify_setup(monkeypatch, tmp_path, overrides={"deployment_ports": ports})
+    with pytest.raises(verifier.VerificationError, match="cluster identity"):
+        verifier.verify(args)
+
+
+def test_pod_http_port_must_match_deployment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    overrides = _pod_overrides(
+        lambda pod: pod["spec"]["containers"][0]["ports"][0].update({"containerPort": 8081})
+    )
+    args, _ = _verify_setup(monkeypatch, tmp_path, overrides=overrides)
+    with pytest.raises(verifier.VerificationError, match="pod/replica identity"):
+        verifier.verify(args)
+
+
+def test_exact_recovery_uses_legacy_contract_and_truthful_journeys(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    args, seen = _verify_setup(monkeypatch, tmp_path, legacy=True, provider="openai")
+    result = verifier.verify(args)
+    contract_index = seen[-1].index("--identity-contract")
+    assert seen[-1][contract_index + 1] == verifier.LEGACY_IDENTITY_CONTRACT
+    assert result["journeys"] == [
+        {"name": "/build-meta.json", "passed": True},
+        {"name": "/", "passed": True},
+        {"name": "/chat", "passed": True},
+    ]
+
+
+@pytest.mark.parametrize("field", list(verifier.LEGACY_RECOVERY_COORDINATES))
+def test_any_recovery_coordinate_drift_prevents_legacy_selection(field: str) -> None:
+    candidate = dict(verifier.LEGACY_RECOVERY_COORDINATES)
+    candidate[field] = "different"
+    assert verifier.identity_contract(candidate) == verifier.MODERN_IDENTITY_CONTRACT
+
+
+def test_modern_identity_failure_never_requests_legacy_surface(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    args, _ = _verify_setup(monkeypatch, tmp_path, overrides={"direct_builds": {"dspace-1": "{"}})
+    original = verifier.command
+    paths: list[str] = []
+
+    def command(argv: list[str]) -> str:
+        if "--raw" in argv:
+            paths.append(argv[-1])
+        return original(argv)
+
+    monkeypatch.setattr(verifier, "command", command)
+    with pytest.raises(verifier.VerificationError, match="direct identity"):
+        verifier.verify(args)
+    assert paths and all("build-meta.json" not in path for path in paths)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "{",
+        "x" * (1024 * 1024 + 1),
+        json.dumps({"gitSha": "wrong", "generatedAt": "2026-08-01T12:00:00Z", "source": "x"}),
+        json.dumps({"gitSha": RECOVERY_SHA, "generatedAt": "", "source": "x"}),
+        json.dumps({"gitSha": RECOVERY_SHA, "generatedAt": "not-a-date", "source": "x"}),
+        json.dumps({"gitSha": RECOVERY_SHA, "generatedAt": "2026-08-01T12:00:00Z", "source": ""}),
+        json.dumps(
+            {
+                "gitSha": RECOVERY_SHA,
+                "generatedAt": "2026-08-01T12:00:00Z",
+                "source": "x",
+                "extra": SENTINEL,
+            }
+        ),
+    ],
+    ids=(
+        "malformed",
+        "oversized",
+        "wrong-sha",
+        "empty-time",
+        "bad-time",
+        "empty-source",
+        "unsafe-shape",
+    ),
+)
+def test_legacy_identity_rejects_bad_payloads_without_leaking(payload: str) -> None:
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.legacy_identity(payload.encode(), RECOVERY_SHA, "direct identity")
+    assert str(raised.value) == "direct identity"
+    assert SENTINEL not in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    "overrides,category",
+    [
+        (
+            {
+                "direct_meta": {
+                    "dspace-2": json.dumps(
+                        {
+                            "gitSha": RECOVERY_SHA,
+                            "generatedAt": "2026-08-02T12:00:00Z",
+                            "source": "dspace",
+                        }
+                    )
+                }
+            },
+            "pod/replica identity",
+        ),
+        (
+            {
+                "public_meta": json.dumps(
+                    {
+                        "gitSha": RECOVERY_SHA,
+                        "generatedAt": "2026-08-02T12:00:00Z",
+                        "source": "dspace",
+                    }
+                )
+            },
+            "public identity",
+        ),
+        ({"direct_html": {"dspace-1": ""}}, "direct identity"),
+        ({"public_html": ""}, "public identity"),
+    ],
+    ids=("replica-disagreement", "public-disagreement", "empty-direct-root", "empty-public-root"),
+)
+def test_legacy_agreement_and_root_evidence_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    overrides: dict[str, object],
+    category: str,
+) -> None:
+    args, _ = _verify_setup(monkeypatch, tmp_path, legacy=True, overrides=overrides)
+    with pytest.raises(verifier.VerificationError, match=category):
+        verifier.verify(args)
 
 
 @pytest.mark.parametrize(
@@ -352,7 +567,15 @@ def _pod_overrides(mutator) -> dict[str, object]:  # noqa: ANN001
                     }
                 ],
             },
-            "spec": {"containers": [{"name": "dspace", "image": canonical}]},
+            "spec": {
+                "containers": [
+                    {
+                        "name": "dspace",
+                        "image": canonical,
+                        "ports": [{"name": "http", "containerPort": 8080}],
+                    }
+                ]
+            },
             "status": {
                 "phase": "Running",
                 "conditions": [{"type": "Ready", "status": "True"}],
