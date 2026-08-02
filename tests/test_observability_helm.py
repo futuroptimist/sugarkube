@@ -1953,10 +1953,20 @@ def test_watchdog_delivery_one_of_multiple_log_retrievals_fails_closed(tmp_path)
 
 def watchdog_silence_fixture():
     matchers = [
-        {"name": "alertname", "value": "SugarkubeObservabilityWatchdog", "isRegex": False},
-        {"name": "environment", "value": "staging", "isRegex": False},
-        {"name": "cluster", "value": "sugarkube-int", "isRegex": False},
-        {"name": "purpose", "value": "observability-watchdog", "isRegex": False},
+        {
+            "name": "alertname",
+            "value": "SugarkubeObservabilityWatchdog",
+            "isRegex": False,
+            "isEqual": True,
+        },
+        {"name": "environment", "value": "staging", "isRegex": False, "isEqual": True},
+        {"name": "cluster", "value": "sugarkube-int", "isRegex": False, "isEqual": True},
+        {
+            "name": "purpose",
+            "value": "observability-watchdog",
+            "isRegex": False,
+            "isEqual": True,
+        },
     ]
 
     def silence(
@@ -1979,6 +1989,14 @@ def watchdog_silence_fixture():
     return [
         silence("owned-active", "active"),
         silence("owned-pending", "pending"),
+        silence(
+            "owned-legacy",
+            "active",
+            selected_matchers=[
+                {key: value for key, value in matcher.items() if key != "isEqual"}
+                for matcher in matchers
+            ],
+        ),
         silence("owned-expired", "expired"),
         silence("foreign-author", "active", created_by="another-operator"),
         silence("foreign-comment", "active", comment="another drill"),
@@ -1986,6 +2004,26 @@ def watchdog_silence_fixture():
             "regex-matcher",
             "active",
             selected_matchers=[matchers[0] | {"isRegex": True}, *matchers[1:]],
+        ),
+        silence(
+            "unequal-matcher",
+            "active",
+            selected_matchers=[matchers[0] | {"isEqual": False}, *matchers[1:]],
+        ),
+        silence(
+            "non-boolean-equality",
+            "active",
+            selected_matchers=[matchers[0] | {"isEqual": "true"}, *matchers[1:]],
+        ),
+        silence(
+            "unexpected-matcher-key",
+            "active",
+            selected_matchers=[matchers[0] | {"unexpected": False}, *matchers[1:]],
+        ),
+        silence(
+            "duplicate-matcher",
+            "active",
+            selected_matchers=[matchers[0], matchers[0], *matchers[2:]],
         ),
         silence(
             "extra-matcher",
@@ -1998,7 +2036,8 @@ def watchdog_silence_fixture():
             "active",
             selected_matchers=[matchers[0] | {"value": ".*"}, *matchers[1:]],
         ),
-        silence("malformed", "active", selected_matchers={"not": "a list"}),
+        silence("malformed-list", "active", selected_matchers={"not": "a list"}),
+        silence("malformed-object", "active", selected_matchers=[None, *matchers[1:]]),
     ]
 
 
@@ -2115,9 +2154,10 @@ def test_watchdog_silence_status_reports_only_exact_owned_active_or_pending(tmp_
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.endswith(
-        "Owned active/pending watchdog drill silence IDs:\nowned-active\nowned-pending\n"
+        "Owned active/pending watchdog drill silence IDs:\n"
+        "owned-active\nowned-pending\nowned-legacy\n"
     )
-    for silence in fixture[2:]:
+    for silence in fixture[3:]:
         assert silence["id"] not in result.stdout
         assert silence["fixtureDetail"] not in result.stdout + result.stderr
 
@@ -2128,13 +2168,13 @@ def test_watchdog_silence_clear_deletes_only_exact_owned_active_or_pending(tmp_p
 
     assert result.returncode == 0, result.stderr
     deleted = (tmp_path / "watchdog-silence-deletions").read_text(encoding="utf-8").splitlines()
-    assert deleted == ["owned-active", "owned-pending"]
+    assert deleted == ["owned-active", "owned-pending", "owned-legacy"]
     assert result.stdout.endswith("Owned watchdog drill silence cleared.\n")
     assert all(item["fixtureDetail"] not in result.stdout + result.stderr for item in fixture)
 
 
 def test_watchdog_silence_clear_is_noop_without_owned_silences(tmp_path):
-    fixture = watchdog_silence_fixture()[2:]
+    fixture = watchdog_silence_fixture()[3:]
     result, audit = run_helper(tmp_path, "watchdog-drill-clear", watchdog_silences=fixture)
 
     assert result.returncode == 0, result.stderr

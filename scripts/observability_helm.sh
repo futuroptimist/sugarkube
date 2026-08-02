@@ -308,11 +308,58 @@ print(f"Owned watchdog drill silence created; id={silence_id}; automatic expiry=
 PY
 )
 watchdog_owned_silences() {
-  kubectl get --raw "${WATCHDOG_API}/silences" | python3 -c 'import json,sys; wanted=[("alertname","SugarkubeObservabilityWatchdog"),("environment","staging"),("cluster","sugarkube-int"),("purpose","observability-watchdog")]; out=[]
-for x in json.load(sys.stdin):
- m=x.get("matchers"); exact=isinstance(m,list) and len(m)==4 and sorted((a.get("name"),a.get("value")) for a in m if isinstance(a,dict) and a.get("isRegex") is False and set(a)=={"name","value","isRegex"})==sorted(wanted)
- if x.get("createdBy")=="sugarkube-observability-watchdog-drill" and x.get("comment")=="Owned staging watchdog failure drill" and x.get("status",{}).get("state") in ("active","pending") and exact: out.append(x["id"])
-print("\n".join(out))'
+  kubectl get --raw "${WATCHDOG_API}/silences" | python3 -c '
+import json
+import re
+import sys
+
+wanted = {
+    ("alertname", "SugarkubeObservabilityWatchdog"),
+    ("environment", "staging"),
+    ("cluster", "sugarkube-int"),
+    ("purpose", "observability-watchdog"),
+}
+
+def exact_matchers(matchers):
+    if not isinstance(matchers, list) or len(matchers) != len(wanted):
+        return False
+    pairs = []
+    for matcher in matchers:
+        if not isinstance(matcher, dict):
+            return False
+        if not set(matcher) <= {"name", "value", "isRegex", "isEqual"}:
+            return False
+        if not {"name", "value", "isRegex"} <= set(matcher):
+            return False
+        if matcher["isRegex"] is not False:
+            return False
+        if "isEqual" in matcher and matcher["isEqual"] is not True:
+            return False
+        pairs.append((matcher["name"], matcher["value"]))
+    return len(set(pairs)) == len(wanted) and set(pairs) == wanted
+
+try:
+    document = json.load(sys.stdin)
+    if not isinstance(document, list) or not all(isinstance(item, dict) for item in document):
+        raise ValueError
+    owned = []
+    for silence in document:
+        status = silence.get("status")
+        silence_id = silence.get("id")
+        if (
+            silence.get("createdBy") == "sugarkube-observability-watchdog-drill"
+            and silence.get("comment") == "Owned staging watchdog failure drill"
+            and isinstance(status, dict)
+            and status.get("state") in ("active", "pending")
+            and isinstance(silence_id, str)
+            and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", silence_id)
+            and exact_matchers(silence.get("matchers"))
+        ):
+            owned.append(silence_id)
+except (json.JSONDecodeError, UnicodeError, ValueError, TypeError):
+    raise SystemExit("ERROR: Alertmanager returned an invalid silences response (response redacted).")
+
+print("\n".join(owned))'
 }
 watchdog_silence_list() { assert_context; local ids; ids="$(watchdog_owned_silences)"; [[ -n "${ids}" ]] && printf 'Owned active/pending watchdog drill silence IDs:\n%s\n' "${ids}" || echo "No owned active/pending watchdog drill silence."; }
 watchdog_silence_clear() { assert_context; local ids; ids="$(watchdog_owned_silences)"; [[ -n "${ids}" ]] || { echo "No owned active/pending watchdog drill silence to clear."; return; }; while IFS= read -r id; do kubectl delete --raw "${WATCHDOG_API}/silence/${id}" >/dev/null; done <<<"${ids}"; echo "Owned watchdog drill silence cleared."; }
