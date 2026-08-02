@@ -221,11 +221,23 @@ requires complete post-mutation finalization before the freeze can be reconsider
 ## Mandatory release verification
 
 DSPACE staging and production releases are verified against an approved immutable release
-manifest. The verifier checks public build identity and frontend marker, every ready serving
-replica's image coordinate, digest, build identity, and frontend marker, then invokes DSPACE's
-non-destructive remote `/chat` harness. It uses read-only Kubernetes API pod proxies. Successful
-bounded results are included in finalized evidence as `runtimeVerification`; response bodies,
-child output, browser artifacts, headers, cookies, credentials, and request payloads are not saved.
+manifest. The default `build-info-v1` contract checks public and direct `/build-info.json` identity
+and the frontend revision marker for every ready serving replica. The verifier derives each
+read-only Kubernetes pod-proxy URL from the unique `http` port on the validated `dspace` Deployment
+container and requires every pod to declare that same named port.
+
+Only the complete, exact coordinates in `dspace.prod-recovery-coordinates.json` select the
+`legacy-build-meta-v1` contract for immutable DSPACE 3.0.1. That exception proves identical public
+and per-replica `/build-meta.json` values (full Git SHA, valid generation timestamp, and non-empty
+source) and bounded, non-empty root documents; it does not require the identity surfaces absent
+from that artifact. This is not a fallback: coordinate drift and every other release retain the
+modern contract, and a modern identity failure cannot switch contracts. Sugarkube always passes
+the selected `--identity-contract` explicitly to DSPACE's non-destructive remote `/chat` harness.
+The exception changes neither immutable release coordinates nor candidate approval.
+
+Successful bounded results are included in finalized evidence as `runtimeVerification`; response
+bodies, child output, browser artifacts, headers, cookies, credentials, and request payloads are
+not saved.
 
 Prepare a DSPACE checkout with `pnpm install` and `pnpm exec playwright install chromium`. The
 runner must be executable. It mocks provider transport, so no token.place or OpenAI credentials
