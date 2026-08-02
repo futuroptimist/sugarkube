@@ -1007,9 +1007,17 @@ def test_post_reservation_failure_preserves_ownership(tmp_path: Path, monkeypatc
 
 
 @pytest.mark.parametrize("schema_version", [1, 2])
-@pytest.mark.parametrize("chartless_status", [False, True])
+@pytest.mark.parametrize(
+    "chart_shape",
+    [
+        pytest.param("metadata", id="metadata"),
+        pytest.param("omitted", id="omitted"),
+        pytest.param(None, id="null-chart"),
+        pytest.param({"metadata": None}, id="null-metadata"),
+    ],
+)
 def test_finalize_cli_collects_bound_evidence_before_consuming_reservation(
-    tmp_path: Path, monkeypatch, schema_version: int, chartless_status: bool
+    tmp_path: Path, monkeypatch, schema_version: int, chart_shape: object
 ) -> None:
     source = tmp_path / "candidate.json"
     output = tmp_path / "evidence.json"
@@ -1077,9 +1085,11 @@ def test_finalize_cli_collects_bound_evidence_before_consuming_reservation(
                     "description": f"sugarkube-release-manifest:{owner}",
                 }
             )
-            if chartless_status:
+            if chart_shape == "omitted":
                 status.pop("chart")
                 status.update(config={}, manifest="redacted")
+            elif chart_shape != "metadata":
+                status["chart"] = chart_shape
             return json.dumps(status)
         resource = command[command.index("get") + 1]
         if resource == "pods":
@@ -1138,7 +1148,7 @@ def test_finalize_cli_collects_bound_evidence_before_consuming_reservation(
         "cluster-identity",
         "helm-status",
     ]
-    if chartless_status:
+    if chart_shape != "metadata":
         expected_events.append("helm-history")
     if schema_version == 2:
         expected_events.append("helm-stored-values")
@@ -1147,10 +1157,10 @@ def test_finalize_cli_collects_bound_evidence_before_consuming_reservation(
         "pod-discovery",
         "helm-status",
     ]
-    if chartless_status:
+    if chart_shape != "metadata":
         expected_events.append("helm-history")
     expected_events += ["workload-discovery", "helm-status"]
-    if chartless_status:
+    if chart_shape != "metadata":
         expected_events.append("helm-history")
     expected_events.append("atomic-final-write")
     assert events == expected_events
@@ -1244,6 +1254,55 @@ def test_finalize_cli_history_failure_is_redacted_and_preserves_reservation(
             )
             status.pop("chart")
             return json.dumps(status)
+        raise AssertionError("unexpected command")
+
+    monkeypatch.setattr(manifest, "_run", run)
+    assert (
+        manifest.main(
+            [
+                "finalize",
+                "--manifest",
+                str(source),
+                "--output",
+                str(output),
+                "--environment",
+                "staging",
+                "--image-tag",
+                "main-abcdef0",
+                "--chart-version",
+                "3.2.0",
+                "--kubeconfig",
+                "kubeconfig",
+                "--release",
+                "dspace",
+                "--namespace",
+                "dspace",
+                "--reservation",
+                owner,
+            ]
+        )
+        == 2
+    )
+    captured = capsys.readouterr()
+    assert "SENTINEL_SECRET" not in captured.out + captured.err
+    assert not output.exists()
+    assert manifest.reservation_path(output).exists()
+
+
+def test_finalize_cli_malformed_status_is_redacted_and_preserves_reservation(
+    tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = tmp_path / "candidate.json"
+    output = tmp_path / "evidence.json"
+    source.write_text(manifest._canonical(candidate()), encoding="utf-8")
+    owner = manifest.reserve(output, candidate(), "staging", "dspace", "dspace")
+    monkeypatch.setattr(manifest, "preflight", lambda *args, **kwargs: [])
+
+    def run(command):
+        if "cluster_identity.py" in " ".join(command):
+            return "staging\n"
+        if command[0] == "helm":
+            return json.dumps(["SENTINEL_SECRET"])
         raise AssertionError("unexpected command")
 
     monkeypatch.setattr(manifest, "_run", run)

@@ -920,8 +920,9 @@ def test_helm_identity_accepts_real_status_schema(monkeypatch: pytest.MonkeyPatc
     assert verifier.helm_identity(args, "3.1.0") == ("dspace", "3.1.0", 7)
 
 
+@pytest.mark.parametrize("chart", [pytest.param("omitted", id="omitted"), None, {"metadata": None}])
 def test_helm_identity_uses_exact_current_history_when_status_omits_chart(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, chart: object
 ) -> None:
     status = {
         "config": {},
@@ -931,6 +932,8 @@ def test_helm_identity_uses_exact_current_history_when_status_omits_chart(
         "namespace": "dspace",
         "version": 26,
     }
+    if chart != "omitted":
+        status["chart"] = chart
     history = [
         {
             "revision": 26,
@@ -940,15 +943,21 @@ def test_helm_identity_uses_exact_current_history_when_status_omits_chart(
             "description": "matching invocation",
         }
     ]
-    monkeypatch.setattr(
-        verifier,
-        "command",
-        lambda argv: json.dumps(history if "history" in argv else status),
-    )
+    history_calls = 0
+
+    def command(argv):
+        nonlocal history_calls
+        if "history" in argv:
+            history_calls += 1
+            return json.dumps(history)
+        return json.dumps(status)
+
+    monkeypatch.setattr(verifier, "command", command)
     args = Namespace(
         kubeconfig="k", release="dspace", namespace="dspace", expected_helm_revision=26
     )
     assert verifier.helm_identity(args, "3.0.2") == ("dspace", "3.0.2", 26)
+    assert history_calls == 1
 
 
 @pytest.mark.parametrize(
