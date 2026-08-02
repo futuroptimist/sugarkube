@@ -162,6 +162,7 @@ def _verify_setup(
             ],
         )
     )
+    helm_histories = iter(override.get("helm_histories", []))
     direct_builds = override.get("direct_builds", {})
     direct_html = override.get("direct_html", {})
     public_build = override.get("public_build", build())
@@ -177,6 +178,8 @@ def _verify_setup(
 
     def command(argv: list[str]) -> str:
         if argv[0] == "helm":
+            if "history" in argv:
+                return json.dumps(next(helm_histories))
             return json.dumps(next(helm_statuses))
         if "pods" in argv:
             return json.dumps({"items": pods})
@@ -442,7 +445,9 @@ def test_modern_identity_failure_never_requests_legacy_surface(
         b"x" * (1024 * 1024 + 1),
         b"\xff" + SENTINEL.encode(),
         b"[" * 2000 + SENTINEL.encode() + b"]" * 2000,
-        json.dumps({"gitSha": "wrong", "generatedAt": "2026-08-01T12:00:00Z", "source": "x"}).encode(),
+        json.dumps(
+            {"gitSha": "wrong", "generatedAt": "2026-08-01T12:00:00Z", "source": "x"}
+        ).encode(),
         json.dumps({"gitSha": RECOVERY_SHA, "generatedAt": "", "source": "x"}).encode(),
         json.dumps({"gitSha": RECOVERY_SHA, "generatedAt": "not-a-date", "source": "x"}).encode(),
         json.dumps(
@@ -452,7 +457,9 @@ def test_modern_identity_failure_never_requests_legacy_surface(
                 "source": SENTINEL,
             }
         ).encode(),
-        json.dumps({"gitSha": RECOVERY_SHA, "generatedAt": "2026-08-01T12:00:00Z", "source": ""}).encode(),
+        json.dumps(
+            {"gitSha": RECOVERY_SHA, "generatedAt": "2026-08-01T12:00:00Z", "source": ""}
+        ).encode(),
         json.dumps(
             {
                 "gitSha": RECOVERY_SHA,
@@ -775,6 +782,24 @@ def test_verify_detects_helm_change_during_chat(
     assert str(raised.value) == "concurrent Helm change"
 
 
+def test_verify_detects_helm_change_during_chat_with_history_fallback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    args, _ = _verify_setup(
+        monkeypatch,
+        tmp_path,
+        overrides={
+            "helm_statuses": [{"version": 7}, {"version": 8}],
+            "helm_histories": [
+                [{"revision": 7, "chart": "dspace-3.1.0"}],
+                [{"revision": 8, "chart": "dspace-3.1.0"}],
+            ],
+        },
+    )
+    with pytest.raises(verifier.VerificationError, match="concurrent Helm change"):
+        verifier.verify(args)
+
+
 def test_missing_or_nonexecutable_runner_fails_safely(tmp_path: Path) -> None:
     args = Namespace(
         environment="staging",
@@ -884,6 +909,88 @@ def test_helm_identity_accepts_real_status_schema(monkeypatch: pytest.MonkeyPatc
     )
     args = Namespace(kubeconfig="k", release="dspace", namespace="dspace", expected_helm_revision=7)
     assert verifier.helm_identity(args, "3.1.0") == ("dspace", "3.1.0", 7)
+
+
+def test_helm_identity_accepts_chartless_status_with_exact_current_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    status = {"name": "dspace", "namespace": "dspace", "version": 26, "info": {}}
+    history = [
+        {
+            "revision": 26,
+            "chart": "dspace-3.0.2",
+            "app_version": "3.0.1",
+            "status": "deployed",
+            "description": "sugarkube-release-manifest:reservation",
+        }
+    ]
+    monkeypatch.setattr(
+        verifier,
+        "command",
+        lambda argv: json.dumps(history if "history" in argv else status),
+    )
+    args = Namespace(
+        kubeconfig="k", release="dspace", namespace="dspace", expected_helm_revision=26
+    )
+    assert verifier.helm_identity(args, "3.0.2") == ("dspace", "3.0.2", 26)
+
+
+@pytest.mark.parametrize(
+    "status,history",
+    [
+        ({"version": 26}, []),
+        ({"version": 26}, [{"revision": 25, "chart": "dspace-3.0.2"}]),
+        (
+            {"version": 26},
+            [
+                {"revision": 26, "chart": "dspace-3.0.2"},
+                {"revision": 26, "chart": "dspace-3.0.2"},
+            ],
+        ),
+        ({"version": 26}, [{"revision": 26, "chart": "dspace-3.0.1"}]),
+        ({"version": True}, [{"revision": 1, "chart": "dspace-3.0.2"}]),
+        ({"version": 26}, {"revision": 26, "chart": "dspace-3.0.2"}),
+        ({"version": 26}, [{"revision": "26", "chart": "dspace-3.0.2"}]),
+        ({"version": 26}, [{"revision": 26, "chart": None}]),
+        (
+            {"version": 26, "chart": {"metadata": []}},
+            [{"revision": 26, "chart": "dspace-3.0.2"}],
+        ),
+    ],
+)
+def test_helm_identity_chartless_fallback_failures_are_closed_and_redacted(
+    monkeypatch: pytest.MonkeyPatch, status: object, history: object
+) -> None:
+    history_with_secret = history
+    if isinstance(history, list):
+        history_with_secret = [*history, {"revision": 99, "chart": SENTINEL}]
+    monkeypatch.setattr(
+        verifier,
+        "command",
+        lambda argv: json.dumps(history_with_secret if "history" in argv else status),
+    )
+    args = Namespace(kubeconfig="k", release="dspace", namespace="dspace")
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.helm_identity(args, "3.0.2")
+    assert str(raised.value) == "cluster identity"
+    assert SENTINEL not in str(raised.value)
+
+
+def test_helm_identity_chartless_expected_revision_drift_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        verifier,
+        "command",
+        lambda argv: json.dumps(
+            [{"revision": 26, "chart": "dspace-3.0.2"}] if "history" in argv else {"version": 26}
+        ),
+    )
+    args = Namespace(
+        kubeconfig="k", release="dspace", namespace="dspace", expected_helm_revision=25
+    )
+    with pytest.raises(verifier.VerificationError, match="staging drift"):
+        verifier.helm_identity(args, "3.0.2")
 
 
 def test_command_timeout_is_bounded_and_redacted(monkeypatch: pytest.MonkeyPatch) -> None:

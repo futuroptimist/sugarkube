@@ -105,6 +105,57 @@ class ManifestError(ValueError):
     """A release record is missing or inconsistent."""
 
 
+def helm_status_needs_history(status: object) -> bool:
+    """Return whether status genuinely omits (or nulls) chart metadata."""
+    if not isinstance(status, dict):
+        return False
+    chart = status.get("chart")
+    return chart is None or (isinstance(chart, dict) and chart.get("metadata") is None)
+
+
+def resolve_helm_chart_identity(
+    status: object,
+    history: object,
+    expected_name: str,
+    expected_version: str,
+) -> tuple[str, str, int]:
+    """Resolve an exact chart coordinate, using history only when status omits it."""
+    if not isinstance(status, dict):
+        raise ManifestError("invalid Helm release identity")
+    revision = status.get("version")
+    if type(revision) is not int or revision < 1:
+        raise ManifestError("invalid Helm release identity")
+
+    if not helm_status_needs_history(status):
+        chart = status["chart"]
+        if not isinstance(chart, dict) or not isinstance(chart.get("metadata"), dict):
+            raise ManifestError("invalid Helm release identity")
+        metadata = chart["metadata"]
+        if metadata.get("name") != expected_name or metadata.get("version") != expected_version:
+            raise ManifestError("invalid Helm release identity")
+        return expected_name, expected_version, revision
+
+    if not isinstance(history, list):
+        raise ManifestError("invalid Helm release identity")
+    matches = []
+    for record in history:
+        if not isinstance(record, dict):
+            raise ManifestError("invalid Helm release identity")
+        record_revision = record.get("revision")
+        chart_coordinate = record.get("chart")
+        if (
+            type(record_revision) is not int
+            or record_revision < 1
+            or not isinstance(chart_coordinate, str)
+        ):
+            raise ManifestError("invalid Helm release identity")
+        if record_revision == revision:
+            matches.append(record)
+    if len(matches) != 1 or matches[0]["chart"] != f"{expected_name}-{expected_version}":
+        raise ManifestError("invalid Helm release identity")
+    return expected_name, expected_version, revision
+
+
 def _object(path: Path) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -1048,7 +1099,34 @@ def main(argv: list[str] | None = None) -> int:
                 "-o",
                 "json",
             ]
-            helm = json.loads(_run(helm_command))
+            history_command = [
+                "helm",
+                "--kubeconfig",
+                args.kubeconfig,
+                "history",
+                args.release,
+                "--namespace",
+                args.namespace,
+                "-o",
+                "json",
+            ]
+
+            def helm_snapshot() -> tuple[dict[str, Any], tuple[str, str, int]]:
+                status = json.loads(_run(helm_command))
+                history = None
+                if helm_status_needs_history(status):
+                    history = json.loads(_run(history_command))
+                identity = resolve_helm_chart_identity(
+                    status, history, "dspace", source["chartVersion"]
+                )
+                if helm_status_needs_history(status):
+                    status = {
+                        **status,
+                        "chart": {"metadata": {"name": identity[0], "version": identity[1]}},
+                    }
+                return status, identity
+
+            helm, helm_binding = helm_snapshot()
             stored_values_result = None
             if source["schemaVersion"] == 2:
                 stored_values = json.loads(
@@ -1085,7 +1163,7 @@ def main(argv: list[str] | None = None) -> int:
                 "json",
             ]
             pods = _settle_release_pods(pod_command)
-            settled_helm = json.loads(_run(helm_command))
+            settled_helm, settled_helm_binding = helm_snapshot()
             workloads = json.loads(
                 _run(
                     [
@@ -1129,10 +1207,11 @@ def main(argv: list[str] | None = None) -> int:
                 args.namespace,
                 args.reservation,
             )
-            stable_helm = json.loads(_run(helm_command))
+            stable_helm, stable_helm_binding = helm_snapshot()
 
-            def binding_fields(status: dict[str, Any]) -> tuple[Any, ...]:
-                metadata = status.get("chart", {}).get("metadata", {})
+            def binding_fields(
+                status: dict[str, Any], identity: tuple[str, str, int]
+            ) -> tuple[Any, ...]:
                 info = status.get("info", {})
                 return (
                     status.get("name"),
@@ -1140,13 +1219,15 @@ def main(argv: list[str] | None = None) -> int:
                     info.get("status"),
                     status.get("version"),
                     info.get("description"),
-                    metadata.get("name"),
-                    metadata.get("version"),
+                    identity[0],
+                    identity[1],
                 )
 
-            if binding_fields(settled_helm) != binding_fields(helm) or binding_fields(
-                stable_helm
-            ) != binding_fields(helm):
+            if binding_fields(settled_helm, settled_helm_binding) != binding_fields(
+                helm, helm_binding
+            ) or binding_fields(stable_helm, stable_helm_binding) != binding_fields(
+                helm, helm_binding
+            ):
                 raise ManifestError("Helm release changed during evidence collection")
             _write_new(args.output, result)
             sidecar.unlink()
