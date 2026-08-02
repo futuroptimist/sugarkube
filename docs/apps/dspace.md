@@ -125,22 +125,25 @@ PUBLIC_BUILD=$(mktemp)
 DIRECT_BUILD=$(mktemp)
 trap 'rm -f "$RECOVERY_CONFIG" "$PUBLIC_BUILD" "$DIRECT_BUILD"' EXIT
 curl --fail --silent --show-error --max-time 10 --max-filesize 16384 \
-  "https://$PROD_HOST/build-info.json" >"$PUBLIC_BUILD"
-jq -e '{version, revision, shortRevision, image}' "$PUBLIC_BUILD" \
+  "https://$PROD_HOST/build-meta.json" >"$PUBLIC_BUILD"
+jq -e '{gitSha, generatedAt, source}' "$PUBLIC_BUILD" \
   >"$CAPTURE/public-build-identity.json"
 POD=$(kubectl --kubeconfig "$PROD_KUBECONFIG" -n dspace get pods \
   -l app.kubernetes.io/name=dspace,app.kubernetes.io/instance=dspace \
   -o jsonpath='{.items[0].metadata.name}')
+HTTP_PORT=$(kubectl --kubeconfig "$PROD_KUBECONFIG" -n dspace get deployment dspace \
+  -o jsonpath='{.spec.template.spec.containers[?(@.name=="dspace")].ports[?(@.name=="http")].containerPort}')
 timeout 10s kubectl --kubeconfig "$PROD_KUBECONFIG" get --raw \
-  "/api/v1/namespaces/dspace/pods/$POD:3000/proxy/build-info.json" \
+  "/api/v1/namespaces/dspace/pods/$POD:$HTTP_PORT/proxy/build-meta.json" \
   | head -c 16384 >"$DIRECT_BUILD"
-jq -e '{version, revision, shortRevision, image}' "$DIRECT_BUILD" \
+jq -e '{gitSha, generatedAt, source}' "$DIRECT_BUILD" \
   >"$CAPTURE/direct-build-identity.json"
 ```
 
 Do not run `dspace-release-verify` against the pre-change 3.0.2 candidate: the full verifier
 correctly rejects the currently installed 3.0.1 chart. The bounded captures above retain only the
-four allowlisted identity fields and cap each response at 16 KiB. Before evidence reservation or
+three allowlisted legacy identity fields and cap each response at 16 KiB. Before evidence
+reservation or
 mutation, run the existing recipe's exact read-only digest-qualified render and structural
 validation sequence:
 
@@ -226,6 +229,19 @@ replica's image coordinate, digest, build identity, and frontend marker, then in
 non-destructive remote `/chat` harness. It uses read-only Kubernetes API pod proxies. Successful
 bounded results are included in finalized evidence as `runtimeVerification`; response bodies,
 child output, browser artifacts, headers, cookies, credentials, and request payloads are not saved.
+
+The default identity contract is `build-info-v1`: public and direct `/build-info.json` plus the
+root HTML build-revision marker must agree for every replica. The verifier derives the proxy port
+from the unique `http` port on the validated Deployment's unique `dspace` container and requires
+the same valid named port on every pod; it does not assume a numeric port. The sole exception is
+`legacy-build-meta-v1`, selected only when every approved 3.0.1 recovery coordinate (schema,
+application and chart revisions, image and chart tags/digests, semantic tag, and OpenAI provider)
+matches exactly. In that mode, bounded public and direct `/build-meta.json` documents must contain
+the approved full `gitSha`, a valid non-empty `generatedAt`, and a non-empty `source`, and must agree
+across all replicas. Bounded non-empty root documents are still checked, but the legacy HTML is not
+treated as a revision marker. Sugarkube always passes the selected contract explicitly to DSPACE's
+smoke runner. This exception is not a fallback after modern verification fails and does not alter
+immutable coordinates, candidate approval, or finalized evidence.
 
 Prepare a DSPACE checkout with `pnpm install` and `pnpm exec playwright install chromium`. The
 runner must be executable. It mocks provider transport, so no token.place or OpenAI credentials

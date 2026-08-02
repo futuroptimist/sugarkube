@@ -114,7 +114,15 @@ def _verify_setup(
                         }
                     ],
                 },
-                "spec": {"containers": [{"name": "dspace", "image": declared}]},
+                "spec": {
+                    "containers": [
+                        {
+                            "name": "dspace",
+                            "image": declared,
+                            "ports": [{"name": "http", "containerPort": 8080}],
+                        }
+                    ]
+                },
                 "status": {
                     "phase": "Running",
                     "conditions": [{"type": "Ready", "status": "True"}],
@@ -166,6 +174,10 @@ def _verify_setup(
                                     {
                                         "name": "dspace",
                                         "image": override.get("deployment_image", declared),
+                                        "ports": override.get(
+                                            "deployment_ports",
+                                            [{"name": "http", "containerPort": 8080}],
+                                        ),
                                         "env": [
                                             {
                                                 "name": "DSPACE_TOKEN_PLACE_URL",
@@ -202,11 +214,12 @@ def _verify_setup(
                     }
                 }
             )
+        override.setdefault("proxy_urls", []).append(argv[-1])
         pod_name = argv[-1].split("/pods/", 1)[1].split(":", 1)[0]
         failure = override.get("direct_failure")
         if failure == pod_name:
             raise verifier.VerificationError(SENTINEL)
-        if argv[-1].endswith("build-info.json"):
+        if argv[-1].endswith(".json"):
             return direct_builds.get(pod_name, build())
         return direct_html.get(pod_name, f'<meta name="dspace-build-revision" content="{SHA}">')
 
@@ -286,8 +299,101 @@ def test_verify_uses_safe_exact_smoke_argv(
     result = verifier.verify(args)
     assert list(result) == list(verifier.RESULT_FIELDS)
     assert result["journeys"][-1] == {"name": "/chat", "passed": True}
+    assert seen[-1][seen[-1].index("--identity-contract") + 1] == "build-info-v1"
     assert ("--expected-token-place-origin" in seen[-1]) is has_token_args
     assert SENTINEL not in json.dumps(result)
+
+
+def test_verify_derives_named_http_port_for_every_proxy(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    overrides: dict[str, object] = {"proxy_urls": []}
+    args, _ = _verify_setup(monkeypatch, tmp_path, overrides=overrides)
+    verifier.verify(args)
+    urls = overrides["proxy_urls"]
+    assert len(urls) == 4
+    assert all(":8080/proxy/" in url for url in urls)
+    assert not any(":3000/" in url for url in urls)
+
+
+@pytest.mark.parametrize(
+    "ports",
+    [
+        [],
+        [{"name": "http", "containerPort": 8080}, {"name": "http", "containerPort": 8081}],
+        [{"name": "http", "containerPort": "8080"}],
+        [{"name": "http", "containerPort": True}],
+        [{"name": "http", "containerPort": 0}],
+        [{"name": "http", "containerPort": 65536}],
+    ],
+    ids=("missing", "duplicate", "malformed", "boolean", "low", "high"),
+)
+def test_verify_rejects_invalid_deployment_http_ports(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, ports: list[dict[str, object]]
+) -> None:
+    args, _ = _verify_setup(monkeypatch, tmp_path, overrides={"deployment_ports": ports})
+    with pytest.raises(verifier.VerificationError, match="cluster identity"):
+        verifier.verify(args)
+
+
+def test_verify_rejects_pod_http_port_mismatch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    overrides = _pod_overrides(
+        lambda pod: pod["spec"]["containers"][0]["ports"][0].update({"containerPort": 8081})
+    )
+    args, _ = _verify_setup(monkeypatch, tmp_path, overrides=overrides)
+    with pytest.raises(verifier.VerificationError, match="pod/replica identity"):
+        verifier.verify(args)
+
+
+@pytest.mark.parametrize("field", list(verifier.LEGACY_RECOVERY_COORDINATES))
+def test_only_complete_recovery_tuple_selects_legacy(field: str) -> None:
+    approved = dict(verifier.LEGACY_RECOVERY_COORDINATES)
+    assert verifier.identity_contract(approved) == "legacy-build-meta-v1"
+    approved[field] = "drift"
+    assert verifier.identity_contract(approved) == "build-info-v1"
+
+
+def test_legacy_contract_verifies_meta_roots_and_truthful_journeys(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    meta = json.dumps({"gitSha": SHA, "generatedAt": "2026-08-02T12:00:00Z", "source": "release"})
+    overrides: dict[str, object] = {
+        "direct_builds": {"dspace-1": meta, "dspace-2": meta},
+        "public_build": meta,
+        "public_html": "<html>legacy</html>",
+        "direct_html": {"dspace-1": "<html>legacy</html>", "dspace-2": "<html>legacy</html>"},
+        "proxy_urls": [],
+    }
+    args, seen = _verify_setup(monkeypatch, tmp_path, overrides=overrides)
+    monkeypatch.setattr(verifier, "identity_contract", lambda manifest: "legacy-build-meta-v1")
+    result = verifier.verify(args)
+    assert result["journeys"] == [
+        {"name": "/build-meta.json", "passed": True},
+        {"name": "/", "passed": True},
+        {"name": "/chat", "passed": True},
+    ]
+    assert seen[-1][seen[-1].index("--identity-contract") + 1] == "legacy-build-meta-v1"
+    assert all("build-info.json" not in url for url in overrides["proxy_urls"])
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        SENTINEL,
+        "x" * (1024 * 1024 + 1),
+        json.dumps({"gitSha": "f" * 40, "generatedAt": "2026-08-02T12:00:00Z", "source": "x"}),
+        json.dumps({"gitSha": SHA, "generatedAt": "", "source": "x"}),
+        json.dumps({"gitSha": SHA, "generatedAt": "not-a-time", "source": "x"}),
+        json.dumps({"gitSha": SHA, "generatedAt": "2026-08-02T12:00:00Z", "source": ""}),
+    ],
+)
+def test_legacy_identity_failures_are_bounded(payload: str) -> None:
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.legacy_identity(payload.encode(), SHA, "direct identity")
+    assert str(raised.value) == "direct identity"
+    assert SENTINEL not in str(raised.value)
 
 
 @pytest.mark.parametrize(
@@ -352,7 +458,15 @@ def _pod_overrides(mutator) -> dict[str, object]:  # noqa: ANN001
                     }
                 ],
             },
-            "spec": {"containers": [{"name": "dspace", "image": canonical}]},
+            "spec": {
+                "containers": [
+                    {
+                        "name": "dspace",
+                        "image": canonical,
+                        "ports": [{"name": "http", "containerPort": 8080}],
+                    }
+                ]
+            },
             "status": {
                 "phase": "Running",
                 "conditions": [{"type": "Ready", "status": "True"}],

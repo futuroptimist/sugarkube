@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import os
 import re
@@ -42,6 +43,19 @@ RESULT_FIELDS = (
     "journeys",
 )
 BUILD_FIELDS = {"version", "revision", "shortRevision", "image"}
+LEGACY_BUILD_FIELDS = {"gitSha", "generatedAt", "source"}
+LEGACY_RECOVERY_COORDINATES = {
+    "schemaVersion": 2,
+    "applicationVersion": "3.0.1",
+    "sourceRevision": "1a31a569aff2dbeb238e8c2688b9e85140d2077d",
+    "chartSourceRevision": "63063e287adb92a4158ce2c8e7d378b73f52c1c5",
+    "imageTag": "main-1a31a56",
+    "imageDigest": "sha256:23dbc573377549136c1f10b05706b3c176ffbabaf04a3194381a24752104a401",
+    "chartVersion": "3.0.2",
+    "chartDigest": "sha256:8b862135e52146f301a41259d6dabb053ed891d798fc1c8c95ca775b2b8e9575",
+    "semanticTag": "v3.0.1",
+    "expectedDefaultChatProvider": "openai",
+}
 META_RE = re.compile(
     r'<meta\s+[^>]*name=["\']dspace-build-revision["\'][^>]*content=["\']([^"\']+)',
     re.IGNORECASE,
@@ -163,6 +177,65 @@ def identity(
     return version, revision, runtime_image or image
 
 
+def identity_contract(manifest: dict[str, Any]) -> str:
+    """Select the sole audited legacy exception; all coordinate drift stays modern."""
+    if all(manifest.get(key) == value for key, value in LEGACY_RECOVERY_COORDINATES.items()):
+        return "legacy-build-meta-v1"
+    return "build-info-v1"
+
+
+def named_http_port(container: object, category: str) -> int:
+    """Return the unique, valid named HTTP port from a trusted container."""
+    if not isinstance(container, dict) or not isinstance(container.get("ports"), list):
+        fail(category)
+    matches = [
+        port for port in container["ports"] if isinstance(port, dict) and port.get("name") == "http"
+    ]
+    if len(matches) != 1:
+        fail(category)
+    value = matches[0].get("containerPort")
+    if type(value) is not int or not 1 <= value <= 65535:
+        fail(category)
+    return value
+
+
+def legacy_identity(raw: bytes, revision: str, category: str) -> tuple[str, str, str]:
+    if len(raw) > 1024 * 1024:
+        fail(category)
+    try:
+        value = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        fail(category)
+    if not isinstance(value, dict) or set(value) != LEGACY_BUILD_FIELDS:
+        fail(category)
+    git_sha, generated_at, source = (
+        value.get("gitSha"),
+        value.get("generatedAt"),
+        value.get("source"),
+    )
+    if git_sha != revision or not isinstance(generated_at, str) or not generated_at.strip():
+        fail(category)
+    if not isinstance(source, str) or not source.strip():
+        fail(category)
+    try:
+        parsed = datetime.datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
+    except ValueError:
+        fail(category)
+    if parsed.tzinfo is None:
+        fail(category)
+    return git_sha, generated_at, source
+
+
+def root_document(raw: bytes, category: str) -> None:
+    if len(raw) > 1024 * 1024 or not raw:
+        fail(category)
+    try:
+        if not raw.decode("utf-8").strip():
+            fail(category)
+    except UnicodeDecodeError:
+        fail(category)
+
+
 def marker(raw: bytes, revision: str, category: str) -> None:
     if len(raw) > 1024 * 1024:
         fail(category)
@@ -213,6 +286,7 @@ def load_manifest(path: Path) -> dict[str, Any]:
 
 def verify(args: argparse.Namespace) -> dict[str, Any]:
     manifest = load_manifest(args.manifest)
+    contract = identity_contract(manifest)
     expected = {
         "version": manifest["applicationVersion"],
         "revision": manifest["sourceRevision"],
@@ -296,6 +370,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
     declared_image = applications[0].get("image") if len(applications) == 1 else None
     if declared_image not in permitted_images:
         fail("cluster identity")
+    proxy_port = named_http_port(applications[0], "cluster identity")
     if token_values is not None:
         live_env = {item.get("name"): item.get("value") for item in applications[0].get("env", [])}
         if (
@@ -306,7 +381,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
 
     helm_before = helm_identity(args, expected["chart_version"])
 
-    direct_names = []
+    replica_identity: tuple[str, str, str] | None = None
     for pod in pods:
         metadata, spec, status = pod.get("metadata", {}), pod.get("spec", {}), pod.get("status", {})
         if metadata.get("deletionTimestamp") is not None or status.get("phase") != "Running":
@@ -350,42 +425,63 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         statuses = [c for c in status.get("containerStatuses", []) if c.get("name") == "dspace"]
         if len(containers) != 1 or containers[0].get("image") != declared_image:
             fail("pod/replica identity")
+        if named_http_port(containers[0], "pod/replica identity") != proxy_port:
+            fail("pod/replica identity")
         image_id = statuses[0].get("imageID") if len(statuses) == 1 else None
         if image_id_digest(image_id) != expected["digest"]:
             fail("pod/replica identity")
         name = metadata.get("name")
         if not isinstance(name, str) or not name:
             fail("pod/replica identity")
-        direct_names.append(name)
         proxy = ["kubectl", "--kubeconfig", args.kubeconfig, "get", "--raw"]
-        prefix = f"/api/v1/namespaces/{args.namespace}/pods/{name}:3000/proxy"
+        prefix = f"/api/v1/namespaces/{args.namespace}/pods/{name}:{proxy_port}/proxy"
         try:
-            direct_build = command(proxy + [prefix + "/build-info.json"]).encode()
+            identity_path = (
+                "/build-meta.json" if contract == "legacy-build-meta-v1" else "/build-info.json"
+            )
+            direct_build = command(proxy + [prefix + identity_path]).encode()
             direct_html = command(proxy + [prefix + "/"]).encode()
         except VerificationError:
             fail("direct identity")
-        direct_identity = identity(
-            direct_build,
+        direct_identity = (
+            legacy_identity(direct_build, expected["revision"], "direct identity")
+            if contract == "legacy-build-meta-v1"
+            else identity(
+                direct_build,
+                expected["version"],
+                expected["revision"],
+                canonical_image,
+                "direct identity",
+            )
+        )
+        if replica_identity is not None and direct_identity != replica_identity:
+            fail("pod/replica identity")
+        replica_identity = direct_identity
+        if contract == "legacy-build-meta-v1":
+            root_document(direct_html, "direct identity")
+        else:
+            marker(direct_html, expected["revision"], "direct identity")
+
+    identity_path = "/build-meta.json" if contract == "legacy-build-meta-v1" else "/build-info.json"
+    public_raw = fetch(base_url + identity_path, origin)
+    public_identity = (
+        legacy_identity(public_raw, expected["revision"], "public identity")
+        if contract == "legacy-build-meta-v1"
+        else identity(
+            public_raw,
             expected["version"],
             expected["revision"],
             canonical_image,
-            "direct identity",
+            "public identity",
         )
-        if direct_names and "replica_identity" in locals() and direct_identity != replica_identity:
-            fail("pod/replica identity")
-        replica_identity = direct_identity
-        marker(direct_html, expected["revision"], "direct identity")
-
-    public_identity = identity(
-        fetch(base_url + "/build-info.json", origin),
-        expected["version"],
-        expected["revision"],
-        canonical_image,
-        "public identity",
     )
     if public_identity != replica_identity:
         fail("public identity")
-    marker(fetch(base_url + "/", origin), expected["revision"], "public identity")
+    public_root = fetch(base_url + "/", origin)
+    if contract == "legacy-build-meta-v1":
+        root_document(public_root, "public identity")
+    else:
+        marker(public_root, expected["revision"], "public identity")
 
     smoke_argv = [
         str(smoke),
@@ -397,6 +493,8 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         expected["revision"],
         "--expected-provider",
         expected["provider"],
+        "--identity-contract",
+        contract,
     ]
     if expected["provider"] == "token-place":
         assert token_values is not None
@@ -435,7 +533,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         "frontendSourceRevision": expected["revision"],
         "defaultProvider": expected["provider"],
         "journeys": [
-            {"name": "/build-info.json", "passed": True},
+            {"name": identity_path, "passed": True},
             {"name": "/", "passed": True},
             {"name": "/chat", "passed": True},
         ],
