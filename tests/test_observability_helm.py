@@ -710,6 +710,7 @@ case "$*" in
   *"get --raw /api/v1/namespaces/monitoring/services/http:kube-prometheus-stack-alertmanager:9093/proxy/api/v2/silences"*)
     [ "$KUBECTL_MODE" != watchdog-silences-fail ] || exit 49
     [ "$KUBECTL_MODE" != watchdog-silences-malformed ] || { printf '%s\n' '{malformed'; exit 0; }
+    [ "$KUBECTL_MODE" != watchdog-silences-nonutf8 ] || { printf '\377PRIVATE_NON_UTF8_SENTINEL\n'; exit 0; }
     cat "$WATCHDOG_SILENCES"
     ;;
   *"delete --raw /api/v1/namespaces/monitoring/services/http:kube-prometheus-stack-alertmanager:9093/proxy/api/v2/silence/"*)
@@ -2197,8 +2198,10 @@ def test_watchdog_silence_clear_is_noop_without_owned_silences(tmp_path):
     [
         ("watchdog-drill-status", "watchdog-silences-fail"),
         ("watchdog-drill-status", "watchdog-silences-malformed"),
+        ("watchdog-drill-status", "watchdog-silences-nonutf8"),
         ("watchdog-drill-clear", "watchdog-silences-fail"),
         ("watchdog-drill-clear", "watchdog-silences-malformed"),
+        ("watchdog-drill-clear", "watchdog-silences-nonutf8"),
     ],
 )
 def test_watchdog_silence_api_failures_do_not_expose_fixture_contents(tmp_path, command, mode):
@@ -2208,6 +2211,9 @@ def test_watchdog_silence_api_failures_do_not_expose_fixture_contents(tmp_path, 
     assert result.returncode != 0
     output = result.stdout + result.stderr
     assert all(item["fixtureDetail"] not in output for item in fixture)
+    assert "PRIVATE_NON_UTF8_SENTINEL" not in output
     assert "credential" not in output
     assert "Traceback" not in output
     assert "response redacted" in output
+    if command == "watchdog-drill-clear":
+        assert not (tmp_path / "watchdog-silence-deletions").exists()
