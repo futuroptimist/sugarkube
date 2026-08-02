@@ -1,7 +1,9 @@
 import json
 import os
 import re
+import signal
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -585,12 +587,14 @@ def run_helper(
     retry_interval="1",
     action=None,
     pagerduty_mode="success",
+    watchdog_silence_mode=None,
     pagerduty_forward_line="Forwarding from 127.0.0.1:43128 -> 9093",
     watchdog_tty_text=None,
     command_args=(),
     extra_env=None,
     watchdog_silences=None,
     watchdog_log_text="",
+    interrupt_signal=None,
 ):
     """Run the lifecycle against deterministic command stubs and return its audit log."""
     bin_dir = tmp_path / "bin"
@@ -757,10 +761,16 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 [ "$noproxy" = '*' ] || exit 64
-[ -z "$data" ] || { cp "$data" "$ALERT_PAYLOAD"; cp "$data" "$WATCHDOG_SILENCE_PAYLOAD"; }
-case "$PAGERDUTY_MODE" in
+[ -z "$data" ] || case "$url" in
+  */api/v2/silences) cp "$data" "$WATCHDOG_SILENCE_PAYLOAD" ;;
+  *) cp "$data" "$ALERT_PAYLOAD" ;;
+esac
+mode=$PAGERDUTY_MODE
+case "$url" in */api/v2/silences) mode=$WATCHDOG_SILENCE_MODE ;; esac
+case "$mode" in
   transport) echo CURL_RESPONSE_SENTINEL >&2; exit 7 ;;
   forward-exit-during-curl) kill -9 "$(cat "$PAGERDUTY_PID")"; /bin/sleep 0.1; code=200 ;;
+  signal-wait) /bin/sleep 30; code=200 ;;
   http000) code=000 ;;
   http415) code=415 ;;
   http400) code=400 ;;
@@ -770,7 +780,7 @@ case "$PAGERDUTY_MODE" in
 esac
 case "$url" in
   */api/v2/silences)
-    case "$PAGERDUTY_MODE" in
+    case "$WATCHDOG_SILENCE_MODE" in
       response-malformed) printf '%s' '{malformed' > "$output" ;;
       response-missing) printf '%s' '{"fixture":"PRIVATE_RESPONSE_SENTINEL"}' > "$output" ;;
       response-invalid-id) printf '%s' '{"silenceID":"PRIVATE_RESPONSE_SENTINEL\ncredential"}' > "$output" ;;
@@ -802,6 +812,7 @@ printf '%s' "$code"
         "TARGET_RESPONSE_DELAY": target_response_delay,
         "ALERT_PAYLOAD": str(tmp_path / "alert-payload"),
         "PAGERDUTY_MODE": pagerduty_mode,
+        "WATCHDOG_SILENCE_MODE": watchdog_silence_mode or pagerduty_mode,
         "PAGERDUTY_FORWARD_LINE": pagerduty_forward_line,
         "PAGERDUTY_PID": str(tmp_path / "pagerduty.pid"),
         "PAGERDUTY_REAPED": str(tmp_path / "pagerduty.reaped"),
@@ -877,20 +888,40 @@ receivers:
         else:
             responses.write_text("\n".join(target_responses) + "\n", encoding="utf-8")
         env["TARGET_RESPONSES"] = str(responses)
-    result = subprocess.run(
-        [
-            "bash",
-            str(SCRIPT),
-            command,
-            "env=staging",
-            *([action] if action is not None else []),
-            *command_args,
-        ],
-        text=True,
-        capture_output=True,
-        env=env,
-        check=False,
-    )
+    argv = [
+        "bash",
+        str(SCRIPT),
+        command,
+        "env=staging",
+        *([action] if action is not None else []),
+        *command_args,
+    ]
+    if interrupt_signal is None:
+        result = subprocess.run(argv, text=True, capture_output=True, env=env, check=False)
+    else:
+        process = subprocess.Popen(
+            argv,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+            start_new_session=True,
+        )
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if (tmp_path / "pagerduty.pid").exists() and list(
+                tmp_path.glob("sugarkube-watchdog-silence.*")
+            ):
+                break
+            if process.poll() is not None:
+                break
+            time.sleep(0.01)
+        assert process.poll() is None, "watchdog drill exited before signal injection"
+        assert (tmp_path / "pagerduty.pid").exists(), "port-forward did not start"
+        assert list(tmp_path.glob("sugarkube-watchdog-silence.*")), "temporary directory missing"
+        os.killpg(process.pid, interrupt_signal)
+        stdout, stderr = process.communicate(timeout=5)
+        result = subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
     return result, audit.read_text(encoding="utf-8") if audit.exists() else ""
 
 
@@ -1997,8 +2028,7 @@ def test_watchdog_drill_create_submits_exact_bounded_sanitized_payload(tmp_path)
         == "Owned watchdog drill silence created; id=created-owned-silence; automatic expiry=8m.\n"
     )
     assert (
-        "port-forward --address=127.0.0.1 "
-        "service/kube-prometheus-stack-alertmanager :9093"
+        "port-forward --address=127.0.0.1 " "service/kube-prometheus-stack-alertmanager :9093"
     ) in audit
     assert "--header Content-Type: application/json" in audit
     assert "http://127.0.0.1:43128/api/v2/silences" in audit
@@ -2007,19 +2037,31 @@ def test_watchdog_drill_create_submits_exact_bounded_sanitized_payload(tmp_path)
     assert "shutdown" not in audit.lower() and "hc-ping" not in audit
 
 
-def test_watchdog_drill_create_installs_cleanup_and_signal_traps_before_forwarding():
-    script = SCRIPT.read_text(encoding="utf-8")
-    create = script.split("watchdog_silence_create() (", 1)[1].split(
-        "\n)\nwatchdog_owned_silences()", 1
-    )[0]
-    forward = create.index('kubectl -n "${NAMESPACE}" port-forward')
+@pytest.mark.parametrize(
+    ("interrupt_signal", "expected_returncode"),
+    [(signal.SIGINT, 130), (signal.SIGTERM, 143)],
+)
+def test_watchdog_drill_create_signals_clean_up_runtime_resources(
+    tmp_path, interrupt_signal, expected_returncode
+):
+    result, _ = run_helper(
+        tmp_path,
+        "watchdog-drill-create",
+        watchdog_silence_mode="signal-wait",
+        interrupt_signal=interrupt_signal,
+    )
 
-    assert "trap cleanup_watchdog_silence EXIT" in create[:forward]
-    assert "trap 'exit 130' INT" in create[:forward]
-    assert "trap 'exit 143' TERM" in create[:forward]
-    assert 'kill "${silence_pid}"' in create
-    assert 'wait "${silence_pid}"' in create
-    assert 'rm -rf "${silence_tmp}"' in create
+    assert result.returncode == expected_returncode
+    port_forward_pid = int((tmp_path / "pagerduty.pid").read_text(encoding="utf-8"))
+    with pytest.raises(ProcessLookupError):
+        os.kill(port_forward_pid, 0)
+    assert (tmp_path / "pagerduty.reaped").read_text(encoding="utf-8").strip() == "reaped"
+    assert not list(tmp_path.glob("sugarkube-watchdog-silence.*"))
+    output = result.stdout + result.stderr
+    assert "PRIVATE_RESPONSE_SENTINEL" not in output
+    assert "CURL_RESPONSE_SENTINEL" not in output
+    assert "credential" not in output
+    assert "Traceback" not in output
 
 
 @pytest.mark.parametrize(

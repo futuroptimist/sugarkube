@@ -678,4 +678,8 @@ if not isinstance(dashboard, dict) or dashboard.get("uid") != "sugarkube-staging
 cmd="${1:-}"; shift || true; [[ -n "${cmd}" ]] || { usage; exit 2; }
 env_arg="${1:-}"; normalize_env "${env_arg}" >/dev/null
 validate_dashboard
+if [[ "${cmd}" == watchdog-drill-create ]]; then
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+fi
 case "${cmd}" in render) render ;; install) install_release ;; upgrade) upgrade_release ;; status) status ;; verify) verify ;; dashboard-verify) dashboard_verify ;; pagerduty-test) pagerduty_test "${2:-${1:-}}" ;; watchdog-secret-install) watchdog_secret_install "${@:2}" ;; watchdog-secret-check) watchdog_secret_check ;; watchdog-verify) watchdog_live_check ;; watchdog-drill-create) watchdog_silence_create ;; watchdog-drill-status) watchdog_silence_list ;; watchdog-drill-clear) watchdog_silence_clear ;; *) usage; exit 2 ;; esac
