@@ -601,6 +601,60 @@ def chart_coordinate(value: dict[str, Any]) -> str:
     return f"oci://{CHART_REF}@{value['chartDigest']}"
 
 
+def helm_status_needs_history(status: object) -> bool:
+    """Return whether status genuinely omits or nulls chart metadata."""
+    if not isinstance(status, dict):
+        return False
+    chart = status.get("chart")
+    return chart is None or (isinstance(chart, dict) and chart.get("metadata") is None)
+
+
+def resolve_helm_chart_identity(
+    status: object,
+    history: object,
+    expected_name: str,
+    expected_version: str,
+) -> tuple[str, str, int]:
+    """Resolve an exact chart identity, using history only when status omits metadata."""
+    if not isinstance(status, dict):
+        raise ManifestError("invalid Helm release identity")
+    revision = status.get("version")
+    if type(revision) is not int or revision < 1:
+        raise ManifestError("invalid Helm release identity")
+    chart = status.get("chart")
+    metadata = chart.get("metadata") if isinstance(chart, dict) else None
+    if metadata is not None:
+        if not isinstance(metadata, dict):
+            raise ManifestError("invalid Helm release identity")
+        name, version = metadata.get("name"), metadata.get("version")
+    else:
+        if not helm_status_needs_history(status):
+            raise ManifestError("invalid Helm release identity")
+        if not isinstance(history, list):
+            raise ManifestError("invalid Helm release identity")
+        matches = []
+        for record in history:
+            if not isinstance(record, dict):
+                raise ManifestError("invalid Helm release identity")
+            record_revision, coordinate = record.get("revision"), record.get("chart")
+            if (
+                type(record_revision) is not int
+                or record_revision < 1
+                or not isinstance(coordinate, str)
+            ):
+                raise ManifestError("invalid Helm release identity")
+            if record_revision == revision:
+                matches.append(coordinate)
+        if len(matches) != 1:
+            raise ManifestError("invalid Helm release identity")
+        name, version = expected_name, expected_version
+        if matches[0] != f"{expected_name}-{expected_version}":
+            raise ManifestError("invalid Helm release identity")
+    if name != expected_name or version != expected_version:
+        raise ManifestError("invalid Helm release identity")
+    return name, version, revision
+
+
 def _image_id_digest(image_id: str) -> str:
     match = re.search(r"sha256:[0-9a-f]{64}$", image_id)
     if not match:
@@ -652,6 +706,7 @@ def finalize(
     expected_image_coordinate: str | None = None,
     runtime_verification: dict[str, Any] | None = None,
     helm_stored_values_result: dict[str, Any] | None = None,
+    helm_history_json: object = None,
 ) -> dict[str, Any]:
     validate(value, False)
     selected = {
@@ -672,9 +727,11 @@ def finalize(
         raise ManifestError("Helm release status must be deployed")
     if helm_info.get("description") != invocation_description:
         raise ManifestError("Helm release description does not match this invocation")
-    revision = helm_json.get("version")
-    chart_metadata = helm_json.get("chart", {}).get("metadata", {})
-    if chart_metadata.get("name") != "dspace" or chart_metadata.get("version") != chart_version:
+    try:
+        _, _, revision = resolve_helm_chart_identity(
+            helm_json, helm_history_json, "dspace", chart_version
+        )
+    except ManifestError:
         raise ManifestError("installed Helm chart identity or version does not match approval")
 
     selector_labels = {
@@ -1048,7 +1105,39 @@ def main(argv: list[str] | None = None) -> int:
                 "-o",
                 "json",
             ]
-            helm = json.loads(_run(helm_command))
+            history_command = [
+                "helm",
+                "--kubeconfig",
+                args.kubeconfig,
+                "history",
+                args.release,
+                "--namespace",
+                args.namespace,
+                "-o",
+                "json",
+            ]
+
+            def helm_snapshot() -> tuple[dict[str, Any], object, tuple[Any, ...]]:
+                status = json.loads(_run(helm_command))
+                history = (
+                    json.loads(_run(history_command)) if helm_status_needs_history(status) else None
+                )
+                name, version, revision = resolve_helm_chart_identity(
+                    status, history, "dspace", args.chart_version
+                )
+                info = status.get("info", {})
+                binding = (
+                    status.get("name"),
+                    status.get("namespace"),
+                    info.get("status"),
+                    revision,
+                    info.get("description"),
+                    name,
+                    version,
+                )
+                return status, history, binding
+
+            helm, helm_history, helm_binding = helm_snapshot()
             stored_values_result = None
             if source["schemaVersion"] == 2:
                 stored_values = json.loads(
@@ -1085,7 +1174,7 @@ def main(argv: list[str] | None = None) -> int:
                 "json",
             ]
             pods = _settle_release_pods(pod_command)
-            settled_helm = json.loads(_run(helm_command))
+            _, _, settled_binding = helm_snapshot()
             workloads = json.loads(
                 _run(
                     [
@@ -1120,6 +1209,7 @@ def main(argv: list[str] | None = None) -> int:
                     _object(args.runtime_verification) if args.runtime_verification else None
                 ),
                 helm_stored_values_result=stored_values_result,
+                helm_history_json=helm_history,
             )
             sidecar = verify_reservation(
                 args.output,
@@ -1129,24 +1219,9 @@ def main(argv: list[str] | None = None) -> int:
                 args.namespace,
                 args.reservation,
             )
-            stable_helm = json.loads(_run(helm_command))
+            _, _, stable_binding = helm_snapshot()
 
-            def binding_fields(status: dict[str, Any]) -> tuple[Any, ...]:
-                metadata = status.get("chart", {}).get("metadata", {})
-                info = status.get("info", {})
-                return (
-                    status.get("name"),
-                    status.get("namespace"),
-                    info.get("status"),
-                    status.get("version"),
-                    info.get("description"),
-                    metadata.get("name"),
-                    metadata.get("version"),
-                )
-
-            if binding_fields(settled_helm) != binding_fields(helm) or binding_fields(
-                stable_helm
-            ) != binding_fields(helm):
+            if settled_binding != helm_binding or stable_binding != helm_binding:
                 raise ManifestError("Helm release changed during evidence collection")
             _write_new(args.output, result)
             sidecar.unlink()
