@@ -230,13 +230,81 @@ PY
   echo "Watchdog rule, active alert, live configuration, pod mount, and bounded repeat observation verified; delivery must be confirmed at Healthchecks."
 )
 
-watchdog_silence_create() {
+watchdog_silence_create() (
+  require_tools kubectl python3 curl sleep
   assert_context
   cat >&2 <<'EOF2'
 MANUAL CHECKPOINT: confirm Healthchecks has a recent watchdog ping before disruption and confirm the PagerDuty resolution after recovery. This creates only an eight-minute silence.
 EOF2
-  python3 -c 'import json; from datetime import datetime,timedelta,timezone; n=datetime.now(timezone.utc); f=lambda d:d.isoformat(timespec="seconds").replace("+00:00","Z"); print(json.dumps({"matchers":[{"name":k,"value":v,"isRegex":False} for k,v in [("alertname","SugarkubeObservabilityWatchdog"),("environment","staging"),("cluster","sugarkube-int"),("purpose","observability-watchdog")]],"startsAt":f(n),"endsAt":f(n+timedelta(minutes=8)),"createdBy":"sugarkube-observability-watchdog-drill","comment":"Owned staging watchdog failure drill"}))' | kubectl create --raw "${WATCHDOG_API}/silences" -f - | python3 -c 'import json,sys; d=json.load(sys.stdin); print("Owned watchdog drill silence created; id="+d["silenceID"]+"; automatic expiry=8m.")'
-}
+  local port="" line http_status silence_id
+  local -a port_forward_lines=()
+  local drill_pid="" drill_tmp
+  drill_tmp="$(mktemp -d -t sugarkube-watchdog-drill.XXXXXX)"
+  chmod 700 "${drill_tmp}"
+  # shellcheck disable=SC2317
+  cleanup_watchdog_drill() {
+    if [[ -n "${drill_pid}" && " $(jobs -pr) " == *" ${drill_pid} "* ]]; then
+      kill "${drill_pid}" 2>/dev/null || true
+    fi
+    [[ -z "${drill_pid}" ]] || wait "${drill_pid}" 2>/dev/null || true
+    rm -rf "${drill_tmp}"
+  }
+  watchdog_forward_running() {
+    [[ " $(jobs -pr) " == *" ${drill_pid} "* ]] && kill -0 "${drill_pid}" 2>/dev/null
+  }
+  trap cleanup_watchdog_drill EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+
+  umask 077
+  python3 -c 'import json; from datetime import datetime,timedelta,timezone; n=datetime.now(timezone.utc); f=lambda d:d.isoformat(timespec="seconds").replace("+00:00","Z"); print(json.dumps({"matchers":[{"name":k,"value":v,"isRegex":False} for k,v in [("alertname","SugarkubeObservabilityWatchdog"),("environment","staging"),("cluster","sugarkube-int"),("purpose","observability-watchdog")]],"startsAt":f(n),"endsAt":f(n+timedelta(minutes=8)),"createdBy":"sugarkube-observability-watchdog-drill","comment":"Owned staging watchdog failure drill"}))' >"${drill_tmp}/payload.json"
+  : >"${drill_tmp}/port-forward.log"
+  kubectl -n "${NAMESPACE}" port-forward --address=127.0.0.1 "service/${RELEASE}-alertmanager" :9093 >"${drill_tmp}/port-forward.log" 2>&1 &
+  drill_pid=$!
+  for _ in {1..20}; do
+    watchdog_forward_running || { echo "ERROR: Alertmanager port-forward stopped (diagnostics redacted)." >&2; return 19; }
+    mapfile -t port_forward_lines <"${drill_tmp}/port-forward.log"
+    for line in "${port_forward_lines[@]}"; do
+      if [[ "${line}" =~ ^Forwarding\ from\ 127\.0\.0\.1:([1-9][0-9]{0,4})\ -\>\ 9093$ ]]; then
+        port="${BASH_REMATCH[1]}"
+        ((10#${port} <= 65535)) || port=""
+      fi
+    done
+    [[ -z "${port}" ]] || break
+    sleep 1
+  done
+  [[ -n "${port}" ]] || { echo "ERROR: Alertmanager port-forward did not establish an owned loopback listener (diagnostics redacted)." >&2; return 19; }
+  watchdog_forward_running || { echo "ERROR: Alertmanager port-forward stopped (diagnostics redacted)." >&2; return 19; }
+  if ! curl --silent --show-error --noproxy '*' --connect-timeout 3 --max-time 10 \
+    --header 'Content-Type: application/json' --data-binary "@${drill_tmp}/payload.json" \
+    --output "${drill_tmp}/response" --write-out '%{http_code}' \
+    "http://127.0.0.1:${port}/api/v2/silences" >"${drill_tmp}/status" 2>"${drill_tmp}/curl.log"; then
+    echo "ERROR: Alertmanager silence request failed (response redacted)." >&2
+    return 18
+  fi
+  watchdog_forward_running || { echo "ERROR: Alertmanager port-forward stopped (diagnostics redacted)." >&2; return 19; }
+  http_status="$(cat "${drill_tmp}/status")"
+  [[ "${http_status}" =~ ^[0-9]{3}$ && "${http_status}" == 200 ]] || {
+    echo "ERROR: Alertmanager silence request was not accepted (response redacted)." >&2
+    return 18
+  }
+  if ! silence_id="$(python3 - "${drill_tmp}/response" <<'PY'
+import json, re, sys
+try:
+    with open(sys.argv[1], encoding="utf-8") as response:
+        value = json.load(response).get("silenceID")
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", value):
+        raise ValueError
+except (OSError, UnicodeError, json.JSONDecodeError, AttributeError, ValueError):
+    raise SystemExit(1)
+print(value)
+PY
+  )"; then
+    echo "ERROR: Alertmanager returned an invalid silence response (response redacted)." >&2
+    return 18
+  fi
+  printf 'Owned watchdog drill silence created; id=%s; automatic expiry=8m.\n' "${silence_id}"
+)
 watchdog_owned_silences() {
   kubectl get --raw "${WATCHDOG_API}/silences" | python3 -c 'import json,sys; wanted=[("alertname","SugarkubeObservabilityWatchdog"),("environment","staging"),("cluster","sugarkube-int"),("purpose","observability-watchdog")]; out=[]
 for x in json.load(sys.stdin):
