@@ -423,11 +423,19 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         metadata, spec, status = pod.get("metadata", {}), pod.get("spec", {}), pod.get("status", {})
         if not all(isinstance(value, dict) for value in (metadata, spec, status)):
             fail("pod/replica identity")
+        conditions = status.get("conditions", [])
+        containers = spec.get("containers", [])
+        statuses = status.get("containerStatuses", [])
+        if not all(
+            isinstance(items, list) and all(isinstance(item, dict) for item in items)
+            for items in (conditions, containers, statuses)
+        ):
+            fail("pod/replica identity")
         if metadata.get("deletionTimestamp") is not None or status.get("phase") != "Running":
             fail("pod/replica identity")
         if not any(
             c.get("type") == "Ready" and c.get("status") == "True"
-            for c in status.get("conditions", [])
+            for c in conditions
         ):
             fail("pod/replica identity")
         owner = controller_owner(metadata.get("ownerReferences", []), "ReplicaSet")
@@ -460,8 +468,8 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         rs_owner = controller_owner(rs_owners, "Deployment")
         if rs_owner.get("name") != args.release or rs_owner.get("uid") != deployment_uid:
             fail("pod/replica identity")
-        containers = [c for c in spec.get("containers", []) if c.get("name") == "dspace"]
-        statuses = [c for c in status.get("containerStatuses", []) if c.get("name") == "dspace"]
+        containers = [c for c in containers if c.get("name") == "dspace"]
+        statuses = [c for c in statuses if c.get("name") == "dspace"]
         if len(containers) != 1 or containers[0].get("image") != declared_image:
             fail("pod/replica identity")
         if named_http_port(containers[0], "pod/replica identity") != proxy_port:
