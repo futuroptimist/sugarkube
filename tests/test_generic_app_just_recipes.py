@@ -1281,6 +1281,121 @@ data:
     )
 
 
+def test_dspace_production_allows_legacy_pod_uid_metrics_token(tmp_path: Path) -> None:
+    values = tmp_path / "prod-values.yaml"
+    values.write_text("metrics:\n  enabled: false\n", encoding="utf-8")
+    inputs = app_chart.ReleaseInputs(
+        "dspace", "prod", "dspace", "dspace", "chart", "3.0.2", (str(values),),
+        "main-deadbee",
+    )
+    manifest = _release_deployment(
+        "dspace",
+        """          env:
+            - name: METRICS_TOKEN
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+---
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/instance: dspace
+""",
+    )
+
+    assert app_chart.validate_rendered_manifest(manifest, inputs) == []
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "value: literal-token",
+        "valueFrom:\n                secretKeyRef:\n                  name: metrics\n                  key: token",
+        "valueFrom:\n                configMapKeyRef:\n                  name: metrics\n                  key: token",
+        "valueFrom:\n                resourceFieldRef:\n                  resource: limits.cpu",
+        "valueFrom:\n                fieldRef:\n                  fieldPath: metadata.name",
+        "# no value source",
+        "valueFrom: {}",
+        "valueFrom: malformed",
+    ],
+)
+def test_dspace_production_rejects_unsafe_metrics_token_sources(entry: str) -> None:
+    inputs = app_chart.ReleaseInputs(
+        "dspace", "prod", "dspace", "dspace", "chart", "3.0.2", (), "main-deadbee"
+    )
+    manifest = _release_deployment(
+        "dspace",
+        f"""          env:
+            - name: METRICS_TOKEN
+              {entry}
+---
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/instance: dspace
+""",
+    )
+
+    assert "DSPACE production rendered staging-only metrics configuration" in (
+        app_chart.validate_rendered_manifest(manifest, inputs)
+    )
+
+
+def test_dspace_production_rejects_pod_uid_metrics_token_on_wrong_container() -> None:
+    inputs = app_chart.ReleaseInputs(
+        "dspace", "prod", "dspace", "dspace", "chart", "3.0.2", (), "main-deadbee"
+    )
+    manifest = _release_deployment(
+        "dspace",
+        """        - name: sidecar
+          image: ghcr.io/example/sidecar:main-deadbee
+          env:
+            - name: METRICS_TOKEN
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+---
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/instance: dspace
+""",
+    )
+
+    assert "DSPACE production rendered staging-only metrics configuration" in (
+        app_chart.validate_rendered_manifest(manifest, inputs)
+    )
+
+
+def test_dspace_production_rejects_pod_uid_metrics_token_when_metrics_enabled(
+    tmp_path: Path,
+) -> None:
+    values = tmp_path / "prod-values.yaml"
+    values.write_text("metrics:\n  enabled: true\n", encoding="utf-8")
+    inputs = app_chart.ReleaseInputs(
+        "dspace", "prod", "dspace", "dspace", "chart", "3.0.2", (str(values),),
+        "main-deadbee",
+    )
+    manifest = _release_deployment(
+        "dspace",
+        """          env:
+            - name: METRICS_TOKEN
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+---
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/instance: dspace
+""",
+    )
+
+    assert "DSPACE production rendered staging-only metrics configuration" in (
+        app_chart.validate_rendered_manifest(manifest, inputs)
+    )
+
+
 @pytest.mark.parametrize(
     "leak", ["METRICS_TOKEN", "dspace-staging-metrics-token", "sugarkube-int"]
 )
