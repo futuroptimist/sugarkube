@@ -605,14 +605,40 @@ def test_verify_redacts_failed_http_identity(
     assert SENTINEL not in str(raised.value) + captured.out + captured.err
 
 
-def test_same_origin_redirect_rejects_cross_origin_before_request() -> None:
+def test_same_origin_redirect_rejects_cross_origin_before_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     handler = verifier.SameOriginRedirect(("https", "staging.example"))
+    redirected = False
+
+    def redirect(*args: object) -> None:
+        nonlocal redirected
+        redirected = True
+
+    monkeypatch.setattr(verifier.urllib.request.HTTPRedirectHandler, "redirect_request", redirect)
     with pytest.raises(verifier.VerificationError) as raised:
         handler.redirect_request(
             object(), object(), 302, SENTINEL, {}, "https://attacker.invalid/secret"
         )
     assert str(raised.value) == "public identity"
     assert SENTINEL not in str(raised.value)
+    assert redirected is False
+
+
+def test_same_origin_redirect_preserves_user_agent() -> None:
+    handler = verifier.SameOriginRedirect(("https", "staging.example"))
+    request = verifier.urllib.request.Request(
+        "https://staging.example/build-meta.json",
+        headers={"User-Agent": verifier.PUBLIC_HTTP_USER_AGENT},
+    )
+
+    redirected = handler.redirect_request(
+        request, object(), 302, "Found", {}, "https://staging.example/build-meta.json?current=1"
+    )
+
+    assert redirected is not None
+    assert redirected.full_url == "https://staging.example/build-meta.json?current=1"
+    assert redirected.get_header("User-agent") == verifier.PUBLIC_HTTP_USER_AGENT
 
 
 def _pod_overrides(mutator) -> dict[str, object]:  # noqa: ANN001
@@ -1159,26 +1185,35 @@ class _Response:
     ("origin", "category"),
     [(None, "direct identity"), (("https", "dspace.example"), "public identity")],
 )
+@pytest.mark.parametrize("path", ["/build-meta.json", "/"], ids=("identity", "root"))
 def test_fetch_success_and_network_failures_are_bounded(
     monkeypatch: pytest.MonkeyPatch,
     origin: tuple[str, str] | None,
     category: str,
+    path: str,
 ) -> None:
+    url = f"https://dspace.example{path}"
+
     class Opener:
-        def open(self, url: str, timeout: int) -> _Response:
+        def open(self, request: verifier.urllib.request.Request, timeout: int) -> _Response:
             assert timeout == 15
+            assert request.full_url == url
+            assert dict(request.header_items()) == {
+                "User-agent": verifier.PUBLIC_HTTP_USER_AGENT,
+            }
             return _Response()
 
     monkeypatch.setattr(verifier.urllib.request, "build_opener", lambda *args: Opener())
-    assert verifier.fetch("https://dspace.example/build-info.json", origin) == b"bounded"
+    assert verifier.fetch(url, origin) == b"bounded"
 
     class BrokenOpener:
-        def open(self, url: str, timeout: int) -> _Response:
+        def open(self, request: verifier.urllib.request.Request, timeout: int) -> _Response:
+            assert request.get_header("User-agent") == verifier.PUBLIC_HTTP_USER_AGENT
             raise verifier.urllib.error.URLError(SENTINEL)
 
     monkeypatch.setattr(verifier.urllib.request, "build_opener", lambda *args: BrokenOpener())
     with pytest.raises(verifier.VerificationError) as raised:
-        verifier.fetch("https://dspace.example/build-info.json", origin)
+        verifier.fetch(url, origin)
     assert str(raised.value) == category
     assert SENTINEL not in str(raised.value)
 
@@ -1266,7 +1301,8 @@ def test_kubernetes_metadata_types_fail_closed(call: object, category: str) -> N
 
 def test_fetch_preserves_bounded_redirect_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     class Opener:
-        def open(self, url: str, timeout: int) -> _Response:
+        def open(self, request: verifier.urllib.request.Request, timeout: int) -> _Response:
+            assert request.get_header("User-agent") == verifier.PUBLIC_HTTP_USER_AGENT
             raise verifier.VerificationError("public identity")
 
     monkeypatch.setattr(verifier.urllib.request, "build_opener", lambda *args: Opener())
