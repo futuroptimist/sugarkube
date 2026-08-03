@@ -178,6 +178,50 @@ def contains_exact_scalar(value: object, expected: set[str]) -> bool:
     return isinstance(value, str) and value in expected
 
 
+def dspace_production_metrics_leak(document: dict[str, object], inputs: ReleaseInputs) -> bool:
+    staging_values = {"dspace-staging-metrics-token", "sugarkube-int"}
+    if contains_exact_scalar(document, staging_values):
+        return True
+
+    def metrics_token_count(value: object) -> int:
+        if isinstance(value, dict):
+            return sum(
+                metrics_token_count(key) + metrics_token_count(item)
+                for key, item in value.items()
+            )
+        if isinstance(value, list):
+            return sum(metrics_token_count(item) for item in value)
+        return int(value == "METRICS_TOKEN")
+
+    token_count = metrics_token_count(document)
+    if not token_count:
+        return False
+    if scalar(document.get("kind")) not in {"Deployment", "StatefulSet", "DaemonSet"}:
+        return True
+    if resolved_values_scalar(inputs.values, ("metrics", "enabled")).lower() == "true":
+        return True
+
+    found, containers = nested_value(document, ("spec", "template", "spec", "containers"))
+    candidates = {inputs.app, inputs.release, *APP_CONTAINER_NAMES.get(inputs.app, set())}
+    safe_entries = 0
+    if found and isinstance(containers, list):
+        for container in containers:
+            if not isinstance(container, dict) or scalar(container.get("name")) not in candidates:
+                continue
+            env = container.get("env")
+            if not isinstance(env, list):
+                continue
+            for entry in env:
+                # Chart 3.0.2 deliberately uses the pod UID as an unpredictable, pod-local
+                # token to keep legacy disabled metrics inaccessible without a Secret.
+                if isinstance(entry, dict) and entry == {
+                    "name": "METRICS_TOKEN",
+                    "valueFrom": {"fieldRef": {"fieldPath": "metadata.uid"}},
+                }:
+                    safe_entries += 1
+    return token_count != safe_entries
+
+
 def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str]:
     try:
         documents = safe_yaml_documents(manifest)
@@ -282,13 +326,12 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
                 errors.append(
                     "DSPACE ServiceMonitor bearerTokenSecret name and key must be nonempty"
                 )
-        production_leaks = {"METRICS_TOKEN", "dspace-staging-metrics-token", "sugarkube-int"}
         if inputs.env == "prod" and (
             service_monitors
             or any(
                 isinstance(doc, dict)
                 and release_associated(doc, inputs.release, allow_name=False)
-                and contains_exact_scalar(doc, production_leaks)
+                and dspace_production_metrics_leak(doc, inputs)
                 for doc in documents
             )
         ):
