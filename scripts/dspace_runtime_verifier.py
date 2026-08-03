@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -65,6 +66,8 @@ META_RE = re.compile(
 IMAGE_ID_RE = re.compile(r"sha256:[0-9a-f]{64}$")
 HTML_DOCUMENT_RE = re.compile(r"^\s*(?:<!doctype\s+html\b|<html\b)", re.IGNORECASE)
 PUBLIC_HTTP_USER_AGENT = "sugarkube-dspace-runtime-verifier/1.0"
+POD_SETTLE_TIMEOUT_SECONDS = 60.0
+POD_SETTLE_INTERVAL_SECONDS = 2.0
 
 
 class VerificationError(ValueError):
@@ -129,6 +132,34 @@ def command(argv: list[str]) -> str:
     if completed.returncode:
         fail("cluster identity")
     return completed.stdout
+
+
+def settle_selected_pods(
+    argv: list[str], *, runner: Any = None, monotonic: Any = None, sleeper: Any = None
+) -> list[Any]:
+    """Return a fresh complete pod snapshot after bounded termination settling."""
+    runner = command if runner is None else runner
+    monotonic = time.monotonic if monotonic is None else monotonic
+    sleeper = time.sleep if sleeper is None else sleeper
+    deadline = monotonic() + POD_SETTLE_TIMEOUT_SECONDS
+    while True:
+        try:
+            pods = json.loads(runner(argv)).get("items", [])
+        except (json.JSONDecodeError, AttributeError):
+            fail("pod/replica identity")
+        if not isinstance(pods, list) or not pods:
+            fail("pod/replica identity")
+        try:
+            terminating = any(
+                pod.get("metadata", {}).get("deletionTimestamp") is not None for pod in pods
+            )
+        except AttributeError:
+            fail("pod/replica identity")
+        if not terminating:
+            return pods
+        if monotonic() >= deadline:
+            fail("pod/replica identity")
+        sleeper(POD_SETTLE_INTERVAL_SECONDS)
 
 
 class SameOriginRedirect(urllib.request.HTTPRedirectHandler):
@@ -325,7 +356,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         fail("provider/chat smoke")
 
     selector = f"app.kubernetes.io/name=dspace,app.kubernetes.io/instance={args.release}"
-    raw_pods = command(
+    pods = settle_selected_pods(
         [
             "kubectl",
             "--kubeconfig",
@@ -340,13 +371,6 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
             "json",
         ]
     )
-    try:
-        pods = json.loads(raw_pods).get("items", [])
-    except (json.JSONDecodeError, AttributeError):
-        fail("pod/replica identity")
-    if not pods:
-        fail("pod/replica identity")
-
     canonical_image = f"{release_manifest.IMAGE_REF}:{expected['image_tag']}"
     rollback_image = f"{canonical_image}@{expected['digest']}"
     permitted_images = {canonical_image, rollback_image}
@@ -390,7 +414,11 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
 
     replica_identity: tuple[str, str, str] | None = None
     for pod in pods:
+        if not isinstance(pod, dict):
+            fail("pod/replica identity")
         metadata, spec, status = pod.get("metadata", {}), pod.get("spec", {}), pod.get("status", {})
+        if not all(isinstance(value, dict) for value in (metadata, spec, status)):
+            fail("pod/replica identity")
         if metadata.get("deletionTimestamp") is not None or status.get("phase") != "Running":
             fail("pod/replica identity")
         if not any(
