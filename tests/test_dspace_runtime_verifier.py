@@ -607,12 +607,32 @@ def test_verify_redacts_failed_http_identity(
 
 def test_same_origin_redirect_rejects_cross_origin_before_request() -> None:
     handler = verifier.SameOriginRedirect(("https", "staging.example"))
+    request = verifier.urllib.request.Request(
+        "https://staging.example/build-info.json",
+        headers={"User-Agent": verifier.PUBLIC_HTTP_USER_AGENT},
+    )
     with pytest.raises(verifier.VerificationError) as raised:
         handler.redirect_request(
-            object(), object(), 302, SENTINEL, {}, "https://attacker.invalid/secret"
+            request, object(), 302, SENTINEL, {}, "https://attacker.invalid/secret"
         )
     assert str(raised.value) == "public identity"
     assert SENTINEL not in str(raised.value)
+
+
+def test_same_origin_redirect_retains_public_user_agent() -> None:
+    handler = verifier.SameOriginRedirect(("https", "staging.example"))
+    request = verifier.urllib.request.Request(
+        "https://staging.example/build-info.json",
+        headers={"User-Agent": verifier.PUBLIC_HTTP_USER_AGENT},
+    )
+
+    redirected = handler.redirect_request(
+        request, object(), 302, "Found", {}, "https://staging.example/release/build-info.json"
+    )
+
+    assert redirected is not None
+    assert redirected.full_url == "https://staging.example/release/build-info.json"
+    assert redirected.get_header("User-agent") == verifier.PUBLIC_HTTP_USER_AGENT
 
 
 def _pod_overrides(mutator) -> dict[str, object]:  # noqa: ANN001
@@ -1165,15 +1185,17 @@ def test_fetch_success_and_network_failures_are_bounded(
     category: str,
 ) -> None:
     class Opener:
-        def open(self, url: str, timeout: int) -> _Response:
+        def open(self, request: verifier.urllib.request.Request, timeout: int) -> _Response:
             assert timeout == 15
+            assert request.full_url == "https://dspace.example/build-info.json"
+            assert request.get_header("User-agent") == verifier.PUBLIC_HTTP_USER_AGENT
             return _Response()
 
     monkeypatch.setattr(verifier.urllib.request, "build_opener", lambda *args: Opener())
     assert verifier.fetch("https://dspace.example/build-info.json", origin) == b"bounded"
 
     class BrokenOpener:
-        def open(self, url: str, timeout: int) -> _Response:
+        def open(self, request: verifier.urllib.request.Request, timeout: int) -> _Response:
             raise verifier.urllib.error.URLError(SENTINEL)
 
     monkeypatch.setattr(verifier.urllib.request, "build_opener", lambda *args: BrokenOpener())
@@ -1266,7 +1288,7 @@ def test_kubernetes_metadata_types_fail_closed(call: object, category: str) -> N
 
 def test_fetch_preserves_bounded_redirect_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     class Opener:
-        def open(self, url: str, timeout: int) -> _Response:
+        def open(self, request: verifier.urllib.request.Request, timeout: int) -> _Response:
             raise verifier.VerificationError("public identity")
 
     monkeypatch.setattr(verifier.urllib.request, "build_opener", lambda *args: Opener())
