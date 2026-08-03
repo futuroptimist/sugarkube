@@ -481,6 +481,52 @@ def test_settle_selected_pods_rejects_non_string_runner_result() -> None:
     assert str(raised.value) == "pod/replica identity"
 
 
+def test_settle_selected_pods_rejects_non_object_pod_without_leaking(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.settle_selected_pods(
+            ["kubectl", "get", "pods"],
+            runner=lambda _argv: json.dumps({"items": [SENTINEL]}),
+        )
+
+    assert str(raised.value) == "pod/replica identity"
+    captured = capsys.readouterr()
+    assert SENTINEL not in str(raised.value) + captured.out + captured.err
+
+
+@pytest.mark.parametrize("section", ["metadata", "spec", "status"])
+def test_verify_rejects_malformed_active_pod_section_after_termination_settles(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    section: str,
+) -> None:
+    args, _ = _verify_setup(monkeypatch, tmp_path)
+    original = verifier.command
+    settled = json.loads(original(["kubectl", "get", "pods"]))["items"]
+    terminating = deepcopy(settled[0])
+    terminating["metadata"]["deletionTimestamp"] = "2026-08-01T09:34:43Z"
+    bad_active = deepcopy(settled)
+    bad_active[1][section] = SENTINEL
+    snapshots = iter([settled + [terminating], bad_active])
+
+    def command(argv: list[str]) -> str:
+        if "pods" in argv and "--raw" not in argv:
+            return json.dumps({"items": next(snapshots)})
+        return original(argv)
+
+    monkeypatch.setattr(verifier, "command", command)
+    monkeypatch.setattr(verifier.time, "sleep", lambda _seconds: None)
+
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.verify(args)
+
+    assert str(raised.value) == "pod/replica identity"
+    captured = capsys.readouterr()
+    assert SENTINEL not in str(raised.value) + captured.out + captured.err
+
+
 @pytest.mark.parametrize("field", ["conditions", "containers", "containerStatuses"])
 @pytest.mark.parametrize(
     "bad_value", [None, SENTINEL, [SENTINEL]], ids=("none", "non-list", "non-dict")
