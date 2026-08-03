@@ -46,6 +46,7 @@ BUILD_FIELDS = {"version", "revision", "shortRevision", "image"}
 LEGACY_BUILD_FIELDS = {"gitSha", "generatedAt", "source"}
 MODERN_IDENTITY_CONTRACT = "build-info-v1"
 LEGACY_IDENTITY_CONTRACT = "legacy-build-meta-v1"
+PUBLIC_HTTP_USER_AGENT = "sugarkube-dspace-runtime-verifier/1.0"
 LEGACY_RECOVERY_COORDINATES = {
     "schemaVersion": 2,
     "applicationVersion": "3.0.1",
@@ -147,8 +148,9 @@ def fetch(url: str, public_origin: tuple[str, str] | None = None) -> bytes:
         if public_origin
         else urllib.request.build_opener()
     )
+    request = urllib.request.Request(url, headers={"User-Agent": PUBLIC_HTTP_USER_AGENT})
     try:
-        with opener.open(url, timeout=15) as response:
+        with opener.open(request, timeout=15) as response:
             return response.read(1024 * 1024 + 1)
     except (OSError, urllib.error.URLError, VerificationError) as exc:
         if isinstance(exc, VerificationError):
