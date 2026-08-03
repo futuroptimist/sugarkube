@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -65,6 +66,8 @@ META_RE = re.compile(
 IMAGE_ID_RE = re.compile(r"sha256:[0-9a-f]{64}$")
 HTML_DOCUMENT_RE = re.compile(r"^\s*(?:<!doctype\s+html\b|<html\b)", re.IGNORECASE)
 PUBLIC_HTTP_USER_AGENT = "sugarkube-dspace-runtime-verifier/1.0"
+POD_SETTLE_TIMEOUT_SECONDS = 60.0
+POD_SETTLE_INTERVAL_SECONDS = 2.0
 
 
 class VerificationError(ValueError):
@@ -129,6 +132,37 @@ def command(argv: list[str]) -> str:
     if completed.returncode:
         fail("cluster identity")
     return completed.stdout
+
+
+def settle_selected_pods(
+    argv: list[str],
+    *,
+    runner: Any = None,
+    monotonic: Any = None,
+    sleeper: Any = None,
+) -> list[dict[str, Any]]:
+    """Fetch fresh pod snapshots until selector-matched terminations disappear."""
+    runner = command if runner is None else runner
+    monotonic = time.monotonic if monotonic is None else monotonic
+    sleeper = time.sleep if sleeper is None else sleeper
+    deadline = monotonic() + POD_SETTLE_TIMEOUT_SECONDS
+    while True:
+        try:
+            payload = json.loads(runner(argv))
+            pods = payload.get("items") if isinstance(payload, dict) else None
+        except (json.JSONDecodeError, TypeError):
+            fail("pod/replica identity")
+        if not isinstance(pods, list) or not all(isinstance(pod, dict) for pod in pods):
+            fail("pod/replica identity")
+        if not any(
+            isinstance(pod.get("metadata"), dict)
+            and pod["metadata"].get("deletionTimestamp") is not None
+            for pod in pods
+        ):
+            return pods
+        if monotonic() >= deadline:
+            fail("pod/replica identity")
+        sleeper(POD_SETTLE_INTERVAL_SECONDS)
 
 
 class SameOriginRedirect(urllib.request.HTTPRedirectHandler):
@@ -325,7 +359,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         fail("provider/chat smoke")
 
     selector = f"app.kubernetes.io/name=dspace,app.kubernetes.io/instance={args.release}"
-    raw_pods = command(
+    pods = settle_selected_pods(
         [
             "kubectl",
             "--kubeconfig",
@@ -340,10 +374,6 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
             "json",
         ]
     )
-    try:
-        pods = json.loads(raw_pods).get("items", [])
-    except (json.JSONDecodeError, AttributeError):
-        fail("pod/replica identity")
     if not pods:
         fail("pod/replica identity")
 
@@ -391,11 +421,21 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
     replica_identity: tuple[str, str, str] | None = None
     for pod in pods:
         metadata, spec, status = pod.get("metadata", {}), pod.get("spec", {}), pod.get("status", {})
+        if not all(isinstance(value, dict) for value in (metadata, spec, status)):
+            fail("pod/replica identity")
+        conditions = status.get("conditions", [])
+        containers = spec.get("containers", [])
+        statuses = status.get("containerStatuses", [])
+        if not all(
+            isinstance(items, list) and all(isinstance(item, dict) for item in items)
+            for items in (conditions, containers, statuses)
+        ):
+            fail("pod/replica identity")
         if metadata.get("deletionTimestamp") is not None or status.get("phase") != "Running":
             fail("pod/replica identity")
         if not any(
             c.get("type") == "Ready" and c.get("status") == "True"
-            for c in status.get("conditions", [])
+            for c in conditions
         ):
             fail("pod/replica identity")
         owner = controller_owner(metadata.get("ownerReferences", []), "ReplicaSet")
@@ -428,8 +468,8 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         rs_owner = controller_owner(rs_owners, "Deployment")
         if rs_owner.get("name") != args.release or rs_owner.get("uid") != deployment_uid:
             fail("pod/replica identity")
-        containers = [c for c in spec.get("containers", []) if c.get("name") == "dspace"]
-        statuses = [c for c in status.get("containerStatuses", []) if c.get("name") == "dspace"]
+        containers = [c for c in containers if c.get("name") == "dspace"]
+        statuses = [c for c in statuses if c.get("name") == "dspace"]
         if len(containers) != 1 or containers[0].get("image") != declared_image:
             fail("pod/replica identity")
         if named_http_port(containers[0], "pod/replica identity") != proxy_port:
