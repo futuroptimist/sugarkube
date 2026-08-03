@@ -153,6 +153,7 @@ def _verify_setup(
             }
         )
     pods = override.get("pods", pods)
+    pod_snapshots = iter(override.get("pod_snapshots", []))
     helm_statuses = iter(
         override.get(
             "helm_statuses",
@@ -190,7 +191,7 @@ def _verify_setup(
                 return json.dumps(next(helm_histories))
             return json.dumps(next(helm_statuses))
         if "pods" in argv:
-            return json.dumps({"items": pods})
+            return json.dumps({"items": next(pod_snapshots, pods)})
         if "deployment" in argv:
             return json.dumps(
                 {
@@ -676,6 +677,124 @@ def _pod_overrides(mutator) -> dict[str, object]:  # noqa: ANN001
         pods.append(pod)
     mutator(pods[1])
     return {"pods": pods}
+
+
+def test_verify_refreshes_terminating_snapshot_before_direct_and_smoke_checks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    fresh = _pod_overrides(lambda pod: None)["pods"]
+    terminating = {
+        "metadata": {"name": SENTINEL, "deletionTimestamp": SENTINEL},
+        "status": {"phase": "Failed"},
+    }
+    args, smoke_calls = _verify_setup(
+        monkeypatch,
+        tmp_path,
+        overrides={"pod_snapshots": [[*fresh, terminating], fresh]},
+    )
+    original = verifier.command
+    pod_fetches = 0
+    direct_urls: list[str] = []
+
+    def command(argv: list[str]) -> str:
+        nonlocal pod_fetches
+        if "pods" in argv and "--raw" not in argv:
+            pod_fetches += 1
+        if "--raw" in argv:
+            direct_urls.append(argv[-1])
+        return original(argv)
+
+    monkeypatch.setattr(verifier, "command", command)
+    sleeps: list[float] = []
+    monkeypatch.setattr(verifier.time, "sleep", sleeps.append)
+
+    verifier.verify(args)
+
+    assert pod_fetches == 2
+    assert sleeps == [verifier.POD_SETTLE_INTERVAL_SECONDS]
+    assert len(direct_urls) == 4
+    assert all(SENTINEL not in url for url in direct_urls)
+    assert len(smoke_calls) == 1
+
+
+def test_verify_does_not_wait_or_refresh_an_already_settled_snapshot(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    args, _ = _verify_setup(monkeypatch, tmp_path)
+    original = verifier.command
+    pod_fetches = 0
+
+    def command(argv: list[str]) -> str:
+        nonlocal pod_fetches
+        if "pods" in argv and "--raw" not in argv:
+            pod_fetches += 1
+        return original(argv)
+
+    monkeypatch.setattr(verifier, "command", command)
+    monkeypatch.setattr(
+        verifier.time,
+        "sleep",
+        lambda seconds: pytest.fail("settled pods must not cause a wait"),
+    )
+    verifier.verify(args)
+    assert pod_fetches == 1
+
+
+def test_terminating_pod_timeout_is_bounded_and_redacted(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    payload = json.dumps(
+        {"items": [{"metadata": {"name": SENTINEL, "deletionTimestamp": SENTINEL}}]}
+    )
+    sleeps: list[float] = []
+    clock = iter((0.0, verifier.POD_SETTLE_TIMEOUT_SECONDS))
+
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.settle_selected_pods(
+            [SENTINEL],
+            runner=lambda argv: payload,
+            monotonic=lambda: next(clock),
+            sleeper=sleeps.append,
+        )
+
+    assert str(raised.value) == "pod/replica identity"
+    assert sleeps == []
+    captured = capsys.readouterr()
+    assert SENTINEL not in str(raised.value) + captured.out + captured.err
+
+
+@pytest.mark.parametrize(
+    "mutator",
+    [
+        lambda pod: pod["status"]["conditions"].clear(),
+        lambda pod: pod["metadata"].update({"ownerReferences": SENTINEL}),
+        lambda pod: pod["metadata"]["ownerReferences"][0].update({"uid": SENTINEL}),
+        lambda pod: pod["status"]["containerStatuses"][0].update(
+            {"imageID": "containerd://sha256:" + "2" * 64}
+        ),
+    ],
+    ids=("unready", "malformed", "wrong-owner", "wrong-digest"),
+)
+def test_refresh_does_not_forgive_bad_active_pods(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mutator
+) -> None:  # noqa: ANN001
+    settled = _pod_overrides(mutator)["pods"]
+    initial = [
+        *_pod_overrides(lambda pod: None)["pods"],
+        {"metadata": {"name": SENTINEL, "deletionTimestamp": SENTINEL}},
+    ]
+    args, _ = _verify_setup(
+        monkeypatch,
+        tmp_path,
+        overrides={"pod_snapshots": [initial, settled]},
+    )
+    monkeypatch.setattr(verifier.time, "sleep", lambda seconds: None)
+
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.verify(args)
+
+    assert str(raised.value) == "pod/replica identity"
+    assert SENTINEL not in str(raised.value)
 
 
 @pytest.mark.parametrize(

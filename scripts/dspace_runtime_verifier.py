@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -65,6 +66,8 @@ META_RE = re.compile(
 IMAGE_ID_RE = re.compile(r"sha256:[0-9a-f]{64}$")
 HTML_DOCUMENT_RE = re.compile(r"^\s*(?:<!doctype\s+html\b|<html\b)", re.IGNORECASE)
 PUBLIC_HTTP_USER_AGENT = "sugarkube-dspace-runtime-verifier/1.0"
+POD_SETTLE_TIMEOUT_SECONDS = release_manifest.POD_SETTLE_TIMEOUT_SECONDS
+POD_SETTLE_INTERVAL_SECONDS = release_manifest.POD_SETTLE_INTERVAL_SECONDS
 
 
 class VerificationError(ValueError):
@@ -129,6 +132,36 @@ def command(argv: list[str]) -> str:
     if completed.returncode:
         fail("cluster identity")
     return completed.stdout
+
+
+def settle_selected_pods(
+    argv: list[str],
+    *,
+    runner: Any = None,
+    monotonic: Any = None,
+    sleeper: Any = None,
+) -> list[dict[str, Any]]:
+    """Return a fresh, settled snapshot of all selector-matched pods."""
+    runner = command if runner is None else runner
+    monotonic = time.monotonic if monotonic is None else monotonic
+    sleeper = time.sleep if sleeper is None else sleeper
+    deadline = monotonic() + POD_SETTLE_TIMEOUT_SECONDS
+    while True:
+        try:
+            items = json.loads(runner(argv)).get("items")
+        except (json.JSONDecodeError, AttributeError, VerificationError):
+            fail("pod/replica identity")
+        if not isinstance(items, list) or not all(isinstance(item, dict) for item in items):
+            fail("pod/replica identity")
+        if not any(
+            item.get("metadata", {}).get("deletionTimestamp") is not None
+            for item in items
+            if isinstance(item.get("metadata", {}), dict)
+        ):
+            return items
+        if monotonic() >= deadline:
+            fail("pod/replica identity")
+        sleeper(POD_SETTLE_INTERVAL_SECONDS)
 
 
 class SameOriginRedirect(urllib.request.HTTPRedirectHandler):
@@ -325,7 +358,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         fail("provider/chat smoke")
 
     selector = f"app.kubernetes.io/name=dspace,app.kubernetes.io/instance={args.release}"
-    raw_pods = command(
+    pods = settle_selected_pods(
         [
             "kubectl",
             "--kubeconfig",
@@ -340,10 +373,6 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
             "json",
         ]
     )
-    try:
-        pods = json.loads(raw_pods).get("items", [])
-    except (json.JSONDecodeError, AttributeError):
-        fail("pod/replica identity")
     if not pods:
         fail("pod/replica identity")
 
