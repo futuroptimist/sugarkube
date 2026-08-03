@@ -1300,6 +1300,43 @@ metadata:
     assert app_chart.validate_rendered_manifest(manifest, inputs) == []
 
 
+def test_dspace_production_allows_legacy_token_with_unrelated_env_entries() -> None:
+    inputs = app_chart.ReleaseInputs(
+        "dspace", "prod", "dspace", "dspace", "chart", "3.0.2", (), "main-deadbee"
+    )
+    manifest = _release_deployment("dspace", """          env:
+            - malformed
+            - name: UNRELATED
+              value: METRICS_TOKEN_SUFFIX
+            - name: METRICS_TOKEN
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+---
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/instance: dspace
+""")
+
+    assert app_chart.validate_rendered_manifest(manifest, inputs) == []
+
+
+def test_dspace_production_rejects_token_in_workload_without_containers() -> None:
+    inputs = app_chart.ReleaseInputs(
+        "dspace", "prod", "dspace", "dspace", "chart", "3.0.2", (), "main-deadbee"
+    )
+    document = {
+        "kind": "Deployment",
+        "metadata": {"name": "dspace", "labels": {"token": "METRICS_TOKEN"}},
+        "spec": {"template": {"spec": {}}},
+    }
+
+    assert app_chart.dspace_production_metrics_token_is_unsafe(
+        document, inputs, metrics_enabled=False
+    )
+
+
 @pytest.mark.parametrize("source", [
     "value: literal",
     "valueFrom:\n                secretKeyRef:\n                  name: staging\n                  key: token",
