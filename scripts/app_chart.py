@@ -178,6 +178,56 @@ def contains_exact_scalar(value: object, expected: set[str]) -> bool:
     return isinstance(value, str) and value in expected
 
 
+def contains_unsafe_dspace_metrics_token(
+    document: dict[str, object], candidates: set[str], metrics_enabled: bool
+) -> bool:
+    safe_entries: set[int] = set()
+    kind = scalar(document.get("kind"))
+    if kind in {"Deployment", "StatefulSet", "DaemonSet"} and not metrics_enabled:
+        found, containers = nested_value(document, ("spec", "template", "spec", "containers"))
+        if found and isinstance(containers, list):
+            for container in containers:
+                if (
+                    not isinstance(container, dict)
+                    or scalar(container.get("name")) not in candidates
+                ):
+                    continue
+                env = container.get("env")
+                if not isinstance(env, list):
+                    continue
+                for entry in env:
+                    if not isinstance(entry, dict):
+                        continue
+                    value_from = entry.get("valueFrom")
+                    field_ref = (
+                        value_from.get("fieldRef") if isinstance(value_from, dict) else None
+                    )
+                    # Chart 3.0.2 uses the pod UID as a safe pod-local token when metrics are off.
+                    if (
+                        set(entry) == {"name", "valueFrom"}
+                        and entry.get("name") == "METRICS_TOKEN"
+                        and isinstance(value_from, dict)
+                        and set(value_from) == {"fieldRef"}
+                        and isinstance(field_ref, dict)
+                        and set(field_ref) == {"fieldPath"}
+                        and field_ref.get("fieldPath") == "metadata.uid"
+                    ):
+                        safe_entries.add(id(entry))
+
+    def contains_unsafe(value: object) -> bool:
+        if isinstance(value, dict):
+            if id(value) in safe_entries:
+                return False
+            return any(
+                contains_unsafe(key) or contains_unsafe(item) for key, item in value.items()
+            )
+        if isinstance(value, list):
+            return any(contains_unsafe(item) for item in value)
+        return value == "METRICS_TOKEN"
+
+    return contains_unsafe(document)
+
+
 def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str]:
     try:
         documents = safe_yaml_documents(manifest)
@@ -282,13 +332,19 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
                 errors.append(
                     "DSPACE ServiceMonitor bearerTokenSecret name and key must be nonempty"
                 )
-        production_leaks = {"METRICS_TOKEN", "dspace-staging-metrics-token", "sugarkube-int"}
+        production_leaks = {"dspace-staging-metrics-token", "sugarkube-int"}
+        metrics_enabled = (
+            resolved_values_scalar(inputs.values, ("metrics", "enabled")).lower() == "true"
+        )
         if inputs.env == "prod" and (
             service_monitors
             or any(
                 isinstance(doc, dict)
                 and release_associated(doc, inputs.release, allow_name=False)
-                and contains_exact_scalar(doc, production_leaks)
+                and (
+                    contains_exact_scalar(doc, production_leaks)
+                    or contains_unsafe_dspace_metrics_token(doc, candidates, metrics_enabled)
+                )
                 for doc in documents
             )
         ):
