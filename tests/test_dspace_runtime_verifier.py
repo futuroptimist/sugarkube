@@ -1,6 +1,7 @@
 import json
 import subprocess
 from argparse import Namespace
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -153,6 +154,7 @@ def _verify_setup(
             }
         )
     pods = override.get("pods", pods)
+    pod_snapshots = iter(override.get("pod_snapshots", []))
     helm_statuses = iter(
         override.get(
             "helm_statuses",
@@ -185,12 +187,15 @@ def _verify_setup(
     )
 
     def command(argv: list[str]) -> str:
+        command_calls = override.get("command_calls")
+        if isinstance(command_calls, list):
+            command_calls.append(argv)
         if argv[0] == "helm":
             if "history" in argv:
                 return json.dumps(next(helm_histories))
             return json.dumps(next(helm_statuses))
         if "pods" in argv:
-            return json.dumps({"items": pods})
+            return json.dumps({"items": next(pod_snapshots, pods)})
         if "deployment" in argv:
             return json.dumps(
                 {
@@ -676,6 +681,103 @@ def _pod_overrides(mutator) -> dict[str, object]:  # noqa: ANN001
         pods.append(pod)
     mutator(pods[1])
     return {"pods": pods}
+
+
+def test_verify_refreshes_complete_snapshot_before_direct_and_smoke_checks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    fresh = _pod_overrides(lambda pod: None)["pods"]
+    terminating = deepcopy(fresh[0])
+    terminating["metadata"]["name"] = SENTINEL
+    terminating["metadata"]["deletionTimestamp"] = SENTINEL
+    calls: list[list[str]] = []
+    sleeps: list[float] = []
+    args, smoke_calls = _verify_setup(
+        monkeypatch,
+        tmp_path,
+        overrides={
+            "pod_snapshots": [fresh + [terminating], fresh],
+            "command_calls": calls,
+        },
+    )
+    monkeypatch.setattr(verifier.time, "sleep", sleeps.append)
+
+    verifier.verify(args)
+
+    pod_lists = [call for call in calls if "pods" in call]
+    direct_calls = [call for call in calls if "/pods/" in call[-1]]
+    assert len(pod_lists) == 2
+    assert sleeps == [verifier.POD_SETTLE_INTERVAL_SECONDS]
+    assert len(direct_calls) == 4
+    assert all(SENTINEL not in call[-1] for call in direct_calls)
+    assert len(smoke_calls) == 1
+    assert SENTINEL not in json.dumps(smoke_calls)
+
+
+def test_verify_does_not_refresh_or_wait_for_settled_snapshot(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[list[str]] = []
+    sleeps: list[float] = []
+    args, _ = _verify_setup(monkeypatch, tmp_path, overrides={"command_calls": calls})
+    monkeypatch.setattr(verifier.time, "sleep", sleeps.append)
+
+    verifier.verify(args)
+
+    assert len([call for call in calls if "pods" in call]) == 1
+    assert sleeps == []
+
+
+def test_terminating_pod_deadline_fails_redacted_identity_category(capsys) -> None:  # noqa: ANN001
+    payload = json.dumps(
+        {"items": [{"metadata": {"name": SENTINEL, "deletionTimestamp": SENTINEL}}]}
+    )
+    times = iter((0.0, 0.0, verifier.POD_SETTLE_TIMEOUT_SECONDS))
+    sleeps: list[float] = []
+    requests: list[list[str]] = []
+
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.settle_selected_pods(
+            [SENTINEL],
+            runner=lambda argv: requests.append(argv) or payload,
+            monotonic=lambda: next(times),
+            sleeper=sleeps.append,
+        )
+
+    assert str(raised.value) == "pod/replica identity"
+    assert SENTINEL not in str(raised.value)
+    captured = capsys.readouterr()
+    assert captured.out == captured.err == ""
+    assert len(requests) == 2
+    assert sleeps == [verifier.POD_SETTLE_INTERVAL_SECONDS]
+
+
+@pytest.mark.parametrize("fault", ("unready", "malformed", "wrong-owner", "wrong-digest"))
+def test_verify_fails_closed_after_terminating_pod_disappears(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fault: str
+) -> None:
+    fresh = _pod_overrides(lambda pod: None)["pods"]
+    terminating = deepcopy(fresh[0])
+    terminating["metadata"]["deletionTimestamp"] = SENTINEL
+    bad = deepcopy(fresh)
+    if fault == "unready":
+        bad[1]["status"]["conditions"] = []
+    elif fault == "malformed":
+        bad[1]["spec"] = None
+    elif fault == "wrong-owner":
+        bad[1]["metadata"]["ownerReferences"][0]["uid"] = "wrong"
+    else:
+        bad[1]["status"]["containerStatuses"][0]["imageID"] = "containerd://sha256:" + "2" * 64
+    args, _ = _verify_setup(
+        monkeypatch, tmp_path, overrides={"pod_snapshots": [fresh + [terminating], bad]}
+    )
+    monkeypatch.setattr(verifier.time, "sleep", lambda seconds: None)
+
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.verify(args)
+
+    assert str(raised.value) == "pod/replica identity"
+    assert SENTINEL not in str(raised.value)
 
 
 @pytest.mark.parametrize(
