@@ -64,6 +64,7 @@ META_RE = re.compile(
 )
 IMAGE_ID_RE = re.compile(r"sha256:[0-9a-f]{64}$")
 HTML_DOCUMENT_RE = re.compile(r"^\s*(?:<!doctype\s+html\b|<html\b)", re.IGNORECASE)
+PUBLIC_HTTP_USER_AGENT = "sugarkube-dspace-runtime-verifier/1.0"
 
 
 class VerificationError(ValueError):
@@ -147,8 +148,9 @@ def fetch(url: str, public_origin: tuple[str, str] | None = None) -> bytes:
         if public_origin
         else urllib.request.build_opener()
     )
+    request = urllib.request.Request(url, headers={"User-Agent": PUBLIC_HTTP_USER_AGENT})
     try:
-        with opener.open(url, timeout=15) as response:
+        with opener.open(request, timeout=15) as response:
             return response.read(1024 * 1024 + 1)
     except (OSError, urllib.error.URLError, VerificationError) as exc:
         if isinstance(exc, VerificationError):
