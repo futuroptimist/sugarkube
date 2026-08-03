@@ -178,6 +178,49 @@ def contains_exact_scalar(value: object, expected: set[str]) -> bool:
     return isinstance(value, str) and value in expected
 
 
+def count_exact_scalar(value: object, expected: str) -> int:
+    if isinstance(value, dict):
+        return sum(
+            count_exact_scalar(key, expected) + count_exact_scalar(item, expected)
+            for key, item in value.items()
+        )
+    if isinstance(value, list):
+        return sum(count_exact_scalar(item, expected) for item in value)
+    return int(isinstance(value, str) and value == expected)
+
+
+def safe_dspace_metrics_token_count(
+    document: dict[str, object], inputs: ReleaseInputs, metrics_enabled: bool
+) -> int:
+    """Count METRICS_TOKEN entries permitted by the legacy DSPACE chart."""
+    if metrics_enabled or scalar(document.get("kind")) not in {
+        "Deployment",
+        "StatefulSet",
+        "DaemonSet",
+    }:
+        return 0
+    if not release_associated(document, inputs.release, allow_name=False):
+        return 0
+    found, containers = nested_value(document, ("spec", "template", "spec", "containers"))
+    if not found or not isinstance(containers, list):
+        return 0
+    candidates = {inputs.app, inputs.release, *APP_CONTAINER_NAMES.get(inputs.app, set())}
+    safe = 0
+    for container in containers:
+        if not isinstance(container, dict) or scalar(container.get("name")) not in candidates:
+            continue
+        env = container.get("env")
+        for entry in env if isinstance(env, list) else []:
+            # Chart 3.0.2 uses the pod UID as an unpredictable pod-local token to
+            # keep legacy /metrics inaccessible when metrics are disabled.
+            if isinstance(entry, dict) and entry == {
+                "name": "METRICS_TOKEN",
+                "valueFrom": {"fieldRef": {"fieldPath": "metadata.uid"}},
+            }:
+                safe += 1
+    return safe
+
+
 def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str]:
     try:
         documents = safe_yaml_documents(manifest)
@@ -282,15 +325,25 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
                 errors.append(
                     "DSPACE ServiceMonitor bearerTokenSecret name and key must be nonempty"
                 )
-        production_leaks = {"METRICS_TOKEN", "dspace-staging-metrics-token", "sugarkube-int"}
+        production_leaks = {"dspace-staging-metrics-token", "sugarkube-int"}
+        metrics_enabled = (
+            resolved_values_scalar(inputs.values, ("metrics", "enabled")).lower() == "true"
+        )
+        associated_documents = [
+            doc
+            for doc in documents
+            if isinstance(doc, dict)
+            and release_associated(doc, inputs.release, allow_name=False)
+        ]
+        unsafe_metrics_token = any(
+            count_exact_scalar(doc, "METRICS_TOKEN")
+            != safe_dspace_metrics_token_count(doc, inputs, metrics_enabled)
+            for doc in associated_documents
+        )
         if inputs.env == "prod" and (
             service_monitors
-            or any(
-                isinstance(doc, dict)
-                and release_associated(doc, inputs.release, allow_name=False)
-                and contains_exact_scalar(doc, production_leaks)
-                for doc in documents
-            )
+            or unsafe_metrics_token
+            or any(contains_exact_scalar(doc, production_leaks) for doc in associated_documents)
         ):
             errors.append("DSPACE production rendered staging-only metrics configuration")
     return errors
