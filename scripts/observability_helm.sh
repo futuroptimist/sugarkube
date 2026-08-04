@@ -17,7 +17,7 @@ PAGERDUTY_SECRET="alertmanager-pagerduty"
 WATCHDOG_SECRET="alertmanager-healthchecks-watchdog"
 ALERTMANAGER_VALIDATOR="${ROOT}/scripts/verify_observability_alertmanager.rb"
 
-usage() { echo "Usage: $0 <render|install|upgrade|status|verify|dashboard-verify|pagerduty-test|watchdog-secret-install|watchdog-secret-check|watchdog-verify|watchdog-drill-create|watchdog-drill-status|watchdog-drill-clear> env=staging [fire|resolve]" >&2; }
+usage() { echo "Usage: $0 <render|install|upgrade|status|verify|dashboard-verify|pagerduty-test|watchdog-secret-install|watchdog-secret-check|watchdog-verify|watchdog-drill-create|watchdog-drill-status|watchdog-drill-clear|app-metrics-secret-install|app-metrics-secret-check|app-metrics-verify> env=staging [app]" >&2; }
 normalize_env() {
   local raw="${1:-}"
   while [[ "${raw}" == env=* ]]; do raw="${raw#env=}"; done
@@ -729,6 +729,47 @@ if not isinstance(dashboard, dict) or dashboard.get("uid") != "sugarkube-staging
   return 13
 )
 
+APP_METRICS_VERIFIER="${ROOT}/scripts/observability_app_metrics.py"
+APP_METRICS_TTY="${SUGARKUBE_APP_METRICS_TTY:-/dev/tty}"
+app_metrics_secret_install() {
+  local env app namespace secret key value
+  app="$1"; env="$(normalize_env "$2")"
+  [[ "${env}" == staging ]] || { echo "ERROR: application metrics Secrets are staging-only." >&2; return 2; }
+  assert_context
+  [[ -n "${app}" ]] || { echo "ERROR: app must not be empty." >&2; return 2; }
+  if env | cut -d= -f1 | grep -Eq "^(TOKENPLACE_METRICS|METRICS|SUGARKUBE_APP_METRICS)_TOKEN$"; then echo "ERROR: credential environment variables are refused." >&2; return 2; fi
+  [[ $# == 2 ]] || { echo "ERROR: credential arguments are refused." >&2; return 2; }
+  mapfile -t contract < <(python3 - "$app" "$env" <<'PY'
+import sys
+from scripts import observability_app_metrics as m
+data=m.load_inventory(); cfg=m.select(data, sys.argv[1], sys.argv[2])
+print(cfg['namespace']); print(cfg['secret']['name']); print(cfg['secret']['key'])
+PY
+)
+  namespace="${contract[0]}"; secret="${contract[1]}"; key="${contract[2]}"
+  exec 3<"${APP_METRICS_TTY}"
+  [[ "${SUGARKUBE_APP_METRICS_TEST_NONTTY:-0}" == 1 || -t 3 ]] || { echo "ERROR: an interactive controlling terminal is required." >&2; return 2; }
+  printf 'Enter application metrics bearer token for %s/%s (input hidden): ' "${app}" "${env}" >&2
+  IFS= read -r -s value <&3 || { echo "ERROR: could not read metrics token (value redacted)." >&2; return 2; }
+  printf '\n' >&2
+  [[ -n "${value}" && "${value}" != *$'\n'* && "${value}" != *$'\0'* ]] || { unset value; echo "ERROR: metrics token is invalid (value redacted)." >&2; return 2; }
+  if ! printf '%s' "${value}" | kubectl -n "${namespace}" create secret generic "${secret}" --from-file="${key}"=/dev/stdin --dry-run=client -o yaml | kubectl apply -f - >/dev/null; then
+    unset value; echo "ERROR: application metrics Secret installation failed (value redacted)." >&2; return 1
+  fi
+  unset value
+  echo "Application metrics Secret installed or rotated (value not displayed)."
+}
+app_metrics_secret_check() { assert_context; python3 "${APP_METRICS_VERIFIER}" secret-check --app "$1" --env "$(normalize_env "$2")"; }
+app_metrics_verify() { python3 "${APP_METRICS_VERIFIER}" verify --app "$1" --env "$(normalize_env "$2")"; }
+app_metrics_verify_all() {
+  python3 - <<'PY' | while read -r app env; do app_metrics_verify "$app" "$env"; done
+from scripts import observability_app_metrics as m
+data=m.load_inventory()
+for app, envs in data['applications'].items():
+  for env in envs: print(app, env)
+PY
+}
+
 cmd="${1:-}"; shift || true; [[ -n "${cmd}" ]] || { usage; exit 2; }
 env_arg="${1:-}"; normalize_env "${env_arg}" >/dev/null
 validate_dashboard
@@ -736,4 +777,4 @@ if [[ "${cmd}" == watchdog-drill-create ]]; then
   trap 'exit 130' INT
   trap 'exit 143' TERM
 fi
-case "${cmd}" in render) render ;; install) install_release ;; upgrade) upgrade_release ;; status) status ;; verify) verify ;; dashboard-verify) dashboard_verify ;; pagerduty-test) pagerduty_test "${2:-${1:-}}" ;; watchdog-secret-install) watchdog_secret_install "${@:2}" ;; watchdog-secret-check) watchdog_secret_check ;; watchdog-verify) watchdog_live_check ;; watchdog-drill-create) watchdog_silence_create ;; watchdog-drill-status) watchdog_silence_list ;; watchdog-drill-clear) watchdog_silence_clear ;; *) usage; exit 2 ;; esac
+case "${cmd}" in render) render ;; install) install_release ;; upgrade) upgrade_release ;; status) status ;; verify) verify; [[ "${SUGARKUBE_OBSERVABILITY_APP_METRICS_SKIP:-0}" == 1 ]] || app_metrics_verify_all ;; dashboard-verify) dashboard_verify ;; pagerduty-test) pagerduty_test "${2:-${1:-}}" ;; watchdog-secret-install) watchdog_secret_install "${@:2}" ;; watchdog-secret-check) watchdog_secret_check ;; watchdog-verify) watchdog_live_check ;; watchdog-drill-create) watchdog_silence_create ;; watchdog-drill-status) watchdog_silence_list ;; watchdog-drill-clear) watchdog_silence_clear ;; app-metrics-secret-install) app_metrics_secret_install "${2:-}" "${env_arg}" ;; app-metrics-secret-check) app_metrics_secret_check "${2:-}" "${env_arg}" ;; app-metrics-verify) app_metrics_verify "${2:-}" "${env_arg}" ;; *) usage; exit 2 ;; esac
