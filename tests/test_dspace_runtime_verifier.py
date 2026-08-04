@@ -726,8 +726,8 @@ def test_any_310_coordinate_drift_prevents_legacy_selection(field: str) -> None:
     assert verifier.identity_contract(candidate) == verifier.MODERN_IDENTITY_CONTRACT
 
 
-def test_unrelated_modern_manifest_uses_modern_contract() -> None:
-    candidate = dict(verifier.LEGACY_310_COORDINATES, sourceRevision=SHA)
+def test_unrelated_modern_manifest_uses_modern_contract(tmp_path: Path) -> None:
+    candidate = json.loads(manifest(tmp_path).read_text())
     assert verifier.identity_contract(candidate) == verifier.MODERN_IDENTITY_CONTRACT
 
 
