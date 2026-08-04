@@ -17,7 +17,7 @@ PAGERDUTY_SECRET="alertmanager-pagerduty"
 WATCHDOG_SECRET="alertmanager-healthchecks-watchdog"
 ALERTMANAGER_VALIDATOR="${ROOT}/scripts/verify_observability_alertmanager.rb"
 
-usage() { echo "Usage: $0 <render|install|upgrade|status|verify|dashboard-verify|pagerduty-test|watchdog-secret-install|watchdog-secret-check|watchdog-verify|watchdog-drill-create|watchdog-drill-status|watchdog-drill-clear|app-metrics-secret-install|app-metrics-secret-check|app-metrics-verify> env=staging [app=<app>]" >&2; }
+usage() { echo "Usage: $0 <render|install|upgrade|status|verify|dashboard-verify|pagerduty-test <fire|resolve>|watchdog-secret-install|watchdog-secret-check|watchdog-verify|watchdog-drill-create|watchdog-drill-status|watchdog-drill-clear|app-metrics-secret-install|app-metrics-secret-check|app-metrics-verify> env=staging [app=<app>]" >&2; }
 normalize_env() {
   local raw="${1:-}"
   while [[ "${raw}" == env=* ]]; do raw="${raw#env=}"; done
@@ -540,9 +540,7 @@ if len(claims) != 1 or claims[0].get("status", {}).get("phase") != "Bound" or cl
   echo "DSPACE ServiceMonitor secret reference exists (value intentionally not printed)."
 
   verify_dspace_targets
-  if [[ -z "${SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_ATTEMPTS:-}" ]]; then
-    python3 "${ROOT}/scripts/observability_app_metrics.py" verify-all --env staging
-  fi
+  python3 "${ROOT}/scripts/observability_app_metrics.py" verify-all --env staging
   echo "Grafana LAN URL: ${GRAFANA_URL} (same NodePort is available through the other staging nodes)"
 )
 

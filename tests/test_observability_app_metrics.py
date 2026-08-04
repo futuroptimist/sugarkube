@@ -52,6 +52,34 @@ def test_inventory_rejects_unknown_keys_duplicates_and_bad_status():
         m.validate_inventory(doc)
 
 
+def test_inventory_rejects_non_object_selector_match_labels():
+    doc = json.loads(CONFIG.read_text())
+    doc["applications"]["tokenplace"]["environments"]["staging"]["serviceMonitor"][
+        "selectorMatchLabels"
+    ] = []
+    with pytest.raises(SystemExit) as excinfo:
+        m.validate_inventory(doc)
+    assert "selectorMatchLabels must be a nonempty object" in str(excinfo.value)
+
+
+def test_standard_scrape_labels_are_not_forbidden_application_labels():
+    cfg = json.loads(CONFIG.read_text())["applications"]["tokenplace"]["environments"]["staging"]
+    m.validate_metric_labels(
+        cfg,
+        {
+            "__name__": "tokenplace_build_info",
+            "instance": "10.42.0.10:8080",
+            "pod": "tokenplace-abc123",
+            "app": "tokenplace",
+            "environment": "staging",
+            "version": "0.1.4",
+        },
+    )
+    with pytest.raises(SystemExit) as excinfo:
+        m.validate_metric_labels(cfg, {"customer_email": "fixture@example.invalid"})
+    assert "unbounded application metric label" in str(excinfo.value)
+
+
 def test_verifier_has_no_tokenplace_specific_branch():
     text = SCRIPT.read_text()
     assert 'if app == "tokenplace"' not in text

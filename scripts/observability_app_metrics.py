@@ -143,7 +143,10 @@ def validate_inventory(doc):
                     fail(f"serviceMonitor.{key} is malformed")
             expect_keys(sm["authorization"], {"type"}, "authorization")
             nonempty(sm["authorization"]["type"], "authorization.type")
-            for k, v in sm["selectorMatchLabels"].items():
+            selector = sm["selectorMatchLabels"]
+            if not isinstance(selector, dict) or not selector:
+                fail("serviceMonitor.selectorMatchLabels must be a nonempty object")
+            for k, v in selector.items():
                 nonempty(k, "selector label name")
                 nonempty(v, "selector label value")
             labels = cfg["targetLabels"]
@@ -289,6 +292,26 @@ def prom(path):
     return doc.get("data")
 
 
+def validate_metric_labels(cfg, labels):
+    if not isinstance(labels, dict):
+        fail("metric labels were malformed (details redacted)", 1)
+    for label, value in labels.items():
+        low = label.lower()
+        is_standard = label in STANDARD_LABELS
+        if not is_standard and label not in cfg["allowedApplicationLabels"]:
+            fail("unbounded application metric label observed (details redacted)", 1)
+        if not is_standard and (
+            any(w in low for w in cfg["forbiddenApplicationLabels"])
+            or any(w in low for w in FORBIDDEN_WORDS)
+        ):
+            fail("forbidden application metric label observed (details redacted)", 1)
+        if (
+            label in cfg["allowedApplicationLabels"]
+            and value not in cfg["allowedApplicationLabels"][label]
+        ):
+            fail("application metric label enum mismatch (details redacted)", 1)
+
+
 def verify(app, env):
     cfg = appcfg(app, env)
     assert_context()
@@ -348,20 +371,7 @@ def verify(app, env):
         if not result:
             fail(f"required metric family missing: {metric}", 1)
         for sample in result:
-            labels = sample.get("metric", {})
-            for label, value in labels.items():
-                low = label.lower()
-                if label not in STANDARD_LABELS and label not in cfg["allowedApplicationLabels"]:
-                    fail("unbounded application metric label observed (details redacted)", 1)
-                if any(w in low for w in cfg["forbiddenApplicationLabels"]) or any(
-                    w in low for w in FORBIDDEN_WORDS
-                ):
-                    fail("forbidden application metric label observed (details redacted)", 1)
-                if (
-                    label in cfg["allowedApplicationLabels"]
-                    and value not in cfg["allowedApplicationLabels"][label]
-                ):
-                    fail("application metric label enum mismatch (details redacted)", 1)
+            validate_metric_labels(cfg, sample.get("metric", {}))
     try:
         urllib.request.urlopen(cfg["publicMetrics"]["url"], timeout=10).read(0)
         got = 200

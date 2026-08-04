@@ -3,6 +3,7 @@ import os
 import re
 import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -600,6 +601,18 @@ def run_helper(
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(parents=True)
     audit = tmp_path / "audit"
+    (bin_dir / "python3").write_text(
+        f"""#!/bin/sh
+case "$*" in
+  *"scripts/observability_app_metrics.py verify-all --env staging")
+    echo "python3 $*" >> "$AUDIT"
+    exit 0
+    ;;
+esac
+exec {sys.executable} "$@"
+""",
+        encoding="utf-8",
+    )
     (bin_dir / "helm").write_text(
         """#!/bin/sh
 echo "helm $*" >> "$AUDIT"
@@ -1019,6 +1032,12 @@ def test_verify_requires_nonempty_pagerduty_secret_and_cleans_temp_files(tmp_pat
     assert "get secret alertmanager-pagerduty" in audit
     assert "routing-key" in result.stderr
     assert not list(tmp_path.glob("sugarkube-alertmanager-*.yaml"))
+
+
+def test_verify_runs_app_metrics_even_with_dspace_retry_override(tmp_path):
+    result, audit = run_helper(tmp_path, "verify", retry_attempts="1")
+    assert result.returncode == 0, result.stderr
+    assert "scripts/observability_app_metrics.py verify-all --env staging" in audit
 
 
 def test_verify_cleans_temp_files_when_live_validator_fails(tmp_path):
