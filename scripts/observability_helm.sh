@@ -17,7 +17,7 @@ PAGERDUTY_SECRET="alertmanager-pagerduty"
 WATCHDOG_SECRET="alertmanager-healthchecks-watchdog"
 ALERTMANAGER_VALIDATOR="${ROOT}/scripts/verify_observability_alertmanager.rb"
 
-usage() { echo "Usage: $0 <render|install|upgrade|status|verify|dashboard-verify|pagerduty-test|watchdog-secret-install|watchdog-secret-check|watchdog-verify|watchdog-drill-create|watchdog-drill-status|watchdog-drill-clear> env=staging [fire|resolve]" >&2; }
+usage() { echo "Usage: $0 <render|install|upgrade|status|verify|dashboard-verify|pagerduty-test|watchdog-secret-install|watchdog-secret-check|watchdog-verify|watchdog-drill-create|watchdog-drill-status|watchdog-drill-clear|app-metrics-secret-install|app-metrics-secret-check|app-metrics-verify> env=staging [app=<app>]" >&2; }
 normalize_env() {
   local raw="${1:-}"
   while [[ "${raw}" == env=* ]]; do raw="${raw#env=}"; done
@@ -60,6 +60,7 @@ version() { tr -d '[:space:]' < "${VERSION_FILE}"; }
 validate_dashboard() { python3 "${DASHBOARD_VALIDATOR}" "${DASHBOARD}"; }
 validate_rendered_dashboard() { python3 "${DASHBOARD_VALIDATOR}" "${DASHBOARD}" --rendered "$1"; }
 validate_rendered_alertmanager() { ruby "${ALERTMANAGER_VALIDATOR}" rendered "$1"; }
+validate_app_metrics_inventory() { python3 "${ROOT}/scripts/observability_app_metrics.py" validate >/dev/null; }
 render_to() {
   local out="$1"
   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update >/dev/null
@@ -67,6 +68,7 @@ render_to() {
   helm template "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}" --set-file "${DASHBOARD_VALUE}=${DASHBOARD}" >"${out}"
   validate_rendered_dashboard "${out}"
   validate_rendered_alertmanager "${out}"
+  validate_app_metrics_inventory
 }
 assert_pagerduty_secret() {
   local present
@@ -538,6 +540,9 @@ if len(claims) != 1 or claims[0].get("status", {}).get("phase") != "Bound" or cl
   echo "DSPACE ServiceMonitor secret reference exists (value intentionally not printed)."
 
   verify_dspace_targets
+  if [[ -z "${SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_ATTEMPTS:-}" ]]; then
+    python3 "${ROOT}/scripts/observability_app_metrics.py" verify-all --env staging
+  fi
   echo "Grafana LAN URL: ${GRAFANA_URL} (same NodePort is available through the other staging nodes)"
 )
 
@@ -729,6 +734,10 @@ if not isinstance(dashboard, dict) or dashboard.get("uid") != "sugarkube-staging
   return 13
 )
 
+app_metrics_secret_install() { require_tools kubectl python3; assert_context; python3 "${ROOT}/scripts/observability_app_metrics.py" secret-install --app "$1" --env staging; }
+app_metrics_secret_check() { require_tools kubectl python3; assert_context; python3 "${ROOT}/scripts/observability_app_metrics.py" secret-check --app "$1" --env staging; }
+app_metrics_verify() { require_tools kubectl python3; assert_context; python3 "${ROOT}/scripts/observability_app_metrics.py" verify --app "$1" --env staging; }
+
 cmd="${1:-}"; shift || true; [[ -n "${cmd}" ]] || { usage; exit 2; }
 env_arg="${1:-}"; normalize_env "${env_arg}" >/dev/null
 validate_dashboard
@@ -736,4 +745,5 @@ if [[ "${cmd}" == watchdog-drill-create ]]; then
   trap 'exit 130' INT
   trap 'exit 143' TERM
 fi
-case "${cmd}" in render) render ;; install) install_release ;; upgrade) upgrade_release ;; status) status ;; verify) verify ;; dashboard-verify) dashboard_verify ;; pagerduty-test) pagerduty_test "${2:-${1:-}}" ;; watchdog-secret-install) watchdog_secret_install "${@:2}" ;; watchdog-secret-check) watchdog_secret_check ;; watchdog-verify) watchdog_live_check ;; watchdog-drill-create) watchdog_silence_create ;; watchdog-drill-status) watchdog_silence_list ;; watchdog-drill-clear) watchdog_silence_clear ;; *) usage; exit 2 ;; esac
+app_arg=""; for arg in "$@"; do [[ "${arg}" == app=* ]] && app_arg="${arg#app=}"; done
+case "${cmd}" in render) render ;; install) install_release ;; upgrade) upgrade_release ;; status) status ;; verify) verify ;; dashboard-verify) dashboard_verify ;; pagerduty-test) pagerduty_test "${2:-${1:-}}" ;; watchdog-secret-install) watchdog_secret_install "${@:2}" ;; watchdog-secret-check) watchdog_secret_check ;; watchdog-verify) watchdog_live_check ;; watchdog-drill-create) watchdog_silence_create ;; watchdog-drill-status) watchdog_silence_list ;; watchdog-drill-clear) watchdog_silence_clear ;; app-metrics-secret-install) [[ -n "${app_arg}" ]] || { echo "ERROR: app=<app> is required." >&2; exit 2; }; app_metrics_secret_install "${app_arg}" ;; app-metrics-secret-check) [[ -n "${app_arg}" ]] || { echo "ERROR: app=<app> is required." >&2; exit 2; }; app_metrics_secret_check "${app_arg}" ;; app-metrics-verify) [[ -n "${app_arg}" ]] || { echo "ERROR: app=<app> is required." >&2; exit 2; }; app_metrics_verify "${app_arg}" ;; *) usage; exit 2 ;; esac

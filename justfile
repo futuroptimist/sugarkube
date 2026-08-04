@@ -3477,6 +3477,18 @@ observability-watchdog-secret-check env='':
 observability-watchdog-verify env='':
     @scripts/observability_helm.sh watchdog-verify '{{ env }}'
 
+# Interactively install or rotate a staging application's metrics bearer token (hidden input).
+observability-app-metrics-secret-install app env='staging':
+    @scripts/observability_helm.sh app-metrics-secret-install '{{ env }}' app='{{ app }}'
+
+# Check a staging application's metrics Secret/key contract without reading its value.
+observability-app-metrics-secret-check app env='staging':
+    @scripts/observability_helm.sh app-metrics-secret-check '{{ env }}' app='{{ app }}'
+
+# Verify a staging application's authenticated Prometheus metrics contract.
+observability-app-metrics-verify app env='staging':
+    @scripts/observability_helm.sh app-metrics-verify '{{ env }}' app='{{ app }}'
+
 # Create the exact, automatically expiring watchdog failure-drill silence.
 observability-watchdog-drill-start env='':
     @scripts/observability_helm.sh watchdog-drill-create '{{ env }}'

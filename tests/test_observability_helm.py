@@ -2217,3 +2217,27 @@ def test_watchdog_silence_api_failures_do_not_expose_fixture_contents(tmp_path, 
     assert "response redacted" in output
     if command == "watchdog-drill-clear":
         assert not (tmp_path / "watchdog-silence-deletions").exists()
+
+
+def test_tokenplace_staging_metrics_values_and_pin():
+    pin = ROOT / "docs/apps/tokenplace.version"
+    values = ROOT / "docs/examples/tokenplace.values.staging.yaml"
+    data = yaml_load(values)
+    assert pin.read_text(encoding="utf-8").strip().endswith("0.1.4")
+    assert data["metrics"] == {
+        "enabled": True,
+        "auth": {"existingSecret": "tokenplace-staging-metrics-token", "secretKey": "token"},
+    }
+    assert data["serviceMonitor"] == {
+        "enabled": True,
+        "interval": "30s",
+        "scrapeTimeout": "10s",
+        "additionalLabels": {"release": "kube-prometheus-stack"},
+        "relabelings": {
+            "app": "tokenplace",
+            "environment": "staging",
+            "release": "tokenplace",
+            "cluster": "sugarkube-int",
+        },
+    }
+    assert "kind: Secret" not in values.read_text(encoding="utf-8")

@@ -14,3 +14,21 @@ ingress:
 env:
   TOKEN_PLACE_ENV: staging
   TOKENPLACE_RELAY_PUBLIC_URL: https://staging.token.place
+
+metrics:
+  enabled: true
+  auth:
+    existingSecret: tokenplace-staging-metrics-token
+    secretKey: token
+
+serviceMonitor:
+  enabled: true
+  interval: 30s
+  scrapeTimeout: 10s
+  additionalLabels:
+    release: kube-prometheus-stack
+  relabelings:
+    app: tokenplace
+    environment: staging
+    release: tokenplace
+    cluster: sugarkube-int

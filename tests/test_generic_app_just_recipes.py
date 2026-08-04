@@ -220,7 +220,7 @@ if [[ "$*" == show\ chart* ]]; then
     printf 'apiVersion: v2\nname: dspace\nversion: %s\nappVersion: main-abcdef0\n' "$version"
     exit 0
   fi
-  printf 'apiVersion: v2\nname: tokenplace\nversion: 0.1.3\nappVersion: main-deadbee\ndigest: sha256:abc123\n'
+  printf 'apiVersion: v2\nname: tokenplace\nversion: 0.1.4\nappVersion: main-deadbee\ndigest: sha256:abc123\n'
   exit 0
 fi
 if [[ "$*" == template* ]]; then
@@ -403,7 +403,7 @@ case "${{url}}" in
     ;;
   https://api.github.com/users/futuroptimist/packages/container/charts%2Ftokenplace/versions*)
     status=200
-    body='[{{"metadata":{{"container":{{"tags":["0.1.3","0.1.4-rc.1","0.1.4"]}}}}}}]'
+    body='[{{"metadata":{{"container":{{"tags":["0.1.4","0.1.4-rc.1","0.1.4"]}}}}}}]'
     ;;
 esac
 if [ "${{method}}" = "OPTIONS" ]; then
@@ -661,7 +661,7 @@ def test_app_chart_cmd_status_reports_helm_show_failure(
         chart="oci://ghcr.io/futuroptimist/charts/tokenplace",
         version_file="docs/apps/tokenplace.version",
     )
-    monkeypatch.setattr(app_chart, "read_pin", lambda path: "0.1.3")
+    monkeypatch.setattr(app_chart, "read_pin", lambda path: "0.1.4")
     monkeypatch.setattr(
         app_chart,
         "helm_show",
@@ -680,7 +680,7 @@ def test_app_chart_cmd_status_prints_metadata_without_stale_warning(
         chart="oci://ghcr.io/futuroptimist/charts/tokenplace",
         version_file="docs/apps/tokenplace.version",
     )
-    monkeypatch.setattr(app_chart, "read_pin", lambda path: "0.1.3")
+    monkeypatch.setattr(app_chart, "read_pin", lambda path: "0.1.4")
     monkeypatch.setattr(
         app_chart,
         "helm_show",
@@ -688,12 +688,12 @@ def test_app_chart_cmd_status_prints_metadata_without_stale_warning(
             [], 0, "apiVersion: v2\nappVersion: main-deadbee\ndigest: sha256:abc\n", ""
         ),
     )
-    monkeypatch.setattr(app_chart, "latest_version", lambda chart: ("0.1.3", "test"))
+    monkeypatch.setattr(app_chart, "latest_version", lambda chart: ("0.1.4", "test"))
 
     assert app_chart.cmd_status(args) == 0
     out = capsys.readouterr().out
     assert "chart appVersion: main-deadbee" in out
-    assert "latest version: 0.1.3 (test)" in out
+    assert "latest version: 0.1.4 (test)" in out
     assert "Pinned chart appears stale" not in out
 
 
@@ -1492,7 +1492,7 @@ def test_app_chart_cmd_preflight_reports_helm_template_failure(
         tag="main-deadbee",
         chart="oci://ghcr.io/futuroptimist/charts/tokenplace",
         version_file="docs/apps/tokenplace.version",
-        version="0.1.3",
+        version="0.1.4",
         release="tokenplace",
         namespace="tokenplace",
         values="values-a.yaml, values-b.yaml",
@@ -1534,7 +1534,7 @@ def test_app_chart_cmd_preflight_reports_helm_show_failure(
         tag="main-deadbee",
         chart="oci://ghcr.io/futuroptimist/charts/tokenplace",
         version_file="docs/apps/tokenplace.version",
-        version="0.1.3",
+        version="0.1.4",
         release="tokenplace",
         namespace="tokenplace",
         values=str(values),
@@ -1591,7 +1591,7 @@ def _assert_preflight_failure_context(error: str, operation: str) -> None:
         "release=tokenplace",
         "namespace=tokenplace",
         "chart=oci://ghcr.io/futuroptimist/charts/tokenplace",
-        "version=0.1.3",
+        "version=0.1.4",
         "tag=main-deadbee",
         "host=staging.example.test",
     ):
@@ -1606,7 +1606,7 @@ def _preflight_args() -> argparse.Namespace:
         tag="main-deadbee",
         chart="oci://ghcr.io/futuroptimist/charts/tokenplace",
         version_file="docs/apps/tokenplace.version",
-        version="0.1.3",
+        version="0.1.4",
         release="tokenplace",
         namespace="tokenplace",
         values="",
@@ -1661,7 +1661,7 @@ def test_app_chart_cmd_preflight_reports_missing_app_container_envs(
         tag="main-deadbee",
         chart="oci://ghcr.io/futuroptimist/charts/tokenplace",
         version_file="docs/apps/tokenplace.version",
-        version="0.1.3",
+        version="0.1.4",
         release="tokenplace",
         namespace="tokenplace",
         values="values-a.yaml, values-b.yaml",
@@ -1698,7 +1698,7 @@ def test_app_chart_cmd_preflight_rejects_envs_split_across_candidate_containers(
         tag="main-deadbee",
         chart="oci://ghcr.io/futuroptimist/charts/tokenplace",
         version_file="docs/apps/tokenplace.version",
-        version="0.1.3",
+        version="0.1.4",
         release="tokenplace",
         namespace="tokenplace",
         values="",
@@ -1875,7 +1875,7 @@ def test_app_chart_cmd_preflight_rejects_metadata_from_unrelated_deployment(
         tag="main-deadbee",
         chart="oci://ghcr.io/futuroptimist/charts/tokenplace",
         version_file="docs/apps/tokenplace.version",
-        version="0.1.3",
+        version="0.1.4",
         release="tokenplace",
         namespace="tokenplace",
         values="",
@@ -1935,7 +1935,7 @@ def test_app_chart_cmd_preflight_passes_when_relay_envs_present(
         tag="main-deadbee",
         chart="oci://ghcr.io/futuroptimist/charts/tokenplace",
         version_file="docs/apps/tokenplace.version",
-        version="0.1.3",
+        version="0.1.4",
         release="tokenplace",
         namespace="tokenplace",
         values="",
@@ -1964,7 +1964,7 @@ def test_app_chart_cmd_preflight_passes_when_relay_envs_present(
     )
 
     assert app_chart.cmd_preflight(args) == 0
-    assert "chart version: 0.1.3" in capsys.readouterr().out
+    assert "chart version: 0.1.4" in capsys.readouterr().out
 
 
 def test_app_chart_cmd_bump_reports_empty_version_and_show_failure(
@@ -2152,9 +2152,9 @@ def test_app_chart_status_reports_pin_and_stale_latest(
     assert result.returncode == 0, result.stderr + result.stdout
     assert "app: tokenplace" in result.stdout
     assert "chart ref: oci://ghcr.io/futuroptimist/charts/tokenplace" in result.stdout
-    assert "pinned version: 0.1.3" in result.stdout
+    assert "pinned version: 0.1.4" in result.stdout
     assert "chart appVersion: main-deadbee" in result.stdout
-    assert "Pinned chart appears stale: 0.1.3 < 9.9.9" in result.stdout
+    assert "Pinned chart appears stale: 0.1.4 < 9.9.9" in result.stdout
     assert "Run: just app-chart-bump app=tokenplace version=9.9.9" in result.stdout
 
 
@@ -2170,7 +2170,7 @@ def test_app_chart_latest_version_falls_back_to_user_owned_ghcr_packages(
         return subprocess.CompletedProcess(
             args,
             0,
-            '[{"metadata":{"container":{"tags":["0.1.3","0.1.4-rc.1","0.1.4"]}}}]',
+            '[{"metadata":{"container":{"tags":["0.1.4","0.1.4-rc.1","0.1.4"]}}}]',
             "",
         )
 
@@ -2212,15 +2212,15 @@ def test_app_chart_bump_updates_only_pin_file_in_temp_config(
     env = generic_app_stub_env.copy()
     env["SUGARKUBE_APP_CONFIG_DIR"] = str(tmp_path)
     result = _run_just(
-        ["app-chart-bump", "app=tokenplace", "version=0.1.3"],
+        ["app-chart-bump", "app=tokenplace", "version=0.1.4"],
         env,
     )
 
     assert result.returncode == 0, result.stderr + result.stdout
-    assert pin.read_text(encoding="utf-8") == "# Default tokenplace chart version.\n0.1.3\n"
+    assert pin.read_text(encoding="utf-8") == "# Default tokenplace chart version.\n0.1.4\n"
     assert "git add" in result.stdout
     helm_log = Path(env["HELM_LOG"]).read_text(encoding="utf-8")
-    assert "show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.3" in helm_log
+    assert "show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.4" in helm_log
 
 
 def test_app_chart_bump_refuses_empty_version(generic_app_stub_env: dict[str, str]) -> None:
@@ -2291,10 +2291,10 @@ def test_app_deploy_uses_app_release_namespace_chart_values(
         assert f"-f {value}" in helm_log
     if app == "tokenplace":
         assert (
-            "show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.3" in helm_log
+            "show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.4" in helm_log
         )
         assert "template tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace" in helm_log
-        assert "--version 0.1.3" in helm_log
+        assert "--version 0.1.4" in helm_log
         assert "--version 9.9.9" not in helm_log
 
 
@@ -2344,7 +2344,7 @@ def test_app_deploy_passes_tokenplace_when_manifest_metadata_env_present(
     assert "9.9.9" not in result.stdout
     assert pin_path.read_text(encoding="utf-8") == before_pin
     helm_log = Path(env["HELM_LOG"]).read_text(encoding="utf-8")
-    assert "--version 0.1.3" in helm_log
+    assert "--version 0.1.4" in helm_log
     assert "--version 9.9.9" not in helm_log
 
 
@@ -2364,7 +2364,7 @@ def test_app_redeploy_prints_chart_pin_reminder_without_latest_lookup_or_pin_mut
     assert pin_path.read_text(encoding="utf-8") == before_pin
     helm_log = Path(env["HELM_LOG"]).read_text(encoding="utf-8")
     assert "upgrade tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace" in helm_log
-    assert "--version 0.1.3" in helm_log
+    assert "--version 0.1.4" in helm_log
     assert "--version 9.9.9" not in helm_log
 
 
@@ -2436,7 +2436,7 @@ def test_app_redeploy_host_resolution_failure_stops_before_release_activity(
                 "SUGARKUBE_RELEASE=tokenplace",
                 "SUGARKUBE_NAMESPACE=tokenplace",
                 "SUGARKUBE_CHART=oci://ghcr.io/futuroptimist/charts/tokenplace",
-                "SUGARKUBE_VERSION=0.1.3",
+                "SUGARKUBE_VERSION=0.1.4",
                 f"SUGARKUBE_VALUES_STAGING={values}",
             ]
         )
@@ -2481,7 +2481,7 @@ def test_helm_oci_install_and_upgrade_keep_authoritative_inputs_identical(
         "chart=oci://ghcr.io/futuroptimist/charts/tokenplace",
         "values=docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml",
         "host=staging.token.place",
-        "version=0.1.3",
+        "version=0.1.4",
         "tag=main-deadbee",
         "env=staging",
         "app=tokenplace",
@@ -4181,7 +4181,7 @@ def test_app_cors_verify_actual_sends_configured_request_headers(
                 "SUGARKUBE_RELEASE=tokenplace",
                 "SUGARKUBE_NAMESPACE=tokenplace",
                 "SUGARKUBE_CHART=oci://ghcr.io/futuroptimist/charts/tokenplace",
-                "SUGARKUBE_VERSION=0.1.3",
+                "SUGARKUBE_VERSION=0.1.4",
                 "SUGARKUBE_VALUES_STAGING=deploy/helm/tokenplace/values.staging.yaml",
                 "SUGARKUBE_CORS_VERIFY_PATH=/api/v1/chat/completions",
                 "SUGARKUBE_CORS_VERIFY_METHOD=POST",
@@ -4249,7 +4249,7 @@ def test_app_cors_verify_bad_expected_statuses_is_operator_error(
                 "SUGARKUBE_RELEASE=tokenplace",
                 "SUGARKUBE_NAMESPACE=tokenplace",
                 "SUGARKUBE_CHART=oci://ghcr.io/futuroptimist/charts/tokenplace",
-                "SUGARKUBE_VERSION=0.1.3",
+                "SUGARKUBE_VERSION=0.1.4",
                 "SUGARKUBE_VALUES_STAGING=deploy/helm/tokenplace/values.staging.yaml",
                 "SUGARKUBE_CORS_VERIFY_EXPECTED_STATUSES=400,abc",
             ]
@@ -4279,7 +4279,7 @@ def test_app_cors_verify_config_third_argument_remains_config(
                 "SUGARKUBE_RELEASE=tokenplace",
                 "SUGARKUBE_NAMESPACE=tokenplace",
                 "SUGARKUBE_CHART=oci://ghcr.io/futuroptimist/charts/tokenplace",
-                "SUGARKUBE_VERSION=0.1.3",
+                "SUGARKUBE_VERSION=0.1.4",
                 "SUGARKUBE_VALUES_STAGING=deploy/helm/tokenplace/values.staging.yaml",
                 "SUGARKUBE_CORS_VERIFY_PATH=/custom-cors",
                 "SUGARKUBE_CORS_VERIFY_METHOD=POST",
@@ -5033,7 +5033,7 @@ def test_direct_helm_oci_helper_matching_env_succeeds(
 
     assert result.returncode == 0, result.stderr + result.stdout
     helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
-    assert "show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.3" in helm_log
+    assert "show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.4" in helm_log
     assert "upgrade tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace" in helm_log
     assert "--description" not in helm_log
 
@@ -5052,7 +5052,7 @@ def test_public_helm_helper_rejects_mutation_marker_without_altering_file(
         "chart=oci://ghcr.io/futuroptimist/charts/tokenplace",
         "values=docs/examples/tokenplace.values.staging.yaml",
         "host=staging.token.place",
-        "version=0.1.3",
+        "version=0.1.4",
         "version_file=",
         "tag=main-deadbee",
         "default_tag=main-deadbee",
@@ -5082,7 +5082,7 @@ def test_direct_helm_oci_helper_uses_digest_coordinate_without_version(
             "release=tokenplace",
             "namespace=tokenplace",
             f"chart={coordinate}",
-            "version=0.1.3",
+            "version=0.1.4",
             "tag=main-deadbee",
             "env=staging",
         ],
@@ -5257,7 +5257,7 @@ def test_app_redeploy_guard_staging_requested_prod_detected_fails_before_helm(
 def test_app_chart_bump_remains_cluster_independent(generic_app_stub_env: dict[str, str]) -> None:
     env = generic_app_stub_env.copy()
     env["SUGARKUBE_STUB_NODE_ENV"] = "prod"
-    result = _run_just(["app-chart-bump", "app=tokenplace", "version=0.1.3"], env)
+    result = _run_just(["app-chart-bump", "app=tokenplace", "version=0.1.4"], env)
     assert result.returncode == 0, result.stderr + result.stdout
     kubectl_log = Path(env["HOME"]).parent / "kubectl.log"
     assert not kubectl_log.exists() or "get nodes" not in kubectl_log.read_text(encoding="utf-8")
@@ -5275,3 +5275,15 @@ def test_dspace_promote_prod_guard_mismatch_fails_before_helm(
     assert "manifest=<approved-candidate.json> is required" in result.stderr
     helm_log_path = Path(env["HELM_LOG"])
     assert not helm_log_path.exists() or helm_log_path.read_text(encoding="utf-8") == ""
+
+
+def test_observability_app_metrics_recipes_are_declared():
+    text = (REPO_ROOT / "justfile").read_text(encoding="utf-8")
+    assert "observability-app-metrics-secret-install app env='staging'" in text
+    assert "app-metrics-secret-install '{{ env }}' app='{{ app }}'" in text
+    assert "observability-app-metrics-secret-check app env='staging'" in text
+    assert "observability-app-metrics-verify app env='staging'" in text
+    script = (REPO_ROOT / "scripts/observability_app_metrics.py").read_text(encoding="utf-8")
+    assert "getpass.getpass" in script
+    assert "credential environment variables are refused" in script
+    assert "Secret contract exists (value intentionally not read or printed)" in script

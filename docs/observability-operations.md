@@ -459,3 +459,40 @@ PagerDuty incident recovers and resolves. Re-run live verification.
 > pause the Healthchecks check or its PagerDuty integration. Otherwise rollback itself generates a
 > page. After pausing, perform the documented Helm rollback, verify the intended prior structure,
 > and retain or remove the Kubernetes Secret only according to that revision's contract.
+
+## Declarative application metrics verification
+
+Sugarkube keeps application-specific Prometheus metrics contracts in the
+strict JSON inventory at `platform/observability/app-metrics.json`. The live
+verifier is generic: application names, metric families, bounded labels, Secret
+names, ServiceMonitor names, retry bounds, and public `/metrics` status checks
+come from that inventory.
+
+For token.place staging, install or rotate the metrics bearer token before the
+application deployment:
+
+```bash
+just observability-app-metrics-secret-install app=tokenplace env=staging
+```
+
+Validate that the configured Secret and key exist without decoding or printing
+the value:
+
+```bash
+just observability-app-metrics-secret-check app=tokenplace env=staging
+```
+
+After staging deploys, verify the configured ServiceMonitor, Secret reference,
+Prometheus target health, required metric families, bounded label enums, and the
+expected unauthenticated public `401` response:
+
+```bash
+just observability-app-metrics-verify app=tokenplace env=staging
+```
+
+`just observability-verify env=staging` also runs every configured application
+metrics verifier after the existing DSPACE checks. Production application metrics
+verification is intentionally rejected until production observability is codified.
+Merging this repository support does not deploy any application, create any
+Secret, dashboard, alert rule, schedulability check, shared-state check, or live
+drill.
