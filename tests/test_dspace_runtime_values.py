@@ -104,7 +104,9 @@ def test_dspace_chart_pins_resolve_staging_and_prod_versions() -> None:
     staging = load_config("dspace", "staging")
     prod = load_config("dspace", "prod")
 
-    assert _first_pin_value(REPO_ROOT / staging["SUGARKUBE_VERSION_FILE"]) == "3.1.0"
+    assert staging["SUGARKUBE_VERSION_FILE"] == "docs/apps/dspace.staging.version"
+    assert _first_pin_value(REPO_ROOT / staging["SUGARKUBE_VERSION_FILE"]) == "3.1.1"
+    assert prod["SUGARKUBE_VERSION_FILE"] == "docs/apps/dspace.prod.version"
     assert _first_pin_value(REPO_ROOT / prod["SUGARKUBE_VERSION_FILE"]) == "3.0.2"
 
 
