@@ -115,6 +115,9 @@ def _verify_setup(
     legacy_310: bool = False,
 ) -> tuple[Namespace, list[list[str]]]:
     """Install a complete, mutable fake cluster and return verifier arguments."""
+    if legacy and legacy_310:
+        raise ValueError("legacy and legacy_310 are mutually exclusive")
+
     override = overrides or {}
     smoke = tmp_path / "smoke"
     smoke.write_text("#!/bin/sh\nexit 0\n")
@@ -313,16 +316,19 @@ def _verify_setup(
         )
 
     monkeypatch.setattr(verifier.subprocess, "run", smoke_run)
+    if legacy_310:
+        manifest_path = legacy_310_manifest(tmp_path)
+    elif legacy:
+        manifest_path = recovery_manifest(tmp_path)
+    else:
+        manifest_path = manifest(tmp_path, provider)
+
     return (
         Namespace(
             environment="staging",
             release="dspace",
             namespace="dspace",
-            manifest=(
-                legacy_310_manifest(tmp_path)
-                if legacy_310
-                else recovery_manifest(tmp_path) if legacy else manifest(tmp_path, provider)
-            ),
+            manifest=manifest_path,
             application_version=None,
             source_revision=None,
             provider=None,
@@ -334,6 +340,13 @@ def _verify_setup(
         ),
         seen,
     )
+
+
+def test_verify_setup_rejects_conflicting_legacy_flags(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        _verify_setup(monkeypatch, tmp_path, legacy=True, legacy_310=True)
 
 
 @pytest.mark.parametrize("provider,has_token_args", [("token-place", True), ("openai", False)])
