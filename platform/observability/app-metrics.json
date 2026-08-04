@@ -15,10 +15,10 @@
             "scrapeTimeout": "10s",
             "authorization": {"type": "Bearer", "credentials": {"name": "tokenplace-staging-metrics-token", "key": "token"}},
             "relabelings": [
-              {"targetLabel": "app", "replacement": "tokenplace"},
-              {"targetLabel": "environment", "replacement": "staging"},
-              {"targetLabel": "release", "replacement": "tokenplace"},
-              {"targetLabel": "cluster", "replacement": "sugarkube-int"}
+              {"action": "replace", "targetLabel": "app", "replacement": "tokenplace"},
+              {"action": "replace", "targetLabel": "environment", "replacement": "staging"},
+              {"action": "replace", "targetLabel": "release", "replacement": "tokenplace"},
+              {"action": "replace", "targetLabel": "cluster", "replacement": "sugarkube-int"}
             ]
           },
           "targetLabels": {"app": "tokenplace", "environment": "staging", "release": "tokenplace", "cluster": "sugarkube-int", "namespace": "tokenplace"},

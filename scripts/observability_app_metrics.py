@@ -158,7 +158,9 @@ def validate_inventory(doc):
             if not isinstance(relabelings, list) or len(relabelings) != 4:
                 fail("serviceMonitor.relabelings must contain exactly four entries")
             for idx, relabeling in enumerate(relabelings):
-                expect_keys(relabeling, {"targetLabel", "replacement"}, f"serviceMonitor.relabelings[{idx}]")
+                expect_keys(relabeling, {"action", "targetLabel", "replacement"}, f"serviceMonitor.relabelings[{idx}]")
+                if relabeling["action"] != "replace":
+                    fail("serviceMonitor.relabelings action must be replace")
                 nonempty(relabeling["targetLabel"], "relabeling targetLabel")
                 nonempty(relabeling["replacement"], "relabeling replacement")
             labels = cfg["targetLabels"]
@@ -167,6 +169,19 @@ def validate_inventory(doc):
             for k, v in labels.items():
                 nonempty(k, "target label name")
                 nonempty(v, "target label value")
+            mapping = {r["targetLabel"]: r["replacement"] for r in relabelings}
+            if len(mapping) != len(relabelings):
+                fail("serviceMonitor.relabelings target labels must be unique")
+            required_mapping = {
+                "app": app,
+                "environment": env,
+                "release": cfg["serviceMonitorName"],
+                "cluster": labels.get("cluster"),
+            }
+            if mapping != required_mapping:
+                fail("serviceMonitor.relabelings must map app, environment, release, and cluster exactly")
+            if "namespace" in mapping:
+                fail("namespace must be supplied by discovery, not relabel replacement")
             pm = cfg["publicMetrics"]
             expect_keys(pm, {"url", "expectedUnauthenticatedStatus"}, "publicMetrics")
             if (
@@ -410,10 +425,12 @@ def verify(app, env):
 
 
 
-def validate_render(app: str, env: str, input_path: str) -> None:
+def validate_render(app: str, env: str, input_path: str, release_namespace: str = "") -> None:
     inv = load_config()
     cfg = inv.get("applications", {}).get(app, {}).get("environments", {}).get(env)
     if cfg is None:
+        if input_path == "-":
+            sys.stdin.read()
         return
     try:
         raw = sys.stdin.read() if input_path == "-" else Path(input_path).read_text(encoding="utf-8")
@@ -430,7 +447,12 @@ def validate_render(app: str, env: str, input_path: str) -> None:
     secrets = [d for d in docs if d.get("kind") == "Secret"]
     if secrets:
         fail("rendered manifests must not include credential Secret resources")
-    sms = [d for d in docs if d.get("kind") == "ServiceMonitor" and d.get("metadata", {}).get("name") == cfg["serviceMonitorName"] and d.get("metadata", {}).get("namespace") == cfg["namespace"]]
+    named_sms = [d for d in docs if d.get("kind") == "ServiceMonitor" and d.get("metadata", {}).get("name") == cfg["serviceMonitorName"]]
+    sms = []
+    for candidate in named_sms:
+        rendered_ns = candidate.get("metadata", {}).get("namespace")
+        if rendered_ns == cfg["namespace"] or (rendered_ns is None and release_namespace == cfg["namespace"]):
+            sms.append(candidate)
     if len(sms) != 1:
         fail("rendered manifests must include exactly one configured ServiceMonitor")
     sm = sms[0]
@@ -438,10 +460,13 @@ def validate_render(app: str, env: str, input_path: str) -> None:
     if labels.get("release") != "kube-prometheus-stack":
         fail("rendered ServiceMonitor release label mismatch")
     spec = sm.get("spec", {})
+    if spec.get("namespaceSelector", {}).get("matchNames") != [cfg["namespace"]]:
+        fail("rendered ServiceMonitor namespace selector mismatch")
     if spec.get("selector", {}).get("matchLabels") != cfg["serviceMonitor"]["selectorMatchLabels"]:
         fail("rendered ServiceMonitor selector mismatch")
-    if "namespace" in cfg["serviceMonitor"].get("relabelings", [{}])[0].get("targetLabel", ""):
-        fail("namespace must be supplied by discovery, not relabel replacement")
+    for relabeling in cfg["serviceMonitor"].get("relabelings", []):
+        if relabeling.get("targetLabel") == "namespace":
+            fail("namespace must be supplied by discovery, not relabel replacement")
     endpoints = spec.get("endpoints")
     if not isinstance(endpoints, list) or len(endpoints) != 1:
         fail("rendered ServiceMonitor must have exactly one endpoint")
@@ -459,6 +484,7 @@ def main(argv=None):
     p.add_argument("--app")
     p.add_argument("--env", default="staging")
     p.add_argument("--input", default="-")
+    p.add_argument("--release-namespace", default="")
     a, extra = p.parse_known_args(argv)
     if extra:
         print("ERROR: unexpected arguments are refused (values redacted)", file=sys.stderr)
@@ -471,7 +497,7 @@ def main(argv=None):
         if a.mode == "validate-render":
             if not a.app:
                 fail("--app is required")
-            validate_render(a.app, a.env, a.input)
+            validate_render(a.app, a.env, a.input, a.release_namespace)
             print("Rendered application metrics contract is valid.")
             return 0
         if a.mode == "verify-all":

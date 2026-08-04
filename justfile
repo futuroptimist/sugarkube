@@ -1655,6 +1655,18 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
 
     ensure_upgrade_target_exists
 
+    render_args=(template "${release}" "${chart}" --namespace "${namespace}")
+    if [ ${#value_args[@]} -gt 0 ]; then
+        render_args+=("${value_args[@]}")
+    fi
+    if [ ${#set_args[@]} -gt 0 ]; then
+        render_args+=("${set_args[@]}")
+    fi
+    if [ ${#version_args[@]} -gt 0 ]; then
+        render_args+=("${version_args[@]}")
+    fi
+    helm "${render_args[@]}" | python3 "{{ justfile_directory() }}/scripts/observability_app_metrics.py" validate-render       --app "${app}" --env "${requested_env}" --release-namespace "${namespace}" --input -
+
     helm_args=(upgrade "${release}" "${chart}" --namespace "${namespace}")
 
     if [ -n "${description}" ]; then

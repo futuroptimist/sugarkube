@@ -338,6 +338,47 @@ spec:
   rules:
     - host: ${{host}}
 YAML
+    if [[ "$*" == *charts/tokenplace* ]]; then
+      cat <<'YAML'
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: tokenplace
+  labels:
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - tokenplace
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: tokenplace
+      app.kubernetes.io/name: tokenplace
+  endpoints:
+    - path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      authorization:
+        type: Bearer
+        credentials:
+          name: tokenplace-staging-metrics-token
+          key: token
+      relabelings:
+        - action: replace
+          targetLabel: app
+          replacement: tokenplace
+        - action: replace
+          targetLabel: environment
+          replacement: staging
+        - action: replace
+          targetLabel: release
+          replacement: tokenplace
+        - action: replace
+          targetLabel: cluster
+          replacement: sugarkube-int
+YAML
+    fi
     if [ "${{app}}" = dspace ] && [[ "$*" == *dspace.values.staging.yaml* ]]; then
       cat <<'YAML'
 ---
@@ -3669,9 +3710,10 @@ def test_tokenplace_oci_paths_render_once_before_single_mutation(
     helm_lines = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8").splitlines()
     renders = [index for index, line in enumerate(helm_lines) if line.startswith("template ")]
     mutations = [index for index, line in enumerate(helm_lines) if line.startswith("upgrade ")]
-    assert len(renders) == 1
+    expected_renders = 2
+    assert len(renders) == expected_renders
     assert len(mutations) == 1
-    assert renders[0] < mutations[0]
+    assert renders[-1] < mutations[0]
 
 
 @pytest.mark.usefixtures("ensure_just_available")
@@ -5368,3 +5410,125 @@ def test_observability_app_metrics_verifier_has_no_tokenplace_specific_branch():
     assert 'if app == "tokenplace"' not in text
     assert 'elif app == "tokenplace"' not in text
     assert text.count("tokenplace") == 0
+
+
+def _tokenplace_chart_like_service_monitor(namespace_line: str = "") -> str:
+    namespace = f"  namespace: {namespace_line}\n" if namespace_line else ""
+    return f"""apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: tokenplace
+{namespace}  labels:
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - tokenplace
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: tokenplace
+      app.kubernetes.io/name: tokenplace
+  endpoints:
+    - path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      authorization:
+        type: Bearer
+        credentials:
+          name: tokenplace-staging-metrics-token
+          key: token
+      relabelings:
+        - action: replace
+          targetLabel: app
+          replacement: tokenplace
+        - action: replace
+          targetLabel: environment
+          replacement: staging
+        - action: replace
+          targetLabel: release
+          replacement: tokenplace
+        - action: replace
+          targetLabel: cluster
+          replacement: sugarkube-int
+"""
+
+
+def test_observability_app_metrics_validate_render_accepts_chart_like_service_monitor(tmp_path: Path):
+    rendered = tmp_path / "rendered.yaml"
+    rendered.write_text(_tokenplace_chart_like_service_monitor(), encoding="utf-8")
+
+    app_metrics.validate_render("tokenplace", "staging", str(rendered), "tokenplace")
+
+
+def test_observability_app_metrics_validate_render_unconfigured_consumes_stdin(monkeypatch):
+    class Input:
+        consumed = False
+
+        def read(self):
+            self.consumed = True
+            return "not: yaml: but: consumed\n"
+
+    fake = Input()
+    monkeypatch.setattr(app_metrics.sys, "stdin", fake)
+
+    app_metrics.validate_render("jobbot3000", "staging", "-", "jobbot3000")
+
+    assert fake.consumed is True
+
+
+@pytest.mark.parametrize(
+    ("mutator", "message"),
+    [
+        (lambda y: y.replace("matchNames:\n      - tokenplace", "matchNames:\n      - wrong"), "namespace selector"),
+        (lambda y: y.replace("        - action: replace\n          targetLabel: cluster\n          replacement: sugarkube-int\n", ""), "endpoint/auth/relabeling"),
+        (lambda y: y + "        - action: replace\n          targetLabel: extra\n          replacement: value\n", "endpoint/auth/relabeling"),
+        (lambda y: y.replace("targetLabel: app", "targetLabel: namespace", 1), "endpoint/auth/relabeling"),
+        (lambda y: y.replace("type: Bearer", "type: Basic"), "endpoint/auth"),
+        (lambda y: y + "---\napiVersion: v1\nkind: Secret\nmetadata:\n  name: leaked\n", "Secret"),
+    ],
+)
+def test_observability_app_metrics_validate_render_rejects_contract_mismatches(
+    tmp_path: Path, mutator, message: str
+):
+    rendered = tmp_path / "rendered.yaml"
+    rendered.write_text(mutator(_tokenplace_chart_like_service_monitor()), encoding="utf-8")
+
+    with pytest.raises(SystemExit) as excinfo:
+        app_metrics.validate_render("tokenplace", "staging", str(rendered), "tokenplace")
+
+    assert message in str(excinfo.value)
+
+
+def test_observability_app_metrics_validate_render_rejects_wrong_release_namespace(tmp_path: Path):
+    rendered = tmp_path / "rendered.yaml"
+    rendered.write_text(_tokenplace_chart_like_service_monitor(), encoding="utf-8")
+
+    with pytest.raises(SystemExit) as excinfo:
+        app_metrics.validate_render("tokenplace", "staging", str(rendered), "wrong")
+
+    assert "exactly one configured ServiceMonitor" in str(excinfo.value)
+
+
+def test_helm_oci_deploy_invokes_render_gate_before_mutation_marker_and_upgrade():
+    justfile = (REPO_ROOT / "justfile").read_text(encoding="utf-8")
+    helper = justfile.split("_helm-oci-deploy ", 1)[1].split("\nhelm-oci-install ", 1)[0]
+    validate_index = helper.index("observability_app_metrics.py\" validate-render")
+    marker_index = helper.index(": > \"${mutation_marker}\"")
+    upgrade_index = helper.index("helm \"${helm_args[@]}\"")
+
+    assert validate_index < marker_index < upgrade_index
+    assert "helm \"${render_args[@]}\" |" in helper
+    assert "--release-namespace \"${namespace}\"" in helper
+
+
+def test_observability_app_metrics_inventory_relabelings_match_rendered_replace_shape():
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"]["tokenplace"]["environments"]["staging"]
+    relabelings = cfg["serviceMonitor"]["relabelings"]
+
+    assert relabelings == [
+        {"action": "replace", "targetLabel": "app", "replacement": "tokenplace"},
+        {"action": "replace", "targetLabel": "environment", "replacement": "staging"},
+        {"action": "replace", "targetLabel": "release", "replacement": "tokenplace"},
+        {"action": "replace", "targetLabel": "cluster", "replacement": "sugarkube-int"},
+    ]
+    assert "namespace" not in {r["targetLabel"] for r in relabelings}
