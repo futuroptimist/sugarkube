@@ -3320,11 +3320,11 @@ def test_dspace_prod_staging_gate_failures_stop_before_production_work(
 
     _write_dspace_candidate(prod_manifest, "prod")
     prod_record = json.loads(prod_manifest.read_text(encoding="utf-8"))
-    prod_record["chartVersion"] = "3.1.0"
+    prod_record["chartVersion"] = "3.1.1"
     prod_manifest.write_text(json.dumps(prod_record) + "\n", encoding="utf-8")
     env = generic_app_stub_env.copy()
     env["SUGARKUBE_STUB_NODE_ENV"] = "prod"
-    env["SUGARKUBE_STUB_CHART_VERSION"] = "3.1.0"
+    env["SUGARKUBE_STUB_CHART_VERSION"] = "3.1.1"
     if staging_record_kind == "revision":
         env["SUGARKUBE_STUB_STAGING_HELM_REVISION"] = "8"
     for name in ("helm.log", "kubectl.log", "commands.log", "runtime-verifier.log"):
@@ -3348,6 +3348,8 @@ def test_dspace_prod_staging_gate_failures_stop_before_production_work(
 
     assert result.returncode != 0
     commands = (tmp_path / "commands.log").read_text(encoding="utf-8")
+    if staging_record_kind == "revision":
+        assert " status dspace --namespace dspace -o json" in commands
     assert "release-manifest preflight" not in commands
     assert "release-manifest reserve" not in commands
     assert "helm template " not in commands
