@@ -84,7 +84,7 @@ class ReleaseInputs:
 
 def safe_yaml_documents(text: str) -> list[object]:
     """Parse JSON-compatible YAML via Psych's AST, rejecting tags and aliases."""
-    ruby = r'''
+    ruby = r"""
 require "psych"
 require "json"
 scanner = Psych::ScalarScanner.new(Psych::ClassLoader::Restricted.new([], []))
@@ -103,7 +103,7 @@ def convert(node, scanner)
   end
 end
 puts JSON.generate(convert(Psych.parse_stream(STDIN.read), scanner))
-'''
+"""
     try:
         parsed = subprocess.run(
             ["ruby", "-e", ruby], input=text, capture_output=True, text=True, check=False
@@ -158,7 +158,9 @@ def release_associated(
 ) -> bool:
     metadata = document.get("metadata") if isinstance(document.get("metadata"), dict) else {}
     labels = metadata.get("labels") if isinstance(metadata.get("labels"), dict) else {}
-    annotations = metadata.get("annotations") if isinstance(metadata.get("annotations"), dict) else {}
+    annotations = (
+        metadata.get("annotations") if isinstance(metadata.get("annotations"), dict) else {}
+    )
     return (
         scalar(labels.get("app.kubernetes.io/instance")) == release
         or scalar(labels.get("release")) == release
@@ -185,7 +187,9 @@ def dspace_production_metrics_token_is_unsafe(
     if not contains_exact_scalar(document, {"METRICS_TOKEN"}):
         return False
     if metrics_enabled or scalar(document.get("kind")) not in {
-        "Deployment", "StatefulSet", "DaemonSet"
+        "Deployment",
+        "StatefulSet",
+        "DaemonSet",
     }:
         return True
     found, containers = nested_value(document, ("spec", "template", "spec", "containers"))
@@ -205,8 +209,10 @@ def dspace_production_metrics_token_is_unsafe(
             # Chart 3.0.2 uses the pod UID as a safe, unpredictable token when metrics are off.
             if (
                 set(entry) == {"name", "valueFrom"}
-                and isinstance(value_from, dict) and set(value_from) == {"fieldRef"}
-                and isinstance(field_ref, dict) and set(field_ref) == {"fieldPath"}
+                and isinstance(value_from, dict)
+                and set(value_from) == {"fieldRef"}
+                and isinstance(field_ref, dict)
+                and set(field_ref) == {"fieldPath"}
                 and field_ref.get("fieldPath") == "metadata.uid"
             ):
                 safe_entries.add(id(entry))
@@ -229,7 +235,6 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
     except (ValueError, json.JSONDecodeError) as error:
         return [f"rendered output is not safe structural YAML: {error}"]
     workloads: list[tuple[str, str]] = []
-    kinds: set[str] = set()
     ingress_hosts: set[str] = set()
     service_monitors: list[dict[str, object]] = []
     candidates = {inputs.app, inputs.release, *APP_CONTAINER_NAMES.get(inputs.app, set())}
@@ -245,9 +250,6 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
         name = scalar(metadata.get("name"))
         namespace = scalar(metadata.get("namespace"))
         labels = metadata.get("labels") if isinstance(metadata.get("labels"), dict) else {}
-        annotations = (
-            metadata.get("annotations") if isinstance(metadata.get("annotations"), dict) else {}
-        )
         associated = release_associated(
             document,
             inputs.release,
@@ -256,9 +258,10 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
                 and kind not in {"Deployment", "StatefulSet", "DaemonSet"}
             ),
         )
-        if inputs.app == "dspace" and kind == "Secret":
+        if kind == "Secret" and inputs.app in {"dspace", "tokenplace"}:
             errors.append(
-                f"DSPACE rendered Secret {name or '<unnamed>'}; literal Secret resources are forbidden"
+                f"{inputs.app.upper()} rendered Secret {name or '<unnamed>'}; "
+                "literal Secret resources are forbidden"
             )
         if namespace and namespace != inputs.namespace:
             errors.append(
@@ -272,10 +275,15 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
                 found, containers = nested_value(
                     document, ("spec", "template", "spec", "containers")
                 )
-                intended = [
-                    item
-                    for item in containers if isinstance(item, dict) and scalar(item.get("name")) in candidates
-                ] if found and isinstance(containers, list) else []
+                intended = (
+                    [
+                        item
+                        for item in containers
+                        if isinstance(item, dict) and scalar(item.get("name")) in candidates
+                    ]
+                    if found and isinstance(containers, list)
+                    else []
+                )
                 intended_container_found = intended_container_found or bool(intended)
                 for item in intended:
                     if not scalar(item.get("image")).endswith(expected_suffix):
@@ -300,6 +308,58 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
         errors.append("intended application container does not use the exact requested image tag")
     if inputs.host and inputs.host not in ingress_hosts:
         errors.append(f"no Ingress rule exactly matches expected host {inputs.host!r}")
+    tokenplace_metrics_configured = (
+        "ghcr.io/example/tokenplace" not in manifest
+        and resolved_values_scalar(inputs.values, ("metrics", "enabled")).lower() == "true"
+        and resolved_values_scalar(inputs.values, ("serviceMonitor", "enabled")).lower() == "true"
+    )
+    if inputs.app == "tokenplace" and inputs.env == "staging" and tokenplace_metrics_configured:
+        expected = {"name": "tokenplace-staging-metrics-token", "key": "token"}
+        if len(service_monitors) != 1:
+            errors.append("tokenplace staging metrics must render exactly one ServiceMonitor")
+        for monitor in service_monitors:
+            labels = (
+                monitor.get("metadata", {}).get("labels", {})
+                if isinstance(monitor.get("metadata"), dict)
+                else {}
+            )
+            spec = monitor.get("spec") if isinstance(monitor.get("spec"), dict) else {}
+            endpoints = spec.get("endpoints")
+            endpoint = (
+                endpoints[0]
+                if isinstance(endpoints, list) and endpoints and isinstance(endpoints[0], dict)
+                else {}
+            )
+            creds = (
+                endpoint.get("authorization", {}).get("credentials", {})
+                if isinstance(endpoint.get("authorization"), dict)
+                else {}
+            )
+            if labels.get("release") != "kube-prometheus-stack":
+                errors.append("tokenplace ServiceMonitor must have release: kube-prometheus-stack")
+            if (
+                endpoint.get("path") != "/metrics"
+                or endpoint.get("interval") != "30s"
+                or endpoint.get("scrapeTimeout") != "10s"
+            ):
+                errors.append("tokenplace ServiceMonitor endpoint contract mismatch")
+            if creds != expected:
+                errors.append(
+                    "tokenplace ServiceMonitor must reference the configured metrics Secret/key"
+                )
+            rendered = {
+                r.get("targetLabel"): r.get("replacement")
+                for r in endpoint.get("relabelings", [])
+                if isinstance(r, dict)
+            }
+            for k, v in {
+                "app": "tokenplace",
+                "environment": "staging",
+                "release": "tokenplace",
+                "cluster": "sugarkube-int",
+            }.items():
+                if rendered.get(k) != v:
+                    errors.append(f"tokenplace ServiceMonitor relabeling {k} mismatch")
     if inputs.app == "dspace":
         for required in ("Deployment", "Service"):
             if not any(
@@ -352,7 +412,11 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
 def parse_chart_yaml(text: str) -> dict[str, str]:
     documents = safe_yaml_documents(text)
     document = documents[0] if documents else {}
-    return {str(key): scalar(value) for key, value in document.items()} if isinstance(document, dict) else {}
+    return (
+        {str(key): scalar(value) for key, value in document.items()}
+        if isinstance(document, dict)
+        else {}
+    )
 
 
 def semver_key(v: str) -> tuple[int, int, int, int, tuple[object, ...]]:
@@ -422,13 +486,15 @@ def deployment_app_container_env_sets(
             found.append(
                 (
                     container_name,
-                    {
-                        scalar(item.get("name"))
-                        for item in envs
-                        if isinstance(item, dict) and scalar(item.get("name"))
-                    }
-                    if isinstance(envs, list)
-                    else set(),
+                    (
+                        {
+                            scalar(item.get("name"))
+                            for item in envs
+                            if isinstance(item, dict) and scalar(item.get("name"))
+                        }
+                        if isinstance(envs, list)
+                        else set()
+                    ),
                 )
             )
     return found
@@ -465,7 +531,8 @@ def latest_version(chart: str) -> tuple[str, str]:
         if production_safe_versions
         else (
             "",
-            f"latest unknown: no semver tags found; run: helm show chart {chart} --version <version>",
+            "latest unknown: no semver tags found; run: "
+            f"helm show chart {chart} --version <version>",
         )
     )
 
@@ -488,7 +555,9 @@ def expected_ingress_host(values: tuple[str, ...], explicit: str) -> str:
     host = scalar(resolved_host)
     enabled = scalar(resolved_enabled).lower()
     if enabled == "true" and not host:
-        raise SystemExit("ERROR: ingress.enabled is true but no nonempty ingress.host was resolved.")
+        raise SystemExit(
+            "ERROR: ingress.enabled is true but no nonempty ingress.host was resolved."
+        )
     return host if enabled != "false" else ""
 
 
@@ -689,7 +758,9 @@ def cmd_resolve_host(args: argparse.Namespace) -> int:
     try:
         host = expected_ingress_host(values, args.host)
     except (ValueError, json.JSONDecodeError, SystemExit) as error:
-        print(f"ERROR: values parsing failed while resolving ingress host: {error}", file=sys.stderr)
+        print(
+            f"ERROR: values parsing failed while resolving ingress host: {error}", file=sys.stderr
+        )
         return 1
     print(host)
     return 0

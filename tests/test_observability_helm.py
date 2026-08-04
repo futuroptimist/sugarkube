@@ -820,6 +820,7 @@ printf '%s' "$code"
         "ALERTMANAGER_CONFIG": str(tmp_path / "alertmanager-config.yaml"),
         "SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_ATTEMPTS": retry_attempts,
         "SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_INTERVAL_SECONDS": retry_interval,
+        "SUGARKUBE_OBSERVABILITY_APP_METRICS_SKIP": "1",
         "SUGARKUBE_WATCHDOG_OBSERVATION_SECONDS": "0",
         "SUGARKUBE_WATCHDOG_TEST_ALLOW_SHORT_OBSERVATION": "1",
         "SUGARKUBE_WATCHDOG_TTY": str(tmp_path / "watchdog-tty"),
@@ -2217,3 +2218,51 @@ def test_watchdog_silence_api_failures_do_not_expose_fixture_contents(tmp_path, 
     assert "response redacted" in output
     if command == "watchdog-drill-clear":
         assert not (tmp_path / "watchdog-silence-deletions").exists()
+
+
+def test_tokenplace_metrics_pin_and_values_contract():
+    assert (ROOT / "docs/apps/tokenplace.version").read_text(encoding="utf-8").splitlines()[
+        1
+    ].strip() == "0.1.4"
+    values = yaml_load(ROOT / "docs/examples/tokenplace.values.staging.yaml")
+    assert values["metrics"] == {
+        "enabled": True,
+        "auth": {"existingSecret": "tokenplace-staging-metrics-token", "secretKey": "token"},
+    }
+    assert values["serviceMonitor"]["enabled"] is True
+    assert values["serviceMonitor"]["interval"] == "30s"
+    assert values["serviceMonitor"]["scrapeTimeout"] == "10s"
+    assert values["serviceMonitor"]["additionalLabels"] == {"release": "kube-prometheus-stack"}
+    assert values["serviceMonitor"]["relabelings"] == {
+        "app": "tokenplace",
+        "environment": "staging",
+        "release": "tokenplace",
+        "cluster": "sugarkube-int",
+    }
+    rendered = subprocess.run(
+        [
+            "helm",
+            "template",
+            "tokenplace",
+            "oci://ghcr.io/futuroptimist/charts/tokenplace",
+            "--version",
+            "0.1.4",
+            "--namespace",
+            "tokenplace",
+            "-f",
+            "docs/examples/tokenplace.values.dev.yaml",
+            "-f",
+            "docs/examples/tokenplace.values.staging.yaml",
+            "--set",
+            "image.tag=main-deadbee",
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout
+    assert "kind: ServiceMonitor" in rendered
+    assert "authorization:" in rendered and "credentials:" in rendered
+    assert "tokenplace-staging-metrics-token" in rendered
+    assert "kind: Secret" not in rendered
+    assert "forbidden" not in rendered

@@ -3543,3 +3543,15 @@ staging-ingress-ha-verify env='staging':
 
 staging-ingress-ha-rollback env='staging':
     scripts/staging_ingress_ha.sh rollback "{{ env }}"
+
+# Interactively install or rotate an application's staging metrics Secret (hidden input).
+observability-app-metrics-secret-install app env='staging':
+    @scripts/observability_helm.sh app-metrics-secret-install '{{ env }}' '{{ app }}'
+
+# Check an application's metrics Secret/key contract without reading its value.
+observability-app-metrics-secret-check app env='staging':
+    @scripts/observability_helm.sh app-metrics-secret-check '{{ env }}' '{{ app }}'
+
+# Verify an application's configured metrics contract through Prometheus.
+observability-app-metrics-verify app env='staging':
+    @scripts/observability_helm.sh app-metrics-verify '{{ env }}' '{{ app }}'

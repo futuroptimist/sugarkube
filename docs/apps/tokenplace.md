@@ -323,3 +323,42 @@ just cf-tunnel-route host=token.place
 - token.place must preserve relay-blind E2EE: relay diagnostics and logs should expose safe routing metadata only, not plaintext payloads.
 - Verify `/relay/diagnostics`, real external compute-node registration, and a real E2EE request/response before production promotion so relay-compute issues are caught in staging.
 - Keep runtime secrets and per-environment external service configuration outside Helm examples and Sugarkube app config files.
+
+## Staging authenticated application metrics (Phase 1, Refs #2405)
+
+Sugarkube repository support now pins token.place chart `0.1.4` for staging metrics wiring. The published OCI chart was verified directly, not from source-only code:
+
+```bash
+just app-chart-status app=tokenplace
+helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.4
+helm pull oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.4
+```
+
+The fetched package reported immutable digest `sha256:0f16aef72500b33a598042465a9b703bf16dc7a5071b3d867c4a78d6928be1e7` and package SHA-256 `c960f7c0793032bcaebd8f8d5546cac16a1cc42b9c543c318f15b2243faaec7a`. Inspect the downloaded `tokenplace-0.1.4.tgz` before deploying; it must contain the opt-in `metrics.enabled`, `metrics.auth.existingSecret`, `metrics.auth.secretKey`, `serviceMonitor.enabled`, `/metrics` endpoint authorization through `authorization.credentials`, and bounded `app`, `environment`, `release`, and `cluster` relabelings.
+
+Merging this repository support does **not** deploy it. Use this order for staging only:
+
+1. Install or rotate the existing metrics bearer Secret. The value is read only from an interactive controlling terminal with hidden input and is never accepted as an argument, environment variable, ordinary stdin, shell history, or temporary file:
+
+   ```bash
+   just observability-app-metrics-secret-install app=tokenplace env=staging
+   ```
+
+2. Check the Secret/key contract without decoding or printing the value:
+
+   ```bash
+   just observability-app-metrics-secret-check app=tokenplace env=staging
+   ```
+
+3. Render and deploy token.place staging with the pinned chart and staging values, then run the generic verifier:
+
+   ```bash
+   just app-deploy app=tokenplace env=staging tag="$APP_TAG"
+   just observability-app-metrics-verify app=tokenplace env=staging
+   ```
+
+The public `https://staging.token.place/metrics` endpoint is expected to return HTTP `401` without credentials. Do not print its response body during verification.
+
+Rollback preserves the Secret: redeploy the previous known-good image tag or restore the previous chart pin (`0.1.3`) in `docs/apps/tokenplace.version`, render, and redeploy staging. Do not delete `tokenplace-staging-metrics-token`; it remains useful for safe rotation and future attempts.
+
+Dashboards, alert rules, functional schedulability, shared state, `/api/v1/relay/availability`, and live drill evidence remain follow-up phases after live metrics evidence exists.
