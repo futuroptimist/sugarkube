@@ -3443,10 +3443,12 @@ observability-render env='':
 
 # Fresh-install the canonical non-Flux kube-prometheus-stack release for staging.
 observability-install env='':
+    @python3 scripts/observability_app_metrics.py validate
     @scripts/observability_helm.sh install '{{ env }}'
 
 # Upgrade the existing canonical non-Flux kube-prometheus-stack release for staging.
 observability-upgrade env='':
+    @python3 scripts/observability_app_metrics.py validate
     @scripts/observability_helm.sh upgrade '{{ env }}'
 
 # Summarize the canonical non-Flux kube-prometheus-stack release for staging (read-only).
@@ -3456,6 +3458,7 @@ observability-status env='':
 # Verify the canonical non-Flux kube-prometheus-stack release for staging (read-only).
 observability-verify env='':
     @scripts/observability_helm.sh verify '{{ env }}'
+    @python3 scripts/observability_app_metrics.py verify-all --env '{{ env }}'
 
 # Prove through the Grafana API that the staging dashboard is loaded (read-only).
 observability-dashboard-verify env='':
@@ -3479,15 +3482,15 @@ observability-watchdog-verify env='':
 
 # Interactively install or rotate a staging application's metrics bearer token (hidden input).
 observability-app-metrics-secret-install app env='staging':
-    @scripts/observability_helm.sh app-metrics-secret-install '{{ env }}' app='{{ app }}'
+    @python3 scripts/observability_app_metrics.py secret-install --app '{{ app }}' --env '{{ env }}'
 
 # Check a staging application's metrics Secret/key contract without reading its value.
 observability-app-metrics-secret-check app env='staging':
-    @scripts/observability_helm.sh app-metrics-secret-check '{{ env }}' app='{{ app }}'
+    @python3 scripts/observability_app_metrics.py secret-check --app '{{ app }}' --env '{{ env }}'
 
 # Verify a staging application's authenticated Prometheus metrics contract.
 observability-app-metrics-verify app env='staging':
-    @scripts/observability_helm.sh app-metrics-verify '{{ env }}' app='{{ app }}'
+    @python3 scripts/observability_app_metrics.py verify --app '{{ app }}' --env '{{ env }}'
 
 # Create the exact, automatically expiring watchdog failure-drill silence.
 observability-watchdog-drill-start env='':

@@ -7,6 +7,7 @@ import argparse
 import json
 import re
 import subprocess
+import os
 import sys
 import time
 import urllib.error
@@ -15,13 +16,14 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "platform/observability/app-metrics.json"
 PROM = "/api/v1/namespaces/monitoring/services/http:kube-prometheus-stack-prometheus:9090/proxy"
 K8S_NAME = re.compile(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?")
 DURATION = re.compile(r"[1-9][0-9]*[smh]")
 STATUS = re.compile(r"[1-5][0-9][0-9]")
-SAFE_VALUE = re.compile(r"[-A-Za-z0-9_./:]+")
+SAFE_VALUE = re.compile(r"[-A-Za-z0-9_./:*]+")
 STANDARD_LABELS = {
     "__name__",
     "job",
@@ -133,7 +135,7 @@ def validate_inventory(doc):
             sm = cfg["serviceMonitor"]
             expect_keys(
                 sm,
-                {"selectorMatchLabels", "path", "interval", "scrapeTimeout", "authorization"},
+                {"selectorMatchLabels", "path", "interval", "scrapeTimeout", "authorization", "relabelings"},
                 "serviceMonitor",
             )
             if sm["path"] != "/metrics":
@@ -141,14 +143,24 @@ def validate_inventory(doc):
             for key in ("interval", "scrapeTimeout"):
                 if not isinstance(sm[key], str) or not DURATION.fullmatch(sm[key]):
                     fail(f"serviceMonitor.{key} is malformed")
-            expect_keys(sm["authorization"], {"type"}, "authorization")
+            expect_keys(sm["authorization"], {"type", "credentials"}, "authorization")
             nonempty(sm["authorization"]["type"], "authorization.type")
+            expect_keys(sm["authorization"].get("credentials"), {"name", "key"}, "authorization.credentials")
+            name(sm["authorization"]["credentials"]["name"], "authorization.credentials.name")
+            name(sm["authorization"]["credentials"]["key"], "authorization.credentials.key")
             selector = sm["selectorMatchLabels"]
             if not isinstance(selector, dict) or not selector:
                 fail("serviceMonitor.selectorMatchLabels must be a nonempty object")
             for k, v in selector.items():
                 nonempty(k, "selector label name")
                 nonempty(v, "selector label value")
+            relabelings = sm["relabelings"]
+            if not isinstance(relabelings, list) or len(relabelings) != 4:
+                fail("serviceMonitor.relabelings must contain exactly four entries")
+            for idx, relabeling in enumerate(relabelings):
+                expect_keys(relabeling, {"targetLabel", "replacement"}, f"serviceMonitor.relabelings[{idx}]")
+                nonempty(relabeling["targetLabel"], "relabeling targetLabel")
+                nonempty(relabeling["replacement"], "relabeling replacement")
             labels = cfg["targetLabels"]
             if not isinstance(labels, dict) or not labels:
                 fail("targetLabels must be a nonempty object")
@@ -172,8 +184,8 @@ def validate_inventory(doc):
             if not all(isinstance(rt[k], int) and 1 <= rt[k] <= 60 for k in rt):
                 fail("retry settings must be bounded integers")
             metrics = cfg["requiredMetricFamilies"]
-            if not isinstance(metrics, list) or len(metrics) != len(set(metrics)):
-                fail("requiredMetricFamilies must not contain duplicates")
+            if not isinstance(metrics, list) or not metrics or len(metrics) != len(set(metrics)):
+                fail("requiredMetricFamilies must be nonempty and not contain duplicates")
             for metric in metrics:
                 if not isinstance(metric, str) or not re.fullmatch(
                     r"[a-zA-Z_:][a-zA-Z0-9_:]*", metric
@@ -245,10 +257,17 @@ def install_secret(cfg):
         if bad in __import__("os").environ:
             fail("credential environment variables are refused")
     if not sys.stdin.isatty():
-        fail("an interactive controlling terminal is required")
+        fail("ordinary stdin is refused; use an interactive controlling terminal")
     import getpass
 
-    value = getpass.getpass("Enter application metrics bearer token (input hidden): ")
+    try:
+        tty = open(os.environ.get("SUGARKUBE_APP_METRICS_TTY", "/dev/tty"), "r")
+    except OSError:
+        fail("an interactive controlling terminal is required")
+    with tty:
+        if not tty.isatty():
+            fail("an interactive controlling terminal is required")
+        value = getpass.getpass("Enter application metrics bearer token (input hidden): ", stream=tty)
     if not value or "\n" in value or "\0" in value:
         fail("credential is invalid (value redacted)")
     proc1 = subprocess.Popen(
@@ -328,12 +347,17 @@ def verify(app, env):
             "json",
         ]
     )
-    ep = (sm.get("spec", {}).get("endpoints") or [{}])[0]
+    endpoints = sm.get("spec", {}).get("endpoints")
+    if not isinstance(endpoints, list) or len(endpoints) != 1:
+        fail("ServiceMonitor must expose exactly one endpoint", 1)
+    ep = endpoints[0]
     auth = ep.get("authorization", {}).get("credentials", {})
     if (
         ep.get("path") != "/metrics"
         or ep.get("interval") != cfg["serviceMonitor"]["interval"]
         or ep.get("scrapeTimeout") != cfg["serviceMonitor"]["scrapeTimeout"]
+        or ep.get("relabelings") != cfg["serviceMonitor"].get("relabelings")
+        or ep.get("authorization", {}).get("type") != cfg["serviceMonitor"]["authorization"]["type"]
         or auth.get("name") != cfg["secret"]["name"]
         or auth.get("key") != cfg["secret"]["key"]
     ):
@@ -373,7 +397,8 @@ def verify(app, env):
         for sample in result:
             validate_metric_labels(cfg, sample.get("metric", {}))
     try:
-        urllib.request.urlopen(cfg["publicMetrics"]["url"], timeout=10).read(0)
+        opener = urllib.request.build_opener(urllib.request.HTTPHandler)
+        opener.open(cfg["publicMetrics"]["url"], timeout=10).read(0)
         got = 200
     except urllib.error.HTTPError as e:
         got = e.code
@@ -384,18 +409,70 @@ def verify(app, env):
     print(f"Application metrics verified for {app} env={env}.")
 
 
+
+def validate_render(app: str, env: str, input_path: str) -> None:
+    inv = load_config()
+    cfg = inv.get("applications", {}).get(app, {}).get("environments", {}).get(env)
+    if cfg is None:
+        return
+    try:
+        raw = sys.stdin.read() if input_path == "-" else Path(input_path).read_text(encoding="utf-8")
+        converted = subprocess.run(
+            ["ruby", "-ryaml", "-rjson", "-e", "puts JSON.generate(YAML.load_stream(STDIN.read).compact)"],
+            input=raw,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout
+        docs = [d for d in json.loads(converted) if isinstance(d, dict)]
+    except (OSError, UnicodeError, subprocess.CalledProcessError, json.JSONDecodeError):
+        fail("rendered manifests are malformed (details redacted)")
+    secrets = [d for d in docs if d.get("kind") == "Secret"]
+    if secrets:
+        fail("rendered manifests must not include credential Secret resources")
+    sms = [d for d in docs if d.get("kind") == "ServiceMonitor" and d.get("metadata", {}).get("name") == cfg["serviceMonitorName"] and d.get("metadata", {}).get("namespace") == cfg["namespace"]]
+    if len(sms) != 1:
+        fail("rendered manifests must include exactly one configured ServiceMonitor")
+    sm = sms[0]
+    labels = sm.get("metadata", {}).get("labels", {})
+    if labels.get("release") != "kube-prometheus-stack":
+        fail("rendered ServiceMonitor release label mismatch")
+    spec = sm.get("spec", {})
+    if spec.get("selector", {}).get("matchLabels") != cfg["serviceMonitor"]["selectorMatchLabels"]:
+        fail("rendered ServiceMonitor selector mismatch")
+    if "namespace" in cfg["serviceMonitor"].get("relabelings", [{}])[0].get("targetLabel", ""):
+        fail("namespace must be supplied by discovery, not relabel replacement")
+    endpoints = spec.get("endpoints")
+    if not isinstance(endpoints, list) or len(endpoints) != 1:
+        fail("rendered ServiceMonitor must have exactly one endpoint")
+    ep = endpoints[0]
+    auth = ep.get("authorization", {})
+    creds = auth.get("credentials", {})
+    if (ep.get("path") != cfg["serviceMonitor"]["path"] or ep.get("interval") != cfg["serviceMonitor"]["interval"] or ep.get("scrapeTimeout") != cfg["serviceMonitor"]["scrapeTimeout"] or auth.get("type") != cfg["serviceMonitor"]["authorization"]["type"] or creds.get("name") != cfg["secret"]["name"] or creds.get("key") != cfg["secret"]["key"] or ep.get("relabelings") != cfg["serviceMonitor"]["relabelings"]):
+        fail("rendered ServiceMonitor endpoint/auth/relabeling contract mismatch")
+
 def main(argv=None):
     p = argparse.ArgumentParser()
     p.add_argument(
-        "mode", choices=["validate", "secret-check", "secret-install", "verify", "verify-all"]
+        "mode", choices=["validate", "validate-render", "secret-check", "secret-install", "verify", "verify-all"]
     )
     p.add_argument("--app")
     p.add_argument("--env", default="staging")
-    a = p.parse_args(argv)
+    p.add_argument("--input", default="-")
+    a, extra = p.parse_known_args(argv)
+    if extra:
+        print("ERROR: unexpected arguments are refused (values redacted)", file=sys.stderr)
+        return 2
     try:
         if a.mode == "validate":
             load_config()
             print("Application metrics inventory is valid.")
+            return 0
+        if a.mode == "validate-render":
+            if not a.app:
+                fail("--app is required")
+            validate_render(a.app, a.env, a.input)
+            print("Rendered application metrics contract is valid.")
             return 0
         if a.mode == "verify-all":
             inv = load_config()

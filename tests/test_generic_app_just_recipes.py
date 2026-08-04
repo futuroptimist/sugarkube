@@ -5280,10 +5280,91 @@ def test_dspace_promote_prod_guard_mismatch_fails_before_helm(
 def test_observability_app_metrics_recipes_are_declared():
     text = (REPO_ROOT / "justfile").read_text(encoding="utf-8")
     assert "observability-app-metrics-secret-install app env='staging'" in text
-    assert "app-metrics-secret-install '{{ env }}' app='{{ app }}'" in text
+    assert "observability_app_metrics.py secret-install --app '{{ app }}' --env '{{ env }}'" in text
     assert "observability-app-metrics-secret-check app env='staging'" in text
     assert "observability-app-metrics-verify app env='staging'" in text
     script = (REPO_ROOT / "scripts/observability_app_metrics.py").read_text(encoding="utf-8")
     assert "getpass.getpass" in script
+    assert "validate-render" in script
     assert "credential environment variables are refused" in script
     assert "Secret contract exists (value intentionally not read or printed)" in script
+
+# Focused declarative app-metrics verifier coverage; kept here with the just recipe
+# tests so Phase 1 remains scoped to the generic app operator surface.
+from scripts import observability_app_metrics as app_metrics
+
+APP_METRICS_CONFIG = REPO_ROOT / "platform/observability/app-metrics.json"
+APP_METRICS_SCRIPT = REPO_ROOT / "scripts/observability_app_metrics.py"
+
+
+def test_observability_app_metrics_inventory_tokenplace_contract_is_strict_and_complete():
+    doc = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))
+    app_metrics.validate_inventory(doc)
+    cfg = doc["applications"]["tokenplace"]["environments"]["staging"]
+    assert cfg["namespace"] == "tokenplace"
+    assert cfg["serviceMonitorName"] == "tokenplace"
+    assert cfg["expectedTargetCount"] == 1
+    assert cfg["secret"] == {"name": "tokenplace-staging-metrics-token", "key": "token"}
+    assert cfg["serviceMonitor"]["path"] == "/metrics"
+    assert cfg["serviceMonitor"]["authorization"]["credentials"] == cfg["secret"]
+    assert len(cfg["serviceMonitor"]["relabelings"]) == 4
+    assert cfg["targetLabels"]["namespace"] == "tokenplace"
+    assert cfg["publicMetrics"]["expectedUnauthenticatedStatus"] == 401
+    assert "tokenplace_build_info" in cfg["requiredMetricFamilies"]
+    allowed = cfg["allowedApplicationLabels"]
+    assert "status" not in allowed
+    assert allowed["status_class"] == ["1xx", "2xx", "3xx", "4xx", "5xx", "unknown"]
+    assert allowed["provider_mode"] == ["relay", "direct", "unknown"]
+    assert allowed["version"] == ["0.1.1"]
+    assert "main-deadbee" in allowed["revision"]
+    assert "token" in cfg["forbiddenApplicationLabels"]
+
+
+def test_observability_app_metrics_inventory_rejects_unknown_keys_duplicates_and_bad_status():
+    doc = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))
+    doc["applications"]["tokenplace"]["environments"]["staging"]["extra"] = True
+    with pytest.raises(SystemExit):
+        app_metrics.validate_inventory(doc)
+    doc = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))
+    metrics = doc["applications"]["tokenplace"]["environments"]["staging"]["requiredMetricFamilies"]
+    metrics.append(metrics[0])
+    with pytest.raises(SystemExit):
+        app_metrics.validate_inventory(doc)
+    doc = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))
+    doc["applications"]["tokenplace"]["environments"]["staging"]["publicMetrics"]["expectedUnauthenticatedStatus"] = 99
+    with pytest.raises(SystemExit):
+        app_metrics.validate_inventory(doc)
+
+
+def test_observability_app_metrics_inventory_rejects_non_object_selector_match_labels():
+    doc = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))
+    doc["applications"]["tokenplace"]["environments"]["staging"]["serviceMonitor"]["selectorMatchLabels"] = []
+    with pytest.raises(SystemExit) as excinfo:
+        app_metrics.validate_inventory(doc)
+    assert "selectorMatchLabels must be a nonempty object" in str(excinfo.value)
+
+
+def test_observability_app_metrics_standard_scrape_labels_are_not_forbidden_application_labels():
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"]["tokenplace"]["environments"]["staging"]
+    app_metrics.validate_metric_labels(
+        cfg,
+        {
+            "__name__": "tokenplace_build_info",
+            "instance": "10.42.0.10:8080",
+            "pod": "tokenplace-abc123",
+            "app": "tokenplace",
+            "environment": "staging",
+            "version": "0.1.1",
+            "revision": "main-deadbee",
+        },
+    )
+    with pytest.raises(SystemExit) as excinfo:
+        app_metrics.validate_metric_labels(cfg, {"customer_email": "fixture@example.invalid"})
+    assert "unbounded application metric label" in str(excinfo.value)
+
+
+def test_observability_app_metrics_verifier_has_no_tokenplace_specific_branch():
+    text = APP_METRICS_SCRIPT.read_text(encoding="utf-8")
+    assert 'if app == "tokenplace"' not in text
+    assert 'elif app == "tokenplace"' not in text
+    assert text.count("tokenplace") == 0

@@ -13,7 +13,13 @@
             "path": "/metrics",
             "interval": "30s",
             "scrapeTimeout": "10s",
-            "authorization": {"type": "Bearer"}
+            "authorization": {"type": "Bearer", "credentials": {"name": "tokenplace-staging-metrics-token", "key": "token"}},
+            "relabelings": [
+              {"targetLabel": "app", "replacement": "tokenplace"},
+              {"targetLabel": "environment", "replacement": "staging"},
+              {"targetLabel": "release", "replacement": "tokenplace"},
+              {"targetLabel": "cluster", "replacement": "sugarkube-int"}
+            ]
           },
           "targetLabels": {"app": "tokenplace", "environment": "staging", "release": "tokenplace", "cluster": "sugarkube-int", "namespace": "tokenplace"},
           "publicMetrics": {"url": "https://staging.token.place/metrics", "expectedUnauthenticatedStatus": 401},
@@ -38,14 +44,16 @@
             "environment": ["staging"],
             "release": ["tokenplace"],
             "cluster": ["sugarkube-int"],
-            "method": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
-            "route": ["/", "/healthz", "/livez", "/metrics", "/api/v1/chat/completions", "/api/v1/meta", "/relay/diagnostics"],
-            "status": ["200", "201", "202", "204", "400", "401", "404", "405", "408", "409", "422", "429", "499", "500", "502", "503", "504"],
-            "outcome": ["success", "error", "timeout", "cancelled", "evicted"],
-            "reason": ["stale_lease", "expired", "capacity", "shutdown", "unhealthy"],
-            "version": ["0.1.4"]
+            "method": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "other"],
+            "route": ["/metrics", "/api/v1/relay/requests", "/api/v1/relay/requests/cancel", "/api/v1/relay/responses", "/api/v1/relay/responses/retrieve", "/api/v1/relay/progress", "/api/v1/relay/servers/register", "/api/v1/relay/servers/unregister", "/api/v1/relay/servers/poll", "/api/v1/relay/servers/control", "/api/v1/relay/servers/next", "/healthz", "/livez", "/relay/diagnostics", "/api/v1/*", "/api/v2/*", "other"],
+            "status_class": ["1xx", "2xx", "3xx", "4xx", "5xx", "unknown"],
+            "provider_mode": ["relay", "direct", "unknown"],
+            "outcome": ["completed", "cancelled", "expired", "timed_out", "rate_limited", "dependency_failure", "failed"],
+            "reason": ["stale_lease", "unregistered", "capacity_loss"],
+            "version": ["0.1.1"],
+            "revision": ["main-deadbee"]
           },
-          "forbiddenApplicationLabels": ["authorization", "bearer", "cookie", "email", "hostname", "instance", "ip", "jwt", "node", "passwd", "passcode", "pod", "remote_addr", "secret", "session", "token", "url", "user"]
+          "forbiddenApplicationLabels": ["authorization", "bearer", "cookie", "email", "hostname", "jwt", "node", "passwd", "passcode", "remote_addr", "secret", "session", "token", "url", "user"]
         }
       }
     }
