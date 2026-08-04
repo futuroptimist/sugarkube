@@ -44,7 +44,7 @@ Use these links before changing a deployment so the workflow runs, package versi
 
 ## Find or publish GHCR image
 
-Find the successful image workflow in the token.place app repo and copy its lowercase branch-SHA tag. Semantic tags are distribution aliases, not staging or production coordinates. The GitHub Actions workflow page is where recent builds are found; the GHCR package page is where published image tags are cross-checked. Do not deploy `latest`, a bare branch name, or an environment name.
+Find the successful image workflow in the credential.place app repo and copy its lowercase branch-SHA tag. Semantic tags are distribution aliases, not staging or production coordinates. The GitHub Actions workflow page is where recent builds are found; the GHCR package page is where published image tags are cross-checked. Do not deploy `latest`, a bare branch name, or an environment name.
 
 Web UI shortcuts:
 
@@ -96,7 +96,7 @@ CHART_VERSION=$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' docs/apps/tokenplace.ve
 helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version "$CHART_VERSION"
 ```
 
-If the chart changed, bump the chart version in the token.place app repo and publish it there with [the chart workflow](https://github.com/futuroptimist/token.place/actions/workflows/ci-helm.yml); do not republish a different chart under an existing OCI version.
+If the chart changed, bump the chart version in the credential.place app repo and publish it there with [the chart workflow](https://github.com/futuroptimist/token.place/actions/workflows/ci-helm.yml); do not republish a different chart under an existing OCI version.
 
 ```bash
 gh workflow run ci-helm.yml --repo futuroptimist/token.place --ref main
@@ -164,7 +164,7 @@ The check sends an `OPTIONS` preflight and an intentionally invalid API v1 `POST
 
 ### Staging relay-compute sign-off
 
-`just app-status`, `just app-verify`, `/livez`, `/healthz`, `/`, and `/relay/diagnostics` are necessary but not sufficient for token.place promotion. Staging-to-prod promotion is blocked until the real relay-compute path passes, as defined in [the token.place Sugarkube onboarding contract](../tokenplace_sugarkube_onboarding.md#promotion-gate-ownership). Before production promotion, capture staging evidence for the real relay path:
+`just app-status`, `just app-verify`, `/livez`, `/healthz`, `/`, and `/relay/diagnostics` are necessary but not sufficient for token.place promotion. Staging-to-prod promotion is blocked until the real relay-compute path passes, as defined in [the credential.place Sugarkube onboarding contract](../tokenplace_sugarkube_onboarding.md#promotion-gate-ownership). Before production promotion, capture staging evidence for the real relay path:
 
 - [ ] A real external desktop or compute node is configured for `staging.token.place`, registers to the staging relay, and appears in staging `/healthz` and `/relay/diagnostics`.
 - [ ] A real E2EE request/response succeeds through that staging-registered compute node.
@@ -323,3 +323,45 @@ just cf-tunnel-route host=token.place
 - token.place must preserve relay-blind E2EE: relay diagnostics and logs should expose safe routing metadata only, not plaintext payloads.
 - Verify `/relay/diagnostics`, real external compute-node registration, and a real E2EE request/response before production promotion so relay-compute issues are caught in staging.
 - Keep runtime secrets and per-environment external service configuration outside Helm examples and Sugarkube app config files.
+
+## Staging authenticated metrics (Phase 1 repository support)
+
+Repository support for issue #2405 Phase 1 pins the publicly fetchable token.place chart `0.1.4` for staging metrics wiring. This repository change does **not** deploy the chart or install any Secret by itself; an operator must follow the deployment order below on the staging cluster.
+
+Verified OCI chart evidence:
+
+```bash
+just app-chart-status app=tokenplace
+helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.4
+helm pull oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.4 --debug
+```
+
+The fetched package reported immutable digest `sha256:0f16aef72500b33a598042465a9b703bf16dc7a5071b3d867c4a78d6928be1e7` and contains opt-in `metrics.enabled`, `metrics.auth.existingSecret`, `metrics.auth.secretKey`, `serviceMonitor.enabled`, `/metrics` with `authorization.credentials`, and bounded `app`, `environment`, `release`, and `cluster` relabelings.
+
+Deployment order for staging:
+
+1. Select the staging kubeconfig/context (`sugar-staging`).
+2. Install or rotate the metrics credential without exposing its value:
+
+   ```bash
+   just observability-app-metrics-secret-install app=tokenplace env=staging
+   ```
+
+3. Check the Secret/key contract without decoding or printing the credential:
+
+   ```bash
+   just observability-app-metrics-secret-check app=tokenplace env=staging
+   ```
+
+4. Deploy or upgrade token.place staging with the pinned chart and staging values.
+5. Verify Prometheus scraping and the metrics contract:
+
+   ```bash
+   just observability-app-metrics-verify app=tokenplace env=staging
+   ```
+
+The public `https://staging.token.place/metrics` endpoint is expected to return unauthenticated HTTP `401`; the verifier checks only the status and does not print the body.
+
+Rollback: preserve the existing `tokenplace-staging-metrics-token` Secret, revert `docs/apps/tokenplace.version` to the previous chart pin (`0.1.3`), deploy the previous Helm revision or chart pin, and rerun the normal staging app checks. Do not delete the metrics Secret during rollback; preserving it allows safe re-roll-forward or rotation.
+
+Dashboards, alert rules, functional schedulability, shared relay state, `/api/v1/relay/availability`, and live drills remain follow-up work requiring live metrics evidence.

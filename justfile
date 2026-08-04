@@ -3457,6 +3457,18 @@ observability-status env='':
 observability-verify env='':
     @scripts/observability_helm.sh verify '{{ env }}'
 
+# Interactively install or rotate a configured staging application metrics token (hidden input).
+observability-app-metrics-secret-install app env='staging':
+    @scripts/observability_app_metrics.py secret-install --app '{{ app }}' --env '{{ env }}'
+
+# Check a configured application metrics Secret/key contract without reading its value.
+observability-app-metrics-secret-check app env='staging':
+    @scripts/observability_app_metrics.py secret-check --app '{{ app }}' --env '{{ env }}'
+
+# Verify configured authenticated application metrics through Prometheus (read-only).
+observability-app-metrics-verify app env='staging':
+    @scripts/observability_app_metrics.py verify --app '{{ app }}' --env '{{ env }}'
+
 # Prove through the Grafana API that the staging dashboard is loaded (read-only).
 observability-dashboard-verify env='':
     @scripts/observability_helm.sh dashboard-verify '{{ env }}'

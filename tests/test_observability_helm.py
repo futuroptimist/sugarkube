@@ -729,6 +729,8 @@ case "$*" in
   *"get servicemonitor dspace"*"metadata.labels.release"*) [ "$KUBECTL_MODE" = wrong-release ] && echo wrong || echo kube-prometheus-stack ;;
   *"get servicemonitor dspace"*"bearerTokenSecret.name"*) [ "$KUBECTL_MODE" != missing-secret-ref ] && echo dspace-token ;;
   *"get secret dspace-token -o name"*) [ "$KUBECTL_MODE" != missing-secret ] || exit 44; echo secret/dspace-token ;;
+  *"get secret tokenplace-staging-metrics-token -o go-template="*) echo present ;;
+  *"get servicemonitor tokenplace -o json"*) printf '%s\n' '{"spec":{"selector":{"matchLabels":{"app.kubernetes.io/instance":"tokenplace","app.kubernetes.io/name":"tokenplace"}},"endpoints":[{"path":"/metrics","interval":"30s","scrapeTimeout":"10s","authorization":{"credentials":{"name":"tokenplace-staging-metrics-token","key":"token"}}}]}}' ;;
   *"get --request-timeout="*" --raw "*)
     [ "$KUBECTL_MODE" != query-fail ] || exit 45
     [ "$TARGET_RESPONSE_DELAY" = 0 ] || /bin/sleep "$TARGET_RESPONSE_DELAY"
@@ -824,6 +826,8 @@ printf '%s' "$code"
         "SUGARKUBE_WATCHDOG_TEST_ALLOW_SHORT_OBSERVATION": "1",
         "SUGARKUBE_WATCHDOG_TTY": str(tmp_path / "watchdog-tty"),
         "SUGARKUBE_WATCHDOG_TEST_NONTTY": "1",
+        "SUGARKUBE_APP_METRICS_PUBLIC_STATUS_STUB": "401",
+        "SUGARKUBE_APP_METRICS_VERIFY_ALL_STUB": "1",
         "WATCHDOG_CREATE_STDIN": str(tmp_path / "watchdog-create-stdin"),
         "WATCHDOG_APPLY_STDIN": str(tmp_path / "watchdog-apply-stdin"),
         "WATCHDOG_SILENCE_PAYLOAD": str(tmp_path / "watchdog-silence-payload"),
@@ -2217,3 +2221,25 @@ def test_watchdog_silence_api_failures_do_not_expose_fixture_contents(tmp_path, 
     assert "response redacted" in output
     if command == "watchdog-drill-clear":
         assert not (tmp_path / "watchdog-silence-deletions").exists()
+
+
+def test_tokenplace_staging_metrics_values_and_pin():
+    assert (ROOT / "docs/apps/tokenplace.version").read_text(encoding="utf-8").splitlines()[
+        -1
+    ] == "0.1.4"
+    values = (ROOT / "docs/examples/tokenplace.values.staging.yaml").read_text(encoding="utf-8")
+    for expected in [
+        "metrics:",
+        "enabled: true",
+        "existingSecret: tokenplace-staging-metrics-token",
+        "secretKey: token",
+        "serviceMonitor:",
+        "interval: 30s",
+        "scrapeTimeout: 10s",
+        "release: kube-prometheus-stack",
+        "app: tokenplace",
+        "environment: staging",
+        "cluster: sugarkube-int",
+    ]:
+        assert expected in values
+    assert "kind: Secret" not in values
