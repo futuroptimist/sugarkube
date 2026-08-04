@@ -3490,6 +3490,19 @@ observability-watchdog-drill-clear env='':
     @scripts/observability_helm.sh watchdog-drill-clear '{{ env }}'
 
 # Render the pinned staging blackbox exporter and Probe manifests (read-only).
+
+# Interactively install or rotate a staging application metrics bearer token (hidden input).
+observability-app-metrics-secret-install app env='staging':
+    @scripts/observability_helm.sh app-metrics-secret-install '{{ env }}' 'app={{ app }}'
+
+# Check a staging application metrics Secret/key contract without reading its value.
+observability-app-metrics-secret-check app env='staging':
+    @scripts/observability_helm.sh app-metrics-secret-check '{{ env }}' 'app={{ app }}'
+
+# Verify configured staging application metrics through Prometheus and the public 401 contract.
+observability-app-metrics-verify app env='staging':
+    @scripts/observability_helm.sh app-metrics-verify '{{ env }}' 'app={{ app }}'
+
 observability-blackbox-render env='':
     @scripts/observability_blackbox.sh render '{{ env }}'
 

@@ -17,7 +17,7 @@ PAGERDUTY_SECRET="alertmanager-pagerduty"
 WATCHDOG_SECRET="alertmanager-healthchecks-watchdog"
 ALERTMANAGER_VALIDATOR="${ROOT}/scripts/verify_observability_alertmanager.rb"
 
-usage() { echo "Usage: $0 <render|install|upgrade|status|verify|dashboard-verify|pagerduty-test|watchdog-secret-install|watchdog-secret-check|watchdog-verify|watchdog-drill-create|watchdog-drill-status|watchdog-drill-clear> env=staging [fire|resolve]" >&2; }
+usage() { echo "Usage: $0 <render|install|upgrade|status|verify|dashboard-verify|pagerduty-test|watchdog-secret-install|watchdog-secret-check|watchdog-verify|watchdog-drill-create|watchdog-drill-status|watchdog-drill-clear|app-metrics-secret-install|app-metrics-secret-check|app-metrics-verify> env=staging [app=<name>]" >&2; }
 normalize_env() {
   local raw="${1:-}"
   while [[ "${raw}" == env=* ]]; do raw="${raw#env=}"; done
@@ -67,6 +67,7 @@ render_to() {
   helm template "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}" --set-file "${DASHBOARD_VALUE}=${DASHBOARD}" >"${out}"
   validate_rendered_dashboard "${out}"
   validate_rendered_alertmanager "${out}"
+  python3 "${ROOT}/scripts/observability_app_metrics.py" validate-config >/dev/null
 }
 assert_pagerduty_secret() {
   local present
@@ -135,6 +136,7 @@ watchdog_secret_install() {
   echo "Watchdog Secret installed or rotated (value not displayed)."
 }
 
+verify_app_metrics_all() { python3 "${ROOT}/scripts/observability_app_metrics.py" verify-all --env staging; }
 watchdog_live_check() (
   require_tools kubectl python3 ruby sleep
   assert_context
@@ -538,6 +540,7 @@ if len(claims) != 1 or claims[0].get("status", {}).get("phase") != "Bound" or cl
   echo "DSPACE ServiceMonitor secret reference exists (value intentionally not printed)."
 
   verify_dspace_targets
+  verify_app_metrics_all
   echo "Grafana LAN URL: ${GRAFANA_URL} (same NodePort is available through the other staging nodes)"
 )
 
@@ -736,4 +739,6 @@ if [[ "${cmd}" == watchdog-drill-create ]]; then
   trap 'exit 130' INT
   trap 'exit 143' TERM
 fi
-case "${cmd}" in render) render ;; install) install_release ;; upgrade) upgrade_release ;; status) status ;; verify) verify ;; dashboard-verify) dashboard_verify ;; pagerduty-test) pagerduty_test "${2:-${1:-}}" ;; watchdog-secret-install) watchdog_secret_install "${@:2}" ;; watchdog-secret-check) watchdog_secret_check ;; watchdog-verify) watchdog_live_check ;; watchdog-drill-create) watchdog_silence_create ;; watchdog-drill-status) watchdog_silence_list ;; watchdog-drill-clear) watchdog_silence_clear ;; *) usage; exit 2 ;; esac
+app_arg="${2:-}"
+while [[ "${app_arg}" == app=* ]]; do app_arg="${app_arg#app=}"; done
+case "${cmd}" in render) render ;; install) install_release ;; upgrade) upgrade_release ;; status) status ;; verify) verify ;; dashboard-verify) dashboard_verify ;; pagerduty-test) pagerduty_test "${2:-${1:-}}" ;; watchdog-secret-install) watchdog_secret_install "${@:2}" ;; watchdog-secret-check) watchdog_secret_check ;; watchdog-verify) watchdog_live_check ;; app-metrics-secret-install) assert_context; python3 "${ROOT}/scripts/observability_app_metrics.py" secret-install --app "${app_arg}" --env staging ;; app-metrics-secret-check) assert_context; python3 "${ROOT}/scripts/observability_app_metrics.py" secret-check --app "${app_arg}" --env staging ;; app-metrics-verify) python3 "${ROOT}/scripts/observability_app_metrics.py" verify --app "${app_arg}" --env staging ;; watchdog-drill-create) watchdog_silence_create ;; watchdog-drill-status) watchdog_silence_list ;; watchdog-drill-clear) watchdog_silence_clear ;; *) usage; exit 2 ;; esac
