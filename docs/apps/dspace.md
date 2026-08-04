@@ -246,6 +246,12 @@ contract explicitly to the smoke runner. This is not a fallback: any coordinate 
 modern contract and a modern identity failure remains fatal. The exception changes neither the
 immutable recovery coordinates nor candidate approval.
 
+The exact immutable DSPACE `3.1.0` restoration artifact (chart `3.1.1`, source
+`018687f5a7f4de45508c6e36eb28afb3e44da24d`) also predates `build-info-v1` and is explicitly
+allowlisted by its complete release tuple for the same strict legacy contract. This is not a
+general fallback: coordinate drift and all future releases remain subject to the modern identity
+contract.
+
 Prepare a DSPACE checkout with `pnpm install` and `pnpm exec playwright install chromium`. The
 runner must be executable. It mocks provider transport, so no token.place or OpenAI credentials
 are required or accepted:
