@@ -54,6 +54,21 @@ def recovery_manifest(tmp_path: Path, **changes: object) -> Path:
     return path
 
 
+def legacy_310_manifest(tmp_path: Path, **changes: object) -> Path:
+    value = {
+        **verifier.LEGACY_310_COORDINATES,
+        "app": "dspace",
+        "recordType": "candidate",
+        "environment": "staging",
+        "approvedAt": "2026-07-30T00:00:00Z",
+        "approvedBy": "release-test",
+        **changes,
+    }
+    path = tmp_path / "legacy-3.1.0.json"
+    path.write_text(json.dumps(value))
+    return path
+
+
 def test_capabilities_schema_and_order(capsys: pytest.CaptureFixture[str]) -> None:
     assert (
         verifier.main(
@@ -97,17 +112,25 @@ def _verify_setup(
     rollback: bool = False,
     overrides: dict[str, object] | None = None,
     legacy: bool = False,
+    legacy_310: bool = False,
 ) -> tuple[Namespace, list[list[str]]]:
     """Install a complete, mutable fake cluster and return verifier arguments."""
+    if legacy and legacy_310:
+        raise ValueError("legacy and legacy_310 are mutually exclusive")
+
     override = overrides or {}
     smoke = tmp_path / "smoke"
     smoke.write_text("#!/bin/sh\nexit 0\n")
     smoke.chmod(0o700)
-    revision = RECOVERY_SHA if legacy else SHA
-    digest = str(verifier.LEGACY_RECOVERY_COORDINATES["imageDigest"]) if legacy else DIGEST
-    image_tag = "main-1a31a56" if legacy else "main-abcdef0"
-    version = "3.0.1" if legacy else "3.1.0"
-    chart_version = "3.0.2" if legacy else "3.1.0"
+    coordinates = (
+        verifier.LEGACY_310_COORDINATES if legacy_310 else verifier.LEGACY_RECOVERY_COORDINATES
+    )
+    is_legacy = legacy or legacy_310
+    revision = str(coordinates["sourceRevision"]) if is_legacy else SHA
+    digest = str(coordinates["imageDigest"]) if is_legacy else DIGEST
+    image_tag = str(coordinates["imageTag"]) if is_legacy else "main-abcdef0"
+    version = str(coordinates["applicationVersion"]) if is_legacy else "3.1.0"
+    chart_version = str(coordinates["chartVersion"]) if is_legacy else "3.1.0"
     canonical = f"ghcr.io/democratizedspace/dspace:{image_tag}"
     declared = f"{canonical}@{digest}" if rollback else canonical
 
@@ -177,7 +200,7 @@ def _verify_setup(
     public_build = override.get("public_build", build())
     default_html = (
         "<!doctype html><html><head><title>DSPACE</title></head><body></body></html>"
-        if legacy
+        if is_legacy
         else f'<meta name="dspace-build-revision" content="{SHA}">'
     )
     public_html = override.get("public_html", default_html)
@@ -293,12 +316,19 @@ def _verify_setup(
         )
 
     monkeypatch.setattr(verifier.subprocess, "run", smoke_run)
+    if legacy_310:
+        manifest_path = legacy_310_manifest(tmp_path)
+    elif legacy:
+        manifest_path = recovery_manifest(tmp_path)
+    else:
+        manifest_path = manifest(tmp_path, provider)
+
     return (
         Namespace(
             environment="staging",
             release="dspace",
             namespace="dspace",
-            manifest=recovery_manifest(tmp_path) if legacy else manifest(tmp_path, provider),
+            manifest=manifest_path,
             application_version=None,
             source_revision=None,
             provider=None,
@@ -310,6 +340,13 @@ def _verify_setup(
         ),
         seen,
     )
+
+
+def test_verify_setup_rejects_conflicting_legacy_flags(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        _verify_setup(monkeypatch, tmp_path, legacy=True, legacy_310=True)
 
 
 @pytest.mark.parametrize("provider,has_token_args", [("token-place", True), ("openai", False)])
@@ -654,10 +691,43 @@ def test_exact_recovery_uses_legacy_contract_and_truthful_journeys(
     ]
 
 
+def test_exact_310_token_place_uses_legacy_contract_and_truthful_journeys(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    args, seen = _verify_setup(monkeypatch, tmp_path, legacy_310=True)
+    result = verifier.verify(args)
+    smoke_argv = seen[-1]
+    assert (
+        smoke_argv[smoke_argv.index("--identity-contract") + 1] == verifier.LEGACY_IDENTITY_CONTRACT
+    )
+    assert smoke_argv[smoke_argv.index("--expected-provider") + 1] == "token-place"
+    assert (
+        smoke_argv[smoke_argv.index("--expected-token-place-origin") + 1] == "https://token.example"
+    )
+    assert smoke_argv[smoke_argv.index("--expected-token-place-model") + 1] == "model-a"
+    assert result["journeys"] == [
+        {"name": "/build-meta.json", "passed": True},
+        {"name": "/", "passed": True},
+        {"name": "/chat", "passed": True},
+    ]
+
+
 @pytest.mark.parametrize("field", list(verifier.LEGACY_RECOVERY_COORDINATES))
 def test_any_recovery_coordinate_drift_prevents_legacy_selection(field: str) -> None:
     candidate = dict(verifier.LEGACY_RECOVERY_COORDINATES)
     candidate[field] = "different"
+    assert verifier.identity_contract(candidate) == verifier.MODERN_IDENTITY_CONTRACT
+
+
+@pytest.mark.parametrize("field", list(verifier.LEGACY_310_COORDINATES))
+def test_any_310_coordinate_drift_prevents_legacy_selection(field: str) -> None:
+    candidate = dict(verifier.LEGACY_310_COORDINATES)
+    candidate[field] = "different"
+    assert verifier.identity_contract(candidate) == verifier.MODERN_IDENTITY_CONTRACT
+
+
+def test_unrelated_modern_manifest_uses_modern_contract(tmp_path: Path) -> None:
+    candidate = json.loads(manifest(tmp_path).read_text())
     assert verifier.identity_contract(candidate) == verifier.MODERN_IDENTITY_CONTRACT
 
 
@@ -799,6 +869,64 @@ def test_legacy_agreement_and_root_evidence_fail_closed(
     category: str,
 ) -> None:
     args, _ = _verify_setup(monkeypatch, tmp_path, legacy=True, overrides=overrides)
+    with pytest.raises(verifier.VerificationError, match=category):
+        verifier.verify(args)
+
+
+@pytest.mark.parametrize(
+    "overrides,category",
+    [
+        (
+            {
+                "direct_meta": {
+                    "dspace-1": json.dumps(
+                        {
+                            "gitSha": RECOVERY_SHA,
+                            "generatedAt": "2026-08-01T12:00:00Z",
+                            "source": "dspace",
+                        }
+                    )
+                }
+            },
+            "direct identity",
+        ),
+        (
+            {
+                "public_meta": json.dumps(
+                    {
+                        "gitSha": verifier.LEGACY_310_COORDINATES["sourceRevision"],
+                        "generatedAt": "2026-08-01T12:00:00Z",
+                        "source": "dspace",
+                        "extra": True,
+                    }
+                )
+            },
+            "public identity",
+        ),
+        (
+            {
+                "direct_meta": {
+                    "dspace-2": json.dumps(
+                        {
+                            "gitSha": verifier.LEGACY_310_COORDINATES["sourceRevision"],
+                            "generatedAt": "2026-08-02T12:00:00Z",
+                            "source": "dspace",
+                        }
+                    )
+                }
+            },
+            "pod/replica identity",
+        ),
+    ],
+    ids=("wrong-sha", "extra-field", "replica-disagreement"),
+)
+def test_310_legacy_metadata_failures_remain_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    overrides: dict[str, object],
+    category: str,
+) -> None:
+    args, _ = _verify_setup(monkeypatch, tmp_path, legacy_310=True, overrides=overrides)
     with pytest.raises(verifier.VerificationError, match=category):
         verifier.verify(args)
 
