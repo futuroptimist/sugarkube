@@ -2217,3 +2217,17 @@ def test_watchdog_silence_api_failures_do_not_expose_fixture_contents(tmp_path, 
     assert "response redacted" in output
     if command == "watchdog-drill-clear":
         assert not (tmp_path / "watchdog-silence-deletions").exists()
+
+def test_tokenplace_staging_metrics_values_are_secret_references_only():
+    values = (ROOT / "docs/examples/tokenplace.values.staging.yaml").read_text()
+    assert "enabled: true" in values
+    assert "existingSecret: tokenplace-staging-metrics-token" in values
+    assert "secretKey: token" in values
+    assert "release: kube-prometheus-stack" in values
+    assert "scrapeTimeout: 10s" in values
+    assert "kind: Secret" not in values
+    assert "TOKENPLACE_METRICS_TOKEN" not in values
+
+
+def test_tokenplace_chart_pin_is_published_metrics_version():
+    assert (ROOT / "docs/apps/tokenplace.version").read_text().strip().endswith("0.1.4")

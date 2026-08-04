@@ -46,6 +46,11 @@ HEALTHCHECKS_UUID = re.compile(
 SAFE_PLACEHOLDERS = (
     re.compile(r"^\+\s*passwordKey:\s*admin-password\s*$"),
     re.compile(r"^\+\s*-\s*Password key:\s*`admin-password`\.\s*$"),
+    re.compile(r"^\+\s*\"key\":\s*\"token\",?\s*$"),
+    re.compile(r"^\+\s*secretKey:\s*token\s*$"),
+    re.compile(r"^\+\s*\"forbiddenApplicationLabels\":\s*\[.*\"password\".*\"token\".*\],?\s*$"),
+    re.compile(r"^\+\s*\"password\",?\s*$"),
+    re.compile(r"^\+\s*\"token\",?\s*$"),
 )
 
 
