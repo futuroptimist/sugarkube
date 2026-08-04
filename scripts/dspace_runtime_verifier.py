@@ -47,7 +47,7 @@ BUILD_FIELDS = {"version", "revision", "shortRevision", "image"}
 LEGACY_BUILD_FIELDS = {"gitSha", "generatedAt", "source"}
 MODERN_IDENTITY_CONTRACT = "build-info-v1"
 LEGACY_IDENTITY_CONTRACT = "legacy-build-meta-v1"
-LEGACY_RECOVERY_COORDINATES = {
+LEGACY_DSPACE_3_0_1_COORDINATES = {
     "schemaVersion": 2,
     "applicationVersion": "3.0.1",
     "sourceRevision": "1a31a569aff2dbeb238e8c2688b9e85140d2077d",
@@ -59,6 +59,22 @@ LEGACY_RECOVERY_COORDINATES = {
     "semanticTag": "v3.0.1",
     "expectedDefaultChatProvider": "openai",
 }
+LEGACY_DSPACE_3_1_0_COORDINATES = {
+    "schemaVersion": 2,
+    "applicationVersion": "3.1.0",
+    "sourceRevision": "018687f5a7f4de45508c6e36eb28afb3e44da24d",
+    "chartSourceRevision": "719644999f284935f792dbe530511278643aa2ef",
+    "imageTag": "main-018687f",
+    "imageDigest": "sha256:2b95b7fdccdd011553c8d8617e3090ee27323996c532148fdb147cb9fd6e1b6c",
+    "chartVersion": "3.1.1",
+    "chartDigest": "sha256:e1f8ab8860e55ee3c8b8ca8cf7bce6ee7ae9c5dbc81ad8bf82b204b51773783b",
+    "semanticTag": "v3.1.0",
+    "expectedDefaultChatProvider": "token-place",
+}
+APPROVED_LEGACY_IDENTITY_COORDINATES = (
+    LEGACY_DSPACE_3_0_1_COORDINATES,
+    LEGACY_DSPACE_3_1_0_COORDINATES,
+)
 META_RE = re.compile(
     r'<meta\s+[^>]*name=["\']dspace-build-revision["\'][^>]*content=["\']([^"\']+)',
     re.IGNORECASE,
@@ -228,8 +244,11 @@ def marker(raw: bytes, revision: str, category: str) -> None:
 
 
 def identity_contract(manifest: dict[str, Any]) -> str:
-    """Select legacy identity only for the complete approved recovery tuple."""
-    if all(manifest.get(key) == value for key, value in LEGACY_RECOVERY_COORDINATES.items()):
+    """Select legacy identity only for a complete approved immutable tuple."""
+    if any(
+        all(manifest.get(key) == value for key, value in coordinates.items())
+        for coordinates in APPROVED_LEGACY_IDENTITY_COORDINATES
+    ):
         return LEGACY_IDENTITY_CONTRACT
     return MODERN_IDENTITY_CONTRACT
 
