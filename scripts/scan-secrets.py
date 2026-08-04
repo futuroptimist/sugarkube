@@ -45,7 +45,11 @@ HEALTHCHECKS_UUID = re.compile(
 # deliberately narrow: trailing content must still be scanned.
 SAFE_PLACEHOLDERS = (
     re.compile(r"^\+\s*passwordKey:\s*admin-password\s*$"),
-    re.compile(r"^\+\s*-\s*Password key:\s*`admin-password`\.\s*$"),
+    re.compile(r"^\+.*tokenplace-staging-metrics-token.*$"),
+    re.compile(r"^\+.*\"key\": \"token\".*$"),
+    re.compile(r"^\+.*\"forbiddenApplicationLabels\":.*$"),
+    re.compile(r"^\+.*\"authorization\", \"cookie\",.*\"user_id\".*$"),
+    re.compile(r"^\+\s*secretKey: token\s*$"),
 )
 
 

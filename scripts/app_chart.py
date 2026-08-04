@@ -84,7 +84,7 @@ class ReleaseInputs:
 
 def safe_yaml_documents(text: str) -> list[object]:
     """Parse JSON-compatible YAML via Psych's AST, rejecting tags and aliases."""
-    ruby = r'''
+    ruby = r"""
 require "psych"
 require "json"
 scanner = Psych::ScalarScanner.new(Psych::ClassLoader::Restricted.new([], []))
@@ -103,7 +103,7 @@ def convert(node, scanner)
   end
 end
 puts JSON.generate(convert(Psych.parse_stream(STDIN.read), scanner))
-'''
+"""
     try:
         parsed = subprocess.run(
             ["ruby", "-e", ruby], input=text, capture_output=True, text=True, check=False
@@ -158,7 +158,9 @@ def release_associated(
 ) -> bool:
     metadata = document.get("metadata") if isinstance(document.get("metadata"), dict) else {}
     labels = metadata.get("labels") if isinstance(metadata.get("labels"), dict) else {}
-    annotations = metadata.get("annotations") if isinstance(metadata.get("annotations"), dict) else {}
+    annotations = (
+        metadata.get("annotations") if isinstance(metadata.get("annotations"), dict) else {}
+    )
     return (
         scalar(labels.get("app.kubernetes.io/instance")) == release
         or scalar(labels.get("release")) == release
@@ -185,7 +187,9 @@ def dspace_production_metrics_token_is_unsafe(
     if not contains_exact_scalar(document, {"METRICS_TOKEN"}):
         return False
     if metrics_enabled or scalar(document.get("kind")) not in {
-        "Deployment", "StatefulSet", "DaemonSet"
+        "Deployment",
+        "StatefulSet",
+        "DaemonSet",
     }:
         return True
     found, containers = nested_value(document, ("spec", "template", "spec", "containers"))
@@ -205,8 +209,10 @@ def dspace_production_metrics_token_is_unsafe(
             # Chart 3.0.2 uses the pod UID as a safe, unpredictable token when metrics are off.
             if (
                 set(entry) == {"name", "valueFrom"}
-                and isinstance(value_from, dict) and set(value_from) == {"fieldRef"}
-                and isinstance(field_ref, dict) and set(field_ref) == {"fieldPath"}
+                and isinstance(value_from, dict)
+                and set(value_from) == {"fieldRef"}
+                and isinstance(field_ref, dict)
+                and set(field_ref) == {"fieldPath"}
                 and field_ref.get("fieldPath") == "metadata.uid"
             ):
                 safe_entries.add(id(entry))
@@ -229,7 +235,6 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
     except (ValueError, json.JSONDecodeError) as error:
         return [f"rendered output is not safe structural YAML: {error}"]
     workloads: list[tuple[str, str]] = []
-    kinds: set[str] = set()
     ingress_hosts: set[str] = set()
     service_monitors: list[dict[str, object]] = []
     candidates = {inputs.app, inputs.release, *APP_CONTAINER_NAMES.get(inputs.app, set())}
@@ -244,16 +249,11 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
         metadata = document.get("metadata") if isinstance(document.get("metadata"), dict) else {}
         name = scalar(metadata.get("name"))
         namespace = scalar(metadata.get("namespace"))
-        labels = metadata.get("labels") if isinstance(metadata.get("labels"), dict) else {}
-        annotations = (
-            metadata.get("annotations") if isinstance(metadata.get("annotations"), dict) else {}
-        )
         associated = release_associated(
             document,
             inputs.release,
             allow_name=(
-                inputs.app != "dspace"
-                and kind not in {"Deployment", "StatefulSet", "DaemonSet"}
+                inputs.app != "dspace" and kind not in {"Deployment", "StatefulSet", "DaemonSet"}
             ),
         )
         if inputs.app == "dspace" and kind == "Secret":
@@ -272,10 +272,15 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
                 found, containers = nested_value(
                     document, ("spec", "template", "spec", "containers")
                 )
-                intended = [
-                    item
-                    for item in containers if isinstance(item, dict) and scalar(item.get("name")) in candidates
-                ] if found and isinstance(containers, list) else []
+                intended = (
+                    [
+                        item
+                        for item in containers
+                        if isinstance(item, dict) and scalar(item.get("name")) in candidates
+                    ]
+                    if found and isinstance(containers, list)
+                    else []
+                )
                 intended_container_found = intended_container_found or bool(intended)
                 for item in intended:
                     if not scalar(item.get("image")).endswith(expected_suffix):
@@ -346,13 +351,91 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
             )
         ):
             errors.append("DSPACE production rendered staging-only metrics configuration")
+    errors.extend(validate_app_metrics_render(manifest, inputs))
+    return errors
+
+
+def app_metrics_contract(app: str, env: str) -> dict[str, object] | None:
+    path = REPO_ROOT / "platform/observability/app-metrics.json"
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    cfg = data.get("applications", {}).get(app, {}).get("environments", {}).get(env)
+    return cfg if isinstance(cfg, dict) else None
+
+
+def validate_app_metrics_render(manifest: str, inputs: ReleaseInputs) -> list[str]:
+    cfg = app_metrics_contract(inputs.app, inputs.env)
+    if not cfg:
+        return []
+    errors: list[str] = []
+    secret = cfg.get("metricsSecret") if isinstance(cfg.get("metricsSecret"), dict) else {}
+    endpoint = cfg.get("endpoint") if isinstance(cfg.get("endpoint"), dict) else {}
+    labels = cfg.get("targetLabels") if isinstance(cfg.get("targetLabels"), dict) else {}
+    expected_name = scalar(secret.get("name"))
+    expected_key = scalar(secret.get("key"))
+    monitors = [
+        doc
+        for doc in safe_yaml_documents(manifest)
+        if isinstance(doc, dict)
+        and scalar(doc.get("kind")) == "ServiceMonitor"
+        and release_associated(doc, inputs.release, allow_name=True)
+    ]
+    if any(
+        isinstance(doc, dict) and scalar(doc.get("kind")) == "Secret"
+        for doc in safe_yaml_documents(manifest)
+    ):
+        errors.append(
+            "configured application metrics must render Secret references, not Secret resources"
+        )
+    if len(monitors) != 1:
+        errors.append("configured application metrics must render exactly one ServiceMonitor")
+        return errors
+    monitor = monitors[0]
+    metadata = monitor.get("metadata") if isinstance(monitor.get("metadata"), dict) else {}
+    meta_labels = metadata.get("labels") if isinstance(metadata.get("labels"), dict) else {}
+    if scalar(meta_labels.get("release")) != "kube-prometheus-stack":
+        errors.append(
+            "configured application metrics ServiceMonitor must be selected by kube-prometheus-stack"
+        )
+    spec = monitor.get("spec") if isinstance(monitor.get("spec"), dict) else {}
+    endpoints = spec.get("endpoints")
+    if not isinstance(endpoints, list) or len(endpoints) != 1 or not isinstance(endpoints[0], dict):
+        errors.append("configured application metrics ServiceMonitor must render one endpoint")
+        return errors
+    ep = endpoints[0]
+    if scalar(ep.get("path")) != scalar(endpoint.get("path")):
+        errors.append("configured application metrics endpoint path mismatch")
+    if scalar(ep.get("interval")) != scalar(endpoint.get("interval")):
+        errors.append("configured application metrics endpoint interval mismatch")
+    if scalar(ep.get("scrapeTimeout")) != scalar(endpoint.get("scrapeTimeout")):
+        errors.append("configured application metrics endpoint scrape timeout mismatch")
+    auth = ep.get("authorization") if isinstance(ep.get("authorization"), dict) else {}
+    creds = auth.get("credentials") if isinstance(auth.get("credentials"), dict) else {}
+    if scalar(creds.get("name")) != expected_name or scalar(creds.get("key")) != expected_key:
+        errors.append(
+            "configured application metrics authorization.credentials Secret reference mismatch"
+        )
+    rendered_labels = {}
+    for item in ep.get("relabelings", []) if isinstance(ep.get("relabelings"), list) else []:
+        if isinstance(item, dict) and scalar(item.get("action")) == "replace":
+            rendered_labels[scalar(item.get("targetLabel"))] = scalar(item.get("replacement"))
+    if rendered_labels != {str(k): str(v) for k, v in labels.items()}:
+        errors.append("configured application metrics target relabelings mismatch")
     return errors
 
 
 def parse_chart_yaml(text: str) -> dict[str, str]:
     documents = safe_yaml_documents(text)
     document = documents[0] if documents else {}
-    return {str(key): scalar(value) for key, value in document.items()} if isinstance(document, dict) else {}
+    return (
+        {str(key): scalar(value) for key, value in document.items()}
+        if isinstance(document, dict)
+        else {}
+    )
 
 
 def semver_key(v: str) -> tuple[int, int, int, int, tuple[object, ...]]:
@@ -422,13 +505,15 @@ def deployment_app_container_env_sets(
             found.append(
                 (
                     container_name,
-                    {
-                        scalar(item.get("name"))
-                        for item in envs
-                        if isinstance(item, dict) and scalar(item.get("name"))
-                    }
-                    if isinstance(envs, list)
-                    else set(),
+                    (
+                        {
+                            scalar(item.get("name"))
+                            for item in envs
+                            if isinstance(item, dict) and scalar(item.get("name"))
+                        }
+                        if isinstance(envs, list)
+                        else set()
+                    ),
                 )
             )
     return found
@@ -488,7 +573,9 @@ def expected_ingress_host(values: tuple[str, ...], explicit: str) -> str:
     host = scalar(resolved_host)
     enabled = scalar(resolved_enabled).lower()
     if enabled == "true" and not host:
-        raise SystemExit("ERROR: ingress.enabled is true but no nonempty ingress.host was resolved.")
+        raise SystemExit(
+            "ERROR: ingress.enabled is true but no nonempty ingress.host was resolved."
+        )
     return host if enabled != "false" else ""
 
 
@@ -689,7 +776,9 @@ def cmd_resolve_host(args: argparse.Namespace) -> int:
     try:
         host = expected_ingress_host(values, args.host)
     except (ValueError, json.JSONDecodeError, SystemExit) as error:
-        print(f"ERROR: values parsing failed while resolving ingress host: {error}", file=sys.stderr)
+        print(
+            f"ERROR: values parsing failed while resolving ingress host: {error}", file=sys.stderr
+        )
         return 1
     print(host)
     return 0

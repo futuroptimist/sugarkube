@@ -538,6 +538,7 @@ if len(claims) != 1 or claims[0].get("status", {}).get("phase") != "Bound" or cl
   echo "DSPACE ServiceMonitor secret reference exists (value intentionally not printed)."
 
   verify_dspace_targets
+  python3 "${ROOT}/scripts/observability_app_metrics.py" verify-all --env staging
   echo "Grafana LAN URL: ${GRAFANA_URL} (same NodePort is available through the other staging nodes)"
 )
 

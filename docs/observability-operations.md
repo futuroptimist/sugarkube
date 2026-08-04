@@ -459,3 +459,19 @@ PagerDuty incident recovers and resolves. Re-run live verification.
 > pause the Healthchecks check or its PagerDuty integration. Otherwise rollback itself generates a
 > page. After pausing, perform the documented Helm rollback, verify the intended prior structure,
 > and retain or remove the Kubernetes Secret only according to that revision's contract.
+
+## Declarative application metrics verification
+
+Sugarkube keeps application metrics contracts in `platform/observability/app-metrics.json` and verifies them with the generic, app-agnostic `scripts/observability_app_metrics.py` helper. The first configured consumer is token.place staging.
+
+Operator commands:
+
+```bash
+just observability-app-metrics-secret-install app=tokenplace env=staging
+just observability-app-metrics-secret-check app=tokenplace env=staging
+just observability-app-metrics-verify app=tokenplace env=staging
+```
+
+The Secret installer is staging-only, requires the exact `sugar-staging` context, reads the credential only from an interactive controlling terminal with hidden input, and pipes the value directly into `kubectl create secret --from-file ... --dry-run=client -o yaml | kubectl apply -f -`. Do not pass metrics credentials through arguments, environment variables, ordinary stdin, shell history, temporary files, docs, logs, or fixtures.
+
+`just observability-verify env=staging` continues to run the existing DSPACE verification and now also verifies every application declared in the metrics inventory. Repository support alone does not deploy token.place metrics or install its Secret.
