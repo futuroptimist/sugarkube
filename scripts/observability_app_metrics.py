@@ -407,12 +407,28 @@ def appcfg(app, env):
 
 
 def check_secret(cfg):
-    data = kjson(
-        ["kubectl", "-n", cfg["namespace"], "get", "secret", cfg["secret"]["name"], "-o", "json"]
-    ).get("data", {})
-    if cfg["secret"]["key"] not in data or not data[cfg["secret"]["key"]]:
-        fail("Secret/key contract is absent or empty (value not read or printed)", 1)
-    print("Application metrics Secret contract exists (value intentionally not read or printed).")
+    # Key truthiness is evaluated inside kubectl so Python never receives Secret data.
+    template = (
+        '{{printf "%s\\t%s\\t" .metadata.namespace .metadata.name}}'
+        f'{{{{if index .data "{cfg["secret"]["key"]}"}}}}nonempty{{{{else}}}}missing{{{{end}}}}'
+    )
+    output = run(
+        [
+            "kubectl",
+            "-n",
+            cfg["namespace"],
+            "get",
+            "secret",
+            cfg["secret"]["name"],
+            "-o",
+            "go-template",
+            "--template",
+            template,
+        ]
+    )
+    if output.split("\t") != [cfg["namespace"], cfg["secret"]["name"], "nonempty"]:
+        fail("Secret/key contract validation failed (response redacted; value not returned)", 1)
+    print("Application metrics Secret contract exists (value was not returned to the verifier).")
 
 
 def install_secret(cfg):

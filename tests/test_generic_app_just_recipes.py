@@ -5334,7 +5334,7 @@ def test_observability_app_metrics_recipes_are_declared():
     assert "getpass.getpass" in script
     assert "validate-render" in script
     assert "credential environment variables are refused" in script
-    assert "Secret contract exists (value intentionally not read or printed)" in script
+    assert "Secret contract exists (value was not returned to the verifier)" in script
 
 # Focused declarative app-metrics verifier coverage; kept here with the just recipe
 # tests so Phase 1 remains scoped to the generic app operator surface.
@@ -5965,12 +5965,61 @@ def test_observability_app_metrics_malformed_kubernetes_nested_objects_fail_cont
 def test_observability_app_metrics_check_secret_uses_redacted_contract(monkeypatch, capsys):
     cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"]["tokenplace"]["environments"]["staging"]
     seen = []
-    monkeypatch.setattr(app_metrics, "kjson", lambda args: seen.append(args) or {"data": {"token": "base64-value"}})
+    monkeypatch.setattr(
+        app_metrics,
+        "run",
+        lambda args: seen.append(args) or "tokenplace\ttokenplace-staging-metrics-token\tnonempty",
+    )
 
     app_metrics.check_secret(cfg)
 
-    assert seen == [["kubectl", "-n", "tokenplace", "get", "secret", "tokenplace-staging-metrics-token", "-o", "json"]]
-    assert "base64-value" not in capsys.readouterr().out
+    command = seen[0]
+    assert command[:7] == [
+        "kubectl",
+        "-n",
+        "tokenplace",
+        "get",
+        "secret",
+        "tokenplace-staging-metrics-token",
+        "-o",
+    ]
+    assert command[7:] == ["go-template", "--template", command[-1]]
+    assert 'index .data "token"' in command[-1]
+    assert "nonempty" in command[-1] and "missing" in command[-1]
+    assert "json" not in command
+    captured = capsys.readouterr()
+    assert "was not returned to the verifier" in captured.out
+    assert not captured.err
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "other\ttokenplace-staging-metrics-token\tnonempty",
+        "tokenplace\tother\tnonempty",
+        "tokenplace\ttokenplace-staging-metrics-token\tmissing",
+        "tokenplace\ttokenplace-staging-metrics-token\t",
+        "malformed",
+        "tokenplace\ttokenplace-staging-metrics-token\tnonempty\textra",
+        "tokenplace\ttokenplace-staging-metrics-token\tnonempty\nraw-credential-looking-output",
+    ],
+)
+def test_observability_app_metrics_check_secret_rejects_invalid_status_redacted(
+    monkeypatch, capsys, output
+):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
+        "tokenplace"
+    ]["environments"]["staging"]
+    monkeypatch.setattr(app_metrics, "run", lambda args: output)
+
+    with pytest.raises(app_metrics.Error) as excinfo:
+        app_metrics.check_secret(cfg)
+
+    captured = capsys.readouterr()
+    combined = captured.out + captured.err + str(excinfo.value)
+    assert "validation failed" in combined
+    assert output not in combined
+    assert "raw-credential-looking-output" not in combined
 
 
 def test_observability_app_metrics_main_rejects_extra_args_without_echo(capsys):
@@ -6183,10 +6232,14 @@ def test_observability_app_metrics_secret_and_context_failures_are_redacted(
         app_metrics.assert_context()
     assert "context mismatch" in str(excinfo.value)
 
-    monkeypatch.setattr(app_metrics, "kjson", lambda args: {"data": {"token": ""}})
+    monkeypatch.setattr(
+        app_metrics,
+        "run",
+        lambda args: "tokenplace\ttokenplace-staging-metrics-token\tmissing",
+    )
     with pytest.raises(SystemExit) as excinfo:
         app_metrics.check_secret(cfg)
-    assert "absent or empty" in str(excinfo.value)
+    assert "validation failed" in str(excinfo.value)
     assert "tokenplace-staging" not in capsys.readouterr().out
 
 
