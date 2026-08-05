@@ -375,15 +375,14 @@ def find_env_value(workload: dict[str, Any], source: dict[str, Any]) -> str:
     return normalize_derived_value(entry["value"], source["normalizer"])
 
 
-def derive_build_labels_from_docs(cfg, docs, workload_name_override: str = ""):
+def derive_build_labels_from_docs(cfg, docs):
     labels = {}
     for label, source in cfg.get("derivedApplicationLabels", {}).items():
         workload = source["workload"]
-        workload_name = workload_name_override or workload["name"]
         matches = [
             d for d in docs
             if d.get("kind") == workload["kind"]
-            and d.get("metadata", {}).get("name") == workload_name
+            and d.get("metadata", {}).get("name") == workload["name"]
             and d.get("metadata", {}).get("namespace", cfg["namespace"]) == cfg["namespace"]
         ]
         if len(matches) != 1:
@@ -539,7 +538,7 @@ def validate_render(app: str, env: str, input_path: str, release_namespace: str 
             sms.append(candidate)
     if len(sms) != 1:
         fail("rendered manifests must include exactly one configured ServiceMonitor")
-    derive_build_labels_from_docs(cfg, docs, release_name)
+    derive_build_labels_from_docs(cfg, docs)
     sm = sms[0]
     labels = sm.get("metadata", {}).get("labels", {})
     if labels.get("release") != "kube-prometheus-stack":

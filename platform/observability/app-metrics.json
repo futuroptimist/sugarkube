@@ -173,7 +173,7 @@
                 "name": "tokenplace"
               },
               "container": "relay",
-              "env": "TOKENPLACE_RELEASE_VERSION",
+              "env": "TOKENPLACE_IMAGE_TAG",
               "normalizer": "identity"
             },
             "revision": {

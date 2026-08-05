@@ -284,7 +284,8 @@ spec:
   else
     release="${{2}}"
     app="${{release}}"
-    if [[ "$*" == *charts/tokenplace* ]]; then container=relay; fi
+    workload="${{release}}"
+    if [[ "$*" == *charts/tokenplace* ]]; then container=relay; app=tokenplace; workload=tokenplace; fi
     container="${{container:-${{app}}}}"
     tag=main-deadbee
     previous=""
@@ -306,7 +307,7 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ${{release}}
+  name: ${{workload}}
   labels:
     app.kubernetes.io/instance: ${{release}}
 spec:
@@ -5367,7 +5368,7 @@ def test_observability_app_metrics_inventory_tokenplace_contract_is_strict_and_c
         "version": {
             "workload": {"kind": "Deployment", "name": "tokenplace"},
             "container": "relay",
-            "env": "TOKENPLACE_RELEASE_VERSION",
+            "env": "TOKENPLACE_IMAGE_TAG",
             "normalizer": "identity",
         },
         "revision": {
@@ -5414,10 +5415,10 @@ def test_observability_app_metrics_standard_scrape_labels_are_not_forbidden_appl
             "pod": "tokenplace-abc123",
             "app": "tokenplace",
             "environment": "staging",
-            "version": "0.1.1",
+            "version": "main-deadbee",
             "revision": "main-deadbee",
         },
-        {"version": "0.1.1", "revision": "main-deadbee"},
+        {"version": "main-deadbee", "revision": "main-deadbee"},
     )
     with pytest.raises(SystemExit) as excinfo:
         app_metrics.validate_metric_labels(cfg, {"customer_email": "fixture@example.invalid"})
@@ -5495,6 +5496,13 @@ def test_observability_app_metrics_validate_render_accepts_chart_like_service_mo
     app_metrics.validate_render("tokenplace", "staging", str(rendered), "tokenplace")
 
 
+def test_observability_app_metrics_validate_render_uses_configured_workload_name_not_release_name(tmp_path: Path):
+    rendered = tmp_path / "rendered.yaml"
+    rendered.write_text(_tokenplace_chart_like_service_monitor(), encoding="utf-8")
+
+    app_metrics.validate_render("tokenplace", "staging", str(rendered), "tokenplace", "different-release")
+
+
 def test_observability_app_metrics_validate_render_unconfigured_consumes_stdin(monkeypatch):
     class Input:
         consumed = False
@@ -5519,7 +5527,7 @@ def test_observability_app_metrics_validate_render_derives_build_labels_from_dep
     docs = app_metrics.load_rendered_docs(str(rendered))
 
     assert app_metrics.derive_build_labels_from_docs(cfg, docs) == {
-        "version": "0.1.1",
+        "version": "main-deadbee",
         "revision": "main-deadbee",
     }
 
@@ -5548,14 +5556,14 @@ def test_observability_app_metrics_rejects_stale_or_mismatched_derived_labels():
     cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"]["tokenplace"]["environments"]["staging"]
     app_metrics.validate_metric_labels(
         cfg,
-        {"version": "0.1.1", "revision": "main-deadbee", "app": "tokenplace"},
-        {"version": "0.1.1", "revision": "main-deadbee"},
+        {"version": "main-deadbee", "revision": "main-deadbee", "app": "tokenplace"},
+        {"version": "main-deadbee", "revision": "main-deadbee"},
     )
     with pytest.raises(SystemExit) as excinfo:
         app_metrics.validate_metric_labels(
             cfg,
-            {"version": "0.1.1", "revision": "main-stale", "app": "tokenplace"},
-            {"version": "0.1.1", "revision": "main-deadbee"},
+            {"version": "main-deadbee", "revision": "main-stale", "app": "tokenplace"},
+            {"version": "main-deadbee", "revision": "main-deadbee"},
         )
     assert "derived application metric label mismatch" in str(excinfo.value)
 
@@ -5664,7 +5672,7 @@ def test_observability_app_metrics_verify_exercises_targets_metrics_and_public_4
         queries.append(path)
         if path == "/api/v1/targets":
             return {"activeTargets": [{"health": "up", "labels": cfg["targetLabels"] | {"pod": "tokenplace-abc"}}]}
-        return {"result": [{"metric": {"__name__": path.rsplit("=", 1)[-1], "app": "tokenplace", "environment": "staging", "version": "0.1.1", "revision": "main-deadbee"}}]}
+        return {"result": [{"metric": {"__name__": path.rsplit("=", 1)[-1], "app": "tokenplace", "environment": "staging", "version": "main-deadbee", "revision": "main-deadbee"}}]}
 
     class Opener:
         def open(self, url, timeout):
@@ -5673,7 +5681,7 @@ def test_observability_app_metrics_verify_exercises_targets_metrics_and_public_4
     monkeypatch.setattr(app_metrics, "appcfg", lambda app, env: cfg)
     monkeypatch.setattr(app_metrics, "assert_context", lambda: None)
     monkeypatch.setattr(app_metrics, "check_secret", lambda cfg: None)
-    monkeypatch.setattr(app_metrics, "derive_build_labels_live", lambda cfg: {"version": "0.1.1", "revision": "main-deadbee"})
+    monkeypatch.setattr(app_metrics, "derive_build_labels_live", lambda cfg: {"version": "main-deadbee", "revision": "main-deadbee"})
     monkeypatch.setattr(app_metrics, "kjson", fake_kjson)
     monkeypatch.setattr(app_metrics, "prom", fake_prom)
     monkeypatch.setattr(app_metrics.urllib.request, "build_opener", lambda *args: Opener())
@@ -5690,9 +5698,9 @@ def test_observability_app_metrics_verify_fails_on_public_200(monkeypatch):
     monkeypatch.setattr(app_metrics, "appcfg", lambda app, env: cfg)
     monkeypatch.setattr(app_metrics, "assert_context", lambda: None)
     monkeypatch.setattr(app_metrics, "check_secret", lambda cfg: None)
-    monkeypatch.setattr(app_metrics, "derive_build_labels_live", lambda cfg: {"version": "0.1.1", "revision": "main-deadbee"})
+    monkeypatch.setattr(app_metrics, "derive_build_labels_live", lambda cfg: {"version": "main-deadbee", "revision": "main-deadbee"})
     monkeypatch.setattr(app_metrics, "kjson", lambda args: sm)
-    monkeypatch.setattr(app_metrics, "prom", lambda path: {"activeTargets": [{"health": "up", "labels": cfg["targetLabels"]}]} if path == "/api/v1/targets" else {"result": [{"metric": {"version": "0.1.1", "revision": "main-deadbee"}}]})
+    monkeypatch.setattr(app_metrics, "prom", lambda path: {"activeTargets": [{"health": "up", "labels": cfg["targetLabels"]}]} if path == "/api/v1/targets" else {"result": [{"metric": {"version": "main-deadbee", "revision": "main-deadbee"}}]})
 
     class Response:
         def read(self, size):
