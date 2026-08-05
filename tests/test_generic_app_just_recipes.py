@@ -5714,8 +5714,13 @@ def test_observability_app_metrics_verify_fails_on_public_200(monkeypatch):
     monkeypatch.setattr(app_metrics, "prom", lambda path: {"activeTargets": [{"health": "up", "scrapePool": "serviceMonitor/tokenplace/tokenplace/0", "labels": cfg["targetLabels"], "discoveredLabels": {}}]} if path == "/api/v1/targets" else {"result": [{"metric": {"__name__": app_metrics.urllib.parse.unquote(path.rsplit("query=", 1)[-1]).split("{", 1)[0], "version": "main-deadbee", "revision": "main-deadbee"}}]})
 
     class Response:
+        status = 200
+
         def read(self, size):
-            return b""
+            raise AssertionError("response body must not be read")
+
+        def close(self):
+            pass
 
     class Opener:
         def open(self, url, timeout):
@@ -5725,6 +5730,35 @@ def test_observability_app_metrics_verify_fails_on_public_200(monkeypatch):
     with pytest.raises(SystemExit) as excinfo:
         app_metrics.verify("tokenplace", "staging")
     assert "status mismatch" in str(excinfo.value)
+
+
+def test_observability_app_metrics_public_uses_actual_success_status_without_body(monkeypatch):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"]["tokenplace"]["environments"]["staging"]
+    cfg = json.loads(json.dumps(cfg))
+    cfg["publicMetrics"]["expectedUnauthenticatedStatus"] = 204
+
+    def prom_func(path):
+        if path == "/api/v1/targets":
+            return {"activeTargets": [{"health": "up", "scrapePool": "serviceMonitor/tokenplace/tokenplace/0", "labels": cfg["targetLabels"], "discoveredLabels": {}}]}
+        metric = app_metrics.urllib.parse.unquote(path.rsplit("query=", 1)[-1]).split("{", 1)[0]
+        return {"result": [{"metric": {"__name__": metric, "version": "main-deadbee", "revision": "main-deadbee"}}]}
+
+    class Response:
+        status = 204
+        closed = False
+
+        def read(self, *args):
+            raise AssertionError("response body must not be read")
+
+        def close(self):
+            self.closed = True
+
+    response = Response()
+    _verify_base(monkeypatch, cfg, prom_func)
+    monkeypatch.setattr(app_metrics.urllib.request, "build_opener", lambda *args: type("Opener", (), {"open": lambda self, url, timeout: response})())
+
+    app_metrics.verify("tokenplace", "staging")
+    assert response.closed
 
 
 
@@ -5841,6 +5875,51 @@ def test_observability_app_metrics_verify_fails_malformed_prometheus_without_sle
         app_metrics.verify("tokenplace", "staging")
     assert slept == []
 
+
+@pytest.mark.parametrize(
+    "sample",
+    [
+        [],
+        {},
+        {"metric": []},
+        {"metric": {"__name__": 1}},
+        {"metric": {"__name__": "valid_metric", "label": 1}},
+        {"metric": {"__name__": "bad-metric"}},
+    ],
+)
+def test_observability_app_metrics_malformed_samples_fail_immediately(monkeypatch, sample):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"]["tokenplace"]["environments"]["staging"]
+    monkeypatch.setattr(app_metrics, "prom", lambda path: {"resultType": "vector", "result": [sample]})
+    slept = []
+    monkeypatch.setattr(app_metrics.time, "sleep", lambda seconds: slept.append(seconds))
+    with pytest.raises(app_metrics.Error):
+        app_metrics.query_required_families(cfg, {"version": "main-deadbee", "revision": "main-deadbee"})
+    assert slept == []
+
+
+@pytest.mark.parametrize(
+    "service_monitor",
+    [
+        {},
+        {"spec": []},
+        {"spec": {"endpoints": [{}], "selector": []}},
+        {"spec": {"endpoints": [[]], "selector": {}}},
+        {"spec": {"endpoints": [{"authorization": []}], "selector": {}}},
+    ],
+)
+def test_observability_app_metrics_malformed_kubernetes_nested_objects_fail_controlled(
+    monkeypatch, service_monitor
+):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"]["tokenplace"]["environments"]["staging"]
+    monkeypatch.setattr(app_metrics, "appcfg", lambda app, env: cfg)
+    monkeypatch.setattr(app_metrics, "assert_context", lambda: None)
+    monkeypatch.setattr(app_metrics, "check_secret", lambda cfg: None)
+    monkeypatch.setattr(app_metrics, "derive_build_labels_live", lambda cfg: {})
+    monkeypatch.setattr(app_metrics, "kjson", lambda args: service_monitor)
+    with pytest.raises(app_metrics.Error) as excinfo:
+        app_metrics.verify("tokenplace", "staging")
+    assert "structurally invalid" in str(excinfo.value) or "exactly one endpoint" in str(excinfo.value)
+
 def test_observability_app_metrics_check_secret_uses_redacted_contract(monkeypatch, capsys):
     cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"]["tokenplace"]["environments"]["staging"]
     seen = []
@@ -5885,6 +5964,54 @@ def test_observability_app_metrics_prom_and_kjson_fail_closed(monkeypatch):
     with pytest.raises(SystemExit) as excinfo:
         app_metrics.prom("/api/v1/query?query=up")
     assert "status was not success" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("payload", ["[]", "null", "42", '"text"'])
+def test_observability_app_metrics_kjson_rejects_non_object_json(monkeypatch, payload):
+    monkeypatch.setattr(app_metrics, "run", lambda args: payload)
+    with pytest.raises(app_metrics.Error) as excinfo:
+        app_metrics.kjson(["kubectl"])
+    assert "structurally invalid" in str(excinfo.value)
+    assert payload not in str(excinfo.value)
+
+
+def test_observability_app_metrics_inventory_invalid_utf8_is_redacted(tmp_path):
+    inventory = tmp_path / "inventory.json"
+    inventory.write_bytes(b"\xffprivate-location")
+    with pytest.raises(app_metrics.Error) as excinfo:
+        app_metrics.load_config(inventory)
+    assert "cannot read" in str(excinfo.value)
+    assert "private-location" not in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        OSError("private executable path"),
+        subprocess.TimeoutExpired("private command", 30),
+        subprocess.CalledProcessError(1, "private command", stderr="private stderr"),
+        UnicodeDecodeError("utf-8", b"\xff", 0, 1, "private bytes"),
+    ],
+)
+def test_observability_app_metrics_kubectl_transport_failures_are_redacted(monkeypatch, error):
+    def fail_run(*args, **kwargs):
+        assert kwargs["timeout"] == app_metrics.KUBECTL_TIMEOUT_SECONDS
+        raise error
+
+    monkeypatch.setattr(app_metrics.subprocess, "run", fail_run)
+    with pytest.raises(app_metrics.Error) as excinfo:
+        app_metrics.run(["kubectl", "private-argument"])
+    message = str(excinfo.value)
+    assert "details redacted" in message
+    assert "private" not in message
+
+
+@pytest.mark.parametrize("data", [None, [], "bad", 1])
+def test_observability_app_metrics_prom_rejects_non_object_data(monkeypatch, data):
+    monkeypatch.setattr(app_metrics, "kjson", lambda args: {"status": "success", "data": data})
+    with pytest.raises(app_metrics.Error) as excinfo:
+        app_metrics.prom("/api/v1/query?query=up")
+    assert "structurally invalid" in str(excinfo.value)
 
 
 def test_observability_app_metrics_verify_all_uses_every_configured_app(monkeypatch):

@@ -20,6 +20,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "platform/observability/app-metrics.json"
 PROM = "/api/v1/namespaces/monitoring/services/http:kube-prometheus-stack-prometheus:9090/proxy"
+KUBECTL_TIMEOUT_SECONDS = 30
 K8S_NAME = re.compile(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?")
 DURATION = re.compile(r"[1-9][0-9]*[smh]")
 STATUS = re.compile(r"[1-5][0-9][0-9]")
@@ -72,8 +73,8 @@ def fail(msg: str, code: int = 2):
 def load_config(path: Path = CONFIG) -> dict[str, Any]:
     try:
         raw = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        fail(f"cannot read app metrics inventory: {exc}")
+    except (OSError, UnicodeError):
+        fail("cannot read app metrics inventory (details redacted)")
     try:
         doc = json.loads(raw)
     except json.JSONDecodeError:
@@ -368,17 +369,26 @@ def normalize_live_env(env: str) -> str:
 
 def run(args):
     try:
-        return subprocess.run(args, check=True, text=True, capture_output=True).stdout
-    except subprocess.CalledProcessError:
+        return subprocess.run(
+            args,
+            check=True,
+            text=True,
+            capture_output=True,
+            timeout=KUBECTL_TIMEOUT_SECONDS,
+        ).stdout
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError, UnicodeError):
         fail("kubectl command failed (details redacted)", 1)
 
 
 def kjson(args):
     out = run(args)
     try:
-        return json.loads(out)
-    except json.JSONDecodeError:
+        doc = json.loads(out)
+    except (json.JSONDecodeError, UnicodeError):
         fail("Kubernetes API returned malformed JSON (response redacted)", 1)
+    if not isinstance(doc, dict):
+        fail("Kubernetes API returned a structurally invalid response (response redacted)", 1)
+    return doc
 
 
 def assert_context():
@@ -466,7 +476,10 @@ def prom(path):
     doc = kjson(["kubectl", "get", "--raw", PROM + path])
     if doc.get("status") != "success":
         fail("Prometheus API status was not success (response redacted)", 1)
-    return doc.get("data")
+    data = doc.get("data")
+    if not isinstance(data, dict):
+        fail("Prometheus API response is structurally invalid (response redacted)", 1)
+    return data
 
 
 def normalize_derived_value(value: str, normalizer: str) -> str:
@@ -478,7 +491,10 @@ def normalize_derived_value(value: str, normalizer: str) -> str:
 
 
 def find_env_value(workload: dict[str, Any], source: dict[str, Any]) -> str:
-    containers = workload.get("spec", {}).get("template", {}).get("spec", {}).get("containers")
+    spec = workload.get("spec")
+    template = spec.get("template") if isinstance(spec, dict) else None
+    pod_spec = template.get("spec") if isinstance(template, dict) else None
+    containers = pod_spec.get("containers") if isinstance(pod_spec, dict) else None
     if not isinstance(containers, list):
         fail("workload source contract is malformed (details redacted)", 1)
     matches = [c for c in containers if isinstance(c, dict) and c.get("name") == source["container"]]
@@ -503,12 +519,20 @@ def derive_build_labels_from_docs(cfg, docs):
     labels = {}
     for label, source in cfg.get("derivedApplicationLabels", {}).items():
         workload = source["workload"]
-        matches = [
-            d for d in docs
-            if d.get("kind") == workload["kind"]
-            and d.get("metadata", {}).get("name") == workload["name"]
-            and d.get("metadata", {}).get("namespace", cfg["namespace"]) == cfg["namespace"]
-        ]
+        matches = []
+        for doc in docs:
+            if not isinstance(doc, dict):
+                fail("rendered workload source is malformed (details redacted)", 1)
+            metadata = doc.get("metadata")
+            if metadata is not None and not isinstance(metadata, dict):
+                fail("rendered workload source is malformed (details redacted)", 1)
+            metadata = metadata or {}
+            if (
+                doc.get("kind") == workload["kind"]
+                and metadata.get("name") == workload["name"]
+                and metadata.get("namespace", cfg["namespace"]) == cfg["namespace"]
+            ):
+                matches.append(doc)
         if len(matches) != 1:
             fail("rendered workload source is absent or ambiguous (details redacted)", 1)
         labels[label] = find_env_value(matches[0], source)
@@ -533,6 +557,8 @@ def validate_metric_labels(cfg, labels, derived_values=None):
     if not isinstance(labels, dict):
         fail("metric labels were malformed (details redacted)", 1)
     for label, value in labels.items():
+        if not isinstance(label, str) or not PROM_LABEL.fullmatch(label) or not isinstance(value, str):
+            fail("metric labels were malformed (details redacted)", 1)
         low = label.lower()
         is_standard = label in STANDARD_LABELS
         if not is_standard and label not in cfg["allowedApplicationLabels"] and label not in cfg.get("derivedApplicationLabels", {}):
@@ -612,7 +638,10 @@ def query_required_families(cfg: dict[str, Any], derived_values: dict[str, str])
     for metric in cfg["requiredMetricFamilies"]:
         candidates = [metric, f"{metric}_bucket", f"{metric}_sum", f"{metric}_count"]
         for candidate in candidates:
-            result = prom("/api/v1/query?query=" + urllib.parse.quote(candidate + selector)).get("result", [])
+            data = prom("/api/v1/query?query=" + urllib.parse.quote(candidate + selector))
+            if data.get("resultType") not in (None, "vector"):
+                fail("Prometheus query response is structurally invalid (details redacted)", 1)
+            result = data.get("result")
             if not isinstance(result, list):
                 fail("Prometheus query response is structurally invalid (details redacted)", 1)
             for sample in result:
@@ -621,7 +650,9 @@ def query_required_families(cfg: dict[str, Any], derived_values: dict[str, str])
                 sample_labels = sample.get("metric")
                 validate_metric_labels(cfg, sample_labels, derived_values)
                 series_name = sample_labels.get("__name__") if isinstance(sample_labels, dict) else None
-                if isinstance(series_name, str) and metric_family_from_series(series_name) == metric:
+                if not isinstance(series_name, str) or not PROM_METRIC.fullmatch(series_name):
+                    fail("Prometheus query sample is structurally invalid (details redacted)", 1)
+                if metric_family_from_series(series_name) == metric:
                     found.add(metric)
     return found
 
@@ -642,23 +673,32 @@ def verify(app, env):
             "json",
         ]
     )
-    endpoints = sm.get("spec", {}).get("endpoints")
+    spec = sm.get("spec")
+    if not isinstance(spec, dict):
+        fail("ServiceMonitor response is structurally invalid", 1)
+    endpoints = spec.get("endpoints")
     if not isinstance(endpoints, list) or len(endpoints) != 1:
         fail("ServiceMonitor must expose exactly one endpoint", 1)
     ep = endpoints[0]
-    auth = ep.get("authorization", {}).get("credentials", {})
+    if not isinstance(ep, dict):
+        fail("ServiceMonitor response is structurally invalid", 1)
+    authorization = ep.get("authorization")
+    auth = authorization.get("credentials") if isinstance(authorization, dict) else None
+    selector = spec.get("selector")
+    if not isinstance(authorization, dict) or not isinstance(auth, dict) or not isinstance(selector, dict):
+        fail("ServiceMonitor response is structurally invalid", 1)
     if (
         ep.get("path") != "/metrics"
         or ep.get("interval") != cfg["serviceMonitor"]["interval"]
         or ep.get("scrapeTimeout") != cfg["serviceMonitor"]["scrapeTimeout"]
         or ep.get("relabelings") != cfg["serviceMonitor"].get("relabelings")
-        or ep.get("authorization", {}).get("type") != cfg["serviceMonitor"]["authorization"]["type"]
+        or authorization.get("type") != cfg["serviceMonitor"]["authorization"]["type"]
         or auth.get("name") != cfg["secret"]["name"]
         or auth.get("key") != cfg["secret"]["key"]
     ):
         fail("ServiceMonitor endpoint/auth contract mismatch", 1)
     if (
-        sm.get("spec", {}).get("selector", {}).get("matchLabels")
+        selector.get("matchLabels")
         != cfg["serviceMonitor"]["selectorMatchLabels"]
     ):
         fail("ServiceMonitor selector mismatch", 1)
@@ -701,14 +741,24 @@ def verify(app, env):
             NoRedirect, urllib.request.HTTPHandler, urllib.request.HTTPSHandler
         )
         response = opener.open(cfg["publicMetrics"]["url"], timeout=10)
-        close = getattr(response, "close", None)
-        if callable(close):
-            close()
-        got = 200
+        try:
+            got = getattr(response, "status", None)
+            if got is None:
+                getcode = getattr(response, "getcode", None)
+                got = getcode() if callable(getcode) else None
+        finally:
+            close = getattr(response, "close", None)
+            if callable(close):
+                close()
     except urllib.error.HTTPError as e:
-        got = e.code
+        try:
+            got = e.code
+        finally:
+            e.close()
     except Exception:
         fail("public /metrics unauthenticated check failed (details redacted)", 1)
+    if isinstance(got, bool) or not isinstance(got, int) or not 100 <= got <= 599:
+        fail("public /metrics response status was malformed (details redacted)", 1)
     if got != cfg["publicMetrics"]["expectedUnauthenticatedStatus"]:
         fail("public /metrics unauthenticated status mismatch (body redacted)", 1)
     print(f"Application metrics verified for {app} env={env}.")
@@ -740,7 +790,17 @@ def validate_render(app: str, env: str, input_path: str, release_namespace: str 
     secrets = [d for d in docs if d.get("kind") == "Secret"]
     if secrets:
         fail("rendered manifests must not include credential Secret resources")
-    named_sms = [d for d in docs if d.get("kind") == "ServiceMonitor" and d.get("metadata", {}).get("name") == cfg["serviceMonitorName"]]
+    named_sms = []
+    for doc in docs:
+        metadata = doc.get("metadata")
+        if metadata is not None and not isinstance(metadata, dict):
+            fail("rendered manifest metadata is structurally invalid")
+        if (
+            doc.get("kind") == "ServiceMonitor"
+            and isinstance(metadata, dict)
+            and metadata.get("name") == cfg["serviceMonitorName"]
+        ):
+            named_sms.append(doc)
     sms = []
     for candidate in named_sms:
         rendered_ns = candidate.get("metadata", {}).get("namespace")
@@ -750,13 +810,22 @@ def validate_render(app: str, env: str, input_path: str, release_namespace: str 
         fail("rendered manifests must include exactly one configured ServiceMonitor")
     derive_build_labels_from_docs(cfg, docs)
     sm = sms[0]
-    labels = sm.get("metadata", {}).get("labels", {})
+    metadata = sm.get("metadata")
+    labels = metadata.get("labels") if isinstance(metadata, dict) else None
+    if not isinstance(labels, dict):
+        fail("rendered ServiceMonitor metadata is structurally invalid")
     if labels.get("release") != "kube-prometheus-stack":
         fail("rendered ServiceMonitor release label mismatch")
     spec = sm.get("spec", {})
-    if spec.get("namespaceSelector", {}).get("matchNames") != [cfg["namespace"]]:
+    if not isinstance(spec, dict):
+        fail("rendered ServiceMonitor spec is structurally invalid")
+    namespace_selector = spec.get("namespaceSelector")
+    selector = spec.get("selector")
+    if not isinstance(namespace_selector, dict) or not isinstance(selector, dict):
+        fail("rendered ServiceMonitor spec is structurally invalid")
+    if namespace_selector.get("matchNames") != [cfg["namespace"]]:
         fail("rendered ServiceMonitor namespace selector mismatch")
-    if spec.get("selector", {}).get("matchLabels") != cfg["serviceMonitor"]["selectorMatchLabels"]:
+    if selector.get("matchLabels") != cfg["serviceMonitor"]["selectorMatchLabels"]:
         fail("rendered ServiceMonitor selector mismatch")
     for relabeling in cfg["serviceMonitor"].get("relabelings", []):
         if relabeling.get("targetLabel") == "namespace":
@@ -765,8 +834,12 @@ def validate_render(app: str, env: str, input_path: str, release_namespace: str 
     if not isinstance(endpoints, list) or len(endpoints) != 1:
         fail("rendered ServiceMonitor must have exactly one endpoint")
     ep = endpoints[0]
-    auth = ep.get("authorization", {})
-    creds = auth.get("credentials", {})
+    if not isinstance(ep, dict):
+        fail("rendered ServiceMonitor endpoint is structurally invalid")
+    auth = ep.get("authorization")
+    creds = auth.get("credentials") if isinstance(auth, dict) else None
+    if not isinstance(auth, dict) or not isinstance(creds, dict):
+        fail("rendered ServiceMonitor authorization is structurally invalid")
     if (ep.get("path") != cfg["serviceMonitor"]["path"] or ep.get("interval") != cfg["serviceMonitor"]["interval"] or ep.get("scrapeTimeout") != cfg["serviceMonitor"]["scrapeTimeout"] or auth.get("type") != cfg["serviceMonitor"]["authorization"]["type"] or creds.get("name") != cfg["secret"]["name"] or creds.get("key") != cfg["secret"]["key"] or ep.get("relabelings") != cfg["serviceMonitor"]["relabelings"]):
         fail("rendered ServiceMonitor endpoint/auth/relabeling contract mismatch")
 
