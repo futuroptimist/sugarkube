@@ -5637,3 +5637,128 @@ def test_observability_app_metrics_inventory_relabelings_match_rendered_replace_
         {"action": "replace", "targetLabel": "cluster", "replacement": "sugarkube-int"},
     ]
     assert "namespace" not in {r["targetLabel"] for r in relabelings}
+
+
+def test_observability_app_metrics_verify_exercises_targets_metrics_and_public_401(monkeypatch):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"]["tokenplace"]["environments"]["staging"]
+    service_monitor = {
+        "spec": {
+            "selector": {"matchLabels": cfg["serviceMonitor"]["selectorMatchLabels"]},
+            "endpoints": [{
+                "path": cfg["serviceMonitor"]["path"],
+                "interval": cfg["serviceMonitor"]["interval"],
+                "scrapeTimeout": cfg["serviceMonitor"]["scrapeTimeout"],
+                "authorization": {"type": "Bearer", "credentials": cfg["secret"]},
+                "relabelings": cfg["serviceMonitor"]["relabelings"],
+            }],
+        }
+    }
+    queries: list[str] = []
+
+    def fake_kjson(args):
+        if args[:4] == ["kubectl", "-n", "tokenplace", "get"] and args[4] == "servicemonitor":
+            return service_monitor
+        raise AssertionError(args)
+
+    def fake_prom(path):
+        queries.append(path)
+        if path == "/api/v1/targets":
+            return {"activeTargets": [{"health": "up", "labels": cfg["targetLabels"] | {"pod": "tokenplace-abc"}}]}
+        return {"result": [{"metric": {"__name__": path.rsplit("=", 1)[-1], "app": "tokenplace", "environment": "staging", "version": "0.1.1", "revision": "main-deadbee"}}]}
+
+    class Opener:
+        def open(self, url, timeout):
+            raise app_metrics.urllib.error.HTTPError(url, 401, "unauthorized", {}, None)
+
+    monkeypatch.setattr(app_metrics, "appcfg", lambda app, env: cfg)
+    monkeypatch.setattr(app_metrics, "assert_context", lambda: None)
+    monkeypatch.setattr(app_metrics, "check_secret", lambda cfg: None)
+    monkeypatch.setattr(app_metrics, "derive_build_labels_live", lambda cfg: {"version": "0.1.1", "revision": "main-deadbee"})
+    monkeypatch.setattr(app_metrics, "kjson", fake_kjson)
+    monkeypatch.setattr(app_metrics, "prom", fake_prom)
+    monkeypatch.setattr(app_metrics.urllib.request, "build_opener", lambda *args: Opener())
+
+    app_metrics.verify("tokenplace", "staging")
+
+    assert "/api/v1/targets" in queries
+    assert any("tokenplace_build_info" in query for query in queries)
+
+
+def test_observability_app_metrics_verify_fails_on_public_200(monkeypatch):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"]["tokenplace"]["environments"]["staging"]
+    sm = {"spec": {"selector": {"matchLabels": cfg["serviceMonitor"]["selectorMatchLabels"]}, "endpoints": [{"path": "/metrics", "interval": cfg["serviceMonitor"]["interval"], "scrapeTimeout": cfg["serviceMonitor"]["scrapeTimeout"], "authorization": {"type": "Bearer", "credentials": cfg["secret"]}, "relabelings": cfg["serviceMonitor"]["relabelings"]}]}}
+    monkeypatch.setattr(app_metrics, "appcfg", lambda app, env: cfg)
+    monkeypatch.setattr(app_metrics, "assert_context", lambda: None)
+    monkeypatch.setattr(app_metrics, "check_secret", lambda cfg: None)
+    monkeypatch.setattr(app_metrics, "derive_build_labels_live", lambda cfg: {"version": "0.1.1", "revision": "main-deadbee"})
+    monkeypatch.setattr(app_metrics, "kjson", lambda args: sm)
+    monkeypatch.setattr(app_metrics, "prom", lambda path: {"activeTargets": [{"health": "up", "labels": cfg["targetLabels"]}]} if path == "/api/v1/targets" else {"result": [{"metric": {"version": "0.1.1", "revision": "main-deadbee"}}]})
+
+    class Response:
+        def read(self, size):
+            return b""
+
+    class Opener:
+        def open(self, url, timeout):
+            return Response()
+
+    monkeypatch.setattr(app_metrics.urllib.request, "build_opener", lambda *args: Opener())
+    with pytest.raises(SystemExit) as excinfo:
+        app_metrics.verify("tokenplace", "staging")
+    assert "status mismatch" in str(excinfo.value)
+
+
+def test_observability_app_metrics_check_secret_uses_redacted_contract(monkeypatch, capsys):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"]["tokenplace"]["environments"]["staging"]
+    seen = []
+    monkeypatch.setattr(app_metrics, "kjson", lambda args: seen.append(args) or {"data": {"token": "base64-value"}})
+
+    app_metrics.check_secret(cfg)
+
+    assert seen == [["kubectl", "-n", "tokenplace", "get", "secret", "tokenplace-staging-metrics-token", "-o", "json"]]
+    assert "base64-value" not in capsys.readouterr().out
+
+
+def test_observability_app_metrics_main_rejects_extra_args_without_echo(capsys):
+    rc = app_metrics.main(["validate", "--surprise", "credential-looking-value"])
+
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "unexpected arguments" in captured.err
+    assert "credential-looking-value" not in captured.err
+
+
+def test_observability_app_metrics_install_secret_refuses_env_and_plain_stdin(monkeypatch):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"]["tokenplace"]["environments"]["staging"]
+    monkeypatch.setenv("SUGARKUBE_APP_METRICS_TOKEN", "redacted")
+    with pytest.raises(SystemExit) as excinfo:
+        app_metrics.install_secret(cfg)
+    assert "environment variables are refused" in str(excinfo.value)
+
+    monkeypatch.delenv("SUGARKUBE_APP_METRICS_TOKEN")
+    monkeypatch.setattr(app_metrics.sys.stdin, "isatty", lambda: False)
+    with pytest.raises(SystemExit) as excinfo:
+        app_metrics.install_secret(cfg)
+    assert "ordinary stdin is refused" in str(excinfo.value)
+
+
+def test_observability_app_metrics_prom_and_kjson_fail_closed(monkeypatch):
+    monkeypatch.setattr(app_metrics, "run", lambda args: "not-json")
+    with pytest.raises(SystemExit) as excinfo:
+        app_metrics.kjson(["kubectl"])
+    assert "malformed JSON" in str(excinfo.value)
+
+    monkeypatch.setattr(app_metrics, "kjson", lambda args: {"status": "error", "data": {}})
+    with pytest.raises(SystemExit) as excinfo:
+        app_metrics.prom("/api/v1/query?query=up")
+    assert "status was not success" in str(excinfo.value)
+
+
+def test_observability_app_metrics_verify_all_uses_every_configured_app(monkeypatch):
+    doc = {"schemaVersion": 1, "applications": {"first": {}, "second": {}}}
+    called = []
+    monkeypatch.setattr(app_metrics, "load_config", lambda: doc)
+    monkeypatch.setattr(app_metrics, "verify", lambda app, env: called.append((app, env)))
+
+    assert app_metrics.main(["verify-all"]) == 0
+    assert called == [("first", "staging"), ("second", "staging")]
