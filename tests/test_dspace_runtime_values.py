@@ -10,6 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.app_config import load_config  # noqa: E402
+from scripts.app_chart import contains_exact_scalar, merged_values_document  # noqa: E402
 
 OVERLAYS = {
     "staging": REPO_ROOT / "docs/examples/dspace.values.staging.yaml",
@@ -65,11 +66,54 @@ def _runtime_env(path: Path) -> dict[str, list[str]]:
     return env
 
 
+def _values_chain(env: str) -> tuple[str, ...]:
+    """Return the configured DSPACE values chain for an environment."""
+    return tuple(load_config("dspace", env)["SUGARKUBE_VALUES"].split(","))
+
+
+def _resolved_runtime_env(env: str) -> dict[str, list[str]]:
+    """Return env entries from the real resolved Helm values chain."""
+    document = merged_values_document(_values_chain(env))
+    entries = document.get("env") if isinstance(document, dict) else None
+    assert isinstance(entries, list)
+
+    resolved: dict[str, list[str]] = {}
+    for entry in entries:
+        assert isinstance(entry, dict)
+        name = entry.get("name")
+        assert isinstance(name, str)
+        value = entry.get("value")
+        resolved.setdefault(name, []).append("" if value is None else str(value))
+    return resolved
+
+
+def _resolved_document(env: str) -> object:
+    """Resolve DSPACE values through the repository merge implementation."""
+    return merged_values_document(_values_chain(env))
+
+
 def test_dspace_staging_overlay_points_to_staging_token_place() -> None:
     env = _runtime_env(OVERLAYS["staging"])
 
     assert env["DSPACE_TOKEN_PLACE_URL"] == ["https://staging.token.place"]
-    assert env["DSPACE_TOKEN_PLACE_CHAT_MODEL"] == ["llama-3.1-8b-instruct"]
+    assert env["DSPACE_TOKEN_PLACE_CHAT_MODEL"] == ["qwen3-8b-instruct"]
+
+
+def test_dspace_resolved_values_keep_staging_and_prod_token_place_separate() -> None:
+    staging_env = _resolved_runtime_env("staging")
+    staging_document = _resolved_document("staging")
+
+    assert staging_env["DSPACE_TOKEN_PLACE_CHAT_MODEL"] == ["qwen3-8b-instruct"]
+    assert staging_env["DSPACE_TOKEN_PLACE_URL"] == ["https://staging.token.place"]
+    assert not contains_exact_scalar(staging_document, {"llama-3.1-8b-instruct"})
+
+    prod_env = _resolved_runtime_env("prod")
+    prod_document = _resolved_document("prod")
+
+    assert prod_env["DSPACE_TOKEN_PLACE_CHAT_MODEL"] == ["llama-3.1-8b-instruct"]
+    assert prod_env["DSPACE_TOKEN_PLACE_URL"] == ["https://token.place"]
+    assert not contains_exact_scalar(prod_document, {"qwen3-8b-instruct"})
+    assert not contains_exact_scalar(prod_document, {"https://staging.token.place"})
 
 
 def test_dspace_prod_overlay_points_to_prod_token_place() -> None:
