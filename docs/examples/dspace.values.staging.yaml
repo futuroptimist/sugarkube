@@ -10,7 +10,7 @@ env:
   - name: DSPACE_TOKEN_PLACE_URL
     value: https://staging.token.place
   - name: DSPACE_TOKEN_PLACE_CHAT_MODEL
-    value: llama-3.1-8b-instruct
+    value: qwen3-8b-instruct
 
 metrics:
   enabled: true
