@@ -424,6 +424,83 @@ def validate_metric_labels(cfg, labels, derived_values=None):
             fail("derived application metric label mismatch (details redacted)", 1)
 
 
+def prometheus_label_escape(value: str) -> str:
+    return value.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
+
+
+def promql_selector(labels: dict[str, str]) -> str:
+    parts = []
+    for key in sorted(labels):
+        if not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]*", key):
+            fail("target label name cannot be used in PromQL selector")
+        parts.append(f'{key}="{prometheus_label_escape(labels[key])}"')
+    return "{" + ",".join(parts) + "}"
+
+
+def metric_family_from_series(name: str) -> str:
+    for suffix in ("_bucket", "_sum", "_count"):
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    return name
+
+
+def target_discovery_identities(cfg: dict[str, Any]) -> set[str]:
+    ns = cfg["namespace"]
+    sm = cfg["serviceMonitorName"]
+    return {f"serviceMonitor/{ns}/{sm}/0", f"{ns}/{sm}/0"}
+
+
+def is_relevant_target(cfg: dict[str, Any], target: dict[str, Any]) -> bool:
+    labels = target.get("labels")
+    discovered = target.get("discoveredLabels")
+    if not isinstance(labels, dict) or not isinstance(discovered, dict):
+        fail("Prometheus target response is structurally invalid (details redacted)", 1)
+    identities = target_discovery_identities(cfg)
+    for field in (target.get("scrapePool"), target.get("scrapeConfig"), labels.get("job"), discovered.get("job")):
+        if isinstance(field, str) and field in identities:
+            return True
+    if (
+        discovered.get("__meta_kubernetes_namespace") == cfg["namespace"]
+        and discovered.get("__meta_prometheus_operator_service_monitor_name") == cfg["serviceMonitorName"]
+    ):
+        return True
+    return False
+
+
+def target_state_converged(cfg: dict[str, Any], targets: list[dict[str, Any]]) -> bool:
+    if len(targets) != cfg["expectedTargetCount"]:
+        return False
+    if not all(t.get("health") == "up" for t in targets):
+        return False
+    for target in targets:
+        labels = target.get("labels")
+        if not isinstance(labels, dict):
+            fail("Prometheus target response is structurally invalid (details redacted)", 1)
+        for key, expected in cfg["targetLabels"].items():
+            if labels.get(key) != expected:
+                return False
+    return True
+
+
+def query_required_families(cfg: dict[str, Any], derived_values: dict[str, str]) -> set[str]:
+    selector = promql_selector(cfg["targetLabels"])
+    found: set[str] = set()
+    for metric in cfg["requiredMetricFamilies"]:
+        candidates = [metric, f"{metric}_bucket", f"{metric}_sum", f"{metric}_count"]
+        for candidate in candidates:
+            result = prom("/api/v1/query?query=" + urllib.parse.quote(candidate + selector)).get("result", [])
+            if not isinstance(result, list):
+                fail("Prometheus query response is structurally invalid (details redacted)", 1)
+            for sample in result:
+                if not isinstance(sample, dict):
+                    fail("Prometheus query response is structurally invalid (details redacted)", 1)
+                sample_labels = sample.get("metric")
+                validate_metric_labels(cfg, sample_labels, derived_values)
+                series_name = sample_labels.get("__name__") if isinstance(sample_labels, dict) else None
+                if isinstance(series_name, str) and metric_family_from_series(series_name) == metric:
+                    found.add(metric)
+    return found
+
 def verify(app, env):
     cfg = appcfg(app, env)
     assert_context()
@@ -464,32 +541,31 @@ def verify(app, env):
     targets = []
     attempts = cfg["retries"]["attempts"]
     for i in range(attempts):
-        active = prom("/api/v1/targets").get("activeTargets", [])
-        targets = [
-            t
-            for t in active
-            if all(t.get("labels", {}).get(k) == v for k, v in cfg["targetLabels"].items())
-        ]
-        if len(targets) == cfg["expectedTargetCount"] and all(
-            t.get("health") == "up" for t in targets
-        ):
+        data = prom("/api/v1/targets")
+        active = data.get("activeTargets") if isinstance(data, dict) else None
+        if not isinstance(active, list):
+            fail("Prometheus targets response is structurally invalid (details redacted)", 1)
+        if not all(isinstance(t, dict) for t in active):
+            fail("Prometheus target response is structurally invalid (details redacted)", 1)
+        targets = [t for t in active if is_relevant_target(cfg, t)]
+        if target_state_converged(cfg, targets):
             break
         if i + 1 < attempts:
             time.sleep(cfg["retries"]["delaySeconds"])
-    if len(targets) != cfg["expectedTargetCount"] or not all(
-        t.get("health") == "up" for t in targets
-    ):
-        fail("Prometheus targets are absent, down, or have unexpected count (details redacted)", 1)
-    for t in targets:
-        for k, v in cfg["targetLabels"].items():
-            if t.get("labels", {}).get(k) != v:
-                fail("target labels mismatch (details redacted)", 1)
-    for metric in cfg["requiredMetricFamilies"]:
-        result = prom("/api/v1/query?query=" + urllib.parse.quote(metric)).get("result", [])
-        if not result:
-            fail(f"required metric family missing: {metric}", 1)
-        for sample in result:
-            validate_metric_labels(cfg, sample.get("metric", {}), derived_values)
+    if not target_state_converged(cfg, targets):
+        fail("Prometheus targets are absent, down, mislabeled, or have unexpected count (details redacted)", 1)
+
+    required = set(cfg["requiredMetricFamilies"])
+    found: set[str] = set()
+    for i in range(attempts):
+        found = query_required_families(cfg, derived_values)
+        if found == required:
+            break
+        if i + 1 < attempts:
+            time.sleep(cfg["retries"]["delaySeconds"])
+    missing = required - found
+    if missing:
+        fail(f"required metric family missing: {sorted(missing)[0]}", 1)
     try:
         opener = urllib.request.build_opener(urllib.request.HTTPHandler)
         opener.open(cfg["publicMetrics"]["url"], timeout=10).read(0)
@@ -501,7 +577,6 @@ def verify(app, env):
     if got != cfg["publicMetrics"]["expectedUnauthenticatedStatus"]:
         fail("public /metrics unauthenticated status mismatch (body redacted)", 1)
     print(f"Application metrics verified for {app} env={env}.")
-
 
 
 def load_rendered_docs(input_path: str) -> list[dict[str, Any]]:
