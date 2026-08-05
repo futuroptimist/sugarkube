@@ -6147,3 +6147,134 @@ def test_observability_app_metrics_inventory_validation_failures_are_controlled(
     with pytest.raises(SystemExit) as excinfo:
         app_metrics.validate_inventory(doc)
     assert message in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    ("mutator", "message"),
+    [
+        (lambda d: d.pop("applications"), "missing required keys"),
+        (
+            lambda d: d["applications"]["tokenplace"].pop("environments"),
+            "missing required keys",
+        ),
+        (
+            lambda d: d["applications"]["tokenplace"].update({"environments": []}),
+            "nonempty object",
+        ),
+        (
+            lambda d: d["applications"]["tokenplace"].update({"environments": {}}),
+            "nonempty object",
+        ),
+        (lambda d: d.update({"schemaVersion": True}), "unsupported"),
+        (
+            lambda d: d["applications"]["tokenplace"]["environments"][
+                "staging"
+            ].update({"expectedTargetCount": True}),
+            "positive integer",
+        ),
+        (
+            lambda d: d["applications"]["tokenplace"]["environments"]["staging"][
+                "publicMetrics"
+            ].update({"expectedUnauthenticatedStatus": True}),
+            "public status",
+        ),
+        (
+            lambda d: d["applications"]["tokenplace"]["environments"]["staging"][
+                "retries"
+            ].update({"attempts": True}),
+            "bounded integer",
+        ),
+        (
+            lambda d: d["applications"]["tokenplace"]["environments"]["staging"][
+                "serviceMonitor"
+            ]["authorization"].update({"type": "Basic"}),
+            "Bearer",
+        ),
+        (
+            lambda d: d["applications"]["tokenplace"]["environments"]["staging"][
+                "serviceMonitor"
+            ]["authorization"]["credentials"].update({"name": "other-secret"}),
+            "match the declared credential reference",
+        ),
+        (
+            lambda d: d["applications"]["tokenplace"]["environments"]["staging"][
+                "targetLabels"
+            ].pop("namespace"),
+            "targetLabels must contain exactly",
+        ),
+        (
+            lambda d: d["applications"]["tokenplace"]["environments"]["staging"][
+                "targetLabels"
+            ].update({"app": "wrong"}),
+            "targetLabels must match application",
+        ),
+        (
+            lambda d: d["applications"]["tokenplace"]["environments"]["staging"][
+                "targetLabels"
+            ].update({"namespace": "wrong"}),
+            "targetLabels must match ServiceMonitor",
+        ),
+        (
+            lambda d: d["applications"]["tokenplace"]["environments"]["staging"][
+                "allowedApplicationLabels"
+            ].update({"app": ["other"]}),
+            "targetLabels and allowed label enums",
+        ),
+        (
+            lambda d: d["applications"]["tokenplace"]["environments"]["staging"][
+                "publicMetrics"
+            ].update({"url": "https://user@example.com/metrics"}),
+            "https /metrics URL",
+        ),
+        (
+            lambda d: d["applications"]["tokenplace"]["environments"]["staging"][
+                "publicMetrics"
+            ].update({"url": "https:///metrics"}),
+            "https /metrics URL",
+        ),
+        (
+            lambda d: d["applications"]["tokenplace"]["environments"]["staging"][
+                "publicMetrics"
+            ].update({"url": "https://example.com:bad/metrics"}),
+            "https /metrics URL",
+        ),
+        (
+            lambda d: d["applications"]["tokenplace"]["environments"]["staging"][
+                "publicMetrics"
+            ].update({"url": "https://example.com/metrics?debug=true"}),
+            "https /metrics URL",
+        ),
+        (
+            lambda d: d["applications"]["tokenplace"]["environments"]["staging"][
+                "serviceMonitor"
+            ]["selectorMatchLabels"].update({"bad/key/extra": "tokenplace"}),
+            "Kubernetes label key",
+        ),
+        (
+            lambda d: d["applications"]["tokenplace"]["environments"]["staging"][
+                "allowedApplicationLabels"
+            ].update({"bad-label": ["ok"]}),
+            "Prometheus label name",
+        ),
+        (
+            lambda d: d["applications"]["tokenplace"]["environments"]["staging"].update(
+                {"requiredMetricFamilies": [["unhashable"]]}
+            ),
+            "requiredMetricFamilies",
+        ),
+        (
+            lambda d: d["applications"]["tokenplace"]["environments"]["staging"][
+                "forbiddenApplicationLabels"
+            ].append("app"),
+            "forbidden labels conflict",
+        ),
+    ],
+)
+def test_observability_app_metrics_strict_inventory_boundaries_are_controlled(
+    mutator, message
+):
+    doc = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))
+    mutator(doc)
+    with pytest.raises(app_metrics.Error) as excinfo:
+        app_metrics.validate_inventory(doc)
+    assert message in str(excinfo.value)

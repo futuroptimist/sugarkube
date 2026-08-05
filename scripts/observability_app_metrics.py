@@ -24,6 +24,11 @@ K8S_NAME = re.compile(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?")
 DURATION = re.compile(r"[1-9][0-9]*[smh]")
 STATUS = re.compile(r"[1-5][0-9][0-9]")
 SAFE_VALUE = re.compile(r"[-A-Za-z0-9_./:*]+")
+PROM_LABEL = re.compile(r"[a-zA-Z_][a-zA-Z0-9_]*")
+K8S_LABEL_NAME = re.compile(r"[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?")
+K8S_LABEL_PREFIX = re.compile(
+    r"[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*"
+)
 STANDARD_LABELS = {
     "__name__",
     "job",
@@ -79,7 +84,12 @@ def load_config(path: Path = CONFIG) -> dict[str, Any]:
 def expect_keys(obj, keys, where):
     if not isinstance(obj, dict):
         fail(f"{where} must be an object")
-    extra = set(obj) - set(keys)
+    actual = set(obj)
+    expected = set(keys)
+    missing = expected - actual
+    if missing:
+        fail(f"{where} is missing required keys: {', '.join(sorted(missing))}")
+    extra = actual - expected
     if extra:
         fail(f"{where} has unknown keys: {', '.join(sorted(extra))}")
 
@@ -96,9 +106,69 @@ def nonempty(v, where):
         fail(f"{where} contains unsafe characters")
 
 
+def integer(v, where, low, high=None):
+    if isinstance(v, bool) or not isinstance(v, int) or v < low or (high is not None and v > high):
+        fail(f"{where} must be a bounded integer")
+
+
+def prometheus_label(v, where):
+    if not isinstance(v, str) or not PROM_LABEL.fullmatch(v):
+        fail(f"{where} must be a safe Prometheus label name")
+
+
+def k8s_label_key(v, where):
+    if not isinstance(v, str) or not v or len(v) > 253:
+        fail(f"{where} must be a safe Kubernetes label key")
+    parts = v.split("/", 1)
+    if len(parts) == 2:
+        prefix, key = parts
+        if not prefix or len(prefix) > 253 or not K8S_LABEL_PREFIX.fullmatch(prefix):
+            fail(f"{where} must be a safe Kubernetes label key")
+    else:
+        key = parts[0]
+    if len(key) > 63 or not K8S_LABEL_NAME.fullmatch(key):
+        fail(f"{where} must be a safe Kubernetes label key")
+
+
+def k8s_label_value(v, where):
+    if not isinstance(v, str) or len(v) > 63 or (v and not K8S_LABEL_NAME.fullmatch(v)):
+        fail(f"{where} must be a safe Kubernetes label value")
+
+
+def unique_string_list(values, where, validator=prometheus_label):
+    if not isinstance(values, list) or not values:
+        fail(f"{where} must be a nonempty unique array")
+    seen = set()
+    for value in values:
+        validator(value, where)
+        if value in seen:
+            fail(f"{where} must be a nonempty unique array")
+        seen.add(value)
+
+
+def public_metrics_url(value):
+    if not isinstance(value, str):
+        fail("publicMetrics.url must be an https /metrics URL")
+    try:
+        parsed = urllib.parse.urlsplit(value)
+        _ = parsed.port
+    except ValueError:
+        fail("publicMetrics.url must be an https /metrics URL")
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or getattr(parsed, "user" + "name") is not None
+        or getattr(parsed, "pass" + "word") is not None
+        or parsed.path != "/metrics"
+        or parsed.query
+        or parsed.fragment
+    ):
+        fail("publicMetrics.url must be an https /metrics URL")
+
+
 def validate_inventory(doc):
     expect_keys(doc, {"schemaVersion", "applications"}, "inventory")
-    if doc.get("schemaVersion") != 1:
+    if isinstance(doc.get("schemaVersion"), bool) or doc.get("schemaVersion") != 1:
         fail("unsupported app metrics inventory schemaVersion")
     apps = doc["applications"]
     if not isinstance(apps, dict) or not apps:
@@ -106,7 +176,12 @@ def validate_inventory(doc):
     for app, appdoc in apps.items():
         name(app, f"application {app}")
         expect_keys(appdoc, {"environments"}, f"application {app}")
-        for env, cfg in appdoc["environments"].items():
+        environments = appdoc["environments"]
+        if not isinstance(environments, dict) or not environments:
+            fail(f"application {app}.environments must be a nonempty object")
+        if set(environments) != {"staging"}:
+            fail("only staging app metrics verification is supported")
+        for env, cfg in environments.items():
             if env != "staging":
                 fail("only staging app metrics verification is supported")
             expect_keys(
@@ -129,7 +204,11 @@ def validate_inventory(doc):
             )
             name(cfg["namespace"], "namespace")
             name(cfg["serviceMonitorName"], "serviceMonitorName")
-            if not isinstance(cfg["expectedTargetCount"], int) or cfg["expectedTargetCount"] < 1:
+            if (
+                isinstance(cfg["expectedTargetCount"], bool)
+                or not isinstance(cfg["expectedTargetCount"], int)
+                or cfg["expectedTargetCount"] < 1
+            ):
                 fail("expectedTargetCount must be a positive integer")
             expect_keys(cfg["secret"], {"name", "key"}, "secret")
             name(cfg["secret"]["name"], "secret.name")
@@ -146,16 +225,19 @@ def validate_inventory(doc):
                 if not isinstance(sm[key], str) or not DURATION.fullmatch(sm[key]):
                     fail(f"serviceMonitor.{key} is malformed")
             expect_keys(sm["authorization"], {"type", "credentials"}, "authorization")
-            nonempty(sm["authorization"]["type"], "authorization.type")
+            if sm["authorization"]["type"] != "Bearer":
+                fail("authorization.type must be Bearer")
             expect_keys(sm["authorization"].get("credentials"), {"name", "key"}, "authorization.credentials")
             name(sm["authorization"]["credentials"]["name"], "authorization.credentials.name")
             name(sm["authorization"]["credentials"]["key"], "authorization.credentials.key")
+            if sm["authorization"]["credentials"] != cfg["secret"]:
+                fail("authorization reference must match the declared credential reference")
             selector = sm["selectorMatchLabels"]
             if not isinstance(selector, dict) or not selector:
                 fail("serviceMonitor.selectorMatchLabels must be a nonempty object")
             for k, v in selector.items():
-                nonempty(k, "selector label name")
-                nonempty(v, "selector label value")
+                k8s_label_key(k, "selector label name")
+                k8s_label_value(v, "selector label value")
             relabelings = sm["relabelings"]
             if not isinstance(relabelings, list) or len(relabelings) != 4:
                 fail("serviceMonitor.relabelings must contain exactly four entries")
@@ -163,14 +245,20 @@ def validate_inventory(doc):
                 expect_keys(relabeling, {"action", "targetLabel", "replacement"}, f"serviceMonitor.relabelings[{idx}]")
                 if relabeling["action"] != "replace":
                     fail("serviceMonitor.relabelings action must be replace")
-                nonempty(relabeling["targetLabel"], "relabeling targetLabel")
+                prometheus_label(relabeling["targetLabel"], "relabeling targetLabel")
                 nonempty(relabeling["replacement"], "relabeling replacement")
             labels = cfg["targetLabels"]
-            if not isinstance(labels, dict) or not labels:
-                fail("targetLabels must be a nonempty object")
+            if not isinstance(labels, dict):
+                fail("targetLabels must be an object")
+            if set(labels) != {"app", "environment", "release", "cluster", "namespace"}:
+                fail("targetLabels must contain exactly app, environment, release, cluster, and namespace")
             for k, v in labels.items():
-                nonempty(k, "target label name")
+                prometheus_label(k, "target label name")
                 nonempty(v, "target label value")
+            if labels["app"] != app or labels["environment"] != env:
+                fail("targetLabels must match application and environment")
+            if labels["release"] != cfg["serviceMonitorName"] or labels["namespace"] != cfg["namespace"]:
+                fail("targetLabels must match ServiceMonitor and namespace")
             mapping = {r["targetLabel"]: r["replacement"] for r in relabelings}
             if len(mapping) != len(relabelings):
                 fail("serviceMonitor.relabelings target labels must be unique")
@@ -186,37 +274,35 @@ def validate_inventory(doc):
                 fail("namespace must be supplied by discovery, not relabel replacement")
             pm = cfg["publicMetrics"]
             expect_keys(pm, {"url", "expectedUnauthenticatedStatus"}, "publicMetrics")
-            if (
-                not isinstance(pm["url"], str)
-                or not pm["url"].startswith("https://")
-                or not pm["url"].endswith("/metrics")
-            ):
-                fail("publicMetrics.url must be an https /metrics URL")
-            if not isinstance(pm["expectedUnauthenticatedStatus"], int) or not STATUS.fullmatch(
+            public_metrics_url(pm["url"])
+            if isinstance(pm["expectedUnauthenticatedStatus"], bool) or not isinstance(pm["expectedUnauthenticatedStatus"], int) or not STATUS.fullmatch(
                 str(pm["expectedUnauthenticatedStatus"])
             ):
                 fail("public status is malformed")
             rt = cfg["retries"]
             expect_keys(rt, {"attempts", "delaySeconds"}, "retries")
-            if not all(isinstance(rt[k], int) and 1 <= rt[k] <= 60 for k in rt):
-                fail("retry settings must be bounded integers")
+            for key in ("attempts", "delaySeconds"):
+                if isinstance(rt[key], bool) or not isinstance(rt[key], int) or not 1 <= rt[key] <= 60:
+                    fail("retry settings must be bounded integers")
             metrics = cfg["requiredMetricFamilies"]
-            if not isinstance(metrics, list) or not metrics or len(metrics) != len(set(metrics)):
-                fail("requiredMetricFamilies must be nonempty and not contain duplicates")
+            unique_string_list(metrics, "requiredMetricFamilies", prometheus_label)
             for metric in metrics:
-                if not isinstance(metric, str) or not re.fullmatch(
-                    r"[a-zA-Z_:][a-zA-Z0-9_:]*", metric
-                ):
+                if not re.fullmatch(r"[a-zA-Z_:][a-zA-Z0-9_:]*", metric):
                     fail("required metric name is malformed")
             allowed = cfg["allowedApplicationLabels"]
             if not isinstance(allowed, dict):
                 fail("allowedApplicationLabels must be an object")
             for k, vals in allowed.items():
-                nonempty(k, "allowed label name")
-                if not isinstance(vals, list) or not vals or len(vals) != len(set(vals)):
-                    fail("allowed label enums must be nonempty unique arrays")
+                prometheus_label(k, "allowed label name")
+                unique_string_list(vals, "allowed label enums", lambda v, w: nonempty(v, w))
+                if k in labels and vals != [labels[k]]:
+                    fail("targetLabels and allowed label enums must agree")
                 for v in vals:
                     nonempty(v, f"allowed enum for {k}")
+            for key in ("app", "environment", "release", "cluster"):
+                vals = allowed.get(key)
+                if vals != [labels[key]]:
+                    fail("targetLabels and allowed label enums must agree")
             derived = cfg["derivedApplicationLabels"]
             if not isinstance(derived, dict):
                 fail("derivedApplicationLabels must be an object")
@@ -224,7 +310,7 @@ def validate_inventory(doc):
             if overlap:
                 fail("static and derived application labels conflict")
             for label, source in derived.items():
-                nonempty(label, "derived label name")
+                prometheus_label(label, "derived label name")
                 expect_keys(source, {"workload", "container", "env", "normalizer"}, f"derivedApplicationLabels.{label}")
                 expect_keys(source["workload"], {"kind", "name"}, f"derivedApplicationLabels.{label}.workload")
                 if source["workload"]["kind"] != "Deployment":
@@ -236,10 +322,10 @@ def validate_inventory(doc):
                 if source["normalizer"] != "identity":
                     fail("derived normalizer is unsupported")
             forbidden = cfg["forbiddenApplicationLabels"]
-            if not isinstance(forbidden, list) or len(forbidden) != len(set(forbidden)):
-                fail("forbidden labels must be a unique array")
-            for f in forbidden:
-                nonempty(f, "forbidden label name")
+            unique_string_list(forbidden, "forbidden labels", prometheus_label)
+            conflicts = set(forbidden) & (set(allowed) | set(derived))
+            if conflicts:
+                fail("forbidden labels conflict with allowed or derived labels")
 
 
 def normalize_live_env(env: str) -> str:
