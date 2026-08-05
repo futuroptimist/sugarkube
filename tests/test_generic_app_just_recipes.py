@@ -5683,7 +5683,7 @@ def test_observability_app_metrics_verify_exercises_targets_metrics_and_public_4
         sample_labels = {"__name__": series, "app": "tokenplace", "environment": "staging", "version": "main-deadbee", "revision": "main-deadbee"}
         if series.endswith("_bucket"):
             sample_labels["le"] = "0.5"
-        return {"result": [{"metric": sample_labels}]}
+        return {"resultType": "vector", "result": [{"metric": sample_labels}]}
 
     class Opener:
         def open(self, url, timeout):
@@ -5711,7 +5711,7 @@ def test_observability_app_metrics_verify_fails_on_public_200(monkeypatch):
     monkeypatch.setattr(app_metrics, "check_secret", lambda cfg: None)
     monkeypatch.setattr(app_metrics, "derive_build_labels_live", lambda cfg: {"version": "main-deadbee", "revision": "main-deadbee"})
     monkeypatch.setattr(app_metrics, "kjson", lambda args: sm)
-    monkeypatch.setattr(app_metrics, "prom", lambda path: {"activeTargets": [{"health": "up", "scrapePool": "serviceMonitor/tokenplace/tokenplace/0", "labels": cfg["targetLabels"], "discoveredLabels": {}}]} if path == "/api/v1/targets" else {"result": [{"metric": {"__name__": app_metrics.urllib.parse.unquote(path.rsplit("query=", 1)[-1]).split("{", 1)[0], "version": "main-deadbee", "revision": "main-deadbee"}}]})
+    monkeypatch.setattr(app_metrics, "prom", lambda path: {"activeTargets": [{"health": "up", "scrapePool": "serviceMonitor/tokenplace/tokenplace/0", "labels": cfg["targetLabels"], "discoveredLabels": {}}]} if path == "/api/v1/targets" else {"resultType": "vector", "result": [{"metric": {"__name__": app_metrics.urllib.parse.unquote(path.rsplit("query=", 1)[-1]).split("{", 1)[0], "version": "main-deadbee", "revision": "main-deadbee"}}]})
 
     class Response:
         status = 200
@@ -5741,7 +5741,7 @@ def test_observability_app_metrics_public_uses_actual_success_status_without_bod
         if path == "/api/v1/targets":
             return {"activeTargets": [{"health": "up", "scrapePool": "serviceMonitor/tokenplace/tokenplace/0", "labels": cfg["targetLabels"], "discoveredLabels": {}}]}
         metric = app_metrics.urllib.parse.unquote(path.rsplit("query=", 1)[-1]).split("{", 1)[0]
-        return {"result": [{"metric": {"__name__": metric, "version": "main-deadbee", "revision": "main-deadbee"}}]}
+        return {"resultType": "vector", "result": [{"metric": {"__name__": metric, "version": "main-deadbee", "revision": "main-deadbee"}}]}
 
     class Response:
         status = 204
@@ -5788,7 +5788,7 @@ def test_observability_app_metrics_verify_target_failures_and_retries(monkeypatc
         if path == "/api/v1/targets":
             return states.pop(0)
         metric = app_metrics.urllib.parse.unquote(path.rsplit("query=", 1)[-1]).split("{", 1)[0]
-        return {"result": [{"metric": {"__name__": metric, "app": "tokenplace", "environment": "staging", "version": "main-deadbee", "revision": "main-deadbee"}}]}
+        return {"resultType": "vector", "result": [{"metric": {"__name__": metric, "app": "tokenplace", "environment": "staging", "version": "main-deadbee", "revision": "main-deadbee"}}]}
     _verify_base(monkeypatch, cfg, prom_func)
     app_metrics.verify("tokenplace", "staging")
 
@@ -5796,7 +5796,7 @@ def test_observability_app_metrics_verify_target_failures_and_retries(monkeypatc
         {"health": "down", "scrapePool": "serviceMonitor/tokenplace/tokenplace/0", "labels": cfg["targetLabels"], "discoveredLabels": {}},
         {"health": "up", "scrapePool": "serviceMonitor/tokenplace/tokenplace/0", "labels": cfg["targetLabels"] | {"app": "wrong"}, "discoveredLabels": {}},
     ]:
-        _verify_base(monkeypatch, cfg, lambda path, bad=bad: {"activeTargets": [bad]} if path == "/api/v1/targets" else {"result": []})
+        _verify_base(monkeypatch, cfg, lambda path, bad=bad: {"activeTargets": [bad]} if path == "/api/v1/targets" else {"resultType": "vector", "result": []})
         with pytest.raises(SystemExit):
             app_metrics.verify("tokenplace", "staging")
 
@@ -5809,7 +5809,7 @@ def test_observability_app_metrics_verify_rejects_extra_relevant_target_and_retr
         {"health": "up", "scrapePool": "serviceMonitor/tokenplace/tokenplace/0", "labels": cfg["targetLabels"], "discoveredLabels": {}},
         {"health": "up", "scrapePool": "serviceMonitor/tokenplace/tokenplace/0", "labels": cfg["targetLabels"], "discoveredLabels": {}},
     ]}
-    _verify_base(monkeypatch, cfg, lambda path: targets if path == "/api/v1/targets" else {"result": []})
+    _verify_base(monkeypatch, cfg, lambda path: targets if path == "/api/v1/targets" else {"resultType": "vector", "result": []})
     with pytest.raises(SystemExit):
         app_metrics.verify("tokenplace", "staging")
 
@@ -5819,9 +5819,9 @@ def test_observability_app_metrics_verify_rejects_extra_relevant_target_and_retr
             return {"activeTargets": [{"health": "up", "scrapePool": "serviceMonitor/tokenplace/tokenplace/0", "labels": cfg["targetLabels"], "discoveredLabels": {}}]}
         seen[path] = seen.get(path, 0) + 1
         if seen[path] == 1:
-            return {"result": []}
+            return {"resultType": "vector", "result": []}
         metric = app_metrics.urllib.parse.unquote(path.rsplit("query=", 1)[-1]).split("{", 1)[0]
-        return {"result": [{"metric": {"__name__": metric, "app": "tokenplace", "environment": "staging", "version": "main-deadbee", "revision": "main-deadbee"}}]}
+        return {"resultType": "vector", "result": [{"metric": {"__name__": metric, "app": "tokenplace", "environment": "staging", "version": "main-deadbee", "revision": "main-deadbee"}}]}
     _verify_base(monkeypatch, cfg, prom_func)
     app_metrics.verify("tokenplace", "staging")
     assert all(count == 2 for count in seen.values())
@@ -5843,8 +5843,8 @@ def test_observability_app_metrics_verify_retries_then_reports_missing_family_wi
         decoded_query = app_metrics.urllib.parse.unquote(path.rsplit("query=", 1)[-1])
         metric = decoded_query.split("{", 1)[0]
         if app_metrics.metric_family_from_series(metric) == missing_family:
-            return {"result": []}
-        return {"result": [{"metric": {"__name__": metric, "app": "tokenplace", "environment": "staging", "version": "main-deadbee", "revision": "main-deadbee"}}]}
+            return {"resultType": "vector", "result": []}
+        return {"resultType": "vector", "result": [{"metric": {"__name__": metric, "app": "tokenplace", "environment": "staging", "version": "main-deadbee", "revision": "main-deadbee"}}]}
 
     class Opener:
         def open(self, url, timeout):
@@ -5870,7 +5870,7 @@ def test_observability_app_metrics_verify_fails_malformed_prometheus_without_sle
     cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"]["tokenplace"]["environments"]["staging"]
     slept = []
     monkeypatch.setattr(app_metrics.time, "sleep", lambda seconds: slept.append(seconds))
-    _verify_base(monkeypatch, cfg, lambda path: {"activeTargets": {}} if path == "/api/v1/targets" else {"result": []})
+    _verify_base(monkeypatch, cfg, lambda path: {"activeTargets": {}} if path == "/api/v1/targets" else {"resultType": "vector", "result": []})
     with pytest.raises(SystemExit):
         app_metrics.verify("tokenplace", "staging")
     assert slept == []
@@ -5895,6 +5895,48 @@ def test_observability_app_metrics_malformed_samples_fail_immediately(monkeypatc
     with pytest.raises(app_metrics.Error):
         app_metrics.query_required_families(cfg, {"version": "main-deadbee", "revision": "main-deadbee"})
     assert slept == []
+
+
+@pytest.mark.parametrize(
+    ("present", "result_type"),
+    [
+        pytest.param(False, None, id="missing"),
+        pytest.param(True, None, id="null"),
+        pytest.param(True, 1, id="number"),
+        pytest.param(True, {}, id="object"),
+        pytest.param(True, [], id="list"),
+        pytest.param(True, "matrix", id="non-vector"),
+    ],
+)
+def test_observability_app_metrics_invalid_result_type_fails_immediately(
+    monkeypatch, present, result_type
+):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"]["tokenplace"]["environments"]["staging"]
+    slept = []
+    public_checked = []
+
+    def prom_func(path):
+        if path == "/api/v1/targets":
+            return {"activeTargets": [{"health": "up", "scrapePool": "serviceMonitor/tokenplace/tokenplace/0", "labels": cfg["targetLabels"], "discoveredLabels": {}}]}
+        response = {"result": []}
+        if present:
+            response["resultType"] = result_type
+        return response
+
+    _verify_base(monkeypatch, cfg, prom_func)
+    monkeypatch.setattr(app_metrics.time, "sleep", lambda seconds: slept.append(seconds))
+    monkeypatch.setattr(
+        app_metrics.urllib.request,
+        "build_opener",
+        lambda *args: public_checked.append(True),
+    )
+
+    with pytest.raises(app_metrics.Error) as excinfo:
+        app_metrics.verify("tokenplace", "staging")
+
+    assert "structurally invalid" in str(excinfo.value)
+    assert slept == []
+    assert public_checked == []
 
 
 @pytest.mark.parametrize(
@@ -6076,7 +6118,7 @@ def test_observability_app_metrics_public_redirect_is_not_followed_and_redacted(
                 "discoveredLabels": {},
             }]}
         metric = app_metrics.urllib.parse.unquote(path.rsplit("query=", 1)[-1]).split("{", 1)[0]
-        return {"result": [{"metric": {
+        return {"resultType": "vector", "result": [{"metric": {
             "__name__": metric,
             "app": "tokenplace",
             "environment": "staging",

@@ -639,7 +639,7 @@ def query_required_families(cfg: dict[str, Any], derived_values: dict[str, str])
         candidates = [metric, f"{metric}_bucket", f"{metric}_sum", f"{metric}_count"]
         for candidate in candidates:
             data = prom("/api/v1/query?query=" + urllib.parse.quote(candidate + selector))
-            if data.get("resultType") not in (None, "vector"):
+            if data.get("resultType") != "vector":
                 fail("Prometheus query response is structurally invalid (details redacted)", 1)
             result = data.get("result")
             if not isinstance(result, list):
