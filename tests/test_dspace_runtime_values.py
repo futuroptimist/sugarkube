@@ -69,7 +69,28 @@ def test_dspace_staging_overlay_points_to_staging_token_place() -> None:
     env = _runtime_env(OVERLAYS["staging"])
 
     assert env["DSPACE_TOKEN_PLACE_URL"] == ["https://staging.token.place"]
+    assert env["DSPACE_TOKEN_PLACE_CHAT_MODEL"] == ["qwen3-8b-instruct"]
+    assert env["DSPACE_TOKEN_PLACE_CHAT_MODEL"].count("llama-3.1-8b-instruct") == 0
+
+
+def test_dspace_staging_resolved_values_keep_single_qwen_model_and_origin() -> None:
+    env: dict[str, list[str]] = {}
+    for values_file in EXPECTED_VALUES_CHAINS["staging"].split(","):
+        for name, values in _runtime_env(REPO_ROOT / values_file).items():
+            env[name] = values
+
+    assert env["DSPACE_TOKEN_PLACE_URL"] == ["https://staging.token.place"]
+    assert env["DSPACE_TOKEN_PLACE_CHAT_MODEL"] == ["qwen3-8b-instruct"]
+    assert "llama-3.1-8b-instruct" not in env["DSPACE_TOKEN_PLACE_CHAT_MODEL"]
+
+
+def test_dspace_prod_overlay_is_not_contaminated_by_staging_values() -> None:
+    env = _runtime_env(OVERLAYS["prod"])
+
+    assert env["DSPACE_TOKEN_PLACE_URL"] == ["https://token.place"]
     assert env["DSPACE_TOKEN_PLACE_CHAT_MODEL"] == ["llama-3.1-8b-instruct"]
+    assert "https://staging.token.place" not in env["DSPACE_TOKEN_PLACE_URL"]
+    assert "qwen3-8b-instruct" not in env["DSPACE_TOKEN_PLACE_CHAT_MODEL"]
 
 
 def test_dspace_prod_overlay_points_to_prod_token_place() -> None:
