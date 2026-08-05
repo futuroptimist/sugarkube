@@ -65,11 +65,22 @@ def _runtime_env(path: Path) -> dict[str, list[str]]:
     return env
 
 
+def _resolved_runtime_env(paths: str) -> dict[str, list[str]]:
+    """Return runtime env from the comma-separated values chain after overlay resolution."""
+    resolved: dict[str, list[str]] = {}
+    for path in paths.split(","):
+        env = _runtime_env(REPO_ROOT / path.strip())
+        for name, values in env.items():
+            resolved[name] = values
+    return resolved
+
+
 def test_dspace_staging_overlay_points_to_staging_token_place() -> None:
     env = _runtime_env(OVERLAYS["staging"])
 
     assert env["DSPACE_TOKEN_PLACE_URL"] == ["https://staging.token.place"]
-    assert env["DSPACE_TOKEN_PLACE_CHAT_MODEL"] == ["llama-3.1-8b-instruct"]
+    assert env["DSPACE_TOKEN_PLACE_CHAT_MODEL"] == ["qwen3-8b-instruct"]
+    assert "llama-3.1-8b-instruct" not in env["DSPACE_TOKEN_PLACE_CHAT_MODEL"]
 
 
 def test_dspace_prod_overlay_points_to_prod_token_place() -> None:
@@ -77,6 +88,29 @@ def test_dspace_prod_overlay_points_to_prod_token_place() -> None:
 
     assert env["DSPACE_TOKEN_PLACE_URL"] == ["https://token.place"]
     assert env["DSPACE_TOKEN_PLACE_CHAT_MODEL"] == ["llama-3.1-8b-instruct"]
+
+
+def test_dspace_staging_values_chain_resolves_canonical_qwen_without_prod_leaks() -> None:
+    config = load_config("dspace", "staging")
+    env = _resolved_runtime_env(config["SUGARKUBE_VALUES"])
+
+    assert env["DSPACE_TOKEN_PLACE_URL"] == ["https://staging.token.place"]
+    assert env["DSPACE_TOKEN_PLACE_CHAT_MODEL"] == ["qwen3-8b-instruct"]
+    assert sum(
+        len(values) for name, values in env.items() if name == "DSPACE_TOKEN_PLACE_CHAT_MODEL"
+    ) == 1
+    assert "llama-3.1-8b-instruct" not in env["DSPACE_TOKEN_PLACE_CHAT_MODEL"]
+    assert "https://token.place" not in env["DSPACE_TOKEN_PLACE_URL"]
+
+
+def test_dspace_prod_values_chain_stays_prod_without_staging_contamination() -> None:
+    config = load_config("dspace", "prod")
+    env = _resolved_runtime_env(config["SUGARKUBE_VALUES"])
+
+    assert env["DSPACE_TOKEN_PLACE_URL"] == ["https://token.place"]
+    assert env["DSPACE_TOKEN_PLACE_CHAT_MODEL"] == ["llama-3.1-8b-instruct"]
+    assert "qwen3-8b-instruct" not in env["DSPACE_TOKEN_PLACE_CHAT_MODEL"]
+    assert "https://staging.token.place" not in env["DSPACE_TOKEN_PLACE_URL"]
 
 
 def test_dspace_deployment_overlays_have_no_vite_runtime_env() -> None:
