@@ -77,9 +77,9 @@ just app-chart-status app=tokenplace
 If status reports a stale pin after a new chart is published, bump it explicitly:
 
 ```bash
-just app-chart-bump app=tokenplace version=0.1.3
+just app-chart-bump app=tokenplace version=0.1.4
 git add docs/apps/tokenplace.version
-git commit -m "Bump tokenplace chart pin to 0.1.3"
+git commit -m "Bump tokenplace chart pin to 0.1.4"
 git push
 ```
 
