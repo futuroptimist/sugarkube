@@ -1,0 +1,153 @@
+{
+  "schemaVersion": 2,
+  "app": "dspace",
+  "applicationVersion": "3.1.0",
+  "sourceRevision": "018687f5a7f4de45508c6e36eb28afb3e44da24d",
+  "chartSourceRevision": "719644999f284935f792dbe530511278643aa2ef",
+  "imageTag": "main-018687f",
+  "imageDigest": "sha256:2b95b7fdccdd011553c8d8617e3090ee27323996c532148fdb147cb9fd6e1b6c",
+  "chartVersion": "3.1.1",
+  "chartDigest": "sha256:e1f8ab8860e55ee3c8b8ca8cf7bce6ee7ae9c5dbc81ad8bf82b204b51773783b",
+  "semanticTag": "v3.1.0",
+  "recordType": "final",
+  "environment": "staging",
+  "expectedDefaultChatProvider": "token-place",
+  "approvedAt": "2026-08-05T03:57:22Z",
+  "approvedBy": "futuroptimist",
+  "helmRevision": 28,
+  "pods": [
+    {
+      "name": "dspace-c95647b57-drptk",
+      "startTime": "2026-08-05T04:27:43Z",
+      "imageID": "ghcr.io/democratizedspace/dspace@sha256:2b95b7fdccdd011553c8d8617e3090ee27323996c532148fdb147cb9fd6e1b6c"
+    },
+    {
+      "name": "dspace-c95647b57-tzh6d",
+      "startTime": "2026-08-05T04:27:29Z",
+      "imageID": "ghcr.io/democratizedspace/dspace@sha256:2b95b7fdccdd011553c8d8617e3090ee27323996c532148fdb147cb9fd6e1b6c"
+    }
+  ],
+  "runtimeSourceRevision": "018687f5a7f4de45508c6e36eb28afb3e44da24d",
+  "runtimeSourceRevisionMethod": "podImageID+ociRevisionAnnotation",
+  "verificationResults": [
+    {
+      "check": "imageDigest",
+      "passed": true,
+      "details": "expected sha256:2b95b7fdccdd011553c8d8617e3090ee27323996c532148fdb147cb9fd6e1b6c; resolved sha256:2b95b7fdccdd011553c8d8617e3090ee27323996c532148fdb147cb9fd6e1b6c"
+    },
+    {
+      "check": "chartDigest",
+      "passed": true,
+      "details": "expected sha256:e1f8ab8860e55ee3c8b8ca8cf7bce6ee7ae9c5dbc81ad8bf82b204b51773783b; resolved sha256:e1f8ab8860e55ee3c8b8ca8cf7bce6ee7ae9c5dbc81ad8bf82b204b51773783b"
+    },
+    {
+      "check": "chartSourceRevision",
+      "passed": true,
+      "details": "expected 719644999f284935f792dbe530511278643aa2ef; resolved 719644999f284935f792dbe530511278643aa2ef"
+    },
+    {
+      "check": "imagePlatformSourceRevision[0]",
+      "passed": true,
+      "details": "expected 018687f5a7f4de45508c6e36eb28afb3e44da24d; resolved 018687f5a7f4de45508c6e36eb28afb3e44da24d"
+    },
+    {
+      "check": "imagePlatformSourceRevision[1]",
+      "passed": true,
+      "details": "expected 018687f5a7f4de45508c6e36eb28afb3e44da24d; resolved 018687f5a7f4de45508c6e36eb28afb3e44da24d"
+    },
+    {
+      "check": "selectedCoordinates",
+      "passed": true,
+      "details": "environment=staging; imageTag=main-018687f; chartVersion=3.1.1"
+    },
+    {
+      "check": "clusterEnvironment",
+      "passed": true,
+      "details": "connected cluster environment=staging"
+    },
+    {
+      "check": "helmRelease",
+      "passed": true,
+      "details": "release=dspace; namespace=dspace; revision=28; status=deployed; binding=Helm mutation description"
+    },
+    {
+      "check": "installedChart",
+      "passed": true,
+      "details": "chart=dspace; version=3.1.1; coordinate=oci://ghcr.io/democratizedspace/charts/dspace@sha256:e1f8ab8860e55ee3c8b8ca8cf7bce6ee7ae9c5dbc81ad8bf82b204b51773783b"
+    },
+    {
+      "check": "releaseOwnershipAndReadiness",
+      "passed": true,
+      "details": "2 pod(s) owned by release workloads and serving"
+    },
+    {
+      "check": "podImageCoordinates",
+      "passed": true,
+      "details": "all dspace containers use ghcr.io/democratizedspace/dspace:main-018687f"
+    },
+    {
+      "check": "podImageDigests",
+      "passed": true,
+      "details": "every running pod imageID matched approved image digest"
+    },
+    {
+      "check": "helmStoredValues",
+      "passed": true,
+      "details": "stored image coordinates, pull policy, and environment isolation matched approval"
+    },
+    {
+      "check": "runtimeIdentity",
+      "passed": true,
+      "details": "approved runtime source and image identity verified"
+    },
+    {
+      "check": "frontendIdentity",
+      "passed": true,
+      "details": "approved frontend revision marker verified"
+    },
+    {
+      "check": "replicaAgreement",
+      "passed": true,
+      "details": "all ready serving replicas agreed"
+    },
+    {
+      "check": "publicDirectAgreement",
+      "passed": true,
+      "details": "public and direct build identities agreed"
+    },
+    {
+      "check": "defaultProvider",
+      "passed": true,
+      "details": "approved default provider verified"
+    },
+    {
+      "check": "remoteChatSmoke",
+      "passed": true,
+      "details": "bounded remote /chat journey passed"
+    }
+  ],
+  "runtimeVerification": {
+    "schemaVersion": 1,
+    "environment": "staging",
+    "release": "dspace",
+    "namespace": "dspace",
+    "applicationVersion": "3.1.0",
+    "runtimeSourceRevision": "018687f5a7f4de45508c6e36eb28afb3e44da24d",
+    "frontendSourceRevision": "018687f5a7f4de45508c6e36eb28afb3e44da24d",
+    "defaultProvider": "token-place",
+    "journeys": [
+      {
+        "name": "/build-meta.json",
+        "passed": true
+      },
+      {
+        "name": "/",
+        "passed": true
+      },
+      {
+        "name": "/chat",
+        "passed": true
+      }
+    ]
+  }
+}
