@@ -5895,3 +5895,108 @@ def test_observability_app_metrics_verify_all_uses_every_configured_app(monkeypa
 
     assert app_metrics.main(["verify-all"]) == 0
     assert called == [("first", "staging"), ("second", "staging")]
+
+
+def test_observability_app_metrics_live_environment_normalization_and_rejection(monkeypatch):
+    forbidden = ["prod", "production", "", "dev", "qa"]
+    for env in forbidden:
+        def fail_load_config(env=env):
+            raise AssertionError(f"loaded config for {env!r}")
+
+        monkeypatch.setattr(app_metrics, "load_config", fail_load_config)
+        with pytest.raises(SystemExit) as excinfo:
+            app_metrics.appcfg("tokenplace", env)
+        assert "staging only" in str(excinfo.value)
+        assert app_metrics.main(["verify-all", "--env", env]) == 2
+
+    assert app_metrics.normalize_live_env("env=env=int") == "staging"
+    assert app_metrics.normalize_live_env("env=staging") == "staging"
+
+
+def test_observability_app_metrics_verify_all_uses_normalized_requested_env(monkeypatch):
+    doc = {"schemaVersion": 1, "applications": {"first": {}, "second": {}}}
+    called = []
+    monkeypatch.setattr(app_metrics, "load_config", lambda: doc)
+    monkeypatch.setattr(app_metrics, "verify", lambda app, env: called.append((app, env)))
+
+    assert app_metrics.main(["verify-all", "--env", "env=env=int"]) == 0
+    assert called == [("first", "staging"), ("second", "staging")]
+
+
+def test_observability_app_metrics_public_redirect_is_not_followed_and_redacted(monkeypatch):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"]["tokenplace"]["environments"]["staging"]
+    cfg = json.loads(json.dumps(cfg))
+    cfg["retries"] = {"attempts": 1, "delaySeconds": 0}
+    sm = {
+        "spec": {
+            "selector": {"matchLabels": cfg["serviceMonitor"]["selectorMatchLabels"]},
+            "endpoints": [{
+                "path": "/metrics",
+                "interval": cfg["serviceMonitor"]["interval"],
+                "scrapeTimeout": cfg["serviceMonitor"]["scrapeTimeout"],
+                "authorization": {"type": "Bearer", "credentials": cfg["secret"]},
+                "relabelings": cfg["serviceMonitor"]["relabelings"],
+            }],
+        }
+    }
+
+    def prom_func(path):
+        if path == "/api/v1/targets":
+            return {"activeTargets": [{
+                "health": "up",
+                "scrapePool": "serviceMonitor/tokenplace/tokenplace/0",
+                "labels": cfg["targetLabels"],
+                "discoveredLabels": {},
+            }]}
+        metric = app_metrics.urllib.parse.unquote(path.rsplit("query=", 1)[-1]).split("{", 1)[0]
+        return {"result": [{"metric": {
+            "__name__": metric,
+            "app": "tokenplace",
+            "environment": "staging",
+            "version": "main-deadbee",
+            "revision": "main-deadbee",
+        }}]}
+
+    class RedirectingOpener:
+        def open(self, url, timeout):
+            raise app_metrics.urllib.error.HTTPError(
+                url,
+                302,
+                "Found",
+                {"Location": "https://example.invalid/secret-path"},
+                None,
+            )
+
+    monkeypatch.setattr(app_metrics, "appcfg", lambda app, env: cfg)
+    monkeypatch.setattr(app_metrics, "assert_context", lambda: None)
+    monkeypatch.setattr(app_metrics, "check_secret", lambda cfg: None)
+    monkeypatch.setattr(
+        app_metrics,
+        "derive_build_labels_live",
+        lambda cfg: {"version": "main-deadbee", "revision": "main-deadbee"},
+    )
+    monkeypatch.setattr(app_metrics, "kjson", lambda args: sm)
+    monkeypatch.setattr(app_metrics, "prom", prom_func)
+    seen_handlers = []
+
+    def fake_build_opener(*handlers):
+        seen_handlers.extend(handlers)
+        return RedirectingOpener()
+
+    monkeypatch.setattr(app_metrics.urllib.request, "build_opener", fake_build_opener)
+
+    with pytest.raises(SystemExit) as excinfo:
+        app_metrics.verify("tokenplace", "staging")
+    message = str(excinfo.value)
+    assert "status mismatch" in message
+    assert "secret-path" not in message
+    assert "Found" not in message
+    redirect_handlers = [
+        handler for handler in seen_handlers
+        if isinstance(handler, type)
+        and issubclass(handler, app_metrics.urllib.request.HTTPRedirectHandler)
+    ]
+    assert redirect_handlers
+    assert redirect_handlers[0]().redirect_request(
+        None, None, 302, "Found", {}, "https://example.invalid/next"
+    ) is None

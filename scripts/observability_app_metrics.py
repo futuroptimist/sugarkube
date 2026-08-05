@@ -242,6 +242,19 @@ def validate_inventory(doc):
                 nonempty(f, "forbidden label name")
 
 
+def normalize_live_env(env: str) -> str:
+    if not isinstance(env, str):
+        fail("application metrics environment is unsupported")
+    value = env.strip()
+    while value.startswith("env="):
+        value = value[4:].strip()
+    if value == "int":
+        value = "staging"
+    if value != "staging":
+        fail("application metrics live operations support staging only")
+    return value
+
+
 def run(args):
     try:
         return subprocess.run(args, check=True, text=True, capture_output=True).stdout
@@ -264,8 +277,7 @@ def assert_context():
 
 
 def appcfg(app, env):
-    if env != "staging":
-        fail("application metrics verification refuses production")
+    env = normalize_live_env(env)
     inv = load_config()
     try:
         return inv["applications"][app]["environments"][env]
@@ -567,9 +579,20 @@ def verify(app, env):
     missing = required - found
     if missing:
         fail(f"required metric family missing: {sorted(missing)[0]}", 1)
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+
     try:
-        opener = urllib.request.build_opener(urllib.request.HTTPHandler)
-        opener.open(cfg["publicMetrics"]["url"], timeout=10).read(0)
+        # Redirects are intentionally disabled: the configured endpoint itself
+        # must return the expected unauthenticated status.
+        opener = urllib.request.build_opener(
+            NoRedirect, urllib.request.HTTPHandler, urllib.request.HTTPSHandler
+        )
+        response = opener.open(cfg["publicMetrics"]["url"], timeout=10)
+        close = getattr(response, "close", None)
+        if callable(close):
+            close()
         got = 200
     except urllib.error.HTTPError as e:
         got = e.code
@@ -662,9 +685,10 @@ def main(argv=None):
             print("Rendered application metrics contract is valid.")
             return 0
         if a.mode == "verify-all":
+            env = normalize_live_env(a.env)
             inv = load_config()
             for app in inv["applications"]:
-                verify(app, "staging")
+                verify(app, env)
             return 0
         if not a.app:
             fail("--app is required")
