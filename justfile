@@ -1665,7 +1665,7 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     if [ ${#version_args[@]} -gt 0 ]; then
         render_args+=("${version_args[@]}")
     fi
-    helm "${render_args[@]}" | python3 "{{ justfile_directory() }}/scripts/observability_app_metrics.py" validate-render       --app "${app}" --env "${requested_env}" --release-namespace "${namespace}" --input -
+    helm "${render_args[@]}" | python3 "{{ justfile_directory() }}/scripts/observability_app_metrics.py" validate-render       --app "${app}" --env "${requested_env}" --release-namespace "${namespace}" --release-name "${release}" --input -
 
     helm_args=(upgrade "${release}" "${chart}" --namespace "${namespace}")
 

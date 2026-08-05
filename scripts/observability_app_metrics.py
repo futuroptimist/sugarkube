@@ -121,6 +121,7 @@ def validate_inventory(doc):
                     "retries",
                     "requiredMetricFamilies",
                     "allowedApplicationLabels",
+                    "derivedApplicationLabels",
                     "forbiddenApplicationLabels",
                 },
                 f"{app}/{env}",
@@ -215,6 +216,24 @@ def validate_inventory(doc):
                     fail("allowed label enums must be nonempty unique arrays")
                 for v in vals:
                     nonempty(v, f"allowed enum for {k}")
+            derived = cfg["derivedApplicationLabels"]
+            if not isinstance(derived, dict):
+                fail("derivedApplicationLabels must be an object")
+            overlap = set(allowed) & set(derived)
+            if overlap:
+                fail("static and derived application labels conflict")
+            for label, source in derived.items():
+                nonempty(label, "derived label name")
+                expect_keys(source, {"workload", "container", "env", "normalizer"}, f"derivedApplicationLabels.{label}")
+                expect_keys(source["workload"], {"kind", "name"}, f"derivedApplicationLabels.{label}.workload")
+                if source["workload"]["kind"] != "Deployment":
+                    fail("derived workload kind is unsupported")
+                name(source["workload"]["name"], "derived workload name")
+                name(source["container"], "derived container")
+                if not isinstance(source["env"], str) or not re.fullmatch(r"[A-Z_][A-Z0-9_]{0,62}", source["env"]):
+                    fail("derived environment variable name is unsafe")
+                if source["normalizer"] != "identity":
+                    fail("derived normalizer is unsupported")
             forbidden = cfg["forbiddenApplicationLabels"]
             if not isinstance(forbidden, list) or len(forbidden) != len(set(forbidden)):
                 fail("forbidden labels must be a unique array")
@@ -326,30 +345,91 @@ def prom(path):
     return doc.get("data")
 
 
-def validate_metric_labels(cfg, labels):
+def normalize_derived_value(value: str, normalizer: str) -> str:
+    if normalizer != "identity":
+        fail("derived normalizer is unsupported")
+    if not isinstance(value, str) or not value or not SAFE_VALUE.fullmatch(value):
+        fail("derived build label value is malformed (details redacted)", 1)
+    return value
+
+
+def find_env_value(workload: dict[str, Any], source: dict[str, Any]) -> str:
+    containers = workload.get("spec", {}).get("template", {}).get("spec", {}).get("containers")
+    if not isinstance(containers, list):
+        fail("workload source contract is malformed (details redacted)", 1)
+    matches = [c for c in containers if isinstance(c, dict) and c.get("name") == source["container"]]
+    if len(matches) != 1:
+        fail("workload container source is absent or ambiguous (details redacted)", 1)
+    env_entries = matches[0].get("env")
+    if not isinstance(env_entries, list):
+        fail("workload environment source is absent (details redacted)", 1)
+    found = []
+    for entry in env_entries:
+        if isinstance(entry, dict) and entry.get("name") == source["env"]:
+            found.append(entry)
+    if len(found) != 1:
+        fail("workload environment source is absent or duplicated (details redacted)", 1)
+    entry = found[0]
+    if "valueFrom" in entry or "value" not in entry:
+        fail("workload environment source must be a literal value (details redacted)", 1)
+    return normalize_derived_value(entry["value"], source["normalizer"])
+
+
+def derive_build_labels_from_docs(cfg, docs, workload_name_override: str = ""):
+    labels = {}
+    for label, source in cfg.get("derivedApplicationLabels", {}).items():
+        workload = source["workload"]
+        workload_name = workload_name_override or workload["name"]
+        matches = [
+            d for d in docs
+            if d.get("kind") == workload["kind"]
+            and d.get("metadata", {}).get("name") == workload_name
+            and d.get("metadata", {}).get("namespace", cfg["namespace"]) == cfg["namespace"]
+        ]
+        if len(matches) != 1:
+            fail("rendered workload source is absent or ambiguous (details redacted)", 1)
+        labels[label] = find_env_value(matches[0], source)
+    return labels
+
+
+def derive_build_labels_live(cfg):
+    docs = []
+    seen = set()
+    for source in cfg.get("derivedApplicationLabels", {}).values():
+        workload = source["workload"]
+        key = (workload["kind"], workload["name"])
+        if key in seen:
+            continue
+        seen.add(key)
+        docs.append(kjson(["kubectl", "-n", cfg["namespace"], "get", workload["kind"].lower(), workload["name"], "-o", "json"]))
+    return derive_build_labels_from_docs(cfg, docs)
+
+
+def validate_metric_labels(cfg, labels, derived_values=None):
+    derived_values = derived_values or {}
     if not isinstance(labels, dict):
         fail("metric labels were malformed (details redacted)", 1)
     for label, value in labels.items():
         low = label.lower()
         is_standard = label in STANDARD_LABELS
-        if not is_standard and label not in cfg["allowedApplicationLabels"]:
+        if not is_standard and label not in cfg["allowedApplicationLabels"] and label not in cfg.get("derivedApplicationLabels", {}):
             fail("unbounded application metric label observed (details redacted)", 1)
         if not is_standard and (
             any(w in low for w in cfg["forbiddenApplicationLabels"])
             or any(w in low for w in FORBIDDEN_WORDS)
         ):
             fail("forbidden application metric label observed (details redacted)", 1)
-        if (
-            label in cfg["allowedApplicationLabels"]
-            and value not in cfg["allowedApplicationLabels"][label]
-        ):
+        if label in cfg["allowedApplicationLabels"] and value not in cfg["allowedApplicationLabels"][label]:
             fail("application metric label enum mismatch (details redacted)", 1)
+        if label in cfg.get("derivedApplicationLabels", {}) and value != derived_values.get(label):
+            fail("derived application metric label mismatch (details redacted)", 1)
 
 
 def verify(app, env):
     cfg = appcfg(app, env)
     assert_context()
     check_secret(cfg)
+    derived_values = derive_build_labels_live(cfg)
     sm = kjson(
         [
             "kubectl",
@@ -410,7 +490,7 @@ def verify(app, env):
         if not result:
             fail(f"required metric family missing: {metric}", 1)
         for sample in result:
-            validate_metric_labels(cfg, sample.get("metric", {}))
+            validate_metric_labels(cfg, sample.get("metric", {}), derived_values)
     try:
         opener = urllib.request.build_opener(urllib.request.HTTPHandler)
         opener.open(cfg["publicMetrics"]["url"], timeout=10).read(0)
@@ -425,13 +505,7 @@ def verify(app, env):
 
 
 
-def validate_render(app: str, env: str, input_path: str, release_namespace: str = "") -> None:
-    inv = load_config()
-    cfg = inv.get("applications", {}).get(app, {}).get("environments", {}).get(env)
-    if cfg is None:
-        if input_path == "-":
-            sys.stdin.read()
-        return
+def load_rendered_docs(input_path: str) -> list[dict[str, Any]]:
     try:
         raw = sys.stdin.read() if input_path == "-" else Path(input_path).read_text(encoding="utf-8")
         converted = subprocess.run(
@@ -441,9 +515,19 @@ def validate_render(app: str, env: str, input_path: str, release_namespace: str 
             capture_output=True,
             check=True,
         ).stdout
-        docs = [d for d in json.loads(converted) if isinstance(d, dict)]
+        return [d for d in json.loads(converted) if isinstance(d, dict)]
     except (OSError, UnicodeError, subprocess.CalledProcessError, json.JSONDecodeError):
         fail("rendered manifests are malformed (details redacted)")
+
+
+def validate_render(app: str, env: str, input_path: str, release_namespace: str = "", release_name: str = "") -> None:
+    inv = load_config()
+    cfg = inv.get("applications", {}).get(app, {}).get("environments", {}).get(env)
+    if cfg is None:
+        if input_path == "-":
+            sys.stdin.read()
+        return
+    docs = load_rendered_docs(input_path)
     secrets = [d for d in docs if d.get("kind") == "Secret"]
     if secrets:
         fail("rendered manifests must not include credential Secret resources")
@@ -455,6 +539,7 @@ def validate_render(app: str, env: str, input_path: str, release_namespace: str 
             sms.append(candidate)
     if len(sms) != 1:
         fail("rendered manifests must include exactly one configured ServiceMonitor")
+    derive_build_labels_from_docs(cfg, docs, release_name)
     sm = sms[0]
     labels = sm.get("metadata", {}).get("labels", {})
     if labels.get("release") != "kube-prometheus-stack":
@@ -485,6 +570,7 @@ def main(argv=None):
     p.add_argument("--env", default="staging")
     p.add_argument("--input", default="-")
     p.add_argument("--release-namespace", default="")
+    p.add_argument("--release-name", default="")
     a, extra = p.parse_known_args(argv)
     if extra:
         print("ERROR: unexpected arguments are refused (values redacted)", file=sys.stderr)
@@ -497,7 +583,7 @@ def main(argv=None):
         if a.mode == "validate-render":
             if not a.app:
                 fail("--app is required")
-            validate_render(a.app, a.env, a.input, a.release_namespace)
+            validate_render(a.app, a.env, a.input, a.release_namespace, a.release_name)
             print("Rendered application metrics contract is valid.")
             return 0
         if a.mode == "verify-all":

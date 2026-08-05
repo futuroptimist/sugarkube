@@ -265,7 +265,7 @@ spec:
   template:
     spec:
       containers:
-        - name: tokenplace
+        - name: relay
           image: ghcr.io/example/tokenplace:main-deadbee
         - name: metrics-sidecar
           env:
@@ -284,7 +284,7 @@ spec:
   else
     release="${{2}}"
     app="${{release}}"
-    [ "${{app}}" != tokenplace ] || container=relay
+    if [[ "$*" == *charts/tokenplace* ]]; then container=relay; fi
     container="${{container:-${{app}}}}"
     tag=main-deadbee
     previous=""
@@ -317,9 +317,13 @@ spec:
           image: ghcr.io/example/${{app}}:${{tag}}
           env:
             - name: TOKENPLACE_IMAGE_TAG
+              value: ${{tag}}
             - name: TOKENPLACE_RELEASE_VERSION
+              value: "0.1.1"
             - name: TOKENPLACE_CHART_VERSION
+              value: "0.1.4"
             - name: TOKENPLACE_DEPLOY_ENV
+              value: staging
 ---
 apiVersion: v1
 kind: Service
@@ -5357,8 +5361,22 @@ def test_observability_app_metrics_inventory_tokenplace_contract_is_strict_and_c
     assert "status" not in allowed
     assert allowed["status_class"] == ["1xx", "2xx", "3xx", "4xx", "5xx", "unknown"]
     assert allowed["provider_mode"] == ["relay", "direct", "unknown"]
-    assert allowed["version"] == ["0.1.1"]
-    assert "main-deadbee" in allowed["revision"]
+    assert "version" not in allowed
+    assert "revision" not in allowed
+    assert cfg["derivedApplicationLabels"] == {
+        "version": {
+            "workload": {"kind": "Deployment", "name": "tokenplace"},
+            "container": "relay",
+            "env": "TOKENPLACE_RELEASE_VERSION",
+            "normalizer": "identity",
+        },
+        "revision": {
+            "workload": {"kind": "Deployment", "name": "tokenplace"},
+            "container": "relay",
+            "env": "TOKENPLACE_IMAGE_TAG",
+            "normalizer": "identity",
+        },
+    }
     assert "token" in cfg["forbiddenApplicationLabels"]
 
 
@@ -5399,6 +5417,7 @@ def test_observability_app_metrics_standard_scrape_labels_are_not_forbidden_appl
             "version": "0.1.1",
             "revision": "main-deadbee",
         },
+        {"version": "0.1.1", "revision": "main-deadbee"},
     )
     with pytest.raises(SystemExit) as excinfo:
         app_metrics.validate_metric_labels(cfg, {"customer_email": "fixture@example.invalid"})
@@ -5414,7 +5433,23 @@ def test_observability_app_metrics_verifier_has_no_tokenplace_specific_branch():
 
 def _tokenplace_chart_like_service_monitor(namespace_line: str = "") -> str:
     namespace = f"  namespace: {namespace_line}\n" if namespace_line else ""
-    return f"""apiVersion: monitoring.coreos.com/v1
+    return f"""apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tokenplace
+{namespace}spec:
+  template:
+    spec:
+      containers:
+        - name: relay
+          image: ghcr.io/futuroptimist/tokenplace:main-deadbee
+          env:
+            - name: TOKENPLACE_RELEASE_VERSION
+              value: "0.1.1"
+            - name: TOKENPLACE_IMAGE_TAG
+              value: main-deadbee
+---
+apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: tokenplace
@@ -5474,6 +5509,76 @@ def test_observability_app_metrics_validate_render_unconfigured_consumes_stdin(m
     app_metrics.validate_render("jobbot3000", "staging", "-", "jobbot3000")
 
     assert fake.consumed is True
+
+
+def test_observability_app_metrics_validate_render_derives_build_labels_from_deployment(tmp_path: Path):
+    rendered = tmp_path / "rendered.yaml"
+    rendered.write_text(_tokenplace_chart_like_service_monitor(), encoding="utf-8")
+
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"]["tokenplace"]["environments"]["staging"]
+    docs = app_metrics.load_rendered_docs(str(rendered))
+
+    assert app_metrics.derive_build_labels_from_docs(cfg, docs) == {
+        "version": "0.1.1",
+        "revision": "main-deadbee",
+    }
+
+
+@pytest.mark.parametrize(
+    ("mutator", "message"),
+    [
+        (lambda y: y.replace("name: relay\n          image:", "name: other\n          image:"), "container source"),
+        (lambda y: y.replace("            - name: TOKENPLACE_IMAGE_TAG\n              value: main-deadbee\n", ""), "environment source"),
+        (lambda y: y.replace("            - name: TOKENPLACE_IMAGE_TAG\n              value: main-deadbee\n", "            - name: TOKENPLACE_IMAGE_TAG\n              value: main-deadbee\n            - name: TOKENPLACE_IMAGE_TAG\n              value: other\n"), "environment source"),
+        (lambda y: y.replace("value: main-deadbee", "valueFrom:\n                fieldRef:\n                  fieldPath: metadata.name"), "literal value"),
+        (lambda y: y.replace("value: main-deadbee", "value: ''"), "malformed"),
+    ],
+)
+def test_observability_app_metrics_validate_render_rejects_bad_derived_sources(tmp_path: Path, mutator, message: str):
+    rendered = tmp_path / "rendered.yaml"
+    rendered.write_text(mutator(_tokenplace_chart_like_service_monitor()), encoding="utf-8")
+
+    with pytest.raises(SystemExit) as excinfo:
+        app_metrics.validate_render("tokenplace", "staging", str(rendered), "tokenplace")
+
+    assert message in str(excinfo.value)
+
+
+def test_observability_app_metrics_rejects_stale_or_mismatched_derived_labels():
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"]["tokenplace"]["environments"]["staging"]
+    app_metrics.validate_metric_labels(
+        cfg,
+        {"version": "0.1.1", "revision": "main-deadbee", "app": "tokenplace"},
+        {"version": "0.1.1", "revision": "main-deadbee"},
+    )
+    with pytest.raises(SystemExit) as excinfo:
+        app_metrics.validate_metric_labels(
+            cfg,
+            {"version": "0.1.1", "revision": "main-stale", "app": "tokenplace"},
+            {"version": "0.1.1", "revision": "main-deadbee"},
+        )
+    assert "derived application metric label mismatch" in str(excinfo.value)
+
+
+def test_observability_app_metrics_second_application_uses_declarative_sources_without_code_changes(tmp_path: Path):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"]["tokenplace"]["environments"]["staging"]
+    cfg = json.loads(json.dumps(cfg))
+    cfg["namespace"] = "synthetic"
+    cfg["derivedApplicationLabels"] = {
+        "build": {
+            "workload": {"kind": "Deployment", "name": "otherapp"},
+            "container": "api",
+            "env": "OTHER_BUILD",
+            "normalizer": "identity",
+        }
+    }
+    docs = [{
+        "kind": "Deployment",
+        "metadata": {"name": "otherapp", "namespace": "synthetic"},
+        "spec": {"template": {"spec": {"containers": [{"name": "api", "env": [{"name": "OTHER_BUILD", "value": "sha-123"}]}]}}},
+    }]
+
+    assert app_metrics.derive_build_labels_from_docs(cfg, docs) == {"build": "sha-123"}
 
 
 @pytest.mark.parametrize(
