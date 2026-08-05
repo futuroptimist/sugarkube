@@ -6000,3 +6000,150 @@ def test_observability_app_metrics_public_redirect_is_not_followed_and_redacted(
     assert redirect_handlers[0]().redirect_request(
         None, None, 302, "Found", {}, "https://example.invalid/next"
     ) is None
+
+
+def test_observability_app_metrics_secret_and_context_failures_are_redacted(
+    monkeypatch, capsys
+):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
+        "tokenplace"
+    ]["environments"]["staging"]
+
+    monkeypatch.setattr(app_metrics, "run", lambda args: "other-context\n")
+    with pytest.raises(SystemExit) as excinfo:
+        app_metrics.assert_context()
+    assert "context mismatch" in str(excinfo.value)
+
+    monkeypatch.setattr(app_metrics, "kjson", lambda args: {"data": {"token": ""}})
+    with pytest.raises(SystemExit) as excinfo:
+        app_metrics.check_secret(cfg)
+    assert "absent or empty" in str(excinfo.value)
+    assert "tokenplace-staging" not in capsys.readouterr().out
+
+
+def test_observability_app_metrics_install_secret_success_uses_stdin_pipe(
+    monkeypatch, tmp_path, capsys
+):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
+        "tokenplace"
+    ]["environments"]["staging"]
+    tty = tmp_path / "tty"
+    tty.write_text("", encoding="utf-8")
+    monkeypatch.setenv("SUGARKUBE_APP_METRICS_TTY", str(tty))
+    monkeypatch.setattr(app_metrics.sys.stdin, "isatty", lambda: True)
+    import getpass
+
+    monkeypatch.setattr(getpass, "getpass", lambda prompt, stream: "rotated-value")
+
+    class TtyWrapper:
+        def __init__(self, handle):
+            self._handle = handle
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self._handle.close()
+
+        def isatty(self):
+            return True
+
+    real_open = open
+    monkeypatch.setattr(
+        app_metrics,
+        "open",
+        lambda path, mode: TtyWrapper(real_open(path, mode)),
+        raising=False,
+    )
+    popen_calls = []
+
+    class FakePopen:
+        returncode = 0
+
+        def __init__(self, args, **kwargs):
+            popen_calls.append((args, kwargs))
+
+        def communicate(self, data):
+            assert data == b"rotated-value"
+            return (b"apiVersion: v1\nkind: Secret\n", b"")
+
+    applied = []
+    monkeypatch.setattr(app_metrics.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(
+        app_metrics.subprocess,
+        "run",
+        lambda args, **kwargs: applied.append((args, kwargs))
+        or argparse.Namespace(returncode=0),
+    )
+
+    app_metrics.install_secret(cfg)
+
+    assert popen_calls[0][0] == [
+        "kubectl",
+        "-n",
+        "tokenplace",
+        "create",
+        "secret",
+        "generic",
+        cfg["secret"]["name"],
+        f"--from-file={cfg['secret']['key']}=/dev/stdin",
+        "--dry-run=client",
+        "-o",
+        "yaml",
+    ]
+    assert applied[0][0] == ["kubectl", "apply", "-f", "-"]
+    assert applied[0][1]["input"] == b"apiVersion: v1\nkind: Secret\n"
+    assert "rotated-value" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("mutator", "message"),
+    [
+        (lambda d: d.update({"schemaVersion": 2}), "unsupported"),
+        (lambda d: d.update({"applications": []}), "applications"),
+        (
+            lambda d: d["applications"]["tokenplace"]["environments"].update(
+                {"prod": {}}
+            ),
+            "only staging",
+        ),
+        (
+            lambda d: d["applications"]["tokenplace"]["environments"][
+                "staging"
+            ].update({"expectedTargetCount": 0}),
+            "positive integer",
+        ),
+        (
+            lambda d: d["applications"]["tokenplace"]["environments"]["staging"][
+                "serviceMonitor"
+            ].update({"interval": "0s"}),
+            "malformed",
+        ),
+        (
+            lambda d: d["applications"]["tokenplace"]["environments"]["staging"][
+                "retries"
+            ].update({"attempts": 0}),
+            "bounded integers",
+        ),
+        (
+            lambda d: d["applications"]["tokenplace"]["environments"]["staging"][
+                "allowedApplicationLabels"
+            ].update({"bad": []}),
+            "nonempty unique",
+        ),
+        (
+            lambda d: d["applications"]["tokenplace"]["environments"]["staging"][
+                "derivedApplicationLabels"
+            ]["version"].update({"normalizer": "regex"}),
+            "unsupported",
+        ),
+    ],
+)
+def test_observability_app_metrics_inventory_validation_failures_are_controlled(
+    mutator, message
+):
+    doc = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))
+    mutator(doc)
+    with pytest.raises(SystemExit) as excinfo:
+        app_metrics.validate_inventory(doc)
+    assert message in str(excinfo.value)
