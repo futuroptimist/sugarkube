@@ -35,6 +35,7 @@ STANDARD_LABELS = {
     "prometheus",
     "prometheus_replica",
     "instance",
+    "le",
 }
 FORBIDDEN_WORDS = (
     "token",

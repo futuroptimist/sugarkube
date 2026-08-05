@@ -5675,10 +5675,15 @@ def test_observability_app_metrics_verify_exercises_targets_metrics_and_public_4
                 {"health": "up", "scrapePool": "serviceMonitor/tokenplace/tokenplace/0", "labels": cfg["targetLabels"] | {"pod": "tokenplace-abc"}, "discoveredLabels": {}},
                 {"health": "up", "scrapePool": "serviceMonitor/other/other/0", "labels": {"app": "other"}, "discoveredLabels": {}},
             ]}
-        assert "%7B" in path and "app%3D%22tokenplace%22" in path
-        metric = app_metrics.urllib.parse.unquote(path.rsplit("query=", 1)[-1]).split("{", 1)[0]
+        decoded_query = app_metrics.urllib.parse.unquote(path.rsplit("query=", 1)[-1])
+        for key, value in cfg["targetLabels"].items():
+            assert f'{key}="{value}"' in decoded_query
+        metric = decoded_query.split("{", 1)[0]
         series = metric + ("_bucket" if metric == "tokenplace_http_request_duration_seconds" else "")
-        return {"result": [{"metric": {"__name__": series, "app": "tokenplace", "environment": "staging", "version": "main-deadbee", "revision": "main-deadbee"}}]}
+        sample_labels = {"__name__": series, "app": "tokenplace", "environment": "staging", "version": "main-deadbee", "revision": "main-deadbee"}
+        if series.endswith("_bucket"):
+            sample_labels["le"] = "0.5"
+        return {"result": [{"metric": sample_labels}]}
 
     class Opener:
         def open(self, url, timeout):
@@ -5787,6 +5792,45 @@ def test_observability_app_metrics_verify_rejects_extra_relevant_target_and_retr
     app_metrics.verify("tokenplace", "staging")
     assert all(count == 2 for count in seen.values())
 
+
+
+def test_observability_app_metrics_verify_retries_then_reports_missing_family_without_public_check(monkeypatch):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"]["tokenplace"]["environments"]["staging"]
+    cfg = json.loads(json.dumps(cfg))
+    cfg["retries"] = {"attempts": 2, "delaySeconds": 0}
+    missing_family = cfg["requiredMetricFamilies"][-1]
+    seen_queries: list[str] = []
+    public_checked = False
+
+    def prom_func(path):
+        if path == "/api/v1/targets":
+            return {"activeTargets": [{"health": "up", "scrapePool": "serviceMonitor/tokenplace/tokenplace/0", "labels": cfg["targetLabels"], "discoveredLabels": {}}]}
+        seen_queries.append(path)
+        decoded_query = app_metrics.urllib.parse.unquote(path.rsplit("query=", 1)[-1])
+        metric = decoded_query.split("{", 1)[0]
+        if app_metrics.metric_family_from_series(metric) == missing_family:
+            return {"result": []}
+        return {"result": [{"metric": {"__name__": metric, "app": "tokenplace", "environment": "staging", "version": "main-deadbee", "revision": "main-deadbee"}}]}
+
+    class Opener:
+        def open(self, url, timeout):
+            nonlocal public_checked
+            public_checked = True
+            raise AssertionError("public status check should not be reached")
+
+    _verify_base(monkeypatch, cfg, prom_func)
+    monkeypatch.setattr(app_metrics.urllib.request, "build_opener", lambda *args: Opener())
+
+    with pytest.raises(SystemExit) as excinfo:
+        app_metrics.verify("tokenplace", "staging")
+
+    assert f"required metric family missing: {missing_family}" in str(excinfo.value)
+    assert not public_checked
+    attempts_for_missing = [
+        path for path in seen_queries
+        if app_metrics.metric_family_from_series(app_metrics.urllib.parse.unquote(path.rsplit("query=", 1)[-1]).split("{", 1)[0]) == missing_family
+    ]
+    assert len(attempts_for_missing) == cfg["retries"]["attempts"] * 4
 
 def test_observability_app_metrics_verify_fails_malformed_prometheus_without_sleep(monkeypatch):
     cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"]["tokenplace"]["environments"]["staging"]
