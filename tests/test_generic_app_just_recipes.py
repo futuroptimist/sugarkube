@@ -6099,7 +6099,7 @@ def test_observability_app_metrics_install_secret_success_uses_stdin_pipe(
 @pytest.mark.parametrize(
     ("mutator", "message"),
     [
-        (lambda d: d.update({"schemaVersion": 2}), "unsupported"),
+        (lambda d: d.update({"schemaVersion": 2}), "schemaVersion"),
         (lambda d: d.update({"applications": []}), "applications"),
         (
             lambda d: d["applications"]["tokenplace"]["environments"].update(
@@ -6149,6 +6149,25 @@ def test_observability_app_metrics_inventory_validation_failures_are_controlled(
     assert message in str(excinfo.value)
 
 
+
+def test_observability_app_metrics_inventory_accepts_colon_metric_family():
+    doc = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))
+    doc["applications"]["tokenplace"]["environments"]["staging"][
+        "requiredMetricFamilies"
+    ].append("namespace:metric_total")
+    app_metrics.validate_inventory(doc)
+
+
+def test_observability_app_metrics_url_and_k8s_label_valid_helpers_accept_safe_values():
+    for url in (
+        "https://example.com/metrics",
+        "https://127.0.0.1:8443/metrics",
+        "https://[2001:db8::1]:443/metrics",
+    ):
+        app_metrics.public_metrics_url(url)
+    app_metrics.k8s_label_key("example.com/component", "label key")
+    app_metrics.k8s_label_key("a." * 125 + "a/name", "label key")
+
 @pytest.mark.parametrize(
     ("mutator", "message"),
     [
@@ -6165,7 +6184,8 @@ def test_observability_app_metrics_inventory_validation_failures_are_controlled(
             lambda d: d["applications"]["tokenplace"].update({"environments": {}}),
             "nonempty object",
         ),
-        (lambda d: d.update({"schemaVersion": True}), "unsupported"),
+        (lambda d: d.update({"schemaVersion": True}), "schemaVersion"),
+        (lambda d: d.update({"schemaVersion": 1.0}), "schemaVersion"),
         (
             lambda d: d["applications"]["tokenplace"]["environments"][
                 "staging"
@@ -6246,8 +6266,40 @@ def test_observability_app_metrics_inventory_validation_failures_are_controlled(
         ),
         (
             lambda d: d["applications"]["tokenplace"]["environments"]["staging"][
+                "publicMetrics"
+            ].update({"url": "https://bad host.example/metrics"}),
+            "https /metrics URL",
+        ),
+        (
+            lambda d: d["applications"]["tokenplace"]["environments"]["staging"][
+                "publicMetrics"
+            ].update({"url": "https://-bad.example/metrics"}),
+            "https /metrics URL",
+        ),
+        (
+            lambda d: d["applications"]["tokenplace"]["environments"]["staging"][
+                "publicMetrics"
+            ].update({"url": "https://" + "a" * 64 + ".example/metrics"}),
+            "https /metrics URL",
+        ),
+        (
+            lambda d: d["applications"]["tokenplace"]["environments"]["staging"][
+                "publicMetrics"
+            ].update({"url": "https://example.com:0/metrics"}),
+            "https /metrics URL",
+        ),
+        (
+            lambda d: d["applications"]["tokenplace"]["environments"]["staging"][
                 "serviceMonitor"
             ]["selectorMatchLabels"].update({"bad/key/extra": "tokenplace"}),
+            "Kubernetes label key",
+        ),
+        (
+            lambda d: d["applications"]["tokenplace"]["environments"]["staging"][
+                "serviceMonitor"
+            ]["selectorMatchLabels"].update(
+                {("a" * 64) + ".example/name": "tokenplace"}
+            ),
             "Kubernetes label key",
         ),
         (
@@ -6261,6 +6313,12 @@ def test_observability_app_metrics_inventory_validation_failures_are_controlled(
                 {"requiredMetricFamilies": [["unhashable"]]}
             ),
             "requiredMetricFamilies",
+        ),
+        (
+            lambda d: d["applications"]["tokenplace"]["environments"]["staging"].update(
+                {"requiredMetricFamilies": ["bad-metric"]}
+            ),
+            "Prometheus metric name",
         ),
         (
             lambda d: d["applications"]["tokenplace"]["environments"]["staging"][

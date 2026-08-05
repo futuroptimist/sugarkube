@@ -25,6 +25,7 @@ DURATION = re.compile(r"[1-9][0-9]*[smh]")
 STATUS = re.compile(r"[1-5][0-9][0-9]")
 SAFE_VALUE = re.compile(r"[-A-Za-z0-9_./:*]+")
 PROM_LABEL = re.compile(r"[a-zA-Z_][a-zA-Z0-9_]*")
+PROM_METRIC = re.compile(r"[a-zA-Z_:][a-zA-Z0-9_:]*")
 K8S_LABEL_NAME = re.compile(r"[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?")
 K8S_LABEL_PREFIX = re.compile(
     r"[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*"
@@ -116,13 +117,20 @@ def prometheus_label(v, where):
         fail(f"{where} must be a safe Prometheus label name")
 
 
+def prometheus_metric(v, where):
+    if not isinstance(v, str) or not PROM_METRIC.fullmatch(v):
+        fail(f"{where} must be a safe Prometheus metric name")
+
+
 def k8s_label_key(v, where):
-    if not isinstance(v, str) or not v or len(v) > 253:
+    if not isinstance(v, str) or not v:
         fail(f"{where} must be a safe Kubernetes label key")
     parts = v.split("/", 1)
     if len(parts) == 2:
         prefix, key = parts
         if not prefix or len(prefix) > 253 or not K8S_LABEL_PREFIX.fullmatch(prefix):
+            fail(f"{where} must be a safe Kubernetes label key")
+        if any(len(segment) > 63 for segment in prefix.split(".")):
             fail(f"{where} must be a safe Kubernetes label key")
     else:
         key = parts[0]
@@ -147,11 +155,11 @@ def unique_string_list(values, where, validator=prometheus_label):
 
 
 def public_metrics_url(value):
-    if not isinstance(value, str):
+    if not isinstance(value, str) or any(ch.isspace() or ord(ch) < 32 for ch in value):
         fail("publicMetrics.url must be an https /metrics URL")
     try:
         parsed = urllib.parse.urlsplit(value)
-        _ = parsed.port
+        port = parsed.port
     except ValueError:
         fail("publicMetrics.url must be an https /metrics URL")
     if (
@@ -164,12 +172,32 @@ def public_metrics_url(value):
         or parsed.fragment
     ):
         fail("publicMetrics.url must be an https /metrics URL")
+    if port == 0:
+        fail("publicMetrics.url must be an https /metrics URL")
+    host = parsed.hostname
+    if host is None or any(ch.isspace() or ord(ch) < 32 for ch in host):
+        fail("publicMetrics.url must be an https /metrics URL")
+    try:
+        import ipaddress
+
+        ipaddress.ip_address(host)
+        return
+    except ValueError:
+        pass
+    if len(host) > 253 or host.endswith(".") or ".." in host:
+        fail("publicMetrics.url must be an https /metrics URL")
+    for segment in host.split("."):
+        if (
+            not segment
+            or len(segment) > 63
+            or not re.fullmatch(r"[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?", segment)
+        ):
+            fail("publicMetrics.url must be an https /metrics URL")
 
 
 def validate_inventory(doc):
     expect_keys(doc, {"schemaVersion", "applications"}, "inventory")
-    if isinstance(doc.get("schemaVersion"), bool) or doc.get("schemaVersion") != 1:
-        fail("unsupported app metrics inventory schemaVersion")
+    integer(doc.get("schemaVersion"), "schemaVersion", 1, 1)
     apps = doc["applications"]
     if not isinstance(apps, dict) or not apps:
         fail("inventory applications must be a nonempty object")
@@ -285,10 +313,7 @@ def validate_inventory(doc):
                 if isinstance(rt[key], bool) or not isinstance(rt[key], int) or not 1 <= rt[key] <= 60:
                     fail("retry settings must be bounded integers")
             metrics = cfg["requiredMetricFamilies"]
-            unique_string_list(metrics, "requiredMetricFamilies", prometheus_label)
-            for metric in metrics:
-                if not re.fullmatch(r"[a-zA-Z_:][a-zA-Z0-9_:]*", metric):
-                    fail("required metric name is malformed")
+            unique_string_list(metrics, "requiredMetricFamilies", prometheus_metric)
             allowed = cfg["allowedApplicationLabels"]
             if not isinstance(allowed, dict):
                 fail("allowedApplicationLabels must be an object")
