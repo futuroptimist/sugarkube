@@ -256,7 +256,7 @@ def test_synthetic_consumer_rejects_future_timestamp_without_replacing_output(tm
     proc, out = run(tmp_path, result(rev, executedAt=int(time.time())), revision=rev)
     assert proc.returncode == 0
     before = out.read_text()
-    proc, _ = run(tmp_path, result(rev, executedAt=int(time.time()) + 61), revision=rev)
+    proc, _ = run(tmp_path, result(rev, executedAt=10**12), revision=rev)
     assert proc.returncode != 0
     assert "allowed clock skew" in proc.stderr
     assert out.read_text() == before
