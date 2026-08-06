@@ -6582,7 +6582,7 @@ class _AppMetricsFakeTty:
 
 
 @pytest.mark.parametrize("tty_result", [OSError("private tty"), _AppMetricsFakeTty(False)])
-def test_observability_app_metrics_install_secret_rejects_bad_controlling_terminal(
+def test_observability_app_metrics_install_secret_falls_back_from_unavailable_controlling_terminal(
     monkeypatch, capsys, tty_result
 ):
     cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
@@ -6596,11 +6596,91 @@ def test_observability_app_metrics_install_secret_rejects_bad_controlling_termin
         return tty_result
 
     monkeypatch.setattr(app_metrics, "open", fake_open, raising=False)
-    with pytest.raises(app_metrics.Error) as excinfo:
-        app_metrics.install_secret(cfg)
-    combined = capsys.readouterr().out + capsys.readouterr().err + str(excinfo.value)
-    assert "controlling terminal is required" in combined
+    monkeypatch.setattr("getpass.getpass", lambda prompt: "fallback-value")
+
+    class FakePopen:
+        returncode = 0
+
+        def __init__(self, args, **kwargs):
+            assert "fallback-value" not in args
+
+        def communicate(self, value):
+            assert value == b"fallback-value"
+            return b"apiVersion: v1\nkind: Secret\n", b""
+
+    monkeypatch.setattr(app_metrics.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(
+        app_metrics.subprocess,
+        "run",
+        lambda args, **kwargs: argparse.Namespace(returncode=0),
+    )
+
+    app_metrics.install_secret(cfg)
+
+    combined = capsys.readouterr().out + capsys.readouterr().err
+    assert "fallback-value" not in combined
     assert "private tty" not in combined
+
+
+def test_observability_app_metrics_secret_install_recipe_uses_stdin_pty_fallback(
+    tmp_path, ensure_just_available
+):
+    import pty
+    import select
+
+    sentinel = "pty-regression-sentinel"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    argv_log = tmp_path / "kubectl-argv.log"
+    _write_executable(
+        bin_dir / "kubectl",
+        f"""#!/bin/sh
+printf '%s\\n' "$*" >> {str(argv_log)!r}
+case " $* " in
+  *" config current-context "*) printf '%s\\n' sugar-staging ;;
+  *" create secret generic "*) cat >/dev/null; printf '%s\\n' 'apiVersion: v1' 'kind: Secret' ;;
+  *" apply -f - "*) cat >/dev/null ;;
+  *) exit 1 ;;
+esac
+""",
+    )
+    master, slave = pty.openpty()
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+    env["SUGARKUBE_APP_METRICS_TTY"] = str(tmp_path / "unavailable-tty")
+    proc = subprocess.Popen(
+        [
+            str(ensure_just_available),
+            "observability-app-metrics-secret-install",
+            "app=tokenplace",
+            "env=staging",
+        ],
+        cwd=REPO_ROOT,
+        env=env,
+        stdin=slave,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=False,
+        start_new_session=True,
+    )
+    os.close(slave)
+    try:
+        ready, _, _ = select.select([proc.stderr], [], [], 10)
+        assert ready, "credential prompt was not written"
+        prompt = os.read(proc.stderr.fileno(), 4096)
+        os.write(master, f"{sentinel}\n".encode())
+        stdout, stderr = proc.communicate(timeout=10)
+    finally:
+        os.close(master)
+
+    combined = (stdout + prompt + stderr).decode(errors="replace")
+    recorded_argv = argv_log.read_text(encoding="utf-8")
+    assert proc.returncode == 0, combined
+    assert "installed or rotated" in combined
+    assert sentinel not in combined
+    assert sentinel not in recorded_argv
+    assert "create secret generic tokenplace-staging-metrics-token" in recorded_argv
+    assert "apply -f -" in recorded_argv
 
 
 def test_observability_app_metrics_install_secret_prompt_write_failure_is_redacted(
@@ -6648,6 +6728,39 @@ def test_observability_app_metrics_install_secret_prompt_write_failure_is_redact
     assert "Traceback" not in combined
     assert private_tty not in combined
     assert credential not in combined
+
+
+@pytest.mark.parametrize("failure", [OSError("private prompt"), EOFError("private prompt")])
+def test_observability_app_metrics_install_secret_stdin_prompt_failure_is_redacted(
+    monkeypatch, capsys, failure
+):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
+        "tokenplace"
+    ]["environments"]["staging"]
+    monkeypatch.setattr(app_metrics.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(
+        app_metrics,
+        "open",
+        lambda *args: (_ for _ in ()).throw(OSError("private tty")),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "getpass.getpass", lambda *args, **kwargs: (_ for _ in ()).throw(failure)
+    )
+    monkeypatch.setattr(
+        app_metrics.subprocess,
+        "Popen",
+        lambda *args, **kwargs: pytest.fail("Secret rendering must not be attempted"),
+    )
+
+    with pytest.raises(app_metrics.Error) as excinfo:
+        app_metrics.install_secret(cfg)
+
+    captured = capsys.readouterr()
+    combined = captured.out + captured.err + str(excinfo.value)
+    assert "credential prompt failed (details redacted)" in combined
+    assert "Traceback" not in combined
+    assert "private" not in combined
 
 
 @pytest.mark.parametrize("credential", ["", "credential-looking-value\n", "credential-looking-value\0"])
