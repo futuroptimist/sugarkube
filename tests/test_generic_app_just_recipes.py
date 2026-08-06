@@ -5324,17 +5324,22 @@ def test_dspace_promote_prod_guard_mismatch_fails_before_helm(
     assert not helm_log_path.exists() or helm_log_path.read_text(encoding="utf-8") == ""
 
 
-def test_observability_app_metrics_recipes_are_declared():
-    text = (REPO_ROOT / "justfile").read_text(encoding="utf-8")
-    assert "observability-app-metrics-secret-install app env='staging'" in text
-    assert "observability_app_metrics.py secret-install --app '{{ app }}' --env '{{ env }}'" in text
-    assert "observability-app-metrics-secret-check app env='staging'" in text
-    assert "observability-app-metrics-verify app env='staging'" in text
-    script = (REPO_ROOT / "scripts/observability_app_metrics.py").read_text(encoding="utf-8")
-    assert "getpass.getpass" in script
-    assert "validate-render" in script
-    assert "credential environment variables are refused" in script
-    assert "Secret contract exists (value was not returned to the verifier)" in script
+@pytest.mark.parametrize(
+    "recipe",
+    [
+        "observability-app-metrics-secret-install",
+        "observability-app-metrics-secret-check",
+        "observability-app-metrics-verify",
+    ],
+)
+def test_observability_app_metrics_just_recipes_forward_documented_arguments(
+    generic_app_stub_env, recipe
+):
+    result = _run_just([recipe, "app=tokenplace", "env=staging"], generic_app_stub_env)
+
+    assert result.returncode != 0
+    assert "context mismatch: expected sugar-staging" in result.stderr
+    assert "no configured app metrics contract" not in result.stderr
 
 # Focused declarative app-metrics verifier coverage; kept here with the just recipe
 # tests so Phase 1 remains scoped to the generic app operator surface.
@@ -6131,6 +6136,57 @@ def test_observability_app_metrics_live_environment_normalization_and_rejection(
     assert app_metrics.normalize_live_env("env=staging") == "staging"
 
 
+@pytest.mark.parametrize("app", ["", "app=", "app=foo=bar", "Uppercase", "bad_name"])
+def test_observability_app_metrics_application_rejection_precedes_delegation(
+    monkeypatch, app, capsys
+):
+    monkeypatch.setattr(
+        app_metrics, "load_config", lambda: pytest.fail("inventory lookup was attempted")
+    )
+    monkeypatch.setattr(
+        app_metrics, "assert_context", lambda: pytest.fail("context check was attempted")
+    )
+    monkeypatch.setattr(
+        app_metrics, "install_secret", lambda cfg: pytest.fail("credential input was attempted")
+    )
+
+    assert app_metrics.main(["secret-install", "--app", app, "--env", "staging"]) == 2
+    error = capsys.readouterr().err
+    if app:
+        assert app not in error
+
+
+@pytest.mark.parametrize("mode", ["secret-install", "secret-check", "verify"])
+@pytest.mark.parametrize("app", ["app=tokenplace", "tokenplace"])
+def test_observability_app_metrics_operations_receive_normalized_contract(
+    monkeypatch, mode, app
+):
+    calls = []
+    monkeypatch.setattr(
+        app_metrics,
+        "appcfg",
+        lambda normalized_app, normalized_env: calls.append(
+            ("lookup", normalized_app, normalized_env)
+        )
+        or "cfg",
+    )
+    monkeypatch.setattr(app_metrics, "assert_context", lambda: calls.append(("context",)))
+    monkeypatch.setattr(app_metrics, "install_secret", lambda cfg: calls.append((mode, cfg)))
+    monkeypatch.setattr(app_metrics, "check_secret", lambda cfg: calls.append((mode, cfg)))
+    monkeypatch.setattr(
+        app_metrics,
+        "verify",
+        lambda normalized_app, normalized_env: calls.append(
+            (mode, normalized_app, normalized_env)
+        ),
+    )
+
+    assert app_metrics.main([mode, "--app", app, "--env", "env=staging"]) == 0
+    assert calls[:2] == [("lookup", "tokenplace", "staging"), ("context",)]
+    expected = (mode, "tokenplace", "staging") if mode == "verify" else (mode, "cfg")
+    assert calls[2] == expected
+
+
 def test_observability_app_metrics_verify_all_uses_normalized_requested_env(monkeypatch):
     doc = {"schemaVersion": 1, "applications": {"first": {}, "second": {}}}
     called = []
@@ -6341,7 +6397,7 @@ def test_observability_app_metrics_install_secret_success_uses_stdin_pipe(
         ),
         (["secret-check", "--app", "example"], "check_secret", ("cfg",)),
         (["secret-install", "--app", "example"], "install_secret", ("cfg",)),
-        (["verify", "--app", "example", "--env", "int"], "verify", ("example", "int")),
+        (["verify", "--app", "example", "--env", "int"], "verify", ("example", "staging")),
     ],
 )
 def test_observability_app_metrics_main_dispatches_exactly(
