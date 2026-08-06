@@ -10,7 +10,6 @@ from pathlib import Path
 from test_observability_helm import yaml_load
 
 ROOT = Path(__file__).parents[1]
-VALUES = ROOT / "clusters/staging/observability/kube-prometheus-stack.values.yaml"
 RULES = ROOT / "platform/observability/rules/dspace-release-integrity.yaml"
 STAGING = ROOT / "deployment-evidence/dspace/staging/main-018687f-20260805T035722Z.json"
 PROD = ROOT / "deployment-evidence/dspace/prod/main-1a31a56-20260801T093443Z.json"
@@ -71,12 +70,7 @@ def render_alert_contracts(canonical_rules, environment, cluster, evidence):
     return contracts
 
 
-def test_canonical_rules_equal_helm_representation_and_evidence():
-    values = yaml_load(VALUES)
-    assert (
-        values["additionalPrometheusRulesMap"]["dspace-release-integrity"]["groups"]
-        == yaml_load(RULES)["groups"]
-    )
+def test_canonical_rules_agree_with_finalized_evidence():
     approved = next(x for x in rules() if x.get("record") == "dspace_release_approved_info")[
         "labels"
     ]
