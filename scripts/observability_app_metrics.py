@@ -367,6 +367,17 @@ def normalize_live_env(env: str) -> str:
     return value
 
 
+def normalize_application_argument(app: str) -> str:
+    if not isinstance(app, str):
+        fail("application must be a non-empty safe Kubernetes name")
+    value = app.strip()
+    if value.startswith("app="):
+        value = value[4:].strip()
+    if not value or "=" in value or len(value) > 63 or not K8S_NAME.fullmatch(value):
+        fail("application must be a non-empty safe Kubernetes name")
+    return value
+
+
 def run(args):
     try:
         return subprocess.run(
@@ -398,6 +409,7 @@ def assert_context():
 
 
 def appcfg(app, env):
+    app = normalize_application_argument(app)
     env = normalize_live_env(env)
     inv = load_config()
     try:
@@ -673,6 +685,8 @@ def query_required_families(cfg: dict[str, Any], derived_values: dict[str, str])
     return found
 
 def verify(app, env):
+    app = normalize_application_argument(app)
+    env = normalize_live_env(env)
     cfg = appcfg(app, env)
     assert_context()
     check_secret(cfg)
@@ -881,7 +895,8 @@ def main(argv=None):
         if a.mode == "validate-render":
             if not a.app:
                 fail("--app is required")
-            validate_render(a.app, a.env, a.input, a.release_namespace, a.release_name)
+            app = normalize_application_argument(a.app)
+            validate_render(app, a.env, a.input, a.release_namespace, a.release_name)
             print("Rendered application metrics contract is valid.")
             return 0
         if a.mode == "verify-all":
@@ -892,14 +907,16 @@ def main(argv=None):
             return 0
         if not a.app:
             fail("--app is required")
-        cfg = appcfg(a.app, a.env)
+        app = normalize_application_argument(a.app)
+        env = normalize_live_env(a.env)
+        cfg = appcfg(app, env)
         assert_context()
         if a.mode == "secret-check":
             check_secret(cfg)
         elif a.mode == "secret-install":
             install_secret(cfg)
         elif a.mode == "verify":
-            verify(a.app, a.env)
+            verify(app, env)
         return 0
     except Error as e:
         print(e, file=sys.stderr)

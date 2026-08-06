@@ -5324,17 +5324,60 @@ def test_dspace_promote_prod_guard_mismatch_fails_before_helm(
     assert not helm_log_path.exists() or helm_log_path.read_text(encoding="utf-8") == ""
 
 
-def test_observability_app_metrics_recipes_are_declared():
-    text = (REPO_ROOT / "justfile").read_text(encoding="utf-8")
-    assert "observability-app-metrics-secret-install app env='staging'" in text
-    assert "observability_app_metrics.py secret-install --app '{{ app }}' --env '{{ env }}'" in text
-    assert "observability-app-metrics-secret-check app env='staging'" in text
-    assert "observability-app-metrics-verify app env='staging'" in text
-    script = (REPO_ROOT / "scripts/observability_app_metrics.py").read_text(encoding="utf-8")
-    assert "getpass.getpass" in script
-    assert "validate-render" in script
-    assert "credential environment variables are refused" in script
-    assert "Secret contract exists (value was not returned to the verifier)" in script
+@pytest.mark.usefixtures("ensure_just_available")
+@pytest.mark.parametrize(
+    ("recipe", "mode"),
+    [
+        ("observability-app-metrics-secret-install", "secret-install"),
+        ("observability-app-metrics-secret-check", "secret-check"),
+        ("observability-app-metrics-verify", "verify"),
+    ],
+)
+def test_observability_app_metrics_named_just_arguments_are_normalized_before_delegation(
+    tmp_path: Path, recipe: str, mode: str
+) -> None:
+    log = tmp_path / "delegation.json"
+    harness = tmp_path / "app_metrics_harness.py"
+    harness.write_text(
+        """import json
+import os
+import sys
+from scripts import observability_app_metrics as subject
+
+calls = []
+subject.assert_context = lambda: calls.append(["context"])
+subject.install_secret = lambda cfg: calls.append(["secret-install", cfg["namespace"]])
+subject.check_secret = lambda cfg: calls.append(["secret-check", cfg["namespace"]])
+subject.verify = lambda app, env: calls.append(["verify", app, env])
+rc = subject.main(sys.argv[2:])
+with open(os.environ["APP_METRICS_DELEGATION_LOG"], "w", encoding="utf-8") as stream:
+    json.dump({"argv": sys.argv[2:], "calls": calls}, stream)
+raise SystemExit(rc)
+""",
+        encoding="utf-8",
+    )
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_executable(
+        bin_dir / "python3",
+        f"#!/bin/sh\nexec {sys.executable!r} {str(harness)!r} \"$@\"\n",
+    )
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+    env["PYTHONPATH"] = str(REPO_ROOT)
+    env["APP_METRICS_DELEGATION_LOG"] = str(log)
+
+    result = _run_just([recipe, "app=tokenplace", "env=staging"], env)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    delegated = json.loads(log.read_text(encoding="utf-8"))
+    assert delegated["argv"] == [mode, "--app", "app=tokenplace", "--env", "env=staging"]
+    expected_operation = (
+        ["verify", "tokenplace", "staging"]
+        if mode == "verify"
+        else [mode, "tokenplace"]
+    )
+    assert delegated["calls"] == [["context"], expected_operation]
 
 # Focused declarative app-metrics verifier coverage; kept here with the just recipe
 # tests so Phase 1 remains scoped to the generic app operator surface.
@@ -6131,6 +6174,46 @@ def test_observability_app_metrics_live_environment_normalization_and_rejection(
     assert app_metrics.normalize_live_env("env=staging") == "staging"
 
 
+@pytest.mark.parametrize("app", ["app=", "app=foo=bar", "app=Bad_Name", "-bad"])
+def test_observability_app_metrics_rejects_malformed_app_before_live_operations(
+    monkeypatch, capsys, app
+):
+    monkeypatch.setattr(
+        app_metrics, "load_config", lambda: pytest.fail("inventory lookup must not run")
+    )
+    monkeypatch.setattr(
+        app_metrics, "assert_context", lambda: pytest.fail("context check must not run")
+    )
+    monkeypatch.setattr(
+        app_metrics, "install_secret", lambda cfg: pytest.fail("credential handling must not run")
+    )
+
+    assert app_metrics.main(["secret-install", f"--app={app}", "--env", "staging"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.strip() == "ERROR: application must be a non-empty safe Kubernetes name"
+    assert app not in captured.err
+
+
+@pytest.mark.parametrize("app", ["", None])
+def test_observability_app_metrics_rejects_empty_application_argument(app):
+    with pytest.raises(app_metrics.Error) as excinfo:
+        app_metrics.normalize_application_argument(app)
+    assert str(excinfo.value) == "ERROR: application must be a non-empty safe Kubernetes name"
+
+
+def test_observability_app_metrics_positional_values_remain_compatible(monkeypatch):
+    calls = []
+    monkeypatch.setattr(app_metrics, "appcfg", lambda app, env: {"namespace": app})
+    monkeypatch.setattr(app_metrics, "assert_context", lambda: calls.append("context"))
+    monkeypatch.setattr(
+        app_metrics, "check_secret", lambda cfg: calls.append((cfg["namespace"], "staging"))
+    )
+
+    assert app_metrics.main(["secret-check", "--app", "tokenplace", "--env", "staging"]) == 0
+    assert calls == ["context", ("tokenplace", "staging")]
+
+
 def test_observability_app_metrics_verify_all_uses_normalized_requested_env(monkeypatch):
     doc = {"schemaVersion": 1, "applications": {"first": {}, "second": {}}}
     called = []
@@ -6341,7 +6424,7 @@ def test_observability_app_metrics_install_secret_success_uses_stdin_pipe(
         ),
         (["secret-check", "--app", "example"], "check_secret", ("cfg",)),
         (["secret-install", "--app", "example"], "install_secret", ("cfg",)),
-        (["verify", "--app", "example", "--env", "int"], "verify", ("example", "int")),
+        (["verify", "--app", "example", "--env", "int"], "verify", ("example", "staging")),
     ],
 )
 def test_observability_app_metrics_main_dispatches_exactly(
