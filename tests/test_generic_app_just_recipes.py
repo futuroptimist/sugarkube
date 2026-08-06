@@ -10,6 +10,8 @@ import pty
 import select
 import subprocess
 import sys
+import time
+import warnings
 from pathlib import Path
 
 import pytest
@@ -6655,8 +6657,10 @@ else:
     )
     os.close(slave)
     output = bytearray()
+    prompt_seen = False
     try:
-        while process.poll() is None:
+        deadline = time.monotonic() + 10
+        while process.poll() is None and time.monotonic() < deadline:
             readable, _, _ = select.select([master], [], [], 0.1)
             if readable:
                 try:
@@ -6665,7 +6669,13 @@ else:
                     break
                 if b"input hidden" in output:
                     os.write(master, credential.encode() + b"\n")
+                    prompt_seen = True
                     break
+        if not prompt_seen:
+            pytest.fail(
+                "credential prompt was not observed before timeout: "
+                + output.decode(errors="replace")
+            )
         process.wait(timeout=10)
         while select.select([master], [], [], 0)[0]:
             try:
@@ -6678,11 +6688,50 @@ else:
             process.kill()
             process.wait()
 
-    commands = command_log.read_text(encoding="utf-8")
     assert process.returncode == 0, output.decode(errors="replace")
+    assert command_log.exists(), output.decode(errors="replace")
+    commands = command_log.read_text(encoding="utf-8")
     assert "create" in commands and '["apply", "-f", "-"]' in commands
     assert credential not in output.decode(errors="replace")
     assert credential not in commands
+
+
+def test_observability_app_metrics_install_secret_rejects_getpass_echo_fallback(
+    monkeypatch, capsys
+):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
+        "tokenplace"
+    ]["environments"]["staging"]
+    credential = "credential-looking-value"
+    monkeypatch.setattr(app_metrics.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(app_metrics.sys.stdin, "readable", lambda: True)
+    monkeypatch.setattr(
+        app_metrics,
+        "open",
+        lambda *args: (_ for _ in ()).throw(OSError("no controlling terminal")),
+        raising=False,
+    )
+
+    def insecure_getpass(*args, **kwargs):
+        warnings.warn("input may be echoed", getpass.GetPassWarning)
+        return credential
+
+    import getpass
+
+    monkeypatch.setattr(getpass, "getpass", insecure_getpass)
+    monkeypatch.setattr(
+        app_metrics.subprocess,
+        "Popen",
+        lambda *args, **kwargs: pytest.fail("Secret rendering must not be attempted"),
+    )
+
+    with pytest.raises(app_metrics.Error) as excinfo:
+        app_metrics.install_secret(cfg)
+
+    captured = capsys.readouterr()
+    combined = captured.out + captured.err + str(excinfo.value)
+    assert "credential prompt failed (details redacted)" in combined
+    assert credential not in combined
 
 
 def test_observability_app_metrics_install_secret_prompt_write_failure_is_redacted(

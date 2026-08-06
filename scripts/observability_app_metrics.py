@@ -7,14 +7,15 @@ import argparse
 import contextlib
 import io
 import json
+import os
 import re
 import subprocess
-import os
 import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -473,12 +474,14 @@ def install_secret(cfg):
             ):
                 fail("an interactive controlling terminal is required")
             prompt = "Enter application metrics bearer token (input hidden): "
-            value = (
-                getpass.getpass(prompt)
-                if use_stdin_fallback
-                else getpass.getpass(prompt, stream=tty)
-            )
-    except (OSError, EOFError, io.UnsupportedOperation):
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", getpass.GetPassWarning)
+                value = (
+                    getpass.getpass(prompt)
+                    if use_stdin_fallback
+                    else getpass.getpass(prompt, stream=tty)
+                )
+    except (OSError, EOFError, io.UnsupportedOperation, getpass.GetPassWarning):
         fail("credential prompt failed (details redacted)")
     if not value or "\n" in value or "\0" in value:
         fail("credential is invalid (value redacted)")
