@@ -61,6 +61,25 @@ def panel_named(dashboard: dict, title: str) -> dict:
     return matching[0]
 
 
+def panel_expression(dashboard: dict, title: str) -> str:
+    panel = panel_named(dashboard, title)
+    targets = panel.get("targets", [])
+    if len(targets) != 1 or not isinstance(targets[0].get("expr"), str):
+        raise SystemExit(f"ERROR: {title} must contain exactly one PromQL target.")
+    return re.sub(r"\s+", " ", targets[0]["expr"])
+
+
+def has_serving_pod_filter(expression: str) -> bool:
+    return all(
+        token in expression
+        for token in (
+            'kube_pod_container_status_ready{namespace="dspace",container="dspace"} == 1',
+            'and on (namespace, pod) kube_pod_status_phase{namespace="dspace",phase="Running"} == 1',
+            'unless on (namespace, pod) kube_pod_deletion_timestamp{namespace="dspace"}',
+        )
+    )
+
+
 def validate_dashboard_semantics(dashboard: dict) -> None:
     variables = {
         variable.get("name"): variable
@@ -185,6 +204,38 @@ def validate_dashboard_semantics(dashboard: dict) -> None:
     if matrix.get("type") != "table" or not matrix.get("targets"):
         raise SystemExit("ERROR: dashboard must retain the detailed endpoint matrix.")
 
+    revisions = panel_expression(dashboard, "Active build revisions by pod")
+    if (
+        "dspace_build_info" not in revisions
+        or "and on (namespace, pod)" not in revisions
+        or not has_serving_pod_filter(revisions)
+    ):
+        raise SystemExit("ERROR: active build revisions must include only serving DSPACE pods.")
+
+    image_agreement = panel_expression(dashboard, "Image-pin agreement")
+    if not has_serving_pod_filter(image_agreement) or "or on() vector(0)" not in image_agreement:
+        raise SystemExit(
+            "ERROR: image-pin agreement must filter serving pods and return a healthy zero."
+        )
+
+    target_panel = panel_named(dashboard, "DSPACE metrics-target health")
+    target_health = panel_expression(dashboard, "DSPACE metrics-target health")
+    if (
+        not has_serving_pod_filter(target_health)
+        or 'unless on (namespace, pod) up{namespace="dspace",service=~"dspace.*"}'
+        not in target_health
+        or 'up{namespace="dspace",service=~"dspace.*"} == 0' not in target_health
+        or "count(" not in target_health
+        or "or on() vector(0)" not in target_health
+        or target_panel.get("targets", [{}])[0].get("legendFormat")
+        != "down or missing serving targets"
+        or "Zero is healthy; missing targets fail closed."
+        not in target_panel.get("description", "")
+    ):
+        raise SystemExit(
+            "ERROR: DSPACE metrics-target health must count down or missing serving targets."
+        )
+
 
 def validate_dashboard(path: Path) -> str:
     dashboard = load_dashboard(path)
@@ -213,9 +264,7 @@ def validate_dashboard(path: Path) -> str:
                 and b["y"] < a["y"] + a["h"]
             )
             if overlaps:
-                raise SystemExit(
-                    f"ERROR: dashboard panels {left['id']} and {right['id']} overlap."
-                )
+                raise SystemExit(f"ERROR: dashboard panels {left['id']} and {right['id']} overlap.")
     validate_dashboard_semantics(dashboard)
     expressions = [
         target["expr"]
