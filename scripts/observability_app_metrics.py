@@ -367,6 +367,18 @@ def normalize_live_env(env: str) -> str:
     return value
 
 
+def normalize_live_app(app: str) -> str:
+    if not isinstance(app, str):
+        fail("application metrics application is unsupported")
+    value = app.strip()
+    if value.startswith("app="):
+        value = value[4:].strip()
+    if not value or "=" in value:
+        fail("application metrics application must be a non-empty Kubernetes name")
+    name(value, "application metrics application")
+    return value
+
+
 def run(args):
     try:
         return subprocess.run(
@@ -398,6 +410,7 @@ def assert_context():
 
 
 def appcfg(app, env):
+    app = normalize_live_app(app)
     env = normalize_live_env(env)
     inv = load_config()
     try:
@@ -673,6 +686,8 @@ def query_required_families(cfg: dict[str, Any], derived_values: dict[str, str])
     return found
 
 def verify(app, env):
+    app = normalize_live_app(app)
+    env = normalize_live_env(env)
     cfg = appcfg(app, env)
     assert_context()
     check_secret(cfg)
@@ -890,16 +905,18 @@ def main(argv=None):
             for app in inv["applications"]:
                 verify(app, env)
             return 0
-        if not a.app:
+        if a.app is None:
             fail("--app is required")
-        cfg = appcfg(a.app, a.env)
+        app = normalize_live_app(a.app)
+        env = normalize_live_env(a.env)
+        cfg = appcfg(app, env)
         assert_context()
         if a.mode == "secret-check":
             check_secret(cfg)
         elif a.mode == "secret-install":
             install_secret(cfg)
         elif a.mode == "verify":
-            verify(a.app, a.env)
+            verify(app, env)
         return 0
     except Error as e:
         print(e, file=sys.stderr)

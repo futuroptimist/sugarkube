@@ -5324,17 +5324,30 @@ def test_dspace_promote_prod_guard_mismatch_fails_before_helm(
     assert not helm_log_path.exists() or helm_log_path.read_text(encoding="utf-8") == ""
 
 
-def test_observability_app_metrics_recipes_are_declared():
-    text = (REPO_ROOT / "justfile").read_text(encoding="utf-8")
-    assert "observability-app-metrics-secret-install app env='staging'" in text
-    assert "observability_app_metrics.py secret-install --app '{{ app }}' --env '{{ env }}'" in text
-    assert "observability-app-metrics-secret-check app env='staging'" in text
-    assert "observability-app-metrics-verify app env='staging'" in text
-    script = (REPO_ROOT / "scripts/observability_app_metrics.py").read_text(encoding="utf-8")
-    assert "getpass.getpass" in script
-    assert "validate-render" in script
-    assert "credential environment variables are refused" in script
-    assert "Secret contract exists (value was not returned to the verifier)" in script
+@pytest.mark.parametrize(
+    ("recipe", "mode"),
+    [
+        ("observability-app-metrics-secret-install", "secret-install"),
+        ("observability-app-metrics-secret-check", "secret-check"),
+        ("observability-app-metrics-verify", "verify"),
+    ],
+)
+def test_observability_app_metrics_documented_named_just_invocations(
+    ensure_just_available: Path, tmp_path: Path, recipe: str, mode: str
+):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "python.log"
+    _write_executable(bin_dir / "python3", f"#!/bin/sh\nprintf '%s\\n' \"$*\" > {str(log)!r}\n")
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
+
+    result = _run_just([recipe, "app=tokenplace", "env=staging"], env)
+
+    assert result.returncode == 0, result.stderr
+    assert log.read_text(encoding="utf-8").strip() == (
+        f"scripts/observability_app_metrics.py {mode} --app app=tokenplace --env env=staging"
+    )
 
 # Focused declarative app-metrics verifier coverage; kept here with the just recipe
 # tests so Phase 1 remains scoped to the generic app operator surface.
@@ -6339,9 +6352,10 @@ def test_observability_app_metrics_install_secret_success_uses_stdin_pipe(
             "validate_render",
             ("example", "preview", "candidate.yaml", "example-ns", "example-release"),
         ),
-        (["secret-check", "--app", "example"], "check_secret", ("cfg",)),
-        (["secret-install", "--app", "example"], "install_secret", ("cfg",)),
-        (["verify", "--app", "example", "--env", "int"], "verify", ("example", "int")),
+        (["secret-check", "--app", "app=tokenplace", "--env", "env=staging"], "check_secret", ("cfg",)),
+        (["secret-install", "--app", "app=tokenplace", "--env", "env=staging"], "install_secret", ("cfg",)),
+        (["verify", "--app", "app=tokenplace", "--env", "env=staging"], "verify", ("tokenplace", "staging")),
+        (["verify", "--app", "tokenplace", "--env", "staging"], "verify", ("tokenplace", "staging")),
     ],
 )
 def test_observability_app_metrics_main_dispatches_exactly(
@@ -6368,6 +6382,30 @@ def test_observability_app_metrics_main_dispatches_exactly(
 def test_observability_app_metrics_main_requires_app(mode, capsys):
     assert app_metrics.main([mode]) == 2
     assert "--app is required" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("app", ["", "app=", "app=foo=bar", "Uppercase"])
+def test_observability_app_metrics_rejects_malformed_app_before_live_operations(
+    monkeypatch, capsys, app
+):
+    monkeypatch.setattr(
+        app_metrics,
+        "appcfg",
+        lambda *args: pytest.fail("inventory lookup reached"),
+    )
+    monkeypatch.setattr(
+        app_metrics,
+        "assert_context",
+        lambda: pytest.fail("context check reached"),
+    )
+    monkeypatch.setattr(
+        app_metrics,
+        "install_secret",
+        lambda cfg: pytest.fail("credential handling reached"),
+    )
+
+    assert app_metrics.main(["secret-install", "--app", app]) == 2
+    assert "application metrics application" in capsys.readouterr().err
 
 
 def test_observability_app_metrics_main_reports_delegated_error(monkeypatch, capsys):
