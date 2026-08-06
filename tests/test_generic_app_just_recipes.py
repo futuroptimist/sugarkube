@@ -6,6 +6,7 @@ import argparse
 import io
 import json
 import os
+import pty
 import subprocess
 import sys
 from pathlib import Path
@@ -6581,7 +6582,7 @@ class _AppMetricsFakeTty:
         return True
 
 
-@pytest.mark.parametrize("tty_result", [OSError("private tty"), _AppMetricsFakeTty(False)])
+@pytest.mark.parametrize("tty_result", [_AppMetricsFakeTty(False)])
 def test_observability_app_metrics_install_secret_rejects_bad_controlling_terminal(
     monkeypatch, capsys, tty_result
 ):
@@ -6601,6 +6602,80 @@ def test_observability_app_metrics_install_secret_rejects_bad_controlling_termin
     combined = capsys.readouterr().out + capsys.readouterr().err + str(excinfo.value)
     assert "controlling terminal is required" in combined
     assert "private tty" not in combined
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_observability_app_metrics_install_secret_falls_back_to_pty_stdin(tmp_path):
+    credential = "interactive-credential-sentinel"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    argv_log = tmp_path / "kubectl-argv.jsonl"
+    kubectl = bin_dir / "kubectl"
+    _write_executable(
+        kubectl,
+        """#!/usr/bin/env python3
+import json
+import os
+import sys
+with open(os.environ["KUBECTL_ARGV_LOG"], "a", encoding="utf-8") as stream:
+    stream.write(json.dumps(sys.argv[1:]) + "\\n")
+if sys.argv[1:] == ["config", "current-context"]:
+    print("sugar-staging")
+elif "create" in sys.argv:
+    sys.stdin.buffer.read()
+    print("apiVersion: v1\\nkind: Secret")
+elif sys.argv[1:] == ["apply", "-f", "-"]:
+    sys.stdin.buffer.read()
+else:
+    raise SystemExit(2)
+""",
+    )
+    env = os.environ.copy()
+    for name in (
+        "TOKEN",
+        "METRICS_TOKEN",
+        "TOKENPLACE_METRICS_TOKEN",
+        "SUGARKUBE_APP_METRICS_TOKEN",
+    ):
+        env.pop(name, None)
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+    env["KUBECTL_ARGV_LOG"] = str(argv_log)
+    master, slave = pty.openpty()
+    try:
+        proc = subprocess.Popen(
+            [
+                "just",
+                "observability-app-metrics-secret-install",
+                "app=tokenplace",
+                "env=staging",
+            ],
+            cwd=REPO_ROOT,
+            env=env,
+            stdin=slave,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+            text=False,
+        )
+        os.close(slave)
+        slave = -1
+        prompt = proc.stderr.read(len(b"Enter application metrics bearer token (input hidden): "))
+        os.write(master, credential.encode() + b"\n")
+        stdout, stderr = proc.communicate(timeout=15)
+    finally:
+        os.close(master)
+        if slave >= 0:
+            os.close(slave)
+
+    combined = stdout + prompt + stderr
+    assert proc.returncode == 0, combined.decode(errors="replace")
+    assert b"installed or rotated" in combined
+    assert credential.encode() not in combined
+    calls = [json.loads(line) for line in argv_log.read_text(encoding="utf-8").splitlines()]
+    assert ["config", "current-context"] in calls
+    assert ["apply", "-f", "-"] in calls
+    assert any("create" in call for call in calls)
+    assert credential not in repr(calls)
 
 
 def test_observability_app_metrics_install_secret_prompt_write_failure_is_redacted(
