@@ -29,8 +29,7 @@ post-merge work. Real workload routes remain deferred.
 - Production alert rollout. This document designs the staging path first; production follows only
   after staging drills succeed (see [`docs/observability-design.md`](./observability-design.md) §13).
 - Advanced SLOs, burn-rate alerting, or multi-window error budgets.
-- Exhaustive application-level synthetic checks. The one synthetic check currently in scope
-  (`DspaceChatSyntheticFailed`) is deferred — see [§8](#8-status-and-dependencies).
+- Exhaustive application-level synthetic checks beyond the bounded DSPACE `/chat` contract.
 
 ## 2. Chosen target architecture
 
@@ -145,7 +144,8 @@ What each check detects, and does not:
 
 ## 5. Planned alert inventory
 
-These are the current alert-design candidates, not proof the rules already exist in this repository.
+This inventory mixes deployed signals and candidates. The five DSPACE release-integrity rules are
+repository-ready for staging; deployment and live drills remain separate acceptance steps.
 
 | Alert | Intent | Notes |
 | --- | --- | --- |
@@ -156,7 +156,7 @@ These are the current alert-design candidates, not proof the rules already exist
 | `PublicEndpointDown` | A blackbox probe's `probe_success` is 0 | Reuses the signal already defined in [`docs/observability-design.md`](./observability-design.md) §6/§11. |
 | `PublicProbeMissing` | An expected blackbox probe target has no recent data at all (distinct from a probe that ran and failed) | Matches the "missing probe data" state already surfaced in the staging dashboard's availability summary panel. |
 | `TLSExpiringSoon` | `probe_ssl_earliest_cert_expiry` crosses a warning/critical threshold | Reuses the signal already defined in [`docs/observability-design.md`](./observability-design.md) §6. |
-| `DspaceChatSyntheticFailed` | A deeper synthetic check exercises DSPACE's dChat path end-to-end | **Explicitly deferred** — see [§8](#8-status-and-dependencies). Not part of the initial rollout. |
+| `DspaceChatSyntheticFailed` | A bounded synthetic exercises DSPACE's dChat path end-to-end | Repository producer/consumer and alert contract are present; installing the pinned external smoke runner and schedule, then proving the live route, remain post-merge work. |
 
 ## 6. Rollout and drill plan
 
@@ -222,9 +222,10 @@ it is deployed yet — see the rollout plan above for the actual sequencing.
 
 ## 8. Status and dependencies
 
-- The deeper DSPACE dChat synthetic check (`DspaceChatSyntheticFailed`) is deferred while token.place
-  staging inference depends on work tracked in `futuroptimist/token.place#1549`. This blocks only that
-  one synthetic check, not the rest of the alerting foundation.
+- The DSPACE dChat synthetic (`DspaceChatSyntheticFailed`) is repository-ready. Continuous staging
+  execution still requires an operator-installed smoke runner pinned to the reviewed immutable
+  DSPACE revision plus scheduling and live failure/recovery evidence; Sugarkube deliberately neither
+  clones mutable code nor vendors DSPACE.
 - Shallow public-endpoint blackbox monitoring (`PublicEndpointDown`, `PublicProbeMissing`,
   `TLSExpiringSoon`) is already live in staging today, independently of that dependency — see
   [`docs/observability-blackbox.md`](./observability-blackbox.md).

@@ -1,5 +1,69 @@
 # democratized.space (dspace) on Sugarkube
 
+## Release-integrity alerts
+
+The staging observability release now owns five fail-closed contracts:
+`DspaceBuildRevisionMismatch`, `DspaceMixedBuildRevisions`,
+`DspaceDeploymentImagePinMismatch`, `DspaceChatSyntheticFailed`, and
+`DspaceMetricsTargetDown`. The approved coordinate comes from the finalized release evidence, not
+from a semantic tag. Production expressions and labels are testable repository contracts only;
+production observability is **not deployed or supported for mutation** by this repository.
+
+### Synthetic producer installation and scheduling
+
+`scripts/dspace_observability_metrics.py` is the bounded consumer for JSON produced by
+`scripts/dspace_runtime_verifier.py`. Schedule those two pinned files from the same reviewed
+Sugarkube commit every five minutes on a staging node, writing the resulting `.prom` file into the
+node-exporter textfile collector directory. The verifier's `--smoke-runner` must be an executable
+file checked out at the reviewed immutable DSPACE source revision; never clone a branch or download
+code in the scheduled job. The runner uses the verifier's isolated/intercepted, mutation-disabled
+remote-chat contract and requires no user API key. This repository does not install that external
+DSPACE artifact, so continuous synthetic coverage remains an explicit post-merge prerequisite.
+
+Pass the active Deployment tag and digest to the producer (never credentials). It atomically emits
+only application, environment, the single approved revision, the single active revision, approved
+image coordinates, result, and execution time. A failed execution leaves the old timestamp in
+place, becoming stale after 15 minutes; no file is a distinct missing result. Both fail closed.
+Rollback by disabling the schedule and removing only its configured `dspace.prom` file.
+
+Verify the collector and rules without displaying application responses:
+
+```bash
+curl -fsS http://127.0.0.1:9100/metrics | grep '^dspace_\(release_expected\|deployment_image\|chat_synthetic\)'
+just observability-render env=staging >/tmp/sugarkube-observability.yaml
+promtool check rules clusters/staging/observability/kube-prometheus-stack.values.yaml
+```
+
+### Diagnosis and remediation
+
+* **Revision mismatch:** compare `dspace_build_info` with finalized evidence. This is runtime
+  identity drift; a stale synthetic instead has an old synthetic timestamp. Reconcile only through
+  the guarded release workflow.
+* **Mixed revisions:** inspect ready, non-terminating pods. Wait through the alert's ten-minute
+  settling window for an ordinary rollout; if it persists, stop the rollout and diagnose ownership,
+  readiness, and image IDs.
+* **Image-pin mismatch:** compare the Deployment tag and runtime image digest with evidence. A
+  correct Deployment plus wrong `dspace_build_info` is runtime identity drift, not image-pin drift.
+* **Metrics target down:** inspect ServiceMonitor discovery and Prometheus target errors first. A
+  scrape/configuration failure does not by itself prove that the public application is unavailable;
+  compare blackbox probes and `/healthz`.
+* **Chat synthetic failed:** freshness says whether it ran. For an executed failure, compare public
+  health/build identity, then the bounded verifier category and configured provider. Public routing
+  failure differs from a healthy public path with provider/configuration failure. Never log prompts,
+  responses, raw errors, or keys.
+
+### Post-merge staging drills
+
+Use a unique owner such as `dspace-2329-$USER-$(date -u +%Y%m%dT%H%M%SZ)`. In a temporary
+`PrometheusRule` named with that owner, copy only the reviewed rule and replace its input expression
+with bounded `vector(1)` series carrying staging labels: first one wrong revision, then two distinct
+revisions, then a zero synthetic result with a fresh timestamp. Apply only in `monitoring`; query
+Prometheus and Alertmanager for the exact owner label; run `just observability-pagerduty-test
+env=staging fire` and `... resolve` and confirm both PagerDuty events. In a shell `trap`, delete by
+the exact generated resource name (never a broad label selector), and verify it is absent. Do not
+change the DSPACE Deployment, release, production context, existing rules, or unrelated alerts.
+These drills are live acceptance work and have not been performed by repository tests.
+
 This is the canonical runbook for deploying DSPACE from GHCR artifacts to Sugarkube. The generic `just app-*` recipes are the preferred future path. The `dspace-oci-*` recipes remain compatibility shims and are scheduled for later removal only after the generic flow has been exercised across routine releases.
 
 ## Production Helm reconciliation for application 3.0.1
