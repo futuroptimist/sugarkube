@@ -6734,6 +6734,87 @@ def test_observability_app_metrics_install_secret_rejects_getpass_echo_fallback(
     assert credential not in combined
 
 
+@pytest.mark.parametrize(
+    "prompt_failure", [OSError, EOFError, io.UnsupportedOperation]
+)
+def test_observability_app_metrics_install_secret_stdin_prompt_failures_are_redacted(
+    monkeypatch, capsys, prompt_failure
+):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
+        "tokenplace"
+    ]["environments"]["staging"]
+    private_tty = "/private/controlling-terminal"
+    monkeypatch.setattr(app_metrics.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(app_metrics.sys.stdin, "readable", lambda: True)
+    monkeypatch.setattr(
+        app_metrics,
+        "open",
+        lambda *args: (_ for _ in ()).throw(OSError("no controlling terminal")),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "getpass.getpass",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            prompt_failure(f"cannot read {private_tty}")
+        ),
+    )
+    monkeypatch.setattr(
+        app_metrics.subprocess,
+        "Popen",
+        lambda *args, **kwargs: pytest.fail("Secret rendering must not be attempted"),
+    )
+    monkeypatch.setattr(
+        app_metrics.subprocess,
+        "run",
+        lambda *args, **kwargs: pytest.fail("kubectl apply must not be attempted"),
+    )
+
+    with pytest.raises(app_metrics.Error) as excinfo:
+        app_metrics.install_secret(cfg)
+
+    captured = capsys.readouterr()
+    combined = captured.out + captured.err + str(excinfo.value)
+    assert str(excinfo.value) == "ERROR: credential prompt failed (details redacted)"
+    assert "Traceback" not in combined
+    assert private_tty not in combined
+
+
+def test_observability_app_metrics_install_secret_stdin_prompt_preserves_ctrl_c(
+    monkeypatch
+):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
+        "tokenplace"
+    ]["environments"]["staging"]
+    interrupt = KeyboardInterrupt()
+    monkeypatch.setattr(app_metrics.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(app_metrics.sys.stdin, "readable", lambda: True)
+    monkeypatch.setattr(
+        app_metrics,
+        "open",
+        lambda *args: (_ for _ in ()).throw(OSError("no controlling terminal")),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "getpass.getpass",
+        lambda *args, **kwargs: (_ for _ in ()).throw(interrupt),
+    )
+    monkeypatch.setattr(
+        app_metrics.subprocess,
+        "Popen",
+        lambda *args, **kwargs: pytest.fail("Secret rendering must not be attempted"),
+    )
+    monkeypatch.setattr(
+        app_metrics.subprocess,
+        "run",
+        lambda *args, **kwargs: pytest.fail("kubectl apply must not be attempted"),
+    )
+
+    with pytest.raises(KeyboardInterrupt) as excinfo:
+        app_metrics.install_secret(cfg)
+
+    assert excinfo.value is interrupt
+
+
 def test_observability_app_metrics_install_secret_prompt_write_failure_is_redacted(
     monkeypatch, capsys
 ):
