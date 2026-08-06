@@ -25,6 +25,10 @@ REQUIRED_METRICS = {
     "probe_duration_seconds",
     "probe_http_status_code",
     "probe_ssl_earliest_cert_expiry",
+    "dspace_release_approved_info",
+    "dspace_deployment_image_pin_matches",
+    "dspace_chat_synthetic_success",
+    "dspace_chat_synthetic_last_run_timestamp_seconds",
 }
 EVENT_METRICS = {"dspace_dchat_requests_total", "dspace_dependency_requests_total"}
 OPERATIONAL_ROUTES = '"/(healthz|livez|metrics)"'
@@ -211,8 +215,13 @@ def validate_dashboard(path: Path) -> str:
         if not matching or any("or on() vector(0)" not in expr for expr in matching):
             raise SystemExit(f"ERROR: event-driven metric {metric} must use a safe zero fallback.")
     serialized = json.dumps(dashboard)
-    if re.search(r"https?://", serialized, re.IGNORECASE):
-        raise SystemExit("ERROR: dashboard must not contain embedded raw URLs.")
+    urls = set(re.findall(r'https?://[^)\" ]+', serialized, re.IGNORECASE))
+    allowed_urls = {
+        "https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-dspace-release-integrity.md",
+        "https://github.com/futuroptimist/sugarkube/blob/main/deployment-evidence/dspace/staging/main-018687f-20260805T035722Z.json",
+    }
+    if urls != allowed_urls:
+        raise SystemExit("ERROR: dashboard links must be the exact reviewed runbook and evidence URLs.")
     if re.search(r"\$\{?DS_|__inputs", serialized, re.IGNORECASE) or re.search(
         r"(?:\{|,)\s*target\s*(?:=|=~|!~|!=)|{{\s*target\s*}}", expression_text
     ):

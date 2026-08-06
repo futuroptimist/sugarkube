@@ -10,7 +10,7 @@ PD_RECEIVER = "pagerduty-synthetic-test"
 HC_RECEIVER = "healthchecks-watchdog"
 PD_PATH = "/etc/alertmanager/secrets/alertmanager-pagerduty/routing-key"
 HC_PATH = "/etc/alertmanager/secrets/alertmanager-healthchecks-watchdog/ping-url"
-PD_MATCHERS = ['alertname="SugarkubePagerDutyTest"', 'environment="staging"',
+PD_MATCHERS = ['alertname=~"^(SugarkubePagerDutyTest|DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown)$"', 'environment="staging"',
                'cluster="sugarkube-int"', 'severity="critical"'].freeze
 HC_MATCHERS = ['alertname="SugarkubeObservabilityWatchdog"', 'environment="staging"',
                'cluster="sugarkube-int"', 'purpose="observability-watchdog"'].freeze
@@ -89,7 +89,7 @@ fail_closed("Healthchecks webhook must use the exact file, resolution, timeout, 
 
 pd_route, hc_route = children
 fail_closed("PagerDuty route ordering or receiver changed") unless pd_route["receiver"] == PD_RECEIVER
-fail_closed("PagerDuty route matchers are not the exact synthetic allowlist") unless pd_route["matchers"].is_a?(Array) && pd_route["matchers"].sort == PD_MATCHERS.sort
+fail_closed("PagerDuty route matchers are not the exact DSPACE and synthetic allowlist") unless pd_route["matchers"].is_a?(Array) && pd_route["matchers"].sort == PD_MATCHERS.sort
 fail_closed("PagerDuty route must contain only receiver and exact matchers") unless pd_route.keys.sort == %w[matchers receiver]
 expected_hc = {
   "receiver" => HC_RECEIVER, "matchers" => HC_MATCHERS,
