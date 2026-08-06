@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import re
 import stat
 import subprocess
 import sys
@@ -21,10 +22,53 @@ NAMES = {
     "DspaceChatSyntheticFailed",
     "DspaceMetricsTargetDown",
 }
+RUNBOOK = (
+    "https://github.com/futuroptimist/sugarkube/blob/main/docs/"
+    "observability-dspace-release-integrity.md"
+)
 
 
 def rules():
     return yaml_load(RULES)["groups"][0]["rules"]
+
+
+def render_alert_contracts(canonical_rules, environment, cluster, evidence):
+    """Render non-installable alert metadata from finalized release evidence."""
+    if evidence.get("recordType") != "final" or evidence.get("environment") != environment:
+        raise ValueError("alert contracts require finalized evidence for their environment")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", cluster):
+        raise ValueError("cluster contract must be a bounded identifier")
+
+    coordinates = {
+        "application_version": evidence["applicationVersion"],
+        "source_revision": evidence["sourceRevision"],
+        "runtime_revision": evidence["runtimeSourceRevision"],
+        "image_tag": evidence["imageTag"],
+        "image_digest": evidence["imageDigest"],
+        "chart_version": evidence["chartVersion"],
+        "chart_digest": evidence["chartDigest"],
+        "helm_revision": evidence["helmRevision"],
+        "provider": evidence["expectedDefaultChatProvider"],
+    }
+    contracts = []
+    for rule in canonical_rules:
+        if "alert" not in rule:
+            continue
+        labels = dict(rule["labels"])
+        labels.update(
+            environment=environment,
+            cluster=cluster,
+            expected_revision=evidence["sourceRevision"],
+        )
+        contracts.append(
+            {
+                "alert": rule["alert"],
+                "labels": labels,
+                "annotations": dict(rule["annotations"]),
+                "coordinates": dict(coordinates),
+            }
+        )
+    return contracts
 
 
 def test_canonical_rules_equal_helm_representation_and_evidence():
@@ -57,6 +101,64 @@ def test_canonical_rules_equal_helm_representation_and_evidence():
         evidence["semanticTag"] not in RULES.read_text()
         and prod["semanticTag"] not in RULES.read_text()
     )
+
+
+def test_staging_alert_contracts_agree_with_canonical_rules():
+    evidence = json.loads(STAGING.read_text())
+    canonical_alerts = [rule for rule in rules() if "alert" in rule]
+    contracts = render_alert_contracts(canonical_alerts, "staging", "sugarkube-int", evidence)
+
+    assert {contract["alert"] for contract in contracts} == NAMES
+    assert [contract["labels"] for contract in contracts] == [
+        rule["labels"] for rule in canonical_alerts
+    ]
+    assert [contract["annotations"] for contract in contracts] == [
+        rule["annotations"] for rule in canonical_alerts
+    ]
+
+
+def test_production_alert_contracts_derive_from_finalized_evidence_only():
+    evidence = json.loads(PROD.read_text())
+    contracts = render_alert_contracts(rules(), "prod", "sugarkube-prod", evidence)
+    expected_coordinates = {
+        "application_version": evidence["applicationVersion"],
+        "source_revision": evidence["sourceRevision"],
+        "runtime_revision": evidence["runtimeSourceRevision"],
+        "image_tag": evidence["imageTag"],
+        "image_digest": evidence["imageDigest"],
+        "chart_version": evidence["chartVersion"],
+        "chart_digest": evidence["chartDigest"],
+        "helm_revision": evidence["helmRevision"],
+        "provider": evidence["expectedDefaultChatProvider"],
+    }
+
+    assert {contract["alert"] for contract in contracts} == NAMES
+    assert len(contracts) == 5
+    for contract in contracts:
+        assert contract["labels"] == {
+            "application": "dspace",
+            "environment": "prod",
+            "cluster": "sugarkube-prod",
+            "severity": "critical",
+            "expected_revision": evidence["sourceRevision"],
+        }
+        assert contract["coordinates"] == expected_coordinates
+        annotations = contract["annotations"]
+        assert all(
+            annotations[field]
+            for field in (
+                "summary",
+                "description",
+                "current_revision",
+                "remediation",
+                "runbook_url",
+            )
+        )
+        assert annotations["runbook_url"].startswith(f"{RUNBOOK}#dspace")
+
+    rendered = json.dumps(contracts, sort_keys=True)
+    assert "semanticTag" not in rendered
+    assert evidence["semanticTag"] not in rendered
 
 
 def test_alert_contract_cardinality_and_promql_states():
