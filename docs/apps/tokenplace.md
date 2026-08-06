@@ -77,9 +77,9 @@ just app-chart-status app=tokenplace
 If status reports a stale pin after a new chart is published, bump it explicitly:
 
 ```bash
-just app-chart-bump app=tokenplace version=0.1.3
+just app-chart-bump app=tokenplace version=0.1.4
 git add docs/apps/tokenplace.version
-git commit -m "Bump tokenplace chart pin to 0.1.3"
+git commit -m "Bump tokenplace chart pin to 0.1.4"
 git push
 ```
 
@@ -323,3 +323,66 @@ just cf-tunnel-route host=token.place
 - token.place must preserve relay-blind E2EE: relay diagnostics and logs should expose safe routing metadata only, not plaintext payloads.
 - Verify `/relay/diagnostics`, real external compute-node registration, and a real E2EE request/response before production promotion so relay-compute issues are caught in staging.
 - Keep runtime secrets and per-environment external service configuration outside Helm examples and Sugarkube app config files.
+
+## Staging authenticated metrics (Phase 1 repository support)
+
+Chart `0.1.4` is the first token.place chart pinned here for staging authenticated
+Prometheus metrics. It was verified from the published OCI package, not from
+source-only chart files:
+
+```bash
+just app-chart-status app=tokenplace
+helm show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.4
+helm pull oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.4
+sha256sum tokenplace-0.1.4.tgz
+```
+
+The public OCI pull reported immutable digest
+`sha256:0f16aef72500b33a598042465a9b703bf16dc7a5071b3d867c4a78d6928be1e7`.
+The fetched `tokenplace-0.1.4.tgz` package had archive SHA-256
+`c960f7c0793032bcaebd8f8d5546cac16a1cc42b9c543c318f15b2243faaec7a` and
+contains the opt-in `metrics.enabled`, `metrics.auth.existingSecret`,
+`metrics.auth.secretKey`, `serviceMonitor.enabled`, `/metrics` endpoint,
+`authorization.credentials`, and bounded `app`, `environment`, `release`, and
+`cluster` relabeling contract.
+
+Merging this repository support does not deploy token.place or create the
+metrics credential. Install or rotate the staging-only bearer token before the
+Helm deployment; the command accepts the value only from a hidden interactive
+terminal prompt and does not print, decode, or log it:
+
+```bash
+just observability-app-metrics-secret-install app=tokenplace env=staging
+```
+
+Check the Secret/key contract without reading the value:
+
+```bash
+just observability-app-metrics-secret-check app=tokenplace env=staging
+```
+
+Deployment order:
+
+1. Install or rotate `tokenplace/tokenplace-staging-metrics-token` with key
+   `token` using the command above.
+2. Deploy or redeploy staging with the pinned chart and staging values.
+3. Run the generic metrics verifier:
+
+```bash
+just observability-app-metrics-verify app=tokenplace env=staging
+```
+
+The public unauthenticated metrics endpoint is expected to return HTTP `401`:
+
+```bash
+curl -o /dev/null -sS -w '%{http_code}\n' https://staging.token.place/metrics
+```
+
+Rollback preserves the Secret. Revert `docs/apps/tokenplace.version` to the
+previous pin, keep `tokenplace-staging-metrics-token` in place for future
+rotation, and redeploy the previous chart through the normal staging deploy
+recipe.
+
+Dashboards, alert rules, functional schedulability, shared state, and live drills
+remain follow-ups that require live metrics evidence. This Phase 1 support does
+not implement `/api/v1/relay/availability` or any Phase 2 relay behavior.
