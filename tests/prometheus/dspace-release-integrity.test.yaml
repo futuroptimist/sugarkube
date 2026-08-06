@@ -4,7 +4,11 @@ evaluation_interval: 1m
 tests:
   - interval: 1m
     input_series:
-      - series: 'dspace_build_info{environment="staging",revision="ffffffffffffffffffffffffffffffffffffffff"}'
+      - series: 'dspace_build_info{namespace="dspace",pod="dspace-1",environment="staging",revision="ffffffffffffffffffffffffffffffffffffffff"}'
+        values: '1x20'
+      - series: 'kube_pod_container_status_ready{namespace="dspace",pod="dspace-1",container="dspace"}'
+        values: '1x20'
+      - series: 'kube_pod_status_phase{namespace="dspace",pod="dspace-1",phase="Running"}'
         values: '1x20'
     alert_rule_test:
       - eval_time: 11m
@@ -39,9 +43,90 @@ tests:
               cluster: sugarkube-int
               severity: critical
               expected_revision: 018687f5a7f4de45508c6e36eb28afb3e44da24d
+              state: executed_failure
             exp_annotations:
               summary: DSPACE isolated /chat synthetic failed, is stale, or is missing
               description: A zero success value is an executed failure; timestamp age or absence is a fail-closed producer failure.
               current_revision: unknown
               remediation: Inspect producer freshness first, then verify public /chat and the configured provider without exposing keys.
               runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-dspace-release-integrity.md#dspacechatsyntheticfailed
+
+  - name: approved_serving_revision_is_normal
+    interval: 1m
+    input_series:
+      - series: 'dspace_build_info{namespace="dspace",pod="new",environment="staging",revision="018687f5a7f4de45508c6e36eb28afb3e44da24d"}'
+        values: '1x20'
+      - series: 'kube_pod_container_status_ready{namespace="dspace",pod="new",container="dspace"}'
+        values: '1x20'
+      - series: 'kube_pod_status_phase{namespace="dspace",pod="new",phase="Running"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: DspaceBuildRevisionMismatch
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: DspaceMixedBuildRevisions
+        exp_alerts: []
+
+  - name: settling_non_serving_old_pod_is_ignored
+    interval: 1m
+    input_series:
+      - series: 'dspace_build_info{namespace="dspace",pod="new",environment="staging",revision="018687f5a7f4de45508c6e36eb28afb3e44da24d"}'
+        values: '1x20'
+      - series: 'dspace_build_info{namespace="dspace",pod="old",environment="staging",revision="ffffffffffffffffffffffffffffffffffffffff"}'
+        values: '1x20'
+      - series: 'kube_pod_container_status_ready{namespace="dspace",pod="new",container="dspace"}'
+        values: '1x20'
+      - series: 'kube_pod_status_phase{namespace="dspace",pod="new",phase="Running"}'
+        values: '1x20'
+      - series: 'kube_pod_container_status_ready{namespace="dspace",pod="old",container="dspace"}'
+        values: '0x20'
+      - series: 'kube_pod_status_phase{namespace="dspace",pod="old",phase="Running"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: DspaceBuildRevisionMismatch
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: DspaceMixedBuildRevisions
+        exp_alerts: []
+
+  - name: fresh_passing_synthetic_is_normal
+    interval: 1m
+    input_series:
+      - series: 'dspace_chat_synthetic_success{application="dspace",environment="staging",cluster="sugarkube-int"}'
+        values: '1x20'
+      - series: 'dspace_chat_synthetic_timestamp_seconds{application="dspace",environment="staging",cluster="sugarkube-int"}'
+        values: '600x20'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: DspaceChatSyntheticFailed
+        exp_alerts: []
+
+  - name: one_target_down_is_not_masked_by_healthy_replica
+    interval: 1m
+    input_series:
+      - series: 'up{namespace="dspace",service="dspace-metrics",pod="one",instance="one"}'
+        values: '1x20'
+      - series: 'up{namespace="dspace",service="dspace-metrics",pod="two",instance="two"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: DspaceMetricsTargetDown
+        exp_alerts:
+          - exp_labels:
+              application: dspace
+              environment: staging
+              cluster: sugarkube-int
+              severity: critical
+              expected_revision: 018687f5a7f4de45508c6e36eb28afb3e44da24d
+              namespace: dspace
+              service: dspace-metrics
+              pod: two
+              instance: two
+            exp_annotations:
+              summary: Prometheus has no healthy DSPACE metrics target
+              description: The DSPACE ServiceMonitor target is down or missing; this does not by itself prove the application is down.
+              current_revision: unknown
+              remediation: Check target discovery, bearer Secret wiring, and network policy before diagnosing the application.
+              runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-dspace-release-integrity.md#dspacemetricstargetdown

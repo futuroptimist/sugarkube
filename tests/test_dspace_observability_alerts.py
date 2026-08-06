@@ -2,6 +2,8 @@ import json
 import subprocess
 import sys
 import time
+import importlib.util
+import stat
 from pathlib import Path
 
 from test_observability_helm import yaml_load
@@ -82,14 +84,12 @@ def test_alert_contract_cardinality_and_promql_states():
         assert not any(x in str(rule).lower() for x in forbidden)
     assert "count(count by (revision)" in alerts["DspaceMixedBuildRevisions"]["expr"]
     image = alerts["DspaceDeploymentImagePinMismatch"]["expr"]
-    assert "image_id!~" in image and "docker-pullable://)?" in image
-    assert "kube_pod_container_status_ready" in image and "== 1" in image
+    assert 'image_id=~"^(docker-pullable://)?' in image and "image_spec=" in image
+    assert "kube_pod_deletion_timestamp" in image and "phase=\"Running\"" in image
     synthetic = alerts["DspaceChatSyntheticFailed"]["expr"]
-    assert "== 0" in synthetic and "> 900" in synthetic and "absent(" in synthetic
-    assert (
-        "== 0" in alerts["DspaceMetricsTargetDown"]["expr"]
-        and "absent(" in alerts["DspaceMetricsTargetDown"]["expr"]
-    )
+    assert all(state in synthetic for state in ("executed_failure", "stale", "missing"))
+    target = alerts["DspaceMetricsTargetDown"]["expr"]
+    assert "up{" in target and "== 0" in target and "unless on (namespace, pod)" in target
 
 
 def result(rev, **overrides):
@@ -134,6 +134,7 @@ def test_synthetic_consumer_pass_fail_and_fail_closed(tmp_path):
     proc, out = run(tmp_path, result(rev))
     assert proc.returncode == 0
     assert "_success{" in out.read_text() and "} 1\n" in out.read_text()
+    assert stat.S_IMODE(out.stat().st_mode) == 0o644
     proc, out = run(tmp_path, result(rev, passed=False))
     assert proc.returncode == 0
     assert "} 0\n" in out.read_text()
@@ -160,8 +161,26 @@ def test_synthetic_consumer_rejects_future_timestamp_without_replacing_output(tm
     assert proc.returncode == 0
     before = out.read_text()
     proc, _ = run(
-        tmp_path, result(rev, executedAt=int(time.time()) + 301), revision=rev
+        tmp_path, result(rev, executedAt=int(time.time()) + 61), revision=rev
     )
     assert proc.returncode != 0
     assert "allowed clock skew" in proc.stderr
     assert out.read_text() == before
+
+
+def test_parse_result_uses_injected_clock_and_accepts_old_results(tmp_path):
+    spec = importlib.util.spec_from_file_location("dspace_metrics", PRODUCER)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader
+    spec.loader.exec_module(module)
+    rev = "d" * 40
+    source = tmp_path / "result.json"
+    source.write_text(json.dumps(result(rev, executedAt=1)))
+    assert module.parse_result(source, rev, now=1000) == (1, 1)
+    source.write_text(json.dumps(result(rev, executedAt=1061)))
+    try:
+        module.parse_result(source, rev, now=1000)
+    except ValueError as error:
+        assert "clock skew" in str(error)
+    else:
+        raise AssertionError("future result was accepted")

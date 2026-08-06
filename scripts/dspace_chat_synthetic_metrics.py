@@ -24,10 +24,12 @@ ALLOWED_KEYS = {
     "transport",
     "mutationEnabled",
 }
-MAX_FUTURE_SKEW_SECONDS = 300
+MAX_FUTURE_SKEW_SECONDS = 60
 
 
-def parse_result(path: Path, expected_runner: str) -> tuple[int, int]:
+def parse_result(
+    path: Path, expected_runner: str, *, now: float | None = None
+) -> tuple[int, int]:
     value = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(value, dict) or set(value) != ALLOWED_KEYS:
         raise ValueError("result does not match the exact bounded schema")
@@ -46,7 +48,9 @@ def parse_result(path: Path, expected_runner: str) -> tuple[int, int]:
         or value["executedAt"] < 1
     ):
         raise ValueError("result status or timestamp is invalid")
-    if value["executedAt"] > int(time.time()) + MAX_FUTURE_SKEW_SECONDS:
+    if now is None:
+        now = time.time()
+    if value["executedAt"] > int(now) + MAX_FUTURE_SKEW_SECONDS:
         raise ValueError("result timestamp exceeds the allowed clock skew")
     return int(value["passed"]), value["executedAt"]
 
@@ -79,6 +83,7 @@ def main() -> int:
     fd, temporary = tempfile.mkstemp(prefix=".dspace-chat.", dir=args.output.parent)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            os.fchmod(stream.fileno(), 0o644)
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())

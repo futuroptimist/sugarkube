@@ -1167,7 +1167,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "count(kube_pod_container_info{namespace=\"dspace\",container=\"dspace\",image_id!~\"(docker-pullable://)?ghcr.io/democratizedspace/dspace@sha256:2b95b7fdccdd011553c8d8617e3090ee27323996c532148fdb147cb9fd6e1b6c\"} and on (namespace, pod, container) kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1)",
+          "expr": "count(max by (pod, image_id, image_spec) ((kube_pod_container_info{namespace=\"dspace\",container=\"dspace\"} unless on (namespace, pod, container) kube_pod_container_info{namespace=\"dspace\",container=\"dspace\",image_id=~\"^(docker-pullable://)?ghcr.io/democratizedspace/dspace@sha256:2b95b7fdccdd011553c8d8617e3090ee27323996c532148fdb147cb9fd6e1b6c$\",image_spec=\"ghcr.io/democratizedspace/dspace:main-018687f\"}) and on (namespace, pod, container) (kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"})) or label_replace(label_replace((kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}) unless on (namespace, pod, container) kube_pod_container_info{namespace=\"dspace\",container=\"dspace\"}, \"image_id\", \"unknown\", \"\", \"\"), \"image_spec\", \"unknown\", \"\", \"\"))",
           "legendFormat": "mismatched pods",
           "instant": true,
           "range": false
@@ -1197,8 +1197,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max(up{namespace=\"dspace\",service=~\"dspace.*\"}) or on() vector(0)",
-          "legendFormat": "target up",
+          "expr": "sum(up{namespace=\"dspace\",service=~\"dspace.*\"}) / count(up{namespace=\"dspace\",service=~\"dspace.*\"}) or on() vector(0)",
+          "legendFormat": "healthy fraction",
           "instant": true,
           "range": false
         }
@@ -1254,7 +1254,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "[DSPACE integrity runbook](https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-dspace-release-integrity.md) \u00b7 [Finalized staging evidence](https://github.com/futuroptimist/sugarkube/blob/main/deployment-evidence/dspace/staging/main-018687f-20260805T035722Z.json)"
+        "content": "[DSPACE integrity runbook](https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-dspace-release-integrity.md) · [Finalized staging evidence](https://github.com/futuroptimist/sugarkube/blob/main/deployment-evidence/dspace/staging/main-018687f-20260805T035722Z.json)"
       }
     }
   ]

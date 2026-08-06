@@ -197,6 +197,25 @@ def validate_dashboard(path: Path) -> str:
         or len(ids) != len(set(ids))
     ):
         raise SystemExit("ERROR: dashboard panel IDs must be present, integer, and unique.")
+    positioned = [
+        panel
+        for panel in panels(dashboard)
+        if panel.get("type") != "row" and isinstance(panel.get("gridPos"), dict)
+    ]
+    for index, left in enumerate(positioned):
+        a = left["gridPos"]
+        for right in positioned[index + 1 :]:
+            b = right["gridPos"]
+            overlaps = (
+                a["x"] < b["x"] + b["w"]
+                and b["x"] < a["x"] + a["w"]
+                and a["y"] < b["y"] + b["h"]
+                and b["y"] < a["y"] + a["h"]
+            )
+            if overlaps:
+                raise SystemExit(
+                    f"ERROR: dashboard panels {left['id']} and {right['id']} overlap."
+                )
     validate_dashboard_semantics(dashboard)
     expressions = [
         target["expr"]

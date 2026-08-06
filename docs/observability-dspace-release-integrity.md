@@ -73,27 +73,87 @@ install, and schedule a DSPACE-owned runner that implements the exact isolated c
 
 ## Staging post-merge drills
 
-Do not change the DSPACE Helm release. Use a unique owner such as
-`dspace-2329-$(date -u +%Y%m%dT%H%M%SZ)-$RANDOM`. Create a temporary `PrometheusRule` in the
-`monitoring` namespace whose name and every rule carry `drill_owner="$owner"`; copy one production
-expression at a time and replace only its input with bounded `vector()` test series. Use full
-staging labels and the real alert name. Simulate (1) a non-approved revision, (2) two revision
-series, and (3) a zero synthetic result with a current timestamp. Wait through each rule's `for`,
-verify firing in Prometheus/Alertmanager, then remove **only** the exact owned object:
+Do **not** run these commands as part of repository validation and do not change DSPACE. An operator
+may run this copy-pasteable drill later with the repository-standard `sugar-staging` context. The
+Prometheus `cluster="sugarkube-int"` value is a metric label, not a kubectl context.
 
 ```bash
+set -euo pipefail
 owner="dspace-2329-$(date -u +%Y%m%dT%H%M%SZ)-$RANDOM"
 rule="${owner,,}"; rule="${rule//_/-}"
-kubectl --context sugarkube-int -n monitoring apply -f "/tmp/${rule}.yaml"
-kubectl --context sugarkube-int -n monitoring get prometheusrule "$rule" \
-  -o jsonpath='{.metadata.labels.drill_owner}' | grep -Fx "$owner"
-kubectl --context sugarkube-int -n monitoring delete prometheusrule "$rule" \
-  --wait=true --ignore-not-found=false
-! kubectl --context sugarkube-int -n monitoring get prometheusrule "$rule"
+cleanup() {
+  current="$(kubectl --context sugar-staging -n monitoring get prometheusrule "$rule" \
+    -o jsonpath='{.metadata.labels.drill_owner}' 2>/dev/null || true)"
+  test -z "$current" || test "$current" = "$owner"
+  test -z "$current" || kubectl --context sugar-staging -n monitoring delete \
+    prometheusrule "$rule" --wait=true --ignore-not-found=false
+  ! kubectl --context sugar-staging -n monitoring get prometheusrule "$rule" >/dev/null 2>&1
+}
+trap cleanup EXIT
+cat >"/tmp/${rule}.yaml" <<EOF
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: ${rule}
+  namespace: monitoring
+  labels:
+    drill_owner: ${owner}
+spec:
+  groups:
+    - name: ${rule}
+      rules:
+        - alert: DspaceBuildRevisionMismatch
+          expr: label_replace(vector(1), "revision", "drill-mismatch", "", "")
+          for: 1m
+          labels: &labels
+            application: dspace
+            environment: staging
+            cluster: sugarkube-int
+            severity: critical
+            expected_revision: 018687f5a7f4de45508c6e36eb28afb3e44da24d
+            drill_owner: ${owner}
+          annotations: &annotations
+            summary: DSPACE drill revision mismatch
+            current_revision: drill-mismatch
+            remediation: Delete the exact owner-scoped temporary PrometheusRule.
+            runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-dspace-release-integrity.md#staging-post-merge-drills
+        - alert: DspaceMixedBuildRevisions
+          expr: label_replace(vector(1), "revision", "drill-multiple", "", "")
+          for: 1m
+          labels: *labels
+          annotations:
+            <<: *annotations
+            summary: DSPACE drill mixed revisions
+            current_revision: multiple
+        - alert: DspaceChatSyntheticFailed
+          expr: label_replace(vector(1), "state", "executed_failure", "", "")
+          for: 1m
+          labels: *labels
+          annotations:
+            <<: *annotations
+            summary: DSPACE drill synthetic failure
+            current_revision: unknown
+EOF
+kubectl --context sugar-staging -n monitoring apply -f "/tmp/${rule}.yaml"
+test "$(kubectl --context sugar-staging -n monitoring get prometheusrule "$rule" \
+  -o jsonpath='{.metadata.labels.drill_owner}')" = "$owner"
+# Observe all three alerts in Prometheus and Alertmanager, then acknowledge their
+# firing incidents in PagerDuty. The EXIT trap performs exact-name cleanup.
+cleanup
+trap - EXIT
 ```
 
-The temporary manifest must set `metadata.labels.drill_owner`, contain no Secret, use at most two
-series, and have a unique name. Abort if the ownership read-back differs. Never use a label selector
-for cleanup. Confirm PagerDuty receives firing and resolved events for every allowlisted alert,
-while an unrelated test alert remains at the null root. Record screenshots/timestamps and confirm
-production received nothing. These live results are required before #2329 can be closed.
+Before the drill, prove there is exactly one scheduled producer, the reviewed external runner is
+pinned to its full immutable revision, and the chart-rendered node-exporter DaemonSet has both the
+`dspace-chat-textfile` host mount and
+`--collector.textfile.directory=/var/lib/node_exporter/textfile_collector`. Verify the collector
+exposes both bounded series. During the drill compare unrelated alerts and confirm they remain on
+the null root. After exact-name cleanup, confirm PagerDuty receives a resolved event for every
+firing incident and record timestamps without credentials or payload data.
+
+Rollback consists of disabling the single producer schedule, removing only `dspace-chat.prom`, and
+reverting this staging observability release; removal of the producer alone intentionally makes the
+missing-result state fire. Repository-ready rules and documentation are not evidence of Helm
+deployment, collector installation, runner scheduling, PagerDuty delivery, or operational proof.
+All those live staging prerequisites remain before #2329 can close. No production deployment or
+route is provided or claimed.

@@ -8,7 +8,7 @@ a human. The secret-file-backed synthetic Alertmanager → PagerDuty path has no
 through fire, phone receipt, acknowledgement, and resolution. The host-heartbeat timers are installed
 on `sugarkube3`, `sugarkube4`, and `sugarkube5`. The watchdog configuration and operator workflows
 are repository-ready, while their Secret installation, deployment, and live delivery proof remain
-post-merge work. Real workload routes remain deferred.
+post-merge work. Only the explicitly allowlisted staging workload routes described below are repository-ready; deployment and live delivery proof remain operator prerequisites.
 
 ## 1. Goals and non-goals
 
