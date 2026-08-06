@@ -6337,6 +6337,15 @@ def test_observability_app_metrics_install_secret_success_uses_stdin_pipe(
     tty.write_text("", encoding="utf-8")
     monkeypatch.setenv("SUGARKUBE_APP_METRICS_TTY", str(tty))
     monkeypatch.setattr(app_metrics.sys.stdin, "isatty", lambda: True)
+    import getpass
+
+    def fake_getpass(prompt, stream):
+        stream.write(prompt)
+        stream.flush()
+        return "rotated-value"
+
+    monkeypatch.setattr(getpass, "getpass", fake_getpass)
+
     class TtyWrapper:
         def __init__(self, handle):
             self._handle = handle
@@ -6356,17 +6365,11 @@ def test_observability_app_metrics_install_secret_success_uses_stdin_pipe(
         def writable(self):
             return self._handle.writable()
 
-        def fileno(self):
-            return self._handle.fileno()
-
         def write(self, value):
             return self._handle.write(value)
 
         def flush(self):
             return self._handle.flush()
-
-        def readline(self):
-            return "rotated-value\n"
 
     real_open = open
     open_calls = []
@@ -6380,16 +6383,6 @@ def test_observability_app_metrics_install_secret_success_uses_stdin_pipe(
         "open",
         fake_open,
         raising=False,
-    )
-    terminal_changes = []
-    original_attributes = [0, 0, 0, app_metrics.termios.ECHO]
-    monkeypatch.setattr(
-        app_metrics.termios, "tcgetattr", lambda fd: original_attributes.copy()
-    )
-    monkeypatch.setattr(
-        app_metrics.termios,
-        "tcsetattr",
-        lambda fd, when, attrs: terminal_changes.append((fd, when, attrs.copy())),
     )
     popen_calls = []
 
@@ -6415,8 +6408,6 @@ def test_observability_app_metrics_install_secret_success_uses_stdin_pipe(
     app_metrics.install_secret(cfg)
 
     assert open_calls == [(str(tty), "r+")]
-    assert terminal_changes[0][2][3] & app_metrics.termios.ECHO == 0
-    assert terminal_changes[-1][2] == original_attributes
     assert popen_calls[0][0] == [
         "kubectl",
         "-n",
@@ -6589,27 +6580,6 @@ class _AppMetricsFakeTty:
     def writable(self):
         return True
 
-    def fileno(self):
-        return 123
-
-    def readline(self):
-        return "credential-looking-value\n"
-
-    def write(self, value):
-        return len(value)
-
-    def flush(self):
-        return None
-
-
-def _mock_app_metrics_termios(monkeypatch):
-    monkeypatch.setattr(
-        app_metrics.termios,
-        "tcgetattr",
-        lambda fd: [0, 0, 0, app_metrics.termios.ECHO],
-    )
-    monkeypatch.setattr(app_metrics.termios, "tcsetattr", lambda *args: None)
-
 
 @pytest.mark.parametrize("tty_result", [OSError("private tty"), _AppMetricsFakeTty(False)])
 def test_observability_app_metrics_install_secret_rejects_bad_controlling_terminal(
@@ -6643,7 +6613,6 @@ def test_observability_app_metrics_install_secret_prompt_write_failure_is_redact
     private_tty = "/private/controlling-terminal"
     monkeypatch.setenv("SUGARKUBE_APP_METRICS_TTY", private_tty)
     monkeypatch.setattr(app_metrics.sys.stdin, "isatty", lambda: True)
-    _mock_app_metrics_termios(monkeypatch)
 
     class PromptWriteFailure(_AppMetricsFakeTty):
         def write(self, value):
@@ -6652,7 +6621,13 @@ def test_observability_app_metrics_install_secret_prompt_write_failure_is_redact
         def flush(self):
             raise AssertionError("flush must not follow a failed write")
 
+    def fake_getpass(prompt, stream):
+        stream.write(prompt)
+        stream.flush()
+        return credential
+
     monkeypatch.setattr(app_metrics, "open", lambda *args: PromptWriteFailure(), raising=False)
+    monkeypatch.setattr("getpass.getpass", fake_getpass)
     monkeypatch.setattr(
         app_metrics.subprocess,
         "Popen",
@@ -6684,10 +6659,7 @@ def test_observability_app_metrics_install_secret_rejects_invalid_hidden_input(
     ]["environments"]["staging"]
     monkeypatch.setattr(app_metrics.sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(app_metrics, "open", lambda *args: _AppMetricsFakeTty(), raising=False)
-    _mock_app_metrics_termios(monkeypatch)
-    monkeypatch.setattr(
-        _AppMetricsFakeTty, "readline", lambda self: f"{credential}\n"
-    )
+    monkeypatch.setattr("getpass.getpass", lambda *args, **kwargs: credential)
     with pytest.raises(app_metrics.Error) as excinfo:
         app_metrics.install_secret(cfg)
     combined = capsys.readouterr().out + capsys.readouterr().err + str(excinfo.value)
@@ -6706,7 +6678,7 @@ def test_observability_app_metrics_install_secret_subprocess_failures_are_redact
     credential = "credential-looking-value"
     monkeypatch.setattr(app_metrics.sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(app_metrics, "open", lambda *args: _AppMetricsFakeTty(), raising=False)
-    _mock_app_metrics_termios(monkeypatch)
+    monkeypatch.setattr("getpass.getpass", lambda *args, **kwargs: credential)
 
     class FailedRender:
         returncode = int(failure == "render")

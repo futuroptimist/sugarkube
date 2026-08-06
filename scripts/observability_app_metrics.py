@@ -9,7 +9,6 @@ import re
 import subprocess
 import os
 import sys
-import termios
 import time
 import urllib.error
 import urllib.parse
@@ -444,28 +443,6 @@ def check_secret(cfg):
     print("Application metrics Secret contract exists (value was not returned to the verifier).")
 
 
-def read_hidden(tty, prompt):
-    """Read a line with echo disabled on the supplied controlling terminal."""
-    fd = tty.fileno()
-    original = termios.tcgetattr(fd)
-    hidden = original.copy()
-    hidden[3] &= ~termios.ECHO
-    try:
-        termios.tcsetattr(fd, termios.TCSAFLUSH, hidden)
-        tty.write(prompt)
-        tty.flush()
-        value = tty.readline()
-        if not value:
-            raise EOFError
-    finally:
-        termios.tcsetattr(fd, termios.TCSAFLUSH, original)
-        tty.write("\n")
-        tty.flush()
-    if value.endswith("\n"):
-        value = value[:-1]
-    return value
-
-
 def install_secret(cfg):
     for bad in (
         "TOKEN",
@@ -477,6 +454,8 @@ def install_secret(cfg):
             fail("credential environment variables are refused")
     if not sys.stdin.isatty():
         fail("ordinary stdin is refused; use an interactive controlling terminal")
+    import getpass
+
     try:
         tty = open(os.environ.get("SUGARKUBE_APP_METRICS_TTY", "/dev/tty"), "r+")
     except OSError:
@@ -485,8 +464,8 @@ def install_secret(cfg):
         with tty:
             if not tty.isatty() or not tty.readable() or not tty.writable():
                 fail("an interactive controlling terminal is required")
-            value = read_hidden(
-                tty, "Enter application metrics bearer token (input hidden): "
+            value = getpass.getpass(
+                "Enter application metrics bearer token (input hidden): ", stream=tty
             )
     except (OSError, EOFError):
         fail("credential prompt failed (details redacted)")
