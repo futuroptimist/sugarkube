@@ -12,6 +12,9 @@ ROOT = Path(__file__).resolve().parents[1]
 VERSION = ROOT / "platform" / "observability" / "helm" / "kube-prometheus-stack.version"
 COMMON = ROOT / "platform" / "observability" / "helm" / "kube-prometheus-stack.values.common.yaml"
 STAGING = ROOT / "clusters" / "staging" / "observability" / "kube-prometheus-stack.values.yaml"
+CANONICAL_DSPACE_RULES = (
+    ROOT / "platform" / "observability" / "rules" / "dspace-release-integrity.yaml"
+)
 SCRIPT = ROOT / "scripts" / "observability_helm.sh"
 ALERTMANAGER_VALIDATOR = ROOT / "scripts" / "verify_observability_alertmanager.rb"
 DASHBOARD = ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
@@ -429,11 +432,59 @@ def test_lifecycle_uses_pinned_version_ordered_values_and_no_reuse_values():
         in script
     )
     assert 'CHART="prometheus-community/kube-prometheus-stack"' in script
-    assert '--version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}"' in script
+    ordered_values = '-f "${COMMON_VALUES}" -f "${STAGING_VALUES}" -f "${RULES_OVERLAY}"'
+    assert script.count(ordered_values) == 3
     assert "--reuse-values" not in script
     assert "platform/observability/kube-prometheus-stack-values.yaml" not in script
     assert "clusters/staging/patches/kube-prometheus-stack-values.yaml" not in script
     assert "longhorn" not in script.lower()
+
+
+def test_dspace_rules_have_one_canonical_source_and_exact_overlay(tmp_path):
+    staging = yaml_load(STAGING)
+    assert "dspace-release-integrity" not in staging["additionalPrometheusRulesMap"]
+
+    result, audit = run_helper(tmp_path, "render")
+    assert result.returncode == 0
+    overlay = yaml_load(tmp_path / "rules-overlay.yaml")
+    assert overlay == {
+        "additionalPrometheusRulesMap": {
+            "dspace-release-integrity": yaml_load(CANONICAL_DSPACE_RULES)
+        }
+    }
+    overlay_paths = re.findall(r"/[^ ]*sugarkube-observability-rules\.[^ ]*\.yaml", audit)
+    assert overlay_paths
+    assert all(not Path(path).exists() for path in overlay_paths)
+
+
+@pytest.mark.parametrize(
+    ("command", "helm_mode", "helm_action"),
+    [
+        ("render", "absent", "template"),
+        ("install", "absent", "install"),
+        ("upgrade", "present", "upgrade"),
+    ],
+)
+def test_all_helm_paths_apply_canonical_rules_overlay_last(
+    tmp_path, command, helm_mode, helm_action
+):
+    result, audit = run_helper(tmp_path, command, helm_mode=helm_mode)
+    assert result.returncode == 0
+    action_lines = [line for line in audit.splitlines() if f"helm {helm_action} " in line]
+    assert action_lines
+    for line in action_lines:
+        common = line.index(str(COMMON))
+        staging = line.index(str(STAGING))
+        overlay = line.index("sugarkube-observability-rules.")
+        assert common < staging < overlay
+
+
+def test_rules_overlay_is_cleaned_when_render_fails(tmp_path):
+    result, audit = run_helper(tmp_path, "render", helm_mode="render-fail")
+    assert result.returncode != 0
+    overlay_paths = re.findall(r"/[^ ]*sugarkube-observability-rules\.[^ ]*\.yaml", audit)
+    assert overlay_paths
+    assert all(not Path(path).exists() for path in overlay_paths)
 
 
 def test_install_upgrade_are_distinct_and_render_before_mutation():
@@ -621,6 +672,11 @@ def run_helper(
     (bin_dir / "helm").write_text(
         """#!/bin/sh
 echo "helm $*" >> "$AUDIT"
+for argument in "$@"; do
+  case "$argument" in
+    *sugarkube-observability-rules.*.yaml) cp "$argument" "$OVERLAY_CAPTURE" ;;
+  esac
+done
 case "$*" in
   *"repo add"*|*"repo update"*) exit 0 ;;
   *template*)
@@ -821,6 +877,7 @@ printf '%s' "$code"
     env = os.environ | {
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
         "AUDIT": str(audit),
+        "OVERLAY_CAPTURE": str(tmp_path / "rules-overlay.yaml"),
         "HELM_MODE": helm_mode,
         "CONTEXT": context,
         "KUBECTL_MODE": kubectl_mode,

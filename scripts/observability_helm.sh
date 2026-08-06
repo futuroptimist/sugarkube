@@ -8,6 +8,7 @@ CHART="prometheus-community/kube-prometheus-stack"
 VERSION_FILE="${ROOT}/platform/observability/helm/kube-prometheus-stack.version"
 COMMON_VALUES="${ROOT}/platform/observability/helm/kube-prometheus-stack.values.common.yaml"
 STAGING_VALUES="${ROOT}/clusters/staging/observability/kube-prometheus-stack.values.yaml"
+DSPACE_RULES="${ROOT}/platform/observability/rules/dspace-release-integrity.yaml"
 DASHBOARD="${ROOT}/clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
 DASHBOARD_VALUE="grafana.dashboards.sugarkube.sugarkube-staging-observability.json"
 DASHBOARD_VALIDATOR="${ROOT}/scripts/validate_observability_dashboard.py"
@@ -16,6 +17,7 @@ GRAFANA_URL="http://sugarkube3.local:30300"
 PAGERDUTY_SECRET="alertmanager-pagerduty"
 WATCHDOG_SECRET="alertmanager-healthchecks-watchdog"
 ALERTMANAGER_VALIDATOR="${ROOT}/scripts/verify_observability_alertmanager.rb"
+RULES_OVERLAY=""
 
 usage() { echo "Usage: $0 <render|install|upgrade|status|verify|dashboard-verify|pagerduty-test|watchdog-secret-install|watchdog-secret-check|watchdog-verify|watchdog-drill-create|watchdog-drill-status|watchdog-drill-clear> env=staging [fire|resolve]" >&2; }
 normalize_env() {
@@ -57,6 +59,19 @@ assert_context() {
   python3 "${ROOT}/scripts/cluster_identity.py" assert --kubeconfig "${KUBECONFIG:-${HOME}/.kube/config}" --env staging >/dev/null
 }
 version() { tr -d '[:space:]' < "${VERSION_FILE}"; }
+create_rules_overlay() {
+  RULES_OVERLAY="$(mktemp -t sugarkube-observability-rules.XXXXXX.yaml)"
+  chmod 600 "${RULES_OVERLAY}"
+  ruby -ryaml -e '
+    rules = YAML.safe_load_file(ARGV.fetch(0), aliases: false)
+    unless rules.is_a?(Hash) && rules.keys == ["groups"] &&
+           rules["groups"].is_a?(Array) && !rules["groups"].empty?
+      abort "ERROR: canonical DSPACE rules must contain only a nonempty groups list."
+    end
+    overlay = {"additionalPrometheusRulesMap" => {"dspace-release-integrity" => rules}}
+    File.write(ARGV.fetch(1), YAML.dump(overlay))
+  ' "${DSPACE_RULES}" "${RULES_OVERLAY}"
+}
 validate_dashboard() { python3 "${DASHBOARD_VALIDATOR}" "${DASHBOARD}"; }
 validate_rendered_dashboard() { python3 "${DASHBOARD_VALIDATOR}" "${DASHBOARD}" --rendered "$1"; }
 validate_rendered_alertmanager() { ruby "${ALERTMANAGER_VALIDATOR}" rendered "$1"; }
@@ -64,7 +79,7 @@ render_to() {
   local out="$1"
   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update >/dev/null
   helm repo update prometheus-community >/dev/null
-  helm template "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}" --set-file "${DASHBOARD_VALUE}=${DASHBOARD}" >"${out}"
+  helm template "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}" -f "${RULES_OVERLAY}" --set-file "${DASHBOARD_VALUE}=${DASHBOARD}" >"${out}"
   validate_rendered_dashboard "${out}"
   validate_rendered_alertmanager "${out}"
 }
@@ -110,9 +125,9 @@ release_state() {
     return 1
   fi
 }
-render() { validate_dashboard; require_tools helm python3 ruby; print_resolved staging '<not queried: offline render>'; tmp="$(mktemp -t sugarkube-observability-render.XXXXXX.yaml)"; trap 'rm -f "${tmp}"' EXIT; render_to "${tmp}"; cat "${tmp}"; }
-install_release() { validate_dashboard; require_tools helm kubectl python3 ruby; print_resolved staging; assert_context; assert_integration_secrets; tmp="$(mktemp -t sugarkube-observability-install.XXXXXX.yaml)"; trap 'rm -f "${tmp:-}"' EXIT; render_to "${tmp}"; state="$(release_state)"; if [[ "${state}" == present ]]; then echo "ERROR: cannot install: ${RELEASE} already exists in ${NAMESPACE}. Use observability-upgrade." >&2; exit 4; fi; helm install "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --create-namespace --version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}" --set-file "${DASHBOARD_VALUE}=${DASHBOARD}" --wait --timeout "${TIMEOUT}"; }
-upgrade_release() { validate_dashboard; require_tools helm kubectl python3 ruby; print_resolved staging; assert_context; assert_integration_secrets; tmp="$(mktemp -t sugarkube-observability-upgrade.XXXXXX.yaml)"; trap 'rm -f "${tmp:-}"' EXIT; render_to "${tmp}"; state="$(release_state)"; if [[ "${state}" == absent ]]; then echo "ERROR: upgrade requires an existing Helm release ${RELEASE} in ${NAMESPACE}. Use observability-install for a fresh cluster." >&2; exit 5; fi; helm upgrade "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}" --set-file "${DASHBOARD_VALUE}=${DASHBOARD}" --wait --timeout "${TIMEOUT}"; }
+render() { validate_dashboard; require_tools helm python3 ruby; print_resolved staging '<not queried: offline render>'; tmp="$(mktemp -t sugarkube-observability-render.XXXXXX.yaml)"; trap 'rm -f "${tmp:-}" "${RULES_OVERLAY:-}"' EXIT; create_rules_overlay; render_to "${tmp}"; cat "${tmp}"; }
+install_release() { validate_dashboard; require_tools helm kubectl python3 ruby; print_resolved staging; assert_context; assert_integration_secrets; tmp="$(mktemp -t sugarkube-observability-install.XXXXXX.yaml)"; trap 'rm -f "${tmp:-}" "${RULES_OVERLAY:-}"' EXIT; create_rules_overlay; render_to "${tmp}"; state="$(release_state)"; if [[ "${state}" == present ]]; then echo "ERROR: cannot install: ${RELEASE} already exists in ${NAMESPACE}. Use observability-upgrade." >&2; exit 4; fi; helm install "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --create-namespace --version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}" -f "${RULES_OVERLAY}" --set-file "${DASHBOARD_VALUE}=${DASHBOARD}" --wait --timeout "${TIMEOUT}"; }
+upgrade_release() { validate_dashboard; require_tools helm kubectl python3 ruby; print_resolved staging; assert_context; assert_integration_secrets; tmp="$(mktemp -t sugarkube-observability-upgrade.XXXXXX.yaml)"; trap 'rm -f "${tmp:-}" "${RULES_OVERLAY:-}"' EXIT; create_rules_overlay; render_to "${tmp}"; state="$(release_state)"; if [[ "${state}" == absent ]]; then echo "ERROR: upgrade requires an existing Helm release ${RELEASE} in ${NAMESPACE}. Use observability-install for a fresh cluster." >&2; exit 5; fi; helm upgrade "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}" -f "${RULES_OVERLAY}" --set-file "${DASHBOARD_VALUE}=${DASHBOARD}" --wait --timeout "${TIMEOUT}"; }
 WATCHDOG_TTY="${SUGARKUBE_WATCHDOG_TTY:-/dev/tty}"
 WATCHDOG_API="/api/v1/namespaces/${NAMESPACE}/services/http:${RELEASE}-alertmanager:9093/proxy/api/v2"
 
