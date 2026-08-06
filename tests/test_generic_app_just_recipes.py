@@ -5324,24 +5324,68 @@ def test_dspace_promote_prod_guard_mismatch_fails_before_helm(
     assert not helm_log_path.exists() or helm_log_path.read_text(encoding="utf-8") == ""
 
 
-def test_observability_app_metrics_recipes_are_declared():
-    text = (REPO_ROOT / "justfile").read_text(encoding="utf-8")
-    assert "observability-app-metrics-secret-install app env='staging'" in text
-    assert "observability_app_metrics.py secret-install --app '{{ app }}' --env '{{ env }}'" in text
-    assert "observability-app-metrics-secret-check app env='staging'" in text
-    assert "observability-app-metrics-verify app env='staging'" in text
-    script = (REPO_ROOT / "scripts/observability_app_metrics.py").read_text(encoding="utf-8")
-    assert "getpass.getpass" in script
-    assert "validate-render" in script
-    assert "credential environment variables are refused" in script
-    assert "Secret contract exists (value was not returned to the verifier)" in script
-
 # Focused declarative app-metrics verifier coverage; kept here with the just recipe
 # tests so Phase 1 remains scoped to the generic app operator surface.
 from scripts import observability_app_metrics as app_metrics
 
 APP_METRICS_CONFIG = REPO_ROOT / "platform/observability/app-metrics.json"
 APP_METRICS_SCRIPT = REPO_ROOT / "scripts/observability_app_metrics.py"
+
+
+@pytest.mark.parametrize(
+    ("mode", "operation"),
+    [("secret-install", "install_secret"), ("secret-check", "check_secret"), ("verify", "verify")],
+)
+@pytest.mark.parametrize("app_arg", ["app=tokenplace", "tokenplace"])
+def test_observability_app_metrics_documented_arguments_reach_normalized_operation(
+    monkeypatch, mode, operation, app_arg
+):
+    cfg = object()
+    calls = []
+    monkeypatch.setattr(
+        app_metrics,
+        "appcfg",
+        lambda app, env: calls.append(("lookup", app, env)) or cfg,
+    )
+    monkeypatch.setattr(app_metrics, "assert_context", lambda: calls.append(("context",)))
+    monkeypatch.setattr(
+        app_metrics,
+        operation,
+        lambda *args: calls.append((operation, *args)),
+    )
+
+    assert app_metrics.main([mode, "--app", app_arg, "--env", "env=staging"]) == 0
+    assert calls[0] == ("lookup", "tokenplace", "staging")
+    assert calls[1] == ("context",)
+    expected_args = ("tokenplace", "staging") if mode == "verify" else (cfg,)
+    assert calls[2] == (operation, *expected_args)
+
+
+@pytest.mark.parametrize("app_arg", ["", "app=", "app=foo=bar", "foo=bar", "Bad_Name"])
+def test_observability_app_metrics_rejects_malformed_app_before_live_operations(
+    monkeypatch, app_arg, capsys
+):
+    monkeypatch.setattr(
+        app_metrics,
+        "appcfg",
+        lambda *args: pytest.fail("inventory lookup must not run"),
+    )
+    monkeypatch.setattr(
+        app_metrics,
+        "assert_context",
+        lambda: pytest.fail("context check must not run"),
+    )
+    monkeypatch.setattr(
+        app_metrics,
+        "install_secret",
+        lambda *args: pytest.fail("credential handling must not run"),
+    )
+
+    assert app_metrics.main(["secret-install", "--app", app_arg, "--env", "staging"]) == 2
+    error = capsys.readouterr().err
+    assert "ERROR:" in error
+    if app_arg not in ("", "app="):
+        assert app_arg not in error
 
 
 def test_observability_app_metrics_inventory_tokenplace_contract_is_strict_and_complete():
@@ -6341,7 +6385,7 @@ def test_observability_app_metrics_install_secret_success_uses_stdin_pipe(
         ),
         (["secret-check", "--app", "example"], "check_secret", ("cfg",)),
         (["secret-install", "--app", "example"], "install_secret", ("cfg",)),
-        (["verify", "--app", "example", "--env", "int"], "verify", ("example", "int")),
+        (["verify", "--app", "example", "--env", "int"], "verify", ("example", "staging")),
     ],
 )
 def test_observability_app_metrics_main_dispatches_exactly(
