@@ -61,6 +61,9 @@ tests:
         cluster: sugarkube-int
         severity: critical
         expected_revision: 018687f5a7f4de45508c6e36eb28afb3e44da24d
+        namespace: dspace
+        pod: missing
+        container: dspace
         revision: unknown
       exp_annotations:
         summary: DSPACE runtime revision differs from the approved release
@@ -68,6 +71,58 @@ tests:
         current_revision: unknown
         remediation: Roll back or redeploy the finalized evidence coordinates, then verify every pod identity.
         runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-dspace-release-integrity.md#dspacebuildrevisionmismatch
+- name: approved_and_missing_runtime_identity_are_evaluated_per_pod
+  interval: 1m
+  input_series:
+  - series: dspace_build_info{namespace="dspace",pod="approved",environment="staging",revision="018687f5a7f4de45508c6e36eb28afb3e44da24d"}
+    values: 1x20
+  - series: kube_pod_container_status_ready{namespace="dspace",pod="approved",container="dspace"}
+    values: 1x20
+  - series: kube_pod_status_phase{namespace="dspace",pod="approved",phase="Running"}
+    values: 1x20
+  - series: kube_pod_container_status_ready{namespace="dspace",pod="missing",container="dspace"}
+    values: 1x20
+  - series: kube_pod_status_phase{namespace="dspace",pod="missing",phase="Running"}
+    values: 1x20
+  alert_rule_test:
+  - eval_time: 11m
+    alertname: DspaceBuildRevisionMismatch
+    exp_alerts:
+    - exp_labels:
+        application: dspace
+        environment: staging
+        cluster: sugarkube-int
+        severity: critical
+        expected_revision: 018687f5a7f4de45508c6e36eb28afb3e44da24d
+        namespace: dspace
+        pod: missing
+        container: dspace
+        revision: unknown
+      exp_annotations:
+        summary: DSPACE runtime revision differs from the approved release
+        description: Runtime revision unknown is not approved; reconcile the immutable release coordinates.
+        current_revision: unknown
+        remediation: Roll back or redeploy the finalized evidence coordinates, then verify every pod identity.
+        runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-dspace-release-integrity.md#dspacebuildrevisionmismatch
+- name: approved_and_non_serving_missing_identity_remain_quiet
+  interval: 1m
+  input_series:
+  - series: dspace_build_info{namespace="dspace",pod="approved",environment="staging",revision="018687f5a7f4de45508c6e36eb28afb3e44da24d"}
+    values: 1x20
+  - series: kube_pod_container_status_ready{namespace="dspace",pod="approved",container="dspace"}
+    values: 1x20
+  - series: kube_pod_status_phase{namespace="dspace",pod="approved",phase="Running"}
+    values: 1x20
+  - series: kube_pod_container_status_ready{namespace="dspace",pod="terminating",container="dspace"}
+    values: 1x20
+  - series: kube_pod_status_phase{namespace="dspace",pod="terminating",phase="Running"}
+    values: 1x20
+  - series: kube_pod_deletion_timestamp{namespace="dspace",pod="terminating"}
+    values: 1x20
+  alert_rule_test:
+  - eval_time: 11m
+    alertname: DspaceBuildRevisionMismatch
+    exp_alerts: []
 - name: two_active_serving_revisions
   interval: 1m
   input_series:
