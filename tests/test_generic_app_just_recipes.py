@@ -6319,6 +6319,231 @@ def test_observability_app_metrics_install_secret_success_uses_stdin_pipe(
 
 
 @pytest.mark.parametrize(
+    ("argv", "delegate", "expected"),
+    [
+        (["validate"], "load_config", ()),
+        (
+            [
+                "validate-render",
+                "--app",
+                "example",
+                "--env",
+                "preview",
+                "--input",
+                "candidate.yaml",
+                "--release-namespace",
+                "example-ns",
+                "--release-name",
+                "example-release",
+            ],
+            "validate_render",
+            ("example", "preview", "candidate.yaml", "example-ns", "example-release"),
+        ),
+        (["secret-check", "--app", "example"], "check_secret", ("cfg",)),
+        (["secret-install", "--app", "example"], "install_secret", ("cfg",)),
+        (["verify", "--app", "example", "--env", "int"], "verify", ("example", "int")),
+    ],
+)
+def test_observability_app_metrics_main_dispatches_exactly(
+    monkeypatch, argv, delegate, expected
+):
+    calls = []
+    monkeypatch.setattr(app_metrics, "load_config", lambda: calls.append(()) or {})
+    monkeypatch.setattr(
+        app_metrics, "validate_render", lambda *args: calls.append(args)
+    )
+    monkeypatch.setattr(app_metrics, "appcfg", lambda app, env: "cfg")
+    monkeypatch.setattr(app_metrics, "assert_context", lambda: None)
+    monkeypatch.setattr(app_metrics, "check_secret", lambda cfg: calls.append((cfg,)))
+    monkeypatch.setattr(app_metrics, "install_secret", lambda cfg: calls.append((cfg,)))
+    monkeypatch.setattr(app_metrics, "verify", lambda app, env: calls.append((app, env)))
+
+    assert app_metrics.main(argv) == 0
+    assert calls == [expected], delegate
+
+
+@pytest.mark.parametrize(
+    "mode", ["validate-render", "secret-check", "secret-install", "verify"]
+)
+def test_observability_app_metrics_main_requires_app(mode, capsys):
+    assert app_metrics.main([mode]) == 2
+    assert "--app is required" in capsys.readouterr().err
+
+
+def test_observability_app_metrics_main_reports_delegated_error(monkeypatch, capsys):
+    monkeypatch.setattr(
+        app_metrics,
+        "load_config",
+        lambda: app_metrics.fail("controlled validation failure", 7),
+    )
+
+    assert app_metrics.main(["validate"]) == 7
+    assert capsys.readouterr().err.strip() == "ERROR: controlled validation failure"
+
+
+def test_observability_app_metrics_derive_build_labels_live_deduplicates_workloads(
+    monkeypatch,
+):
+    cfg = {
+        "namespace": "example-ns",
+        "derivedApplicationLabels": {
+            "version": {"workload": {"kind": "Deployment", "name": "example"}},
+            "revision": {"workload": {"kind": "Deployment", "name": "example"}},
+        },
+    }
+    document = {"kind": "Deployment", "metadata": {"name": "example"}}
+    kubectl_calls = []
+    derived_calls = []
+    monkeypatch.setattr(
+        app_metrics,
+        "kjson",
+        lambda args: kubectl_calls.append(args) or document,
+    )
+    monkeypatch.setattr(
+        app_metrics,
+        "derive_build_labels_from_docs",
+        lambda actual_cfg, docs: derived_calls.append((actual_cfg, docs)) or {"version": "v1"},
+    )
+
+    assert app_metrics.derive_build_labels_live(cfg) == {"version": "v1"}
+    assert kubectl_calls == [
+        ["kubectl", "-n", "example-ns", "get", "deployment", "example", "-o", "json"]
+    ]
+    assert derived_calls == [(cfg, [document])]
+
+
+def test_observability_app_metrics_appcfg_missing_contract_is_controlled(monkeypatch):
+    monkeypatch.setattr(app_metrics, "load_config", lambda: {"applications": {}})
+    with pytest.raises(app_metrics.Error) as excinfo:
+        app_metrics.appcfg("missing-app", "staging")
+    assert "missing-app/staging" in str(excinfo.value)
+
+
+def test_observability_app_metrics_runtime_helpers_fail_closed(monkeypatch):
+    with pytest.raises(app_metrics.Error):
+        app_metrics.normalize_live_env(None)
+    with pytest.raises(app_metrics.Error):
+        app_metrics.normalize_derived_value("safe", "unsupported")
+    with pytest.raises(app_metrics.Error):
+        app_metrics.promql_selector({"bad-label": "value"})
+
+    monkeypatch.setattr(app_metrics, "run", lambda args: '{"kind":"Deployment"}')
+    assert app_metrics.kjson(["kubectl"]) == {"kind": "Deployment"}
+    monkeypatch.setattr(
+        app_metrics,
+        "kjson",
+        lambda args: {"status": "success", "data": {"result": []}},
+    )
+    assert app_metrics.prom("/api/v1/query?query=up") == {"result": []}
+
+
+def test_observability_app_metrics_load_rendered_docs_malformed_is_redacted(
+    monkeypatch, tmp_path
+):
+    candidate = tmp_path / "candidate.yaml"
+    candidate.write_text("credential-looking-render", encoding="utf-8")
+    monkeypatch.setattr(
+        app_metrics.subprocess,
+        "run",
+        lambda *args, **kwargs: argparse.Namespace(stdout="not-json"),
+    )
+    with pytest.raises(app_metrics.Error) as excinfo:
+        app_metrics.load_rendered_docs(str(candidate))
+    assert "rendered manifests are malformed" in str(excinfo.value)
+    assert "credential-looking-render" not in str(excinfo.value)
+
+
+class _AppMetricsFakeTty:
+    def __init__(self, is_tty=True):
+        self.is_tty = is_tty
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return None
+
+    def isatty(self):
+        return self.is_tty
+
+
+@pytest.mark.parametrize("tty_result", [OSError("private tty"), _AppMetricsFakeTty(False)])
+def test_observability_app_metrics_install_secret_rejects_bad_controlling_terminal(
+    monkeypatch, capsys, tty_result
+):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
+        "tokenplace"
+    ]["environments"]["staging"]
+    monkeypatch.setattr(app_metrics.sys.stdin, "isatty", lambda: True)
+
+    def fake_open(*args):
+        if isinstance(tty_result, BaseException):
+            raise tty_result
+        return tty_result
+
+    monkeypatch.setattr(app_metrics, "open", fake_open, raising=False)
+    with pytest.raises(app_metrics.Error) as excinfo:
+        app_metrics.install_secret(cfg)
+    combined = capsys.readouterr().out + capsys.readouterr().err + str(excinfo.value)
+    assert "controlling terminal is required" in combined
+    assert "private tty" not in combined
+
+
+@pytest.mark.parametrize("credential", ["", "credential-looking-value\n", "credential-looking-value\0"])
+def test_observability_app_metrics_install_secret_rejects_invalid_hidden_input(
+    monkeypatch, capsys, credential
+):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
+        "tokenplace"
+    ]["environments"]["staging"]
+    monkeypatch.setattr(app_metrics.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(app_metrics, "open", lambda *args: _AppMetricsFakeTty(), raising=False)
+    monkeypatch.setattr("getpass.getpass", lambda *args, **kwargs: credential)
+    with pytest.raises(app_metrics.Error) as excinfo:
+        app_metrics.install_secret(cfg)
+    combined = capsys.readouterr().out + capsys.readouterr().err + str(excinfo.value)
+    assert "credential is invalid" in combined
+    if credential:
+        assert credential not in combined
+
+
+@pytest.mark.parametrize("failure", ["render", "apply"])
+def test_observability_app_metrics_install_secret_subprocess_failures_are_redacted(
+    monkeypatch, capsys, failure
+):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
+        "tokenplace"
+    ]["environments"]["staging"]
+    credential = "credential-looking-value"
+    monkeypatch.setattr(app_metrics.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(app_metrics, "open", lambda *args: _AppMetricsFakeTty(), raising=False)
+    monkeypatch.setattr("getpass.getpass", lambda *args, **kwargs: credential)
+
+    class FailedRender:
+        returncode = int(failure == "render")
+
+        def __init__(self, args, **kwargs):
+            assert args[0:4] == ["kubectl", "-n", cfg["namespace"], "create"]
+
+        def communicate(self, value):
+            assert value == credential.encode()
+            return b"credential-looking-rendered-secret", b""
+
+    monkeypatch.setattr(app_metrics.subprocess, "Popen", FailedRender)
+    monkeypatch.setattr(
+        app_metrics.subprocess,
+        "run",
+        lambda args, **kwargs: argparse.Namespace(returncode=int(failure == "apply")),
+    )
+    with pytest.raises(app_metrics.Error) as excinfo:
+        app_metrics.install_secret(cfg)
+    combined = capsys.readouterr().out + capsys.readouterr().err + str(excinfo.value)
+    assert "failed" in combined
+    assert credential not in combined
+    assert "credential-looking-rendered-secret" not in combined
+
+
+@pytest.mark.parametrize(
     ("mutator", "message"),
     [
         (lambda d: d.update({"schemaVersion": 2}), "schemaVersion"),
