@@ -457,13 +457,18 @@ def install_secret(cfg):
     import getpass
 
     try:
-        tty = open(os.environ.get("SUGARKUBE_APP_METRICS_TTY", "/dev/tty"), "r")
-    except OSError:
+        tty = open(os.environ.get("SUGARKUBE_APP_METRICS_TTY", "/dev/tty"), "r+")
+    except (OSError, ValueError):
         fail("an interactive controlling terminal is required")
     with tty:
-        if not tty.isatty():
-            fail("an interactive controlling terminal is required")
-        value = getpass.getpass("Enter application metrics bearer token (input hidden): ", stream=tty)
+        try:
+            if not tty.isatty() or not tty.writable():
+                fail("an interactive controlling terminal is required")
+            value = getpass.getpass(
+                "Enter application metrics bearer token (input hidden): ", stream=tty
+            )
+        except (EOFError, OSError, ValueError):
+            fail("interactive credential prompt failed (details redacted)")
     if not value or "\n" in value or "\0" in value:
         fail("credential is invalid (value redacted)")
     proc1 = subprocess.Popen(
