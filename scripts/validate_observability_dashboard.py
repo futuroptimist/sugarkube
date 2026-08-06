@@ -74,7 +74,8 @@ def has_serving_pod_filter(expression: str) -> bool:
         token in expression
         for token in (
             'kube_pod_container_status_ready{namespace="dspace",container="dspace"} == 1',
-            'and on (namespace, pod) kube_pod_status_phase{namespace="dspace",phase="Running"} == 1',
+            "and on (namespace, pod) "
+            'kube_pod_status_phase{namespace="dspace",phase="Running"} == 1',
             'unless on (namespace, pod) kube_pod_deletion_timestamp{namespace="dspace"}',
         )
     )
@@ -285,8 +286,10 @@ def validate_dashboard(path: Path) -> str:
     serialized = json.dumps(dashboard)
     urls = set(re.findall(r"https?://[^)\\\" ]+", serialized, re.IGNORECASE))
     approved_urls = {
-        "https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-dspace-release-integrity.md",
-        "https://github.com/futuroptimist/sugarkube/blob/main/deployment-evidence/dspace/staging/main-018687f-20260805T035722Z.json",
+        "https://github.com/futuroptimist/sugarkube/blob/main/docs/"
+        "observability-dspace-release-integrity.md",
+        "https://github.com/futuroptimist/sugarkube/blob/main/deployment-evidence/"
+        "dspace/staging/main-018687f-20260805T035722Z.json",
     }
     if urls != approved_urls:
         raise SystemExit(

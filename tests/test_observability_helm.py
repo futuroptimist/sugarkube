@@ -24,6 +24,11 @@ LEGACY = [
     ROOT / "clusters" / "staging" / "patches" / "kube-prometheus-stack-values.yaml",
     ROOT / "clusters" / "prod" / "patches" / "kube-prometheus-stack-values.yaml",
 ]
+DSPACE_ALERT_MATCHER = (
+    'alertname=~"^(DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|'
+    "DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|"
+    'DspaceMetricsTargetDown)$"'
+)
 
 
 def watchdog_canary():
@@ -93,10 +98,7 @@ def test_chart_version_and_values_match_live_staging_baseline():
     }
     dspace_route = route["routes"][0]
     assert dspace_route["receiver"] == "pagerduty-dspace"
-    assert (
-        dspace_route["matchers"][0]
-        == 'alertname=~"^(DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown)$"'
-    )
+    assert dspace_route["matchers"][0] == DSPACE_ALERT_MATCHER
     watchdog_route = route["routes"][2]
     assert watchdog_route["receiver"] == "healthchecks-watchdog"
     assert watchdog_route["repeat_interval"] == "5m"
@@ -183,7 +185,7 @@ stringData:
       routes:
         - receiver: pagerduty-dspace
           matchers:
-            - 'alertname=~"^(DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown)$"'
+            - '{DSPACE_ALERT_MATCHER}'
             - 'environment="staging"'
             - 'cluster="sugarkube-int"'
             - 'severity="critical"'
@@ -857,12 +859,12 @@ printf '%s' "$code"
     if extra_env:
         env.update(extra_env)
     (tmp_path / "alertmanager-config.yaml").write_text(
-        """route:
+        f"""route:
   receiver: "null"
   routes:
     - receiver: pagerduty-dspace
       matchers:
-        - alertname=~"^(DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown)$"
+        - {DSPACE_ALERT_MATCHER}
         - environment="staging"
         - cluster="sugarkube-int"
         - severity="critical"
