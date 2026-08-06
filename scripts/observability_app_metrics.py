@@ -4,10 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import io
 import json
+import os
 import re
 import subprocess
-import os
 import sys
 import time
 import urllib.error
@@ -457,17 +458,22 @@ def install_secret(cfg):
     import getpass
 
     try:
-        tty = open(os.environ.get("SUGARKUBE_APP_METRICS_TTY", "/dev/tty"), "r+")
-    except OSError:
-        fail("an interactive controlling terminal is required")
-    try:
-        with tty:
-            if not tty.isatty() or not tty.readable() or not tty.writable():
-                fail("an interactive controlling terminal is required")
+        try:
+            tty = open(os.environ.get("SUGARKUBE_APP_METRICS_TTY", "/dev/tty"), "r+")
+        except OSError:
+            tty = None
+        if tty is None:
             value = getpass.getpass(
-                "Enter application metrics bearer token (input hidden): ", stream=tty
+                "Enter application metrics bearer token (input hidden): ", stream=sys.stdin
             )
-    except (OSError, EOFError):
+        else:
+            with tty:
+                if not tty.isatty() or not tty.readable() or not tty.writable():
+                    fail("an interactive controlling terminal is required")
+                value = getpass.getpass(
+                    "Enter application metrics bearer token (input hidden): ", stream=tty
+                )
+    except (OSError, EOFError, io.UnsupportedOperation):
         fail("credential prompt failed (details redacted)")
     if not value or "\n" in value or "\0" in value:
         fail("credential is invalid (value redacted)")

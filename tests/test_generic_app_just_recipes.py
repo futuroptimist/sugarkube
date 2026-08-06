@@ -6581,14 +6581,14 @@ class _AppMetricsFakeTty:
         return True
 
 
-@pytest.mark.parametrize("tty_result", [OSError("private tty"), _AppMetricsFakeTty(False)])
 def test_observability_app_metrics_install_secret_rejects_bad_controlling_terminal(
-    monkeypatch, capsys, tty_result
+    monkeypatch, capsys
 ):
     cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
         "tokenplace"
     ]["environments"]["staging"]
     monkeypatch.setattr(app_metrics.sys.stdin, "isatty", lambda: True)
+    tty_result = _AppMetricsFakeTty(False)
 
     def fake_open(*args):
         if isinstance(tty_result, BaseException):
@@ -6601,6 +6601,55 @@ def test_observability_app_metrics_install_secret_rejects_bad_controlling_termin
     combined = capsys.readouterr().out + capsys.readouterr().err + str(excinfo.value)
     assert "controlling terminal is required" in combined
     assert "private tty" not in combined
+
+
+def test_observability_app_metrics_install_secret_falls_back_to_interactive_stdin(
+    monkeypatch, capsys
+):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
+        "tokenplace"
+    ]["environments"]["staging"]
+    credential = "pty-fallback-sentinel"
+    monkeypatch.setattr(app_metrics.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(
+        app_metrics,
+        "open",
+        lambda *args: (_ for _ in ()).throw(OSError(f"private tty {credential}")),
+        raising=False,
+    )
+    prompted_streams = []
+    monkeypatch.setattr(
+        "getpass.getpass",
+        lambda prompt, stream: prompted_streams.append(stream) or credential,
+    )
+    commands = []
+
+    class RenderSecret:
+        returncode = 0
+
+        def __init__(self, args, **kwargs):
+            commands.append((args, kwargs))
+
+        def communicate(self, value):
+            assert value == credential.encode()
+            return b"apiVersion: v1\nkind: Secret\n", b""
+
+    monkeypatch.setattr(app_metrics.subprocess, "Popen", RenderSecret)
+    monkeypatch.setattr(
+        app_metrics.subprocess,
+        "run",
+        lambda args, **kwargs: commands.append((args, kwargs))
+        or argparse.Namespace(returncode=0),
+    )
+
+    app_metrics.install_secret(cfg)
+
+    assert prompted_streams == [app_metrics.sys.stdin]
+    assert len(commands) == 2
+    assert commands[1][0] == ["kubectl", "apply", "-f", "-"]
+    captured = capsys.readouterr()
+    assert credential not in captured.out + captured.err
+    assert all(credential not in repr(args) for args, _ in commands)
 
 
 def test_observability_app_metrics_install_secret_prompt_write_failure_is_redacted(
