@@ -45,6 +45,7 @@ pinned version: $(cat "${VERSION_FILE}")
 ordered values files:
   - ${COMMON_VALUES}
   - ${STAGING_VALUES}
+  - generated mode-0600 rules overlay sourced from ${DSPACE_RULES}
 dashboard source (--set-file): ${DASHBOARD}
 Grafana LAN URL: ${GRAFANA_URL} (same NodePort is available through the other staging nodes)
 EOT

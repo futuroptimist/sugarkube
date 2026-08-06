@@ -32,6 +32,13 @@ DSPACE_ALERT_MATCHER = (
     "DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|"
     'DspaceMetricsTargetDown)$"'
 )
+DSPACE_ALERT_NAMES = (
+    "DspaceBuildRevisionMismatch",
+    "DspaceMixedBuildRevisions",
+    "DspaceDeploymentImagePinMismatch",
+    "DspaceChatSyntheticFailed",
+    "DspaceMetricsTargetDown",
+)
 
 
 def watchdog_canary():
@@ -438,6 +445,43 @@ def test_lifecycle_uses_pinned_version_ordered_values_and_no_reuse_values():
     assert "platform/observability/kube-prometheus-stack-values.yaml" not in script
     assert "clusters/staging/patches/kube-prometheus-stack-values.yaml" not in script
     assert "longhorn" not in script.lower()
+
+
+def test_print_resolved_reports_complete_stable_source_chain(tmp_path):
+    result, _ = run_helper(tmp_path, "render")
+    assert result.returncode == 0
+
+    sources = [str(COMMON), str(STAGING), str(CANONICAL_DSPACE_RULES), str(DASHBOARD)]
+    positions = [result.stdout.index(source) for source in sources]
+    assert positions == sorted(positions)
+    assert "generated mode-0600 rules overlay sourced from" in result.stdout
+    assert "sugarkube-observability-rules." not in result.stdout
+
+
+def test_operations_runbook_describes_dspace_operator_contract():
+    operations = (ROOT / "docs" / "observability-operations.md").read_text(encoding="utf-8")
+    for source in (
+        "platform/observability/rules/dspace-release-integrity.yaml",
+        "docs/observability-dspace-release-integrity.md",
+    ):
+        assert source in operations
+
+    assert "SugarkubePagerDutyTest" in operations
+    assert "deployed and has passed" in operations
+    assert "That five-alert route is not yet deployed or live-proven" in operations
+    assert "pagerduty-dspace" in operations
+    assert "send_resolved: true" in operations
+    assert 'fall through to `"null"`' in operations
+    assert "watchdog route, its order" in operations
+    assert "30-second group wait" in operations
+    for alert in DSPACE_ALERT_NAMES:
+        assert alert in operations
+    for stale in (
+        "Repository configuration is is deployed",
+        "both values files in order",
+        "bundled and real workload alerts still fall through",
+    ):
+        assert stale not in operations
 
 
 def test_dspace_rules_have_one_canonical_source_and_exact_overlay(tmp_path):
