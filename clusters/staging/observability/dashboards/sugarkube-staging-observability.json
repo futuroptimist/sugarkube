@@ -1071,6 +1071,191 @@
           "mode": "multi"
         }
       }
+    },
+    {
+      "id": 22,
+      "type": "row",
+      "title": "DSPACE release integrity",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 50
+      }
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 23,
+      "type": "table",
+      "title": "Approved revision",
+      "description": "Approved immutable coordinate from finalized release evidence.",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 51
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "dspace_release_approved_info{environment=~\"$environment\"}",
+          "legendFormat": "{{revision}}",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 24,
+      "type": "table",
+      "title": "Active build revisions by pod",
+      "description": "Only currently scraped DSPACE pod identities.",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 51
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (pod, revision) (dspace_build_info{environment=~\"$environment\"})",
+          "legendFormat": "{{pod}} {{revision}}",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 25,
+      "type": "stat",
+      "title": "Image-pin agreement",
+      "description": "Zero means no active DSPACE container differs from the approved digest.",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 51
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count(kube_pod_container_info{namespace=\"dspace\",container=\"dspace\",image_id!=\"docker-pullable://ghcr.io/democratizedspace/dspace@sha256:2b95b7fdccdd011553c8d8617e3090ee27323996c532148fdb147cb9fd6e1b6c\"})",
+          "legendFormat": "mismatched pods",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 26,
+      "type": "stat",
+      "title": "DSPACE metrics-target health",
+      "description": "Scrape health is distinct from application health.",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 57
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(up{namespace=\"dspace\",service=~\"dspace.*\"}) or on() vector(0)",
+          "legendFormat": "target up",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 27,
+      "type": "stat",
+      "title": "/chat synthetic result and freshness",
+      "description": "Success and age; missing or older than 15 minutes fails closed.",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 57
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "dspace_chat_synthetic_success{environment=~\"$environment\"} or on() vector(0)",
+          "legendFormat": "success",
+          "instant": true,
+          "range": false
+        },
+        {
+          "refId": "B",
+          "expr": "time() - dspace_chat_synthetic_timestamp_seconds{environment=~\"$environment\"}",
+          "legendFormat": "age seconds",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 28,
+      "type": "text",
+      "title": "Release integrity references",
+      "description": "Operator-owned stable references.",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 57
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "[DSPACE integrity runbook](https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-dspace-release-integrity.md) \u00b7 [Finalized staging evidence](https://github.com/futuroptimist/sugarkube/blob/main/deployment-evidence/dspace/staging/main-018687f-20260805T035722Z.json)"
+      }
     }
   ]
 }

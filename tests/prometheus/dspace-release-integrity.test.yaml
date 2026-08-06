@@ -1,0 +1,47 @@
+rule_files:
+  - ../../platform/observability/rules/dspace-release-integrity.yaml
+evaluation_interval: 1m
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'dspace_build_info{environment="staging",revision="ffffffffffffffffffffffffffffffffffffffff"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: DspaceBuildRevisionMismatch
+        exp_alerts:
+          - exp_labels:
+              application: dspace
+              environment: staging
+              cluster: sugarkube-int
+              severity: critical
+              expected_revision: 018687f5a7f4de45508c6e36eb28afb3e44da24d
+              revision: ffffffffffffffffffffffffffffffffffffffff
+            exp_annotations:
+              summary: DSPACE runtime revision differs from the approved release
+              description: Runtime revision ffffffffffffffffffffffffffffffffffffffff is not approved; reconcile the immutable release coordinates.
+              current_revision: ffffffffffffffffffffffffffffffffffffffff
+              remediation: Roll back or redeploy the finalized evidence coordinates, then verify every pod identity.
+              runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-dspace-release-integrity.md#dspacebuildrevisionmismatch
+  - interval: 1m
+    input_series:
+      - series: 'dspace_chat_synthetic_success{application="dspace",environment="staging",cluster="sugarkube-int"}'
+        values: '0x20'
+      - series: 'dspace_chat_synthetic_timestamp_seconds{application="dspace",environment="staging",cluster="sugarkube-int"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: DspaceChatSyntheticFailed
+        exp_alerts:
+          - exp_labels:
+              application: dspace
+              environment: staging
+              cluster: sugarkube-int
+              severity: critical
+              expected_revision: 018687f5a7f4de45508c6e36eb28afb3e44da24d
+            exp_annotations:
+              summary: DSPACE isolated /chat synthetic failed, is stale, or is missing
+              description: A zero success value is an executed failure; timestamp age or absence is a fail-closed producer failure.
+              current_revision: unknown
+              remediation: Inspect producer freshness first, then verify public /chat and the configured provider without exposing keys.
+              runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-dspace-release-integrity.md#dspacechatsyntheticfailed

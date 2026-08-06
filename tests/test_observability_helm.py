@@ -82,7 +82,7 @@ def test_chart_version_and_values_match_live_staging_baseline():
         "group_interval": None,
         "repeat_interval": None,
     }
-    assert route["routes"][0] == {
+    assert route["routes"][1] == {
         "receiver": "pagerduty-synthetic-test",
         "matchers": [
             'alertname="SugarkubePagerDutyTest"',
@@ -91,7 +91,13 @@ def test_chart_version_and_values_match_live_staging_baseline():
             'severity="critical"',
         ],
     }
-    watchdog_route = route["routes"][1]
+    dspace_route = route["routes"][0]
+    assert dspace_route["receiver"] == "pagerduty-dspace"
+    assert (
+        dspace_route["matchers"][0]
+        == 'alertname=~"DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown"'
+    )
+    watchdog_route = route["routes"][2]
     assert watchdog_route["receiver"] == "healthchecks-watchdog"
     assert watchdog_route["repeat_interval"] == "5m"
     pagerduty_receiver = next(
@@ -175,6 +181,12 @@ stringData:
     route:
       receiver: "null"
       routes:
+        - receiver: pagerduty-dspace
+          matchers:
+            - 'alertname=~"DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown"'
+            - 'environment="staging"'
+            - 'cluster="sugarkube-int"'
+            - 'severity="critical"'
         - receiver: pagerduty-synthetic-test
           matchers:
 {matcher_yaml}
@@ -195,6 +207,10 @@ stringData:
         pagerduty_configs:
           - routing_key_file: {path}
             send_resolved: true{inline_field}
+      - name: pagerduty-dspace
+        pagerduty_configs:
+          - routing_key_file: {path}
+            send_resolved: true
       - name: healthchecks-watchdog
         webhook_configs:
           - url_file: /etc/alertmanager/secrets/alertmanager-healthchecks-watchdog/ping-url
@@ -295,10 +311,10 @@ def test_alertmanager_validator_redacts_invalid_base64(tmp_path):
         ),
         (
             lambda text: text.replace(
-                "      routes:\n        - receiver: pagerduty-synthetic-test",
-                "      routes:\n        - receiver: nested\n          routes:\n            - receiver: pagerduty-synthetic-test",
+                "      routes:\n        - receiver: pagerduty-dspace",
+                "      routes:\n        - receiver: nested\n          routes:\n            - receiver: pagerduty-dspace",
             ),
-            "PagerDuty route ordering or receiver changed",
+            "DSPACE route ordering or receiver changed",
         ),
         (
             lambda text: text.replace(
@@ -312,7 +328,7 @@ def test_alertmanager_validator_redacts_invalid_base64(tmp_path):
                 "            send_resolved: true",
                 "            send_resolved: true\n          - routing_key_file: /another/file",
             ),
-            "exactly one PagerDuty configuration",
+            "PagerDuty configuration is malformed",
         ),
         (
             lambda text: text.replace(
@@ -333,14 +349,14 @@ def test_alertmanager_validator_redacts_invalid_base64(tmp_path):
                 "            - 'severity=\"critical\"'",
                 "            - 'severity=\"critical\"'\n          continue: false",
             ),
-            "PagerDuty route must contain only receiver and exact matchers",
+            "DSPACE route must contain only receiver and exact matchers",
         ),
         (
             lambda text: text.replace(
                 "            - 'severity=\"critical\"'",
                 "            - 'severity=\"critical\"'\n          routes: []",
             ),
-            "PagerDuty route must contain only receiver and exact matchers",
+            "DSPACE route must contain only receiver and exact matchers",
         ),
         (
             lambda text: text.replace(
@@ -517,7 +533,7 @@ def test_watchdog_documentation_timing_matches_configuration():
         assert f"just observability-watchdog-{recipe} env=staging" in operations
 
     staging = yaml_load(STAGING)
-    route = staging["alertmanager"]["config"]["route"]["routes"][1]
+    route = staging["alertmanager"]["config"]["route"]["routes"][2]
     assert route["repeat_interval"] == "5m"
     assert re.search(r"five-minute period and\s+two-minute grace", operations)
     assert re.search(r"eight-minute Alertmanager\s+silence", operations)
@@ -844,6 +860,12 @@ printf '%s' "$code"
         """route:
   receiver: "null"
   routes:
+    - receiver: pagerduty-dspace
+      matchers:
+        - alertname=~"DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown"
+        - environment="staging"
+        - cluster="sugarkube-int"
+        - severity="critical"
     - receiver: pagerduty-synthetic-test
       matchers:
         - alertname="SugarkubePagerDutyTest"
@@ -864,6 +886,10 @@ printf '%s' "$code"
 receivers:
   - name: "null"
   - name: pagerduty-synthetic-test
+    pagerduty_configs:
+      - routing_key_file: /etc/alertmanager/secrets/alertmanager-pagerduty/routing-key
+        send_resolved: true
+  - name: pagerduty-dspace
     pagerduty_configs:
       - routing_key_file: /etc/alertmanager/secrets/alertmanager-pagerduty/routing-key
         send_resolved: true
@@ -1602,7 +1628,7 @@ def test_watchdog_rule_and_healthchecks_contract_are_exact():
             },
         }
     ]
-    webhook = staging["alertmanager"]["config"]["receivers"][2]["webhook_configs"][0]
+    webhook = staging["alertmanager"]["config"]["receivers"][3]["webhook_configs"][0]
     assert webhook == {
         "url_file": "/etc/alertmanager/secrets/alertmanager-healthchecks-watchdog/ping-url",
         "send_resolved": False,
