@@ -835,6 +835,202 @@
       }
     },
     {
+      "id": 22,
+      "type": "row",
+      "title": "DSPACE release integrity",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 41
+      },
+      "panels": []
+    },
+    {
+      "id": 23,
+      "type": "stat",
+      "title": "Approved revision",
+      "description": "Finalized evidence: https://github.com/futuroptimist/sugarkube/blob/main/deployment-evidence/dspace/staging/main-018687f-20260805T035722Z.json",
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 0,
+        "y": 42
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "dspace:approved_release_info{environment=~\"$environment\"}",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{expected_revision}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "NO DATA"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 24,
+      "type": "table",
+      "title": "Active build revisions by pod",
+      "description": "Runbook: https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-dspace-release-integrity.md",
+      "gridPos": {
+        "h": 6,
+        "w": 5,
+        "x": 4,
+        "y": 42
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "max by (pod, revision) (dspace_build_info{environment=~\"$environment\"})",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 25,
+      "type": "stat",
+      "title": "Image-pin agreement",
+      "gridPos": {
+        "h": 6,
+        "w": 5,
+        "x": 9,
+        "y": 42
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "count(kube_pod_container_info{environment=~\"$environment\",namespace=\"dspace\",container=\"dspace\",image_id!~\".*sha256:2b95b7fdccdd011553c8d8617e3090ee27323996c532148fdb147cb9fd6e1b6c$\"})",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "NO DATA"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 26,
+      "type": "stat",
+      "title": "DSPACE metrics-target health",
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 14,
+        "y": 42
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "max(up{environment=~\"$environment\",namespace=\"dspace\",service=\"dspace\"})",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "NO DATA"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 27,
+      "type": "stat",
+      "title": "/chat synthetic result",
+      "gridPos": {
+        "h": 6,
+        "w": 3,
+        "x": 18,
+        "y": 42
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "dspace_chat_synthetic_success{environment=~\"$environment\"}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "MISSING"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 28,
+      "type": "stat",
+      "title": "/chat synthetic freshness",
+      "gridPos": {
+        "h": 6,
+        "w": 3,
+        "x": 21,
+        "y": 42
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "time() - dspace_chat_synthetic_timestamp_seconds{environment=~\"$environment\"}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "STALE / MISSING"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
       "id": 16,
       "type": "row",
       "title": "Blackbox monitoring",
@@ -843,7 +1039,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 41
+        "y": 55
       }
     },
     {
@@ -859,7 +1055,7 @@
         "h": 9,
         "w": 12,
         "x": 0,
-        "y": 42
+        "y": 56
       },
       "targets": [
         {
@@ -927,7 +1123,7 @@
         "h": 9,
         "w": 12,
         "x": 12,
-        "y": 42
+        "y": 56
       },
       "targets": [
         {
@@ -965,7 +1161,7 @@
         "h": 9,
         "w": 12,
         "x": 0,
-        "y": 51
+        "y": 65
       },
       "targets": [
         {
@@ -1026,7 +1222,7 @@
         "h": 9,
         "w": 12,
         "x": 12,
-        "y": 51
+        "y": 65
       },
       "targets": [
         {

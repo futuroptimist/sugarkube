@@ -189,12 +189,22 @@ stringData:
           group_interval: 1m
           repeat_interval: 5m
           continue: false
+        - receiver: pagerduty-dspace
+          matchers:
+            - 'alertname=~"^(DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown)$"'
+            - 'environment="staging"'
+            - 'cluster="sugarkube-int"'
+            - 'severity="critical"'
     receivers:
       - name: "null"
       - name: pagerduty-synthetic-test
         pagerduty_configs:
           - routing_key_file: {path}
             send_resolved: true{inline_field}
+      - name: pagerduty-dspace
+        pagerduty_configs:
+          - routing_key_file: {path}
+            send_resolved: true
       - name: healthchecks-watchdog
         webhook_configs:
           - url_file: /etc/alertmanager/secrets/alertmanager-healthchecks-watchdog/ping-url
@@ -861,9 +871,19 @@ printf '%s' "$code"
       group_interval: 1m
       repeat_interval: 5m
       continue: false
+    - receiver: pagerduty-dspace
+      matchers:
+        - alertname=~"^(DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown)$"
+        - environment="staging"
+        - cluster="sugarkube-int"
+        - severity="critical"
 receivers:
   - name: "null"
   - name: pagerduty-synthetic-test
+    pagerduty_configs:
+      - routing_key_file: /etc/alertmanager/secrets/alertmanager-pagerduty/routing-key
+        send_resolved: true
+  - name: pagerduty-dspace
     pagerduty_configs:
       - routing_key_file: /etc/alertmanager/secrets/alertmanager-pagerduty/routing-key
         send_resolved: true

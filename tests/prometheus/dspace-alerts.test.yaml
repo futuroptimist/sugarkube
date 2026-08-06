@@ -1,0 +1,11 @@
+rule_files:
+  - dspace-alerts.rules.yaml
+evaluation_interval: 1m
+tests:
+  - interval: 1m
+    promql_expr_test:
+      - expr: dspace:approved_release_info
+        eval_time: 1m
+        exp_samples:
+          - labels: 'dspace:approved_release_info{application="dspace",cluster="sugarkube-int",environment="staging",evidence="deployment-evidence/dspace/staging/main-018687f-20260805T035722Z.json",expected_image_digest="sha256:2b95b7fdccdd011553c8d8617e3090ee27323996c532148fdb147cb9fd6e1b6c",expected_revision="018687f5a7f4de45508c6e36eb28afb3e44da24d"}'
+            value: 1
