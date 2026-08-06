@@ -11,6 +11,7 @@ import json
 import os
 import re
 import tempfile
+import time
 from pathlib import Path
 
 SHA = re.compile(r"[0-9a-f]{40}")
@@ -23,6 +24,7 @@ ALLOWED_KEYS = {
     "transport",
     "mutationEnabled",
 }
+MAX_FUTURE_SKEW_SECONDS = 300
 
 
 def parse_result(path: Path, expected_runner: str) -> tuple[int, int]:
@@ -44,6 +46,8 @@ def parse_result(path: Path, expected_runner: str) -> tuple[int, int]:
         or value["executedAt"] < 1
     ):
         raise ValueError("result status or timestamp is invalid")
+    if value["executedAt"] > int(time.time()) + MAX_FUTURE_SKEW_SECONDS:
+        raise ValueError("result timestamp exceeds the allowed clock skew")
     return int(value["passed"]), value["executedAt"]
 
 

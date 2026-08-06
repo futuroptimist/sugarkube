@@ -54,7 +54,7 @@ additionalPrometheusRulesMap:
               remediation: Pause the rollout; inspect ReplicaSets and converge all ready pods on the approved revision.
               runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-dspace-release-integrity.md#dspacemixedbuildrevisions
           - alert: DspaceDeploymentImagePinMismatch
-            expr: max by (image_id) (kube_pod_container_info{namespace="dspace",container="dspace",image_id!="docker-pullable://ghcr.io/democratizedspace/dspace@sha256:2b95b7fdccdd011553c8d8617e3090ee27323996c532148fdb147cb9fd6e1b6c"}) > 0
+            expr: max by (image_id) (kube_pod_container_info{namespace="dspace",container="dspace",image_id!~"(docker-pullable://)?ghcr.io/democratizedspace/dspace@sha256:2b95b7fdccdd011553c8d8617e3090ee27323996c532148fdb147cb9fd6e1b6c"} and on (namespace, pod, container) kube_pod_container_status_ready{namespace="dspace",container="dspace"} == 1) > 0
             for: 10m
             labels:
               application: dspace
@@ -127,7 +127,7 @@ alertmanager:
       routes:
         - receiver: pagerduty-dspace
           matchers:
-            - alertname=~"DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown"
+            - alertname=~"^(DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown)$"
             - environment="staging"
             - cluster="sugarkube-int"
             - severity="critical"

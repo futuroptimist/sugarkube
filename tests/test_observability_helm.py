@@ -95,7 +95,7 @@ def test_chart_version_and_values_match_live_staging_baseline():
     assert dspace_route["receiver"] == "pagerduty-dspace"
     assert (
         dspace_route["matchers"][0]
-        == 'alertname=~"DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown"'
+        == 'alertname=~"^(DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown)$"'
     )
     watchdog_route = route["routes"][2]
     assert watchdog_route["receiver"] == "healthchecks-watchdog"
@@ -183,7 +183,7 @@ stringData:
       routes:
         - receiver: pagerduty-dspace
           matchers:
-            - 'alertname=~"DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown"'
+            - 'alertname=~"^(DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown)$"'
             - 'environment="staging"'
             - 'cluster="sugarkube-int"'
             - 'severity="critical"'
@@ -862,7 +862,7 @@ printf '%s' "$code"
   routes:
     - receiver: pagerduty-dspace
       matchers:
-        - alertname=~"DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown"
+        - alertname=~"^(DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown)$"
         - environment="staging"
         - cluster="sugarkube-int"
         - severity="critical"

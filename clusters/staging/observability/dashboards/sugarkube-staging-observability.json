@@ -1081,7 +1081,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 50
+        "y": 60
       }
     },
     {
@@ -1102,7 +1102,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 51
+        "y": 61
       },
       "targets": [
         {
@@ -1132,7 +1132,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 51
+        "y": 61
       },
       "targets": [
         {
@@ -1162,12 +1162,12 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 51
+        "y": 61
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "count(kube_pod_container_info{namespace=\"dspace\",container=\"dspace\",image_id!=\"docker-pullable://ghcr.io/democratizedspace/dspace@sha256:2b95b7fdccdd011553c8d8617e3090ee27323996c532148fdb147cb9fd6e1b6c\"})",
+          "expr": "count(kube_pod_container_info{namespace=\"dspace\",container=\"dspace\",image_id!~\"(docker-pullable://)?ghcr.io/democratizedspace/dspace@sha256:2b95b7fdccdd011553c8d8617e3090ee27323996c532148fdb147cb9fd6e1b6c\"} and on (namespace, pod, container) kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1)",
           "legendFormat": "mismatched pods",
           "instant": true,
           "range": false
@@ -1192,7 +1192,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 57
+        "y": 67
       },
       "targets": [
         {
@@ -1222,7 +1222,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 57
+        "y": 67
       },
       "targets": [
         {
@@ -1250,7 +1250,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 57
+        "y": 67
       },
       "options": {
         "mode": "markdown",

@@ -1,4 +1,7 @@
-import json, subprocess, sys
+import json
+import subprocess
+import sys
+import time
 from pathlib import Path
 
 from test_observability_helm import yaml_load
@@ -78,7 +81,9 @@ def test_alert_contract_cardinality_and_promql_states():
         )
         assert not any(x in str(rule).lower() for x in forbidden)
     assert "count(count by (revision)" in alerts["DspaceMixedBuildRevisions"]["expr"]
-    assert "image_id!=" in alerts["DspaceDeploymentImagePinMismatch"]["expr"]
+    image = alerts["DspaceDeploymentImagePinMismatch"]["expr"]
+    assert "image_id!~" in image and "docker-pullable://)?" in image
+    assert "kube_pod_container_status_ready" in image and "== 1" in image
     synthetic = alerts["DspaceChatSyntheticFailed"]["expr"]
     assert "== 0" in synthetic and "> 900" in synthetic and "absent(" in synthetic
     assert (
@@ -92,7 +97,7 @@ def result(rev, **overrides):
         "schemaVersion": 1,
         "journey": "/chat",
         "passed": True,
-        "executedAt": 1785988800,
+        "executedAt": int(time.time()),
         "runnerRevision": rev,
         "transport": "intercepted",
         "mutationEnabled": False,
@@ -147,3 +152,16 @@ def test_synthetic_consumer_rejects_mutation_unpinned_and_production(tmp_path):
         proc, out = run(tmp_path, value, revision, env)
         assert proc.returncode != 0
         assert not out.exists()
+
+
+def test_synthetic_consumer_rejects_future_timestamp_without_replacing_output(tmp_path):
+    rev = "c" * 40
+    proc, out = run(tmp_path, result(rev, executedAt=int(time.time())), revision=rev)
+    assert proc.returncode == 0
+    before = out.read_text()
+    proc, _ = run(
+        tmp_path, result(rev, executedAt=int(time.time()) + 301), revision=rev
+    )
+    assert proc.returncode != 0
+    assert "allowed clock skew" in proc.stderr
+    assert out.read_text() == before

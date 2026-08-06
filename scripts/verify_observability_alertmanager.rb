@@ -15,7 +15,7 @@ PD_MATCHERS = ['alertname="SugarkubePagerDutyTest"', 'environment="staging"',
                'cluster="sugarkube-int"', 'severity="critical"'].freeze
 HC_MATCHERS = ['alertname="SugarkubeObservabilityWatchdog"', 'environment="staging"',
                'cluster="sugarkube-int"', 'purpose="observability-watchdog"'].freeze
-DSPACE_MATCHERS = ['alertname=~"DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown"',
+DSPACE_MATCHERS = ['alertname=~"^(DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown)$"',
                    'environment="staging"', 'cluster="sugarkube-int"', 'severity="critical"'].freeze
 
 def fail_closed(message)
