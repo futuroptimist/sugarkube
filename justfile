@@ -1655,6 +1655,18 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
 
     ensure_upgrade_target_exists
 
+    render_args=(template "${release}" "${chart}" --namespace "${namespace}")
+    if [ ${#value_args[@]} -gt 0 ]; then
+        render_args+=("${value_args[@]}")
+    fi
+    if [ ${#set_args[@]} -gt 0 ]; then
+        render_args+=("${set_args[@]}")
+    fi
+    if [ ${#version_args[@]} -gt 0 ]; then
+        render_args+=("${version_args[@]}")
+    fi
+    helm "${render_args[@]}" | python3 "{{ justfile_directory() }}/scripts/observability_app_metrics.py" validate-render       --app "${app}" --env "${requested_env}" --release-namespace "${namespace}" --release-name "${release}" --input -
+
     helm_args=(upgrade "${release}" "${chart}" --namespace "${namespace}")
 
     if [ -n "${description}" ]; then
@@ -3443,10 +3455,12 @@ observability-render env='':
 
 # Fresh-install the canonical non-Flux kube-prometheus-stack release for staging.
 observability-install env='':
+    @python3 scripts/observability_app_metrics.py validate
     @scripts/observability_helm.sh install '{{ env }}'
 
 # Upgrade the existing canonical non-Flux kube-prometheus-stack release for staging.
 observability-upgrade env='':
+    @python3 scripts/observability_app_metrics.py validate
     @scripts/observability_helm.sh upgrade '{{ env }}'
 
 # Summarize the canonical non-Flux kube-prometheus-stack release for staging (read-only).
@@ -3456,6 +3470,7 @@ observability-status env='':
 # Verify the canonical non-Flux kube-prometheus-stack release for staging (read-only).
 observability-verify env='':
     @scripts/observability_helm.sh verify '{{ env }}'
+    @python3 scripts/observability_app_metrics.py verify-all --env '{{ env }}'
 
 # Prove through the Grafana API that the staging dashboard is loaded (read-only).
 observability-dashboard-verify env='':
@@ -3476,6 +3491,18 @@ observability-watchdog-secret-check env='':
 # Verify the live rule, alert, receiver structure, mount, and recent delivery logs.
 observability-watchdog-verify env='':
     @scripts/observability_helm.sh watchdog-verify '{{ env }}'
+
+# Interactively install or rotate a staging application's metrics bearer token (hidden input).
+observability-app-metrics-secret-install app env='staging':
+    @python3 scripts/observability_app_metrics.py secret-install --app '{{ app }}' --env '{{ env }}'
+
+# Check a staging application's metrics Secret/key contract without reading its value.
+observability-app-metrics-secret-check app env='staging':
+    @python3 scripts/observability_app_metrics.py secret-check --app '{{ app }}' --env '{{ env }}'
+
+# Verify a staging application's authenticated Prometheus metrics contract.
+observability-app-metrics-verify app env='staging':
+    @python3 scripts/observability_app_metrics.py verify --app '{{ app }}' --env '{{ env }}'
 
 # Create the exact, automatically expiring watchdog failure-drill silence.
 observability-watchdog-drill-start env='':
