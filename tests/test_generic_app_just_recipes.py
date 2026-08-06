@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import os
 import subprocess
@@ -6338,7 +6339,12 @@ def test_observability_app_metrics_install_secret_success_uses_stdin_pipe(
     monkeypatch.setattr(app_metrics.sys.stdin, "isatty", lambda: True)
     import getpass
 
-    monkeypatch.setattr(getpass, "getpass", lambda prompt, stream: "rotated-value")
+    def fake_getpass(prompt, stream):
+        stream.write(prompt)
+        stream.flush()
+        return "rotated-value"
+
+    monkeypatch.setattr(getpass, "getpass", fake_getpass)
 
     class TtyWrapper:
         def __init__(self, handle):
@@ -6353,11 +6359,29 @@ def test_observability_app_metrics_install_secret_success_uses_stdin_pipe(
         def isatty(self):
             return True
 
+        def readable(self):
+            return self._handle.readable()
+
+        def writable(self):
+            return self._handle.writable()
+
+        def write(self, value):
+            return self._handle.write(value)
+
+        def flush(self):
+            return self._handle.flush()
+
     real_open = open
+    open_calls = []
+
+    def fake_open(path, mode):
+        open_calls.append((path, mode))
+        return TtyWrapper(real_open(path, mode))
+
     monkeypatch.setattr(
         app_metrics,
         "open",
-        lambda path, mode: TtyWrapper(real_open(path, mode)),
+        fake_open,
         raising=False,
     )
     popen_calls = []
@@ -6383,6 +6407,10 @@ def test_observability_app_metrics_install_secret_success_uses_stdin_pipe(
 
     app_metrics.install_secret(cfg)
 
+    assert open_calls == [(str(tty), "r+")]
+    assert tty.read_text(encoding="utf-8") == (
+        "Enter application metrics bearer token (input hidden): "
+    )
     assert popen_calls[0][0] == [
         "kubectl",
         "-n",
@@ -6549,6 +6577,12 @@ class _AppMetricsFakeTty:
     def isatty(self):
         return self.is_tty
 
+    def readable(self):
+        return True
+
+    def writable(self):
+        return True
+
 
 @pytest.mark.parametrize("tty_result", [OSError("private tty"), _AppMetricsFakeTty(False)])
 def test_observability_app_metrics_install_secret_rejects_bad_controlling_terminal(
@@ -6570,6 +6604,44 @@ def test_observability_app_metrics_install_secret_rejects_bad_controlling_termin
     combined = capsys.readouterr().out + capsys.readouterr().err + str(excinfo.value)
     assert "controlling terminal is required" in combined
     assert "private tty" not in combined
+
+
+def test_observability_app_metrics_install_secret_prompt_failure_is_redacted(
+    monkeypatch, capsys
+):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
+        "tokenplace"
+    ]["environments"]["staging"]
+    credential = "credential-looking-value"
+    private_path = "/private/controlling-terminal"
+    monkeypatch.setattr(app_metrics.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setenv("SUGARKUBE_APP_METRICS_TTY", private_path)
+    monkeypatch.setattr(app_metrics, "open", lambda *args: _AppMetricsFakeTty(), raising=False)
+
+    def failed_getpass(prompt, stream):
+        raise io.UnsupportedOperation(f"cannot write {private_path}: {credential}")
+
+    monkeypatch.setattr("getpass.getpass", failed_getpass)
+    monkeypatch.setattr(
+        app_metrics.subprocess,
+        "Popen",
+        lambda *args, **kwargs: pytest.fail("Secret rendering must not be attempted"),
+    )
+    monkeypatch.setattr(
+        app_metrics.subprocess,
+        "run",
+        lambda *args, **kwargs: pytest.fail("kubectl apply must not be attempted"),
+    )
+
+    with pytest.raises(app_metrics.Error) as excinfo:
+        app_metrics.install_secret(cfg)
+
+    captured = capsys.readouterr()
+    combined = captured.out + captured.err + str(excinfo.value)
+    assert "interactive credential prompt failed (details redacted)" in combined
+    assert "Traceback" not in combined
+    assert private_path not in combined
+    assert credential not in combined
 
 
 @pytest.mark.parametrize("credential", ["", "credential-looking-value\n", "credential-looking-value\0"])
