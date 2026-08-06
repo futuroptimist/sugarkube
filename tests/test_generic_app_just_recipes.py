@@ -6195,9 +6195,10 @@ def test_observability_app_metrics_rejects_malformed_app_before_live_operations(
     assert app not in captured.err
 
 
-def test_observability_app_metrics_rejects_empty_application_argument():
+@pytest.mark.parametrize("app", ["", None])
+def test_observability_app_metrics_rejects_empty_application_argument(app):
     with pytest.raises(app_metrics.Error) as excinfo:
-        app_metrics.normalize_application_argument("")
+        app_metrics.normalize_application_argument(app)
     assert str(excinfo.value) == "ERROR: application must be a non-empty safe Kubernetes name"
 
 
