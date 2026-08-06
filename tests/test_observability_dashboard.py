@@ -494,6 +494,14 @@ def test_validator_rejects_wrong_dashboard_mount(tmp_path, dashboard, mount_path
             "exactly one 'Endpoint matrix' panel",
         ),
         (
+            lambda item: next(
+                panel
+                for panel in item["panels"]
+                if panel["title"] == "Active build revisions by pod"
+            )["targets"].clear(),
+            "must contain exactly one PromQL target",
+        ),
+        (
             lambda item: replace_panel_expression(
                 item,
                 "Active build revisions by pod",
@@ -531,6 +539,16 @@ def test_validator_directly_rejects_unsafe_dashboard_sources(
     mutation(dashboard)
     candidate.write_text(json.dumps(dashboard), encoding="utf-8")
     with pytest.raises(SystemExit, match=message):
+        validator.validate_dashboard(candidate)
+
+
+def test_validator_directly_rejects_overlapping_panels(tmp_path, dashboard):
+    positioned = [panel for panel in dashboard["panels"] if panel.get("type") != "row"]
+    positioned[1]["gridPos"] = dict(positioned[0]["gridPos"])
+    candidate = tmp_path / "overlap.json"
+    candidate.write_text(json.dumps(dashboard), encoding="utf-8")
+
+    with pytest.raises(SystemExit, match="overlap"):
         validator.validate_dashboard(candidate)
 
 

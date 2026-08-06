@@ -7,6 +7,7 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
 from test_observability_helm import yaml_load
 
 ROOT = Path(__file__).parents[1]
@@ -225,6 +226,14 @@ def run(tmp_path, value, revision="a" * 40, environment="staging"):
     return proc, out
 
 
+def load_producer():
+    spec = importlib.util.spec_from_file_location("dspace_metrics", PRODUCER)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_synthetic_consumer_pass_fail_and_fail_closed(tmp_path):
     rev = "a" * 40
     proc, out = run(tmp_path, result(rev))
@@ -263,10 +272,7 @@ def test_synthetic_consumer_rejects_future_timestamp_without_replacing_output(tm
 
 
 def test_parse_result_uses_injected_clock_and_accepts_old_results(tmp_path):
-    spec = importlib.util.spec_from_file_location("dspace_metrics", PRODUCER)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader
-    spec.loader.exec_module(module)
+    module = load_producer()
     rev = "d" * 40
     source = tmp_path / "result.json"
     source.write_text(json.dumps(result(rev, executedAt=1)))
@@ -280,6 +286,84 @@ def test_parse_result_uses_injected_clock_and_accepts_old_results(tmp_path):
         assert "clock skew" in str(error)
     else:
         raise AssertionError("future result was accepted")
+
+
+def test_synthetic_consumer_main_publishes_atomically(tmp_path, monkeypatch):
+    module = load_producer()
+    rev = "f" * 40
+    source = tmp_path / "result.json"
+    output = tmp_path / "metrics" / "result.prom"
+    source.write_text(json.dumps(result(rev)), encoding="utf-8")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            str(PRODUCER),
+            "--result",
+            str(source),
+            "--output",
+            str(output),
+            "--runner-revision",
+            rev,
+        ],
+    )
+
+    assert module.main() == 0
+    assert "dspace_chat_synthetic_success" in output.read_text(encoding="utf-8")
+    assert stat.S_IMODE(output.stat().st_mode) == 0o644
+
+
+@pytest.mark.parametrize(
+    ("revision", "environment", "message"),
+    [
+        ("f" * 40, "prod", "production publishing is intentionally unsupported"),
+        ("main", "staging", "runner revision must be a full immutable commit SHA"),
+    ],
+)
+def test_synthetic_consumer_main_rejects_unsafe_cli_contracts(
+    tmp_path, monkeypatch, capsys, revision, environment, message
+):
+    module = load_producer()
+    source = tmp_path / "result.json"
+    source.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            str(PRODUCER),
+            "--result",
+            str(source),
+            "--output",
+            str(tmp_path / "result.prom"),
+            "--runner-revision",
+            revision,
+            "--environment",
+            environment,
+        ],
+    )
+
+    with pytest.raises(SystemExit, match="2"):
+        module.main()
+    assert message in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"passed": 1},
+        {"executedAt": 0},
+        {"runnerRevision": "0" * 40},
+        {"unexpected": False},
+    ],
+)
+def test_parse_result_rejects_invalid_contract_values(tmp_path, overrides):
+    module = load_producer()
+    rev = "f" * 40
+    source = tmp_path / "result.json"
+    source.write_text(json.dumps(result(rev, **overrides)), encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        module.parse_result(source, rev, now=time.time())
 
 
 def test_synthetic_consumer_rejects_extra_fields_without_replacing_output(tmp_path):
