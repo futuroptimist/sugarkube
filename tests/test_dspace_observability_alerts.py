@@ -1,9 +1,9 @@
+import importlib.util
 import json
+import stat
 import subprocess
 import sys
 import time
-import importlib.util
-import stat
 from pathlib import Path
 
 from test_observability_helm import yaml_load
@@ -85,7 +85,7 @@ def test_alert_contract_cardinality_and_promql_states():
     assert "count(count by (revision)" in alerts["DspaceMixedBuildRevisions"]["expr"]
     image = alerts["DspaceDeploymentImagePinMismatch"]["expr"]
     assert 'image_id=~"^(docker-pullable://)?' in image and "image_spec=" in image
-    assert "kube_pod_deletion_timestamp" in image and "phase=\"Running\"" in image
+    assert "kube_pod_deletion_timestamp" in image and 'phase="Running"' in image
     synthetic = alerts["DspaceChatSyntheticFailed"]["expr"]
     assert all(state in synthetic for state in ("executed_failure", "stale", "missing"))
     target = alerts["DspaceMetricsTargetDown"]["expr"]
@@ -160,9 +160,7 @@ def test_synthetic_consumer_rejects_future_timestamp_without_replacing_output(tm
     proc, out = run(tmp_path, result(rev, executedAt=int(time.time())), revision=rev)
     assert proc.returncode == 0
     before = out.read_text()
-    proc, _ = run(
-        tmp_path, result(rev, executedAt=int(time.time()) + 61), revision=rev
-    )
+    proc, _ = run(tmp_path, result(rev, executedAt=int(time.time()) + 61), revision=rev)
     assert proc.returncode != 0
     assert "allowed clock skew" in proc.stderr
     assert out.read_text() == before
@@ -177,6 +175,8 @@ def test_parse_result_uses_injected_clock_and_accepts_old_results(tmp_path):
     source = tmp_path / "result.json"
     source.write_text(json.dumps(result(rev, executedAt=1)))
     assert module.parse_result(source, rev, now=1000) == (1, 1)
+    source.write_text(json.dumps(result(rev, executedAt=1060)))
+    assert module.parse_result(source, rev, now=1000) == (1, 1060)
     source.write_text(json.dumps(result(rev, executedAt=1061)))
     try:
         module.parse_result(source, rev, now=1000)
@@ -184,3 +184,15 @@ def test_parse_result_uses_injected_clock_and_accepts_old_results(tmp_path):
         assert "clock skew" in str(error)
     else:
         raise AssertionError("future result was accepted")
+
+
+def test_synthetic_consumer_rejects_extra_fields_without_replacing_output(tmp_path):
+    rev = "e" * 40
+    proc, out = run(tmp_path, result(rev, executedAt=1), revision=rev)
+    assert proc.returncode == 0
+    before = out.read_text()
+    for extra in ({"loginField": False}, {"unexpected": False}):
+        proc, _ = run(tmp_path, result(rev, executedAt=1, **extra), revision=rev)
+        assert proc.returncode != 0
+        assert "exact bounded schema" in proc.stderr
+        assert out.read_text() == before
