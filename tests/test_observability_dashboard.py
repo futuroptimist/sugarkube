@@ -274,6 +274,40 @@ def test_validator_rejects_actual_phase_two_metrics(dashboard, metric):
 
 
 @pytest.mark.parametrize(
+    ("title", "mutation", "message"),
+    [
+        (
+            "token.place scrape availability",
+            lambda expression: f"{expression} or up",
+            "bare or unverified metric selector",
+        ),
+        (
+            "token.place scrape availability",
+            lambda expression: (
+                f"{expression} or tokenplace_unverified_future_metric{{"
+                'app="tokenplace",environment=~"$environment",release="tokenplace",'
+                'cluster="sugarkube-int",namespace="tokenplace"}'
+            ),
+            "intended metric family",
+        ),
+        (
+            "token.place instrumentation health",
+            lambda expression: f'label_replace({expression}, "remote_addr", "raw", "pod", "(.*)")',
+            "synthesize labels",
+        ),
+    ],
+)
+def test_validator_rejects_unscoped_unverified_or_synthesized_metrics(
+    dashboard, title, mutation, message
+):
+    changed = json.loads(json.dumps(dashboard))
+    panel = next(panel for panel in all_panels(changed) if panel["title"] == title)
+    panel["targets"][0]["expr"] = mutation(panel["targets"][0]["expr"])
+    with pytest.raises(SystemExit, match=message):
+        validator.validate_tokenplace_semantics(changed)
+
+
+@pytest.mark.parametrize(
     ("title", "replacement", "message"),
     [
         (

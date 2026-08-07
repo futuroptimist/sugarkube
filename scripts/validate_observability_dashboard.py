@@ -338,11 +338,8 @@ def validate_tokenplace_semantics(dashboard: dict) -> None:
         for target in panel.get("targets", [])
         if isinstance(target, dict)
     ]
-    if not expressions or any(
-        any(part not in expression for part in TOKENPLACE_SELECTOR_PARTS)
-        for expression in expressions
-    ):
-        raise SystemExit("ERROR: every token.place query must use the canonical target selector.")
+    if not expressions:
+        raise SystemExit("ERROR: token.place panels must contain queries.")
     if any(
         "vector(0)" in expression or re.search(r"\bor\s+(?:on\(\)\s+)?0\b", expression)
         for expression in expressions
@@ -374,16 +371,40 @@ def validate_tokenplace_semantics(dashboard: dict) -> None:
         "token.place HTTP latency percentiles": {"tokenplace_http_request_duration_seconds_bucket"},
         "token.place build identity": {"tokenplace_build_info"},
     }
-    known_metrics = set().union(*expected_metrics.values())
     for title, intended in expected_metrics.items():
         panel_expressions = [target["expr"] for target in token_panels_by_title[title]["targets"]]
-        found = {
-            metric
-            for metric in known_metrics
-            if any(re.search(rf"\b{re.escape(metric)}\b", expr) for expr in panel_expressions)
-        }
+        found = set()
+        for expression in panel_expressions:
+            selectors = list(
+                re.finditer(r"\b([a-zA-Z_:][a-zA-Z0-9_:]*)\s*\{([^{}]*)\}", expression)
+            )
+            for selector in selectors:
+                metric, matchers = selector.groups()
+                found.add(metric)
+                if metric not in intended or any(
+                    part not in matchers for part in TOKENPLACE_SELECTOR_PARTS
+                ):
+                    raise SystemExit(
+                        f"ERROR: {title} must use only its intended metric family "
+                        "with the canonical target selector."
+                    )
+            without_selectors = "".join(
+                expression[end:start]
+                for (end, start) in zip(
+                    [0, *(selector.end() for selector in selectors)],
+                    [*(selector.start() for selector in selectors), len(expression)],
+                )
+            )
+            if re.search(r"\b(?:up|tokenplace_[a-zA-Z0-9_:]*)\b", without_selectors):
+                raise SystemExit(
+                    f"ERROR: {title} contains a bare or unverified metric selector; "
+                    "the canonical target selector is required."
+                )
         if found != intended:
             raise SystemExit(f"ERROR: {title} must use its intended metric family.")
+
+    if any(re.search(r"\blabel_(?:replace|join)\s*\(", expression) for expression in expressions):
+        raise SystemExit("ERROR: token.place queries must not synthesize labels.")
 
     for title in (
         "token.place scrape availability",
