@@ -417,7 +417,15 @@ def validate_tokenplace_semantics(dashboard: dict) -> None:
                 )
             )
             selector_free = re.sub(r'"(?:\\.|[^"\\])*"', "", without_selectors)
-            selector_free = re.sub(r"\$[a-zA-Z_][a-zA-Z0-9_]*", "", selector_free)
+            selector_free = selector_free.replace("[$__rate_interval]", "")
+            if re.search(
+                r"\$(?:[a-zA-Z_][a-zA-Z0-9_]*|\{[a-zA-Z_][a-zA-Z0-9_]*\})",
+                selector_free,
+            ):
+                raise SystemExit(
+                    f"ERROR: {title} contains a template variable outside its permitted "
+                    "canonical selector or rate range."
+                )
             selector_free = re.sub(
                 r"\b(?:by|without|on|ignoring|group_left|group_right)\s*\([^()]*\)",
                 "",

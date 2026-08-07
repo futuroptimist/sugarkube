@@ -158,6 +158,10 @@ def test_tokenplace_queries_are_replica_safe_bounded_and_preserve_missing_data(d
     assert len(latency["targets"]) == 3
     assert all("histogram_quantile(" in target["expr"] for target in latency["targets"])
     assert all("sum by (le, route)" in target["expr"] for target in latency["targets"])
+    rate_expressions = [expression for expression in expressions if "rate(" in expression]
+    assert rate_expressions
+    assert all("[$__rate_interval]" in expression for expression in rate_expressions)
+    validator.validate_tokenplace_semantics(dashboard)
     build = panels["token.place build identity"]["targets"][0]
     assert build["expr"].startswith("max by (pod, version, revision)")
     assert build["legendFormat"] == "{{pod}} {{version}} {{revision}}"
@@ -325,6 +329,23 @@ def test_validator_rejects_any_bare_metric_selector(dashboard, addition):
     expression = panel["targets"][0]["expr"]
     panel["targets"][0]["expr"] = f"({expression}) or ({addition})"
     with pytest.raises(SystemExit, match="bare or unverified metric selector"):
+        validator.validate_tokenplace_semantics(changed)
+
+
+@pytest.mark.parametrize(
+    "variable",
+    ["$app", "$environment", "$__range", "$__rate_interval", "${app}"],
+)
+def test_validator_rejects_template_variables_in_metric_position(dashboard, variable):
+    changed = json.loads(json.dumps(dashboard))
+    panel = next(
+        panel
+        for panel in all_panels(changed)
+        if panel["title"] == "token.place scrape availability"
+    )
+    expression = panel["targets"][0]["expr"]
+    panel["targets"][0]["expr"] = f"({expression}) or ({variable})"
+    with pytest.raises(SystemExit, match="template variable outside"):
         validator.validate_tokenplace_semantics(changed)
 
 
