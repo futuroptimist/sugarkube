@@ -157,6 +157,116 @@ def test_tokenplace_queries_are_replica_safe_bounded_and_preserve_missing_data(d
 
 
 @pytest.mark.parametrize(
+    "title",
+    ["token.place scrape availability", "token.place instrumentation health"],
+)
+@pytest.mark.parametrize("missing_flag", ["instant", "range"])
+def test_validator_rejects_missing_health_query_flags(dashboard, title, missing_flag):
+    changed = json.loads(json.dumps(dashboard))
+    panel = next(panel for panel in all_panels(changed) if panel["title"] == title)
+    panel["targets"][0].pop(missing_flag)
+    with pytest.raises(SystemExit, match="instant-only"):
+        validator.validate_tokenplace_semantics(changed)
+
+
+@pytest.mark.parametrize(
+    ("title", "mutation"),
+    [
+        ("token.place HTTP 5xx ratio", lambda panel: panel.update(targets=[])),
+        (
+            "token.place terminal outcome rate",
+            lambda panel: panel["targets"][0].update(
+                expr=panel["targets"][0]["expr"].replace(
+                    "tokenplace_relay_request_outcomes_total",
+                    "tokenplace_compute_node_evictions_total",
+                )
+            ),
+        ),
+    ],
+)
+def test_validator_rejects_empty_or_metric_swapped_panels(dashboard, title, mutation):
+    changed = json.loads(json.dumps(dashboard))
+    mutation(next(panel for panel in all_panels(changed) if panel["title"] == title))
+    with pytest.raises(SystemExit):
+        validator.validate_tokenplace_semantics(changed)
+
+
+def test_validator_rejects_queued_age_grouped_away_from_provider_mode(dashboard):
+    changed = json.loads(json.dumps(dashboard))
+    panel = next(
+        panel
+        for panel in all_panels(changed)
+        if panel["title"] == "token.place oldest queued-request age"
+    )
+    panel["targets"][0]["expr"] = panel["targets"][0]["expr"].replace(
+        "by (provider_mode)", "by (pod)"
+    )
+    with pytest.raises(SystemExit, match="provider_mode"):
+        validator.validate_tokenplace_semantics(changed)
+
+
+@pytest.mark.parametrize("mutation", ["4xx", "unclamped"])
+def test_validator_rejects_unsafe_http_5xx_ratio(dashboard, mutation):
+    changed = json.loads(json.dumps(dashboard))
+    target = next(
+        panel for panel in all_panels(changed) if panel["title"] == "token.place HTTP 5xx ratio"
+    )["targets"][0]
+    if mutation == "4xx":
+        target["expr"] = target["expr"].replace('status_class="5xx"', 'status_class="4xx"')
+    else:
+        target["expr"] = target["expr"].replace("clamp_min(", "(").replace(", 1e-9)", ")")
+    with pytest.raises(SystemExit, match="5xx ratio"):
+        validator.validate_tokenplace_semantics(changed)
+
+
+@pytest.mark.parametrize(
+    ("label", "location"),
+    [
+        ("remote_addr", "matcher"),
+        ("node_id", "grouping"),
+        ("remote_addr", "legend"),
+    ],
+)
+def test_validator_rejects_unknown_tokenplace_labels(dashboard, label, location):
+    changed = json.loads(json.dumps(dashboard))
+    panel = next(
+        panel for panel in all_panels(changed) if panel["title"] == "token.place relay queue depth"
+    )
+    target = panel["targets"][0]
+    if location == "matcher":
+        target["expr"] = target["expr"].replace(
+            'namespace="tokenplace"', f'namespace="tokenplace",{label}="raw"'
+        )
+    elif location == "grouping":
+        target["expr"] = target["expr"].replace(
+            "by (provider_mode)", f"by (provider_mode, {label})"
+        )
+    else:
+        target["legendFormat"] = f"{{{{provider_mode}}}} {{{{{label}}}}}"
+    with pytest.raises(SystemExit):
+        validator.validate_tokenplace_semantics(changed)
+
+
+@pytest.mark.parametrize(
+    "metric",
+    [
+        "tokenplace_relay_chat_available",
+        "tokenplace_relay_schedulable_compute_nodes",
+        "tokenplace_relay_chat_availability_state",
+        "tokenplace_relay_state_store_up",
+    ],
+)
+def test_validator_rejects_actual_phase_two_metrics(dashboard, metric):
+    changed = json.loads(json.dumps(dashboard))
+    panel = next(
+        panel for panel in all_panels(changed) if panel["title"] == "token.place relay queue depth"
+    )
+    panel["description"] = f"Deferred metric: {metric}"
+    with pytest.raises(SystemExit, match="Phase 2"):
+        validator.validate_tokenplace_semantics(changed)
+
+
+@pytest.mark.parametrize(
     ("title", "replacement", "message"),
     [
         (

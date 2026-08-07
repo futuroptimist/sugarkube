@@ -76,6 +76,26 @@ PHASE_TWO_METRICS = {
     "tokenplace_compute_nodes_schedulable",
     "tokenplace_availability_reason",
     "tokenplace_shared_state_health",
+    "tokenplace_relay_chat_available",
+    "tokenplace_relay_schedulable_compute_nodes",
+    "tokenplace_relay_chat_availability_state",
+    "tokenplace_relay_state_store_up",
+}
+TOKENPLACE_LABELS = {
+    "app",
+    "environment",
+    "release",
+    "cluster",
+    "namespace",
+    "pod",
+    "reason",
+    "provider_mode",
+    "outcome",
+    "route",
+    "status_class",
+    "le",
+    "version",
+    "revision",
 }
 
 
@@ -237,7 +257,25 @@ def validate_tokenplace_semantics(dashboard: dict) -> None:
     if any(panel_named(dashboard, title).get("type") != "row" for title in TOKENPLACE_ROWS):
         raise SystemExit("ERROR: token.place section headings must remain dashboard rows.")
 
-    token_panels = [panel_named(dashboard, title) for title in TOKENPLACE_PANELS]
+    token_panels_by_title = {title: panel_named(dashboard, title) for title in TOKENPLACE_PANELS}
+    expected_targets = {title: 1 for title in TOKENPLACE_PANELS}
+    expected_targets["token.place compute-node counts"] = 2
+    expected_targets["token.place HTTP latency percentiles"] = 3
+    for title, expected_count in expected_targets.items():
+        targets = token_panels_by_title[title].get("targets")
+        if (
+            not isinstance(targets, list)
+            or len(targets) != expected_count
+            or any(
+                not isinstance(target, dict) or not target.get("expr", "").strip()
+                for target in targets
+            )
+        ):
+            raise SystemExit(
+                f"ERROR: {title} must contain exactly {expected_count} non-empty target(s)."
+            )
+
+    token_panels = list(token_panels_by_title.values())
     expressions = [
         target.get("expr", "")
         for panel in token_panels
@@ -257,6 +295,60 @@ def validate_tokenplace_semantics(dashboard: dict) -> None:
             "ERROR: token.place queries must preserve missing data instead of substituting zero."
         )
 
+    expected_metrics = {
+        "token.place scrape availability": {"up"},
+        "token.place instrumentation health": {"tokenplace_instrumentation_up"},
+        "token.place compute-node counts": {
+            "tokenplace_compute_nodes_registered",
+            "tokenplace_compute_nodes_healthy",
+        },
+        "token.place oldest compute-node lease age": {"tokenplace_compute_node_lease_age_seconds"},
+        "token.place compute-node eviction rate": {"tokenplace_compute_node_evictions_total"},
+        "token.place relay queue depth": {"tokenplace_relay_queue_depth"},
+        "token.place oldest queued-request age": {
+            "tokenplace_relay_oldest_queued_request_age_seconds"
+        },
+        "token.place in-flight requests by pod": {"tokenplace_relay_in_flight_requests"},
+        "token.place oldest in-flight age by pod": {
+            "tokenplace_relay_oldest_in_flight_age_seconds"
+        },
+        "token.place terminal outcome rate": {"tokenplace_relay_request_outcomes_total"},
+        "token.place HTTP request rate": {"tokenplace_http_requests_total"},
+        "token.place HTTP 5xx ratio": {"tokenplace_http_requests_total"},
+        "token.place HTTP latency percentiles": {"tokenplace_http_request_duration_seconds_bucket"},
+        "token.place build identity": {"tokenplace_build_info"},
+    }
+    known_metrics = set().union(*expected_metrics.values())
+    for title, intended in expected_metrics.items():
+        panel_expressions = [target["expr"] for target in token_panels_by_title[title]["targets"]]
+        found = {
+            metric
+            for metric in known_metrics
+            if any(re.search(rf"\b{re.escape(metric)}\b", expr) for expr in panel_expressions)
+        }
+        if found != intended:
+            raise SystemExit(f"ERROR: {title} must use its intended metric family.")
+
+    for title in (
+        "token.place scrape availability",
+        "token.place instrumentation health",
+    ):
+        panel = token_panels_by_title[title]
+        target = panel["targets"][0]
+        mappings = panel.get("fieldConfig", {}).get("defaults", {}).get("mappings", [])
+        mapping_options = mappings[0].get("options", {}) if len(mappings) == 1 else {}
+        if (
+            target.get("instant") is not True
+            or target.get("range") is not False
+            or mapping_options.get("0", {}).get("text") != "UNHEALTHY"
+            or mapping_options.get("1", {}).get("text") != "HEALTHY"
+            or panel.get("fieldConfig", {}).get("defaults", {}).get("noValue") != "NO DATA"
+        ):
+            raise SystemExit(
+                "ERROR: token.place health stats must be instant-only and distinguish "
+                "healthy, unhealthy, and NO DATA."
+            )
+
     logical = {
         "tokenplace_compute_nodes_registered",
         "tokenplace_compute_nodes_healthy",
@@ -271,6 +363,39 @@ def validate_tokenplace_semantics(dashboard: dict) -> None:
             for expression in matching
         ):
             raise SystemExit(f"ERROR: logical gauge {metric} must use explicit max deduplication.")
+
+    direct_max = {
+        "tokenplace_compute_nodes_registered",
+        "tokenplace_compute_nodes_healthy",
+        "tokenplace_compute_node_lease_age_seconds",
+    }
+    for metric in direct_max:
+        expression = next(expr for expr in expressions if metric in expr)
+        if not re.match(rf"^max\s*\(\s*{metric}\{{", expression):
+            raise SystemExit(f"ERROR: logical gauge {metric} must use direct max deduplication.")
+
+    grouped_gauges = {
+        "token.place relay queue depth": ("tokenplace_relay_queue_depth", "provider_mode"),
+        "token.place oldest queued-request age": (
+            "tokenplace_relay_oldest_queued_request_age_seconds",
+            "provider_mode",
+        ),
+        "token.place in-flight requests by pod": (
+            "tokenplace_relay_in_flight_requests",
+            "pod",
+        ),
+        "token.place oldest in-flight age by pod": (
+            "tokenplace_relay_oldest_in_flight_age_seconds",
+            "pod",
+        ),
+    }
+    for title, (metric, label) in grouped_gauges.items():
+        target = token_panels_by_title[title]["targets"][0]
+        if not re.match(rf"^max\s+by\s*\(\s*{label}\s*\)\s*\(\s*{metric}\{{", target["expr"]):
+            qualifier = "remain per pod and " if label == "pod" else ""
+            raise SystemExit(f"ERROR: {title} must {qualifier}use max by ({label}).")
+        if target.get("legendFormat") != f"{{{{{label}}}}}":
+            raise SystemExit(f"ERROR: {title} must use a {label} legend.")
 
     counters = {
         "tokenplace_compute_node_evictions_total": "reason",
@@ -291,6 +416,39 @@ def validate_tokenplace_semantics(dashboard: dict) -> None:
         ):
             raise SystemExit(f"ERROR: {metric} must remain grouped by bounded {bounded_group}.")
 
+    direct_counter_groups = {
+        "tokenplace_compute_node_evictions_total": "reason",
+        "tokenplace_relay_request_outcomes_total": "outcome",
+    }
+    for metric, label in direct_counter_groups.items():
+        expression = next(expr for expr in expressions if metric in expr)
+        pattern = rf"^sum\s+by\s*\(\s*{label}\s*\)\s*\(\s*rate\s*\(\s*{metric}\{{.*\}}\[\$__rate_interval\]\s*\)\s*\)\s*$"
+        if not re.match(pattern, expression):
+            raise SystemExit(f"ERROR: {metric} must directly use sum by ({label}) of rate.")
+
+    request_rate = token_panels_by_title["token.place HTTP request rate"]["targets"][0]["expr"]
+    if not re.match(
+        r"^sum\s+by\s*\(\s*route\s*,\s*status_class\s*\)\s*\(\s*rate\s*\(\s*tokenplace_http_requests_total\{.*\}\[\$__rate_interval\]\s*\)\s*\)\s*$",
+        request_rate,
+    ):
+        raise SystemExit(
+            "ERROR: token.place HTTP request rate must group by route and status_class."
+        )
+
+    ratio = token_panels_by_title["token.place HTTP 5xx ratio"]["targets"][0]["expr"]
+    numerator, separator, denominator = ratio.partition(" / ")
+    if (
+        not separator
+        or 'status_class="5xx"' not in numerator
+        or re.search(r"status_class\s*(?:=|=~|!=|!~)", denominator)
+        or not re.match(r"^clamp_min\s*\(\s*sum\s*\(\s*rate\s*\(", denominator)
+        or not re.search(r"\)\s*,\s*1e-9\s*\)\s*$", denominator)
+    ):
+        raise SystemExit(
+            "ERROR: token.place HTTP 5xx ratio must select 5xx and use an unfiltered "
+            "clamp_min denominator."
+        )
+
     for title in (
         "token.place in-flight requests by pod",
         "token.place oldest in-flight age by pod",
@@ -305,12 +463,18 @@ def validate_tokenplace_semantics(dashboard: dict) -> None:
     if (
         "max by (pod, version, revision)" not in build_target.get("expr", "")
         or build_target.get("legendFormat") != "{{pod}} {{version}} {{revision}}"
+        or build_target.get("instant") is not True
+        or build_target.get("range") is not False
     ):
         raise SystemExit(
             "ERROR: token.place build identity must remain per pod, version, and revision."
         )
     latency = panel_named(dashboard, "token.place HTTP latency percentiles")
-    if any(
+    if {target.get("legendFormat", "").split(" ", 1)[0] for target in latency["targets"]} != {
+        "p50",
+        "p95",
+        "p99",
+    } or any(
         "histogram_quantile(" not in target.get("expr", "")
         or "sum by (le, route)" not in target.get("expr", "")
         or "rate(tokenplace_http_request_duration_seconds_bucket" not in target.get("expr", "")
@@ -326,24 +490,17 @@ def validate_tokenplace_semantics(dashboard: dict) -> None:
         raise SystemExit("ERROR: token.place panels must display missing series as NO DATA.")
 
     token_serialized = json.dumps(token_panels)
-    unsafe_labels = (
-        r"(?:target|instance|url|request_id|node|prompt|output|authorization|bearer|cookie|"
-        r"credential|secret|token|user)"
-    )
     expression_text = "\n".join(expressions)
-    if (
-        re.search(
-            rf"(?:\{{|,)\s*{unsafe_labels}\s*(?:=|=~|!=|!~)",
-            expression_text,
-            re.IGNORECASE,
-        )
-        or re.search(
-            rf"\b(?:by|without)\s*\([^)]*\b{unsafe_labels}\b",
-            expression_text,
-            re.IGNORECASE,
-        )
-        or re.search(rf"{{{{\s*{unsafe_labels}\s*}}}}", token_serialized, re.IGNORECASE)
+    used_labels = set(
+        re.findall(r"(?:\{|,)\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:=|=~|!=|!~)", expression_text)
+    )
+    for labels in re.findall(
+        r"\b(?:by|without|on|ignoring|group_left|group_right)\s*\(([^)]*)\)",
+        expression_text,
     ):
+        used_labels.update(label.strip() for label in labels.split(",") if label.strip())
+    used_labels.update(re.findall(r"{{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*}}", token_serialized))
+    if not used_labels <= TOKENPLACE_LABELS:
         raise SystemExit("ERROR: token.place queries or legends contain an unsafe label.")
     if any(metric in token_serialized for metric in PHASE_TWO_METRICS):
         raise SystemExit("ERROR: token.place Phase 2 metrics must not be presented as implemented.")

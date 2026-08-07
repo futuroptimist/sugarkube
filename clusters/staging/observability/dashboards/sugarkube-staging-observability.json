@@ -1103,7 +1103,9 @@
         {
           "refId": "A",
           "expr": "min by (pod) (up{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"})",
-          "legendFormat": "{{pod}} scrape"
+          "legendFormat": "{{pod}} scrape",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -1170,7 +1172,9 @@
         {
           "refId": "A",
           "expr": "min by (pod) (tokenplace_instrumentation_up{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"})",
-          "legendFormat": "{{pod}} instrumentation"
+          "legendFormat": "{{pod}} instrumentation",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
