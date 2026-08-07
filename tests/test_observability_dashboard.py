@@ -349,6 +349,91 @@ def test_validator_rejects_template_variables_in_metric_position(dashboard, vari
         validator.validate_tokenplace_semantics(changed)
 
 
+def test_validator_rejects_canonical_matchers_hidden_in_backtick_value(dashboard):
+    changed = json.loads(json.dumps(dashboard))
+    panel = next(
+        panel
+        for panel in all_panels(changed)
+        if panel["title"] == "token.place scrape availability"
+    )
+    panel["targets"][0]["expr"] = (
+        "min by (pod) (up{route=`"
+        'app="tokenplace",environment=~"$environment",release="tokenplace",'
+        'cluster="sugarkube-int",namespace="tokenplace"`})'
+    )
+    with pytest.raises(SystemExit, match="canonical target selector"):
+        validator.validate_tokenplace_semantics(changed)
+
+
+@pytest.mark.parametrize(
+    "extra_matcher",
+    [
+        'route=~"$app"',
+        'route=~"$environment"',
+        'pod=~"$__range"',
+        'app="tokenplace"',
+        'route="unexpected"',
+    ],
+)
+def test_validator_rejects_extra_dynamic_matchers(dashboard, extra_matcher):
+    changed = json.loads(json.dumps(dashboard))
+    panel = next(
+        panel
+        for panel in all_panels(changed)
+        if panel["title"] == "token.place scrape availability"
+    )
+    panel["targets"][0]["expr"] = panel["targets"][0]["expr"].replace(
+        'namespace="tokenplace"', f'namespace="tokenplace",{extra_matcher}'
+    )
+    with pytest.raises(SystemExit, match="canonical target selector"):
+        validator.validate_tokenplace_semantics(changed)
+
+
+def test_validator_rejects_single_quoted_matcher(dashboard):
+    changed = json.loads(json.dumps(dashboard))
+    panel = next(
+        panel
+        for panel in all_panels(changed)
+        if panel["title"] == "token.place scrape availability"
+    )
+    panel["targets"][0]["expr"] = panel["targets"][0]["expr"].replace(
+        'app="tokenplace"', "app='tokenplace'"
+    )
+    with pytest.raises(SystemExit, match="canonical target selector"):
+        validator.validate_tokenplace_semantics(changed)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda expression: f"{expression}[$__rate_interval]",
+        lambda expression: f"{expression} + rate([$__rate_interval])",
+    ],
+)
+def test_validator_rejects_stray_rate_ranges(dashboard, mutation):
+    changed = json.loads(json.dumps(dashboard))
+    panel = next(
+        panel
+        for panel in all_panels(changed)
+        if panel["title"] == "token.place scrape availability"
+    )
+    panel["targets"][0]["expr"] = mutation(panel["targets"][0]["expr"])
+    with pytest.raises(SystemExit):
+        validator.validate_tokenplace_semantics(changed)
+
+
+def test_validator_rejects_selector_range_outside_rate(dashboard):
+    changed = json.loads(json.dumps(dashboard))
+    panel = next(
+        panel
+        for panel in all_panels(changed)
+        if panel["title"] == "token.place scrape availability"
+    )
+    panel["targets"][0]["expr"] = panel["targets"][0]["expr"].replace("})", "}[$__rate_interval])")
+    with pytest.raises(SystemExit, match="range outside"):
+        validator.validate_tokenplace_semantics(changed)
+
+
 @pytest.mark.parametrize(
     ("title", "replacement", "message"),
     [

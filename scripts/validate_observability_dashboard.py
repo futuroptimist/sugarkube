@@ -48,13 +48,6 @@ OPERATIONAL_ROUTES = '"/(healthz|livez|metrics)"'
 BLACKBOX_JOB_MATCHER = (
     'job=~"probe/monitoring/blackbox-(dspace|tokenplace|danielsmith|jobbot3000)-staging-.*"'
 )
-TOKENPLACE_SELECTOR_PARTS = {
-    'app="tokenplace"',
-    'environment=~"$environment"',
-    'release="tokenplace"',
-    'cluster="sugarkube-int"',
-    'namespace="tokenplace"',
-}
 TOKENPLACE_ROWS = {
     "token.place relay and compute capacity",
     "token.place HTTP and release",
@@ -120,6 +113,33 @@ TOKENPLACE_PROMQL_MODIFIERS = {
     "or",
     "unless",
 }
+TOKENPLACE_CANONICAL_MATCHERS = {
+    "app": ("=", '"tokenplace"'),
+    "environment": ("=~", '"$environment"'),
+    "release": ("=", '"tokenplace"'),
+    "cluster": ("=", '"sugarkube-int"'),
+    "namespace": ("=", '"tokenplace"'),
+}
+TOKENPLACE_RATE_METRICS = {
+    "tokenplace_compute_node_evictions_total",
+    "tokenplace_relay_request_outcomes_total",
+    "tokenplace_http_requests_total",
+    "tokenplace_http_request_duration_seconds_bucket",
+}
+
+
+def parse_tokenplace_matchers(matchers: str) -> dict:
+    """Parse the deliberately small matcher grammar used by token.place panels."""
+    parsed = {}
+    for entry in matchers.split(","):
+        match = re.fullmatch(
+            r'\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*(=~|!~|!=|=)\s*("(?:\\.|[^"\\])*")\s*',
+            entry,
+        )
+        if not match or match.group(1) in parsed:
+            raise ValueError("malformed or duplicate matcher")
+        parsed[match.group(1)] = match.groups()[1:]
+    return parsed
 
 
 def load_dashboard(path: Path) -> dict:
@@ -399,25 +419,56 @@ def validate_tokenplace_semantics(dashboard: dict) -> None:
             selectors = list(
                 re.finditer(r"\b([a-zA-Z_:][a-zA-Z0-9_:]*)\s*\{([^{}]*)\}", expression)
             )
+            consumed_selector_ends = []
             for selector in selectors:
                 metric, matchers = selector.groups()
                 found.add(metric)
-                if metric not in intended or any(
-                    part not in matchers for part in TOKENPLACE_SELECTOR_PARTS
+                try:
+                    parsed_matchers = parse_tokenplace_matchers(matchers)
+                except ValueError:
+                    parsed_matchers = None
+                allowed_matchers = dict(TOKENPLACE_CANONICAL_MATCHERS)
+                if title == "token.place HTTP 5xx ratio":
+                    allowed_matchers["status_class"] = ("=", '"5xx"')
+                if (
+                    metric not in intended
+                    or parsed_matchers is None
+                    or any(
+                        parsed_matchers.get(key) != value
+                        for key, value in TOKENPLACE_CANONICAL_MATCHERS.items()
+                    )
+                    or any(key not in allowed_matchers for key in parsed_matchers)
+                    or any(allowed_matchers[key] != value for key, value in parsed_matchers.items())
                 ):
                     raise SystemExit(
                         f"ERROR: {title} must use only its intended metric family "
                         "with the canonical target selector."
                     )
+                suffix = expression[selector.end() :]
+                range_match = re.match(r"\[\$__rate_interval\]", suffix)
+                if metric in TOKENPLACE_RATE_METRICS:
+                    if not range_match or not re.search(
+                        r"\brate\s*\(\s*$", expression[: selector.start()]
+                    ):
+                        raise SystemExit(
+                            f"ERROR: {title} rate ranges must be attached to a metric "
+                            "selector directly inside rate()."
+                        )
+                    consumed_selector_ends.append(selector.end() + range_match.end())
+                else:
+                    if range_match:
+                        raise SystemExit(
+                            f"ERROR: {title} has a range outside an intended rate expression."
+                        )
+                    consumed_selector_ends.append(selector.end())
             without_selectors = "".join(
                 expression[end:start]
                 for (end, start) in zip(
-                    [0, *(selector.end() for selector in selectors)],
+                    [0, *consumed_selector_ends],
                     [*(selector.start() for selector in selectors), len(expression)],
                 )
             )
             selector_free = re.sub(r'"(?:\\.|[^"\\])*"', "", without_selectors)
-            selector_free = selector_free.replace("[$__rate_interval]", "")
             if re.search(
                 r"\$(?:[a-zA-Z_][a-zA-Z0-9_]*|\{[a-zA-Z_][a-zA-Z0-9_]*\})",
                 selector_free,
@@ -426,6 +477,8 @@ def validate_tokenplace_semantics(dashboard: dict) -> None:
                     f"ERROR: {title} contains a template variable outside its permitted "
                     "canonical selector or rate range."
                 )
+            if "[" in selector_free or "]" in selector_free:
+                raise SystemExit(f"ERROR: {title} contains an invalid range expression.")
             selector_free = re.sub(
                 r"\b(?:by|without|on|ignoring|group_left|group_right)\s*\([^()]*\)",
                 "",
