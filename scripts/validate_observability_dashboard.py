@@ -22,6 +22,10 @@ REQUIRED_METRICS = {
     "dspace_build_info",
     "dspace_dchat_requests_total",
     "dspace_dependency_requests_total",
+    "dspace:approved_release_info",
+    "kube_pod_container_info",
+    "dspace_chat_synthetic_success",
+    "dspace_chat_synthetic_timestamp_seconds",
     "probe_duration_seconds",
     "probe_http_status_code",
     "probe_ssl_earliest_cert_expiry",
@@ -58,6 +62,26 @@ def panel_named(dashboard: dict, title: str) -> dict:
 
 
 def validate_dashboard_semantics(dashboard: dict) -> None:
+    release_panels = {
+        "Approved revision": "dspace:approved_release_info",
+        "Active build revisions by pod": "dspace_build_info",
+        "Image-pin agreement": "kube_pod_container_info",
+        "DSPACE metrics-target health": "up",
+        "/chat synthetic result": "dspace_chat_synthetic_success",
+        "/chat synthetic freshness": "dspace_chat_synthetic_timestamp_seconds",
+    }
+    for title, metric in release_panels.items():
+        panel = panel_named(dashboard, title)
+        if not any(metric in target.get("expr", "") for target in panel.get("targets", [])):
+            raise SystemExit(f"ERROR: {title} must query {metric}.")
+    serialized = json.dumps(dashboard)
+    if (
+        "docs/observability-dspace-release-integrity.md" not in serialized
+        or "deployment-evidence/dspace/staging/main-018687f-20260805T035722Z.json" not in serialized
+    ):
+        raise SystemExit(
+            "ERROR: release-integrity dashboard must link the runbook and finalized evidence."
+        )
     variables = {
         variable.get("name"): variable
         for variable in dashboard.get("templating", {}).get("list", [])
@@ -211,7 +235,14 @@ def validate_dashboard(path: Path) -> str:
         if not matching or any("or on() vector(0)" not in expr for expr in matching):
             raise SystemExit(f"ERROR: event-driven metric {metric} must use a safe zero fallback.")
     serialized = json.dumps(dashboard)
-    if re.search(r"https?://", serialized, re.IGNORECASE):
+    allowed_links = (
+        "https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-dspace-release-integrity.md",
+        "https://github.com/futuroptimist/sugarkube/blob/main/deployment-evidence/dspace/staging/main-018687f-20260805T035722Z.json",
+    )
+    scrubbed = serialized
+    for link in allowed_links:
+        scrubbed = scrubbed.replace(link, "")
+    if re.search(r"https?://", scrubbed, re.IGNORECASE):
         raise SystemExit("ERROR: dashboard must not contain embedded raw URLs.")
     if re.search(r"\$\{?DS_|__inputs", serialized, re.IGNORECASE) or re.search(
         r"(?:\{|,)\s*target\s*(?:=|=~|!~|!=)|{{\s*target\s*}}", expression_text

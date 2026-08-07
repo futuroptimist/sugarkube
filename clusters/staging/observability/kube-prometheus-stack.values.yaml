@@ -5,6 +5,130 @@ prometheus:
     externalLabels:
       cluster: sugarkube-int
 additionalPrometheusRulesMap:
+  dspace-release-integrity:
+    groups:
+      - name: dspace-release-integrity
+        interval: 1m
+        rules:
+          # This bounded, generated representation is checked against the finalized
+          # evidence by tests/test_dspace_observability.py. Never use semanticTag here.
+          - record: dspace:approved_release_info
+            expr: vector(1)
+            labels:
+              application: dspace
+              environment: staging
+              cluster: sugarkube-int
+              expected_revision: 018687f5a7f4de45508c6e36eb28afb3e44da24d
+              expected_image_digest: sha256:2b95b7fdccdd011553c8d8617e3090ee27323996c532148fdb147cb9fd6e1b6c
+              evidence: deployment-evidence/dspace/staging/main-018687f-20260805T035722Z.json
+          - record: dspace:approved_revision_info
+            expr: label_replace(dspace:approved_release_info, "revision", "$1", "expected_revision", "(.+)")
+          - alert: DspaceBuildRevisionMismatch
+            expr: |
+              (max by (application, environment, cluster, revision, expected_revision) (
+                dspace_build_info{environment="staging"}
+                * on (environment) group_left(application, cluster, expected_revision) dspace:approved_release_info
+              ) unless on (environment, revision) dspace:approved_revision_info)
+              or
+              label_replace(
+                dspace:approved_release_info unless on (environment) dspace_build_info{environment="staging"},
+                "revision", "unknown", "expected_revision", ".+"
+              )
+            for: 10m
+            labels:
+              severity: critical
+              application: dspace
+              environment: staging
+              cluster: sugarkube-int
+            annotations:
+              summary: DSPACE runtime revision differs from the approved release
+              remediation: Verify serving pod identity, then roll back or redeploy the finalized immutable coordinates.
+              current_revision: '{{ $labels.revision }}'
+              expected_revision: '{{ $labels.expected_revision }}'
+              runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-dspace-release-integrity.md#dspacebuildrevisionmismatch
+          - alert: DspaceMixedBuildRevisions
+            expr: |
+              label_replace(
+                (count by (environment) (count by (environment, revision) (dspace_build_info{environment="staging"})) > 1)
+                * on (environment) group_left(application, cluster, expected_revision) dspace:approved_release_info,
+                "revision", "mixed", "expected_revision", ".+"
+              )
+            for: 10m
+            labels:
+              severity: critical
+              application: dspace
+              environment: staging
+              cluster: sugarkube-int
+            annotations:
+              summary: DSPACE serving replicas report mixed build revisions
+              remediation: Confirm the rollout exceeded its settling window; inspect ReplicaSets and restore one approved revision.
+              current_revision: '{{ $labels.revision }}'
+              expected_revision: '{{ $labels.expected_revision }}'
+              runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-dspace-release-integrity.md#dspacemixedbuildrevisions
+          - alert: DspaceDeploymentImagePinMismatch
+            expr: |
+              label_replace(
+                max by (environment, pod) (kube_pod_container_info{environment="staging", namespace="dspace", container="dspace", image_id!="docker-pullable://ghcr.io/democratizedspace/dspace@sha256:2b95b7fdccdd011553c8d8617e3090ee27323996c532148fdb147cb9fd6e1b6c"})
+                * on (environment) group_left(application, cluster, expected_revision) dspace:approved_release_info,
+                "revision", "unknown", "expected_revision", ".+"
+              )
+            for: 10m
+            labels:
+              severity: critical
+              application: dspace
+              environment: staging
+              cluster: sugarkube-int
+            annotations:
+              summary: DSPACE active pod image digest differs from the approved pin
+              remediation: Compare the Deployment template and pod imageID with finalized evidence; redeploy the digest pin.
+              current_revision: '{{ $labels.revision }}'
+              expected_revision: '{{ $labels.expected_revision }}'
+              runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-dspace-release-integrity.md#dspacedeploymentimagepinmismatch
+          - alert: DspaceChatSyntheticFailed
+            expr: |
+              label_replace(
+                (((dspace_chat_synthetic_success{environment="staging"} == 0)
+                  and on (environment) (time() - dspace_chat_synthetic_timestamp_seconds{environment="staging"} <= 900))
+                  * on (environment) group_left(application, cluster, expected_revision) dspace:approved_release_info),
+                "synthetic_state", "executed_failure", "environment", ".+"
+              )
+              or
+              label_replace(
+                (dspace:approved_release_info unless on (environment) dspace_chat_synthetic_timestamp_seconds{environment="staging"})
+                or (dspace:approved_release_info * on (environment) (time() - dspace_chat_synthetic_timestamp_seconds{environment="staging"} > 900)),
+                "synthetic_state", "missing_or_stale", "environment", ".+"
+              )
+            for: 5m
+            labels:
+              severity: critical
+              application: dspace
+              environment: staging
+              cluster: sugarkube-int
+            annotations:
+              summary: DSPACE non-mutating /chat synthetic failed or is stale
+              remediation: Inspect synthetic_state, freshness, provider health, and configuration without supplying user API keys.
+              current_revision: '{{ $labels.revision }}'
+              expected_revision: '{{ $labels.expected_revision }}'
+              runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-dspace-release-integrity.md#dspacechatsyntheticfailed
+          - alert: DspaceMetricsTargetDown
+            expr: |
+              label_replace(
+                (dspace:approved_release_info unless on (environment) up{environment="staging", namespace="dspace", service="dspace"})
+                or (dspace:approved_release_info * on (environment) (max by (environment) (up{environment="staging", namespace="dspace", service="dspace"}) == 0)),
+                "revision", "unknown", "expected_revision", ".+"
+              )
+            for: 5m
+            labels:
+              severity: critical
+              application: dspace
+              environment: staging
+              cluster: sugarkube-int
+            annotations:
+              summary: Prometheus has no healthy DSPACE metrics target
+              remediation: Check ServiceMonitor discovery, authentication, networking, and /metrics separately from application health.
+              current_revision: '{{ $labels.revision }}'
+              expected_revision: '{{ $labels.expected_revision }}'
+              runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-dspace-release-integrity.md#dspacemetricstargetdown
   sugarkube-observability-watchdog:
     groups:
       - name: sugarkube-observability-watchdog
@@ -49,9 +173,19 @@ alertmanager:
           group_interval: 1m
           repeat_interval: 5m
           continue: false
+        - receiver: pagerduty-dspace
+          matchers:
+            - alertname=~"^(DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown)$"
+            - environment="staging"
+            - cluster="sugarkube-int"
+            - severity="critical"
     receivers:
       - name: "null"
       - name: pagerduty-synthetic-test
+        pagerduty_configs:
+          - routing_key_file: /etc/alertmanager/secrets/alertmanager-pagerduty/routing-key
+            send_resolved: true
+      - name: pagerduty-dspace
         pagerduty_configs:
           - routing_key_file: /etc/alertmanager/secrets/alertmanager-pagerduty/routing-key
             send_resolved: true

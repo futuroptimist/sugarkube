@@ -4,6 +4,10 @@ This runbook covers the current live **staging-only** kube-prometheus-stack life
 
 Production observability is intentionally unsupported in this slice because no production live baseline has been proven yet.
 
+For the repository-ready DSPACE release-coordinate, mixed-revision, image-pin, `/chat` synthetic,
+and metrics-target alerts, use the [DSPACE release-integrity runbook](./observability-dspace-release-integrity.md).
+Its exact PagerDuty allowlist retains this staging-only deployment boundary.
+
 ## Canonical sources
 
 - Chart version: `platform/observability/helm/kube-prometheus-stack.version` (`87.19.0`).

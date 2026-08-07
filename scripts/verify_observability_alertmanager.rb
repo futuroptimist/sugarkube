@@ -7,11 +7,16 @@ require "yaml"
 PD_SECRET = "alertmanager-pagerduty"
 HC_SECRET = "alertmanager-healthchecks-watchdog"
 PD_RECEIVER = "pagerduty-synthetic-test"
+DSPACE_RECEIVER = "pagerduty-dspace"
 HC_RECEIVER = "healthchecks-watchdog"
 PD_PATH = "/etc/alertmanager/secrets/alertmanager-pagerduty/routing-key"
 HC_PATH = "/etc/alertmanager/secrets/alertmanager-healthchecks-watchdog/ping-url"
 PD_MATCHERS = ['alertname="SugarkubePagerDutyTest"', 'environment="staging"',
                'cluster="sugarkube-int"', 'severity="critical"'].freeze
+DSPACE_MATCHERS = [
+  'alertname=~"^(DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown)$"',
+  'environment="staging"', 'cluster="sugarkube-int"', 'severity="critical"'
+].freeze
 HC_MATCHERS = ['alertname="SugarkubeObservabilityWatchdog"', 'environment="staging"',
                'cluster="sugarkube-int"', 'purpose="observability-watchdog"'].freeze
 
@@ -64,19 +69,20 @@ route = config["route"]
 fail_closed('root receiver must remain "null"') unless route.is_a?(Hash) && route["receiver"] == "null"
 fail_closed("root route must contain only its receiver and exact child routes") unless route.keys.sort == %w[receiver routes]
 children = route["routes"]
-fail_closed("root must have exactly the two allowlisted direct-child routes") unless children.is_a?(Array) && children.length == 2
+fail_closed("root must have exactly the three allowlisted direct-child routes") unless children.is_a?(Array) && children.length == 3
 receivers = config["receivers"]
-fail_closed("receiver list must contain exactly null, PagerDuty, and Healthchecks") unless receivers.is_a?(Array) && receivers.length == 3 && receivers.all? { |x| x.is_a?(Hash) }
+fail_closed("receiver list must contain exactly null, two PagerDuty, and Healthchecks") unless receivers.is_a?(Array) && receivers.length == 4 && receivers.all? { |x| x.is_a?(Hash) }
 fail_closed('root "null" receiver is missing or broadened') unless receivers.count { |x| x == { "name" => "null" } } == 1
 
 pd_receivers = receivers.select { |x| x.key?("pagerduty_configs") }
-fail_closed("there must be exactly one PagerDuty receiver") unless pd_receivers.length == 1
-pd = pd_receivers.first
-fail_closed("PagerDuty receiver name changed") unless pd["name"] == PD_RECEIVER
-fail_closed("PagerDuty receiver is malformed") unless pd.keys.sort == %w[name pagerduty_configs]
-pd_configs = pd["pagerduty_configs"]
-fail_closed("there must be exactly one PagerDuty configuration") unless pd_configs.is_a?(Array) && pd_configs.length == 1
-fail_closed("PagerDuty configuration is malformed") unless pd_configs.first == { "routing_key_file" => PD_PATH, "send_resolved" => true }
+fail_closed("there must be exactly two PagerDuty receivers") unless pd_receivers.length == 2
+fail_closed("PagerDuty receiver names changed") unless pd_receivers.map { |x| x["name"] }.sort == [DSPACE_RECEIVER, PD_RECEIVER].sort
+pd_receivers.each do |pd|
+  fail_closed("PagerDuty receiver is malformed") unless pd.keys.sort == %w[name pagerduty_configs]
+  pd_configs = pd["pagerduty_configs"]
+  fail_closed("there must be exactly one PagerDuty configuration per receiver") unless pd_configs.is_a?(Array) && pd_configs.length == 1
+  fail_closed("PagerDuty configuration is malformed") unless pd_configs.first == { "routing_key_file" => PD_PATH, "send_resolved" => true }
+end
 
 webhook_receivers = receivers.select { |x| x.key?("webhook_configs") }
 fail_closed("there must be exactly one webhook receiver") unless webhook_receivers.length == 1
@@ -87,7 +93,10 @@ webhooks = hc["webhook_configs"]
 expected_webhook = { "url_file" => HC_PATH, "send_resolved" => false, "max_alerts" => 1, "timeout" => "10s" }
 fail_closed("Healthchecks webhook must use the exact file, resolution, timeout, and alert limit") unless webhooks == [expected_webhook]
 
-pd_route, hc_route = children
+pd_route, hc_route, dspace_route = children
+fail_closed("DSPACE PagerDuty route ordering or receiver changed") unless dspace_route["receiver"] == DSPACE_RECEIVER
+fail_closed("DSPACE PagerDuty route matchers are not the exact alert allowlist") unless dspace_route["matchers"].is_a?(Array) && dspace_route["matchers"].sort == DSPACE_MATCHERS.sort
+fail_closed("DSPACE PagerDuty route must contain only receiver and exact matchers") unless dspace_route.keys.sort == %w[matchers receiver]
 fail_closed("PagerDuty route ordering or receiver changed") unless pd_route["receiver"] == PD_RECEIVER
 fail_closed("PagerDuty route matchers are not the exact synthetic allowlist") unless pd_route["matchers"].is_a?(Array) && pd_route["matchers"].sort == PD_MATCHERS.sort
 fail_closed("PagerDuty route must contain only receiver and exact matchers") unless pd_route.keys.sort == %w[matchers receiver]
@@ -97,4 +106,4 @@ expected_hc = {
   "group_interval" => "1m", "repeat_interval" => "5m", "continue" => false
 }
 fail_closed("watchdog route is not the exact direct-child allowlist and timing contract") unless hc_route == expected_hc
-warn "Alertmanager two-integration structure verified (credential values not accessed)."
+warn "Alertmanager exact DSPACE/test PagerDuty and watchdog structure verified (credential values not accessed)."

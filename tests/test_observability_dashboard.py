@@ -53,6 +53,7 @@ def test_dashboard_identity_defaults_rows_and_required_panels(dashboard):
         "DSPACE HTTP",
         "DSPACE runtime and release",
         "DSPACE feature traffic",
+        "DSPACE release integrity",
         "Blackbox monitoring",
     }
     titles = {panel["title"] for panel in panels}
@@ -85,7 +86,8 @@ def test_queries_use_stable_datasource_bounded_labels_and_safe_zero(dashboard):
     assert '"uid": "prometheus"' in serialized
     assert "${DS_" not in serialized and "__inputs" not in serialized
     assert not any("{{target}}" in serialized or "target=~" in expr for expr in expressions)
-    assert "http://" not in serialized and "https://" not in serialized
+    assert "http://" not in serialized
+    assert serialized.count("https://") == 2
     assert all(
         "or on() vector(0)" in expr
         for expr in expressions

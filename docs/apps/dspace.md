@@ -2,6 +2,11 @@
 
 This is the canonical runbook for deploying DSPACE from GHCR artifacts to Sugarkube. The generic `just app-*` recipes are the preferred future path. The `dspace-oci-*` recipes remain compatibility shims and are scheduled for later removal only after the generic flow has been exercised across routine releases.
 
+Release monitoring is defined in the [DSPACE release-integrity alert runbook](../observability-dspace-release-integrity.md).
+Its non-mutating `/chat` publisher consumes this runtime verifier's bounded JSON result; continuous
+execution still requires an externally installed smoke runner pinned by immutable commit and digest,
+isolated/intercepted transport with mutation disabled, and the documented staging scheduler.
+
 ## Production Helm reconciliation for application 3.0.1
 
 This section **prepares but does not execute** the incident reconciliation tracked by

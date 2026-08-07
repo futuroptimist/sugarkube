@@ -8,7 +8,7 @@ a human. The secret-file-backed synthetic Alertmanager → PagerDuty path has no
 through fire, phone receipt, acknowledgement, and resolution. The host-heartbeat timers are installed
 on `sugarkube3`, `sugarkube4`, and `sugarkube5`. The watchdog configuration and operator workflows
 are repository-ready, while their Secret installation, deployment, and live delivery proof remain
-post-merge work. Real workload routes remain deferred.
+post-merge work. The exact five-alert DSPACE workload allowlist is repository-ready; live staging deployment and drills remain required.
 
 ## 1. Goals and non-goals
 
@@ -30,7 +30,7 @@ post-merge work. Real workload routes remain deferred.
   after staging drills succeed (see [`docs/observability-design.md`](./observability-design.md) §13).
 - Advanced SLOs, burn-rate alerting, or multi-window error budgets.
 - Exhaustive application-level synthetic checks. The one synthetic check currently in scope
-  (`DspaceChatSyntheticFailed`) is deferred — see [§8](#8-status-and-dependencies).
+  (`DspaceChatSyntheticFailed`) now has a fail-closed producer/consumer contract; the pinned external scheduler remains a prerequisite — see [the runbook](./observability-dspace-release-integrity.md).
 
 ## 2. Chosen target architecture
 
@@ -156,7 +156,7 @@ These are the current alert-design candidates, not proof the rules already exist
 | `PublicEndpointDown` | A blackbox probe's `probe_success` is 0 | Reuses the signal already defined in [`docs/observability-design.md`](./observability-design.md) §6/§11. |
 | `PublicProbeMissing` | An expected blackbox probe target has no recent data at all (distinct from a probe that ran and failed) | Matches the "missing probe data" state already surfaced in the staging dashboard's availability summary panel. |
 | `TLSExpiringSoon` | `probe_ssl_earliest_cert_expiry` crosses a warning/critical threshold | Reuses the signal already defined in [`docs/observability-design.md`](./observability-design.md) §6. |
-| `DspaceChatSyntheticFailed` | A deeper synthetic check exercises DSPACE's dChat path end-to-end | **Explicitly deferred** — see [§8](#8-status-and-dependencies). Not part of the initial rollout. |
+| `DspaceChatSyntheticFailed` | A non-mutating check exercises DSPACE's `/chat` path end-to-end | Repository-ready with stale/missing fail-closed semantics; external pinned runner installation and live staging proof remain. |
 
 ## 6. Rollout and drill plan
 
@@ -222,9 +222,9 @@ it is deployed yet — see the rollout plan above for the actual sequencing.
 
 ## 8. Status and dependencies
 
-- The deeper DSPACE dChat synthetic check (`DspaceChatSyntheticFailed`) is deferred while token.place
-  staging inference depends on work tracked in `futuroptimist/token.place#1549`. This blocks only that
-  one synthetic check, not the rest of the alerting foundation.
+- The DSPACE `/chat` bounded publisher and fail-closed alert consumer are repository-ready. The
+  immutable external smoke runner, scheduler/textfile installation, and live staging proof remain
+  prerequisites; see [the release-integrity runbook](./observability-dspace-release-integrity.md).
 - Shallow public-endpoint blackbox monitoring (`PublicEndpointDown`, `PublicProbeMissing`,
   `TLSExpiringSoon`) is already live in staging today, independently of that dependency — see
   [`docs/observability-blackbox.md`](./observability-blackbox.md).
