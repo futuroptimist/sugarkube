@@ -20,6 +20,10 @@ REQUIRED_METRICS = {
     "dspace_http_request_duration_seconds_bucket",
     "process_resident_memory_bytes",
     "dspace_build_info",
+    "dspace_release_approved_info",
+    "kube_pod_container_info",
+    "dspace_chat_synthetic_success",
+    "dspace_chat_synthetic_timestamp_seconds",
     "dspace_dchat_requests_total",
     "dspace_dependency_requests_total",
     "probe_duration_seconds",
@@ -55,6 +59,26 @@ def panel_named(dashboard: dict, title: str) -> dict:
     if len(matching) != 1:
         raise SystemExit(f"ERROR: dashboard must contain exactly one {title!r} panel.")
     return matching[0]
+
+
+def panel_expression(dashboard: dict, title: str) -> str:
+    panel = panel_named(dashboard, title)
+    targets = panel.get("targets", [])
+    if len(targets) != 1 or not isinstance(targets[0].get("expr"), str):
+        raise SystemExit(f"ERROR: {title} must contain exactly one PromQL target.")
+    return re.sub(r"\s+", " ", targets[0]["expr"])
+
+
+def has_serving_pod_filter(expression: str) -> bool:
+    return all(
+        token in expression
+        for token in (
+            'kube_pod_container_status_ready{namespace="dspace",container="dspace"} == 1',
+            "and on (namespace, pod) "
+            'kube_pod_status_phase{namespace="dspace",phase="Running"} == 1',
+            'unless on (namespace, pod) kube_pod_deletion_timestamp{namespace="dspace"}',
+        )
+    )
 
 
 def validate_dashboard_semantics(dashboard: dict) -> None:
@@ -181,6 +205,38 @@ def validate_dashboard_semantics(dashboard: dict) -> None:
     if matrix.get("type") != "table" or not matrix.get("targets"):
         raise SystemExit("ERROR: dashboard must retain the detailed endpoint matrix.")
 
+    revisions = panel_expression(dashboard, "Active build revisions by pod")
+    if (
+        "dspace_build_info" not in revisions
+        or "and on (namespace, pod)" not in revisions
+        or not has_serving_pod_filter(revisions)
+    ):
+        raise SystemExit("ERROR: active build revisions must include only serving DSPACE pods.")
+
+    image_agreement = panel_expression(dashboard, "Image-pin agreement")
+    if not has_serving_pod_filter(image_agreement) or "or on() vector(0)" not in image_agreement:
+        raise SystemExit(
+            "ERROR: image-pin agreement must filter serving pods and return a healthy zero."
+        )
+
+    target_panel = panel_named(dashboard, "DSPACE metrics-target health")
+    target_health = panel_expression(dashboard, "DSPACE metrics-target health")
+    if (
+        not has_serving_pod_filter(target_health)
+        or 'unless on (namespace, pod) up{namespace="dspace",service=~"dspace.*"}'
+        not in target_health
+        or 'up{namespace="dspace",service=~"dspace.*"} == 0' not in target_health
+        or "count(" not in target_health
+        or "or on() vector(0)" not in target_health
+        or target_panel.get("targets", [{}])[0].get("legendFormat")
+        != "down or missing serving targets"
+        or "Zero is healthy; missing targets fail closed."
+        not in target_panel.get("description", "")
+    ):
+        raise SystemExit(
+            "ERROR: DSPACE metrics-target health must count down or missing serving targets."
+        )
+
 
 def validate_dashboard(path: Path) -> str:
     dashboard = load_dashboard(path)
@@ -193,6 +249,23 @@ def validate_dashboard(path: Path) -> str:
         or len(ids) != len(set(ids))
     ):
         raise SystemExit("ERROR: dashboard panel IDs must be present, integer, and unique.")
+    positioned = [
+        panel
+        for panel in panels(dashboard)
+        if panel.get("type") != "row" and isinstance(panel.get("gridPos"), dict)
+    ]
+    for index, left in enumerate(positioned):
+        a = left["gridPos"]
+        for right in positioned[index + 1 :]:
+            b = right["gridPos"]
+            overlaps = (
+                a["x"] < b["x"] + b["w"]
+                and b["x"] < a["x"] + a["w"]
+                and a["y"] < b["y"] + b["h"]
+                and b["y"] < a["y"] + a["h"]
+            )
+            if overlaps:
+                raise SystemExit(f"ERROR: dashboard panels {left['id']} and {right['id']} overlap.")
     validate_dashboard_semantics(dashboard)
     expressions = [
         target["expr"]
@@ -211,8 +284,17 @@ def validate_dashboard(path: Path) -> str:
         if not matching or any("or on() vector(0)" not in expr for expr in matching):
             raise SystemExit(f"ERROR: event-driven metric {metric} must use a safe zero fallback.")
     serialized = json.dumps(dashboard)
-    if re.search(r"https?://", serialized, re.IGNORECASE):
-        raise SystemExit("ERROR: dashboard must not contain embedded raw URLs.")
+    urls = set(re.findall(r"https?://[^)\\\" ]+", serialized, re.IGNORECASE))
+    approved_urls = {
+        "https://github.com/futuroptimist/sugarkube/blob/main/docs/"
+        "observability-dspace-release-integrity.md",
+        "https://github.com/futuroptimist/sugarkube/blob/main/deployment-evidence/"
+        "dspace/staging/main-018687f-20260805T035722Z.json",
+    }
+    if urls != approved_urls:
+        raise SystemExit(
+            "ERROR: dashboard raw URLs must be the exact reviewed runbook/evidence allowlist."
+        )
     if re.search(r"\$\{?DS_|__inputs", serialized, re.IGNORECASE) or re.search(
         r"(?:\{|,)\s*target\s*(?:=|=~|!~|!=)|{{\s*target\s*}}", expression_text
     ):

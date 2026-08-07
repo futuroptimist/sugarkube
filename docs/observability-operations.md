@@ -9,9 +9,12 @@ Production observability is intentionally unsupported in this slice because no p
 - Chart version: `platform/observability/helm/kube-prometheus-stack.version` (`87.19.0`).
 - Common values: `platform/observability/helm/kube-prometheus-stack.values.common.yaml`.
 - Staging overrides: `clusters/staging/observability/kube-prometheus-stack.values.yaml`.
+- Canonical DSPACE rules: `platform/observability/rules/dspace-release-integrity.yaml`.
 - Staging dashboard: `clusters/staging/observability/dashboards/sugarkube-staging-observability.json`.
 - Helper: `scripts/observability_helm.sh` through `just observability-*` recipes.
 - Alert delivery, routing, and drill strategy: [`docs/observability-alerting.md`](observability-alerting.md).
+- DSPACE release-integrity triage and focused drills:
+  [`docs/observability-dspace-release-integrity.md`](observability-dspace-release-integrity.md).
 - Canonical staging node inventory: `clusters/staging/nodes.txt`.
 - Host-heartbeat helper and assets: `scripts/observability_node_heartbeat.sh`,
   `scripts/sugarkube-node-heartbeat`, and `scripts/systemd/sugarkube-node-heartbeat.*`.
@@ -63,7 +66,12 @@ just observability-dashboard-verify env=staging
 
 `env=int` is accepted only through the repository's deprecated alias normalization to `staging`. Missing, unknown, `prod`, and `production` fail before Helm or kubectl mutation with a message that production observability is not yet codified.
 
-Each helper prints the resolved environment, current Kubernetes context, namespace, release, chart, pinned version, ordered values files, and Grafana LAN URL.
+Each helper prints the resolved environment, current Kubernetes context,
+namespace, release, chart, pinned version, ordered values sources, dashboard
+source, and Grafana LAN URL. The ordered Helm values chain is the common values,
+staging values, and a mode-`0600` temporary overlay generated from the canonical
+DSPACE rules. The helper reports the stable canonical source, never the random
+temporary pathname.
 
 ## Render, install, and upgrade distinction
 
@@ -71,8 +79,9 @@ Each helper prints the resolved environment, current Kubernetes context, namespa
 - `just observability-install env=staging` is for a fresh cluster. It renders first, checks the staging context, and fails if the Helm release already exists.
 - `just observability-upgrade env=staging` is for steady-state changes. It renders first, checks the staging context, and fails if the Helm release does not exist.
 
-The mutating recipes never use `--reuse-values`; the committed version, both
-values files in order, and the dashboard source are always supplied. Before
+The mutating recipes never use `--reuse-values`; the committed version, the two
+committed values files, the generated canonical-rule overlay in that order, and
+the dashboard source are always supplied. Before
 cluster access or mutation, the helper rejects malformed dashboard JSON,
 changed identity, duplicate panel IDs, missing metric families, unsafe
 event-driven queries, or invalid datasource references. It then validates that
@@ -108,7 +117,8 @@ is not rollout evidence.
 
 ## Steady-state upgrade procedure
 
-1. Review changes to the version file and both values files.
+1. Review changes to the version file, both committed values files, and the
+   canonical DSPACE rule source.
 2. Render and inspect the full output:
    ```bash
    just observability-render env=staging
@@ -127,11 +137,20 @@ is not rollout evidence.
 
 - Helm release: `kube-prometheus-stack` in namespace `monitoring`.
 - Prometheus: one replica, `7d` retention, `15GB` retention size, `local-path` `ReadWriteOnce` PVC requesting `20Gi`, CPU request `200m`, memory request `512Mi`, memory limit `2Gi`, admin API disabled, and external label `cluster=sugarkube-int`.
-- Alertmanager: one replica with root/default no-op receiver named exactly `"null"`. Staging values
-  define a secret-file-backed PagerDuty receiver, but route only the exact synthetic test labels to
-  it; bundled and real workload alerts still fall through to `"null"`. Repository configuration is
-  is deployed, and its manual fire/acknowledge/resolve drill has been proven. Bundled and real
-  workload alerts still fall through to `"null"`.
+- Alertmanager: one replica with root/default no-op receiver named exactly
+  `"null"`. The existing watchdog route, its order, and its 30-second group wait,
+  one-minute group interval, and five-minute repeat interval remain preserved.
+  The exact-label `SugarkubePagerDutyTest` route is deployed and has passed its
+  manual fire/acknowledge/resolve delivery drill. Separately, the repository is
+  ready to route exactly `DspaceBuildRevisionMismatch`,
+  `DspaceMixedBuildRevisions`, `DspaceDeploymentImagePinMismatch`,
+  `DspaceChatSyntheticFailed`, and `DspaceMetricsTargetDown` to
+  `pagerduty-dspace`. That five-alert route is not yet deployed or live-proven.
+  Its receiver uses the existing Secret-mounted PagerDuty integration and
+  `send_resolved: true`; unrelated alerts continue to fall through to `"null"`.
+  Deployment, collector/runner setup, and firing/resolved drill prerequisites
+  remain in the focused
+  [DSPACE release-integrity runbook](observability-dspace-release-integrity.md).
 - Grafana: persistence disabled, no Ingress, LAN-only NodePort `30300`.
 - The provisioned dashboard defaults to six hours and a 30-second refresh. Its
   top-level public availability summary reports **Healthy endpoints**, **Failed
@@ -245,8 +264,11 @@ five minutes. Retain the procedure below for regression drills.
      /tmp/kube-prometheus-stack.rendered.yaml
    ```
 
-   Confirm the validator reports the exact synthetic route, file reference, and Secret mount contract;
-   remove the temporary render after review.
+   Confirm the validator reports the exact synthetic route, the exact five-alert
+   DSPACE allowlist, file references, and Secret mount contract; remove the
+   temporary render after review. This validates repository structure only; use
+   the focused [DSPACE release-integrity runbook](observability-dspace-release-integrity.md)
+   for the remaining deployment and live firing/resolved drill prerequisites.
 4. Upgrade and verify:
 
    ```bash

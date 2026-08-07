@@ -8,7 +8,7 @@ a human. The secret-file-backed synthetic Alertmanager → PagerDuty path has no
 through fire, phone receipt, acknowledgement, and resolution. The host-heartbeat timers are installed
 on `sugarkube3`, `sugarkube4`, and `sugarkube5`. The watchdog configuration and operator workflows
 are repository-ready, while their Secret installation, deployment, and live delivery proof remain
-post-merge work. Real workload routes remain deferred.
+post-merge work. Only the explicitly allowlisted staging workload routes described below are repository-ready; deployment and live delivery proof remain operator prerequisites.
 
 ## 1. Goals and non-goals
 
@@ -29,8 +29,7 @@ post-merge work. Real workload routes remain deferred.
 - Production alert rollout. This document designs the staging path first; production follows only
   after staging drills succeed (see [`docs/observability-design.md`](./observability-design.md) §13).
 - Advanced SLOs, burn-rate alerting, or multi-window error budgets.
-- Exhaustive application-level synthetic checks. The one synthetic check currently in scope
-  (`DspaceChatSyntheticFailed`) is deferred — see [§8](#8-status-and-dependencies).
+- Exhaustive application-level synthetic checks. The repository now defines the bounded producer/consumer contract for `DspaceChatSyntheticFailed`; an externally pinned runner and live scheduling remain prerequisites.
 
 ## 2. Chosen target architecture
 
@@ -156,7 +155,7 @@ These are the current alert-design candidates, not proof the rules already exist
 | `PublicEndpointDown` | A blackbox probe's `probe_success` is 0 | Reuses the signal already defined in [`docs/observability-design.md`](./observability-design.md) §6/§11. |
 | `PublicProbeMissing` | An expected blackbox probe target has no recent data at all (distinct from a probe that ran and failed) | Matches the "missing probe data" state already surfaced in the staging dashboard's availability summary panel. |
 | `TLSExpiringSoon` | `probe_ssl_earliest_cert_expiry` crosses a warning/critical threshold | Reuses the signal already defined in [`docs/observability-design.md`](./observability-design.md) §6. |
-| `DspaceChatSyntheticFailed` | A deeper synthetic check exercises DSPACE's dChat path end-to-end | **Explicitly deferred** — see [§8](#8-status-and-dependencies). Not part of the initial rollout. |
+| `DspaceChatSyntheticFailed` | An isolated, non-mutating `/chat` result fails or becomes stale | Repository-ready; the pinned external runner, scheduler, deployment, and live drill remain operational prerequisites. |
 
 ## 6. Rollout and drill plan
 
@@ -189,8 +188,7 @@ A safe, phased sequence — each step depends on the previous one succeeding:
     gaps and detection latency; fail the drill if a healthy gap exceeds the configured period.
 12. Add custom application and blackbox alerts one at a time, each with its own drill before the next
     is added.
-13. Return to `DspaceChatSyntheticFailed` once token.place staging inference is operational again
-    (see [§8](#8-status-and-dependencies)).
+13. Install and schedule the reviewed, immutable external `/chat` smoke runner, then execute the bounded staging drills in the [release-integrity runbook](./observability-dspace-release-integrity.md).
 
 Rollback and noise control:
 
@@ -222,9 +220,7 @@ it is deployed yet — see the rollout plan above for the actual sequencing.
 
 ## 8. Status and dependencies
 
-- The deeper DSPACE dChat synthetic check (`DspaceChatSyntheticFailed`) is deferred while token.place
-  staging inference depends on work tracked in `futuroptimist/token.place#1549`. This blocks only that
-  one synthetic check, not the rest of the alerting foundation.
+- `DspaceChatSyntheticFailed` rules and the bounded textfile producer/consumer contract are repository-ready. Selecting, pinning, installing, and scheduling the external isolated smoke runner, deploying the rules, and completing the live drill remain operational prerequisites.
 - Shallow public-endpoint blackbox monitoring (`PublicEndpointDown`, `PublicProbeMissing`,
   `TLSExpiringSoon`) is already live in staging today, independently of that dependency — see
   [`docs/observability-blackbox.md`](./observability-blackbox.md).
