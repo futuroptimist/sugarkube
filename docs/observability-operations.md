@@ -160,6 +160,77 @@ is not rollout evidence.
 - No public ingress, public DNS, Cloudflare route, router forwarding, or public observability endpoint is part of this lifecycle.
 - Verification waits up to the configured Helm timeout for each workload and requires every desired node-exporter pod to be ready. After workload readiness, it also waits for DSPACE target discovery and the first successful scrape. By default, it schedules 20 observations 15 seconds apart and gives each proxy request a finite 14-second budget, so the final request finishes within a 299-second overall deadline. Request time consumes the cadence delay rather than extending it. Override the positive-integer settings with `SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_INTERVAL_SECONDS` and `SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_ATTEMPTS`; the request budget and deadline are derived from those controls. Missing, unknown, down, and partially healthy target sets are retried, but Kubernetes transport failures, invalid UTF-8, malformed JSON, non-string target health, invalid Prometheus response structures, and unsuccessful Prometheus API statuses fail immediately.
 
+## token.place Phase 1 dashboard
+
+The two token.place rows use only metric families already emitted and verified
+in staging. Every query selects the canonical `app=tokenplace`,
+`release=tokenplace`, `cluster=sugarkube-int`, and `namespace=tokenplace`
+labels plus the selected environment. They deliberately avoid raw scrape
+targets, instances, URLs, request or node identities, and sensitive labels.
+
+The **token.place relay and compute capacity** row contains:
+
+- **token.place scrape availability** and **token.place instrumentation
+  health**, shown per relay pod so a missing or unhealthy replica is visible;
+- **Registered compute nodes** and **Healthy compute nodes**, deduplicated with
+  `max` because these are logical relay gauges that future replicas may repeat;
+- **Oldest compute-node lease age**, the maximum reported logical lease age;
+- **Compute-node eviction rate by reason**, a summed process-local counter rate
+  grouped only by the bounded `reason` label;
+- **Relay queue depth by provider mode** and **Oldest queued-request age by
+  provider mode**, deduplicated with `max` and grouped only by bounded
+  `provider_mode`; and
+- **In-flight requests by relay pod** and **Oldest in-flight request age by
+  relay pod**. These gauges are owned by the relay process, so the dashboard
+  does not assume that summing future replicas has meaningful cluster-wide
+  semantics.
+
+The **token.place HTTP and release** row contains:
+
+- **Terminal outcome rate by outcome**, a summed process-local counter rate
+  grouped by the bounded `outcome` values;
+- **token.place HTTP request rate**, summed across processes and grouped by the
+  normalized `route` and bounded `status_class` labels;
+- **token.place HTTP 5xx ratio**, the summed 5xx rate divided by the summed
+  request rate;
+- **token.place HTTP latency percentiles**, calculated with
+  `histogram_quantile` from histogram bucket rates summed by `le`; and
+- **token.place build identity**, an instant table retaining only `pod`,
+  `version`, and `revision`.
+
+All event panels use `rate(...[$__rate_interval])`. Outcome and eviction
+counters are initialized by the application, so their emitted zero is a real
+zero. No token.place query substitutes `vector(0)`: an absent scrape or metric
+series remains **NO DATA**, distinct from an emitted zero. The 5xx ratio also
+remains **NO DATA** when its source counters are absent rather than implying a
+healthy zero-error service. The displayed thresholds are visual aids, not alert
+thresholds inferred from this staging sample.
+
+The live Phase 1 baseline was one healthy Prometheus target with the canonical
+labels above and `environment=staging`. One real encrypted staging request was
+observed with one registered and one healthy compute node; in-flight requests
+moved `0 -> 1 -> 0`; maximum in-flight age was approximately 49.52 seconds;
+completed outcomes moved `1 -> 2`; queue depth, oldest queued age, and
+compute-node evictions remained zero; and maximum lease age was approximately
+28.15 seconds. The bounded outcome vocabulary observed in the instrumentation
+is `completed`, `cancelled`, `expired`, `timed_out`, `rate_limited`,
+`dependency_failure`, and `failed`. This is staging evidence, not an alerting
+baseline.
+
+Repository support is not deployment proof. After merge, an operator must run
+the guarded staging Helm upgrade, verify API provisioning, and visually inspect
+the rendered panels at the default six-hour range:
+
+```bash
+just observability-upgrade env=staging
+just observability-dashboard-verify env=staging
+```
+
+Functional chat availability, schedulable-node capacity, availability-reason,
+and shared-state health signals do not yet exist in this dashboard. They remain
+Phase 2 work; this Phase 1 slice does not claim issue #2405 is closed or fully
+complete.
+
 ## Troubleshooting signals
 
 - **Context mismatch:** helper exits before mutation and prints the expected `sugar-staging` context. Rerun `just kubeconfig-env env=staging`.

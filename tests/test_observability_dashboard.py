@@ -54,6 +54,8 @@ def test_dashboard_identity_defaults_rows_and_required_panels(dashboard):
         "DSPACE runtime and release",
         "DSPACE feature traffic",
         "Blackbox monitoring",
+        "token.place relay and compute capacity",
+        "token.place HTTP and release",
     }
     titles = {panel["title"] for panel in panels}
     for title in (
@@ -73,6 +75,21 @@ def test_dashboard_identity_defaults_rows_and_required_panels(dashboard):
         "Probe duration",
         "HTTP response status",
         "TLS certificate lifetime",
+        "token.place scrape availability",
+        "token.place instrumentation health",
+        "Registered compute nodes",
+        "Healthy compute nodes",
+        "Oldest compute-node lease age",
+        "Compute-node eviction rate by reason",
+        "Relay queue depth by provider mode",
+        "Oldest queued-request age by provider mode",
+        "In-flight requests by relay pod",
+        "Oldest in-flight request age by relay pod",
+        "Terminal outcome rate by outcome",
+        "token.place HTTP request rate",
+        "token.place HTTP 5xx ratio",
+        "token.place HTTP latency percentiles",
+        "token.place build identity",
     ):
         assert title in titles
 
@@ -96,6 +113,110 @@ def test_queries_use_stable_datasource_bounded_labels_and_safe_zero(dashboard):
         "app",
         "route",
     }
+
+
+def test_tokenplace_phase1_promql_and_missing_data_contract(dashboard):
+    panels = {panel["title"]: panel for panel in all_panels(dashboard)}
+    titles = validator.TOKENPLACE_PANELS
+    expressions = {
+        title: "\n".join(target["expr"] for target in panels[title]["targets"]) for title in titles
+    }
+    assert validator.TOKENPLACE_METRICS <= {
+        metric
+        for metric in validator.TOKENPLACE_METRICS
+        if any(metric in expression for expression in expressions.values())
+    }
+    assert all(validator.TOKENPLACE_SELECTOR in expression for expression in expressions.values())
+    assert all(panels[title]["fieldConfig"]["defaults"]["noValue"] == "NO DATA" for title in titles)
+    assert not any("vector(0)" in expression for expression in expressions.values())
+    assert "max(tokenplace_compute_nodes_registered" in expressions["Registered compute nodes"]
+    assert "max(tokenplace_compute_nodes_healthy" in expressions["Healthy compute nodes"]
+    assert "max by (provider_mode)" in expressions["Relay queue depth by provider mode"]
+    assert "sum by (reason) (rate(" in expressions["Compute-node eviction rate by reason"]
+    assert "sum by (outcome) (rate(" in expressions["Terminal outcome rate by outcome"]
+    assert "sum by (route, status_class) (rate(" in expressions["token.place HTTP request rate"]
+    assert all(
+        "$__rate_interval" in expressions[title]
+        for title in (
+            "Compute-node eviction rate by reason",
+            "Terminal outcome rate by outcome",
+            "token.place HTTP request rate",
+        )
+    )
+    assert "sum by (le)" in expressions["token.place HTTP latency percentiles"]
+    assert "max by (pod, version, revision)" in expressions["token.place build identity"]
+    assert all(
+        "max by (pod)" in expressions[title]
+        for title in (
+            "In-flight requests by relay pod",
+            "Oldest in-flight request age by relay pod",
+        )
+    )
+    serialized = json.dumps([panels[title] for title in titles]).lower()
+    assert not any(metric in serialized for metric in validator.PHASE2_METRICS)
+
+
+@pytest.mark.parametrize(
+    ("title", "mutation", "message"),
+    [
+        ("Registered compute nodes", lambda expr: expr.replace("max(", "sum("), "logical gauges"),
+        (
+            "Terminal outcome rate by outcome",
+            lambda expr: expr.replace("sum by (outcome)", "sum"),
+            "summed rates",
+        ),
+        (
+            "Compute-node eviction rate by reason",
+            lambda expr: expr.replace("sum by (reason)", "sum"),
+            "summed rates",
+        ),
+        (
+            "token.place build identity",
+            lambda expr: expr.replace("pod, version, revision", "version, revision"),
+            "build identity",
+        ),
+        (
+            "In-flight requests by relay pod",
+            lambda expr: expr.replace("max by (pod)", "sum"),
+            "in-flight gauges",
+        ),
+        (
+            "token.place HTTP request rate",
+            lambda expr: expr.replace('namespace="tokenplace"', 'instance=~".*"'),
+            "canonical target selector",
+        ),
+        (
+            "Healthy compute nodes",
+            lambda expr: expr + " or on() vector(0)",
+            "preserve missing data",
+        ),
+    ],
+)
+def test_validator_rejects_tokenplace_promql_regressions(
+    tmp_path, dashboard, title, mutation, message
+):
+    panel = next(panel for panel in all_panels(dashboard) if panel["title"] == title)
+    panel["targets"][0]["expr"] = mutation(panel["targets"][0]["expr"])
+    candidate = tmp_path / "candidate.json"
+    candidate.write_text(json.dumps(dashboard), encoding="utf-8")
+    with pytest.raises(SystemExit, match=message):
+        validator.validate_dashboard(candidate)
+
+
+def test_validator_rejects_tokenplace_unsafe_legend_and_phase2_claim(tmp_path, dashboard):
+    panel = next(
+        panel for panel in all_panels(dashboard) if panel["title"] == "Registered compute nodes"
+    )
+    for legend, message in (
+        ("{{request_id}}", "unsafe labels"),
+        ("tokenplace_chat_availability", "Phase 2"),
+    ):
+        panel["targets"][0]["legendFormat"] = legend
+        candidate = tmp_path / f"{message.replace(' ', '-')}.json"
+        candidate.write_text(json.dumps(dashboard), encoding="utf-8")
+        with pytest.raises(SystemExit, match=message):
+            validator.validate_dashboard(candidate)
+        panel["targets"][0]["legendFormat"] = "registered"
 
 
 def test_snapshot_tables_use_instant_queries(dashboard):
