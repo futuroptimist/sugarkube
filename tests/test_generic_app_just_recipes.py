@@ -6,8 +6,12 @@ import argparse
 import io
 import json
 import os
+import pty
+import select
 import subprocess
 import sys
+import time
+import warnings
 from pathlib import Path
 
 import pytest
@@ -6581,7 +6585,7 @@ class _AppMetricsFakeTty:
         return True
 
 
-@pytest.mark.parametrize("tty_result", [OSError("private tty"), _AppMetricsFakeTty(False)])
+@pytest.mark.parametrize("tty_result", [_AppMetricsFakeTty(False)])
 def test_observability_app_metrics_install_secret_rejects_bad_controlling_terminal(
     monkeypatch, capsys, tty_result
 ):
@@ -6601,6 +6605,214 @@ def test_observability_app_metrics_install_secret_rejects_bad_controlling_termin
     combined = capsys.readouterr().out + capsys.readouterr().err + str(excinfo.value)
     assert "controlling terminal is required" in combined
     assert "private tty" not in combined
+
+
+def test_observability_app_metrics_install_secret_falls_back_to_tty_stdin(
+    monkeypatch, tmp_path, ensure_just_available
+):
+    credential = "pty-fallback-sentinel"
+    command_log = tmp_path / "kubectl.jsonl"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_executable(
+        bin_dir / "kubectl",
+        f"""#!/usr/bin/env python3
+import json
+import sys
+
+args = sys.argv[1:]
+with open({str(command_log)!r}, "a", encoding="utf-8") as stream:
+    stream.write(json.dumps(args) + "\\n")
+if args == ["config", "current-context"]:
+    print("sugar-staging")
+elif "create" in args:
+    value = sys.stdin.buffer.read()
+    if not value:
+        raise SystemExit(1)
+    sys.stdout.buffer.write(b"apiVersion: v1\\nkind: Secret\\n")
+elif args == ["apply", "-f", "-"]:
+    if b"kind: Secret" not in sys.stdin.buffer.read():
+        raise SystemExit(1)
+else:
+    raise SystemExit(1)
+""",
+    )
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+    env["SUGARKUBE_APP_METRICS_TTY"] = str(tmp_path / "unavailable-tty")
+    master, slave = pty.openpty()
+    process = subprocess.Popen(
+        [
+            str(ensure_just_available),
+            "observability-app-metrics-secret-install",
+            "app=tokenplace",
+            "env=staging",
+        ],
+        cwd=REPO_ROOT,
+        env=env,
+        stdin=slave,
+        stdout=slave,
+        stderr=slave,
+        start_new_session=True,
+    )
+    os.close(slave)
+    output = bytearray()
+    prompt_seen = False
+    try:
+        deadline = time.monotonic() + 10
+        while process.poll() is None and time.monotonic() < deadline:
+            readable, _, _ = select.select([master], [], [], 0.1)
+            if readable:
+                try:
+                    output.extend(os.read(master, 4096))
+                except OSError:
+                    break
+                if b"input hidden" in output:
+                    os.write(master, credential.encode() + b"\n")
+                    prompt_seen = True
+                    break
+        if not prompt_seen:
+            pytest.fail(
+                "credential prompt was not observed before timeout: "
+                + output.decode(errors="replace")
+            )
+        process.wait(timeout=10)
+        while select.select([master], [], [], 0)[0]:
+            try:
+                output.extend(os.read(master, 4096))
+            except OSError:
+                break
+    finally:
+        os.close(master)
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+
+    assert process.returncode == 0, output.decode(errors="replace")
+    assert command_log.exists(), output.decode(errors="replace")
+    commands = command_log.read_text(encoding="utf-8")
+    assert "create" in commands and '["apply", "-f", "-"]' in commands
+    assert credential not in output.decode(errors="replace")
+    assert credential not in commands
+
+
+def test_observability_app_metrics_install_secret_rejects_getpass_echo_fallback(
+    monkeypatch, capsys
+):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
+        "tokenplace"
+    ]["environments"]["staging"]
+    credential = "credential-looking-value"
+    monkeypatch.setattr(app_metrics.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(app_metrics.sys.stdin, "readable", lambda: True)
+    monkeypatch.setattr(
+        app_metrics,
+        "open",
+        lambda *args: (_ for _ in ()).throw(OSError("no controlling terminal")),
+        raising=False,
+    )
+
+    def insecure_getpass(*args, **kwargs):
+        warnings.warn("input may be echoed", getpass.GetPassWarning)
+        return credential
+
+    import getpass
+
+    monkeypatch.setattr(getpass, "getpass", insecure_getpass)
+    monkeypatch.setattr(
+        app_metrics.subprocess,
+        "Popen",
+        lambda *args, **kwargs: pytest.fail("Secret rendering must not be attempted"),
+    )
+
+    with pytest.raises(app_metrics.Error) as excinfo:
+        app_metrics.install_secret(cfg)
+
+    captured = capsys.readouterr()
+    combined = captured.out + captured.err + str(excinfo.value)
+    assert "credential prompt failed (details redacted)" in combined
+    assert credential not in combined
+
+
+@pytest.mark.parametrize(
+    "prompt_failure", [OSError, EOFError, io.UnsupportedOperation]
+)
+def test_observability_app_metrics_install_secret_stdin_prompt_failures_are_redacted(
+    monkeypatch, capsys, prompt_failure
+):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
+        "tokenplace"
+    ]["environments"]["staging"]
+    private_tty = "/private/controlling-terminal"
+    monkeypatch.setattr(app_metrics.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(app_metrics.sys.stdin, "readable", lambda: True)
+    monkeypatch.setattr(
+        app_metrics,
+        "open",
+        lambda *args: (_ for _ in ()).throw(OSError("no controlling terminal")),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "getpass.getpass",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            prompt_failure(f"cannot read {private_tty}")
+        ),
+    )
+    monkeypatch.setattr(
+        app_metrics.subprocess,
+        "Popen",
+        lambda *args, **kwargs: pytest.fail("Secret rendering must not be attempted"),
+    )
+    monkeypatch.setattr(
+        app_metrics.subprocess,
+        "run",
+        lambda *args, **kwargs: pytest.fail("kubectl apply must not be attempted"),
+    )
+
+    with pytest.raises(app_metrics.Error) as excinfo:
+        app_metrics.install_secret(cfg)
+
+    captured = capsys.readouterr()
+    combined = captured.out + captured.err + str(excinfo.value)
+    assert str(excinfo.value) == "ERROR: credential prompt failed (details redacted)"
+    assert "Traceback" not in combined
+    assert private_tty not in combined
+
+
+def test_observability_app_metrics_install_secret_stdin_prompt_preserves_ctrl_c(
+    monkeypatch
+):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
+        "tokenplace"
+    ]["environments"]["staging"]
+    interrupt = KeyboardInterrupt()
+    monkeypatch.setattr(app_metrics.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(app_metrics.sys.stdin, "readable", lambda: True)
+    monkeypatch.setattr(
+        app_metrics,
+        "open",
+        lambda *args: (_ for _ in ()).throw(OSError("no controlling terminal")),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "getpass.getpass",
+        lambda *args, **kwargs: (_ for _ in ()).throw(interrupt),
+    )
+    monkeypatch.setattr(
+        app_metrics.subprocess,
+        "Popen",
+        lambda *args, **kwargs: pytest.fail("Secret rendering must not be attempted"),
+    )
+    monkeypatch.setattr(
+        app_metrics.subprocess,
+        "run",
+        lambda *args, **kwargs: pytest.fail("kubectl apply must not be attempted"),
+    )
+
+    with pytest.raises(KeyboardInterrupt) as excinfo:
+        app_metrics.install_secret(cfg)
+
+    assert excinfo.value is interrupt
 
 
 def test_observability_app_metrics_install_secret_prompt_write_failure_is_redacted(
