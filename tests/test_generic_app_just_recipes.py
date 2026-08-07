@@ -5710,6 +5710,7 @@ def test_observability_app_metrics_verify_exercises_targets_metrics_and_public_4
         }
     }
     queries: list[str] = []
+    requests = []
 
     def fake_kjson(args):
         if args[:4] == ["kubectl", "-n", "tokenplace", "get"] and args[4] == "servicemonitor":
@@ -5734,8 +5735,11 @@ def test_observability_app_metrics_verify_exercises_targets_metrics_and_public_4
         return {"resultType": "vector", "result": [{"metric": sample_labels}]}
 
     class Opener:
-        def open(self, url, timeout):
-            raise app_metrics.urllib.error.HTTPError(url, 401, "unauthorized", {}, None)
+        def open(self, request, timeout):
+            requests.append((request, timeout))
+            raise app_metrics.urllib.error.HTTPError(
+                request.full_url, 401, "unauthorized", {}, None
+            )
 
     monkeypatch.setattr(app_metrics, "appcfg", lambda app, env: cfg)
     monkeypatch.setattr(app_metrics, "assert_context", lambda: None)
@@ -5749,6 +5753,119 @@ def test_observability_app_metrics_verify_exercises_targets_metrics_and_public_4
 
     assert "/api/v1/targets" in queries
     assert any("tokenplace_build_info" in query for query in queries)
+    assert len(requests) == 1
+    request, timeout = requests[0]
+    assert isinstance(request, app_metrics.urllib.request.Request)
+    assert request.full_url == cfg["publicMetrics"]["url"]
+    assert request.get_header("User-agent") == app_metrics.USER_AGENT
+    assert app_metrics.USER_AGENT == "sugarkube-observability-verifier/1.0"
+    assert timeout == 10
+
+
+def test_observability_app_metrics_public_403_remains_adverse_and_redacted(
+    monkeypatch, capsys
+):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
+        "tokenplace"
+    ]["environments"]["staging"]
+    sensitive = "response-body-sensitive-sentinel"
+
+    def prom_func(path):
+        if path == "/api/v1/targets":
+            return {"activeTargets": [{
+                "health": "up",
+                "scrapePool": "serviceMonitor/tokenplace/tokenplace/0",
+                "labels": cfg["targetLabels"],
+                "discoveredLabels": {},
+            }]}
+        metric = app_metrics.urllib.parse.unquote(path.rsplit("query=", 1)[-1]).split("{", 1)[0]
+        return {"resultType": "vector", "result": [{"metric": {
+            "__name__": metric,
+            "version": "main-deadbee",
+            "revision": "main-deadbee",
+        }}]}
+
+    class SensitiveBody:
+        def read(self, *args):
+            raise AssertionError(sensitive)
+
+        def close(self):
+            pass
+
+    class Opener:
+        def open(self, request, timeout):
+            raise app_metrics.urllib.error.HTTPError(
+                request.full_url, 403, sensitive, {}, SensitiveBody()
+            )
+
+    _verify_base(monkeypatch, cfg, prom_func)
+    monkeypatch.setattr(app_metrics.urllib.request, "build_opener", lambda *args: Opener())
+
+    with pytest.raises(app_metrics.Error) as excinfo:
+        app_metrics.verify("tokenplace", "staging")
+
+    captured = capsys.readouterr()
+    assert str(excinfo.value) == (
+        "ERROR: public /metrics unauthenticated status mismatch (body redacted)"
+    )
+    assert sensitive not in str(excinfo.value)
+    assert sensitive not in captured.out
+    assert sensitive not in captured.err
+
+
+@pytest.mark.parametrize(
+    ("failure", "message"),
+    [
+        ("transport", "unauthenticated check failed (details redacted)"),
+        ("malformed", "response status was malformed (details redacted)"),
+    ],
+)
+def test_observability_app_metrics_public_failures_remain_redacted(
+    monkeypatch, capsys, failure, message
+):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
+        "tokenplace"
+    ]["environments"]["staging"]
+    sensitive = "transport-sensitive-sentinel"
+
+    def prom_func(path):
+        if path == "/api/v1/targets":
+            return {"activeTargets": [{
+                "health": "up",
+                "scrapePool": "serviceMonitor/tokenplace/tokenplace/0",
+                "labels": cfg["targetLabels"],
+                "discoveredLabels": {},
+            }]}
+        metric = app_metrics.urllib.parse.unquote(path.rsplit("query=", 1)[-1]).split("{", 1)[0]
+        return {"resultType": "vector", "result": [{"metric": {
+            "__name__": metric,
+            "version": "main-deadbee",
+            "revision": "main-deadbee",
+        }}]}
+
+    class Response:
+        status = sensitive
+
+        def close(self):
+            pass
+
+    class Opener:
+        def open(self, request, timeout):
+            if failure == "transport":
+                raise OSError(sensitive)
+            return Response()
+
+    _verify_base(monkeypatch, cfg, prom_func)
+    monkeypatch.setattr(app_metrics.urllib.request, "build_opener", lambda *args: Opener())
+
+    with pytest.raises(app_metrics.Error) as excinfo:
+        app_metrics.verify("tokenplace", "staging")
+
+    captured = capsys.readouterr()
+    assert message in str(excinfo.value)
+    assert sensitive not in str(excinfo.value)
+    assert sensitive not in captured.out
+    assert sensitive not in captured.err
 
 
 def test_observability_app_metrics_verify_fails_on_public_200(monkeypatch):
