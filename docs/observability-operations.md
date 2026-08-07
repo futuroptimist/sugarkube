@@ -125,6 +125,62 @@ is not rollout evidence.
 
 ## Runtime expectations
 
+### token.place Phase 1 dashboard slice
+
+The two token.place rows are a staging operational view of metric families that
+the application already emits and that Prometheus has verified live. They do
+not define alert thresholds:
+
+- **token.place scrape availability** reports Prometheus `up` per relay pod,
+  while **token.place instrumentation health** reports the application's own
+  instrumentation self-check per relay pod. A value of one is healthy, zero is
+  visibly unhealthy, and a missing series is `NO DATA`.
+- **token.place compute-node counts** shows registered and healthy nodes.
+  **token.place oldest compute-node lease age** shows the worst reported lease
+  age, and **token.place compute-node eviction rate** splits the summed
+  process-local counter rate by the bounded `reason` label.
+- **token.place relay queue depth** and **token.place oldest queued-request
+  age** split the logical queue gauges by bounded `provider_mode`.
+  **token.place in-flight requests by pod** and **token.place oldest in-flight
+  age by pod** deliberately retain relay-pod ownership: the application has not
+  established that values from future relay replicas may safely be combined.
+  **token.place terminal outcome rate** sums process-local counters and groups
+  them by the bounded `outcome` label.
+- **token.place HTTP request rate** groups summed counter rates by normalized
+  `route` and bounded `status_class`. **token.place HTTP 5xx ratio** divides the
+  summed 5xx rate by the summed request rate, and **token.place HTTP latency
+  percentiles** derives p50, p95, and p99 from summed histogram-bucket rates by
+  normalized route.
+- **token.place build identity** is an instant table containing only `pod`,
+  `version`, and `revision`.
+
+Every token.place query selects the canonical `app=tokenplace`,
+`release=tokenplace`, `cluster=sugarkube-int`, and `namespace=tokenplace`
+labels plus the selected environment. Logical gauges use `max` to deduplicate
+values that future relay replicas may repeat instead of incorrectly adding
+them. Process-local event counters use summed rates. No token.place state or
+event query substitutes zero for an absent series: an emitted zero remains
+zero, while absent instrumentation remains `NO DATA`. Queries and legends do
+not expose raw targets, instances, node identities, request identifiers,
+URLs, payloads, credentials, or other sensitive or unbounded labels.
+
+A real encrypted staging request provided the Phase 1 functional evidence:
+the single canonical Prometheus target was healthy; registered and healthy
+nodes were both 1; in-flight requests moved `0 → 1 → 0`; the maximum observed
+in-flight age was approximately 49.52 seconds; completed outcomes moved
+`1 → 2`; queue depth and queued age stayed at 0; compute-node evictions stayed
+at 0; and maximum lease age was approximately 28.15 seconds. The emitted
+bounded outcomes were `completed`, `cancelled`, `expired`, `timed_out`,
+`rate_limited`, `dependency_failure`, and `failed`. This is observed staging
+evidence, not justification for alert thresholds.
+
+Repository support is only the dashboard source and its fail-closed checks.
+After merge, an operator must run the guarded staging Helm upgrade, verify the
+stable dashboard UID through the Grafana API, and visually inspect the panels;
+until then, the repository change is not deployment proof. Functional chat
+availability, schedulable-node capacity, availability-reason, and shared-state
+health panels remain Phase 2 work and are not presented as implemented here.
+
 - Helm release: `kube-prometheus-stack` in namespace `monitoring`.
 - Prometheus: one replica, `7d` retention, `15GB` retention size, `local-path` `ReadWriteOnce` PVC requesting `20Gi`, CPU request `200m`, memory request `512Mi`, memory limit `2Gi`, admin API disabled, and external label `cluster=sugarkube-int`.
 - Alertmanager: one replica with root/default no-op receiver named exactly `"null"`. Staging values

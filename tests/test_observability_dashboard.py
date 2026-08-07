@@ -54,6 +54,8 @@ def test_dashboard_identity_defaults_rows_and_required_panels(dashboard):
         "DSPACE runtime and release",
         "DSPACE feature traffic",
         "Blackbox monitoring",
+        "token.place relay and compute capacity",
+        "token.place HTTP and release",
     }
     titles = {panel["title"] for panel in panels}
     for title in (
@@ -73,6 +75,20 @@ def test_dashboard_identity_defaults_rows_and_required_panels(dashboard):
         "Probe duration",
         "HTTP response status",
         "TLS certificate lifetime",
+        "token.place scrape availability",
+        "token.place instrumentation health",
+        "token.place compute-node counts",
+        "token.place oldest compute-node lease age",
+        "token.place compute-node eviction rate",
+        "token.place relay queue depth",
+        "token.place oldest queued-request age",
+        "token.place in-flight requests by pod",
+        "token.place oldest in-flight age by pod",
+        "token.place terminal outcome rate",
+        "token.place HTTP request rate",
+        "token.place HTTP 5xx ratio",
+        "token.place HTTP latency percentiles",
+        "token.place build identity",
     ):
         assert title in titles
 
@@ -96,6 +112,93 @@ def test_queries_use_stable_datasource_bounded_labels_and_safe_zero(dashboard):
         "app",
         "route",
     }
+
+
+def test_tokenplace_queries_are_replica_safe_bounded_and_preserve_missing_data(dashboard):
+    panels = {panel["title"]: panel for panel in all_panels(dashboard)}
+    token_panels = [
+        panel for panel in panels.values() if panel["id"] >= 23 and panel["type"] != "row"
+    ]
+    expressions = [target["expr"] for panel in token_panels for target in panel["targets"]]
+    selector = (
+        'app="tokenplace",environment=~"$environment",release="tokenplace",'
+        'cluster="sugarkube-int",namespace="tokenplace"'
+    )
+    assert all(selector in expression for expression in expressions)
+    assert all("vector(0)" not in expression for expression in expressions)
+    assert all(panel["fieldConfig"]["defaults"]["noValue"] == "NO DATA" for panel in token_panels)
+
+    counts = panels["token.place compute-node counts"]
+    assert all(target["expr"].startswith("max(") for target in counts["targets"])
+    assert panels["token.place relay queue depth"]["targets"][0]["expr"].startswith(
+        "max by (provider_mode)"
+    )
+    assert panels["token.place in-flight requests by pod"]["targets"][0]["expr"].startswith(
+        "max by (pod)"
+    )
+    assert (
+        "sum by (reason) (rate("
+        in panels["token.place compute-node eviction rate"]["targets"][0]["expr"]
+    )
+    assert (
+        "sum by (outcome) (rate("
+        in panels["token.place terminal outcome rate"]["targets"][0]["expr"]
+    )
+    assert (
+        "sum by (route, status_class) (rate("
+        in panels["token.place HTTP request rate"]["targets"][0]["expr"]
+    )
+
+    latency = panels["token.place HTTP latency percentiles"]
+    assert len(latency["targets"]) == 3
+    assert all("histogram_quantile(" in target["expr"] for target in latency["targets"])
+    assert all("sum by (le, route)" in target["expr"] for target in latency["targets"])
+    build = panels["token.place build identity"]["targets"][0]
+    assert build["expr"].startswith("max by (pod, version, revision)")
+    assert build["legendFormat"] == "{{pod}} {{version}} {{revision}}"
+
+
+@pytest.mark.parametrize(
+    ("title", "replacement", "message"),
+    [
+        (
+            "token.place compute-node counts",
+            "sum(tokenplace_compute_nodes_registered)",
+            "canonical target selector",
+        ),
+        (
+            "token.place terminal outcome rate",
+            "sum(rate(tokenplace_relay_request_outcomes_total{"
+            'app="tokenplace",environment=~"$environment",release="tokenplace",'
+            'cluster="sugarkube-int",namespace="tokenplace"}[$__rate_interval])) '
+            "or vector(0)",
+            "substituting zero",
+        ),
+        (
+            "token.place compute-node eviction rate",
+            "sum(rate(tokenplace_compute_node_evictions_total{"
+            'app="tokenplace",environment=~"$environment",release="tokenplace",'
+            'cluster="sugarkube-int",namespace="tokenplace"}[$__rate_interval]))',
+            "bounded reason",
+        ),
+        (
+            "token.place in-flight requests by pod",
+            "sum(tokenplace_relay_in_flight_requests{"
+            'app="tokenplace",environment=~"$environment",release="tokenplace",'
+            'cluster="sugarkube-int",namespace="tokenplace"})',
+            "per pod",
+        ),
+    ],
+)
+def test_validator_rejects_unsafe_tokenplace_query_regressions(
+    dashboard, title, replacement, message
+):
+    changed = json.loads(json.dumps(dashboard))
+    next(panel for panel in changed["panels"] if panel["title"] == title)["targets"][0][
+        "expr"
+    ] = replacement
+    with pytest.raises(SystemExit, match=message):
+        validator.validate_tokenplace_semantics(changed)
 
 
 def test_snapshot_tables_use_instant_queries(dashboard):
