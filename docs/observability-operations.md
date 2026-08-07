@@ -155,6 +155,35 @@ is not rollout evidence.
 - dChat and token.place dependency traffic may be absent until those features
   receive requests. Their queries deliberately fall back to zero: **no requests
   observed** is expected and is not an instrumentation failure.
+- The two token.place Phase 1 rows use only metric families verified in staging:
+  - **token.place scrape availability** reports Prometheus `up` per relay pod, while
+    **token.place instrumentation health** reports the application's own health
+    gauge per pod. Both map `1` to healthy and `0` to unhealthy; an absent series
+    is shown as `NO DATA`.
+  - **Registered and healthy compute nodes** shows the two logical capacity
+    gauges. **Oldest compute-node lease age** shows the maximum emitted lease age.
+    These cluster-wide gauges use `max`, rather than summing values repeated by
+    future relay replicas.
+  - **Compute-node eviction rate by reason** sums process-local counter rates and
+    retains only the bounded `reason`. **Queue depth by provider mode** and
+    **Oldest queued-request age by provider mode** use `max` to deduplicate logical
+    gauges and retain only bounded `provider_mode` values.
+  - **In-flight requests by relay pod** and **Oldest in-flight age by relay pod**
+    deliberately preserve `pod`: in-flight ownership is relay-process local, so
+    cross-replica aggregation is not assumed safe.
+  - **Terminal outcome rate by outcome** sums process-local counter rates and
+    groups only by the bounded `outcome` enum.
+  - **token.place HTTP request rate by route and status class** sums process-local
+    rates and uses only normalized `route` and bounded `status_class` labels.
+    **token.place HTTP 5xx ratio** divides the summed 5xx rate by the summed total
+    rate. **token.place HTTP latency percentiles** derives p50, p95, and p99 from
+    buckets summed by `le` and normalized route.
+  - **token.place build identity** is an instant table retaining `pod`, `version`,
+    and `revision` so mixed releases remain visible.
+  Every token.place query is scoped to the canonical application, selected
+  environment, release, cluster, and namespace labels. Rate panels use
+  `$__rate_interval`. No token.place panel substitutes zero for a missing series:
+  an emitted zero remains zero, while absent instrumentation remains `NO DATA`.
 - Grafana URL: `http://sugarkube3.local:30300`; the same NodePort is available through the other staging nodes.
 - Prometheus, Alertmanager, and administrative services remain ClusterIP-only.
 - No public ingress, public DNS, Cloudflare route, router forwarding, or public observability endpoint is part of this lifecycle.
@@ -395,6 +424,16 @@ lost, and distinct from the automated evidence above:
   `ServiceMonitor` reporting two healthy Prometheus targets in staging. `scripts/observability_helm.sh`
   only asserts "at least one target, all healthy" (`verify_dspace_targets`), so the exact count of two
   is an observed fact at time of writing, not a value the verification script enforces.
+- **token.place Phase 1 signals during a real encrypted request.** Operators observed
+  one healthy Prometheus target with canonical `app=tokenplace`,
+  `environment=staging`, `release=tokenplace`, `cluster=sugarkube-int`, and
+  `namespace=tokenplace` labels. Registered and healthy nodes were both `1`;
+  in-flight requests moved `0 → 1 → 0`, with a maximum observed age of about
+  `49.52s`; completed outcomes moved `1 → 2`; queue depth and queued age stayed
+  `0`; evictions stayed `0`; and maximum lease age was about `28.15s`. Observed
+  bounded outcomes were `completed`, `cancelled`, `expired`, `timed_out`,
+  `rate_limited`, `dependency_failure`, and `failed`. This is point-in-time staging
+  evidence, not an alert-threshold basis or a continuously enforced guarantee.
 
 ## Follow-ups intentionally out of scope
 
@@ -406,6 +445,13 @@ remains outstanding. The watchdog's secret-safe configuration and operator workf
 repository-ready, as tracked in [`docs/observability-alerting.md`](observability-alerting.md). Its
 Secret installation, deployment, live confirmation, and failure-drill evidence remain post-merge
 operator work.
+
+The token.place dashboard slice is repository-ready only. After merge, an operator
+must run the staging Helm upgrade, verify provisioning through Grafana's API with
+`just observability-dashboard-verify env=staging`, and visually inspect every new
+panel. Functional chat availability, schedulable-node capacity, availability-reason,
+and shared-state health panels remain Phase 2 work; this Phase 1 slice does not
+claim issue #2405 is closed or fully complete.
 
 ## Observability watchdog
 
