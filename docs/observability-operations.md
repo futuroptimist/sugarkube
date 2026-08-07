@@ -155,6 +155,57 @@ is not rollout evidence.
 - dChat and token.place dependency traffic may be absent until those features
   receive requests. Their queries deliberately fall back to zero: **no requests
   observed** is expected and is not an instrumentation failure.
+
+### token.place Phase 1 dashboard slice
+
+The two token.place rows use only metric families verified from the staging
+target with canonical `app=tokenplace`, `environment=staging`,
+`release=tokenplace`, `cluster=sugarkube-int`, and `namespace=tokenplace`
+labels:
+
+- **token.place relay and compute capacity** shows Prometheus scrape and
+  instrumentation health per relay pod; registered and healthy compute-node
+  counts; the oldest compute-node lease; eviction rate by bounded `reason`;
+  queue depth and oldest queued-request age by bounded `provider_mode`;
+  in-flight count and oldest age per relay pod; and terminal request rate by
+  bounded `outcome`.
+- **token.place HTTP and release** shows summed HTTP request rate by normalized
+  `route` and bounded `status_class`, the 5xx ratio, p50/p95/p99 latency from
+  histogram buckets, and build identity by `pod`, `version`, and `revision`.
+
+Logical shared gauges use `max` to deduplicate values that future relay replicas
+may repeat; they are never added together. In-flight gauges remain per pod
+because their ownership is process-local and aggregation across future replicas
+is not yet a safe operational contract. Process-local HTTP, outcome, and
+eviction counters use summed rates over Grafana's rate interval. Latency
+percentiles sum buckets by `le` and normalized route before calculating the
+quantile. Queries never group by raw scrape targets, instances, URLs, request or
+node identities, payloads, or credential-bearing labels.
+
+Every token.place panel displays a missing series as **NO DATA**. An emitted
+gauge value of zero remains zero, and initialized bounded outcome and eviction
+counters can report a real zero rate. The queries deliberately do not substitute
+zero for absent data. Health mappings distinguish healthy (`1`), unhealthy
+(`0`), and missing data.
+
+A successful encrypted staging request provided the Phase 1 evidence for this
+view: one registered and one healthy node; in-flight requests moving
+`0 → 1 → 0`; a maximum observed in-flight age of approximately `49.52s`;
+completed outcomes moving `1 → 2`; queue depth and queued age remaining zero;
+compute-node evictions remaining zero; and a maximum lease age of approximately
+`28.15s`. The live target was healthy with the canonical labels above. Observed
+outcome labels were the bounded `completed`, `cancelled`, `expired`, `timed_out`,
+`rate_limited`, `dependency_failure`, and `failed` values. This is staging
+evidence, not justification for alert thresholds.
+
+Repository support alone does not prove the provisioned dashboard is live.
+After merge, an operator must run the guarded staging Helm upgrade, verify the
+stable dashboard UID through the Grafana API with
+`just observability-dashboard-verify env=staging`, and visually inspect the
+rendered panels and their no-data behavior. Functional chat availability,
+schedulable-node capacity and availability reasons, and shared-state health
+remain Phase 2 work; this slice does not present placeholder metrics for them.
+
 - Grafana URL: `http://sugarkube3.local:30300`; the same NodePort is available through the other staging nodes.
 - Prometheus, Alertmanager, and administrative services remain ClusterIP-only.
 - No public ingress, public DNS, Cloudflare route, router forwarding, or public observability endpoint is part of this lifecycle.

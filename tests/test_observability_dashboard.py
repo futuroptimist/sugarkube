@@ -54,6 +54,8 @@ def test_dashboard_identity_defaults_rows_and_required_panels(dashboard):
         "DSPACE runtime and release",
         "DSPACE feature traffic",
         "Blackbox monitoring",
+        "token.place relay and compute capacity",
+        "token.place HTTP and release",
     }
     titles = {panel["title"] for panel in panels}
     for title in (
@@ -73,6 +75,20 @@ def test_dashboard_identity_defaults_rows_and_required_panels(dashboard):
         "Probe duration",
         "HTTP response status",
         "TLS certificate lifetime",
+        "token.place scrape availability",
+        "token.place instrumentation health",
+        "Registered and healthy compute nodes",
+        "Oldest compute-node lease age",
+        "Compute-node eviction rate by reason",
+        "Relay queue depth by provider mode",
+        "Oldest queued-request age by provider mode",
+        "In-flight requests by relay pod",
+        "Oldest in-flight age by relay pod",
+        "Terminal outcome rate by outcome",
+        "token.place HTTP request rate",
+        "token.place HTTP 5xx ratio",
+        "token.place HTTP latency percentiles",
+        "token.place build identity",
     ):
         assert title in titles
 
@@ -98,8 +114,69 @@ def test_queries_use_stable_datasource_bounded_labels_and_safe_zero(dashboard):
     }
 
 
+def test_tokenplace_phase_one_query_contracts(dashboard):
+    token_panels = {
+        panel["title"]: panel
+        for panel in all_panels(dashboard)
+        if any("tokenplace_" in target.get("expr", "") for target in panel.get("targets", []))
+    }
+    expressions = [target["expr"] for panel in token_panels.values() for target in panel["targets"]]
+    required = {
+        "tokenplace_compute_nodes_registered",
+        "tokenplace_compute_nodes_healthy",
+        "tokenplace_compute_node_lease_age_seconds",
+        "tokenplace_compute_node_evictions_total",
+        "tokenplace_relay_queue_depth",
+        "tokenplace_relay_oldest_queued_request_age_seconds",
+        "tokenplace_relay_in_flight_requests",
+        "tokenplace_relay_oldest_in_flight_age_seconds",
+        "tokenplace_relay_request_outcomes_total",
+        "tokenplace_http_requests_total",
+        "tokenplace_http_request_duration_seconds_bucket",
+        "tokenplace_instrumentation_up",
+        "tokenplace_build_info",
+    }
+    assert all(any(metric in expression for expression in expressions) for metric in required)
+    canonical = (
+        'app="tokenplace",environment=~"$environment",release="tokenplace",'
+        'cluster="sugarkube-int",namespace="tokenplace"'
+    )
+    assert all(canonical in expression for expression in expressions)
+    assert not any("vector(0)" in expression for expression in expressions)
+    assert all(
+        panel["fieldConfig"]["defaults"]["noValue"] == "NO DATA" for panel in token_panels.values()
+    )
+    assert (
+        "sum by (reason) (rate("
+        in token_panels["Compute-node eviction rate by reason"]["targets"][0]["expr"]
+    )
+    assert (
+        "sum by (outcome) (rate("
+        in token_panels["Terminal outcome rate by outcome"]["targets"][0]["expr"]
+    )
+    assert all(
+        "[$__rate_interval]" in expression
+        for expression in expressions
+        if "_total" in expression or "_bucket" in expression
+    )
+    assert "max by (pod)" in token_panels["In-flight requests by relay pod"]["targets"][0]["expr"]
+    assert (
+        "max by (pod, version, revision)"
+        in token_panels["token.place build identity"]["targets"][0]["expr"]
+    )
+    assert (
+        "histogram_quantile"
+        in token_panels["token.place HTTP latency percentiles"]["targets"][0]["expr"]
+    )
+
+
 def test_snapshot_tables_use_instant_queries(dashboard):
-    snapshots = {"Endpoint matrix", "Build identity", "HTTP response status"}
+    snapshots = {
+        "Endpoint matrix",
+        "Build identity",
+        "HTTP response status",
+        "token.place build identity",
+    }
     panels = {panel["title"]: panel for panel in all_panels(dashboard)}
     for title in snapshots:
         assert panels[title]["targets"]
@@ -493,6 +570,52 @@ def test_validator_directly_rejects_unsafe_dashboard_sources(
 ):
     candidate = tmp_path / "candidate.json"
     mutation(dashboard)
+    candidate.write_text(json.dumps(dashboard), encoding="utf-8")
+    with pytest.raises(SystemExit, match=message):
+        validator.validate_dashboard(candidate)
+
+
+@pytest.mark.parametrize(
+    ("title", "replacement", "message"),
+    [
+        (
+            "Registered and healthy compute nodes",
+            'sum(tokenplace_compute_nodes_registered{app="tokenplace"})',
+            "canonical target selector",
+        ),
+        (
+            "Compute-node eviction rate by reason",
+            'rate(tokenplace_compute_node_evictions_total{app="tokenplace"}[5m])',
+            "canonical target selector",
+        ),
+        (
+            "Terminal outcome rate by outcome",
+            'sum(rate(tokenplace_relay_request_outcomes_total{app="tokenplace",environment=~'
+            '"$environment",release="tokenplace",cluster="sugarkube-int",namespace="tokenplace"}'
+            "[$__rate_interval])) or vector(0)",
+            "converted to zero",
+        ),
+        (
+            "token.place HTTP request rate",
+            'sum by (instance) (rate(tokenplace_http_requests_total{app="tokenplace",environment=~'
+            '"$environment",release="tokenplace",cluster="sugarkube-int",namespace="tokenplace"}'
+            "[$__rate_interval]))",
+            "unsafe labels",
+        ),
+        (
+            "token.place HTTP latency percentiles",
+            'tokenplace_shared_state_health{app="tokenplace",environment=~"$environment",'
+            'release="tokenplace",cluster="sugarkube-int",namespace="tokenplace"}',
+            "Phase 2 metrics",
+        ),
+    ],
+)
+def test_validator_rejects_tokenplace_query_regressions(
+    tmp_path, dashboard, title, replacement, message
+):
+    panel = next(panel for panel in dashboard["panels"] if panel["title"] == title)
+    panel["targets"][0]["expr"] = replacement
+    candidate = tmp_path / "tokenplace-regression.json"
     candidate.write_text(json.dumps(dashboard), encoding="utf-8")
     with pytest.raises(SystemExit, match=message):
         validator.validate_dashboard(candidate)
