@@ -308,6 +308,27 @@ def test_validator_rejects_unscoped_unverified_or_synthesized_metrics(
 
 
 @pytest.mark.parametrize(
+    "addition",
+    [
+        "process_cpu_seconds_total",
+        "probe_success",
+        "sum(arbitrary_external_metric_total) + 1",
+    ],
+)
+def test_validator_rejects_any_bare_metric_selector(dashboard, addition):
+    changed = json.loads(json.dumps(dashboard))
+    panel = next(
+        panel
+        for panel in all_panels(changed)
+        if panel["title"] == "token.place scrape availability"
+    )
+    expression = panel["targets"][0]["expr"]
+    panel["targets"][0]["expr"] = f"({expression}) or ({addition})"
+    with pytest.raises(SystemExit, match="bare or unverified metric selector"):
+        validator.validate_tokenplace_semantics(changed)
+
+
+@pytest.mark.parametrize(
     ("title", "replacement", "message"),
     [
         (

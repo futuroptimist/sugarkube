@@ -101,6 +101,25 @@ TOKENPLACE_LABELS = {
     "version",
     "revision",
 }
+TOKENPLACE_PROMQL_FUNCTIONS = {
+    "clamp_min",
+    "histogram_quantile",
+    "max",
+    "min",
+    "rate",
+    "sum",
+}
+TOKENPLACE_PROMQL_MODIFIERS = {
+    "and",
+    "bool",
+    "group_left",
+    "group_right",
+    "ignoring",
+    "offset",
+    "on",
+    "or",
+    "unless",
+}
 
 
 def load_dashboard(path: Path) -> dict:
@@ -347,6 +366,8 @@ def validate_tokenplace_semantics(dashboard: dict) -> None:
         raise SystemExit(
             "ERROR: token.place queries must preserve missing data instead of substituting zero."
         )
+    if any(re.search(r"\blabel_(?:replace|join)\s*\(", expression) for expression in expressions):
+        raise SystemExit("ERROR: token.place queries must not synthesize labels.")
 
     expected_metrics = {
         "token.place scrape availability": {"up"},
@@ -395,16 +416,36 @@ def validate_tokenplace_semantics(dashboard: dict) -> None:
                     [*(selector.start() for selector in selectors), len(expression)],
                 )
             )
-            if re.search(r"\b(?:up|tokenplace_[a-zA-Z0-9_:]*)\b", without_selectors):
+            selector_free = re.sub(r'"(?:\\.|[^"\\])*"', "", without_selectors)
+            selector_free = re.sub(r"\$[a-zA-Z_][a-zA-Z0-9_]*", "", selector_free)
+            selector_free = re.sub(
+                r"\b(?:by|without|on|ignoring|group_left|group_right)\s*\([^()]*\)",
+                "",
+                selector_free,
+            )
+            selector_free = re.sub(
+                rf"\b(?:{'|'.join(TOKENPLACE_PROMQL_FUNCTIONS)})\s*(?=\()",
+                "",
+                selector_free,
+            )
+            selector_free = re.sub(
+                rf"\b(?:{'|'.join(TOKENPLACE_PROMQL_MODIFIERS)})\b",
+                "",
+                selector_free,
+            )
+            selector_free = re.sub(
+                r"(?<![a-zA-Z_:])(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?",
+                "",
+                selector_free,
+                flags=re.IGNORECASE,
+            )
+            if re.search(r"\b[a-zA-Z_:][a-zA-Z0-9_:]*\b", selector_free):
                 raise SystemExit(
                     f"ERROR: {title} contains a bare or unverified metric selector; "
                     "the canonical target selector is required."
                 )
         if found != intended:
             raise SystemExit(f"ERROR: {title} must use its intended metric family.")
-
-    if any(re.search(r"\blabel_(?:replace|join)\s*\(", expression) for expression in expressions):
-        raise SystemExit("ERROR: token.place queries must not synthesize labels.")
 
     for title in (
         "token.place scrape availability",
