@@ -35,6 +35,11 @@ def replace_metric_expression(document, metric, replacement):
     target["expr"] = replacement
 
 
+def replace_panel_expression(document, title, replacement):
+    panel = next(panel for panel in all_panels(document) if panel["title"] == title)
+    panel["targets"][0]["expr"] = replacement
+
+
 @pytest.fixture
 def dashboard():
     return json.loads(DASHBOARD.read_text(encoding="utf-8"))
@@ -54,6 +59,7 @@ def test_dashboard_identity_defaults_rows_and_required_panels(dashboard):
         "DSPACE runtime and release",
         "DSPACE feature traffic",
         "Blackbox monitoring",
+        "DSPACE release integrity",
         "token.place relay and compute capacity",
         "token.place HTTP and release",
     }
@@ -101,7 +107,8 @@ def test_queries_use_stable_datasource_bounded_labels_and_safe_zero(dashboard):
     assert '"uid": "prometheus"' in serialized
     assert "${DS_" not in serialized and "__inputs" not in serialized
     assert not any("{{target}}" in serialized or "target=~" in expr for expr in expressions)
-    assert "http://" not in serialized and "https://" not in serialized
+    assert "http://" not in serialized
+    assert serialized.count("https://github.com/futuroptimist/sugarkube/blob/main/") == 2
     assert all(
         "or on() vector(0)" in expr
         for expr in expressions
@@ -697,6 +704,43 @@ def test_validator_rejects_wrong_dashboard_mount(tmp_path, dashboard, mount_path
             ).update(title="Removed matrix"),
             "exactly one 'Endpoint matrix' panel",
         ),
+        (
+            lambda item: next(
+                panel
+                for panel in item["panels"]
+                if panel["title"] == "Active build revisions by pod"
+            )["targets"].clear(),
+            "must contain exactly one PromQL target",
+        ),
+        (
+            lambda item: replace_panel_expression(
+                item,
+                "Active build revisions by pod",
+                'max by (pod, revision) (dspace_build_info{environment=~"$environment"})',
+            ),
+            "active build revisions must include only serving DSPACE pods",
+        ),
+        (
+            lambda item: replace_panel_expression(
+                item,
+                "Image-pin agreement",
+                next(
+                    panel["targets"][0]["expr"]
+                    for panel in all_panels(item)
+                    if panel["title"] == "Image-pin agreement"
+                ).replace(" or on() vector(0)", ""),
+            ),
+            "image-pin agreement must filter serving pods and return a healthy zero",
+        ),
+        (
+            lambda item: replace_panel_expression(
+                item,
+                "DSPACE metrics-target health",
+                'sum(up{namespace="dspace",service=~"dspace.*"}) / '
+                'count(up{namespace="dspace",service=~"dspace.*"}) or on() vector(0)',
+            ),
+            "metrics-target health must count down or missing serving targets",
+        ),
     ],
 )
 def test_validator_directly_rejects_unsafe_dashboard_sources(
@@ -706,6 +750,16 @@ def test_validator_directly_rejects_unsafe_dashboard_sources(
     mutation(dashboard)
     candidate.write_text(json.dumps(dashboard), encoding="utf-8")
     with pytest.raises(SystemExit, match=message):
+        validator.validate_dashboard(candidate)
+
+
+def test_validator_directly_rejects_overlapping_panels(tmp_path, dashboard):
+    positioned = [panel for panel in dashboard["panels"] if panel.get("type") != "row"]
+    positioned[1]["gridPos"] = dict(positioned[0]["gridPos"])
+    candidate = tmp_path / "overlap.json"
+    candidate.write_text(json.dumps(dashboard), encoding="utf-8")
+
+    with pytest.raises(SystemExit, match="overlap"):
         validator.validate_dashboard(candidate)
 
 

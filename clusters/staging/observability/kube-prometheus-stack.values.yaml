@@ -32,6 +32,12 @@ alertmanager:
       repeat_interval: null
       receiver: "null"
       routes:
+        - receiver: pagerduty-dspace
+          matchers:
+            - alertname=~"^(DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown)$"
+            - environment="staging"
+            - cluster="sugarkube-int"
+            - severity="critical"
         - receiver: pagerduty-synthetic-test
           matchers:
             - alertname="SugarkubePagerDutyTest"
@@ -55,9 +61,21 @@ alertmanager:
         pagerduty_configs:
           - routing_key_file: /etc/alertmanager/secrets/alertmanager-pagerduty/routing-key
             send_resolved: true
+      - name: pagerduty-dspace
+        pagerduty_configs:
+          - routing_key_file: /etc/alertmanager/secrets/alertmanager-pagerduty/routing-key
+            send_resolved: true
       - name: healthchecks-watchdog
         webhook_configs:
           - url_file: /etc/alertmanager/secrets/alertmanager-healthchecks-watchdog/ping-url
             send_resolved: false
             max_alerts: 1
             timeout: 10s
+prometheus-node-exporter:
+  extraArgs:
+    - --collector.textfile.directory=/var/lib/node_exporter/textfile_collector
+  extraHostVolumeMounts:
+    - name: dspace-chat-textfile
+      hostPath: /var/lib/node_exporter/textfile_collector
+      mountPath: /var/lib/node_exporter/textfile_collector
+      readOnly: true

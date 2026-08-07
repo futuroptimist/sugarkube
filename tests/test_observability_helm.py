@@ -12,6 +12,9 @@ ROOT = Path(__file__).resolve().parents[1]
 VERSION = ROOT / "platform" / "observability" / "helm" / "kube-prometheus-stack.version"
 COMMON = ROOT / "platform" / "observability" / "helm" / "kube-prometheus-stack.values.common.yaml"
 STAGING = ROOT / "clusters" / "staging" / "observability" / "kube-prometheus-stack.values.yaml"
+CANONICAL_DSPACE_RULES = (
+    ROOT / "platform" / "observability" / "rules" / "dspace-release-integrity.yaml"
+)
 SCRIPT = ROOT / "scripts" / "observability_helm.sh"
 ALERTMANAGER_VALIDATOR = ROOT / "scripts" / "verify_observability_alertmanager.rb"
 DASHBOARD = ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
@@ -24,6 +27,18 @@ LEGACY = [
     ROOT / "clusters" / "staging" / "patches" / "kube-prometheus-stack-values.yaml",
     ROOT / "clusters" / "prod" / "patches" / "kube-prometheus-stack-values.yaml",
 ]
+DSPACE_ALERT_MATCHER = (
+    'alertname=~"^(DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|'
+    "DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|"
+    'DspaceMetricsTargetDown)$"'
+)
+DSPACE_ALERT_NAMES = (
+    "DspaceBuildRevisionMismatch",
+    "DspaceMixedBuildRevisions",
+    "DspaceDeploymentImagePinMismatch",
+    "DspaceChatSyntheticFailed",
+    "DspaceMetricsTargetDown",
+)
 
 
 def watchdog_canary():
@@ -82,7 +97,7 @@ def test_chart_version_and_values_match_live_staging_baseline():
         "group_interval": None,
         "repeat_interval": None,
     }
-    assert route["routes"][0] == {
+    assert route["routes"][1] == {
         "receiver": "pagerduty-synthetic-test",
         "matchers": [
             'alertname="SugarkubePagerDutyTest"',
@@ -91,7 +106,10 @@ def test_chart_version_and_values_match_live_staging_baseline():
             'severity="critical"',
         ],
     }
-    watchdog_route = route["routes"][1]
+    dspace_route = route["routes"][0]
+    assert dspace_route["receiver"] == "pagerduty-dspace"
+    assert dspace_route["matchers"][0] == DSPACE_ALERT_MATCHER
+    watchdog_route = route["routes"][2]
     assert watchdog_route["receiver"] == "healthchecks-watchdog"
     assert watchdog_route["repeat_interval"] == "5m"
     pagerduty_receiver = next(
@@ -175,6 +193,12 @@ stringData:
     route:
       receiver: "null"
       routes:
+        - receiver: pagerduty-dspace
+          matchers:
+            - '{DSPACE_ALERT_MATCHER}'
+            - 'environment="staging"'
+            - 'cluster="sugarkube-int"'
+            - 'severity="critical"'
         - receiver: pagerduty-synthetic-test
           matchers:
 {matcher_yaml}
@@ -195,6 +219,10 @@ stringData:
         pagerduty_configs:
           - routing_key_file: {path}
             send_resolved: true{inline_field}
+      - name: pagerduty-dspace
+        pagerduty_configs:
+          - routing_key_file: {path}
+            send_resolved: true
       - name: healthchecks-watchdog
         webhook_configs:
           - url_file: /etc/alertmanager/secrets/alertmanager-healthchecks-watchdog/ping-url
@@ -295,10 +323,10 @@ def test_alertmanager_validator_redacts_invalid_base64(tmp_path):
         ),
         (
             lambda text: text.replace(
-                "      routes:\n        - receiver: pagerduty-synthetic-test",
-                "      routes:\n        - receiver: nested\n          routes:\n            - receiver: pagerduty-synthetic-test",
+                "      routes:\n        - receiver: pagerduty-dspace",
+                "      routes:\n        - receiver: nested\n          routes:\n            - receiver: pagerduty-dspace",
             ),
-            "PagerDuty route ordering or receiver changed",
+            "DSPACE route ordering or receiver changed",
         ),
         (
             lambda text: text.replace(
@@ -312,7 +340,7 @@ def test_alertmanager_validator_redacts_invalid_base64(tmp_path):
                 "            send_resolved: true",
                 "            send_resolved: true\n          - routing_key_file: /another/file",
             ),
-            "exactly one PagerDuty configuration",
+            "PagerDuty configuration is malformed",
         ),
         (
             lambda text: text.replace(
@@ -333,14 +361,14 @@ def test_alertmanager_validator_redacts_invalid_base64(tmp_path):
                 "            - 'severity=\"critical\"'",
                 "            - 'severity=\"critical\"'\n          continue: false",
             ),
-            "PagerDuty route must contain only receiver and exact matchers",
+            "DSPACE route must contain only receiver and exact matchers",
         ),
         (
             lambda text: text.replace(
                 "            - 'severity=\"critical\"'",
                 "            - 'severity=\"critical\"'\n          routes: []",
             ),
-            "PagerDuty route must contain only receiver and exact matchers",
+            "DSPACE route must contain only receiver and exact matchers",
         ),
         (
             lambda text: text.replace(
@@ -411,11 +439,96 @@ def test_lifecycle_uses_pinned_version_ordered_values_and_no_reuse_values():
         in script
     )
     assert 'CHART="prometheus-community/kube-prometheus-stack"' in script
-    assert '--version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}"' in script
+    ordered_values = '-f "${COMMON_VALUES}" -f "${STAGING_VALUES}" -f "${RULES_OVERLAY}"'
+    assert script.count(ordered_values) == 3
     assert "--reuse-values" not in script
     assert "platform/observability/kube-prometheus-stack-values.yaml" not in script
     assert "clusters/staging/patches/kube-prometheus-stack-values.yaml" not in script
     assert "longhorn" not in script.lower()
+
+
+def test_print_resolved_reports_complete_stable_source_chain(tmp_path):
+    result, _ = run_helper(tmp_path, "render")
+    assert result.returncode == 0
+
+    sources = [str(COMMON), str(STAGING), str(CANONICAL_DSPACE_RULES), str(DASHBOARD)]
+    positions = [result.stdout.index(source) for source in sources]
+    assert positions == sorted(positions)
+    assert "generated mode-0600 rules overlay sourced from" in result.stdout
+    assert "sugarkube-observability-rules." not in result.stdout
+
+
+def test_operations_runbook_describes_dspace_operator_contract():
+    operations = (ROOT / "docs" / "observability-operations.md").read_text(encoding="utf-8")
+    for source in (
+        "platform/observability/rules/dspace-release-integrity.yaml",
+        "docs/observability-dspace-release-integrity.md",
+    ):
+        assert source in operations
+
+    assert "SugarkubePagerDutyTest" in operations
+    assert "deployed and has passed" in operations
+    assert "That five-alert route is not yet deployed or live-proven" in operations
+    assert "pagerduty-dspace" in operations
+    assert "send_resolved: true" in operations
+    assert 'fall through to `"null"`' in operations
+    assert "watchdog route, its order" in operations
+    assert "30-second group wait" in operations
+    for alert in DSPACE_ALERT_NAMES:
+        assert alert in operations
+    for stale in (
+        "Repository configuration is is deployed",
+        "both values files in order",
+        "bundled and real workload alerts still fall through",
+    ):
+        assert stale not in operations
+
+
+def test_dspace_rules_have_one_canonical_source_and_exact_overlay(tmp_path):
+    staging = yaml_load(STAGING)
+    assert "dspace-release-integrity" not in staging["additionalPrometheusRulesMap"]
+
+    result, audit = run_helper(tmp_path, "render")
+    assert result.returncode == 0
+    overlay = yaml_load(tmp_path / "rules-overlay.yaml")
+    assert overlay == {
+        "additionalPrometheusRulesMap": {
+            "dspace-release-integrity": yaml_load(CANONICAL_DSPACE_RULES)
+        }
+    }
+    overlay_paths = re.findall(r"/[^ ]*sugarkube-observability-rules\.[^ ]*\.yaml", audit)
+    assert overlay_paths
+    assert all(not Path(path).exists() for path in overlay_paths)
+
+
+@pytest.mark.parametrize(
+    ("command", "helm_mode", "helm_action"),
+    [
+        ("render", "absent", "template"),
+        ("install", "absent", "install"),
+        ("upgrade", "present", "upgrade"),
+    ],
+)
+def test_all_helm_paths_apply_canonical_rules_overlay_last(
+    tmp_path, command, helm_mode, helm_action
+):
+    result, audit = run_helper(tmp_path, command, helm_mode=helm_mode)
+    assert result.returncode == 0
+    action_lines = [line for line in audit.splitlines() if f"helm {helm_action} " in line]
+    assert action_lines
+    for line in action_lines:
+        common = line.index(str(COMMON))
+        staging = line.index(str(STAGING))
+        overlay = line.index("sugarkube-observability-rules.")
+        assert common < staging < overlay
+
+
+def test_rules_overlay_is_cleaned_when_render_fails(tmp_path):
+    result, audit = run_helper(tmp_path, "render", helm_mode="render-fail")
+    assert result.returncode != 0
+    overlay_paths = re.findall(r"/[^ ]*sugarkube-observability-rules\.[^ ]*\.yaml", audit)
+    assert overlay_paths
+    assert all(not Path(path).exists() for path in overlay_paths)
 
 
 def test_install_upgrade_are_distinct_and_render_before_mutation():
@@ -517,7 +630,7 @@ def test_watchdog_documentation_timing_matches_configuration():
         assert f"just observability-watchdog-{recipe} env=staging" in operations
 
     staging = yaml_load(STAGING)
-    route = staging["alertmanager"]["config"]["route"]["routes"][1]
+    route = staging["alertmanager"]["config"]["route"]["routes"][2]
     assert route["repeat_interval"] == "5m"
     assert re.search(r"five-minute period and\s+two-minute grace", operations)
     assert re.search(r"eight-minute Alertmanager\s+silence", operations)
@@ -603,6 +716,11 @@ def run_helper(
     (bin_dir / "helm").write_text(
         """#!/bin/sh
 echo "helm $*" >> "$AUDIT"
+for argument in "$@"; do
+  case "$argument" in
+    *sugarkube-observability-rules.*.yaml) cp "$argument" "$OVERLAY_CAPTURE" ;;
+  esac
+done
 case "$*" in
   *"repo add"*|*"repo update"*) exit 0 ;;
   *template*)
@@ -803,6 +921,7 @@ printf '%s' "$code"
     env = os.environ | {
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
         "AUDIT": str(audit),
+        "OVERLAY_CAPTURE": str(tmp_path / "rules-overlay.yaml"),
         "HELM_MODE": helm_mode,
         "CONTEXT": context,
         "KUBECTL_MODE": kubectl_mode,
@@ -841,9 +960,15 @@ printf '%s' "$code"
     if extra_env:
         env.update(extra_env)
     (tmp_path / "alertmanager-config.yaml").write_text(
-        """route:
+        f"""route:
   receiver: "null"
   routes:
+    - receiver: pagerduty-dspace
+      matchers:
+        - {DSPACE_ALERT_MATCHER}
+        - environment="staging"
+        - cluster="sugarkube-int"
+        - severity="critical"
     - receiver: pagerduty-synthetic-test
       matchers:
         - alertname="SugarkubePagerDutyTest"
@@ -864,6 +989,10 @@ printf '%s' "$code"
 receivers:
   - name: "null"
   - name: pagerduty-synthetic-test
+    pagerduty_configs:
+      - routing_key_file: /etc/alertmanager/secrets/alertmanager-pagerduty/routing-key
+        send_resolved: true
+  - name: pagerduty-dspace
     pagerduty_configs:
       - routing_key_file: /etc/alertmanager/secrets/alertmanager-pagerduty/routing-key
         send_resolved: true
@@ -1602,7 +1731,7 @@ def test_watchdog_rule_and_healthchecks_contract_are_exact():
             },
         }
     ]
-    webhook = staging["alertmanager"]["config"]["receivers"][2]["webhook_configs"][0]
+    webhook = staging["alertmanager"]["config"]["receivers"][3]["webhook_configs"][0]
     assert webhook == {
         "url_file": "/etc/alertmanager/secrets/alertmanager-healthchecks-watchdog/ping-url",
         "send_resolved": False,

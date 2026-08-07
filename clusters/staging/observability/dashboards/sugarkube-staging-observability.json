@@ -1075,7 +1075,7 @@
     {
       "id": 22,
       "type": "row",
-      "title": "token.place relay and compute capacity",
+      "title": "DSPACE release integrity",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -1085,7 +1085,192 @@
       }
     },
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
       "id": 23,
+      "type": "table",
+      "title": "Approved revision",
+      "description": "Approved immutable coordinate from finalized release evidence.",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 61
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "dspace_release_approved_info{environment=~\"$environment\"}",
+          "legendFormat": "{{revision}}",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 24,
+      "type": "table",
+      "title": "Active build revisions by pod",
+      "description": "Build identities reported by ready, Running, non-terminating DSPACE pods.",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 61
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (pod, revision) (dspace_build_info{environment=~\"$environment\"} and on (namespace, pod) (kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}))",
+          "legendFormat": "{{pod}} {{revision}}",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 25,
+      "type": "stat",
+      "title": "Image-pin agreement",
+      "description": "Zero means no active DSPACE container differs from the approved digest.",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 61
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count(max by (pod, image_id, image_spec) ((kube_pod_container_info{namespace=\"dspace\",container=\"dspace\"} unless on (namespace, pod, container) kube_pod_container_info{namespace=\"dspace\",container=\"dspace\",image_id=~\"^(docker-pullable://)?ghcr.io/democratizedspace/dspace@sha256:2b95b7fdccdd011553c8d8617e3090ee27323996c532148fdb147cb9fd6e1b6c$\",image_spec=\"ghcr.io/democratizedspace/dspace:main-018687f\"}) and on (namespace, pod, container) (kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"})) or label_replace(label_replace((kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}) unless on (namespace, pod, container) kube_pod_container_info{namespace=\"dspace\",container=\"dspace\"}, \"image_id\", \"unknown\", \"\", \"\"), \"image_spec\", \"unknown\", \"\", \"\")) or on() vector(0)",
+          "legendFormat": "mismatched pods",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 26,
+      "type": "stat",
+      "title": "DSPACE metrics-target health",
+      "description": "Count of ready, Running, non-terminating DSPACE pods whose target is down or undiscovered. Zero is healthy; missing targets fail closed.",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 67
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count((up{namespace=\"dspace\",service=~\"dspace.*\"} == 0) or ((kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}) unless on (namespace, pod) up{namespace=\"dspace\",service=~\"dspace.*\"})) or on() vector(0)",
+          "legendFormat": "down or missing serving targets",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 27,
+      "type": "stat",
+      "title": "/chat synthetic result and freshness",
+      "description": "Success and age; missing or older than 15 minutes fails closed.",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 67
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "dspace_chat_synthetic_success{environment=~\"$environment\"} or on() vector(0)",
+          "legendFormat": "success",
+          "instant": true,
+          "range": false
+        },
+        {
+          "refId": "B",
+          "expr": "time() - dspace_chat_synthetic_timestamp_seconds{environment=~\"$environment\"}",
+          "legendFormat": "age seconds",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 28,
+      "type": "text",
+      "title": "Release integrity references",
+      "description": "Operator-owned stable references.",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 67
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "[DSPACE integrity runbook](https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-dspace-release-integrity.md) · [Finalized staging evidence](https://github.com/futuroptimist/sugarkube/blob/main/deployment-evidence/dspace/staging/main-018687f-20260805T035722Z.json)"
+      }
+    },
+    {
+      "id": 29,
+      "type": "row",
+      "title": "token.place relay and compute capacity",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 73
+      }
+    },
+    {
+      "id": 30,
       "type": "stat",
       "title": "token.place scrape availability",
       "description": "Prometheus scrape health per relay pod. Missing targets remain NO DATA.",
@@ -1097,7 +1282,7 @@
         "h": 5,
         "w": 12,
         "x": 0,
-        "y": 61
+        "y": 74
       },
       "targets": [
         {
@@ -1154,7 +1339,7 @@
       }
     },
     {
-      "id": 24,
+      "id": 31,
       "type": "stat",
       "title": "token.place instrumentation health",
       "description": "Application instrumentation self-check per relay pod; zero is unhealthy and an absent series remains NO DATA.",
@@ -1166,7 +1351,7 @@
         "h": 5,
         "w": 12,
         "x": 12,
-        "y": 61
+        "y": 74
       },
       "targets": [
         {
@@ -1223,7 +1408,7 @@
       }
     },
     {
-      "id": 25,
+      "id": 32,
       "type": "timeseries",
       "title": "token.place compute-node counts",
       "description": "Registered and healthy logical compute-node gauges. max deduplicates identical values emitted by future relay replicas without multiplying capacity.",
@@ -1235,7 +1420,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 66
+        "y": 79
       },
       "targets": [
         {
@@ -1268,7 +1453,7 @@
       }
     },
     {
-      "id": 26,
+      "id": 33,
       "type": "timeseries",
       "title": "token.place oldest compute-node lease age",
       "description": "Oldest lease age reported by the relay fleet. max preserves the worst observed logical age across replicas.",
@@ -1280,7 +1465,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 66
+        "y": 79
       },
       "targets": [
         {
@@ -1308,7 +1493,7 @@
       }
     },
     {
-      "id": 27,
+      "id": 34,
       "type": "timeseries",
       "title": "token.place compute-node eviction rate",
       "description": "Summed process-local eviction counter rate grouped only by bounded reason.",
@@ -1320,7 +1505,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 74
+        "y": 87
       },
       "targets": [
         {
@@ -1348,7 +1533,7 @@
       }
     },
     {
-      "id": 28,
+      "id": 35,
       "type": "timeseries",
       "title": "token.place relay queue depth",
       "description": "Logical queue depth by bounded provider mode. max avoids multiplying a shared queue gauge across future relay replicas.",
@@ -1360,7 +1545,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 74
+        "y": 87
       },
       "targets": [
         {
@@ -1388,7 +1573,7 @@
       }
     },
     {
-      "id": 29,
+      "id": 36,
       "type": "timeseries",
       "title": "token.place oldest queued-request age",
       "description": "Oldest queued-request age by bounded provider mode. max shows the worst age without multiplying replicated logical gauges.",
@@ -1400,7 +1585,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 82
+        "y": 95
       },
       "targets": [
         {
@@ -1428,7 +1613,7 @@
       }
     },
     {
-      "id": 30,
+      "id": 37,
       "type": "timeseries",
       "title": "token.place in-flight requests by pod",
       "description": "In-flight ownership is relay-process local, so values remain per pod rather than being combined across replicas.",
@@ -1440,7 +1625,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 82
+        "y": 95
       },
       "targets": [
         {
@@ -1468,7 +1653,7 @@
       }
     },
     {
-      "id": 31,
+      "id": 38,
       "type": "timeseries",
       "title": "token.place oldest in-flight age by pod",
       "description": "Oldest in-flight age remains per relay pod because cross-replica ownership is not assumed.",
@@ -1480,7 +1665,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 90
+        "y": 103
       },
       "targets": [
         {
@@ -1508,7 +1693,7 @@
       }
     },
     {
-      "id": 32,
+      "id": 39,
       "type": "timeseries",
       "title": "token.place terminal outcome rate",
       "description": "Summed process-local terminal outcome counter rate grouped only by bounded outcome.",
@@ -1520,7 +1705,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 90
+        "y": 103
       },
       "targets": [
         {
@@ -1548,7 +1733,7 @@
       }
     },
     {
-      "id": 33,
+      "id": 40,
       "type": "row",
       "title": "token.place HTTP and release",
       "collapsed": false,
@@ -1556,11 +1741,11 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 98
+        "y": 111
       }
     },
     {
-      "id": 34,
+      "id": 41,
       "type": "timeseries",
       "title": "token.place HTTP request rate",
       "description": "Summed request rate grouped by normalized route and bounded status class.",
@@ -1572,7 +1757,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 99
+        "y": 112
       },
       "targets": [
         {
@@ -1600,7 +1785,7 @@
       }
     },
     {
-      "id": 35,
+      "id": 42,
       "type": "timeseries",
       "title": "token.place HTTP 5xx ratio",
       "description": "Fraction of observed token.place HTTP requests returning a bounded 5xx status class; absent counters remain NO DATA.",
@@ -1612,7 +1797,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 99
+        "y": 112
       },
       "targets": [
         {
@@ -1658,7 +1843,7 @@
       }
     },
     {
-      "id": 36,
+      "id": 43,
       "type": "timeseries",
       "title": "token.place HTTP latency percentiles",
       "description": "Request latency percentiles from histogram buckets, grouped only by normalized route.",
@@ -1670,7 +1855,7 @@
         "h": 8,
         "w": 16,
         "x": 0,
-        "y": 107
+        "y": 120
       },
       "targets": [
         {
@@ -1708,7 +1893,7 @@
       }
     },
     {
-      "id": 37,
+      "id": 44,
       "type": "table",
       "title": "token.place build identity",
       "description": "Safe release identity per relay pod: version and revision.",
@@ -1720,7 +1905,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 107
+        "y": 120
       },
       "targets": [
         {
