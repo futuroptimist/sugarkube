@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "platform/observability/app-metrics.json"
 PROM = "/api/v1/namespaces/monitoring/services/http:kube-prometheus-stack-prometheus:9090/proxy"
 KUBECTL_TIMEOUT_SECONDS = 30
+PUBLIC_METRICS_USER_AGENT = "sugarkube-observability-verifier/1.0"
 K8S_NAME = re.compile(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?")
 DURATION = re.compile(r"[1-9][0-9]*[smh]")
 STATUS = re.compile(r"[1-5][0-9][0-9]")
@@ -789,7 +790,10 @@ def verify(app, env):
         opener = urllib.request.build_opener(
             NoRedirect, urllib.request.HTTPHandler, urllib.request.HTTPSHandler
         )
-        response = opener.open(cfg["publicMetrics"]["url"], timeout=10)
+        request = urllib.request.Request(
+            cfg["publicMetrics"]["url"], headers={"User-Agent": PUBLIC_METRICS_USER_AGENT}
+        )
+        response = opener.open(request, timeout=10)
         try:
             got = getattr(response, "status", None)
             if got is None:

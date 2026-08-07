@@ -5733,9 +5733,12 @@ def test_observability_app_metrics_verify_exercises_targets_metrics_and_public_4
             sample_labels["le"] = "0.5"
         return {"resultType": "vector", "result": [{"metric": sample_labels}]}
 
+    requests = []
+
     class Opener:
-        def open(self, url, timeout):
-            raise app_metrics.urllib.error.HTTPError(url, 401, "unauthorized", {}, None)
+        def open(self, request, timeout):
+            requests.append((request, timeout))
+            raise app_metrics.urllib.error.HTTPError(request.full_url, 401, "unauthorized", {}, None)
 
     monkeypatch.setattr(app_metrics, "appcfg", lambda app, env: cfg)
     monkeypatch.setattr(app_metrics, "assert_context", lambda: None)
@@ -5749,9 +5752,15 @@ def test_observability_app_metrics_verify_exercises_targets_metrics_and_public_4
 
     assert "/api/v1/targets" in queries
     assert any("tokenplace_build_info" in query for query in queries)
+    assert len(requests) == 1
+    request, timeout = requests[0]
+    assert isinstance(request, app_metrics.urllib.request.Request)
+    assert request.full_url == cfg["publicMetrics"]["url"]
+    assert request.get_header("User-agent") == "sugarkube-observability-verifier/1.0"
+    assert timeout == 10
 
 
-def test_observability_app_metrics_verify_fails_on_public_200(monkeypatch):
+def test_observability_app_metrics_verify_rejects_public_403_without_body(monkeypatch):
     cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"]["tokenplace"]["environments"]["staging"]
     sm = {"spec": {"selector": {"matchLabels": cfg["serviceMonitor"]["selectorMatchLabels"]}, "endpoints": [{"path": "/metrics", "interval": cfg["serviceMonitor"]["interval"], "scrapeTimeout": cfg["serviceMonitor"]["scrapeTimeout"], "authorization": {"type": "Bearer", "credentials": cfg["secret"]}, "relabelings": cfg["serviceMonitor"]["relabelings"]}]}}
     monkeypatch.setattr(app_metrics, "appcfg", lambda app, env: cfg)
@@ -5761,23 +5770,20 @@ def test_observability_app_metrics_verify_fails_on_public_200(monkeypatch):
     monkeypatch.setattr(app_metrics, "kjson", lambda args: sm)
     monkeypatch.setattr(app_metrics, "prom", lambda path: {"activeTargets": [{"health": "up", "scrapePool": "serviceMonitor/tokenplace/tokenplace/0", "labels": cfg["targetLabels"], "discoveredLabels": {}}]} if path == "/api/v1/targets" else {"resultType": "vector", "result": [{"metric": {"__name__": app_metrics.urllib.parse.unquote(path.rsplit("query=", 1)[-1]).split("{", 1)[0], "version": "main-deadbee", "revision": "main-deadbee"}}]})
 
-    class Response:
-        status = 200
-
-        def read(self, size):
-            raise AssertionError("response body must not be read")
-
-        def close(self):
-            pass
-
     class Opener:
-        def open(self, url, timeout):
-            return Response()
+        def open(self, request, timeout):
+            body = io.BytesIO(b"sensitive-response-body-sentinel")
+            raise app_metrics.urllib.error.HTTPError(
+                request.full_url, 403, "sensitive-reason-sentinel", {}, body
+            )
 
     monkeypatch.setattr(app_metrics.urllib.request, "build_opener", lambda *args: Opener())
     with pytest.raises(SystemExit) as excinfo:
         app_metrics.verify("tokenplace", "staging")
-    assert "status mismatch" in str(excinfo.value)
+    message = str(excinfo.value)
+    assert message == "ERROR: public /metrics unauthenticated status mismatch (body redacted)"
+    assert "sensitive-response-body-sentinel" not in message
+    assert "sensitive-reason-sentinel" not in message
 
 
 def test_observability_app_metrics_public_uses_actual_success_status_without_body(monkeypatch):
@@ -5803,10 +5809,56 @@ def test_observability_app_metrics_public_uses_actual_success_status_without_bod
 
     response = Response()
     _verify_base(monkeypatch, cfg, prom_func)
-    monkeypatch.setattr(app_metrics.urllib.request, "build_opener", lambda *args: type("Opener", (), {"open": lambda self, url, timeout: response})())
+    monkeypatch.setattr(app_metrics.urllib.request, "build_opener", lambda *args: type("Opener", (), {"open": lambda self, request, timeout: response})())
 
     app_metrics.verify("tokenplace", "staging")
     assert response.closed
+
+
+@pytest.mark.parametrize(
+    ("outcome", "expected_error"),
+    [
+        (OSError("sensitive-transport-sentinel"), "unauthenticated check failed"),
+        (argparse.Namespace(status="sensitive-status-sentinel"), "response status was malformed"),
+    ],
+)
+def test_observability_app_metrics_public_failures_are_redacted(
+    monkeypatch, capsys, outcome, expected_error
+):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
+        "tokenplace"
+    ]["environments"]["staging"]
+
+    def prom_func(path):
+        if path == "/api/v1/targets":
+            return {"activeTargets": [{
+                "health": "up",
+                "scrapePool": "serviceMonitor/tokenplace/tokenplace/0",
+                "labels": cfg["targetLabels"],
+                "discoveredLabels": {},
+            }]}
+        metric = app_metrics.urllib.parse.unquote(path.rsplit("query=", 1)[-1]).split("{", 1)[0]
+        return {"resultType": "vector", "result": [{"metric": {
+            "__name__": metric,
+            "version": "main-deadbee",
+            "revision": "main-deadbee",
+        }}]}
+
+    _verify_base(monkeypatch, cfg, prom_func)
+
+    class Opener:
+        def open(self, request, timeout):
+            if isinstance(outcome, BaseException):
+                raise outcome
+            return outcome
+
+    monkeypatch.setattr(app_metrics.urllib.request, "build_opener", lambda *args: Opener())
+
+    assert app_metrics.main(["verify", "--app", "tokenplace"]) == 1
+    captured = capsys.readouterr()
+    assert expected_error in captured.err
+    assert "sensitive-transport-sentinel" not in captured.out + captured.err
+    assert "sensitive-status-sentinel" not in captured.out + captured.err
 
 
 
@@ -6263,10 +6315,13 @@ def test_observability_app_metrics_public_redirect_is_not_followed_and_redacted(
             "revision": "main-deadbee",
         }}]}
 
+    seen_requests = []
+
     class RedirectingOpener:
-        def open(self, url, timeout):
+        def open(self, request, timeout):
+            seen_requests.append(request)
             raise app_metrics.urllib.error.HTTPError(
-                url,
+                request.full_url,
                 302,
                 "Found",
                 {"Location": "https://example.invalid/secret-path"},
@@ -6297,6 +6352,7 @@ def test_observability_app_metrics_public_redirect_is_not_followed_and_redacted(
     assert "status mismatch" in message
     assert "secret-path" not in message
     assert "Found" not in message
+    assert seen_requests[0].get_header("User-agent") == app_metrics.PUBLIC_METRICS_USER_AGENT
     redirect_handlers = [
         handler for handler in seen_handlers
         if isinstance(handler, type)
