@@ -25,12 +25,63 @@ REQUIRED_METRICS = {
     "probe_duration_seconds",
     "probe_http_status_code",
     "probe_ssl_earliest_cert_expiry",
+    "tokenplace_compute_nodes_registered",
+    "tokenplace_compute_nodes_healthy",
+    "tokenplace_compute_node_lease_age_seconds",
+    "tokenplace_compute_node_evictions_total",
+    "tokenplace_relay_queue_depth",
+    "tokenplace_relay_oldest_queued_request_age_seconds",
+    "tokenplace_relay_in_flight_requests",
+    "tokenplace_relay_oldest_in_flight_age_seconds",
+    "tokenplace_relay_request_outcomes_total",
+    "tokenplace_http_requests_total",
+    "tokenplace_http_request_duration_seconds_bucket",
+    "tokenplace_instrumentation_up",
+    "tokenplace_build_info",
 }
 EVENT_METRICS = {"dspace_dchat_requests_total", "dspace_dependency_requests_total"}
 OPERATIONAL_ROUTES = '"/(healthz|livez|metrics)"'
 BLACKBOX_JOB_MATCHER = (
     'job=~"probe/monitoring/blackbox-(dspace|tokenplace|danielsmith|jobbot3000)-staging-.*"'
 )
+TOKENPLACE_SELECTOR_PARTS = {
+    'app="tokenplace"',
+    'environment=~"$environment"',
+    'release="tokenplace"',
+    'cluster="sugarkube-int"',
+    'namespace="tokenplace"',
+}
+TOKENPLACE_ROWS = {
+    "token.place relay and compute capacity",
+    "token.place HTTP and release",
+}
+TOKENPLACE_PANELS = {
+    "token.place scrape availability",
+    "token.place instrumentation health",
+    "Registered and healthy compute nodes",
+    "Oldest compute-node lease age",
+    "Compute-node eviction rate by reason",
+    "Queue depth by provider mode",
+    "Oldest queued-request age by provider mode",
+    "In-flight requests by relay pod",
+    "Oldest in-flight age by relay pod",
+    "Terminal outcome rate by outcome",
+    "token.place HTTP request rate by route and status class",
+    "token.place HTTP 5xx ratio",
+    "token.place HTTP latency percentiles",
+    "token.place build identity",
+}
+PHASE_TWO_METRICS = {
+    "tokenplace_chat_availability",
+    "tokenplace_compute_nodes_schedulable",
+    "tokenplace_availability_reason",
+    "tokenplace_shared_state_health",
+}
+UNSAFE_LABELS = {
+    "target", "instance", "url", "request_id", "node", "node_id", "prompt",
+    "output", "authorization", "bearer", "cookie", "credential", "email", "hostname",
+    "jwt", "pass" "word", "secret", "session", "token", "user",
+}
 
 
 def load_dashboard(path: Path) -> dict:
@@ -180,6 +231,80 @@ def validate_dashboard_semantics(dashboard: dict) -> None:
     matrix = panel_named(dashboard, "Endpoint matrix")
     if matrix.get("type") != "table" or not matrix.get("targets"):
         raise SystemExit("ERROR: dashboard must retain the detailed endpoint matrix.")
+
+    rows = [panel for panel in panels(dashboard) if panel.get("type") == "row"]
+    for title in TOKENPLACE_ROWS:
+        if sum(panel.get("title") == title for panel in rows) != 1:
+            raise SystemExit(f"ERROR: dashboard must contain exactly one {title!r} row.")
+    token_panels = {title: panel_named(dashboard, title) for title in TOKENPLACE_PANELS}
+    token_expressions = [
+        target.get("expr", "")
+        for panel in token_panels.values()
+        for target in panel.get("targets", [])
+    ]
+    if not token_expressions or any(
+        not all(part in expression for part in TOKENPLACE_SELECTOR_PARTS)
+        for expression in token_expressions
+    ):
+        raise SystemExit("ERROR: token.place queries must retain every canonical target selector.")
+    if any("or vector(0)" in expression or "or on() vector(0)" in expression for expression in token_expressions):
+        raise SystemExit("ERROR: token.place missing data must not be converted to zero.")
+
+    logical_metrics = {
+        "tokenplace_compute_nodes_registered",
+        "tokenplace_compute_nodes_healthy",
+        "tokenplace_compute_node_lease_age_seconds",
+        "tokenplace_relay_queue_depth",
+        "tokenplace_relay_oldest_queued_request_age_seconds",
+    }
+    for metric in logical_metrics:
+        matching = [expression for expression in token_expressions if metric in expression]
+        if not matching or any(re.search(r"\bsum(?:\s+by\s*\([^)]*\))?\s*\(", expr) for expr in matching):
+            raise SystemExit(f"ERROR: logical token.place gauge {metric} must not use unsafe summation.")
+
+    counters = {
+        "tokenplace_compute_node_evictions_total",
+        "tokenplace_relay_request_outcomes_total",
+        "tokenplace_http_requests_total",
+    }
+    for metric in counters:
+        matching = [expression for expression in token_expressions if metric in expression]
+        if not matching or any("rate(" not in expr or "$__rate_interval" not in expr or "sum" not in expr for expr in matching):
+            raise SystemExit(f"ERROR: process-local token.place counter {metric} must use a summed rate.")
+    eviction = token_panels["Compute-node eviction rate by reason"]["targets"][0]["expr"]
+    outcomes = token_panels["Terminal outcome rate by outcome"]["targets"][0]["expr"]
+    if "sum by (reason)" not in eviction or "sum by (outcome)" not in outcomes:
+        raise SystemExit("ERROR: token.place eviction and outcome rates must retain bounded grouping.")
+    for title in ("In-flight requests by relay pod", "Oldest in-flight age by relay pod"):
+        if "by (pod)" not in token_panels[title]["targets"][0]["expr"]:
+            raise SystemExit("ERROR: token.place in-flight gauges must remain visible per pod.")
+    build = token_panels["token.place build identity"]
+    if "max by (pod, version, revision)" not in build["targets"][0]["expr"]:
+        raise SystemExit("ERROR: token.place build identity must remain per pod, version, and revision.")
+    latency = token_panels["token.place HTTP latency percentiles"]
+    if any("histogram_quantile(" not in target.get("expr", "") or "sum by (le, route)" not in target.get("expr", "") for target in latency.get("targets", [])):
+        raise SystemExit("ERROR: token.place latency must use summed histogram buckets.")
+    for title in ("token.place scrape availability", "token.place instrumentation health"):
+        panel = token_panels[title]
+        if panel.get("fieldConfig", {}).get("defaults", {}).get("noValue") != "NO DATA":
+            raise SystemExit("ERROR: token.place health must visibly distinguish no data.")
+
+    unsafe_names = "|".join(map(re.escape, sorted(UNSAFE_LABELS)))
+    unsafe_pattern = re.compile(
+        r"(?:by\s*\([^)]*\b|{{\s*)(" + unsafe_names + r")(?:\b[^)]*\)|\s*}})"
+        r"|(?:\{|,)\s*(?:" + unsafe_names + r")\s*(?:=|!=|=~|!~)",
+        re.IGNORECASE,
+    )
+    legends = "\n".join(
+        str(target.get("legendFormat", ""))
+        for panel in token_panels.values()
+        for target in panel.get("targets", [])
+    )
+    if unsafe_pattern.search("\n".join(token_expressions) + "\n" + legends):
+        raise SystemExit("ERROR: token.place queries and legends contain an unsafe label.")
+    phase_two_text = json.dumps(dashboard)
+    if any(metric in phase_two_text for metric in PHASE_TWO_METRICS):
+        raise SystemExit("ERROR: token.place Phase 2 metrics must not be presented as implemented.")
 
 
 def validate_dashboard(path: Path) -> str:

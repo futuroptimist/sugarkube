@@ -54,6 +54,8 @@ def test_dashboard_identity_defaults_rows_and_required_panels(dashboard):
         "DSPACE runtime and release",
         "DSPACE feature traffic",
         "Blackbox monitoring",
+        "token.place relay and compute capacity",
+        "token.place HTTP and release",
     }
     titles = {panel["title"] for panel in panels}
     for title in (
@@ -73,8 +75,104 @@ def test_dashboard_identity_defaults_rows_and_required_panels(dashboard):
         "Probe duration",
         "HTTP response status",
         "TLS certificate lifetime",
+        "token.place scrape availability",
+        "token.place instrumentation health",
+        "Registered and healthy compute nodes",
+        "Oldest compute-node lease age",
+        "Compute-node eviction rate by reason",
+        "Queue depth by provider mode",
+        "Oldest queued-request age by provider mode",
+        "In-flight requests by relay pod",
+        "Oldest in-flight age by relay pod",
+        "Terminal outcome rate by outcome",
+        "token.place HTTP request rate by route and status class",
+        "token.place HTTP 5xx ratio",
+        "token.place HTTP latency percentiles",
+        "token.place build identity",
     ):
         assert title in titles
+
+
+def test_tokenplace_phase_one_queries_are_replica_safe_and_bounded(dashboard):
+    panels = {panel["title"]: panel for panel in all_panels(dashboard)}
+    token_panels = {title: panels[title] for title in validator.TOKENPLACE_PANELS}
+    expressions = [
+        target["expr"]
+        for panel in token_panels.values()
+        for target in panel.get("targets", [])
+    ]
+    assert all(
+        all(selector in expression for selector in validator.TOKENPLACE_SELECTOR_PARTS)
+        for expression in expressions
+    )
+    assert all("vector(0)" not in expression for expression in expressions)
+    for metric in validator.REQUIRED_METRICS:
+        if metric.startswith("tokenplace_"):
+            assert any(metric in expression for expression in expressions)
+    assert all(
+        "sum by (reason)" in target["expr"]
+        for target in token_panels["Compute-node eviction rate by reason"]["targets"]
+    )
+    assert all(
+        "sum by (outcome)" in target["expr"]
+        for target in token_panels["Terminal outcome rate by outcome"]["targets"]
+    )
+    assert "max by (pod, version, revision)" in token_panels[
+        "token.place build identity"
+    ]["targets"][0]["expr"]
+    assert all(
+        "histogram_quantile(" in target["expr"] and "sum by (le, route)" in target["expr"]
+        for target in token_panels["token.place HTTP latency percentiles"]["targets"]
+    )
+    serialized = json.dumps(token_panels).lower()
+    assert not any(metric in serialized for metric in validator.PHASE_TWO_METRICS)
+
+
+@pytest.mark.parametrize(
+    ("title", "replacement", "message"),
+    [
+        (
+            "Registered and healthy compute nodes",
+            'sum(tokenplace_compute_nodes_registered{app="tokenplace"})',
+            "canonical target selector",
+        ),
+        (
+            "Queue depth by provider mode",
+            'sum(tokenplace_relay_queue_depth{app="tokenplace",environment=~"$environment",release="tokenplace",cluster="sugarkube-int",namespace="tokenplace"})',
+            "unsafe summation",
+        ),
+        (
+            "Terminal outcome rate by outcome",
+            'rate(tokenplace_relay_request_outcomes_total{app="tokenplace",environment=~"$environment",release="tokenplace",cluster="sugarkube-int",namespace="tokenplace"}[$__rate_interval])',
+            "summed rate",
+        ),
+        (
+            "Compute-node eviction rate by reason",
+            'sum by (instance) (rate(tokenplace_compute_node_evictions_total{app="tokenplace",environment=~"$environment",release="tokenplace",cluster="sugarkube-int",namespace="tokenplace"}[$__rate_interval]))',
+            "bounded grouping",
+        ),
+        (
+            "In-flight requests by relay pod",
+            'max(tokenplace_relay_in_flight_requests{app="tokenplace",environment=~"$environment",release="tokenplace",cluster="sugarkube-int",namespace="tokenplace"})',
+            "remain visible per pod",
+        ),
+        (
+            "Oldest in-flight age by relay pod",
+            'max by (pod) (tokenplace_relay_oldest_in_flight_age_seconds{app="tokenplace",environment=~"$environment",release="tokenplace",cluster="sugarkube-int",namespace="tokenplace"}) or vector(0)',
+            "converted to zero",
+        ),
+    ],
+)
+def test_validator_rejects_unsafe_tokenplace_queries(
+    tmp_path, dashboard, title, replacement, message
+):
+    next(panel for panel in dashboard["panels"] if panel["title"] == title)["targets"][0][
+        "expr"
+    ] = replacement
+    candidate = tmp_path / "candidate.json"
+    candidate.write_text(json.dumps(dashboard), encoding="utf-8")
+    with pytest.raises(SystemExit, match=message):
+        validator.validate_dashboard(candidate)
 
 
 def test_queries_use_stable_datasource_bounded_labels_and_safe_zero(dashboard):
