@@ -116,9 +116,7 @@ def test_queries_use_stable_datasource_bounded_labels_and_safe_zero(dashboard):
 
 def test_tokenplace_queries_are_replica_safe_bounded_and_preserve_missing_data(dashboard):
     panels = {panel["title"]: panel for panel in all_panels(dashboard)}
-    token_panels = [
-        panel for panel in panels.values() if panel["id"] >= 23 and panel["type"] != "row"
-    ]
+    token_panels = [panels[title] for title in validator.TOKENPLACE_PANELS]
     expressions = [target["expr"] for panel in token_panels for target in panel["targets"]]
     selector = (
         'app="tokenplace",environment=~"$environment",release="tokenplace",'
@@ -194,7 +192,7 @@ def test_validator_rejects_unsafe_tokenplace_query_regressions(
     dashboard, title, replacement, message
 ):
     changed = json.loads(json.dumps(dashboard))
-    next(panel for panel in changed["panels"] if panel["title"] == title)["targets"][0][
+    next(panel for panel in all_panels(changed) if panel["title"] == title)["targets"][0][
         "expr"
     ] = replacement
     with pytest.raises(SystemExit, match=message):
