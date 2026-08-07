@@ -85,7 +85,7 @@ def test_chart_version_and_values_match_live_staging_baseline():
     assert route["routes"][0] == {
         "receiver": "pagerduty-synthetic-test",
         "matchers": [
-            'alertname="SugarkubePagerDutyTest"',
+            'alertname=~"^(SugarkubePagerDutyTest|DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown)$"',
             'environment="staging"',
             'cluster="sugarkube-int"',
             'severity="critical"',
@@ -151,7 +151,7 @@ def rendered_alertmanager_fixture(
 ):
     path = path or "/etc/alertmanager/secrets/alertmanager-pagerduty/routing-key"
     matchers = matchers or [
-        'alertname="SugarkubePagerDutyTest"',
+        'alertname=~"^(SugarkubePagerDutyTest|DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown)$"',
         'environment="staging"',
         'cluster="sugarkube-int"',
         'severity="critical"',
@@ -209,7 +209,7 @@ stringData:
     [
         ({"secret": "wrong-secret"}, "exactly the two expected"),
         ({"path": "/wrong/path"}, "PagerDuty configuration is malformed"),
-        ({"matchers": ['severity="critical"']}, "exact synthetic allowlist"),
+        ({"matchers": ['severity="critical"']}, "exact DSPACE and synthetic allowlist"),
         ({"inline": True}, "inline credentials or webhook URLs are forbidden"),
     ],
 )
@@ -846,7 +846,7 @@ printf '%s' "$code"
   routes:
     - receiver: pagerduty-synthetic-test
       matchers:
-        - alertname="SugarkubePagerDutyTest"
+        - alertname=~"^(SugarkubePagerDutyTest|DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown)$"
         - environment="staging"
         - cluster="sugarkube-int"
         - severity="critical"

@@ -810,3 +810,8 @@ just helm-oci-install release=dspace namespace=dspace chart=oci://ghcr.io/democr
 ```bash
 just helm-oci-upgrade release=dspace namespace=dspace chart=oci://ghcr.io/democratizedspace/charts/dspace values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml version_file=docs/apps/dspace.staging.version tag="$APP_TAG" env=staging
 ```
+
+
+## Release-integrity monitoring
+
+The repository-owned alert rules, bounded `/chat` synthetic metric contract, operational diagnosis, and staging-only drills are documented in the [DSPACE release-integrity runbook](../observability-dspace-release-integrity.md). Repository readiness does not imply deployment or live PagerDuty proof, and production observability remains unsupported.

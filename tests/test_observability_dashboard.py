@@ -54,6 +54,7 @@ def test_dashboard_identity_defaults_rows_and_required_panels(dashboard):
         "DSPACE runtime and release",
         "DSPACE feature traffic",
         "Blackbox monitoring",
+        "DSPACE release integrity",
     }
     titles = {panel["title"] for panel in panels}
     for title in (
@@ -85,7 +86,10 @@ def test_queries_use_stable_datasource_bounded_labels_and_safe_zero(dashboard):
     assert '"uid": "prometheus"' in serialized
     assert "${DS_" not in serialized and "__inputs" not in serialized
     assert not any("{{target}}" in serialized or "target=~" in expr for expr in expressions)
-    assert "http://" not in serialized and "https://" not in serialized
+    assert "http://" not in serialized
+    assert "https://example" not in serialized
+    assert "observability-dspace-release-integrity.md" in serialized
+    assert "main-018687f-20260805T035722Z.json" in serialized
     assert all(
         "or on() vector(0)" in expr
         for expr in expressions
@@ -359,7 +363,7 @@ def test_validator_rejects_wrong_dashboard_mount(tmp_path, dashboard, mount_path
             ),
             "must use a safe zero fallback",
         ),
-        (lambda item: item.update(links=[{"url": "https://example.invalid"}]), "raw URLs"),
+        (lambda item: item.update(links=[{"url": "https://example.invalid"}]), "dashboard links"),
         (lambda item: item.update(description="${DS_PROMETHEUS}"), "datasource placeholder"),
         (lambda item: item.update(datasource={"uid": "unexpected"}), "datasource references"),
         (

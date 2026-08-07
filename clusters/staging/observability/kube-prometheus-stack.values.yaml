@@ -34,7 +34,7 @@ alertmanager:
       routes:
         - receiver: pagerduty-synthetic-test
           matchers:
-            - alertname="SugarkubePagerDutyTest"
+            - alertname=~"^(SugarkubePagerDutyTest|DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown)$"
             - environment="staging"
             - cluster="sugarkube-int"
             - severity="critical"

@@ -1,0 +1,126 @@
+{
+  "groups": [
+    {
+      "name": "sugarkube.dspace-release-integrity",
+      "interval": "30s",
+      "rules": [
+        {
+          "record": "dspace_release_approved_info",
+          "expr": "vector(1)",
+          "labels": {
+            "application": "dspace",
+            "environment": "staging",
+            "cluster": "sugarkube-int",
+            "revision": "018687f5a7f4de45508c6e36eb28afb3e44da24d",
+            "image_tag": "main-018687f",
+            "image_digest": "sha256:2b95b7fdccdd011553c8d8617e3090ee27323996c532148fdb147cb9fd6e1b6c"
+          }
+        },
+        {
+          "record": "dspace_deployment_image_pin_matches",
+          "expr": "min(kube_pod_container_info{namespace=\"dspace\",container=\"dspace\",image=\"ghcr.io/democratizedspace/dspace:main-018687f\"}) and on(pod) min(kube_pod_container_status_image_id{namespace=\"dspace\",container=\"dspace\",image_id=~\".*@sha256:2b95b7fdccdd011553c8d8617e3090ee27323996c532148fdb147cb9fd6e1b6c\"})",
+          "labels": {
+            "application": "dspace",
+            "environment": "staging",
+            "cluster": "sugarkube-int"
+          }
+        },
+        {
+          "alert": "DspaceBuildRevisionMismatch",
+          "expr": "(max by (pod, revision) (dspace_build_info{environment=\"staging\",revision!=\"018687f5a7f4de45508c6e36eb28afb3e44da24d\"})) or (label_replace(vector(1), \"revision\", \"unknown\", \"\", \"\") unless on() dspace_build_info{environment=\"staging\"})",
+          "for": "5m",
+          "labels": {
+            "application": "dspace",
+            "environment": "staging",
+            "cluster": "sugarkube-int",
+            "severity": "critical",
+            "expected_revision": "018687f5a7f4de45508c6e36eb28afb3e44da24d"
+          },
+          "annotations": {
+            "summary": "DSPACE runtime revision differs from the approved release",
+            "current_revision": "{{ if $labels.revision }}{{ $labels.revision }}{{ else }}unknown{{ end }}",
+            "expected_revision": "018687f5a7f4de45508c6e36eb28afb3e44da24d",
+            "remediation": "Verify build identity and pod image IDs, then reconcile to finalized evidence.",
+            "runbook_url": "https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-dspace-release-integrity.md"
+          }
+        },
+        {
+          "alert": "DspaceMixedBuildRevisions",
+          "expr": "count(count by (revision) (dspace_build_info{environment=\"staging\"})) > 1",
+          "for": "5m",
+          "labels": {
+            "application": "dspace",
+            "environment": "staging",
+            "cluster": "sugarkube-int",
+            "severity": "critical",
+            "expected_revision": "018687f5a7f4de45508c6e36eb28afb3e44da24d"
+          },
+          "annotations": {
+            "summary": "DSPACE replicas expose mixed build revisions",
+            "current_revision": "{{ if $labels.revision }}{{ $labels.revision }}{{ else }}unknown{{ end }}",
+            "expected_revision": "018687f5a7f4de45508c6e36eb28afb3e44da24d",
+            "remediation": "Allow a settling rollout briefly; otherwise stop and reconcile every replica.",
+            "runbook_url": "https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-dspace-release-integrity.md"
+          }
+        },
+        {
+          "alert": "DspaceDeploymentImagePinMismatch",
+          "expr": "(max by (deployment, image) (kube_deployment_container_info{namespace=\"dspace\",deployment=\"dspace\",container=\"dspace\",image!=\"ghcr.io/democratizedspace/dspace:main-018687f@sha256:2b95b7fdccdd011553c8d8617e3090ee27323996c532148fdb147cb9fd6e1b6c\"})) or (label_replace(vector(1), \"revision\", \"unknown\", \"\", \"\") unless on() kube_deployment_container_info{namespace=\"dspace\",deployment=\"dspace\",container=\"dspace\"})",
+          "for": "5m",
+          "labels": {
+            "application": "dspace",
+            "environment": "staging",
+            "cluster": "sugarkube-int",
+            "severity": "critical",
+            "expected_revision": "018687f5a7f4de45508c6e36eb28afb3e44da24d"
+          },
+          "annotations": {
+            "summary": "DSPACE Deployment image is not the approved immutable pin",
+            "current_revision": "unknown",
+            "expected_revision": "018687f5a7f4de45508c6e36eb28afb3e44da24d",
+            "remediation": "Reconcile the Deployment to the finalized tag and digest; never use a semantic tag.",
+            "runbook_url": "https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-dspace-release-integrity.md"
+          }
+        },
+        {
+          "alert": "DspaceChatSyntheticFailed",
+          "expr": "(dspace_chat_synthetic_success{application=\"dspace\",environment=\"staging\"} == 0) or (time() - dspace_chat_synthetic_last_run_timestamp_seconds{application=\"dspace\",environment=\"staging\"} > 900) or (label_replace(vector(1), \"revision\", \"unknown\", \"\", \"\") unless on() dspace_chat_synthetic_last_run_timestamp_seconds{application=\"dspace\",environment=\"staging\"})",
+          "for": "5m",
+          "labels": {
+            "application": "dspace",
+            "environment": "staging",
+            "cluster": "sugarkube-int",
+            "severity": "critical",
+            "expected_revision": "018687f5a7f4de45508c6e36eb28afb3e44da24d"
+          },
+          "annotations": {
+            "summary": "DSPACE non-mutating /chat synthetic failed, is stale, or is missing",
+            "current_revision": "{{ if $labels.revision }}{{ $labels.revision }}{{ else }}unknown{{ end }}",
+            "expected_revision": "018687f5a7f4de45508c6e36eb28afb3e44da24d",
+            "remediation": "Inspect freshness first, then the pinned smoke-runner result and provider configuration.",
+            "runbook_url": "https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-dspace-release-integrity.md"
+          }
+        },
+        {
+          "alert": "DspaceMetricsTargetDown",
+          "expr": "(max by (job) (up{namespace=\"dspace\",service=~\"dspace.*\"}) == 0) or (label_replace(vector(1), \"revision\", \"unknown\", \"\", \"\") unless on() up{namespace=\"dspace\",service=~\"dspace.*\"})",
+          "for": "5m",
+          "labels": {
+            "application": "dspace",
+            "environment": "staging",
+            "cluster": "sugarkube-int",
+            "severity": "critical",
+            "expected_revision": "018687f5a7f4de45508c6e36eb28afb3e44da24d"
+          },
+          "annotations": {
+            "summary": "DSPACE metrics target is down or missing",
+            "current_revision": "unknown",
+            "expected_revision": "018687f5a7f4de45508c6e36eb28afb3e44da24d",
+            "remediation": "Separate scrape/authentication failure from application health before changing DSPACE.",
+            "runbook_url": "https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-dspace-release-integrity.md"
+          }
+        }
+      ]
+    }
+  ]
+}

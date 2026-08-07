@@ -29,8 +29,7 @@ post-merge work. Real workload routes remain deferred.
 - Production alert rollout. This document designs the staging path first; production follows only
   after staging drills succeed (see [`docs/observability-design.md`](./observability-design.md) §13).
 - Advanced SLOs, burn-rate alerting, or multi-window error budgets.
-- Exhaustive application-level synthetic checks. The one synthetic check currently in scope
-  (`DspaceChatSyntheticFailed`) is deferred — see [§8](#8-status-and-dependencies).
+- Exhaustive application-level synthetic checks. The bounded producer/consumer contract for `DspaceChatSyntheticFailed` is repository-ready; its externally pinned smoke runner remains an operational prerequisite — see [the release-integrity runbook](./observability-dspace-release-integrity.md).
 
 ## 2. Chosen target architecture
 
@@ -129,7 +128,7 @@ What each check detects, and does not:
 - Staging repository support now mounts `monitoring/alertmanager-pagerduty` and reads its
   `routing-key` key from
   `/etc/alertmanager/secrets/alertmanager-pagerduty/routing-key`; the credential is never inline.
-  The only PagerDuty route is the exact `SugarkubePagerDutyTest` synthetic allowlist. This is
+  The only PagerDuty route is the exact reviewed DSPACE alert plus `SugarkubePagerDutyTest` allowlist. This is
   repository support is deployed in staging, and its synthetic fire/acknowledge/resolve path has
   been manually proven. No real workload alert is routed by that evidence.
 - Set `send_resolved: true` on the PagerDuty receiver so incidents auto-resolve when the underlying
@@ -156,7 +155,7 @@ These are the current alert-design candidates, not proof the rules already exist
 | `PublicEndpointDown` | A blackbox probe's `probe_success` is 0 | Reuses the signal already defined in [`docs/observability-design.md`](./observability-design.md) §6/§11. |
 | `PublicProbeMissing` | An expected blackbox probe target has no recent data at all (distinct from a probe that ran and failed) | Matches the "missing probe data" state already surfaced in the staging dashboard's availability summary panel. |
 | `TLSExpiringSoon` | `probe_ssl_earliest_cert_expiry` crosses a warning/critical threshold | Reuses the signal already defined in [`docs/observability-design.md`](./observability-design.md) §6. |
-| `DspaceChatSyntheticFailed` | A deeper synthetic check exercises DSPACE's dChat path end-to-end | **Explicitly deferred** — see [§8](#8-status-and-dependencies). Not part of the initial rollout. |
+| `DspaceChatSyntheticFailed` | A deeper synthetic check exercises DSPACE's dChat path end-to-end | Repository-ready with a fail-closed metric contract; continuous execution awaits the externally pinned smoke runner. |
 
 ## 6. Rollout and drill plan
 
@@ -164,7 +163,7 @@ A safe, phased sequence — each step depends on the previous one succeeding:
 
 1. Establish PagerDuty and Healthchecks.io accounts and integrations manually (outside this repo).
 2. Deploy and verify the repository's secret-safe receiver foundation (`routing_key_file`, no inline
-   secrets); the root remains the null receiver and only the synthetic test is allowlisted.
+   secrets); the root remains the null receiver and only the reviewed DSPACE alerts plus the synthetic test are allowlisted.
 3. **Proven:** manually fire the synthetic PagerDuty test alert, receive and acknowledge the phone
    incident, resolve the alert, and observe resolution after Alertmanager's expected default
    resolution delay (about five minutes).
@@ -222,12 +221,7 @@ it is deployed yet — see the rollout plan above for the actual sequencing.
 
 ## 8. Status and dependencies
 
-- The deeper DSPACE dChat synthetic check (`DspaceChatSyntheticFailed`) is deferred while token.place
-  staging inference depends on work tracked in `futuroptimist/token.place#1549`. This blocks only that
-  one synthetic check, not the rest of the alerting foundation.
-- Shallow public-endpoint blackbox monitoring (`PublicEndpointDown`, `PublicProbeMissing`,
-  `TLSExpiringSoon`) is already live in staging today, independently of that dependency — see
-  [`docs/observability-blackbox.md`](./observability-blackbox.md).
+- The `DspaceChatSyntheticFailed` consumer and bounded publisher are repository-ready. Continuous execution and live proof still require the externally pinned smoke runner described in the [release-integrity runbook](./observability-dspace-release-integrity.md).
 - The synthetic Alertmanager → PagerDuty fire/acknowledge/resolve drill succeeded, including the
   expected roughly five-minute Alertmanager resolution delay.
 - Per-node heartbeat timers are installed on `sugarkube3`, `sugarkube4`, and `sugarkube5`; their
