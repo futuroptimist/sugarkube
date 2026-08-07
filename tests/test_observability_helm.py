@@ -189,6 +189,13 @@ stringData:
           group_interval: 1m
           repeat_interval: 5m
           continue: false
+        - receiver: pagerduty-synthetic-test
+          matchers:
+            - 'alertname=~"DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown"'
+            - 'application="dspace"'
+            - 'environment="staging"'
+            - 'cluster="sugarkube-int"'
+            - 'severity="critical"'
     receivers:
       - name: "null"
       - name: pagerduty-synthetic-test
@@ -333,14 +340,14 @@ def test_alertmanager_validator_redacts_invalid_base64(tmp_path):
                 "            - 'severity=\"critical\"'",
                 "            - 'severity=\"critical\"'\n          continue: false",
             ),
-            "PagerDuty route must contain only receiver and exact matchers",
+                "DSPACE PagerDuty route is not the exact reviewed allowlist",
         ),
         (
             lambda text: text.replace(
                 "            - 'severity=\"critical\"'",
                 "            - 'severity=\"critical\"'\n          routes: []",
             ),
-            "PagerDuty route must contain only receiver and exact matchers",
+                "DSPACE PagerDuty route is not the exact reviewed allowlist",
         ),
         (
             lambda text: text.replace(
@@ -861,6 +868,13 @@ printf '%s' "$code"
       group_interval: 1m
       repeat_interval: 5m
       continue: false
+    - receiver: pagerduty-synthetic-test
+      matchers:
+        - alertname=~"DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown"
+        - application="dspace"
+        - environment="staging"
+        - cluster="sugarkube-int"
+        - severity="critical"
 receivers:
   - name: "null"
   - name: pagerduty-synthetic-test

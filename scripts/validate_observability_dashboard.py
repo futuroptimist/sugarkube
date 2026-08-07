@@ -25,6 +25,16 @@ REQUIRED_METRICS = {
     "probe_duration_seconds",
     "probe_http_status_code",
     "probe_ssl_earliest_cert_expiry",
+    "dspace_release_expected_info",
+    "dspace_deployment_image_pin_match",
+    "dspace_chat_synthetic_success",
+    "dspace_chat_synthetic_timestamp_seconds",
+}
+RELEASE_LINKS = {
+    "https://github.com/futuroptimist/sugarkube/blob/main/"
+    "docs/apps/dspace.md#release-integrity-alerts",
+    "https://github.com/futuroptimist/sugarkube/blob/main/"
+    "deployment-evidence/dspace/staging/main-018687f-20260805T035722Z.json",
 }
 EVENT_METRICS = {"dspace_dchat_requests_total", "dspace_dependency_requests_total"}
 OPERATIONAL_ROUTES = '"/(healthz|livez|metrics)"'
@@ -194,6 +204,16 @@ def validate_dashboard(path: Path) -> str:
     ):
         raise SystemExit("ERROR: dashboard panel IDs must be present, integer, and unique.")
     validate_dashboard_semantics(dashboard)
+    integrity_titles = {
+        "DSPACE release integrity",
+        "Approved DSPACE revision",
+        "Active DSPACE build revisions by pod",
+        "Deployment image-pin agreement",
+        "DSPACE metrics-target health",
+        "DSPACE /chat synthetic result and freshness",
+    }
+    if not integrity_titles.issubset({panel.get("title") for panel in panels(dashboard)}):
+        raise SystemExit("ERROR: dashboard is missing the DSPACE release-integrity section.")
     expressions = [
         target["expr"]
         for panel in panels(dashboard)
@@ -211,8 +231,11 @@ def validate_dashboard(path: Path) -> str:
         if not matching or any("or on() vector(0)" not in expr for expr in matching):
             raise SystemExit(f"ERROR: event-driven metric {metric} must use a safe zero fallback.")
     serialized = json.dumps(dashboard)
-    if re.search(r"https?://", serialized, re.IGNORECASE):
-        raise SystemExit("ERROR: dashboard must not contain embedded raw URLs.")
+    urls = set(re.findall(r'"url":\s*"(https?://[^"]+)"', serialized, re.IGNORECASE))
+    if urls != RELEASE_LINKS:
+        raise SystemExit(
+            "ERROR: dashboard links must be the exact runbook and finalized evidence allowlist."
+        )
     if re.search(r"\$\{?DS_|__inputs", serialized, re.IGNORECASE) or re.search(
         r"(?:\{|,)\s*target\s*(?:=|=~|!~|!=)|{{\s*target\s*}}", expression_text
     ):

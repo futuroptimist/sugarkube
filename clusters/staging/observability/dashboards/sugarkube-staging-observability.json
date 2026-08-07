@@ -1071,6 +1071,196 @@
           "mode": "multi"
         }
       }
+    },
+    {
+      "id": 22,
+      "title": "DSPACE release integrity",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 60
+      },
+      "panels": [],
+      "links": [
+        {
+          "title": "DSPACE release-integrity runbook",
+          "url": "https://github.com/futuroptimist/sugarkube/blob/main/docs/apps/dspace.md#release-integrity-alerts",
+          "targetBlank": true
+        },
+        {
+          "title": "Finalized staging release evidence",
+          "url": "https://github.com/futuroptimist/sugarkube/blob/main/deployment-evidence/dspace/staging/main-018687f-20260805T035722Z.json",
+          "targetBlank": true
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "pluginVersion": "11.6.0",
+      "id": 23,
+      "title": "Approved DSPACE revision",
+      "type": "stat",
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 0,
+        "y": 61
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "dspace_release_expected_info{environment=~\"$environment\"}",
+          "instant": true,
+          "range": false,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "pluginVersion": "11.6.0",
+      "id": 24,
+      "title": "Active DSPACE build revisions by pod",
+      "type": "table",
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 6,
+        "y": 61
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (pod, revision) (dspace_build_info{environment=~\"$environment\"})",
+          "instant": true,
+          "range": false,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "pluginVersion": "11.6.0",
+      "id": 25,
+      "title": "Deployment image-pin agreement",
+      "type": "stat",
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 12,
+        "y": 61
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "dspace_deployment_image_pin_match{environment=~\"$environment\"}",
+          "instant": true,
+          "range": false,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "pluginVersion": "11.6.0",
+      "id": 26,
+      "title": "DSPACE metrics-target health",
+      "type": "stat",
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 18,
+        "y": 61
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(up{job=~\"serviceMonitor/dspace/.*\", environment=~\"$environment\"})",
+          "instant": true,
+          "range": false,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "pluginVersion": "11.6.0",
+      "id": 27,
+      "title": "DSPACE /chat synthetic result and freshness",
+      "type": "table",
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 61
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "dspace_chat_synthetic_success{environment=~\"$environment\"} or (time() - dspace_chat_synthetic_timestamp_seconds{environment=~\"$environment\"})",
+          "instant": true,
+          "range": false,
+          "refId": "A"
+        }
+      ]
     }
   ]
 }
