@@ -790,6 +790,7 @@ if not isinstance(dashboard, dict) or dashboard.get("uid") != "sugarkube-staging
 
 cmd="${1:-}"; shift || true; [[ -n "${cmd}" ]] || { usage; exit 2; }
 env_arg="${1:-}"; resolve_environment "${env_arg}"
+[[ "${ENVIRONMENT}" != staging ]] || validate_dashboard
 if [[ "${cmd}" == watchdog-drill-create ]]; then
   trap 'exit 130' INT
   trap 'exit 143' TERM
