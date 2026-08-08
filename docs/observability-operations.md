@@ -184,10 +184,10 @@ bounded outcomes were `completed`, `cancelled`, `expired`, `timed_out`,
 `rate_limited`, `dependency_failure`, and `failed`. This is observed staging
 evidence, not justification for alert thresholds.
 
-Repository support is only the dashboard source and its fail-closed checks.
-After merge, an operator must run the guarded staging Helm upgrade, verify the
-stable dashboard UID through the Grafana API, and visually inspect the panels;
-until then, the repository change is not deployment proof. Functional chat
+The dashboard source and its fail-closed checks are deployed in staging. Helm revision 8 uses chart
+`87.19.0`; that revision, its live ConfigMap, and repository `main` contain the same 44-panel
+dashboard, whose canonical JSON SHA-256 is
+`59cb188e015574a50a703c5000128d446896b1526f2d9fed9f7dde4ade32717b`. Functional chat
 availability, schedulable-node capacity, availability-reason, and shared-state
 health panels remain Phase 2 work and are not presented as implemented here.
 
@@ -197,14 +197,16 @@ health panels remain Phase 2 work and are not presented as implemented here.
   `"null"`. The existing watchdog route, its order, and its 30-second group wait,
   one-minute group interval, and five-minute repeat interval remain preserved.
   The exact-label `SugarkubePagerDutyTest` route is deployed and has passed its
-  manual fire/acknowledge/resolve delivery drill. Separately, the repository is
-  ready to route exactly `DspaceBuildRevisionMismatch`,
+  manual fire/acknowledge/resolve delivery drill. The deployed staging allowlist also routes exactly
+  `DspaceBuildRevisionMismatch`,
   `DspaceMixedBuildRevisions`, `DspaceDeploymentImagePinMismatch`,
   `DspaceChatSyntheticFailed`, and `DspaceMetricsTargetDown` to
-  `pagerduty-dspace`. That five-alert route is not yet deployed or live-proven.
+  `pagerduty-dspace`. All five rules are loaded, healthy, and inactive in steady state. The
+  owner-scoped #2329 drill proved live firing, acknowledgement, and resolution for the first,
+  second, and fourth alerts; it did not deliberately fire all five.
   Its receiver uses the existing Secret-mounted PagerDuty integration and
   `send_resolved: true`; unrelated alerts continue to fall through to `"null"`.
-  Deployment, collector/runner setup, and firing/resolved drill prerequisites
+  Deployment, collector/runner details, the sanitized verification record, and the reusable drill
   remain in the focused
   [DSPACE release-integrity runbook](observability-dspace-release-integrity.md).
 - Grafana: persistence disabled, no Ingress, LAN-only NodePort `30300`.
@@ -324,7 +326,7 @@ five minutes. Retain the procedure below for regression drills.
    DSPACE allowlist, file references, and Secret mount contract; remove the
    temporary render after review. This validates repository structure only; use
    the focused [DSPACE release-integrity runbook](observability-dspace-release-integrity.md)
-   for the remaining deployment and live firing/resolved drill prerequisites.
+   for the completed staging proof and repeatable regression drill.
 4. Upgrade and verify:
 
    ```bash
