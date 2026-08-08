@@ -454,8 +454,8 @@ documents these [connector metrics and readiness semantics](https://developers.c
 ### Alerts
 
 - `CloudflareTunnelNoHealthyConnections` pages after aggregate
-  `cloudflared_tunnel_ha_connections` remains zero for five minutes while both scrape targets are
-  healthy.
+  `cloudflared_tunnel_ha_connections` remains zero for five minutes when at least one connection series is present. Missing connection
+  metrics do not prove an outage.
 - `CloudflareTunnelConnectionsDegraded` warns after ten minutes if fewer than two connector series
   exist or either connector reports fewer than the expected four HA connections. This delay excludes
   ordinary rolling churn and brief individual QUIC reconnections.
@@ -487,7 +487,7 @@ part of this rollout.
    test "$(kubectl config current-context)" = sugar-staging
    helm -n cloudflare list --filter '^cloudflare-tunnel$'
    kubectl -n cloudflare get deploy cloudflare-tunnel -o jsonpath='{.metadata.labels.app\.kubernetes\.io/managed-by}{"\n"}'
-   kubectl -n cloudflare get secret tunnel-token -o 'go-template={{if index .data "token"}}token key present (value not read){{end}}{{"\n"}}'
+   kubectl -n cloudflare get secret tunnel-token -o name
    ```
 
    Stop unless exactly one deployed `cloudflare-tunnel` release exists and the Deployment is
@@ -502,20 +502,26 @@ part of this rollout.
 3. Run `just cf-tunnel-verify env=staging`; verify two Ready pods on separate nodes, version
    `2026.7.3`, readiness-only `/ready`, two Prometheus targets, four HA connections per connector,
    healthy alerts, and every approved staging public endpoint.
-4. For the authorized recovery drill, delete **one owner-selected pod only** by its exact name:
+4. A pod-deletion drill is not an acceptable WAN-recovery test: it proves replacement, not that the
+   same cloudflared processes stay alive during dependency loss and reconnect afterward. The repository
+   shows that staging uses Kubernetes `NetworkPolicy`, but it does not establish which staging CNI
+   enforces a temporary egress-deny policy or prove that an exact release selector cannot affect other
+   workloads. Therefore the dependency-loss drill is **blocked** pending separate owner confirmation of
+   the staging CNI and its egress-policy behavior. Do not apply a speculative policy or substitute pod
+   deletion.
 
-   ```bash
-   pod='<one cloudflare-tunnel pod selected by the owner>'
-   kubectl -n cloudflare delete pod "$pod"
-   kubectl -n cloudflare rollout status deploy/cloudflare-tunnel --timeout=5m
-   just cf-tunnel-verify env=staging
-   ```
-
-   Do not disrupt a node, WAN, DNS, both pods, the Deployment, the Secret, or any production
-   resource. The replacement must reconnect within five minutes while the other connector and public
-   endpoints remain available.
-5. Cleanup is only `unset CF_TUNNEL_TOKEN CF_TUNNEL_NAME CF_TUNNEL_ID pod`; retain the two healthy
-   replacement pods, Service, ServiceMonitor, and PDB. No drill resource should remain.
+   Once that evidence is recorded, a separately authorized procedure must use a uniquely named,
+   temporary `NetworkPolicy` in `cloudflare`, selecting exactly
+   `app.kubernetes.io/name=cloudflare-tunnel` and
+   `app.kubernetes.io/instance=cloudflare-tunnel`. Before applying it, record both pod names, UIDs, and
+   restart counts and install a cleanup trap that deletes that exact policy name. Keep the deny interval
+   below five minutes (the shortest alert `for` duration); verify readiness becomes false while both UIDs
+   and restart counts remain unchanged. Delete the exact policy, then require those same two pods to
+   become Ready and report at least four HA connections each within five minutes. This contract may be
+   executed only after the CNI safety blocker is resolved and the exact manifest is separately reviewed.
+5. Cleanup is `unset CF_TUNNEL_TOKEN CF_TUNNEL_NAME CF_TUNNEL_ID`; retain the two healthy pods,
+   Service, ServiceMonitor, and PDB. If a future authorized drill resolves the blocker, exact deletion of
+   its uniquely named NetworkPolicy is mandatory even on interruption.
 
 Rollback immediately if no connector stays Ready, a public endpoint fails for two consecutive
 one-minute checks, a replacement does not reach four HA connections within five minutes, metrics

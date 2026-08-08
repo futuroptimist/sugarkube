@@ -51,7 +51,7 @@ tests:
     interval: 1m
     input_series:
       - series: 'up{namespace="cloudflare",service="cloudflare-tunnel-metrics",instance="connector-1"}'
-        values: '1x15'
+        values: '0x15'
       - series: 'up{namespace="cloudflare",service="cloudflare-tunnel-metrics",instance="connector-2"}'
         values: '1x15'
       - series: 'cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel-metrics",instance="connector-1"}'
@@ -65,7 +65,7 @@ tests:
           - exp_labels: {application: cloudflare-tunnel, environment: staging, cluster: sugarkube-int, severity: critical}
             exp_annotations:
               summary: No Cloudflare Tunnel edge connections are healthy
-              description: Both staging connectors have reported zero aggregate HA connections for five minutes.
+              description: The available staging connector metrics have reported zero aggregate HA connections for five minutes.
               remediation: Check WAN and DNS first; do not restart connectors that are alive and reconnecting.
               runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/cloudflare_tunnel.md#alerts
   - name: missing metrics
@@ -77,7 +77,7 @@ tests:
       - eval_time: 7m
         alertname: CloudflareTunnelMetricsTargetsDown
         exp_alerts:
-          - exp_labels: {application: cloudflare-tunnel, environment: staging, cluster: sugarkube-int, severity: warning, namespace: cloudflare, service: cloudflare-tunnel-metrics}
+          - exp_labels: {application: cloudflare-tunnel, environment: staging, cluster: sugarkube-int, severity: warning}
             exp_annotations:
               summary: Cloudflare Tunnel metrics targets are absent or down
               description: Prometheus has fewer than two healthy cloudflared scrape targets; this does not alone prove the tunnel is down.

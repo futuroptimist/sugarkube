@@ -569,9 +569,14 @@ cf-tunnel-install env='dev' token='':
 
     origin_cert_guidance="{{ origin_cert_guidance }}"
 
+    kubectl get namespace cloudflare >/dev/null 2>&1 || kubectl create namespace cloudflare
+
+    if kubectl -n cloudflare get secret tunnel-token -o name >/dev/null 2>&1; then
+    echo "Using existing cloudflare/tunnel-token Secret; its value was not read or changed."
+    else
     : "${token:=${CF_TUNNEL_TOKEN:-}}"
     if [ -z "${token}" ]; then
-    echo "Set CF_TUNNEL_TOKEN or pass token=<tunnel-token> to proceed." >&2
+    echo "Set CF_TUNNEL_TOKEN or pass token=<tunnel-token> for the initial installation." >&2
     exit 1
     fi
 
@@ -589,7 +594,6 @@ cf-tunnel-install env='dev' token='':
     if printf '%s' "${token}" | grep -q "cloudflared"; then
     token="$(printf '%s' "${token}" | awk '{print $NF}')"
     fi
-    # Final whitespace trim after all token transforms
     token="$(printf '%s' "${token}" | sed -e 's/^ *//' -e 's/ *$//')"
 
     token_len=${#token}
@@ -602,11 +606,10 @@ cf-tunnel-install env='dev' token='':
     echo "Ensure you copied the connector token from the 'tunnel run --token' snippet." >&2
     fi
 
-    kubectl get namespace cloudflare >/dev/null 2>&1 || kubectl create namespace cloudflare
-
     kubectl -n cloudflare create secret generic tunnel-token \
     --from-literal=token="${token}" \
     --dry-run=client -o yaml | kubectl apply -f -
+    fi
 
     helm repo add cloudflare https://cloudflare.github.io/helm-charts --force-update
     helm repo update cloudflare
@@ -614,6 +617,19 @@ cf-tunnel-install env='dev' token='':
     values_file="{{ justfile_directory() }}/config/cloudflare-tunnel/values.yaml"
     monitoring_file="{{ justfile_directory() }}/config/cloudflare-tunnel/monitoring.yaml"
     chart_version="0.3.2"
+    values_yaml=$(printf '%s\n' \
+    'fullnameOverride: cloudflare-tunnel' \
+    'cloudflare:' \
+    "  tunnelName: \"${CF_TUNNEL_NAME:-sugarkube-${env_name}}\"" \
+    "  tunnelId: \"${CF_TUNNEL_ID:-}\"" \
+    '  secretName: tunnel-token' \
+    '  ingress: []')
+    helm_values=(--values -)
+    if [ "${env_name}" = "staging" ]; then
+    helm_values=(--version "${chart_version}" --values "${values_file}" \
+    --set-string "cloudflare.tunnelName=${CF_TUNNEL_NAME:-sugarkube-${env_name}}" \
+    --set-string "cloudflare.tunnelId=${CF_TUNNEL_ID:-}")
+    fi
 
     existing=$(helm -n cloudflare list --filter '^cloudflare-tunnel$' --output json 2>/dev/null || true)
     if [ -n "${existing}" ]; then
@@ -632,10 +648,7 @@ cf-tunnel-install env='dev' token='':
     if ! helm upgrade --install cloudflare-tunnel cloudflare/cloudflare-tunnel \
     --namespace cloudflare \
     --create-namespace \
-    --version "${chart_version}" \
-    --values "${values_file}" \
-    --set-string "cloudflare.tunnelName=${CF_TUNNEL_NAME:-sugarkube-${env_name}}" \
-    --set-string "cloudflare.tunnelId=${CF_TUNNEL_ID:-}"; then
+    "${helm_values[@]}" <<<"${values_yaml}"; then
     helm_exit_code=$?
     echo "Helm upgrade/install failed; diagnostics to follow:" >&2
     helm -n cloudflare status cloudflare-tunnel || true
@@ -655,18 +668,22 @@ cf-tunnel-install env='dev' token='':
     {"op":"replace","path":"/spec/template/spec/volumes","value":[]},
     {"op":"replace","path":"/spec/template/spec/containers/0/env","value":[{"name":"TUNNEL_TOKEN","valueFrom":{"secretKeyRef":{"name":"tunnel-token","key":"token"}}}]},
     {"op":"replace","path":"/spec/template/spec/containers/0/volumeMounts","value":[]},
-    {"op":"replace","path":"/spec/replicas","value":2},
-    {"op":"replace","path":"/spec/strategy","value":{"type":"RollingUpdate","rollingUpdate":{"maxUnavailable":0,"maxSurge":1}}},
-    {"op":"add","path":"/spec/template/spec/affinity","value":{"podAntiAffinity":{"requiredDuringSchedulingIgnoredDuringExecution":[{"topologyKey":"kubernetes.io/hostname","labelSelector":{"matchLabels":{"app.kubernetes.io/name":"cloudflare-tunnel","app.kubernetes.io/instance":"cloudflare-tunnel"}}}]}}},
-    {"op":"replace","path":"/spec/template/spec/containers/0/image","value":"cloudflare/cloudflared:2026.7.3@sha256:e39ee8da81ad5e05d77f38d2f51c60ca51bf2a8450ac3abab50c17fdb91d91bf"},
+    {"op":"replace","path":"/spec/template/spec/containers/0/image","value":"cloudflare/cloudflared:2024.8.3"},
     {"op":"replace","path":"/spec/template/spec/containers/0/command","value":["cloudflared","tunnel","--no-autoupdate","--metrics","0.0.0.0:2000","run"]},
-    {"op":"replace","path":"/spec/template/spec/containers/0/args","value":[]},
-    {"op":"remove","path":"/spec/template/spec/containers/0/livenessProbe"},
-    {"op":"add","path":"/spec/template/spec/containers/0/readinessProbe","value":{"httpGet":{"path":"/ready","port":2000},"initialDelaySeconds":10,"periodSeconds":10,"timeoutSeconds":2,"failureThreshold":3,"successThreshold":1}}
+    {"op":"replace","path":"/spec/template/spec/containers/0/args","value":[]}
     ]'
 
     kubectl -n cloudflare patch deployment cloudflare-tunnel --type json --patch "${deployment_patch}"
     if [ "${env_name}" = "staging" ]; then
+    staging_patch='[
+    {"op":"replace","path":"/spec/template/spec/containers/0/image","value":"cloudflare/cloudflared:2026.7.3@sha256:e39ee8da81ad5e05d77f38d2f51c60ca51bf2a8450ac3abab50c17fdb91d91bf"},
+    {"op":"replace","path":"/spec/replicas","value":2},
+    {"op":"replace","path":"/spec/strategy","value":{"type":"RollingUpdate","rollingUpdate":{"maxUnavailable":0,"maxSurge":1}}},
+    {"op":"add","path":"/spec/template/spec/affinity","value":{"podAntiAffinity":{"requiredDuringSchedulingIgnoredDuringExecution":[{"topologyKey":"kubernetes.io/hostname","labelSelector":{"matchLabels":{"app.kubernetes.io/name":"cloudflare-tunnel","app.kubernetes.io/instance":"cloudflare-tunnel"}}}]}}},
+    {"op":"remove","path":"/spec/template/spec/containers/0/livenessProbe"},
+    {"op":"add","path":"/spec/template/spec/containers/0/readinessProbe","value":{"httpGet":{"path":"/ready","port":2000},"initialDelaySeconds":10,"periodSeconds":10,"timeoutSeconds":2,"failureThreshold":3,"successThreshold":1}}
+    ]'
+    kubectl -n cloudflare patch deployment cloudflare-tunnel --type json --patch "${staging_patch}"
     # Production and development do not necessarily install the ServiceMonitor CRD.
     # These staging owner-scoped resources remain on ClusterIP and select only this release.
     kubectl apply -f "${monitoring_file}"

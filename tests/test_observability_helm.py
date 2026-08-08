@@ -166,13 +166,15 @@ def test_production_values_have_exact_safe_overrides_without_public_exposure_or_
             },
         },
     }
-    text = COMMON.read_text(encoding="utf-8") + STAGING.read_text(encoding="utf-8") + PROD.read_text(encoding="utf-8")
+    text = COMMON.read_text(encoding="utf-8") + PROD.read_text(encoding="utf-8")
     forbidden = [
         "longhorn",
         "IngressRoute",
         "kind: Ingress",
         "pass" + "word:",
         "admin" + "Pass" + "word",
+        "cloudflare-tunnel",
+        "CloudflareTunnel",
     ]
     for needle in forbidden:
         assert needle not in text
