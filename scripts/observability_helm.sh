@@ -153,8 +153,6 @@ assert_grafana_secret() {
   echo "Grafana admin Secret contract exists (values intentionally not read or printed)."
 }
 
-GRAFANA_SECRET_TTY="${SUGARKUBE_GRAFANA_SECRET_TTY:-/dev/tty}"
-
 grafana_secret_check() { assert_context; [[ $# == 0 ]] || { echo "ERROR: credential arguments are refused." >&2; return 2; }; assert_grafana_secret; }
 grafana_secret_install() (
   local credential_name grafana_admin_user="" grafana_admin_password="" grafana_admin_confirmation=""
@@ -172,8 +170,8 @@ grafana_secret_install() (
   done < <(compgen -e)
   [[ "${OBSERVABILITY_XTRACE_WAS_ENABLED}" == 0 ]] || { echo "ERROR: shell xtrace is refused for Grafana credential input." >&2; return 2; }
 
-  exec 3<"${GRAFANA_SECRET_TTY}"
-  [[ "${SUGARKUBE_GRAFANA_SECRET_TEST_NONTTY:-0}" == 1 || -t 3 ]] || {
+  exec 3</dev/tty
+  [[ -t 3 ]] || {
     echo "ERROR: an interactive controlling terminal is required." >&2
     return 2
   }
@@ -865,7 +863,7 @@ if not isinstance(dashboard, dict) or dashboard.get("uid") != "sugarkube-staging
 
 cmd="${1:-}"; shift || true; [[ -n "${cmd}" ]] || { usage; exit 2; }
 env_arg="${1:-}"; resolve_environment "${env_arg}"
-if [[ "${OBSERVABILITY_XTRACE_WAS_ENABLED}" == 1 && "${cmd}" != grafana-secret-* ]]; then set -x; fi
+if [[ "${OBSERVABILITY_XTRACE_WAS_ENABLED}" == 1 && "${cmd}" != grafana-secret-install ]]; then set -x; fi
 [[ "${ENVIRONMENT}" != staging ]] || validate_dashboard
 if [[ "${cmd}" == watchdog-drill-create ]]; then
   trap 'exit 130' INT

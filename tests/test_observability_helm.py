@@ -1,8 +1,11 @@
+import fcntl
 import json
 import os
+import pty
 import re
 import signal
 import subprocess
+import termios
 import time
 from pathlib import Path
 
@@ -771,22 +774,44 @@ esac
             "CONTEXT": context,
             "IDENTITY": identity,
             "SECRET_STATE": secret_state,
-            "SUGARKUBE_GRAFANA_SECRET_TTY": str(tty),
         }
     )
     if kubeconfig:
         env["KUBECONFIG"] = str(tmp_path / "kubeconfig")
     else:
         env.pop("KUBECONFIG", None)
-    if test_tty:
-        env["SUGARKUBE_GRAFANA_SECRET_TEST_NONTTY"] = "1"
     if extra_env:
         env.update(extra_env)
     invocation = ["bash"]
     if xtrace:
         invocation.append("-x")
     invocation.extend([str(SCRIPT), command, env_name, *args])
-    result = subprocess.run(invocation, text=True, capture_output=True, env=env, check=False)
+    if test_tty and command == "grafana-secret-install":
+        master_fd, slave_fd = pty.openpty()
+
+        def establish_controlling_tty():
+            os.setsid()
+            fcntl.ioctl(slave_fd, termios.TIOCSCTTY, 0)
+
+        process = subprocess.Popen(
+            invocation,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+            pass_fds=(slave_fd,),
+            preexec_fn=establish_controlling_tty,
+        )
+        os.close(slave_fd)
+        os.write(master_fd, tty_text.encode())
+        stdout, stderr = process.communicate()
+        os.close(master_fd)
+        result = subprocess.CompletedProcess(invocation, process.returncode, stdout, stderr)
+    else:
+        env["SUGARKUBE_GRAFANA_SECRET_TTY"] = str(tty)
+        env["SUGARKUBE_GRAFANA_SECRET_TEST_NONTTY"] = "1"
+        result = subprocess.run(invocation, text=True, capture_output=True, env=env, check=False)
     return result, audit.read_text(encoding="utf-8") if audit.exists() else "", tty
 
 
@@ -852,6 +877,15 @@ def test_grafana_secret_check_is_read_only_and_redacted(tmp_path, state, success
     assert "operator" not in result.stdout + result.stderr
     assert "admin-user" not in result.stdout + result.stderr
     assert "admin-password" not in result.stdout + result.stderr
+
+
+def test_grafana_secret_check_restores_requested_xtrace(tmp_path):
+    result, audit, _ = run_grafana_secret_helper(
+        tmp_path, command="grafana-secret-check", xtrace=True
+    )
+    assert result.returncode == 0
+    assert audit == "secret-check\n"
+    assert "+ grafana_secret_check" in result.stderr
 
 
 def run_helper(
