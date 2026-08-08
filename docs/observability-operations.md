@@ -197,15 +197,15 @@ health panels remain Phase 2 work and are not presented as implemented here.
   `"null"`. The existing watchdog route, its order, and its 30-second group wait,
   one-minute group interval, and five-minute repeat interval remain preserved.
   The exact-label `SugarkubePagerDutyTest` route is deployed and has passed its
-  manual fire/acknowledge/resolve delivery drill. Separately, the repository is
-  ready to route exactly `DspaceBuildRevisionMismatch`,
+  manual fire/acknowledge/resolve delivery drill. The deployed staging release also routes exactly
+  `DspaceBuildRevisionMismatch`,
   `DspaceMixedBuildRevisions`, `DspaceDeploymentImagePinMismatch`,
   `DspaceChatSyntheticFailed`, and `DspaceMetricsTargetDown` to
-  `pagerduty-dspace`. That five-alert route is not yet deployed or live-proven.
-  Its receiver uses the existing Secret-mounted PagerDuty integration and
-  `send_resolved: true`; unrelated alerts continue to fall through to `"null"`.
-  Deployment, collector/runner setup, and firing/resolved drill prerequisites
-  remain in the focused
+  `pagerduty-dspace`. All five are installed, loaded, healthy, and inactive in steady state. The
+  owner-scoped DSPACE drill live-proved three of them through firing, phone delivery, manual
+  acknowledgement, resolution, and exact cleanup. Its receiver uses the existing Secret-mounted
+  PagerDuty integration and `send_resolved: true`; unrelated alerts continue to fall through to `"null"`.
+  Deployment and drill evidence is recorded in the focused
   [DSPACE release-integrity runbook](observability-dspace-release-integrity.md).
 - Grafana: persistence disabled, no Ingress, LAN-only NodePort `30300`.
 - The provisioned dashboard defaults to six hours and a 30-second refresh. Its
@@ -322,9 +322,9 @@ five minutes. Retain the procedure below for regression drills.
 
    Confirm the validator reports the exact synthetic route, the exact five-alert
    DSPACE allowlist, file references, and Secret mount contract; remove the
-   temporary render after review. This validates repository structure only; use
-   the focused [DSPACE release-integrity runbook](observability-dspace-release-integrity.md)
-   for the remaining deployment and live firing/resolved drill prerequisites.
+   temporary render after review. This validates repository structure only; the completed staging
+   deployment and live firing/resolved drill evidence is in the focused
+   [DSPACE release-integrity runbook](observability-dspace-release-integrity.md).
 4. Upgrade and verify:
 
    ```bash
