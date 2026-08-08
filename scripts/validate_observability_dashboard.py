@@ -601,13 +601,17 @@ def validate_tokenplace_semantics(dashboard: dict) -> None:
     }
     for metric, label in direct_counter_groups.items():
         expression = next(expr for expr in expressions if metric in expr)
-        pattern = rf"^sum\s+by\s*\(\s*{label}\s*\)\s*\(\s*rate\s*\(\s*{metric}\{{.*\}}\[\$__rate_interval\]\s*\)\s*\)\s*$"
+        pattern = (
+            rf"^sum\s+by\s*\(\s*{label}\s*\)\s*\(\s*rate\s*\(\s*"
+            rf"{metric}\{{.*\}}\[\$__rate_interval\]\s*\)\s*\)\s*$"
+        )
         if not re.match(pattern, expression):
             raise SystemExit(f"ERROR: {metric} must directly use sum by ({label}) of rate.")
 
     request_rate = token_panels_by_title["token.place HTTP request rate"]["targets"][0]["expr"]
     if not re.match(
-        r"^sum\s+by\s*\(\s*route\s*,\s*status_class\s*\)\s*\(\s*rate\s*\(\s*tokenplace_http_requests_total\{.*\}\[\$__rate_interval\]\s*\)\s*\)\s*$",
+        r"^sum\s+by\s*\(\s*route\s*,\s*status_class\s*\)\s*\(\s*rate\s*\(\s*"
+        r"tokenplace_http_requests_total\{.*\}\[\$__rate_interval\]\s*\)\s*\)\s*$",
         request_rate,
     ):
         raise SystemExit(
