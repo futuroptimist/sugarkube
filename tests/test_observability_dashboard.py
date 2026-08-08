@@ -60,6 +60,8 @@ def test_dashboard_identity_defaults_rows_and_required_panels(dashboard):
         "DSPACE feature traffic",
         "Blackbox monitoring",
         "DSPACE release integrity",
+        "token.place relay and compute capacity",
+        "token.place HTTP and release",
     }
     titles = {panel["title"] for panel in panels}
     for title in (
@@ -79,6 +81,20 @@ def test_dashboard_identity_defaults_rows_and_required_panels(dashboard):
         "Probe duration",
         "HTTP response status",
         "TLS certificate lifetime",
+        "token.place scrape availability",
+        "token.place instrumentation health",
+        "token.place compute-node counts",
+        "token.place oldest compute-node lease age",
+        "token.place compute-node eviction rate",
+        "token.place relay queue depth",
+        "token.place oldest queued-request age",
+        "token.place in-flight requests by pod",
+        "token.place oldest in-flight age by pod",
+        "token.place terminal outcome rate",
+        "token.place HTTP request rate",
+        "token.place HTTP 5xx ratio",
+        "token.place HTTP latency percentiles",
+        "token.place build identity",
     ):
         assert title in titles
 
@@ -103,6 +119,472 @@ def test_queries_use_stable_datasource_bounded_labels_and_safe_zero(dashboard):
         "app",
         "route",
     }
+
+
+def test_tokenplace_queries_are_replica_safe_bounded_and_preserve_missing_data(dashboard):
+    panels = {panel["title"]: panel for panel in all_panels(dashboard)}
+    token_panels = [panels[title] for title in validator.TOKENPLACE_PANELS]
+    expressions = [target["expr"] for panel in token_panels for target in panel["targets"]]
+    selector = (
+        'app="tokenplace",environment=~"$environment",release="tokenplace",'
+        'cluster="sugarkube-int",namespace="tokenplace"'
+    )
+    assert all(selector in expression for expression in expressions)
+    assert all("vector(0)" not in expression for expression in expressions)
+    assert all(panel["fieldConfig"]["defaults"]["noValue"] == "NO DATA" for panel in token_panels)
+
+    counts = panels["token.place compute-node counts"]
+    assert all(target["expr"].startswith("max(") for target in counts["targets"])
+    assert panels["token.place relay queue depth"]["targets"][0]["expr"].startswith(
+        "max by (provider_mode)"
+    )
+    assert panels["token.place in-flight requests by pod"]["targets"][0]["expr"].startswith(
+        "max by (pod)"
+    )
+    assert (
+        "sum by (reason) (rate("
+        in panels["token.place compute-node eviction rate"]["targets"][0]["expr"]
+    )
+    assert (
+        "sum by (outcome) (rate("
+        in panels["token.place terminal outcome rate"]["targets"][0]["expr"]
+    )
+    assert (
+        "sum by (route, status_class) (rate("
+        in panels["token.place HTTP request rate"]["targets"][0]["expr"]
+    )
+
+    latency = panels["token.place HTTP latency percentiles"]
+    assert len(latency["targets"]) == 3
+    assert all("histogram_quantile(" in target["expr"] for target in latency["targets"])
+    assert all("sum by (le, route)" in target["expr"] for target in latency["targets"])
+    rate_expressions = [expression for expression in expressions if "rate(" in expression]
+    assert rate_expressions
+    assert all("[$__rate_interval]" in expression for expression in rate_expressions)
+    validator.validate_tokenplace_semantics(dashboard)
+    build = panels["token.place build identity"]["targets"][0]
+    assert build["expr"].startswith("max by (pod, version, revision)")
+    assert build["legendFormat"] == "{{pod}} {{version}} {{revision}}"
+
+
+@pytest.mark.parametrize(
+    "title",
+    ["token.place scrape availability", "token.place instrumentation health"],
+)
+@pytest.mark.parametrize("missing_flag", ["instant", "range"])
+def test_validator_rejects_missing_health_query_flags(dashboard, title, missing_flag):
+    changed = json.loads(json.dumps(dashboard))
+    panel = next(panel for panel in all_panels(changed) if panel["title"] == title)
+    panel["targets"][0].pop(missing_flag)
+    with pytest.raises(SystemExit, match="instant-only"):
+        validator.validate_tokenplace_semantics(changed)
+
+
+@pytest.mark.parametrize(
+    ("title", "mutation"),
+    [
+        ("token.place HTTP 5xx ratio", lambda panel: panel.update(targets=[])),
+        (
+            "token.place terminal outcome rate",
+            lambda panel: panel["targets"][0].update(
+                expr=panel["targets"][0]["expr"].replace(
+                    "tokenplace_relay_request_outcomes_total",
+                    "tokenplace_compute_node_evictions_total",
+                )
+            ),
+        ),
+    ],
+)
+def test_validator_rejects_empty_or_metric_swapped_panels(dashboard, title, mutation):
+    changed = json.loads(json.dumps(dashboard))
+    mutation(next(panel for panel in all_panels(changed) if panel["title"] == title))
+    with pytest.raises(SystemExit):
+        validator.validate_tokenplace_semantics(changed)
+
+
+def test_validator_rejects_queued_age_grouped_away_from_provider_mode(dashboard):
+    changed = json.loads(json.dumps(dashboard))
+    panel = next(
+        panel
+        for panel in all_panels(changed)
+        if panel["title"] == "token.place oldest queued-request age"
+    )
+    panel["targets"][0]["expr"] = panel["targets"][0]["expr"].replace(
+        "by (provider_mode)", "by (pod)"
+    )
+    with pytest.raises(SystemExit, match="provider_mode"):
+        validator.validate_tokenplace_semantics(changed)
+
+
+@pytest.mark.parametrize("mutation", ["4xx", "unclamped"])
+def test_validator_rejects_unsafe_http_5xx_ratio(dashboard, mutation):
+    changed = json.loads(json.dumps(dashboard))
+    target = next(
+        panel for panel in all_panels(changed) if panel["title"] == "token.place HTTP 5xx ratio"
+    )["targets"][0]
+    if mutation == "4xx":
+        target["expr"] = target["expr"].replace('status_class="5xx"', 'status_class="4xx"')
+    else:
+        target["expr"] = target["expr"].replace("clamp_min(", "(").replace(", 1e-9)", ")")
+    with pytest.raises(SystemExit, match="5xx ratio"):
+        validator.validate_tokenplace_semantics(changed)
+
+
+@pytest.mark.parametrize(
+    ("label", "location"),
+    [
+        ("remote_addr", "matcher"),
+        ("node_id", "grouping"),
+        ("remote_addr", "legend"),
+    ],
+)
+def test_validator_rejects_unknown_tokenplace_labels(dashboard, label, location):
+    changed = json.loads(json.dumps(dashboard))
+    panel = next(
+        panel for panel in all_panels(changed) if panel["title"] == "token.place relay queue depth"
+    )
+    target = panel["targets"][0]
+    if location == "matcher":
+        target["expr"] = target["expr"].replace(
+            'namespace="tokenplace"', f'namespace="tokenplace",{label}="raw"'
+        )
+    elif location == "grouping":
+        target["expr"] = target["expr"].replace(
+            "by (provider_mode)", f"by (provider_mode, {label})"
+        )
+    else:
+        target["legendFormat"] = f"{{{{provider_mode}}}} {{{{{label}}}}}"
+    with pytest.raises(SystemExit):
+        validator.validate_tokenplace_semantics(changed)
+
+
+@pytest.mark.parametrize(
+    "metric",
+    [
+        "tokenplace_relay_chat_available",
+        "tokenplace_relay_schedulable_compute_nodes",
+        "tokenplace_relay_chat_availability_state",
+        "tokenplace_relay_state_store_up",
+    ],
+)
+def test_validator_rejects_actual_phase_two_metrics(dashboard, metric):
+    changed = json.loads(json.dumps(dashboard))
+    panel = next(
+        panel for panel in all_panels(changed) if panel["title"] == "token.place relay queue depth"
+    )
+    panel["description"] = f"Deferred metric: {metric}"
+    with pytest.raises(SystemExit, match="Phase 2"):
+        validator.validate_tokenplace_semantics(changed)
+
+
+@pytest.mark.parametrize(
+    ("title", "mutation", "message"),
+    [
+        (
+            "token.place scrape availability",
+            lambda expression: f"{expression} or up",
+            "bare or unverified metric selector",
+        ),
+        (
+            "token.place scrape availability",
+            lambda expression: (
+                f"{expression} or tokenplace_unverified_future_metric{{"
+                'app="tokenplace",environment=~"$environment",release="tokenplace",'
+                'cluster="sugarkube-int",namespace="tokenplace"}'
+            ),
+            "intended metric family",
+        ),
+        (
+            "token.place instrumentation health",
+            lambda expression: f'label_replace({expression}, "remote_addr", "raw", "pod", "(.*)")',
+            "synthesize labels",
+        ),
+    ],
+)
+def test_validator_rejects_unscoped_unverified_or_synthesized_metrics(
+    dashboard, title, mutation, message
+):
+    changed = json.loads(json.dumps(dashboard))
+    panel = next(panel for panel in all_panels(changed) if panel["title"] == title)
+    panel["targets"][0]["expr"] = mutation(panel["targets"][0]["expr"])
+    with pytest.raises(SystemExit, match=message):
+        validator.validate_tokenplace_semantics(changed)
+
+
+@pytest.mark.parametrize(
+    "addition",
+    [
+        "process_cpu_seconds_total",
+        "probe_success",
+        "sum(arbitrary_external_metric_total) + 1",
+    ],
+)
+def test_validator_rejects_any_bare_metric_selector(dashboard, addition):
+    changed = json.loads(json.dumps(dashboard))
+    panel = next(
+        panel
+        for panel in all_panels(changed)
+        if panel["title"] == "token.place scrape availability"
+    )
+    expression = panel["targets"][0]["expr"]
+    panel["targets"][0]["expr"] = f"({expression}) or ({addition})"
+    with pytest.raises(SystemExit, match="bare or unverified metric selector"):
+        validator.validate_tokenplace_semantics(changed)
+
+
+@pytest.mark.parametrize(
+    "variable",
+    ["$app", "$environment", "$__range", "$__rate_interval", "${app}"],
+)
+def test_validator_rejects_template_variables_in_metric_position(dashboard, variable):
+    changed = json.loads(json.dumps(dashboard))
+    panel = next(
+        panel
+        for panel in all_panels(changed)
+        if panel["title"] == "token.place scrape availability"
+    )
+    expression = panel["targets"][0]["expr"]
+    panel["targets"][0]["expr"] = f"({expression}) or ({variable})"
+    with pytest.raises(SystemExit, match="template variable outside"):
+        validator.validate_tokenplace_semantics(changed)
+
+
+def test_validator_rejects_canonical_matchers_hidden_in_backtick_value(dashboard):
+    changed = json.loads(json.dumps(dashboard))
+    panel = next(
+        panel
+        for panel in all_panels(changed)
+        if panel["title"] == "token.place scrape availability"
+    )
+    panel["targets"][0]["expr"] = (
+        "min by (pod) (up{route=`"
+        'app="tokenplace",environment=~"$environment",release="tokenplace",'
+        'cluster="sugarkube-int",namespace="tokenplace"`})'
+    )
+    with pytest.raises(SystemExit, match="canonical target selector"):
+        validator.validate_tokenplace_semantics(changed)
+
+
+@pytest.mark.parametrize(
+    "extra_matcher",
+    [
+        'route=~"$app"',
+        'route=~"$environment"',
+        'pod=~"$__range"',
+        'app="tokenplace"',
+        'route="unexpected"',
+    ],
+)
+def test_validator_rejects_extra_dynamic_matchers(dashboard, extra_matcher):
+    changed = json.loads(json.dumps(dashboard))
+    panel = next(
+        panel
+        for panel in all_panels(changed)
+        if panel["title"] == "token.place scrape availability"
+    )
+    panel["targets"][0]["expr"] = panel["targets"][0]["expr"].replace(
+        'namespace="tokenplace"', f'namespace="tokenplace",{extra_matcher}'
+    )
+    with pytest.raises(SystemExit, match="canonical target selector"):
+        validator.validate_tokenplace_semantics(changed)
+
+
+def test_validator_rejects_single_quoted_matcher(dashboard):
+    changed = json.loads(json.dumps(dashboard))
+    panel = next(
+        panel
+        for panel in all_panels(changed)
+        if panel["title"] == "token.place scrape availability"
+    )
+    panel["targets"][0]["expr"] = panel["targets"][0]["expr"].replace(
+        'app="tokenplace"', "app='tokenplace'"
+    )
+    with pytest.raises(SystemExit, match="canonical target selector"):
+        validator.validate_tokenplace_semantics(changed)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda expression: f"{expression}[$__rate_interval]",
+        lambda expression: f"{expression} + rate([$__rate_interval])",
+    ],
+)
+def test_validator_rejects_stray_rate_ranges(dashboard, mutation):
+    changed = json.loads(json.dumps(dashboard))
+    panel = next(
+        panel
+        for panel in all_panels(changed)
+        if panel["title"] == "token.place scrape availability"
+    )
+    panel["targets"][0]["expr"] = mutation(panel["targets"][0]["expr"])
+    with pytest.raises(SystemExit):
+        validator.validate_tokenplace_semantics(changed)
+
+
+def test_validator_rejects_selector_range_outside_rate(dashboard):
+    changed = json.loads(json.dumps(dashboard))
+    panel = next(
+        panel
+        for panel in all_panels(changed)
+        if panel["title"] == "token.place scrape availability"
+    )
+    panel["targets"][0]["expr"] = panel["targets"][0]["expr"].replace("})", "}[$__rate_interval])")
+    with pytest.raises(SystemExit, match="range outside"):
+        validator.validate_tokenplace_semantics(changed)
+
+
+@pytest.mark.parametrize(
+    ("title", "mutation", "message"),
+    [
+        (
+            "token.place compute-node eviction rate",
+            lambda panel: panel["targets"][0].update(
+                expr=panel["targets"][0]["expr"].replace("[$__rate_interval]", "")
+            ),
+            "rate ranges",
+        ),
+        (
+            "token.place scrape availability",
+            lambda panel: panel["targets"][0].update(
+                expr=f'({panel["targets"][0]["expr"]}) + [5m]'
+            ),
+            "invalid range",
+        ),
+        (
+            "token.place instrumentation health",
+            lambda panel: panel["targets"][0].update(expr="1"),
+            "intended metric family",
+        ),
+        (
+            "token.place relay queue depth",
+            lambda panel: panel["targets"][0].update(
+                expr=panel["targets"][0]["expr"].replace("max by", "min by")
+            ),
+            "explicit max deduplication",
+        ),
+        (
+            "token.place compute-node counts",
+            lambda panel: panel["targets"][0].update(
+                expr=panel["targets"][0]["expr"].replace("max(", "max by (pod) (")
+            ),
+            "direct max deduplication",
+        ),
+        (
+            "token.place compute-node eviction rate",
+            lambda panel: panel["targets"][0].update(
+                expr=panel["targets"][0]["expr"].replace("sum by (reason)", "min")
+            ),
+            "summed rate",
+        ),
+        (
+            "token.place terminal outcome rate",
+            lambda panel: panel["targets"][0].update(expr=f'({panel["targets"][0]["expr"]})'),
+            "directly use",
+        ),
+        (
+            "token.place HTTP request rate",
+            lambda panel: panel["targets"][0].update(
+                expr=panel["targets"][0]["expr"].replace(
+                    "sum by (route, status_class)", "sum by (route)"
+                )
+            ),
+            "group by route",
+        ),
+        (
+            "token.place build identity",
+            lambda panel: panel["targets"][0].update(instant=False),
+            "build identity",
+        ),
+        (
+            "token.place HTTP latency percentiles",
+            lambda panel: panel["targets"][0].update(legendFormat="p90 {{route}}"),
+            "latency",
+        ),
+        (
+            "token.place relay queue depth",
+            lambda panel: panel["fieldConfig"]["defaults"].update(noValue="0"),
+            "NO DATA",
+        ),
+        (
+            "token.place scrape availability",
+            lambda panel: panel["targets"][0].update(legendFormat="{{remote_addr}}"),
+            "unsafe label",
+        ),
+    ],
+)
+def test_validator_rejects_tokenplace_contract_mutations(dashboard, title, mutation, message):
+    changed = json.loads(json.dumps(dashboard))
+    panel = next(panel for panel in all_panels(changed) if panel["title"] == title)
+    mutation(panel)
+    with pytest.raises(SystemExit, match=message):
+        validator.validate_tokenplace_semantics(changed)
+
+
+def test_validator_rejects_duplicate_panel_and_non_row_heading(dashboard):
+    duplicate = json.loads(json.dumps(dashboard))
+    duplicate["panels"].append(
+        next(
+            panel
+            for panel in all_panels(duplicate)
+            if panel["title"] == "token.place scrape availability"
+        )
+    )
+    with pytest.raises(SystemExit, match="exactly one"):
+        validator.validate_tokenplace_semantics(duplicate)
+
+    non_row = json.loads(json.dumps(dashboard))
+    heading = next(
+        panel
+        for panel in all_panels(non_row)
+        if panel["title"] == "token.place relay and compute capacity"
+    )
+    heading["type"] = "stat"
+    with pytest.raises(SystemExit, match="section headings"):
+        validator.validate_tokenplace_semantics(non_row)
+
+
+@pytest.mark.parametrize(
+    ("title", "replacement", "message"),
+    [
+        (
+            "token.place compute-node counts",
+            "sum(tokenplace_compute_nodes_registered)",
+            "canonical target selector",
+        ),
+        (
+            "token.place terminal outcome rate",
+            "sum(rate(tokenplace_relay_request_outcomes_total{"
+            'app="tokenplace",environment=~"$environment",release="tokenplace",'
+            'cluster="sugarkube-int",namespace="tokenplace"}[$__rate_interval])) '
+            "or vector(0)",
+            "substituting zero",
+        ),
+        (
+            "token.place compute-node eviction rate",
+            "sum(rate(tokenplace_compute_node_evictions_total{"
+            'app="tokenplace",environment=~"$environment",release="tokenplace",'
+            'cluster="sugarkube-int",namespace="tokenplace"}[$__rate_interval]))',
+            "bounded reason",
+        ),
+        (
+            "token.place in-flight requests by pod",
+            "sum(tokenplace_relay_in_flight_requests{"
+            'app="tokenplace",environment=~"$environment",release="tokenplace",'
+            'cluster="sugarkube-int",namespace="tokenplace"})',
+            "per pod",
+        ),
+    ],
+)
+def test_validator_rejects_unsafe_tokenplace_query_regressions(
+    dashboard, title, replacement, message
+):
+    changed = json.loads(json.dumps(dashboard))
+    next(panel for panel in all_panels(changed) if panel["title"] == title)["targets"][0][
+        "expr"
+    ] = replacement
+    with pytest.raises(SystemExit, match=message):
+        validator.validate_tokenplace_semantics(changed)
 
 
 def test_snapshot_tables_use_instant_queries(dashboard):

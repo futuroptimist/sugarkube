@@ -29,12 +29,117 @@ REQUIRED_METRICS = {
     "probe_duration_seconds",
     "probe_http_status_code",
     "probe_ssl_earliest_cert_expiry",
+    "tokenplace_compute_nodes_registered",
+    "tokenplace_compute_nodes_healthy",
+    "tokenplace_compute_node_lease_age_seconds",
+    "tokenplace_compute_node_evictions_total",
+    "tokenplace_relay_queue_depth",
+    "tokenplace_relay_oldest_queued_request_age_seconds",
+    "tokenplace_relay_in_flight_requests",
+    "tokenplace_relay_oldest_in_flight_age_seconds",
+    "tokenplace_relay_request_outcomes_total",
+    "tokenplace_http_requests_total",
+    "tokenplace_http_request_duration_seconds_bucket",
+    "tokenplace_instrumentation_up",
+    "tokenplace_build_info",
 }
 EVENT_METRICS = {"dspace_dchat_requests_total", "dspace_dependency_requests_total"}
 OPERATIONAL_ROUTES = '"/(healthz|livez|metrics)"'
 BLACKBOX_JOB_MATCHER = (
     'job=~"probe/monitoring/blackbox-(dspace|tokenplace|danielsmith|jobbot3000)-staging-.*"'
 )
+TOKENPLACE_ROWS = {
+    "token.place relay and compute capacity",
+    "token.place HTTP and release",
+}
+TOKENPLACE_PANELS = {
+    "token.place scrape availability",
+    "token.place instrumentation health",
+    "token.place compute-node counts",
+    "token.place oldest compute-node lease age",
+    "token.place compute-node eviction rate",
+    "token.place relay queue depth",
+    "token.place oldest queued-request age",
+    "token.place in-flight requests by pod",
+    "token.place oldest in-flight age by pod",
+    "token.place terminal outcome rate",
+    "token.place HTTP request rate",
+    "token.place HTTP 5xx ratio",
+    "token.place HTTP latency percentiles",
+    "token.place build identity",
+}
+PHASE_TWO_METRICS = {
+    "tokenplace_chat_availability",
+    "tokenplace_compute_nodes_schedulable",
+    "tokenplace_availability_reason",
+    "tokenplace_shared_state_health",
+    "tokenplace_relay_chat_available",
+    "tokenplace_relay_schedulable_compute_nodes",
+    "tokenplace_relay_chat_availability_state",
+    "tokenplace_relay_state_store_up",
+}
+TOKENPLACE_LABELS = {
+    "app",
+    "environment",
+    "release",
+    "cluster",
+    "namespace",
+    "pod",
+    "reason",
+    "provider_mode",
+    "outcome",
+    "route",
+    "status_class",
+    "le",
+    "version",
+    "revision",
+}
+TOKENPLACE_PROMQL_FUNCTIONS = {
+    "clamp_min",
+    "histogram_quantile",
+    "max",
+    "min",
+    "rate",
+    "sum",
+}
+TOKENPLACE_PROMQL_MODIFIERS = {
+    "and",
+    "bool",
+    "group_left",
+    "group_right",
+    "ignoring",
+    "offset",
+    "on",
+    "or",
+    "unless",
+}
+TOKENPLACE_CANONICAL_MATCHERS = {
+    "app": ("=", '"tokenplace"'),
+    "environment": ("=~", '"$environment"'),
+    "release": ("=", '"tokenplace"'),
+    "cluster": ("=", '"sugarkube-int"'),
+    "namespace": ("=", '"tokenplace"'),
+}
+TOKENPLACE_RATE_METRICS = {
+    "tokenplace_compute_node_evictions_total",
+    "tokenplace_relay_request_outcomes_total",
+    "tokenplace_http_requests_total",
+    "tokenplace_http_request_duration_seconds_bucket",
+}
+
+
+def parse_tokenplace_matchers(matchers: str) -> dict:
+    """Parse the deliberately small matcher grammar used by token.place panels."""
+    parsed = {}
+    for entry in matchers.split(","):
+        match = re.fullmatch(
+            r'\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*(=~|!~|!=|=)\s*("(?:\\.|[^"\\])*")\s*',
+            entry,
+        )
+        if not match or match.group(1) in parsed:
+            raise ValueError("malformed or duplicate matcher")
+        parsed[match.group(1)] = match.groups()[1:]
+    return parsed
 
 
 def load_dashboard(path: Path) -> dict:
@@ -238,6 +343,352 @@ def validate_dashboard_semantics(dashboard: dict) -> None:
         )
 
 
+def validate_tokenplace_semantics(dashboard: dict) -> None:
+    all_items = list(panels(dashboard))
+    for title in TOKENPLACE_ROWS | TOKENPLACE_PANELS:
+        matching = [panel for panel in all_items if panel.get("title") == title]
+        if len(matching) != 1:
+            raise SystemExit(f"ERROR: dashboard must contain exactly one {title!r} panel.")
+    if any(panel_named(dashboard, title).get("type") != "row" for title in TOKENPLACE_ROWS):
+        raise SystemExit("ERROR: token.place section headings must remain dashboard rows.")
+
+    token_panels_by_title = {title: panel_named(dashboard, title) for title in TOKENPLACE_PANELS}
+    expected_targets = {title: 1 for title in TOKENPLACE_PANELS}
+    expected_targets["token.place compute-node counts"] = 2
+    expected_targets["token.place HTTP latency percentiles"] = 3
+    for title, expected_count in expected_targets.items():
+        targets = token_panels_by_title[title].get("targets")
+        if (
+            not isinstance(targets, list)
+            or len(targets) != expected_count
+            or any(
+                not isinstance(target, dict) or not target.get("expr", "").strip()
+                for target in targets
+            )
+        ):
+            raise SystemExit(
+                f"ERROR: {title} must contain exactly {expected_count} non-empty target(s)."
+            )
+
+    token_panels = list(token_panels_by_title.values())
+    expressions = [
+        target.get("expr", "")
+        for panel in token_panels
+        for target in panel.get("targets", [])
+        if isinstance(target, dict)
+    ]
+    if not expressions:
+        raise SystemExit("ERROR: token.place panels must contain queries.")
+    if any(
+        "vector(0)" in expression or re.search(r"\bor\s+(?:on\(\)\s+)?0\b", expression)
+        for expression in expressions
+    ):
+        raise SystemExit(
+            "ERROR: token.place queries must preserve missing data instead of substituting zero."
+        )
+    if any(re.search(r"\blabel_(?:replace|join)\s*\(", expression) for expression in expressions):
+        raise SystemExit("ERROR: token.place queries must not synthesize labels.")
+
+    expected_metrics = {
+        "token.place scrape availability": {"up"},
+        "token.place instrumentation health": {"tokenplace_instrumentation_up"},
+        "token.place compute-node counts": {
+            "tokenplace_compute_nodes_registered",
+            "tokenplace_compute_nodes_healthy",
+        },
+        "token.place oldest compute-node lease age": {"tokenplace_compute_node_lease_age_seconds"},
+        "token.place compute-node eviction rate": {"tokenplace_compute_node_evictions_total"},
+        "token.place relay queue depth": {"tokenplace_relay_queue_depth"},
+        "token.place oldest queued-request age": {
+            "tokenplace_relay_oldest_queued_request_age_seconds"
+        },
+        "token.place in-flight requests by pod": {"tokenplace_relay_in_flight_requests"},
+        "token.place oldest in-flight age by pod": {
+            "tokenplace_relay_oldest_in_flight_age_seconds"
+        },
+        "token.place terminal outcome rate": {"tokenplace_relay_request_outcomes_total"},
+        "token.place HTTP request rate": {"tokenplace_http_requests_total"},
+        "token.place HTTP 5xx ratio": {"tokenplace_http_requests_total"},
+        "token.place HTTP latency percentiles": {"tokenplace_http_request_duration_seconds_bucket"},
+        "token.place build identity": {"tokenplace_build_info"},
+    }
+    for title, intended in expected_metrics.items():
+        panel_expressions = [target["expr"] for target in token_panels_by_title[title]["targets"]]
+        found = set()
+        for expression in panel_expressions:
+            selectors = list(
+                re.finditer(r"\b([a-zA-Z_:][a-zA-Z0-9_:]*)\s*\{([^{}]*)\}", expression)
+            )
+            consumed_selector_ends = []
+            for selector in selectors:
+                metric, matchers = selector.groups()
+                found.add(metric)
+                try:
+                    parsed_matchers = parse_tokenplace_matchers(matchers)
+                except ValueError:
+                    parsed_matchers = None
+                allowed_matchers = dict(TOKENPLACE_CANONICAL_MATCHERS)
+                if title == "token.place HTTP 5xx ratio":
+                    allowed_matchers["status_class"] = ("=", '"5xx"')
+                if (
+                    metric not in intended
+                    or parsed_matchers is None
+                    or any(
+                        parsed_matchers.get(key) != value
+                        for key, value in TOKENPLACE_CANONICAL_MATCHERS.items()
+                    )
+                    or any(key not in allowed_matchers for key in parsed_matchers)
+                    or any(allowed_matchers[key] != value for key, value in parsed_matchers.items())
+                ):
+                    raise SystemExit(
+                        f"ERROR: {title} must use only its intended metric family "
+                        "with the canonical target selector."
+                    )
+                suffix = expression[selector.end() :]
+                range_match = re.match(r"\[\$__rate_interval\]", suffix)
+                if metric in TOKENPLACE_RATE_METRICS:
+                    if not range_match or not re.search(
+                        r"\brate\s*\(\s*$", expression[: selector.start()]
+                    ):
+                        raise SystemExit(
+                            f"ERROR: {title} rate ranges must be attached to a metric "
+                            "selector directly inside rate()."
+                        )
+                    consumed_selector_ends.append(selector.end() + range_match.end())
+                else:
+                    if range_match:
+                        raise SystemExit(
+                            f"ERROR: {title} has a range outside an intended rate expression."
+                        )
+                    consumed_selector_ends.append(selector.end())
+            without_selectors = "".join(
+                expression[end:start]
+                for (end, start) in zip(
+                    [0, *consumed_selector_ends],
+                    [*(selector.start() for selector in selectors), len(expression)],
+                )
+            )
+            selector_free = re.sub(r'"(?:\\.|[^"\\])*"', "", without_selectors)
+            if re.search(
+                r"\$(?:[a-zA-Z_][a-zA-Z0-9_]*|\{[a-zA-Z_][a-zA-Z0-9_]*\})",
+                selector_free,
+            ):
+                raise SystemExit(
+                    f"ERROR: {title} contains a template variable outside its permitted "
+                    "canonical selector or rate range."
+                )
+            if "[" in selector_free or "]" in selector_free:
+                raise SystemExit(f"ERROR: {title} contains an invalid range expression.")
+            selector_free = re.sub(
+                r"\b(?:by|without|on|ignoring|group_left|group_right)\s*\([^()]*\)",
+                "",
+                selector_free,
+            )
+            selector_free = re.sub(
+                rf"\b(?:{'|'.join(TOKENPLACE_PROMQL_FUNCTIONS)})\s*(?=\()",
+                "",
+                selector_free,
+            )
+            selector_free = re.sub(
+                rf"\b(?:{'|'.join(TOKENPLACE_PROMQL_MODIFIERS)})\b",
+                "",
+                selector_free,
+            )
+            selector_free = re.sub(
+                r"(?<![a-zA-Z_:])(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?",
+                "",
+                selector_free,
+                flags=re.IGNORECASE,
+            )
+            if re.search(r"\b[a-zA-Z_:][a-zA-Z0-9_:]*\b", selector_free):
+                raise SystemExit(
+                    f"ERROR: {title} contains a bare or unverified metric selector; "
+                    "the canonical target selector is required."
+                )
+        if found != intended:
+            raise SystemExit(f"ERROR: {title} must use its intended metric family.")
+
+    for title in (
+        "token.place scrape availability",
+        "token.place instrumentation health",
+    ):
+        panel = token_panels_by_title[title]
+        target = panel["targets"][0]
+        mappings = panel.get("fieldConfig", {}).get("defaults", {}).get("mappings", [])
+        mapping_options = mappings[0].get("options", {}) if len(mappings) == 1 else {}
+        if (
+            target.get("instant") is not True
+            or target.get("range") is not False
+            or mapping_options.get("0", {}).get("text") != "UNHEALTHY"
+            or mapping_options.get("1", {}).get("text") != "HEALTHY"
+            or panel.get("fieldConfig", {}).get("defaults", {}).get("noValue") != "NO DATA"
+        ):
+            raise SystemExit(
+                "ERROR: token.place health stats must be instant-only and distinguish "
+                "healthy, unhealthy, and NO DATA."
+            )
+
+    logical = {
+        "tokenplace_compute_nodes_registered",
+        "tokenplace_compute_nodes_healthy",
+        "tokenplace_compute_node_lease_age_seconds",
+        "tokenplace_relay_queue_depth",
+        "tokenplace_relay_oldest_queued_request_age_seconds",
+    }
+    for metric in logical:
+        matching = [expression for expression in expressions if metric in expression]
+        if not matching or any(
+            not re.search(rf"\bmax(?:\s+by\s*\([^)]*\))?\s*\([^)]*{metric}", expression)
+            for expression in matching
+        ):
+            raise SystemExit(f"ERROR: logical gauge {metric} must use explicit max deduplication.")
+
+    direct_max = {
+        "tokenplace_compute_nodes_registered",
+        "tokenplace_compute_nodes_healthy",
+        "tokenplace_compute_node_lease_age_seconds",
+    }
+    for metric in direct_max:
+        expression = next(expr for expr in expressions if metric in expr)
+        if not re.match(rf"^max\s*\(\s*{metric}\{{", expression):
+            raise SystemExit(f"ERROR: logical gauge {metric} must use direct max deduplication.")
+
+    grouped_gauges = {
+        "token.place relay queue depth": ("tokenplace_relay_queue_depth", "provider_mode"),
+        "token.place oldest queued-request age": (
+            "tokenplace_relay_oldest_queued_request_age_seconds",
+            "provider_mode",
+        ),
+        "token.place in-flight requests by pod": (
+            "tokenplace_relay_in_flight_requests",
+            "pod",
+        ),
+        "token.place oldest in-flight age by pod": (
+            "tokenplace_relay_oldest_in_flight_age_seconds",
+            "pod",
+        ),
+    }
+    for title, (metric, label) in grouped_gauges.items():
+        target = token_panels_by_title[title]["targets"][0]
+        if not re.match(rf"^max\s+by\s*\(\s*{label}\s*\)\s*\(\s*{metric}\{{", target["expr"]):
+            qualifier = "remain per pod and " if label == "pod" else ""
+            raise SystemExit(f"ERROR: {title} must {qualifier}use max by ({label}).")
+        if target.get("legendFormat") != f"{{{{{label}}}}}":
+            raise SystemExit(f"ERROR: {title} must use a {label} legend.")
+
+    counters = {
+        "tokenplace_compute_node_evictions_total": "reason",
+        "tokenplace_relay_request_outcomes_total": "outcome",
+        "tokenplace_http_requests_total": None,
+    }
+    for metric, bounded_group in counters.items():
+        matching = [expression for expression in expressions if metric in expression]
+        if not matching or any(
+            "sum" not in expression
+            or f"rate({metric}" not in expression
+            or "[$__rate_interval]" not in expression
+            for expression in matching
+        ):
+            raise SystemExit(f"ERROR: process-local counter {metric} must use a summed rate.")
+        if bounded_group and any(
+            f"sum by ({bounded_group})" not in expression for expression in matching
+        ):
+            raise SystemExit(f"ERROR: {metric} must remain grouped by bounded {bounded_group}.")
+
+    direct_counter_groups = {
+        "tokenplace_compute_node_evictions_total": "reason",
+        "tokenplace_relay_request_outcomes_total": "outcome",
+    }
+    for metric, label in direct_counter_groups.items():
+        expression = next(expr for expr in expressions if metric in expr)
+        pattern = (
+            rf"^sum\s+by\s*\(\s*{label}\s*\)\s*\(\s*rate\s*\(\s*"
+            rf"{metric}\{{.*\}}\[\$__rate_interval\]\s*\)\s*\)\s*$"
+        )
+        if not re.match(pattern, expression):
+            raise SystemExit(f"ERROR: {metric} must directly use sum by ({label}) of rate.")
+
+    request_rate = token_panels_by_title["token.place HTTP request rate"]["targets"][0]["expr"]
+    if not re.match(
+        r"^sum\s+by\s*\(\s*route\s*,\s*status_class\s*\)\s*\(\s*rate\s*\(\s*"
+        r"tokenplace_http_requests_total\{.*\}\[\$__rate_interval\]\s*\)\s*\)\s*$",
+        request_rate,
+    ):
+        raise SystemExit(
+            "ERROR: token.place HTTP request rate must group by route and status_class."
+        )
+
+    ratio = token_panels_by_title["token.place HTTP 5xx ratio"]["targets"][0]["expr"]
+    numerator, separator, denominator = ratio.partition(" / ")
+    if (
+        not separator
+        or 'status_class="5xx"' not in numerator
+        or re.search(r"status_class\s*(?:=|=~|!=|!~)", denominator)
+        or not re.match(r"^clamp_min\s*\(\s*sum\s*\(\s*rate\s*\(", denominator)
+        or not re.search(r"\)\s*,\s*1e-9\s*\)\s*$", denominator)
+    ):
+        raise SystemExit(
+            "ERROR: token.place HTTP 5xx ratio must select 5xx and use an unfiltered "
+            "clamp_min denominator."
+        )
+
+    for title in (
+        "token.place in-flight requests by pod",
+        "token.place oldest in-flight age by pod",
+    ):
+        target = panel_named(dashboard, title).get("targets", [{}])[0]
+        if "by (pod)" not in target.get("expr", "") or "{{pod}}" not in target.get(
+            "legendFormat", ""
+        ):
+            raise SystemExit("ERROR: token.place in-flight gauges must remain visible per pod.")
+    build = panel_named(dashboard, "token.place build identity")
+    build_target = build.get("targets", [{}])[0]
+    if (
+        "max by (pod, version, revision)" not in build_target.get("expr", "")
+        or build_target.get("legendFormat") != "{{pod}} {{version}} {{revision}}"
+        or build_target.get("instant") is not True
+        or build_target.get("range") is not False
+    ):
+        raise SystemExit(
+            "ERROR: token.place build identity must remain per pod, version, and revision."
+        )
+    latency = panel_named(dashboard, "token.place HTTP latency percentiles")
+    if {target.get("legendFormat", "").split(" ", 1)[0] for target in latency["targets"]} != {
+        "p50",
+        "p95",
+        "p99",
+    } or any(
+        "histogram_quantile(" not in target.get("expr", "")
+        or "sum by (le, route)" not in target.get("expr", "")
+        or "rate(tokenplace_http_request_duration_seconds_bucket" not in target.get("expr", "")
+        for target in latency.get("targets", [])
+    ):
+        raise SystemExit(
+            "ERROR: token.place latency must use histogram bucket rates and bounded grouping."
+        )
+    if any(
+        panel.get("fieldConfig", {}).get("defaults", {}).get("noValue") != "NO DATA"
+        for panel in token_panels
+    ):
+        raise SystemExit("ERROR: token.place panels must display missing series as NO DATA.")
+
+    token_serialized = json.dumps(token_panels)
+    expression_text = "\n".join(expressions)
+    used_labels = set(
+        re.findall(r"(?:\{|,)\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:=|=~|!=|!~)", expression_text)
+    )
+    for labels in re.findall(
+        r"\b(?:by|without|on|ignoring|group_left|group_right)\s*\(([^)]*)\)",
+        expression_text,
+    ):
+        used_labels.update(label.strip() for label in labels.split(",") if label.strip())
+    used_labels.update(re.findall(r"{{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*}}", token_serialized))
+    if not used_labels <= TOKENPLACE_LABELS:
+        raise SystemExit("ERROR: token.place queries or legends contain an unsafe label.")
+    if any(metric in token_serialized for metric in PHASE_TWO_METRICS):
+        raise SystemExit("ERROR: token.place Phase 2 metrics must not be presented as implemented.")
+
+
 def validate_dashboard(path: Path) -> str:
     dashboard = load_dashboard(path)
     if dashboard.get("uid") != UID or dashboard.get("title") != TITLE:
@@ -249,24 +700,37 @@ def validate_dashboard(path: Path) -> str:
         or len(ids) != len(set(ids))
     ):
         raise SystemExit("ERROR: dashboard panel IDs must be present, integer, and unique.")
-    positioned = [
-        panel
-        for panel in panels(dashboard)
-        if panel.get("type") != "row" and isinstance(panel.get("gridPos"), dict)
-    ]
-    for index, left in enumerate(positioned):
-        a = left["gridPos"]
-        for right in positioned[index + 1 :]:
-            b = right["gridPos"]
-            overlaps = (
-                a["x"] < b["x"] + b["w"]
-                and b["x"] < a["x"] + a["w"]
-                and a["y"] < b["y"] + b["h"]
-                and b["y"] < a["y"] + a["h"]
-            )
-            if overlaps:
-                raise SystemExit(f"ERROR: dashboard panels {left['id']} and {right['id']} overlap.")
+    positions = []
+    for panel in panels(dashboard):
+        position = panel.get("gridPos", {})
+        if (
+            any(not isinstance(position.get(key), int) for key in ("x", "y", "w", "h"))
+            or position.get("x", -1) < 0
+            or position.get("y", -1) < 0
+            or position.get("w", 0) <= 0
+            or position.get("h", 0) <= 0
+            or position.get("x", 0) + position.get("w", 0) > 24
+        ):
+            raise SystemExit("ERROR: dashboard panels must have valid integer grid positions.")
+        if panel.get("type") == "row":
+            continue
+        rectangle = (
+            position["x"],
+            position["y"],
+            position["x"] + position["w"],
+            position["y"] + position["h"],
+        )
+        if any(
+            rectangle[0] < other[2]
+            and rectangle[2] > other[0]
+            and rectangle[1] < other[3]
+            and rectangle[3] > other[1]
+            for other in positions
+        ):
+            raise SystemExit("ERROR: dashboard panel grid positions must not overlap.")
+        positions.append(rectangle)
     validate_dashboard_semantics(dashboard)
+    validate_tokenplace_semantics(dashboard)
     expressions = [
         target["expr"]
         for panel in panels(dashboard)

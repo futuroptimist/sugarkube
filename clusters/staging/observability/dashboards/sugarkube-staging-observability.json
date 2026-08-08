@@ -1256,6 +1256,702 @@
         "mode": "markdown",
         "content": "[DSPACE integrity runbook](https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-dspace-release-integrity.md) · [Finalized staging evidence](https://github.com/futuroptimist/sugarkube/blob/main/deployment-evidence/dspace/staging/main-018687f-20260805T035722Z.json)"
       }
+    },
+    {
+      "id": 29,
+      "type": "row",
+      "title": "token.place relay and compute capacity",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 73
+      }
+    },
+    {
+      "id": 30,
+      "type": "stat",
+      "title": "token.place scrape availability",
+      "description": "Prometheus scrape health per relay pod. Missing targets remain NO DATA.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 12,
+        "x": 0,
+        "y": 74
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "min by (pod) (up{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"})",
+          "legendFormat": "{{pod}} scrape",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "NO DATA",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "UNHEALTHY",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "HEALTHY",
+                  "color": "green"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 31,
+      "type": "stat",
+      "title": "token.place instrumentation health",
+      "description": "Application instrumentation self-check per relay pod; zero is unhealthy and an absent series remains NO DATA.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 12,
+        "x": 12,
+        "y": 74
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "min by (pod) (tokenplace_instrumentation_up{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"})",
+          "legendFormat": "{{pod}} instrumentation",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "NO DATA",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "UNHEALTHY",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "HEALTHY",
+                  "color": "green"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 32,
+      "type": "timeseries",
+      "title": "token.place compute-node counts",
+      "description": "Registered and healthy logical compute-node gauges. max deduplicates identical values emitted by future relay replicas without multiplying capacity.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 79
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(tokenplace_compute_nodes_registered{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"})",
+          "legendFormat": "registered"
+        },
+        {
+          "refId": "B",
+          "expr": "max(tokenplace_compute_nodes_healthy{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"})",
+          "legendFormat": "healthy"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 33,
+      "type": "timeseries",
+      "title": "token.place oldest compute-node lease age",
+      "description": "Oldest lease age reported by the relay fleet. max preserves the worst observed logical age across replicas.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 79
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(tokenplace_compute_node_lease_age_seconds{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"})",
+          "legendFormat": "oldest lease"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 34,
+      "type": "timeseries",
+      "title": "token.place compute-node eviction rate",
+      "description": "Summed process-local eviction counter rate grouped only by bounded reason.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 87
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (reason) (rate(tokenplace_compute_node_evictions_total{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"}[$__rate_interval]))",
+          "legendFormat": "{{reason}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 35,
+      "type": "timeseries",
+      "title": "token.place relay queue depth",
+      "description": "Logical queue depth by bounded provider mode. max avoids multiplying a shared queue gauge across future relay replicas.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 87
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (provider_mode) (tokenplace_relay_queue_depth{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"})",
+          "legendFormat": "{{provider_mode}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 36,
+      "type": "timeseries",
+      "title": "token.place oldest queued-request age",
+      "description": "Oldest queued-request age by bounded provider mode. max shows the worst age without multiplying replicated logical gauges.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 95
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (provider_mode) (tokenplace_relay_oldest_queued_request_age_seconds{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"})",
+          "legendFormat": "{{provider_mode}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 37,
+      "type": "timeseries",
+      "title": "token.place in-flight requests by pod",
+      "description": "In-flight ownership is relay-process local, so values remain per pod rather than being combined across replicas.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 95
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (pod) (tokenplace_relay_in_flight_requests{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"})",
+          "legendFormat": "{{pod}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 38,
+      "type": "timeseries",
+      "title": "token.place oldest in-flight age by pod",
+      "description": "Oldest in-flight age remains per relay pod because cross-replica ownership is not assumed.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 103
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (pod) (tokenplace_relay_oldest_in_flight_age_seconds{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"})",
+          "legendFormat": "{{pod}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 39,
+      "type": "timeseries",
+      "title": "token.place terminal outcome rate",
+      "description": "Summed process-local terminal outcome counter rate grouped only by bounded outcome.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 103
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(tokenplace_relay_request_outcomes_total{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"}[$__rate_interval]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 40,
+      "type": "row",
+      "title": "token.place HTTP and release",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 111
+      }
+    },
+    {
+      "id": 41,
+      "type": "timeseries",
+      "title": "token.place HTTP request rate",
+      "description": "Summed request rate grouped by normalized route and bounded status class.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 112
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (route, status_class) (rate(tokenplace_http_requests_total{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"}[$__rate_interval]))",
+          "legendFormat": "{{route}} {{status_class}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 42,
+      "type": "timeseries",
+      "title": "token.place HTTP 5xx ratio",
+      "description": "Fraction of observed token.place HTTP requests returning a bounded 5xx status class; absent counters remain NO DATA.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 112
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(tokenplace_http_requests_total{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\",status_class=\"5xx\"}[$__rate_interval])) / clamp_min(sum(rate(tokenplace_http_requests_total{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"}[$__rate_interval])), 1e-9)",
+          "legendFormat": "5xx ratio"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "NO DATA",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.01
+              },
+              {
+                "color": "red",
+                "value": 0.05
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 43,
+      "type": "timeseries",
+      "title": "token.place HTTP latency percentiles",
+      "description": "Request latency percentiles from histogram buckets, grouped only by normalized route.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 0,
+        "y": 120
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(.50, sum by (le, route) (rate(tokenplace_http_request_duration_seconds_bucket{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"}[$__rate_interval])))",
+          "legendFormat": "p50 {{route}}"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(.95, sum by (le, route) (rate(tokenplace_http_request_duration_seconds_bucket{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"}[$__rate_interval])))",
+          "legendFormat": "p95 {{route}}"
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(.99, sum by (le, route) (rate(tokenplace_http_request_duration_seconds_bucket{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"}[$__rate_interval])))",
+          "legendFormat": "p99 {{route}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 44,
+      "type": "table",
+      "title": "token.place build identity",
+      "description": "Safe release identity per relay pod: version and revision.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 120
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (pod, version, revision) (tokenplace_build_info{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"})",
+          "legendFormat": "{{pod}} {{version}} {{revision}}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value": true
+            },
+            "indexByName": {
+              "pod": 0,
+              "version": 1,
+              "revision": 2
+            }
+          }
+        }
+      ]
     }
   ]
 }
