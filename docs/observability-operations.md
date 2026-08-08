@@ -197,16 +197,15 @@ health panels remain Phase 2 work and are not presented as implemented here.
   `"null"`. The existing watchdog route, its order, and its 30-second group wait,
   one-minute group interval, and five-minute repeat interval remain preserved.
   The exact-label `SugarkubePagerDutyTest` route is deployed and has passed its
-  manual fire/acknowledge/resolve delivery drill. Separately, the repository is
-  ready to route exactly `DspaceBuildRevisionMismatch`,
-  `DspaceMixedBuildRevisions`, `DspaceDeploymentImagePinMismatch`,
-  `DspaceChatSyntheticFailed`, and `DspaceMetricsTargetDown` to
-  `pagerduty-dspace`. That five-alert route is not yet deployed or live-proven.
-  Its receiver uses the existing Secret-mounted PagerDuty integration and
-  `send_resolved: true`; unrelated alerts continue to fall through to `"null"`.
-  Deployment, collector/runner setup, and firing/resolved drill prerequisites
-  remain in the focused
-  [DSPACE release-integrity runbook](observability-dspace-release-integrity.md).
+  manual fire/acknowledge/resolve delivery drill. The deployed DSPACE allowlist routes exactly
+  `DspaceBuildRevisionMismatch`, `DspaceMixedBuildRevisions`,
+  `DspaceDeploymentImagePinMismatch`, `DspaceChatSyntheticFailed`, and
+  `DspaceMetricsTargetDown` to `pagerduty-dspace`. All five are loaded, healthy, and inactive in
+  steady state; the owner-scoped staging drill deliberately fired three and proved phone delivery,
+  acknowledgement, resolution, and exact cleanup. Its receiver uses the existing Secret-mounted
+  PagerDuty integration and `send_resolved: true`; unrelated alerts continue to
+  fall through to `"null"`. See the
+  [DSPACE release-integrity verification record](observability-dspace-release-integrity.md#completed-staging-verification).
 - Grafana: persistence disabled, no Ingress, LAN-only NodePort `30300`.
 - The provisioned dashboard defaults to six hours and a 30-second refresh. Its
   top-level public availability summary reports **Healthy endpoints**, **Failed
@@ -322,9 +321,9 @@ five minutes. Retain the procedure below for regression drills.
 
    Confirm the validator reports the exact synthetic route, the exact five-alert
    DSPACE allowlist, file references, and Secret mount contract; remove the
-   temporary render after review. This validates repository structure only; use
-   the focused [DSPACE release-integrity runbook](observability-dspace-release-integrity.md)
-   for the remaining deployment and live firing/resolved drill prerequisites.
+   temporary render after review. This validates repository structure only; the completed DSPACE
+   deployment and live firing/resolved proof are recorded in the focused
+   [DSPACE release-integrity runbook](observability-dspace-release-integrity.md#completed-staging-verification).
 4. Upgrade and verify:
 
    ```bash
@@ -458,6 +457,15 @@ revision restores its dashboard ConfigMap; after a forward fix, the standard
 upgrade lifecycle again supplies the complete values chain and dashboard file.
 
 ## Manually verified staging observations
+
+The DSPACE #2329 verification established a healthy staging `kube-prometheus-stack` Helm revision 8
+using chart `87.19.0`. Its live ConfigMap and repository `main` matched the same 44-panel dashboard
+at canonical JSON SHA-256
+`59cb188e015574a50a703c5000128d446896b1526f2d9fed9f7dde4ade32717b`. DSPACE stayed healthy and
+unchanged at Helm revision 28, application version `3.1.0`, and source revision
+`018687f5a7f4de45508c6e36eb28afb3e44da24d`. The complete sanitized alert and cleanup record is in
+the [DSPACE release-integrity runbook](observability-dspace-release-integrity.md#completed-staging-verification).
+This is staging evidence only; no production observability deployment or live test is claimed.
 
 The reprovisioning proof above is scripted and repeatable: `observability-dashboard-verify` is the
 acceptance evidence, and it runs the same way every time. The following two observations are not
