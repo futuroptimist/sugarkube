@@ -1,0 +1,13 @@
+# Production-only overrides for the guarded, non-Flux core observability lifecycle.
+prometheus:
+  prometheusSpec:
+    externalLabels:
+      cluster: sugarkube-prod
+alertmanager:
+  alertmanagerSpec:
+    secrets: []
+  config:
+    route:
+      receiver: "null"
+    receivers:
+      - name: "null"

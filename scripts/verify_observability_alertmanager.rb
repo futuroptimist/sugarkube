@@ -24,6 +24,8 @@ def fail_closed(message)
 end
 
 mode, *paths = ARGV
+environment = paths.last&.start_with?("env=") ? paths.pop.delete_prefix("env=") : "staging"
+fail_closed("unsupported environment") unless %w[staging prod].include?(environment)
 fail_closed("expected rendered FILE or live ALERTMANAGER_YAML CONFIG_SECRET_YAML") unless
   (mode == "rendered" && paths.length == 1) || (mode == "live" && paths.length == 2)
 
@@ -39,8 +41,11 @@ rescue StandardError
 end
 ams = documents.select { |d| d.is_a?(Hash) && d["kind"] == "Alertmanager" && d.dig("metadata", "name") == "kube-prometheus-stack-alertmanager" }
 fail_closed("expected exactly one kube-prometheus-stack Alertmanager custom resource") unless ams.length == 1
-unless ams.first.dig("spec", "secrets") == [PD_SECRET, HC_SECRET]
-  fail_closed("Alertmanager must reference exactly the two expected Secrets in order")
+secrets = ams.first.dig("spec", "secrets")
+if environment == "staging"
+  fail_closed("Alertmanager must reference exactly the two expected Secrets in order") unless secrets == [PD_SECRET, HC_SECRET]
+else
+  fail_closed("production Alertmanager must not mount integration Secrets") unless secrets.nil? || secrets == []
 end
 secret = documents.find { |d| d.is_a?(Hash) && d["kind"] == "Secret" && d.dig("metadata", "name") == "alertmanager-kube-prometheus-stack-alertmanager" }
 fail_closed("generated Alertmanager configuration Secret is missing") unless secret
@@ -62,6 +67,13 @@ forbidden = lambda do |value|
   end
 end
 fail_closed("inline credentials or webhook URLs are forbidden") if forbidden.call(config)
+
+if environment == "prod"
+  fail_closed("production route must be the exact top-level null route") unless config["route"] == { "receiver" => "null" }
+  fail_closed("production must contain only the null receiver") unless config["receivers"] == [{ "name" => "null" }]
+  warn "Production null-only Alertmanager structure verified (credential values not accessed)."
+  exit 0
+end
 
 route = config["route"]
 fail_closed('root receiver must remain "null"') unless route.is_a?(Hash) && route["receiver"] == "null"

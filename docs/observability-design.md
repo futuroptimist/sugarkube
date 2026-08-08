@@ -155,7 +155,7 @@ graph TD
 
 ### Persistent storage
 
-- Prometheus and Grafana need persistent volumes in staging/prod.
+- Prometheus needs persistent storage in staging and production. Production Grafana persistence is deliberately disabled for the initial declarative core-stack phase; durable UI-created state is a separate follow-up decision.
 - Alerts should treat PV exhaustion and Prometheus write failures as observability-stack risks, not app outages.
 - If the monitoring PV is unavailable, app traffic must continue; the failure mode is loss of visibility, not application rollback.
 
