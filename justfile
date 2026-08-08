@@ -611,14 +611,9 @@ cf-tunnel-install env='dev' token='':
     helm repo add cloudflare https://cloudflare.github.io/helm-charts --force-update
     helm repo update cloudflare
 
-    values_yaml=$(printf '%s\n' \
-    'fullnameOverride: cloudflare-tunnel' \
-    'cloudflare:' \
-    "  tunnelName: \"${CF_TUNNEL_NAME:-sugarkube-${env_name}}\"" \
-    "  tunnelId: \"${CF_TUNNEL_ID:-}\"" \
-    '  secretName: tunnel-token' \
-    '  ingress: []'
-    )
+    values_file="{{ justfile_directory() }}/config/cloudflare-tunnel/values.yaml"
+    monitoring_file="{{ justfile_directory() }}/config/cloudflare-tunnel/monitoring.yaml"
+    chart_version="0.3.2"
 
     existing=$(helm -n cloudflare list --filter '^cloudflare-tunnel$' --output json 2>/dev/null || true)
     if [ -n "${existing}" ]; then
@@ -637,7 +632,10 @@ cf-tunnel-install env='dev' token='':
     if ! helm upgrade --install cloudflare-tunnel cloudflare/cloudflare-tunnel \
     --namespace cloudflare \
     --create-namespace \
-    --values - <<<"${values_yaml}"; then
+    --version "${chart_version}" \
+    --values "${values_file}" \
+    --set-string "cloudflare.tunnelName=${CF_TUNNEL_NAME:-sugarkube-${env_name}}" \
+    --set-string "cloudflare.tunnelId=${CF_TUNNEL_ID:-}"; then
     helm_exit_code=$?
     echo "Helm upgrade/install failed; diagnostics to follow:" >&2
     helm -n cloudflare status cloudflare-tunnel || true
@@ -657,12 +655,18 @@ cf-tunnel-install env='dev' token='':
     {"op":"replace","path":"/spec/template/spec/volumes","value":[]},
     {"op":"replace","path":"/spec/template/spec/containers/0/env","value":[{"name":"TUNNEL_TOKEN","valueFrom":{"secretKeyRef":{"name":"tunnel-token","key":"token"}}}]},
     {"op":"replace","path":"/spec/template/spec/containers/0/volumeMounts","value":[]},
-    {"op":"replace","path":"/spec/template/spec/containers/0/image","value":"cloudflare/cloudflared:2024.8.3"},
+    {"op":"replace","path":"/spec/replicas","value":2},
+    {"op":"replace","path":"/spec/strategy","value":{"type":"RollingUpdate","rollingUpdate":{"maxUnavailable":0,"maxSurge":1}}},
+    {"op":"replace","path":"/spec/template/spec/containers/0/image","value":"cloudflare/cloudflared:2026.7.3@sha256:e39ee8da81ad5e05d77f38d2f51c60ca51bf2a8450ac3abab50c17fdb91d91bf"},
     {"op":"replace","path":"/spec/template/spec/containers/0/command","value":["cloudflared","tunnel","--no-autoupdate","--metrics","0.0.0.0:2000","run"]},
-    {"op":"replace","path":"/spec/template/spec/containers/0/args","value":[]}
+    {"op":"replace","path":"/spec/template/spec/containers/0/args","value":[]},
+    {"op":"remove","path":"/spec/template/spec/containers/0/livenessProbe"},
+    {"op":"add","path":"/spec/template/spec/containers/0/readinessProbe","value":{"httpGet":{"path":"/ready","port":2000},"initialDelaySeconds":10,"periodSeconds":10,"timeoutSeconds":2,"failureThreshold":3,"successThreshold":1}}
     ]'
 
     kubectl -n cloudflare patch deployment cloudflare-tunnel --type json --patch "${deployment_patch}"
+    # These owner-scoped resources remain on ClusterIP and select only this release.
+    kubectl apply -f "${monitoring_file}"
 
     helm_note_printed=0
 
@@ -673,27 +677,13 @@ cf-tunnel-install env='dev' token='':
     kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel || true
     kubectl -n cloudflare logs deploy/cloudflare-tunnel --tail=50 || true
 
-    echo "Attempting teardown + retry: deleting existing pods and retrying rollout..." >&2
-    kubectl -n cloudflare delete pod -l app.kubernetes.io/name=cloudflare-tunnel || true
-
-    sleep 5
-
-    if ! kubectl -n cloudflare rollout status deployment/cloudflare-tunnel --timeout=60s; then
-    echo "cloudflare-tunnel still failing after teardown+retry; see logs above." >&2
-    helm -n cloudflare status cloudflare-tunnel || true
-    kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel || true
+    # Never delete both connectors to force a retry: that defeats the HA rollout contract and can
+    # synchronize their restart backoff. Leave the live rollout intact for owner diagnosis.
     logs=$(kubectl -n cloudflare logs deploy/cloudflare-tunnel --tail=50 2>/dev/null || true)
-    printf '%s\n' "${logs}"
-
-        if printf '%s' "${logs}" | grep -Eq "Cannot determine default origin certificate path|client didn't specify origincert path"; then
-            printf '%s\n' "${origin_cert_guidance}" >&2
-        fi
-    if [ "${helm_exit_code:-0}" -ne 0 ] && [ "${helm_note_printed}" -eq 0 ]; then
-    echo "Note: Helm reported errors earlier; token-mode patches still applied." >&2
-    helm_note_printed=1
+    if printf '%s' "${logs}" | grep -Eq "Cannot determine default origin certificate path|client didn't specify origincert path"; then
+        printf '%s\n' "${origin_cert_guidance}" >&2
     fi
     exit 1
-    fi
     fi
 
     if [ "${helm_exit_code:-0}" -ne 0 ] && [ "${helm_note_printed}" -eq 0 ]; then
@@ -707,6 +697,10 @@ cf-tunnel-install env='dev' token='':
     "- Tunnel name: ${CF_TUNNEL_NAME:-sugarkube-${env_name}}" \
     '- Verify readiness: kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel' \
     '- Readiness endpoint: /ready must return 200'
+
+# Read-only staging verification; never reads Secret data.
+cf-tunnel-verify env='staging':
+    scripts/verify_cloudflare_tunnel.sh {{ quote(env) }}
 
 # Hard reset the Cloudflare Tunnel resources in the cluster for a fresh cf-tunnel-install.
 cf-tunnel-reset:

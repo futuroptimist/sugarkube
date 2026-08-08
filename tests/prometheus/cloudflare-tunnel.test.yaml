@@ -1,0 +1,106 @@
+rule_files:
+  - ../../platform/observability/rules/cloudflare-tunnel.yaml
+evaluation_interval: 1m
+tests:
+  - name: two healthy connectors
+    interval: 1m
+    input_series:
+      - series: 'up{namespace="cloudflare",service="cloudflare-tunnel-metrics",instance="connector-1"}'
+        values: '1x20'
+      - series: 'up{namespace="cloudflare",service="cloudflare-tunnel-metrics",instance="connector-2"}'
+        values: '1x20'
+      - series: 'cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel-metrics",instance="connector-1"}'
+        values: '4x20'
+      - series: 'cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel-metrics",instance="connector-2"}'
+        values: '4x20'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: CloudflareTunnelNoHealthyConnections
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: CloudflareTunnelConnectionsDegraded
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: CloudflareTunnelMetricsTargetsDown
+        exp_alerts: []
+  - name: one degraded connector and recovery
+    interval: 1m
+    input_series:
+      - series: 'up{namespace="cloudflare",service="cloudflare-tunnel-metrics",instance="connector-1"}'
+        values: '1x25'
+      - series: 'up{namespace="cloudflare",service="cloudflare-tunnel-metrics",instance="connector-2"}'
+        values: '1x25'
+      - series: 'cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel-metrics",instance="connector-1"}'
+        values: '4x25'
+      - series: 'cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel-metrics",instance="connector-2"}'
+        values: '2x15 4x10'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: CloudflareTunnelConnectionsDegraded
+        exp_alerts:
+          - exp_labels: {application: cloudflare-tunnel, environment: staging, cluster: sugarkube-int, severity: warning}
+            exp_annotations:
+              summary: Cloudflare Tunnel connector capacity is degraded
+              description: Fewer than two connectors report metrics or a connector has fewer than four HA connections.
+              remediation: Inspect target and connector status after excluding an ordinary rolling upgrade.
+              runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/cloudflare_tunnel.md#alerts
+      - eval_time: 20m
+        alertname: CloudflareTunnelConnectionsDegraded
+        exp_alerts: []
+  - name: zero connections
+    interval: 1m
+    input_series:
+      - series: 'up{namespace="cloudflare",service="cloudflare-tunnel-metrics",instance="connector-1"}'
+        values: '1x15'
+      - series: 'up{namespace="cloudflare",service="cloudflare-tunnel-metrics",instance="connector-2"}'
+        values: '1x15'
+      - series: 'cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel-metrics",instance="connector-1"}'
+        values: '0x15'
+      - series: 'cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel-metrics",instance="connector-2"}'
+        values: '0x15'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: CloudflareTunnelNoHealthyConnections
+        exp_alerts:
+          - exp_labels: {application: cloudflare-tunnel, environment: staging, cluster: sugarkube-int, severity: critical}
+            exp_annotations:
+              summary: No Cloudflare Tunnel edge connections are healthy
+              description: Both staging connectors have reported zero aggregate HA connections for five minutes.
+              remediation: Check WAN and DNS first; do not restart connectors that are alive and reconnecting.
+              runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/cloudflare_tunnel.md#alerts
+  - name: missing metrics
+    interval: 1m
+    input_series:
+      - series: 'unrelated_metric'
+        values: '1x15'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: CloudflareTunnelMetricsTargetsDown
+        exp_alerts:
+          - exp_labels: {application: cloudflare-tunnel, environment: staging, cluster: sugarkube-int, severity: warning, namespace: cloudflare, service: cloudflare-tunnel-metrics}
+            exp_annotations:
+              summary: Cloudflare Tunnel metrics targets are absent or down
+              description: Prometheus has fewer than two healthy cloudflared scrape targets; this does not alone prove the tunnel is down.
+              remediation: Check ServiceMonitor discovery, Service selectors, pods, and network policy.
+              runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/cloudflare_tunnel.md#alerts
+      - eval_time: 7m
+        alertname: CloudflareTunnelNoHealthyConnections
+        exp_alerts: []
+  - name: brief transient degradation
+    interval: 1m
+    input_series:
+      - series: 'up{namespace="cloudflare",service="cloudflare-tunnel-metrics",instance="connector-1"}'
+        values: '1x20'
+      - series: 'up{namespace="cloudflare",service="cloudflare-tunnel-metrics",instance="connector-2"}'
+        values: '1x20'
+      - series: 'cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel-metrics",instance="connector-1"}'
+        values: '4x5 2x5 4x10'
+      - series: 'cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel-metrics",instance="connector-2"}'
+        values: '4x20'
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: CloudflareTunnelConnectionsDegraded
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: CloudflareTunnelConnectionsDegraded
+        exp_alerts: []

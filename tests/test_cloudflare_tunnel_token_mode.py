@@ -292,7 +292,19 @@ def test_deployment_patch_enforces_token_mode(deployment_patch_ops: list[dict]) 
 
     image_op = ops_by_path.get("/spec/template/spec/containers/0/image")
     assert image_op and image_op.get("op") in {"add", "replace"}
-    assert image_op.get("value") == "cloudflare/cloudflared:2024.8.3"
+    assert image_op.get("value") == (
+        "cloudflare/cloudflared:2026.7.3@"
+        "sha256:e39ee8da81ad5e05d77f38d2f51c60ca51bf2a8450ac3abab50c17fdb91d91bf"
+    )
+
+    assert ops_by_path["/spec/template/spec/containers/0/livenessProbe"]["op"] == "remove"
+    readiness = ops_by_path["/spec/template/spec/containers/0/readinessProbe"]["value"]
+    assert readiness["httpGet"] == {"path": "/ready", "port": 2000}
+    assert readiness["failureThreshold"] == 3
+    assert ops_by_path["/spec/strategy"]["value"]["rollingUpdate"] == {
+        "maxUnavailable": 0,
+        "maxSurge": 1,
+    }
 
 
 def test_recipe_relies_on_rollout_status_not_helm_wait(cf_recipe_body: str) -> None:
@@ -304,18 +316,12 @@ def test_recipe_relies_on_rollout_status_not_helm_wait(cf_recipe_body: str) -> N
     assert "--wait" not in cf_recipe_body
 
 
-def test_teardown_retry_is_baked_into_cf_tunnel_install(cf_recipe_body: str) -> None:
+def test_failed_rollout_never_deletes_both_connectors(cf_recipe_body: str) -> None:
     assert (
         "kubectl -n cloudflare delete pod -l app.kubernetes.io/name=cloudflare-tunnel"
-        in cf_recipe_body
+        not in cf_recipe_body
     )
-
-    rollout_calls = re.findall(
-        r"kubectl -n cloudflare rollout status deployment/cloudflare-tunnel --timeout=\d+s",
-        cf_recipe_body,
-    )
-    assert len(rollout_calls) >= 2, "Expected two rollout status calls (initial + retry)"
-    assert "cloudflare-tunnel still failing after teardown+retry" in cf_recipe_body
+    assert "synchronize their restart backoff" in cf_recipe_body
     assert "exit 1" in cf_recipe_body
 
 
@@ -373,10 +379,10 @@ def test_cf_tunnel_install_normalizes_named_env_arguments(cf_recipe_body: str) -
 
         combined_output = result.stdout + result.stderr
         assert re.search(
-            r"HELM:upgrade --install cloudflare-tunnel cloudflare/cloudflare-tunnel .* --values -",
+            r"HELM:upgrade --install cloudflare-tunnel cloudflare/cloudflare-tunnel .* --values .*/config/cloudflare-tunnel/values.yaml",
             result.stdout,
         )
-        assert f'HELM_STDIN:  tunnelName: "sugarkube-{normalized_env}"' in combined_output
+        assert f"--set-string cloudflare.tunnelName=sugarkube-{normalized_env}" in combined_output
         assert f"- Tunnel name: sugarkube-{normalized_env}" in combined_output
         assert "sugarkube-env=staging" not in combined_output
         assert "sugarkube-env=env=staging" not in combined_output

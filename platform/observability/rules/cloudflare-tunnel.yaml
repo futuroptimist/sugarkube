@@ -1,0 +1,44 @@
+---
+groups:
+  - name: cloudflare-tunnel
+    interval: 30s
+    rules:
+      - alert: CloudflareTunnelNoHealthyConnections
+        expr: (sum(cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel-metrics"}) or vector(0)) == 0 and on() count(up{namespace="cloudflare",service="cloudflare-tunnel-metrics"} == 1) == 2
+        for: 5m
+        labels:
+          application: cloudflare-tunnel
+          environment: staging
+          cluster: sugarkube-int
+          severity: critical
+        annotations:
+          summary: No Cloudflare Tunnel edge connections are healthy
+          description: Both staging connectors have reported zero aggregate HA connections for five minutes.
+          remediation: Check WAN and DNS first; do not restart connectors that are alive and reconnecting.
+          runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/cloudflare_tunnel.md#alerts
+      - alert: CloudflareTunnelConnectionsDegraded
+        expr: count(cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel-metrics"} < 4) > 0 or count(cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel-metrics"}) < 2 or absent(cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel-metrics"})
+        for: 10m
+        labels:
+          application: cloudflare-tunnel
+          environment: staging
+          cluster: sugarkube-int
+          severity: warning
+        annotations:
+          summary: Cloudflare Tunnel connector capacity is degraded
+          description: Fewer than two connectors report metrics or a connector has fewer than four HA connections.
+          remediation: Inspect target and connector status after excluding an ordinary rolling upgrade.
+          runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/cloudflare_tunnel.md#alerts
+      - alert: CloudflareTunnelMetricsTargetsDown
+        expr: count(up{namespace="cloudflare",service="cloudflare-tunnel-metrics"} == 1) < 2 or absent(up{namespace="cloudflare",service="cloudflare-tunnel-metrics"})
+        for: 5m
+        labels:
+          application: cloudflare-tunnel
+          environment: staging
+          cluster: sugarkube-int
+          severity: warning
+        annotations:
+          summary: Cloudflare Tunnel metrics targets are absent or down
+          description: Prometheus has fewer than two healthy cloudflared scrape targets; this does not alone prove the tunnel is down.
+          remediation: Check ServiceMonitor discovery, Service selectors, pods, and network policy.
+          runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/cloudflare_tunnel.md#alerts
