@@ -435,6 +435,116 @@ def test_validator_rejects_selector_range_outside_rate(dashboard):
 
 
 @pytest.mark.parametrize(
+    ("title", "mutation", "message"),
+    [
+        (
+            "token.place compute-node eviction rate",
+            lambda panel: panel["targets"][0].update(
+                expr=panel["targets"][0]["expr"].replace("[$__rate_interval]", "")
+            ),
+            "rate ranges",
+        ),
+        (
+            "token.place scrape availability",
+            lambda panel: panel["targets"][0].update(
+                expr=f'({panel["targets"][0]["expr"]}) + [5m]'
+            ),
+            "invalid range",
+        ),
+        (
+            "token.place instrumentation health",
+            lambda panel: panel["targets"][0].update(expr="1"),
+            "intended metric family",
+        ),
+        (
+            "token.place relay queue depth",
+            lambda panel: panel["targets"][0].update(
+                expr=panel["targets"][0]["expr"].replace("max by", "min by")
+            ),
+            "explicit max deduplication",
+        ),
+        (
+            "token.place compute-node counts",
+            lambda panel: panel["targets"][0].update(
+                expr=panel["targets"][0]["expr"].replace("max(", "max by (pod) (")
+            ),
+            "direct max deduplication",
+        ),
+        (
+            "token.place compute-node eviction rate",
+            lambda panel: panel["targets"][0].update(
+                expr=panel["targets"][0]["expr"].replace("sum by (reason)", "min")
+            ),
+            "summed rate",
+        ),
+        (
+            "token.place terminal outcome rate",
+            lambda panel: panel["targets"][0].update(expr=f'({panel["targets"][0]["expr"]})'),
+            "directly use",
+        ),
+        (
+            "token.place HTTP request rate",
+            lambda panel: panel["targets"][0].update(
+                expr=panel["targets"][0]["expr"].replace(
+                    "sum by (route, status_class)", "sum by (route)"
+                )
+            ),
+            "group by route",
+        ),
+        (
+            "token.place build identity",
+            lambda panel: panel["targets"][0].update(instant=False),
+            "build identity",
+        ),
+        (
+            "token.place HTTP latency percentiles",
+            lambda panel: panel["targets"][0].update(legendFormat="p90 {{route}}"),
+            "latency",
+        ),
+        (
+            "token.place relay queue depth",
+            lambda panel: panel["fieldConfig"]["defaults"].update(noValue="0"),
+            "NO DATA",
+        ),
+        (
+            "token.place scrape availability",
+            lambda panel: panel["targets"][0].update(legendFormat="{{remote_addr}}"),
+            "unsafe label",
+        ),
+    ],
+)
+def test_validator_rejects_tokenplace_contract_mutations(dashboard, title, mutation, message):
+    changed = json.loads(json.dumps(dashboard))
+    panel = next(panel for panel in all_panels(changed) if panel["title"] == title)
+    mutation(panel)
+    with pytest.raises(SystemExit, match=message):
+        validator.validate_tokenplace_semantics(changed)
+
+
+def test_validator_rejects_duplicate_panel_and_non_row_heading(dashboard):
+    duplicate = json.loads(json.dumps(dashboard))
+    duplicate["panels"].append(
+        next(
+            panel
+            for panel in all_panels(duplicate)
+            if panel["title"] == "token.place scrape availability"
+        )
+    )
+    with pytest.raises(SystemExit, match="exactly one"):
+        validator.validate_tokenplace_semantics(duplicate)
+
+    non_row = json.loads(json.dumps(dashboard))
+    heading = next(
+        panel
+        for panel in all_panels(non_row)
+        if panel["title"] == "token.place relay and compute capacity"
+    )
+    heading["type"] = "stat"
+    with pytest.raises(SystemExit, match="section headings"):
+        validator.validate_tokenplace_semantics(non_row)
+
+
+@pytest.mark.parametrize(
     ("title", "replacement", "message"),
     [
         (
