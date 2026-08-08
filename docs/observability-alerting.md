@@ -8,7 +8,8 @@ a human. The secret-file-backed synthetic Alertmanager → PagerDuty path has no
 through fire, phone receipt, acknowledgement, and resolution. The host-heartbeat timers are installed
 on `sugarkube3`, `sugarkube4`, and `sugarkube5`. The watchdog configuration and operator workflows
 are repository-ready, while their Secret installation, deployment, and live delivery proof remain
-post-merge work. Only the explicitly allowlisted staging workload routes described below are repository-ready; deployment and live delivery proof remain operator prerequisites.
+post-merge work. The explicitly allowlisted five-alert DSPACE route is deployed and live-proven in
+staging as described below; this does not claim a production observability rollout.
 
 ## 1. Goals and non-goals
 
@@ -29,7 +30,9 @@ post-merge work. Only the explicitly allowlisted staging workload routes describ
 - Production alert rollout. This document designs the staging path first; production follows only
   after staging drills succeed (see [`docs/observability-design.md`](./observability-design.md) §13).
 - Advanced SLOs, burn-rate alerting, or multi-window error budgets.
-- Exhaustive application-level synthetic checks. The repository now defines the bounded producer/consumer contract for `DspaceChatSyntheticFailed`; an externally pinned runner and live scheduling remain prerequisites.
+- Exhaustive application-level synthetic checks. The bounded `DspaceChatSyntheticFailed` contract
+  has one pinned, scheduled staging implementation; that focused proof does not imply broader
+  synthetic coverage or production deployment.
 
 ## 2. Chosen target architecture
 
@@ -155,7 +158,7 @@ These are the current alert-design candidates, not proof the rules already exist
 | `PublicEndpointDown` | A blackbox probe's `probe_success` is 0 | Reuses the signal already defined in [`docs/observability-design.md`](./observability-design.md) §6/§11. |
 | `PublicProbeMissing` | An expected blackbox probe target has no recent data at all (distinct from a probe that ran and failed) | Matches the "missing probe data" state already surfaced in the staging dashboard's availability summary panel. |
 | `TLSExpiringSoon` | `probe_ssl_earliest_cert_expiry` crosses a warning/critical threshold | Reuses the signal already defined in [`docs/observability-design.md`](./observability-design.md) §6. |
-| `DspaceChatSyntheticFailed` | An isolated, non-mutating `/chat` result fails or becomes stale | Repository-ready; the pinned external runner, scheduler, deployment, and live drill remain operational prerequisites. |
+| `DspaceChatSyntheticFailed` | An isolated, non-mutating `/chat` result fails or becomes stale | Deployed in staging with a pinned five-minute producer; included among the three alerts deliberately fired in the completed owner-scoped drill. |
 
 ## 6. Rollout and drill plan
 
@@ -188,7 +191,10 @@ A safe, phased sequence — each step depends on the previous one succeeding:
     gaps and detection latency; fail the drill if a healthy gap exceeds the configured period.
 12. Add custom application and blackbox alerts one at a time, each with its own drill before the next
     is added.
-13. Install and schedule the reviewed, immutable external `/chat` smoke runner, then execute the bounded staging drills in the [release-integrity runbook](./observability-dspace-release-integrity.md).
+13. **Proven in staging:** install and schedule the reviewed, immutable external `/chat` smoke
+    runner, then execute the bounded drill in the
+    [release-integrity runbook](./observability-dspace-release-integrity.md). Retain that procedure
+    for regression testing.
 
 Rollback and noise control:
 
@@ -215,12 +221,16 @@ Rollback and noise control:
 
 PagerDuty plus an externally hosted Healthchecks.io is the preferred initial direction because it is
 the only combination here that gives both an acknowledgeable phone workflow *and* a dead-man path that
-survives the monitoring stack's own node going down. Nothing about this preference implies any part of
-it is deployed yet — see the rollout plan above for the actual sequencing.
+survives the monitoring stack's own node going down. The preference alone is not deployment evidence; see the rollout plan and status below for the
+current sequencing and explicitly proven staging slices.
 
 ## 8. Status and dependencies
 
-- `DspaceChatSyntheticFailed` rules and the bounded textfile producer/consumer contract are repository-ready. Selecting, pinning, installing, and scheduling the external isolated smoke runner, deploying the rules, and completing the live drill remain operational prerequisites.
+- The five DSPACE release-integrity alerts and PagerDuty route are deployed and healthy in staging.
+  The bounded producer runs every five minutes at the reviewed DSPACE revision, and its metrics are
+  fresh in Prometheus. The owner-scoped drill fired three alerts—not all five—and proved Prometheus,
+  Alertmanager, PagerDuty phone delivery, acknowledgement, resolution, and exact cleanup. See the
+  [sanitized staging verification](./observability-dspace-release-integrity.md#verified-staging-state-2026-08-08).
 - Shallow public-endpoint blackbox monitoring (`PublicEndpointDown`, `PublicProbeMissing`,
   `TLSExpiringSoon`) is already live in staging today, independently of that dependency — see
   [`docs/observability-blackbox.md`](./observability-blackbox.md).
@@ -230,7 +240,8 @@ it is deployed yet — see the rollout plan above for the actual sequencing.
   node-power-off drill remains outstanding. The watchdog configuration and workflows are
   repository-ready too, but its Secret
   installation, Helm deployment, live Last Ping confirmation, and PagerDuty failure/recovery drill
-  remain post-merge. `KubeNodeNotReady` routing and application alerts remain later work.
+  remain post-merge. `KubeNodeNotReady` routing and other application alerts remain later work. No
+  production observability deployment or live test is claimed.
 
 ## Staging observability watchdog delivery
 

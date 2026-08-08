@@ -1,13 +1,44 @@
 # DSPACE release-integrity alerting and synthetic runbook
 
-This repository defines the staging rules and PagerDuty route for issue #2329. It does **not**
-prove that Helm has deployed them or that PagerDuty has delivered them. Production labels are part
-of the contract tests, but production observability installation and all production mutation remain
-unsupported. The approved staging coordinate is derived from
+The version-controlled rules, PagerDuty route, dashboard section, bounded synthetic consumer,
+tests, and runbooks for [issue #2329](https://github.com/futuroptimist/sugarkube/issues/2329)
+merged in [Sugarkube PR #2501](https://github.com/futuroptimist/sugarkube/pull/2501).
+The bounded result-file producer contract merged in
+[DSPACE PR #4806](https://github.com/democratizedspace/dspace/pull/4806) at runner revision
+`92dad0cba4414aa111fd78bf03607c0aacc4043e`. The staging deployment and live proof are recorded
+below. Production labels are part of the contract tests, but production observability installation,
+live testing, and all production mutation remain unsupported. The approved staging coordinate is derived from
 [`main-018687f-20260805T035722Z.json`](../deployment-evidence/dspace/staging/main-018687f-20260805T035722Z.json);
 the production contract is checked against
 [`main-1a31a56-20260801T093443Z.json`](../deployment-evidence/dspace/prod/main-1a31a56-20260801T093443Z.json).
 Semantic tags are descriptive only and are never deployment identity.
+
+## Verified staging state (2026-08-08)
+
+- `kube-prometheus-stack` is deployed and healthy at Helm revision 8 with chart `87.19.0`.
+  Revision 8, its live ConfigMap, and current repository `main` contain the same canonical 44-panel
+  dashboard; its canonical JSON SHA-256 is
+  `59cb188e015574a50a703c5000128d446896b1526f2d9fed9f7dde4ade32717b`.
+- DSPACE remained healthy and unchanged at Helm revision 28, application version `3.1.0`, and source
+  revision `018687f5a7f4de45508c6e36eb28afb3e44da24d` throughout verification.
+- A five-minute systemd producer is enabled on the trusted staging operator host, pinned to runner
+  revision `92dad0cba4414aa111fd78bf03607c0aacc4043e`. Prometheus ingests fresh, bounded
+  `dspace_chat_synthetic_success` and `dspace_chat_synthetic_timestamp_seconds` series.
+- All five canonical alerts are installed, loaded by Prometheus, healthy, and inactive in the
+  healthy steady state: `DspaceBuildRevisionMismatch`, `DspaceMixedBuildRevisions`,
+  `DspaceDeploymentImagePinMismatch`, `DspaceChatSyntheticFailed`, and `DspaceMetricsTargetDown`.
+- The owner-scoped drill `dspace-2329-20260808T051818Z-1053` deliberately exercised only
+  `DspaceBuildRevisionMismatch`, `DspaceMixedBuildRevisions`, and `DspaceChatSyntheticFailed`.
+  All three reached firing in Prometheus and active state in Alertmanager. Delivery to the configured
+  PagerDuty iPhone receiver, manual acknowledgement, and resolved delivery were confirmed.
+- The exact temporary PrometheusRule was deleted by name and owner. After cleanup, the drill rule
+  and alerts were absent, canonical observability verification passed, observability remained at
+  revision 8, and DSPACE remained at revision 28.
+
+This is sanitized operational verification: no credentials, Secret values, routing keys, payloads,
+or private addresses are recorded. No production cluster, Helm release, or workload was accessed or
+changed. The separate future production-observability rollout is not deployed or live-tested by this
+staging proof.
 
 ## Signals and triage
 
@@ -45,7 +76,8 @@ blackbox probes. Conversely, an `up` target does not prove `/chat` works.
 
 ## Synthetic producer/consumer contract
 
-Sugarkube supplies a bounded textfile consumer, not the external smoke runner or scheduler. Install
+Sugarkube supplies the bounded textfile consumer; DSPACE supplies the external smoke runner contract.
+The staging installation uses the pinned producer described above. For a new installation, install
 `scripts/dspace_chat_synthetic_metrics.py` on a trusted staging operator host that has a
 node-exporter textfile directory. Pin the external DSPACE smoke runner to a reviewed **full commit
 SHA** and install it from an immutable artifact out of band; never clone a branch or download code
@@ -68,13 +100,13 @@ python3 scripts/dspace_chat_synthetic_metrics.py \
 Verify both metrics in Prometheus and check timestamp age. A malformed result leaves the prior file
 untouched, which becomes stale and alerts. Roll back by disabling only this scheduler and removing
 only `dspace-chat.prom`; the missing-series branch deliberately continues to alert until the route
-is removed or a valid producer is restored. Remaining live prerequisite: select, review, pin,
-install, and schedule a DSPACE-owned runner that implements the exact isolated contract above.
+is removed or a valid producer is restored.
 
 ## Staging post-merge drills
 
-Do **not** run these commands as part of repository validation and do not change DSPACE. An operator
-may run this copy-pasteable drill later with the repository-standard `sugar-staging` context. The
+Do **not** run these commands as part of repository validation and do not change DSPACE. The drill
+completed as recorded above; retain this copy-pasteable procedure for future staging regression
+testing with the repository-standard `sugar-staging` context. The
 Prometheus `cluster="sugarkube-int"` value is a metric label, not a kubectl context.
 
 ```bash
@@ -153,7 +185,8 @@ firing incident and record timestamps without credentials or payload data.
 
 Rollback consists of disabling the single producer schedule, removing only `dspace-chat.prom`, and
 reverting this staging observability release; removal of the producer alone intentionally makes the
-missing-result state fire. Repository-ready rules and documentation are not evidence of Helm
-deployment, collector installation, runner scheduling, PagerDuty delivery, or operational proof.
-All those live staging prerequisites remain before #2329 can close. No production deployment or
-route is provided or claimed.
+missing-result state fire. The verified staging state above supplies deployment and operational
+proof for issue #2329; repository support alone must not be treated as equivalent evidence for a
+different environment or later release. No production deployment or route is provided or claimed.
+
+Refs #2329.
