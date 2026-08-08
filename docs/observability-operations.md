@@ -78,9 +78,19 @@ test "$(kubectl config current-context)" = sugar-prod
 python3 scripts/cluster_identity.py assert --kubeconfig "$KUBECONFIG" --env prod
 ```
 
-Before a first install, create `monitoring` and safely reconcile the existing
-SOPS declaration `clusters/prod/secrets/grafana-admin.enc.yaml` through the
-established production secrets workflow. It declares
+Before a first install, create `monitoring` and apply only the existing SOPS
+declaration `clusters/prod/secrets/grafana-admin.enc.yaml`. Do not reconcile the
+full production overlay: it also contains observability resources whose CRDs do
+not exist until the core stack is installed. With the production context and
+identity checks above still in effect, use a configured SOPS age key and stream
+the decrypted manifest directly to the API without writing it to disk:
+
+```bash
+kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
+sops --decrypt clusters/prod/secrets/grafana-admin.enc.yaml | kubectl apply -f -
+```
+
+The declaration creates
 `monitoring/grafana-admin-credentials` with both required keys:
 
 - Username key: `admin-user`.

@@ -3455,12 +3455,12 @@ observability-render env='':
 
 # Fresh-install the canonical non-Flux kube-prometheus-stack release for staging or production.
 observability-install env='':
-    @if [ "{{ env }}" = staging ] || [ "{{ env }}" = int ] || [ "{{ env }}" = env=staging ]; then python3 scripts/observability_app_metrics.py validate; fi
+    @env_name='{{ env }}'; while [ "${env_name#env=}" != "${env_name}" ]; do env_name="${env_name#env=}"; done; if [ "${env_name}" = staging ] || [ "${env_name}" = int ]; then python3 scripts/observability_app_metrics.py validate; fi
     @scripts/observability_helm.sh install '{{ env }}'
 
 # Upgrade the existing canonical non-Flux kube-prometheus-stack release for staging or production.
 observability-upgrade env='':
-    @if [ "{{ env }}" = staging ] || [ "{{ env }}" = int ] || [ "{{ env }}" = env=staging ]; then python3 scripts/observability_app_metrics.py validate; fi
+    @env_name='{{ env }}'; while [ "${env_name#env=}" != "${env_name}" ]; do env_name="${env_name#env=}"; done; if [ "${env_name}" = staging ] || [ "${env_name}" = int ]; then python3 scripts/observability_app_metrics.py validate; fi
     @scripts/observability_helm.sh upgrade '{{ env }}'
 
 # Summarize the canonical non-Flux kube-prometheus-stack release for staging or production (read-only).
@@ -3470,7 +3470,7 @@ observability-status env='':
 # Verify the canonical non-Flux core stack for staging or production (read-only).
 observability-verify env='':
     @scripts/observability_helm.sh verify '{{ env }}'
-    @if [ "{{ env }}" = staging ] || [ "{{ env }}" = int ] || [ "{{ env }}" = env=staging ]; then python3 scripts/observability_app_metrics.py verify-all --env '{{ env }}'; fi
+    @env_name='{{ env }}'; while [ "${env_name#env=}" != "${env_name}" ]; do env_name="${env_name#env=}"; done; if [ "${env_name}" = staging ] || [ "${env_name}" = int ]; then python3 scripts/observability_app_metrics.py verify-all --env '{{ env }}'; fi
 
 # Prove through the Grafana API that the staging dashboard is loaded (read-only).
 observability-dashboard-verify env='':

@@ -611,6 +611,18 @@ def test_justfile_exposes_observability_recipes():
         assert "env={{ env }}" not in recipe_block
 
 
+def test_justfile_normalizes_repeated_env_prefixes_before_staging_metrics_checks():
+    text = JUSTFILE.read_text(encoding="utf-8")
+    normalization = (
+        'while [ "${env_name#env=}" != "${env_name}" ]; '
+        'do env_name="${env_name#env=}"; done'
+    )
+    for recipe in ("observability-install", "observability-upgrade", "observability-verify"):
+        recipe_block = text.split(f"{recipe} env='':", 1)[1].split("\n\n", 1)[0]
+        assert normalization in recipe_block
+        assert '[ "${env_name}" = staging ] || [ "${env_name}" = int ]' in recipe_block
+
+
 def test_watchdog_documentation_timing_matches_configuration():
     operations = (ROOT / "docs" / "observability-operations.md").read_text(encoding="utf-8")
     assert not re.search(
