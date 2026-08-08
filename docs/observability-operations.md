@@ -78,16 +78,20 @@ test "$(kubectl config current-context)" = sugar-prod
 python3 scripts/cluster_identity.py assert --kubeconfig "$KUBECONFIG" --env prod
 ```
 
-Before a first install, create `monitoring` and apply only the existing SOPS
-declaration `clusters/prod/secrets/grafana-admin.enc.yaml`. Do not reconcile the
-full production overlay: it also contains observability resources whose CRDs do
-not exist until the core stack is installed. With the production context and
-identity checks above still in effect, use a configured SOPS age key and stream
-the decrypted manifest directly to the API without writing it to disk:
+The checked-in production Grafana Secret declaration and the example age
+recipient are scaffolding, not live, deployable ciphertext. **Do not decrypt or
+apply that file, and do not reconcile the full production overlay**: the overlay
+also contains resources whose CRDs do not exist until the core stack is installed.
+
+Generate and store the username and password in the operator's password manager,
+then enter them only through the guarded hidden-TTY lifecycle. The install recipe
+checks the explicit kubeconfig, `sugar-prod` context, and production cluster
+identity before reading input; it then creates `monitoring` idempotently and
+installs or intentionally rotates only the Grafana Secret:
 
 ```bash
-kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
-sops --decrypt clusters/prod/secrets/grafana-admin.enc.yaml | kubectl apply -f -
+just observability-grafana-secret-install env=prod
+just observability-grafana-secret-check env=prod
 ```
 
 The declaration creates
@@ -96,7 +100,8 @@ The declaration creates
 - Username key: `admin-user`.
 - Password key: `admin-password`.
 
-Both keys must be nonempty. Do not decrypt or print them during preflight. The Helm
+Both keys must be nonempty. The check recipe verifies only that key contract and
+never returns either value. Do not decrypt or print credentials during preflight. The Helm
 helper checks only that the Secret and both keys exist and are nonempty.
 
 After merge, an operator should capture deployment evidence in this order:
@@ -128,6 +133,11 @@ capacity. The custom production dashboard is deferred until live stack metric
 families and labels are inventoried. Application panels and metrics lifecycle,
 blackbox monitoring, alerts, paging, HA, and persistent Grafana UI state are
 also explicitly deferred.
+
+After this correction merges, the next operator sequence is a production render,
+a fresh core-stack install, core verification and status, and a sanitized live
+Prometheus inventory. Neither this PR nor PR #2529 proves a production deployment
+or a custom production dashboard.
 
 ## Read-only preflight and status
 
@@ -318,7 +328,9 @@ health panels remain Phase 2 work and are not presented as implemented here.
 - **Context mismatch:** helper exits before mutation and prints the expected `sugar-staging` context. Rerun `just kubeconfig-env env=staging`.
 - **Missing CRDs:** `observability-verify` fails on Prometheus Operator CRD checks; render/install/upgrade the pinned chart rather than applying Flux CRDs manually.
 - **Unbound PVC:** verify `kubectl -n monitoring get pvc` shows `Bound` and storage class `local-path`; investigate local-path provisioner and node disk health without pinning Prometheus to a node in Git.
-- **Missing Grafana Secret:** create or repair the operator-managed `grafana-admin-credentials` Secret out of band without committing values.
+- **Missing Grafana Secret:** install or rotate it with
+  `just observability-grafana-secret-install env=prod`, then check the redacted
+  key contract with `just observability-grafana-secret-check env=prod`.
 - **Dashboard API verification:** `just observability-dashboard-verify
   env=staging` checks the stable UID through Grafana's API. It validates context
   and cluster identity first, reads the existing Secret without printing it,
