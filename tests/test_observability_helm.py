@@ -468,7 +468,9 @@ def test_operations_runbook_describes_dspace_operator_contract():
 
     assert "SugarkubePagerDutyTest" in operations
     assert "deployed and has passed" in operations
-    assert "That five-alert route is not yet deployed or live-proven" in operations
+    assert "The deployed staging allowlist also routes exactly" in operations
+    assert "All five rules are loaded, healthy, and inactive in steady state" in operations
+    assert "it did not deliberately fire all five" in operations
     assert "pagerduty-dspace" in operations
     assert "send_resolved: true" in operations
     assert 'fall through to `"null"`' in operations

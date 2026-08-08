@@ -1,9 +1,14 @@
 # DSPACE release-integrity alerting and synthetic runbook
 
-This repository defines the staging rules and PagerDuty route for issue #2329. It does **not**
-prove that Helm has deployed them or that PagerDuty has delivered them. Production labels are part
-of the contract tests, but production observability installation and all production mutation remain
-unsupported. The approved staging coordinate is derived from
+For [issue #2329](https://github.com/futuroptimist/sugarkube/issues/2329),
+[Sugarkube PR #2501](https://github.com/futuroptimist/sugarkube/pull/2501) added the
+version-controlled staging rules, PagerDuty route, dashboard section, bounded synthetic consumer,
+tests, and runbooks. [DSPACE PR #4806](https://github.com/democratizedspace/dspace/pull/4806)
+added the result-file producer contract at runner revision
+`92dad0cba4414aa111fd78bf03607c0aacc4043e`. The complete path is deployed and live-proven in
+staging as recorded below. Production labels are part of the contract tests, but production
+observability installation, live testing, and all production mutation remain unsupported and
+unclaimed. The approved staging coordinate is derived from
 [`main-018687f-20260805T035722Z.json`](../deployment-evidence/dspace/staging/main-018687f-20260805T035722Z.json);
 the production contract is checked against
 [`main-1a31a56-20260801T093443Z.json`](../deployment-evidence/dspace/prod/main-1a31a56-20260801T093443Z.json).
@@ -68,13 +73,15 @@ python3 scripts/dspace_chat_synthetic_metrics.py \
 Verify both metrics in Prometheus and check timestamp age. A malformed result leaves the prior file
 untouched, which becomes stale and alerts. Roll back by disabling only this scheduler and removing
 only `dspace-chat.prom`; the missing-series branch deliberately continues to alert until the route
-is removed or a valid producer is restored. Remaining live prerequisite: select, review, pin,
-install, and schedule a DSPACE-owned runner that implements the exact isolated contract above.
+is removed or a valid producer is restored. In staging, a five-minute systemd producer is enabled
+on the trusted operator host and pinned to DSPACE runner revision
+`92dad0cba4414aa111fd78bf03607c0aacc4043e`; Prometheus ingests fresh, bounded
+`dspace_chat_synthetic_success` and `dspace_chat_synthetic_timestamp_seconds` series.
 
 ## Staging post-merge drills
 
 Do **not** run these commands as part of repository validation and do not change DSPACE. An operator
-may run this copy-pasteable drill later with the repository-standard `sugar-staging` context. The
+may repeat this copy-pasteable drill with the repository-standard `sugar-staging` context. The
 Prometheus `cluster="sugarkube-int"` value is a metric label, not a kubectl context.
 
 ```bash
@@ -151,9 +158,25 @@ exposes both bounded series. During the drill compare unrelated alerts and confi
 the null root. After exact-name cleanup, confirm PagerDuty receives a resolved event for every
 firing incident and record timestamps without credentials or payload data.
 
+### Sanitized staging verification record
+
+On 2026-08-08, owner-scoped drill `dspace-2329-20260808T051818Z-1053` deliberately fired
+`DspaceBuildRevisionMismatch`, `DspaceMixedBuildRevisions`, and `DspaceChatSyntheticFailed`.
+All three reached firing in Prometheus and active state in Alertmanager; delivery to the configured
+PagerDuty iPhone receiver, manual acknowledgement, and resolved delivery were confirmed. The other
+two canonical alerts were not deliberately fired. All five canonical alerts were installed, loaded
+by Prometheus, healthy, and inactive in the healthy steady state.
+
+The exact temporary PrometheusRule was deleted by name and owner. After cleanup, its rule and alerts
+were absent and the canonical observability verification passed. The healthy staging baselines were
+unchanged: kube-prometheus-stack Helm revision 8 on chart `87.19.0`, and DSPACE Helm revision 28 at
+application version `3.1.0` and source revision
+`018687f5a7f4de45508c6e36eb28afb3e44da24d`. Revision 8, its live ConfigMap, and repository `main`
+contained the same 44-panel dashboard, with canonical JSON SHA-256
+`59cb188e015574a50a703c5000128d446896b1526f2d9fed9f7dde4ade32717b`. No production cluster,
+Helm release, or workload was accessed or changed. This sanitized record intentionally excludes
+credentials, routing keys, payloads, private addresses, and operator-local captures.
+
 Rollback consists of disabling the single producer schedule, removing only `dspace-chat.prom`, and
 reverting this staging observability release; removal of the producer alone intentionally makes the
-missing-result state fire. Repository-ready rules and documentation are not evidence of Helm
-deployment, collector installation, runner scheduling, PagerDuty delivery, or operational proof.
-All those live staging prerequisites remain before #2329 can close. No production deployment or
-route is provided or claimed.
+missing-result state fire. No production deployment or route is provided or claimed.
