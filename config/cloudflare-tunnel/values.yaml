@@ -1,5 +1,5 @@
-# Repository baseline for manually managed releases in every environment.
-# Applied by `just cf-tunnel-install`; environment-specific names are set by the recipe.
+# Canonical values for the manually managed staging release.
+# Selected only for staging by `just cf-tunnel-install`.
 # This is not a Flux resource.
 fullnameOverride: cloudflare-tunnel
 replicaCount: 2

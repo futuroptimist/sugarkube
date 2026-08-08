@@ -495,8 +495,9 @@ part of this rollout.
    routes stay in Cloudflare and are not part of this repository rollout.
 
 2. Record `helm -n cloudflare history cloudflare-tunnel`, the current revision, public endpoint
-   results, pod/node placement, and image. With the existing token supplied out of band in the
-   operator's environment, run `just cf-tunnel-install env=staging`. Watch
+   results, pod/node placement, and image. The preflight-confirmed Secret is preserved: supply no
+   token argument or `CF_TUNNEL_TOKEN` value, and do not read, print, or reapply the token. Run
+   `just cf-tunnel-install env=staging`. Watch
    `kubectl -n cloudflare rollout status deploy/cloudflare-tunnel --timeout=5m` and confirm at every
    transition that at least one old or new pod remains Ready.
 3. Run `just cf-tunnel-verify env=staging`; verify two Ready pods on separate nodes, version
