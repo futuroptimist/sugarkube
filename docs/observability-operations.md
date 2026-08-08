@@ -78,28 +78,36 @@ test "$(kubectl config current-context)" = sugar-prod
 python3 scripts/cluster_identity.py assert --kubeconfig "$KUBECONFIG" --env prod
 ```
 
-Before a first install, create `monitoring` and apply only the existing SOPS
-declaration `clusters/prod/secrets/grafana-admin.enc.yaml`. Do not reconcile the
-full production overlay: it also contains observability resources whose CRDs do
-not exist until the core stack is installed. With the production context and
-identity checks above still in effect, use a configured SOPS age key and stream
-the decrypted manifest directly to the API without writing it to disk:
+The checked-in production Grafana Secret declaration and the example age
+recipient are scaffolding, not deployable live ciphertext. **Do not decrypt or
+apply that file.** Also do not reconcile the full production overlay: it
+contains observability resources whose CRDs do not exist until the core stack
+is installed.
+
+Generate and retain the production credentials in the operator's password
+manager. Enter them only through the guarded hidden-TTY lifecycle; never paste
+them into a command, environment variable, log, transcript, or file. With the
+production context and identity checks above still in effect, install (or
+intentionally rotate) and then check the Secret contract:
 
 ```bash
-kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
-sops --decrypt clusters/prod/secrets/grafana-admin.enc.yaml | kubectl apply -f -
+just observability-grafana-secret-install env=prod
+just observability-grafana-secret-check env=prod
 ```
 
-The declaration creates
+The install recipe creates only the `monitoring` Namespace, if absent, and
 `monitoring/grafana-admin-credentials` with both required keys:
 
 - Username key: `admin-user`.
 - Password key: `admin-password`.
 
-Both keys must be nonempty. Do not decrypt or print them during preflight. The Helm
-helper checks only that the Secret and both keys exist and are nonempty.
+Both keys must be nonempty. The check recipe verifies only that key contract; it
+does not return either value. The Helm install and upgrade preflight preserves
+the same contract check.
 
-After merge, an operator should capture deployment evidence in this order:
+After this Secret-bootstrap correction merges, the next operator sequence is a
+production render, fresh core-stack install, core verification and status, and
+sanitized live Prometheus inventory:
 
 ```bash
 just observability-render env=prod >/tmp/sugarkube-prod-render.yaml
@@ -109,6 +117,8 @@ just observability-verify env=prod
 just observability-status env=prod
 kubectl -n monitoring get deploy,statefulset,daemonset,pods,pvc
 kubectl -n monitoring get prometheus,alertmanager,servicemonitor
+# Capture live Prometheus target/metric inventory only after sanitizing labels,
+# endpoints, errors, and any other credential-bearing or identifying fields.
 ```
 
 Record the workload, PVC, and Prometheus target inventory without recording
@@ -118,6 +128,9 @@ production nodes. There is no public Grafana endpoint. Grafana persistence is
 disabled in this initial declarative phase, so UI-created state is ephemeral;
 provisioned dashboards remain code-owned, and durable UI state is a separate
 follow-up decision.
+
+Neither this correction nor PR #2529 proves a production deployment or a
+custom production dashboard. Both require separate, sanitized live evidence.
 
 The core baseline is one Prometheus and one Alertmanager replica, seven-day / 15
 GB retention, a 20 Gi RWO `local-path` Prometheus claim, and a null-only
