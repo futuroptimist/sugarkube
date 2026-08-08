@@ -42,7 +42,10 @@ ams = documents.select { |d| d.is_a?(Hash) && d["kind"] == "Alertmanager" && d.d
 fail_closed("expected exactly one kube-prometheus-stack Alertmanager custom resource") unless ams.length == 1
 expected_secrets = environment == "staging" ? [PD_SECRET, HC_SECRET] : []
 unless (ams.first.dig("spec", "secrets") || []) == expected_secrets
-  fail_closed("Alertmanager must reference exactly the two expected Secrets in order")
+  if environment == "staging"
+    fail_closed("staging Alertmanager must reference exactly the two expected integration Secrets in order")
+  end
+  fail_closed("production Alertmanager must mount no integration Secrets")
 end
 secret = documents.find { |d| d.is_a?(Hash) && d["kind"] == "Secret" && d.dig("metadata", "name") == "alertmanager-kube-prometheus-stack-alertmanager" }
 fail_closed("generated Alertmanager configuration Secret is missing") unless secret

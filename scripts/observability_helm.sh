@@ -69,7 +69,7 @@ EOT
 assert_context() {
   local ctx
   if [[ "$ENVIRONMENT" == prod && -z "${KUBECONFIG:-}" ]]; then
-    echo 'ERROR: production live actions require an explicitly supplied KUBECONFIG (for example $HOME/.kube/config-sugarkube-prod).' >&2; exit 3
+    printf '%s\n' "ERROR: production live actions require an explicitly supplied KUBECONFIG (for example \$HOME/.kube/config-sugarkube-prod)." >&2; exit 3
   fi
   ctx="$(current_context)"
   if [[ "$ctx" != "$EXPECTED_CONTEXT" ]]; then

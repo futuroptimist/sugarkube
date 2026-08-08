@@ -149,7 +149,10 @@ def test_production_values_have_exact_safe_overrides_without_public_exposure_or_
     assert STAGING.exists() and PROD.exists()
     prod = yaml_load(PROD)
     assert prod == {
-        "prometheus": {"prometheusSpec": {"externalLabels": {"cluster": "sugarkube-prod"}}},
+        "defaultRules": {"disabled": {"Watchdog": True}},
+        "prometheus": {
+            "prometheusSpec": {"externalLabels": {"cluster": "sugarkube-prod"}}
+        },
         "alertmanager": {
             "alertmanagerSpec": {"secrets": []},
             "config": {
@@ -173,6 +176,11 @@ def test_production_values_have_exact_safe_overrides_without_public_exposure_or_
         assert needle not in text
     assert "30300" in text
     assert "enableAdminAPI: false" in text
+
+
+def test_production_values_disable_builtin_watchdog_rule():
+    prod = yaml_load(PROD)
+    assert prod["defaultRules"]["disabled"]["Watchdog"] is True
 
 
 def rendered_alertmanager_fixture(
@@ -2488,3 +2496,21 @@ def test_production_alertmanager_validator_accepts_null_only_and_rejects_integra
     )
     assert rejected.returncode == 16
     assert "forbidden-stub" not in rejected.stderr
+
+
+def test_production_alertmanager_secret_mount_has_production_specific_diagnostic(
+    tmp_path,
+):
+    manifest = tmp_path / "integration-secret.yaml"
+    manifest.write_text(
+        production_alertmanager_fixture(secrets="[integration-secret]"), encoding="utf-8"
+    )
+    result = subprocess.run(
+        ["ruby", str(ALERTMANAGER_VALIDATOR), "prod", "rendered", str(manifest)],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 16
+    assert "production Alertmanager must mount no integration Secrets" in result.stderr
+    assert "two expected" not in result.stderr
+    assert "alertmanager-pagerduty" not in result.stderr
+    assert "alertmanager-healthchecks-watchdog" not in result.stderr
