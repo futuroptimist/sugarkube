@@ -1,0 +1,21 @@
+# Production-only non-Flux kube-prometheus-stack overrides.
+prometheus:
+  prometheusSpec:
+    externalLabels:
+      cluster: sugarkube-prod
+alertmanager:
+  alertmanagerSpec:
+    secrets: []
+  config:
+    global: null
+    inhibit_rules: null
+    templates: null
+    route:
+      group_by: null
+      group_wait: null
+      group_interval: null
+      repeat_interval: null
+      receiver: "null"
+      routes: null
+    receivers:
+      - name: "null"

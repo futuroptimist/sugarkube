@@ -23,7 +23,8 @@ def fail_closed(message)
   exit 16
 end
 
-mode, *paths = ARGV
+environment, mode, *paths = ARGV
+fail_closed("expected environment staging or prod") unless %w[staging prod].include?(environment)
 fail_closed("expected rendered FILE or live ALERTMANAGER_YAML CONFIG_SECRET_YAML") unless
   (mode == "rendered" && paths.length == 1) || (mode == "live" && paths.length == 2)
 
@@ -39,7 +40,8 @@ rescue StandardError
 end
 ams = documents.select { |d| d.is_a?(Hash) && d["kind"] == "Alertmanager" && d.dig("metadata", "name") == "kube-prometheus-stack-alertmanager" }
 fail_closed("expected exactly one kube-prometheus-stack Alertmanager custom resource") unless ams.length == 1
-unless ams.first.dig("spec", "secrets") == [PD_SECRET, HC_SECRET]
+expected_secrets = environment == "staging" ? [PD_SECRET, HC_SECRET] : []
+unless (ams.first.dig("spec", "secrets") || []) == expected_secrets
   fail_closed("Alertmanager must reference exactly the two expected Secrets in order")
 end
 secret = documents.find { |d| d.is_a?(Hash) && d["kind"] == "Secret" && d.dig("metadata", "name") == "alertmanager-kube-prometheus-stack-alertmanager" }
@@ -65,6 +67,16 @@ fail_closed("inline credentials or webhook URLs are forbidden") if forbidden.cal
 
 route = config["route"]
 fail_closed('root receiver must remain "null"') unless route.is_a?(Hash) && route["receiver"] == "null"
+if environment == "prod"
+  allowed_route = {"receiver" => "null"}
+  nullable_route = {"group_by" => nil, "group_wait" => nil, "group_interval" => nil,
+                    "repeat_interval" => nil, "receiver" => "null"}
+  fail_closed("production root route must be the exact null-only route") unless [allowed_route, nullable_route].include?(route)
+  fail_closed("production receiver list must contain only null") unless config["receivers"] == [{"name" => "null"}]
+  fail_closed("production configuration must contain only route and receivers") unless config.keys.sort == %w[receivers route]
+  warn "Alertmanager production null-only structure verified (credential values not accessed)."
+  exit 0
+end
 fail_closed("root route must contain only its receiver and exact child routes") unless route.keys.sort == %w[receiver routes]
 children = route["routes"]
 fail_closed("root must have exactly the three allowlisted direct-child routes") unless children.is_a?(Array) && children.length == 3

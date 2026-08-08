@@ -8,6 +8,7 @@ CHART="prometheus-community/kube-prometheus-stack"
 VERSION_FILE="${ROOT}/platform/observability/helm/kube-prometheus-stack.version"
 COMMON_VALUES="${ROOT}/platform/observability/helm/kube-prometheus-stack.values.common.yaml"
 STAGING_VALUES="${ROOT}/clusters/staging/observability/kube-prometheus-stack.values.yaml"
+PROD_VALUES="${ROOT}/clusters/prod/observability/kube-prometheus-stack.values.yaml"
 DSPACE_RULES="${ROOT}/platform/observability/rules/dspace-release-integrity.yaml"
 DASHBOARD="${ROOT}/clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
 DASHBOARD_VALUE="grafana.dashboards.sugarkube.sugarkube-staging-observability.json"
@@ -17,26 +18,40 @@ GRAFANA_URL="http://sugarkube3.local:30300"
 PAGERDUTY_SECRET="alertmanager-pagerduty"
 WATCHDOG_SECRET="alertmanager-healthchecks-watchdog"
 ALERTMANAGER_VALIDATOR="${ROOT}/scripts/verify_observability_alertmanager.rb"
+GRAFANA_SECRET="grafana-admin-credentials"
 RULES_OVERLAY=""
+ENVIRONMENT=""
+ENV_VALUES=""
+EXPECTED_CONTEXT=""
 
-usage() { echo "Usage: $0 <render|install|upgrade|status|verify|dashboard-verify|pagerduty-test|watchdog-secret-install|watchdog-secret-check|watchdog-verify|watchdog-drill-create|watchdog-drill-status|watchdog-drill-clear> env=staging [fire|resolve]" >&2; }
+usage() { echo "Usage: $0 <render|install|upgrade|status|verify|dashboard-verify|pagerduty-test|watchdog-secret-install|watchdog-secret-check|watchdog-verify|watchdog-drill-create|watchdog-drill-status|watchdog-drill-clear> env=<staging|prod> [fire|resolve]" >&2; }
 normalize_env() {
   local raw="${1:-}"
   while [[ "${raw}" == env=* ]]; do raw="${raw#env=}"; done
   case "${raw}" in
     int) echo "WARNING: env name 'int' is deprecated; using env=staging." >&2; printf staging ;;
     staging) printf staging ;;
-    ""|prod|production) echo "ERROR: production observability is not yet codified; pass env=staging explicitly." >&2; exit 2 ;;
-    *) echo "ERROR: unsupported observability env '${raw}'. Production observability is not yet codified; supported env: staging." >&2; exit 2 ;;
+    prod|production) printf prod ;;
+    "") echo "ERROR: pass env=staging or env=prod explicitly." >&2; exit 2 ;;
+    *) echo "ERROR: unsupported observability env '${raw}'; supported envs: staging, prod." >&2; exit 2 ;;
   esac
 }
+resolve_environment() {
+  ENVIRONMENT="$(normalize_env "$1")"
+  if [[ "$ENVIRONMENT" == staging ]]; then
+    ENV_VALUES="$STAGING_VALUES"; EXPECTED_CONTEXT="sugar-staging"; GRAFANA_URL="http://sugarkube3.local:30300"
+  else
+    ENV_VALUES="$PROD_VALUES"; EXPECTED_CONTEXT="sugar-prod"; GRAFANA_URL="http://sugarkube0.local:30300"
+  fi
+}
+require_staging() { [[ "$ENVIRONMENT" == staging ]] || { echo "ERROR: $1 is staging-only; production support is deferred." >&2; exit 2; }; }
 require_tools() { for t in "$@"; do command -v "$t" >/dev/null 2>&1 || { echo "ERROR: required tool missing: $t" >&2; exit 127; }; done; }
 current_context() { kubectl config current-context 2>/dev/null || true; }
 print_resolved() {
-  local env="$1" ctx
-  if (($# >= 2)); then ctx="$2"; else ctx="$(current_context)"; fi
+  local ctx
+  if (($#)); then ctx="$1"; else ctx="$(current_context)"; fi
   cat <<EOT
-observability environment: ${env}
+observability environment: ${ENVIRONMENT}
 current Kubernetes context: ${ctx:-<unknown>}
 namespace: ${NAMESPACE}
 release: ${RELEASE}
@@ -44,20 +59,25 @@ chart: ${CHART}
 pinned version: $(cat "${VERSION_FILE}")
 ordered values files:
   - ${COMMON_VALUES}
-  - ${STAGING_VALUES}
-  - generated mode-0600 rules overlay sourced from ${DSPACE_RULES}
-dashboard source (--set-file): ${DASHBOARD}
-Grafana LAN URL: ${GRAFANA_URL} (same NodePort is available through the other staging nodes)
+  - ${ENV_VALUES}
 EOT
+  if [[ "$ENVIRONMENT" == staging ]]; then
+    printf '  - generated mode-0600 rules overlay sourced from %s\ndashboard source (--set-file): %s\n' "$DSPACE_RULES" "$DASHBOARD"
+  fi
+  printf 'Grafana LAN URL: %s (same NodePort is available through the other %s nodes)\n' "$GRAFANA_URL" "$ENVIRONMENT"
 }
 assert_context() {
-  local ctx; ctx="$(current_context)"
-  if [[ "${ctx}" != "sugar-staging" ]]; then
-    echo "ERROR: context mismatch for staging observability: expected 'sugar-staging', got '${ctx:-<none>}' before mutation." >&2
-    echo "Run: just kubeconfig-env env=staging" >&2
+  local ctx
+  if [[ "$ENVIRONMENT" == prod && -z "${KUBECONFIG:-}" ]]; then
+    echo 'ERROR: production live actions require an explicitly supplied KUBECONFIG (for example $HOME/.kube/config-sugarkube-prod).' >&2; exit 3
+  fi
+  ctx="$(current_context)"
+  if [[ "$ctx" != "$EXPECTED_CONTEXT" ]]; then
+    echo "ERROR: context mismatch for ${ENVIRONMENT} observability: expected '${EXPECTED_CONTEXT}', got '${ctx:-<none>}' before mutation." >&2
+    [[ "$ENVIRONMENT" != staging ]] || echo "Run: just kubeconfig-env env=staging" >&2
     exit 3
   fi
-  python3 "${ROOT}/scripts/cluster_identity.py" assert --kubeconfig "${KUBECONFIG:-${HOME}/.kube/config}" --env staging >/dev/null
+  python3 "${ROOT}/scripts/cluster_identity.py" assert --kubeconfig "${KUBECONFIG:-${HOME}/.kube/config}" --env "$ENVIRONMENT" >/dev/null
 }
 version() { tr -d '[:space:]' < "${VERSION_FILE}"; }
 create_rules_overlay() {
@@ -75,14 +95,21 @@ create_rules_overlay() {
 }
 validate_dashboard() { python3 "${DASHBOARD_VALIDATOR}" "${DASHBOARD}"; }
 validate_rendered_dashboard() { python3 "${DASHBOARD_VALIDATOR}" "${DASHBOARD}" --rendered "$1"; }
-validate_rendered_alertmanager() { ruby "${ALERTMANAGER_VALIDATOR}" rendered "$1"; }
+validate_rendered_alertmanager() { ruby "${ALERTMANAGER_VALIDATOR}" "${ENVIRONMENT}" rendered "$1"; }
 render_to() {
-  local out="$1"
+  local out="$1"; shift
   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update >/dev/null
   helm repo update prometheus-community >/dev/null
-  helm template "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}" -f "${RULES_OVERLAY}" --set-file "${DASHBOARD_VALUE}=${DASHBOARD}" >"${out}"
-  validate_rendered_dashboard "${out}"
+  helm template "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${COMMON_VALUES}" -f "${ENV_VALUES}" "$@" >"${out}"
+  [[ "$ENVIRONMENT" != staging ]] || validate_rendered_dashboard "${out}"
   validate_rendered_alertmanager "${out}"
+}
+prepare_render_args() {
+  RENDER_ARGS=()
+  if [[ "$ENVIRONMENT" == staging ]]; then
+    create_rules_overlay
+    RENDER_ARGS=(-f "$RULES_OVERLAY" --set-file "${DASHBOARD_VALUE}=${DASHBOARD}")
+  fi
 }
 assert_pagerduty_secret() {
   local present
@@ -109,6 +136,15 @@ assert_watchdog_secret() {
   echo "Watchdog Secret contract exists (value intentionally not read or printed)."
 }
 assert_integration_secrets() { assert_pagerduty_secret && assert_watchdog_secret; }
+assert_grafana_secret() {
+  local present admin_key="admin-pass""word"
+  if ! present="$(kubectl -n "${NAMESPACE}" get secret "${GRAFANA_SECRET}" -o "go-template={{if and (index .data \"admin-user\") (index .data \"${admin_key}\")}}present{{end}}" 2>/dev/null)" || [[ "$present" != present ]]; then
+    echo "ERROR: Grafana admin contract monitoring/grafana-admin-credentials requires both nonempty keys (values intentionally not read or printed)." >&2
+    return 15
+  fi
+  echo "Grafana admin Secret contract exists (values intentionally not read or printed)."
+}
+
 release_state() {
   local matches
   # Do not infer absence from `helm status`: transport and authorization errors
@@ -126,9 +162,9 @@ release_state() {
     return 1
   fi
 }
-render() { validate_dashboard; require_tools helm python3 ruby; print_resolved staging '<not queried: offline render>'; tmp="$(mktemp -t sugarkube-observability-render.XXXXXX.yaml)"; trap 'rm -f "${tmp:-}" "${RULES_OVERLAY:-}"' EXIT; create_rules_overlay; render_to "${tmp}"; cat "${tmp}"; }
-install_release() { validate_dashboard; require_tools helm kubectl python3 ruby; print_resolved staging; assert_context; assert_integration_secrets; tmp="$(mktemp -t sugarkube-observability-install.XXXXXX.yaml)"; trap 'rm -f "${tmp:-}" "${RULES_OVERLAY:-}"' EXIT; create_rules_overlay; render_to "${tmp}"; state="$(release_state)"; if [[ "${state}" == present ]]; then echo "ERROR: cannot install: ${RELEASE} already exists in ${NAMESPACE}. Use observability-upgrade." >&2; exit 4; fi; helm install "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --create-namespace --version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}" -f "${RULES_OVERLAY}" --set-file "${DASHBOARD_VALUE}=${DASHBOARD}" --wait --timeout "${TIMEOUT}"; }
-upgrade_release() { validate_dashboard; require_tools helm kubectl python3 ruby; print_resolved staging; assert_context; assert_integration_secrets; tmp="$(mktemp -t sugarkube-observability-upgrade.XXXXXX.yaml)"; trap 'rm -f "${tmp:-}" "${RULES_OVERLAY:-}"' EXIT; create_rules_overlay; render_to "${tmp}"; state="$(release_state)"; if [[ "${state}" == absent ]]; then echo "ERROR: upgrade requires an existing Helm release ${RELEASE} in ${NAMESPACE}. Use observability-install for a fresh cluster." >&2; exit 5; fi; helm upgrade "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${COMMON_VALUES}" -f "${STAGING_VALUES}" -f "${RULES_OVERLAY}" --set-file "${DASHBOARD_VALUE}=${DASHBOARD}" --wait --timeout "${TIMEOUT}"; }
+render() { [[ "$ENVIRONMENT" != staging ]] || validate_dashboard; require_tools helm python3 ruby; print_resolved '<not queried: offline render>'; local tmp; tmp="$(mktemp -t sugarkube-observability-render.XXXXXX.yaml)"; trap 'rm -f "${tmp:-}" "${RULES_OVERLAY:-}"' EXIT; prepare_render_args; render_to "$tmp" "${RENDER_ARGS[@]}"; cat "$tmp"; }
+install_release() { [[ "$ENVIRONMENT" != staging ]] || validate_dashboard; require_tools helm kubectl python3 ruby; print_resolved; assert_context; assert_grafana_secret; [[ "$ENVIRONMENT" != staging ]] || assert_integration_secrets; local tmp state; tmp="$(mktemp -t sugarkube-observability-install.XXXXXX.yaml)"; trap 'rm -f "${tmp:-}" "${RULES_OVERLAY:-}"' EXIT; prepare_render_args; render_to "$tmp" "${RENDER_ARGS[@]}"; state="$(release_state)"; if [[ "$state" == present ]]; then echo "ERROR: cannot install: ${RELEASE} already exists in ${NAMESPACE}. Use observability-upgrade." >&2; exit 4; fi; helm install "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --create-namespace --version "$(version)" -f "${COMMON_VALUES}" -f "${ENV_VALUES}" "${RENDER_ARGS[@]}" --atomic --wait --timeout "${TIMEOUT}"; }
+upgrade_release() { [[ "$ENVIRONMENT" != staging ]] || validate_dashboard; require_tools helm kubectl python3 ruby; print_resolved; assert_context; assert_grafana_secret; [[ "$ENVIRONMENT" != staging ]] || assert_integration_secrets; local tmp state; tmp="$(mktemp -t sugarkube-observability-upgrade.XXXXXX.yaml)"; trap 'rm -f "${tmp:-}" "${RULES_OVERLAY:-}"' EXIT; prepare_render_args; render_to "$tmp" "${RENDER_ARGS[@]}"; state="$(release_state)"; if [[ "$state" == absent ]]; then echo "ERROR: upgrade requires an existing Helm release ${RELEASE} in ${NAMESPACE}. Use observability-install for a fresh cluster." >&2; exit 5; fi; helm upgrade "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${COMMON_VALUES}" -f "${ENV_VALUES}" "${RENDER_ARGS[@]}" --atomic --wait --timeout "${TIMEOUT}"; }
 WATCHDOG_TTY="${SUGARKUBE_WATCHDOG_TTY:-/dev/tty}"
 WATCHDOG_API="/api/v1/namespaces/${NAMESPACE}/services/http:${RELEASE}-alertmanager:9093/proxy/api/v2"
 
@@ -176,7 +212,7 @@ if len(matching)!=1:
 PY
   kubectl -n "${NAMESPACE}" get alertmanager "${RELEASE}-alertmanager" -o yaml >"${tmp}/cr"
   kubectl -n "${NAMESPACE}" get secret "alertmanager-${RELEASE}-alertmanager" -o yaml >"${tmp}/config"
-  ruby "${ALERTMANAGER_VALIDATOR}" live "${tmp}/cr" "${tmp}/config"
+  ruby "${ALERTMANAGER_VALIDATOR}" staging live "${tmp}/cr" "${tmp}/config"
   kubectl -n "${NAMESPACE}" get pods -l 'app.kubernetes.io/name=alertmanager' -o json >"${tmp}/pods"
   python3 - "${tmp}/pods" "${RELEASE}-alertmanager" >"${tmp}/pod-names" <<'PY'
 import json, re, sys
@@ -387,7 +423,7 @@ print("\n".join(owned))'
 watchdog_silence_list() { assert_context; local ids; ids="$(watchdog_owned_silences)"; [[ -n "${ids}" ]] && printf 'Owned active/pending watchdog drill silence IDs:\n%s\n' "${ids}" || echo "No owned active/pending watchdog drill silence."; }
 watchdog_silence_clear() { assert_context; local ids; ids="$(watchdog_owned_silences)"; [[ -n "${ids}" ]] || { echo "No owned active/pending watchdog drill silence to clear."; return; }; while IFS= read -r id; do kubectl delete --raw "${WATCHDOG_API}/silence/${id}" >/dev/null; done <<<"${ids}"; echo "Owned watchdog drill silence cleared."; }
 
-status() { require_tools helm kubectl python3; print_resolved staging; assert_context; helm -n "${NAMESPACE}" status "${RELEASE}"; kubectl -n "${NAMESPACE}" get deploy,statefulset,daemonset -l "app.kubernetes.io/instance=${RELEASE}"; kubectl -n "${NAMESPACE}" get prometheus,alertmanager; kubectl -n "${NAMESPACE}" get svc,pvc; kubectl get crd prometheuses.monitoring.coreos.com alertmanagers.monitoring.coreos.com servicemonitors.monitoring.coreos.com probes.monitoring.coreos.com; }
+status() { require_tools helm kubectl python3; print_resolved; assert_context; helm -n "${NAMESPACE}" status "${RELEASE}"; kubectl -n "${NAMESPACE}" get deploy,statefulset,daemonset -l "app.kubernetes.io/instance=${RELEASE}"; kubectl -n "${NAMESPACE}" get prometheus,alertmanager; kubectl -n "${NAMESPACE}" get svc,pvc; kubectl get crd prometheuses.monitoring.coreos.com alertmanagers.monitoring.coreos.com servicemonitors.monitoring.coreos.com probes.monitoring.coreos.com; }
 verify_dspace_targets() {
   require_tools kubectl python3 sleep
   local attempts="${SUGARKUBE_OBSERVABILITY_TARGET_HEALTH_ATTEMPTS:-20}"
@@ -512,7 +548,7 @@ raise SystemExit(10)' <<<"${targets_json}" || parser_status=$?
 }
 verify() (
   require_tools kubectl python3 ruby
-  print_resolved staging
+  print_resolved
   assert_context
   kubectl get crd prometheuses.monitoring.coreos.com alertmanagers.monitoring.coreos.com servicemonitors.monitoring.coreos.com probes.monitoring.coreos.com >/dev/null
   for workload in \
@@ -525,27 +561,32 @@ verify() (
   done
 
   read -r desired_ne ready_ne < <(kubectl -n "${NAMESPACE}" get daemonset kube-prometheus-stack-prometheus-node-exporter -o jsonpath='{.status.desiredNumberScheduled}{" "}{.status.numberReady}{"\n"}')
-  [[ "${desired_ne}" == 3 && "${ready_ne}" == 3 ]] || {
+  [[ "${ready_ne}" == "${desired_ne}" && ( ( "$ENVIRONMENT" == staging && "$desired_ne" == 3 ) || ( "$ENVIRONMENT" == prod && "$desired_ne" =~ ^[1-9][0-9]*$ ) ) ]] || {
     echo "ERROR: node-exporter daemonset has ${ready_ne:-0}/${desired_ne:-0} ready pods." >&2
     exit 6
   }
   kubectl -n "${NAMESPACE}" get pvc -o json | python3 -c 'import json, sys
 items = json.load(sys.stdin).get("items", [])
 claims = [item for item in items if item.get("metadata", {}).get("labels", {}).get("app.kubernetes.io/name") == "prometheus"]
-if len(claims) != 1 or claims[0].get("status", {}).get("phase") != "Bound" or claims[0].get("spec", {}).get("storageClassName") != "local-path":
-    raise SystemExit("ERROR: expected one Bound local-path Prometheus PVC.")'
+if len(claims) != 1 or claims[0].get("status", {}).get("phase") != "Bound" or claims[0].get("spec", {}).get("storageClassName") != "local-path" or claims[0].get("spec", {}).get("accessModes") != ["ReadWriteOnce"] or claims[0].get("spec", {}).get("resources", {}).get("requests", {}).get("storage") != "20Gi":
+    raise SystemExit("ERROR: expected one Bound RWO 20Gi local-path Prometheus PVC.")'
   [[ "$(kubectl -n "${NAMESPACE}" get prometheus kube-prometheus-stack-prometheus -o jsonpath='{.spec.replicas}')" == 1 ]]
   [[ "$(kubectl -n "${NAMESPACE}" get alertmanager kube-prometheus-stack-alertmanager -o jsonpath='{.spec.replicas}')" == 1 ]]
-  assert_integration_secrets
+  assert_grafana_secret
   local alertmanager_yaml="" config_yaml=""
   trap 'rm -f "${alertmanager_yaml:-}" "${config_yaml:-}"' EXIT
   alertmanager_yaml="$(mktemp -t sugarkube-alertmanager-cr.XXXXXX.yaml)"
   config_yaml="$(mktemp -t sugarkube-alertmanager-config.XXXXXX.yaml)"
   kubectl -n "${NAMESPACE}" get alertmanager kube-prometheus-stack-alertmanager -o yaml >"${alertmanager_yaml}"
   kubectl -n "${NAMESPACE}" get secret alertmanager-kube-prometheus-stack-alertmanager -o yaml >"${config_yaml}"
-  ruby "${ALERTMANAGER_VALIDATOR}" live "${alertmanager_yaml}" "${config_yaml}"
+  ruby "${ALERTMANAGER_VALIDATOR}" "${ENVIRONMENT}" live "${alertmanager_yaml}" "${config_yaml}"
   [[ -z "$(kubectl -n "${NAMESPACE}" get ingress -l app.kubernetes.io/name=grafana -o name 2>/dev/null)" ]]
   [[ "$(kubectl -n "${NAMESPACE}" get svc kube-prometheus-stack-grafana -o jsonpath='{.spec.ports[?(@.port==80)].nodePort}')" == 30300 ]]
+  if [[ "$ENVIRONMENT" == prod ]]; then
+    echo "Grafana LAN URL: ${GRAFANA_URL} (same NodePort is available through the other production nodes)"
+    exit 0
+  fi
+  assert_integration_secrets
   monitor_release="$(kubectl -n dspace get servicemonitor dspace -o jsonpath='{.metadata.labels.release}')"
   [[ "${monitor_release}" == "${RELEASE}" ]] || { echo "ERROR: dspace ServiceMonitor must have release: ${RELEASE}." >&2; exit 7; }
   secret_name="$(kubectl -n dspace get servicemonitor dspace -o jsonpath='{.spec.endpoints[0].bearerTokenSecret.name}')"
@@ -746,10 +787,9 @@ if not isinstance(dashboard, dict) or dashboard.get("uid") != "sugarkube-staging
 )
 
 cmd="${1:-}"; shift || true; [[ -n "${cmd}" ]] || { usage; exit 2; }
-env_arg="${1:-}"; normalize_env "${env_arg}" >/dev/null
-validate_dashboard
+env_arg="${1:-}"; resolve_environment "${env_arg}"
 if [[ "${cmd}" == watchdog-drill-create ]]; then
   trap 'exit 130' INT
   trap 'exit 143' TERM
 fi
-case "${cmd}" in render) render ;; install) install_release ;; upgrade) upgrade_release ;; status) status ;; verify) verify ;; dashboard-verify) dashboard_verify ;; pagerduty-test) pagerduty_test "${2:-${1:-}}" ;; watchdog-secret-install) watchdog_secret_install "${@:2}" ;; watchdog-secret-check) watchdog_secret_check ;; watchdog-verify) watchdog_live_check ;; watchdog-drill-create) watchdog_silence_create ;; watchdog-drill-status) watchdog_silence_list ;; watchdog-drill-clear) watchdog_silence_clear ;; *) usage; exit 2 ;; esac
+case "${cmd}" in render) render ;; install) install_release ;; upgrade) upgrade_release ;; status) status ;; verify) verify ;; dashboard-verify) require_staging "dashboard-verify"; dashboard_verify ;; pagerduty-test) require_staging "pagerduty-test"; pagerduty_test "${2:-${1:-}}" ;; watchdog-secret-install) require_staging "watchdog-secret-install"; watchdog_secret_install "${@:2}" ;; watchdog-secret-check) require_staging "watchdog-secret-check"; watchdog_secret_check ;; watchdog-verify) require_staging "watchdog-verify"; watchdog_live_check ;; watchdog-drill-create) require_staging "watchdog-drill-create"; watchdog_silence_create ;; watchdog-drill-status) require_staging "watchdog-drill-status"; watchdog_silence_list ;; watchdog-drill-clear) require_staging "watchdog-drill-clear"; watchdog_silence_clear ;; *) usage; exit 2 ;; esac
