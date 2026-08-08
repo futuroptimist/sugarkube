@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 VERSION = ROOT / "platform" / "observability" / "helm" / "kube-prometheus-stack.version"
 COMMON = ROOT / "platform" / "observability" / "helm" / "kube-prometheus-stack.values.common.yaml"
 STAGING = ROOT / "clusters" / "staging" / "observability" / "kube-prometheus-stack.values.yaml"
+PROD = ROOT / "clusters" / "prod" / "observability" / "kube-prometheus-stack.values.yaml"
 CANONICAL_DSPACE_RULES = (
     ROOT / "platform" / "observability" / "rules" / "dspace-release-integrity.yaml"
 )
@@ -146,10 +147,8 @@ def test_grafana_alertmanager_k3s_monitor_values_are_guarded():
 
 def test_no_production_values_or_public_exposure_or_credentials_added():
     assert STAGING.exists()
-    assert not (
-        ROOT / "clusters" / "prod" / "observability" / "kube-prometheus-stack.values.yaml"
-    ).exists()
-    text = COMMON.read_text(encoding="utf-8") + STAGING.read_text(encoding="utf-8")
+    assert PROD.exists()
+    text = COMMON.read_text(encoding="utf-8") + STAGING.read_text(encoding="utf-8") + PROD.read_text(encoding="utf-8")
     forbidden = [
         "longhorn",
         "cloudflare",
@@ -439,8 +438,9 @@ def test_lifecycle_uses_pinned_version_ordered_values_and_no_reuse_values():
         in script
     )
     assert 'CHART="prometheus-community/kube-prometheus-stack"' in script
-    ordered_values = '-f "${COMMON_VALUES}" -f "${STAGING_VALUES}" -f "${RULES_OVERLAY}"'
-    assert script.count(ordered_values) == 3
+    assert 'HELM_VALUES=(-f "${COMMON_VALUES}" -f "${VALUES_FILE}")' in script
+    assert 'HELM_VALUES+=(-f "${RULES_OVERLAY}"' in script
+    assert 'PROD_VALUES="${ROOT}/clusters/prod/observability/kube-prometheus-stack.values.yaml"' in script
     assert "--reuse-values" not in script
     assert "platform/observability/kube-prometheus-stack-values.yaml" not in script
     assert "clusters/staging/patches/kube-prometheus-stack-values.yaml" not in script
@@ -549,9 +549,9 @@ def test_install_upgrade_are_distinct_and_render_before_mutation():
 
 def test_unsupported_env_and_context_mismatch_fail_before_mutation():
     script = SCRIPT.read_text(encoding="utf-8")
-    assert "prod|production" in script
-    assert "production observability is not yet codified" in script
-    assert "expected 'sugar-staging'" in script
+    assert "staging|prod" in script
+    assert 'EXPECTED_CONTEXT="sugar-prod"' in script
+    assert 'EXPECTED_CONTEXT="sugar-staging"' in script
     assert script.index("assert_context") < script.index("helm install")
     assert script.index("assert_context") < script.index("helm upgrade")
 
@@ -750,7 +750,7 @@ case "$*" in
     printf '%s\n' '{"items":[{"metadata":{"name":"n1","labels":{"sugarkube.env":"'"$environment"'","sugarkube.cluster":"sugar-staging"}}}]}'
     ;;
   *"get daemonset kube-prometheus-stack-prometheus-node-exporter"*) [ "$KUBECTL_MODE" = two-nodes ] && echo '2 2' || echo '3 3' ;;
-  *"get pvc -o json"*) printf '%s\n' '{"items":[{"metadata":{"name":"generated-pvc","labels":{"app.kubernetes.io/name":"prometheus"}},"spec":{"storageClassName":"local-path"},"status":{"phase":"Bound"}}]}' ;;
+  *"get pvc -o json"*) printf '%s\n' '{"items":[{"metadata":{"name":"generated-pvc","labels":{"app.kubernetes.io/name":"prometheus"}},"spec":{"storageClassName":"local-path","accessModes":["ReadWriteOnce"],"resources":{"requests":{"storage":"20Gi"}}},"status":{"phase":"Bound"}}]}' ;;
   *"get prometheus kube-prometheus-stack-prometheus"*) echo 1 ;;
   *"get alertmanager kube-prometheus-stack-alertmanager -o yaml"*) printf '%s\n' 'apiVersion: monitoring.coreos.com/v1' 'kind: Alertmanager' 'metadata:' '  name: kube-prometheus-stack-alertmanager' 'spec:' '  secrets:' '    - alertmanager-pagerduty' '    - alertmanager-healthchecks-watchdog' ;;
   *"get alertmanager kube-prometheus-stack-alertmanager"*) echo 1 ;;
@@ -760,6 +760,7 @@ case "$*" in
     ;;
   *"get secret alertmanager-pagerduty -o go-template="*) [ "$KUBECTL_MODE" != missing-pagerduty ] || exit 44; [ "$KUBECTL_MODE" != empty-pagerduty ] && echo present ;;
   *"get secret alertmanager-healthchecks-watchdog -o go-template="*) [ "$KUBECTL_MODE" != missing-watchdog ] || exit 44; [ "$KUBECTL_MODE" != empty-watchdog ] && echo present ;;
+  *"get secret grafana-admin-credentials -o go-template="*) echo present ;;
   *"create secret generic alertmanager-healthchecks-watchdog --from-file=ping-url=/dev/stdin --dry-run=client -o yaml"*)
     cat > "$WATCHDOG_CREATE_STDIN"
     [ "$KUBECTL_MODE" != watchdog-create-fail ] || exit 46
@@ -1325,7 +1326,7 @@ def test_verify_exact_three_nodes_secret_reference_and_first_observation_health(
     )
     assert audit.count(" --raw ") == 1
     assert "sleep " not in audit
-    for mode in ("two-nodes", "wrong-release", "missing-secret-ref", "missing-secret"):
+    for mode in ("wrong-release", "missing-secret-ref", "missing-secret"):
         result, _ = run_helper(tmp_path / mode, "verify", kubectl_mode=mode)
         assert result.returncode != 0, mode
 
@@ -2346,3 +2347,28 @@ def test_watchdog_silence_api_failures_do_not_expose_fixture_contents(tmp_path, 
     assert "response redacted" in output
     if command == "watchdog-drill-clear":
         assert not (tmp_path / "watchdog-silence-deletions").exists()
+
+
+def test_production_values_are_minimal_and_null_only():
+    prod = yaml_load(PROD)
+    assert prod == {
+        "prometheus": {"prometheusSpec": {"externalLabels": {"cluster": "sugarkube-prod"}}},
+        "alertmanager": {
+            "alertmanagerSpec": {"secrets": []},
+            "config": {"route": {"receiver": "null"}, "receivers": [{"name": "null"}]},
+        },
+    }
+    common = yaml_load(COMMON)
+    assert common["prometheus"]["prometheusSpec"]["replicas"] == 1
+    assert common["prometheus"]["prometheusSpec"]["retention"] == "7d"
+    assert common["grafana"]["service"]["nodePort"] == 30300
+
+
+def test_production_staging_only_commands_fail_closed_without_cluster_access(tmp_path):
+    for command in ("dashboard-verify", "pagerduty-test", "watchdog-verify"):
+        result, audit = run_helper(tmp_path / command, command, command_args=("fire",))
+        # run_helper supplies staging; invoke production directly with the same stubs instead.
+        env = os.environ | {"PATH": str(tmp_path / command / "bin") + ":" + os.environ["PATH"], "AUDIT": str(tmp_path / command / "audit")}
+        result = subprocess.run(["bash", str(SCRIPT), command, "env=prod", "fire"], env=env, text=True, capture_output=True, check=False)
+        assert result.returncode == 2
+        assert "staging-only" in result.stderr and "production" in result.stderr

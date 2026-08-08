@@ -1,14 +1,13 @@
 # Observability operations runbook
 
-This runbook covers the current live **staging-only** kube-prometheus-stack lifecycle. It is intentionally non-Flux: operators use guarded Helm commands from this repository, with the chart version and full values chain committed in Git.
-
-Production observability is intentionally unsupported in this slice because no production live baseline has been proven yet.
+This runbook covers the live staging lifecycle and repository support for a production core kube-prometheus-stack lifecycle. It is intentionally non-Flux: operators use guarded Helm commands from this repository, with the chart version and full values chain committed in Git. Merging production support is not evidence that the stack or a production dashboard is live.
 
 ## Canonical sources
 
 - Chart version: `platform/observability/helm/kube-prometheus-stack.version` (`87.19.0`).
 - Common values: `platform/observability/helm/kube-prometheus-stack.values.common.yaml`.
 - Staging overrides: `clusters/staging/observability/kube-prometheus-stack.values.yaml`.
+- Production overrides: `clusters/prod/observability/kube-prometheus-stack.values.yaml`.
 - Canonical DSPACE rules: `platform/observability/rules/dspace-release-integrity.yaml`.
 - Staging dashboard: `clusters/staging/observability/dashboards/sugarkube-staging-observability.json`.
 - Helper: `scripts/observability_helm.sh` through `just observability-*` recipes.
@@ -574,3 +573,69 @@ verification is intentionally rejected until production observability is codifie
 Merging this repository support does not deploy any application, create any
 Secret, dashboard, alert rule, schedulability check, shared-state check, or live
 drill.
+
+## Production core-stack foundation
+
+Read-only discovery on 2026-08-08 at merge SHA `b650f760ffaeaa6f6d820bb2f4f99bf897b6854d`
+found context `sugar-prod` with identity `env=prod`, `cluster=sugar`. Nodes
+`sugarkube0`, `sugarkube1`, and `sugarkube2` were Ready; each had 4 CPUs,
+about 8 GiB allocatable memory, and ample local storage. The default
+`local-path` StorageClass used `WaitForFirstConsumer`, did not allow expansion,
+and there were no PVs or PVCs. The `monitoring` namespace, observability Helm
+releases, and `monitoring.coreos.com` APIs were absent. No production
+application-metrics or blackbox lifecycle has been verified, and current
+application releases predate the staging metrics integrations.
+
+Production live commands require an explicitly supplied kubeconfig and the
+current context `sugar-prod`; the helper also asserts the production cluster
+identity before reads or mutations. Do not use the node-local staging
+`kubeconfig-env` recipe on `sugarkube3` for production.
+
+```bash
+export KUBECONFIG="$HOME/.kube/config-sugarkube-prod"
+kubectl config current-context                 # must print sugar-prod
+python3 scripts/cluster_identity.py assert --kubeconfig "$KUBECONFIG" --env prod
+```
+
+The encrypted declaration `clusters/prod/secrets/grafana-admin.enc.yaml`
+already defines `monitoring/grafana-admin-credentials`. Before installation,
+create `monitoring` and use the repository's established SOPS reconciliation
+workflow (`sops -d ... | kubectl apply -f -`) from an authorized workstation;
+do not write decrypted output to disk or print it. Confirm only that both declared keys are nonempty:
+
+- Username key: `admin-user`.
+- Password key: `admin-password`.
+
+The lifecycle preflight performs that redacted contract check.
+
+After this foundation merges, deploy and capture evidence deliberately:
+
+```bash
+just observability-render env=prod > /tmp/sugarkube-prod-render.yaml
+# Inspect the complete render before cluster mutation.
+just observability-install env=prod
+just observability-verify env=prod
+just observability-status env=prod
+kubectl -n monitoring get deploy,statefulset,daemonset,pvc
+kubectl -n monitoring get prometheus,alertmanager
+kubectl get --raw /api/v1/namespaces/monitoring/services/http:kube-prometheus-stack-prometheus:9090/proxy/api/v1/targets
+```
+
+Capture the commit, chart version, commands, rollout results, PVC details,
+target metric families, and labels without recording credentials. Grafana is
+LAN-only at <http://sugarkube0.local:30300>; the same NodePort is available on
+the other production nodes. There is no public Grafana endpoint.
+
+This phase uses one 20 Gi `local-path` RWO Prometheus claim. Node-local storage
+has scheduling/host-loss risk and cannot be expanded in place on the discovered
+StorageClass. Review retention, WAL/PVC usage, and Prometheus memory after at
+least one production week before changing capacity or topology.
+
+Grafana persistence is disabled: UI-created dashboards, users, preferences,
+and other UI state are ephemeral. Provisioned dashboards remain code-owned;
+durable UI state is a separate follow-up decision. A custom production
+dashboard is explicitly deferred until the deployed stack's live metric
+families and labels are inventoried. Application panels and metrics lifecycle,
+blackbox probes, alert rules, paging, HA, and persistent Grafana UI state are
+also deferred. Production dashboard verification, PagerDuty, watchdog, and
+staging DSPACE integration commands therefore fail closed for `env=prod`.
