@@ -161,6 +161,7 @@ grafana_secret_check() {
 }
 grafana_secret_install() (
   local credential_name grafana_admin_user="" grafana_admin_password="" grafana_admin_confirmation=""
+  # shellcheck disable=SC2317  # Invoked indirectly by the EXIT trap on every exit path.
   cleanup_grafana_credentials() {
     exec 3<&- 2>/dev/null || true
     unset grafana_admin_user grafana_admin_password grafana_admin_confirmation

@@ -732,8 +732,6 @@ def run_grafana_secret_helper(
     args=(),
     xtrace=False,
     secret_state="present",
-    expected_user="operator",
-    expected_password="correct horse battery staple",
 ):
     """Run only the Grafana Secret lifecycle against redacting command stubs."""
     bin_dir = tmp_path / "bin"
@@ -741,10 +739,9 @@ def run_grafana_secret_helper(
     audit = tmp_path / "audit"
     script_tmp = tmp_path / "tmp"
     script_tmp.mkdir()
-    tty = tmp_path / "tty-input"
-    tty.write_text(tty_text, encoding="utf-8")
+    capture_read, capture_write = os.pipe()
     (bin_dir / "kubectl").write_text(
-        """#!/bin/sh
+        r"""#!/bin/sh
 case "$*" in
   *"config current-context") echo "$CONTEXT" ;;
   *"config view --minify"*) echo https://cluster.invalid ;;
@@ -762,8 +759,9 @@ case "$*" in
   *"create secret generic grafana-admin-credentials"*)
     [ "$7" = "--from-file=admin-user=/dev/fd/4" ]
     [ "$8" = "--from-file=admin-password=/dev/fd/5" ]
-    [ "$(cat /dev/fd/4)" = "$EXPECTED_USER" ]
-    [ "$(cat /dev/fd/5)" = "$EXPECTED_PASSWORD" ]
+    python3 -c \
+      'import os, sys; os.write(int(sys.argv[1]), os.read(4, 1048576) + b"\n" + os.read(5, 1048576))' \
+      "$CAPTURE_FD"
     echo 'mutate secret monitoring/grafana-admin-credentials' >> "$AUDIT"
     printf '%s\n' 'kind: Secret' 'metadata:' '  name: grafana-admin-credentials' '  namespace: monitoring'
     ;;
@@ -779,6 +777,23 @@ esac
         encoding="utf-8",
     )
     (bin_dir / "kubectl").chmod(0o755)
+    forbidden_stub = """#!/bin/sh
+echo "forbidden operation: $(basename "$0")" >> "$AUDIT"
+exit 99
+"""
+    for command_name in (
+        "helm",
+        "flux",
+        "sops",
+        "dashboard",
+        "application-metrics",
+        "blackbox",
+        "pagerduty",
+        "watchdog",
+    ):
+        guard = bin_dir / command_name
+        guard.write_text(forbidden_stub, encoding="utf-8")
+        guard.chmod(0o755)
     env = os.environ.copy()
     env.update(
         {
@@ -787,8 +802,7 @@ esac
             "CONTEXT": context,
             "IDENTITY": identity,
             "SECRET_STATE": secret_state,
-            "EXPECTED_USER": expected_user,
-            "EXPECTED_PASSWORD": expected_password,
+            "CAPTURE_FD": str(capture_write),
             "TMPDIR": str(script_tmp),
         }
     )
@@ -816,7 +830,7 @@ esac
             stderr=subprocess.PIPE,
             text=True,
             env=env,
-            pass_fds=(slave_fd,),
+            pass_fds=(slave_fd, capture_write),
             preexec_fn=establish_controlling_tty,
         )
         os.close(slave_fd)
@@ -825,12 +839,29 @@ esac
         os.close(master_fd)
         result = subprocess.CompletedProcess(invocation, process.returncode, stdout, stderr)
     else:
-        env["SUGARKUBE_GRAFANA_SECRET_TTY"] = str(tty)
+        tty_read, tty_write = os.pipe()
+        os.write(tty_write, tty_text.encode())
+        os.close(tty_write)
+        env["SUGARKUBE_GRAFANA_SECRET_TTY"] = f"/dev/fd/{tty_read}"
         env["SUGARKUBE_GRAFANA_SECRET_TEST_NONTTY"] = "1"
         if extra_env:
             env.update(extra_env)
-        result = subprocess.run(invocation, text=True, capture_output=True, env=env, check=False)
-    return result, audit.read_text(encoding="utf-8") if audit.exists() else "", tty
+        result = subprocess.run(
+            invocation,
+            text=True,
+            capture_output=True,
+            env=env,
+            pass_fds=(tty_read, capture_write),
+            check=False,
+        )
+        os.close(tty_read)
+    os.close(capture_write)
+    captured = b""
+    while chunk := os.read(capture_read, 4096):
+        captured += chunk
+    os.close(capture_read)
+    credentials = tuple(captured.decode().split("\n", 1)) if captured else ()
+    return result, audit.read_text(encoding="utf-8") if audit.exists() else "", credentials
 
 
 def test_grafana_secret_prod_guards_precede_tty_and_mutation(tmp_path):
@@ -839,10 +870,12 @@ def test_grafana_secret_prod_guards_precede_tty_and_mutation(tmp_path):
         {"context": "sugar-staging"},
         {"identity": "staging"},
     ):
-        result, audit, tty = run_grafana_secret_helper(tmp_path / str(len(list(tmp_path.iterdir()))), **kwargs)
+        result, audit, credentials = run_grafana_secret_helper(
+            tmp_path / str(len(list(tmp_path.iterdir()))), **kwargs
+        )
         assert result.returncode != 0
         assert audit == ""
-        assert tty.read_text(encoding="utf-8").startswith("operator\n")
+        assert credentials == ()
 
 
 def test_grafana_secret_prod_rejects_test_override_and_regular_file(tmp_path):
@@ -904,15 +937,17 @@ def test_grafana_secret_install_fails_closed_before_mutation(tmp_path, kwargs):
 
 
 def test_grafana_secret_install_is_exact_redacted_and_rotatable(tmp_path):
-    before = {path.name for path in tmp_path.iterdir()}
-    result, audit, _ = run_grafana_secret_helper(tmp_path)
-    assert result.returncode == 0, result.stderr
-    assert audit.splitlines() == [
+    expected_mutations = [
         "mutate namespace monitoring",
         "apply namespace monitoring",
         "mutate secret monitoring/grafana-admin-credentials",
         "apply secret monitoring/grafana-admin-credentials",
     ]
+    before = {path.name for path in tmp_path.iterdir()}
+    result, audit, credentials = run_grafana_secret_helper(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert audit.splitlines() == expected_mutations
+    assert credentials == ("operator", "correct horse battery staple")
     combined = result.stdout + result.stderr + audit
     assert "operator" not in combined
     assert "correct horse battery staple" not in combined
@@ -927,18 +962,23 @@ def test_grafana_secret_install_is_exact_redacted_and_rotatable(tmp_path):
         "watchdog",
     ):
         assert forbidden not in audit.lower()
-    assert {path.name for path in tmp_path.iterdir()} - before == {"bin", "audit", "tmp", "tty-input"}
+    assert {path.name for path in tmp_path.iterdir()} - before == {"bin", "audit", "tmp"}
     assert list((tmp_path / "tmp").iterdir()) == []
+    repeated, repeated_audit, repeated_credentials = run_grafana_secret_helper(
+        tmp_path / "repeat"
+    )
+    assert repeated.returncode == 0, repeated.stderr
+    assert repeated_audit.splitlines() == expected_mutations
+    assert repeated_credentials == ("operator", "correct horse battery staple")
     second_user = "rotation-user-sentinel"
     second_password = "rotation-password-sentinel"
-    result, audit, _ = run_grafana_secret_helper(
+    result, audit, credentials = run_grafana_secret_helper(
         tmp_path / "rotation",
         tty_text=f"{second_user}\n{second_password}\n{second_password}\n",
-        expected_user=second_user,
-        expected_password=second_password,
     )
     assert result.returncode == 0
-    assert audit.count("mutate secret monitoring/grafana-admin-credentials") == 1
+    assert audit.splitlines() == expected_mutations
+    assert credentials == (second_user, second_password)
     assert second_user not in result.stdout + result.stderr + audit
     assert second_password not in result.stdout + result.stderr + audit
     assert list((tmp_path / "rotation" / "tmp").iterdir()) == []
