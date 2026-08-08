@@ -305,6 +305,21 @@ def test_deployment_patch_enforces_token_mode(deployment_patch_ops: list[dict]) 
         "maxUnavailable": 0,
         "maxSurge": 1,
     }
+    assert ops_by_path["/spec/template/spec/affinity"]["value"] == {
+        "podAntiAffinity": {
+            "requiredDuringSchedulingIgnoredDuringExecution": [
+                {
+                    "topologyKey": "kubernetes.io/hostname",
+                    "labelSelector": {
+                        "matchLabels": {
+                            "app.kubernetes.io/name": "cloudflare-tunnel",
+                            "app.kubernetes.io/instance": "cloudflare-tunnel",
+                        }
+                    },
+                }
+            ]
+        }
+    }
 
 
 def test_recipe_relies_on_rollout_status_not_helm_wait(cf_recipe_body: str) -> None:
@@ -390,6 +405,18 @@ def test_cf_tunnel_install_normalizes_named_env_arguments(cf_recipe_body: str) -
     alias_result = _run_cf_tunnel_install_recipe("int")
     assert alias_result.returncode == 0, alias_result.stderr
     assert 'WARNING: env name "int" is deprecated; using env=staging.' in alias_result.stderr
+
+
+def test_cf_tunnel_monitoring_is_applied_only_in_staging() -> None:
+    staging = _run_cf_tunnel_install_recipe("staging")
+    assert staging.returncode == 0, staging.stderr
+    assert "KUBECTL:apply -f " in staging.stdout
+    assert "/config/cloudflare-tunnel/monitoring.yaml" in staging.stdout
+
+    for env_name in ("dev", "prod"):
+        result = _run_cf_tunnel_install_recipe(env_name)
+        assert result.returncode == 0, result.stderr
+        assert "/config/cloudflare-tunnel/monitoring.yaml" not in result.stdout
 
 
 def test_cf_tunnel_install_flags_origin_cert_logs(cf_recipe_body: str, origin_cert_guidance_text: str) -> None:

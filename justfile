@@ -657,6 +657,7 @@ cf-tunnel-install env='dev' token='':
     {"op":"replace","path":"/spec/template/spec/containers/0/volumeMounts","value":[]},
     {"op":"replace","path":"/spec/replicas","value":2},
     {"op":"replace","path":"/spec/strategy","value":{"type":"RollingUpdate","rollingUpdate":{"maxUnavailable":0,"maxSurge":1}}},
+    {"op":"add","path":"/spec/template/spec/affinity","value":{"podAntiAffinity":{"requiredDuringSchedulingIgnoredDuringExecution":[{"topologyKey":"kubernetes.io/hostname","labelSelector":{"matchLabels":{"app.kubernetes.io/name":"cloudflare-tunnel","app.kubernetes.io/instance":"cloudflare-tunnel"}}}]}}},
     {"op":"replace","path":"/spec/template/spec/containers/0/image","value":"cloudflare/cloudflared:2026.7.3@sha256:e39ee8da81ad5e05d77f38d2f51c60ca51bf2a8450ac3abab50c17fdb91d91bf"},
     {"op":"replace","path":"/spec/template/spec/containers/0/command","value":["cloudflared","tunnel","--no-autoupdate","--metrics","0.0.0.0:2000","run"]},
     {"op":"replace","path":"/spec/template/spec/containers/0/args","value":[]},
@@ -665,8 +666,11 @@ cf-tunnel-install env='dev' token='':
     ]'
 
     kubectl -n cloudflare patch deployment cloudflare-tunnel --type json --patch "${deployment_patch}"
-    # These owner-scoped resources remain on ClusterIP and select only this release.
+    if [ "${env_name}" = "staging" ]; then
+    # Production and development do not necessarily install the ServiceMonitor CRD.
+    # These staging owner-scoped resources remain on ClusterIP and select only this release.
     kubectl apply -f "${monitoring_file}"
+    fi
 
     helm_note_printed=0
 

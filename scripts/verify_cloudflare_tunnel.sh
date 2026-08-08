@@ -20,6 +20,13 @@ jq -e --arg image "${expected_image}" '
   .spec.replicas == 2 and
   .spec.strategy.rollingUpdate.maxUnavailable == 0 and
   .spec.strategy.rollingUpdate.maxSurge == 1 and
+  .spec.template.spec.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution == [{
+    "topologyKey":"kubernetes.io/hostname",
+    "labelSelector":{"matchLabels":{
+      "app.kubernetes.io/name":"cloudflare-tunnel",
+      "app.kubernetes.io/instance":"cloudflare-tunnel"
+    }}
+  }] and
   .spec.template.spec.containers[0].image == $image and
   (.spec.template.spec.containers[0] | has("livenessProbe") | not) and
   .spec.template.spec.containers[0].readinessProbe.httpGet.path == "/ready" and

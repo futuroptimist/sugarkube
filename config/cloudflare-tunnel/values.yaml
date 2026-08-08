@@ -1,5 +1,6 @@
-# Repository source of truth for the manually managed staging release.
-# Applied only by `just cf-tunnel-install env=staging`; this is not a Flux resource.
+# Repository baseline for manually managed releases in every environment.
+# Applied by `just cf-tunnel-install`; environment-specific names are set by the recipe.
+# This is not a Flux resource.
 fullnameOverride: cloudflare-tunnel
 replicaCount: 2
 image:
