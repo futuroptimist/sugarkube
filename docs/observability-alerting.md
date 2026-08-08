@@ -191,9 +191,12 @@ A safe, phased sequence — each step depends on the previous one succeeding:
     gaps and detection latency; fail the drill if a healthy gap exceeds the configured period.
 12. Add custom application and blackbox alerts one at a time, each with its own drill before the next
     is added.
-13. **Proven:** install and schedule the reviewed, immutable external `/chat` smoke runner, then
-    execute and exactly clean up the bounded staging drill in the
-    [release-integrity runbook](./observability-dspace-release-integrity.md).
+
+The DSPACE release-integrity staging work was completed as an independent track; it did not depend
+on completing the outstanding node, watchdog, or other application-alert work in steps 4–12. That
+track installed and scheduled the reviewed, immutable external `/chat` smoke runner, then executed
+and exactly cleaned up the bounded staging drill in the
+[release-integrity runbook](./observability-dspace-release-integrity.md).
 
 Rollback and noise control:
 
