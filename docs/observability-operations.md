@@ -1,14 +1,16 @@
 # Observability operations runbook
 
-This runbook covers the current live **staging-only** kube-prometheus-stack lifecycle. It is intentionally non-Flux: operators use guarded Helm commands from this repository, with the chart version and full values chain committed in Git.
-
-Production observability is intentionally unsupported in this slice because no production live baseline has been proven yet.
+This runbook covers the live staging stack and repository support for the production
+core-stack lifecycle. It is intentionally non-Flux: operators use guarded Helm commands
+from this repository, with the chart version and full values chain committed in Git.
+Merging production support is not evidence that the stack or a production dashboard is live.
 
 ## Canonical sources
 
 - Chart version: `platform/observability/helm/kube-prometheus-stack.version` (`87.19.0`).
 - Common values: `platform/observability/helm/kube-prometheus-stack.values.common.yaml`.
 - Staging overrides: `clusters/staging/observability/kube-prometheus-stack.values.yaml`.
+- Production overrides: `clusters/prod/observability/kube-prometheus-stack.values.yaml`.
 - Canonical DSPACE rules: `platform/observability/rules/dspace-release-integrity.yaml`.
 - Staging dashboard: `clusters/staging/observability/dashboards/sugarkube-staging-observability.json`.
 - Helper: `scripts/observability_helm.sh` through `just observability-*` recipes.
@@ -55,6 +57,78 @@ The old Flux/Longhorn files under `platform/observability/*.yaml` and `clusters/
 
 Never put example credentials or plaintext Secret data in commands, logs, docs, commits, or PRs.
 
+## Production core-stack foundation
+
+Read-only discovery on 2026-08-08 at merge SHA
+`b650f760ffaeaa6f6d820bb2f4f99bf897b6854d` found context `sugar-prod`, identity
+`env=prod` / `cluster=sugar`, and Ready nodes `sugarkube0`, `sugarkube1`, and
+`sugarkube2`. Each node had four CPUs, about 8 GiB allocatable memory, and ample
+local storage. The default `local-path` StorageClass used
+`WaitForFirstConsumer`, did not allow expansion, and there were no PVs or PVCs.
+The `monitoring` namespace, observability releases, and `monitoring.coreos.com`
+APIs/CRDs were absent. No production application-metrics or blackbox lifecycle
+was verified, and current application releases predate the staging metrics integrations.
+
+Production live actions require an explicit kubeconfig and the `sugar-prod`
+context; do not run the node-local staging kubeconfig recipe on `sugarkube3`:
+
+```bash
+export KUBECONFIG="$HOME/.kube/config-sugarkube-prod"
+test "$(kubectl config current-context)" = sugar-prod
+python3 scripts/cluster_identity.py assert --kubeconfig "$KUBECONFIG" --env prod
+```
+
+Before a first install, create `monitoring` and apply only the existing SOPS
+declaration `clusters/prod/secrets/grafana-admin.enc.yaml`. Do not reconcile the
+full production overlay: it also contains observability resources whose CRDs do
+not exist until the core stack is installed. With the production context and
+identity checks above still in effect, use a configured SOPS age key and stream
+the decrypted manifest directly to the API without writing it to disk:
+
+```bash
+kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
+sops --decrypt clusters/prod/secrets/grafana-admin.enc.yaml | kubectl apply -f -
+```
+
+The declaration creates
+`monitoring/grafana-admin-credentials` with both required keys:
+
+- Username key: `admin-user`.
+- Password key: `admin-password`.
+
+Both keys must be nonempty. Do not decrypt or print them during preflight. The Helm
+helper checks only that the Secret and both keys exist and are nonempty.
+
+After merge, an operator should capture deployment evidence in this order:
+
+```bash
+just observability-render env=prod >/tmp/sugarkube-prod-render.yaml
+# Inspect the render before any cluster mutation.
+just observability-install env=prod
+just observability-verify env=prod
+just observability-status env=prod
+kubectl -n monitoring get deploy,statefulset,daemonset,pods,pvc
+kubectl -n monitoring get prometheus,alertmanager,servicemonitor
+```
+
+Record the workload, PVC, and Prometheus target inventory without recording
+credentials or sensitive labels. Grafana is LAN-only at
+<http://sugarkube0.local:30300>; the same NodePort is available on the other
+production nodes. There is no public Grafana endpoint. Grafana persistence is
+disabled in this initial declarative phase, so UI-created state is ephemeral;
+provisioned dashboards remain code-owned, and durable UI state is a separate
+follow-up decision.
+
+The core baseline is one Prometheus and one Alertmanager replica, seven-day / 15
+GB retention, a 20 Gi RWO `local-path` Prometheus claim, and a null-only
+Alertmanager. Local-path storage is node-local and non-expandable, so capacity
+pressure or node loss needs explicit operator action. After at least one
+production week, review retention, WAL/PVC usage, and memory before changing
+capacity. The custom production dashboard is deferred until live stack metric
+families and labels are inventoried. Application panels and metrics lifecycle,
+blackbox monitoring, alerts, paging, HA, and persistent Grafana UI state are
+also explicitly deferred.
+
 ## Read-only preflight and status
 
 ```bash
@@ -64,14 +138,16 @@ just observability-verify env=staging
 just observability-dashboard-verify env=staging
 ```
 
-`env=int` is accepted only through the repository's deprecated alias normalization to `staging`. Missing, unknown, `prod`, and `production` fail before Helm or kubectl mutation with a message that production observability is not yet codified.
+`env=int` is accepted only through the repository's deprecated alias normalization to
+`staging`. Missing and unknown environments fail before Helm or kubectl activity;
+`env=prod` and `env=production` select the guarded production core lifecycle.
 
 Each helper prints the resolved environment, current Kubernetes context,
-namespace, release, chart, pinned version, ordered values sources, dashboard
-source, and Grafana LAN URL. The ordered Helm values chain is the common values,
-staging values, and a mode-`0600` temporary overlay generated from the canonical
-DSPACE rules. The helper reports the stable canonical source, never the random
-temporary pathname.
+namespace, release, chart, pinned version, ordered values sources, and Grafana
+LAN URL. Staging additionally reports its dashboard source and uses the common
+values, staging values, and a mode-`0600` temporary overlay generated from the
+canonical DSPACE rules. Production uses only common values followed by production
+values. The helper reports stable canonical sources, never a random temporary pathname.
 
 ## Render, install, and upgrade distinction
 
