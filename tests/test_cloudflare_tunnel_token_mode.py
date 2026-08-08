@@ -59,7 +59,7 @@ def _extract_recipe_body(name: str) -> str:
                 body.append(line)
                 heredoc_end = "PATCH"
                 continue
-            if line and not line[0].isspace() and line.strip() not in {')', 'EOF', 'PATCH'}:
+            if line and not line[0].isspace() and line.strip() not in {")", "EOF", "PATCH"}:
                 break
             body.append(line)
             continue
@@ -82,11 +82,9 @@ def cf_tunnel_route_recipe_body() -> str:
 
 def _run_cf_tunnel_route_recipe(host: str) -> subprocess.CompletedProcess[str]:
     rendered_body = _extract_cf_tunnel_route_recipe_body().replace("{{ host }}", host)
-    script = textwrap.dedent(
-        """#!/usr/bin/env bash
+    script = textwrap.dedent("""#!/usr/bin/env bash
         set -euo pipefail
-        """
-    ) + rendered_body + "\n"
+        """) + rendered_body + "\n"
 
     with tempfile.NamedTemporaryFile("w", delete=False) as f:
         f.write(script)
@@ -109,25 +107,10 @@ def test_cf_tunnel_route_normalizes_host_prefix(host_input: str) -> None:
 def deployment_patch_ops(cf_recipe_body: str) -> list[dict]:
     """Extract and parse the deployment patch JSON patch payload."""
 
-    match = re.search(
-        r"deployment_patch.*?<<-?'PATCH'.*?\n[ \t]*(?P<patch>\[.*\])\n[ \t]*PATCH",
-        cf_recipe_body,
-        re.S,
+    assert "platform/cloudflare-tunnel/deployment-patch.json" in cf_recipe_body
+    return json.loads(
+        (REPO_ROOT / "platform/cloudflare-tunnel/deployment-patch.json").read_text(encoding="utf-8")
     )
-    if not match:
-        match = re.search(
-            r"deployment_patch=\$?'(?P<patch>\[.*\])'",
-            cf_recipe_body,
-            re.S,
-        )
-
-    assert match, "Deployment patch declaration missing from cf-tunnel-install"
-
-    patch_text = match.group("patch")
-    if "\\n" in patch_text:
-        patch_text = patch_text.encode("utf-8").decode("unicode_escape")
-
-    return json.loads(patch_text)
 
 
 def test_cf_tunnel_install_heredocs_are_well_formed(cf_recipe_body: str) -> None:
@@ -157,15 +140,13 @@ def test_cf_tunnel_install_heredocs_are_well_formed(cf_recipe_body: str) -> None
 
     for terminator, expected_count in opening_counts.items():
         actual_count = terminator_counts.get(terminator, 0)
-        assert actual_count == expected_count, (
-            f"Expected {expected_count} {terminator!r} terminators but found {actual_count}"
-        )
+        assert (
+            actual_count == expected_count
+        ), f"Expected {expected_count} {terminator!r} terminators but found {actual_count}"
         allow_tabs = terminator_allows_tabs.get(terminator, False)
         assert not any(
             _terminator_has_invalid_whitespace(line, terminator, allow_tabs) for line in body
-        ), (
-            f"Terminator {terminator!r} must not be indented or have trailing whitespace"
-        )
+        ), f"Terminator {terminator!r} must not be indented or have trailing whitespace"
 
 
 def _terminator_has_invalid_whitespace(line: str, terminator: str, allow_tabs: bool) -> bool:
@@ -185,8 +166,7 @@ def _terminator_has_invalid_whitespace(line: str, terminator: str, allow_tabs: b
 
 def test_cf_tunnel_install_shell_syntax_is_valid(cf_recipe_body: str) -> None:
     rendered_body = cf_recipe_body.replace("{{ quote(env) }}", "'${env}'")
-    script = textwrap.dedent(
-        """#!/usr/bin/env bash
+    script = textwrap.dedent("""#!/usr/bin/env bash
         set -euo pipefail
 
         # Dummy env so expansions don't blow up under bash -n
@@ -198,8 +178,7 @@ def test_cf_tunnel_install_shell_syntax_is_valid(cf_recipe_body: str) -> None:
         helm() { :; }
         kubectl() { :; }
 
-        """
-    ) + rendered_body + "\n"
+        """) + rendered_body + "\n"
 
     with tempfile.NamedTemporaryFile("w", delete=False) as f:
         f.write(script)
@@ -216,8 +195,7 @@ def test_cf_tunnel_install_shell_syntax_is_valid(cf_recipe_body: str) -> None:
 
 def _run_cf_tunnel_install_recipe(env: str) -> subprocess.CompletedProcess[str]:
     rendered_body = _extract_cf_recipe_body().replace("{{ quote(env) }}", json.dumps(env))
-    script = textwrap.dedent(
-        """#!/usr/bin/env bash
+    script = textwrap.dedent("""#!/usr/bin/env bash
         set -euo pipefail
 
         export CF_TUNNEL_TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.signature
@@ -235,8 +213,7 @@ def _run_cf_tunnel_install_recipe(env: str) -> subprocess.CompletedProcess[str]:
             return 0
         }
 
-        """
-    ) + rendered_body + "\n"
+        """) + rendered_body + "\n"
 
     with tempfile.NamedTemporaryFile("w", delete=False) as f:
         f.write(script)
@@ -292,7 +269,7 @@ def test_deployment_patch_enforces_token_mode(deployment_patch_ops: list[dict]) 
 
     image_op = ops_by_path.get("/spec/template/spec/containers/0/image")
     assert image_op and image_op.get("op") in {"add", "replace"}
-    assert image_op.get("value") == "cloudflare/cloudflared:2024.8.3"
+    assert image_op.get("value").startswith("cloudflare/cloudflared:2026.7.3@sha256:")
 
 
 def test_recipe_relies_on_rollout_status_not_helm_wait(cf_recipe_body: str) -> None:
@@ -319,7 +296,9 @@ def test_teardown_retry_is_baked_into_cf_tunnel_install(cf_recipe_body: str) -> 
     assert "exit 1" in cf_recipe_body
 
 
-def test_deployment_patch_does_not_reference_credentials_file(deployment_patch_ops: list[dict]) -> None:
+def test_deployment_patch_does_not_reference_credentials_file(
+    deployment_patch_ops: list[dict],
+) -> None:
     patch_text = json.dumps(deployment_patch_ops)
     assert "credentials.json" not in patch_text
     assert "creds" not in patch_text
@@ -386,7 +365,9 @@ def test_cf_tunnel_install_normalizes_named_env_arguments(cf_recipe_body: str) -
     assert 'WARNING: env name "int" is deprecated; using env=staging.' in alias_result.stderr
 
 
-def test_cf_tunnel_install_flags_origin_cert_logs(cf_recipe_body: str, origin_cert_guidance_text: str) -> None:
+def test_cf_tunnel_install_flags_origin_cert_logs(
+    cf_recipe_body: str, origin_cert_guidance_text: str
+) -> None:
     assert "Cannot determine default origin certificate path" in cf_recipe_body
     assert "origin_cert_guidance" in cf_recipe_body
     assert 'config_src="cloudflare"' in origin_cert_guidance_text
@@ -399,7 +380,9 @@ def test_reset_and_debug_recipes_exist_and_reset_is_safe() -> None:
     debug_body = _extract_recipe_body("cf-tunnel-debug")
 
     assert "kubectl -n cloudflare delete deploy cloudflare-tunnel" in reset_body
-    assert "kubectl -n cloudflare delete pod -l app.kubernetes.io/name=cloudflare-tunnel" in reset_body
+    assert (
+        "kubectl -n cloudflare delete pod -l app.kubernetes.io/name=cloudflare-tunnel" in reset_body
+    )
     assert "helm -n cloudflare uninstall cloudflare-tunnel" in reset_body
 
     # Secret deletion must remain optional/commented.
@@ -411,7 +394,7 @@ def test_reset_and_debug_recipes_exist_and_reset_is_safe() -> None:
         "kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel"
         in debug_body
     )
-    assert "kubectl -n cloudflare logs \"$POD\" --tail=50" in debug_body
+    assert 'kubectl -n cloudflare logs "$POD" --tail=50' in debug_body
     assert "No ConfigMap created in token-only mode" in debug_body
 
 
@@ -421,3 +404,44 @@ def test_debug_recipe_surfaces_origin_cert_guidance(origin_cert_guidance_text: s
     assert "origin_cert_guidance" in debug_body
     assert "behaving like a locally-managed tunnel" in origin_cert_guidance_text
     assert 'config_src="cloudflare"' in origin_cert_guidance_text
+
+
+def test_connector_lifecycle_is_wan_safe(deployment_patch_ops: list[dict]) -> None:
+    ops = {op["path"]: op for op in deployment_patch_ops}
+    assert ops["/spec/replicas"]["value"] == 2
+    assert ops["/spec/strategy"]["value"]["rollingUpdate"] == {
+        "maxUnavailable": 0,
+        "maxSurge": 1,
+    }
+    assert ops["/spec/template/spec/containers/0/livenessProbe"]["op"] == "remove"
+    readiness = ops["/spec/template/spec/containers/0/readinessProbe"]["value"]
+    assert readiness["httpGet"] == {"path": "/ready", "port": 2000}
+    assert readiness["failureThreshold"] == 3
+
+
+def test_metrics_discovery_and_pdb_contracts_exist() -> None:
+    text = (
+        (REPO_ROOT / "platform/cloudflare-tunnel/service.yaml").read_text()
+        + (REPO_ROOT / "platform/cloudflare-tunnel/servicemonitor.yaml").read_text()
+        + (REPO_ROOT / "platform/cloudflare-tunnel/pdb.yaml").read_text()
+    )
+    assert "type: ClusterIP" in text
+    assert "name: metrics" in text and "targetPort: 2000" in text
+    assert "kind: ServiceMonitor" in text
+    assert "release: kube-prometheus-stack" in text
+    assert "path: /metrics" in text and "scrapeTimeout: 10s" in text
+    assert "kind: PodDisruptionBudget" in text and "minAvailable: 1" in text
+
+
+def test_cloudflare_alert_and_verification_contracts_exist() -> None:
+    rules = (REPO_ROOT / "platform/observability/rules/cloudflare-tunnel.yaml").read_text()
+    for name in (
+        "CloudflareTunnelNoConnections",
+        "CloudflareTunnelDegraded",
+        "CloudflareTunnelMetricsDown",
+    ):
+        assert name in rules
+    assert "or vector(0)" in rules
+    verify = (REPO_ROOT / "scripts/verify_cloudflare_tunnel.py").read_text()
+    for contract in ("tunnel-token", '"token"', "livenessProbe", "activeTargets", "/api/v1/rules"):
+        assert contract in verify

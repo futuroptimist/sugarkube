@@ -16,6 +16,7 @@ PROD = ROOT / "clusters" / "prod" / "observability" / "kube-prometheus-stack.val
 CANONICAL_DSPACE_RULES = (
     ROOT / "platform" / "observability" / "rules" / "dspace-release-integrity.yaml"
 )
+CANONICAL_CLOUDFLARE_RULES = ROOT / "platform/observability/rules/cloudflare-tunnel.yaml"
 SCRIPT = ROOT / "scripts" / "observability_helm.sh"
 ALERTMANAGER_VALIDATOR = ROOT / "scripts" / "verify_observability_alertmanager.rb"
 DASHBOARD = ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
@@ -150,20 +151,30 @@ def test_production_values_have_exact_safe_overrides_without_public_exposure_or_
     prod = yaml_load(PROD)
     assert prod == {
         "defaultRules": {"disabled": {"Watchdog": True}},
-        "prometheus": {
-            "prometheusSpec": {"externalLabels": {"cluster": "sugarkube-prod"}}
-        },
+        "prometheus": {"prometheusSpec": {"externalLabels": {"cluster": "sugarkube-prod"}}},
         "alertmanager": {
             "alertmanagerSpec": {"secrets": []},
             "config": {
-                "global": None, "inhibit_rules": None, "templates": None,
-                "route": {"group_by": None, "group_wait": None, "group_interval": None,
-                          "repeat_interval": None, "receiver": "null", "routes": None},
+                "global": None,
+                "inhibit_rules": None,
+                "templates": None,
+                "route": {
+                    "group_by": None,
+                    "group_wait": None,
+                    "group_interval": None,
+                    "repeat_interval": None,
+                    "receiver": "null",
+                    "routes": None,
+                },
                 "receivers": [{"name": "null"}],
             },
         },
     }
-    text = COMMON.read_text(encoding="utf-8") + STAGING.read_text(encoding="utf-8") + PROD.read_text(encoding="utf-8")
+    text = (
+        COMMON.read_text(encoding="utf-8")
+        + STAGING.read_text(encoding="utf-8")
+        + PROD.read_text(encoding="utf-8")
+    )
     forbidden = [
         "longhorn",
         "cloudflare",
@@ -232,6 +243,12 @@ stringData:
           group_interval: 1m
           repeat_interval: 5m
           continue: false
+        - receiver: pagerduty-dspace
+          matchers:
+            - 'alertname=~"^(CloudflareTunnelNoConnections|CloudflareTunnelMetricsDown)$"'
+            - 'environment="staging"'
+            - 'cluster="sugarkube-int"'
+            - 'severity="critical"'
     receivers:
       - name: "null"
       - name: pagerduty-synthetic-test
@@ -447,7 +464,10 @@ def test_discovery_contract_uses_release_label():
 def test_lifecycle_uses_pinned_version_ordered_values_and_no_reuse_values():
     script = SCRIPT.read_text(encoding="utf-8")
     assert 'CHART="prometheus-community/kube-prometheus-stack"' in script
-    assert 'PROD_VALUES="${ROOT}/clusters/prod/observability/kube-prometheus-stack.values.yaml"' in script
+    assert (
+        'PROD_VALUES="${ROOT}/clusters/prod/observability/kube-prometheus-stack.values.yaml"'
+        in script
+    )
     assert '-f "${COMMON_VALUES}" -f "${ENV_VALUES}"' in script
     assert "--reuse-values" not in script
     assert "--atomic" in script
@@ -502,7 +522,8 @@ def test_dspace_rules_have_one_canonical_source_and_exact_overlay(tmp_path):
     overlay = yaml_load(tmp_path / "rules-overlay.yaml")
     assert overlay == {
         "additionalPrometheusRulesMap": {
-            "dspace-release-integrity": yaml_load(CANONICAL_DSPACE_RULES)
+            "dspace-release-integrity": yaml_load(CANONICAL_DSPACE_RULES),
+            "cloudflare-tunnel": yaml_load(CANONICAL_CLOUDFLARE_RULES),
         }
     }
     overlay_paths = re.findall(r"/[^ ]*sugarkube-observability-rules\.[^ ]*\.yaml", audit)
@@ -624,8 +645,7 @@ def test_justfile_exposes_observability_recipes():
 def test_justfile_normalizes_repeated_env_prefixes_before_staging_metrics_checks():
     text = JUSTFILE.read_text(encoding="utf-8")
     normalization = (
-        'while [ "${env_name#env=}" != "${env_name}" ]; '
-        'do env_name="${env_name#env=}"; done'
+        'while [ "${env_name#env=}" != "${env_name}" ]; ' 'do env_name="${env_name#env=}"; done'
     )
     for recipe in ("observability-install", "observability-upgrade", "observability-verify"):
         recipe_block = text.split(f"{recipe} env='':", 1)[1].split("\n\n", 1)[0]
@@ -1021,6 +1041,12 @@ printf '%s' "$code"
       group_interval: 1m
       repeat_interval: 5m
       continue: false
+    - receiver: pagerduty-dspace
+      matchers:
+        - alertname=~"^(CloudflareTunnelNoConnections|CloudflareTunnelMetricsDown)$"
+        - environment="staging"
+        - cluster="sugarkube-int"
+        - severity="critical"
 receivers:
   - name: "null"
   - name: pagerduty-synthetic-test
@@ -2384,7 +2410,7 @@ def test_watchdog_silence_api_failures_do_not_expose_fixture_contents(tmp_path, 
 
 
 def production_alertmanager_fixture(*, secrets="[]", route_extra="", receiver_extra="", inline=""):
-    return f'''---
+    return f"""---
 apiVersion: monitoring.coreos.com/v1
 kind: Alertmanager
 metadata:
@@ -2402,7 +2428,7 @@ stringData:
       receiver: "null"{route_extra}
     receivers:
       - name: "null"{receiver_extra}{inline}
-'''
+"""
 
 
 def test_production_offline_render_uses_only_ordered_core_values(tmp_path):
@@ -2430,8 +2456,12 @@ def test_production_install_identity_and_explicit_kubeconfig_fail_before_helm_mu
     tmp_path, context, mode, extra_env
 ):
     result, audit = run_helper(
-        tmp_path, "install", env_name="prod", context=context,
-        kubectl_mode=mode, extra_env=extra_env,
+        tmp_path,
+        "install",
+        env_name="prod",
+        context=context,
+        kubectl_mode=mode,
+        extra_env=extra_env,
     )
     assert result.returncode != 0
     assert "helm install" not in audit
@@ -2443,13 +2473,18 @@ def test_production_install_release_and_secret_guards(tmp_path):
     )
     assert installed.returncode == 0, installed.stderr
     assert "helm install" in audit and "--atomic" in audit
-    assert "alertmanager-pagerduty" not in audit and "alertmanager-healthchecks-watchdog" not in audit
+    assert (
+        "alertmanager-pagerduty" not in audit and "alertmanager-healthchecks-watchdog" not in audit
+    )
     existing, audit = run_helper(
         tmp_path / "existing", "install", env_name="prod", context="sugar-prod", helm_mode="present"
     )
     assert existing.returncode != 0 and "helm install" not in audit
     missing, audit = run_helper(
-        tmp_path / "secret", "install", env_name="prod", context="sugar-prod",
+        tmp_path / "secret",
+        "install",
+        env_name="prod",
+        context="sugar-prod",
         kubectl_mode="missing-grafana",
     )
     assert missing.returncode != 0 and "helm " not in audit
@@ -2458,9 +2493,20 @@ def test_production_install_release_and_secret_guards(tmp_path):
 def test_production_core_verify_skips_staging_integrations(tmp_path):
     result, audit = run_helper(tmp_path, "verify", env_name="prod", context="sugar-prod")
     assert result.returncode == 0, result.stderr
-    for required in ("rollout status", "get daemonset", "get pvc -o json", "get svc kube-prometheus-stack-grafana", "get secret grafana-admin-credentials"):
+    for required in (
+        "rollout status",
+        "get daemonset",
+        "get pvc -o json",
+        "get svc kube-prometheus-stack-grafana",
+        "get secret grafana-admin-credentials",
+    ):
         assert required in audit
-    for excluded in ("servicemonitor dspace", "alertmanager-pagerduty", "alertmanager-healthchecks-watchdog", " --raw "):
+    for excluded in (
+        "servicemonitor dspace",
+        "alertmanager-pagerduty",
+        "alertmanager-healthchecks-watchdog",
+        " --raw ",
+    ):
         assert excluded not in audit
 
 
@@ -2487,14 +2533,18 @@ def test_production_alertmanager_validator_accepts_null_only_and_rejects_integra
     valid.write_text(production_alertmanager_fixture(), encoding="utf-8")
     accepted = subprocess.run(
         ["ruby", str(ALERTMANAGER_VALIDATOR), "prod", "rendered", str(valid)],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     assert accepted.returncode == 0, accepted.stderr
     invalid = tmp_path / "invalid.yaml"
     invalid.write_text(production_alertmanager_fixture(**mutation), encoding="utf-8")
     rejected = subprocess.run(
         ["ruby", str(ALERTMANAGER_VALIDATOR), "prod", "rendered", str(invalid)],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     assert rejected.returncode == 16
     assert "forbidden-stub" not in rejected.stderr
@@ -2509,7 +2559,9 @@ def test_production_alertmanager_secret_mount_has_production_specific_diagnostic
     )
     result = subprocess.run(
         ["ruby", str(ALERTMANAGER_VALIDATOR), "prod", "rendered", str(manifest)],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     assert result.returncode == 16
     assert "production Alertmanager must mount no integration Secrets" in result.stderr

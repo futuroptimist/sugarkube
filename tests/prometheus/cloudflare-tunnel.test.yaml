@@ -1,0 +1,81 @@
+rule_files:
+  - ../../platform/observability/rules/cloudflare-tunnel.yaml
+evaluation_interval: 30s
+tests:
+  - name: two_healthy_connectors
+    input_series:
+      - series: 'cloudflared_tunnel_ha_connections{namespace="cloudflare",pod="connector-a"}'
+        values: '4x30'
+      - series: 'cloudflared_tunnel_ha_connections{namespace="cloudflare",pod="connector-b"}'
+        values: '4x30'
+      - series: 'up{namespace="cloudflare",service="cloudflare-tunnel-metrics",pod="connector-a"}'
+        values: '1x30'
+      - series: 'up{namespace="cloudflare",service="cloudflare-tunnel-metrics",pod="connector-b"}'
+        values: '1x30'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: CloudflareTunnelNoConnections
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: CloudflareTunnelDegraded
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: CloudflareTunnelMetricsDown
+        exp_alerts: []
+  - name: one_degraded_connector
+    input_series:
+      - series: 'cloudflared_tunnel_ha_connections{namespace="cloudflare",pod="connector-a"}'
+        values: '4x30'
+      - series: 'cloudflared_tunnel_ha_connections{namespace="cloudflare",pod="connector-b"}'
+        values: '2x30'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: CloudflareTunnelDegraded
+        exp_alerts:
+          - exp_labels: {severity: warning, environment: staging, cluster: sugarkube-int}
+            exp_annotations:
+              summary: Cloudflare Tunnel has fewer than eight aggregate HA connections
+              runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/cloudflare_tunnel.md#wan-outage-recovery
+  - name: zero_connections
+    input_series:
+      - series: 'cloudflared_tunnel_ha_connections{namespace="cloudflare",pod="connector-a"}'
+        values: '0x12'
+      - series: 'cloudflared_tunnel_ha_connections{namespace="cloudflare",pod="connector-b"}'
+        values: '0x12'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: CloudflareTunnelNoConnections
+        exp_alerts:
+          - exp_labels: {severity: critical, environment: staging, cluster: sugarkube-int}
+            exp_annotations:
+              summary: No Cloudflare Tunnel edge connections are healthy
+              runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/cloudflare_tunnel.md#wan-outage-recovery
+  - name: missing_metrics
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: CloudflareTunnelMetricsDown
+        exp_alerts:
+          - exp_labels: {severity: critical, environment: staging, cluster: sugarkube-int}
+            exp_annotations:
+              summary: One or more Cloudflare Tunnel metrics targets are absent or down
+              runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/cloudflare_tunnel.md#wan-outage-recovery
+  - name: brief_transient_then_recovery
+    input_series:
+      - series: 'cloudflared_tunnel_ha_connections{namespace="cloudflare",pod="connector-a"}'
+        values: '4x2 0x2 4x30'
+      - series: 'cloudflared_tunnel_ha_connections{namespace="cloudflare",pod="connector-b"}'
+        values: '4x2 0x2 4x30'
+      - series: 'up{namespace="cloudflare",service="cloudflare-tunnel-metrics",pod="connector-a"}'
+        values: '1x34'
+      - series: 'up{namespace="cloudflare",service="cloudflare-tunnel-metrics",pod="connector-b"}'
+        values: '1x34'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: CloudflareTunnelNoConnections
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: CloudflareTunnelNoConnections
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: CloudflareTunnelDegraded
+        exp_alerts: []

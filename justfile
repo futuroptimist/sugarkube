@@ -637,6 +637,7 @@ cf-tunnel-install env='dev' token='':
     if ! helm upgrade --install cloudflare-tunnel cloudflare/cloudflare-tunnel \
     --namespace cloudflare \
     --create-namespace \
+    --version 0.3.2 \
     --values - <<<"${values_yaml}"; then
     helm_exit_code=$?
     echo "Helm upgrade/install failed; diagnostics to follow:" >&2
@@ -653,16 +654,10 @@ cf-tunnel-install env='dev' token='':
     # Force remote-managed token-mode authentication by injecting the TUNNEL_TOKEN env var and running cloudflared
     # exactly as documented for Kubernetes token deployments. Remove config/creds volumes entirely so the pod never
     # mounts credentials.json or any origin certificate material.
-    deployment_patch='[
-    {"op":"replace","path":"/spec/template/spec/volumes","value":[]},
-    {"op":"replace","path":"/spec/template/spec/containers/0/env","value":[{"name":"TUNNEL_TOKEN","valueFrom":{"secretKeyRef":{"name":"tunnel-token","key":"token"}}}]},
-    {"op":"replace","path":"/spec/template/spec/containers/0/volumeMounts","value":[]},
-    {"op":"replace","path":"/spec/template/spec/containers/0/image","value":"cloudflare/cloudflared:2024.8.3"},
-    {"op":"replace","path":"/spec/template/spec/containers/0/command","value":["cloudflared","tunnel","--no-autoupdate","--metrics","0.0.0.0:2000","run"]},
-    {"op":"replace","path":"/spec/template/spec/containers/0/args","value":[]}
-    ]'
+    deployment_patch="$(cat platform/cloudflare-tunnel/deployment-patch.json)"
 
     kubectl -n cloudflare patch deployment cloudflare-tunnel --type json --patch "${deployment_patch}"
+    kubectl apply -k platform/cloudflare-tunnel
 
     helm_note_printed=0
 
@@ -729,6 +724,13 @@ cf-tunnel-reset:
     fi
 
     echo "Cloudflare Tunnel reset complete. Re-run 'just cf-tunnel-install env=<env>' after exporting CF_TUNNEL_TOKEN to reinstall."
+
+# Show Cloudflare Tunnel status and recent logs (for debugging rollout failures).
+cf-tunnel-verify env='staging':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    [ "{{ env }}" = staging ] || { echo "ERROR: verification is staging-only." >&2; exit 2; }
+    python3 scripts/verify_cloudflare_tunnel.py
 
 # Show Cloudflare Tunnel status and recent logs (for debugging rollout failures).
 cf-tunnel-debug:

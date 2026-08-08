@@ -1,0 +1,34 @@
+groups:
+  - name: cloudflare-tunnel
+    interval: 30s
+    rules:
+      - alert: CloudflareTunnelNoConnections
+        expr: (sum(cloudflared_tunnel_ha_connections{namespace="cloudflare"}) or vector(0)) == 0
+        for: 2m
+        labels:
+          severity: critical
+          environment: staging
+          cluster: sugarkube-int
+        annotations:
+          summary: No Cloudflare Tunnel edge connections are healthy
+          runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/cloudflare_tunnel.md#wan-outage-recovery
+      - alert: CloudflareTunnelDegraded
+        expr: (sum(cloudflared_tunnel_ha_connections{namespace="cloudflare"}) or vector(0)) > 0 and (sum(cloudflared_tunnel_ha_connections{namespace="cloudflare"}) or vector(0)) < 8
+        for: 10m
+        labels:
+          severity: warning
+          environment: staging
+          cluster: sugarkube-int
+        annotations:
+          summary: Cloudflare Tunnel has fewer than eight aggregate HA connections
+          runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/cloudflare_tunnel.md#wan-outage-recovery
+      - alert: CloudflareTunnelMetricsDown
+        expr: (sum(up{namespace="cloudflare",service="cloudflare-tunnel-metrics"}) or vector(0)) < 2
+        for: 5m
+        labels:
+          severity: critical
+          environment: staging
+          cluster: sugarkube-int
+        annotations:
+          summary: One or more Cloudflare Tunnel metrics targets are absent or down
+          runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/cloudflare_tunnel.md#wan-outage-recovery
