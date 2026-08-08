@@ -24,7 +24,7 @@ ENVIRONMENT=""
 ENV_VALUES=""
 EXPECTED_CONTEXT=""
 
-usage() { echo "Usage: $0 <render|install|upgrade|status|verify|dashboard-verify|pagerduty-test|watchdog-secret-install|watchdog-secret-check|watchdog-verify|watchdog-drill-create|watchdog-drill-status|watchdog-drill-clear> env=<staging|prod> [fire|resolve]" >&2; }
+usage() { echo "Usage: $0 <render|install|upgrade|status|verify|dashboard-verify|grafana-secret-install|grafana-secret-check|pagerduty-test|watchdog-secret-install|watchdog-secret-check|watchdog-verify|watchdog-drill-create|watchdog-drill-status|watchdog-drill-clear> env=<staging|prod> [fire|resolve]" >&2; }
 normalize_env() {
   local raw="${1:-}"
   while [[ "${raw}" == env=* ]]; do raw="${raw#env=}"; done
@@ -146,6 +146,41 @@ assert_grafana_secret() {
   fi
   echo "Grafana admin Secret contract exists (values intentionally not read or printed)."
 }
+
+GRAFANA_TTY="${SUGARKUBE_GRAFANA_TTY:-/dev/tty}"
+grafana_secret_check() { assert_context; assert_grafana_secret; }
+grafana_secret_install() (
+  local grafana_user="" grafana_password="" grafana_confirmation=""
+  trap 'unset grafana_user grafana_password grafana_confirmation' EXIT INT TERM
+  assert_context
+  [[ $- != *x* ]] || { echo "ERROR: shell xtrace is refused for credential input." >&2; return 2; }
+  [[ ! -v GRAFANA_ADMIN_USER && ! -v GRAFANA_ADMIN_PASSWORD && ! -v GF_SECURITY_ADMIN_USER && ! -v GF_SECURITY_ADMIN_PASSWORD ]] || { echo "ERROR: Grafana credential environment variables are refused." >&2; return 2; }
+  [[ $# == 0 ]] || { echo "ERROR: credential arguments are refused." >&2; return 2; }
+  exec 3<"${GRAFANA_TTY}"
+  [[ "${SUGARKUBE_GRAFANA_TEST_NONTTY:-0}" == 1 || -t 3 ]] || { echo "ERROR: an interactive controlling terminal is required." >&2; return 2; }
+  printf 'Enter the Grafana admin username (input hidden): ' >&2
+  IFS= read -r -s grafana_user <&3 || { echo "ERROR: could not read Grafana credentials (values redacted)." >&2; return 2; }
+  printf '\nEnter the Grafana admin password (input hidden): ' >&2
+  IFS= read -r -s grafana_password <&3 || { echo "\nERROR: could not read Grafana credentials (values redacted)." >&2; return 2; }
+  printf '\nConfirm the Grafana admin password (input hidden): ' >&2
+  IFS= read -r -s grafana_confirmation <&3 || { echo "\nERROR: could not read Grafana credentials (values redacted)." >&2; return 2; }
+  printf '\n' >&2
+  [[ -n "${grafana_user}" && -n "${grafana_password}" ]] || { echo "ERROR: Grafana username and password must both be nonempty (values redacted)." >&2; return 2; }
+  [[ "${grafana_password}" == "${grafana_confirmation}" ]] || { echo "ERROR: Grafana password confirmation does not match (values redacted)." >&2; return 2; }
+
+  if ! kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f - >/dev/null; then
+    echo "ERROR: monitoring Namespace creation failed (credentials redacted)." >&2; return 1
+  fi
+  exec 4< <(printf '%s' "${grafana_user}")
+  exec 5< <(printf '%s' "${grafana_password}")
+  if ! kubectl -n "${NAMESPACE}" create secret generic "${GRAFANA_SECRET}" --from-file=admin-user=/dev/fd/4 --from-file=admin-password=/dev/fd/5 --dry-run=client -o yaml | kubectl apply -f - >/dev/null; then
+    exec 4<&- 5<&-
+    echo "ERROR: Grafana admin Secret installation failed (values redacted)." >&2; return 1
+  fi
+  exec 4<&- 5<&-
+  unset grafana_user grafana_password grafana_confirmation
+  echo "Grafana admin Secret installed or rotated (values not displayed)."
+)
 
 release_state() {
   local matches
@@ -795,4 +830,4 @@ if [[ "${cmd}" == watchdog-drill-create ]]; then
   trap 'exit 130' INT
   trap 'exit 143' TERM
 fi
-case "${cmd}" in render) render ;; install) install_release ;; upgrade) upgrade_release ;; status) status ;; verify) verify ;; dashboard-verify) require_staging "dashboard-verify"; dashboard_verify ;; pagerduty-test) require_staging "pagerduty-test"; pagerduty_test "${2:-${1:-}}" ;; watchdog-secret-install) require_staging "watchdog-secret-install"; watchdog_secret_install "${@:2}" ;; watchdog-secret-check) require_staging "watchdog-secret-check"; watchdog_secret_check ;; watchdog-verify) require_staging "watchdog-verify"; watchdog_live_check ;; watchdog-drill-create) require_staging "watchdog-drill-create"; watchdog_silence_create ;; watchdog-drill-status) require_staging "watchdog-drill-status"; watchdog_silence_list ;; watchdog-drill-clear) require_staging "watchdog-drill-clear"; watchdog_silence_clear ;; *) usage; exit 2 ;; esac
+case "${cmd}" in render) render ;; install) install_release ;; upgrade) upgrade_release ;; status) status ;; verify) verify ;; dashboard-verify) require_staging "dashboard-verify"; dashboard_verify ;; grafana-secret-install) grafana_secret_install "${@:2}" ;; grafana-secret-check) grafana_secret_check ;; pagerduty-test) require_staging "pagerduty-test"; pagerduty_test "${2:-${1:-}}" ;; watchdog-secret-install) require_staging "watchdog-secret-install"; watchdog_secret_install "${@:2}" ;; watchdog-secret-check) require_staging "watchdog-secret-check"; watchdog_secret_check ;; watchdog-verify) require_staging "watchdog-verify"; watchdog_live_check ;; watchdog-drill-create) require_staging "watchdog-drill-create"; watchdog_silence_create ;; watchdog-drill-status) require_staging "watchdog-drill-status"; watchdog_silence_list ;; watchdog-drill-clear) require_staging "watchdog-drill-clear"; watchdog_silence_clear ;; *) usage; exit 2 ;; esac
