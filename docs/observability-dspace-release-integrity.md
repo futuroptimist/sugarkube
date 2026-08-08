@@ -86,12 +86,26 @@ read-only checks to confirm the installed paths, the five-minute cadence, and th
 is scheduled:
 
 ```bash
-sudo systemctl cat dspace-chat-synthetic.service dspace-chat-synthetic.timer
-sudo systemctl status --no-pager dspace-chat-synthetic.service dspace-chat-synthetic.timer
-systemctl is-enabled --quiet dspace-chat-synthetic.timer
-systemctl is-active --quiet dspace-chat-synthetic.timer
-test "$(systemctl list-timers --all --no-legend --no-pager | \
-  awk '$(NF - 1) == "dspace-chat-synthetic.timer" { count++ } END { print count + 0 }')" -eq 1
+(
+if ! sudo systemctl cat dspace-chat-synthetic.service dspace-chat-synthetic.timer; then
+  echo "verification failed: producer units cannot be loaded or read" >&2
+  exit 1
+fi
+if ! systemctl is-enabled --quiet dspace-chat-synthetic.timer; then
+  echo "verification failed: dspace-chat-synthetic.timer is not enabled" >&2
+  exit 1
+fi
+if ! systemctl is-active --quiet dspace-chat-synthetic.timer; then
+  echo "verification failed: dspace-chat-synthetic.timer is not active" >&2
+  exit 1
+fi
+timer_count="$(systemctl list-timers --all --no-legend --no-pager | \
+  awk '$(NF - 1) == "dspace-chat-synthetic.timer" && NF { count++ } END { print count + 0 }')"
+if test "$timer_count" -ne 1; then
+  echo "verification failed: expected exactly one scheduled timer; found $timer_count" >&2
+  exit 1
+fi
+)
 ```
 
 For producer-only rollback, run the following on the same operator host. `disable --now` stops and
@@ -100,25 +114,39 @@ is intentional and causes the fail-closed missing-series alert until the route i
 producer is restored.
 
 ```bash
-sudo systemctl disable --now dspace-chat-synthetic.timer
-sudo systemctl stop dspace-chat-synthetic.service
-sudo rm -f /var/lib/node_exporter/textfile_collector/dspace-chat.prom
-if systemctl is-enabled --quiet dspace-chat-synthetic.timer; then
-  echo "rollback failed: dspace-chat-synthetic.timer remains enabled" >&2
+(
+if ! sudo systemctl disable --now dspace-chat-synthetic.timer; then
+  echo "rollback failed: could not disable and stop dspace-chat-synthetic.timer" >&2
   exit 1
 fi
-if systemctl is-active --quiet dspace-chat-synthetic.timer; then
-  echo "rollback failed: dspace-chat-synthetic.timer remains active" >&2
+if ! sudo systemctl stop dspace-chat-synthetic.service; then
+  echo "rollback failed: could not stop dspace-chat-synthetic.service" >&2
   exit 1
 fi
-if systemctl is-active --quiet dspace-chat-synthetic.service; then
-  echo "rollback failed: dspace-chat-synthetic.service remains active" >&2
+if ! sudo rm -f /var/lib/node_exporter/textfile_collector/dspace-chat.prom; then
+  echo "rollback failed: could not remove dspace-chat.prom" >&2
+  exit 1
+fi
+timer_enabled="$(systemctl is-enabled dspace-chat-synthetic.timer 2>&1)"
+if test "$timer_enabled" != disabled; then
+  echo "rollback failed: timer state is $timer_enabled, not disabled" >&2
+  exit 1
+fi
+timer_active="$(systemctl is-active dspace-chat-synthetic.timer 2>&1)"
+if test "$timer_active" != inactive; then
+  echo "rollback failed: timer state is $timer_active, not inactive" >&2
+  exit 1
+fi
+service_active="$(systemctl is-active dspace-chat-synthetic.service 2>&1)"
+if test "$service_active" != inactive; then
+  echo "rollback failed: service state is $service_active, not inactive" >&2
   exit 1
 fi
 if test -e /var/lib/node_exporter/textfile_collector/dspace-chat.prom; then
   echo "rollback failed: dspace-chat.prom remains present" >&2
   exit 1
 fi
+)
 ```
 
 ## Staging post-merge drills
