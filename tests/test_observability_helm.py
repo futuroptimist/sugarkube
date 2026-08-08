@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 VERSION = ROOT / "platform" / "observability" / "helm" / "kube-prometheus-stack.version"
 COMMON = ROOT / "platform" / "observability" / "helm" / "kube-prometheus-stack.values.common.yaml"
 STAGING = ROOT / "clusters" / "staging" / "observability" / "kube-prometheus-stack.values.yaml"
+PROD = ROOT / "clusters" / "prod" / "observability" / "kube-prometheus-stack.values.yaml"
 CANONICAL_DSPACE_RULES = (
     ROOT / "platform" / "observability" / "rules" / "dspace-release-integrity.yaml"
 )
@@ -144,12 +145,29 @@ def test_grafana_alertmanager_k3s_monitor_values_are_guarded():
         assert common[monitor]["enabled"] is False
 
 
-def test_no_production_values_or_public_exposure_or_credentials_added():
+def test_production_values_are_minimal_and_have_no_public_exposure_or_credentials():
     assert STAGING.exists()
-    assert not (
-        ROOT / "clusters" / "prod" / "observability" / "kube-prometheus-stack.values.yaml"
-    ).exists()
-    text = COMMON.read_text(encoding="utf-8") + STAGING.read_text(encoding="utf-8")
+    prod = yaml_load(PROD)
+    assert prod == {
+        "defaultRules": {"disabled": {"Watchdog": True}},
+        "prometheus": {"prometheusSpec": {"externalLabels": {"cluster": "sugarkube-prod"}}},
+        "alertmanager": {
+            "alertmanagerSpec": {"secrets": []},
+            "config": {
+                "route": {
+                    "group_by": None,
+                    "group_wait": None,
+                    "group_interval": None,
+                    "repeat_interval": None,
+                    "receiver": "null",
+                    "routes": [],
+                },
+                "receivers": [{"name": "null"}],
+                "inhibit_rules": [],
+            },
+        },
+    }
+    text = COMMON.read_text(encoding="utf-8") + PROD.read_text(encoding="utf-8")
     forbidden = [
         "longhorn",
         "cloudflare",
@@ -230,6 +248,63 @@ stringData:
             max_alerts: 1
             timeout: 10s
 """
+
+
+def production_alertmanager_fixture(route='      receiver: "null"', receivers='      - name: "null"', secrets="  secrets: []"):
+    return f"""---
+apiVersion: monitoring.coreos.com/v1
+kind: Alertmanager
+metadata:
+  name: kube-prometheus-stack-alertmanager
+spec:
+{secrets}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alertmanager-kube-prometheus-stack-alertmanager
+stringData:
+  alertmanager.yaml: |
+    route:
+{route}
+    receivers:
+{receivers}
+"""
+
+
+def test_production_alertmanager_validator_accepts_only_null_contract(tmp_path):
+    manifest = tmp_path / "prod.yaml"
+    manifest.write_text(production_alertmanager_fixture(), encoding="utf-8")
+    result = subprocess.run(
+        ["ruby", str(ALERTMANAGER_VALIDATOR), "rendered", "prod", str(manifest)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "production null-only structure verified" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "manifest",
+    [
+        production_alertmanager_fixture(route='      receiver: "null"\n      routes:\n        - receiver: extra'),
+        production_alertmanager_fixture(receivers='      - name: "null"\n      - name: extra'),
+        production_alertmanager_fixture(secrets="  secrets: [alertmanager-pagerduty]"),
+        production_alertmanager_fixture(receivers='      - name: "null"\n        webhook_configs:\n          - url: https://example.invalid/private'),
+    ],
+)
+def test_production_alertmanager_validator_rejects_integrations(tmp_path, manifest):
+    path = tmp_path / "prod-invalid.yaml"
+    path.write_text(manifest, encoding="utf-8")
+    result = subprocess.run(
+        ["ruby", str(ALERTMANAGER_VALIDATOR), "rendered", "prod", str(path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 16
+    assert "sensitive values not printed" in result.stderr
 
 
 @pytest.mark.parametrize(
@@ -439,8 +514,10 @@ def test_lifecycle_uses_pinned_version_ordered_values_and_no_reuse_values():
         in script
     )
     assert 'CHART="prometheus-community/kube-prometheus-stack"' in script
-    ordered_values = '-f "${COMMON_VALUES}" -f "${STAGING_VALUES}" -f "${RULES_OVERLAY}"'
-    assert script.count(ordered_values) == 3
+    assert 'HELM_VALUES=(-f "${COMMON_VALUES}" -f "${VALUES_FILE}")' in script
+    assert 'HELM_VALUES+=(-f "${RULES_OVERLAY}" --set-file' in script
+    assert 'VALUES_FILE="${STAGING_VALUES}"' in script
+    assert 'VALUES_FILE="${PROD_VALUES}"' in script
     assert "--reuse-values" not in script
     assert "platform/observability/kube-prometheus-stack-values.yaml" not in script
     assert "clusters/staging/patches/kube-prometheus-stack-values.yaml" not in script
@@ -452,9 +529,10 @@ def test_print_resolved_reports_complete_stable_source_chain(tmp_path):
     assert result.returncode == 0
 
     sources = [str(COMMON), str(STAGING), str(CANONICAL_DSPACE_RULES), str(DASHBOARD)]
-    positions = [result.stdout.index(source) for source in sources]
+    output = result.stdout + result.stderr
+    positions = [output.index(source) for source in sources]
     assert positions == sorted(positions)
-    assert "generated mode-0600 rules overlay sourced from" in result.stdout
+    assert "generated mode-0600 rules overlay sourced from" in output
     assert "sugarkube-observability-rules." not in result.stdout
 
 
@@ -535,14 +613,12 @@ def test_install_upgrade_are_distinct_and_render_before_mutation():
     script = SCRIPT.read_text(encoding="utf-8")
     install = re.search(r"install_release\(\).*?\nupgrade_release\(", script, re.S).group(0)
     upgrade = re.search(r"upgrade_release\(\).*?\nstatus\(", script, re.S).group(0)
-    assert "render_to" in install and "helm install" in install
-    assert install.index("assert_integration_secrets") < install.index("render_to")
-    assert install.index("render_to") < install.index("helm install")
+    assert 'prepare_release "${tmp}"' in install and "helm install" in install
+    assert install.index("prepare_release") < install.index("helm install")
     assert 'state="$(release_state)"' in install
     assert "already exists" in install
-    assert "render_to" in upgrade and "helm upgrade" in upgrade
-    assert upgrade.index("assert_integration_secrets") < upgrade.index("render_to")
-    assert upgrade.index("render_to") < upgrade.index("helm upgrade")
+    assert 'prepare_release "${tmp}"' in upgrade and "helm upgrade" in upgrade
+    assert upgrade.index("prepare_release") < upgrade.index("helm upgrade")
     assert 'state="$(release_state)"' in upgrade
     assert "requires an existing Helm release" in upgrade
 
@@ -550,8 +626,8 @@ def test_install_upgrade_are_distinct_and_render_before_mutation():
 def test_unsupported_env_and_context_mismatch_fail_before_mutation():
     script = SCRIPT.read_text(encoding="utf-8")
     assert "prod|production" in script
-    assert "production observability is not yet codified" in script
-    assert "expected 'sugar-staging'" in script
+    assert 'EXPECTED_CONTEXT="sugar-prod"' in script
+    assert "production live actions require an explicit KUBECONFIG" in script
     assert script.index("assert_context") < script.index("helm install")
     assert script.index("assert_context") < script.index("helm upgrade")
 
@@ -750,7 +826,7 @@ case "$*" in
     printf '%s\n' '{"items":[{"metadata":{"name":"n1","labels":{"sugarkube.env":"'"$environment"'","sugarkube.cluster":"sugar-staging"}}}]}'
     ;;
   *"get daemonset kube-prometheus-stack-prometheus-node-exporter"*) [ "$KUBECTL_MODE" = two-nodes ] && echo '2 2' || echo '3 3' ;;
-  *"get pvc -o json"*) printf '%s\n' '{"items":[{"metadata":{"name":"generated-pvc","labels":{"app.kubernetes.io/name":"prometheus"}},"spec":{"storageClassName":"local-path"},"status":{"phase":"Bound"}}]}' ;;
+  *"get pvc -o json"*) printf '%s\n' '{"items":[{"metadata":{"name":"generated-pvc","labels":{"app.kubernetes.io/name":"prometheus"}},"spec":{"storageClassName":"local-path","accessModes":["ReadWriteOnce"],"resources":{"requests":{"storage":"20Gi"}}},"status":{"phase":"Bound"}}]}' ;;
   *"get prometheus kube-prometheus-stack-prometheus"*) echo 1 ;;
   *"get alertmanager kube-prometheus-stack-alertmanager -o yaml"*) printf '%s\n' 'apiVersion: monitoring.coreos.com/v1' 'kind: Alertmanager' 'metadata:' '  name: kube-prometheus-stack-alertmanager' 'spec:' '  secrets:' '    - alertmanager-pagerduty' '    - alertmanager-healthchecks-watchdog' ;;
   *"get alertmanager kube-prometheus-stack-alertmanager"*) echo 1 ;;
@@ -760,6 +836,7 @@ case "$*" in
     ;;
   *"get secret alertmanager-pagerduty -o go-template="*) [ "$KUBECTL_MODE" != missing-pagerduty ] || exit 44; [ "$KUBECTL_MODE" != empty-pagerduty ] && echo present ;;
   *"get secret alertmanager-healthchecks-watchdog -o go-template="*) [ "$KUBECTL_MODE" != missing-watchdog ] || exit 44; [ "$KUBECTL_MODE" != empty-watchdog ] && echo present ;;
+  *"get secret grafana-admin-credentials -o go-template="*) [ "$KUBECTL_MODE" != missing-grafana ] && echo present ;;
   *"create secret generic alertmanager-healthchecks-watchdog --from-file=ping-url=/dev/stdin --dry-run=client -o yaml"*)
     cat > "$WATCHDOG_CREATE_STDIN"
     [ "$KUBECTL_MODE" != watchdog-create-fail ] || exit 46
