@@ -3476,6 +3476,14 @@ observability-verify env='':
 observability-dashboard-verify env='':
     @scripts/observability_helm.sh dashboard-verify '{{ env }}'
 
+# Interactively install or rotate the Grafana admin Secret (hidden input).
+observability-grafana-secret-install env='':
+    @scripts/observability_helm.sh grafana-secret-install '{{ env }}'
+
+# Check the Grafana admin Secret/key contract without reading either value.
+observability-grafana-secret-check env='':
+    @scripts/observability_helm.sh grafana-secret-check '{{ env }}'
+
 # Explicitly fire or resolve the staging-only synthetic PagerDuty alert (manual only).
 observability-pagerduty-test env='' action='':
     @scripts/observability_helm.sh pagerduty-test '{{ env }}' '{{ action }}'
