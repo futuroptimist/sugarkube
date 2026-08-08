@@ -78,6 +78,33 @@ on the trusted operator host and pinned to DSPACE runner revision
 `92dad0cba4414aa111fd78bf03607c0aacc4043e`; Prometheus ingests fresh, bounded
 `dspace_chat_synthetic_success` and `dspace_chat_synthetic_timestamp_seconds` series.
 
+The deployed scheduler is local to the trusted staging operator host that provides the
+node-exporter textfile directory; it is not installed in the DSPACE pods or on an arbitrary cluster
+node. Its unit files are `/etc/systemd/system/dspace-chat-synthetic.service` and
+`/etc/systemd/system/dspace-chat-synthetic.timer`. Log in to that host and use these safe,
+read-only checks to confirm the installed paths, the five-minute cadence, and that exactly one timer
+is scheduled:
+
+```bash
+sudo systemctl cat dspace-chat-synthetic.service dspace-chat-synthetic.timer
+sudo systemctl status --no-pager dspace-chat-synthetic.service dspace-chat-synthetic.timer
+systemctl list-timers --all dspace-chat-synthetic.timer --no-pager
+test "$(systemctl list-unit-files dspace-chat-synthetic.timer --no-legend | wc -l)" -eq 1
+```
+
+For producer-only rollback, run the following on the same operator host. `disable --now` stops and
+unschedules only this producer; it does not alter DSPACE or other timers. Removing the metrics file
+is intentional and causes the fail-closed missing-series alert until the route is removed or a valid
+producer is restored.
+
+```bash
+sudo systemctl disable --now dspace-chat-synthetic.timer
+sudo systemctl stop dspace-chat-synthetic.service
+sudo rm -f /var/lib/node_exporter/textfile_collector/dspace-chat.prom
+systemctl is-enabled dspace-chat-synthetic.timer && exit 1 || true
+systemctl is-active dspace-chat-synthetic.timer && exit 1 || true
+```
+
 ## Staging post-merge drills
 
 Do **not** run these commands as part of repository validation and do not change DSPACE. An operator

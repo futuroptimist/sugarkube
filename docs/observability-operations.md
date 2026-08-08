@@ -202,7 +202,7 @@ health panels remain Phase 2 work and are not presented as implemented here.
   `DspaceMixedBuildRevisions`, `DspaceDeploymentImagePinMismatch`,
   `DspaceChatSyntheticFailed`, and `DspaceMetricsTargetDown` to
   `pagerduty-dspace`. All five rules are loaded, healthy, and inactive in steady state. The
-  owner-scoped #2329 drill live-proved firing, acknowledgement, and resolution for the first,
+  owner-scoped #2329 drill proved live firing, acknowledgement, and resolution for the first,
   second, and fourth alerts; it did not deliberately fire all five.
   Its receiver uses the existing Secret-mounted PagerDuty integration and
   `send_resolved: true`; unrelated alerts continue to fall through to `"null"`.
