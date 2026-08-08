@@ -1,0 +1,12 @@
+# Canonical values for the manually managed staging cloudflare-tunnel release.
+# The 0.3.2 chart cannot express token-mode commands or probe/rollout settings;
+# just cf-tunnel-install applies the repository-owned post-render contract.
+fullnameOverride: cloudflare-tunnel
+replicaCount: 2
+image:
+  repository: cloudflare/cloudflared
+  tag: "2026.7.3"
+  pullPolicy: IfNotPresent
+cloudflare:
+  secretName: tunnel-token
+  ingress: []

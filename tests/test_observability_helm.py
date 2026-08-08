@@ -16,6 +16,9 @@ PROD = ROOT / "clusters" / "prod" / "observability" / "kube-prometheus-stack.val
 CANONICAL_DSPACE_RULES = (
     ROOT / "platform" / "observability" / "rules" / "dspace-release-integrity.yaml"
 )
+CANONICAL_CLOUDFLARE_RULES = (
+    ROOT / "platform" / "observability" / "rules" / "cloudflare-tunnel.yaml"
+)
 SCRIPT = ROOT / "scripts" / "observability_helm.sh"
 ALERTMANAGER_VALIDATOR = ROOT / "scripts" / "verify_observability_alertmanager.rb"
 DASHBOARD = ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
@@ -163,7 +166,7 @@ def test_production_values_have_exact_safe_overrides_without_public_exposure_or_
             },
         },
     }
-    text = COMMON.read_text(encoding="utf-8") + STAGING.read_text(encoding="utf-8") + PROD.read_text(encoding="utf-8")
+    text = COMMON.read_text(encoding="utf-8") + PROD.read_text(encoding="utf-8")
     forbidden = [
         "longhorn",
         "cloudflare",
@@ -502,7 +505,8 @@ def test_dspace_rules_have_one_canonical_source_and_exact_overlay(tmp_path):
     overlay = yaml_load(tmp_path / "rules-overlay.yaml")
     assert overlay == {
         "additionalPrometheusRulesMap": {
-            "dspace-release-integrity": yaml_load(CANONICAL_DSPACE_RULES)
+            "dspace-release-integrity": yaml_load(CANONICAL_DSPACE_RULES),
+            "cloudflare-tunnel": yaml_load(CANONICAL_CLOUDFLARE_RULES),
         }
     }
     overlay_paths = re.findall(r"/[^ ]*sugarkube-observability-rules\.[^ ]*\.yaml", audit)

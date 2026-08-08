@@ -14,6 +14,9 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 JUSTFILE = REPO_ROOT / "justfile"
 CLOUDFLARE_DOC = REPO_ROOT / "docs" / "cloudflare_tunnel.md"
+VALUES = REPO_ROOT / "platform" / "cloudflare-tunnel-staging" / "values.yaml"
+RESOURCES = REPO_ROOT / "platform" / "cloudflare-tunnel-staging" / "resources.yaml"
+RULES = REPO_ROOT / "platform" / "observability" / "rules" / "cloudflare-tunnel.yaml"
 
 
 def _extract_cf_recipe_body() -> str:
@@ -292,7 +295,23 @@ def test_deployment_patch_enforces_token_mode(deployment_patch_ops: list[dict]) 
 
     image_op = ops_by_path.get("/spec/template/spec/containers/0/image")
     assert image_op and image_op.get("op") in {"add", "replace"}
-    assert image_op.get("value") == "cloudflare/cloudflared:2024.8.3"
+    assert image_op.get("value") == (
+        "cloudflare/cloudflared@"
+        "sha256:e39ee8da81ad5e05d77f38d2f51c60ca51bf2a8450ac3abab50c17fdb91d91bf"
+    )
+
+
+def test_deployment_patch_enforces_wan_safe_lifecycle(deployment_patch_ops: list[dict]) -> None:
+    ops_by_path = {op["path"]: op for op in deployment_patch_ops}
+    assert ops_by_path["/spec/template/spec/containers/0/livenessProbe"]["op"] == "remove"
+    readiness = ops_by_path["/spec/template/spec/containers/0/readinessProbe"]["value"]
+    assert readiness["httpGet"] == {"path": "/ready", "port": 2000}
+    assert readiness["failureThreshold"] == 3
+    assert readiness["timeoutSeconds"] == 2
+    assert ops_by_path["/spec/strategy"]["value"] == {
+        "type": "RollingUpdate",
+        "rollingUpdate": {"maxUnavailable": 0, "maxSurge": 1},
+    }
 
 
 def test_recipe_relies_on_rollout_status_not_helm_wait(cf_recipe_body: str) -> None:
@@ -325,6 +344,26 @@ def test_deployment_patch_does_not_reference_credentials_file(deployment_patch_o
     assert "creds" not in patch_text
     assert "/etc/cloudflared/config" not in patch_text
     assert "cloudflare-tunnel-config" not in patch_text
+
+
+def test_staging_metrics_alert_and_disruption_contracts() -> None:
+    values = VALUES.read_text(encoding="utf-8")
+    resources = RESOURCES.read_text(encoding="utf-8")
+    rules = RULES.read_text(encoding="utf-8")
+    for contract in ("replicaCount: 2", 'tag: "2026.7.3"', "secretName: tunnel-token", "ingress: []"):
+        assert contract in values
+    for contract in (
+        "kind: Service\n", "kind: PodDisruptionBudget\n", "kind: ServiceMonitor\n",
+        "type: ClusterIP", "targetPort: 2000", "minAvailable: 1",
+        "release: kube-prometheus-stack", "scrapeTimeout: 10s",
+    ):
+        assert contract in resources
+    for contract in (
+        "CloudflareTunnelNoHealthyConnections", "count(cloudflared_tunnel_ha_connections",
+        "CloudflareTunnelConnectionsDegraded", "< 8", "CloudflareTunnelMetricsTargetsDown",
+        "or vector(0)",
+    ):
+        assert contract in rules
 
 
 def test_cloudflare_tunnel_docs_call_out_token_mode() -> None:
@@ -373,10 +412,11 @@ def test_cf_tunnel_install_normalizes_named_env_arguments(cf_recipe_body: str) -
 
         combined_output = result.stdout + result.stderr
         assert re.search(
-            r"HELM:upgrade --install cloudflare-tunnel cloudflare/cloudflare-tunnel .* --values -",
+            r"HELM:upgrade --install cloudflare-tunnel cloudflare/cloudflare-tunnel .*"
+            r"--version 0.3.2 .*--values .*platform/cloudflare-tunnel-staging/values.yaml",
             result.stdout,
         )
-        assert f'HELM_STDIN:  tunnelName: "sugarkube-{normalized_env}"' in combined_output
+        assert f"--set-string cloudflare.tunnelName=sugarkube-{normalized_env}" in combined_output
         assert f"- Tunnel name: sugarkube-{normalized_env}" in combined_output
         assert "sugarkube-env=staging" not in combined_output
         assert "sugarkube-env=env=staging" not in combined_output

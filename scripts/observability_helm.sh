@@ -10,6 +10,7 @@ COMMON_VALUES="${ROOT}/platform/observability/helm/kube-prometheus-stack.values.
 STAGING_VALUES="${ROOT}/clusters/staging/observability/kube-prometheus-stack.values.yaml"
 PROD_VALUES="${ROOT}/clusters/prod/observability/kube-prometheus-stack.values.yaml"
 DSPACE_RULES="${ROOT}/platform/observability/rules/dspace-release-integrity.yaml"
+CLOUDFLARE_RULES="${ROOT}/platform/observability/rules/cloudflare-tunnel.yaml"
 DASHBOARD="${ROOT}/clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
 DASHBOARD_VALUE="grafana.dashboards.sugarkube.sugarkube-staging-observability.json"
 DASHBOARD_VALIDATOR="${ROOT}/scripts/validate_observability_dashboard.py"
@@ -62,7 +63,7 @@ ordered values files:
   - ${ENV_VALUES}
 EOT
   if [[ "$ENVIRONMENT" == staging ]]; then
-    printf '  - generated mode-0600 rules overlay sourced from %s\ndashboard source (--set-file): %s\n' "$DSPACE_RULES" "$DASHBOARD"
+    printf '  - generated mode-0600 rules overlay sourced from %s and %s\ndashboard source (--set-file): %s\n' "$DSPACE_RULES" "$CLOUDFLARE_RULES" "$DASHBOARD"
   fi
   printf 'Grafana LAN URL: %s (same NodePort is available through the other %s nodes)\n' "$GRAFANA_URL" "$ENVIRONMENT"
 }
@@ -89,9 +90,17 @@ create_rules_overlay() {
            rules["groups"].is_a?(Array) && !rules["groups"].empty?
       abort "ERROR: canonical DSPACE rules must contain only a nonempty groups list."
     end
-    overlay = {"additionalPrometheusRulesMap" => {"dspace-release-integrity" => rules}}
-    File.write(ARGV.fetch(1), YAML.dump(overlay))
-  ' "${DSPACE_RULES}" "${RULES_OVERLAY}"
+    cloudflare = YAML.safe_load_file(ARGV.fetch(1), aliases: false)
+    unless cloudflare.is_a?(Hash) && cloudflare.keys == ["groups"] &&
+           cloudflare["groups"].is_a?(Array) && !cloudflare["groups"].empty?
+      abort "ERROR: canonical Cloudflare rules must contain only a nonempty groups list."
+    end
+    overlay = {"additionalPrometheusRulesMap" => {
+      "dspace-release-integrity" => rules,
+      "cloudflare-tunnel" => cloudflare,
+    }}
+    File.write(ARGV.fetch(2), YAML.dump(overlay))
+  ' "${DSPACE_RULES}" "${CLOUDFLARE_RULES}" "${RULES_OVERLAY}"
 }
 validate_dashboard() { python3 "${DASHBOARD_VALIDATOR}" "${DASHBOARD}"; }
 validate_rendered_dashboard() { python3 "${DASHBOARD_VALIDATOR}" "${DASHBOARD}" --rendered "$1"; }

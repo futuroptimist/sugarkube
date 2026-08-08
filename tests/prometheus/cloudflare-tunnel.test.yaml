@@ -1,0 +1,115 @@
+rule_files:
+  - ../../platform/observability/rules/cloudflare-tunnel.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - name: two healthy connectors with four connections each
+    input_series:
+      - series: 'cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel",pod="connector-a"}'
+        values: '4x12'
+      - series: 'cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel",pod="connector-b"}'
+        values: '4x12'
+      - series: 'up{namespace="cloudflare",service="cloudflare-tunnel",pod="connector-a"}'
+        values: '1x12'
+      - series: 'up{namespace="cloudflare",service="cloudflare-tunnel",pod="connector-b"}'
+        values: '1x12'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: CloudflareTunnelNoHealthyConnections
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: CloudflareTunnelConnectionsDegraded
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: CloudflareTunnelMetricsTargetsDown
+        exp_alerts: []
+
+  - name: one connector is degraded long enough to warn
+    input_series:
+      - series: 'cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel",pod="connector-a"}'
+        values: '4x12'
+      - series: 'cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel",pod="connector-b"}'
+        values: '2x12'
+      - series: 'up{namespace="cloudflare",service="cloudflare-tunnel",pod="connector-a"}'
+        values: '1x12'
+      - series: 'up{namespace="cloudflare",service="cloudflare-tunnel",pod="connector-b"}'
+        values: '1x12'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: CloudflareTunnelConnectionsDegraded
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              environment: staging
+              cluster: sugarkube-int
+            exp_annotations:
+              summary: Cloudflare Tunnel has fewer than four connections per connector
+              runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/cloudflare_tunnel.md#alerts
+
+  - name: zero connections is critical
+    input_series:
+      - series: 'cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel",pod="connector-a"}'
+        values: '0x7'
+      - series: 'cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel",pod="connector-b"}'
+        values: '0x7'
+      - series: 'up{namespace="cloudflare",service="cloudflare-tunnel",pod="connector-a"}'
+        values: '1x7'
+      - series: 'up{namespace="cloudflare",service="cloudflare-tunnel",pod="connector-b"}'
+        values: '1x7'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: CloudflareTunnelNoHealthyConnections
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              environment: staging
+              cluster: sugarkube-int
+            exp_annotations:
+              summary: No Cloudflare Tunnel edge connections remain
+              runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/cloudflare_tunnel.md#alerts
+
+  - name: missing metrics targets is critical but not misreported as zero connections
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: CloudflareTunnelMetricsTargetsDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              environment: staging
+              cluster: sugarkube-int
+            exp_annotations:
+              summary: Fewer than two Cloudflare Tunnel metrics targets are available
+              runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/cloudflare_tunnel.md#alerts
+      - eval_time: 6m
+        alertname: CloudflareTunnelNoHealthyConnections
+        exp_alerts: []
+
+  - name: brief degradation does not satisfy the warning duration
+    input_series:
+      - series: 'cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel",pod="connector-a"}'
+        values: '4 4 4 2 2 2 4 4 4 4 4 4'
+      - series: 'cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel",pod="connector-b"}'
+        values: '4x12'
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: CloudflareTunnelConnectionsDegraded
+        exp_alerts: []
+
+  - name: connectors recover before the critical duration
+    input_series:
+      - series: 'cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel",pod="connector-a"}'
+        values: '0 0 0 0 4 4 4 4'
+      - series: 'cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel",pod="connector-b"}'
+        values: '0 0 0 0 4 4 4 4'
+      - series: 'up{namespace="cloudflare",service="cloudflare-tunnel",pod="connector-a"}'
+        values: '1x8'
+      - series: 'up{namespace="cloudflare",service="cloudflare-tunnel",pod="connector-b"}'
+        values: '1x8'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: CloudflareTunnelNoHealthyConnections
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: CloudflareTunnelConnectionsDegraded
+        exp_alerts: []

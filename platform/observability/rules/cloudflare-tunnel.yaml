@@ -1,0 +1,41 @@
+---
+groups:
+  - name: cloudflare-tunnel
+    rules:
+      - alert: CloudflareTunnelNoHealthyConnections
+        expr: |
+          sum(cloudflared_tunnel_ha_connections{namespace="cloudflare", service="cloudflare-tunnel"}) == 0
+          and
+          count(cloudflared_tunnel_ha_connections{namespace="cloudflare", service="cloudflare-tunnel"}) > 0
+        for: 5m
+        labels:
+          severity: critical
+          environment: staging
+          cluster: sugarkube-int
+        annotations:
+          summary: No Cloudflare Tunnel edge connections remain
+          runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/cloudflare_tunnel.md#alerts
+      - alert: CloudflareTunnelConnectionsDegraded
+        expr: |
+          sum(cloudflared_tunnel_ha_connections{namespace="cloudflare", service="cloudflare-tunnel"}) > 0
+          and
+          sum(cloudflared_tunnel_ha_connections{namespace="cloudflare", service="cloudflare-tunnel"}) < 8
+        for: 10m
+        labels:
+          severity: warning
+          environment: staging
+          cluster: sugarkube-int
+        annotations:
+          summary: Cloudflare Tunnel has fewer than four connections per connector
+          runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/cloudflare_tunnel.md#alerts
+      - alert: CloudflareTunnelMetricsTargetsDown
+        expr: |
+          (sum(up{namespace="cloudflare", service="cloudflare-tunnel"}) or vector(0)) < 2
+        for: 5m
+        labels:
+          severity: critical
+          environment: staging
+          cluster: sugarkube-int
+        annotations:
+          summary: Fewer than two Cloudflare Tunnel metrics targets are available
+          runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/cloudflare_tunnel.md#alerts

@@ -1,5 +1,12 @@
 # Cloudflare Tunnel (cloudflared) for dspace staging + production rollout
 
+> **Staging ownership:** the live `cloudflare/cloudflare-tunnel` chart release named
+> `cloudflare-tunnel` in namespace `cloudflare`, installed by `just cf-tunnel-install`, is the
+> source of truth for the connector described in this guide. The retained Flux resources under
+> `platform/cloudflared` use a different release and namespace and are dormant. Do not add them to
+> a reconciliation graph or use them to adopt the live release. Any future adoption needs a
+> separately reviewed, post-merge ownership migration.
+
 We use **Cloudflare Tunnel** to expose the k3s/Sugarkube cluster to the internet without opening
 inbound firewall ports. Canonical dspace hostnames are:
 
@@ -407,3 +414,119 @@ for temporary local development. See
 - After apex promotion, `prod.democratized.space` can be converted to a redirect to
   `https://democratized.space`.
 - The Sugarkube dspace app expects this persistent tunnel setup to be in place.
+
+## WAN outage recovery contract
+
+### Evidence and root cause
+
+During the 2026-08-04 staging outage, 16 public probes first became unreachable at
+`01:46:04Z`. Cloudflare HTTP 530 responses began at `01:56:04Z`, recovery began at
+`01:59:04Z`, and all probes were healthy by `02:00:04Z`; the observed 530 phase therefore lasted
+120–180 seconds. “Unreachable” means the probe could not obtain an HTTP response. A Cloudflare 530
+with error 1033 is different: Cloudflare answered, but had no healthy connector for the tunnel.
+Cloudflare documents 1033 as the tunnel having no healthy `cloudflared` instance; use the
+[1033 guidance](https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-1xxx-errors/error-1033/)
+and the broader [tunnel troubleshooting guide](https://developers.cloudflare.com/tunnel/troubleshooting/)
+to preserve that distinction.
+
+The connectors failed edge DNS discovery during the outage. The chart had configured `/ready` as
+a liveness probe with a one-failure threshold, so Kubernetes sent SIGTERM about 11–12 seconds after
+each start. Both replicas exited cleanly in lockstep and eventually accumulated roughly five-minute
+Kubernetes restart backoff. Shared CoreDNS, Traefik, and application workloads recovered normally.
+Once allowed to restart after WAN/DNS recovery, each connector established four QUIC connections
+in roughly three seconds. This proves the delay was not a multi-minute polling interval:
+`cloudflared` already reconnects with backoff, but the dependency-sensitive liveness contract kept
+killing the process that needed to reconnect.
+
+The staging contract therefore uses `/ready` only as a readiness probe (10-second period,
+2-second timeout, three-failure threshold) and has no liveness probe. A disconnected pod leaves
+Service readiness promptly but remains alive to reconnect. Kubernetes still replaces it if the
+process exits. Do not invent a process-health endpoint or put `/ready` back under liveness.
+
+### Version, metrics, and alerts
+
+The connector is pinned to stable `2026.7.3` by the immutable multi-architecture image-index digest
+in the install contract. The index contains Linux `amd64` and `arm64` images required by supported
+Sugarkube nodes. Never change this to `latest`; review the upstream
+[downloads and supported releases](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/),
+verify the registry index architectures and digest, update the exact tag in
+`platform/cloudflare-tunnel-staging/values.yaml`, and update the digest in the post-render patch and
+verifier together. Chart 0.3.2 constructs only `repository:tag`, so the digest is cleanly enforced
+by the repository-owned Deployment patch rather than guessed or forced through an unsupported
+chart value.
+
+The internal `cloudflare/cloudflare-tunnel` ClusterIP Service selects only this Helm release and
+maps named port `metrics` to port 2000. Its ServiceMonitor is also in `cloudflare`, carries the
+`release: kube-prometheus-stack` discovery label, and scrapes `/metrics` every 30 seconds with a
+10-second timeout. It creates one target per pod and is never exposed publicly. See Cloudflare's
+[monitoring reference](https://developers.cloudflare.com/tunnel/monitoring/) for the endpoint and
+metric semantics.
+
+### Alerts
+
+- `CloudflareTunnelNoHealthyConnections` is critical after five minutes with zero aggregate
+  `cloudflared_tunnel_ha_connections`; it explicitly requires the metric to be present.
+- `CloudflareTunnelConnectionsDegraded` warns after ten minutes below eight aggregate connections
+  (four expected for each of two connectors), excluding normal rollout and brief QUIC churn.
+- `CloudflareTunnelMetricsTargetsDown` is critical after five minutes with fewer than two `up`
+  targets and explicitly treats absent target series as zero.
+
+Critical tunnel alerts use the staging PagerDuty integration and labels; the degradation warning
+does not page. Diagnose target discovery separately from edge connectivity before changing routes
+or applications. Run `just cf-tunnel-verify env=staging` for the read-only context, ownership,
+lifecycle, spread, ServiceMonitor, target, connection, and loaded-rule checks. The verifier reads
+only the Secret reference name/key from the Deployment and never reads the Secret.
+
+## Separately authorized staging rollout and recovery drill
+
+This procedure is **post-merge, manual, staging-only**, and must never run in CI or during repository
+validation. Obtain an explicit maintenance authorization first. Keep the existing remotely managed
+routes and `cloudflare/tunnel-token` Secret; never export, print, decode, recreate, or rotate it.
+
+1. Save sanitized rollback metadata only (no Secret data):
+
+   ```bash
+   just assert-cluster-env env=staging
+   helm list -A --filter '^cloudflare-tunnel$'
+   helm -n cloudflare history cloudflare-tunnel
+   kubectl -n cloudflare get secret tunnel-token -o name
+   kubectl -n cloudflare get deployment cloudflare-tunnel \
+     -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}{"\n"}'
+   kubectl -n cloudflare get deployment,pods -l app.kubernetes.io/name=cloudflare-tunnel -o wide
+   ```
+
+   Stop unless context is staging, exactly one release is named `cloudflare-tunnel`, it owns the
+   Deployment, and the existing Secret name is present. Record the current Helm revision for
+   rollback. Do not continue if Flux claims the resource.
+
+2. Run `just cf-tunnel-install env=staging`. Because `cloudflare/tunnel-token` already exists, the
+   recipe preserves it without accepting or reading its value. (Protected token input is required
+   only for an explicitly authorized initial installation.) The recipe pins chart 0.3.2, rolls with
+   `maxUnavailable: 0` and `maxSurge: 1`, and preserves a one-available PDB. Watch
+   `kubectl -n cloudflare get pods -w`; stop if no old connector remains Ready while the new pod
+   starts.
+3. Run `just observability-upgrade env=staging` to load the repository-owned tunnel alert group
+   through the existing canonical `kube-prometheus-stack` release. Do not apply the rule through a
+   second observability release or Flux path. Then run `just cf-tunnel-verify env=staging`. Confirm
+   both pods show zero restarts since rollout,
+   image ID corresponds to the pinned digest, `/ready` appears only under readiness, both targets
+   are up, each reports at least four HA connections, and all tunnel alerts are loaded and healthy.
+   Re-run the repository's documented 16 staging public endpoint probes and require every endpoint
+   to return its expected status.
+4. For the recovery drill, select exactly one pod owned by the Deployment, record its node, and
+   delete only that pod: `kubectl -n cloudflare delete pod <owned-pod>`. This is the bounded,
+   owner-scoped disruption; do not disrupt DNS, WAN, nodes, both pods, or any production resource.
+   Confirm the other connector remains Ready and public probes remain healthy. Require the
+   replacement to stay running (no liveness restart), become Ready, and return to four connections
+   within five minutes. Then repeat `just cf-tunnel-verify env=staging` and the public probes.
+5. Cleanup consists only of confirming that the replacement pod is Ready and that no temporary
+   local terminal output or port-forward remains. The drill creates no persistent test object and
+   must not delete the Secret, Service, ServiceMonitor, PDB, rules, routes, or tunnel.
+
+Rollback if the rollout ever has zero Ready connectors, any pod enters repeated restart/backoff,
+the replacement misses the five-minute recovery bound, metrics/rules fail verification, or public
+endpoints remain unhealthy for five minutes. Run
+`helm -n cloudflare rollback cloudflare-tunnel <recorded-revision>`, then reapply the previously
+recorded repository contract only if that revision requires it, wait for rollout, and run the full
+verification and public probes again. If rollback cannot restore one healthy connector within five
+minutes, stop; preserve the token and remote routes, gather sanitized events/logs, and escalate.

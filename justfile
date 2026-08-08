@@ -569,12 +569,19 @@ cf-tunnel-install env='dev' token='':
 
     origin_cert_guidance="{{ origin_cert_guidance }}"
 
-    : "${token:=${CF_TUNNEL_TOKEN:-}}"
-    if [ -z "${token}" ]; then
-    echo "Set CF_TUNNEL_TOKEN or pass token=<tunnel-token> to proceed." >&2
-    exit 1
+    secret_exists=0
+    if kubectl -n cloudflare get secret tunnel-token -o name >/dev/null 2>&1; then
+        secret_exists=1
+        echo "Preserving existing cloudflare/tunnel-token Secret."
     fi
 
+    : "${token:=${CF_TUNNEL_TOKEN:-}}"
+    if [ "${secret_exists}" -eq 0 ] && [ -z "${token}" ]; then
+        echo "Provide the protected connector credential for the initial install." >&2
+        exit 1
+    fi
+
+    if [ "${secret_exists}" -eq 0 ]; then
     # Tolerate common Cloudflare dashboard copy/paste patterns so the Secret always gets just the JWT.
     token="$(printf '%s' "${token}" | tr -d '\r\n' | sed -e 's/^ *//' -e 's/ *$//')"
     if printf '%s' "${token}" | grep -qi '^export '; then
@@ -607,18 +614,12 @@ cf-tunnel-install env='dev' token='':
     kubectl -n cloudflare create secret generic tunnel-token \
     --from-literal=token="${token}" \
     --dry-run=client -o yaml | kubectl apply -f -
+    fi
 
     helm repo add cloudflare https://cloudflare.github.io/helm-charts --force-update
     helm repo update cloudflare
 
-    values_yaml=$(printf '%s\n' \
-    'fullnameOverride: cloudflare-tunnel' \
-    'cloudflare:' \
-    "  tunnelName: \"${CF_TUNNEL_NAME:-sugarkube-${env_name}}\"" \
-    "  tunnelId: \"${CF_TUNNEL_ID:-}\"" \
-    '  secretName: tunnel-token' \
-    '  ingress: []'
-    )
+    values_file="{{ justfile_directory() }}/platform/cloudflare-tunnel-staging/values.yaml"
 
     existing=$(helm -n cloudflare list --filter '^cloudflare-tunnel$' --output json 2>/dev/null || true)
     if [ -n "${existing}" ]; then
@@ -637,7 +638,10 @@ cf-tunnel-install env='dev' token='':
     if ! helm upgrade --install cloudflare-tunnel cloudflare/cloudflare-tunnel \
     --namespace cloudflare \
     --create-namespace \
-    --values - <<<"${values_yaml}"; then
+    --version 0.3.2 \
+    --values "${values_file}" \
+    --set-string "cloudflare.tunnelName=${CF_TUNNEL_NAME:-sugarkube-${env_name}}" \
+    --set-string "cloudflare.tunnelId=${CF_TUNNEL_ID:-}"; then
     helm_exit_code=$?
     echo "Helm upgrade/install failed; diagnostics to follow:" >&2
     helm -n cloudflare status cloudflare-tunnel || true
@@ -657,12 +661,16 @@ cf-tunnel-install env='dev' token='':
     {"op":"replace","path":"/spec/template/spec/volumes","value":[]},
     {"op":"replace","path":"/spec/template/spec/containers/0/env","value":[{"name":"TUNNEL_TOKEN","valueFrom":{"secretKeyRef":{"name":"tunnel-token","key":"token"}}}]},
     {"op":"replace","path":"/spec/template/spec/containers/0/volumeMounts","value":[]},
-    {"op":"replace","path":"/spec/template/spec/containers/0/image","value":"cloudflare/cloudflared:2024.8.3"},
+    {"op":"replace","path":"/spec/strategy","value":{"type":"RollingUpdate","rollingUpdate":{"maxUnavailable":0,"maxSurge":1}}},
+    {"op":"replace","path":"/spec/template/spec/containers/0/image","value":"cloudflare/cloudflared@sha256:e39ee8da81ad5e05d77f38d2f51c60ca51bf2a8450ac3abab50c17fdb91d91bf"},
     {"op":"replace","path":"/spec/template/spec/containers/0/command","value":["cloudflared","tunnel","--no-autoupdate","--metrics","0.0.0.0:2000","run"]},
-    {"op":"replace","path":"/spec/template/spec/containers/0/args","value":[]}
+    {"op":"replace","path":"/spec/template/spec/containers/0/args","value":[]},
+    {"op":"remove","path":"/spec/template/spec/containers/0/livenessProbe"},
+    {"op":"add","path":"/spec/template/spec/containers/0/readinessProbe","value":{"httpGet":{"path":"/ready","port":2000},"initialDelaySeconds":10,"periodSeconds":10,"timeoutSeconds":2,"failureThreshold":3,"successThreshold":1}}
     ]'
 
     kubectl -n cloudflare patch deployment cloudflare-tunnel --type json --patch "${deployment_patch}"
+    kubectl apply -f "{{ justfile_directory() }}/platform/cloudflare-tunnel-staging/resources.yaml"
 
     helm_note_printed=0
 
@@ -707,6 +715,10 @@ cf-tunnel-install env='dev' token='':
     "- Tunnel name: ${CF_TUNNEL_NAME:-sugarkube-${env_name}}" \
     '- Verify readiness: kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel' \
     '- Readiness endpoint: /ready must return 200'
+
+# Verify the staging Cloudflare Tunnel release, lifecycle, HA, metrics, and alerts (read-only).
+cf-tunnel-verify env='staging':
+    @python3 scripts/verify_cloudflare_tunnel.py '{{ env }}'
 
 # Hard reset the Cloudflare Tunnel resources in the cluster for a fresh cf-tunnel-install.
 cf-tunnel-reset:
