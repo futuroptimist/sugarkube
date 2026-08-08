@@ -878,7 +878,9 @@ if not isinstance(dashboard, dict) or dashboard.get("uid") != "sugarkube-staging
 cmd="${1:-}"; shift || true; [[ -n "${cmd}" ]] || { usage; exit 2; }
 env_arg="${1:-}"; resolve_environment "${env_arg}"
 if [[ "${OBSERVABILITY_XTRACE_WAS_ENABLED}" == 1 && "${cmd}" != grafana-secret-install && "${cmd}" != grafana-secret-check ]]; then set -x; fi
-[[ "${ENVIRONMENT}" != staging ]] || validate_dashboard
+if [[ "${ENVIRONMENT}" == staging && "${cmd}" != grafana-secret-install && "${cmd}" != grafana-secret-check ]]; then
+  validate_dashboard
+fi
 if [[ "${cmd}" == watchdog-drill-create ]]; then
   trap 'exit 130' INT
   trap 'exit 143' TERM

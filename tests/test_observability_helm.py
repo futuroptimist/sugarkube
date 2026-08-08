@@ -5,6 +5,7 @@ import pty
 import re
 import signal
 import subprocess
+import sys
 import termios
 import time
 from pathlib import Path
@@ -777,6 +778,19 @@ esac
         encoding="utf-8",
     )
     (bin_dir / "kubectl").chmod(0o755)
+    (bin_dir / "python3").write_text(
+        r"""#!/bin/sh
+case "${1:-}" in
+  *validate_observability_dashboard.py)
+    echo "forbidden operation: dashboard validator" >> "$AUDIT"
+    exit 99
+    ;;
+esac
+exec "$REAL_PYTHON" "$@"
+""",
+        encoding="utf-8",
+    )
+    (bin_dir / "python3").chmod(0o755)
     forbidden_stub = """#!/bin/sh
 echo "forbidden operation: $(basename "$0")" >> "$AUDIT"
 exit 99
@@ -803,6 +817,7 @@ exit 99
             "IDENTITY": identity,
             "SECRET_STATE": secret_state,
             "CAPTURE_FD": str(capture_write),
+            "REAL_PYTHON": sys.executable,
             "TMPDIR": str(script_tmp),
         }
     )
@@ -893,7 +908,24 @@ def test_grafana_secret_nonprod_test_override_is_deterministic(tmp_path):
         test_tty=False,
     )
     assert result.returncode == 0, result.stderr
-    assert audit.splitlines()[-1] == "apply secret monitoring/grafana-admin-credentials"
+    assert audit.splitlines() == [
+        "mutate namespace monitoring",
+        "apply namespace monitoring",
+        "mutate secret monitoring/grafana-admin-credentials",
+        "apply secret monitoring/grafana-admin-credentials",
+    ]
+
+
+def test_grafana_secret_check_staging_skips_dashboard_and_is_read_only(tmp_path):
+    result, audit, _ = run_grafana_secret_helper(
+        tmp_path,
+        command="grafana-secret-check",
+        env_name="staging",
+        context="sugar-staging",
+        identity="staging",
+    )
+    assert result.returncode == 0, result.stderr
+    assert audit == "secret-check\n"
 
 
 def test_grafana_secret_tty_open_failure_is_redacted(tmp_path):
