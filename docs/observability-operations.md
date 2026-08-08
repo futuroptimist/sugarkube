@@ -1,14 +1,16 @@
 # Observability operations runbook
 
-This runbook covers the current live **staging-only** kube-prometheus-stack lifecycle. It is intentionally non-Flux: operators use guarded Helm commands from this repository, with the chart version and full values chain committed in Git.
-
-Production observability is intentionally unsupported in this slice because no production live baseline has been proven yet.
+This runbook covers the live staging lifecycle and repository support for the
+production kube-prometheus-stack core. It is intentionally non-Flux: operators
+use guarded Helm commands from this repository. Merging production support is
+not evidence that the stack or a production dashboard is live.
 
 ## Canonical sources
 
 - Chart version: `platform/observability/helm/kube-prometheus-stack.version` (`87.19.0`).
 - Common values: `platform/observability/helm/kube-prometheus-stack.values.common.yaml`.
 - Staging overrides: `clusters/staging/observability/kube-prometheus-stack.values.yaml`.
+- Production overrides: `clusters/prod/observability/kube-prometheus-stack.values.yaml`.
 - Canonical DSPACE rules: `platform/observability/rules/dspace-release-integrity.yaml`.
 - Staging dashboard: `clusters/staging/observability/dashboards/sugarkube-staging-observability.json`.
 - Helper: `scripts/observability_helm.sh` through `just observability-*` recipes.
@@ -55,6 +57,64 @@ The old Flux/Longhorn files under `platform/observability/*.yaml` and `clusters/
 
 Never put example credentials or plaintext Secret data in commands, logs, docs, commits, or PRs.
 
+## Production foundation rollout
+
+Read-only discovery on 2026-08-08 at merge SHA `b650f760ffaeaa6f6d820bb2f4f99bf897b6854d`
+found context `sugar-prod`, identity `env=prod` / `cluster=sugar`, and Ready nodes
+`sugarkube0`, `sugarkube1`, and `sugarkube2`. Each had four CPUs, about 8 GiB
+allocatable memory, and ample local storage. `local-path` was the default
+StorageClass with `WaitForFirstConsumer`; expansion was disabled. The
+`monitoring` namespace, observability releases and CRDs, and all PVs/PVCs were
+absent. No production application-metrics or blackbox lifecycle was verified,
+and application releases predate the staging metrics integrations.
+
+Production live commands require an explicitly supplied kubeconfig and the
+current `sugar-prod` context; the helper also asserts the production cluster
+identity before access or mutation. Do not use the node-local staging
+`kubeconfig-env` recipe on `sugarkube3`:
+
+```bash
+export KUBECONFIG="$HOME/.kube/config-sugarkube-prod"
+kubectl config use-context sugar-prod
+```
+
+Before installation, create `monitoring` and safely reconcile the existing
+encrypted `clusters/prod/secrets/grafana-admin.enc.yaml` through the established
+SOPS reconciliation workflow. The resulting Secret must be
+`monitoring/grafana-admin-credentials` with both required keys:
+
+- Username key: `admin-user`.
+- Password key: `admin-password`.
+
+The lifecycle checks only key presence; it never decodes
+or prints values.
+
+After merge, perform and retain evidence for this sequence:
+
+```bash
+just observability-render env=prod > /tmp/sugarkube-prod-render.yaml
+# Inspect the render before any cluster mutation.
+just observability-install env=prod
+just observability-verify env=prod
+just observability-status env=prod
+kubectl -n monitoring get deploy,statefulset,daemonset,pods,pvc
+kubectl -n monitoring get prometheus,alertmanager,servicemonitor
+```
+
+Capture the render inspection, workload/PVC state, Prometheus target inventory,
+and metric-family and bounded-label evidence. Grafana is LAN-only at
+<http://sugarkube0.local:30300>; the same NodePort is available on the other
+production nodes, and there is no public endpoint. Grafana persistence is
+disabled, so UI-created state is ephemeral. Provisioned dashboards remain
+code-owned; durable UI state is a separate decision.
+
+The single 20 Gi `local-path` RWO volume is node-local and cannot be expanded in
+place on this cluster. After at least one production week, review retention,
+WAL/PVC usage, and Prometheus memory before changing capacity. A custom
+production dashboard is deferred until the live stack's metric families and
+labels are inventoried. Application panels, blackbox monitoring, alerts,
+paging, HA, and persistent Grafana UI state are also explicit follow-ups.
+
 ## Read-only preflight and status
 
 ```bash
@@ -64,7 +124,9 @@ just observability-verify env=staging
 just observability-dashboard-verify env=staging
 ```
 
-`env=int` is accepted only through the repository's deprecated alias normalization to `staging`. Missing, unknown, `prod`, and `production` fail before Helm or kubectl mutation with a message that production observability is not yet codified.
+`env=int` is accepted only through the repository's deprecated alias
+normalization to `staging`. Missing and unknown environments fail closed;
+`prod` and `production` select the production core lifecycle.
 
 Each helper prints the resolved environment, current Kubernetes context,
 namespace, release, chart, pinned version, ordered values sources, dashboard

@@ -3449,28 +3449,28 @@ platform-bootstrap env='dev':
     fi
     just --justfile "{{ justfile_directory() }}/justfile" flux-bootstrap "${env_name}"
 
-# Render the canonical non-Flux kube-prometheus-stack chart for staging (read-only).
+# Render the canonical non-Flux kube-prometheus-stack chart (staging or production, read-only).
 observability-render env='':
     @scripts/observability_helm.sh render '{{ env }}'
 
-# Fresh-install the canonical non-Flux kube-prometheus-stack release for staging.
+# Fresh-install the canonical non-Flux kube-prometheus-stack release.
 observability-install env='':
-    @python3 scripts/observability_app_metrics.py validate
+    @if [ "{{ env }}" = staging ] || [ "{{ env }}" = int ] || [ "{{ env }}" = env=staging ]; then python3 scripts/observability_app_metrics.py validate; fi
     @scripts/observability_helm.sh install '{{ env }}'
 
-# Upgrade the existing canonical non-Flux kube-prometheus-stack release for staging.
+# Upgrade the existing canonical non-Flux kube-prometheus-stack release.
 observability-upgrade env='':
-    @python3 scripts/observability_app_metrics.py validate
+    @if [ "{{ env }}" = staging ] || [ "{{ env }}" = int ] || [ "{{ env }}" = env=staging ]; then python3 scripts/observability_app_metrics.py validate; fi
     @scripts/observability_helm.sh upgrade '{{ env }}'
 
-# Summarize the canonical non-Flux kube-prometheus-stack release for staging (read-only).
+# Summarize the canonical non-Flux kube-prometheus-stack release (staging or production, read-only).
 observability-status env='':
     @scripts/observability_helm.sh status '{{ env }}'
 
-# Verify the canonical non-Flux kube-prometheus-stack release for staging (read-only).
+# Verify the canonical non-Flux kube-prometheus-stack core (staging or production, read-only).
 observability-verify env='':
     @scripts/observability_helm.sh verify '{{ env }}'
-    @python3 scripts/observability_app_metrics.py verify-all --env '{{ env }}'
+    @if [ "{{ env }}" = staging ] || [ "{{ env }}" = int ] || [ "{{ env }}" = env=staging ]; then python3 scripts/observability_app_metrics.py verify-all --env '{{ env }}'; fi
 
 # Prove through the Grafana API that the staging dashboard is loaded (read-only).
 observability-dashboard-verify env='':

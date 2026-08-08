@@ -23,7 +23,11 @@ def fail_closed(message)
   exit 16
 end
 
-mode, *paths = ARGV
+mode, environment, *paths = ARGV
+if !%w[staging prod].include?(environment)
+  paths.unshift(environment) if environment
+  environment = "staging"
+end
 fail_closed("expected rendered FILE or live ALERTMANAGER_YAML CONFIG_SECRET_YAML") unless
   (mode == "rendered" && paths.length == 1) || (mode == "live" && paths.length == 2)
 
@@ -40,7 +44,11 @@ end
 ams = documents.select { |d| d.is_a?(Hash) && d["kind"] == "Alertmanager" && d.dig("metadata", "name") == "kube-prometheus-stack-alertmanager" }
 fail_closed("expected exactly one kube-prometheus-stack Alertmanager custom resource") unless ams.length == 1
 unless ams.first.dig("spec", "secrets") == [PD_SECRET, HC_SECRET]
-  fail_closed("Alertmanager must reference exactly the two expected Secrets in order")
+  if environment == "prod"
+    fail_closed("production Alertmanager must not mount integration Secrets") unless [nil, []].include?(ams.first.dig("spec", "secrets"))
+  else
+    fail_closed("Alertmanager must reference exactly the two expected Secrets in order")
+  end
 end
 secret = documents.find { |d| d.is_a?(Hash) && d["kind"] == "Secret" && d.dig("metadata", "name") == "alertmanager-kube-prometheus-stack-alertmanager" }
 fail_closed("generated Alertmanager configuration Secret is missing") unless secret
@@ -62,6 +70,16 @@ forbidden = lambda do |value|
   end
 end
 fail_closed("inline credentials or webhook URLs are forbidden") if forbidden.call(config)
+
+if environment == "prod"
+  prod_route = config["route"]
+  fail_closed("production must have only the top-level null route") unless
+    prod_route == { "receiver" => "null" } || prod_route == { "receiver" => "null", "routes" => [] }
+  fail_closed("production must have only the null receiver") unless config["receivers"] == [{ "name" => "null" }]
+  fail_closed("production configuration contains extra keys") unless (config.keys - %w[route receivers templates inhibit_rules mute_time_intervals time_intervals global]).empty?
+  warn "Alertmanager production null-only structure verified (credential values not accessed)."
+  exit 0
+end
 
 route = config["route"]
 fail_closed('root receiver must remain "null"') unless route.is_a?(Hash) && route["receiver"] == "null"
