@@ -121,7 +121,11 @@ def deployment_patch_ops(cf_recipe_body: str) -> list[dict]:
             re.S,
         )
 
-    assert match, "Deployment patch declaration missing from cf-tunnel-install"
+    if not match:
+        assert "clusters/staging/cloudflare-tunnel/deployment-patch.json" in cf_recipe_body
+        return json.loads(
+            (REPO_ROOT / "clusters/staging/cloudflare-tunnel/deployment-patch.json").read_text()
+        )
 
     patch_text = match.group("patch")
     if "\\n" in patch_text:
@@ -292,7 +296,22 @@ def test_deployment_patch_enforces_token_mode(deployment_patch_ops: list[dict]) 
 
     image_op = ops_by_path.get("/spec/template/spec/containers/0/image")
     assert image_op and image_op.get("op") in {"add", "replace"}
-    assert image_op.get("value") == "cloudflare/cloudflared:2024.8.3"
+    assert image_op.get("value") == (
+        "cloudflare/cloudflared:2026.7.3@"
+        "sha256:e39ee8da81ad5e05d77f38d2f51c60ca51bf2a8450ac3abab50c17fdb91d91bf"
+    )
+
+
+def test_deployment_patch_uses_readiness_without_liveness(deployment_patch_ops: list[dict]) -> None:
+    ops_by_path = {op["path"]: op for op in deployment_patch_ops}
+    assert ops_by_path["/spec/template/spec/containers/0/livenessProbe"]["op"] == "remove"
+    readiness = ops_by_path["/spec/template/spec/containers/0/readinessProbe"]["value"]
+    assert readiness["httpGet"] == {"path": "/ready", "port": 2000}
+    assert readiness["failureThreshold"] == 3
+    assert ops_by_path["/spec/strategy"]["value"]["rollingUpdate"] == {
+        "maxUnavailable": 0,
+        "maxSurge": 1,
+    }
 
 
 def test_recipe_relies_on_rollout_status_not_helm_wait(cf_recipe_body: str) -> None:

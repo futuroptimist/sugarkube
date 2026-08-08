@@ -1,0 +1,12 @@
+groups:
+  - name: cloudflare-tunnel
+    rules:
+      - alert: CloudflareTunnelNoHealthyConnections
+        expr: (sum(cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel-metrics"}) or vector(0)) == 0
+        for: 5m
+      - alert: CloudflareTunnelConnectionsDegraded
+        expr: (sum(cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel-metrics"}) or vector(0)) > 0 and (sum(cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel-metrics"}) or vector(0)) < 8
+        for: 10m
+      - alert: CloudflareTunnelMetricsTargetsDown
+        expr: (sum(up{namespace="cloudflare",service="cloudflare-tunnel-metrics"} == 1) or vector(0)) < 2
+        for: 5m

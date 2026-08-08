@@ -5,6 +5,43 @@ prometheus:
     externalLabels:
       cluster: sugarkube-int
 additionalPrometheusRulesMap:
+  cloudflare-tunnel:
+    groups:
+      - name: cloudflare-tunnel
+        rules:
+          - alert: CloudflareTunnelNoHealthyConnections
+            expr: (sum(cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel-metrics"}) or vector(0)) == 0
+            for: 5m
+            labels:
+              environment: staging
+              cluster: sugarkube-int
+              severity: critical
+            annotations:
+              summary: No Cloudflare Tunnel edge connections
+              description: Both staging connectors have reported zero healthy edge connections for five minutes.
+              runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/cloudflare_tunnel.md#wan-outage-recovery
+          - alert: CloudflareTunnelConnectionsDegraded
+            expr: (sum(cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel-metrics"}) or vector(0)) > 0 and (sum(cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel-metrics"}) or vector(0)) < 8
+            for: 10m
+            labels:
+              environment: staging
+              cluster: sugarkube-int
+              severity: warning
+            annotations:
+              summary: Cloudflare Tunnel connections are degraded
+              description: The two staging connectors have fewer than their expected eight aggregate HA connections.
+              runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/cloudflare_tunnel.md#wan-outage-recovery
+          - alert: CloudflareTunnelMetricsTargetsDown
+            expr: (sum(up{namespace="cloudflare",service="cloudflare-tunnel-metrics"} == 1) or vector(0)) < 2
+            for: 5m
+            labels:
+              environment: staging
+              cluster: sugarkube-int
+              severity: critical
+            annotations:
+              summary: Cloudflare Tunnel metrics targets are missing or down
+              description: Prometheus has scraped fewer than two healthy connector targets for five minutes.
+              runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/cloudflare_tunnel.md#wan-outage-recovery
   sugarkube-observability-watchdog:
     groups:
       - name: sugarkube-observability-watchdog
@@ -55,6 +92,12 @@ alertmanager:
           group_interval: 1m
           repeat_interval: 5m
           continue: false
+        - receiver: pagerduty-dspace
+          matchers:
+            - alertname=~"^(CloudflareTunnelNoHealthyConnections|CloudflareTunnelMetricsTargetsDown)$"
+            - environment="staging"
+            - cluster="sugarkube-int"
+            - severity="critical"
     receivers:
       - name: "null"
       - name: pagerduty-synthetic-test
