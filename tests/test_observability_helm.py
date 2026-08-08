@@ -620,6 +620,13 @@ def test_justfile_exposes_observability_recipes():
         assert "env=staging" not in recipe_block
         assert "env={{ env }}" not in recipe_block
 
+    for recipe, subcommand in (
+        ("observability-grafana-secret-install", "grafana-secret-install"),
+        ("observability-grafana-secret-check", "grafana-secret-check"),
+    ):
+        recipe_block = text.split(f"{recipe} env='':", 1)[1].split("\n\n", 1)[0]
+        assert f"scripts/observability_helm.sh {subcommand} '{{{{ env }}}}'" in recipe_block
+
 
 def test_justfile_normalizes_repeated_env_prefixes_before_staging_metrics_checks():
     text = JUSTFILE.read_text(encoding="utf-8")
@@ -706,6 +713,145 @@ def test_flux_health_checks_exclude_manually_managed_observability():
     assert names == {"traefik", "cloudflared", "longhorn-driver-deployer"}
     assert "manually managed" in text
     assert "just observability-verify" in text
+
+
+def run_grafana_secret_helper(
+    tmp_path: Path,
+    command="grafana-secret-install",
+    *,
+    env_name="prod",
+    context="sugar-prod",
+    kubeconfig=True,
+    identity="prod",
+    tty_text="operator\ncorrect horse battery staple\ncorrect horse battery staple\n",
+    test_tty=True,
+    extra_env=None,
+    args=(),
+    xtrace=False,
+    secret_state="present",
+):
+    """Run only the Grafana Secret lifecycle against redacting command stubs."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(parents=True)
+    audit = tmp_path / "audit"
+    tty = tmp_path / "tty-input"
+    tty.write_text(tty_text, encoding="utf-8")
+    (bin_dir / "kubectl").write_text(
+        """#!/bin/sh
+case "$*" in
+  *"config current-context") echo "$CONTEXT" ;;
+  *"config view --minify"*) echo https://cluster.invalid ;;
+  *"get nodes -o json"*) printf '%s\n' '{"items":[{"metadata":{"name":"n1","labels":{"sugarkube.env":"'"$IDENTITY"'","sugarkube.cluster":"sugar"}}}]}' ;;
+  "create namespace monitoring --dry-run=client -o yaml") echo namespace-manifest; echo namespace-create >> "$AUDIT" ;;
+  "apply -f -") cat >/dev/null; echo apply >> "$AUDIT" ;;
+  *"create secret generic grafana-admin-credentials"*)
+    [ "$7" = "--from-file=admin-user=/dev/fd/4" ]
+    [ "$8" = "--from-file=admin-password=/dev/fd/5" ]
+    [ "$(cat /dev/fd/4)" = operator ]
+    [ "$(cat /dev/fd/5)" = 'correct horse battery staple' ]
+    echo secret-create >> "$AUDIT"
+    echo secret-manifest
+    ;;
+  *"get secret grafana-admin-credentials -o go-template="*)
+    echo secret-check >> "$AUDIT"
+    [ "$SECRET_STATE" = missing ] && exit 44
+    [ "$SECRET_STATE" = present ] && echo present
+    ;;
+  *) echo "unexpected kubectl operation" >> "$AUDIT"; exit 90 ;;
+esac
+""",
+        encoding="utf-8",
+    )
+    (bin_dir / "kubectl").chmod(0o755)
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{bin_dir}:{env['PATH']}",
+            "AUDIT": str(audit),
+            "CONTEXT": context,
+            "IDENTITY": identity,
+            "SECRET_STATE": secret_state,
+            "SUGARKUBE_GRAFANA_SECRET_TTY": str(tty),
+        }
+    )
+    if kubeconfig:
+        env["KUBECONFIG"] = str(tmp_path / "kubeconfig")
+    else:
+        env.pop("KUBECONFIG", None)
+    if test_tty:
+        env["SUGARKUBE_GRAFANA_SECRET_TEST_NONTTY"] = "1"
+    if extra_env:
+        env.update(extra_env)
+    invocation = ["bash"]
+    if xtrace:
+        invocation.append("-x")
+    invocation.extend([str(SCRIPT), command, env_name, *args])
+    result = subprocess.run(invocation, text=True, capture_output=True, env=env, check=False)
+    return result, audit.read_text(encoding="utf-8") if audit.exists() else "", tty
+
+
+def test_grafana_secret_prod_guards_precede_tty_and_mutation(tmp_path):
+    for kwargs in (
+        {"kubeconfig": False},
+        {"context": "sugar-staging"},
+        {"identity": "staging"},
+    ):
+        result, audit, tty = run_grafana_secret_helper(tmp_path / str(len(list(tmp_path.iterdir()))), **kwargs)
+        assert result.returncode != 0
+        assert audit == ""
+        assert tty.read_text(encoding="utf-8").startswith("operator\n")
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"test_tty": False},
+        {"xtrace": True},
+        {"extra_env": {"GRAFANA_ADMIN_USER": "ENV_SENTINEL_VALUE"}},
+        {"extra_env": {"GRAFANA_ADMIN_PASSWORD": "ENV_SENTINEL_VALUE"}},
+        {"extra_env": {"GF_SECURITY_ADMIN_USER": "ENV_SENTINEL_VALUE"}},
+        {"extra_env": {"GF_SECURITY_ADMIN_PASSWORD": "ENV_SENTINEL_VALUE"}},
+        {"args": ("ARG_SENTINEL_VALUE",)},
+        {"tty_text": "\nINPUT_SENTINEL_VALUE\nINPUT_SENTINEL_VALUE\n"},
+        {"tty_text": "operator\n\n\n"},
+        {"tty_text": "operator\none\ntwo\n"},
+    ],
+)
+def test_grafana_secret_install_fails_closed_before_mutation(tmp_path, kwargs):
+    result, audit, _ = run_grafana_secret_helper(tmp_path, **kwargs)
+    assert result.returncode != 0
+    assert audit == ""
+    combined = result.stdout + result.stderr
+    for value in ("ENV_SENTINEL_VALUE", "ARG_SENTINEL_VALUE", "INPUT_SENTINEL_VALUE", "operator"):
+        assert value not in combined
+
+
+def test_grafana_secret_install_is_exact_redacted_and_rotatable(tmp_path):
+    before = {path.name for path in tmp_path.iterdir()}
+    result, audit, tty = run_grafana_secret_helper(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert audit.splitlines() == ["namespace-create", "apply", "secret-create", "apply"]
+    combined = result.stdout + result.stderr + audit
+    assert "operator" not in combined
+    assert "correct horse battery staple" not in combined
+    assert "helm" not in audit and "sops" not in audit and "flux" not in audit
+    assert {path.name for path in tmp_path.iterdir()} - before == {"bin", "audit", "tty-input"}
+    tty.write_text("operator\ncorrect horse battery staple\ncorrect horse battery staple\n", encoding="utf-8")
+    result, audit, _ = run_grafana_secret_helper(tmp_path / "rotation")
+    assert result.returncode == 0
+    assert audit.count("secret-create") == 1
+
+
+@pytest.mark.parametrize("state,success", [("present", True), ("missing", False), ("empty", False)])
+def test_grafana_secret_check_is_read_only_and_redacted(tmp_path, state, success):
+    result, audit, _ = run_grafana_secret_helper(
+        tmp_path, command="grafana-secret-check", secret_state=state
+    )
+    assert (result.returncode == 0) is success
+    assert audit == "secret-check\n"
+    assert "operator" not in result.stdout + result.stderr
+    assert "admin-user" not in result.stdout + result.stderr
+    assert "admin-password" not in result.stdout + result.stderr
 
 
 def run_helper(
