@@ -3472,6 +3472,14 @@ observability-verify env='':
     @scripts/observability_helm.sh verify '{{ env }}'
     @env_name='{{ env }}'; while [ "${env_name#env=}" != "${env_name}" ]; do env_name="${env_name#env=}"; done; if [ "${env_name}" = staging ] || [ "${env_name}" = int ]; then python3 scripts/observability_app_metrics.py verify-all --env '{{ env }}'; fi
 
+# Interactively install or rotate the Grafana admin Secret (hidden TTY input).
+observability-grafana-secret-install env='':
+    @scripts/observability_helm.sh grafana-secret-install '{{ env }}'
+
+# Check only the Grafana admin Secret/key contract (read-only).
+observability-grafana-secret-check env='':
+    @scripts/observability_helm.sh grafana-secret-check '{{ env }}'
+
 # Prove through the Grafana API that the staging dashboard is loaded (read-only).
 observability-dashboard-verify env='':
     @scripts/observability_helm.sh dashboard-verify '{{ env }}'

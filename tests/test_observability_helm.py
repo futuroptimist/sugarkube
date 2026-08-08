@@ -150,20 +150,30 @@ def test_production_values_have_exact_safe_overrides_without_public_exposure_or_
     prod = yaml_load(PROD)
     assert prod == {
         "defaultRules": {"disabled": {"Watchdog": True}},
-        "prometheus": {
-            "prometheusSpec": {"externalLabels": {"cluster": "sugarkube-prod"}}
-        },
+        "prometheus": {"prometheusSpec": {"externalLabels": {"cluster": "sugarkube-prod"}}},
         "alertmanager": {
             "alertmanagerSpec": {"secrets": []},
             "config": {
-                "global": None, "inhibit_rules": None, "templates": None,
-                "route": {"group_by": None, "group_wait": None, "group_interval": None,
-                          "repeat_interval": None, "receiver": "null", "routes": None},
+                "global": None,
+                "inhibit_rules": None,
+                "templates": None,
+                "route": {
+                    "group_by": None,
+                    "group_wait": None,
+                    "group_interval": None,
+                    "repeat_interval": None,
+                    "receiver": "null",
+                    "routes": None,
+                },
                 "receivers": [{"name": "null"}],
             },
         },
     }
-    text = COMMON.read_text(encoding="utf-8") + STAGING.read_text(encoding="utf-8") + PROD.read_text(encoding="utf-8")
+    text = (
+        COMMON.read_text(encoding="utf-8")
+        + STAGING.read_text(encoding="utf-8")
+        + PROD.read_text(encoding="utf-8")
+    )
     forbidden = [
         "longhorn",
         "cloudflare",
@@ -447,7 +457,10 @@ def test_discovery_contract_uses_release_label():
 def test_lifecycle_uses_pinned_version_ordered_values_and_no_reuse_values():
     script = SCRIPT.read_text(encoding="utf-8")
     assert 'CHART="prometheus-community/kube-prometheus-stack"' in script
-    assert 'PROD_VALUES="${ROOT}/clusters/prod/observability/kube-prometheus-stack.values.yaml"' in script
+    assert (
+        'PROD_VALUES="${ROOT}/clusters/prod/observability/kube-prometheus-stack.values.yaml"'
+        in script
+    )
     assert '-f "${COMMON_VALUES}" -f "${ENV_VALUES}"' in script
     assert "--reuse-values" not in script
     assert "--atomic" in script
@@ -624,8 +637,7 @@ def test_justfile_exposes_observability_recipes():
 def test_justfile_normalizes_repeated_env_prefixes_before_staging_metrics_checks():
     text = JUSTFILE.read_text(encoding="utf-8")
     normalization = (
-        'while [ "${env_name#env=}" != "${env_name}" ]; '
-        'do env_name="${env_name#env=}"; done'
+        'while [ "${env_name#env=}" != "${env_name}" ]; ' 'do env_name="${env_name#env=}"; done'
     )
     for recipe in ("observability-install", "observability-upgrade", "observability-verify"):
         recipe_block = text.split(f"{recipe} env='':", 1)[1].split("\n\n", 1)[0]
@@ -725,11 +737,14 @@ def run_helper(
     watchdog_silence_mode=None,
     pagerduty_forward_line="Forwarding from 127.0.0.1:43128 -> 9093",
     watchdog_tty_text=None,
+    grafana_tty_text=None,
     command_args=(),
     extra_env=None,
     watchdog_silences=None,
     watchdog_log_text="",
     interrupt_signal=None,
+    explicit_kubeconfig=True,
+    shell_xtrace=False,
 ):
     """Run the lifecycle against deterministic command stubs and return its audit log."""
     bin_dir = tmp_path / "bin"
@@ -794,6 +809,14 @@ case "$*" in
   *"get secret grafana-admin-credentials -o go-template="*) [ "$KUBECTL_MODE" != missing-grafana ] || exit 44; [ "$KUBECTL_MODE" != empty-grafana ] && echo present ;;
   *"get secret alertmanager-pagerduty -o go-template="*) [ "$KUBECTL_MODE" != missing-pagerduty ] || exit 44; [ "$KUBECTL_MODE" != empty-pagerduty ] && echo present ;;
   *"get secret alertmanager-healthchecks-watchdog -o go-template="*) [ "$KUBECTL_MODE" != missing-watchdog ] || exit 44; [ "$KUBECTL_MODE" != empty-watchdog ] && echo present ;;
+  "create namespace monitoring --dry-run=client -o yaml")
+    printf '%s\n' 'apiVersion: v1' 'kind: Namespace' 'metadata:' '  name: monitoring'
+    ;;
+  *"create secret generic grafana-admin-credentials --from-file=admin-user=/dev/fd/4 --from-file=admin-password=/dev/fd/5 --dry-run=client -o yaml"*)
+    [ "$(cat /dev/fd/4)" = "$EXPECTED_GRAFANA_USER" ] || exit 48
+    [ "$(cat /dev/fd/5)" = "$EXPECTED_GRAFANA_PASSWORD" ] || exit 49
+    printf '%s\n' 'apiVersion: v1' 'kind: Secret' 'metadata:' '  name: grafana-admin-credentials' 'data:' '  admin-user: REDACTED' '  admin-password: REDACTED'
+    ;;
   *"create secret generic alertmanager-healthchecks-watchdog --from-file=ping-url=/dev/stdin --dry-run=client -o yaml"*)
     cat > "$WATCHDOG_CREATE_STDIN"
     [ "$KUBECTL_MODE" != watchdog-create-fail ] || exit 46
@@ -978,6 +1001,10 @@ printf '%s' "$code"
         "SUGARKUBE_WATCHDOG_TEST_ALLOW_SHORT_OBSERVATION": "1",
         "SUGARKUBE_WATCHDOG_TTY": str(tmp_path / "watchdog-tty"),
         "SUGARKUBE_WATCHDOG_TEST_NONTTY": "1",
+        "SUGARKUBE_GRAFANA_SECRET_TTY": str(tmp_path / "grafana-tty"),
+        "SUGARKUBE_GRAFANA_SECRET_TEST_NONTTY": "1",
+        "EXPECTED_GRAFANA_USER": "grafana-test-user",
+        "EXPECTED_GRAFANA_PASSWORD": "grafana-test-password",
         "WATCHDOG_CREATE_STDIN": str(tmp_path / "watchdog-create-stdin"),
         "WATCHDOG_APPLY_STDIN": str(tmp_path / "watchdog-apply-stdin"),
         "WATCHDOG_SILENCE_PAYLOAD": str(tmp_path / "watchdog-silence-payload"),
@@ -989,11 +1016,14 @@ printf '%s' "$code"
         ),
     }
     (tmp_path / "watchdog-tty").write_text(watchdog_tty_text or "", encoding="utf-8")
+    (tmp_path / "grafana-tty").write_text(grafana_tty_text or "", encoding="utf-8")
     (tmp_path / "watchdog-silences.json").write_text(
         json.dumps(watchdog_silences or []), encoding="utf-8"
     )
     if extra_env:
         env.update(extra_env)
+    if not explicit_kubeconfig:
+        env.pop("KUBECONFIG", None)
     (tmp_path / "alertmanager-config.yaml").write_text(
         f"""route:
   receiver: "null"
@@ -1055,6 +1085,7 @@ receivers:
         env["TARGET_RESPONSES"] = str(responses)
     argv = [
         "bash",
+        *(["-x"] if shell_xtrace else []),
         str(SCRIPT),
         command,
         f"env={env_name}",
@@ -1818,6 +1849,139 @@ def test_watchdog_secret_install_uses_hidden_tty_and_stdin_only_kubernetes(tmp_p
     )
 
 
+def grafana_input(user="grafana-test-user", password="grafana-test-password", confirmation=None):
+    return f"{user}\n{password}\n{password if confirmation is None else confirmation}\n"
+
+
+@pytest.mark.parametrize(
+    ("context", "mode", "explicit_kubeconfig"),
+    [
+        ("sugar-prod", "healthy", False),
+        ("another-context", "healthy", True),
+        ("sugar-prod", "identity-mismatch", True),
+    ],
+)
+def test_production_grafana_secret_guards_fail_before_tty_or_mutation(
+    tmp_path, context, mode, explicit_kubeconfig
+):
+    result, audit = run_helper(
+        tmp_path,
+        "grafana-secret-install",
+        env_name="prod",
+        context=context,
+        kubectl_mode=mode,
+        explicit_kubeconfig=explicit_kubeconfig,
+        grafana_tty_text=grafana_input(),
+    )
+
+    assert result.returncode != 0
+    assert "create namespace" not in audit and "create secret" not in audit
+    assert "apply -f -" not in audit
+
+
+@pytest.mark.parametrize(
+    ("tty", "extra_env", "args", "non_tty", "xtrace"),
+    [
+        (grafana_input(user=""), {}, (), False, False),
+        (grafana_input(password=""), {}, (), False, False),
+        (grafana_input(confirmation="different"), {}, (), False, False),
+        (grafana_input(), {"GRAFANA_ADMIN_USER": "refused"}, (), False, False),
+        (grafana_input(), {"GRAFANA_ADMIN_PASSWORD": "refused"}, (), False, False),
+        (grafana_input(), {"GF_SECURITY_ADMIN_USER": "refused"}, (), False, False),
+        (grafana_input(), {"GF_SECURITY_ADMIN_PASSWORD": "refused"}, (), False, False),
+        (grafana_input(), {}, ("refused",), False, False),
+        (grafana_input(), {}, (), True, False),
+        (grafana_input(), {}, (), False, True),
+    ],
+)
+def test_grafana_secret_invalid_inputs_fail_before_mutation(
+    tmp_path, tty, extra_env, args, non_tty, xtrace
+):
+    env = dict(extra_env)
+    if non_tty:
+        env["SUGARKUBE_GRAFANA_SECRET_TEST_NONTTY"] = "0"
+    result, audit = run_helper(
+        tmp_path,
+        "grafana-secret-install",
+        grafana_tty_text=tty,
+        command_args=args,
+        extra_env=env,
+        shell_xtrace=xtrace,
+    )
+
+    assert result.returncode != 0
+    assert "create namespace" not in audit and "create secret" not in audit
+    assert "apply -f -" not in audit
+    assert "grafana-test-password" not in result.stdout + result.stderr + audit
+
+
+def test_grafana_secret_install_streams_exact_contract_and_can_rotate(tmp_path):
+    first_dir = tmp_path / "first"
+    rotated_dir = tmp_path / "rotated"
+    first, first_audit = run_helper(
+        first_dir, "grafana-secret-install", grafana_tty_text=grafana_input()
+    )
+    assert first.returncode == 0, first.stderr
+    assert "create namespace monitoring --dry-run=client -o yaml" in first_audit
+    assert "create secret generic grafana-admin-credentials" in first_audit
+    assert "--from-file=admin-user=/dev/fd/4" in first_audit
+    assert "--from-file=admin-password=/dev/fd/5" in first_audit
+    assert first_audit.count("apply -f -") == 2
+
+    rotated, rotated_audit = run_helper(
+        rotated_dir,
+        "grafana-secret-install",
+        grafana_tty_text=grafana_input("rotated-user", "rotated-password"),
+        extra_env={
+            "EXPECTED_GRAFANA_USER": "rotated-user",
+            "EXPECTED_GRAFANA_PASSWORD": "rotated-password",
+        },
+    )
+    assert rotated.returncode == 0, rotated.stderr
+    public = (
+        first.stdout + first.stderr + first_audit + rotated.stdout + rotated.stderr + rotated_audit
+    )
+    for value in ("grafana-test-user", "grafana-test-password", "rotated-user", "rotated-password"):
+        assert value not in public
+    for forbidden in (
+        "helm ",
+        "flux",
+        "sops",
+        "dashboard",
+        "app-metrics",
+        "blackbox",
+        "pagerduty",
+        "watchdog",
+    ):
+        assert forbidden not in first_audit.lower() + rotated_audit.lower()
+
+
+def test_grafana_secret_check_is_read_only_and_redacted(tmp_path):
+    result, audit = run_helper(
+        tmp_path, "grafana-secret-check", env_name="prod", context="sugar-prod"
+    )
+    assert result.returncode == 0, result.stderr
+    assert "get secret grafana-admin-credentials -o go-template=" in audit
+    assert "admin-user" in audit and "admin-password" in audit
+    assert (
+        "create namespace" not in audit
+        and "create secret" not in audit
+        and "apply -f -" not in audit
+    )
+    assert "values intentionally not read or printed" in result.stdout
+
+
+@pytest.mark.parametrize("mode", ["missing-grafana", "empty-grafana"])
+def test_grafana_secret_check_rejects_missing_or_empty_keys_with_redacted_diagnostic(
+    tmp_path, mode
+):
+    result, audit = run_helper(tmp_path, "grafana-secret-check", kubectl_mode=mode)
+    assert result.returncode != 0
+    assert "both nonempty keys" in result.stderr
+    assert "intentionally not read or printed" in result.stderr
+    assert "create secret" not in audit and "apply -f -" not in audit
+
+
 @pytest.mark.parametrize(
     "variation",
     [
@@ -2384,7 +2548,7 @@ def test_watchdog_silence_api_failures_do_not_expose_fixture_contents(tmp_path, 
 
 
 def production_alertmanager_fixture(*, secrets="[]", route_extra="", receiver_extra="", inline=""):
-    return f'''---
+    return f"""---
 apiVersion: monitoring.coreos.com/v1
 kind: Alertmanager
 metadata:
@@ -2402,7 +2566,7 @@ stringData:
       receiver: "null"{route_extra}
     receivers:
       - name: "null"{receiver_extra}{inline}
-'''
+"""
 
 
 def test_production_offline_render_uses_only_ordered_core_values(tmp_path):
@@ -2430,8 +2594,12 @@ def test_production_install_identity_and_explicit_kubeconfig_fail_before_helm_mu
     tmp_path, context, mode, extra_env
 ):
     result, audit = run_helper(
-        tmp_path, "install", env_name="prod", context=context,
-        kubectl_mode=mode, extra_env=extra_env,
+        tmp_path,
+        "install",
+        env_name="prod",
+        context=context,
+        kubectl_mode=mode,
+        extra_env=extra_env,
     )
     assert result.returncode != 0
     assert "helm install" not in audit
@@ -2443,13 +2611,18 @@ def test_production_install_release_and_secret_guards(tmp_path):
     )
     assert installed.returncode == 0, installed.stderr
     assert "helm install" in audit and "--atomic" in audit
-    assert "alertmanager-pagerduty" not in audit and "alertmanager-healthchecks-watchdog" not in audit
+    assert (
+        "alertmanager-pagerduty" not in audit and "alertmanager-healthchecks-watchdog" not in audit
+    )
     existing, audit = run_helper(
         tmp_path / "existing", "install", env_name="prod", context="sugar-prod", helm_mode="present"
     )
     assert existing.returncode != 0 and "helm install" not in audit
     missing, audit = run_helper(
-        tmp_path / "secret", "install", env_name="prod", context="sugar-prod",
+        tmp_path / "secret",
+        "install",
+        env_name="prod",
+        context="sugar-prod",
         kubectl_mode="missing-grafana",
     )
     assert missing.returncode != 0 and "helm " not in audit
@@ -2458,9 +2631,20 @@ def test_production_install_release_and_secret_guards(tmp_path):
 def test_production_core_verify_skips_staging_integrations(tmp_path):
     result, audit = run_helper(tmp_path, "verify", env_name="prod", context="sugar-prod")
     assert result.returncode == 0, result.stderr
-    for required in ("rollout status", "get daemonset", "get pvc -o json", "get svc kube-prometheus-stack-grafana", "get secret grafana-admin-credentials"):
+    for required in (
+        "rollout status",
+        "get daemonset",
+        "get pvc -o json",
+        "get svc kube-prometheus-stack-grafana",
+        "get secret grafana-admin-credentials",
+    ):
         assert required in audit
-    for excluded in ("servicemonitor dspace", "alertmanager-pagerduty", "alertmanager-healthchecks-watchdog", " --raw "):
+    for excluded in (
+        "servicemonitor dspace",
+        "alertmanager-pagerduty",
+        "alertmanager-healthchecks-watchdog",
+        " --raw ",
+    ):
         assert excluded not in audit
 
 
@@ -2487,14 +2671,18 @@ def test_production_alertmanager_validator_accepts_null_only_and_rejects_integra
     valid.write_text(production_alertmanager_fixture(), encoding="utf-8")
     accepted = subprocess.run(
         ["ruby", str(ALERTMANAGER_VALIDATOR), "prod", "rendered", str(valid)],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     assert accepted.returncode == 0, accepted.stderr
     invalid = tmp_path / "invalid.yaml"
     invalid.write_text(production_alertmanager_fixture(**mutation), encoding="utf-8")
     rejected = subprocess.run(
         ["ruby", str(ALERTMANAGER_VALIDATOR), "prod", "rendered", str(invalid)],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     assert rejected.returncode == 16
     assert "forbidden-stub" not in rejected.stderr
@@ -2509,7 +2697,9 @@ def test_production_alertmanager_secret_mount_has_production_specific_diagnostic
     )
     result = subprocess.run(
         ["ruby", str(ALERTMANAGER_VALIDATOR), "prod", "rendered", str(manifest)],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     assert result.returncode == 16
     assert "production Alertmanager must mount no integration Secrets" in result.stderr
