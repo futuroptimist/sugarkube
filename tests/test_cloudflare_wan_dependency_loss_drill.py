@@ -735,23 +735,29 @@ def test_recipe_defaults_to_staging_plan(arguments: list[str]) -> None:
     assert "--env=env=staging" not in result.stdout + result.stderr
 
 
-def test_recipe_forwards_helper_arguments_once_and_unchanged() -> None:
+def test_recipe_forwards_helper_arguments_once_and_unchanged(tmp_path: Path) -> None:
     arguments = [
         "env=staging",
         "--manual-node-plan",
         "--execute",
-        "--confirm=confirmation-marker",
+        f"--confirm={CONFIRM}",
         "--evidence-dir=/tmp/evidence-marker",
     ]
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    helper = scripts / "cloudflare_wan_dependency_loss_drill.sh"
+    helper.write_text("#!/usr/bin/env bash\nprintf '%s\\n' \"$@\"\n")
+    helper.chmod(0o755)
+    justfile = shutil.copy(ROOT / "justfile", tmp_path / "justfile")
     result = subprocess.run(
-        ["just", "--dry-run", "cf-tunnel-wan-dependency-loss-drill", *arguments],
-        cwd=ROOT,
+        ["just", "--justfile", str(justfile),
+         "cf-tunnel-wan-dependency-loss-drill", *arguments],
+        cwd=tmp_path,
         text=True,
         capture_output=True,
     )
 
     assert result.returncode == 0, result.stderr
-    rendered = result.stdout + result.stderr
-    for argument in arguments:
-        assert rendered.count(argument) == 1
-    assert "--env=env=staging" not in rendered
+    forwarded = result.stdout.splitlines()
+    assert forwarded == arguments
+    assert "--env=env=staging" not in forwarded
