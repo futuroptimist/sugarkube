@@ -1,9 +1,9 @@
 # Observability operations runbook
 
-This runbook covers the live staging stack and repository support for the production
-core-stack lifecycle. It is intentionally non-Flux: operators use guarded Helm commands
-from this repository, with the chart version and full values chain committed in Git.
-Merging production support is not evidence that the stack or a production dashboard is live.
+This runbook covers the staging and production observability lifecycles. It is intentionally
+non-Flux: operators use guarded Helm commands from this repository, with the chart version and
+full values chain committed in Git. The production core stack has live acceptance evidence; the
+application integrations listed below remain separately deferred.
 
 ## Canonical sources
 
@@ -12,8 +12,13 @@ Merging production support is not evidence that the stack or a production dashbo
 - Staging overrides: `clusters/staging/observability/kube-prometheus-stack.values.yaml`.
 - Production overrides: `clusters/prod/observability/kube-prometheus-stack.values.yaml`.
 - Canonical DSPACE rules: `platform/observability/rules/dspace-release-integrity.yaml`.
-- Staging dashboard: `clusters/staging/observability/dashboards/sugarkube-staging-observability.json`.
-- Production dashboard: `clusters/prod/observability/dashboards/sugarkube-prod-observability.json`.
+- Authoritative dashboard template:
+  `platform/observability/dashboards/sugarkube-observability.template.json`.
+- Deterministic generator: `scripts/generate_observability_dashboards.py`.
+- Generated staging artifact:
+  `clusters/staging/observability/dashboards/sugarkube-staging-observability.json`.
+- Generated production artifact:
+  `clusters/prod/observability/dashboards/sugarkube-prod-observability.json`.
 - Helper: `scripts/observability_helm.sh` through `just observability-*` recipes.
 - Alert delivery, routing, and drill strategy: [`docs/observability-alerting.md`](observability-alerting.md).
 - DSPACE release-integrity triage and focused drills:
@@ -31,6 +36,20 @@ Observability** (`sugarkube-staging-observability`) or **Sugarkube Production
 Observability** (`sugarkube-prod-observability`). Grafana's chart-rendered
 Prometheus datasource has stable UID `prometheus`, which both dashboards
 reference directly.
+
+Both environment artifacts intentionally share the same 11-row, 60-object panel layout. Regenerate
+rather than hand-editing either artifact:
+
+```bash
+python3 scripts/generate_observability_dashboards.py --write
+python3 scripts/generate_observability_dashboards.py --check
+```
+
+Their panel arrays are identical. Only the UID, title, environment tag, hidden `environment`
+constant, and hidden `cluster` constant differ. The visible `app` and `route` selectors have the
+same `All = .*` shape in both profiles. The validator compares each artifact to the authoritative
+template and rejects one-sided title, query, visualization, transformation, target-mode, ID, order,
+or grid drift.
 
 The staging blackbox exporter and Probe lifecycle is documented separately in
 [Staging blackbox monitoring](observability-blackbox.md). That guarded lifecycle
@@ -159,8 +178,9 @@ The production dashboard gives each signal the following operational meaning:
   `kube_state_metrics_build_info` was absent from the live inventory and is intentionally omitted,
   without a substitute signal.
 
-All gauge/count panels explicitly render `NO DATA` for absence and do not use `or vector(0)` or
-another zero substitution. The datasource is single-cluster. Prometheus `externalLabels` are added
+All data panels explicitly render `NO DATA` for absence. Legitimate event-rate and health zeroes
+are capability-gated; no query uses an unconditional `or vector(0)` substitution. The datasource
+is single-cluster. Prometheus `externalLabels` are added
 for remote/exported series, not to samples returned by local Prometheus queries, so dashboard
 expressions must not select `cluster="sugarkube-prod"` (or any other external cluster label).
 
@@ -184,9 +204,20 @@ acceptance proof after the replacement.
 8. Visually inspect every panel at <http://sugarkube0.local:30300> with credentials retrieved from the operator vault.
 9. Record the Git SHA, Helm revision, and private operator-evidence path.
 
-Production application metrics, blackbox monitoring, paging and alerts, persistent Grafana UI
-state, HA, and retention/storage changes remain explicitly deferred. This dashboard adds no
-application, DSPACE, synthetic, routing, watchdog, or alert lifecycle.
+Production application producers and integrations remain explicitly deferred. Until they are
+separately deployed and verified, production intentionally shows `NO DATA` throughout **DSPACE
+HTTP**, **DSPACE runtime and release**, **DSPACE feature traffic**, **Blackbox monitoring**,
+**DSPACE release integrity**, **token.place relay and compute capacity**, and **token.place HTTP
+and release**. Those panels are not placeholders and never convert absent telemetry into a healthy
+zero. Event-rate zeroes require DSPACE instrumentation capability; image-pin, metrics-target, and
+chat-synthetic fallbacks require `dspace_release_approved_info`. With the capability absent, the
+query returns no series. The blackbox missing-data summary retains its seven-day discovery logic,
+but no blackbox history still yields `NO DATA`.
+
+Paging and alerts, persistent Grafana UI state, HA, and retention/storage changes also remain
+deferred. This dashboard provisions none of those integrations. Merging this dashboard change does
+not deploy either generated artifact: staging and production each require a separate guarded Helm
+upgrade, visual acceptance, API verification, and retained evidence.
 
 ## Read-only preflight and status
 
@@ -275,9 +306,9 @@ is not rollout evidence.
 
 ### token.place Phase 1 dashboard slice
 
-The two token.place rows are a staging operational view of metric families that
-the application already emits and that Prometheus has verified live. They do
-not define alert thresholds:
+The two token.place rows use one environment-neutral layout. Their metric families have been
+verified live in staging; production remains `NO DATA` until equivalent producers are verified.
+They do not define alert thresholds:
 
 - **token.place scrape availability** reports Prometheus `up` per relay pod,
   while **token.place instrumentation health** reports the application's own
@@ -303,8 +334,8 @@ not define alert thresholds:
   `version`, and `revision`.
 
 Every token.place query selects the canonical `app=tokenplace`,
-`release=tokenplace`, `cluster=sugarkube-int`, and `namespace=tokenplace`
-labels plus the selected environment. Logical gauges use `max` to deduplicate
+`release=tokenplace`, the hidden `$cluster`, and `namespace=tokenplace` labels plus the hidden
+selected `$environment`. Logical gauges use `max` to deduplicate
 values that future relay replicas may repeat instead of incorrectly adding
 them. Process-local event counters use summed rates. No token.place state or
 event query substitutes zero for an absent series: an emitted zero remains
