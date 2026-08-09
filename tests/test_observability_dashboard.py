@@ -122,10 +122,55 @@ def test_production_snapshot_and_unready_pod_contracts(prod_dashboard):
         "Observability component build identity",
     }
     assert all(
-        target.get("instant") is True and target.get("range") is False
+        target.get("format") == "table"
+        and target.get("instant") is True
+        and target.get("range") is False
         for title in snapshot_tables
         for target in panels[title]["targets"]
     )
+    expected_columns = {
+        "Scrape availability by job": {"job": 0, "Value": 1},
+        "Node readiness": {"node": 0, "Value": 1},
+        "Deployment replica deficit": {"namespace": 0, "deployment": 1, "Value": 2},
+        "Observability component build identity": {
+            "component": 0,
+            "pod": 1,
+            "version": 2,
+            "revision": 3,
+        },
+    }
+    expected_headings = {
+        "Scrape availability by job": {"job": "Job", "Value": "Status"},
+        "Node readiness": {"node": "Node", "Value": "Status"},
+        "Deployment replica deficit": {
+            "namespace": "Namespace",
+            "deployment": "Deployment",
+            "Value": "Replica deficit",
+        },
+        "Observability component build identity": {
+            "component": "Component",
+            "pod": "Pod",
+            "version": "Version",
+            "revision": "Revision",
+        },
+    }
+    for title, columns in expected_columns.items():
+        assert len(panels[title]["targets"]) == 1
+        assert len(panels[title]["transformations"]) == 1
+        assert panels[title]["transformations"][0]["id"] == "organize"
+        assert panels[title]["transformations"][0]["options"]["indexByName"] == columns
+        assert (
+            panels[title]["transformations"][0]["options"]["renameByName"]
+            == expected_headings[title]
+        )
+    build = panels["Observability component build identity"]["targets"][0]["expr"]
+    assert build.startswith("max by (component, pod, version, revision) (")
+    assert {
+        match[1]
+        for match in re.findall(
+            r'label_replace\((\w+), "component", "([\w-]+)", "", ""\)', build
+        )
+    } == {"prometheus", "alertmanager", "grafana", "node-exporter"}
     unready = panels["Unready pods by namespace"]["targets"][0]["expr"]
     assert 'kube_pod_status_phase{phase=~"Pending|Running|Unknown"} == 1' in unready
     assert "group_left" in unready
@@ -159,13 +204,36 @@ def test_production_snapshot_and_unready_pod_contracts(prod_dashboard):
             lambda d: production_panel(d, "Observability component build identity").update(
                 type="stat"
             ),
-            "four table queries",
+            "consolidate into one frame",
         ),
         (
             lambda d: production_panel(d, "Observability component build identity")["targets"][
                 0
-            ].update(legendFormat="Prometheus"),
-            "pod/version/revision",
+            ].update(expr="max by (instance) (prometheus_build_info)"),
+            "bounded component/pod/version/revision",
+        ),
+        (lambda d: d["panels"][1]["targets"][0].update(format="time_series"), "table-formatted"),
+        (
+            lambda d: d["panels"][1]["transformations"][0].update(id="reduce"),
+            "field organization",
+        ),
+        (
+            lambda d: d["panels"][1]["transformations"][0]["options"][
+                "indexByName"
+            ].pop("Value"),
+            "table columns",
+        ),
+        (
+            lambda d: d["panels"][1]["transformations"][0]["options"][
+                "renameByName"
+            ].pop("Value"),
+            "headings",
+        ),
+        (
+            lambda d: d["panels"][3]["transformations"][0]["options"][
+                "renameByName"
+            ].update(node="Host"),
+            "headings",
         ),
         (lambda d: d.update(refresh="1m"), "defaults or variables"),
         (lambda d: add_row_expression(d, "or vector(0)"), "preserve missing data"),
@@ -872,7 +940,7 @@ def test_validator_rejects_malformed_missing_and_changed_identity(tmp_path):
 
 
 def rendered_dashboard_yaml(dashboard, mount_path=None, sub_path=None):
-    filename = "sugarkube-staging-observability.json"
+    filename = f"{dashboard['uid']}.json"
     mount_path = mount_path or f"/var/lib/grafana/dashboards/sugarkube/{filename}"
     sub_path = sub_path or filename
     payload = json.dumps(dashboard, indent=2)
@@ -914,6 +982,13 @@ def test_validator_accepts_chart_native_render(tmp_path, dashboard):
     rendered = tmp_path / "direct-rendered.yaml"
     rendered.write_text(rendered_dashboard_yaml(dashboard), encoding="utf-8")
     dashboard_json = validator.validate_dashboard(DASHBOARD)
+    validator.validate_render(rendered, dashboard_json)
+
+
+def test_validator_accepts_production_rendered_source_equality(tmp_path, prod_dashboard):
+    rendered = tmp_path / "prod-rendered.yaml"
+    rendered.write_text(rendered_dashboard_yaml(prod_dashboard), encoding="utf-8")
+    dashboard_json = validator.validate_dashboard(PROD_DASHBOARD)
     validator.validate_render(rendered, dashboard_json)
 
 
