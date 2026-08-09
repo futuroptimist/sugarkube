@@ -567,7 +567,11 @@ cf-tunnel-install env='dev' token='':
 
     export KUBECONFIG="${HOME}/.kube/config"
 
-    origin_cert_guidance="{{ origin_cert_guidance }}"
+    print_origin_cert_guidance() {
+    cat >&2 <<'GUIDANCE'
+    {{ origin_cert_guidance }}
+    GUIDANCE
+    }
 
     kubectl get namespace cloudflare >/dev/null 2>&1 || kubectl create namespace cloudflare
 
@@ -702,7 +706,7 @@ cf-tunnel-install env='dev' token='':
     # synchronize their restart backoff. Leave the live rollout intact for owner diagnosis.
     logs=$(kubectl -n cloudflare logs deploy/cloudflare-tunnel --tail=50 2>/dev/null || true)
     if printf '%s' "${logs}" | grep -Eq "Cannot determine default origin certificate path|client didn't specify origincert path"; then
-        printf '%s\n' "${origin_cert_guidance}" >&2
+        print_origin_cert_guidance
     fi
     exit 1
     fi
@@ -752,7 +756,11 @@ cf-tunnel-debug:
 
     export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
 
-    origin_cert_guidance="{{ origin_cert_guidance }}"
+    print_origin_cert_guidance() {
+    cat >&2 <<'GUIDANCE'
+    {{ origin_cert_guidance }}
+    GUIDANCE
+    }
 
     echo "=== Helm release ==="
     helm -n cloudflare status cloudflare-tunnel || echo "No Helm release."
@@ -777,7 +785,7 @@ cf-tunnel-debug:
         printf '%s\n' "${logs}"
 
         if printf '%s' "${logs}" | grep -Eq "Cannot determine default origin certificate path|client didn't specify origincert path"; then
-            printf '%s\n' "${origin_cert_guidance}" >&2
+            print_origin_cert_guidance
         fi
     else
         echo "No Cloudflare Tunnel pods to show logs for."
