@@ -1,5 +1,6 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
 set export := true
+set positional-arguments := true
 
 export SUGARKUBE_CLUSTER := env('SUGARKUBE_CLUSTER', 'sugar')
 export SUGARKUBE_SERVERS := env('SUGARKUBE_SERVERS', '1')
@@ -728,7 +729,6 @@ cf-tunnel-verify env='staging':
     scripts/verify_cloudflare_tunnel.sh {{ quote(env) }}
 
 # Plan (default) or execute the staging-only, same-process Cloudflare WAN dependency-loss drill.
-[positional-arguments]
 cf-tunnel-wan-dependency-loss-drill *args:
     scripts/cloudflare_wan_dependency_loss_drill.sh "$@"
 
