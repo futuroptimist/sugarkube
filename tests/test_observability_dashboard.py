@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -8,6 +9,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 DASHBOARD = ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
+PROD_DASHBOARD = ROOT / "clusters/prod/observability/dashboards/sugarkube-prod-observability.json"
 VALIDATOR = ROOT / "scripts/validate_observability_dashboard.py"
 SCRIPT = ROOT / "scripts/observability_helm.sh"
 PROMETHEUS_VALUES = ROOT / "platform/observability/helm/kube-prometheus-stack.values.common.yaml"
@@ -43,6 +45,68 @@ def replace_panel_expression(document, title, replacement):
 @pytest.fixture
 def dashboard():
     return json.loads(DASHBOARD.read_text(encoding="utf-8"))
+
+
+@pytest.fixture
+def prod_dashboard():
+    return json.loads(PROD_DASHBOARD.read_text(encoding="utf-8"))
+
+
+def test_production_dashboard_live_backed_contract(prod_dashboard):
+    assert prod_dashboard["uid"] == "sugarkube-prod-observability"
+    assert prod_dashboard["title"] == "Sugarkube Production Observability"
+    assert prod_dashboard["time"] == {"from": "now-6h", "to": "now"}
+    assert prod_dashboard["refresh"] == "30s"
+    assert prod_dashboard["templating"]["list"] == []
+    panels = list(all_panels(prod_dashboard))
+    assert len(panels) == 17
+    assert len({panel["id"] for panel in panels}) == 17
+    assert {panel["title"] for panel in panels if panel["type"] == "row"} == {
+        "Cluster health", "Workload health", "Node and Prometheus capacity",
+        "Observability build identity",
+    }
+    expressions = "\n".join(
+        target["expr"] for panel in panels for target in panel.get("targets", [])
+    )
+    metrics = set(re.findall(r"\b[a-zA-Z_:][a-zA-Z0-9_:]*", expressions))
+    expected = {
+        "up", "kube_node_status_condition", "kube_deployment_spec_replicas",
+        "kube_deployment_status_replicas_available", "kube_pod_status_ready",
+        "kube_pod_status_phase", "kube_pod_container_status_restarts_total",
+        "node_cpu_seconds_total", "node_uname_info", "node_memory_MemAvailable_bytes",
+        "node_memory_MemTotal_bytes", "node_filesystem_avail_bytes",
+        "node_filesystem_size_bytes", "kubelet_volume_stats_available_bytes",
+        "kubelet_volume_stats_capacity_bytes", "prometheus_tsdb_head_series",
+        "prometheus_build_info", "alertmanager_build_info", "grafana_build_info",
+        "node_exporter_build_info",
+    }
+    assert expected <= metrics
+    assert "kube_state_metrics_build_info" not in expressions
+    assert "cluster=" not in expressions and "vector(0)" not in expressions
+    assert expressions.count("$__rate_interval") == 2
+    assert all(
+        panel["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
+        for panel in panels if panel["type"] != "row"
+    )
+    validator.validate_dashboard(PROD_DASHBOARD)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (lambda d: d.update(uid="wrong"), "supported profile"),
+        (lambda d: d["panels"].append(d["panels"][1]), "IDs"),
+        (lambda d: d["panels"][8]["targets"][0].update(expr="rate(kube_pod_container_status_restarts_total[5m])"), "PromQL contract"),
+        (lambda d: d["panels"][1]["targets"][0].update(expr='min by (job) (up{cluster="sugarkube-prod"})'), "PromQL contract"),
+        (lambda d: d["panels"][14]["targets"][0].update(expr="sum(prometheus_tsdb_head_series)"), "PromQL contract"),
+    ],
+)
+def test_production_validator_fails_closed(tmp_path, prod_dashboard, mutation, message):
+    mutation(prod_dashboard)
+    path = tmp_path / "dashboard.json"
+    path.write_text(json.dumps(prod_dashboard), encoding="utf-8")
+    with pytest.raises(SystemExit, match=message):
+        validator.validate_dashboard(path)
 
 
 def test_dashboard_identity_defaults_rows_and_required_panels(dashboard):
@@ -1101,10 +1165,9 @@ def test_validator_directly_rejects_missing_or_empty_render(tmp_path):
 def test_lifecycle_passes_same_dashboard_to_all_helm_paths():
     script = SCRIPT.read_text(encoding="utf-8")
     assert script.count('--set-file "${DASHBOARD_VALUE}=${DASHBOARD}"') == 3
-    assert (
-        'DASHBOARD_VALUE="grafana.dashboards.sugarkube.sugarkube-staging-observability.json"'
-        in script
-    )
+    assert 'DASHBOARD_VALUE="grafana.dashboards.sugarkube.${DASHBOARD_UID}.json"' in script
+    assert "sugarkube-staging-observability" in script
+    assert "sugarkube-prod-observability" in script
     assert script.index(
         "validate_dashboard; require_tools", script.index("install_release")
     ) < script.index("helm install")
@@ -1118,7 +1181,9 @@ def test_dashboard_verifier_is_guarded_read_only_and_redacted():
     body = script.split("dashboard_verify()", 1)[1].split('\ncmd="${1:-}"', 1)[0]
     assert "assert_context" in body
     assert body.index("assert_context") < body.index("get secret grafana-admin-credentials")
-    assert "/api/dashboards/uid/sugarkube-staging-observability" in body
+    assert "/api/dashboards/uid/${DASHBOARD_UID}" in body
+    assert 'os.environ["DASHBOARD_UID"]' in body
+    assert 'os.environ["DASHBOARD_TITLE"]' in body
     assert "--netrc-file" in body and "chmod 600" in body and "rm -rf" in body
     for mutation in ("helm install", "helm upgrade", "kubectl apply", "kubectl delete"):
         assert mutation not in body

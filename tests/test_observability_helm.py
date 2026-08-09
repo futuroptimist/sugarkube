@@ -23,6 +23,7 @@ CANONICAL_DSPACE_RULES = (
 SCRIPT = ROOT / "scripts" / "observability_helm.sh"
 ALERTMANAGER_VALIDATOR = ROOT / "scripts" / "verify_observability_alertmanager.rb"
 DASHBOARD = ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
+PROD_DASHBOARD = ROOT / "clusters/prod/observability/dashboards/sugarkube-prod-observability.json"
 JUSTFILE = ROOT / "justfile"
 FLUX_SYNC = ROOT / "flux" / "gotk-sync.yaml"
 LEGACY = [
@@ -1091,13 +1092,13 @@ case "$*" in
   *"repo add"*|*"repo update"*) exit 0 ;;
   *template*)
     [ "$HELM_MODE" != render-fail ] || exit 31
+    printf '%s\n' 'apiVersion: v1' 'kind: ConfigMap' 'metadata:' '  name: kube-prometheus-stack-grafana-dashboards-sugarkube' '  labels:' '    dashboard-provider: sugarkube' 'data:' "  $DASHBOARD_FILE:" '    |-'
+    sed 's/^/      /' "$DASHBOARD"
+    printf '%s\n' '---' 'kind: ConfigMap' 'data:' '  dashboardproviders.yaml: |' '    providers:' '      - name: sugarkube' '        options:' '          path: /var/lib/grafana/dashboards/sugarkube' '---' 'kind: Deployment' 'spec:' '  template:' '    spec:' '      containers:' '        - volumeMounts:' '            - name: dashboards-sugarkube' "              mountPath: /var/lib/grafana/dashboards/sugarkube/$DASHBOARD_FILE" "              subPath: $DASHBOARD_FILE"
     if [ "$ENV_NAME" = prod ]; then
-      printf '%s\n' 'apiVersion: monitoring.coreos.com/v1' 'kind: Alertmanager' 'metadata:' '  name: kube-prometheus-stack-alertmanager' 'spec:' '  secrets: []' '---' 'apiVersion: v1' 'kind: Secret' 'metadata:' '  name: alertmanager-kube-prometheus-stack-alertmanager' 'stringData:' '  alertmanager.yaml: |' '    route:' '      receiver: "null"' '    receivers:' '      - name: "null"'
+      printf '%s\n' '---' 'apiVersion: monitoring.coreos.com/v1' 'kind: Alertmanager' 'metadata:' '  name: kube-prometheus-stack-alertmanager' 'spec:' '  secrets: []' '---' 'apiVersion: v1' 'kind: Secret' 'metadata:' '  name: alertmanager-kube-prometheus-stack-alertmanager' 'stringData:' '  alertmanager.yaml: |' '    route:' '      receiver: "null"' '    receivers:' '      - name: "null"'
       exit 0
     fi
-    printf '%s\n' 'apiVersion: v1' 'kind: ConfigMap' 'metadata:' '  name: kube-prometheus-stack-grafana-dashboards-sugarkube' '  labels:' '    dashboard-provider: sugarkube' 'data:' '  sugarkube-staging-observability.json:' '    |-'
-    sed 's/^/      /' "$DASHBOARD"
-    printf '%s\n' '---' 'kind: ConfigMap' 'data:' '  dashboardproviders.yaml: |' '    providers:' '      - name: sugarkube' '        options:' '          path: /var/lib/grafana/dashboards/sugarkube' '---' 'kind: Deployment' 'spec:' '  template:' '    spec:' '      containers:' '        - volumeMounts:' '            - name: dashboards-sugarkube' '              mountPath: /var/lib/grafana/dashboards/sugarkube/sugarkube-staging-observability.json' '              subPath: sugarkube-staging-observability.json'
     printf '%s\n' '---' 'apiVersion: monitoring.coreos.com/v1' 'kind: Alertmanager' 'metadata:' '  name: kube-prometheus-stack-alertmanager' 'spec:' '  secrets:' '    - alertmanager-pagerduty' '    - alertmanager-healthchecks-watchdog'
     printf '%s\n' '---' 'apiVersion: v1' 'kind: Secret' 'metadata:' '  name: alertmanager-kube-prometheus-stack-alertmanager' 'stringData:' '  alertmanager.yaml: |'
     sed 's/^/    /' "$ALERTMANAGER_CONFIG"
@@ -1328,9 +1329,8 @@ printf '%s' "$code"
         "WATCHDOG_SILENCE_DELETIONS": str(tmp_path / "watchdog-silence-deletions"),
         "WATCHDOG_SILENCES": str(tmp_path / "watchdog-silences.json"),
         "WATCHDOG_LOG_TEXT": watchdog_log_text,
-        "DASHBOARD": str(
-            ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
-        ),
+        "DASHBOARD": str(PROD_DASHBOARD if env_name == "prod" else DASHBOARD),
+        "DASHBOARD_FILE": (PROD_DASHBOARD if env_name == "prod" else DASHBOARD).name,
     }
     (tmp_path / "watchdog-tty").write_text(watchdog_tty_text or "", encoding="utf-8")
     (tmp_path / "watchdog-silences.json").write_text(
@@ -1909,6 +1909,7 @@ def run_dashboard_verifier(
     mode="success",
     context="sugar-staging",
     forward_line="Forwarding from 127.0.0.1:43127 -> 3000",
+    env_name="staging",
 ):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(parents=True)
@@ -1919,7 +1920,7 @@ def run_dashboard_verifier(
 echo "kubectl $*" >> "$AUDIT"
 case "$*" in
   "config current-context") echo "$CONTEXT" ;;
-  *"get nodes -o json"*) echo '{"items":[{"metadata":{"name":"n1","labels":{"sugarkube.env":"staging","sugarkube.cluster":"sugar-staging"}}}]}' ;;
+  *"get nodes -o json"*) echo '{"items":[{"metadata":{"name":"n1","labels":{"sugarkube.env":"'"$ENV_NAME"'","sugarkube.cluster":"sugar-'"$ENV_NAME"'"}}}]}' ;;
   *"get secret grafana-admin-credentials"*"admin-user"*)
     [ "$MODE" != forward-exits-after-ready ] || { touch "$READY_SECRET"; /bin/sleep 0.2; }
     [ "$MODE" != secret-missing ] || exit 41
@@ -1959,7 +1960,7 @@ case "$MODE" in
   malformed-api) printf '%s\n%s\n' '{' 200 ;;
   wrong-api) printf '%s\n%s\n' '{"dashboard":{"uid":"wrong","title":"wrong"}}' 200 ;;
   interrupt) exit 143 ;;
-  *) printf '%s\n%s\n' '{"dashboard":{"uid":"sugarkube-staging-observability","title":"Sugarkube Staging Observability"}}' 200 ;;
+  *) printf '%s\n%s\n' "$DASHBOARD_RESPONSE" 200 ;;
 esac
 """,
         encoding="utf-8",
@@ -1973,6 +1974,11 @@ esac
         "AUDIT": str(audit),
         "MODE": mode,
         "CONTEXT": context,
+        "ENV_NAME": env_name,
+        "DASHBOARD_RESPONSE": json.dumps({"dashboard": {
+            "uid": "sugarkube-prod-observability" if env_name == "prod" else "sugarkube-staging-observability",
+            "title": "Sugarkube Production Observability" if env_name == "prod" else "Sugarkube Staging Observability",
+        }}),
         "PID_FILE": str(pid_file),
         "FORWARD_PID": str(tmp_path / "port-forward.pid"),
         "FORWARD_LINE": forward_line,
@@ -1981,13 +1987,23 @@ esac
         "KUBECONFIG": str(tmp_path / "kubeconfig"),
     }
     result = subprocess.run(
-        ["bash", str(SCRIPT), "dashboard-verify", "env=staging"],
+        ["bash", str(SCRIPT), "dashboard-verify", f"env={env_name}"],
         env=env,
         capture_output=True,
         text=True,
         start_new_session=True,
     )
     return result, audit.read_text() if audit.exists() else "", pid_file
+
+
+def test_production_dashboard_verifier_uses_production_identity_and_redacts(tmp_path):
+    result, audit, _ = run_dashboard_verifier(
+        tmp_path, context="sugar-prod", env_name="prod"
+    )
+    assert result.returncode == 0, result.stderr
+    assert "/api/dashboards/uid/sugarkube-prod-observability" in audit
+    assert "Sugarkube Production Observability" not in audit
+    assert "placeholder" not in result.stdout + result.stderr
 
 
 def test_dashboard_verifier_runtime_owns_port_and_cleans_up(tmp_path):
@@ -2754,6 +2770,7 @@ def test_production_offline_render_uses_only_ordered_core_values(tmp_path):
     assert result.returncode == 0, result.stderr
     template = next(line for line in audit.splitlines() if "helm template " in line)
     assert template.index(str(COMMON)) < template.index(str(PROD))
+    assert str(PROD_DASHBOARD) in template
     for excluded in (str(STAGING), str(DASHBOARD), "sugarkube-observability-rules"):
         assert excluded not in template
     assert "kubectl" not in audit
@@ -2808,7 +2825,7 @@ def test_production_core_verify_skips_staging_integrations(tmp_path):
         assert excluded not in audit
 
 
-@pytest.mark.parametrize("command", ["dashboard-verify", "pagerduty-test", "watchdog-verify"])
+@pytest.mark.parametrize("command", ["pagerduty-test", "watchdog-verify"])
 def test_staging_only_subcommands_reject_production(tmp_path, command):
     result, audit = run_helper(tmp_path, command, env_name="prod", context="sugar-prod")
     assert result.returncode != 0
