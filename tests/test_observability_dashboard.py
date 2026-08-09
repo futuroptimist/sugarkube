@@ -120,6 +120,10 @@ def test_missing_application_capabilities_produce_no_series_not_healthy_zero(das
     for title in ("Image-pin agreement", "DSPACE metrics-target health"):
         assert "0 * count(dspace_release_approved_info" in expressions[title][0]
         assert "vector(0)" not in expressions[title][0]
+    image_pin = expressions["Image-pin agreement"][0]
+    assert '"^(docker-pullable://)?(.*)$"' in image_pin
+    assert '"image_id", "unknown"' in image_pin
+    assert '"image_spec", "unknown"' in image_pin
     assert (
         "0 * count(dspace_release_approved_info"
         in expressions["/chat synthetic result and freshness"][0]

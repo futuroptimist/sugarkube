@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.generate_observability_dashboards import PROFILES, render
+from scripts.generate_observability_dashboards import PROFILES, render  # noqa: E402
 
 DATASOURCE_UID = "prometheus"
 DASHBOARD_PATH = "/var/lib/grafana/dashboards/sugarkube"
@@ -232,6 +232,11 @@ def _validate_semantics(dashboard: dict) -> None:
     for title in ("Image-pin agreement", "DSPACE metrics-target health"):
         if "0 * count(" + CAPABILITY not in panel_expression(dashboard, title):
             raise SystemExit(f"ERROR: {title} requires an approved-release-gated zero.")
+    image_pin = panel_expression(dashboard, "Image-pin agreement")
+    if '"^(docker-pullable://)?(.*)$"' not in image_pin:
+        raise SystemExit("ERROR: image-pin comparison must normalize runtime image-ID prefixes.")
+    if '"image_id", "unknown"' not in image_pin or '"image_spec", "unknown"' not in image_pin:
+        raise SystemExit("ERROR: image-pin comparison must fail closed on missing metadata.")
     if (
         "0 * count(" + CAPABILITY
         not in panel_named(dashboard, "/chat synthetic result and freshness")["targets"][0]["expr"]
