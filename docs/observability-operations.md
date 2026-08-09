@@ -13,6 +13,7 @@ Merging production support is not evidence that the stack or a production dashbo
 - Production overrides: `clusters/prod/observability/kube-prometheus-stack.values.yaml`.
 - Canonical DSPACE rules: `platform/observability/rules/dspace-release-integrity.yaml`.
 - Staging dashboard: `clusters/staging/observability/dashboards/sugarkube-staging-observability.json`.
+- Production dashboard: `clusters/prod/observability/dashboards/sugarkube-prod-observability.json`.
 - Helper: `scripts/observability_helm.sh` through `just observability-*` recipes.
 - Alert delivery, routing, and drill strategy: [`docs/observability-alerting.md`](observability-alerting.md).
 - DSPACE release-integrity triage and focused drills:
@@ -24,10 +25,12 @@ Merging production support is not evidence that the stack or a production dashbo
 The dashboard is owned by Sugarkube and provisioned by the pinned Grafana
 subchart. Every render, install, and upgrade passes the same standalone JSON
 with Helm `--set-file`; the provider mounts it under
-`/var/lib/grafana/dashboards/sugarkube`. Its title is **Sugarkube Staging
-Observability** and its stable UID is `sugarkube-staging-observability`.
-Grafana's chart-rendered Prometheus datasource has stable UID `prometheus`,
-which the dashboard references directly.
+`/var/lib/grafana/dashboards/sugarkube`. The helper selects exactly one environment
+dashboard: **Sugarkube Staging
+Observability** (`sugarkube-staging-observability`) or **Sugarkube Production
+Observability** (`sugarkube-prod-observability`). Grafana's chart-rendered
+Prometheus datasource has stable UID `prometheus`, which both dashboards
+reference directly.
 
 The staging blackbox exporter and Probe lifecycle is documented separately in
 [Staging blackbox monitoring](observability-blackbox.md). That guarded lifecycle
@@ -69,6 +72,14 @@ The `monitoring` namespace, observability releases, and `monitoring.coreos.com`
 APIs/CRDs were absent. No production application-metrics or blackbox lifecycle
 was verified, and current application releases predate the staging metrics integrations.
 
+The committed production baseline is one Prometheus replica with `7d` retention
+and a `15GB` retention-size limit, backed by one `20Gi` ReadWriteOnce Prometheus
+PVC using `local-path`. This storage is node-local and does not support
+expansion, so capacity pressure or node loss requires explicit operator action.
+The baseline also runs one Alertmanager replica using the null-only default
+receiver. After one production week, operators should review observed retention,
+WAL/PVC consumption, and memory before proposing capacity or retention changes.
+
 Production live actions require an explicit kubeconfig and the `sugar-prod`
 context; do not run the node-local staging kubeconfig recipe on `sugarkube3`:
 
@@ -105,42 +116,74 @@ Both keys must be nonempty. The check recipe verifies only that key contract; it
 does not return either value. The Helm install and upgrade preflight preserves
 the same contract check.
 
-After this Secret-bootstrap correction merges, the next operator sequence is a
-production render, fresh core-stack install, core verification and status, and
-sanitized live Prometheus inventory:
+## Production dashboard evidence and contract
 
-```bash
-just observability-render env=prod >/tmp/sugarkube-prod-render.yaml
-# Inspect the render before any cluster mutation.
-just observability-install env=prod
-just observability-verify env=prod
-just observability-status env=prod
-kubectl -n monitoring get deploy,statefulset,daemonset,pods,pvc
-kubectl -n monitoring get prometheus,alertmanager,servicemonitor
-# Capture live Prometheus target/metric inventory only after sanitizing labels,
-# endpoints, errors, and any other credential-bearing or identifying fields.
-```
+The production core stack was successfully installed as Helm revision 1. Read-only evidence captured
+on 2026-08-08 from repository SHA `2984f3fd5b39d391621f414ae01150cf6c0a7a59`
+showed 23 of 23 active targets healthy in two distinct scrapes and three Ready nodes. The nine jobs
+were `apiserver` (3), `coredns` (1), `kube-prometheus-stack-alertmanager` (2),
+`kube-prometheus-stack-grafana` (1), `kube-prometheus-stack-operator` (1),
+`kube-prometheus-stack-prometheus` (2), `kube-state-metrics` (1), `kubelet` (9), and
+`node-exporter` (3). Sanitized candidate results showed three CPU values near 2.39–4.04%, three
+memory values near 15.00–25.17%, three root-filesystem values near 6.26–6.50%, eleven zero
+deployment deficits, six zero namespace problem-pod results, twenty zero restart-rate results, one
+Prometheus-PVC value near 6.50%, and about 174,263 active series. No raw target, URL, instance,
+address, error, or identity-label value was retained.
 
-Record the workload, PVC, and Prometheus target inventory without recording
-credentials or sensitive labels. Grafana is LAN-only at
-<http://sugarkube0.local:30300>; the same NodePort is available on the other
-production nodes. There is no public Grafana endpoint. Grafana persistence is
-disabled in this initial declarative phase, so UI-created state is ephemeral;
-provisioned dashboards remain code-owned, and durable UI state is a separate
-follow-up decision.
+The production dashboard gives each signal the following operational meaning:
 
-Neither this correction nor PR #2529 proves a production deployment or a
-custom production dashboard. Both require separate, sanitized live evidence.
+- **Scrape availability by job** takes the minimum `up` value per job, so any failed target makes
+  that job unhealthy. **Ready nodes** deduplicates the Ready condition per node before summing;
+  three is the observed visual expectation, not an alert threshold. **Node readiness** retains each
+  node and distinguishes Ready (`1`), not Ready (`0`), and `NO DATA`.
+- **Deployment replica deficit** independently takes the maximum desired and available gauges per
+  namespace/deployment before subtracting and clamping negative values. **Unready pods by
+  namespace** and **Problem pods by namespace** deduplicate pod (and bounded phase) gauges before
+  summing. An emitted zero remains visible; an absent series stays `NO DATA`.
+- **Container restart rate** deduplicates each namespace/pod/container counter, applies `rate` over
+  Grafana's `$__rate_interval`, and then sums only containers belonging to the same namespace/pod.
+  It does not impose a fixed production window.
+- **Node CPU utilization**, **Node memory utilization**, and **Root filesystem utilization** join
+  node-exporter samples to `node_uname_info` internally on `instance`, then group and display only
+  `nodename`. The final output never exposes a scrape address or device. All three use a 0–100%
+  scale, and CPU uses `$__rate_interval`.
+- **Prometheus PVC utilization** takes bounded maxima for the available-byte numerator and
+  capacity-byte denominator independently by namespace/PVC before division. **Prometheus active
+  series** uses the maximum by pod and deliberately stays per pod; future replicas must not be
+  summed into a misleading total.
+- **Observability component build identity** has separate per-pod/version/revision queries and
+  component-prefixed legends for Prometheus, Alertmanager, Grafana, and node-exporter.
+  `kube_state_metrics_build_info` was absent from the live inventory and is intentionally omitted,
+  without a substitute signal.
 
-The core baseline is one Prometheus and one Alertmanager replica, seven-day / 15
-GB retention, a 20 Gi RWO `local-path` Prometheus claim, and a null-only
-Alertmanager. Local-path storage is node-local and non-expandable, so capacity
-pressure or node loss needs explicit operator action. After at least one
-production week, review retention, WAL/PVC usage, and memory before changing
-capacity. The custom production dashboard is deferred until live stack metric
-families and labels are inventoried. Application panels and metrics lifecycle,
-blackbox monitoring, alerts, paging, HA, and persistent Grafana UI state are
-also explicitly deferred.
+All gauge/count panels explicitly render `NO DATA` for absence and do not use `or vector(0)` or
+another zero substitution. The datasource is single-cluster. Prometheus `externalLabels` are added
+for remote/exported series, not to samples returned by local Prometheus queries, so dashboard
+expressions must not select `cluster="sugarkube-prod"` (or any other external cluster label).
+
+Grafana remains LAN-only at <http://sugarkube0.local:30300>, with the same NodePort on the other
+production nodes and no public endpoint. Grafana persistence remains disabled: mutable UI-created
+state is ephemeral, but the immutable dashboard is Helm-provisioned through its ConfigMap and
+should reappear automatically after Grafana pod replacement. API verification remains the
+acceptance proof after the replacement.
+
+### Post-merge production procedure
+
+1. Export `KUBECONFIG="$HOME/.kube/config-sugarkube-prod"`, verify the current context is
+   `sugar-prod`, and run the production cluster-identity assertion shown above.
+2. Keep the externally managed `127.0.0.1:16443` API tunnel running.
+3. Run `just observability-render env=prod >/tmp/sugarkube-prod-render.yaml` and inspect it.
+4. Run `just observability-upgrade env=prod`, **not install**, because Helm revision 1 exists.
+5. Run `just observability-verify env=prod`.
+6. Run `just observability-dashboard-verify env=prod`.
+7. Delete only the Grafana pod, wait for the Grafana deployment rollout, and run dashboard
+   verification again.
+8. Visually inspect every panel at <http://sugarkube0.local:30300> with credentials retrieved from the operator vault.
+9. Record the Git SHA, Helm revision, and private operator-evidence path.
+
+Production application metrics, blackbox monitoring, paging and alerts, persistent Grafana UI
+state, HA, and retention/storage changes remain explicitly deferred. This dashboard adds no
+application, DSPACE, synthetic, routing, watchdog, or alert lifecycle.
 
 ## Read-only preflight and status
 
@@ -157,10 +200,13 @@ just observability-dashboard-verify env=staging
 
 Each helper prints the resolved environment, current Kubernetes context,
 namespace, release, chart, pinned version, ordered values sources, and Grafana
-LAN URL. Staging additionally reports its dashboard source and uses the common
+LAN URL. Both environments report their selected dashboard source. Staging uses
+the common
 values, staging values, and a mode-`0600` temporary overlay generated from the
-canonical DSPACE rules. Production uses only common values followed by production
-values. The helper reports stable canonical sources, never a random temporary pathname.
+canonical DSPACE rules. Production uses common values followed by production
+values and its production dashboard; it does not use the staging DSPACE rules
+overlay. The helper reports stable canonical sources, never a random temporary
+pathname.
 
 ## Render, install, and upgrade distinction
 

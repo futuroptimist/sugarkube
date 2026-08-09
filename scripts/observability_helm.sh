@@ -17,8 +17,12 @@ STAGING_VALUES="${ROOT}/clusters/staging/observability/kube-prometheus-stack.val
 PROD_VALUES="${ROOT}/clusters/prod/observability/kube-prometheus-stack.values.yaml"
 DSPACE_RULES="${ROOT}/platform/observability/rules/dspace-release-integrity.yaml"
 CLOUDFLARE_RULES="${ROOT}/platform/observability/rules/cloudflare-tunnel.yaml"
-DASHBOARD="${ROOT}/clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
-DASHBOARD_VALUE="grafana.dashboards.sugarkube.sugarkube-staging-observability.json"
+STAGING_DASHBOARD="${ROOT}/clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
+PROD_DASHBOARD="${ROOT}/clusters/prod/observability/dashboards/sugarkube-prod-observability.json"
+DASHBOARD=""
+DASHBOARD_VALUE=""
+DASHBOARD_UID=""
+DASHBOARD_TITLE=""
 DASHBOARD_VALIDATOR="${ROOT}/scripts/validate_observability_dashboard.py"
 TIMEOUT="${SUGARKUBE_OBSERVABILITY_HELM_TIMEOUT:-20m}"
 GRAFANA_URL="http://sugarkube3.local:30300"
@@ -47,9 +51,12 @@ resolve_environment() {
   ENVIRONMENT="$(normalize_env "$1")"
   if [[ "$ENVIRONMENT" == staging ]]; then
     ENV_VALUES="$STAGING_VALUES"; EXPECTED_CONTEXT="sugar-staging"; GRAFANA_URL="http://sugarkube3.local:30300"
+    DASHBOARD="$STAGING_DASHBOARD"; DASHBOARD_UID="sugarkube-staging-observability"; DASHBOARD_TITLE="Sugarkube Staging Observability"
   else
     ENV_VALUES="$PROD_VALUES"; EXPECTED_CONTEXT="sugar-prod"; GRAFANA_URL="http://sugarkube0.local:30300"
+    DASHBOARD="$PROD_DASHBOARD"; DASHBOARD_UID="sugarkube-prod-observability"; DASHBOARD_TITLE="Sugarkube Production Observability"
   fi
+  DASHBOARD_VALUE="grafana.dashboards.sugarkube.${DASHBOARD_UID}.json"
 }
 require_staging() { [[ "$ENVIRONMENT" == staging ]] || { echo "ERROR: $1 is staging-only; production support is deferred." >&2; exit 2; }; }
 require_tools() { for t in "$@"; do command -v "$t" >/dev/null 2>&1 || { echo "ERROR: required tool missing: $t" >&2; exit 127; }; done; }
@@ -68,9 +75,8 @@ ordered values files:
   - ${COMMON_VALUES}
   - ${ENV_VALUES}
 EOT
-  if [[ "$ENVIRONMENT" == staging ]]; then
-    printf '  - generated mode-0600 rules overlay sourced from %s\ndashboard source (--set-file): %s\n' "$DSPACE_RULES" "$DASHBOARD"
-  fi
+  [[ "$ENVIRONMENT" != staging ]] || printf '  - generated mode-0600 rules overlay sourced from %s\n' "$DSPACE_RULES"
+  printf 'dashboard source (--set-file): %s\n' "$DASHBOARD"
   printf 'Grafana LAN URL: %s (same NodePort is available through the other %s nodes)\n' "$GRAFANA_URL" "$ENVIRONMENT"
 }
 assert_context() {
@@ -112,11 +118,11 @@ validate_rendered_alertmanager() { ruby "${ALERTMANAGER_VALIDATOR}" "${ENVIRONME
 render_to() {
   local out="$1"; shift
   local dashboard_args=()
-  [[ "$ENVIRONMENT" != staging ]] || dashboard_args=(--set-file "${DASHBOARD_VALUE}=${DASHBOARD}")
+  dashboard_args=(--set-file "${DASHBOARD_VALUE}=${DASHBOARD}")
   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update >/dev/null
   helm repo update prometheus-community >/dev/null
   helm template "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${COMMON_VALUES}" -f "${ENV_VALUES}" "$@" "${dashboard_args[@]}" >"${out}"
-  [[ "$ENVIRONMENT" != staging ]] || validate_rendered_dashboard "${out}"
+  validate_rendered_dashboard "${out}"
   validate_rendered_alertmanager "${out}"
 }
 prepare_render_args() {
@@ -258,9 +264,9 @@ release_state() {
     return 1
   fi
 }
-render() { [[ "$ENVIRONMENT" != staging ]] || validate_dashboard; require_tools helm python3 ruby; print_resolved '<not queried: offline render>'; local tmp; tmp="$(mktemp -t sugarkube-observability-render.XXXXXX.yaml)"; trap 'rm -f "${tmp:-}" "${RULES_OVERLAY:-}"' EXIT; prepare_render_args; render_to "$tmp" "${RENDER_ARGS[@]}"; cat "$tmp"; }
-install_release() { [[ "$ENVIRONMENT" != staging ]] || validate_dashboard; require_tools helm kubectl python3 ruby; print_resolved; assert_context; assert_grafana_secret; [[ "$ENVIRONMENT" != staging ]] || assert_integration_secrets; local tmp state dashboard_args=(); tmp="$(mktemp -t sugarkube-observability-install.XXXXXX.yaml)"; trap 'rm -f "${tmp:-}" "${RULES_OVERLAY:-}"' EXIT; prepare_render_args; render_to "$tmp" "${RENDER_ARGS[@]}"; state="$(release_state)"; if [[ "$state" == present ]]; then echo "ERROR: cannot install: ${RELEASE} already exists in ${NAMESPACE}. Use observability-upgrade." >&2; exit 4; fi; [[ "$ENVIRONMENT" != staging ]] || dashboard_args=(--set-file "${DASHBOARD_VALUE}=${DASHBOARD}"); helm install "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --create-namespace --version "$(version)" -f "${COMMON_VALUES}" -f "${ENV_VALUES}" "${RENDER_ARGS[@]}" "${dashboard_args[@]}" --atomic --wait --timeout "${TIMEOUT}"; }
-upgrade_release() { [[ "$ENVIRONMENT" != staging ]] || validate_dashboard; require_tools helm kubectl python3 ruby; print_resolved; assert_context; assert_grafana_secret; [[ "$ENVIRONMENT" != staging ]] || assert_integration_secrets; local tmp state dashboard_args=(); tmp="$(mktemp -t sugarkube-observability-upgrade.XXXXXX.yaml)"; trap 'rm -f "${tmp:-}" "${RULES_OVERLAY:-}"' EXIT; prepare_render_args; render_to "$tmp" "${RENDER_ARGS[@]}"; state="$(release_state)"; if [[ "$state" == absent ]]; then echo "ERROR: upgrade requires an existing Helm release ${RELEASE} in ${NAMESPACE}. Use observability-install for a fresh cluster." >&2; exit 5; fi; [[ "$ENVIRONMENT" != staging ]] || dashboard_args=(--set-file "${DASHBOARD_VALUE}=${DASHBOARD}"); helm upgrade "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${COMMON_VALUES}" -f "${ENV_VALUES}" "${RENDER_ARGS[@]}" "${dashboard_args[@]}" --atomic --wait --timeout "${TIMEOUT}"; }
+render() { validate_dashboard; require_tools helm python3 ruby; print_resolved '<not queried: offline render>'; local tmp; tmp="$(mktemp -t sugarkube-observability-render.XXXXXX.yaml)"; trap 'rm -f "${tmp:-}" "${RULES_OVERLAY:-}"' EXIT; prepare_render_args; render_to "$tmp" "${RENDER_ARGS[@]}"; cat "$tmp"; }
+install_release() { validate_dashboard; require_tools helm kubectl python3 ruby; print_resolved; assert_context; assert_grafana_secret; [[ "$ENVIRONMENT" != staging ]] || assert_integration_secrets; local tmp state dashboard_args=(); tmp="$(mktemp -t sugarkube-observability-install.XXXXXX.yaml)"; trap 'rm -f "${tmp:-}" "${RULES_OVERLAY:-}"' EXIT; prepare_render_args; render_to "$tmp" "${RENDER_ARGS[@]}"; state="$(release_state)"; if [[ "$state" == present ]]; then echo "ERROR: cannot install: ${RELEASE} already exists in ${NAMESPACE}. Use observability-upgrade." >&2; exit 4; fi; dashboard_args=(--set-file "${DASHBOARD_VALUE}=${DASHBOARD}"); helm install "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --create-namespace --version "$(version)" -f "${COMMON_VALUES}" -f "${ENV_VALUES}" "${RENDER_ARGS[@]}" "${dashboard_args[@]}" --atomic --wait --timeout "${TIMEOUT}"; }
+upgrade_release() { validate_dashboard; require_tools helm kubectl python3 ruby; print_resolved; assert_context; assert_grafana_secret; [[ "$ENVIRONMENT" != staging ]] || assert_integration_secrets; local tmp state dashboard_args=(); tmp="$(mktemp -t sugarkube-observability-upgrade.XXXXXX.yaml)"; trap 'rm -f "${tmp:-}" "${RULES_OVERLAY:-}"' EXIT; prepare_render_args; render_to "$tmp" "${RENDER_ARGS[@]}"; state="$(release_state)"; if [[ "$state" == absent ]]; then echo "ERROR: upgrade requires an existing Helm release ${RELEASE} in ${NAMESPACE}. Use observability-install for a fresh cluster." >&2; exit 5; fi; dashboard_args=(--set-file "${DASHBOARD_VALUE}=${DASHBOARD}"); helm upgrade "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${COMMON_VALUES}" -f "${ENV_VALUES}" "${RENDER_ARGS[@]}" "${dashboard_args[@]}" --atomic --wait --timeout "${TIMEOUT}"; }
 WATCHDOG_TTY="${SUGARKUBE_WATCHDOG_TTY:-/dev/tty}"
 WATCHDOG_API="/api/v1/namespaces/${NAMESPACE}/services/http:${RELEASE}-alertmanager:9093/proxy/api/v2"
 
@@ -789,7 +795,7 @@ json.dump([{
 
 dashboard_verify() (
   require_tools kubectl python3 curl base64 sleep
-  print_resolved staging
+  print_resolved
   assert_context
   local response body http_status port="" remote_port line
   local -a port_forward_lines=()
@@ -857,7 +863,7 @@ dashboard_verify() (
 
   for _ in {1..20}; do
     kill -0 "${verify_pid}" 2>/dev/null || port_forward_stopped
-    if response="$(curl --silent --show-error --max-time 3 --netrc-file "${verify_tmp}/netrc" --write-out $'\n%{http_code}' "http://127.0.0.1:${port}/api/dashboards/uid/sugarkube-staging-observability" 2>"${verify_tmp}/curl.log")"; then
+    if response="$(curl --silent --show-error --max-time 3 --netrc-file "${verify_tmp}/netrc" --write-out $'\n%{http_code}' "http://127.0.0.1:${port}/api/dashboards/uid/${DASHBOARD_UID}" 2>"${verify_tmp}/curl.log")"; then
       http_status="${response##*$'\n'}"; body="${response%$'\n'*}"
       case "${http_status}" in
         401|403) echo "ERROR: Grafana authentication was rejected (credentials and response redacted)." >&2; return 14 ;;
@@ -865,15 +871,15 @@ dashboard_verify() (
         000|404|429|500|502|503|504) sleep 1; continue ;;
         *) echo "ERROR: Grafana dashboard API rejected the request (response redacted)." >&2; return 13 ;;
       esac
-      python3 -c 'import json, sys
+      DASHBOARD_UID="${DASHBOARD_UID}" DASHBOARD_TITLE="${DASHBOARD_TITLE}" python3 -c 'import json, os, sys
 try:
     result = json.load(sys.stdin)
 except (json.JSONDecodeError, UnicodeError):
     raise SystemExit("ERROR: Grafana dashboard API returned malformed JSON (response redacted).")
 dashboard = result.get("dashboard") if isinstance(result, dict) else None
-if not isinstance(dashboard, dict) or dashboard.get("uid") != "sugarkube-staging-observability" or dashboard.get("title") != "Sugarkube Staging Observability":
+if not isinstance(dashboard, dict) or dashboard.get("uid") != os.environ["DASHBOARD_UID"] or dashboard.get("title") != os.environ["DASHBOARD_TITLE"]:
     raise SystemExit("ERROR: Grafana did not return the expected provisioned dashboard (response redacted).")' <<<"${body}"
-      echo "Grafana API confirmed dashboard UID sugarkube-staging-observability (credentials and response redacted)."
+      echo "Grafana API confirmed dashboard UID ${DASHBOARD_UID} (credentials and response redacted)."
       return 0
     fi
     sleep 1
@@ -885,11 +891,11 @@ if not isinstance(dashboard, dict) or dashboard.get("uid") != "sugarkube-staging
 cmd="${1:-}"; shift || true; [[ -n "${cmd}" ]] || { usage; exit 2; }
 env_arg="${1:-}"; resolve_environment "${env_arg}"
 if [[ "${OBSERVABILITY_XTRACE_WAS_ENABLED}" == 1 && "${cmd}" != grafana-secret-install && "${cmd}" != grafana-secret-check ]]; then set -x; fi
-if [[ "${ENVIRONMENT}" == staging && "${cmd}" != grafana-secret-install && "${cmd}" != grafana-secret-check ]]; then
+if [[ "${cmd}" != grafana-secret-install && "${cmd}" != grafana-secret-check ]]; then
   validate_dashboard
 fi
 if [[ "${cmd}" == watchdog-drill-create ]]; then
   trap 'exit 130' INT
   trap 'exit 143' TERM
 fi
-case "${cmd}" in render) render ;; install) install_release ;; upgrade) upgrade_release ;; status) status ;; verify) verify ;; dashboard-verify) require_staging "dashboard-verify"; dashboard_verify ;; pagerduty-test) require_staging "pagerduty-test"; pagerduty_test "${2:-${1:-}}" ;; grafana-secret-install) grafana_secret_install "${@:2}" ;; grafana-secret-check) grafana_secret_check "${@:2}" ;; watchdog-secret-install) require_staging "watchdog-secret-install"; watchdog_secret_install "${@:2}" ;; watchdog-secret-check) require_staging "watchdog-secret-check"; watchdog_secret_check ;; watchdog-verify) require_staging "watchdog-verify"; watchdog_live_check ;; watchdog-drill-create) require_staging "watchdog-drill-create"; watchdog_silence_create ;; watchdog-drill-status) require_staging "watchdog-drill-status"; watchdog_silence_list ;; watchdog-drill-clear) require_staging "watchdog-drill-clear"; watchdog_silence_clear ;; *) usage; exit 2 ;; esac
+case "${cmd}" in render) render ;; install) install_release ;; upgrade) upgrade_release ;; status) status ;; verify) verify ;; dashboard-verify) dashboard_verify ;; pagerduty-test) require_staging "pagerduty-test"; pagerduty_test "${2:-${1:-}}" ;; grafana-secret-install) grafana_secret_install "${@:2}" ;; grafana-secret-check) grafana_secret_check "${@:2}" ;; watchdog-secret-install) require_staging "watchdog-secret-install"; watchdog_secret_install "${@:2}" ;; watchdog-secret-check) require_staging "watchdog-secret-check"; watchdog_secret_check ;; watchdog-verify) require_staging "watchdog-verify"; watchdog_live_check ;; watchdog-drill-create) require_staging "watchdog-drill-create"; watchdog_silence_create ;; watchdog-drill-status) require_staging "watchdog-drill-status"; watchdog_silence_list ;; watchdog-drill-clear) require_staging "watchdog-drill-clear"; watchdog_silence_clear ;; *) usage; exit 2 ;; esac
