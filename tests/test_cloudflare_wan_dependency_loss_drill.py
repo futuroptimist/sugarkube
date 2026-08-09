@@ -86,8 +86,11 @@ def test_exact_network_namespace_resolution_is_required() -> None:
 
 
 def test_owner_collision_is_refused() -> None:
-    assert "nft list table inet ${table}" in TEXT
-    assert "owner-tagged rule already exists" in TEXT
+    collision = TEXT.split('collision_check="', 1)[1].split('"\n', 1)[0]
+    assert "nft -j list ruleset" in collision
+    assert 'ruleset=\\"\\$(' in collision
+    assert "length == 0" in collision
+    assert "owner table absence could not be proven" in TEXT
 
 
 def test_watchdogs_are_installed_on_both_nodes_before_disruption() -> None:
@@ -166,10 +169,23 @@ def test_stateful_cleanup_stub_requires_successful_absence_query(
     )
     nft.chmod(0o755)
     result = subprocess.run(
-        ["bash", "-o", "pipefail", "-c", f"'{nft}' delete table inet owner || true; '{nft}' -j list ruleset | jq -e --arg table owner '[.nftables[]?.table? | select(.family==\"inet\" and .name==$table)] | length == 0' >/dev/null"],
+        ["bash", "-c", f"'{nft}' delete table inet owner || true; ruleset=\"$('{nft}' -j list ruleset)\" && printf '%s\\n' \"$ruleset\" | jq -e --arg table owner '[.nftables[]?.table? | select(.family==\"inet\" and .name==$table)] | length == 0' >/dev/null"],
         capture_output=True, text=True,
     )
     assert (result.returncode == 0) is success
+
+
+def test_cleanup_proof_does_not_depend_on_remote_pipefail() -> None:
+    for marker in ('    command="', '  delete_and_prove="'):
+        command = TEXT.split(marker, 1)[1].split("\n", 1)[0]
+        assert 'ruleset=\\"\\$(' in command
+        assert 'printf \'%s\\\\n\' \\"\\${ruleset}\\" | /usr/bin/jq' in command
+
+
+def test_watchdog_fails_closed_on_query_failure_or_present_table() -> None:
+    watchdog = TEXT.split("printf -v watchdog_body", 1)[1].split("\n", 1)[0]
+    assert 'ruleset=\\"\\$(/usr/sbin/nft -j list ruleset)\\" || exit 71' in watchdog
+    assert "length == 0" in watchdog
 
 
 def test_manual_cleanup_prints_successful_absence_proof() -> None:
