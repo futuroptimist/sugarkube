@@ -8,6 +8,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 DASHBOARD = ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
+PROD_DASHBOARD = ROOT / "clusters/prod/observability/dashboards/sugarkube-prod-observability.json"
 VALIDATOR = ROOT / "scripts/validate_observability_dashboard.py"
 SCRIPT = ROOT / "scripts/observability_helm.sh"
 PROMETHEUS_VALUES = ROOT / "platform/observability/helm/kube-prometheus-stack.values.common.yaml"
@@ -1101,10 +1102,9 @@ def test_validator_directly_rejects_missing_or_empty_render(tmp_path):
 def test_lifecycle_passes_same_dashboard_to_all_helm_paths():
     script = SCRIPT.read_text(encoding="utf-8")
     assert script.count('--set-file "${DASHBOARD_VALUE}=${DASHBOARD}"') == 3
-    assert (
-        'DASHBOARD_VALUE="grafana.dashboards.sugarkube.sugarkube-staging-observability.json"'
-        in script
-    )
+    assert 'DASHBOARD_VALUE="grafana.dashboards.sugarkube.${DASHBOARD_UID}.json"' in script
+    assert "sugarkube-staging-observability" in script
+    assert "sugarkube-prod-observability" in script
     assert script.index(
         "validate_dashboard; require_tools", script.index("install_release")
     ) < script.index("helm install")
@@ -1118,7 +1118,8 @@ def test_dashboard_verifier_is_guarded_read_only_and_redacted():
     body = script.split("dashboard_verify()", 1)[1].split('\ncmd="${1:-}"', 1)[0]
     assert "assert_context" in body
     assert body.index("assert_context") < body.index("get secret grafana-admin-credentials")
-    assert "/api/dashboards/uid/sugarkube-staging-observability" in body
+    assert "/api/dashboards/uid/${DASHBOARD_UID}" in body
+    assert 'dashboard.get("uid") != sys.argv[1]' in body
     assert "--netrc-file" in body and "chmod 600" in body and "rm -rf" in body
     for mutation in ("helm install", "helm upgrade", "kubectl apply", "kubectl delete"):
         assert mutation not in body
@@ -1151,3 +1152,44 @@ def test_malformed_source_fails_before_any_stubbed_cluster_or_helm_access(tmp_pa
     )
     assert result.returncode != 0
     assert "dashboard JSON" in result.stderr
+
+
+@pytest.fixture
+def production_dashboard():
+    return json.loads(PROD_DASHBOARD.read_text(encoding="utf-8"))
+
+
+def test_production_dashboard_exact_contract(production_dashboard):
+    validator.validate_production_dashboard(PROD_DASHBOARD, production_dashboard)
+    panels = list(all_panels(production_dashboard))
+    assert production_dashboard["uid"] == validator.PROD_UID
+    assert production_dashboard["title"] == validator.PROD_TITLE
+    assert production_dashboard["templating"]["list"] == []
+    assert {p["title"] for p in panels if p["type"] == "row"} == validator.PROD_ROWS
+    assert {p["title"] for p in panels if p["type"] != "row"} == set(validator.PROD_QUERIES)
+    assert len({p["id"] for p in panels}) == len(panels)
+
+
+@pytest.mark.parametrize(
+    "needle", ['cluster="sugarkube-prod"', "or vector(0)", "kube_state_metrics_build_info"]
+)
+def test_production_validator_rejects_external_label_zero_fill_and_unverified_build(
+    production_dashboard, tmp_path, needle
+):
+    changed = json.loads(json.dumps(production_dashboard))
+    changed["panels"][1]["targets"][0]["expr"] += " " + needle
+    path = tmp_path / "prod.json"
+    path.write_text(json.dumps(changed), encoding="utf-8")
+    with pytest.raises(SystemExit):
+        validator.validate_production_dashboard(path, changed)
+
+
+@pytest.mark.parametrize("title", ["Container restart rate", "Node CPU utilization"])
+def test_production_rates_require_grafana_interval(production_dashboard, tmp_path, title):
+    changed = json.loads(json.dumps(production_dashboard))
+    panel = next(p for p in all_panels(changed) if p["title"] == title)
+    panel["targets"][0]["expr"] = panel["targets"][0]["expr"].replace("$__rate_interval", "5m")
+    path = tmp_path / "prod.json"
+    path.write_text(json.dumps(changed), encoding="utf-8")
+    with pytest.raises(SystemExit, match="reviewed production PromQL"):
+        validator.validate_production_dashboard(path, changed)

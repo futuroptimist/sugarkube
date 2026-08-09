@@ -13,6 +13,7 @@ Merging production support is not evidence that the stack or a production dashbo
 - Production overrides: `clusters/prod/observability/kube-prometheus-stack.values.yaml`.
 - Canonical DSPACE rules: `platform/observability/rules/dspace-release-integrity.yaml`.
 - Staging dashboard: `clusters/staging/observability/dashboards/sugarkube-staging-observability.json`.
+- Production dashboard: `clusters/prod/observability/dashboards/sugarkube-prod-observability.json`.
 - Helper: `scripts/observability_helm.sh` through `just observability-*` recipes.
 - Alert delivery, routing, and drill strategy: [`docs/observability-alerting.md`](observability-alerting.md).
 - DSPACE release-integrity triage and focused drills:
@@ -129,18 +130,64 @@ disabled in this initial declarative phase, so UI-created state is ephemeral;
 provisioned dashboards remain code-owned, and durable UI state is a separate
 follow-up decision.
 
-Neither this correction nor PR #2529 proves a production deployment or a
-custom production dashboard. Both require separate, sanitized live evidence.
 
 The core baseline is one Prometheus and one Alertmanager replica, seven-day / 15
 GB retention, a 20 Gi RWO `local-path` Prometheus claim, and a null-only
 Alertmanager. Local-path storage is node-local and non-expandable, so capacity
 pressure or node loss needs explicit operator action. After at least one
 production week, review retention, WAL/PVC usage, and memory before changing
-capacity. The custom production dashboard is deferred until live stack metric
-families and labels are inventoried. Application panels and metrics lifecycle,
-blackbox monitoring, alerts, paging, HA, and persistent Grafana UI state are
-also explicitly deferred.
+capacity. The first production dashboard now uses only the sanitized live metric inventory below.
+Production application metrics, blackbox monitoring, alerts and paging, HA, retention/storage
+changes, and persistent Grafana UI state remain explicitly deferred.
+
+## Production dashboard: live-backed Phase 1
+
+`Sugarkube Production Observability` (`sugarkube-prod-observability`) is a single-cluster,
+provisioned dashboard with no environment or cluster selector. Prometheus `externalLabels` are
+applied when samples leave Prometheus, not to local query evaluation, so adding
+`cluster="sugarkube-prod"` to these local expressions would incorrectly return no data. All panels
+show `NO DATA` for absence; legitimate emitted zeroes are not replaced with synthetic zeroes.
+Visual colors and the observed three-node expectation are display guidance, not alert thresholds.
+
+The **Cluster health** row reports the minimum `up` value per job, the replica-safe count of Ready
+nodes, and each node's Ready condition. **Workload health** shows deployment desired-minus-available
+deficits after independently deduplicating each kube-state-metrics gauge, unready and problem pod
+counts after per-pod deduplication, and per-namespace/pod container restart rates over Grafana's
+`$__rate_interval`. **Node and Prometheus capacity** maps node-exporter samples to the permitted
+`nodename` label through the internal `on(instance)` join; it presents CPU, memory, and root
+filesystem percentages on a 0–100 scale. The Prometheus PVC percentage independently takes the
+maximum available and capacity samples per claim before division. Active series remains a maximum
+per Prometheus pod rather than an unsafe sum across future replicas. **Observability build identity**
+keeps separate Prometheus, Alertmanager, Grafana, and node-exporter queries grouped by pod, version,
+and revision. `kube_state_metrics_build_info` was absent and is intentionally omitted rather than
+replaced with a different signal.
+
+The evidence was captured read-only on 2026-08-08 from repository SHA
+`2984f3fd5b39d391621f414ae01150cf6c0a7a59`, after Helm revision 1 installed successfully. Two
+distinct scrapes showed all 23 targets healthy: apiserver (3), coredns (1), Alertmanager (2), Grafana
+(1), operator (1), Prometheus (2), kube-state-metrics (1), kubelet (9), and node-exporter (3). Three
+nodes were Ready. Candidate queries returned three CPU results (about 2.39–4.04%), three memory
+results (15.00–25.17%), three root-filesystem results (6.26–6.50%), eleven zero deployment deficits,
+six zero problem-pod namespace results, twenty zero restart rates, one Prometheus PVC result (about
+6.50%), and about 174,263 active series. No raw target, URL, address, instance, error, or sensitive
+identity value was retained.
+
+Grafana persistence remains disabled: mutable UI-created state is ephemeral. The immutable dashboard
+is supplied by Helm and must recover after Grafana pod recreation without a manual UI save. After
+merge, perform the remaining production proof exactly as follows:
+
+1. Export `KUBECONFIG="$HOME/.kube/config-sugarkube-prod"` and verify context `sugar-prod`.
+2. Keep the externally managed `127.0.0.1:16443` tunnel running.
+3. Run `just observability-render env=prod`, save the output outside the repository, and inspect it.
+4. Run `just observability-upgrade env=prod`—not install, because Helm revision 1 already exists.
+5. Run `just observability-verify env=prod`.
+6. Run `just observability-dashboard-verify env=prod`.
+7. Delete only the Grafana pod, wait for its deployment rollout, then run dashboard verification again.
+8. Visually inspect every panel at <http://sugarkube0.local:30300> using credentials retrieved from the operator-managed vault.
+9. Record the Git SHA, Helm revision, and private operator-evidence path.
+
+This repository procedure does not itself contact production. The post-merge operator must provide
+the API, pod-recreation, and visual proof.
 
 ## Read-only preflight and status
 

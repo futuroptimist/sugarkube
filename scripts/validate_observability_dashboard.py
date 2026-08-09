@@ -689,6 +689,170 @@ def validate_tokenplace_semantics(dashboard: dict) -> None:
         raise SystemExit("ERROR: token.place Phase 2 metrics must not be presented as implemented.")
 
 
+PROD_TITLE = "Sugarkube Production Observability"
+PROD_UID = "sugarkube-prod-observability"
+PROD_ROWS = {
+    "Cluster health",
+    "Workload health",
+    "Node and Prometheus capacity",
+    "Observability build identity",
+}
+PROD_QUERIES = {
+    "Scrape availability by job": ["min by (job) (up)"],
+    "Ready nodes": [
+        'sum(max by (node) (kube_node_status_condition{condition="Ready",status="true"}))'
+    ],
+    "Node readiness": [
+        'max by (node) (kube_node_status_condition{condition="Ready",status="true"})'
+    ],
+    "Deployment replica deficit": [
+        "clamp_min(max by (namespace, deployment) (kube_deployment_spec_replicas) - max by (namespace, deployment) (kube_deployment_status_replicas_available), 0)"
+    ],
+    "Unready pods by namespace": [
+        'sum by (namespace) (max by (namespace, pod) (kube_pod_status_ready{condition="false"}))'
+    ],
+    "Problem pods by namespace": [
+        'sum by (namespace) (max by (namespace, pod, phase) (kube_pod_status_phase{phase=~"Pending|Failed|Unknown"}))'
+    ],
+    "Container restart rate": [
+        "sum by (namespace, pod) (max by (namespace, pod, container) (rate(kube_pod_container_status_restarts_total[$__rate_interval])))"
+    ],
+    "Node CPU utilization": [
+        'max by (nodename) (100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[$__rate_interval]))) * on (instance) group_left (nodename) node_uname_info)'
+    ],
+    "Node memory utilization": [
+        "max by (nodename) (100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * on (instance) group_left (nodename) node_uname_info)"
+    ],
+    "Root filesystem utilization": [
+        'max by (nodename) (100 * (1 - node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}) * on (instance) group_left (nodename) node_uname_info)'
+    ],
+    "Prometheus PVC utilization": [
+        '100 * (1 - max by (namespace, persistentvolumeclaim) (kubelet_volume_stats_available_bytes{namespace="monitoring",persistentvolumeclaim=~"prometheus-kube-prometheus-stack-prometheus-db-.*"}) / max by (namespace, persistentvolumeclaim) (kubelet_volume_stats_capacity_bytes{namespace="monitoring",persistentvolumeclaim=~"prometheus-kube-prometheus-stack-prometheus-db-.*"}))'
+    ],
+    "Prometheus active series": ["max by (pod) (prometheus_tsdb_head_series)"],
+    "Observability component build identity": [
+        "max by (pod, version, revision) (prometheus_build_info)",
+        "max by (pod, version, revision) (alertmanager_build_info)",
+        "max by (pod, version, revision) (grafana_build_info)",
+        "max by (pod, version, revision) (node_exporter_build_info)",
+    ],
+}
+PROD_FORBIDDEN = {
+    "kube_state_metrics_build_info",
+    "probe_success",
+    "dspace_",
+    "tokenplace_",
+    "cluster=",
+    "or vector(0)",
+    "or on() vector(0)",
+}
+
+
+def validate_production_dashboard(path: Path, dashboard: dict) -> str:
+    global TITLE, UID, DASHBOARD_FILE, DASHBOARD_MOUNT
+    TITLE, UID = PROD_TITLE, PROD_UID
+    DASHBOARD_FILE = f"{UID}.json"
+    DASHBOARD_MOUNT = f"{DASHBOARD_PATH}/{DASHBOARD_FILE}"
+    if dashboard.get("uid") != UID or dashboard.get("title") != TITLE:
+        raise SystemExit("ERROR: incorrect production dashboard UID or title.")
+    if dashboard.get("refresh") != "30s" or dashboard.get("time") != {
+        "from": "now-6h",
+        "to": "now",
+    }:
+        raise SystemExit("ERROR: production dashboard refresh and time range are fixed.")
+    if dashboard.get("templating", {}).get("list"):
+        raise SystemExit("ERROR: production dashboard must not define variables.")
+    items = list(panels(dashboard))
+    ids = [item.get("id") for item in items]
+    if any(not isinstance(value, int) for value in ids) or len(ids) != len(set(ids)):
+        raise SystemExit("ERROR: dashboard panel IDs must be unique integers.")
+    rows = [item.get("title") for item in items if item.get("type") == "row"]
+    if set(rows) != PROD_ROWS or len(rows) != len(PROD_ROWS):
+        raise SystemExit("ERROR: production rows must each occur exactly once.")
+    titles = [item.get("title") for item in items if item.get("type") != "row"]
+    if set(titles) != set(PROD_QUERIES) or len(titles) != len(PROD_QUERIES):
+        raise SystemExit("ERROR: production panels must each occur exactly once.")
+    rectangles = []
+    for item in items:
+        pos = item.get("gridPos", {})
+        if (
+            any(not isinstance(pos.get(k), int) for k in ("x", "y", "w", "h"))
+            or pos.get("w", 0) <= 0
+            or pos.get("h", 0) <= 0
+            or pos.get("x", -1) < 0
+            or pos.get("y", -1) < 0
+            or pos["x"] + pos["w"] > 24
+        ):
+            raise SystemExit("ERROR: dashboard panels must have valid grid positions.")
+        if item.get("type") != "row":
+            rect = (pos["x"], pos["y"], pos["x"] + pos["w"], pos["y"] + pos["h"])
+            if any(
+                rect[0] < other[2]
+                and rect[2] > other[0]
+                and rect[1] < other[3]
+                and rect[3] > other[1]
+                for other in rectangles
+            ):
+                raise SystemExit("ERROR: dashboard panel grid positions must not overlap.")
+            rectangles.append(rect)
+    for title, expected in PROD_QUERIES.items():
+        panel = panel_named(dashboard, title)
+        targets = panel.get("targets", [])
+        actual = [re.sub(r"\s+", " ", target.get("expr", "")).strip() for target in targets]
+        if actual != expected:
+            raise SystemExit(f"ERROR: {title} does not use the reviewed production PromQL.")
+        if (
+            any(target.get("datasource", {}).get("uid") != DATASOURCE_UID for target in targets)
+            or panel.get("datasource", {}).get("uid") != DATASOURCE_UID
+        ):
+            raise SystemExit("ERROR: production datasource UID must be prometheus.")
+        if panel.get("fieldConfig", {}).get("defaults", {}).get("noValue") != "NO DATA":
+            raise SystemExit("ERROR: production panels must preserve missing data as NO DATA.")
+    serialized = json.dumps(dashboard)
+    if any(value in serialized for value in PROD_FORBIDDEN):
+        raise SystemExit("ERROR: production dashboard contains an unverified or unsafe signal.")
+    forbidden_labels = {
+        "instance",
+        "ip",
+        "url",
+        "endpoint",
+        "device",
+        "system_uuid",
+        "provider_id",
+        "pod_cidr",
+        "address",
+    }
+    legends = "\n".join(
+        target.get("legendFormat", "") for item in items for target in item.get("targets", [])
+    )
+    exposed = set(re.findall(r"{{\s*([A-Za-z_][A-Za-z0-9_]*)\s*}}", legends)) & forbidden_labels
+    if exposed:
+        raise SystemExit("ERROR: production legends expose a forbidden raw label.")
+    for title in (
+        "Node CPU utilization",
+        "Node memory utilization",
+        "Root filesystem utilization",
+        "Prometheus PVC utilization",
+    ):
+        defaults = panel_named(dashboard, title)["fieldConfig"]["defaults"]
+        if (
+            defaults.get("unit") != "percent"
+            or defaults.get("min") != 0
+            or defaults.get("max") != 100
+        ):
+            raise SystemExit("ERROR: percent panels require a 0-100 percent scale.")
+    build = panel_named(dashboard, "Observability component build identity")
+    if build.get("type") != "table" or any(
+        not all(
+            label in target.get("legendFormat", "")
+            for label in ("{{pod}}", "{{version}}", "{{revision}}")
+        )
+        for target in build["targets"]
+    ):
+        raise SystemExit("ERROR: build identity must remain per pod, version, and revision.")
+    return path.read_text(encoding="utf-8")
+
+
 def validate_dashboard(path: Path) -> str:
     dashboard = load_dashboard(path)
     if dashboard.get("uid") != UID or dashboard.get("title") != TITLE:
@@ -895,7 +1059,12 @@ def main() -> None:
     parser.add_argument("dashboard", type=Path)
     parser.add_argument("--rendered", type=Path)
     args = parser.parse_args()
-    dashboard_json = validate_dashboard(args.dashboard)
+    document = load_dashboard(args.dashboard)
+    dashboard_json = (
+        validate_production_dashboard(args.dashboard, document)
+        if document.get("uid") == PROD_UID or "prod" in args.dashboard.name
+        else validate_dashboard(args.dashboard)
+    )
     if args.rendered:
         validate_render(args.rendered, dashboard_json)
 
