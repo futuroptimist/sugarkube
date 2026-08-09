@@ -1,0 +1,227 @@
+#!/usr/bin/env bash
+# Staging-only, process-preserving Cloudflare WAN dependency-loss drill.
+set -Eeuo pipefail
+
+readonly EXPECTED_CONTEXT=sugar-staging
+readonly EXPECTED_IMAGE='cloudflare/cloudflared:2026.7.3@sha256:e39ee8da81ad5e05d77f38d2f51c60ca51bf2a8450ac3abab50c17fdb91d91bf'
+readonly EXPECTED_CHART='cloudflare-tunnel-0.3.2'
+readonly EXPECTED_HELM_REVISION=2
+readonly CONFIRMATION='DISRUPT STAGING CLOUDFLARE WAN FOR SAME-PROCESS RECOVERY'
+readonly SELECTOR='app.kubernetes.io/name=cloudflare-tunnel,app.kubernetes.io/instance=cloudflare-tunnel'
+readonly DISRUPTION_SECONDS=180
+readonly RECOVERY_SECONDS=300
+
+execute=0
+env_name=staging
+confirmation=''
+owner=''
+evidence_dir=''
+declare -a installed_nodes=()
+declare -a pod_names=() pod_uids=() pod_nodes=() pod_restarts=() pod_sandboxes=() pod_pids=() pod_netns=()
+cleanup_failed=0
+
+usage() {
+  cat <<'EOF'
+Usage: cloudflare_wan_dependency_loss_drill.sh [--execute] [--env staging]
+       [--confirm 'DISRUPT STAGING CLOUDFLARE WAN FOR SAME-PROCESS RECOVERY']
+
+The default is a non-mutating plan. Execution also requires:
+  CF_DRILL_APPROVED_REVISION=<full git revision>
+  CF_DRILL_NODE_EXECUTOR=<executable accepting NODE and COMMAND arguments>
+The executor is deliberately not SSH: authentication and sudo must be established separately.
+It must execute the supplied command verbatim on the named node and must not log credentials.
+EOF
+}
+
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+node_exec() { "${CF_DRILL_NODE_EXECUTOR}" "$1" "$2"; }
+table_for() { printf '%s' "${owner//-/_}"; }
+
+manual_cleanup() {
+  local i table; table="$(table_for)"
+  printf 'MANUAL CLEANUP REQUIRED (run through an authenticated, host-key-verified node session):\n' >&2
+  for i in "${!pod_nodes[@]}"; do
+    printf '  node=%q command=%q\n' "${pod_nodes[$i]}" \
+      "sudo nsenter -t ${pod_pids[$i]:-POD_SANDBOX_PID} -n nft delete table inet ${table}" >&2
+  done
+}
+
+cleanup() {
+  local status="${1:-$?}" node i command table
+  trap - EXIT INT TERM
+  table="$(table_for)"
+  for ((i=${#installed_nodes[@]}-1; i>=0; i--)); do
+    node="${installed_nodes[$i]}"
+    command="sudo nsenter -t ${pod_pids[$i]} -n nft delete table inet ${table}"
+    if ! node_exec "${node}" "${command}" >/dev/null; then cleanup_failed=1; fi
+  done
+  if ((cleanup_failed)); then manual_cleanup; status=1; fi
+  exit "${status}"
+}
+
+for arg in "$@"; do
+  case "${arg}" in
+    --execute) execute=1 ;;
+    --env=*) env_name="${arg#*=}" ;;
+    env=*) env_name="${arg#*=}" ;;
+    --confirm=*) confirmation="${arg#*=}" ;;
+    --evidence-dir=*) evidence_dir="${arg#*=}" ;;
+    -h|--help) usage; exit 0 ;;
+    *) die "unknown argument: ${arg}" ;;
+  esac
+done
+
+[[ "${env_name}" == staging ]] || die 'the WAN drill is staging-only'
+if ((!execute)); then
+  cat <<EOF
+PLAN ONLY -- no cluster or node command was run.
+Mechanism: create one uniquely named nftables inet/output table inside each of the two selected
+pod network namespaces. Its owner-commented edge-port rules affect new and established QUIC/TCP traffic
+while cloudflared remains alive. Before either rule, install a 240-second transient systemd cleanup
+watchdog on that node. Delete only that exact table during normal cleanup.
+Execution remains blocked until every read-only preflight and the typed confirmation passes.
+Owner format: cfwandrill-<UTC timestamp>-<operator PID>
+EOF
+  exit 0
+fi
+
+owner="cfwandrill-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+[[ "${confirmation}" == "${CONFIRMATION}" ]] || die "confirmation must exactly equal: ${CONFIRMATION}"
+[[ -n "${CF_DRILL_APPROVED_REVISION:-}" ]] || die 'CF_DRILL_APPROVED_REVISION is required'
+[[ -n "${CF_DRILL_NODE_EXECUTOR:-}" && -x "${CF_DRILL_NODE_EXECUTOR}" ]] || \
+  die 'CF_DRILL_NODE_EXECUTOR must name an executable safe node-command adapter'
+[[ "$(kubectl config current-context)" == "${EXPECTED_CONTEXT}" ]] || die "context must be ${EXPECTED_CONTEXT}"
+[[ -z "$(git status --porcelain)" ]] || die 'repository worktree must be clean'
+head_revision="$(git rev-parse HEAD)"
+[[ "${head_revision}" == "${CF_DRILL_APPROVED_REVISION}" ]] || die 'repository revision is not approved'
+
+releases="$(helm -n cloudflare list -o json)"
+[[ "$(jq '[.[]|select(.name=="cloudflare-tunnel" and .status=="deployed")]|length' <<<"${releases}")" == 1 ]] || \
+  die 'expected exactly one deployed cloudflare-tunnel release'
+[[ "$(jq -r '.[]|select(.name=="cloudflare-tunnel")|.chart' <<<"${releases}")" == "${EXPECTED_CHART}" ]] || die 'wrong Cloudflare chart'
+cf_history="$(helm -n cloudflare history cloudflare-tunnel -o json)"
+[[ "$(jq -r '[.[]|select(.status=="deployed")][0].revision' <<<"${cf_history}")" == "${EXPECTED_HELM_REVISION}" ]] || die 'Cloudflare Helm revision must be 2'
+obs_history="$(helm -n monitoring history kube-prometheus-stack -o json)"
+[[ "$(jq -r '[.[]|select(.status=="deployed")][0].revision' <<<"${obs_history}")" == 9 ]] || die 'observability Helm revision must be 9'
+
+deployment="$(kubectl -n cloudflare get deployment cloudflare-tunnel -o json)"
+jq -e --arg image "${EXPECTED_IMAGE}" '
+ .metadata.labels["app.kubernetes.io/managed-by"]=="Helm" and
+ .metadata.labels["app.kubernetes.io/name"]=="cloudflare-tunnel" and
+ .metadata.labels["app.kubernetes.io/instance"]=="cloudflare-tunnel" and
+ .spec.replicas==2 and .spec.template.spec.containers[0].image==$image
+' <<<"${deployment}" >/dev/null || die 'Deployment ownership, replicas, or immutable image is not approved'
+deployment_fingerprint="$(jq -S '{metadata:{uid:.metadata.uid,generation:.metadata.generation},spec:.spec,statusObserved:.status.observedGeneration}' <<<"${deployment}" | sha256sum | cut -d' ' -f1)"
+
+pods="$(kubectl -n cloudflare get pods -l "${SELECTOR}" -o json)"
+mapfile -t records < <(jq -r --arg image "${EXPECTED_IMAGE}" '
+ [.items[]|select(.metadata.deletionTimestamp==null and .status.phase=="Running" and
+   any(.status.conditions[]?;.type=="Ready" and .status=="True") and
+   .metadata.labels["app.kubernetes.io/name"]=="cloudflare-tunnel" and
+   .metadata.labels["app.kubernetes.io/instance"]=="cloudflare-tunnel" and
+   .spec.containers[0].image==$image)] | .[] |
+ [.metadata.name,.metadata.uid,.spec.nodeName,([.status.containerStatuses[].restartCount]|add)]|@tsv
+' <<<"${pods}")
+[[ "${#records[@]}" == 2 ]] || die 'exactly two Ready, exactly labelled connector pods are required'
+for record in "${records[@]}"; do
+  IFS=$'\t' read -r name uid node restarts <<<"${record}"
+  pod_names+=("${name}"); pod_uids+=("${uid}"); pod_nodes+=("${node}"); pod_restarts+=("${restarts}")
+done
+[[ "${pod_nodes[0]}" != "${pod_nodes[1]}" ]] || die 'connector pods must be on distinct nodes'
+
+prom_query() { local encoded; encoded="$(jq -nr --arg q "$1" '$q|@uri')"; kubectl get --raw "/api/v1/namespaces/monitoring/services/http:kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query=${encoded}"; }
+[[ "$(prom_query 'count(up{namespace="cloudflare",service="cloudflare-tunnel-metrics"} == 1)' | jq -r '.data.result[0].value[1]//"0"')" == 2 ]] || die 'Prometheus targets are unhealthy'
+[[ "$(prom_query 'count(cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel-metrics"} >= 4)' | jq -r '.data.result[0].value[1]//"0"')" == 2 ]] || die 'each connector must have at least four HA connections'
+[[ "$(prom_query 'count(ALERTS{alertname=~"CloudflareTunnel.*",alertstate="firing"})' | jq -r '.data.result[0].value[1]//"0"')" == 0 ]] || die 'a Cloudflare alert is active'
+
+mapfile -t endpoints < <(ruby -ryaml -e 'YAML.load_stream(File.read(ARGV[0])){|d| next unless d.is_a?(Hash); t=d.dig("spec","targets","staticConfig","static") || []; t.each{|x| puts x}}' clusters/staging/observability/probes/public-apps.yaml | sort -u)
+[[ "${#endpoints[@]}" == 16 ]] || die 'approved staging endpoint manifest must contain exactly 16 URLs'
+http_command="${CF_DRILL_HTTP_COMMAND:-curl}"
+for endpoint in "${endpoints[@]}"; do
+  [[ "$(${http_command} -fsS -o /dev/null -w '%{http_code}' --max-time 15 "${endpoint}")" == 200 ]] || die "unhealthy endpoint: ${endpoint}"
+done
+
+# Metadata only: never request Secret JSON/YAML or its data.
+secret_metadata="$(kubectl -n cloudflare get secret tunnel-token -o jsonpath='{.metadata.uid}{"\t"}{.metadata.resourceVersion}{"\t"}{.metadata.creationTimestamp}{"\n"}')"
+[[ -n "${secret_metadata}" ]] || die 'tunnel-token Secret metadata is unavailable'
+
+table="$(table_for)"
+for i in 0 1; do
+  resolve="sudo crictl pods --name '^${pod_names[$i]}$' -q"
+  sandbox="$(node_exec "${pod_nodes[$i]}" "${resolve}")"
+  [[ "${sandbox}" != *$'\n'* && "${sandbox}" =~ ^[a-f0-9]{12,64}$ ]] || die "cannot resolve one exact sandbox for ${pod_names[$i]}"
+  inspect="$(node_exec "${pod_nodes[$i]}" "sudo crictl inspectp ${sandbox}")"
+  [[ "$(jq -r '.status.labels["io.kubernetes.pod.uid"]//empty' <<<"${inspect}")" == "${pod_uids[$i]}" ]] || die 'sandbox UID does not match selected pod'
+  pid="$(jq -r '.info.pid//empty' <<<"${inspect}")"
+  [[ "${pid}" =~ ^[1-9][0-9]*$ ]] || die 'sandbox has no exact network namespace PID'
+  inode="$(node_exec "${pod_nodes[$i]}" "readlink /proc/${pid}/ns/net")"
+  [[ "${inode}" =~ ^net:\[[0-9]+\]$ ]] || die 'cannot prove exact pod network namespace identity'
+  pod_sandboxes+=("${sandbox}"); pod_pids+=("${pid}"); pod_netns+=("${inode}")
+  if node_exec "${pod_nodes[$i]}" "sudo nsenter -t ${pid} -n nft list table inet ${table}" >/dev/null 2>&1; then die 'owner-tagged rule already exists'; fi
+done
+
+evidence_dir="${evidence_dir:-${HOME}/operator-evidence/cloudflare-wan-dependency-loss-drill-${owner}}"
+umask 077; mkdir -p "${evidence_dir}"
+jq -n --arg owner "${owner}" --arg revision "${head_revision}" --arg secret "${secret_metadata}" --argjson pods "$(jq '[.items[]|{name:.metadata.name,uid:.metadata.uid,node:.spec.nodeName,image:.spec.containers[0].image,restarts:[.status.containerStatuses[].restartCount]}]' <<<"${pods}")" \
+  '{owner:$owner,revision:$revision,secretMetadata:$secret,pods:$pods}' >"${evidence_dir}/preflight.json"
+printf '%s\n' "${cf_history}" >"${evidence_dir}/cloudflare-helm-history.json"
+printf '%s\n' "${obs_history}" >"${evidence_dir}/observability-helm-history.json"
+
+trap 'cleanup $?' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# A transient host service survives this operator process. Install all watchdogs before disruption.
+for i in 0 1; do
+  watchdog="sudo systemd-run --unit ${owner}-cleanup --collect /bin/sh -c 'sleep 240; nsenter -t ${pod_pids[$i]} -n nft delete table inet ${table} 2>/dev/null || true'"
+  node_exec "${pod_nodes[$i]}" "${watchdog}" >/dev/null || die "cleanup watchdog failed on ${pod_nodes[$i]}"
+done
+for i in 0 1; do
+  install="sudo nsenter -t ${pod_pids[$i]} -n nft 'add table inet ${table}; add chain inet ${table} output { type filter hook output priority -10; policy accept; }; add rule inet ${table} output udp dport { 7844, 443 } counter drop comment \"${owner}\"; add rule inet ${table} output tcp dport { 7844, 443 } counter drop comment \"${owner}\"'"
+  node_exec "${pod_nodes[$i]}" "${install}" >/dev/null || die "rule setup failed on ${pod_nodes[$i]}"
+  installed_nodes+=("${pod_nodes[$i]}")
+done
+
+disruption_started="${SECONDS}"
+deadline=$((SECONDS+90)); interrupted=0
+while ((SECONDS < deadline)); do
+  current="$(kubectl -n cloudflare get pods -l "${SELECTOR}" -o json)"
+  same="$(jq --arg u0 "${pod_uids[0]}" --arg u1 "${pod_uids[1]}" --argjson r0 "${pod_restarts[0]}" --argjson r1 "${pod_restarts[1]}" '
+    [.items[]|select(.metadata.uid==$u0 or .metadata.uid==$u1)] as $p |
+    ($p|length)==2 and all($p[];([.status.containerStatuses[].restartCount]|add)==(if .metadata.uid==$u0 then $r0 else $r1 end)) and
+    all($p[]; any(.status.conditions[]?;.type=="Ready" and .status=="False"))' <<<"${current}")"
+  [[ "${same}" == true ]] || { sleep 5; continue; }
+  [[ "$(prom_query 'sum(cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel-metrics"})' | jq -r '.data.result[0].value[1]//"-1"')" == 0 ]] && { interrupted=1; break; }
+  sleep 5
+done
+((interrupted)) || die 'did not prove same-process NotReady and zero HA connections'
+remaining=$((DISRUPTION_SECONDS-(SECONDS-disruption_started)))
+if ((remaining > 0)); then sleep "${remaining}"; fi
+
+# Remove only the two exact drill-owned tables now; EXIT cleanup remains a second attempt.
+cleanup_failed=0
+for i in 0 1; do
+  node_exec "${pod_nodes[$i]}" "sudo nsenter -t ${pod_pids[$i]} -n nft delete table inet ${table}" >/dev/null || cleanup_failed=1
+done
+installed_nodes=()
+((cleanup_failed==0)) || { manual_cleanup; die 'automated exact cleanup could not be proven'; }
+
+deadline=$((SECONDS+RECOVERY_SECONDS)); recovered=0
+while ((SECONDS < deadline)); do
+  current="$(kubectl -n cloudflare get pods -l "${SELECTOR}" -o json)"
+  if jq -e --arg u0 "${pod_uids[0]}" --arg u1 "${pod_uids[1]}" --argjson r0 "${pod_restarts[0]}" --argjson r1 "${pod_restarts[1]}" '
+    [.items[]|select(.metadata.uid==$u0 or .metadata.uid==$u1)] as $p | ($p|length)==2 and
+    all($p[];([.status.containerStatuses[].restartCount]|add)==(if .metadata.uid==$u0 then $r0 else $r1 end)) and
+    all($p[];any(.status.conditions[]?;.type=="Ready" and .status=="True"))' <<<"${current}" >/dev/null &&
+    [[ "$(prom_query 'count(cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel-metrics"} >= 4)' | jq -r '.data.result[0].value[1]//"0"')" == 2 ]]; then recovered=1; break; fi
+  sleep 5
+done
+((recovered)) || die 'same-pod recovery with unchanged restart counts was not proven within five minutes'
+for endpoint in "${endpoints[@]}"; do [[ "$(${http_command} -fsS -o /dev/null -w '%{http_code}' --max-time 15 "${endpoint}")" == 200 ]] || die "endpoint did not recover: ${endpoint}"; done
+[[ "$(kubectl -n cloudflare get secret tunnel-token -o jsonpath='{.metadata.uid}{"\t"}{.metadata.resourceVersion}{"\t"}{.metadata.creationTimestamp}{"\n"}')" == "${secret_metadata}" ]] || die 'Secret metadata changed'
+[[ "$(helm -n cloudflare history cloudflare-tunnel -o json)" == "${cf_history}" ]] || die 'Cloudflare Helm history changed'
+[[ "$(helm -n monitoring history kube-prometheus-stack -o json)" == "${obs_history}" ]] || die 'observability Helm history changed'
+final_deployment="$(kubectl -n cloudflare get deployment cloudflare-tunnel -o json)"
+[[ "$(jq -S '{metadata:{uid:.metadata.uid,generation:.metadata.generation},spec:.spec,statusObserved:.status.observedGeneration}' <<<"${final_deployment}" | sha256sum | cut -d' ' -f1)" == "${deployment_fingerprint}" ]] || die 'Deployment state changed'
+just cf-tunnel-verify env=staging
+printf 'PASS: same cloudflared processes recovered; sanitized evidence: %s\n' "${evidence_dir}"
