@@ -122,10 +122,39 @@ def test_production_snapshot_and_unready_pod_contracts(prod_dashboard):
         "Observability component build identity",
     }
     assert all(
-        target.get("instant") is True and target.get("range") is False
+        len(panels[title]["targets"]) == 1
+        and panels[title]["targets"][0].get("format") == "table"
+        and panels[title]["targets"][0].get("instant") is True
+        and panels[title]["targets"][0].get("range") is False
         for title in snapshot_tables
-        for target in panels[title]["targets"]
     )
+    assert {
+        title: list(panels[title]["transformations"][0]["options"]["indexByName"])
+        for title in snapshot_tables
+    } == {
+        "Scrape availability by job": ["job", "Value"],
+        "Node readiness": ["node", "Value"],
+        "Deployment replica deficit": ["namespace", "deployment", "Value"],
+        "Observability component build identity": [
+            "component",
+            "pod",
+            "version",
+            "revision",
+        ],
+    }
+    build = panels["Observability component build identity"]["targets"][0]["expr"]
+    assert build.startswith("max by (component, pod, version, revision)")
+    assert {
+        (metric, component)
+        for metric, component in re.findall(
+            r'label_replace\((\w+), "component", "([\w-]+)", "", ""\)', build
+        )
+    } == {
+        ("prometheus_build_info", "prometheus"),
+        ("alertmanager_build_info", "alertmanager"),
+        ("grafana_build_info", "grafana"),
+        ("node_exporter_build_info", "node-exporter"),
+    }
     unready = panels["Unready pods by namespace"]["targets"][0]["expr"]
     assert 'kube_pod_status_phase{phase=~"Pending|Running|Unknown"} == 1' in unready
     assert "group_left" in unready
@@ -155,17 +184,28 @@ def test_production_snapshot_and_unready_pod_contracts(prod_dashboard):
             "PromQL contract",
         ),
         (lambda d: d["panels"][1]["targets"][0].update(instant=False, range=True), "instant-only"),
+        (lambda d: d["panels"][1]["targets"][0].update(format="time_series"), "table-formatted"),
+        (
+            lambda d: d["panels"][3]["targets"].append(d["panels"][3]["targets"][0].copy()),
+            "exactly one PromQL target",
+        ),
+        (
+            lambda d: d["panels"][5]["transformations"][0]["options"]["indexByName"].pop(
+                "deployment"
+            ),
+            "required label/value columns",
+        ),
         (
             lambda d: production_panel(d, "Observability component build identity").update(
                 type="stat"
             ),
-            "four table queries",
+            "table-formatted instant-only",
         ),
         (
             lambda d: production_panel(d, "Observability component build identity")["targets"][
                 0
-            ].update(legendFormat="Prometheus"),
-            "pod/version/revision",
+            ].update(expr="max by (instance, pod, version, revision) (prometheus_build_info)"),
+            "bounded identity labels",
         ),
         (lambda d: d.update(refresh="1m"), "defaults or variables"),
         (lambda d: add_row_expression(d, "or vector(0)"), "preserve missing data"),

@@ -224,23 +224,71 @@ def validate_production_dashboard(dashboard: dict) -> None:
         "Deployment replica deficit",
         "Observability component build identity",
     )
-    if any(
-        target.get("instant") is not True or target.get("range") is not False
-        for title in snapshot_tables
-        for target in panel_named(dashboard, title).get("targets", [])
-    ):
-        raise SystemExit("ERROR: production snapshot tables must use instant-only queries.")
-    build = panel_named(dashboard, "Observability component build identity")
-    expected_builds = {
-        "prometheus_build_info": "Prometheus:", "alertmanager_build_info": "Alertmanager:",
-        "grafana_build_info": "Grafana:", "node_exporter_build_info": "node-exporter:",
+    table_columns = {
+        "Scrape availability by job": (["job", "Value"], {"Time", "__name__"}),
+        "Node readiness": (["node", "Value"], {"Time", "__name__"}),
+        "Deployment replica deficit": (
+            ["namespace", "deployment", "Value"],
+            {"Time", "__name__"},
+        ),
+        "Observability component build identity": (
+            ["component", "pod", "version", "revision"],
+            {"Time", "__name__", "Value"},
+        ),
     }
-    if build.get("type") != "table" or len(build.get("targets", [])) != 4:
-        raise SystemExit("ERROR: production build identity must have four table queries.")
-    for metric, prefix in expected_builds.items():
-        matches = [target for target in build["targets"] if metric in target.get("expr", "")]
-        if len(matches) != 1 or matches[0]["expr"] != f"max by (pod, version, revision) ({metric})" or not matches[0].get("legendFormat", "").startswith(prefix):
-            raise SystemExit("ERROR: production build identity must retain pod/version/revision and component legends.")
+    for title in snapshot_tables:
+        panel = panel_named(dashboard, title)
+        targets = panel.get("targets", [])
+        if (
+            panel.get("type") != "table"
+            or len(targets) != 1
+            or targets[0].get("format") != "table"
+            or targets[0].get("instant") is not True
+            or targets[0].get("range") is not False
+        ):
+            raise SystemExit(
+                "ERROR: production tables must use one table-formatted instant-only query."
+            )
+        transformations = panel.get("transformations", [])
+        if len(transformations) != 1 or transformations[0].get("id") != "organize":
+            raise SystemExit(
+                "ERROR: production tables require deterministic single-frame consolidation."
+            )
+        options = transformations[0].get("options", {})
+        columns, excluded = table_columns[title]
+        if (
+            list(options.get("indexByName", {})) != columns
+            or {field for field, hidden in options.get("excludeByName", {}).items() if hidden}
+            != excluded
+            or set(options.get("renameByName", {})) != set(columns)
+        ):
+            raise SystemExit(
+                f"ERROR: production table {title} is missing required label/value columns."
+            )
+    build = panel_named(dashboard, "Observability component build identity")
+    build_expression = re.sub(r"\s+", " ", build["targets"][0]["expr"])
+    expected_builds = {
+        "prometheus_build_info": "prometheus",
+        "alertmanager_build_info": "alertmanager",
+        "grafana_build_info": "grafana",
+        "node_exporter_build_info": "node-exporter",
+    }
+    if not build_expression.startswith("max by (component, pod, version, revision) ("):
+        raise SystemExit("ERROR: production build identity must retain bounded identity labels.")
+    for metric, component in expected_builds.items():
+        expected = f'label_replace({metric}, "component", "{component}", "", "")'
+        if build_expression.count(expected) != 1:
+            raise SystemExit(
+                "ERROR: production build identity must union every fixed bounded component."
+            )
+    build_labels = re.search(r"max by \(([^)]*)\)", build_expression)
+    if not build_labels or {label.strip() for label in build_labels.group(1).split(",")} != {
+        "component",
+        "pod",
+        "version",
+        "revision",
+    }:
+        raise SystemExit("ERROR: production build identity introduced raw or unbounded labels.")
     serialized = json.dumps(dashboard)
     expressions = "\n".join(target.get("expr", "") for panel in panels(dashboard) for target in panel.get("targets", []))
     if dashboard.get("refresh") != "30s" or dashboard.get("time") != {"from": "now-6h", "to": "now"} or dashboard.get("templating", {}).get("list") != []:
