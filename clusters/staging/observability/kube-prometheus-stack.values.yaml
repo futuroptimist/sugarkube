@@ -38,6 +38,12 @@ alertmanager:
             - environment="staging"
             - cluster="sugarkube-int"
             - severity="critical"
+        - receiver: pagerduty-dspace
+          matchers:
+            - alertname="CloudflareTunnelNoHealthyConnections"
+            - environment="staging"
+            - cluster="sugarkube-int"
+            - severity="critical"
         - receiver: pagerduty-synthetic-test
           matchers:
             - alertname="SugarkubePagerDutyTest"

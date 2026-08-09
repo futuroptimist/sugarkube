@@ -1,0 +1,22 @@
+# Canonical values for the manually managed staging release.
+# Selected only for staging by `just cf-tunnel-install`.
+# This is not a Flux resource.
+fullnameOverride: cloudflare-tunnel
+replicaCount: 2
+image:
+  repository: cloudflare/cloudflared
+  tag: 2026.7.3
+  pullPolicy: IfNotPresent
+cloudflare:
+  tunnelName: sugarkube-staging
+  tunnelId: ""
+  secretName: tunnel-token
+  ingress: []
+affinity:
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - topologyKey: kubernetes.io/hostname
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: cloudflare-tunnel
+            app.kubernetes.io/instance: cloudflare-tunnel
