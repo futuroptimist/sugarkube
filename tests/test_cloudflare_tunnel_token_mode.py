@@ -269,12 +269,10 @@ def _run_actual_cf_tunnel_install(
                 [ "${SECRET_EXISTS}" = yes ]
                 exit
             fi
-            case " $* " in
-                *" secret "*" get "*|*" get "*" secret "*|*" secret "*" describe "*|*" describe "*" secret "*)
-                    printf '%s\n' 'FORBIDDEN_SECRET_CONTENT_SENTINEL' >&2
-                    exit 97
-                    ;;
-            esac
+            if [[ " $* " == *" secret "* ]]; then
+                printf '%s\n' 'FORBIDDEN_SECRET_CONTENT_SENTINEL' >&2
+                exit 97
+            fi
             exit 0
         fi
         if [ "$*" = "-n cloudflare list --filter ^cloudflare-tunnel$ --output json" ]; then
@@ -492,15 +490,12 @@ def test_existing_secret_is_preserved_without_token_input(tmp_path: Path) -> Non
     assert result.returncode == 0, result.stderr
     combined = result.stdout + result.stderr + calls
     permitted_secret_read = "kubectl:-n cloudflare get secret tunnel-token -o name"
-    assert calls.splitlines().count(permitted_secret_read) == 1
-    assert not [
+    secret_commands = [
         call
         for call in calls.splitlines()
-        if call.startswith("kubectl:")
-        and " secret " in f" {call} "
-        and (" get " in f" {call} " or " describe " in f" {call} ")
-        and call != permitted_secret_read
+        if call.startswith("kubectl:") and " secret " in f" {call} "
     ]
+    assert secret_commands == [permitted_secret_read]
     assert "FORBIDDEN_SECRET_CONTENT_SENTINEL" not in combined
     assert "create secret" not in combined
     assert "apply -f -" not in combined
@@ -515,12 +510,14 @@ def test_existing_secret_is_preserved_without_token_input(tmp_path: Path) -> Non
     assert guidance_example not in result.stdout + result.stderr
 
 
-def test_guidance_is_not_eagerly_expanded_under_nounset(cf_recipe_body: str) -> None:
+def test_guidance_is_not_eagerly_expanded_under_nounset(
+    cf_recipe_body: str, origin_cert_guidance_text: str
+) -> None:
     assert "cat >&2 <<'ORIGIN_CERT_GUIDANCE'" in cf_recipe_body
     assert 'origin_cert_guidance="{{ origin_cert_guidance }}"' not in cf_recipe_body
     assert 'origin_cert_guidance="' not in cf_recipe_body
     guidance_example = "token" + '="$CF_TUNNEL_TOKEN"'
-    assert guidance_example in JUSTFILE.read_text(encoding="utf-8")
+    assert guidance_example in origin_cert_guidance_text
 
 
 def test_initial_install_requires_and_creates_secret_from_out_of_band_token() -> None:
@@ -529,6 +526,9 @@ def test_initial_install_requires_and_creates_secret_from_out_of_band_token() ->
     assert "initial installation" in missing.stderr
     assert "HELM:" not in missing.stdout
     assert "KUBECTL:-n cloudflare patch deployment" not in missing.stdout
+    assert "KUBECTL:-n cloudflare rollout" not in missing.stdout
+    assert "KUBECTL:-n cloudflare create secret" not in missing.stdout
+    assert "KUBECTL:apply -f -" not in missing.stdout
 
     created = _run_cf_tunnel_install_recipe("staging", secret_exists=False)
     assert created.returncode == 0, created.stderr
