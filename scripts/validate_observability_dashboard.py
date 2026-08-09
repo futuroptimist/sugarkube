@@ -197,7 +197,7 @@ def validate_production_dashboard(dashboard: dict) -> None:
         "Node readiness": 'max by (node) (kube_node_status_condition{condition="Ready",status="true"})',
         "Workload health": None,
         "Deployment replica deficit": "clamp_min(max by (namespace, deployment) (kube_deployment_spec_replicas) - max by (namespace, deployment) (kube_deployment_status_replicas_available), 0)",
-        "Unready pods by namespace": 'sum by (namespace) (max by (namespace, pod) (kube_pod_status_ready{condition="false"}))',
+        "Unready pods by namespace": 'sum by (namespace) (max by (namespace, pod) (kube_pod_status_ready{condition="false"}) * on (namespace, pod) group_left max by (namespace, pod) (kube_pod_status_phase{phase=~"Pending|Running|Unknown"} == 1))',
         "Problem pods by namespace": 'sum by (namespace) (max by (namespace, pod, phase) (kube_pod_status_phase{phase=~"Pending|Failed|Unknown"}))',
         "Container restart rate": "sum by (namespace, pod) (max by (namespace, pod, container) (rate(kube_pod_container_status_restarts_total[$__rate_interval])))",
         "Node and Prometheus capacity": None,
@@ -218,6 +218,18 @@ def validate_production_dashboard(dashboard: dict) -> None:
                 raise SystemExit("ERROR: production dashboard row contract is invalid.")
         elif panel_expression(dashboard, title) != expression:
             raise SystemExit(f"ERROR: production PromQL contract changed for {title}.")
+    snapshot_tables = (
+        "Scrape availability by job",
+        "Node readiness",
+        "Deployment replica deficit",
+        "Observability component build identity",
+    )
+    if any(
+        target.get("instant") is not True or target.get("range") is not False
+        for title in snapshot_tables
+        for target in panel_named(dashboard, title).get("targets", [])
+    ):
+        raise SystemExit("ERROR: production snapshot tables must use instant-only queries.")
     build = panel_named(dashboard, "Observability component build identity")
     expected_builds = {
         "prometheus_build_info": "Prometheus:", "alertmanager_build_info": "Alertmanager:",

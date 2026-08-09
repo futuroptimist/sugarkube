@@ -91,6 +91,24 @@ def test_production_dashboard_live_backed_contract(prod_dashboard):
     validator.validate_dashboard(PROD_DASHBOARD)
 
 
+def test_production_snapshot_and_unready_pod_contracts(prod_dashboard):
+    panels = {panel["title"]: panel for panel in all_panels(prod_dashboard)}
+    snapshot_tables = {
+        "Scrape availability by job",
+        "Node readiness",
+        "Deployment replica deficit",
+        "Observability component build identity",
+    }
+    assert all(
+        target.get("instant") is True and target.get("range") is False
+        for title in snapshot_tables
+        for target in panels[title]["targets"]
+    )
+    unready = panels["Unready pods by namespace"]["targets"][0]["expr"]
+    assert 'kube_pod_status_phase{phase=~"Pending|Running|Unknown"} == 1' in unready
+    assert "group_left" in unready
+
+
 @pytest.mark.parametrize(
     ("mutation", "message"),
     [
@@ -99,6 +117,7 @@ def test_production_dashboard_live_backed_contract(prod_dashboard):
         (lambda d: d["panels"][8]["targets"][0].update(expr="rate(kube_pod_container_status_restarts_total[5m])"), "PromQL contract"),
         (lambda d: d["panels"][1]["targets"][0].update(expr='min by (job) (up{cluster="sugarkube-prod"})'), "PromQL contract"),
         (lambda d: d["panels"][14]["targets"][0].update(expr="sum(prometheus_tsdb_head_series)"), "PromQL contract"),
+        (lambda d: d["panels"][1]["targets"][0].update(instant=False, range=True), "instant-only"),
     ],
 )
 def test_production_validator_fails_closed(tmp_path, prod_dashboard, mutation, message):
