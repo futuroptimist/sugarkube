@@ -11,6 +11,7 @@ STAGING = ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-ob
 PROD = ROOT / "clusters/prod/observability/dashboards/sugarkube-prod-observability.json"
 GENERATOR = ROOT / "scripts/generate_observability_dashboards.py"
 sys.path.insert(0, str(ROOT))
+from scripts import generate_observability_dashboards as generator  # noqa: E402
 from scripts import validate_observability_dashboard as validator  # noqa: E402
 
 
@@ -39,6 +40,27 @@ def test_generator_check_and_outputs_are_deterministic(dashboards):
     assert len(staging["panels"]) == 60
     assert sum(item["type"] == "row" for item in staging["panels"]) == 11
     assert sum(item["type"] != "row" for item in staging["panels"]) == 49
+
+
+def test_generator_write_check_and_stale_exit_paths(tmp_path, monkeypatch, capsys):
+    profiles = {
+        name: {**profile, "path": tmp_path / f"{name}.json"}
+        for name, profile in generator.PROFILES.items()
+    }
+    monkeypatch.setattr(generator, "ROOT", tmp_path)
+    monkeypatch.setattr(generator, "PROFILES", profiles)
+
+    monkeypatch.setattr(sys, "argv", [str(GENERATOR), "--check"])
+    assert generator.main() == 1
+    assert "staging, prod" in capsys.readouterr().err
+
+    monkeypatch.setattr(sys, "argv", [str(GENERATOR), "--write"])
+    assert generator.main() == 0
+    assert capsys.readouterr().out.count("wrote") == 2
+
+    monkeypatch.setattr(sys, "argv", [str(GENERATOR), "--check"])
+    assert generator.main() == 0
+    assert "are current" in capsys.readouterr().out
 
 
 def test_profiles_differ_only_by_allowlisted_identity(dashboards):
@@ -185,9 +207,7 @@ def test_query_scoping_and_safe_labels(dashboards):
         ("/chat synthetic result and freshness", 1),
     ],
 )
-def test_capability_outer_presence_gate_is_required(
-    tmp_path, dashboards, title, target_index
-):
+def test_capability_outer_presence_gate_is_required(tmp_path, dashboards, title, target_index):
     staging, _ = dashboards
     changed = copy.deepcopy(staging)
     target = panel(changed, title)["targets"][target_index]
@@ -203,6 +223,121 @@ def test_raw_ip_legend_is_rejected(tmp_path, dashboards):
     panel(changed, "Scrape availability by job")["targets"][0]["legendFormat"] = "{{ip}}"
     with pytest.raises(SystemExit, match="forbidden raw identity label"):
         validator.validate_dashboard(write_candidate(tmp_path, changed))
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "object-count",
+        "ids",
+        "grid-type",
+        "grid-bounds",
+        "grid-overlap",
+        "table-count",
+        "table-target",
+        "table-transform-count",
+        "table-columns",
+        "table-exclusions",
+        "variable-shape",
+        "constant-variable",
+        "query-variable",
+        "build-info",
+        "external-cluster",
+        "token-scope",
+        "token-zero",
+        "event-capability",
+        "image-zero",
+        "image-prefix",
+        "image-metadata",
+        "chat-capability",
+        "blackbox-environment",
+    ],
+)
+def test_semantic_contract_rejects_invalid_dashboard_mutations(dashboards, mutation):
+    staging, _ = dashboards
+    changed = copy.deepcopy(staging)
+    scrape_table = panel(changed, "Scrape availability by job")
+    if mutation == "object-count":
+        changed["panels"].pop()
+    elif mutation == "ids":
+        changed["panels"][0]["id"] = 99
+    elif mutation == "grid-type":
+        changed["panels"][1]["gridPos"]["x"] = "0"
+    elif mutation == "grid-bounds":
+        changed["panels"][1]["gridPos"]["w"] = 25
+    elif mutation == "grid-overlap":
+        changed["panels"][2]["gridPos"] = changed["panels"][1]["gridPos"]
+    elif mutation == "table-count":
+        scrape_table["type"] = "stat"
+    elif mutation == "table-target":
+        scrape_table["targets"][0]["range"] = True
+    elif mutation == "table-transform-count":
+        scrape_table["transformations"] = []
+    elif mutation == "table-columns":
+        scrape_table["transformations"][0]["options"]["indexByName"] = {}
+    elif mutation == "table-exclusions":
+        scrape_table["transformations"][0]["options"]["excludeByName"].pop("Time")
+    elif mutation == "variable-shape":
+        changed["templating"]["list"][3]["name"] = "path"
+    elif mutation == "constant-variable":
+        changed["templating"]["list"][0]["hide"] = 0
+    elif mutation == "query-variable":
+        changed["templating"]["list"][2]["includeAll"] = False
+    elif mutation == "build-info":
+        changed["panels"][1]["targets"][0]["expr"] = "kube_state_metrics_build_info"
+    elif mutation == "external-cluster":
+        changed["panels"][1]["targets"][0]["expr"] = 'up{cluster="remote"}'
+    elif mutation == "token-scope":
+        panel(changed, next(iter(validator.TOKENPLACE_DATA_TITLES)))["targets"][0]["expr"] = "up"
+    elif mutation == "token-zero":
+        panel(changed, next(iter(validator.TOKENPLACE_DATA_TITLES)))["targets"][0][
+            "expr"
+        ] += " or vector(0)"
+    elif mutation == "event-capability":
+        panel(changed, "dChat request activity")["targets"][0][
+            "expr"
+        ] = "dspace_dchat_requests_total"
+    elif mutation == "image-zero":
+        panel(changed, "Image-pin agreement")["targets"][0]["expr"] = panel(
+            changed, "Image-pin agreement"
+        )["targets"][0]["expr"].replace("0 * count(", "count(", 1)
+    elif mutation == "image-prefix":
+        panel(changed, "Image-pin agreement")["targets"][0]["expr"] = panel(
+            changed, "Image-pin agreement"
+        )["targets"][0]["expr"].replace('"^(docker-pullable://)?(.*)$"', '"(.*)"')
+    elif mutation == "image-metadata":
+        panel(changed, "Image-pin agreement")["targets"][0]["expr"] = panel(
+            changed, "Image-pin agreement"
+        )["targets"][0]["expr"].replace('"image_id", "unknown"', '"image_id", "missing"')
+    elif mutation == "chat-capability":
+        panel(changed, "/chat synthetic result and freshness")["targets"][0]["expr"] = panel(
+            changed, "/chat synthetic result and freshness"
+        )["targets"][0]["expr"].replace("0 * count(", "count(", 1)
+    else:
+        blackbox = next(
+            target
+            for item in changed["panels"]
+            for target in item.get("targets", [])
+            if "blackbox-" in target.get("expr", "")
+        )
+        blackbox["expr"] = blackbox["expr"].replace("-$environment-.*", "-prod-.*")
+    with pytest.raises(SystemExit):
+        validator._validate_semantics(changed)
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "up",
+        "(up)",
+        f"up {validator.CAPABILITY_PRESENCE_GATE}",
+        f"(up) + 1 {validator.CAPABILITY_PRESENCE_GATE}",
+        f"((up) {validator.CAPABILITY_PRESENCE_GATE}",
+        f'((label_replace(up, "x", "\\"", "y", ".*"))) extra {validator.CAPABILITY_PRESENCE_GATE}',
+    ],
+)
+def test_outer_capability_gate_parser_rejects_malformed_expressions(expression):
+    assert not validator._has_outer_capability_presence_gate(expression)
 
 
 @pytest.mark.parametrize(
@@ -264,3 +399,54 @@ def test_source_rendered_configmap_equality(tmp_path, source):
     rendered.write_text(rendered_manifest(drifted))
     with pytest.raises(SystemExit, match="differs"):
         validator.validate_render(rendered, dashboard_json)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "dashboard-count",
+        "configmap-identity",
+        "provider-count",
+        "provider-path",
+        "mount",
+        "block-marker",
+        "payload",
+    ],
+)
+def test_render_validation_fails_closed(tmp_path, dashboards, mutation):
+    staging, _ = dashboards
+    dashboard_json = json.dumps(staging)
+    manifest = rendered_manifest(staging)
+    if mutation == "dashboard-count":
+        manifest = manifest.replace(f'"uid": "{staging["uid"]}"', '"uid": "wrong"')
+    elif mutation == "configmap-identity":
+        manifest = manifest.replace("dashboard-provider: sugarkube", "dashboard-provider: other")
+    elif mutation == "provider-count":
+        manifest = manifest.replace("name: sugarkube", "name: other", 1)
+    elif mutation == "provider-path":
+        manifest = manifest.replace(
+            "/var/lib/grafana/dashboards/sugarkube\n---", "/tmp/dashboards\n---"
+        )
+    elif mutation == "mount":
+        manifest = manifest.replace("subPath:", "otherPath:")
+    elif mutation == "block-marker":
+        manifest = manifest.replace("    |-\n", "    >-\n", 1)
+    else:
+        manifest = manifest.replace("      {\n", "      not-json\n", 1)
+    rendered = tmp_path / "rendered.yaml"
+    rendered.write_text(manifest)
+    with pytest.raises(SystemExit):
+        validator.validate_render(rendered, dashboard_json)
+
+
+def test_dashboard_loading_and_profile_identity_fail_closed(tmp_path):
+    malformed = tmp_path / "malformed.json"
+    malformed.write_text("[")
+    with pytest.raises(SystemExit, match="missing or malformed"):
+        validator.load_dashboard(malformed)
+    non_object = tmp_path / "array.json"
+    non_object.write_text("[]")
+    with pytest.raises(SystemExit, match="root must be an object"):
+        validator.load_dashboard(non_object)
+    with pytest.raises(SystemExit, match="supported profile"):
+        validator.configure_profile({"uid": "unknown", "title": "Unknown"})
