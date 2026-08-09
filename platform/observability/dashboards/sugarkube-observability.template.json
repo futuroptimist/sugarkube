@@ -1,11 +1,11 @@
 {
   "id": null,
-  "uid": "sugarkube-staging-observability",
-  "title": "Sugarkube Staging Observability",
+  "uid": "${UID}",
+  "title": "${TITLE}",
   "tags": [
     "sugarkube",
     "observability",
-    "staging"
+    "${ENVIRONMENT}"
   ],
   "timezone": "browser",
   "schemaVersion": 41,
@@ -23,10 +23,10 @@
         "label": "Environment",
         "type": "constant",
         "hide": 2,
-        "query": "staging",
+        "query": "${ENVIRONMENT}",
         "current": {
-          "text": "staging",
-          "value": "staging"
+          "text": "${ENVIRONMENT}",
+          "value": "${ENVIRONMENT}"
         },
         "includeAll": false,
         "multi": false
@@ -36,10 +36,10 @@
         "label": "Cluster",
         "type": "constant",
         "hide": 2,
-        "query": "sugarkube-int",
+        "query": "${CLUSTER}",
         "current": {
-          "text": "sugarkube-int",
-          "value": "sugarkube-int"
+          "text": "${CLUSTER}",
+          "value": "${CLUSTER}"
         },
         "includeAll": false,
         "multi": false

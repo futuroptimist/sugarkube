@@ -1,60 +1,38 @@
 #!/usr/bin/env python3
-"""Fail-closed validation for Sugarkube Grafana dashboards and Helm renders."""
+"""Fail-closed validation for generated Sugarkube Grafana dashboards and Helm renders."""
 
 import argparse
 import json
 import re
+import sys
 from pathlib import Path
 
-TITLE = "Sugarkube Staging Observability"
-UID = "sugarkube-staging-observability"
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from scripts.generate_observability_dashboards import PROFILES, render  # noqa: E402
+
 DATASOURCE_UID = "prometheus"
 DASHBOARD_PATH = "/var/lib/grafana/dashboards/sugarkube"
-DASHBOARD_FILE = f"{UID}.json"
-DASHBOARD_MOUNT = f"{DASHBOARD_PATH}/{DASHBOARD_FILE}"
-PROD_TITLE = "Sugarkube Production Observability"
-PROD_UID = "sugarkube-prod-observability"
-REQUIRED_METRICS = {
-    "up",
-    "dspace_instrumentation_up",
-    "probe_success",
-    "dspace_http_requests_total",
-    "dspace_http_request_duration_seconds_bucket",
-    "process_resident_memory_bytes",
-    "dspace_build_info",
-    "dspace_release_approved_info",
-    "kube_pod_container_info",
-    "dspace_chat_synthetic_success",
-    "dspace_chat_synthetic_timestamp_seconds",
-    "dspace_dchat_requests_total",
-    "dspace_dependency_requests_total",
-    "probe_duration_seconds",
-    "probe_http_status_code",
-    "probe_ssl_earliest_cert_expiry",
-    "tokenplace_compute_nodes_registered",
-    "tokenplace_compute_nodes_healthy",
-    "tokenplace_compute_node_lease_age_seconds",
-    "tokenplace_compute_node_evictions_total",
-    "tokenplace_relay_queue_depth",
-    "tokenplace_relay_oldest_queued_request_age_seconds",
-    "tokenplace_relay_in_flight_requests",
-    "tokenplace_relay_oldest_in_flight_age_seconds",
-    "tokenplace_relay_request_outcomes_total",
-    "tokenplace_http_requests_total",
-    "tokenplace_http_request_duration_seconds_bucket",
-    "tokenplace_instrumentation_up",
-    "tokenplace_build_info",
+TITLE = ""
+UID = ""
+DASHBOARD_FILE = ""
+DASHBOARD_MOUNT = ""
+PROFILE_DIFFERENCES = {"uid", "title", "tags", "templating"}
+FORBIDDEN_LABELS = {
+    "instance",
+    "ip",
+    "address",
+    "endpoint",
+    "url",
+    "device",
+    "system_uuid",
+    "provider_id",
+    "pod_cidr",
+    "uuid",
 }
-EVENT_METRICS = {"dspace_dchat_requests_total", "dspace_dependency_requests_total"}
-OPERATIONAL_ROUTES = '"/(healthz|livez|metrics)"'
-BLACKBOX_JOB_MATCHER = (
-    'job=~"probe/monitoring/blackbox-(dspace|tokenplace|danielsmith|jobbot3000)-staging-.*"'
-)
-TOKENPLACE_ROWS = {
-    "token.place relay and compute capacity",
-    "token.place HTTP and release",
-}
-TOKENPLACE_PANELS = {
+TOKENPLACE_DATA_TITLES = {
     "token.place scrape availability",
     "token.place instrumentation health",
     "token.place compute-node counts",
@@ -70,78 +48,9 @@ TOKENPLACE_PANELS = {
     "token.place HTTP latency percentiles",
     "token.place build identity",
 }
-PHASE_TWO_METRICS = {
-    "tokenplace_chat_availability",
-    "tokenplace_compute_nodes_schedulable",
-    "tokenplace_availability_reason",
-    "tokenplace_shared_state_health",
-    "tokenplace_relay_chat_available",
-    "tokenplace_relay_schedulable_compute_nodes",
-    "tokenplace_relay_chat_availability_state",
-    "tokenplace_relay_state_store_up",
-}
-TOKENPLACE_LABELS = {
-    "app",
-    "environment",
-    "release",
-    "cluster",
-    "namespace",
-    "pod",
-    "reason",
-    "provider_mode",
-    "outcome",
-    "route",
-    "status_class",
-    "le",
-    "version",
-    "revision",
-}
-TOKENPLACE_PROMQL_FUNCTIONS = {
-    "clamp_min",
-    "histogram_quantile",
-    "max",
-    "min",
-    "rate",
-    "sum",
-}
-TOKENPLACE_PROMQL_MODIFIERS = {
-    "and",
-    "bool",
-    "group_left",
-    "group_right",
-    "ignoring",
-    "offset",
-    "on",
-    "or",
-    "unless",
-}
-TOKENPLACE_CANONICAL_MATCHERS = {
-    "app": ("=", '"tokenplace"'),
-    "environment": ("=~", '"$environment"'),
-    "release": ("=", '"tokenplace"'),
-    "cluster": ("=", '"sugarkube-int"'),
-    "namespace": ("=", '"tokenplace"'),
-}
-TOKENPLACE_RATE_METRICS = {
-    "tokenplace_compute_node_evictions_total",
-    "tokenplace_relay_request_outcomes_total",
-    "tokenplace_http_requests_total",
-    "tokenplace_http_request_duration_seconds_bucket",
-}
-
-
-def parse_tokenplace_matchers(matchers: str) -> dict:
-    """Parse the deliberately small matcher grammar used by token.place panels."""
-    parsed = {}
-    for entry in matchers.split(","):
-        match = re.fullmatch(
-            r'\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*(=~|!~|!=|=)\s*("(?:\\.|[^"\\])*")\s*',
-            entry,
-        )
-        if not match or match.group(1) in parsed:
-            raise ValueError("malformed or duplicate matcher")
-        parsed[match.group(1)] = match.groups()[1:]
-    return parsed
+EVENT_METRICS = {"dspace_dchat_requests_total", "dspace_dependency_requests_total"}
+CAPABILITY = 'dspace_release_approved_info{environment=~"$environment"}'
+CAPABILITY_PRESENCE_GATE = f"and on() (count({CAPABILITY}) > 0)"
 
 
 def load_dashboard(path: Path) -> dict:
@@ -169,755 +78,245 @@ def panel_named(dashboard: dict, title: str) -> dict:
 
 
 def panel_expression(dashboard: dict, title: str) -> str:
-    panel = panel_named(dashboard, title)
-    targets = panel.get("targets", [])
+    targets = panel_named(dashboard, title).get("targets", [])
     if len(targets) != 1 or not isinstance(targets[0].get("expr"), str):
         raise SystemExit(f"ERROR: {title} must contain exactly one PromQL target.")
     return re.sub(r"\s+", " ", targets[0]["expr"])
 
 
+def _has_outer_capability_presence_gate(expression: str) -> bool:
+    """Return whether one parenthesized result is followed by the capability gate."""
+    normalized = re.sub(r"\s+", " ", expression).strip()
+    suffix = " " + CAPABILITY_PRESENCE_GATE
+    if not normalized.endswith(suffix):
+        return False
+    result = normalized[: -len(suffix)]
+    if not result.startswith("(") or not result.endswith(")"):
+        return False
+    depth = 0
+    quoted = False
+    escaped = False
+    for index, character in enumerate(result):
+        if quoted:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                quoted = False
+            continue
+        if character == '"':
+            quoted = True
+        elif character == "(":
+            depth += 1
+        elif character == ")":
+            depth -= 1
+            if depth == 0 and index != len(result) - 1:
+                return False
+            if depth < 0:
+                return False
+    return depth == 0 and not quoted
+
+
 def configure_profile(dashboard: dict) -> bool:
-    """Select render identity from the source itself, rejecting unknown profiles."""
+    """Select the supported profile and configure rendered mount identity."""
     global TITLE, UID, DASHBOARD_FILE, DASHBOARD_MOUNT
     identity = (dashboard.get("uid"), dashboard.get("title"))
-    production = identity == (PROD_UID, PROD_TITLE)
-    if not production and identity != ("sugarkube-staging-observability", "Sugarkube Staging Observability"):
+    selected = next(
+        (
+            name
+            for name, profile in PROFILES.items()
+            if identity == (profile["UID"], profile["TITLE"])
+        ),
+        None,
+    )
+    if selected is None:
         raise SystemExit("ERROR: dashboard title and UID do not match a supported profile.")
     UID, TITLE = identity
     DASHBOARD_FILE = f"{UID}.json"
     DASHBOARD_MOUNT = f"{DASHBOARD_PATH}/{DASHBOARD_FILE}"
-    return production
+    return selected == "prod"
 
 
-def validate_production_dashboard(dashboard: dict) -> None:
-    required = {
-        "Cluster health": None,
-        "Scrape availability by job": "min by (job) (up)",
-        "Ready nodes": 'sum(max by (node) (kube_node_status_condition{condition="Ready",status="true"}))',
-        "Node readiness": 'max by (node) (kube_node_status_condition{condition="Ready",status="true"})',
-        "Workload health": None,
-        "Deployment replica deficit": "clamp_min(max by (namespace, deployment) (kube_deployment_spec_replicas) - max by (namespace, deployment) (kube_deployment_status_replicas_available), 0)",
-        "Unready pods by namespace": 'sum by (namespace) (max by (namespace, pod) (kube_pod_status_ready{condition="false"}) * on (namespace, pod) group_left max by (namespace, pod) (kube_pod_status_phase{phase=~"Pending|Running|Unknown"} == 1))',
-        "Problem pods by namespace": 'sum by (namespace) (max by (namespace, pod, phase) (kube_pod_status_phase{phase=~"Pending|Failed|Unknown"}))',
-        "Container restart rate": "sum by (namespace, pod) (max by (namespace, pod, container) (rate(kube_pod_container_status_restarts_total[$__rate_interval])))",
-        "Node and Prometheus capacity": None,
-        "Node CPU utilization": 'max by (nodename) (100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[$__rate_interval]))) * on (instance) group_left (nodename) node_uname_info)',
-        "Node memory utilization": "max by (nodename) (100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * on (instance) group_left (nodename) node_uname_info)",
-        "Root filesystem utilization": 'max by (nodename) (100 * (1 - node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}) * on (instance) group_left (nodename) node_uname_info)',
-        "Prometheus PVC utilization": '100 * (1 - max by (namespace, persistentvolumeclaim) (kubelet_volume_stats_available_bytes{namespace="monitoring",persistentvolumeclaim=~"prometheus-kube-prometheus-stack-prometheus-db-.*"}) / max by (namespace, persistentvolumeclaim) (kubelet_volume_stats_capacity_bytes{namespace="monitoring",persistentvolumeclaim=~"prometheus-kube-prometheus-stack-prometheus-db-.*"}))',
-        "Prometheus active series": "max by (pod) (prometheus_tsdb_head_series)",
-        "Observability build identity": None,
-    }
-    actual_titles = [panel.get("title") for panel in panels(dashboard)]
-    if len(actual_titles) != len(required) + 1 or any(actual_titles.count(title) != 1 for title in required):
-        raise SystemExit("ERROR: production dashboard must contain every required row and panel exactly once.")
-    for title, expression in required.items():
-        panel = panel_named(dashboard, title)
-        if expression is None:
-            if panel.get("type") != "row":
-                raise SystemExit("ERROR: production dashboard row contract is invalid.")
-        elif panel_expression(dashboard, title) != expression:
-            raise SystemExit(f"ERROR: production PromQL contract changed for {title}.")
-    snapshot_tables = (
-        "Scrape availability by job",
-        "Node readiness",
-        "Deployment replica deficit",
-        "Observability component build identity",
-    )
-    table_columns = {
-        "Scrape availability by job": (
-            {"job": 0, "Value": 1},
-            {"Time", "__name__"},
-            {"job": "Job", "Value": "Status"},
-        ),
-        "Node readiness": (
-            {"node": 0, "Value": 1},
-            {"Time", "__name__"},
-            {"node": "Node", "Value": "Status"},
-        ),
-        "Deployment replica deficit": (
-            {"namespace": 0, "deployment": 1, "Value": 2},
-            {"Time", "__name__"},
-            {
-                "namespace": "Namespace",
-                "deployment": "Deployment",
-                "Value": "Replica deficit",
-            },
-        ),
-        "Observability component build identity": (
-            {"component": 0, "pod": 1, "version": 2, "revision": 3},
-            {"Time", "Value", "__name__"},
-            {
-                "component": "Component",
-                "pod": "Pod",
-                "version": "Version",
-                "revision": "Revision",
-            },
-        ),
-    }
-    for title in snapshot_tables:
-        table = panel_named(dashboard, title)
-        targets = table.get("targets", [])
-        if table.get("type") != "table" or len(targets) != 1:
-            raise SystemExit(
-                "ERROR: production tables must deterministically consolidate into one frame."
-            )
-        if any(
-            target.get("format") != "table"
-            or target.get("instant") is not True
-            or target.get("range") is not False
-            for target in targets
-        ):
-            raise SystemExit("ERROR: production tables must be table-formatted instant-only queries.")
-        transformations = table.get("transformations", [])
-        if len(transformations) != 1 or transformations[0].get("id") != "organize":
-            raise SystemExit("ERROR: production tables require deterministic field organization.")
-        options = transformations[0].get("options", {})
-        expected_columns, expected_hidden, expected_headings = table_columns[title]
-        if options.get("indexByName") != expected_columns or {
-            name for name, hidden in options.get("excludeByName", {}).items() if hidden is True
-        } != expected_hidden or options.get("renameByName") != expected_headings:
-            raise SystemExit(
-                "ERROR: production table columns, headings, or hidden raw fields are invalid."
-            )
-    build = panel_named(dashboard, "Observability component build identity")
-    expected_build = 'max by (component, pod, version, revision) (' + " or ".join(
-        f'label_replace({metric}, "component", "{component}", "", "")'
-        for metric, component in (
-            ("prometheus_build_info", "prometheus"),
-            ("alertmanager_build_info", "alertmanager"),
-            ("grafana_build_info", "grafana"),
-            ("node_exporter_build_info", "node-exporter"),
-        )
-    ) + ")"
-    if build["targets"][0].get("expr") != expected_build:
-        raise SystemExit(
-            "ERROR: production build identity must retain bounded component/pod/version/revision."
-        )
-    serialized = json.dumps(dashboard)
-    expressions = "\n".join(target.get("expr", "") for panel in panels(dashboard) for target in panel.get("targets", []))
-    if dashboard.get("refresh") != "30s" or dashboard.get("time") != {"from": "now-6h", "to": "now"} or dashboard.get("templating", {}).get("list") != []:
-        raise SystemExit("ERROR: production dashboard defaults or variables are invalid.")
-    if "or vector(0)" in expressions or "or on() vector(0)" in expressions or re.search(r'cluster\s*(?:=|=~)', expressions):
-        raise SystemExit("ERROR: production queries must preserve missing data and omit external-label selectors.")
-    forbidden = ("kube_state_metrics_build_info", "probe_", "dspace", "tokenplace", "blackbox", "synthetic")
-    if any(item in expressions.lower() for item in forbidden):
-        raise SystemExit("ERROR: production dashboard contains an unverified signal.")
-    if re.search(r"{{\s*(instance|ip|url|endpoint|device|system_uuid|provider_id|pod_cidr)\s*}}", serialized, re.I):
-        raise SystemExit("ERROR: production legends expose a forbidden raw identity label.")
-    for title in ("Node CPU utilization", "Node memory utilization", "Root filesystem utilization"):
-        if panel_named(dashboard, title)["targets"][0].get("legendFormat") != "{{nodename}}":
-            raise SystemExit("ERROR: node panels must expose only nodename in their legends.")
-    for title in ("Node CPU utilization", "Node memory utilization", "Root filesystem utilization", "Prometheus PVC utilization"):
-        defaults = panel_named(dashboard, title).get("fieldConfig", {}).get("defaults", {})
-        if (defaults.get("unit"), defaults.get("min"), defaults.get("max")) != ("percent", 0, 100):
-            raise SystemExit("ERROR: production percentage panels require a 0-100 percent scale.")
-    if any(panel.get("type") != "row" and panel.get("fieldConfig", {}).get("defaults", {}).get("noValue") != "NO DATA" for panel in panels(dashboard)):
-        raise SystemExit("ERROR: production panels must explicitly preserve NO DATA.")
-    datasource_refs = re.findall(r'"uid":\s*"([^"]+)"', serialized)
-    if DATASOURCE_UID not in datasource_refs or any(uid not in {DATASOURCE_UID, PROD_UID} for uid in datasource_refs):
-        raise SystemExit("ERROR: production datasource references must use Prometheus UID.")
-
-
-def has_serving_pod_filter(expression: str) -> bool:
-    return all(
-        token in expression
-        for token in (
-            'kube_pod_container_status_ready{namespace="dspace",container="dspace"} == 1',
-            "and on (namespace, pod) "
-            'kube_pod_status_phase{namespace="dspace",phase="Running"} == 1',
-            'unless on (namespace, pod) kube_pod_deletion_timestamp{namespace="dspace"}',
-        )
-    )
-
-
-def validate_dashboard_semantics(dashboard: dict) -> None:
-    variables = {
-        variable.get("name"): variable
-        for variable in dashboard.get("templating", {}).get("list", [])
-        if isinstance(variable, dict)
-    }
-    expected_labels = {"app": "Probe application", "route": "Probe route"}
-    if any(
-        variables.get(name, {}).get("label") != label for name, label in expected_labels.items()
-    ):
-        raise SystemExit("ERROR: blackbox variables must use probe-specific visible labels.")
-
-    distribution = panel_named(dashboard, "Status-class distribution")
-    if distribution.get("type") not in {"piechart", "bargauge"}:
-        raise SystemExit("ERROR: status-class distribution must use a categorical visualization.")
-    distribution_targets = distribution.get("targets", [])
-    if not distribution_targets or any(
-        target.get("instant") is not True or target.get("range") is not False
-        for target in distribution_targets
-    ):
-        raise SystemExit(
-            "ERROR: status-class distribution must be an instant selected-window query."
-        )
-    if any(
-        "increase(" not in target.get("expr", "")
-        or "$__range" not in target.get("expr", "")
-        or "sum by (status_class)" not in target.get("expr", "")
-        or 'environment=~"$environment"' not in target.get("expr", "")
-        for target in distribution_targets
-    ):
-        raise SystemExit("ERROR: status-class distribution must summarize the selected window.")
-    distribution_colors = {
-        override.get("matcher", {})
-        .get("options"): override.get("properties", [{}])[0]
-        .get("value", {})
-        .get("fixedColor")
-        for override in distribution.get("fieldConfig", {}).get("overrides", [])
-    }
-    if distribution_colors != {"2xx": "green", "4xx": "orange", "5xx": "red"}:
-        raise SystemExit("ERROR: status-class distribution must use explicit status-class colors.")
-
-    user_rate = panel_named(dashboard, "User request rate by route and status class")
-    user_expressions = [target.get("expr", "") for target in user_rate.get("targets", [])]
-    if not user_expressions or any(
-        f"route!~{OPERATIONAL_ROUTES}" not in expression for expression in user_expressions
-    ):
-        raise SystemExit("ERROR: user request rate must exclude operational routes.")
-    operational_rate = panel_named(dashboard, "Operational request rate")
-    if not any(
-        f"route=~{OPERATIONAL_ROUTES}" in target.get("expr", "")
-        for target in operational_rate.get("targets", [])
-    ):
-        raise SystemExit("ERROR: operational request rate must retain health and metrics routes.")
-
-    summary = panel_named(dashboard, "Public availability summary")
-    summary_targets = summary.get("targets", [])
-    if (
-        not isinstance(summary_targets, list)
-        or len(summary_targets) != 3
-        or any(
-            not isinstance(target, dict)
-            or not isinstance(target.get("expr"), str)
-            or target.get("instant") is not True
-            or target.get("range") is not False
-            or "sum(" not in target.get("expr", "")
-            or " by (environment, app, route) " not in target.get("expr", "")
-            or BLACKBOX_JOB_MATCHER not in target.get("expr", "")
-            or any(
-                selector not in target.get("expr", "")
-                for selector in (
-                    'environment=~"$environment"',
-                    'app=~"$app"',
-                    'route=~"$route"',
-                )
-            )
-            for target in summary_targets
-        )
-    ):
-        raise SystemExit(
-            "ERROR: public availability must be a three-value instant aggregate summary."
-        )
-    summary_by_legend = {
-        target.get("legendFormat"): target.get("expr", "") for target in summary_targets
-    }
-    healthy_expression = re.sub(r"\s+", " ", summary_by_legend.get("Healthy endpoints", ""))
-    failed_expression = re.sub(r"\s+", " ", summary_by_legend.get("Failed endpoints", ""))
-    missing_expression = re.sub(r"\s+", " ", summary_by_legend.get("Missing probe data", ""))
-    if "== bool 1" not in healthy_expression or "== bool 0" not in failed_expression:
-        raise SystemExit("ERROR: availability counts must use boolean healthy and failed sums.")
-    if (
-        "max_over_time(up{" not in missing_expression
-        or "[7d]" not in missing_expression
-        or ">= bool 0" not in missing_expression
-        or " - (sum(" not in missing_expression
-        or "probe_success{" not in missing_expression
-        or "or vector(0)" not in missing_expression
-    ):
-        raise SystemExit(
-            "ERROR: missing probe data must compare retention-backed discovered "
-            "probes with current samples."
-        )
-    if {target.get("legendFormat") for target in summary_targets} != {
-        "Healthy endpoints",
-        "Failed endpoints",
-        "Missing probe data",
-    } or summary.get("fieldConfig", {}).get("defaults", {}).get("noValue") != "NO DATA":
-        raise SystemExit(
-            "ERROR: public availability must distinguish healthy, failed, and no data."
-        )
-    missing_colors = [
-        prop.get("value", {}).get("fixedColor")
-        for override in summary.get("fieldConfig", {}).get("overrides", [])
-        if isinstance(override, dict)
-        and override.get("matcher", {}).get("options") == "Missing probe data"
-        for prop in override.get("properties", [])
-        if isinstance(prop, dict) and prop.get("id") == "color"
-    ]
-    if missing_colors != ["yellow"]:
-        raise SystemExit("ERROR: missing probe data must be a compact yellow summary value.")
-
-    matrix = panel_named(dashboard, "Endpoint matrix")
-    if matrix.get("type") != "table" or not matrix.get("targets"):
-        raise SystemExit("ERROR: dashboard must retain the detailed endpoint matrix.")
-
-    revisions = panel_expression(dashboard, "Active build revisions by pod")
-    if (
-        "dspace_build_info" not in revisions
-        or "and on (namespace, pod)" not in revisions
-        or not has_serving_pod_filter(revisions)
-    ):
-        raise SystemExit("ERROR: active build revisions must include only serving DSPACE pods.")
-
-    image_agreement = panel_expression(dashboard, "Image-pin agreement")
-    if not has_serving_pod_filter(image_agreement) or "or on() vector(0)" not in image_agreement:
-        raise SystemExit(
-            "ERROR: image-pin agreement must filter serving pods and return a healthy zero."
-        )
-
-    target_panel = panel_named(dashboard, "DSPACE metrics-target health")
-    target_health = panel_expression(dashboard, "DSPACE metrics-target health")
-    if (
-        not has_serving_pod_filter(target_health)
-        or 'unless on (namespace, pod) up{namespace="dspace",service=~"dspace.*"}'
-        not in target_health
-        or 'up{namespace="dspace",service=~"dspace.*"} == 0' not in target_health
-        or "count(" not in target_health
-        or "or on() vector(0)" not in target_health
-        or target_panel.get("targets", [{}])[0].get("legendFormat")
-        != "down or missing serving targets"
-        or "Zero is healthy; missing targets fail closed."
-        not in target_panel.get("description", "")
-    ):
-        raise SystemExit(
-            "ERROR: DSPACE metrics-target health must count down or missing serving targets."
-        )
-
-
-def validate_tokenplace_semantics(dashboard: dict) -> None:
-    all_items = list(panels(dashboard))
-    for title in TOKENPLACE_ROWS | TOKENPLACE_PANELS:
-        matching = [panel for panel in all_items if panel.get("title") == title]
-        if len(matching) != 1:
-            raise SystemExit(f"ERROR: dashboard must contain exactly one {title!r} panel.")
-    if any(panel_named(dashboard, title).get("type") != "row" for title in TOKENPLACE_ROWS):
-        raise SystemExit("ERROR: token.place section headings must remain dashboard rows.")
-
-    token_panels_by_title = {title: panel_named(dashboard, title) for title in TOKENPLACE_PANELS}
-    expected_targets = {title: 1 for title in TOKENPLACE_PANELS}
-    expected_targets["token.place compute-node counts"] = 2
-    expected_targets["token.place HTTP latency percentiles"] = 3
-    for title, expected_count in expected_targets.items():
-        targets = token_panels_by_title[title].get("targets")
-        if (
-            not isinstance(targets, list)
-            or len(targets) != expected_count
-            or any(
-                not isinstance(target, dict) or not target.get("expr", "").strip()
-                for target in targets
-            )
-        ):
-            raise SystemExit(
-                f"ERROR: {title} must contain exactly {expected_count} non-empty target(s)."
-            )
-
-    token_panels = list(token_panels_by_title.values())
-    expressions = [
-        target.get("expr", "")
-        for panel in token_panels
-        for target in panel.get("targets", [])
-        if isinstance(target, dict)
-    ]
-    if not expressions:
-        raise SystemExit("ERROR: token.place panels must contain queries.")
-    if any(
-        "vector(0)" in expression or re.search(r"\bor\s+(?:on\(\)\s+)?0\b", expression)
-        for expression in expressions
-    ):
-        raise SystemExit(
-            "ERROR: token.place queries must preserve missing data instead of substituting zero."
-        )
-    if any(re.search(r"\blabel_(?:replace|join)\s*\(", expression) for expression in expressions):
-        raise SystemExit("ERROR: token.place queries must not synthesize labels.")
-
-    expected_metrics = {
-        "token.place scrape availability": {"up"},
-        "token.place instrumentation health": {"tokenplace_instrumentation_up"},
-        "token.place compute-node counts": {
-            "tokenplace_compute_nodes_registered",
-            "tokenplace_compute_nodes_healthy",
-        },
-        "token.place oldest compute-node lease age": {"tokenplace_compute_node_lease_age_seconds"},
-        "token.place compute-node eviction rate": {"tokenplace_compute_node_evictions_total"},
-        "token.place relay queue depth": {"tokenplace_relay_queue_depth"},
-        "token.place oldest queued-request age": {
-            "tokenplace_relay_oldest_queued_request_age_seconds"
-        },
-        "token.place in-flight requests by pod": {"tokenplace_relay_in_flight_requests"},
-        "token.place oldest in-flight age by pod": {
-            "tokenplace_relay_oldest_in_flight_age_seconds"
-        },
-        "token.place terminal outcome rate": {"tokenplace_relay_request_outcomes_total"},
-        "token.place HTTP request rate": {"tokenplace_http_requests_total"},
-        "token.place HTTP 5xx ratio": {"tokenplace_http_requests_total"},
-        "token.place HTTP latency percentiles": {"tokenplace_http_request_duration_seconds_bucket"},
-        "token.place build identity": {"tokenplace_build_info"},
-    }
-    for title, intended in expected_metrics.items():
-        panel_expressions = [target["expr"] for target in token_panels_by_title[title]["targets"]]
-        found = set()
-        for expression in panel_expressions:
-            selectors = list(
-                re.finditer(r"\b([a-zA-Z_:][a-zA-Z0-9_:]*)\s*\{([^{}]*)\}", expression)
-            )
-            consumed_selector_ends = []
-            for selector in selectors:
-                metric, matchers = selector.groups()
-                found.add(metric)
-                try:
-                    parsed_matchers = parse_tokenplace_matchers(matchers)
-                except ValueError:
-                    parsed_matchers = None
-                allowed_matchers = dict(TOKENPLACE_CANONICAL_MATCHERS)
-                if title == "token.place HTTP 5xx ratio":
-                    allowed_matchers["status_class"] = ("=", '"5xx"')
-                if (
-                    metric not in intended
-                    or parsed_matchers is None
-                    or any(
-                        parsed_matchers.get(key) != value
-                        for key, value in TOKENPLACE_CANONICAL_MATCHERS.items()
-                    )
-                    or any(key not in allowed_matchers for key in parsed_matchers)
-                    or any(allowed_matchers[key] != value for key, value in parsed_matchers.items())
-                ):
-                    raise SystemExit(
-                        f"ERROR: {title} must use only its intended metric family "
-                        "with the canonical target selector."
-                    )
-                suffix = expression[selector.end() :]
-                range_match = re.match(r"\[\$__rate_interval\]", suffix)
-                if metric in TOKENPLACE_RATE_METRICS:
-                    if not range_match or not re.search(
-                        r"\brate\s*\(\s*$", expression[: selector.start()]
-                    ):
-                        raise SystemExit(
-                            f"ERROR: {title} rate ranges must be attached to a metric "
-                            "selector directly inside rate()."
-                        )
-                    consumed_selector_ends.append(selector.end() + range_match.end())
-                else:
-                    if range_match:
-                        raise SystemExit(
-                            f"ERROR: {title} has a range outside an intended rate expression."
-                        )
-                    consumed_selector_ends.append(selector.end())
-            without_selectors = "".join(
-                expression[end:start]
-                for (end, start) in zip(
-                    [0, *consumed_selector_ends],
-                    [*(selector.start() for selector in selectors), len(expression)],
-                )
-            )
-            selector_free = re.sub(r'"(?:\\.|[^"\\])*"', "", without_selectors)
-            if re.search(
-                r"\$(?:[a-zA-Z_][a-zA-Z0-9_]*|\{[a-zA-Z_][a-zA-Z0-9_]*\})",
-                selector_free,
-            ):
-                raise SystemExit(
-                    f"ERROR: {title} contains a template variable outside its permitted "
-                    "canonical selector or rate range."
-                )
-            if "[" in selector_free or "]" in selector_free:
-                raise SystemExit(f"ERROR: {title} contains an invalid range expression.")
-            selector_free = re.sub(
-                r"\b(?:by|without|on|ignoring|group_left|group_right)\s*\([^()]*\)",
-                "",
-                selector_free,
-            )
-            selector_free = re.sub(
-                rf"\b(?:{'|'.join(TOKENPLACE_PROMQL_FUNCTIONS)})\s*(?=\()",
-                "",
-                selector_free,
-            )
-            selector_free = re.sub(
-                rf"\b(?:{'|'.join(TOKENPLACE_PROMQL_MODIFIERS)})\b",
-                "",
-                selector_free,
-            )
-            selector_free = re.sub(
-                r"(?<![a-zA-Z_:])(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?",
-                "",
-                selector_free,
-                flags=re.IGNORECASE,
-            )
-            if re.search(r"\b[a-zA-Z_:][a-zA-Z0-9_:]*\b", selector_free):
-                raise SystemExit(
-                    f"ERROR: {title} contains a bare or unverified metric selector; "
-                    "the canonical target selector is required."
-                )
-        if found != intended:
-            raise SystemExit(f"ERROR: {title} must use its intended metric family.")
-
-    for title in (
-        "token.place scrape availability",
-        "token.place instrumentation health",
-    ):
-        panel = token_panels_by_title[title]
-        target = panel["targets"][0]
-        mappings = panel.get("fieldConfig", {}).get("defaults", {}).get("mappings", [])
-        mapping_options = mappings[0].get("options", {}) if len(mappings) == 1 else {}
-        if (
-            target.get("instant") is not True
-            or target.get("range") is not False
-            or mapping_options.get("0", {}).get("text") != "UNHEALTHY"
-            or mapping_options.get("1", {}).get("text") != "HEALTHY"
-            or panel.get("fieldConfig", {}).get("defaults", {}).get("noValue") != "NO DATA"
-        ):
-            raise SystemExit(
-                "ERROR: token.place health stats must be instant-only and distinguish "
-                "healthy, unhealthy, and NO DATA."
-            )
-
-    logical = {
-        "tokenplace_compute_nodes_registered",
-        "tokenplace_compute_nodes_healthy",
-        "tokenplace_compute_node_lease_age_seconds",
-        "tokenplace_relay_queue_depth",
-        "tokenplace_relay_oldest_queued_request_age_seconds",
-    }
-    for metric in logical:
-        matching = [expression for expression in expressions if metric in expression]
-        if not matching or any(
-            not re.search(rf"\bmax(?:\s+by\s*\([^)]*\))?\s*\([^)]*{metric}", expression)
-            for expression in matching
-        ):
-            raise SystemExit(f"ERROR: logical gauge {metric} must use explicit max deduplication.")
-
-    direct_max = {
-        "tokenplace_compute_nodes_registered",
-        "tokenplace_compute_nodes_healthy",
-        "tokenplace_compute_node_lease_age_seconds",
-    }
-    for metric in direct_max:
-        expression = next(expr for expr in expressions if metric in expr)
-        if not re.match(rf"^max\s*\(\s*{metric}\{{", expression):
-            raise SystemExit(f"ERROR: logical gauge {metric} must use direct max deduplication.")
-
-    grouped_gauges = {
-        "token.place relay queue depth": ("tokenplace_relay_queue_depth", "provider_mode"),
-        "token.place oldest queued-request age": (
-            "tokenplace_relay_oldest_queued_request_age_seconds",
-            "provider_mode",
-        ),
-        "token.place in-flight requests by pod": (
-            "tokenplace_relay_in_flight_requests",
-            "pod",
-        ),
-        "token.place oldest in-flight age by pod": (
-            "tokenplace_relay_oldest_in_flight_age_seconds",
-            "pod",
-        ),
-    }
-    for title, (metric, label) in grouped_gauges.items():
-        target = token_panels_by_title[title]["targets"][0]
-        if not re.match(rf"^max\s+by\s*\(\s*{label}\s*\)\s*\(\s*{metric}\{{", target["expr"]):
-            qualifier = "remain per pod and " if label == "pod" else ""
-            raise SystemExit(f"ERROR: {title} must {qualifier}use max by ({label}).")
-        if target.get("legendFormat") != f"{{{{{label}}}}}":
-            raise SystemExit(f"ERROR: {title} must use a {label} legend.")
-
-    counters = {
-        "tokenplace_compute_node_evictions_total": "reason",
-        "tokenplace_relay_request_outcomes_total": "outcome",
-        "tokenplace_http_requests_total": None,
-    }
-    for metric, bounded_group in counters.items():
-        matching = [expression for expression in expressions if metric in expression]
-        if not matching or any(
-            "sum" not in expression
-            or f"rate({metric}" not in expression
-            or "[$__rate_interval]" not in expression
-            for expression in matching
-        ):
-            raise SystemExit(f"ERROR: process-local counter {metric} must use a summed rate.")
-        if bounded_group and any(
-            f"sum by ({bounded_group})" not in expression for expression in matching
-        ):
-            raise SystemExit(f"ERROR: {metric} must remain grouped by bounded {bounded_group}.")
-
-    direct_counter_groups = {
-        "tokenplace_compute_node_evictions_total": "reason",
-        "tokenplace_relay_request_outcomes_total": "outcome",
-    }
-    for metric, label in direct_counter_groups.items():
-        expression = next(expr for expr in expressions if metric in expr)
-        pattern = (
-            rf"^sum\s+by\s*\(\s*{label}\s*\)\s*\(\s*rate\s*\(\s*"
-            rf"{metric}\{{.*\}}\[\$__rate_interval\]\s*\)\s*\)\s*$"
-        )
-        if not re.match(pattern, expression):
-            raise SystemExit(f"ERROR: {metric} must directly use sum by ({label}) of rate.")
-
-    request_rate = token_panels_by_title["token.place HTTP request rate"]["targets"][0]["expr"]
-    if not re.match(
-        r"^sum\s+by\s*\(\s*route\s*,\s*status_class\s*\)\s*\(\s*rate\s*\(\s*"
-        r"tokenplace_http_requests_total\{.*\}\[\$__rate_interval\]\s*\)\s*\)\s*$",
-        request_rate,
-    ):
-        raise SystemExit(
-            "ERROR: token.place HTTP request rate must group by route and status_class."
-        )
-
-    ratio = token_panels_by_title["token.place HTTP 5xx ratio"]["targets"][0]["expr"]
-    numerator, separator, denominator = ratio.partition(" / ")
-    if (
-        not separator
-        or 'status_class="5xx"' not in numerator
-        or re.search(r"status_class\s*(?:=|=~|!=|!~)", denominator)
-        or not re.match(r"^clamp_min\s*\(\s*sum\s*\(\s*rate\s*\(", denominator)
-        or not re.search(r"\)\s*,\s*1e-9\s*\)\s*$", denominator)
-    ):
-        raise SystemExit(
-            "ERROR: token.place HTTP 5xx ratio must select 5xx and use an unfiltered "
-            "clamp_min denominator."
-        )
-
-    for title in (
-        "token.place in-flight requests by pod",
-        "token.place oldest in-flight age by pod",
-    ):
-        target = panel_named(dashboard, title).get("targets", [{}])[0]
-        if "by (pod)" not in target.get("expr", "") or "{{pod}}" not in target.get(
-            "legendFormat", ""
-        ):
-            raise SystemExit("ERROR: token.place in-flight gauges must remain visible per pod.")
-    build = panel_named(dashboard, "token.place build identity")
-    build_target = build.get("targets", [{}])[0]
-    if (
-        "max by (pod, version, revision)" not in build_target.get("expr", "")
-        or build_target.get("legendFormat") != "{{pod}} {{version}} {{revision}}"
-        or build_target.get("instant") is not True
-        or build_target.get("range") is not False
-    ):
-        raise SystemExit(
-            "ERROR: token.place build identity must remain per pod, version, and revision."
-        )
-    latency = panel_named(dashboard, "token.place HTTP latency percentiles")
-    if {target.get("legendFormat", "").split(" ", 1)[0] for target in latency["targets"]} != {
-        "p50",
-        "p95",
-        "p99",
-    } or any(
-        "histogram_quantile(" not in target.get("expr", "")
-        or "sum by (le, route)" not in target.get("expr", "")
-        or "rate(tokenplace_http_request_duration_seconds_bucket" not in target.get("expr", "")
-        for target in latency.get("targets", [])
-    ):
-        raise SystemExit(
-            "ERROR: token.place latency must use histogram bucket rates and bounded grouping."
-        )
-    if any(
-        panel.get("fieldConfig", {}).get("defaults", {}).get("noValue") != "NO DATA"
-        for panel in token_panels
-    ):
-        raise SystemExit("ERROR: token.place panels must display missing series as NO DATA.")
-
-    token_serialized = json.dumps(token_panels)
-    expression_text = "\n".join(expressions)
-    used_labels = set(
-        re.findall(r"(?:\{|,)\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:=|=~|!=|!~)", expression_text)
-    )
-    for labels in re.findall(
-        r"\b(?:by|without|on|ignoring|group_left|group_right)\s*\(([^)]*)\)",
-        expression_text,
-    ):
-        used_labels.update(label.strip() for label in labels.split(",") if label.strip())
-    used_labels.update(re.findall(r"{{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*}}", token_serialized))
-    if not used_labels <= TOKENPLACE_LABELS:
-        raise SystemExit("ERROR: token.place queries or legends contain an unsafe label.")
-    if any(metric in token_serialized for metric in PHASE_TWO_METRICS):
-        raise SystemExit("ERROR: token.place Phase 2 metrics must not be presented as implemented.")
-
-
-def validate_dashboard(path: Path) -> str:
-    dashboard = load_dashboard(path)
+def _expected_dashboard(dashboard: dict) -> dict:
     production = configure_profile(dashboard)
-    ids = [panel.get("id") for panel in panels(dashboard)]
-    if (
-        not ids
-        or any(not isinstance(panel_id, int) for panel_id in ids)
-        or len(ids) != len(set(ids))
-    ):
-        raise SystemExit("ERROR: dashboard panel IDs must be present, integer, and unique.")
-    positions = []
-    for panel in panels(dashboard):
+    return json.loads(render(PROFILES["prod" if production else "staging"]))
+
+
+def _validate_grid(items: list[dict]) -> None:
+    if len(items) != 60 or sum(panel.get("type") == "row" for panel in items) != 11:
+        raise SystemExit("ERROR: canonical dashboard must contain exactly 60 objects and 11 rows.")
+    ids = [panel.get("id") for panel in items]
+    if ids != list(range(1, 61)):
+        raise SystemExit(
+            "ERROR: canonical dashboard panel IDs must be stable consecutive integers."
+        )
+    rectangles = []
+    for panel in items:
         position = panel.get("gridPos", {})
+        if any(not isinstance(position.get(key), int) for key in ("x", "y", "w", "h")):
+            raise SystemExit("ERROR: dashboard panels must have valid integer grid positions.")
         if (
-            any(not isinstance(position.get(key), int) for key in ("x", "y", "w", "h"))
-            or position.get("x", -1) < 0
-            or position.get("y", -1) < 0
-            or position.get("w", 0) <= 0
-            or position.get("h", 0) <= 0
-            or position.get("x", 0) + position.get("w", 0) > 24
+            position["x"] < 0
+            or position["y"] < 0
+            or position["w"] <= 0
+            or position["h"] <= 0
+            or position["x"] + position["w"] > 24
         ):
             raise SystemExit("ERROR: dashboard panels must have valid integer grid positions.")
         if panel.get("type") == "row":
             continue
-        rectangle = (
+        rect = (
             position["x"],
             position["y"],
             position["x"] + position["w"],
             position["y"] + position["h"],
         )
         if any(
-            rectangle[0] < other[2]
-            and rectangle[2] > other[0]
-            and rectangle[1] < other[3]
-            and rectangle[3] > other[1]
-            for other in positions
+            rect[0] < other[2] and rect[2] > other[0] and rect[1] < other[3] and rect[3] > other[1]
+            for other in rectangles
         ):
             raise SystemExit("ERROR: dashboard panel grid positions must not overlap.")
-        positions.append(rectangle)
-    if production:
-        validate_production_dashboard(dashboard)
-        return path.read_text(encoding="utf-8")
-    validate_dashboard_semantics(dashboard)
-    validate_tokenplace_semantics(dashboard)
+        rectangles.append(rect)
+
+
+def _validate_semantics(dashboard: dict) -> None:
+    items = list(panels(dashboard))
+    _validate_grid(items)
+    data_panels = [panel for panel in items if panel.get("type") not in {"row", "text"}]
+    if any(
+        panel.get("fieldConfig", {}).get("defaults", {}).get("noValue") != "NO DATA"
+        for panel in data_panels
+    ):
+        raise SystemExit("ERROR: every data panel must explicitly preserve NO DATA.")
+    tables = [panel for panel in items if panel.get("type") == "table"]
+    if len(tables) != 10:
+        raise SystemExit("ERROR: canonical dashboard must contain exactly ten tables.")
+    for table in tables:
+        targets = table.get("targets", [])
+        transforms = table.get("transformations", [])
+        if (
+            len(targets) != 1
+            or targets[0].get("format") != "table"
+            or targets[0].get("instant") is not True
+            or targets[0].get("range") is not False
+        ):
+            raise SystemExit("ERROR: tables require one table-formatted instant-only target.")
+        if len(transforms) != 1 or transforms[0].get("id") != "organize":
+            raise SystemExit(
+                "ERROR: tables require exactly one deterministic organize transformation."
+            )
+        options = transforms[0].get("options", {})
+        if not options.get("indexByName") or not options.get("renameByName"):
+            raise SystemExit("ERROR: tables must explicitly order and rename visible columns.")
+        excluded = {key for key, value in options.get("excludeByName", {}).items() if value}
+        if not {"Time", "__name__"} <= excluded:
+            raise SystemExit("ERROR: tables must hide Time and __name__ fields.")
+    variables = dashboard.get("templating", {}).get("list", [])
+    if [variable.get("name") for variable in variables] != [
+        "environment",
+        "cluster",
+        "app",
+        "route",
+    ]:
+        raise SystemExit("ERROR: dashboard variables must use the canonical shape.")
+    for variable in variables[:2]:
+        if (
+            variable.get("type") != "constant"
+            or variable.get("hide") != 2
+            or variable.get("multi") is not False
+        ):
+            raise SystemExit(
+                "ERROR: environment and cluster must be hidden single-value constants."
+            )
+    if any(
+        variable.get("allValue") != ".*" or variable.get("includeAll") is not True
+        for variable in variables[2:]
+    ):
+        raise SystemExit("ERROR: app and route variables must expose All = .*.")
     expressions = [
         target["expr"]
-        for panel in panels(dashboard)
+        for panel in items
         for target in panel.get("targets", [])
-        if isinstance(target, dict) and isinstance(target.get("expr"), str)
+        if isinstance(target.get("expr"), str)
     ]
     expression_text = "\n".join(expressions)
-    missing = sorted(metric for metric in REQUIRED_METRICS if metric not in expression_text)
-    if missing:
-        raise SystemExit(
-            f"ERROR: dashboard is missing required PromQL metrics: {', '.join(missing)}"
-        )
+    if "kube_state_metrics_build_info" in expression_text:
+        raise SystemExit("ERROR: unavailable kube-state-metrics build identity is forbidden.")
+    if re.search(
+        r"cluster\s*(?:=|=~)", "\n".join(expr for expr in expressions if "$cluster" not in expr)
+    ):
+        raise SystemExit("ERROR: core local queries must not select an external cluster label.")
+    token_expressions = [
+        target["expr"]
+        for title in TOKENPLACE_DATA_TITLES
+        for target in panel_named(dashboard, title).get("targets", [])
+    ]
+    if any(
+        'environment=~"$environment"' not in expr or 'cluster=~"$cluster"' not in expr
+        for expr in token_expressions
+    ):
+        raise SystemExit("ERROR: token.place queries require environment and cluster variables.")
+    if any("vector(0)" in expr for expr in token_expressions):
+        raise SystemExit("ERROR: token.place queries must preserve missing data.")
     for metric in EVENT_METRICS:
-        matching = [expr for expr in expressions if metric in expr]
-        if not matching or any("or on() vector(0)" not in expr for expr in matching):
-            raise SystemExit(f"ERROR: event-driven metric {metric} must use a safe zero fallback.")
-    serialized = json.dumps(dashboard)
-    urls = set(re.findall(r"https?://[^)\\\" ]+", serialized, re.IGNORECASE))
-    approved_urls = {
-        "https://github.com/futuroptimist/sugarkube/blob/main/docs/"
-        "observability-dspace-release-integrity.md",
-        "https://github.com/futuroptimist/sugarkube/blob/main/deployment-evidence/"
-        "dspace/staging/main-018687f-20260805T035722Z.json",
+        matches = [expr for expr in expressions if metric in expr]
+        if not matches or any(
+            "0 * count(dspace_instrumentation_up" not in expr for expr in matches
+        ):
+            raise SystemExit(f"ERROR: event-driven metric {metric} requires capability-gated zero.")
+    capability_targets = {
+        "Image-pin agreement": [panel_expression(dashboard, "Image-pin agreement")],
+        "DSPACE metrics-target health": [
+            panel_expression(dashboard, "DSPACE metrics-target health")
+        ],
+        "/chat synthetic result and freshness": [
+            re.sub(r"\s+", " ", target.get("expr", ""))
+            for target in panel_named(
+                dashboard, "/chat synthetic result and freshness"
+            ).get("targets", [])
+        ],
     }
-    if urls != approved_urls:
-        raise SystemExit(
-            "ERROR: dashboard raw URLs must be the exact reviewed runbook/evidence allowlist."
-        )
-    if re.search(r"\$\{?DS_|__inputs", serialized, re.IGNORECASE) or re.search(
-        r"(?:\{|,)\s*target\s*(?:=|=~|!~|!=)|{{\s*target\s*}}", expression_text
+    for title, targets in capability_targets.items():
+        if not targets or any(
+            not _has_outer_capability_presence_gate(expression) for expression in targets
+        ):
+            raise SystemExit(
+                f"ERROR: {title} requires an outer approved-release capability-presence gate."
+            )
+    for title in ("Image-pin agreement", "DSPACE metrics-target health"):
+        if "0 * count(" + CAPABILITY not in capability_targets[title][0]:
+            raise SystemExit(f"ERROR: {title} requires an approved-release-gated zero.")
+    image_pin = panel_expression(dashboard, "Image-pin agreement")
+    if '"^(docker-pullable://)?(.*)$"' not in image_pin:
+        raise SystemExit("ERROR: image-pin comparison must normalize runtime image-ID prefixes.")
+    if '"image_id", "unknown"' not in image_pin or '"image_spec", "unknown"' not in image_pin:
+        raise SystemExit("ERROR: image-pin comparison must fail closed on missing metadata.")
+    if (
+        "0 * count(" + CAPABILITY
+        not in panel_named(dashboard, "/chat synthetic result and freshness")["targets"][0]["expr"]
     ):
-        raise SystemExit(
-            "ERROR: dashboard contains a datasource placeholder or unsafe raw target label."
+        raise SystemExit("ERROR: chat synthetic fallback requires approved-release capability.")
+    blackbox = [expr for expr in expressions if "probe_" in expr or "blackbox-" in expr]
+    if any("blackbox-" in expr and "-$environment-.*" not in expr for expr in blackbox):
+        raise SystemExit("ERROR: blackbox jobs must use the environment variable.")
+    serialized = json.dumps(dashboard)
+    if re.search(r"{{\s*(?:" + "|".join(FORBIDDEN_LABELS) + r")\s*}}", serialized, re.I):
+        raise SystemExit("ERROR: dashboard legends expose a forbidden raw identity label.")
+
+
+def validate_dashboard(path: Path) -> str:
+    dashboard = load_dashboard(path)
+    expected = _expected_dashboard(dashboard)
+    _validate_semantics(dashboard)
+    # This authoritative comparison independently locks titles, types, queries,
+    # transformations, IDs, order, and grid positions to the shared template.
+    if dashboard != expected:
+        differing = sorted(
+            key for key in set(dashboard) | set(expected) if dashboard.get(key) != expected.get(key)
         )
-    datasource_refs = re.findall(r'"uid":\s*"([^"]+)"', serialized)
-    if DATASOURCE_UID not in datasource_refs or any(
-        uid not in {DATASOURCE_UID, UID} for uid in datasource_refs
-    ):
         raise SystemExit(
-            "ERROR: dashboard datasource references must use the rendered Prometheus UID."
+            "ERROR: dashboard differs from canonical generated profile: " + ", ".join(differing)
         )
     return path.read_text(encoding="utf-8")
 

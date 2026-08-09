@@ -1,6 +1,5 @@
+import copy
 import json
-import os
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -8,284 +7,96 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-DASHBOARD = ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
-PROD_DASHBOARD = ROOT / "clusters/prod/observability/dashboards/sugarkube-prod-observability.json"
-VALIDATOR = ROOT / "scripts/validate_observability_dashboard.py"
-SCRIPT = ROOT / "scripts/observability_helm.sh"
-PROMETHEUS_VALUES = ROOT / "platform/observability/helm/kube-prometheus-stack.values.common.yaml"
-
-# Import the validator so pytest-cov attributes its execution to the production
-# module. Subprocess-only checks prove the command-line contract, but their
-# coverage data is not collected by the parent pytest process.
+STAGING = ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
+PROD = ROOT / "clusters/prod/observability/dashboards/sugarkube-prod-observability.json"
+GENERATOR = ROOT / "scripts/generate_observability_dashboards.py"
 sys.path.insert(0, str(ROOT))
+from scripts import generate_observability_dashboards as generator  # noqa: E402
 from scripts import validate_observability_dashboard as validator  # noqa: E402
 
 
-def all_panels(document):
-    for panel in document["panels"]:
-        yield panel
-        yield from panel.get("panels", [])
+@pytest.fixture
+def dashboards():
+    return json.loads(STAGING.read_text()), json.loads(PROD.read_text())
 
 
-def replace_metric_expression(document, metric, replacement):
-    target = next(
-        target
-        for panel in all_panels(document)
-        for target in panel.get("targets", [])
-        if metric in target.get("expr", "")
+def panel(document, title):
+    return next(item for item in document["panels"] if item["title"] == title)
+
+
+def write_candidate(tmp_path, document):
+    path = tmp_path / f'{document["uid"]}.json'
+    path.write_text(json.dumps(document), encoding="utf-8")
+    return path
+
+
+def test_generator_check_and_outputs_are_deterministic(dashboards):
+    result = subprocess.run(
+        [sys.executable, str(GENERATOR), "--check"], cwd=ROOT, text=True, capture_output=True
     )
-    target["expr"] = replacement
+    assert result.returncode == 0, result.stderr
+    staging, prod = dashboards
+    assert staging["panels"] == prod["panels"]
+    assert len(staging["panels"]) == 60
+    assert sum(item["type"] == "row" for item in staging["panels"]) == 11
+    assert sum(item["type"] != "row" for item in staging["panels"]) == 49
 
 
-def replace_panel_expression(document, title, replacement):
-    panel = next(panel for panel in all_panels(document) if panel["title"] == title)
-    panel["targets"][0]["expr"] = replacement
+def test_generator_write_check_and_stale_exit_paths(tmp_path, monkeypatch, capsys):
+    profiles = {
+        name: {**profile, "path": tmp_path / f"{name}.json"}
+        for name, profile in generator.PROFILES.items()
+    }
+    monkeypatch.setattr(generator, "ROOT", tmp_path)
+    monkeypatch.setattr(generator, "PROFILES", profiles)
+
+    monkeypatch.setattr(sys, "argv", [str(GENERATOR), "--check"])
+    assert generator.main() == 1
+    assert "staging, prod" in capsys.readouterr().err
+
+    monkeypatch.setattr(sys, "argv", [str(GENERATOR), "--write"])
+    assert generator.main() == 0
+    assert capsys.readouterr().out.count("wrote") == 2
+
+    monkeypatch.setattr(sys, "argv", [str(GENERATOR), "--check"])
+    assert generator.main() == 0
+    assert "are current" in capsys.readouterr().out
 
 
-def production_panel(document, title):
-    return next(panel for panel in all_panels(document) if panel["title"] == title)
+def test_profiles_differ_only_by_allowlisted_identity(dashboards):
+    staging, prod = dashboards
+    differing = {key for key in staging if staging[key] != prod[key]}
+    assert differing == validator.PROFILE_DIFFERENCES
+    assert (staging["uid"], staging["title"], staging["tags"][-1]) == (
+        "sugarkube-staging-observability",
+        "Sugarkube Staging Observability",
+        "staging",
+    )
+    assert (prod["uid"], prod["title"], prod["tags"][-1]) == (
+        "sugarkube-prod-observability",
+        "Sugarkube Production Observability",
+        "prod",
+    )
+    for document, environment, cluster in (
+        (staging, "staging", "sugarkube-int"),
+        (prod, "prod", "sugarkube-prod"),
+    ):
+        variables = document["templating"]["list"]
+        assert [item["name"] for item in variables] == ["environment", "cluster", "app", "route"]
+        assert variables[0]["query"] == environment
+        assert variables[1]["query"] == cluster
+        assert all(item["hide"] == 2 and item["type"] == "constant" for item in variables[:2])
+        assert all(item["allValue"] == ".*" for item in variables[2:])
 
 
-def add_row_expression(document, expression):
-    production_panel(document, "Cluster health")["targets"] = [{"expr": expression}]
-
-
-@pytest.fixture
-def dashboard():
-    return json.loads(DASHBOARD.read_text(encoding="utf-8"))
-
-
-@pytest.fixture
-def prod_dashboard():
-    return json.loads(PROD_DASHBOARD.read_text(encoding="utf-8"))
-
-
-def test_production_dashboard_live_backed_contract(prod_dashboard):
-    assert prod_dashboard["uid"] == "sugarkube-prod-observability"
-    assert prod_dashboard["title"] == "Sugarkube Production Observability"
-    assert prod_dashboard["time"] == {"from": "now-6h", "to": "now"}
-    assert prod_dashboard["refresh"] == "30s"
-    assert prod_dashboard["templating"]["list"] == []
-    panels = list(all_panels(prod_dashboard))
-    assert len(panels) == 17
-    assert len({panel["id"] for panel in panels}) == 17
-    assert {panel["title"] for panel in panels if panel["type"] == "row"} == {
-        "Cluster health",
+def test_canonical_order_ids_grid_and_defaults(dashboards):
+    staging, _ = dashboards
+    rows = [item["title"] for item in staging["panels"] if item["type"] == "row"]
+    assert rows == [
+        "Cluster and service health",
         "Workload health",
         "Node and Prometheus capacity",
         "Observability build identity",
-    }
-    expressions = "\n".join(
-        target["expr"] for panel in panels for target in panel.get("targets", [])
-    )
-    metrics = set(re.findall(r"\b[a-zA-Z_:][a-zA-Z0-9_:]*", expressions))
-    expected = {
-        "up",
-        "kube_node_status_condition",
-        "kube_deployment_spec_replicas",
-        "kube_deployment_status_replicas_available",
-        "kube_pod_status_ready",
-        "kube_pod_status_phase",
-        "kube_pod_container_status_restarts_total",
-        "node_cpu_seconds_total",
-        "node_uname_info",
-        "node_memory_MemAvailable_bytes",
-        "node_memory_MemTotal_bytes",
-        "node_filesystem_avail_bytes",
-        "node_filesystem_size_bytes",
-        "kubelet_volume_stats_available_bytes",
-        "kubelet_volume_stats_capacity_bytes",
-        "prometheus_tsdb_head_series",
-        "prometheus_build_info",
-        "alertmanager_build_info",
-        "grafana_build_info",
-        "node_exporter_build_info",
-    }
-    assert expected <= metrics
-    assert "kube_state_metrics_build_info" not in expressions
-    assert "cluster=" not in expressions and "vector(0)" not in expressions
-    assert expressions.count("$__rate_interval") == 2
-    assert all(
-        panel["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
-        for panel in panels
-        if panel["type"] != "row"
-    )
-    validator.validate_dashboard(PROD_DASHBOARD)
-
-
-def test_production_snapshot_and_unready_pod_contracts(prod_dashboard):
-    panels = {panel["title"]: panel for panel in all_panels(prod_dashboard)}
-    snapshot_tables = {
-        "Scrape availability by job",
-        "Node readiness",
-        "Deployment replica deficit",
-        "Observability component build identity",
-    }
-    assert all(
-        target.get("format") == "table"
-        and target.get("instant") is True
-        and target.get("range") is False
-        for title in snapshot_tables
-        for target in panels[title]["targets"]
-    )
-    expected_columns = {
-        "Scrape availability by job": {"job": 0, "Value": 1},
-        "Node readiness": {"node": 0, "Value": 1},
-        "Deployment replica deficit": {"namespace": 0, "deployment": 1, "Value": 2},
-        "Observability component build identity": {
-            "component": 0,
-            "pod": 1,
-            "version": 2,
-            "revision": 3,
-        },
-    }
-    expected_headings = {
-        "Scrape availability by job": {"job": "Job", "Value": "Status"},
-        "Node readiness": {"node": "Node", "Value": "Status"},
-        "Deployment replica deficit": {
-            "namespace": "Namespace",
-            "deployment": "Deployment",
-            "Value": "Replica deficit",
-        },
-        "Observability component build identity": {
-            "component": "Component",
-            "pod": "Pod",
-            "version": "Version",
-            "revision": "Revision",
-        },
-    }
-    for title, columns in expected_columns.items():
-        assert len(panels[title]["targets"]) == 1
-        assert len(panels[title]["transformations"]) == 1
-        assert panels[title]["transformations"][0]["id"] == "organize"
-        assert panels[title]["transformations"][0]["options"]["indexByName"] == columns
-        assert (
-            panels[title]["transformations"][0]["options"]["renameByName"]
-            == expected_headings[title]
-        )
-    build = panels["Observability component build identity"]["targets"][0]["expr"]
-    assert build.startswith("max by (component, pod, version, revision) (")
-    assert {
-        match[1]
-        for match in re.findall(
-            r'label_replace\((\w+), "component", "([\w-]+)", "", ""\)', build
-        )
-    } == {"prometheus", "alertmanager", "grafana", "node-exporter"}
-    unready = panels["Unready pods by namespace"]["targets"][0]["expr"]
-    assert 'kube_pod_status_phase{phase=~"Pending|Running|Unknown"} == 1' in unready
-    assert "group_left" in unready
-
-
-@pytest.mark.parametrize(
-    ("mutation", "message"),
-    [
-        (lambda d: d.update(uid="wrong"), "supported profile"),
-        (lambda d: d["panels"].append(d["panels"][1]), "IDs"),
-        (lambda d: d["panels"].pop(), "every required row and panel"),
-        (lambda d: production_panel(d, "Cluster health").update(type="stat"), "row contract"),
-        (
-            lambda d: d["panels"][8]["targets"][0].update(
-                expr="rate(kube_pod_container_status_restarts_total[5m])"
-            ),
-            "PromQL contract",
-        ),
-        (
-            lambda d: d["panels"][1]["targets"][0].update(
-                expr='min by (job) (up{cluster="sugarkube-prod"})'
-            ),
-            "PromQL contract",
-        ),
-        (
-            lambda d: d["panels"][14]["targets"][0].update(expr="sum(prometheus_tsdb_head_series)"),
-            "PromQL contract",
-        ),
-        (lambda d: d["panels"][1]["targets"][0].update(instant=False, range=True), "instant-only"),
-        (
-            lambda d: production_panel(d, "Observability component build identity").update(
-                type="stat"
-            ),
-            "consolidate into one frame",
-        ),
-        (
-            lambda d: production_panel(d, "Observability component build identity")["targets"][
-                0
-            ].update(expr="max by (instance) (prometheus_build_info)"),
-            "bounded component/pod/version/revision",
-        ),
-        (lambda d: d["panels"][1]["targets"][0].update(format="time_series"), "table-formatted"),
-        (
-            lambda d: d["panels"][1]["transformations"][0].update(id="reduce"),
-            "field organization",
-        ),
-        (
-            lambda d: d["panels"][1]["transformations"][0]["options"][
-                "indexByName"
-            ].pop("Value"),
-            "table columns",
-        ),
-        (
-            lambda d: d["panels"][1]["transformations"][0]["options"][
-                "renameByName"
-            ].pop("Value"),
-            "headings",
-        ),
-        (
-            lambda d: d["panels"][3]["transformations"][0]["options"][
-                "renameByName"
-            ].update(node="Host"),
-            "headings",
-        ),
-        (lambda d: d.update(refresh="1m"), "defaults or variables"),
-        (lambda d: add_row_expression(d, "or vector(0)"), "preserve missing data"),
-        (lambda d: add_row_expression(d, "probe_success"), "unverified signal"),
-        (
-            lambda d: production_panel(d, "Ready nodes")["targets"][0].update(
-                legendFormat="{{instance}}"
-            ),
-            "forbidden raw identity",
-        ),
-        (
-            lambda d: production_panel(d, "Node CPU utilization")["targets"][0].update(
-                legendFormat="{{node}}"
-            ),
-            "only nodename",
-        ),
-        (
-            lambda d: production_panel(d, "Node memory utilization")["fieldConfig"][
-                "defaults"
-            ].update(max=99),
-            "0-100 percent scale",
-        ),
-        (
-            lambda d: production_panel(d, "Ready nodes")["fieldConfig"]["defaults"].update(
-                noValue="0"
-            ),
-            "preserve NO DATA",
-        ),
-        (
-            lambda d: production_panel(d, "Ready nodes")["datasource"].update(uid="other"),
-            "Prometheus UID",
-        ),
-    ],
-)
-def test_production_validator_fails_closed(tmp_path, prod_dashboard, mutation, message):
-    mutation(prod_dashboard)
-    path = tmp_path / "dashboard.json"
-    path.write_text(json.dumps(prod_dashboard), encoding="utf-8")
-    with pytest.raises(SystemExit, match=message):
-        validator.validate_dashboard(path)
-
-
-def test_dashboard_identity_defaults_rows_and_required_panels(dashboard):
-    assert dashboard["uid"] == "sugarkube-staging-observability"
-    assert dashboard["title"] == "Sugarkube Staging Observability"
-    assert dashboard["time"] == {"from": "now-6h", "to": "now"}
-    assert dashboard["refresh"] == "30s"
-    panels = list(all_panels(dashboard))
-    assert len({panel["id"] for panel in panels}) == len(panels)
-    rows = {panel["title"] for panel in panels if panel["type"] == "row"}
-    assert rows == {
-        "Overall status",
         "DSPACE HTTP",
         "DSPACE runtime and release",
         "DSPACE feature traffic",
@@ -293,666 +104,277 @@ def test_dashboard_identity_defaults_rows_and_required_panels(dashboard):
         "DSPACE release integrity",
         "token.place relay and compute capacity",
         "token.place HTTP and release",
-    }
-    titles = {panel["title"] for panel in panels}
-    for title in (
-        "DSPACE scrape availability",
-        "Instrumentation health",
-        "Public availability summary",
-        "User request rate by route and status class",
-        "Operational request rate",
-        "Status-class distribution",
-        "5xx error ratio",
-        "HTTP latency percentiles",
-        "Resident memory by pod",
-        "Build identity",
-        "dChat request activity",
-        "token.place dependency request activity",
-        "Endpoint matrix",
-        "Probe duration",
-        "HTTP response status",
-        "TLS certificate lifetime",
-        "token.place scrape availability",
-        "token.place instrumentation health",
-        "token.place compute-node counts",
-        "token.place oldest compute-node lease age",
-        "token.place compute-node eviction rate",
-        "token.place relay queue depth",
-        "token.place oldest queued-request age",
-        "token.place in-flight requests by pod",
-        "token.place oldest in-flight age by pod",
-        "token.place terminal outcome rate",
-        "token.place HTTP request rate",
-        "token.place HTTP 5xx ratio",
-        "token.place HTTP latency percentiles",
-        "token.place build identity",
-    ):
-        assert title in titles
-
-
-def test_queries_use_stable_datasource_bounded_labels_and_safe_zero(dashboard):
-    serialized = json.dumps(dashboard)
-    expressions = [
-        target["expr"] for panel in all_panels(dashboard) for target in panel.get("targets", [])
     ]
-    assert '"uid": "prometheus"' in serialized
-    assert "${DS_" not in serialized and "__inputs" not in serialized
-    assert not any("{{target}}" in serialized or "target=~" in expr for expr in expressions)
-    assert "http://" not in serialized
-    assert serialized.count("https://github.com/futuroptimist/sugarkube/blob/main/") == 2
+    assert [item["id"] for item in staging["panels"]] == list(range(1, 61))
+    assert panel(staging, "DSPACE instrumentation health")
+    assert panel(staging, "DSPACE build identity")
     assert all(
-        "or on() vector(0)" in expr
-        for expr in expressions
-        if "dspace_dchat_requests_total" in expr or "dspace_dependency_requests_total" in expr
+        item["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
+        for item in staging["panels"]
+        if item["type"] not in {"row", "text"}
     )
-    assert {item["name"] for item in dashboard["templating"]["list"]} == {
-        "environment",
-        "app",
-        "route",
+    validator.validate_dashboard(STAGING)
+    validator.validate_dashboard(PROD)
+
+
+def test_all_ten_tables_are_simultaneous_single_frames(dashboards):
+    staging, _ = dashboards
+    tables = [item for item in staging["panels"] if item["type"] == "table"]
+    assert len(tables) == 10
+    for table in tables:
+        assert len(table["targets"]) == 1
+        assert table["targets"][0]["format"] == "table"
+        assert table["targets"][0]["instant"] is True
+        assert table["targets"][0]["range"] is False
+        assert [item["id"] for item in table["transformations"]] == ["organize"]
+        options = table["transformations"][0]["options"]
+        assert options["indexByName"] and options["renameByName"]
+        assert options["excludeByName"]["Time"] is True
+        assert options["excludeByName"]["__name__"] is True
+
+
+def test_missing_application_capabilities_produce_no_series_not_healthy_zero(dashboards):
+    _, prod = dashboards
+    expressions = {
+        item["title"]: [target.get("expr", "") for target in item.get("targets", [])]
+        for item in prod["panels"]
     }
-
-
-def test_tokenplace_queries_are_replica_safe_bounded_and_preserve_missing_data(dashboard):
-    panels = {panel["title"]: panel for panel in all_panels(dashboard)}
-    token_panels = [panels[title] for title in validator.TOKENPLACE_PANELS]
-    expressions = [target["expr"] for panel in token_panels for target in panel["targets"]]
-    selector = (
-        'app="tokenplace",environment=~"$environment",release="tokenplace",'
-        'cluster="sugarkube-int",namespace="tokenplace"'
-    )
-    assert all(selector in expression for expression in expressions)
-    assert all("vector(0)" not in expression for expression in expressions)
-    assert all(panel["fieldConfig"]["defaults"]["noValue"] == "NO DATA" for panel in token_panels)
-
-    counts = panels["token.place compute-node counts"]
-    assert all(target["expr"].startswith("max(") for target in counts["targets"])
-    assert panels["token.place relay queue depth"]["targets"][0]["expr"].startswith(
-        "max by (provider_mode)"
-    )
-    assert panels["token.place in-flight requests by pod"]["targets"][0]["expr"].startswith(
-        "max by (pod)"
-    )
-    assert (
-        "sum by (reason) (rate("
-        in panels["token.place compute-node eviction rate"]["targets"][0]["expr"]
-    )
-    assert (
-        "sum by (outcome) (rate("
-        in panels["token.place terminal outcome rate"]["targets"][0]["expr"]
-    )
-    assert (
-        "sum by (route, status_class) (rate("
-        in panels["token.place HTTP request rate"]["targets"][0]["expr"]
-    )
-
-    latency = panels["token.place HTTP latency percentiles"]
-    assert len(latency["targets"]) == 3
-    assert all("histogram_quantile(" in target["expr"] for target in latency["targets"])
-    assert all("sum by (le, route)" in target["expr"] for target in latency["targets"])
-    rate_expressions = [expression for expression in expressions if "rate(" in expression]
-    assert rate_expressions
-    assert all("[$__rate_interval]" in expression for expression in rate_expressions)
-    validator.validate_tokenplace_semantics(dashboard)
-    build = panels["token.place build identity"]["targets"][0]
-    assert build["expr"].startswith("max by (pod, version, revision)")
-    assert build["legendFormat"] == "{{pod}} {{version}} {{revision}}"
-
-
-@pytest.mark.parametrize(
-    "title",
-    ["token.place scrape availability", "token.place instrumentation health"],
-)
-@pytest.mark.parametrize("missing_flag", ["instant", "range"])
-def test_validator_rejects_missing_health_query_flags(dashboard, title, missing_flag):
-    changed = json.loads(json.dumps(dashboard))
-    panel = next(panel for panel in all_panels(changed) if panel["title"] == title)
-    panel["targets"][0].pop(missing_flag)
-    with pytest.raises(SystemExit, match="instant-only"):
-        validator.validate_tokenplace_semantics(changed)
-
-
-@pytest.mark.parametrize(
-    ("title", "mutation"),
-    [
-        ("token.place HTTP 5xx ratio", lambda panel: panel.update(targets=[])),
-        (
-            "token.place terminal outcome rate",
-            lambda panel: panel["targets"][0].update(
-                expr=panel["targets"][0]["expr"].replace(
-                    "tokenplace_relay_request_outcomes_total",
-                    "tokenplace_compute_node_evictions_total",
-                )
-            ),
-        ),
-    ],
-)
-def test_validator_rejects_empty_or_metric_swapped_panels(dashboard, title, mutation):
-    changed = json.loads(json.dumps(dashboard))
-    mutation(next(panel for panel in all_panels(changed) if panel["title"] == title))
-    with pytest.raises(SystemExit):
-        validator.validate_tokenplace_semantics(changed)
-
-
-def test_validator_rejects_queued_age_grouped_away_from_provider_mode(dashboard):
-    changed = json.loads(json.dumps(dashboard))
-    panel = next(
-        panel
-        for panel in all_panels(changed)
-        if panel["title"] == "token.place oldest queued-request age"
-    )
-    panel["targets"][0]["expr"] = panel["targets"][0]["expr"].replace(
-        "by (provider_mode)", "by (pod)"
-    )
-    with pytest.raises(SystemExit, match="provider_mode"):
-        validator.validate_tokenplace_semantics(changed)
-
-
-@pytest.mark.parametrize("mutation", ["4xx", "unclamped"])
-def test_validator_rejects_unsafe_http_5xx_ratio(dashboard, mutation):
-    changed = json.loads(json.dumps(dashboard))
-    target = next(
-        panel for panel in all_panels(changed) if panel["title"] == "token.place HTTP 5xx ratio"
-    )["targets"][0]
-    if mutation == "4xx":
-        target["expr"] = target["expr"].replace('status_class="5xx"', 'status_class="4xx"')
-    else:
-        target["expr"] = target["expr"].replace("clamp_min(", "(").replace(", 1e-9)", ")")
-    with pytest.raises(SystemExit, match="5xx ratio"):
-        validator.validate_tokenplace_semantics(changed)
-
-
-@pytest.mark.parametrize(
-    ("label", "location"),
-    [
-        ("remote_addr", "matcher"),
-        ("node_id", "grouping"),
-        ("remote_addr", "legend"),
-    ],
-)
-def test_validator_rejects_unknown_tokenplace_labels(dashboard, label, location):
-    changed = json.loads(json.dumps(dashboard))
-    panel = next(
-        panel for panel in all_panels(changed) if panel["title"] == "token.place relay queue depth"
-    )
-    target = panel["targets"][0]
-    if location == "matcher":
-        target["expr"] = target["expr"].replace(
-            'namespace="tokenplace"', f'namespace="tokenplace",{label}="raw"'
+    for title in ("Image-pin agreement", "DSPACE metrics-target health"):
+        assert "0 * count(dspace_release_approved_info" in expressions[title][0]
+        assert "vector(0)" not in expressions[title][0]
+    for title in (
+        "Image-pin agreement",
+        "DSPACE metrics-target health",
+        "/chat synthetic result and freshness",
+    ):
+        assert all(
+            expression.endswith(validator.CAPABILITY_PRESENCE_GATE)
+            for expression in expressions[title]
         )
-    elif location == "grouping":
-        target["expr"] = target["expr"].replace(
-            "by (provider_mode)", f"by (provider_mode, {label})"
-        )
-    else:
-        target["legendFormat"] = f"{{{{provider_mode}}}} {{{{{label}}}}}"
-    with pytest.raises(SystemExit):
-        validator.validate_tokenplace_semantics(changed)
+    image_pin = expressions["Image-pin agreement"][0]
+    assert '"^(docker-pullable://)?(.*)$"' in image_pin
+    assert '"image_id", "unknown"' in image_pin
+    assert '"image_spec", "unknown"' in image_pin
+    assert (
+        "0 * count(dspace_release_approved_info"
+        in expressions["/chat synthetic result and freshness"][0]
+    )
+    for title in ("dChat request activity", "token.place dependency request activity"):
+        assert "0 * count(dspace_instrumentation_up" in expressions[title][0]
+    token_expressions = [
+        expr
+        for title, values in expressions.items()
+        if title.startswith("token.place")
+        for expr in values
+    ]
+    assert not any("vector(0)" in expr for expr in token_expressions)
+    # Production has no capability producer in this task; gated RHS therefore has no output.
+    assert prod["templating"]["list"][0]["query"] == "prod"
+    assert all(
+        item["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
+        for item in prod["panels"]
+        if item["type"] not in {"row", "text"}
+    )
+
+
+def test_query_scoping_and_safe_labels(dashboards):
+    staging, _ = dashboards
+    serialized = json.dumps(staging)
+    expressions = [
+        target["expr"] for item in staging["panels"] for target in item.get("targets", [])
+    ]
+    assert all("-$environment-.*" in expr for expr in expressions if "blackbox-" in expr)
+    token_titles = validator.TOKENPLACE_DATA_TITLES
+    token_expressions = [
+        target["expr"] for title in token_titles for target in panel(staging, title)["targets"]
+    ]
+    assert all(
+        'environment=~"$environment"' in expr and 'cluster=~"$cluster"' in expr
+        for expr in token_expressions
+    )
+    core = [expr for expr in expressions if "$cluster" not in expr]
+    assert not any("cluster=" in expr or "cluster=~" in expr for expr in core)
+    assert "kube_state_metrics_build_info" not in serialized
+    assert not any(f"{{{{{label}}}}}" in serialized for label in validator.FORBIDDEN_LABELS)
 
 
 @pytest.mark.parametrize(
-    "metric",
+    ("title", "target_index"),
     [
-        "tokenplace_relay_chat_available",
-        "tokenplace_relay_schedulable_compute_nodes",
-        "tokenplace_relay_chat_availability_state",
-        "tokenplace_relay_state_store_up",
+        ("Image-pin agreement", 0),
+        ("DSPACE metrics-target health", 0),
+        ("/chat synthetic result and freshness", 0),
+        ("/chat synthetic result and freshness", 1),
     ],
 )
-def test_validator_rejects_actual_phase_two_metrics(dashboard, metric):
-    changed = json.loads(json.dumps(dashboard))
-    panel = next(
-        panel for panel in all_panels(changed) if panel["title"] == "token.place relay queue depth"
-    )
-    panel["description"] = f"Deferred metric: {metric}"
-    with pytest.raises(SystemExit, match="Phase 2"):
-        validator.validate_tokenplace_semantics(changed)
+def test_capability_outer_presence_gate_is_required(tmp_path, dashboards, title, target_index):
+    staging, _ = dashboards
+    changed = copy.deepcopy(staging)
+    target = panel(changed, title)["targets"][target_index]
+    assert target["expr"].endswith(validator.CAPABILITY_PRESENCE_GATE)
+    target["expr"] = target["expr"][: -len(validator.CAPABILITY_PRESENCE_GATE)].rstrip()
+    with pytest.raises(SystemExit, match="capability-presence"):
+        validator.validate_dashboard(write_candidate(tmp_path, changed))
 
 
-@pytest.mark.parametrize(
-    ("title", "mutation", "message"),
-    [
-        (
-            "token.place scrape availability",
-            lambda expression: f"{expression} or up",
-            "bare or unverified metric selector",
-        ),
-        (
-            "token.place scrape availability",
-            lambda expression: (
-                f"{expression} or tokenplace_unverified_future_metric{{"
-                'app="tokenplace",environment=~"$environment",release="tokenplace",'
-                'cluster="sugarkube-int",namespace="tokenplace"}'
-            ),
-            "intended metric family",
-        ),
-        (
-            "token.place instrumentation health",
-            lambda expression: f'label_replace({expression}, "remote_addr", "raw", "pod", "(.*)")',
-            "synthesize labels",
-        ),
-    ],
-)
-def test_validator_rejects_unscoped_unverified_or_synthesized_metrics(
-    dashboard, title, mutation, message
-):
-    changed = json.loads(json.dumps(dashboard))
-    panel = next(panel for panel in all_panels(changed) if panel["title"] == title)
-    panel["targets"][0]["expr"] = mutation(panel["targets"][0]["expr"])
-    with pytest.raises(SystemExit, match=message):
-        validator.validate_tokenplace_semantics(changed)
-
-
-@pytest.mark.parametrize(
-    "addition",
-    [
-        "process_cpu_seconds_total",
-        "probe_success",
-        "sum(arbitrary_external_metric_total) + 1",
-    ],
-)
-def test_validator_rejects_any_bare_metric_selector(dashboard, addition):
-    changed = json.loads(json.dumps(dashboard))
-    panel = next(
-        panel
-        for panel in all_panels(changed)
-        if panel["title"] == "token.place scrape availability"
-    )
-    expression = panel["targets"][0]["expr"]
-    panel["targets"][0]["expr"] = f"({expression}) or ({addition})"
-    with pytest.raises(SystemExit, match="bare or unverified metric selector"):
-        validator.validate_tokenplace_semantics(changed)
-
-
-@pytest.mark.parametrize(
-    "variable",
-    ["$app", "$environment", "$__range", "$__rate_interval", "${app}"],
-)
-def test_validator_rejects_template_variables_in_metric_position(dashboard, variable):
-    changed = json.loads(json.dumps(dashboard))
-    panel = next(
-        panel
-        for panel in all_panels(changed)
-        if panel["title"] == "token.place scrape availability"
-    )
-    expression = panel["targets"][0]["expr"]
-    panel["targets"][0]["expr"] = f"({expression}) or ({variable})"
-    with pytest.raises(SystemExit, match="template variable outside"):
-        validator.validate_tokenplace_semantics(changed)
-
-
-def test_validator_rejects_canonical_matchers_hidden_in_backtick_value(dashboard):
-    changed = json.loads(json.dumps(dashboard))
-    panel = next(
-        panel
-        for panel in all_panels(changed)
-        if panel["title"] == "token.place scrape availability"
-    )
-    panel["targets"][0]["expr"] = (
-        "min by (pod) (up{route=`"
-        'app="tokenplace",environment=~"$environment",release="tokenplace",'
-        'cluster="sugarkube-int",namespace="tokenplace"`})'
-    )
-    with pytest.raises(SystemExit, match="canonical target selector"):
-        validator.validate_tokenplace_semantics(changed)
-
-
-@pytest.mark.parametrize(
-    "extra_matcher",
-    [
-        'route=~"$app"',
-        'route=~"$environment"',
-        'pod=~"$__range"',
-        'app="tokenplace"',
-        'route="unexpected"',
-    ],
-)
-def test_validator_rejects_extra_dynamic_matchers(dashboard, extra_matcher):
-    changed = json.loads(json.dumps(dashboard))
-    panel = next(
-        panel
-        for panel in all_panels(changed)
-        if panel["title"] == "token.place scrape availability"
-    )
-    panel["targets"][0]["expr"] = panel["targets"][0]["expr"].replace(
-        'namespace="tokenplace"', f'namespace="tokenplace",{extra_matcher}'
-    )
-    with pytest.raises(SystemExit, match="canonical target selector"):
-        validator.validate_tokenplace_semantics(changed)
-
-
-def test_validator_rejects_single_quoted_matcher(dashboard):
-    changed = json.loads(json.dumps(dashboard))
-    panel = next(
-        panel
-        for panel in all_panels(changed)
-        if panel["title"] == "token.place scrape availability"
-    )
-    panel["targets"][0]["expr"] = panel["targets"][0]["expr"].replace(
-        'app="tokenplace"', "app='tokenplace'"
-    )
-    with pytest.raises(SystemExit, match="canonical target selector"):
-        validator.validate_tokenplace_semantics(changed)
+def test_raw_ip_legend_is_rejected(tmp_path, dashboards):
+    staging, _ = dashboards
+    changed = copy.deepcopy(staging)
+    panel(changed, "Scrape availability by job")["targets"][0]["legendFormat"] = "{{ip}}"
+    with pytest.raises(SystemExit, match="forbidden raw identity label"):
+        validator.validate_dashboard(write_candidate(tmp_path, changed))
 
 
 @pytest.mark.parametrize(
     "mutation",
     [
-        lambda expression: f"{expression}[$__rate_interval]",
-        lambda expression: f"{expression} + rate([$__rate_interval])",
+        "object-count",
+        "ids",
+        "grid-type",
+        "grid-bounds",
+        "grid-overlap",
+        "table-count",
+        "table-target",
+        "table-transform-count",
+        "table-columns",
+        "table-exclusions",
+        "variable-shape",
+        "constant-variable",
+        "query-variable",
+        "build-info",
+        "external-cluster",
+        "token-scope",
+        "token-zero",
+        "event-capability",
+        "image-zero",
+        "image-prefix",
+        "image-metadata",
+        "chat-capability",
+        "blackbox-environment",
     ],
 )
-def test_validator_rejects_stray_rate_ranges(dashboard, mutation):
-    changed = json.loads(json.dumps(dashboard))
-    panel = next(
-        panel
-        for panel in all_panels(changed)
-        if panel["title"] == "token.place scrape availability"
-    )
-    panel["targets"][0]["expr"] = mutation(panel["targets"][0]["expr"])
+def test_semantic_contract_rejects_invalid_dashboard_mutations(dashboards, mutation):
+    staging, _ = dashboards
+    changed = copy.deepcopy(staging)
+    scrape_table = panel(changed, "Scrape availability by job")
+    if mutation == "object-count":
+        changed["panels"].pop()
+    elif mutation == "ids":
+        changed["panels"][0]["id"] = 99
+    elif mutation == "grid-type":
+        changed["panels"][1]["gridPos"]["x"] = "0"
+    elif mutation == "grid-bounds":
+        changed["panels"][1]["gridPos"]["w"] = 25
+    elif mutation == "grid-overlap":
+        changed["panels"][2]["gridPos"] = changed["panels"][1]["gridPos"]
+    elif mutation == "table-count":
+        scrape_table["type"] = "stat"
+    elif mutation == "table-target":
+        scrape_table["targets"][0]["range"] = True
+    elif mutation == "table-transform-count":
+        scrape_table["transformations"] = []
+    elif mutation == "table-columns":
+        scrape_table["transformations"][0]["options"]["indexByName"] = {}
+    elif mutation == "table-exclusions":
+        scrape_table["transformations"][0]["options"]["excludeByName"].pop("Time")
+    elif mutation == "variable-shape":
+        changed["templating"]["list"][3]["name"] = "path"
+    elif mutation == "constant-variable":
+        changed["templating"]["list"][0]["hide"] = 0
+    elif mutation == "query-variable":
+        changed["templating"]["list"][2]["includeAll"] = False
+    elif mutation == "build-info":
+        changed["panels"][1]["targets"][0]["expr"] = "kube_state_metrics_build_info"
+    elif mutation == "external-cluster":
+        changed["panels"][1]["targets"][0]["expr"] = 'up{cluster="remote"}'
+    elif mutation == "token-scope":
+        panel(changed, next(iter(validator.TOKENPLACE_DATA_TITLES)))["targets"][0]["expr"] = "up"
+    elif mutation == "token-zero":
+        panel(changed, next(iter(validator.TOKENPLACE_DATA_TITLES)))["targets"][0][
+            "expr"
+        ] += " or vector(0)"
+    elif mutation == "event-capability":
+        panel(changed, "dChat request activity")["targets"][0][
+            "expr"
+        ] = "dspace_dchat_requests_total"
+    elif mutation == "image-zero":
+        panel(changed, "Image-pin agreement")["targets"][0]["expr"] = panel(
+            changed, "Image-pin agreement"
+        )["targets"][0]["expr"].replace("0 * count(", "count(", 1)
+    elif mutation == "image-prefix":
+        panel(changed, "Image-pin agreement")["targets"][0]["expr"] = panel(
+            changed, "Image-pin agreement"
+        )["targets"][0]["expr"].replace('"^(docker-pullable://)?(.*)$"', '"(.*)"')
+    elif mutation == "image-metadata":
+        panel(changed, "Image-pin agreement")["targets"][0]["expr"] = panel(
+            changed, "Image-pin agreement"
+        )["targets"][0]["expr"].replace('"image_id", "unknown"', '"image_id", "missing"')
+    elif mutation == "chat-capability":
+        panel(changed, "/chat synthetic result and freshness")["targets"][0]["expr"] = panel(
+            changed, "/chat synthetic result and freshness"
+        )["targets"][0]["expr"].replace("0 * count(", "count(", 1)
+    else:
+        blackbox = next(
+            target
+            for item in changed["panels"]
+            for target in item.get("targets", [])
+            if "blackbox-" in target.get("expr", "")
+        )
+        blackbox["expr"] = blackbox["expr"].replace("-$environment-.*", "-prod-.*")
     with pytest.raises(SystemExit):
-        validator.validate_tokenplace_semantics(changed)
-
-
-def test_validator_rejects_selector_range_outside_rate(dashboard):
-    changed = json.loads(json.dumps(dashboard))
-    panel = next(
-        panel
-        for panel in all_panels(changed)
-        if panel["title"] == "token.place scrape availability"
-    )
-    panel["targets"][0]["expr"] = panel["targets"][0]["expr"].replace("})", "}[$__rate_interval])")
-    with pytest.raises(SystemExit, match="range outside"):
-        validator.validate_tokenplace_semantics(changed)
+        validator._validate_semantics(changed)
 
 
 @pytest.mark.parametrize(
-    ("title", "mutation", "message"),
+    "expression",
     [
-        (
-            "token.place compute-node eviction rate",
-            lambda panel: panel["targets"][0].update(
-                expr=panel["targets"][0]["expr"].replace("[$__rate_interval]", "")
-            ),
-            "rate ranges",
-        ),
-        (
-            "token.place scrape availability",
-            lambda panel: panel["targets"][0].update(
-                expr=f'({panel["targets"][0]["expr"]}) + [5m]'
-            ),
-            "invalid range",
-        ),
-        (
-            "token.place instrumentation health",
-            lambda panel: panel["targets"][0].update(expr="1"),
-            "intended metric family",
-        ),
-        (
-            "token.place relay queue depth",
-            lambda panel: panel["targets"][0].update(
-                expr=panel["targets"][0]["expr"].replace("max by", "min by")
-            ),
-            "explicit max deduplication",
-        ),
-        (
-            "token.place compute-node counts",
-            lambda panel: panel["targets"][0].update(
-                expr=panel["targets"][0]["expr"].replace("max(", "max by (pod) (")
-            ),
-            "direct max deduplication",
-        ),
-        (
-            "token.place compute-node eviction rate",
-            lambda panel: panel["targets"][0].update(
-                expr=panel["targets"][0]["expr"].replace("sum by (reason)", "min")
-            ),
-            "summed rate",
-        ),
-        (
-            "token.place terminal outcome rate",
-            lambda panel: panel["targets"][0].update(expr=f'({panel["targets"][0]["expr"]})'),
-            "directly use",
-        ),
-        (
-            "token.place HTTP request rate",
-            lambda panel: panel["targets"][0].update(
-                expr=panel["targets"][0]["expr"].replace(
-                    "sum by (route, status_class)", "sum by (route)"
-                )
-            ),
-            "group by route",
-        ),
-        (
-            "token.place build identity",
-            lambda panel: panel["targets"][0].update(instant=False),
-            "build identity",
-        ),
-        (
-            "token.place HTTP latency percentiles",
-            lambda panel: panel["targets"][0].update(legendFormat="p90 {{route}}"),
-            "latency",
-        ),
-        (
-            "token.place relay queue depth",
-            lambda panel: panel["fieldConfig"]["defaults"].update(noValue="0"),
-            "NO DATA",
-        ),
-        (
-            "token.place scrape availability",
-            lambda panel: panel["targets"][0].update(legendFormat="{{remote_addr}}"),
-            "unsafe label",
-        ),
+        "up",
+        "(up)",
+        f"up {validator.CAPABILITY_PRESENCE_GATE}",
+        f"(up) + 1 {validator.CAPABILITY_PRESENCE_GATE}",
+        f"((up) {validator.CAPABILITY_PRESENCE_GATE}",
+        f'((label_replace(up, "x", "\\"", "y", ".*"))) extra {validator.CAPABILITY_PRESENCE_GATE}',
     ],
 )
-def test_validator_rejects_tokenplace_contract_mutations(dashboard, title, mutation, message):
-    changed = json.loads(json.dumps(dashboard))
-    panel = next(panel for panel in all_panels(changed) if panel["title"] == title)
-    mutation(panel)
-    with pytest.raises(SystemExit, match=message):
-        validator.validate_tokenplace_semantics(changed)
-
-
-def test_validator_rejects_duplicate_panel_and_non_row_heading(dashboard):
-    duplicate = json.loads(json.dumps(dashboard))
-    duplicate["panels"].append(
-        next(
-            panel
-            for panel in all_panels(duplicate)
-            if panel["title"] == "token.place scrape availability"
-        )
-    )
-    with pytest.raises(SystemExit, match="exactly one"):
-        validator.validate_tokenplace_semantics(duplicate)
-
-    non_row = json.loads(json.dumps(dashboard))
-    heading = next(
-        panel
-        for panel in all_panels(non_row)
-        if panel["title"] == "token.place relay and compute capacity"
-    )
-    heading["type"] = "stat"
-    with pytest.raises(SystemExit, match="section headings"):
-        validator.validate_tokenplace_semantics(non_row)
+def test_outer_capability_gate_parser_rejects_malformed_expressions(expression):
+    assert not validator._has_outer_capability_presence_gate(expression)
 
 
 @pytest.mark.parametrize(
-    ("title", "replacement", "message"),
-    [
-        (
-            "token.place compute-node counts",
-            "sum(tokenplace_compute_nodes_registered)",
-            "canonical target selector",
-        ),
-        (
-            "token.place terminal outcome rate",
-            "sum(rate(tokenplace_relay_request_outcomes_total{"
-            'app="tokenplace",environment=~"$environment",release="tokenplace",'
-            'cluster="sugarkube-int",namespace="tokenplace"}[$__rate_interval])) '
-            "or vector(0)",
-            "substituting zero",
-        ),
-        (
-            "token.place compute-node eviction rate",
-            "sum(rate(tokenplace_compute_node_evictions_total{"
-            'app="tokenplace",environment=~"$environment",release="tokenplace",'
-            'cluster="sugarkube-int",namespace="tokenplace"}[$__rate_interval]))',
-            "bounded reason",
-        ),
-        (
-            "token.place in-flight requests by pod",
-            "sum(tokenplace_relay_in_flight_requests{"
-            'app="tokenplace",environment=~"$environment",release="tokenplace",'
-            'cluster="sugarkube-int",namespace="tokenplace"})',
-            "per pod",
-        ),
-    ],
+    "kind",
+    ["title", "query", "grid", "type", "transformation", "noValue", "variable", "target-mode"],
 )
-def test_validator_rejects_unsafe_tokenplace_query_regressions(
-    dashboard, title, replacement, message
-):
-    changed = json.loads(json.dumps(dashboard))
-    next(panel for panel in all_panels(changed) if panel["title"] == title)["targets"][0][
-        "expr"
-    ] = replacement
-    with pytest.raises(SystemExit, match=message):
-        validator.validate_tokenplace_semantics(changed)
+def test_one_sided_canonical_mutations_fail(tmp_path, dashboards, kind):
+    staging, _ = dashboards
+    changed = copy.deepcopy(staging)
+    if kind == "title":
+        changed["panels"][1]["title"] += " drift"
+    elif kind == "query":
+        changed["panels"][1]["targets"][0]["expr"] = "up"
+    elif kind == "grid":
+        changed["panels"][1]["gridPos"]["x"] += 1
+    elif kind == "type":
+        changed["panels"][1]["type"] = "gauge"
+    elif kind == "transformation":
+        panel(changed, "Scrape availability by job")["transformations"][0]["id"] = "merge"
+    elif kind == "noValue":
+        changed["panels"][1]["fieldConfig"]["defaults"].pop("noValue")
+    elif kind == "variable":
+        changed["templating"]["list"][0]["query"] = "prod"
+    else:
+        panel(changed, "Scrape availability by job")["targets"][0]["instant"] = False
+    with pytest.raises(SystemExit):
+        validator.validate_dashboard(write_candidate(tmp_path, changed))
 
 
-def test_snapshot_tables_use_instant_queries(dashboard):
-    snapshots = {"Endpoint matrix", "Build identity", "HTTP response status"}
-    panels = {panel["title"]: panel for panel in all_panels(dashboard)}
-    for title in snapshots:
-        assert panels[title]["targets"]
-        assert all(
-            target.get("instant") is True and target.get("range") is False
-            for target in panels[title]["targets"]
-        )
-    build = panels["Build identity"]
-    assert build["targets"][0]["expr"].startswith("max by (pod, version, revision) (")
-    organize = next(item for item in build["transformations"] if item["id"] == "organize")
-    assert organize["options"]["indexByName"] == {"pod": 0, "version": 1, "revision": 2}
-    assert organize["options"]["excludeByName"] == {"Time": True, "Value": True}
-
-
-def test_selected_window_traffic_and_availability_semantics(dashboard):
-    panels = {panel["title"]: panel for panel in all_panels(dashboard)}
-
-    distribution = panels["Status-class distribution"]
-    assert distribution["type"] == "piechart"
-    assert all(
-        target.get("instant") is True and target.get("range") is False
-        for target in distribution["targets"]
-    )
-    assert "increase(" in distribution["targets"][0]["expr"]
-    assert "$__range" in distribution["targets"][0]["expr"]
-    colors = {
-        override["matcher"]["options"]: override["properties"][0]["value"]["fixedColor"]
-        for override in distribution["fieldConfig"]["overrides"]
-    }
-    assert colors == {"2xx": "green", "4xx": "orange", "5xx": "red"}
-
-    user_expression = panels["User request rate by route and status class"]["targets"][0]["expr"]
-    operational_expression = panels["Operational request rate"]["targets"][0]["expr"]
-    assert 'route!~"/(healthz|livez|metrics)"' in user_expression
-    assert 'route=~"/(healthz|livez|metrics)"' in operational_expression
-
-    summary = panels["Public availability summary"]
-    assert len(summary["targets"]) == 3
-    assert all(
-        target["instant"] is True and target["range"] is False for target in summary["targets"]
-    )
-    assert {target["legendFormat"] for target in summary["targets"]} == {
-        "Healthy endpoints",
-        "Failed endpoints",
-        "Missing probe data",
-    }
-    summary_expressions = {target["legendFormat"]: target["expr"] for target in summary["targets"]}
-    assert "sum(" in summary_expressions["Healthy endpoints"]
-    assert "== bool 1" in summary_expressions["Healthy endpoints"]
-    failed_expression = summary_expressions["Failed endpoints"]
-    assert "sum(" in failed_expression and "== bool 0" in failed_expression
-    missing_expression = summary_expressions["Missing probe data"]
-    assert "max_over_time(up{" in missing_expression
-    retention = next(
-        line.split(":", 1)[1].strip()
-        for line in PROMETHEUS_VALUES.read_text(encoding="utf-8").splitlines()
-        if line.strip().startswith("retention:")
-    )
-    assert f"[{retention}]" in missing_expression
-    assert ">= bool 0" in missing_expression
-    assert " - (sum(" in missing_expression
-    assert "probe_success{" in missing_expression
-    assert "or vector(0)" in missing_expression
-    assert all(
-        'job=~"probe/monitoring/blackbox-(dspace|tokenplace|danielsmith|jobbot3000)-staging-.*"'
-        in expression
-        for expression in summary_expressions.values()
-    )
-    missing_override = next(
-        override
-        for override in summary["fieldConfig"]["overrides"]
-        if override["matcher"]["options"] == "Missing probe data"
-    )
-    assert missing_override["properties"][0]["value"]["fixedColor"] == "yellow"
-    assert summary["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
-    assert panels["Endpoint matrix"]["type"] == "table"
-
-    variables = {item["name"]: item for item in dashboard["templating"]["list"]}
-    assert variables["app"]["label"] == "Probe application"
-    assert variables["route"]["label"] == "Probe route"
-
-
-def test_blackbox_queries_drop_raw_target_labels(dashboard):
-    panels = {panel["title"]: panel for panel in all_panels(dashboard)}
-    expected = {
-        "Endpoint matrix": "min",
-        "Probe duration": "max",
-        "HTTP response status": "max",
-        "TLS certificate lifetime": "min",
-    }
-    for title, aggregation in expected.items():
-        expression = panels[title]["targets"][0]["expr"]
-        assert f"{aggregation} by (environment, app, route) (" in expression
-        assert " by (environment, app, route, " not in expression
-        assert "instance" not in expression and "target" not in expression
-
-
-def test_validator_rejects_malformed_missing_and_changed_identity(tmp_path):
-    for content in ("{", "{}"):
-        candidate = tmp_path / f"candidate-{len(content)}.json"
-        candidate.write_text(content, encoding="utf-8")
-        result = subprocess.run(
-            ["python3", str(VALIDATOR), str(candidate)], capture_output=True, text=True
-        )
-        assert result.returncode != 0
-    missing = subprocess.run(
-        ["python3", str(VALIDATOR), str(tmp_path / "missing.json")], capture_output=True
-    )
-    assert missing.returncode != 0
-
-    for content in ("{", "[]"):
-        candidate = tmp_path / f"direct-{len(content)}.json"
-        candidate.write_text(content, encoding="utf-8")
-        with pytest.raises(SystemExit, match="dashboard JSON"):
-            validator.load_dashboard(candidate)
-    with pytest.raises(SystemExit, match="dashboard JSON"):
-        validator.load_dashboard(tmp_path / "direct-missing.json")
-
-
-def rendered_dashboard_yaml(dashboard, mount_path=None, sub_path=None):
-    filename = f"{dashboard['uid']}.json"
-    mount_path = mount_path or f"/var/lib/grafana/dashboards/sugarkube/{filename}"
-    sub_path = sub_path or filename
-    payload = json.dumps(dashboard, indent=2)
+def rendered_manifest(document):
+    uid = document["uid"]
+    payload = json.dumps(document, indent=2)
     return (
-        "kind: ConfigMap\n"
-        "metadata:\n"
+        "kind: ConfigMap\nmetadata:\n"
         "  name: kube-prometheus-stack-grafana-dashboards-sugarkube\n"
-        "  labels:\n"
-        "    dashboard-provider: sugarkube\n"
-        "data:\n"
-        f"  {filename}:\n"
-        "    |-\n"
+        "  labels:\n    dashboard-provider: sugarkube\ndata:\n"
+        f"  {uid}.json:\n    |-\n"
         + "\n".join(f"      {line}" for line in payload.splitlines())
         + "\n---\nkind: ConfigMap\ndata:\n  dashboardproviders.yaml: |\n"
         "    providers:\n      - name: sugarkube\n        options:\n"
@@ -960,433 +382,71 @@ def rendered_dashboard_yaml(dashboard, mount_path=None, sub_path=None):
         "---\nkind: Deployment\nspec:\n  template:\n    spec:\n      containers:\n"
         "        - volumeMounts:\n"
         "            - name: dashboards-sugarkube\n"
-        f'              mountPath: "{mount_path}"\n'
-        f'              subPath: "{sub_path}"\n'
+        f'              mountPath: "/var/lib/grafana/dashboards/sugarkube/{uid}.json"\n'
+        f'              subPath: "{uid}.json"\n'
     )
 
 
-def run_render_validation(tmp_path, content):
+@pytest.mark.parametrize("source", [STAGING, PROD])
+def test_source_rendered_configmap_equality(tmp_path, source):
+    document = json.loads(source.read_text())
     rendered = tmp_path / "rendered.yaml"
-    rendered.write_text(content, encoding="utf-8")
-    return subprocess.run(
-        ["python3", str(VALIDATOR), str(DASHBOARD), "--rendered", str(rendered)],
-        capture_output=True,
-        text=True,
-    )
-
-
-def test_validator_accepts_chart_native_render(tmp_path, dashboard):
-    result = run_render_validation(tmp_path, rendered_dashboard_yaml(dashboard))
-    assert result.returncode == 0, result.stderr
-
-    rendered = tmp_path / "direct-rendered.yaml"
-    rendered.write_text(rendered_dashboard_yaml(dashboard), encoding="utf-8")
-    dashboard_json = validator.validate_dashboard(DASHBOARD)
+    rendered.write_text(rendered_manifest(document))
+    dashboard_json = validator.validate_dashboard(source)
     validator.validate_render(rendered, dashboard_json)
-
-
-def test_validator_accepts_production_rendered_source_equality(tmp_path, prod_dashboard):
-    rendered = tmp_path / "prod-rendered.yaml"
-    rendered.write_text(rendered_dashboard_yaml(prod_dashboard), encoding="utf-8")
-    dashboard_json = validator.validate_dashboard(PROD_DASHBOARD)
-    validator.validate_render(rendered, dashboard_json)
-
-
-def test_validator_accepts_single_quoted_render_scalars(tmp_path, dashboard):
-    rendered = tmp_path / "single-quoted.yaml"
-    content = rendered_dashboard_yaml(dashboard).replace(
-        "path: /var/lib/grafana/dashboards/sugarkube",
-        "path: '/var/lib/grafana/dashboards/sugarkube'",
-    )
-    rendered.write_text(content, encoding="utf-8")
-    validator.validate_render(rendered, DASHBOARD.read_text(encoding="utf-8"))
-
-
-def test_validator_main_validates_source_and_render(monkeypatch, tmp_path, dashboard):
-    rendered = tmp_path / "rendered.yaml"
-    rendered.write_text(rendered_dashboard_yaml(dashboard), encoding="utf-8")
-    monkeypatch.setattr(sys, "argv", [str(VALIDATOR), str(DASHBOARD)])
-    validator.main()
-    monkeypatch.setattr(sys, "argv", [str(VALIDATOR), str(DASHBOARD), "--rendered", str(rendered)])
-    validator.main()
-
-
-def test_validator_rejects_raw_urls_and_complete_render_drift(tmp_path, dashboard):
-    unsafe = tmp_path / "unsafe.json"
-    unsafe_dashboard = json.loads(json.dumps(dashboard))
-    unsafe_dashboard["links"] = [{"url": "https://example.invalid"}]
-    unsafe.write_text(json.dumps(unsafe_dashboard), encoding="utf-8")
-    result = subprocess.run(["python3", str(VALIDATOR), str(unsafe)], capture_output=True)
-    assert result.returncode != 0
-
-    changed = json.loads(json.dumps(dashboard))
-    changed["refresh"] = "5m"
-    result = run_render_validation(tmp_path, rendered_dashboard_yaml(changed))
-    assert result.returncode != 0
-    assert "differs from the version-controlled source" in result.stderr
-
-
-@pytest.mark.parametrize(
-    ("mount_path", "sub_path"),
-    [
-        ("/var/lib/grafana/dashboards/sugarkube", None),
-        (None, "another-dashboard.json"),
-    ],
-)
-def test_validator_rejects_wrong_dashboard_mount(tmp_path, dashboard, mount_path, sub_path):
-    result = run_render_validation(
-        tmp_path, rendered_dashboard_yaml(dashboard, mount_path, sub_path)
-    )
-    assert result.returncode != 0
-    assert "dashboard mount must be exactly" in result.stderr
-
-
-@pytest.mark.parametrize(
-    ("mutation", "message"),
-    [
-        (lambda item: item.update(uid="wrong"), "dashboard title"),
-        (lambda item: item.update(panels=[]), "panel IDs"),
-        (
-            lambda item: next(
-                variable for variable in item["templating"]["list"] if variable["name"] == "app"
-            ).update(label="Application"),
-            "probe-specific visible labels",
-        ),
-        (
-            lambda item: next(
-                panel for panel in item["panels"] if panel["title"] == "Status-class distribution"
-            ).update(type="timeseries"),
-            "categorical visualization",
-        ),
-        (
-            lambda item: next(
-                panel for panel in item["panels"] if panel["title"] == "Status-class distribution"
-            )["targets"][0].update(expr="sum(dspace_http_requests_total)"),
-            "summarize the selected window",
-        ),
-        (
-            lambda item: next(
-                panel for panel in item["panels"] if panel["title"] == "Status-class distribution"
-            )["fieldConfig"].update(overrides=[]),
-            "explicit status-class colors",
-        ),
-        (
-            lambda item: next(
-                panel for panel in item["panels"] if panel["title"] == "Operational request rate"
-            )["targets"][0].update(expr="sum(dspace_http_requests_total)"),
-            "retain health and metrics routes",
-        ),
-        (
-            lambda item: replace_metric_expression(item, "process_resident_memory_bytes", "0"),
-            "missing required PromQL metrics",
-        ),
-        (
-            lambda item: replace_metric_expression(
-                item, "dspace_dchat_requests_total", "dspace_dchat_requests_total"
-            ),
-            "must use a safe zero fallback",
-        ),
-        (lambda item: item.update(links=[{"url": "https://example.invalid"}]), "raw URLs"),
-        (lambda item: item.update(description="${DS_PROMETHEUS}"), "datasource placeholder"),
-        (lambda item: item.update(datasource={"uid": "unexpected"}), "datasource references"),
-        (
-            lambda item: next(
-                target
-                for panel in item["panels"]
-                if panel["title"] == "Public availability summary"
-                for target in panel["targets"]
-                if target["legendFormat"] == "Missing probe data"
-            ).update(
-                expr=next(
-                    target["expr"]
-                    for panel in item["panels"]
-                    if panel["title"] == "Public availability summary"
-                    for target in panel["targets"]
-                    if target["legendFormat"] == "Missing probe data"
-                ).replace("[7d]", "[5m]")
-            ),
-            "retention-backed discovered probes",
-        ),
-        (
-            lambda item: next(
-                panel for panel in item["panels"] if panel["title"] == "Status-class distribution"
-            )["targets"][0].update(instant=False, range=True),
-            "instant selected-window query",
-        ),
-        (
-            lambda item: next(
-                panel
-                for panel in item["panels"]
-                if panel["title"] == "User request rate by route and status class"
-            )["targets"][0].update(
-                expr='sum(rate(dspace_http_requests_total{environment=~"$environment"}[5m]))'
-            ),
-            "exclude operational routes",
-        ),
-        (
-            lambda item: next(
-                panel for panel in item["panels"] if panel["title"] == "Public availability summary"
-            ).update(targets=[]),
-            "three-value instant aggregate summary",
-        ),
-        (
-            lambda item: next(
-                target
-                for panel in item["panels"]
-                if panel["title"] == "Public availability summary"
-                for target in panel["targets"]
-                if target["legendFormat"] == "Healthy endpoints"
-            ).update(
-                expr=next(
-                    target["expr"]
-                    for panel in item["panels"]
-                    if panel["title"] == "Public availability summary"
-                    for target in panel["targets"]
-                    if target["legendFormat"] == "Healthy endpoints"
-                ).replace("== bool 1", "== 1")
-            ),
-            "boolean healthy and failed sums",
-        ),
-        (
-            lambda item: next(
-                target
-                for panel in item["panels"]
-                if panel["title"] == "Public availability summary"
-                for target in panel["targets"]
-                if target["legendFormat"] == "Healthy endpoints"
-            ).update(expr='count(probe_success{environment=~"$environment"} == 1)'),
-            "three-value instant aggregate summary",
-        ),
-        (
-            lambda item: next(
-                panel for panel in item["panels"] if panel["title"] == "Public availability summary"
-            )["fieldConfig"]["defaults"].update(noValue="0"),
-            "distinguish healthy, failed, and no data",
-        ),
-        (
-            lambda item: next(
-                override
-                for panel in item["panels"]
-                if panel["title"] == "Public availability summary"
-                for override in panel["fieldConfig"]["overrides"]
-                if override["matcher"]["options"] == "Missing probe data"
-            )["properties"][0]["value"].update(fixedColor="green"),
-            "compact yellow summary value",
-        ),
-        (
-            lambda item: next(
-                panel for panel in item["panels"] if panel["title"] == "Endpoint matrix"
-            ).update(type="stat"),
-            "retain the detailed endpoint matrix",
-        ),
-        (
-            lambda item: next(
-                target
-                for panel in item["panels"]
-                if panel["title"] == "Public availability summary"
-                for target in panel["targets"]
-                if target["legendFormat"] == "Missing probe data"
-            ).update(
-                expr=(
-                    "sum(min by (environment, app, route) (probe_success{"
-                    'job=~"probe/monitoring/blackbox-'
-                    '(dspace|tokenplace|danielsmith|jobbot3000)-staging-.*",'
-                    'environment=~"$environment",app=~"$app",route=~"$route"'
-                    "}) == bool 1)"
-                )
-            ),
-            "missing probe data must compare",
-        ),
-        (
-            lambda item: next(
-                target
-                for panel in item["panels"]
-                if panel["title"] == "Public availability summary"
-                for target in panel["targets"]
-                if target["legendFormat"] == "Failed endpoints"
-            ).pop("expr"),
-            "three-value instant aggregate summary",
-        ),
-        (
-            lambda item: next(
-                panel for panel in item["panels"] if panel["title"] == "Endpoint matrix"
-            ).update(title="Removed matrix"),
-            "exactly one 'Endpoint matrix' panel",
-        ),
-        (
-            lambda item: next(
-                panel
-                for panel in item["panels"]
-                if panel["title"] == "Active build revisions by pod"
-            )["targets"].clear(),
-            "must contain exactly one PromQL target",
-        ),
-        (
-            lambda item: replace_panel_expression(
-                item,
-                "Active build revisions by pod",
-                'max by (pod, revision) (dspace_build_info{environment=~"$environment"})',
-            ),
-            "active build revisions must include only serving DSPACE pods",
-        ),
-        (
-            lambda item: replace_panel_expression(
-                item,
-                "Image-pin agreement",
-                next(
-                    panel["targets"][0]["expr"]
-                    for panel in all_panels(item)
-                    if panel["title"] == "Image-pin agreement"
-                ).replace(" or on() vector(0)", ""),
-            ),
-            "image-pin agreement must filter serving pods and return a healthy zero",
-        ),
-        (
-            lambda item: replace_panel_expression(
-                item,
-                "DSPACE metrics-target health",
-                'sum(up{namespace="dspace",service=~"dspace.*"}) / '
-                'count(up{namespace="dspace",service=~"dspace.*"}) or on() vector(0)',
-            ),
-            "metrics-target health must count down or missing serving targets",
-        ),
-    ],
-)
-def test_validator_directly_rejects_unsafe_dashboard_sources(
-    tmp_path, dashboard, mutation, message
-):
-    candidate = tmp_path / "candidate.json"
-    mutation(dashboard)
-    candidate.write_text(json.dumps(dashboard), encoding="utf-8")
-    with pytest.raises(SystemExit, match=message):
-        validator.validate_dashboard(candidate)
-
-
-def test_validator_directly_rejects_overlapping_panels(tmp_path, dashboard):
-    positioned = [panel for panel in dashboard["panels"] if panel.get("type") != "row"]
-    positioned[1]["gridPos"] = dict(positioned[0]["gridPos"])
-    candidate = tmp_path / "overlap.json"
-    candidate.write_text(json.dumps(dashboard), encoding="utf-8")
-
-    with pytest.raises(SystemExit, match="overlap"):
-        validator.validate_dashboard(candidate)
-
-
-@pytest.mark.parametrize(
-    ("mutation", "message"),
-    [
-        (lambda text: text.replace("kind: ConfigMap", "kind: Secret", 1), "intended"),
-        (lambda text: text.replace("name: sugarkube", "name: other"), "one Sugarkube"),
-        (
-            lambda text: text.replace(
-                "path: /var/lib/grafana/dashboards/sugarkube", "path: /tmp/dashboard"
-            ),
-            "provider path",
-        ),
-        (lambda text: text.replace("    |-", "    >-", 1), "block scalar is malformed"),
-        (lambda text: text.replace('"refresh": "30s"', '"refresh": "5m"'), "differs"),
-    ],
-)
-def test_validator_directly_rejects_unsafe_render_shapes(tmp_path, dashboard, mutation, message):
-    rendered = tmp_path / "rendered.yaml"
-    rendered.write_text(mutation(rendered_dashboard_yaml(dashboard)), encoding="utf-8")
-    with pytest.raises(SystemExit, match=message):
-        validator.validate_render(rendered, DASHBOARD.read_text(encoding="utf-8"))
-
-
-@pytest.mark.parametrize(
-    ("mutation", "message"),
-    [
-        (
-            lambda text: text.replace(
-                'mountPath: "/var/lib/grafana/dashboards/sugarkube/',
-                'mountPath: "/tmp/',
-            ),
-            "dashboard mount must be exactly",
-        ),
-        (
-            lambda text: text.replace(
-                "path: /var/lib/grafana/dashboards/sugarkube", 'path: "unterminated'
-            ),
-            "malformed YAML scalars",
-        ),
-        (lambda text: text.replace("    |-", "  |-", 1), "block scalar is misplaced"),
-        (
-            lambda text: text.replace('"refresh": "30s",', '"refresh": ,'),
-            "contains malformed JSON",
-        ),
-    ],
-)
-def test_validator_directly_rejects_remaining_render_branches(
-    tmp_path, dashboard, mutation, message
-):
-    rendered = tmp_path / "rendered.yaml"
-    rendered.write_text(mutation(rendered_dashboard_yaml(dashboard)), encoding="utf-8")
-    with pytest.raises(SystemExit, match=message):
-        validator.validate_render(rendered, DASHBOARD.read_text(encoding="utf-8"))
-
-
-def test_validator_directly_rejects_missing_or_empty_render(tmp_path):
-    dashboard_json = DASHBOARD.read_text(encoding="utf-8")
-    with pytest.raises(SystemExit, match="rendered Helm output"):
-        validator.validate_render(tmp_path / "missing.yaml", dashboard_json)
-    rendered = tmp_path / "empty.yaml"
-    rendered.write_text("", encoding="utf-8")
-    with pytest.raises(SystemExit, match="exactly one custom dashboard"):
+    drifted = copy.deepcopy(document)
+    drifted["panels"][1]["title"] += " drift"
+    rendered.write_text(rendered_manifest(drifted))
+    with pytest.raises(SystemExit, match="differs"):
         validator.validate_render(rendered, dashboard_json)
 
 
-def test_lifecycle_passes_same_dashboard_to_all_helm_paths():
-    script = SCRIPT.read_text(encoding="utf-8")
-    assert script.count('--set-file "${DASHBOARD_VALUE}=${DASHBOARD}"') == 3
-    assert 'DASHBOARD_VALUE="grafana.dashboards.sugarkube.${DASHBOARD_UID}.json"' in script
-    assert "sugarkube-staging-observability" in script
-    assert "sugarkube-prod-observability" in script
-    assert script.index(
-        "validate_dashboard; require_tools", script.index("install_release")
-    ) < script.index("helm install")
-    assert script.index(
-        "validate_dashboard; require_tools", script.index("upgrade_release")
-    ) < script.index("helm upgrade")
-
-
-def test_dashboard_verifier_is_guarded_read_only_and_redacted():
-    script = SCRIPT.read_text(encoding="utf-8")
-    body = script.split("dashboard_verify()", 1)[1].split('\ncmd="${1:-}"', 1)[0]
-    assert "assert_context" in body
-    assert body.index("assert_context") < body.index("get secret grafana-admin-credentials")
-    assert "/api/dashboards/uid/${DASHBOARD_UID}" in body
-    assert 'os.environ["DASHBOARD_UID"]' in body
-    assert 'os.environ["DASHBOARD_TITLE"]' in body
-    assert "--netrc-file" in body and "chmod 600" in body and "rm -rf" in body
-    for mutation in ("helm install", "helm upgrade", "kubectl apply", "kubectl delete"):
-        assert mutation not in body
-    assert "credentials and response redacted" in body
-    assert "--address=127.0.0.1" in body and '"service/${RELEASE}-grafana" :80' in body
-    assert body.index("Forwarding\\ from") < body.index("--netrc-file")
-    assert "require_tools kubectl python3 curl base64 sleep" in body
-
-
 @pytest.mark.parametrize(
-    "command", ["render", "install", "upgrade", "status", "verify", "dashboard-verify"]
+    "mutation",
+    [
+        "dashboard-count",
+        "configmap-identity",
+        "provider-count",
+        "provider-path",
+        "mount",
+        "block-marker",
+        "payload",
+    ],
 )
-def test_malformed_source_fails_before_any_stubbed_cluster_or_helm_access(tmp_path, command):
-    (tmp_path / "scripts").mkdir()
-    copied_script = tmp_path / "scripts/observability_helm.sh"
-    copied_script.write_text(SCRIPT.read_text(encoding="utf-8"), encoding="utf-8")
-    # The copied script resolves ROOT to tmp_path; provide only the validator and
-    # malformed artifact. Validation must stop before missing helm/kubectl matter.
-    (tmp_path / "scripts/validate_observability_dashboard.py").write_text(
-        VALIDATOR.read_text(encoding="utf-8"), encoding="utf-8"
-    )
-    path = tmp_path / "clusters/staging/observability/dashboards"
-    path.mkdir(parents=True)
-    (path / DASHBOARD.name).write_text("{", encoding="utf-8")
-    result = subprocess.run(
-        ["bash", str(copied_script), command, "env=staging"],
-        env=os.environ | {"PATH": "/usr/bin:/bin"},
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode != 0
-    assert "dashboard JSON" in result.stderr
+def test_render_validation_fails_closed(tmp_path, dashboards, mutation):
+    staging, _ = dashboards
+    dashboard_json = json.dumps(staging)
+    manifest = rendered_manifest(staging)
+    if mutation == "dashboard-count":
+        manifest = manifest.replace(f'"uid": "{staging["uid"]}"', '"uid": "wrong"')
+    elif mutation == "configmap-identity":
+        manifest = manifest.replace("dashboard-provider: sugarkube", "dashboard-provider: other")
+    elif mutation == "provider-count":
+        manifest = manifest.replace("name: sugarkube", "name: other", 1)
+    elif mutation == "provider-path":
+        manifest = manifest.replace(
+            "/var/lib/grafana/dashboards/sugarkube\n---", "/tmp/dashboards\n---"
+        )
+    elif mutation == "mount":
+        manifest = manifest.replace("subPath:", "otherPath:")
+    elif mutation == "block-marker":
+        manifest = manifest.replace("    |-\n", "    >-\n", 1)
+    else:
+        manifest = manifest.replace("      {\n", "      not-json\n", 1)
+    rendered = tmp_path / "rendered.yaml"
+    rendered.write_text(manifest)
+    with pytest.raises(SystemExit):
+        validator.validate_render(rendered, dashboard_json)
+
+
+def test_dashboard_loading_and_profile_identity_fail_closed(tmp_path):
+    malformed = tmp_path / "malformed.json"
+    malformed.write_text("[")
+    with pytest.raises(SystemExit, match="missing or malformed"):
+        validator.load_dashboard(malformed)
+    non_object = tmp_path / "array.json"
+    non_object.write_text("[]")
+    with pytest.raises(SystemExit, match="root must be an object"):
+        validator.load_dashboard(non_object)
+    with pytest.raises(SystemExit, match="supported profile"):
+        validator.configure_profile({"uid": "unknown", "title": "Unknown"})
