@@ -38,12 +38,13 @@ jq -e --arg image "${expected_image}" '
 pods="$(kubectl -n cloudflare get pods -l app.kubernetes.io/name=cloudflare-tunnel,app.kubernetes.io/instance=cloudflare-tunnel -o json)"
 jq -e '
   [.items[] | select(.metadata.deletionTimestamp == null)] as $current |
-  ($current | length == 2) and
-  ($current | all(
+  [$current[] | select(
     .status.phase == "Running" and
     any(.status.conditions[]?; .type == "Ready" and .status == "True")
-  )) and
-  ($current | map(.spec.nodeName) | unique | length == 2)
+  )] as $ready |
+  ($current | length == 2) and
+  ($ready | length == 2) and
+  ($ready | map(.spec.nodeName) | unique | length == 2)
 ' <<<"${pods}" >/dev/null
 kubectl -n cloudflare get pdb cloudflare-tunnel -o json | jq -e '.spec.minAvailable == 1' >/dev/null
 service="$(kubectl -n cloudflare get service cloudflare-tunnel-metrics -o json)"

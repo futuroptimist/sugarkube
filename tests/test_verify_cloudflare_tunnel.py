@@ -144,6 +144,16 @@ def test_two_ready_current_pods_on_distinct_nodes_pass(tmp_path: Path) -> None:
     assert 'Cannot index array with string "items"' not in result.stderr
 
 
+def test_two_ready_pods_and_additional_terminating_pod_pass(tmp_path: Path) -> None:
+    pods = [
+        _pod("tunnel-a", "node-a"),
+        _pod("tunnel-b", "node-b"),
+        _pod("tunnel-old", "node-c", terminating=True),
+    ]
+    result = _run_verifier(tmp_path, pods)
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.mark.parametrize(
     "pods",
     [
