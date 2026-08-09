@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -26,8 +27,11 @@ def _extract_cf_recipe_body() -> str:
 def _render_cf_recipe(env: str) -> str:
     """Render the recipe through Just, including all Just variable interpolation."""
 
+    just = shutil.which("just")
+    if just is None:
+        pytest.skip("just is required to render Cloudflare Tunnel recipes")
     result = subprocess.run(
-        ["just", "--dry-run", "cf-tunnel-install", f"env={env}"],
+        [just, "--dry-run", "cf-tunnel-install", f"env={env}"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -250,6 +254,10 @@ def _run_actual_cf_tunnel_install(
 ) -> tuple[subprocess.CompletedProcess[str], str]:
     """Run Just's fully rendered recipe against command-recording stubs."""
 
+    just = shutil.which("just")
+    if just is None:
+        pytest.skip("just is required to run the Cloudflare Tunnel recipe")
+
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     call_log = tmp_path / "calls.log"
@@ -285,12 +293,12 @@ def _run_actual_cf_tunnel_install(
         {
             "CALL_LOG": str(call_log),
             "HOME": str(tmp_path),
-            "PATH": f"{bin_dir}:{environment['PATH']}",
+            "PATH": f"{bin_dir}{os.pathsep}{environment['PATH']}",
             "SECRET_EXISTS": "yes" if secret_exists else "no",
         }
     )
     result = subprocess.run(
-        ["just", "cf-tunnel-install", "env=staging"],
+        [just, "cf-tunnel-install", "env=staging"],
         cwd=REPO_ROOT,
         env=environment,
         capture_output=True,
