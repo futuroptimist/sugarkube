@@ -66,8 +66,8 @@ render_manual_node_plan() {
     guard="sudo /usr/bin/systemctl is-active --quiet '${unit}' && watchdog_pid=\"\$(sudo /usr/bin/systemctl show --property MainPID --value '${unit}')\" && case \"\${watchdog_pid}\" in ''|0|*[!0-9]*) exit 66;; esac && test \"\$(/usr/bin/readlink /proc/\${watchdog_pid}/ns/net)\" = \"\${netns}\""
     disruption="${resolve} && ${guard} && ruleset=\"\$(sudo /usr/bin/nsenter -t \"\${pid}\" -n /usr/sbin/nft -j list ruleset)\" && printf '%s\\n' \"\${ruleset}\" | /usr/bin/jq -e --arg table '${table}' '[.nftables[]?.table? | select(.family==\"inet\" and .name==\$table)] | length == 0' >/dev/null && sudo /usr/bin/nsenter -t \"\${pid}\" -n /usr/sbin/nft 'add table inet ${table}; add chain inet ${table} output { type filter hook output priority -10; policy accept; }; add rule inet ${table} output udp dport { 7844, 443 } counter drop comment \"${owner}\"; add rule inet ${table} output tcp dport { 7844, 443 } counter drop comment \"${owner}\"'"
     cleanup="${resolve} && { sudo /usr/bin/nsenter -t \"\${pid}\" -n /usr/sbin/nft delete table inet ${table} 2>/dev/null || true; } && ruleset=\"\$(sudo /usr/bin/nsenter -t \"\${pid}\" -n /usr/sbin/nft -j list ruleset)\" && printf '%s\\n' \"\${ruleset}\" | /usr/bin/jq -e --arg table '${table}' '[.nftables[]?.table? | select(.family==\"inet\" and .name==\$table)] | length == 0' >/dev/null"
-    disruptions[$i]="${disruption}"
-    cleanups[$i]="${cleanup}"
+    disruptions[i]="${disruption}"
+    cleanups[i]="${cleanup}"
   done
   for i in 0 1; do
     printf 'DISRUPTION node=%q pod=%q uid=%q owner=%q table=%q command=%q\n' "${pod_nodes[$i]}" "${pod_names[$i]}" "${pod_uids[$i]}" "${owner}" "${table}" "${disruptions[$i]}"
