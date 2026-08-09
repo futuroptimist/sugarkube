@@ -150,9 +150,14 @@ def test_two_ready_current_pods_on_distinct_nodes_pass(tmp_path: Path) -> None:
         [_pod("tunnel-a", "node-a"), _pod("tunnel-b", "node-a")],
         [_pod("tunnel-a", "node-a")],
         [_pod("tunnel-a", "node-a"), _pod("tunnel-b", "node-b", ready=False)],
+        [
+            _pod("tunnel-a", "node-a"),
+            _pod("tunnel-b", "node-b"),
+            _pod("tunnel-surge", "node-c", ready=False),
+        ],
         [_pod("tunnel-a", "node-a"), _pod("tunnel-b", "node-b", terminating=True)],
     ],
-    ids=["duplicate-node", "incorrect-count", "not-ready", "terminating"],
+    ids=["duplicate-node", "incorrect-count", "not-ready", "unready-surge", "terminating"],
 )
 def test_invalid_pod_contract_fails(tmp_path: Path, pods: list[dict]) -> None:
     result = _run_verifier(tmp_path, pods)

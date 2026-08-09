@@ -37,12 +37,12 @@ jq -e --arg image "${expected_image}" '
 
 pods="$(kubectl -n cloudflare get pods -l app.kubernetes.io/name=cloudflare-tunnel,app.kubernetes.io/instance=cloudflare-tunnel -o json)"
 jq -e '
-  [.items[] | select(
-    .metadata.deletionTimestamp == null and
+  [.items[] | select(.metadata.deletionTimestamp == null)] as $current |
+  ($current | length == 2) and
+  ($current | all(
     .status.phase == "Running" and
     any(.status.conditions[]?; .type == "Ready" and .status == "True")
-  )] as $current |
-  ($current | length == 2) and
+  )) and
   ($current | map(.spec.nodeName) | unique | length == 2)
 ' <<<"${pods}" >/dev/null
 kubectl -n cloudflare get pdb cloudflare-tunnel -o json | jq -e '.spec.minAvailable == 1' >/dev/null
