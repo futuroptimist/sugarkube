@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import signal
 import subprocess
 import time
@@ -52,13 +53,23 @@ class StatefulDrillHarness:
             "CF_DRILL_NODE_EXECUTOR": str(node),
         }
 
-    def start(self) -> subprocess.Popen[str]:
+    def start(self, wrapper: list[str] | None = None) -> subprocess.Popen[str]:
         return subprocess.Popen(
-            ["bash", str(DRILL), "--execute", f"--confirm={CONFIRM}",
+            [*(wrapper or []), "bash", str(DRILL), "--execute", f"--confirm={CONFIRM}",
              f"--evidence-dir={self.evidence}"], cwd=ROOT, env=os.environ | self.env,
             text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             start_new_session=True,
         )
+
+    def wait_for_disruption(self, timeout: float = 20) -> None:
+        """Block until both owner tables are installed and the observation sleep is active."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            state = self.current()
+            if state.get("sleeping") and state.get("tables") == [True, True]:
+                return
+            time.sleep(.02)
+        raise AssertionError("helper never reached the disrupted observation window")
 
     def run(self, *, confirmation: str = CONFIRM, timeout: float = 30) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -80,11 +91,20 @@ class StatefulDrillHarness:
                 if "event" in (entry := json.loads(line))]
 
     def current(self) -> dict[str, object]:
-        for _ in range(50):
+        # The shim rewrites state.json (non-atomically) on nearly every
+        # subprocess invocation, so a concurrent read can catch a
+        # truncated-but-not-yet-written file. A fixed 100ms budget resolves
+        # this locally but is not always enough on a loaded/throttled CI
+        # runner, so retry on a longer wall-clock budget with backoff
+        # instead of a small fixed attempt count.
+        deadline = time.monotonic() + 2.0
+        delay = 0.002
+        while time.monotonic() < deadline:
             try:
                 return json.loads(self.state.read_text())
-            except json.JSONDecodeError:
-                time.sleep(.002)
+            except (json.JSONDecodeError, FileNotFoundError):
+                time.sleep(delay)
+                delay = min(delay * 1.5, 0.05)
         raise AssertionError("state shim did not leave valid JSON")
 
 
@@ -600,34 +620,47 @@ def test_ambiguous_second_install_attempt_cleans_every_possible_node(tmp_path: P
 def test_sigterm_after_disruption_runs_exact_cleanup(tmp_path: Path) -> None:
     harness = StatefulDrillHarness(tmp_path, block_long_sleep=True)
     process = harness.start()
-    deadline = time.monotonic() + 20
-    while time.monotonic() < deadline and not harness.current().get("sleeping"):
-        time.sleep(.02)
-    assert harness.current().get("sleeping"), "helper never reached the disrupted observation window"
+    harness.wait_for_disruption()
     os.killpg(process.pid, signal.SIGTERM)
-    stdout, stderr = process.communicate(timeout=5)
+    stdout, stderr = process.communicate(timeout=10)
     assert process.returncode == 143, (stdout, stderr)
     assert harness.current()["tables"] == [False, False]
-    deletes = [entry for entry in harness.commands() if entry["tool"] == "node-executor" and "delete table inet" in entry["args"][1]]
+    deletes = [entry["args"][1] for entry in harness.commands()
+               if entry["tool"] == "node-executor" and "delete table inet" in entry["args"][1]]
     assert len(deletes) == 2
+    assert all("list ruleset" in command and "flush" not in command for command in deletes)
+
+
+def test_sigint_after_disruption_runs_exact_cleanup(tmp_path: Path) -> None:
+    harness = StatefulDrillHarness(tmp_path, block_long_sleep=True)
+    process = harness.start()
+    harness.wait_for_disruption()
+    os.killpg(process.pid, signal.SIGINT)
+    stdout, stderr = process.communicate(timeout=10)
+    assert process.returncode == 130, (stdout, stderr)
+    assert harness.current()["tables"] == [False, False]
+    deletes = [entry["args"][1] for entry in harness.commands()
+               if entry["tool"] == "node-executor" and "delete table inet" in entry["args"][1]]
+    assert len(deletes) == 2
+    assert all("list ruleset" in command and "flush" not in command for command in deletes)
 
 
 def test_external_timeout_after_disruption_runs_exact_cleanup(tmp_path: Path) -> None:
+    timeout_bin = shutil.which("timeout")
+    assert timeout_bin, "coreutils timeout is required to exercise a real external timeout"
     harness = StatefulDrillHarness(tmp_path, block_long_sleep=True)
-    process = harness.start()
-    deadline = time.monotonic() + 20
-    while time.monotonic() < deadline and not harness.current().get("sleeping"):
-        time.sleep(.02)
-    assert harness.current().get("sleeping"), "helper never reached disruption"
-    with pytest.raises(subprocess.TimeoutExpired):
-        process.communicate(timeout=.1)
-    os.killpg(process.pid, signal.SIGTERM)
-    stdout, stderr = process.communicate(timeout=5)
-    assert process.returncode == 143, (stdout, stderr)
+    # The timeout wrapper -- not the test -- delivers the terminating signal when the bound expires.
+    process = harness.start(wrapper=[timeout_bin, "--signal=TERM", "--kill-after=5", "8"])
+    harness.wait_for_disruption()
+    stdout, stderr = process.communicate(timeout=30)
+    # coreutils timeout reports 124 when it fires the bound, distinct from the helper's 143 signal exit.
+    assert process.returncode == 124, (stdout, stderr)
+    assert process.poll() is not None, "helper process was left orphaned"
     assert harness.current()["tables"] == [False, False]
     transitions = [(event["node"], event["present"]) for event in harness.events() if event.get("event") == "table"]
     assert transitions == [("node-1", True), ("node-2", True), ("node-2", False), ("node-1", False)]
-    deletes = [entry["args"][1] for entry in harness.commands() if entry["tool"] == "node-executor" and "delete table inet" in entry["args"][1]]
+    deletes = [entry["args"][1] for entry in harness.commands()
+               if entry["tool"] == "node-executor" and "delete table inet" in entry["args"][1]]
     assert len(deletes) == 2
     assert all("list ruleset" in command and "flush" not in command for command in deletes)
 
