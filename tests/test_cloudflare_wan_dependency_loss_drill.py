@@ -97,9 +97,34 @@ def test_watchdogs_are_installed_on_both_nodes_before_disruption() -> None:
 
 
 def test_one_node_setup_failure_cleans_the_installed_node() -> None:
-    assert 'installed_nodes+=("${pod_nodes[$i]}")' in TEXT
+    attempted = TEXT.index('attempted_indices+=("${i}")')
+    install = TEXT.index('node_exec "${pod_nodes[$i]}" "${install}"', attempted)
+    assert attempted < install, "ambiguous installation attempts must be tracked first"
     assert "trap 'cleanup $?' EXIT" in TEXT
     assert "rule setup failed" in TEXT
+
+
+def test_failed_normal_cleanup_remains_tracked_for_exit_retry() -> None:
+    normal_cleanup = TEXT.index("declare -a cleanup_retry_indices=()")
+    failure = TEXT.index('cleanup_retry_indices+=("${i}")', normal_cleanup)
+    preserve = TEXT.index('attempted_indices=("${cleanup_retry_indices[@]}")', failure)
+    abort = TEXT.index("automated exact cleanup could not be proven", preserve)
+    assert failure < preserve < abort
+
+
+def test_nft_table_name_is_short_and_does_not_embed_owner() -> None:
+    table_function = TEXT.split("table_for() {", 1)[1].split("\n}", 1)[0]
+    assert "sha256sum" in table_function
+    assert "cfwd_" in table_function
+    assert '${owner//-/_}' not in table_function
+
+
+def test_lifecycle_contract_is_checked_before_disruption() -> None:
+    deployment_check = TEXT.index('has("livenessProbe") | not')
+    watchdogs = TEXT.index("# A transient host service survives")
+    assert deployment_check < watchdogs
+    assert '.readinessProbe.httpGet.path=="/ready"' in TEXT
+    assert ".readinessProbe.httpGet.port==2000" in TEXT
 
 
 def test_interruption_requires_same_uids_and_restart_counts() -> None:

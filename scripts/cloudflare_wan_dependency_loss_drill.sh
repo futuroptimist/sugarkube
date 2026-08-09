@@ -16,7 +16,7 @@ env_name=staging
 confirmation=''
 owner=''
 evidence_dir=''
-declare -a installed_nodes=()
+declare -a attempted_indices=()
 declare -a pod_names=() pod_uids=() pod_nodes=() pod_restarts=() pod_sandboxes=() pod_pids=() pod_netns=()
 cleanup_failed=0
 
@@ -35,7 +35,11 @@ EOF
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 node_exec() { "${CF_DRILL_NODE_EXECUTOR}" "$1" "$2"; }
-table_for() { printf '%s' "${owner//-/_}"; }
+table_for() {
+  local digest
+  digest="$(printf '%s' "${owner}" | sha256sum | cut -d' ' -f1)"
+  printf 'cfwd_%s' "${digest:0:20}"
+}
 
 manual_cleanup() {
   local i table; table="$(table_for)"
@@ -47,11 +51,12 @@ manual_cleanup() {
 }
 
 cleanup() {
-  local status="${1:-$?}" node i command table
+  local status="${1:-$?}" node i position command table
   trap - EXIT INT TERM
   table="$(table_for)"
-  for ((i=${#installed_nodes[@]}-1; i>=0; i--)); do
-    node="${installed_nodes[$i]}"
+  for ((position=${#attempted_indices[@]}-1; position>=0; position--)); do
+    i="${attempted_indices[$position]}"
+    node="${pod_nodes[$i]}"
     command="sudo nsenter -t ${pod_pids[$i]} -n nft delete table inet ${table}"
     if ! node_exec "${node}" "${command}" >/dev/null; then cleanup_failed=1; fi
   done
@@ -110,7 +115,10 @@ jq -e --arg image "${EXPECTED_IMAGE}" '
  .metadata.labels["app.kubernetes.io/name"]=="cloudflare-tunnel" and
  .metadata.labels["app.kubernetes.io/instance"]=="cloudflare-tunnel" and
  .spec.replicas==2 and .spec.template.spec.containers[0].image==$image
-' <<<"${deployment}" >/dev/null || die 'Deployment ownership, replicas, or immutable image is not approved'
+ and (.spec.template.spec.containers[0] | has("livenessProbe") | not)
+ and .spec.template.spec.containers[0].readinessProbe.httpGet.path=="/ready"
+ and .spec.template.spec.containers[0].readinessProbe.httpGet.port==2000
+' <<<"${deployment}" >/dev/null || die 'Deployment ownership, replicas, immutable image is not approved, or probe lifecycle is unsafe'
 deployment_fingerprint="$(jq -S '{metadata:{uid:.metadata.uid,generation:.metadata.generation},spec:.spec,statusObserved:.status.observedGeneration}' <<<"${deployment}" | sha256sum | cut -d' ' -f1)"
 
 pods="$(kubectl -n cloudflare get pods -l "${SELECTOR}" -o json)"
@@ -178,8 +186,9 @@ for i in 0 1; do
 done
 for i in 0 1; do
   install="sudo nsenter -t ${pod_pids[$i]} -n nft 'add table inet ${table}; add chain inet ${table} output { type filter hook output priority -10; policy accept; }; add rule inet ${table} output udp dport { 7844, 443 } counter drop comment \"${owner}\"; add rule inet ${table} output tcp dport { 7844, 443 } counter drop comment \"${owner}\"'"
+  # A transport failure is ambiguous: record the attempt before the command so EXIT cleanup tries it.
+  attempted_indices+=("${i}")
   node_exec "${pod_nodes[$i]}" "${install}" >/dev/null || die "rule setup failed on ${pod_nodes[$i]}"
-  installed_nodes+=("${pod_nodes[$i]}")
 done
 
 disruption_started="${SECONDS}"
@@ -200,10 +209,14 @@ if ((remaining > 0)); then sleep "${remaining}"; fi
 
 # Remove only the two exact drill-owned tables now; EXIT cleanup remains a second attempt.
 cleanup_failed=0
-for i in 0 1; do
-  node_exec "${pod_nodes[$i]}" "sudo nsenter -t ${pod_pids[$i]} -n nft delete table inet ${table}" >/dev/null || cleanup_failed=1
+declare -a cleanup_retry_indices=()
+for i in "${attempted_indices[@]}"; do
+  if ! node_exec "${pod_nodes[$i]}" "sudo nsenter -t ${pod_pids[$i]} -n nft delete table inet ${table}" >/dev/null; then
+    cleanup_failed=1
+    cleanup_retry_indices+=("${i}")
+  fi
 done
-installed_nodes=()
+attempted_indices=("${cleanup_retry_indices[@]}")
 ((cleanup_failed==0)) || { manual_cleanup; die 'automated exact cleanup could not be proven'; }
 
 deadline=$((SECONDS+RECOVERY_SECONDS)); recovered=0
