@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -1101,10 +1102,9 @@ def test_validator_directly_rejects_missing_or_empty_render(tmp_path):
 def test_lifecycle_passes_same_dashboard_to_all_helm_paths():
     script = SCRIPT.read_text(encoding="utf-8")
     assert script.count('--set-file "${DASHBOARD_VALUE}=${DASHBOARD}"') == 3
-    assert (
-        'DASHBOARD_VALUE="grafana.dashboards.sugarkube.sugarkube-staging-observability.json"'
-        in script
-    )
+    assert 'DASHBOARD_VALUE="grafana.dashboards.sugarkube.${DASHBOARD_UID}.json"' in script
+    assert 'DASHBOARD_UID="sugarkube-staging-observability"' in script
+    assert 'DASHBOARD_UID="sugarkube-prod-observability"' in script
     assert script.index(
         "validate_dashboard; require_tools", script.index("install_release")
     ) < script.index("helm install")
@@ -1118,7 +1118,7 @@ def test_dashboard_verifier_is_guarded_read_only_and_redacted():
     body = script.split("dashboard_verify()", 1)[1].split('\ncmd="${1:-}"', 1)[0]
     assert "assert_context" in body
     assert body.index("assert_context") < body.index("get secret grafana-admin-credentials")
-    assert "/api/dashboards/uid/sugarkube-staging-observability" in body
+    assert "/api/dashboards/uid/${DASHBOARD_UID}" in body
     assert "--netrc-file" in body and "chmod 600" in body and "rm -rf" in body
     for mutation in ("helm install", "helm upgrade", "kubectl apply", "kubectl delete"):
         assert mutation not in body
@@ -1151,3 +1151,72 @@ def test_malformed_source_fails_before_any_stubbed_cluster_or_helm_access(tmp_pa
     )
     assert result.returncode != 0
     assert "dashboard JSON" in result.stderr
+
+
+PROD_DASHBOARD = ROOT / "clusters/prod/observability/dashboards/sugarkube-prod-observability.json"
+
+
+@pytest.fixture
+def production_dashboard():
+    return json.loads(PROD_DASHBOARD.read_text(encoding="utf-8"))
+
+
+def test_production_dashboard_profile_is_live_backed_and_exact(production_dashboard):
+    validator.validate_production_dashboard(PROD_DASHBOARD)
+    items = list(all_panels(production_dashboard))
+    assert production_dashboard["uid"] == validator.PROD_UID
+    assert production_dashboard["title"] == validator.PROD_TITLE
+    assert production_dashboard["templating"]["list"] == []
+    assert {p["title"] for p in items if p["type"] == "row"} == validator.PROD_ROWS
+    assert {p["title"] for p in items if p["type"] != "row"} == set(validator.PROD_QUERIES)
+    expressions = "\n".join(
+        target["expr"] for panel in items for target in panel.get("targets", [])
+    )
+    expected_metrics = {
+        "up",
+        "kube_node_status_condition",
+        "kube_deployment_spec_replicas",
+        "kube_deployment_status_replicas_available",
+        "kube_pod_status_ready",
+        "kube_pod_status_phase",
+        "kube_pod_container_status_restarts_total",
+        "node_cpu_seconds_total",
+        "node_uname_info",
+        "node_memory_MemAvailable_bytes",
+        "node_memory_MemTotal_bytes",
+        "node_filesystem_avail_bytes",
+        "node_filesystem_size_bytes",
+        "kubelet_volume_stats_available_bytes",
+        "kubelet_volume_stats_capacity_bytes",
+        "prometheus_tsdb_head_series",
+        "prometheus_build_info",
+        "alertmanager_build_info",
+        "grafana_build_info",
+        "node_exporter_build_info",
+    }
+    assert set(re.findall(r"\b[a-zA-Z_:][a-zA-Z0-9_:]*", expressions)) >= expected_metrics
+    assert "cluster=" not in expressions and "vector(0)" not in expressions
+    assert "kube_state_metrics_build_info" not in expressions
+
+
+@pytest.mark.parametrize(
+    ("title", "replacement"),
+    [
+        ("Container restart rate", "[5m]"),
+        ("Prometheus active series", "sum(prometheus_tsdb_head_series)"),
+        (
+            "Prometheus PVC utilization",
+            "kubelet_volume_stats_available_bytes / kubelet_volume_stats_capacity_bytes",
+        ),
+        ("Node memory utilization", 'node_memory_MemTotal_bytes{cluster="sugarkube-prod"}'),
+    ],
+)
+def test_production_validator_rejects_unsafe_promql(
+    production_dashboard, tmp_path, title, replacement
+):
+    panel = next(p for p in all_panels(production_dashboard) if p["title"] == title)
+    panel["targets"][0]["expr"] = replacement
+    changed = tmp_path / validator.DASHBOARD_FILE
+    changed.write_text(json.dumps(production_dashboard), encoding="utf-8")
+    with pytest.raises(SystemExit, match="live-backed query contract"):
+        validator.validate_production_dashboard(changed)
