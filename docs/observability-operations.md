@@ -1,9 +1,10 @@
 # Observability operations runbook
 
-This runbook covers the live staging stack and repository support for the production
-core-stack lifecycle. It is intentionally non-Flux: operators use guarded Helm commands
-from this repository, with the chart version and full values chain committed in Git.
-Merging production support is not evidence that the stack or a production dashboard is live.
+This runbook covers the staging and production observability core-stack lifecycles. It is
+intentionally non-Flux: operators use guarded Helm commands from this repository, with the chart
+version and full values chain committed in Git. Repository changes and generated dashboard
+artifacts are not deployment evidence; each environment requires its own guarded upgrade and
+acceptance evidence.
 
 ## Canonical sources
 
@@ -12,8 +13,13 @@ Merging production support is not evidence that the stack or a production dashbo
 - Staging overrides: `clusters/staging/observability/kube-prometheus-stack.values.yaml`.
 - Production overrides: `clusters/prod/observability/kube-prometheus-stack.values.yaml`.
 - Canonical DSPACE rules: `platform/observability/rules/dspace-release-integrity.yaml`.
-- Staging dashboard: `clusters/staging/observability/dashboards/sugarkube-staging-observability.json`.
-- Production dashboard: `clusters/prod/observability/dashboards/sugarkube-prod-observability.json`.
+- Authoritative dashboard layout:
+  `platform/observability/dashboards/observability-dashboard.template.json`.
+- Dashboard generator: `scripts/generate_observability_dashboards.py`.
+- Generated staging artifact:
+  `clusters/staging/observability/dashboards/sugarkube-staging-observability.json`.
+- Generated production artifact:
+  `clusters/prod/observability/dashboards/sugarkube-prod-observability.json`.
 - Helper: `scripts/observability_helm.sh` through `just observability-*` recipes.
 - Alert delivery, routing, and drill strategy: [`docs/observability-alerting.md`](observability-alerting.md).
 - DSPACE release-integrity triage and focused drills:
@@ -30,7 +36,29 @@ dashboard: **Sugarkube Staging
 Observability** (`sugarkube-staging-observability`) or **Sugarkube Production
 Observability** (`sugarkube-prod-observability`). Grafana's chart-rendered
 Prometheus datasource has stable UID `prometheus`, which both dashboards
-reference directly.
+reference directly. Both artifacts intentionally have the same 60-object panel array: infrastructure
+and application signals keep identical positions, titles, queries, table behavior, and missing-data
+semantics. Only the UID, title, environment tag, and hidden single-value `environment` and `cluster`
+constants differ. Regenerate and byte-check them with:
+
+```bash
+python3 scripts/generate_observability_dashboards.py --write
+python3 scripts/generate_observability_dashboards.py --check
+```
+
+The generator reads only the shared specification; neither generated environment artifact is an
+input to the other. Every data panel says `NO DATA` when its query returns no series. Production is
+not currently verified to produce the application signals behind these sections, so they are
+expected to show `NO DATA` until each producer is separately deployed and accepted:
+
+- DSPACE HTTP, runtime/release, feature traffic, and release integrity;
+- blackbox monitoring and public availability;
+- token.place relay/compute-capacity, HTTP, and release identity.
+
+These are truthful absent-series states, not placeholder health. Capability-gated zeroes appear only
+when the corresponding instrumentation or approved-release series exists; an absent capability does
+not become a healthy zero. Core Kubernetes, node-exporter, Prometheus, Alertmanager, and Grafana
+sections remain locally queryable in both environments without relying on external `cluster` labels.
 
 The staging blackbox exporter and Probe lifecycle is documented separately in
 [Staging blackbox monitoring](observability-blackbox.md). That guarded lifecycle
@@ -275,7 +303,8 @@ is not rollout evidence.
 
 ### token.place Phase 1 dashboard slice
 
-The two token.place rows are a staging operational view of metric families that
+The two token.place rows are a shared dashboard view of metric families that are currently
+verified in staging and that
 the application already emits and that Prometheus has verified live. They do
 not define alert thresholds:
 
@@ -616,8 +645,8 @@ lost, and distinct from the automated evidence above:
 
 ## Follow-ups intentionally out of scope
 
-Additional dashboards, Grafana persistence, central multi-cluster Grafana, and production
-observability codification are separate follow-ups. The existing blackbox NetworkPolicy is unchanged.
+Additional dashboards, Grafana persistence, central multi-cluster Grafana, and deployment of the
+currently absent production application telemetry are separate follow-ups. The existing blackbox NetworkPolicy is unchanged.
 The synthetic Alertmanager → PagerDuty route is deployed and delivery-tested. External node-heartbeat
 timers are installed on `sugarkube3`, `sugarkube4`, and `sugarkube5`; their node-power-off drill
 remains outstanding. The watchdog's secret-safe configuration and operator workflows are
@@ -709,8 +738,8 @@ just observability-app-metrics-verify app=tokenplace env=staging
 ```
 
 `just observability-verify env=staging` also runs every configured application
-metrics verifier after the existing DSPACE checks. Production application metrics
-verification is intentionally rejected until production observability is codified.
-Merging this repository support does not deploy any application, create any
-Secret, dashboard, alert rule, schedulability check, shared-state check, or live
-drill.
+metrics verifier after the existing DSPACE checks. Production application-metrics verification remains intentionally rejected until those producers
+are deployed and verified. Merging this change does not deploy either generated dashboard or any
+application integration. Staging and production each require a separate guarded Helm upgrade,
+source/render/API verification, and Grafana pod-replacement proof. It also does not create any
+Secret, alert rule, schedulability check, shared-state check, or live drill.
