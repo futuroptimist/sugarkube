@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-import os
-import subprocess
 import json
+import os
+import signal
+import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -12,6 +14,147 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 DRILL = ROOT / "scripts" / "cloudflare_wan_dependency_loss_drill.sh"
 TEXT = DRILL.read_text()
+
+
+CONFIRM = "DISRUPT STAGING CLOUDFLARE WAN FOR SAME-PROCESS RECOVERY"
+
+
+class StatefulDrillHarness:
+    """Run the real helper against one stateful, entirely offline command shim."""
+
+    def __init__(self, tmp_path: Path, **overrides: object) -> None:
+        self.root = tmp_path
+        self.state = tmp_path / "state.json"
+        self.log = tmp_path / "commands.jsonl"
+        self.evidence = tmp_path / "evidence"
+        state = {
+            "context": "sugar-staging", "revision": "approved", "dirty": False,
+            "image_ok": True, "helm_revision": 2, "pod_count": 2,
+            "same_node": False, "alerts": 0, "endpoint": 200,
+            "sandbox_fail": False, "collision": False, "install_fail": -1,
+            "restart": [0, 0], "tables": [False, False], "watchdogs": [False, False],
+            "block_long_sleep": False, "secret": "SENTINEL-SECRET-MUST-NOT-LEAK",
+        }
+        state.update(overrides)
+        self.state.write_text(json.dumps(state))
+        shim = tmp_path / "shim.py"
+        shim.write_text(_STATEFUL_SHIM)
+        shim.chmod(0o755)
+        for name in ("git", "kubectl", "helm", "just", "ruby", "curl", "date", "sleep"):
+            (tmp_path / name).symlink_to(shim)
+        node = tmp_path / "node-executor"
+        node.symlink_to(shim)
+        self.env = {
+            "PATH": f"{tmp_path}:/usr/bin:/bin",
+            "HARNESS_STATE": str(self.state),
+            "HARNESS_LOG": str(self.log),
+            "CF_DRILL_APPROVED_REVISION": "approved",
+            "CF_DRILL_NODE_EXECUTOR": str(node),
+        }
+
+    def start(self) -> subprocess.Popen[str]:
+        return subprocess.Popen(
+            ["bash", str(DRILL), "--execute", f"--confirm={CONFIRM}",
+             f"--evidence-dir={self.evidence}"], cwd=ROOT, env=os.environ | self.env,
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+
+    def run(self, *, confirmation: str = CONFIRM, timeout: float = 30) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["bash", str(DRILL), "--execute", f"--confirm={confirmation}",
+             f"--evidence-dir={self.evidence}"], cwd=ROOT, env=os.environ | self.env,
+            text=True, capture_output=True, timeout=timeout,
+        )
+
+    def commands(self) -> list[dict[str, object]]:
+        if not self.log.exists():
+            return []
+        return [json.loads(line) for line in self.log.read_text().splitlines()]
+
+    def current(self) -> dict[str, object]:
+        for _ in range(50):
+            try:
+                return json.loads(self.state.read_text())
+            except json.JSONDecodeError:
+                time.sleep(.002)
+        raise AssertionError("state shim did not leave valid JSON")
+
+
+_STATEFUL_SHIM = r'''#!/usr/bin/env python3
+import json, os, pathlib, sys, time, urllib.parse
+state_path = pathlib.Path(os.environ["HARNESS_STATE"])
+log_path = pathlib.Path(os.environ["HARNESS_LOG"])
+name, args = pathlib.Path(sys.argv[0]).name, sys.argv[1:]
+state = json.loads(state_path.read_text())
+with log_path.open("a") as stream:
+    stream.write(json.dumps({"tool": name, "args": args}) + "\n")
+def save(): state_path.write_text(json.dumps(state))
+def out(value): print(value, end="" if str(value).endswith("\n") else "\n")
+image = "cloudflare/cloudflared:2026.7.3@sha256:e39ee8da81ad5e05d77f38d2f51c60ca51bf2a8450ac3abab50c17fdb91d91bf"
+if name == "git":
+    if "status" in args: out(" M dirty" if state["dirty"] else "")
+    else: out(state["revision"])
+elif name == "helm":
+    if "list" in args: out(json.dumps([{"name":"cloudflare-tunnel","status":"deployed","chart":"cloudflare-tunnel-0.3.2"}]))
+    elif "cloudflare-tunnel" in args: out(json.dumps([{"status":"deployed","revision":state["helm_revision"]}]))
+    else: out('[{"status":"deployed","revision":9}]')
+elif name == "just": sys.exit(0)
+elif name == "ruby":
+    for i in range(16): out(f"https://endpoint-{i}.test")
+elif name == "curl": out(str(state["endpoint"]))
+elif name == "date": out("20260809T000000Z")
+elif name == "sleep":
+    if state["block_long_sleep"] and args and int(args[0]) > 30:
+        state["sleeping"] = True; save()
+        while True: time.sleep(.05)
+elif name == "kubectl":
+    joined = " ".join(args)
+    if "current-context" in joined: out(state["context"])
+    elif "get deployment" in joined:
+        used = image if state["image_ok"] else "cloudflare/cloudflared:wrong"
+        out(json.dumps({"metadata":{"labels":{"app.kubernetes.io/managed-by":"Helm","app.kubernetes.io/name":"cloudflare-tunnel","app.kubernetes.io/instance":"cloudflare-tunnel"}},"spec":{"replicas":2,"template":{"spec":{"containers":[{"image":used,"readinessProbe":{"httpGet":{"path":"/ready","port":2000}}}]}}},"status":{"observedGeneration":1}}))
+    elif "get pods" in joined:
+        items=[]
+        for i in range(state["pod_count"]):
+            disrupted = i < 2 and state["tables"][i]
+            restart = state["restart"][i] if i < 2 else 0
+            items.append({"metadata":{"name":f"connector-{i+1}","uid":f"uid-{i+1}","labels":{"app.kubernetes.io/name":"cloudflare-tunnel","app.kubernetes.io/instance":"cloudflare-tunnel"}},"spec":{"nodeName":"node-1" if state["same_node"] else f"node-{i+1}","containers":[{"image":image}]},"status":{"phase":"Running","conditions":[{"type":"Ready","status":"False" if disrupted else "True"}],"containerStatuses":[{"restartCount":restart}]}})
+        out(json.dumps({"items":items}))
+    elif "get secret" in joined:
+        if ".data" in joined or "-o json " in joined or "-o yaml" in joined: out(state["secret"]); sys.exit(91)
+        out("secret-uid\t12\t2026-08-09T00:00:00Z")
+    elif "get --raw" in joined:
+        query=urllib.parse.unquote(joined)
+        if "ALERTS" in query: value=state["alerts"]
+        elif "sum(cloudflared" in query: value=0 if all(state["tables"]) else 8
+        else: value=2
+        out(json.dumps({"data":{"result":[{"value":[0,str(value)]}]}}))
+elif name == "node-executor":
+    node, command=args[0],args[1]; idx=int(node[-1])-1
+    if "test -x" in command: sys.exit(0)
+    if "crictl pods --name" in command and "inspectp" not in command:
+        if state["sandbox_fail"]: out("ambiguous\nsecond"); sys.exit(0)
+        out(("a" if idx == 0 else "b")*12)
+    elif command.startswith("sudo crictl inspectp"):
+        out(json.dumps({"status":{"labels":{"io.kubernetes.pod.uid":f"uid-{idx+1}"}},"info":{"pid":101+idx}}))
+    elif command.startswith("readlink /proc/") or command.startswith("/usr/bin/readlink /proc/"):
+        out(f"net:[{1001+idx}]")
+    elif "systemd-run" in command:
+        state["watchdogs"][idx]=True; save()
+    elif "systemctl is-active" in command:
+        if not state["watchdogs"][idx]: sys.exit(3)
+        out(str(501+idx))
+    elif "add table inet" in command:
+        state["tables"][idx]=True; save()
+        if state["install_fail"] == idx: sys.exit(44)
+    elif "delete table inet" in command:
+        state["tables"][idx]=False; save(); out("")
+    elif "list ruleset" in command:
+        if state["collision"]: sys.exit(1)
+        sys.exit(0)
+save()
+'''
 
 
 def run(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -358,6 +501,124 @@ def test_secret_values_are_never_requested_or_printed() -> None:
     assert "get secret tunnel-token -o jsonpath='{.metadata" in TEXT
     for forbidden in (".data.token", "-o yaml", "get secret tunnel-token -o json\n", "base64 -d"):
         assert forbidden not in TEXT
+
+
+def test_actual_helper_completes_stateful_interruption_and_recovery(tmp_path: Path) -> None:
+    harness = StatefulDrillHarness(tmp_path)
+    result = harness.run()
+    assert result.returncode == 0, result.stderr
+    commands = harness.commands()
+    node_commands = [entry["args"][1] for entry in commands if entry["tool"] == "node-executor"]
+    watchdogs = [i for i, command in enumerate(node_commands) if "systemd-run --unit" in command]
+    installs = [i for i, command in enumerate(node_commands) if "add table inet" in command]
+    deletes = [command for command in node_commands if "delete table inet" in command]
+    assert len(watchdogs) == len(installs) == len(deletes) == 2
+    assert max(watchdogs) < min(installs)
+    assert all("list ruleset" in command for command in deletes)
+    assert harness.current()["tables"] == [False, False]
+    preflight = json.loads((harness.evidence / "preflight.json").read_text())
+    assert [pod["restartCount"] for pod in preflight["pods"]] == [0, 0]
+    assert all(pod["image"].startswith("cloudflare/cloudflared:") for pod in preflight["pods"])
+    assert (harness.evidence / "interruption-metrics.json").exists()
+    assert (harness.evidence / "recovery-metrics.json").exists()
+
+
+@pytest.mark.parametrize(
+    ("override", "message"),
+    [
+        ({"context": "production"}, "context must be"),
+        ({"revision": "wrong"}, "revision is not approved"),
+        ({"dirty": True}, "worktree must be clean"),
+        ({"image_ok": False}, "immutable image is not approved"),
+        ({"helm_revision": 3}, "Helm revision must be 2"),
+        ({"pod_count": 3}, "exactly two Ready"),
+        ({"same_node": True}, "distinct nodes"),
+        ({"alerts": 1}, "alert is active"),
+        ({"endpoint": 503}, "unhealthy endpoint"),
+        ({"sandbox_fail": True}, "cannot resolve one exact sandbox"),
+        ({"collision": True}, "owner table absence could not be proven"),
+    ],
+)
+def test_actual_helper_preflights_fail_closed(
+    tmp_path: Path, override: dict[str, object], message: str
+) -> None:
+    harness = StatefulDrillHarness(tmp_path, **override)
+    result = harness.run()
+    assert result.returncode != 0
+    assert message in result.stderr
+    assert not any(
+        "add table inet" in entry["args"][1]
+        for entry in harness.commands() if entry["tool"] == "node-executor"
+    )
+
+
+def test_actual_helper_rejects_confirmation_without_external_calls(tmp_path: Path) -> None:
+    harness = StatefulDrillHarness(tmp_path)
+    result = harness.run(confirmation="no")
+    assert result.returncode != 0
+    assert "confirmation must exactly equal" in result.stderr
+    assert {entry["tool"] for entry in harness.commands()} <= {"date"}
+
+
+def test_ambiguous_second_install_attempt_cleans_every_possible_node(tmp_path: Path) -> None:
+    harness = StatefulDrillHarness(tmp_path, install_fail=1)
+    result = harness.run()
+    assert result.returncode != 0
+    commands = harness.commands()
+    cleanup_nodes = {
+        entry["args"][0] for entry in commands
+        if entry["tool"] == "node-executor" and "delete table inet" in entry["args"][1]
+    }
+    assert cleanup_nodes == {"node-1", "node-2"}
+    assert harness.current()["tables"] == [False, False]
+
+
+def test_sigterm_after_disruption_runs_exact_cleanup(tmp_path: Path) -> None:
+    harness = StatefulDrillHarness(tmp_path, block_long_sleep=True)
+    process = harness.start()
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline and not harness.current().get("sleeping"):
+        time.sleep(.02)
+    assert harness.current().get("sleeping"), "helper never reached the disrupted observation window"
+    os.killpg(process.pid, signal.SIGTERM)
+    stdout, stderr = process.communicate(timeout=5)
+    assert process.returncode == 143, (stdout, stderr)
+    assert harness.current()["tables"] == [False, False]
+    deletes = [entry for entry in harness.commands() if entry["tool"] == "node-executor" and "delete table inet" in entry["args"][1]]
+    assert len(deletes) == 2
+
+
+def test_actual_helper_rejects_accidental_restart(tmp_path: Path) -> None:
+    harness = StatefulDrillHarness(tmp_path, restart=[1, 0])
+    # The changed count becomes the baseline, so change it only after disruption.
+    process = harness.start()
+    deadline = time.monotonic() + 20
+    changed = False
+    while time.monotonic() < deadline:
+        state = harness.current()
+        if state["tables"] == [True, True]:
+            state["restart"][0] = 2
+            harness.state.write_text(json.dumps(state))
+            changed = True
+            break
+        time.sleep(.01)
+    stdout, stderr = process.communicate(timeout=5)
+    assert changed, "helper never installed both disruption tables"
+    assert process.returncode != 0, stdout
+    assert "UID/restart set changed" in stderr
+    assert harness.current()["tables"] == [False, False]
+
+
+def test_secret_metadata_only_and_sentinel_never_leaks(tmp_path: Path) -> None:
+    harness = StatefulDrillHarness(tmp_path)
+    result = harness.run()
+    material = result.stdout + result.stderr + harness.log.read_text()
+    material += "".join(path.read_text() for path in harness.evidence.iterdir())
+    assert "SENTINEL-SECRET-MUST-NOT-LEAK" not in material
+    secret_calls = [entry for entry in harness.commands() if entry["tool"] == "kubectl" and "secret" in entry["args"]]
+    assert len(secret_calls) == 2
+    assert all(".metadata.uid" in " ".join(entry["args"]) and ".data" not in " ".join(entry["args"]) for entry in secret_calls)
+    assert "NetworkPolicy" not in result.stdout
 
 
 def test_evidence_is_sanitized_and_outside_repository_by_default() -> None:
