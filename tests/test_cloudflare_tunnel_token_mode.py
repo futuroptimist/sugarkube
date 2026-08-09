@@ -5,13 +5,14 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
 import subprocess
 import tempfile
 import textwrap
 from pathlib import Path
 
 import pytest
+
+pytestmark = pytest.mark.usefixtures("ensure_just_available")
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 JUSTFILE = REPO_ROOT / "justfile"
@@ -27,11 +28,8 @@ def _extract_cf_recipe_body() -> str:
 def _render_cf_recipe(env: str) -> str:
     """Render the recipe through Just, including all Just variable interpolation."""
 
-    just = shutil.which("just")
-    if just is None:
-        pytest.skip("just is required to render Cloudflare Tunnel recipes")
     result = subprocess.run(
-        [just, "--dry-run", "cf-tunnel-install", f"env={env}"],
+        ["just", "--dry-run", "cf-tunnel-install", f"env={env}"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -244,7 +242,12 @@ def _run_cf_tunnel_install_recipe(
         path = f.name
 
     try:
-        return subprocess.run(["bash", path], capture_output=True, text=True)
+        environment = os.environ.copy()
+        for variable in ("CF_TUNNEL_TOKEN", "CF_TUNNEL_NAME", "CF_TUNNEL_ID"):
+            environment.pop(variable, None)
+        return subprocess.run(
+            ["bash", path], env=environment, capture_output=True, text=True
+        )
     finally:
         Path(path).unlink(missing_ok=True)
 
@@ -253,10 +256,6 @@ def _run_actual_cf_tunnel_install(
     tmp_path: Path, *, secret_exists: bool
 ) -> tuple[subprocess.CompletedProcess[str], str]:
     """Run Just's fully rendered recipe against command-recording stubs."""
-
-    just = shutil.which("just")
-    if just is None:
-        pytest.skip("just is required to run the Cloudflare Tunnel recipe")
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -270,6 +269,12 @@ def _run_actual_cf_tunnel_install(
                 [ "${SECRET_EXISTS}" = yes ]
                 exit
             fi
+            case " $* " in
+                *" secret "*" get "*|*" get "*" secret "*|*" secret "*" describe "*|*" describe "*" secret "*)
+                    printf '%s\n' 'FORBIDDEN_SECRET_CONTENT_SENTINEL' >&2
+                    exit 97
+                    ;;
+            esac
             exit 0
         fi
         if [ "$*" = "-n cloudflare list --filter ^cloudflare-tunnel$ --output json" ]; then
@@ -298,7 +303,7 @@ def _run_actual_cf_tunnel_install(
         }
     )
     result = subprocess.run(
-        [just, "cf-tunnel-install", "env=staging"],
+        ["just", "cf-tunnel-install", "env=staging"],
         cwd=REPO_ROOT,
         env=environment,
         capture_output=True,
@@ -486,7 +491,17 @@ def test_existing_secret_is_preserved_without_token_input(tmp_path: Path) -> Non
     result, calls = _run_actual_cf_tunnel_install(tmp_path, secret_exists=True)
     assert result.returncode == 0, result.stderr
     combined = result.stdout + result.stderr + calls
-    assert "kubectl:-n cloudflare get secret tunnel-token -o name" in calls
+    permitted_secret_read = "kubectl:-n cloudflare get secret tunnel-token -o name"
+    assert calls.splitlines().count(permitted_secret_read) == 1
+    assert not [
+        call
+        for call in calls.splitlines()
+        if call.startswith("kubectl:")
+        and " secret " in f" {call} "
+        and (" get " in f" {call} " or " describe " in f" {call} ")
+        and call != permitted_secret_read
+    ]
+    assert "FORBIDDEN_SECRET_CONTENT_SENTINEL" not in combined
     assert "create secret" not in combined
     assert "apply -f -" not in combined
     assert "--from-literal" not in combined
@@ -496,19 +511,24 @@ def test_existing_secret_is_preserved_without_token_input(tmp_path: Path) -> Non
     assert "helm:upgrade --install cloudflare-tunnel" in calls
     assert calls.count("kubectl:-n cloudflare patch deployment cloudflare-tunnel") == 2
     assert "kubectl:-n cloudflare rollout status deployment/cloudflare-tunnel" in calls
-    assert ("token" + '="$CF_TUNNEL_TOKEN"') not in result.stdout + result.stderr
+    guidance_example = "token" + '="$CF_TUNNEL_TOKEN"'
+    assert guidance_example not in result.stdout + result.stderr
 
 
 def test_guidance_is_not_eagerly_expanded_under_nounset(cf_recipe_body: str) -> None:
     assert "cat >&2 <<'ORIGIN_CERT_GUIDANCE'" in cf_recipe_body
     assert 'origin_cert_guidance="{{ origin_cert_guidance }}"' not in cf_recipe_body
     assert 'origin_cert_guidance="' not in cf_recipe_body
+    guidance_example = "token" + '="$CF_TUNNEL_TOKEN"'
+    assert guidance_example in JUSTFILE.read_text(encoding="utf-8")
 
 
 def test_initial_install_requires_and_creates_secret_from_out_of_band_token() -> None:
     missing = _run_cf_tunnel_install_recipe("staging", secret_exists=False, connector_value=None)
     assert missing.returncode != 0
     assert "initial installation" in missing.stderr
+    assert "HELM:" not in missing.stdout
+    assert "KUBECTL:-n cloudflare patch deployment" not in missing.stdout
 
     created = _run_cf_tunnel_install_recipe("staging", secret_exists=False)
     assert created.returncode == 0, created.stderr
