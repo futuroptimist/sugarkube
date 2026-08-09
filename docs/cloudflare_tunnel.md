@@ -541,13 +541,17 @@ part of this rollout.
    nothing.
 
    Before disruption, the helper records only sanitized pod, image, metric, Helm, Secret-metadata, and
-   endpoint evidence. It resolves each CRI sandbox to its PID and network-namespace inode, rejects an
-   ambiguous sandbox or pre-existing owner table, and installs a transient cleanup watchdog independently
-   on both affected nodes. It then proves the original UIDs become NotReady with zero HA connections and
+   endpoint evidence, both Helm histories, and a canonical Deployment projection. It resolves each CRI
+   sandbox to its PID and network-namespace inode, revalidates those three identities before every
+   privileged namespace operation, and rejects an ambiguous sandbox or pre-existing owner table. Each
+   transient watchdog enters and holds the validated namespace before disruption, avoiding delayed PID
+   reuse, and all watchdog binary paths are preflighted on both affected nodes. It then proves the
+   original UIDs become NotReady with zero HA connections and
    unchanged restart counts. Cleanup deletes only the exact owner table, including after signals and
-   partial setup. Failure to prove automatic cleanup fails closed and prints exact node-specific manual
-   cleanup commands. The disruption is limited to three minutes, below the shortest five-minute alert
-   threshold.
+   partial or ambiguously reported setup. A node remains cleanup-eligible until both exact deletion and
+   table absence are proven; normal-cleanup failure leaves it available to the EXIT retry. Failure to
+   prove automatic cleanup fails closed and prints exact UID/inode-guarded, node-specific manual cleanup
+   commands. The disruption is limited to three minutes, below the shortest five-minute alert threshold.
 6. Recovery must use the same UIDs with unchanged restart counts. Within five minutes both pods must be
    Ready with at least four HA connections apiece; all approved public endpoints must return HTTP 200;
    Helm histories, Secret metadata, and Deployment state must be unchanged; and

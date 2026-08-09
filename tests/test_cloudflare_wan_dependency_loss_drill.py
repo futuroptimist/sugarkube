@@ -91,9 +91,11 @@ def test_owner_collision_is_refused() -> None:
 
 def test_watchdogs_are_installed_on_both_nodes_before_disruption() -> None:
     watchdog = TEXT.index("# A transient host service survives")
-    install = TEXT.index('install="sudo nsenter', watchdog)
+    install = TEXT.index('install="test ', watchdog)
     assert "for i in 0 1; do" in TEXT[watchdog:install]
     assert "systemd-run" in TEXT[watchdog:install]
+    assert "/usr/bin/nsenter" in TEXT[watchdog:install]
+    assert "/proc/self/ns/net" in TEXT[watchdog:install]
 
 
 def test_one_node_setup_failure_cleans_the_installed_node() -> None:
@@ -101,7 +103,7 @@ def test_one_node_setup_failure_cleans_the_installed_node() -> None:
     install = TEXT.index('node_exec "${pod_nodes[$i]}" "${install}"', attempted)
     assert attempted < install, "ambiguous installation attempts must be tracked first"
     assert "trap 'cleanup $?' EXIT" in TEXT
-    assert "rule setup failed" in TEXT
+    assert "cleanup 1" in TEXT[install : install + 200]
 
 
 def test_failed_normal_cleanup_remains_tracked_for_exit_retry() -> None:
