@@ -728,8 +728,8 @@ cf-tunnel-verify env='staging':
     scripts/verify_cloudflare_tunnel.sh {{ quote(env) }}
 
 # Plan (default) or execute the staging-only, same-process Cloudflare WAN dependency-loss drill.
-cf-tunnel-wan-dependency-loss-drill env='staging' *args='':
-    scripts/cloudflare_wan_dependency_loss_drill.sh --env={{ quote(env) }} {{ args }}
+cf-tunnel-wan-dependency-loss-drill *args='env=staging':
+    scripts/cloudflare_wan_dependency_loss_drill.sh {{ args }}
 
 # Hard reset the Cloudflare Tunnel resources in the cluster for a fresh cf-tunnel-install.
 cf-tunnel-reset:
