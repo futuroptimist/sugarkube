@@ -39,6 +39,72 @@ def test_dry_run_performs_no_mutation_or_external_preflight(tmp_path: Path) -> N
     assert not marker.exists(), "dry-run should not even invoke cluster/node stubs"
 
 
+def manual_plan_environment(tmp_path: Path, *, context: str = "sugar-staging") -> dict[str, str]:
+    image = TEXT.split("readonly EXPECTED_IMAGE='", 1)[1].split("'", 1)[0]
+    deployment = {
+        "metadata": {"labels": {"app.kubernetes.io/managed-by": "Helm", "app.kubernetes.io/name": "cloudflare-tunnel", "app.kubernetes.io/instance": "cloudflare-tunnel"}},
+        "spec": {"replicas": 2, "template": {"spec": {"containers": [{"image": image, "readinessProbe": {"httpGet": {"path": "/ready", "port": 2000}}}]}}},
+        "status": {"observedGeneration": 1},
+    }
+    pods = {"items": []}
+    for number in (1, 2):
+        pods["items"].append({
+            "metadata": {"name": f"connector-{number}", "uid": f"uid-{number}", "labels": {"app.kubernetes.io/name": "cloudflare-tunnel", "app.kubernetes.io/instance": "cloudflare-tunnel"}},
+            "spec": {"nodeName": f"node-{number}", "containers": [{"image": image}]},
+            "status": {"phase": "Running", "conditions": [{"type": "Ready", "status": "True"}], "containerStatuses": [{"restartCount": 0}]},
+        })
+
+    def stub(name: str, body: str) -> None:
+        path = tmp_path / name
+        path.write_text("#!/bin/sh\nset -eu\n" + body)
+        path.chmod(0o755)
+
+    stub("git", "case \"$*\" in *status*) exit 0;; *rev-parse*) echo approved;; esac\n")
+    stub("helm", "case \"$*\" in *' list '*) printf '%s\\n' '[{\"name\":\"cloudflare-tunnel\",\"status\":\"deployed\",\"chart\":\"cloudflare-tunnel-0.3.2\"}]';; *cloudflare-tunnel*) printf '%s\\n' '[{\"status\":\"deployed\",\"revision\":2}]';; *) printf '%s\\n' '[{\"status\":\"deployed\",\"revision\":9}]';; esac\n")
+    stub("kubectl", f"case \"$*\" in *current-context*) echo {context};; *'get deployment'*) printf '%s\\n' {json.dumps(json.dumps(deployment))};; *'get pods'*) printf '%s\\n' {json.dumps(json.dumps(pods))};; *'get secret'*) printf 'secret-uid\\t12\\t2026-08-09T00:00:00Z\\n';; *ALERTS*) printf '%s\\n' '{{\"data\":{{\"result\":[{{\"value\":[0,\"0\"]}}]}}}}';; *get\\ --raw*) printf '%s\\n' '{{\"data\":{{\"result\":[{{\"value\":[0,\"2\"]}}]}}}}';; esac\n")
+    stub("just", "exit 0\n")
+    stub("ruby", "i=1; while [ $i -le 16 ]; do echo https://endpoint-$i.test; i=$((i+1)); done\n")
+    stub("curl", "printf 200\n")
+    stub("date", "printf 20260809T000000Z\n")
+    return {"PATH": f"{tmp_path}:/usr/bin:/bin", "CF_DRILL_APPROVED_REVISION": "approved"}
+
+
+def test_manual_node_plan_runs_read_only_preflights_and_renders_exact_ordered_commands(tmp_path: Path) -> None:
+    result = run("--manual-node-plan", env=manual_plan_environment(tmp_path))
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    watchdogs = [i for i, line in enumerate(lines) if line.startswith("WATCHDOG ")]
+    disruptions = [i for i, line in enumerate(lines) if line.startswith("DISRUPTION ")]
+    cleanups = [i for i, line in enumerate(lines) if line.startswith("CLEANUP ")]
+    assert len(watchdogs) == len(disruptions) == len(cleanups) == 2
+    assert max(watchdogs) < min(disruptions)
+    for number in (1, 2):
+        associated = [line for line in lines if f"node=node-{number}" in line]
+        assert len(associated) == 3
+        assert all(f"pod=connector-{number}" in line and f"uid=uid-{number}" in line for line in associated)
+        assert all("crictl\\ pods" in line and "inspectp" in line and "readlink" in line for line in associated)
+    assert all("systemctl" in lines[i] and "MainPID" in lines[i] for i in disruptions)
+    assert all("delete\\ table\\ inet" in lines[i] and "list\\ ruleset" in lines[i] and "length\\ ==\\ 0" in lines[i] for i in cleanups)
+    assert "BLOCKED: manual-node plan only; the drill was not executed and has not passed." in result.stdout
+
+
+def test_manual_node_plan_preflight_failure_emits_no_actionable_commands(tmp_path: Path) -> None:
+    result = run("--manual-node-plan", env=manual_plan_environment(tmp_path, context="wrong-context"))
+    assert result.returncode != 0
+    assert not any(record in result.stdout for record in ("WATCHDOG ", "DISRUPTION ", "CLEANUP "))
+
+
+def test_execute_without_node_adapter_renders_plan_then_fails_closed(tmp_path: Path) -> None:
+    result = run(
+        "--execute",
+        "--confirm=DISRUPT STAGING CLOUDFLARE WAN FOR SAME-PROCESS RECOVERY",
+        env=manual_plan_environment(tmp_path),
+    )
+    assert result.returncode != 0
+    assert result.stdout.count("WATCHDOG ") == 2
+    assert "execution remains blocked" in result.stderr
+
+
 def test_non_staging_is_rejected_before_any_mutation() -> None:
     result = run("--env=prod")
     assert result.returncode != 0

@@ -12,6 +12,7 @@ readonly DISRUPTION_SECONDS=180
 readonly RECOVERY_SECONDS=300
 
 execute=0
+manual_node_plan=0
 env_name=staging
 confirmation=''
 owner=''
@@ -24,6 +25,7 @@ declare -a preflight_http=()
 usage() {
   cat <<'EOF'
 Usage: cloudflare_wan_dependency_loss_drill.sh [--execute] [--env staging]
+       cloudflare_wan_dependency_loss_drill.sh --manual-node-plan [--env staging]
        [--confirm 'DISRUPT STAGING CLOUDFLARE WAN FOR SAME-PROCESS RECOVERY']
 
 The default is a non-mutating plan. Execution also requires:
@@ -40,6 +42,30 @@ table_for() {
   local digest
   digest="$(printf '%s' "${owner}" | sha256sum | cut -d' ' -f1)"
   printf 'cfwd_%s' "${digest:0:20}"
+}
+
+render_manual_node_plan() {
+  local i table unit resolve guard watchdog_body watchdog disruption cleanup
+  table="$(table_for)"
+  printf 'MANUAL NODE PLAN -- commands were rendered but NOT EXECUTED.\n'
+  printf 'Run each record through a separately authenticated, host-key-verified session for its exact node.\n'
+  for i in 0 1; do
+    unit="${owner}-cleanup.service"
+    resolve="sandboxes=\"\$(sudo /usr/bin/crictl pods --name '^${pod_names[$i]}$' -q)\" && set -- \${sandboxes} && test \"\$#\" -eq 1 && sandbox=\"\$1\" && inspect=\"\$(sudo /usr/bin/crictl inspectp \"\${sandbox}\")\" && test \"\$(printf '%s\\n' \"\${inspect}\" | /usr/bin/jq -r '.status.labels[\"io.kubernetes.pod.uid\"]')\" = '${pod_uids[$i]}' && pid=\"\$(printf '%s\\n' \"\${inspect}\" | /usr/bin/jq -r '.info.pid')\" && case \"\${pid}\" in ''|0|*[!0-9]*) exit 64;; esac && netns=\"\$(/usr/bin/readlink /proc/\${pid}/ns/net)\" && case \"\${netns}\" in 'net:['*']') :;; *) exit 65;; esac"
+    watchdog_body="/bin/sh -c 'test \"\$(/usr/bin/readlink /proc/self/ns/net)\" = \"\$1\" || exit 70; /bin/sleep 240; /usr/sbin/nft delete table inet ${table} 2>/dev/null || true; ruleset=\"\$(/usr/sbin/nft -j list ruleset)\" || exit 71; printf \"%s\\n\" \"\${ruleset}\" | /usr/bin/jq -e --arg table ${table} '\"'\"'[.nftables[]?.table? | select(.family==\"inet\" and .name==\$table)] | length == 0'\"'\"' >/dev/null' sh \"\${netns}\""
+    watchdog="${resolve} && sudo /usr/bin/systemd-run --unit '${unit%.service}' --collect /usr/bin/nsenter -t \"\${pid}\" -n ${watchdog_body} && sudo /usr/bin/systemctl is-active --quiet '${unit}' && watchdog_pid=\"\$(sudo /usr/bin/systemctl show --property MainPID --value '${unit}')\" && case \"\${watchdog_pid}\" in ''|0|*[!0-9]*) exit 66;; esac && test \"\$(/usr/bin/readlink /proc/\${watchdog_pid}/ns/net)\" = \"\${netns}\""
+    printf 'WATCHDOG node=%q pod=%q uid=%q owner=%q table=%q command=%q\n' "${pod_nodes[$i]}" "${pod_names[$i]}" "${pod_uids[$i]}" "${owner}" "${table}" "${watchdog}"
+  done
+  for i in 0 1; do
+    unit="${owner}-cleanup.service"
+    resolve="sandboxes=\"\$(sudo /usr/bin/crictl pods --name '^${pod_names[$i]}$' -q)\" && set -- \${sandboxes} && test \"\$#\" -eq 1 && sandbox=\"\$1\" && inspect=\"\$(sudo /usr/bin/crictl inspectp \"\${sandbox}\")\" && test \"\$(printf '%s\\n' \"\${inspect}\" | /usr/bin/jq -r '.status.labels[\"io.kubernetes.pod.uid\"]')\" = '${pod_uids[$i]}' && pid=\"\$(printf '%s\\n' \"\${inspect}\" | /usr/bin/jq -r '.info.pid')\" && case \"\${pid}\" in ''|0|*[!0-9]*) exit 64;; esac && netns=\"\$(/usr/bin/readlink /proc/\${pid}/ns/net)\" && case \"\${netns}\" in 'net:['*']') :;; *) exit 65;; esac"
+    guard="sudo /usr/bin/systemctl is-active --quiet '${unit}' && watchdog_pid=\"\$(sudo /usr/bin/systemctl show --property MainPID --value '${unit}')\" && case \"\${watchdog_pid}\" in ''|0|*[!0-9]*) exit 66;; esac && test \"\$(/usr/bin/readlink /proc/\${watchdog_pid}/ns/net)\" = \"\${netns}\""
+    disruption="${resolve} && ${guard} && ruleset=\"\$(sudo /usr/bin/nsenter -t \"\${pid}\" -n /usr/sbin/nft -j list ruleset)\" && printf '%s\\n' \"\${ruleset}\" | /usr/bin/jq -e --arg table '${table}' '[.nftables[]?.table? | select(.family==\"inet\" and .name==\$table)] | length == 0' >/dev/null && sudo /usr/bin/nsenter -t \"\${pid}\" -n /usr/sbin/nft 'add table inet ${table}; add chain inet ${table} output { type filter hook output priority -10; policy accept; }; add rule inet ${table} output udp dport { 7844, 443 } counter drop comment \"${owner}\"; add rule inet ${table} output tcp dport { 7844, 443 } counter drop comment \"${owner}\"'"
+    cleanup="${resolve} && { sudo /usr/bin/nsenter -t \"\${pid}\" -n /usr/sbin/nft delete table inet ${table} 2>/dev/null || true; } && ruleset=\"\$(sudo /usr/bin/nsenter -t \"\${pid}\" -n /usr/sbin/nft -j list ruleset)\" && printf '%s\\n' \"\${ruleset}\" | /usr/bin/jq -e --arg table '${table}' '[.nftables[]?.table? | select(.family==\"inet\" and .name==\$table)] | length == 0' >/dev/null"
+    printf 'DISRUPTION node=%q pod=%q uid=%q owner=%q table=%q command=%q\n' "${pod_nodes[$i]}" "${pod_names[$i]}" "${pod_uids[$i]}" "${owner}" "${table}" "${disruption}"
+    printf 'CLEANUP node=%q pod=%q uid=%q owner=%q table=%q command=%q\n' "${pod_nodes[$i]}" "${pod_names[$i]}" "${pod_uids[$i]}" "${owner}" "${table}" "${cleanup}"
+  done
+  printf 'BLOCKED: manual-node plan only; the drill was not executed and has not passed.\n'
 }
 
 manual_cleanup() {
@@ -73,6 +99,7 @@ cleanup() {
 for arg in "$@"; do
   case "${arg}" in
     --execute) execute=1 ;;
+    --manual-node-plan) manual_node_plan=1 ;;
     --env=*) env_name="${arg#*=}" ;;
     env=*) env_name="${arg#*=}" ;;
     --confirm=*) confirmation="${arg#*=}" ;;
@@ -83,7 +110,7 @@ for arg in "$@"; do
 done
 
 [[ "${env_name}" == staging ]] || die 'the WAN drill is staging-only'
-if ((!execute)); then
+if ((!execute && !manual_node_plan)); then
   cat <<EOF
 PLAN ONLY -- no cluster or node command was run.
 Mechanism: create one uniquely named nftables inet/output table inside each of the two selected
@@ -97,10 +124,10 @@ EOF
 fi
 
 owner="cfwandrill-$(date -u +%Y%m%dT%H%M%SZ)-$$"
-[[ "${confirmation}" == "${CONFIRMATION}" ]] || die "confirmation must exactly equal: ${CONFIRMATION}"
+if ((execute)); then
+  [[ "${confirmation}" == "${CONFIRMATION}" ]] || die "confirmation must exactly equal: ${CONFIRMATION}"
+fi
 [[ -n "${CF_DRILL_APPROVED_REVISION:-}" ]] || die 'CF_DRILL_APPROVED_REVISION is required'
-[[ -n "${CF_DRILL_NODE_EXECUTOR:-}" && -x "${CF_DRILL_NODE_EXECUTOR}" ]] || \
-  die 'CF_DRILL_NODE_EXECUTOR must name an executable safe node-command adapter'
 [[ "$(kubectl config current-context)" == "${EXPECTED_CONTEXT}" ]] || die "context must be ${EXPECTED_CONTEXT}"
 [[ -z "$(git status --porcelain)" ]] || die 'repository worktree must be clean'
 head_revision="$(git rev-parse HEAD)"
@@ -164,6 +191,14 @@ done
 # Metadata only: never request Secret JSON/YAML or its data.
 secret_metadata="$(kubectl -n cloudflare get secret tunnel-token -o jsonpath='{.metadata.uid}{"\t"}{.metadata.resourceVersion}{"\t"}{.metadata.creationTimestamp}{"\n"}')"
 [[ -n "${secret_metadata}" ]] || die 'tunnel-token Secret metadata is unavailable'
+
+if ((manual_node_plan)) || [[ -z "${CF_DRILL_NODE_EXECUTOR:-}" || ! -x "${CF_DRILL_NODE_EXECUTOR}" ]]; then
+  render_manual_node_plan
+  if ((execute)); then
+    die 'CF_DRILL_NODE_EXECUTOR is unavailable; execution remains blocked'
+  fi
+  exit 0
+fi
 
 table="$(table_for)"
 for i in 0 1; do
