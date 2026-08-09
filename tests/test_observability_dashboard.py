@@ -214,6 +214,10 @@ def test_production_snapshot_and_unready_pod_contracts(prod_dashboard):
         ),
         (lambda d: d["panels"][1]["targets"][0].update(format="time_series"), "table-formatted"),
         (
+            lambda d: d["panels"][1]["transformations"][0].update(id="reduce"),
+            "field organization",
+        ),
+        (
             lambda d: d["panels"][1]["transformations"][0]["options"][
                 "indexByName"
             ].pop("Value"),
