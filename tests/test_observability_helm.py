@@ -1495,6 +1495,52 @@ def test_install_and_upgrade_require_distinct_release_states(tmp_path):
     assert rejected.returncode != 0 and "helm upgrade" not in audit
 
 
+@pytest.mark.parametrize(
+    ("command", "helm_mode", "env_name", "context"),
+    [
+        ("install", "absent", "staging", "sugar-staging"),
+        ("upgrade", "present", "staging", "sugar-staging"),
+        ("install", "absent", "prod", "sugar-prod"),
+        ("upgrade", "present", "prod", "sugar-prod"),
+    ],
+)
+def test_install_and_upgrade_dashboard_arguments(tmp_path, command, helm_mode, env_name, context):
+    result, audit = run_helper(
+        tmp_path,
+        command,
+        helm_mode=helm_mode,
+        env_name=env_name,
+        context=context,
+    )
+
+    assert result.returncode == 0, result.stderr
+    mutation = next(line for line in audit.splitlines() if line.startswith(f"helm {command} "))
+    env_values = PROD if env_name == "prod" else STAGING
+    dashboard = PROD_DASHBOARD if env_name == "prod" else DASHBOARD
+    dashboard_uid = (
+        "sugarkube-prod-observability" if env_name == "prod" else "sugarkube-staging-observability"
+    )
+    other_values = STAGING if env_name == "prod" else PROD
+    other_dashboard = DASHBOARD if env_name == "prod" else PROD_DASHBOARD
+    other_dashboard_uid = (
+        "sugarkube-staging-observability" if env_name == "prod" else "sugarkube-prod-observability"
+    )
+
+    assert mutation.index(f"-f {COMMON}") < mutation.index(f"-f {env_values}")
+    assert f"--set-file grafana.dashboards.sugarkube.{dashboard_uid}.json={dashboard}" in mutation
+    assert str(other_values) not in mutation
+    assert str(other_dashboard) not in mutation
+    assert f"grafana.dashboards.sugarkube.{other_dashboard_uid}.json" not in mutation
+
+    overlay = str(tmp_path / "sugarkube-observability-rules.")
+    if env_name == "staging":
+        assert overlay in mutation
+    else:
+        assert overlay not in mutation
+        assert str(CANONICAL_DSPACE_RULES) not in mutation
+        assert str(CANONICAL_CLOUDFLARE_RULES) not in mutation
+
+
 @pytest.mark.parametrize("mode", ["missing-pagerduty", "empty-pagerduty"])
 @pytest.mark.parametrize(("command", "helm_mode"), [("install", "absent"), ("upgrade", "present")])
 def test_mutation_requires_nonempty_pagerduty_secret_without_exposure(
