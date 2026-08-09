@@ -8,6 +8,7 @@ import subprocess
 import sys
 import termios
 import time
+from contextlib import suppress
 from pathlib import Path
 
 import pytest
@@ -53,6 +54,46 @@ DSPACE_ALERT_NAMES = (
 def watchdog_canary():
     uuid = "12345678" + "-1234-4123-8123-123456789abc"
     return "https://" + "hc-ping.com/" + uuid, uuid
+
+
+def terminate_and_reap_process_group(process: subprocess.Popen[str]) -> None:
+    with suppress(ProcessLookupError):
+        os.killpg(process.pid, signal.SIGTERM)
+    try:
+        process.communicate(timeout=1)
+    except subprocess.TimeoutExpired:
+        with suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGKILL)
+        process.communicate()
+
+
+def watchdog_cleanup_state(process: subprocess.Popen[str], tmp_path: Path) -> list[str]:
+    missing_cleanup_states = []
+    if process.poll() is None:
+        missing_cleanup_states.append("watchdog drill exit")
+    if not (tmp_path / "pagerduty.reaped").exists():
+        missing_cleanup_states.append("port-forward reap marker")
+    if list(tmp_path.glob("sugarkube-watchdog-silence.*")):
+        missing_cleanup_states.append("temporary directory removal")
+    return missing_cleanup_states
+
+
+def wait_for_watchdog_signal_cleanup(
+    process: subprocess.Popen[str], tmp_path: Path, *, cleanup_deadline_seconds: int = 15
+) -> tuple[str, str]:
+    cleanup_deadline = time.monotonic() + cleanup_deadline_seconds
+    missing_cleanup_states = ["watchdog drill exit"]
+    while time.monotonic() < cleanup_deadline:
+        missing_cleanup_states = watchdog_cleanup_state(process, tmp_path)
+        if not missing_cleanup_states:
+            return process.communicate()
+        time.sleep(0.01)
+    terminate_and_reap_process_group(process)
+    pytest.fail(
+        "watchdog drill cleanup timed out after "
+        f"{cleanup_deadline_seconds}s waiting for "
+        + ", ".join(missing_cleanup_states)
+    )
 
 
 def yaml_load(path: Path):
@@ -1433,8 +1474,8 @@ receivers:
             env=env,
             start_new_session=True,
         )
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline:
+        readiness_deadline = time.monotonic() + 5
+        while time.monotonic() < readiness_deadline:
             if (tmp_path / "pagerduty.pid").exists() and list(
                 tmp_path.glob("sugarkube-watchdog-silence.*")
             ):
@@ -1446,7 +1487,7 @@ receivers:
         assert (tmp_path / "pagerduty.pid").exists(), "port-forward did not start"
         assert list(tmp_path.glob("sugarkube-watchdog-silence.*")), "temporary directory missing"
         os.killpg(process.pid, interrupt_signal)
-        stdout, stderr = process.communicate(timeout=5)
+        stdout, stderr = wait_for_watchdog_signal_cleanup(process, tmp_path)
         result = subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
     return result, audit.read_text(encoding="utf-8") if audit.exists() else ""
 
@@ -1469,6 +1510,71 @@ def test_fallback_secret_scanner_allows_only_complete_placeholders():
         assert namespace["regex_scan"](["+++ b/docs.md", documented_key + suffix])
     risky_comment = " # " + credential_word + "=real-secret"
     assert namespace["regex_scan"](["+++ b/values.yaml", metadata + risky_comment])
+
+
+def test_terminate_and_reap_process_group_escalates_after_timeout(monkeypatch):
+    class FakeProcess:
+        pid = 4321
+
+        def __init__(self):
+            self.timeouts = []
+
+        def communicate(self, timeout=None):
+            self.timeouts.append(timeout)
+            if timeout == 1:
+                raise subprocess.TimeoutExpired(cmd=["fake"], timeout=timeout)
+            return "", ""
+
+    process = FakeProcess()
+    signals = []
+    monkeypatch.setattr(os, "killpg", lambda pid, sig: signals.append((pid, sig)))
+
+    terminate_and_reap_process_group(process)
+
+    assert signals == [(4321, signal.SIGTERM), (4321, signal.SIGKILL)]
+    assert process.timeouts == [1, None]
+
+
+def test_wait_for_watchdog_signal_cleanup_returns_output_after_cleanup(tmp_path):
+    class FakeProcess:
+        pid = 4321
+        returncode = 130
+
+        def poll(self):
+            return self.returncode
+
+        def communicate(self):
+            return "stdout", "stderr"
+
+    (tmp_path / "pagerduty.reaped").write_text("reaped", encoding="utf-8")
+
+    assert wait_for_watchdog_signal_cleanup(FakeProcess(), tmp_path) == ("stdout", "stderr")
+
+
+def test_wait_for_watchdog_signal_cleanup_times_out_with_missing_state_message(
+    tmp_path, monkeypatch
+):
+    class FakeProcess:
+        pid = 4321
+
+        def poll(self):
+            return None
+
+    (tmp_path / "sugarkube-watchdog-silence.fixture").mkdir()
+    monotonic_values = iter((0.0, 0.0, 16.0))
+    monkeypatch.setattr(time, "monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr(time, "sleep", lambda _: None)
+    reaped = []
+    monkeypatch.setattr(
+        sys.modules[__name__],
+        "terminate_and_reap_process_group",
+        lambda process: reaped.append(process.pid),
+    )
+
+    with pytest.raises(pytest.fail.Exception, match="watchdog drill exit, port-forward reap marker, temporary directory removal"):
+        wait_for_watchdog_signal_cleanup(FakeProcess(), tmp_path)
+
+    assert reaped == [4321]
 
 
 def test_pre_mutation_guards_are_fail_closed(tmp_path):
