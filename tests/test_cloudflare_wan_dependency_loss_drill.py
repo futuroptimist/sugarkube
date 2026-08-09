@@ -719,7 +719,84 @@ def test_node_execution_does_not_weaken_authentication() -> None:
     assert "CF_DRILL_NODE_EXECUTOR" in TEXT
 
 
-def test_recipe_is_clearly_named_and_defaults_to_plan() -> None:
-    justfile = (ROOT / "justfile").read_text()
-    assert "cf-tunnel-wan-dependency-loss-drill env='staging' *args=''" in justfile
-    assert "cloudflare_wan_dependency_loss_drill.sh" in justfile
+@pytest.mark.parametrize("arguments", [[], ["env=staging"]])
+def test_recipe_defaults_to_staging_plan(
+    arguments: list[str], ensure_just_available: Path,
+) -> None:
+    result = subprocess.run(
+        ["just", "cf-tunnel-wan-dependency-loss-drill", *arguments],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "PLAN ONLY -- no cluster or node command was run." in result.stdout
+    assert "--env=env=staging" not in result.stdout + result.stderr
+
+
+def test_recipe_accepts_multiword_confirmation(
+    ensure_just_available: Path,
+) -> None:
+    result = subprocess.run(
+        [
+            "just",
+            "cf-tunnel-wan-dependency-loss-drill",
+            "env=staging",
+            "--manual-node-plan",
+            "--execute",
+            f"--confirm={CONFIRM}",
+            "--evidence-dir=/tmp/evidence-marker",
+            "--help",
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        timeout=30,
+    )
+
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, output
+    assert "Usage:" in output
+    assert "unknown argument" not in output.lower()
+    assert "--env=env=staging" not in output
+
+
+def test_recipe_forwards_helper_arguments_once_and_unchanged(
+    tmp_path: Path, ensure_just_available: Path,
+) -> None:
+    arguments = [
+        "env=staging",
+        "--manual-node-plan",
+        "--execute",
+        f"--confirm={CONFIRM}",
+        "--evidence-dir=/tmp/evidence-marker",
+    ]
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    helper = scripts / "cloudflare_wan_dependency_loss_drill.sh"
+    helper.write_text("#!/usr/bin/env bash\nprintf '%s\\n' \"$@\"\n")
+    helper.chmod(0o755)
+    justfile = shutil.copy(ROOT / "justfile", tmp_path / "justfile")
+    result = subprocess.run(
+        [
+            "just",
+            "--justfile",
+            str(justfile),
+            "cf-tunnel-wan-dependency-loss-drill",
+            *arguments,
+        ],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    forwarded = result.stdout.splitlines()
+    assert forwarded == arguments
+    assert forwarded.count(f"--confirm={CONFIRM}") == 1
+    assert "--env=env=staging" not in forwarded
+    recipe = (ROOT / "justfile").read_text()
+    assert recipe.count('scripts/cloudflare_wan_dependency_loss_drill.sh "$@"') == 1
