@@ -78,6 +78,10 @@ def test_manual_node_plan_runs_read_only_preflights_and_renders_exact_ordered_co
     cleanups = [i for i, line in enumerate(lines) if line.startswith("CLEANUP ")]
     assert len(watchdogs) == len(disruptions) == len(cleanups) == 2
     assert max(watchdogs) < min(disruptions)
+    assert max(disruptions) < min(cleanups)
+    assert "verify both watchdog commands successfully before running either DISRUPTION" in result.stdout
+    assert "After the observation window, run both CLEANUP commands." in result.stdout
+    assert "If either DISRUPTION command fails or you abort after any disruption, immediately run both CLEANUP commands." in result.stdout
     for number in (1, 2):
         associated = [line for line in lines if f"node=node-{number}" in line]
         assert len(associated) == 3

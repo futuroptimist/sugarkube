@@ -46,9 +46,13 @@ table_for() {
 
 render_manual_node_plan() {
   local i table unit resolve guard watchdog_body watchdog disruption cleanup
+  local -a disruptions=() cleanups=()
   table="$(table_for)"
   printf 'MANUAL NODE PLAN -- commands were rendered but NOT EXECUTED.\n'
   printf 'Run each record through a separately authenticated, host-key-verified session for its exact node.\n'
+  printf 'Complete and verify both watchdog commands successfully before running either DISRUPTION command.\n'
+  printf 'After the observation window, run both CLEANUP commands.\n'
+  printf 'If either DISRUPTION command fails or you abort after any disruption, immediately run both CLEANUP commands.\n'
   for i in 0 1; do
     unit="${owner}-cleanup.service"
     resolve="sandboxes=\"\$(sudo /usr/bin/crictl pods --name '^${pod_names[$i]}$' -q)\" && set -- \${sandboxes} && test \"\$#\" -eq 1 && sandbox=\"\$1\" && inspect=\"\$(sudo /usr/bin/crictl inspectp \"\${sandbox}\")\" && test \"\$(printf '%s\\n' \"\${inspect}\" | /usr/bin/jq -r '.status.labels[\"io.kubernetes.pod.uid\"]')\" = '${pod_uids[$i]}' && pid=\"\$(printf '%s\\n' \"\${inspect}\" | /usr/bin/jq -r '.info.pid')\" && case \"\${pid}\" in ''|0|*[!0-9]*) exit 64;; esac && netns=\"\$(/usr/bin/readlink /proc/\${pid}/ns/net)\" && case \"\${netns}\" in 'net:['*']') :;; *) exit 65;; esac"
@@ -62,8 +66,14 @@ render_manual_node_plan() {
     guard="sudo /usr/bin/systemctl is-active --quiet '${unit}' && watchdog_pid=\"\$(sudo /usr/bin/systemctl show --property MainPID --value '${unit}')\" && case \"\${watchdog_pid}\" in ''|0|*[!0-9]*) exit 66;; esac && test \"\$(/usr/bin/readlink /proc/\${watchdog_pid}/ns/net)\" = \"\${netns}\""
     disruption="${resolve} && ${guard} && ruleset=\"\$(sudo /usr/bin/nsenter -t \"\${pid}\" -n /usr/sbin/nft -j list ruleset)\" && printf '%s\\n' \"\${ruleset}\" | /usr/bin/jq -e --arg table '${table}' '[.nftables[]?.table? | select(.family==\"inet\" and .name==\$table)] | length == 0' >/dev/null && sudo /usr/bin/nsenter -t \"\${pid}\" -n /usr/sbin/nft 'add table inet ${table}; add chain inet ${table} output { type filter hook output priority -10; policy accept; }; add rule inet ${table} output udp dport { 7844, 443 } counter drop comment \"${owner}\"; add rule inet ${table} output tcp dport { 7844, 443 } counter drop comment \"${owner}\"'"
     cleanup="${resolve} && { sudo /usr/bin/nsenter -t \"\${pid}\" -n /usr/sbin/nft delete table inet ${table} 2>/dev/null || true; } && ruleset=\"\$(sudo /usr/bin/nsenter -t \"\${pid}\" -n /usr/sbin/nft -j list ruleset)\" && printf '%s\\n' \"\${ruleset}\" | /usr/bin/jq -e --arg table '${table}' '[.nftables[]?.table? | select(.family==\"inet\" and .name==\$table)] | length == 0' >/dev/null"
-    printf 'DISRUPTION node=%q pod=%q uid=%q owner=%q table=%q command=%q\n' "${pod_nodes[$i]}" "${pod_names[$i]}" "${pod_uids[$i]}" "${owner}" "${table}" "${disruption}"
-    printf 'CLEANUP node=%q pod=%q uid=%q owner=%q table=%q command=%q\n' "${pod_nodes[$i]}" "${pod_names[$i]}" "${pod_uids[$i]}" "${owner}" "${table}" "${cleanup}"
+    disruptions[$i]="${disruption}"
+    cleanups[$i]="${cleanup}"
+  done
+  for i in 0 1; do
+    printf 'DISRUPTION node=%q pod=%q uid=%q owner=%q table=%q command=%q\n' "${pod_nodes[$i]}" "${pod_names[$i]}" "${pod_uids[$i]}" "${owner}" "${table}" "${disruptions[$i]}"
+  done
+  for i in 0 1; do
+    printf 'CLEANUP node=%q pod=%q uid=%q owner=%q table=%q command=%q\n' "${pod_nodes[$i]}" "${pod_names[$i]}" "${pod_uids[$i]}" "${owner}" "${table}" "${cleanups[$i]}"
   done
   printf 'BLOCKED: manual-node plan only; the drill was not executed and has not passed.\n'
 }
