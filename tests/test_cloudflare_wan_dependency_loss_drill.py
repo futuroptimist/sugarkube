@@ -194,6 +194,30 @@ def test_manual_cleanup_prints_successful_absence_proof() -> None:
     assert "length == 0" in manual
 
 
+def test_preflight_pod_evidence_records_image_and_numeric_restart_count() -> None:
+    construction = TEXT.split('--argjson pods "$(for i in 0 1; do ', 1)[1].split(
+        "; done | jq -s .)", 1
+    )[0]
+    assert '--argjson restartCount "${pod_restarts[$i]}"' in construction
+    assert '--arg image "${EXPECTED_IMAGE}"' in construction
+    assert "restartCount:$restartCount,image:$image" in construction
+
+    record = subprocess.run(
+        [
+            "jq", "-n", "--argjson", "restartCount", "7", "--arg", "image",
+            "cloudflare/cloudflared:test@sha256:approved",
+            "{restartCount:$restartCount,image:$image}",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert json.loads(record.stdout) == {
+        "restartCount": 7,
+        "image": "cloudflare/cloudflared:test@sha256:approved",
+    }
+
+
 def test_one_node_setup_failure_cleans_the_installed_node() -> None:
     attempted = TEXT.index('attempted_indices+=("${i}")')
     install = TEXT.index('node_exec "${pod_nodes[$i]}" "${install}"', attempted)
