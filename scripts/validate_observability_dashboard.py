@@ -225,15 +225,34 @@ def validate_production_dashboard(dashboard: dict) -> None:
         "Observability component build identity",
     )
     table_columns = {
-        "Scrape availability by job": ({"job": 0, "Value": 1}, {"Time", "__name__"}),
-        "Node readiness": ({"node": 0, "Value": 1}, {"Time", "__name__"}),
+        "Scrape availability by job": (
+            {"job": 0, "Value": 1},
+            {"Time", "__name__"},
+            {"job": "Job", "Value": "Status"},
+        ),
+        "Node readiness": (
+            {"node": 0, "Value": 1},
+            {"Time", "__name__"},
+            {"node": "Node", "Value": "Status"},
+        ),
         "Deployment replica deficit": (
             {"namespace": 0, "deployment": 1, "Value": 2},
             {"Time", "__name__"},
+            {
+                "namespace": "Namespace",
+                "deployment": "Deployment",
+                "Value": "Replica deficit",
+            },
         ),
         "Observability component build identity": (
             {"component": 0, "pod": 1, "version": 2, "revision": 3},
             {"Time", "Value", "__name__"},
+            {
+                "component": "Component",
+                "pod": "Pod",
+                "version": "Version",
+                "revision": "Revision",
+            },
         ),
     }
     for title in snapshot_tables:
@@ -254,12 +273,12 @@ def validate_production_dashboard(dashboard: dict) -> None:
         if len(transformations) != 1 or transformations[0].get("id") != "organize":
             raise SystemExit("ERROR: production tables require deterministic field organization.")
         options = transformations[0].get("options", {})
-        expected_columns, expected_hidden = table_columns[title]
+        expected_columns, expected_hidden, expected_headings = table_columns[title]
         if options.get("indexByName") != expected_columns or {
             name for name, hidden in options.get("excludeByName", {}).items() if hidden is True
-        } != expected_hidden:
+        } != expected_hidden or options.get("renameByName") != expected_headings:
             raise SystemExit(
-                "ERROR: production table label/value columns or hidden raw fields are invalid."
+                "ERROR: production table columns, headings, or hidden raw fields are invalid."
             )
     build = panel_named(dashboard, "Observability component build identity")
     expected_build = 'max by (component, pod, version, revision) (' + " or ".join(

@@ -151,10 +151,11 @@ The production dashboard gives each signal the following operational meaning:
   capacity-byte denominator independently by namespace/PVC before division. **Prometheus active
   series** uses the maximum by pod and deliberately stays per pod; future replicas must not be
   summed into a misleading total.
-- **Observability component build identity** uses one instant table query that unions the four
-  build-info metrics and assigns a bounded `component` label. The resulting **Component**, **Pod**,
-  **Version**, and **Revision** columns identify Prometheus, Alertmanager, Grafana, and
-  node-exporter without producing separate selectable query frames.
+- **Observability component build identity** uses one instant table union query over the four
+  build-info metrics. Its fixed, bounded **Component** column contains only `prometheus`,
+  `alertmanager`, `grafana`, or `node-exporter`, while the **Pod**, **Version**, and **Revision**
+  columns preserve a row for each pod/version/revision identity without exposing raw instance or
+  address labels or producing separate selectable query frames.
   `kube_state_metrics_build_info` was absent from the live inventory and is intentionally omitted,
   without a substitute signal.
 

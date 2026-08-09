@@ -139,11 +139,30 @@ def test_production_snapshot_and_unready_pod_contracts(prod_dashboard):
             "revision": 3,
         },
     }
+    expected_headings = {
+        "Scrape availability by job": {"job": "Job", "Value": "Status"},
+        "Node readiness": {"node": "Node", "Value": "Status"},
+        "Deployment replica deficit": {
+            "namespace": "Namespace",
+            "deployment": "Deployment",
+            "Value": "Replica deficit",
+        },
+        "Observability component build identity": {
+            "component": "Component",
+            "pod": "Pod",
+            "version": "Version",
+            "revision": "Revision",
+        },
+    }
     for title, columns in expected_columns.items():
         assert len(panels[title]["targets"]) == 1
         assert len(panels[title]["transformations"]) == 1
         assert panels[title]["transformations"][0]["id"] == "organize"
         assert panels[title]["transformations"][0]["options"]["indexByName"] == columns
+        assert (
+            panels[title]["transformations"][0]["options"]["renameByName"]
+            == expected_headings[title]
+        )
     build = panels["Observability component build identity"]["targets"][0]["expr"]
     assert build.startswith("max by (component, pod, version, revision) (")
     assert {
@@ -198,7 +217,19 @@ def test_production_snapshot_and_unready_pod_contracts(prod_dashboard):
             lambda d: d["panels"][1]["transformations"][0]["options"][
                 "indexByName"
             ].pop("Value"),
-            "label/value columns",
+            "table columns",
+        ),
+        (
+            lambda d: d["panels"][1]["transformations"][0]["options"][
+                "renameByName"
+            ].pop("Value"),
+            "headings",
+        ),
+        (
+            lambda d: d["panels"][3]["transformations"][0]["options"][
+                "renameByName"
+            ].update(node="Host"),
+            "headings",
         ),
         (lambda d: d.update(refresh="1m"), "defaults or variables"),
         (lambda d: add_row_expression(d, "or vector(0)"), "preserve missing data"),
