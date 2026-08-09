@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -51,15 +53,12 @@ def _extract_recipe_body(name: str) -> str:
                 if line.strip() == heredoc_end:
                     heredoc_end = None
                 continue
-            if "<<EOF" in line:
+            heredoc = re.search(r"<<-?['\"]?(?P<end>[A-Z_]+)['\"]?", line)
+            if heredoc:
                 body.append(line)
-                heredoc_end = "EOF"
+                heredoc_end = heredoc.group("end")
                 continue
-            if "<<'PATCH'" in line:
-                body.append(line)
-                heredoc_end = "PATCH"
-                continue
-            if line and not line[0].isspace() and line.strip() not in {')', 'EOF', 'PATCH'}:
+            if line and not line[0].isspace() and line.strip() not in {")", "EOF", "PATCH"}:
                 break
             body.append(line)
             continue
@@ -82,11 +81,9 @@ def cf_tunnel_route_recipe_body() -> str:
 
 def _run_cf_tunnel_route_recipe(host: str) -> subprocess.CompletedProcess[str]:
     rendered_body = _extract_cf_tunnel_route_recipe_body().replace("{{ host }}", host)
-    script = textwrap.dedent(
-        """#!/usr/bin/env bash
+    script = textwrap.dedent("""#!/usr/bin/env bash
         set -euo pipefail
-        """
-    ) + rendered_body + "\n"
+        """) + rendered_body + "\n"
 
     with tempfile.NamedTemporaryFile("w", delete=False) as f:
         f.write(script)
@@ -109,7 +106,9 @@ def test_cf_tunnel_route_normalizes_host_prefix(host_input: str) -> None:
 def deployment_patch_ops(cf_recipe_body: str) -> list[dict]:
     """Extract and combine the common and staging JSON patch payloads."""
 
-    payloads = re.findall(r"(?:deployment|staging)_patch=\$?'(?P<patch>\[.*?\])'", cf_recipe_body, re.S)
+    payloads = re.findall(
+        r"(?:deployment|staging)_patch=\$?'(?P<patch>\[.*?\])'", cf_recipe_body, re.S
+    )
     assert len(payloads) == 2, "Common and staging patch declarations are required"
     return [operation for payload in payloads for operation in json.loads(payload)]
 
@@ -141,15 +140,13 @@ def test_cf_tunnel_install_heredocs_are_well_formed(cf_recipe_body: str) -> None
 
     for terminator, expected_count in opening_counts.items():
         actual_count = terminator_counts.get(terminator, 0)
-        assert actual_count == expected_count, (
-            f"Expected {expected_count} {terminator!r} terminators but found {actual_count}"
-        )
+        assert (
+            actual_count == expected_count
+        ), f"Expected {expected_count} {terminator!r} terminators but found {actual_count}"
         allow_tabs = terminator_allows_tabs.get(terminator, False)
         assert not any(
             _terminator_has_invalid_whitespace(line, terminator, allow_tabs) for line in body
-        ), (
-            f"Terminator {terminator!r} must not be indented or have trailing whitespace"
-        )
+        ), f"Terminator {terminator!r} must not be indented or have trailing whitespace"
 
 
 def _terminator_has_invalid_whitespace(line: str, terminator: str, allow_tabs: bool) -> bool:
@@ -169,8 +166,7 @@ def _terminator_has_invalid_whitespace(line: str, terminator: str, allow_tabs: b
 
 def test_cf_tunnel_install_shell_syntax_is_valid(cf_recipe_body: str) -> None:
     rendered_body = cf_recipe_body.replace("{{ quote(env) }}", "'${env}'")
-    script = textwrap.dedent(
-        """#!/usr/bin/env bash
+    script = textwrap.dedent("""#!/usr/bin/env bash
         set -euo pipefail
 
         # Dummy env so expansions don't blow up under bash -n
@@ -182,8 +178,7 @@ def test_cf_tunnel_install_shell_syntax_is_valid(cf_recipe_body: str) -> None:
         helm() { :; }
         kubectl() { :; }
 
-        """
-    ) + rendered_body + "\n"
+        """) + textwrap.dedent(rendered_body) + "\n"
 
     with tempfile.NamedTemporaryFile("w", delete=False) as f:
         f.write(script)
@@ -199,47 +194,59 @@ def test_cf_tunnel_install_shell_syntax_is_valid(cf_recipe_body: str) -> None:
 
 
 def _run_cf_tunnel_install_recipe(
-    env: str, *, secret_exists: bool = True, token: str | None = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.signature"
+    env: str,
+    *,
+    secret_exists: bool = True,
+    token_input: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    rendered_body = _extract_cf_recipe_body().replace("{{ quote(env) }}", json.dumps(env))
-    script = textwrap.dedent(
-        """#!/usr/bin/env bash
-        set -euo pipefail
+    just = shutil.which("just")
+    assert just, "just is required to exercise the fully rendered recipe"
 
-        if [ {{TOKEN_SET}} = yes ]; then
-            export CF_TUNNEL_TOKEN={{TOKEN}}
-        fi
-        helm() {
-            printf 'HELM:%s\n' "$*"
-            if [ ! -t 0 ]; then
-                sed 's/^/HELM_STDIN:/' <&0
-            fi
-        }
-        kubectl() {
-            printf 'KUBECTL:%s\n' "$*"
-            if [ "$*" = "-n cloudflare get secret tunnel-token -o name" ] && [ {{SECRET_EXISTS}} = no ]; then
-                return 1
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        command_log = tmp_path / "commands.log"
+        stub = textwrap.dedent("""#!/usr/bin/env bash
+            printf '%s:%s\n' "${0##*/}" "$*" >>"${COMMAND_LOG}"
+            if [ "${0##*/}" = kubectl ] &&
+               [ "$*" = "-n cloudflare get secret tunnel-token -o name" ] &&
+               [ "${SECRET_EXISTS}" = no ]; then
+                exit 1
             fi
             if [ ! -t 0 ]; then
-                sed 's/^/KUBECTL_STDIN:/' <&0 >/dev/null
+                cat >/dev/null
             fi
-            return 0
-        }
+            """)
+        for command in ("helm", "kubectl"):
+            path = bin_dir / command
+            path.write_text(stub, encoding="utf-8")
+            path.chmod(0o755)
 
-        """
-    ) + rendered_body + "\n"
-    script = script.replace("{{SECRET_EXISTS}}", "yes" if secret_exists else "no")
-    script = script.replace("{{TOKEN_SET}}", "yes" if token is not None else "no")
-    script = script.replace("{{TOKEN}}", json.dumps(token or ""))
+        run_env = os.environ.copy()
+        run_env.pop("CF_TUNNEL_TOKEN", None)
+        run_env.update(
+            {
+                "COMMAND_LOG": str(command_log),
+                "HOME": tmp,
+                "PATH": f"{bin_dir}:{run_env['PATH']}",
+                "SECRET_EXISTS": "yes" if secret_exists else "no",
+            }
+        )
+        if token_input is not None:
+            run_env["CF_TUNNEL_TOKEN"] = token_input
 
-    with tempfile.NamedTemporaryFile("w", delete=False) as f:
-        f.write(script)
-        path = f.name
-
-    try:
-        return subprocess.run(["bash", path], capture_output=True, text=True)
-    finally:
-        Path(path).unlink(missing_ok=True)
+        result = subprocess.run(
+            [just, "--justfile", str(JUSTFILE), "cf-tunnel-install", f"env={env}"],
+            cwd=REPO_ROOT,
+            env=run_env,
+            capture_output=True,
+            text=True,
+        )
+        commands = command_log.read_text(encoding="utf-8") if command_log.exists() else ""
+        return subprocess.CompletedProcess(
+            result.args, result.returncode, result.stdout + commands, result.stderr
+        )
 
 
 def test_configmap_creation_removed_in_token_mode(cf_recipe_body: str) -> None:
@@ -334,7 +341,9 @@ def test_failed_rollout_never_deletes_both_connectors(cf_recipe_body: str) -> No
     assert "exit 1" in cf_recipe_body
 
 
-def test_deployment_patch_does_not_reference_credentials_file(deployment_patch_ops: list[dict]) -> None:
+def test_deployment_patch_does_not_reference_credentials_file(
+    deployment_patch_ops: list[dict],
+) -> None:
     patch_text = json.dumps(deployment_patch_ops)
     assert "credentials.json" not in patch_text
     assert "creds" not in patch_text
@@ -388,7 +397,7 @@ def test_cf_tunnel_install_normalizes_named_env_arguments(cf_recipe_body: str) -
 
         combined_output = result.stdout + result.stderr
         assert re.search(
-            r"HELM:upgrade --install cloudflare-tunnel cloudflare/cloudflare-tunnel .* --values .*/config/cloudflare-tunnel/values.yaml",
+            r"helm:upgrade --install cloudflare-tunnel cloudflare/cloudflare-tunnel .* --values .*/config/cloudflare-tunnel/values.yaml",
             result.stdout,
         )
         assert f"--set-string cloudflare.tunnelName=sugarkube-{normalized_env}" in combined_output
@@ -404,7 +413,7 @@ def test_cf_tunnel_install_normalizes_named_env_arguments(cf_recipe_body: str) -
 def test_cf_tunnel_monitoring_is_applied_only_in_staging() -> None:
     staging = _run_cf_tunnel_install_recipe("staging")
     assert staging.returncode == 0, staging.stderr
-    assert "KUBECTL:apply -f " in staging.stdout
+    assert "kubectl:apply -f " in staging.stdout
     assert "/config/cloudflare-tunnel/monitoring.yaml" in staging.stdout
 
     for env_name in ("dev", "prod"):
@@ -414,34 +423,49 @@ def test_cf_tunnel_monitoring_is_applied_only_in_staging() -> None:
         assert "ServiceMonitor" not in result.stdout
         assert "--values -" in result.stdout
         assert "/config/cloudflare-tunnel/values.yaml" not in result.stdout
-        assert result.stdout.count("KUBECTL:-n cloudflare patch deployment") == 1
+        assert result.stdout.count("kubectl:-n cloudflare patch deployment") == 1
 
 
 def test_existing_secret_is_preserved_without_token_input() -> None:
-    result = _run_cf_tunnel_install_recipe("staging", secret_exists=True, token=None)
+    result = _run_cf_tunnel_install_recipe("staging", secret_exists=True, token_input=None)
     assert result.returncode == 0, result.stderr
-    assert "kubectl -n cloudflare get secret tunnel-token -o name" in _extract_cf_recipe_body()
-    assert "create secret generic tunnel-token" not in result.stdout
-    assert "--from-literal" not in result.stdout
+    commands = result.stdout
+    assert "kubectl:-n cloudflare get secret tunnel-token -o name" in commands
+    assert "kubectl:-n cloudflare create secret" not in commands
+    assert "kubectl:apply -f -" not in commands
+    assert "--from-literal" not in commands
+    assert "eyJ" not in commands
+    assert "kubectl:-n cloudflare patch deployment cloudflare-tunnel" in commands
+    assert "helm:upgrade --install cloudflare-tunnel" in commands
+    assert "kubectl:-n cloudflare rollout status deployment/cloudflare-tunnel" in commands
 
 
 def test_initial_install_requires_and_creates_secret_from_out_of_band_token() -> None:
-    missing = _run_cf_tunnel_install_recipe("staging", secret_exists=False, token=None)
+    missing = _run_cf_tunnel_install_recipe("staging", secret_exists=False, token_input=None)
     assert missing.returncode != 0
     assert "initial installation" in missing.stderr
+    assert "helm:" not in missing.stdout
+    assert "patch deployment" not in missing.stdout
 
-    created = _run_cf_tunnel_install_recipe("staging", secret_exists=False)
+    created = _run_cf_tunnel_install_recipe(
+        "staging", secret_exists=False, token_input="opaque-test-connector-token"
+    )
     assert created.returncode == 0, created.stderr
     assert "kubectl -n cloudflare create secret generic tunnel-token" in _extract_cf_recipe_body()
-    assert "KUBECTL:apply -f -" in created.stdout
+    assert "kubectl:apply -f -" in created.stdout
 
 
-def test_cf_tunnel_install_flags_origin_cert_logs(cf_recipe_body: str, origin_cert_guidance_text: str) -> None:
+def test_cf_tunnel_install_flags_origin_cert_logs(
+    cf_recipe_body: str, origin_cert_guidance_text: str
+) -> None:
     assert "Cannot determine default origin certificate path" in cf_recipe_body
     assert "origin_cert_guidance" in cf_recipe_body
     assert 'config_src="cloudflare"' in origin_cert_guidance_text
     assert "behaving like a locally-managed tunnel" in origin_cert_guidance_text
     assert "cloudflared tunnel --no-autoupdate run --token <TOKEN>" in origin_cert_guidance_text
+    assert "$CF_TUNNEL_TOKEN" in origin_cert_guidance_text
+    assert 'origin_cert_guidance="' not in cf_recipe_body
+    assert "cat <<'ORIGIN_CERT_GUIDANCE'" in cf_recipe_body
 
 
 def test_reset_and_debug_recipes_exist_and_reset_is_safe() -> None:
@@ -449,7 +473,9 @@ def test_reset_and_debug_recipes_exist_and_reset_is_safe() -> None:
     debug_body = _extract_recipe_body("cf-tunnel-debug")
 
     assert "kubectl -n cloudflare delete deploy cloudflare-tunnel" in reset_body
-    assert "kubectl -n cloudflare delete pod -l app.kubernetes.io/name=cloudflare-tunnel" in reset_body
+    assert (
+        "kubectl -n cloudflare delete pod -l app.kubernetes.io/name=cloudflare-tunnel" in reset_body
+    )
     assert "helm -n cloudflare uninstall cloudflare-tunnel" in reset_body
 
     # Secret deletion must remain optional/commented.
@@ -461,7 +487,7 @@ def test_reset_and_debug_recipes_exist_and_reset_is_safe() -> None:
         "kubectl -n cloudflare get deploy,po -l app.kubernetes.io/name=cloudflare-tunnel"
         in debug_body
     )
-    assert "kubectl -n cloudflare logs \"$POD\" --tail=50" in debug_body
+    assert 'kubectl -n cloudflare logs "$POD" --tail=50' in debug_body
     assert "No ConfigMap created in token-only mode" in debug_body
 
 
