@@ -504,25 +504,57 @@ part of this rollout.
    `2026.7.3`, readiness-only `/ready`, two Prometheus targets, four HA connections per connector,
    healthy alerts, and every approved staging public endpoint.
 4. A pod-deletion drill is not an acceptable WAN-recovery test: it proves replacement, not that the
-   same cloudflared processes stay alive during dependency loss and reconnect afterward. The repository
-   shows that staging uses Kubernetes `NetworkPolicy`, but it does not establish which staging CNI
-   enforces a temporary egress-deny policy or prove that an exact release selector cannot affect other
-   workloads. Therefore the dependency-loss drill is **blocked** pending separate owner confirmation of
-   the staging CNI and its egress-policy behavior. Do not apply a speculative policy or substitute pod
-   deletion.
+   same cloudflared processes stay alive during dependency loss and reconnect afterward. A deny-egress
+   `NetworkPolicy` created after cloudflared has connected is also not a deterministic substitute.
+   Kubernetes explicitly makes handling of existing connections after policy creation or change
+   [implementation-defined](https://kubernetes.io/docs/concepts/services-networking/network-policies/#networkpolicy-and-existing-connections).
+   In particular, an established QUIC flow can continue even when the CNI would deny a new flow. Do
+   not claim that a NetworkPolicy alone must make `/ready` false.
 
-   Once that evidence is recorded, a separately authorized procedure must use a uniquely named,
-   temporary `NetworkPolicy` in `cloudflare`, selecting exactly
-   `app.kubernetes.io/name=cloudflare-tunnel` and
-   `app.kubernetes.io/instance=cloudflare-tunnel`. Before applying it, record both pod names, UIDs, and
-   restart counts and install a cleanup trap that deletes that exact policy name. Keep the deny interval
-   below five minutes (the shortest alert `for` duration); verify readiness becomes false while both UIDs
-   and restart counts remain unchanged. Delete the exact policy, then require those same two pods to
-   become Ready and report at least four HA connections each within five minutes. This contract may be
-   executed only after the CNI safety blocker is resolved and the exact manifest is separately reviewed.
-5. Cleanup is `unset CF_TUNNEL_TOKEN CF_TUNNEL_NAME CF_TUNNEL_ID`; retain the two healthy pods,
-   Service, ServiceMonitor, and PDB. If a future authorized drill resolves the blocker, exact deletion of
-   its uniquely named NetworkPolicy is mandatory even on interruption.
+   On August 9, 2026, the authorized staging attempt created uniquely owned deny-egress policy
+   `cloudflare-wan-drill-20260809t060056z-29424`, which selected exactly both connectors. Both original
+   pods stayed Ready through 23 polls over about 120 seconds with unchanged UIDs and zero restarts.
+   Cleanup deleted the exact policy. Reconciliation found both original processes healthy with four HA
+   connections, no active Cloudflare alert, all 16 staging endpoints returning HTTP 200, and no Helm or
+   Secret change. This was an **inconclusive dependency-loss test**, not a passing recovery drill; it
+   caused no service impact. Operator evidence remains local and must not be committed.
+5. The repository helper instead plans a process-preserving, pod-network-namespace-local nftables
+   interruption:
+
+   ```bash
+   # Non-mutating default; inspect this first.
+   just cf-tunnel-wan-dependency-loss-drill env=staging
+   ```
+
+   It adds one uniquely named `inet` table inside each exact preflight-selected pod network namespace
+   and gives its output chain a drop policy. Namespace-local output filtering sees packets from existing
+   QUIC sockets, so it interrupts established traffic without killing or signaling cloudflared. It never
+   installs a broad node rule or flushes a ruleset. Root on each affected node is nevertheless a sharp
+   privilege boundary: execution therefore requires an operator-reviewed `WAN_DRILL_NODE_EXEC` adapter
+   that accepts a node and one root command. The helper does not invent credentials, weaken SSH host-key
+   checking, or assume unattended remote access. If authenticated execution on both nodes cannot be
+   guaranteed, leave execution blocked and separately review/run the exact commands from the plan.
+
+   Before adding either table, execution resolves the selected sandbox to one network namespace,
+   refuses an existing owner table or ambiguous result, and installs an independent 210-second
+   transient-systemd cleanup watchdog on that node. Normal and signal cleanup delete only the exact
+   owner table. Partial setup cleans a table already installed on the other node; if deletion cannot be
+   proven, the helper fails closed and prints the exact manual cleanup command. The bounded interruption
+   remains below the shortest five-minute alert threshold. Residual risks are loss of node access,
+   failure of the node's transient systemd manager, container-runtime PID churn, and nftables behavior
+   that differs from the reviewed staging hosts; preflight or cleanup uncertainty blocks the drill.
+
+   A live run remains separately authorized and **blocked unless every helper preflight passes**. It
+   requires `--execute`, the exact approved Git revision, staging context `sugar-staging`, clean worktree,
+   Helm revision 2, two exact Ready pods on distinct nodes, the approved immutable image, four HA
+   connections each, healthy metrics/alerts/endpoints, authenticated node execution, and the typed
+   confirmation printed by `--help`. It captures only metadata in `~/operator-evidence`, never Secret
+   values. It must prove both same-UID, same-restart-count pods become NotReady with zero HA connections,
+   remove the exact tables, and prove those processes recover readiness and four connections within five
+   minutes before running `just cf-tunnel-verify env=staging`. Do not execute it in CI or as part of this
+   rollout.
+6. Retain the two healthy pods, Service, ServiceMonitor, and PDB; clear any temporary operator-shell
+   environment after the authorized work.
 
 Rollback immediately if no connector stays Ready, a public endpoint fails for two consecutive
 one-minute checks, a replacement does not reach four HA connections within five minutes, metrics
