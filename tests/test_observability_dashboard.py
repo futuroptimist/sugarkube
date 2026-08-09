@@ -122,10 +122,47 @@ def test_production_snapshot_and_unready_pod_contracts(prod_dashboard):
         "Observability component build identity",
     }
     assert all(
-        target.get("instant") is True and target.get("range") is False
+        target.get("format") == "table"
+        and target.get("instant") is True
+        and target.get("range") is False
         for title in snapshot_tables
         for target in panels[title]["targets"]
     )
+    expected_columns = {
+        "Scrape availability by job": {"job", "Value"},
+        "Node readiness": {"node", "Value"},
+        "Deployment replica deficit": {"namespace", "deployment", "Value"},
+        "Observability component build identity": {
+            "component",
+            "pod",
+            "version",
+            "revision",
+        },
+    }
+    for title, columns in expected_columns.items():
+        panel = panels[title]
+        assert len(panel["targets"]) == 1
+        assert [item["id"] for item in panel["transformations"]] == ["organize"]
+        organize = panel["transformations"][0]["options"]
+        assert set(organize["indexByName"]) == columns
+        assert set(organize["indexByName"].values()) == set(range(len(columns)))
+        assert columns <= set(organize["renameByName"])
+        assert organize["excludeByName"]["Time"] is True
+        assert organize["excludeByName"]["__name__"] is True
+
+    build = panels["Observability component build identity"]
+    expression = build["targets"][0]["expr"]
+    for metric, component in {
+        "prometheus_build_info": "prometheus",
+        "alertmanager_build_info": "alertmanager",
+        "grafana_build_info": "grafana",
+        "node_exporter_build_info": "node-exporter",
+    }.items():
+        assert (
+            f"label_replace(max by (pod, version, revision) ({metric}), "
+            f'"component", "{component}", "", "")'
+        ) in expression
+    assert build["transformations"][0]["options"]["excludeByName"]["Value"] is True
     unready = panels["Unready pods by namespace"]["targets"][0]["expr"]
     assert 'kube_pod_status_phase{phase=~"Pending|Running|Unknown"} == 1' in unready
     assert "group_left" in unready
@@ -154,18 +191,27 @@ def test_production_snapshot_and_unready_pod_contracts(prod_dashboard):
             lambda d: d["panels"][14]["targets"][0].update(expr="sum(prometheus_tsdb_head_series)"),
             "PromQL contract",
         ),
-        (lambda d: d["panels"][1]["targets"][0].update(instant=False, range=True), "instant-only"),
+        (
+            lambda d: d["panels"][1]["targets"][0].update(format="time_series"),
+            "table-formatted instant-only",
+        ),
         (
             lambda d: production_panel(d, "Observability component build identity").update(
-                type="stat"
+                transformations=[]
             ),
-            "four table queries",
+            "deterministic single-frame organization",
+        ),
+        (
+            lambda d: production_panel(d, "Node readiness")["transformations"][0]["options"][
+                "indexByName"
+            ].pop("node"),
+            "required label/value columns",
         ),
         (
             lambda d: production_panel(d, "Observability component build identity")["targets"][
                 0
-            ].update(legendFormat="Prometheus"),
-            "pod/version/revision",
+            ].update(expr="max by (instance, version) (prometheus_build_info)"),
+            "bounded component/pod/version/revision",
         ),
         (lambda d: d.update(refresh="1m"), "defaults or variables"),
         (lambda d: add_row_expression(d, "or vector(0)"), "preserve missing data"),

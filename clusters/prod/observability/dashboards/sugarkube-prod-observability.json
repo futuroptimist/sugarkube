@@ -85,7 +85,27 @@
           "instant": true,
           "legendFormat": "{{job}}",
           "range": false,
-          "refId": "A"
+          "refId": "A",
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true
+            },
+            "indexByName": {
+              "job": 0,
+              "Value": 1
+            },
+            "renameByName": {
+              "job": "Job",
+              "Value": "Status"
+            }
+          }
         }
       ]
     },
@@ -176,7 +196,27 @@
           "instant": true,
           "legendFormat": "{{node}}",
           "range": false,
-          "refId": "A"
+          "refId": "A",
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true
+            },
+            "indexByName": {
+              "node": 0,
+              "Value": 1
+            },
+            "renameByName": {
+              "node": "Node",
+              "Value": "Status"
+            }
+          }
         }
       ]
     },
@@ -227,7 +267,29 @@
           "instant": true,
           "legendFormat": "{{namespace}} / {{deployment}}",
           "range": false,
-          "refId": "A"
+          "refId": "A",
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true
+            },
+            "indexByName": {
+              "namespace": 0,
+              "deployment": 1,
+              "Value": 2
+            },
+            "renameByName": {
+              "namespace": "Namespace",
+              "deployment": "Deployment",
+              "Value": "Deficit"
+            }
+          }
         }
       ]
     },
@@ -599,47 +661,36 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "max by (pod, version, revision) (prometheus_build_info)",
+          "expr": "label_replace(max by (pod, version, revision) (prometheus_build_info), \"component\", \"prometheus\", \"\", \"\") or label_replace(max by (pod, version, revision) (alertmanager_build_info), \"component\", \"alertmanager\", \"\", \"\") or label_replace(max by (pod, version, revision) (grafana_build_info), \"component\", \"grafana\", \"\", \"\") or label_replace(max by (pod, version, revision) (node_exporter_build_info), \"component\", \"node-exporter\", \"\", \"\")",
+          "format": "table",
           "instant": true,
-          "legendFormat": "Prometheus: {{pod}} / {{version}} / {{revision}}",
+          "legendFormat": "",
           "range": false,
           "refId": "A"
-        },
+        }
+      ],
+      "transformations": [
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "max by (pod, version, revision) (alertmanager_build_info)",
-          "instant": true,
-          "legendFormat": "Alertmanager: {{pod}} / {{version}} / {{revision}}",
-          "range": false,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "max by (pod, version, revision) (grafana_build_info)",
-          "instant": true,
-          "legendFormat": "Grafana: {{pod}} / {{version}} / {{revision}}",
-          "range": false,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "max by (pod, version, revision) (node_exporter_build_info)",
-          "instant": true,
-          "legendFormat": "node-exporter: {{pod}} / {{version}} / {{revision}}",
-          "range": false,
-          "refId": "D"
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value": true,
+              "__name__": true
+            },
+            "indexByName": {
+              "component": 0,
+              "pod": 1,
+              "version": 2,
+              "revision": 3
+            },
+            "renameByName": {
+              "component": "Component",
+              "pod": "Pod",
+              "version": "Version",
+              "revision": "Revision"
+            }
+          }
         }
       ]
     }
