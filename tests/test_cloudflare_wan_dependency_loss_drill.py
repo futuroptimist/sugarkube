@@ -70,7 +70,14 @@ class StatefulDrillHarness:
     def commands(self) -> list[dict[str, object]]:
         if not self.log.exists():
             return []
-        return [json.loads(line) for line in self.log.read_text().splitlines()]
+        return [entry for line in self.log.read_text().splitlines()
+                if "tool" in (entry := json.loads(line))]
+
+    def events(self) -> list[dict[str, object]]:
+        if not self.log.exists():
+            return []
+        return [entry for line in self.log.read_text().splitlines()
+                if "event" in (entry := json.loads(line))]
 
     def current(self) -> dict[str, object]:
         for _ in range(50):
@@ -89,6 +96,8 @@ name, args = pathlib.Path(sys.argv[0]).name, sys.argv[1:]
 state = json.loads(state_path.read_text())
 with log_path.open("a") as stream:
     stream.write(json.dumps({"tool": name, "args": args}) + "\n")
+def event(kind, **values):
+    with log_path.open("a") as stream: stream.write(json.dumps({"event":kind, **values}) + "\n")
 def save(): state_path.write_text(json.dumps(state))
 def out(value): print(value, end="" if str(value).endswith("\n") else "\n")
 image = "cloudflare/cloudflared:2026.7.3@sha256:e39ee8da81ad5e05d77f38d2f51c60ca51bf2a8450ac3abab50c17fdb91d91bf"
@@ -102,7 +111,7 @@ elif name == "helm":
 elif name == "just": sys.exit(0)
 elif name == "ruby":
     for i in range(16): out(f"https://endpoint-{i}.test")
-elif name == "curl": out(str(state["endpoint"]))
+elif name == "curl": event("endpoint", response=state["endpoint"]); out(str(state["endpoint"]))
 elif name == "date": out("20260809T000000Z")
 elif name == "sleep":
     if state["block_long_sleep"] and args and int(args[0]) > 30:
@@ -121,7 +130,9 @@ elif name == "kubectl":
             restart = state["restart"][i] if i < 2 else 0
             items.append({"metadata":{"name":f"connector-{i+1}","uid":f"uid-{i+1}","labels":{"app.kubernetes.io/name":"cloudflare-tunnel","app.kubernetes.io/instance":"cloudflare-tunnel"}},"spec":{"nodeName":"node-1" if state["same_node"] else f"node-{i+1}","containers":[{"image":image}]},"status":{"phase":"Running","conditions":[{"type":"Ready","status":"False" if disrupted else "True"}],"containerStatuses":[{"restartCount":restart}]}})
         out(json.dumps({"items":items}))
+        event("pods", uids=[p["metadata"]["uid"] for p in items], restarts=[p["status"]["containerStatuses"][0]["restartCount"] for p in items], ready=[p["status"]["conditions"][0]["status"] for p in items])
     elif "get secret" in joined:
+        event("secret_request", command=joined)
         if ".data" in joined or "-o json " in joined or "-o yaml" in joined: out(state["secret"]); sys.exit(91)
         out("secret-uid\t12\t2026-08-09T00:00:00Z")
     elif "get --raw" in joined:
@@ -129,6 +140,7 @@ elif name == "kubectl":
         if "ALERTS" in query: value=state["alerts"]
         elif "sum(cloudflared" in query: value=0 if all(state["tables"]) else 8
         else: value=2
+        event("prometheus", query=query, value=value)
         out(json.dumps({"data":{"result":[{"value":[0,str(value)]}]}}))
 elif name == "node-executor":
     node, command=args[0],args[1]; idx=int(node[-1])-1
@@ -141,15 +153,16 @@ elif name == "node-executor":
     elif command.startswith("readlink /proc/") or command.startswith("/usr/bin/readlink /proc/"):
         out(f"net:[{1001+idx}]")
     elif "systemd-run" in command:
-        state["watchdogs"][idx]=True; save()
+        state["watchdogs"][idx]=True; save(); event("watchdog", node=node, verified=False)
     elif "systemctl is-active" in command:
         if not state["watchdogs"][idx]: sys.exit(3)
+        event("watchdog", node=node, verified=True)
         out(str(501+idx))
     elif "add table inet" in command:
-        state["tables"][idx]=True; save()
+        state["tables"][idx]=True; save(); event("table", node=node, present=True)
         if state["install_fail"] == idx: sys.exit(44)
     elif "delete table inet" in command:
-        state["tables"][idx]=False; save(); out("")
+        state["tables"][idx]=False; save(); event("table", node=node, present=False); out("")
     elif "list ruleset" in command:
         if state["collision"]: sys.exit(1)
         sys.exit(0)
@@ -516,6 +529,17 @@ def test_actual_helper_completes_stateful_interruption_and_recovery(tmp_path: Pa
     assert max(watchdogs) < min(installs)
     assert all("list ruleset" in command for command in deletes)
     assert harness.current()["tables"] == [False, False]
+    events = harness.events()
+    verified = [i for i, event in enumerate(events) if event.get("event") == "watchdog" and event.get("verified") is True]
+    installed = [i for i, event in enumerate(events) if event.get("event") == "table" and event.get("present") is True]
+    assert len(verified) == len(installed) == 2 and max(verified) < min(installed)
+    pod_events = [event for event in events if event.get("event") == "pods"]
+    assert any(event["ready"] == ["False", "False"] for event in pod_events)
+    assert pod_events[-1]["ready"] == ["True", "True"]
+    assert all(event["uids"] == ["uid-1", "uid-2"] and event["restarts"] == [0, 0] for event in pod_events)
+    assert any("sum(cloudflared" in str(event["query"]) and event["value"] == 0 for event in events if event.get("event") == "prometheus")
+    assert sum(entry["tool"] == "just" for entry in commands) == 2
+    assert len([event for event in events if event.get("event") == "endpoint"]) == 32
     preflight = json.loads((harness.evidence / "preflight.json").read_text())
     assert [pod["restartCount"] for pod in preflight["pods"]] == [0, 0]
     assert all(pod["image"].startswith("cloudflare/cloudflared:") for pod in preflight["pods"])
@@ -586,6 +610,26 @@ def test_sigterm_after_disruption_runs_exact_cleanup(tmp_path: Path) -> None:
     assert harness.current()["tables"] == [False, False]
     deletes = [entry for entry in harness.commands() if entry["tool"] == "node-executor" and "delete table inet" in entry["args"][1]]
     assert len(deletes) == 2
+
+
+def test_external_timeout_after_disruption_runs_exact_cleanup(tmp_path: Path) -> None:
+    harness = StatefulDrillHarness(tmp_path, block_long_sleep=True)
+    process = harness.start()
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline and not harness.current().get("sleeping"):
+        time.sleep(.02)
+    assert harness.current().get("sleeping"), "helper never reached disruption"
+    with pytest.raises(subprocess.TimeoutExpired):
+        process.communicate(timeout=.1)
+    os.killpg(process.pid, signal.SIGTERM)
+    stdout, stderr = process.communicate(timeout=5)
+    assert process.returncode == 143, (stdout, stderr)
+    assert harness.current()["tables"] == [False, False]
+    transitions = [(event["node"], event["present"]) for event in harness.events() if event.get("event") == "table"]
+    assert transitions == [("node-1", True), ("node-2", True), ("node-2", False), ("node-1", False)]
+    deletes = [entry["args"][1] for entry in harness.commands() if entry["tool"] == "node-executor" and "delete table inet" in entry["args"][1]]
+    assert len(deletes) == 2
+    assert all("list ruleset" in command and "flush" not in command for command in deletes)
 
 
 def test_actual_helper_rejects_accidental_restart(tmp_path: Path) -> None:
