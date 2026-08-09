@@ -72,6 +72,14 @@ The `monitoring` namespace, observability releases, and `monitoring.coreos.com`
 APIs/CRDs were absent. No production application-metrics or blackbox lifecycle
 was verified, and current application releases predate the staging metrics integrations.
 
+The committed production baseline is one Prometheus replica with `7d` retention
+and a `15GB` retention-size limit, backed by one `20Gi` ReadWriteOnce Prometheus
+PVC using `local-path`. This storage is node-local and does not support
+expansion, so capacity pressure or node loss requires explicit operator action.
+The baseline also runs one Alertmanager replica using the null-only default
+receiver. After one production week, operators should review observed retention,
+WAL/PVC consumption, and memory before proposing capacity or retention changes.
+
 Production live actions require an explicit kubeconfig and the `sugar-prod`
 context; do not run the node-local staging kubeconfig recipe on `sugarkube3`:
 
@@ -155,8 +163,9 @@ expressions must not select `cluster="sugarkube-prod"` (or any other external cl
 
 Grafana remains LAN-only at <http://sugarkube0.local:30300>, with the same NodePort on the other
 production nodes and no public endpoint. Grafana persistence remains disabled: mutable UI-created
-state is ephemeral, but the immutable Helm-provisioned dashboard must be recreated from Git after
-Grafana pod replacement.
+state is ephemeral, but the immutable dashboard is Helm-provisioned through its ConfigMap and
+should reappear automatically after Grafana pod replacement. API verification remains the
+acceptance proof after the replacement.
 
 ### Post-merge production procedure
 
