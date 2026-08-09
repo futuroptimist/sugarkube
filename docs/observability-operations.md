@@ -3,7 +3,7 @@
 This runbook covers the live staging stack and repository support for the production
 core-stack lifecycle. It is intentionally non-Flux: operators use guarded Helm commands
 from this repository, with the chart version and full values chain committed in Git.
-Merging production support is not evidence that the stack or a production dashboard is live.
+The production core stack is installed; merging dashboard code is not evidence that the dashboard has been upgraded or visually proven live.
 
 ## Canonical sources
 
@@ -13,6 +13,7 @@ Merging production support is not evidence that the stack or a production dashbo
 - Production overrides: `clusters/prod/observability/kube-prometheus-stack.values.yaml`.
 - Canonical DSPACE rules: `platform/observability/rules/dspace-release-integrity.yaml`.
 - Staging dashboard: `clusters/staging/observability/dashboards/sugarkube-staging-observability.json`.
+- Production dashboard: `clusters/prod/observability/dashboards/sugarkube-prod-observability.json`.
 - Helper: `scripts/observability_helm.sh` through `just observability-*` recipes.
 - Alert delivery, routing, and drill strategy: [`docs/observability-alerting.md`](observability-alerting.md).
 - DSPACE release-integrity triage and focused drills:
@@ -129,18 +130,89 @@ disabled in this initial declarative phase, so UI-created state is ephemeral;
 provisioned dashboards remain code-owned, and durable UI state is a separate
 follow-up decision.
 
-Neither this correction nor PR #2529 proves a production deployment or a
-custom production dashboard. Both require separate, sanitized live evidence.
+PRs #2529 and #2532 established the production core lifecycle and installation evidence; the provisioned production dashboard still requires the post-merge proof below.
 
 The core baseline is one Prometheus and one Alertmanager replica, seven-day / 15
 GB retention, a 20 Gi RWO `local-path` Prometheus claim, and a null-only
 Alertmanager. Local-path storage is node-local and non-expandable, so capacity
 pressure or node loss needs explicit operator action. After at least one
 production week, review retention, WAL/PVC usage, and memory before changing
-capacity. The custom production dashboard is deferred until live stack metric
-families and labels are inventoried. Application panels and metrics lifecycle,
+capacity. The custom production dashboard below uses the completed live core-metric inventory. Application panels and metrics lifecycle,
 blackbox monitoring, alerts, paging, HA, and persistent Grafana UI state are
 also explicitly deferred.
+
+### Live-backed production dashboard
+
+The **Sugarkube Production Observability** dashboard (UID
+`sugarkube-prod-observability`) is a provisioned, single-cluster view. Its local
+Prometheus queries deliberately have no `cluster="sugarkube-prod"` selector:
+Prometheus `externalLabels` are attached to remote-write/federated data, not to
+samples returned by this Prometheus's local query API. Adding that selector
+would therefore turn verified signals into `NO DATA`.
+
+The panels have these operational meanings and query contracts:
+
+- **Scrape availability by job** takes the minimum `up` value for each job;
+  one is healthy, zero is unhealthy, and an absent job remains `NO DATA`.
+- **Ready nodes** deduplicates the Ready gauge per node and sums it. Three is
+  the observed visual expectation, not an alert threshold. **Node readiness**
+  retains each node so one, zero, and missing data remain distinct.
+- **Deployment replica deficit** independently takes the maximum desired and
+  available KSM gauges by namespace/deployment before subtraction and clamps
+  only negative arithmetic to zero. **Unready pods by namespace** and
+  **Problem pods by namespace** first deduplicate pod (and bounded phase) KSM
+  gauges, then sum by namespace; emitted zero is not replaced or hidden.
+- **Container restart rate** deduplicates each namespace/pod/container series,
+  applies `rate` with Grafana's `$__rate_interval`, and sums by namespace/pod.
+- **Node CPU utilization**, **Node memory utilization**, and **Root filesystem
+  utilization** use the verified `node_uname_info` join only to map exporter
+  instances to the permitted `nodename`; the final grouping and legend expose
+  only node names. Percent displays use a zero-to-100 scale.
+- **Prometheus PVC utilization** independently deduplicates available bytes and
+  capacity by namespace/PVC before division. **Prometheus active series** uses
+  `max by (pod)` and remains per pod rather than summing future replicas.
+- **Observability component build identity** presents separate per-pod,
+  version, and revision rows for Prometheus, Alertmanager, Grafana, and
+  node-exporter. `kube_state_metrics_build_info` was absent from production and
+  is intentionally neither displayed nor replaced by another signal.
+
+Every panel preserves missing samples as `NO DATA`; no query uses `or
+vector(0)`. Display thresholds, where present, are guidance only and are not
+production alert thresholds.
+
+Read-only evidence captured on 2026-08-08 from repository SHA
+`2984f3fd5b39d391621f414ae01150cf6c0a7a59`, after successful Helm revision 1,
+showed 23/23 healthy targets on two scrapes across nine jobs: apiserver (3),
+coredns (1), Alertmanager (2), Grafana (1), operator (1), Prometheus (2),
+kube-state-metrics (1), kubelet (9), and node-exporter (3). All three nodes were
+Ready. The candidate queries returned CPU utilization of about 2.39–4.04%,
+memory utilization of about 15.00–25.17%, root-filesystem utilization of about
+6.26–6.50%, eleven zero deployment deficits, six zero problem-pod namespace
+results, twenty zero restart-rate results, about 6.50% Prometheus PVC use, and
+about 174,263 active series. No target URLs, instances, addresses, errors, or
+raw identity-label values were retained.
+
+Grafana persistence remains disabled: mutable UI-created state is ephemeral.
+The immutable provisioned dashboard is code-owned and must be restored by the
+Grafana sidecar/provider after pod recreation. After merge, perform this
+production proof without changing any deferred lifecycle:
+
+1. `export KUBECONFIG="$HOME/.kube/config-sugarkube-prod"` and verify the current
+   context is `sugar-prod`.
+2. Keep the externally managed `127.0.0.1:16443` tunnel running.
+3. Run `just observability-render env=prod`, retain the output privately, and inspect it.
+4. Run `just observability-upgrade env=prod`—not install, because Helm revision 1 exists.
+5. Run `just observability-verify env=prod`.
+6. Run `just observability-dashboard-verify env=prod`.
+7. Delete only the Grafana pod, wait for its deployment rollout, then run the
+   dashboard verification again.
+8. Visually inspect every panel at <http://sugarkube0.local:30300> with
+   credentials from the operator’s secure credential manager.
+9. Record the Git SHA, Helm revision, and private operator-evidence path.
+
+Production application metrics, blackbox monitoring, paging and alerts,
+Grafana persistence, HA, and retention/storage changes remain explicitly
+deferred. This dashboard does not create placeholders for them.
 
 ## Read-only preflight and status
 

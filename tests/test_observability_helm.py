@@ -23,6 +23,7 @@ CANONICAL_DSPACE_RULES = (
 SCRIPT = ROOT / "scripts" / "observability_helm.sh"
 ALERTMANAGER_VALIDATOR = ROOT / "scripts" / "verify_observability_alertmanager.rb"
 DASHBOARD = ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
+PROD_DASHBOARD = ROOT / "clusters/prod/observability/dashboards/sugarkube-prod-observability.json"
 JUSTFILE = ROOT / "justfile"
 FLUX_SYNC = ROOT / "flux" / "gotk-sync.yaml"
 LEGACY = [
@@ -154,20 +155,30 @@ def test_production_values_have_exact_safe_overrides_without_public_exposure_or_
     prod = yaml_load(PROD)
     assert prod == {
         "defaultRules": {"disabled": {"Watchdog": True}},
-        "prometheus": {
-            "prometheusSpec": {"externalLabels": {"cluster": "sugarkube-prod"}}
-        },
+        "prometheus": {"prometheusSpec": {"externalLabels": {"cluster": "sugarkube-prod"}}},
         "alertmanager": {
             "alertmanagerSpec": {"secrets": []},
             "config": {
-                "global": None, "inhibit_rules": None, "templates": None,
-                "route": {"group_by": None, "group_wait": None, "group_interval": None,
-                          "repeat_interval": None, "receiver": "null", "routes": None},
+                "global": None,
+                "inhibit_rules": None,
+                "templates": None,
+                "route": {
+                    "group_by": None,
+                    "group_wait": None,
+                    "group_interval": None,
+                    "repeat_interval": None,
+                    "receiver": "null",
+                    "routes": None,
+                },
                 "receivers": [{"name": "null"}],
             },
         },
     }
-    text = COMMON.read_text(encoding="utf-8") + STAGING.read_text(encoding="utf-8") + PROD.read_text(encoding="utf-8")
+    text = (
+        COMMON.read_text(encoding="utf-8")
+        + STAGING.read_text(encoding="utf-8")
+        + PROD.read_text(encoding="utf-8")
+    )
     forbidden = [
         "longhorn",
         "cloudflare",
@@ -451,7 +462,10 @@ def test_discovery_contract_uses_release_label():
 def test_lifecycle_uses_pinned_version_ordered_values_and_no_reuse_values():
     script = SCRIPT.read_text(encoding="utf-8")
     assert 'CHART="prometheus-community/kube-prometheus-stack"' in script
-    assert 'PROD_VALUES="${ROOT}/clusters/prod/observability/kube-prometheus-stack.values.yaml"' in script
+    assert (
+        'PROD_VALUES="${ROOT}/clusters/prod/observability/kube-prometheus-stack.values.yaml"'
+        in script
+    )
     assert '-f "${COMMON_VALUES}" -f "${ENV_VALUES}"' in script
     assert "--reuse-values" not in script
     assert "--atomic" in script
@@ -635,8 +649,7 @@ def test_justfile_exposes_observability_recipes():
 def test_justfile_normalizes_repeated_env_prefixes_before_staging_metrics_checks():
     text = JUSTFILE.read_text(encoding="utf-8")
     normalization = (
-        'while [ "${env_name#env=}" != "${env_name}" ]; '
-        'do env_name="${env_name#env=}"; done'
+        'while [ "${env_name#env=}" != "${env_name}" ]; ' 'do env_name="${env_name#env=}"; done'
     )
     for recipe in ("observability-install", "observability-upgrade", "observability-verify"):
         recipe_block = text.split(f"{recipe} env='':", 1)[1].split("\n\n", 1)[0]
@@ -996,9 +1009,7 @@ def test_grafana_secret_install_is_exact_redacted_and_rotatable(tmp_path):
         assert forbidden not in audit.lower()
     assert {path.name for path in tmp_path.iterdir()} - before == {"bin", "audit", "tmp"}
     assert list((tmp_path / "tmp").iterdir()) == []
-    repeated, repeated_audit, repeated_credentials = run_grafana_secret_helper(
-        tmp_path / "repeat"
-    )
+    repeated, repeated_audit, repeated_credentials = run_grafana_secret_helper(tmp_path / "repeat")
     assert repeated.returncode == 0, repeated.stderr
     assert repeated_audit.splitlines() == expected_mutations
     assert repeated_credentials == ("operator", "correct horse battery staple")
@@ -1092,6 +1103,9 @@ case "$*" in
   *template*)
     [ "$HELM_MODE" != render-fail ] || exit 31
     if [ "$ENV_NAME" = prod ]; then
+      printf '%s\n' 'apiVersion: v1' 'kind: ConfigMap' 'metadata:' '  name: kube-prometheus-stack-grafana-dashboards-sugarkube' '  labels:' '    dashboard-provider: sugarkube' 'data:' "  $DASHBOARD_UID.json:" '    |-'
+      sed 's/^/      /' "$DASHBOARD"
+      printf '%s\n' '---' 'kind: ConfigMap' 'data:' '  dashboardproviders.yaml: |' '    providers:' '      - name: sugarkube' '        options:' '          path: /var/lib/grafana/dashboards/sugarkube' '---' 'kind: Deployment' 'spec:' '  template:' '    spec:' '      containers:' '        - volumeMounts:' '            - name: dashboards-sugarkube' "              mountPath: /var/lib/grafana/dashboards/sugarkube/$DASHBOARD_UID.json" "              subPath: $DASHBOARD_UID.json"
       printf '%s\n' 'apiVersion: monitoring.coreos.com/v1' 'kind: Alertmanager' 'metadata:' '  name: kube-prometheus-stack-alertmanager' 'spec:' '  secrets: []' '---' 'apiVersion: v1' 'kind: Secret' 'metadata:' '  name: alertmanager-kube-prometheus-stack-alertmanager' 'stringData:' '  alertmanager.yaml: |' '    route:' '      receiver: "null"' '    receivers:' '      - name: "null"'
       exit 0
     fi
@@ -1328,8 +1342,11 @@ printf '%s' "$code"
         "WATCHDOG_SILENCE_DELETIONS": str(tmp_path / "watchdog-silence-deletions"),
         "WATCHDOG_SILENCES": str(tmp_path / "watchdog-silences.json"),
         "WATCHDOG_LOG_TEXT": watchdog_log_text,
-        "DASHBOARD": str(
-            ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
+        "DASHBOARD": str(PROD_DASHBOARD if env_name == "prod" else DASHBOARD),
+        "DASHBOARD_UID": (
+            "sugarkube-prod-observability"
+            if env_name == "prod"
+            else "sugarkube-staging-observability"
         ),
     }
     (tmp_path / "watchdog-tty").write_text(watchdog_tty_text or "", encoding="utf-8")
@@ -1909,6 +1926,7 @@ def run_dashboard_verifier(
     mode="success",
     context="sugar-staging",
     forward_line="Forwarding from 127.0.0.1:43127 -> 3000",
+    env_name="staging",
 ):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(parents=True)
@@ -1919,7 +1937,7 @@ def run_dashboard_verifier(
 echo "kubectl $*" >> "$AUDIT"
 case "$*" in
   "config current-context") echo "$CONTEXT" ;;
-  *"get nodes -o json"*) echo '{"items":[{"metadata":{"name":"n1","labels":{"sugarkube.env":"staging","sugarkube.cluster":"sugar-staging"}}}]}' ;;
+  *"get nodes -o json"*) echo '{"items":[{"metadata":{"name":"n1","labels":{"sugarkube.env":"'"$ENV_NAME"'","sugarkube.cluster":"sugar"}}}]}' ;;
   *"get secret grafana-admin-credentials"*"admin-user"*)
     [ "$MODE" != forward-exits-after-ready ] || { touch "$READY_SECRET"; /bin/sleep 0.2; }
     [ "$MODE" != secret-missing ] || exit 41
@@ -1959,7 +1977,7 @@ case "$MODE" in
   malformed-api) printf '%s\n%s\n' '{' 200 ;;
   wrong-api) printf '%s\n%s\n' '{"dashboard":{"uid":"wrong","title":"wrong"}}' 200 ;;
   interrupt) exit 143 ;;
-  *) printf '%s\n%s\n' '{"dashboard":{"uid":"sugarkube-staging-observability","title":"Sugarkube Staging Observability"}}' 200 ;;
+  *) printf '%s\n%s\n' "{\"dashboard\":{\"uid\":\"$EXPECTED_UID\",\"title\":\"$EXPECTED_TITLE\"}}" 200 ;;
 esac
 """,
         encoding="utf-8",
@@ -1979,9 +1997,16 @@ esac
         "READY_SECRET": str(tmp_path / "secret-requested"),
         "TMPDIR": str(tmp_path),
         "KUBECONFIG": str(tmp_path / "kubeconfig"),
+        "ENV_NAME": env_name,
+        "EXPECTED_UID": f"sugarkube-{env_name}-observability",
+        "EXPECTED_TITLE": (
+            "Sugarkube Production Observability"
+            if env_name == "prod"
+            else "Sugarkube Staging Observability"
+        ),
     }
     result = subprocess.run(
-        ["bash", str(SCRIPT), "dashboard-verify", "env=staging"],
+        ["bash", str(SCRIPT), "dashboard-verify", f"env={env_name}"],
         env=env,
         capture_output=True,
         text=True,
@@ -1998,6 +2023,13 @@ def test_dashboard_verifier_runtime_owns_port_and_cleans_up(tmp_path):
     assert "http://127.0.0.1:43127/" in audit
     assert not list(tmp_path.glob("sugarkube-grafana-verify.*"))
     assert pid_file.read_text(encoding="utf-8").strip() == "terminated"
+
+
+def test_production_dashboard_verifier_requests_production_uid_and_title(tmp_path):
+    result, audit, _ = run_dashboard_verifier(tmp_path, context="sugar-prod", env_name="prod")
+    assert result.returncode == 0, result.stderr
+    assert "/api/dashboards/uid/sugarkube-prod-observability" in audit
+    assert "Grafana API confirmed dashboard UID sugarkube-prod-observability" in result.stdout
 
 
 @pytest.mark.parametrize("remote_port", ["3000", "12345", "80"])
@@ -2728,7 +2760,7 @@ def test_watchdog_silence_api_failures_do_not_expose_fixture_contents(tmp_path, 
 
 
 def production_alertmanager_fixture(*, secrets="[]", route_extra="", receiver_extra="", inline=""):
-    return f'''---
+    return f"""---
 apiVersion: monitoring.coreos.com/v1
 kind: Alertmanager
 metadata:
@@ -2746,7 +2778,7 @@ stringData:
       receiver: "null"{route_extra}
     receivers:
       - name: "null"{receiver_extra}{inline}
-'''
+"""
 
 
 def test_production_offline_render_uses_only_ordered_core_values(tmp_path):
@@ -2754,6 +2786,7 @@ def test_production_offline_render_uses_only_ordered_core_values(tmp_path):
     assert result.returncode == 0, result.stderr
     template = next(line for line in audit.splitlines() if "helm template " in line)
     assert template.index(str(COMMON)) < template.index(str(PROD))
+    assert str(PROD_DASHBOARD) in template
     for excluded in (str(STAGING), str(DASHBOARD), "sugarkube-observability-rules"):
         assert excluded not in template
     assert "kubectl" not in audit
@@ -2774,8 +2807,12 @@ def test_production_install_identity_and_explicit_kubeconfig_fail_before_helm_mu
     tmp_path, context, mode, extra_env
 ):
     result, audit = run_helper(
-        tmp_path, "install", env_name="prod", context=context,
-        kubectl_mode=mode, extra_env=extra_env,
+        tmp_path,
+        "install",
+        env_name="prod",
+        context=context,
+        kubectl_mode=mode,
+        extra_env=extra_env,
     )
     assert result.returncode != 0
     assert "helm install" not in audit
@@ -2787,13 +2824,18 @@ def test_production_install_release_and_secret_guards(tmp_path):
     )
     assert installed.returncode == 0, installed.stderr
     assert "helm install" in audit and "--atomic" in audit
-    assert "alertmanager-pagerduty" not in audit and "alertmanager-healthchecks-watchdog" not in audit
+    assert (
+        "alertmanager-pagerduty" not in audit and "alertmanager-healthchecks-watchdog" not in audit
+    )
     existing, audit = run_helper(
         tmp_path / "existing", "install", env_name="prod", context="sugar-prod", helm_mode="present"
     )
     assert existing.returncode != 0 and "helm install" not in audit
     missing, audit = run_helper(
-        tmp_path / "secret", "install", env_name="prod", context="sugar-prod",
+        tmp_path / "secret",
+        "install",
+        env_name="prod",
+        context="sugar-prod",
         kubectl_mode="missing-grafana",
     )
     assert missing.returncode != 0 and "helm " not in audit
@@ -2802,13 +2844,24 @@ def test_production_install_release_and_secret_guards(tmp_path):
 def test_production_core_verify_skips_staging_integrations(tmp_path):
     result, audit = run_helper(tmp_path, "verify", env_name="prod", context="sugar-prod")
     assert result.returncode == 0, result.stderr
-    for required in ("rollout status", "get daemonset", "get pvc -o json", "get svc kube-prometheus-stack-grafana", "get secret grafana-admin-credentials"):
+    for required in (
+        "rollout status",
+        "get daemonset",
+        "get pvc -o json",
+        "get svc kube-prometheus-stack-grafana",
+        "get secret grafana-admin-credentials",
+    ):
         assert required in audit
-    for excluded in ("servicemonitor dspace", "alertmanager-pagerduty", "alertmanager-healthchecks-watchdog", " --raw "):
+    for excluded in (
+        "servicemonitor dspace",
+        "alertmanager-pagerduty",
+        "alertmanager-healthchecks-watchdog",
+        " --raw ",
+    ):
         assert excluded not in audit
 
 
-@pytest.mark.parametrize("command", ["dashboard-verify", "pagerduty-test", "watchdog-verify"])
+@pytest.mark.parametrize("command", ["pagerduty-test", "watchdog-verify"])
 def test_staging_only_subcommands_reject_production(tmp_path, command):
     result, audit = run_helper(tmp_path, command, env_name="prod", context="sugar-prod")
     assert result.returncode != 0
@@ -2831,14 +2884,18 @@ def test_production_alertmanager_validator_accepts_null_only_and_rejects_integra
     valid.write_text(production_alertmanager_fixture(), encoding="utf-8")
     accepted = subprocess.run(
         ["ruby", str(ALERTMANAGER_VALIDATOR), "prod", "rendered", str(valid)],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     assert accepted.returncode == 0, accepted.stderr
     invalid = tmp_path / "invalid.yaml"
     invalid.write_text(production_alertmanager_fixture(**mutation), encoding="utf-8")
     rejected = subprocess.run(
         ["ruby", str(ALERTMANAGER_VALIDATOR), "prod", "rendered", str(invalid)],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     assert rejected.returncode == 16
     assert "forbidden-stub" not in rejected.stderr
@@ -2853,7 +2910,9 @@ def test_production_alertmanager_secret_mount_has_production_specific_diagnostic
     )
     result = subprocess.run(
         ["ruby", str(ALERTMANAGER_VALIDATOR), "prod", "rendered", str(manifest)],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     assert result.returncode == 16
     assert "production Alertmanager must mount no integration Secrets" in result.stderr

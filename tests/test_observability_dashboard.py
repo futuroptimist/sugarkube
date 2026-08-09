@@ -8,6 +8,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 DASHBOARD = ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
+PROD_DASHBOARD = ROOT / "clusters/prod/observability/dashboards/sugarkube-prod-observability.json"
 VALIDATOR = ROOT / "scripts/validate_observability_dashboard.py"
 SCRIPT = ROOT / "scripts/observability_helm.sh"
 PROMETHEUS_VALUES = ROOT / "platform/observability/helm/kube-prometheus-stack.values.common.yaml"
@@ -1101,10 +1102,9 @@ def test_validator_directly_rejects_missing_or_empty_render(tmp_path):
 def test_lifecycle_passes_same_dashboard_to_all_helm_paths():
     script = SCRIPT.read_text(encoding="utf-8")
     assert script.count('--set-file "${DASHBOARD_VALUE}=${DASHBOARD}"') == 3
-    assert (
-        'DASHBOARD_VALUE="grafana.dashboards.sugarkube.sugarkube-staging-observability.json"'
-        in script
-    )
+    assert 'DASHBOARD_VALUE="grafana.dashboards.sugarkube.${DASHBOARD_UID}.json"' in script
+    assert str(DASHBOARD.relative_to(ROOT)) in script
+    assert str(PROD_DASHBOARD.relative_to(ROOT)) in script
     assert script.index(
         "validate_dashboard; require_tools", script.index("install_release")
     ) < script.index("helm install")
@@ -1118,7 +1118,7 @@ def test_dashboard_verifier_is_guarded_read_only_and_redacted():
     body = script.split("dashboard_verify()", 1)[1].split('\ncmd="${1:-}"', 1)[0]
     assert "assert_context" in body
     assert body.index("assert_context") < body.index("get secret grafana-admin-credentials")
-    assert "/api/dashboards/uid/sugarkube-staging-observability" in body
+    assert "/api/dashboards/uid/${DASHBOARD_UID}" in body
     assert "--netrc-file" in body and "chmod 600" in body and "rm -rf" in body
     for mutation in ("helm install", "helm upgrade", "kubectl apply", "kubectl delete"):
         assert mutation not in body
@@ -1126,6 +1126,29 @@ def test_dashboard_verifier_is_guarded_read_only_and_redacted():
     assert "--address=127.0.0.1" in body and '"service/${RELEASE}-grafana" :80' in body
     assert body.index("Forwarding\\ from") < body.index("--netrc-file")
     assert "require_tools kubectl python3 curl base64 sleep" in body
+
+
+def test_production_dashboard_profile_is_live_backed_and_fail_closed():
+    document = json.loads(PROD_DASHBOARD.read_text(encoding="utf-8"))
+    assert validator.validate_production_dashboard(PROD_DASHBOARD)
+    assert document["uid"] == "sugarkube-prod-observability"
+    assert document["title"] == "Sugarkube Production Observability"
+    assert document["templating"]["list"] == []
+    assert {p["title"] for p in all_panels(document) if p["type"] == "row"} == validator.PROD_ROWS
+    assert {p["title"] for p in all_panels(document) if p["type"] != "row"} == set(
+        validator.PROD_QUERIES
+    )
+    changed = json.loads(json.dumps(document))
+    next(p for p in all_panels(changed) if p["title"] == "Ready nodes")["targets"][0][
+        "expr"
+    ] += ' + up{cluster="sugarkube-prod"}'
+    path = PROD_DASHBOARD.parent / ".invalid-test.json"
+    try:
+        path.write_text(json.dumps(changed), encoding="utf-8")
+        with pytest.raises(SystemExit, match="PromQL contract"):
+            validator.validate_production_dashboard(path)
+    finally:
+        path.unlink(missing_ok=True)
 
 
 @pytest.mark.parametrize(
