@@ -1,9 +1,10 @@
 # Observability operations runbook
 
-This runbook covers the live staging stack and repository support for the production
-core-stack lifecycle. It is intentionally non-Flux: operators use guarded Helm commands
-from this repository, with the chart version and full values chain committed in Git.
-Merging production support is not evidence that the stack or a production dashboard is live.
+This runbook covers the staging and production observability lifecycles. It is intentionally
+non-Flux: operators use guarded Helm commands from this repository, with the chart version and
+full values chain committed in Git. Merging dashboard source changes does not deploy either
+dashboard; staging and production each require a separate guarded Helm upgrade and acceptance
+evidence.
 
 ## Canonical sources
 
@@ -12,8 +13,11 @@ Merging production support is not evidence that the stack or a production dashbo
 - Staging overrides: `clusters/staging/observability/kube-prometheus-stack.values.yaml`.
 - Production overrides: `clusters/prod/observability/kube-prometheus-stack.values.yaml`.
 - Canonical DSPACE rules: `platform/observability/rules/dspace-release-integrity.yaml`.
-- Staging dashboard: `clusters/staging/observability/dashboards/sugarkube-staging-observability.json`.
-- Production dashboard: `clusters/prod/observability/dashboards/sugarkube-prod-observability.json`.
+- Authoritative dashboard specification: `platform/observability/dashboards/sugarkube-observability.json`.
+- Dashboard generator: `scripts/generate_observability_dashboards.py`; use `--write` to regenerate
+  artifacts and `--check` to detect drift.
+- Generated staging artifact: `clusters/staging/observability/dashboards/sugarkube-staging-observability.json`.
+- Generated production artifact: `clusters/prod/observability/dashboards/sugarkube-prod-observability.json`.
 - Helper: `scripts/observability_helm.sh` through `just observability-*` recipes.
 - Alert delivery, routing, and drill strategy: [`docs/observability-alerting.md`](observability-alerting.md).
 - DSPACE release-integrity triage and focused drills:
@@ -30,7 +34,11 @@ dashboard: **Sugarkube Staging
 Observability** (`sugarkube-staging-observability`) or **Sugarkube Production
 Observability** (`sugarkube-prod-observability`). Grafana's chart-rendered
 Prometheus datasource has stable UID `prometheus`, which both dashboards
-reference directly.
+reference directly. Both profiles intentionally share the exact same 11-row, 60-object panel
+layout and PromQL semantics. Their only differences are UID, title, environment tag, and the hidden
+single-value `environment` and `cluster` constants. The visible `app` and `route` variables retain
+`All = .*`. Never edit a generated artifact directly; review and change the shared specification,
+then regenerate both files.
 
 The staging blackbox exporter and Probe lifecycle is documented separately in
 [Staging blackbox monitoring](observability-blackbox.md). That guarded lifecycle
@@ -159,8 +167,15 @@ The production dashboard gives each signal the following operational meaning:
   `kube_state_metrics_build_info` was absent from the live inventory and is intentionally omitted,
   without a substitute signal.
 
-All gauge/count panels explicitly render `NO DATA` for absence and do not use `or vector(0)` or
-another zero substitution. The datasource is single-cluster. Prometheus `externalLabels` are added
+Every data panel explicitly renders `NO DATA` for absence. Event-rate zeroes are emitted only when
+the approved DSPACE release capability exists; DSPACE image-pin, metrics-target, and chat-synthetic
+fallbacks use the same capability gate. Thus an absent producer is not presented as healthy. The
+retention-backed public-availability missing-data expression keeps its inner zero only after an
+outer, previously discovered blackbox series exists; with no blackbox capability it returns no
+series. Production is expected to show `NO DATA` in **DSPACE HTTP**, **DSPACE runtime and release**,
+**DSPACE feature traffic**, **Blackbox monitoring**, **DSPACE release integrity**, **token.place
+relay and compute capacity**, and **token.place HTTP and release** until those application metrics, probes, release-integrity rules, and synthetic producers are
+separately deployed and verified. The datasource is single-cluster. Prometheus `externalLabels` are added
 for remote/exported series, not to samples returned by local Prometheus queries, so dashboard
 expressions must not select `cluster="sugarkube-prod"` (or any other external cluster label).
 
@@ -184,9 +199,9 @@ acceptance proof after the replacement.
 8. Visually inspect every panel at <http://sugarkube0.local:30300> with credentials retrieved from the operator vault.
 9. Record the Git SHA, Helm revision, and private operator-evidence path.
 
-Production application metrics, blackbox monitoring, paging and alerts, persistent Grafana UI
-state, HA, and retention/storage changes remain explicitly deferred. This dashboard adds no
-application, DSPACE, synthetic, routing, watchdog, or alert lifecycle.
+Production application metrics, blackbox monitoring, release-integrity rules, synthetics, paging
+and alerts, persistent Grafana UI state, HA, and retention/storage changes remain explicitly
+deferred. The shared panels do not enable any producer, routing, watchdog, or alert lifecycle.
 
 ## Read-only preflight and status
 
@@ -616,8 +631,9 @@ lost, and distinct from the automated evidence above:
 
 ## Follow-ups intentionally out of scope
 
-Additional dashboards, Grafana persistence, central multi-cluster Grafana, and production
-observability codification are separate follow-ups. The existing blackbox NetworkPolicy is unchanged.
+Additional dashboards, Grafana persistence, and central multi-cluster Grafana are separate
+follow-ups; the production core stack and generated dashboard are current repository contracts,
+not future scaffolding. The existing blackbox NetworkPolicy is unchanged.
 The synthetic Alertmanager → PagerDuty route is deployed and delivery-tested. External node-heartbeat
 timers are installed on `sugarkube3`, `sugarkube4`, and `sugarkube5`; their node-power-off drill
 remains outstanding. The watchdog's secret-safe configuration and operator workflows are

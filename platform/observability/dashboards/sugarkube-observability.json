@@ -1,11 +1,11 @@
 {
   "id": null,
-  "uid": "sugarkube-prod-observability",
-  "title": "Sugarkube Production Observability",
+  "uid": "${UID}",
+  "title": "${TITLE}",
   "tags": [
     "sugarkube",
     "observability",
-    "prod"
+    "${ENVIRONMENT}"
   ],
   "timezone": "browser",
   "schemaVersion": 41,
@@ -22,11 +22,11 @@
         "name": "environment",
         "type": "constant",
         "label": "Environment",
-        "query": "prod",
+        "query": "${ENVIRONMENT}",
         "current": {
           "selected": true,
-          "text": "prod",
-          "value": "prod"
+          "text": "${ENVIRONMENT}",
+          "value": "${ENVIRONMENT}"
         },
         "hide": 2,
         "skipUrlSync": true
@@ -35,11 +35,11 @@
         "name": "cluster",
         "type": "constant",
         "label": "Cluster",
-        "query": "sugarkube-prod",
+        "query": "${CLUSTER}",
         "current": {
           "selected": true,
-          "text": "sugarkube-prod",
-          "value": "sugarkube-prod"
+          "text": "${CLUSTER}",
+          "value": "${CLUSTER}"
         },
         "hide": 2,
         "skipUrlSync": true

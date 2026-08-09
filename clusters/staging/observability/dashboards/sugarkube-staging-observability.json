@@ -4,8 +4,8 @@
   "title": "Sugarkube Staging Observability",
   "tags": [
     "sugarkube",
-    "staging",
-    "provisioned"
+    "observability",
+    "staging"
   ],
   "timezone": "browser",
   "schemaVersion": 41,
@@ -20,29 +20,34 @@
     "list": [
       {
         "name": "environment",
+        "type": "constant",
         "label": "Environment",
-        "type": "query",
-        "datasource": {
-          "type": "prometheus",
-          "uid": "prometheus"
-        },
-        "query": {
-          "query": "label_values(probe_success, environment)",
-          "refId": "StandardVariableQuery"
-        },
-        "refresh": 1,
-        "includeAll": false,
-        "multi": false,
-        "allValue": null,
+        "query": "staging",
         "current": {
+          "selected": true,
           "text": "staging",
           "value": "staging"
-        }
+        },
+        "hide": 2,
+        "skipUrlSync": true
+      },
+      {
+        "name": "cluster",
+        "type": "constant",
+        "label": "Cluster",
+        "query": "sugarkube-int",
+        "current": {
+          "selected": true,
+          "text": "sugarkube-int",
+          "value": "sugarkube-int"
+        },
+        "hide": 2,
+        "skipUrlSync": true
       },
       {
         "name": "app",
-        "label": "Probe application",
         "type": "query",
+        "label": "Probe application",
         "datasource": {
           "type": "prometheus",
           "uid": "prometheus"
@@ -51,19 +56,22 @@
           "query": "label_values(probe_success{environment=~\"$environment\"}, app)",
           "refId": "StandardVariableQuery"
         },
-        "refresh": 1,
         "includeAll": true,
-        "multi": true,
         "allValue": ".*",
+        "multi": true,
+        "refresh": 1,
         "current": {
+          "selected": true,
           "text": "All",
-          "value": "$__all"
+          "value": [
+            "$__all"
+          ]
         }
       },
       {
         "name": "route",
-        "label": "Probe route",
         "type": "query",
+        "label": "Probe route",
         "datasource": {
           "type": "prometheus",
           "uid": "prometheus"
@@ -72,13 +80,16 @@
           "query": "label_values(probe_success{environment=~\"$environment\",app=~\"$app\"}, route)",
           "refId": "StandardVariableQuery"
         },
-        "refresh": 1,
         "includeAll": true,
-        "multi": true,
         "allValue": ".*",
+        "multi": true,
+        "refresh": 1,
         "current": {
+          "selected": true,
           "text": "All",
-          "value": "$__all"
+          "value": [
+            "$__all"
+          ]
         }
       }
     ]
@@ -90,7 +101,7 @@
     {
       "id": 1,
       "type": "row",
-      "title": "Overall status",
+      "title": "Cluster and service health",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -101,6 +112,190 @@
     },
     {
       "id": 2,
+      "title": "Scrape availability by job",
+      "type": "table",
+      "description": "",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "UNHEALTHY",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "HEALTHY",
+                  "color": "green"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "min by (job) (up)",
+          "instant": true,
+          "legendFormat": "{{job}}",
+          "range": false,
+          "refId": "A",
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true
+            },
+            "indexByName": {
+              "job": 0,
+              "Value": 1
+            },
+            "renameByName": {
+              "job": "Job",
+              "Value": "Status"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Ready nodes",
+      "type": "stat",
+      "description": "Three Ready nodes were observed live; this is a visual expectation, not an alert threshold.",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(max by (node) (kube_node_status_condition{condition=\"Ready\",status=\"true\"}))",
+          "instant": false,
+          "legendFormat": "Ready nodes",
+          "range": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Node readiness",
+      "type": "table",
+      "description": "",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "NOT READY",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "READY",
+                  "color": "green"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "max by (node) (kube_node_status_condition{condition=\"Ready\",status=\"true\"})",
+          "instant": true,
+          "legendFormat": "{{node}}",
+          "range": false,
+          "refId": "A",
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true
+            },
+            "indexByName": {
+              "node": 0,
+              "Value": 1
+            },
+            "renameByName": {
+              "node": "Node",
+              "Value": "Status"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 5,
       "type": "stat",
       "title": "DSPACE scrape availability",
       "description": "Prometheus scrape availability for DSPACE.",
@@ -112,7 +307,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 1
+        "y": 7
       },
       "targets": [
         {
@@ -136,7 +331,8 @@
                 "value": 1
               }
             ]
-          }
+          },
+          "noValue": "NO DATA"
         },
         "overrides": []
       },
@@ -151,9 +347,9 @@
       }
     },
     {
-      "id": 3,
+      "id": 6,
       "type": "stat",
-      "title": "Instrumentation health",
+      "title": "DSPACE instrumentation health",
       "description": "Application instrumentation self-check.",
       "datasource": {
         "type": "prometheus",
@@ -163,7 +359,7 @@
         "h": 5,
         "w": 8,
         "x": 8,
-        "y": 1
+        "y": 7
       },
       "targets": [
         {
@@ -187,7 +383,8 @@
                 "value": 1
               }
             ]
-          }
+          },
+          "noValue": "NO DATA"
         },
         "overrides": []
       },
@@ -202,7 +399,7 @@
       }
     },
     {
-      "id": 4,
+      "id": 7,
       "type": "stat",
       "title": "Public availability summary",
       "description": "Current healthy, failed, and retention-backed missing probe-data counts for the selected filters; complete absence of expected target data is shown as no data.",
@@ -214,26 +411,26 @@
         "h": 5,
         "w": 8,
         "x": 16,
-        "y": 1
+        "y": 7
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(min by (environment, app, route) (probe_success{job=~\"probe/monitoring/blackbox-(dspace|tokenplace|danielsmith|jobbot3000)-staging-.*\",environment=~\"$environment\",app=~\"$app\",route=~\"$route\"}) == bool 1)",
+          "expr": "sum(min by (environment, app, route) (probe_success{job=~\"probe/monitoring/blackbox-(dspace|tokenplace|danielsmith|jobbot3000)-$environment-.*\",environment=~\"$environment\",app=~\"$app\",route=~\"$route\"}) == bool 1)",
           "legendFormat": "Healthy endpoints",
           "instant": true,
           "range": false
         },
         {
           "refId": "B",
-          "expr": "sum(min by (environment, app, route) (probe_success{job=~\"probe/monitoring/blackbox-(dspace|tokenplace|danielsmith|jobbot3000)-staging-.*\",environment=~\"$environment\",app=~\"$app\",route=~\"$route\"}) == bool 0)",
+          "expr": "sum(min by (environment, app, route) (probe_success{job=~\"probe/monitoring/blackbox-(dspace|tokenplace|danielsmith|jobbot3000)-$environment-.*\",environment=~\"$environment\",app=~\"$app\",route=~\"$route\"}) == bool 0)",
           "legendFormat": "Failed endpoints",
           "instant": true,
           "range": false
         },
         {
           "refId": "C",
-          "expr": "sum(max by (environment, app, route) (max_over_time(up{job=~\"probe/monitoring/blackbox-(dspace|tokenplace|danielsmith|jobbot3000)-staging-.*\",environment=~\"$environment\",app=~\"$app\",route=~\"$route\"}[7d])) >= bool 0) - (sum(min by (environment, app, route) (probe_success{job=~\"probe/monitoring/blackbox-(dspace|tokenplace|danielsmith|jobbot3000)-staging-.*\",environment=~\"$environment\",app=~\"$app\",route=~\"$route\"}) >= bool 0) or vector(0))",
+          "expr": "sum(max by (environment, app, route) (max_over_time(up{job=~\"probe/monitoring/blackbox-(dspace|tokenplace|danielsmith|jobbot3000)-$environment-.*\",environment=~\"$environment\",app=~\"$app\",route=~\"$route\"}[7d])) >= bool 0) - (sum(min by (environment, app, route) (probe_success{job=~\"probe/monitoring/blackbox-(dspace|tokenplace|danielsmith|jobbot3000)-$environment-.*\",environment=~\"$environment\",app=~\"$app\",route=~\"$route\"}) >= bool 0) or vector(0))",
           "legendFormat": "Missing probe data",
           "instant": true,
           "range": false
@@ -322,7 +519,480 @@
       }
     },
     {
-      "id": 5,
+      "id": 8,
+      "title": "Workload health",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 12
+      },
+      "panels": []
+    },
+    {
+      "id": 9,
+      "title": "Deployment replica deficit",
+      "type": "table",
+      "description": "",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 13
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "clamp_min(max by (namespace, deployment) (kube_deployment_spec_replicas) - max by (namespace, deployment) (kube_deployment_status_replicas_available), 0)",
+          "instant": true,
+          "legendFormat": "{{namespace}} / {{deployment}}",
+          "range": false,
+          "refId": "A",
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true
+            },
+            "indexByName": {
+              "namespace": 0,
+              "deployment": 1,
+              "Value": 2
+            },
+            "renameByName": {
+              "namespace": "Namespace",
+              "deployment": "Deployment",
+              "Value": "Replica deficit"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Unready pods by namespace",
+      "type": "timeseries",
+      "description": "",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 13
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (namespace) (max by (namespace, pod) (kube_pod_status_ready{condition=\"false\"}) * on (namespace, pod) group_left max by (namespace, pod) (kube_pod_status_phase{phase=~\"Pending|Running|Unknown\"} == 1))",
+          "instant": false,
+          "legendFormat": "{{namespace}}",
+          "range": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "Problem pods by namespace",
+      "type": "timeseries",
+      "description": "",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 20
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (namespace) (max by (namespace, pod, phase) (kube_pod_status_phase{phase=~\"Pending|Failed|Unknown\"}))",
+          "instant": false,
+          "legendFormat": "{{namespace}}",
+          "range": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "Container restart rate",
+      "type": "timeseries",
+      "description": "",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 20
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "noValue": "NO DATA"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (namespace, pod) (max by (namespace, pod, container) (rate(kube_pod_container_status_restarts_total[$__rate_interval])))",
+          "instant": false,
+          "legendFormat": "{{namespace}} / {{pod}}",
+          "range": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "title": "Node and Prometheus capacity",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 27
+      },
+      "panels": []
+    },
+    {
+      "id": 14,
+      "title": "Node CPU utilization",
+      "type": "timeseries",
+      "description": "",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 28
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "noValue": "NO DATA",
+          "min": 0,
+          "max": 100
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "max by (nodename) (100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[$__rate_interval]))) * on (instance) group_left (nodename) node_uname_info)",
+          "instant": false,
+          "legendFormat": "{{nodename}}",
+          "range": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "title": "Node memory utilization",
+      "type": "timeseries",
+      "description": "",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 28
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "noValue": "NO DATA",
+          "min": 0,
+          "max": 100
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "max by (nodename) (100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * on (instance) group_left (nodename) node_uname_info)",
+          "instant": false,
+          "legendFormat": "{{nodename}}",
+          "range": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "title": "Root filesystem utilization",
+      "type": "timeseries",
+      "description": "",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 28
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "noValue": "NO DATA",
+          "min": 0,
+          "max": 100
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "max by (nodename) (100 * (1 - node_filesystem_avail_bytes{mountpoint=\"/\",fstype!~\"tmpfs|overlay\"} / node_filesystem_size_bytes{mountpoint=\"/\",fstype!~\"tmpfs|overlay\"}) * on (instance) group_left (nodename) node_uname_info)",
+          "instant": false,
+          "legendFormat": "{{nodename}}",
+          "range": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "title": "Prometheus PVC utilization",
+      "type": "timeseries",
+      "description": "",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 35
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "noValue": "NO DATA",
+          "min": 0,
+          "max": 100
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "100 * (1 - max by (namespace, persistentvolumeclaim) (kubelet_volume_stats_available_bytes{namespace=\"monitoring\",persistentvolumeclaim=~\"prometheus-kube-prometheus-stack-prometheus-db-.*\"}) / max by (namespace, persistentvolumeclaim) (kubelet_volume_stats_capacity_bytes{namespace=\"monitoring\",persistentvolumeclaim=~\"prometheus-kube-prometheus-stack-prometheus-db-.*\"}))",
+          "instant": false,
+          "legendFormat": "{{namespace}} / {{persistentvolumeclaim}}",
+          "range": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "title": "Prometheus active series",
+      "type": "timeseries",
+      "description": "",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 35
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "max by (pod) (prometheus_tsdb_head_series)",
+          "instant": false,
+          "legendFormat": "{{pod}}",
+          "range": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "title": "Observability build identity",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 42
+      },
+      "panels": []
+    },
+    {
+      "id": 20,
+      "title": "Observability component build identity",
+      "type": "table",
+      "description": "",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 43
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "max by (component, pod, version, revision) (label_replace(prometheus_build_info, \"component\", \"prometheus\", \"\", \"\") or label_replace(alertmanager_build_info, \"component\", \"alertmanager\", \"\", \"\") or label_replace(grafana_build_info, \"component\", \"grafana\", \"\", \"\") or label_replace(node_exporter_build_info, \"component\", \"node-exporter\", \"\", \"\"))",
+          "format": "table",
+          "instant": true,
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value": true,
+              "__name__": true
+            },
+            "indexByName": {
+              "component": 0,
+              "pod": 1,
+              "version": 2,
+              "revision": 3
+            },
+            "renameByName": {
+              "component": "Component",
+              "pod": "Pod",
+              "version": "Version",
+              "revision": "Revision"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 21,
       "type": "row",
       "title": "DSPACE HTTP",
       "collapsed": false,
@@ -330,11 +1000,11 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 6
+        "y": 51
       }
     },
     {
-      "id": 6,
+      "id": 22,
       "type": "timeseries",
       "title": "User request rate by route and status class",
       "description": "Application request rate by bounded route templates and status classes; operational health and metrics routes are excluded.",
@@ -346,7 +1016,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 7
+        "y": 52
       },
       "targets": [
         {
@@ -357,7 +1027,8 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "reqps"
+          "unit": "reqps",
+          "noValue": "NO DATA"
         },
         "overrides": []
       },
@@ -372,7 +1043,7 @@
       }
     },
     {
-      "id": 7,
+      "id": 23,
       "type": "piechart",
       "title": "Status-class distribution",
       "description": "Selected-window request totals grouped by bounded status class.",
@@ -384,7 +1055,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 7
+        "y": 52
       },
       "targets": [
         {
@@ -397,7 +1068,8 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "noValue": "NO DATA"
         },
         "overrides": [
           {
@@ -476,7 +1148,7 @@
       }
     },
     {
-      "id": 21,
+      "id": 24,
       "type": "timeseries",
       "title": "Operational request rate",
       "description": "Health, liveness, and metrics request rate kept separate from user traffic.",
@@ -488,7 +1160,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 7
+        "y": 52
       },
       "targets": [
         {
@@ -499,7 +1171,8 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "reqps"
+          "unit": "reqps",
+          "noValue": "NO DATA"
         },
         "overrides": []
       },
@@ -514,7 +1187,7 @@
       }
     },
     {
-      "id": 8,
+      "id": 25,
       "type": "timeseries",
       "title": "5xx error ratio",
       "description": "Fraction of observed DSPACE HTTP requests returning 5xx.",
@@ -526,7 +1199,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 15
+        "y": 60
       },
       "targets": [
         {
@@ -554,7 +1227,8 @@
                 "value": 0.05
               }
             ]
-          }
+          },
+          "noValue": "NO DATA"
         },
         "overrides": []
       },
@@ -569,7 +1243,7 @@
       }
     },
     {
-      "id": 9,
+      "id": 26,
       "type": "timeseries",
       "title": "HTTP latency percentiles",
       "description": "DSPACE HTTP latency by bounded route template.",
@@ -581,7 +1255,7 @@
         "h": 8,
         "w": 16,
         "x": 8,
-        "y": 15
+        "y": 60
       },
       "targets": [
         {
@@ -602,7 +1276,8 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "s"
+          "unit": "s",
+          "noValue": "NO DATA"
         },
         "overrides": []
       },
@@ -617,7 +1292,7 @@
       }
     },
     {
-      "id": 10,
+      "id": 27,
       "type": "row",
       "title": "DSPACE runtime and release",
       "collapsed": false,
@@ -625,11 +1300,11 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 23
+        "y": 68
       }
     },
     {
-      "id": 11,
+      "id": 28,
       "type": "timeseries",
       "title": "Resident memory by pod",
       "description": "Resident process memory for each DSPACE pod.",
@@ -641,7 +1316,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 24
+        "y": 69
       },
       "targets": [
         {
@@ -652,7 +1327,8 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "bytes"
+          "unit": "bytes",
+          "noValue": "NO DATA"
         },
         "overrides": []
       },
@@ -667,9 +1343,9 @@
       }
     },
     {
-      "id": 12,
+      "id": 29,
       "type": "table",
-      "title": "Build identity",
+      "title": "DSPACE build identity",
       "description": "Safe release identity fields: pod, version, and revision.",
       "datasource": {
         "type": "prometheus",
@@ -679,7 +1355,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 24
+        "y": 69
       },
       "targets": [
         {
@@ -687,12 +1363,14 @@
           "expr": "max by (pod, version, revision) (dspace_build_info{environment=~\"$environment\"})",
           "legendFormat": "{{pod}} {{version}} {{revision}}",
           "instant": true,
-          "range": false
+          "range": false,
+          "format": "table"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "noValue": "NO DATA"
         },
         "overrides": []
       },
@@ -707,27 +1385,29 @@
       },
       "transformations": [
         {
-          "id": "labelsToFields",
-          "options": {}
-        },
-        {
           "id": "organize",
           "options": {
             "excludeByName": {
               "Time": true,
+              "__name__": true,
               "Value": true
             },
             "indexByName": {
               "pod": 0,
               "version": 1,
               "revision": 2
+            },
+            "renameByName": {
+              "pod": "Pod",
+              "version": "Version",
+              "revision": "Revision"
             }
           }
         }
       ]
     },
     {
-      "id": 13,
+      "id": 30,
       "type": "row",
       "title": "DSPACE feature traffic",
       "collapsed": false,
@@ -735,14 +1415,14 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 32
+        "y": 77
       }
     },
     {
-      "id": 14,
+      "id": 31,
       "type": "timeseries",
       "title": "dChat request activity",
-      "description": "Zero means no dChat requests were observed; it is not an instrumentation failure.",
+      "description": "Zero means no dChat requests only when the approved-release capability is present; absent capability remains NO DATA.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -751,12 +1431,12 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 33
+        "y": 78
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(dspace_dchat_requests_total{environment=~\"$environment\"}[$__rate_interval])) or on() vector(0)",
+          "expr": "sum(rate(dspace_dchat_requests_total{environment=~\"$environment\"}[$__rate_interval])) or on() (0 * count(dspace_release_approved_info{environment=~\"$environment\"}))",
           "legendFormat": "dChat requests"
         }
       ],
@@ -772,7 +1452,8 @@
                 }
               }
             }
-          ]
+          ],
+          "noValue": "NO DATA"
         },
         "overrides": []
       },
@@ -787,10 +1468,10 @@
       }
     },
     {
-      "id": 15,
+      "id": 32,
       "type": "timeseries",
       "title": "token.place dependency request activity",
-      "description": "Zero means no token.place dependency requests were observed; it is not an instrumentation failure.",
+      "description": "Zero means no token.place dependency requests only when the approved-release capability is present; absent capability remains NO DATA.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -799,12 +1480,12 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 33
+        "y": 78
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(dspace_dependency_requests_total{environment=~\"$environment\",dependency=\"tokenplace\"}[$__rate_interval])) or on() vector(0)",
+          "expr": "sum(rate(dspace_dependency_requests_total{environment=~\"$environment\",dependency=\"tokenplace\"}[$__rate_interval])) or on() (0 * count(dspace_release_approved_info{environment=~\"$environment\"}))",
           "legendFormat": "token.place requests"
         }
       ],
@@ -820,7 +1501,8 @@
                 }
               }
             }
-          ]
+          ],
+          "noValue": "NO DATA"
         },
         "overrides": []
       },
@@ -835,7 +1517,7 @@
       }
     },
     {
-      "id": 16,
+      "id": 33,
       "type": "row",
       "title": "Blackbox monitoring",
       "collapsed": false,
@@ -843,11 +1525,11 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 41
+        "y": 86
       }
     },
     {
-      "id": 17,
+      "id": 34,
       "type": "table",
       "title": "Endpoint matrix",
       "description": "Latest endpoint result without exposing raw target URLs.",
@@ -859,7 +1541,7 @@
         "h": 9,
         "w": 12,
         "x": 0,
-        "y": 42
+        "y": 87
       },
       "targets": [
         {
@@ -867,7 +1549,8 @@
           "expr": "min by (environment, app, route) (probe_success{environment=~\"$environment\",app=~\"$app\",route=~\"$route\"})",
           "legendFormat": "{{environment}} / {{app}} / {{route}}",
           "instant": true,
-          "range": false
+          "range": false,
+          "format": "table"
         }
       ],
       "fieldConfig": {
@@ -900,7 +1583,8 @@
                 }
               }
             }
-          ]
+          ],
+          "noValue": "NO DATA"
         },
         "overrides": []
       },
@@ -912,10 +1596,33 @@
         "tooltip": {
           "mode": "multi"
         }
-      }
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true
+            },
+            "indexByName": {
+              "environment": 0,
+              "app": 1,
+              "route": 2,
+              "Value": 3
+            },
+            "renameByName": {
+              "environment": "Environment",
+              "app": "Application",
+              "route": "Route",
+              "Value": "Status"
+            }
+          }
+        }
+      ]
     },
     {
-      "id": 18,
+      "id": 35,
       "type": "timeseries",
       "title": "Probe duration",
       "description": "End-to-end blackbox probe duration.",
@@ -927,7 +1634,7 @@
         "h": 9,
         "w": 12,
         "x": 12,
-        "y": 42
+        "y": 87
       },
       "targets": [
         {
@@ -938,7 +1645,8 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "s"
+          "unit": "s",
+          "noValue": "NO DATA"
         },
         "overrides": []
       },
@@ -953,7 +1661,7 @@
       }
     },
     {
-      "id": 19,
+      "id": 36,
       "type": "table",
       "title": "HTTP response status",
       "description": "HTTP response status by bounded labels.",
@@ -965,7 +1673,7 @@
         "h": 9,
         "w": 12,
         "x": 0,
-        "y": 51
+        "y": 96
       },
       "targets": [
         {
@@ -973,7 +1681,8 @@
           "expr": "max by (environment, app, route) (probe_http_status_code{environment=~\"$environment\",app=~\"$app\",route=~\"$route\"})",
           "legendFormat": "{{environment}} / {{app}} / {{route}}",
           "instant": true,
-          "range": false
+          "range": false,
+          "format": "table"
         }
       ],
       "fieldConfig": {
@@ -999,7 +1708,8 @@
                 "value": 500
               }
             ]
-          }
+          },
+          "noValue": "NO DATA"
         },
         "overrides": []
       },
@@ -1011,10 +1721,33 @@
         "tooltip": {
           "mode": "multi"
         }
-      }
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true
+            },
+            "indexByName": {
+              "environment": 0,
+              "app": 1,
+              "route": 2,
+              "Value": 3
+            },
+            "renameByName": {
+              "environment": "Environment",
+              "app": "Application",
+              "route": "Route",
+              "Value": "Status"
+            }
+          }
+        }
+      ]
     },
     {
-      "id": 20,
+      "id": 37,
       "type": "timeseries",
       "title": "TLS certificate lifetime",
       "description": "Days until the earliest certificate expiry.",
@@ -1026,7 +1759,7 @@
         "h": 9,
         "w": 12,
         "x": 12,
-        "y": 51
+        "y": 96
       },
       "targets": [
         {
@@ -1058,7 +1791,8 @@
                 "value": 30
               }
             ]
-          }
+          },
+          "noValue": "NO DATA"
         },
         "overrides": []
       },
@@ -1073,7 +1807,7 @@
       }
     },
     {
-      "id": 22,
+      "id": 38,
       "type": "row",
       "title": "DSPACE release integrity",
       "collapsed": false,
@@ -1081,7 +1815,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 60
+        "y": 105
       }
     },
     {
@@ -1090,11 +1824,13 @@
         "uid": "prometheus"
       },
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "noValue": "NO DATA"
+        },
         "overrides": []
       },
       "options": {},
-      "id": 23,
+      "id": 39,
       "type": "table",
       "title": "Approved revision",
       "description": "Approved immutable coordinate from finalized release evidence.",
@@ -1102,7 +1838,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 61
+        "y": 106
       },
       "targets": [
         {
@@ -1110,7 +1846,33 @@
           "expr": "dspace_release_approved_info{environment=~\"$environment\"}",
           "legendFormat": "{{revision}}",
           "instant": true,
-          "range": false
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true
+            },
+            "indexByName": {
+              "environment": 0,
+              "revision": 1,
+              "image": 2,
+              "image_digest": 3,
+              "Value": 4
+            },
+            "renameByName": {
+              "environment": "Environment",
+              "revision": "Revision",
+              "image": "Image tag",
+              "image_digest": "Image digest",
+              "Value": "Status"
+            }
+          }
         }
       ]
     },
@@ -1120,11 +1882,13 @@
         "uid": "prometheus"
       },
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "noValue": "NO DATA"
+        },
         "overrides": []
       },
       "options": {},
-      "id": 24,
+      "id": 40,
       "type": "table",
       "title": "Active build revisions by pod",
       "description": "Build identities reported by ready, Running, non-terminating DSPACE pods.",
@@ -1132,7 +1896,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 61
+        "y": 106
       },
       "targets": [
         {
@@ -1140,7 +1904,29 @@
           "expr": "max by (pod, revision) (dspace_build_info{environment=~\"$environment\"} and on (namespace, pod) (kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}))",
           "legendFormat": "{{pod}} {{revision}}",
           "instant": true,
-          "range": false
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true
+            },
+            "indexByName": {
+              "pod": 0,
+              "revision": 1,
+              "Value": 2
+            },
+            "renameByName": {
+              "pod": "Pod",
+              "revision": "Revision",
+              "Value": "Status"
+            }
+          }
         }
       ]
     },
@@ -1150,11 +1936,13 @@
         "uid": "prometheus"
       },
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "noValue": "NO DATA"
+        },
         "overrides": []
       },
       "options": {},
-      "id": 25,
+      "id": 41,
       "type": "stat",
       "title": "Image-pin agreement",
       "description": "Zero means no active DSPACE container differs from the approved digest.",
@@ -1162,12 +1950,12 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 61
+        "y": 106
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "count(max by (pod, image_id, image_spec) ((kube_pod_container_info{namespace=\"dspace\",container=\"dspace\"} unless on (namespace, pod, container) kube_pod_container_info{namespace=\"dspace\",container=\"dspace\",image_id=~\"^(docker-pullable://)?ghcr.io/democratizedspace/dspace@sha256:2b95b7fdccdd011553c8d8617e3090ee27323996c532148fdb147cb9fd6e1b6c$\",image_spec=\"ghcr.io/democratizedspace/dspace:main-018687f\"}) and on (namespace, pod, container) (kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"})) or label_replace(label_replace((kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}) unless on (namespace, pod, container) kube_pod_container_info{namespace=\"dspace\",container=\"dspace\"}, \"image_id\", \"unknown\", \"\", \"\"), \"image_spec\", \"unknown\", \"\", \"\")) or on() vector(0)",
+          "expr": "count(max by (pod, image_id, image_spec) ((kube_pod_container_info{namespace=\"dspace\",container=\"dspace\"} unless on (image_id, image_spec) label_replace(label_replace(dspace_release_approved_info{environment=~\"$environment\"}, \"image_spec\", \"ghcr.io/democratizedspace/dspace:$1\", \"image\", \"(.*)\"), \"image_id\", \"ghcr.io/democratizedspace/dspace@$1\", \"image_digest\", \"(.*)\")) and on (namespace, pod, container) (kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}))) or on() (0 * count(dspace_release_approved_info{environment=~\"$environment\"}))",
           "legendFormat": "mismatched pods",
           "instant": true,
           "range": false
@@ -1180,24 +1968,26 @@
         "uid": "prometheus"
       },
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "noValue": "NO DATA"
+        },
         "overrides": []
       },
       "options": {},
-      "id": 26,
+      "id": 42,
       "type": "stat",
       "title": "DSPACE metrics-target health",
-      "description": "Count of ready, Running, non-terminating DSPACE pods whose target is down or undiscovered. Zero is healthy; missing targets fail closed.",
+      "description": "Zero is healthy only when the approved-release capability exists; absent capability remains NO DATA.",
       "gridPos": {
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 67
+        "y": 112
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "count((up{namespace=\"dspace\",service=~\"dspace.*\"} == 0) or ((kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}) unless on (namespace, pod) up{namespace=\"dspace\",service=~\"dspace.*\"})) or on() vector(0)",
+          "expr": "(count((up{namespace=\"dspace\",service=~\"dspace.*\"} == 0) or ((kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}) unless on (namespace, pod) up{namespace=\"dspace\",service=~\"dspace.*\"})) or on() (0 * count(dspace_release_approved_info{environment=~\"$environment\"}))) and on() (count(dspace_release_approved_info{environment=~\"$environment\"}) > 0)",
           "legendFormat": "down or missing serving targets",
           "instant": true,
           "range": false
@@ -1210,11 +2000,13 @@
         "uid": "prometheus"
       },
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "noValue": "NO DATA"
+        },
         "overrides": []
       },
       "options": {},
-      "id": 27,
+      "id": 43,
       "type": "stat",
       "title": "/chat synthetic result and freshness",
       "description": "Success and age; missing or older than 15 minutes fails closed.",
@@ -1222,12 +2014,12 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 67
+        "y": 112
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "dspace_chat_synthetic_success{environment=~\"$environment\"} or on() vector(0)",
+          "expr": "(dspace_chat_synthetic_success{environment=~\"$environment\"} or on() (0 * count(dspace_release_approved_info{environment=~\"$environment\"}))) and on() (count(dspace_release_approved_info{environment=~\"$environment\"}) > 0)",
           "legendFormat": "success",
           "instant": true,
           "range": false
@@ -1242,7 +2034,7 @@
       ]
     },
     {
-      "id": 28,
+      "id": 44,
       "type": "text",
       "title": "Release integrity references",
       "description": "Operator-owned stable references.",
@@ -1250,15 +2042,15 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 67
+        "y": 112
       },
       "options": {
         "mode": "markdown",
-        "content": "[DSPACE integrity runbook](https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-dspace-release-integrity.md) · [Finalized staging evidence](https://github.com/futuroptimist/sugarkube/blob/main/deployment-evidence/dspace/staging/main-018687f-20260805T035722Z.json)"
+        "content": "[DSPACE integrity runbook](https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-dspace-release-integrity.md) \u00b7 [Finalized staging evidence](https://github.com/futuroptimist/sugarkube/blob/main/deployment-evidence/dspace/staging/main-018687f-20260805T035722Z.json)"
       }
     },
     {
-      "id": 29,
+      "id": 45,
       "type": "row",
       "title": "token.place relay and compute capacity",
       "collapsed": false,
@@ -1266,11 +2058,11 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 73
+        "y": 118
       }
     },
     {
-      "id": 30,
+      "id": 46,
       "type": "stat",
       "title": "token.place scrape availability",
       "description": "Prometheus scrape health per relay pod. Missing targets remain NO DATA.",
@@ -1282,12 +2074,12 @@
         "h": 5,
         "w": 12,
         "x": 0,
-        "y": 74
+        "y": 119
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "min by (pod) (up{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"})",
+          "expr": "min by (pod) (up{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=~\"$cluster\",namespace=\"tokenplace\"})",
           "legendFormat": "{{pod}} scrape",
           "instant": true,
           "range": false
@@ -1339,7 +2131,7 @@
       }
     },
     {
-      "id": 31,
+      "id": 47,
       "type": "stat",
       "title": "token.place instrumentation health",
       "description": "Application instrumentation self-check per relay pod; zero is unhealthy and an absent series remains NO DATA.",
@@ -1351,12 +2143,12 @@
         "h": 5,
         "w": 12,
         "x": 12,
-        "y": 74
+        "y": 119
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "min by (pod) (tokenplace_instrumentation_up{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"})",
+          "expr": "min by (pod) (tokenplace_instrumentation_up{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=~\"$cluster\",namespace=\"tokenplace\"})",
           "legendFormat": "{{pod}} instrumentation",
           "instant": true,
           "range": false
@@ -1408,7 +2200,7 @@
       }
     },
     {
-      "id": 32,
+      "id": 48,
       "type": "timeseries",
       "title": "token.place compute-node counts",
       "description": "Registered and healthy logical compute-node gauges. max deduplicates identical values emitted by future relay replicas without multiplying capacity.",
@@ -1420,17 +2212,17 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 79
+        "y": 124
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "max(tokenplace_compute_nodes_registered{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"})",
+          "expr": "max(tokenplace_compute_nodes_registered{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=~\"$cluster\",namespace=\"tokenplace\"})",
           "legendFormat": "registered"
         },
         {
           "refId": "B",
-          "expr": "max(tokenplace_compute_nodes_healthy{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"})",
+          "expr": "max(tokenplace_compute_nodes_healthy{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=~\"$cluster\",namespace=\"tokenplace\"})",
           "legendFormat": "healthy"
         }
       ],
@@ -1453,7 +2245,7 @@
       }
     },
     {
-      "id": 33,
+      "id": 49,
       "type": "timeseries",
       "title": "token.place oldest compute-node lease age",
       "description": "Oldest lease age reported by the relay fleet. max preserves the worst observed logical age across replicas.",
@@ -1465,12 +2257,12 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 79
+        "y": 124
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "max(tokenplace_compute_node_lease_age_seconds{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"})",
+          "expr": "max(tokenplace_compute_node_lease_age_seconds{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=~\"$cluster\",namespace=\"tokenplace\"})",
           "legendFormat": "oldest lease"
         }
       ],
@@ -1493,7 +2285,7 @@
       }
     },
     {
-      "id": 34,
+      "id": 50,
       "type": "timeseries",
       "title": "token.place compute-node eviction rate",
       "description": "Summed process-local eviction counter rate grouped only by bounded reason.",
@@ -1505,12 +2297,12 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 87
+        "y": 132
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (reason) (rate(tokenplace_compute_node_evictions_total{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"}[$__rate_interval]))",
+          "expr": "sum by (reason) (rate(tokenplace_compute_node_evictions_total{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=~\"$cluster\",namespace=\"tokenplace\"}[$__rate_interval]))",
           "legendFormat": "{{reason}}"
         }
       ],
@@ -1533,7 +2325,7 @@
       }
     },
     {
-      "id": 35,
+      "id": 51,
       "type": "timeseries",
       "title": "token.place relay queue depth",
       "description": "Logical queue depth by bounded provider mode. max avoids multiplying a shared queue gauge across future relay replicas.",
@@ -1545,12 +2337,12 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 87
+        "y": 132
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "max by (provider_mode) (tokenplace_relay_queue_depth{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"})",
+          "expr": "max by (provider_mode) (tokenplace_relay_queue_depth{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=~\"$cluster\",namespace=\"tokenplace\"})",
           "legendFormat": "{{provider_mode}}"
         }
       ],
@@ -1573,7 +2365,7 @@
       }
     },
     {
-      "id": 36,
+      "id": 52,
       "type": "timeseries",
       "title": "token.place oldest queued-request age",
       "description": "Oldest queued-request age by bounded provider mode. max shows the worst age without multiplying replicated logical gauges.",
@@ -1585,12 +2377,12 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 95
+        "y": 140
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "max by (provider_mode) (tokenplace_relay_oldest_queued_request_age_seconds{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"})",
+          "expr": "max by (provider_mode) (tokenplace_relay_oldest_queued_request_age_seconds{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=~\"$cluster\",namespace=\"tokenplace\"})",
           "legendFormat": "{{provider_mode}}"
         }
       ],
@@ -1613,7 +2405,7 @@
       }
     },
     {
-      "id": 37,
+      "id": 53,
       "type": "timeseries",
       "title": "token.place in-flight requests by pod",
       "description": "In-flight ownership is relay-process local, so values remain per pod rather than being combined across replicas.",
@@ -1625,12 +2417,12 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 95
+        "y": 140
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "max by (pod) (tokenplace_relay_in_flight_requests{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"})",
+          "expr": "max by (pod) (tokenplace_relay_in_flight_requests{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=~\"$cluster\",namespace=\"tokenplace\"})",
           "legendFormat": "{{pod}}"
         }
       ],
@@ -1653,7 +2445,7 @@
       }
     },
     {
-      "id": 38,
+      "id": 54,
       "type": "timeseries",
       "title": "token.place oldest in-flight age by pod",
       "description": "Oldest in-flight age remains per relay pod because cross-replica ownership is not assumed.",
@@ -1665,12 +2457,12 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 103
+        "y": 148
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "max by (pod) (tokenplace_relay_oldest_in_flight_age_seconds{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"})",
+          "expr": "max by (pod) (tokenplace_relay_oldest_in_flight_age_seconds{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=~\"$cluster\",namespace=\"tokenplace\"})",
           "legendFormat": "{{pod}}"
         }
       ],
@@ -1693,7 +2485,7 @@
       }
     },
     {
-      "id": 39,
+      "id": 55,
       "type": "timeseries",
       "title": "token.place terminal outcome rate",
       "description": "Summed process-local terminal outcome counter rate grouped only by bounded outcome.",
@@ -1705,12 +2497,12 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 103
+        "y": 148
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (outcome) (rate(tokenplace_relay_request_outcomes_total{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"}[$__rate_interval]))",
+          "expr": "sum by (outcome) (rate(tokenplace_relay_request_outcomes_total{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=~\"$cluster\",namespace=\"tokenplace\"}[$__rate_interval]))",
           "legendFormat": "{{outcome}}"
         }
       ],
@@ -1733,7 +2525,7 @@
       }
     },
     {
-      "id": 40,
+      "id": 56,
       "type": "row",
       "title": "token.place HTTP and release",
       "collapsed": false,
@@ -1741,11 +2533,11 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 111
+        "y": 156
       }
     },
     {
-      "id": 41,
+      "id": 57,
       "type": "timeseries",
       "title": "token.place HTTP request rate",
       "description": "Summed request rate grouped by normalized route and bounded status class.",
@@ -1757,12 +2549,12 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 112
+        "y": 157
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (route, status_class) (rate(tokenplace_http_requests_total{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"}[$__rate_interval]))",
+          "expr": "sum by (route, status_class) (rate(tokenplace_http_requests_total{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=~\"$cluster\",namespace=\"tokenplace\"}[$__rate_interval]))",
           "legendFormat": "{{route}} {{status_class}}"
         }
       ],
@@ -1785,7 +2577,7 @@
       }
     },
     {
-      "id": 42,
+      "id": 58,
       "type": "timeseries",
       "title": "token.place HTTP 5xx ratio",
       "description": "Fraction of observed token.place HTTP requests returning a bounded 5xx status class; absent counters remain NO DATA.",
@@ -1797,12 +2589,12 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 112
+        "y": 157
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(tokenplace_http_requests_total{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\",status_class=\"5xx\"}[$__rate_interval])) / clamp_min(sum(rate(tokenplace_http_requests_total{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"}[$__rate_interval])), 1e-9)",
+          "expr": "sum(rate(tokenplace_http_requests_total{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=~\"$cluster\",namespace=\"tokenplace\",status_class=\"5xx\"}[$__rate_interval])) / clamp_min(sum(rate(tokenplace_http_requests_total{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=~\"$cluster\",namespace=\"tokenplace\"}[$__rate_interval])), 1e-9)",
           "legendFormat": "5xx ratio"
         }
       ],
@@ -1843,7 +2635,7 @@
       }
     },
     {
-      "id": 43,
+      "id": 59,
       "type": "timeseries",
       "title": "token.place HTTP latency percentiles",
       "description": "Request latency percentiles from histogram buckets, grouped only by normalized route.",
@@ -1855,22 +2647,22 @@
         "h": 8,
         "w": 16,
         "x": 0,
-        "y": 120
+        "y": 165
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(.50, sum by (le, route) (rate(tokenplace_http_request_duration_seconds_bucket{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(.50, sum by (le, route) (rate(tokenplace_http_request_duration_seconds_bucket{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=~\"$cluster\",namespace=\"tokenplace\"}[$__rate_interval])))",
           "legendFormat": "p50 {{route}}"
         },
         {
           "refId": "B",
-          "expr": "histogram_quantile(.95, sum by (le, route) (rate(tokenplace_http_request_duration_seconds_bucket{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(.95, sum by (le, route) (rate(tokenplace_http_request_duration_seconds_bucket{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=~\"$cluster\",namespace=\"tokenplace\"}[$__rate_interval])))",
           "legendFormat": "p95 {{route}}"
         },
         {
           "refId": "C",
-          "expr": "histogram_quantile(.99, sum by (le, route) (rate(tokenplace_http_request_duration_seconds_bucket{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(.99, sum by (le, route) (rate(tokenplace_http_request_duration_seconds_bucket{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=~\"$cluster\",namespace=\"tokenplace\"}[$__rate_interval])))",
           "legendFormat": "p99 {{route}}"
         }
       ],
@@ -1893,7 +2685,7 @@
       }
     },
     {
-      "id": 44,
+      "id": 60,
       "type": "table",
       "title": "token.place build identity",
       "description": "Safe release identity per relay pod: version and revision.",
@@ -1905,15 +2697,16 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 120
+        "y": 165
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "max by (pod, version, revision) (tokenplace_build_info{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=\"sugarkube-int\",namespace=\"tokenplace\"})",
+          "expr": "max by (pod, version, revision) (tokenplace_build_info{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=~\"$cluster\",namespace=\"tokenplace\"})",
           "legendFormat": "{{pod}} {{version}} {{revision}}",
           "instant": true,
-          "range": false
+          "range": false,
+          "format": "table"
         }
       ],
       "fieldConfig": {
@@ -1934,20 +2727,22 @@
       },
       "transformations": [
         {
-          "id": "labelsToFields",
-          "options": {}
-        },
-        {
           "id": "organize",
           "options": {
             "excludeByName": {
               "Time": true,
+              "__name__": true,
               "Value": true
             },
             "indexByName": {
               "pod": 0,
               "version": 1,
               "revision": 2
+            },
+            "renameByName": {
+              "pod": "Pod",
+              "version": "Version",
+              "revision": "Revision"
             }
           }
         }
