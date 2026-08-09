@@ -137,7 +137,11 @@ jobs:
       - name: Install Bubblewrap sandbox runtime
         run: |
           set -euo pipefail
+          sudo apt-get update
           sudo apt-get install -y --no-install-recommends bubblewrap
+          if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
 
       - name: Prove validation sandbox denies outbound network
         working-directory: pr-workspace
@@ -359,7 +363,7 @@ jobs:
         id: claude
         uses: anthropics/claude-code-action@fa7e2f0a29a126f0b81cdcf360561b36e44cf608 # v1
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ steps.claude-app-token.outputs.token }}
           allowed_non_write_users: ${{ needs.authorize.outputs.authorized_actor }}
           include_comments_by_actor: ${{ needs.authorize.outputs.trusted_actors }}
