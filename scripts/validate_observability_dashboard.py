@@ -181,7 +181,10 @@ def configure_profile(dashboard: dict) -> bool:
     global TITLE, UID, DASHBOARD_FILE, DASHBOARD_MOUNT
     identity = (dashboard.get("uid"), dashboard.get("title"))
     production = identity == (PROD_UID, PROD_TITLE)
-    if not production and identity != ("sugarkube-staging-observability", "Sugarkube Staging Observability"):
+    if not production and identity != (
+        "sugarkube-staging-observability",
+        "Sugarkube Staging Observability",
+    ):
         raise SystemExit("ERROR: dashboard title and UID do not match a supported profile.")
     UID, TITLE = identity
     DASHBOARD_FILE = f"{UID}.json"
@@ -209,8 +212,12 @@ def validate_production_dashboard(dashboard: dict) -> None:
         "Observability build identity": None,
     }
     actual_titles = [panel.get("title") for panel in panels(dashboard)]
-    if len(actual_titles) != len(required) + 1 or any(actual_titles.count(title) != 1 for title in required):
-        raise SystemExit("ERROR: production dashboard must contain every required row and panel exactly once.")
+    if len(actual_titles) != len(required) + 1 or any(
+        actual_titles.count(title) != 1 for title in required
+    ):
+        raise SystemExit(
+            "ERROR: production dashboard must contain every required row and panel exactly once."
+        )
     for title, expression in required.items():
         panel = panel_named(dashboard, title)
         if expression is None:
@@ -218,51 +225,126 @@ def validate_production_dashboard(dashboard: dict) -> None:
                 raise SystemExit("ERROR: production dashboard row contract is invalid.")
         elif panel_expression(dashboard, title) != expression:
             raise SystemExit(f"ERROR: production PromQL contract changed for {title}.")
-    snapshot_tables = (
-        "Scrape availability by job",
-        "Node readiness",
-        "Deployment replica deficit",
-        "Observability component build identity",
-    )
-    if any(
-        target.get("instant") is not True or target.get("range") is not False
-        for title in snapshot_tables
-        for target in panel_named(dashboard, title).get("targets", [])
-    ):
-        raise SystemExit("ERROR: production snapshot tables must use instant-only queries.")
-    build = panel_named(dashboard, "Observability component build identity")
-    expected_builds = {
-        "prometheus_build_info": "Prometheus:", "alertmanager_build_info": "Alertmanager:",
-        "grafana_build_info": "Grafana:", "node_exporter_build_info": "node-exporter:",
+    table_contracts = {
+        "Scrape availability by job": ({"job": 0, "Value": 1}, {"Value": "Status"}, False),
+        "Node readiness": ({"node": 0, "Value": 1}, {"Value": "Status"}, False),
+        "Deployment replica deficit": (
+            {"namespace": 0, "deployment": 1, "Value": 2},
+            {"Value": "Replica deficit"},
+            False,
+        ),
+        "Observability component build identity": (
+            {"component": 0, "pod": 1, "version": 2, "revision": 3},
+            {},
+            True,
+        ),
     }
-    if build.get("type") != "table" or len(build.get("targets", [])) != 4:
-        raise SystemExit("ERROR: production build identity must have four table queries.")
-    for metric, prefix in expected_builds.items():
-        matches = [target for target in build["targets"] if metric in target.get("expr", "")]
-        if len(matches) != 1 or matches[0]["expr"] != f"max by (pod, version, revision) ({metric})" or not matches[0].get("legendFormat", "").startswith(prefix):
-            raise SystemExit("ERROR: production build identity must retain pod/version/revision and component legends.")
+    for title, (columns, renames, hide_value) in table_contracts.items():
+        panel = panel_named(dashboard, title)
+        targets = panel.get("targets", [])
+        if panel.get("type") != "table" or len(targets) != 1:
+            raise SystemExit(
+                f"ERROR: production table {title} must deterministically consolidate into one frame."
+            )
+        target = targets[0]
+        if (
+            target.get("format") != "table"
+            or target.get("instant") is not True
+            or target.get("range") is not False
+        ):
+            raise SystemExit(
+                "ERROR: production table targets must be table-formatted and instant-only."
+            )
+        transformations = panel.get("transformations", [])
+        if len(transformations) != 1 or transformations[0].get("id") != "organize":
+            raise SystemExit(
+                f"ERROR: production table {title} requires deterministic field organization."
+            )
+        options = transformations[0].get("options", {})
+        excluded = options.get("excludeByName")
+        expected_excluded = {"Time": True, "__name__": True}
+        if hide_value:
+            expected_excluded["Value"] = True
+        if (
+            options.get("indexByName") != columns
+            or options.get("renameByName") != renames
+            or excluded != expected_excluded
+        ):
+            raise SystemExit(
+                f"ERROR: production table {title} has missing, raw, or unordered fields."
+            )
+
+    build = panel_named(dashboard, "Observability component build identity")
+    expected_build = " or ".join(
+        f"label_replace(max by (pod, version, revision) ({metric}), "
+        f'"component", "{component}", "pod", ".*")'
+        for metric, component in (
+            ("prometheus_build_info", "prometheus"),
+            ("alertmanager_build_info", "alertmanager"),
+            ("grafana_build_info", "grafana"),
+            ("node_exporter_build_info", "node-exporter"),
+        )
+    )
+    if build["targets"][0].get("expr") != expected_build:
+        raise SystemExit(
+            "ERROR: production build identity must safely union bounded component/pod/version/revision rows."
+        )
     serialized = json.dumps(dashboard)
-    expressions = "\n".join(target.get("expr", "") for panel in panels(dashboard) for target in panel.get("targets", []))
-    if dashboard.get("refresh") != "30s" or dashboard.get("time") != {"from": "now-6h", "to": "now"} or dashboard.get("templating", {}).get("list") != []:
+    expressions = "\n".join(
+        target.get("expr", "") for panel in panels(dashboard) for target in panel.get("targets", [])
+    )
+    if (
+        dashboard.get("refresh") != "30s"
+        or dashboard.get("time") != {"from": "now-6h", "to": "now"}
+        or dashboard.get("templating", {}).get("list") != []
+    ):
         raise SystemExit("ERROR: production dashboard defaults or variables are invalid.")
-    if "or vector(0)" in expressions or "or on() vector(0)" in expressions or re.search(r'cluster\s*(?:=|=~)', expressions):
-        raise SystemExit("ERROR: production queries must preserve missing data and omit external-label selectors.")
-    forbidden = ("kube_state_metrics_build_info", "probe_", "dspace", "tokenplace", "blackbox", "synthetic")
+    if (
+        "or vector(0)" in expressions
+        or "or on() vector(0)" in expressions
+        or re.search(r"cluster\s*(?:=|=~)", expressions)
+    ):
+        raise SystemExit(
+            "ERROR: production queries must preserve missing data and omit external-label selectors."
+        )
+    forbidden = (
+        "kube_state_metrics_build_info",
+        "probe_",
+        "dspace",
+        "tokenplace",
+        "blackbox",
+        "synthetic",
+    )
     if any(item in expressions.lower() for item in forbidden):
         raise SystemExit("ERROR: production dashboard contains an unverified signal.")
-    if re.search(r"{{\s*(instance|ip|url|endpoint|device|system_uuid|provider_id|pod_cidr)\s*}}", serialized, re.I):
+    if re.search(
+        r"{{\s*(instance|ip|url|endpoint|device|system_uuid|provider_id|pod_cidr)\s*}}",
+        serialized,
+        re.I,
+    ):
         raise SystemExit("ERROR: production legends expose a forbidden raw identity label.")
     for title in ("Node CPU utilization", "Node memory utilization", "Root filesystem utilization"):
         if panel_named(dashboard, title)["targets"][0].get("legendFormat") != "{{nodename}}":
             raise SystemExit("ERROR: node panels must expose only nodename in their legends.")
-    for title in ("Node CPU utilization", "Node memory utilization", "Root filesystem utilization", "Prometheus PVC utilization"):
+    for title in (
+        "Node CPU utilization",
+        "Node memory utilization",
+        "Root filesystem utilization",
+        "Prometheus PVC utilization",
+    ):
         defaults = panel_named(dashboard, title).get("fieldConfig", {}).get("defaults", {})
         if (defaults.get("unit"), defaults.get("min"), defaults.get("max")) != ("percent", 0, 100):
             raise SystemExit("ERROR: production percentage panels require a 0-100 percent scale.")
-    if any(panel.get("type") != "row" and panel.get("fieldConfig", {}).get("defaults", {}).get("noValue") != "NO DATA" for panel in panels(dashboard)):
+    if any(
+        panel.get("type") != "row"
+        and panel.get("fieldConfig", {}).get("defaults", {}).get("noValue") != "NO DATA"
+        for panel in panels(dashboard)
+    ):
         raise SystemExit("ERROR: production panels must explicitly preserve NO DATA.")
     datasource_refs = re.findall(r'"uid":\s*"([^"]+)"', serialized)
-    if DATASOURCE_UID not in datasource_refs or any(uid not in {DATASOURCE_UID, PROD_UID} for uid in datasource_refs):
+    if DATASOURCE_UID not in datasource_refs or any(
+        uid not in {DATASOURCE_UID, PROD_UID} for uid in datasource_refs
+    ):
         raise SystemExit("ERROR: production datasource references must use Prometheus UID.")
 
 

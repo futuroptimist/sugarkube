@@ -122,9 +122,16 @@ def test_production_snapshot_and_unready_pod_contracts(prod_dashboard):
         "Observability component build identity",
     }
     assert all(
-        target.get("instant") is True and target.get("range") is False
+        len(panels[title]["targets"]) == 1
+        and panels[title]["targets"][0].get("format") == "table"
+        and panels[title]["targets"][0].get("instant") is True
+        and panels[title]["targets"][0].get("range") is False
         for title in snapshot_tables
-        for target in panels[title]["targets"]
+    )
+    assert all(
+        [transformation["id"] for transformation in panels[title]["transformations"]]
+        == ["organize"]
+        for title in snapshot_tables
     )
     unready = panels["Unready pods by namespace"]["targets"][0]["expr"]
     assert 'kube_pod_status_phase{phase=~"Pending|Running|Unknown"} == 1' in unready
@@ -155,17 +162,26 @@ def test_production_snapshot_and_unready_pod_contracts(prod_dashboard):
             "PromQL contract",
         ),
         (lambda d: d["panels"][1]["targets"][0].update(instant=False, range=True), "instant-only"),
+        (lambda d: d["panels"][1]["targets"][0].update(format="time_series"), "table-formatted"),
         (
-            lambda d: production_panel(d, "Observability component build identity").update(
-                type="stat"
+            lambda d: production_panel(d, "Observability component build identity")[
+                "targets"
+            ].append(
+                dict(production_panel(d, "Observability component build identity")["targets"][0])
             ),
-            "four table queries",
+            "consolidate into one frame",
+        ),
+        (
+            lambda d: production_panel(d, "Node readiness")["transformations"][0]["options"][
+                "indexByName"
+            ].pop("node"),
+            "missing, raw, or unordered fields",
         ),
         (
             lambda d: production_panel(d, "Observability component build identity")["targets"][
                 0
-            ].update(legendFormat="Prometheus"),
-            "pod/version/revision",
+            ].update(expr="max by (instance, pod, version, revision) (prometheus_build_info)"),
+            "safely union bounded",
         ),
         (lambda d: d.update(refresh="1m"), "defaults or variables"),
         (lambda d: add_row_expression(d, "or vector(0)"), "preserve missing data"),
@@ -872,7 +888,7 @@ def test_validator_rejects_malformed_missing_and_changed_identity(tmp_path):
 
 
 def rendered_dashboard_yaml(dashboard, mount_path=None, sub_path=None):
-    filename = "sugarkube-staging-observability.json"
+    filename = f"{dashboard['uid']}.json"
     mount_path = mount_path or f"/var/lib/grafana/dashboards/sugarkube/{filename}"
     sub_path = sub_path or filename
     payload = json.dumps(dashboard, indent=2)
@@ -914,6 +930,13 @@ def test_validator_accepts_chart_native_render(tmp_path, dashboard):
     rendered = tmp_path / "direct-rendered.yaml"
     rendered.write_text(rendered_dashboard_yaml(dashboard), encoding="utf-8")
     dashboard_json = validator.validate_dashboard(DASHBOARD)
+    validator.validate_render(rendered, dashboard_json)
+
+
+def test_production_rendered_dashboard_equals_source(tmp_path, prod_dashboard):
+    rendered = tmp_path / "prod-rendered.yaml"
+    rendered.write_text(rendered_dashboard_yaml(prod_dashboard), encoding="utf-8")
+    dashboard_json = validator.validate_dashboard(PROD_DASHBOARD)
     validator.validate_render(rendered, dashboard_json)
 
 
