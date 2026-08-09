@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import json
 from pathlib import Path
 
 import pytest
@@ -96,6 +97,85 @@ def test_watchdogs_are_installed_on_both_nodes_before_disruption() -> None:
     assert "systemd-run" in TEXT[watchdog:install]
     assert "/usr/bin/nsenter" in TEXT[watchdog:install]
     assert "/proc/self/ns/net" in TEXT[watchdog:install]
+    assert "/usr/bin/systemctl is-active --quiet" in TEXT[watchdog:install]
+    assert "/usr/bin/systemctl show --property MainPID --value" in TEXT[watchdog:install]
+    assert "/proc/${watchdog_pid}/ns/net" in TEXT[watchdog:install]
+
+
+@pytest.mark.parametrize(
+    ("active", "main_pid", "watchdog_netns", "expected"),
+    [
+        (False, "41", "net:[100]", "inactive"),
+        (True, "0", "net:[100]", "pid"),
+        (True, "", "net:[100]", "pid"),
+        (True, "41", "net:[999]", "netns"),
+        (True, "41", "net:[100]", "ok"),
+    ],
+)
+def test_stateful_watchdog_stub_fails_closed(
+    tmp_path: Path, active: bool, main_pid: str, watchdog_netns: str, expected: str
+) -> None:
+    """Exercise the ordered remote contract without contacting a node or cluster."""
+    state = tmp_path / "state.json"
+    stub = tmp_path / "node-executor"
+    state.write_text(json.dumps({"active": active, "pid": main_pid, "netns": watchdog_netns}))
+    stub.write_text(
+        "#!/bin/sh\n"
+        f"state={state!s}\n"
+        "cmd=$2\n"
+        "printf '%s\\n' \"$cmd\" >> \"$state.audit\"\n"
+        "case $cmd in\n"
+        "  *systemd-run*) exit 0;;\n"
+        f"  *is-active*) {'exit 0' if active else 'exit 3'};;\n"
+        f"  *MainPID*) printf '%s\\n' {main_pid!r};;\n"
+        f"  *'/proc/{main_pid}/ns/net'*) printf '%s\\n' {watchdog_netns!r};;\n"
+        "  *'nft add table'*) printf mutation >> \"$state.mutated\";;\n"
+        "esac\n"
+    )
+    stub.chmod(0o755)
+    result = subprocess.run(
+        [
+            "bash", "-c",
+            'set -e; x=$1; "$x" n "systemd-run"; '
+            '"$x" n "systemctl is-active"; p=$("$x" n "MainPID"); '
+            '[[ $p =~ ^[1-9][0-9]*$ ]] || exit 20; '
+            '[[ $("$x" n "/proc/$p/ns/net") == "net:[100]" ]] || exit 21; '
+            '"$x" n "nft add table"',
+            "test", str(stub),
+        ], capture_output=True, text=True,
+    )
+    mutated = (tmp_path / "state.json.mutated").exists()
+    assert mutated is (expected == "ok")
+    assert (result.returncode == 0) is (expected == "ok")
+
+
+@pytest.mark.parametrize(
+    ("query_ok", "present", "success"),
+    [(False, False, False), (True, True, False), (True, False, True)],
+)
+def test_stateful_cleanup_stub_requires_successful_absence_query(
+    tmp_path: Path, query_ok: bool, present: bool, success: bool
+) -> None:
+    nft = tmp_path / "nft"
+    nft.write_text(
+        "#!/bin/sh\n"
+        "case \"$*\" in\n"
+        "  *delete*) exit 0;;\n"
+        f"  *list\\ ruleset*) {'exit 2' if not query_ok else 'printf %s ' + repr(json.dumps({'nftables': [{'table': {'family': 'inet', 'name': 'owner'}}] if present else []}))};;\n"
+        "esac\n"
+    )
+    nft.chmod(0o755)
+    result = subprocess.run(
+        ["bash", "-o", "pipefail", "-c", f"'{nft}' delete table inet owner || true; '{nft}' -j list ruleset | jq -e --arg table owner '[.nftables[]?.table? | select(.family==\"inet\" and .name==$table)] | length == 0' >/dev/null"],
+        capture_output=True, text=True,
+    )
+    assert (result.returncode == 0) is success
+
+
+def test_manual_cleanup_prints_successful_absence_proof() -> None:
+    manual = TEXT.split("manual_cleanup() {", 1)[1].split("\n}", 1)[0]
+    assert "nft -j list ruleset" in manual
+    assert "length == 0" in manual
 
 
 def test_one_node_setup_failure_cleans_the_installed_node() -> None:

@@ -47,7 +47,7 @@ manual_cleanup() {
   printf 'MANUAL CLEANUP REQUIRED (run through an authenticated, host-key-verified node session):\n' >&2
   for i in "${!pod_nodes[@]}"; do
     printf '  node=%q command=%q\n' "${pod_nodes[$i]}" \
-      "test \"\$(sudo crictl inspectp ${pod_sandboxes[$i]:-SANDBOX_ID} | jq -r '.status.labels[\"io.kubernetes.pod.uid\"]')\" = ${pod_uids[$i]:-POD_UID} && test \"\$(readlink /proc/${pod_pids[$i]:-POD_SANDBOX_PID}/ns/net)\" = '${pod_netns[$i]:-NETNS_INODE}' && sudo nsenter -t ${pod_pids[$i]:-POD_SANDBOX_PID} -n /usr/sbin/nft delete table inet ${table}" >&2
+      "test \"\$(sudo /usr/bin/crictl inspectp ${pod_sandboxes[$i]:-SANDBOX_ID} | /usr/bin/jq -r '.status.labels[\"io.kubernetes.pod.uid\"]')\" = '${pod_uids[$i]:-POD_UID}' && test \"\$(/usr/bin/readlink /proc/${pod_pids[$i]:-POD_SANDBOX_PID}/ns/net)\" = '${pod_netns[$i]:-NETNS_INODE}' && { sudo /usr/bin/nsenter -t ${pod_pids[$i]:-POD_SANDBOX_PID} -n /usr/sbin/nft delete table inet ${table} 2>/dev/null || true; } && sudo /usr/bin/nsenter -t ${pod_pids[$i]:-POD_SANDBOX_PID} -n /usr/sbin/nft -j list ruleset | /usr/bin/jq -e --arg table '${table}' '[.nftables[]?.table? | select(.family==\"inet\" and .name==\$table)] | length == 0' >/dev/null" >&2
   done
 }
 
@@ -59,7 +59,7 @@ cleanup() {
   for ((position=${#attempted_indices[@]}-1; position>=0; position--)); do
     i="${attempted_indices[$position]}"
     node="${pod_nodes[$i]}"
-    command="test \"\$(sudo /usr/bin/crictl inspectp ${pod_sandboxes[$i]} | /usr/bin/jq -r '.status.labels[\"io.kubernetes.pod.uid\"]')\" = '${pod_uids[$i]}' && test \"\$(/usr/bin/readlink /proc/${pod_pids[$i]}/ns/net)\" = '${pod_netns[$i]}' && { sudo /usr/bin/nsenter -t ${pod_pids[$i]} -n /usr/sbin/nft delete table inet ${table} 2>/dev/null || true; ! sudo /usr/bin/nsenter -t ${pod_pids[$i]} -n /usr/sbin/nft list table inet ${table} >/dev/null 2>&1; }"
+    command="test \"\$(sudo /usr/bin/crictl inspectp ${pod_sandboxes[$i]} | /usr/bin/jq -r '.status.labels[\"io.kubernetes.pod.uid\"]')\" = '${pod_uids[$i]}' && test \"\$(/usr/bin/readlink /proc/${pod_pids[$i]}/ns/net)\" = '${pod_netns[$i]}' && { sudo /usr/bin/nsenter -t ${pod_pids[$i]} -n /usr/sbin/nft delete table inet ${table} 2>/dev/null || true; } && sudo /usr/bin/nsenter -t ${pod_pids[$i]} -n /usr/sbin/nft -j list ruleset | /usr/bin/jq -e --arg table '${table}' '[.nftables[]?.table? | select(.family==\"inet\" and .name==\$table)] | length == 0' >/dev/null"
     if node_exec "${node}" "${command}" >/dev/null; then
       unset 'attempted_indices[position]'
     else
@@ -167,7 +167,7 @@ secret_metadata="$(kubectl -n cloudflare get secret tunnel-token -o jsonpath='{.
 
 table="$(table_for)"
 for i in 0 1; do
-  node_exec "${pod_nodes[$i]}" "test -x /usr/bin/crictl -a -x /usr/bin/jq -a -x /usr/bin/readlink -a -x /usr/bin/nsenter -a -x /usr/bin/systemd-run -a -x /bin/sh -a -x /bin/sleep -a -x /usr/sbin/nft" >/dev/null || die "required remote binary path missing on ${pod_nodes[$i]}"
+  node_exec "${pod_nodes[$i]}" "test -x /usr/bin/crictl -a -x /usr/bin/jq -a -x /usr/bin/readlink -a -x /usr/bin/nsenter -a -x /usr/bin/systemd-run -a -x /usr/bin/systemctl -a -x /bin/sh -a -x /bin/sleep -a -x /usr/sbin/nft" >/dev/null || die "required remote binary path missing on ${pod_nodes[$i]}"
   resolve="sudo crictl pods --name '^${pod_names[$i]}$' -q"
   sandbox="$(node_exec "${pod_nodes[$i]}" "${resolve}")"
   [[ "${sandbox}" != *$'\n'* && "${sandbox}" =~ ^[a-f0-9]{12,64}$ ]] || die "cannot resolve one exact sandbox for ${pod_names[$i]}"
@@ -201,8 +201,13 @@ trap 'exit 143' TERM
 for i in 0 1; do
   # Revalidate the CRI owner and inode, then enter the namespace immediately.  The
   # long-lived nsenter child pins that namespace; no delayed stored-PID lookup occurs.
-  watchdog="test \"\$(sudo /usr/bin/crictl inspectp ${pod_sandboxes[$i]} | /usr/bin/jq -r '.status.labels[\"io.kubernetes.pod.uid\"]')\" = '${pod_uids[$i]}' && test \"\$(/usr/bin/readlink /proc/${pod_pids[$i]}/ns/net)\" = '${pod_netns[$i]}' && sudo /usr/bin/systemd-run --unit ${owner}-cleanup --collect /usr/bin/nsenter -t ${pod_pids[$i]} -n /bin/sh -c 'test \"\$(/usr/bin/readlink /proc/self/ns/net)\" = "${pod_netns[$i]}" || exit 70; /bin/sleep 240; /usr/sbin/nft delete table inet ${table} 2>/dev/null || true'"
+  printf -v watchdog_body '%q ' /bin/sh -c "test \"\$(/usr/bin/readlink /proc/self/ns/net)\" = '${pod_netns[$i]}' || exit 70; /bin/sleep 240; /usr/sbin/nft delete table inet ${table} 2>/dev/null || true"
+  unit="${owner}-cleanup.service"
+  watchdog="test \"\$(sudo /usr/bin/crictl inspectp ${pod_sandboxes[$i]} | /usr/bin/jq -r '.status.labels[\"io.kubernetes.pod.uid\"]')\" = '${pod_uids[$i]}' && test \"\$(/usr/bin/readlink /proc/${pod_pids[$i]}/ns/net)\" = '${pod_netns[$i]}' && sudo /usr/bin/systemd-run --unit '${unit%.service}' --collect /usr/bin/nsenter -t ${pod_pids[$i]} -n ${watchdog_body}"
   node_exec "${pod_nodes[$i]}" "${watchdog}" >/dev/null || die "cleanup watchdog failed on ${pod_nodes[$i]}"
+  watchdog_pid="$(node_exec "${pod_nodes[$i]}" "sudo /usr/bin/systemctl is-active --quiet '${unit}' && sudo /usr/bin/systemctl show --property MainPID --value '${unit}'")" || die "cleanup watchdog is inactive on ${pod_nodes[$i]}"
+  [[ "${watchdog_pid}" =~ ^[1-9][0-9]*$ ]] || die "cleanup watchdog has no live MainPID on ${pod_nodes[$i]}"
+  [[ "$(node_exec "${pod_nodes[$i]}" "/usr/bin/readlink /proc/${watchdog_pid}/ns/net")" == "${pod_netns[$i]}" ]] || die "cleanup watchdog namespace mismatch on ${pod_nodes[$i]}"
 done
 for i in 0 1; do
   install="test \"\$(sudo /usr/bin/crictl inspectp ${pod_sandboxes[$i]} | /usr/bin/jq -r '.status.labels[\"io.kubernetes.pod.uid\"]')\" = '${pod_uids[$i]}' && test \"\$(/usr/bin/readlink /proc/${pod_pids[$i]}/ns/net)\" = '${pod_netns[$i]}' && sudo /usr/bin/nsenter -t ${pod_pids[$i]} -n /usr/sbin/nft 'add table inet ${table}; add chain inet ${table} output { type filter hook output priority -10; policy accept; }; add rule inet ${table} output udp dport { 7844, 443 } counter drop comment \"${owner}\"; add rule inet ${table} output tcp dport { 7844, 443 } counter drop comment \"${owner}\"'"
@@ -236,7 +241,7 @@ if ((remaining > 0)); then sleep "${remaining}"; fi
 cleanup_failed=0
 declare -a cleanup_retry_indices=()
 for i in "${attempted_indices[@]}"; do
-  delete_and_prove="test \"\$(sudo /usr/bin/crictl inspectp ${pod_sandboxes[$i]} | /usr/bin/jq -r '.status.labels[\"io.kubernetes.pod.uid\"]')\" = '${pod_uids[$i]}' && test \"\$(/usr/bin/readlink /proc/${pod_pids[$i]}/ns/net)\" = '${pod_netns[$i]}' && { sudo /usr/bin/nsenter -t ${pod_pids[$i]} -n /usr/sbin/nft delete table inet ${table} 2>/dev/null || true; ! sudo /usr/bin/nsenter -t ${pod_pids[$i]} -n /usr/sbin/nft list table inet ${table} >/dev/null 2>&1; }"
+  delete_and_prove="test \"\$(sudo /usr/bin/crictl inspectp ${pod_sandboxes[$i]} | /usr/bin/jq -r '.status.labels[\"io.kubernetes.pod.uid\"]')\" = '${pod_uids[$i]}' && test \"\$(/usr/bin/readlink /proc/${pod_pids[$i]}/ns/net)\" = '${pod_netns[$i]}' && { sudo /usr/bin/nsenter -t ${pod_pids[$i]} -n /usr/sbin/nft delete table inet ${table} 2>/dev/null || true; } && sudo /usr/bin/nsenter -t ${pod_pids[$i]} -n /usr/sbin/nft -j list ruleset | /usr/bin/jq -e --arg table '${table}' '[.nftables[]?.table? | select(.family==\"inet\" and .name==\$table)] | length == 0' >/dev/null"
   if ! node_exec "${pod_nodes[$i]}" "${delete_and_prove}" >/dev/null; then
     cleanup_failed=1
     cleanup_retry_indices+=("${i}")
