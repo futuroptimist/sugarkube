@@ -20,6 +20,9 @@ PROD = ROOT / "clusters" / "prod" / "observability" / "kube-prometheus-stack.val
 CANONICAL_DSPACE_RULES = (
     ROOT / "platform" / "observability" / "rules" / "dspace-release-integrity.yaml"
 )
+CANONICAL_CLOUDFLARE_RULES = (
+    ROOT / "platform" / "observability" / "rules" / "cloudflare-tunnel.yaml"
+)
 SCRIPT = ROOT / "scripts" / "observability_helm.sh"
 ALERTMANAGER_VALIDATOR = ROOT / "scripts" / "verify_observability_alertmanager.rb"
 DASHBOARD = ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
@@ -103,7 +106,7 @@ def test_chart_version_and_values_match_live_staging_baseline():
         "group_interval": None,
         "repeat_interval": None,
     }
-    assert route["routes"][1] == {
+    assert route["routes"][2] == {
         "receiver": "pagerduty-synthetic-test",
         "matchers": [
             'alertname="SugarkubePagerDutyTest"',
@@ -115,7 +118,7 @@ def test_chart_version_and_values_match_live_staging_baseline():
     dspace_route = route["routes"][0]
     assert dspace_route["receiver"] == "pagerduty-dspace"
     assert dspace_route["matchers"][0] == DSPACE_ALERT_MATCHER
-    watchdog_route = route["routes"][2]
+    watchdog_route = route["routes"][3]
     assert watchdog_route["receiver"] == "healthchecks-watchdog"
     assert watchdog_route["repeat_interval"] == "5m"
     pagerduty_receiver = next(
@@ -168,14 +171,15 @@ def test_production_values_have_exact_safe_overrides_without_public_exposure_or_
             },
         },
     }
-    text = COMMON.read_text(encoding="utf-8") + STAGING.read_text(encoding="utf-8") + PROD.read_text(encoding="utf-8")
+    text = COMMON.read_text(encoding="utf-8") + PROD.read_text(encoding="utf-8")
     forbidden = [
         "longhorn",
-        "cloudflare",
         "IngressRoute",
         "kind: Ingress",
         "pass" + "word:",
         "admin" + "Pass" + "word",
+        "cloudflare-tunnel",
+        "CloudflareTunnel",
     ]
     for needle in forbidden:
         assert needle not in text
@@ -220,6 +224,12 @@ stringData:
         - receiver: pagerduty-dspace
           matchers:
             - '{DSPACE_ALERT_MATCHER}'
+            - 'environment="staging"'
+            - 'cluster="sugarkube-int"'
+            - 'severity="critical"'
+        - receiver: pagerduty-dspace
+          matchers:
+            - 'alertname="CloudflareTunnelNoHealthyConnections"'
             - 'environment="staging"'
             - 'cluster="sugarkube-int"'
             - 'severity="critical"'
@@ -507,7 +517,8 @@ def test_dspace_rules_have_one_canonical_source_and_exact_overlay(tmp_path):
     overlay = yaml_load(tmp_path / "rules-overlay.yaml")
     assert overlay == {
         "additionalPrometheusRulesMap": {
-            "dspace-release-integrity": yaml_load(CANONICAL_DSPACE_RULES)
+            "dspace-release-integrity": yaml_load(CANONICAL_DSPACE_RULES),
+            "cloudflare-tunnel": yaml_load(CANONICAL_CLOUDFLARE_RULES),
         }
     }
     overlay_paths = re.findall(r"/[^ ]*sugarkube-observability-rules\.[^ ]*\.yaml", audit)
@@ -663,7 +674,7 @@ def test_watchdog_documentation_timing_matches_configuration():
         assert f"just observability-watchdog-{recipe} env=staging" in operations
 
     staging = yaml_load(STAGING)
-    route = staging["alertmanager"]["config"]["route"]["routes"][2]
+    route = staging["alertmanager"]["config"]["route"]["routes"][3]
     assert route["repeat_interval"] == "5m"
     assert re.search(r"five-minute period and\s+two-minute grace", operations)
     assert re.search(r"eight-minute Alertmanager\s+silence", operations)
@@ -1345,6 +1356,12 @@ printf '%s' "$code"
     - receiver: pagerduty-dspace
       matchers:
         - {DSPACE_ALERT_MATCHER}
+        - environment="staging"
+        - cluster="sugarkube-int"
+        - severity="critical"
+    - receiver: pagerduty-dspace
+      matchers:
+        - alertname="CloudflareTunnelNoHealthyConnections"
         - environment="staging"
         - cluster="sugarkube-int"
         - severity="critical"

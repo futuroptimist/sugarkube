@@ -16,6 +16,7 @@ COMMON_VALUES="${ROOT}/platform/observability/helm/kube-prometheus-stack.values.
 STAGING_VALUES="${ROOT}/clusters/staging/observability/kube-prometheus-stack.values.yaml"
 PROD_VALUES="${ROOT}/clusters/prod/observability/kube-prometheus-stack.values.yaml"
 DSPACE_RULES="${ROOT}/platform/observability/rules/dspace-release-integrity.yaml"
+CLOUDFLARE_RULES="${ROOT}/platform/observability/rules/cloudflare-tunnel.yaml"
 STAGING_DASHBOARD="${ROOT}/clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
 PROD_DASHBOARD="${ROOT}/clusters/prod/observability/dashboards/sugarkube-prod-observability.json"
 DASHBOARD=""
@@ -96,14 +97,20 @@ create_rules_overlay() {
   RULES_OVERLAY="$(mktemp -t sugarkube-observability-rules.XXXXXX.yaml)"
   chmod 600 "${RULES_OVERLAY}"
   ruby -ryaml -e '
-    rules = YAML.safe_load_file(ARGV.fetch(0), aliases: false)
-    unless rules.is_a?(Hash) && rules.keys == ["groups"] &&
-           rules["groups"].is_a?(Array) && !rules["groups"].empty?
-      abort "ERROR: canonical DSPACE rules must contain only a nonempty groups list."
+    dspace = YAML.safe_load_file(ARGV.fetch(0), aliases: false)
+    cloudflare = YAML.safe_load_file(ARGV.fetch(1), aliases: false)
+    {"DSPACE" => dspace, "Cloudflare Tunnel" => cloudflare}.each do |name, rules|
+      unless rules.is_a?(Hash) && rules.keys == ["groups"] &&
+             rules["groups"].is_a?(Array) && !rules["groups"].empty?
+        abort "ERROR: canonical #{name} rules must contain only a nonempty groups list."
+      end
     end
-    overlay = {"additionalPrometheusRulesMap" => {"dspace-release-integrity" => rules}}
-    File.write(ARGV.fetch(1), YAML.dump(overlay))
-  ' "${DSPACE_RULES}" "${RULES_OVERLAY}"
+    overlay = {"additionalPrometheusRulesMap" => {
+      "dspace-release-integrity" => dspace,
+      "cloudflare-tunnel" => cloudflare,
+    }}
+    File.write(ARGV.fetch(2), YAML.dump(overlay))
+  ' "${DSPACE_RULES}" "${CLOUDFLARE_RULES}" "${RULES_OVERLAY}"
 }
 validate_dashboard() { python3 "${DASHBOARD_VALIDATOR}" "${DASHBOARD}"; }
 validate_rendered_dashboard() { python3 "${DASHBOARD_VALIDATOR}" "${DASHBOARD}" --rendered "$1"; }
