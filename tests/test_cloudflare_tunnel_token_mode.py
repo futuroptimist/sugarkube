@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -31,7 +33,11 @@ def _extract_cf_tunnel_route_recipe_body() -> str:
 @pytest.fixture(scope="module")
 def origin_cert_guidance_text() -> str:
     just_text = JUSTFILE.read_text(encoding="utf-8")
-    match = re.search(r"origin_cert_guidance := \"\"\"(?P<body>.*?)\"\"\"", just_text, re.S)
+    match = re.search(
+        r"cat >&2 <<'ORIGIN_CERT_GUIDANCE'\n(?P<body>.*?)\n\s*ORIGIN_CERT_GUIDANCE",
+        just_text,
+        re.S,
+    )
     assert match, "origin_cert_guidance helper missing from justfile"
 
     return match.group("body")
@@ -168,7 +174,7 @@ def _terminator_has_invalid_whitespace(line: str, terminator: str, allow_tabs: b
 
 
 def test_cf_tunnel_install_shell_syntax_is_valid(cf_recipe_body: str) -> None:
-    rendered_body = cf_recipe_body.replace("{{ quote(env) }}", "'${env}'")
+    rendered_body = textwrap.dedent(cf_recipe_body).replace("{{ quote(env) }}", "'${env}'")
     script = textwrap.dedent(
         """#!/usr/bin/env bash
         set -euo pipefail
@@ -201,7 +207,9 @@ def test_cf_tunnel_install_shell_syntax_is_valid(cf_recipe_body: str) -> None:
 def _run_cf_tunnel_install_recipe(
     env: str, *, secret_exists: bool = True, token: str | None = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.signature"
 ) -> subprocess.CompletedProcess[str]:
-    rendered_body = _extract_cf_recipe_body().replace("{{ quote(env) }}", json.dumps(env))
+    rendered_body = textwrap.dedent(_extract_cf_recipe_body()).replace(
+        "{{ quote(env) }}", json.dumps(env)
+    )
     script = textwrap.dedent(
         """#!/usr/bin/env bash
         set -euo pipefail
@@ -240,6 +248,60 @@ def _run_cf_tunnel_install_recipe(
         return subprocess.run(["bash", path], capture_output=True, text=True)
     finally:
         Path(path).unlink(missing_ok=True)
+
+
+def _run_actual_cf_tunnel_install(
+    tmp_path: Path, *, secret_exists: bool
+) -> tuple[subprocess.CompletedProcess[str], str]:
+    """Run Just's fully rendered recipe with inert command stubs."""
+
+    just = shutil.which("just")
+    if just is None:
+        pytest.fail("just is required for the real-rendering regression test")
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    call_log = tmp_path / "calls.log"
+    stub = textwrap.dedent(
+        """#!/usr/bin/env bash
+        set -eu
+        printf '%s:%s\n' "${0##*/}" "$*" >>"${CALL_LOG}"
+        if [ "${0##*/}" = kubectl ] &&
+           [ "$*" = "-n cloudflare get secret tunnel-token -o name" ] &&
+           [ "${SECRET_EXISTS}" = no ]; then
+            exit 1
+        fi
+        if [ "${0##*/}" = helm ] &&
+           [ "$*" = "-n cloudflare list --filter ^cloudflare-tunnel$ --output json" ]; then
+            printf '[]\n'
+        fi
+        """
+    )
+    for command in ("kubectl", "helm"):
+        path = bin_dir / command
+        path.write_text(stub, encoding="utf-8")
+        path.chmod(0o755)
+
+    test_env = os.environ.copy()
+    test_env.pop("CF_TUNNEL_TOKEN", None)
+    test_env.pop("CF_TUNNEL_NAME", None)
+    test_env.pop("CF_TUNNEL_ID", None)
+    test_env.update(
+        {
+            "PATH": f"{bin_dir}:{test_env['PATH']}",
+            "CALL_LOG": str(call_log),
+            "SECRET_EXISTS": "yes" if secret_exists else "no",
+            "HOME": str(tmp_path),
+        }
+    )
+    result = subprocess.run(
+        [just, "--justfile", str(JUSTFILE), "cf-tunnel-install", "env=staging"],
+        cwd=REPO_ROOT,
+        env=test_env,
+        capture_output=True,
+        text=True,
+    )
+    return result, call_log.read_text(encoding="utf-8") if call_log.exists() else ""
 
 
 def test_configmap_creation_removed_in_token_mode(cf_recipe_body: str) -> None:
@@ -417,18 +479,37 @@ def test_cf_tunnel_monitoring_is_applied_only_in_staging() -> None:
         assert result.stdout.count("KUBECTL:-n cloudflare patch deployment") == 1
 
 
-def test_existing_secret_is_preserved_without_token_input() -> None:
-    result = _run_cf_tunnel_install_recipe("staging", secret_exists=True, token=None)
+def test_existing_secret_is_preserved_without_token_input(tmp_path: Path) -> None:
+    result, calls = _run_actual_cf_tunnel_install(tmp_path, secret_exists=True)
     assert result.returncode == 0, result.stderr
     assert "kubectl -n cloudflare get secret tunnel-token -o name" in _extract_cf_recipe_body()
-    assert "create secret generic tunnel-token" not in result.stdout
-    assert "--from-literal" not in result.stdout
+    assert "kubectl:-n cloudflare get secret tunnel-token -o name" in calls
+    assert "create secret" not in calls
+    assert "--from-literal" not in calls
+    assert "get secret tunnel-token" not in calls.replace(
+        "kubectl:-n cloudflare get secret tunnel-token -o name", ""
+    )
+    assert "helm:upgrade --install cloudflare-tunnel" in calls
+    assert calls.count("kubectl:-n cloudflare patch deployment cloudflare-tunnel") == 2
+    assert "CF_TUNNEL_TOKEN" not in result.stdout + result.stderr
 
 
-def test_initial_install_requires_and_creates_secret_from_out_of_band_token() -> None:
-    missing = _run_cf_tunnel_install_recipe("staging", secret_exists=False, token=None)
+def test_guidance_is_deferred_and_nounset_safe(cf_recipe_body: str) -> None:
+    assert "cat >&2 <<'ORIGIN_CERT_GUIDANCE'" in cf_recipe_body
+    assert 'uses "$CF_TUNNEL_TOKEN"' in cf_recipe_body
+    assert 'origin_cert_guidance="' not in cf_recipe_body
+    assert 'origin_cert_guidance="{{ origin_cert_guidance }}"' not in JUSTFILE.read_text(
+        encoding="utf-8"
+    )
+
+
+def test_initial_install_requires_and_creates_secret_from_out_of_band_token(tmp_path: Path) -> None:
+    missing, calls = _run_actual_cf_tunnel_install(tmp_path, secret_exists=False)
     assert missing.returncode != 0
     assert "initial installation" in missing.stderr
+    assert "helm:" not in calls
+    assert "create secret" not in calls
+    assert "--from-literal" not in calls
 
     created = _run_cf_tunnel_install_recipe("staging", secret_exists=False)
     assert created.returncode == 0, created.stderr
