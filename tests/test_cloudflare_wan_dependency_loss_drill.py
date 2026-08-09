@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("ensure_just_available")
+
 ROOT = Path(__file__).resolve().parents[1]
 DRILL = ROOT / "scripts" / "cloudflare_wan_dependency_loss_drill.sh"
 TEXT = DRILL.read_text()
@@ -719,7 +721,37 @@ def test_node_execution_does_not_weaken_authentication() -> None:
     assert "CF_DRILL_NODE_EXECUTOR" in TEXT
 
 
-def test_recipe_is_clearly_named_and_defaults_to_plan() -> None:
-    justfile = (ROOT / "justfile").read_text()
-    assert "cf-tunnel-wan-dependency-loss-drill env='staging' *args=''" in justfile
-    assert "cloudflare_wan_dependency_loss_drill.sh" in justfile
+@pytest.mark.parametrize("arguments", [[], ["env=staging"]])
+def test_recipe_defaults_to_staging_plan(arguments: list[str]) -> None:
+    result = subprocess.run(
+        ["just", "cf-tunnel-wan-dependency-loss-drill", *arguments],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "PLAN ONLY -- no cluster or node command was run." in result.stdout
+    assert "--env=env=staging" not in result.stdout + result.stderr
+
+
+def test_recipe_forwards_helper_arguments_once_and_unchanged() -> None:
+    arguments = [
+        "env=staging",
+        "--manual-node-plan",
+        "--execute",
+        "--confirm=confirmation-marker",
+        "--evidence-dir=/tmp/evidence-marker",
+    ]
+    result = subprocess.run(
+        ["just", "--dry-run", "cf-tunnel-wan-dependency-loss-drill", *arguments],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    rendered = result.stdout + result.stderr
+    for argument in arguments:
+        assert rendered.count(argument) == 1
+    assert "--env=env=staging" not in rendered
