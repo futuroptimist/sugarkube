@@ -42,6 +42,14 @@ def replace_panel_expression(document, title, replacement):
     panel["targets"][0]["expr"] = replacement
 
 
+def production_panel(document, title):
+    return next(panel for panel in all_panels(document) if panel["title"] == title)
+
+
+def add_row_expression(document, expression):
+    production_panel(document, "Cluster health")["targets"] = [{"expr": expression}]
+
+
 @pytest.fixture
 def dashboard():
     return json.loads(DASHBOARD.read_text(encoding="utf-8"))
@@ -62,7 +70,9 @@ def test_production_dashboard_live_backed_contract(prod_dashboard):
     assert len(panels) == 17
     assert len({panel["id"] for panel in panels}) == 17
     assert {panel["title"] for panel in panels if panel["type"] == "row"} == {
-        "Cluster health", "Workload health", "Node and Prometheus capacity",
+        "Cluster health",
+        "Workload health",
+        "Node and Prometheus capacity",
         "Observability build identity",
     }
     expressions = "\n".join(
@@ -70,14 +80,25 @@ def test_production_dashboard_live_backed_contract(prod_dashboard):
     )
     metrics = set(re.findall(r"\b[a-zA-Z_:][a-zA-Z0-9_:]*", expressions))
     expected = {
-        "up", "kube_node_status_condition", "kube_deployment_spec_replicas",
-        "kube_deployment_status_replicas_available", "kube_pod_status_ready",
-        "kube_pod_status_phase", "kube_pod_container_status_restarts_total",
-        "node_cpu_seconds_total", "node_uname_info", "node_memory_MemAvailable_bytes",
-        "node_memory_MemTotal_bytes", "node_filesystem_avail_bytes",
-        "node_filesystem_size_bytes", "kubelet_volume_stats_available_bytes",
-        "kubelet_volume_stats_capacity_bytes", "prometheus_tsdb_head_series",
-        "prometheus_build_info", "alertmanager_build_info", "grafana_build_info",
+        "up",
+        "kube_node_status_condition",
+        "kube_deployment_spec_replicas",
+        "kube_deployment_status_replicas_available",
+        "kube_pod_status_ready",
+        "kube_pod_status_phase",
+        "kube_pod_container_status_restarts_total",
+        "node_cpu_seconds_total",
+        "node_uname_info",
+        "node_memory_MemAvailable_bytes",
+        "node_memory_MemTotal_bytes",
+        "node_filesystem_avail_bytes",
+        "node_filesystem_size_bytes",
+        "kubelet_volume_stats_available_bytes",
+        "kubelet_volume_stats_capacity_bytes",
+        "prometheus_tsdb_head_series",
+        "prometheus_build_info",
+        "alertmanager_build_info",
+        "grafana_build_info",
         "node_exporter_build_info",
     }
     assert expected <= metrics
@@ -86,7 +107,8 @@ def test_production_dashboard_live_backed_contract(prod_dashboard):
     assert expressions.count("$__rate_interval") == 2
     assert all(
         panel["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
-        for panel in panels if panel["type"] != "row"
+        for panel in panels
+        if panel["type"] != "row"
     )
     validator.validate_dashboard(PROD_DASHBOARD)
 
@@ -114,10 +136,68 @@ def test_production_snapshot_and_unready_pod_contracts(prod_dashboard):
     [
         (lambda d: d.update(uid="wrong"), "supported profile"),
         (lambda d: d["panels"].append(d["panels"][1]), "IDs"),
-        (lambda d: d["panels"][8]["targets"][0].update(expr="rate(kube_pod_container_status_restarts_total[5m])"), "PromQL contract"),
-        (lambda d: d["panels"][1]["targets"][0].update(expr='min by (job) (up{cluster="sugarkube-prod"})'), "PromQL contract"),
-        (lambda d: d["panels"][14]["targets"][0].update(expr="sum(prometheus_tsdb_head_series)"), "PromQL contract"),
+        (lambda d: d["panels"].pop(), "every required row and panel"),
+        (lambda d: production_panel(d, "Cluster health").update(type="stat"), "row contract"),
+        (
+            lambda d: d["panels"][8]["targets"][0].update(
+                expr="rate(kube_pod_container_status_restarts_total[5m])"
+            ),
+            "PromQL contract",
+        ),
+        (
+            lambda d: d["panels"][1]["targets"][0].update(
+                expr='min by (job) (up{cluster="sugarkube-prod"})'
+            ),
+            "PromQL contract",
+        ),
+        (
+            lambda d: d["panels"][14]["targets"][0].update(expr="sum(prometheus_tsdb_head_series)"),
+            "PromQL contract",
+        ),
         (lambda d: d["panels"][1]["targets"][0].update(instant=False, range=True), "instant-only"),
+        (
+            lambda d: production_panel(d, "Observability component build identity").update(
+                type="stat"
+            ),
+            "four table queries",
+        ),
+        (
+            lambda d: production_panel(d, "Observability component build identity")["targets"][
+                0
+            ].update(legendFormat="Prometheus"),
+            "pod/version/revision",
+        ),
+        (lambda d: d.update(refresh="1m"), "defaults or variables"),
+        (lambda d: add_row_expression(d, "or vector(0)"), "preserve missing data"),
+        (lambda d: add_row_expression(d, "probe_success"), "unverified signal"),
+        (
+            lambda d: production_panel(d, "Ready nodes")["targets"][0].update(
+                legendFormat="{{instance}}"
+            ),
+            "forbidden raw identity",
+        ),
+        (
+            lambda d: production_panel(d, "Node CPU utilization")["targets"][0].update(
+                legendFormat="{{node}}"
+            ),
+            "only nodename",
+        ),
+        (
+            lambda d: production_panel(d, "Node memory utilization")["fieldConfig"][
+                "defaults"
+            ].update(max=99),
+            "0-100 percent scale",
+        ),
+        (
+            lambda d: production_panel(d, "Ready nodes")["fieldConfig"]["defaults"].update(
+                noValue="0"
+            ),
+            "preserve NO DATA",
+        ),
+        (
+            lambda d: production_panel(d, "Ready nodes")["datasource"].update(uid="other"),
+            "Prometheus UID",
+        ),
     ],
 )
 def test_production_validator_fails_closed(tmp_path, prod_dashboard, mutation, message):
