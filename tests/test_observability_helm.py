@@ -1561,8 +1561,12 @@ def test_wait_for_watchdog_signal_cleanup_times_out_with_missing_state_message(
             return None
 
     (tmp_path / "sugarkube-watchdog-silence.fixture").mkdir()
-    monotonic_values = iter((0.0, 0.0, 16.0))
-    monkeypatch.setattr(time, "monotonic", lambda: next(monotonic_values))
+    monotonic_values = [0.0, 0.0]
+
+    def fake_monotonic():
+        return monotonic_values.pop(0) if monotonic_values else 16.0
+
+    monkeypatch.setattr(time, "monotonic", fake_monotonic)
     monkeypatch.setattr(time, "sleep", lambda _: None)
     reaped = []
     monkeypatch.setattr(
@@ -1571,7 +1575,13 @@ def test_wait_for_watchdog_signal_cleanup_times_out_with_missing_state_message(
         lambda process: reaped.append(process.pid),
     )
 
-    with pytest.raises(pytest.fail.Exception, match="watchdog drill exit, port-forward reap marker, temporary directory removal"):
+    with pytest.raises(
+        pytest.fail.Exception,
+        match=(
+            "watchdog drill exit, port-forward reap marker, "
+            "temporary directory removal"
+        ),
+    ):
         wait_for_watchdog_signal_cleanup(FakeProcess(), tmp_path)
 
     assert reaped == [4321]
