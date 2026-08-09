@@ -224,23 +224,57 @@ def validate_production_dashboard(dashboard: dict) -> None:
         "Deployment replica deficit",
         "Observability component build identity",
     )
-    if any(
-        target.get("instant") is not True or target.get("range") is not False
-        for title in snapshot_tables
-        for target in panel_named(dashboard, title).get("targets", [])
-    ):
-        raise SystemExit("ERROR: production snapshot tables must use instant-only queries.")
-    build = panel_named(dashboard, "Observability component build identity")
-    expected_builds = {
-        "prometheus_build_info": "Prometheus:", "alertmanager_build_info": "Alertmanager:",
-        "grafana_build_info": "Grafana:", "node_exporter_build_info": "node-exporter:",
+    table_columns = {
+        "Scrape availability by job": ({"job": 0, "Value": 1}, {"Time", "__name__"}),
+        "Node readiness": ({"node": 0, "Value": 1}, {"Time", "__name__"}),
+        "Deployment replica deficit": (
+            {"namespace": 0, "deployment": 1, "Value": 2},
+            {"Time", "__name__"},
+        ),
+        "Observability component build identity": (
+            {"component": 0, "pod": 1, "version": 2, "revision": 3},
+            {"Time", "Value", "__name__"},
+        ),
     }
-    if build.get("type") != "table" or len(build.get("targets", [])) != 4:
-        raise SystemExit("ERROR: production build identity must have four table queries.")
-    for metric, prefix in expected_builds.items():
-        matches = [target for target in build["targets"] if metric in target.get("expr", "")]
-        if len(matches) != 1 or matches[0]["expr"] != f"max by (pod, version, revision) ({metric})" or not matches[0].get("legendFormat", "").startswith(prefix):
-            raise SystemExit("ERROR: production build identity must retain pod/version/revision and component legends.")
+    for title in snapshot_tables:
+        table = panel_named(dashboard, title)
+        targets = table.get("targets", [])
+        if table.get("type") != "table" or len(targets) != 1:
+            raise SystemExit(
+                "ERROR: production tables must deterministically consolidate into one frame."
+            )
+        if any(
+            target.get("format") != "table"
+            or target.get("instant") is not True
+            or target.get("range") is not False
+            for target in targets
+        ):
+            raise SystemExit("ERROR: production tables must be table-formatted instant-only queries.")
+        transformations = table.get("transformations", [])
+        if len(transformations) != 1 or transformations[0].get("id") != "organize":
+            raise SystemExit("ERROR: production tables require deterministic field organization.")
+        options = transformations[0].get("options", {})
+        expected_columns, expected_hidden = table_columns[title]
+        if options.get("indexByName") != expected_columns or {
+            name for name, hidden in options.get("excludeByName", {}).items() if hidden is True
+        } != expected_hidden:
+            raise SystemExit(
+                "ERROR: production table label/value columns or hidden raw fields are invalid."
+            )
+    build = panel_named(dashboard, "Observability component build identity")
+    expected_build = 'max by (component, pod, version, revision) (' + " or ".join(
+        f'label_replace({metric}, "component", "{component}", "", "")'
+        for metric, component in (
+            ("prometheus_build_info", "prometheus"),
+            ("alertmanager_build_info", "alertmanager"),
+            ("grafana_build_info", "grafana"),
+            ("node_exporter_build_info", "node-exporter"),
+        )
+    ) + ")"
+    if build["targets"][0].get("expr") != expected_build:
+        raise SystemExit(
+            "ERROR: production build identity must retain bounded component/pod/version/revision."
+        )
     serialized = json.dumps(dashboard)
     expressions = "\n".join(target.get("expr", "") for panel in panels(dashboard) for target in panel.get("targets", []))
     if dashboard.get("refresh") != "30s" or dashboard.get("time") != {"from": "now-6h", "to": "now"} or dashboard.get("templating", {}).get("list") != []:
