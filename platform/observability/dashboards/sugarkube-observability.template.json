@@ -1959,7 +1959,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "count(max by (pod, image_id, image_spec) ((label_replace(kube_pod_container_info{namespace=\"dspace\",container=\"dspace\"}, \"image_id\", \"$2\", \"image_id\", \"^(docker-pullable://)?(.*)$\") unless on (image_spec, image_id) label_replace(label_replace(dspace_release_approved_info{environment=~\"$environment\"}, \"image_spec\", \"ghcr.io/democratizedspace/dspace:$1\", \"image\", \"(.*)\"), \"image_id\", \"ghcr.io/democratizedspace/dspace@$1\", \"image_digest\", \"(.*)\")) and on (namespace, pod, container) (kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"})) or label_replace(label_replace(((kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}) unless on (namespace, pod, container) kube_pod_container_info{namespace=\"dspace\",container=\"dspace\"}), \"image_id\", \"unknown\", \"\", \"\"), \"image_spec\", \"unknown\", \"\", \"\")) or on() (0 * count(dspace_release_approved_info{environment=~\"$environment\"}))",
+          "expr": "(count(max by (pod, image_id, image_spec) ((label_replace(kube_pod_container_info{namespace=\"dspace\",container=\"dspace\"}, \"image_id\", \"$2\", \"image_id\", \"^(docker-pullable://)?(.*)$\") unless on (image_spec, image_id) label_replace(label_replace(dspace_release_approved_info{environment=~\"$environment\"}, \"image_spec\", \"ghcr.io/democratizedspace/dspace:$1\", \"image\", \"(.*)\"), \"image_id\", \"ghcr.io/democratizedspace/dspace@$1\", \"image_digest\", \"(.*)\")) and on (namespace, pod, container) (kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"})) or label_replace(label_replace(((kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}) unless on (namespace, pod, container) kube_pod_container_info{namespace=\"dspace\",container=\"dspace\"}), \"image_id\", \"unknown\", \"\", \"\"), \"image_spec\", \"unknown\", \"\", \"\")) or on() (0 * count(dspace_release_approved_info{environment=~\"$environment\"}))) and on() (count(dspace_release_approved_info{environment=~\"$environment\"}) > 0)",
           "legendFormat": "mismatched pods",
           "instant": true,
           "range": false
@@ -1991,7 +1991,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "count((up{namespace=\"dspace\",service=~\"dspace.*\"} == 0) or ((kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}) unless on (namespace, pod) up{namespace=\"dspace\",service=~\"dspace.*\"})) or on() (0 * count(dspace_release_approved_info{environment=~\"$environment\"}))",
+          "expr": "(count((up{namespace=\"dspace\",service=~\"dspace.*\"} == 0) or ((kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}) unless on (namespace, pod) up{namespace=\"dspace\",service=~\"dspace.*\"})) or on() (0 * count(dspace_release_approved_info{environment=~\"$environment\"}))) and on() (count(dspace_release_approved_info{environment=~\"$environment\"}) > 0)",
           "legendFormat": "down or missing serving targets",
           "instant": true,
           "range": false
@@ -2023,14 +2023,14 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "dspace_chat_synthetic_success{environment=~\"$environment\"} or on() (0 * count(dspace_release_approved_info{environment=~\"$environment\"}))",
+          "expr": "(dspace_chat_synthetic_success{environment=~\"$environment\"} or on() (0 * count(dspace_release_approved_info{environment=~\"$environment\"}))) and on() (count(dspace_release_approved_info{environment=~\"$environment\"}) > 0)",
           "legendFormat": "success",
           "instant": true,
           "range": false
         },
         {
           "refId": "B",
-          "expr": "time() - dspace_chat_synthetic_timestamp_seconds{environment=~\"$environment\"}",
+          "expr": "(time() - dspace_chat_synthetic_timestamp_seconds{environment=~\"$environment\"}) and on() (count(dspace_release_approved_info{environment=~\"$environment\"}) > 0)",
           "legendFormat": "age seconds",
           "instant": true,
           "range": false

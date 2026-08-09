@@ -22,6 +22,7 @@ DASHBOARD_MOUNT = ""
 PROFILE_DIFFERENCES = {"uid", "title", "tags", "templating"}
 FORBIDDEN_LABELS = {
     "instance",
+    "ip",
     "address",
     "endpoint",
     "url",
@@ -49,6 +50,7 @@ TOKENPLACE_DATA_TITLES = {
 }
 EVENT_METRICS = {"dspace_dchat_requests_total", "dspace_dependency_requests_total"}
 CAPABILITY = 'dspace_release_approved_info{environment=~"$environment"}'
+CAPABILITY_PRESENCE_GATE = f"and on() (count({CAPABILITY}) > 0)"
 
 
 def load_dashboard(path: Path) -> dict:
@@ -80,6 +82,40 @@ def panel_expression(dashboard: dict, title: str) -> str:
     if len(targets) != 1 or not isinstance(targets[0].get("expr"), str):
         raise SystemExit(f"ERROR: {title} must contain exactly one PromQL target.")
     return re.sub(r"\s+", " ", targets[0]["expr"])
+
+
+def _has_outer_capability_presence_gate(expression: str) -> bool:
+    """Return whether one parenthesized result is followed by the capability gate."""
+    normalized = re.sub(r"\s+", " ", expression).strip()
+    suffix = " " + CAPABILITY_PRESENCE_GATE
+    if not normalized.endswith(suffix):
+        return False
+    result = normalized[: -len(suffix)]
+    if not result.startswith("(") or not result.endswith(")"):
+        return False
+    depth = 0
+    quoted = False
+    escaped = False
+    for index, character in enumerate(result):
+        if quoted:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                quoted = False
+            continue
+        if character == '"':
+            quoted = True
+        elif character == "(":
+            depth += 1
+        elif character == ")":
+            depth -= 1
+            if depth == 0 and index != len(result) - 1:
+                return False
+            if depth < 0:
+                return False
+    return depth == 0 and not quoted
 
 
 def configure_profile(dashboard: dict) -> bool:
@@ -229,8 +265,27 @@ def _validate_semantics(dashboard: dict) -> None:
             "0 * count(dspace_instrumentation_up" not in expr for expr in matches
         ):
             raise SystemExit(f"ERROR: event-driven metric {metric} requires capability-gated zero.")
+    capability_targets = {
+        "Image-pin agreement": [panel_expression(dashboard, "Image-pin agreement")],
+        "DSPACE metrics-target health": [
+            panel_expression(dashboard, "DSPACE metrics-target health")
+        ],
+        "/chat synthetic result and freshness": [
+            re.sub(r"\s+", " ", target.get("expr", ""))
+            for target in panel_named(
+                dashboard, "/chat synthetic result and freshness"
+            ).get("targets", [])
+        ],
+    }
+    for title, targets in capability_targets.items():
+        if not targets or any(
+            not _has_outer_capability_presence_gate(expression) for expression in targets
+        ):
+            raise SystemExit(
+                f"ERROR: {title} requires an outer approved-release capability-presence gate."
+            )
     for title in ("Image-pin agreement", "DSPACE metrics-target health"):
-        if "0 * count(" + CAPABILITY not in panel_expression(dashboard, title):
+        if "0 * count(" + CAPABILITY not in capability_targets[title][0]:
             raise SystemExit(f"ERROR: {title} requires an approved-release-gated zero.")
     image_pin = panel_expression(dashboard, "Image-pin agreement")
     if '"^(docker-pullable://)?(.*)$"' not in image_pin:

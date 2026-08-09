@@ -120,6 +120,15 @@ def test_missing_application_capabilities_produce_no_series_not_healthy_zero(das
     for title in ("Image-pin agreement", "DSPACE metrics-target health"):
         assert "0 * count(dspace_release_approved_info" in expressions[title][0]
         assert "vector(0)" not in expressions[title][0]
+    for title in (
+        "Image-pin agreement",
+        "DSPACE metrics-target health",
+        "/chat synthetic result and freshness",
+    ):
+        assert all(
+            expression.endswith(validator.CAPABILITY_PRESENCE_GATE)
+            for expression in expressions[title]
+        )
     image_pin = expressions["Image-pin agreement"][0]
     assert '"^(docker-pullable://)?(.*)$"' in image_pin
     assert '"image_id", "unknown"' in image_pin
@@ -165,6 +174,35 @@ def test_query_scoping_and_safe_labels(dashboards):
     assert not any("cluster=" in expr or "cluster=~" in expr for expr in core)
     assert "kube_state_metrics_build_info" not in serialized
     assert not any(f"{{{{{label}}}}}" in serialized for label in validator.FORBIDDEN_LABELS)
+
+
+@pytest.mark.parametrize(
+    ("title", "target_index"),
+    [
+        ("Image-pin agreement", 0),
+        ("DSPACE metrics-target health", 0),
+        ("/chat synthetic result and freshness", 0),
+        ("/chat synthetic result and freshness", 1),
+    ],
+)
+def test_capability_outer_presence_gate_is_required(
+    tmp_path, dashboards, title, target_index
+):
+    staging, _ = dashboards
+    changed = copy.deepcopy(staging)
+    target = panel(changed, title)["targets"][target_index]
+    assert target["expr"].endswith(validator.CAPABILITY_PRESENCE_GATE)
+    target["expr"] = target["expr"][: -len(validator.CAPABILITY_PRESENCE_GATE)].rstrip()
+    with pytest.raises(SystemExit, match="capability-presence"):
+        validator.validate_dashboard(write_candidate(tmp_path, changed))
+
+
+def test_raw_ip_legend_is_rejected(tmp_path, dashboards):
+    staging, _ = dashboards
+    changed = copy.deepcopy(staging)
+    panel(changed, "Scrape availability by job")["targets"][0]["legendFormat"] = "{{ip}}"
+    with pytest.raises(SystemExit, match="forbidden raw identity label"):
+        validator.validate_dashboard(write_candidate(tmp_path, changed))
 
 
 @pytest.mark.parametrize(
