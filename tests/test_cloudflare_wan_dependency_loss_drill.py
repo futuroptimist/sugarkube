@@ -34,7 +34,7 @@ class StatefulDrillHarness:
             "obs_revision": 10, "obs_deployed_entries": 1, "obs_revision_after_cleanup": None,
             "same_node": False, "alerts": 0, "endpoint": 200,
             "sandbox_fail": False, "collision": False, "install_fail": -1,
-            "approved_crictl": True,
+            "crictl_paths": ["/usr/local/bin/crictl"],
             "restart": [0, 0], "tables": [False, False], "watchdogs": [False, False],
             "block_long_sleep": False, "secret": "SENTINEL-SECRET-MUST-NOT-LEAK",
         }
@@ -174,8 +174,8 @@ elif name == "kubectl":
 elif name == "node-executor":
     node, command=args[0],args[1]; idx=int(node[-1])-1
     if "test -x" in command:
-        if "test -x /usr/local/bin/crictl" not in command: sys.exit(92)
-        sys.exit(0 if state["approved_crictl"] else 1)
+        requested_path = command.split("test -x ", 1)[1].split()[0]
+        sys.exit(0 if requested_path in state["crictl_paths"] else 1)
     if "crictl pods --name" in command and "inspectp" not in command:
         if state["sandbox_fail"]: out("ambiguous\nsecond"); sys.exit(0)
         out(("a" if idx == 0 else "b")*12)
@@ -705,14 +705,15 @@ def test_execution_commands_use_only_the_approved_crictl_path(tmp_path: Path) ->
     assert any("crictl inspectp" in command and "delete table inet" in command
                for command in node_commands)
 
-    automatic_cleanup = TEXT.split("cleanup() {", 1)[1].split("\n}", 1)[0]
-    manual_cleanup = TEXT.split("manual_cleanup() {", 1)[1].split("\n}", 1)[0]
+    automatic_cleanup = TEXT.split("\ncleanup() {", 1)[1].split("\n}", 1)[0]
+    manual_cleanup = TEXT.split("\nmanual_cleanup() {", 1)[1].split("\n}", 1)[0]
     assert "sudo ${CRICTL} inspectp" in automatic_cleanup
     assert "sudo ${CRICTL} inspectp" in manual_cleanup
 
 
-def test_missing_approved_crictl_fails_before_any_mutation(tmp_path: Path) -> None:
-    harness = StatefulDrillHarness(tmp_path, approved_crictl=False)
+def test_legacy_only_crictl_fails_before_any_followup_command(tmp_path: Path) -> None:
+    legacy_path = "/usr/bin/" + "crictl"
+    harness = StatefulDrillHarness(tmp_path, crictl_paths=[legacy_path])
     result = harness.run()
     assert result.returncode != 0
     assert "required remote binary path missing" in result.stderr
@@ -729,6 +730,7 @@ def test_missing_approved_crictl_fails_before_any_mutation(tmp_path: Path) -> No
         event.get("event") in {"watchdog", "table"} for event in harness.events()
     )
     assert harness.current()["tables"] == [False, False]
+    assert harness.current()["watchdogs"] == [False, False]
 
 
 @pytest.mark.parametrize("expected", ["", "0", "-1", "+10", "01", " 10", "ten"])
