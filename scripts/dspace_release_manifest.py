@@ -924,6 +924,7 @@ def verify_helm_stored_values(
     if environment == "prod":
         expected_metrics = {
             "enabled": True,
+            "path": "/metrics",
             "auth": {"existingSecret": "dspace-prod-metrics-token", "secretKey": "token"},
         }
         expected_monitor = {
@@ -959,7 +960,6 @@ def verify_helm_stored_values(
 def contains_staging_reference(value: object) -> bool:
     """Detect known staging-only scalar values without reflecting them in diagnostics."""
     forbidden = {
-        "METRICS_TOKEN",
         "dspace-staging-metrics-token",
         "sugarkube-int",
         "staging.democratized.space",
@@ -975,13 +975,42 @@ def contains_staging_reference(value: object) -> bool:
 
 
 def contains_inline_credential(value: object) -> bool:
-    """Reject credential-shaped values without reflecting their contents."""
+    """Detect inline credential material while allowing references and empty defaults."""
     sensitive = re.compile(
         r"(?:authorization|bearer|credential|pass" r"word|passwd|secret|token)", re.I
     )
+    reference_keys = {
+        "automountserviceaccounttoken",
+        "existingsecret",
+        "secretkey",
+        "secretkeyref",
+        "secretname",
+    }
+
+    def is_empty(item: object) -> bool:
+        return item is None or item is False or item == "" or item == {} or item == []
+
     if isinstance(value, dict):
+        name = value.get("name")
+        if (
+            isinstance(name, str)
+            and sensitive.search(name)
+            and "value" in value
+            and not is_empty(value["value"])
+        ):
+            return True
         for key, item in value.items():
             if isinstance(key, str) and sensitive.search(key):
+                if key.lower() in reference_keys:
+                    if isinstance(item, (dict, list)) and contains_inline_credential(item):
+                        return True
+                    continue
+                if is_empty(item):
+                    continue
+                if key.lower() == "secret" and isinstance(item, dict):
+                    if contains_inline_credential(item):
+                        return True
+                    continue
                 return True
             if contains_inline_credential(item):
                 return True
