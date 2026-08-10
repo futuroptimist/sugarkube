@@ -763,6 +763,158 @@ def test_configuration_reconciliation_reasserts_target_immediately_before_upgrad
     assert written["clusterMayHaveChanged"] is True
 
 
+def test_configuration_reconciliation_completes_all_production_gates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    args, commands, evidence, verifier = pre_reservation_case(
+        tmp_path, monkeypatch, environment="prod"
+    )
+    selected = target("prod", schema_version=2)
+    args.manifest.write_text(manifest._canonical(selected), encoding="utf-8")
+    kubeconfig = tmp_path / "kubeconfig"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    args.configuration_reconciliation = True
+    args.kubeconfig = str(kubeconfig)
+    args.confirm = f"dspace:prod:{SHA}"
+    image = {
+        "repository": manifest.IMAGE_REF,
+        "tag": selected["imageTag"],
+        "pullPolicy": "Always",
+    }
+    desired = {
+        "replicaCount": 2,
+        "image": image,
+        "metrics": {
+            "enabled": True,
+            "path": "/metrics",
+            "auth": {
+                "existingSecret": "dspace-prod-metrics-token",
+                "secretKey": "token",
+            },
+        },
+        "serviceMonitor": {
+            "enabled": True,
+            "interval": "30s",
+            "scrapeTimeout": "10s",
+            "additionalLabels": {"release": "kube-prometheus-stack"},
+            "cluster": "sugarkube-prod",
+        },
+    }
+    live = {"replicaCount": 2, "image": image}
+    stored_proof = [{"check": "helmStoredValues", "passed": True, "details": "safe"}]
+    finalized: dict[str, object] = {}
+    monkeypatch.setattr(rollback.app_chart, "merged_values_document", lambda _paths: desired)
+    monkeypatch.setattr(rollback.app_chart, "validate_rendered_manifest", lambda *_args: [])
+
+    def verify_stored(_approved: object, values: object, _environment: str) -> object:
+        assert values == desired
+        return stored_proof
+
+    def finalize(*_args: object, **kwargs: object) -> dict[str, object]:
+        finalized.update(kwargs)
+        return {"verificationResults": [{"check": "finalized", "passed": True}]}
+
+    monkeypatch.setattr(rollback.release, "verify_helm_stored_values", verify_stored)
+    monkeypatch.setattr(rollback.release, "finalize", finalize)
+    monkeypatch.setattr(rollback, "verifier_accepts_runtime_arguments", lambda *_args: True)
+
+    def ready(uid: str) -> dict[str, object]:
+        return {
+            **pod(uid),
+            "applicationImage": f"{manifest.IMAGE_REF}:{selected['imageTag']}",
+            "applicationImageID": f"{manifest.IMAGE_REF}@{DIGEST}",
+        }
+
+    before_pods = [ready("1"), ready("2")]
+    after_pods = [ready("3"), ready("4")]
+    state = {"upgraded": False, "description": ""}
+
+    def status(*_args: object) -> dict[str, object]:
+        return {
+            "name": "dspace",
+            "namespace": "dspace",
+            "version": 8 if state["upgraded"] else 7,
+            "info": {
+                "status": "deployed",
+                "description": state["description"] if state["upgraded"] else "previous",
+            },
+            "chart": {"metadata": {"name": "dspace", "version": selected["chartVersion"]}},
+        }
+
+    monkeypatch.setattr(rollback, "helm_status", status)
+    monkeypatch.setattr(
+        rollback,
+        "pods",
+        lambda *_args, **_kwargs: json.loads(
+            json.dumps(after_pods if state["upgraded"] else before_pods)
+        ),
+    )
+
+    def runner(command: list[str]) -> str:
+        commands.append(command)
+        if "current-context" in command:
+            return "sugar-prod"
+        if command[:3] == ["git", "rev-parse", "HEAD"]:
+            return "f" * 40
+        if command[0] == "helm" and "upgrade" in command:
+            state["description"] = command[command.index("--description") + 1]
+            state["upgraded"] = True
+        elif command[0] == "helm" and "values" in command and "get" in command:
+            return json.dumps(desired if "--all" in command else live)
+        elif command[0] == "helm" and "template" in command:
+            return "live render" if "live-values.json" in " ".join(command) else "target render"
+        elif command[0] == "helm" and "manifest" in command:
+            return "live render"
+        elif command[:2] == [str(verifier), "verify"]:
+            return json.dumps(verifier_result(environment="prod"))
+        elif command[0] == "kubectl" and (
+            "replicasets,deployments" in command or "pods" in command
+        ):
+            return '{"items": []}'
+        return ""
+
+    result = rollback.rollback(args, runner)
+
+    upgrade = next(command for command in commands if "upgrade" in command)
+    assert upgrade[upgrade.index("--kubeconfig") + 1] == str(kubeconfig)
+    assert f"oci://{manifest.CHART_REF}@{selected['chartDigest']}" in upgrade
+    assert f"image.tag={selected['imageTag']}" in upgrade
+    forbidden = ("--reuse-values", "--version", selected["semanticTag"], "rollback")
+    assert not any(item in upgrade for item in forbidden)
+    assert DIGEST not in next(item for item in upgrade if item.startswith("image.tag="))
+    assert finalized["helm_stored_values_result"] is stored_proof
+    assert finalized["expected_image_coordinate"] == (
+        f"{manifest.IMAGE_REF}:{selected['imageTag']}"
+    )
+    assert result["state"] == "succeeded"
+    assert result["helm"]["beforeRevision"] == 7
+    assert result["helm"]["afterRevision"] == 8
+    assert result["verification"]["helmStoredValues"] == stored_proof
+    assert result["verification"]["runtime"]["sourceRevision"] == SHA
+    journeys = {item["name"] for item in result["verification"]["journeys"]}
+    assert journeys == {"/", "/chat"}
+    assert result["verification"]["productionMetrics"] == {
+        "secretContract": True,
+        "serviceMonitor": True,
+        "healthyTargets": 2,
+        "requiredFamilies": True,
+        "unauthenticatedStatus": 401,
+    }
+    assert json.loads(evidence.read_text(encoding="utf-8")) == result
+    assert "dspace-prod-metrics-token" not in evidence.read_text(encoding="utf-8")
+    original = evidence.read_bytes()
+    with pytest.raises(rollback.RollbackError, match="overwrite"):
+        rollback.reserve(evidence, {"state": "reserved"})
+    assert evidence.read_bytes() == original
+    assert sum("secret-check" in command for command in commands) == 2
+    metrics_verifications = [
+        command
+        for command in commands
+        if "observability_app_metrics.py" in " ".join(command) and "verify" in command
+    ]
+    assert len(metrics_verifications) == 1
+
+
 def test_staging_is_non_interactive_and_reservation_collision_is_immutable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

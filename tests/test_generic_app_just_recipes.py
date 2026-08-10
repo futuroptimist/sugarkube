@@ -1425,12 +1425,52 @@ def test_dspace_production_requires_exact_metrics_path_and_relabelings(
         (str(values),),
         "main-deadbee",
     )
-    monitor = """kind: ServiceMonitor
+    monitor = """kind: Deployment
 metadata:
+  name: dspace
+  namespace: dspace
+  labels:
+    app.kubernetes.io/instance: dspace
+spec:
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: dspace
+        app.kubernetes.io/name: dspace
+    spec:
+      containers:
+        - name: dspace
+          image: ghcr.io/democratizedspace/dspace:main-deadbee
+          env:
+            - name: METRICS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: dspace-prod-metrics-token
+                  key: token
+---
+kind: Service
+metadata:
+  name: dspace
+  namespace: dspace
+  labels:
+    app.kubernetes.io/instance: dspace
+spec:
+  selector:
+    app.kubernetes.io/instance: dspace
+    app.kubernetes.io/name: dspace
+---
+kind: ServiceMonitor
+metadata:
+  name: dspace
+  namespace: dspace
   labels:
     app.kubernetes.io/instance: dspace
     release: kube-prometheus-stack
 spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: dspace
+      app.kubernetes.io/name: dspace
   endpoints:
     - path: /metrics
       interval: 30s
@@ -1453,8 +1493,11 @@ spec:
           replacement: sugarkube-prod
 """
 
+    assert app_chart.validate_rendered_manifest(monitor, inputs) == []
+    mutated = mutation(monitor)
+    assert mutated != monitor
     assert "DSPACE production ServiceMonitor contract mismatch" in (
-        app_chart.validate_rendered_manifest(mutation(monitor), inputs)
+        app_chart.validate_rendered_manifest(mutated, inputs)
     )
 
 
