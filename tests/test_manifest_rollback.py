@@ -574,6 +574,195 @@ def test_configuration_reconciliation_invalid_render_fails_before_reservation_an
     assert_no_mutation(commands)
 
 
+@pytest.mark.parametrize("drift", ("context", "identity"))
+def test_configuration_reconciliation_reasserts_trusted_target_after_reservation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, drift: str
+) -> None:
+    args, commands, evidence, _verifier = pre_reservation_case(
+        tmp_path, monkeypatch, environment="prod"
+    )
+    args.configuration_reconciliation = True
+    args.confirm = f"dspace:prod:{SHA}"
+    desired = {
+        "image": {
+            "repository": manifest.IMAGE_REF,
+            "tag": "main-abcdef0",
+            "pullPolicy": "Always",
+        },
+        "metrics": {"enabled": True},
+        "serviceMonitor": {"enabled": True},
+    }
+    live = {"image": desired["image"]}
+    ready_pods = [
+        {
+            "ready": True,
+            "applicationImage": f"{manifest.IMAGE_REF}:main-abcdef0",
+            "applicationImageID": f"{manifest.IMAGE_REF}@{DIGEST}",
+        }
+    ] * 2
+    monkeypatch.setattr(rollback.app_chart, "merged_values_document", lambda _paths: desired)
+    monkeypatch.setattr(rollback.app_chart, "validate_rendered_manifest", lambda *_args: [])
+    monkeypatch.setattr(rollback.release, "verify_helm_stored_values", lambda *_args: None)
+    helm_reads = []
+    pod_reads = []
+
+    def status(*args: object) -> dict[str, object]:
+        helm_reads.append(args)
+        return {
+            "name": "dspace",
+            "namespace": "dspace",
+            "version": 7,
+            "info": {"status": "deployed"},
+            "chart": {"metadata": {"name": "dspace", "version": "3.2.0"}},
+        }
+
+    def pod_read(*args: object, **kwargs: object) -> list[dict[str, object]]:
+        pod_reads.append((args, kwargs))
+        return ready_pods
+
+    monkeypatch.setattr(rollback, "helm_status", status)
+    monkeypatch.setattr(rollback, "pods", pod_read)
+    reserved_at = []
+    real_reserve = rollback.reserve
+
+    def reserve(path: Path, record: dict[str, object]) -> None:
+        real_reserve(path, record)
+        reserved_at.append((len(commands), len(helm_reads), len(pod_reads)))
+
+    monkeypatch.setattr(rollback, "reserve", reserve)
+    sentinel = "TOP-SECRET-drift-diagnostic"
+    template_calls = 0
+
+    def runner(command: list[str]) -> str:
+        nonlocal template_calls
+        commands.append(command)
+        if command[:3] == ["git", "rev-parse", "HEAD"]:
+            return "f" * 40
+        if "current-context" in command:
+            if drift == "context" and reserved_at:
+                return "sugar-staging"
+            return "sugar-prod"
+        if any("cluster_identity.py" in part for part in command):
+            if drift == "identity" and reserved_at:
+                raise rollback.RollbackError(sentinel)
+            return ""
+        if "get" in command and "values" in command:
+            return json.dumps(live)
+        if "template" in command:
+            template_calls += 1
+            return "target render" if template_calls == 1 else "live render"
+        if "get" in command and "manifest" in command:
+            return "live render"
+        return ""
+
+    staged = tmp_path / "staged"
+    staged.mkdir()
+    with pytest.raises(rollback.RollbackError, match="preserved evidence"):
+        rollback._rollback(args, runner, staged)
+
+    command_count, helm_count, pod_count = reserved_at[0]
+    after_reservation = commands[command_count:]
+    assert "current-context" in after_reservation[0]
+    assert not any("secret-check" in command for command in after_reservation)
+    assert_no_mutation(after_reservation)
+    assert len(helm_reads) == helm_count
+    assert len(pod_reads) == pod_count
+    written = json.loads(evidence.read_text(encoding="utf-8"))
+    assert written["state"] == "failed"
+    assert written["failedStage"] == "pre-mutation-revalidation"
+    assert written["clusterMayHaveChanged"] is False
+    assert written["diagnostics"] == {}
+    assert sentinel not in evidence.read_text(encoding="utf-8")
+    original = evidence.read_bytes()
+    with pytest.raises(rollback.RollbackError, match="overwrite"):
+        rollback.reserve(evidence, {"state": "reserved"})
+    assert evidence.read_bytes() == original
+
+
+def test_configuration_reconciliation_reasserts_target_immediately_before_upgrade(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    args, commands, evidence, _verifier = pre_reservation_case(
+        tmp_path, monkeypatch, environment="prod"
+    )
+    args.configuration_reconciliation = True
+    args.confirm = f"dspace:prod:{SHA}"
+    image = {
+        "repository": manifest.IMAGE_REF,
+        "tag": "main-abcdef0",
+        "pullPolicy": "Always",
+    }
+    desired = {
+        "image": image,
+        "metrics": {"enabled": True},
+        "serviceMonitor": {"enabled": True},
+    }
+    monkeypatch.setattr(rollback.app_chart, "merged_values_document", lambda _paths: desired)
+    monkeypatch.setattr(rollback.app_chart, "validate_rendered_manifest", lambda *_args: [])
+    monkeypatch.setattr(rollback.release, "verify_helm_stored_values", lambda *_args: None)
+    monkeypatch.setattr(
+        rollback,
+        "helm_status",
+        lambda *_args: {
+            "name": "dspace",
+            "namespace": "dspace",
+            "version": 7,
+            "info": {"status": "deployed"},
+            "chart": {"metadata": {"name": "dspace", "version": "3.2.0"}},
+        },
+    )
+    monkeypatch.setattr(
+        rollback,
+        "pods",
+        lambda *_args, **_kwargs: [
+            {
+                "ready": True,
+                "applicationImage": f"{manifest.IMAGE_REF}:main-abcdef0",
+                "applicationImageID": f"{manifest.IMAGE_REF}@{DIGEST}",
+            }
+        ]
+        * 2,
+    )
+    template_calls = 0
+
+    def runner(command: list[str]) -> str:
+        nonlocal template_calls
+        commands.append(command)
+        if command[:3] == ["git", "rev-parse", "HEAD"]:
+            return "f" * 40
+        if "current-context" in command:
+            return "sugar-prod"
+        if "get" in command and "values" in command:
+            return json.dumps({"image": image})
+        if "template" in command:
+            template_calls += 1
+            return "target render" if template_calls == 1 else "live render"
+        if "get" in command and "manifest" in command:
+            return "live render"
+        if "upgrade" in command:
+            raise rollback.RollbackError("bounded failure")
+        return ""
+
+    staged = tmp_path / "staged"
+    staged.mkdir()
+    with pytest.raises(rollback.RollbackError, match="preserved evidence"):
+        rollback._rollback(args, runner, staged)
+
+    upgrade_index = next(i for i, command in enumerate(commands) if "upgrade" in command)
+    secret_index = max(i for i, command in enumerate(commands) if "secret-check" in command)
+    final_context = max(i for i, command in enumerate(commands) if "current-context" in command)
+    final_identity = max(
+        i
+        for i, command in enumerate(commands)
+        if any("cluster_identity.py" in part for part in command)
+    )
+    assert secret_index < final_context < final_identity < upgrade_index
+    assert not any("rollout" in command for command in commands)
+    written = json.loads(evidence.read_text(encoding="utf-8"))
+    assert written["failedStage"] == "helm-upgrade"
+    assert written["clusterMayHaveChanged"] is True
+
+
 def test_staging_is_non_interactive_and_reservation_collision_is_immutable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

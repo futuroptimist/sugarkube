@@ -483,6 +483,25 @@ def application_image_id(pod: dict[str, Any]) -> str | None:
     return pod.get("applicationImageID", pod.get("imageIDs", {}).get("dspace"))
 
 
+def assert_production_target(kubeconfig: str, runner: Runner) -> None:
+    context = runner(
+        ["kubectl", "--kubeconfig", kubeconfig, "config", "current-context"]
+    ).strip()
+    if context != "sugar-prod":
+        raise RollbackError("metrics configuration reconciliation requires sugar-prod")
+    runner(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts" / "cluster_identity.py"),
+            "assert",
+            "--kubeconfig",
+            kubeconfig,
+            "--env",
+            "prod",
+        ]
+    )
+
+
 def rollback(args: argparse.Namespace, runner: Runner = run) -> dict[str, Any]:
     if getattr(args, "configuration_reconciliation", False):
         if not args.kubeconfig or ":" in args.kubeconfig:
@@ -494,22 +513,7 @@ def rollback(args: argparse.Namespace, runner: Runner = run) -> dict[str, Any]:
             raise RollbackError(
                 "metrics configuration reconciliation requires one explicit absolute kubeconfig"
             )
-        context = runner(
-            ["kubectl", "--kubeconfig", str(kubeconfig), "config", "current-context"]
-        ).strip()
-        if context != "sugar-prod":
-            raise RollbackError("metrics configuration reconciliation requires sugar-prod")
-        runner(
-            [
-                sys.executable,
-                str(REPO_ROOT / "scripts" / "cluster_identity.py"),
-                "assert",
-                "--kubeconfig",
-                str(kubeconfig),
-                "--env",
-                "prod",
-            ]
-        )
+        assert_production_target(str(kubeconfig), runner)
         args.kubeconfig = str(kubeconfig)
     with tempfile.TemporaryDirectory(prefix="dspace-rollback-values-") as temporary:
         os.chmod(temporary, 0o700)
@@ -815,10 +819,15 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
     }
     reserve(args.evidence, evidence)
     mutated = False
+    production_target_verified = not configuration_reconciliation
     failed_stage = "pre-mutation-revalidation"
     operation = "metrics-reconciliation" if configuration_reconciliation else "manifest-rollback"
     description = f"sugarkube-dspace-{operation}:{invocation}"
     try:
+        if configuration_reconciliation:
+            production_target_verified = False
+            assert_production_target(args.kubeconfig, runner)
+            production_target_verified = True
         if runner(["git", "rev-parse", "HEAD"]).strip() != sugarkube_revision:
             raise RollbackError("Sugarkube revision changed before mutation")
         if configuration_reconciliation:
@@ -862,6 +871,9 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
                     "prod",
                 ]
             )
+            production_target_verified = False
+            assert_production_target(args.kubeconfig, runner)
+            production_target_verified = True
         command = [
             "helm",
             "--kubeconfig",
@@ -1115,27 +1127,29 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
         return result
     except Exception as exc:
         diagnostics: dict[str, Any] = {}
-        try:
-            observed_helm = helm_status(runner, args.kubeconfig, "dspace", "dspace")
-            observed_info = observed_helm.get("info", {})
-            observed_chart = observed_helm.get("chart", {}).get("metadata", {})
-            diagnostics["helm"] = {
-                "release": observed_helm.get("name"),
-                "namespace": observed_helm.get("namespace"),
-                "revision": revision(observed_helm),
-                "status": observed_info.get("status"),
-                "chartName": observed_chart.get("name"),
-                "chartVersion": chart_version(observed_helm),
-                "invocationDescriptionMatches": observed_info.get("description") == description,
-            }
-        except Exception:
-            diagnostics["helm"] = "unavailable"
-        try:
-            diagnostics["pods"] = pods(
-                runner, args.kubeconfig, "dspace", "dspace", require_any=False
-            )
-        except Exception:
-            diagnostics["pods"] = "unavailable"
+        if production_target_verified:
+            try:
+                observed_helm = helm_status(runner, args.kubeconfig, "dspace", "dspace")
+                observed_info = observed_helm.get("info", {})
+                observed_chart = observed_helm.get("chart", {}).get("metadata", {})
+                diagnostics["helm"] = {
+                    "release": observed_helm.get("name"),
+                    "namespace": observed_helm.get("namespace"),
+                    "revision": revision(observed_helm),
+                    "status": observed_info.get("status"),
+                    "chartName": observed_chart.get("name"),
+                    "chartVersion": chart_version(observed_helm),
+                    "invocationDescriptionMatches": observed_info.get("description")
+                    == description,
+                }
+            except Exception:
+                diagnostics["helm"] = "unavailable"
+            try:
+                diagnostics["pods"] = pods(
+                    runner, args.kubeconfig, "dspace", "dspace", require_any=False
+                )
+            except Exception:
+                diagnostics["pods"] = "unavailable"
         evidence.update(
             state="failed",
             failedStage=failed_stage,
