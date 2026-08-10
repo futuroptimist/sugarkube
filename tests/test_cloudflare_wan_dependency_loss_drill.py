@@ -18,6 +18,8 @@ TEXT = DRILL.read_text()
 
 
 CONFIRM = "DISRUPT STAGING CLOUDFLARE WAN FOR SAME-PROCESS RECOVERY"
+CRICTL = "/usr/local/bin/crictl"
+OBSOLETE_CRICTL = "/usr/bin/" + "crictl"
 
 
 class StatefulDrillHarness:
@@ -35,7 +37,8 @@ class StatefulDrillHarness:
             "same_node": False, "alerts": 0, "endpoint": 200,
             "sandbox_fail": False, "collision": False, "install_fail": -1,
             "restart": [0, 0], "tables": [False, False], "watchdogs": [False, False],
-            "block_long_sleep": False, "secret": "SENTINEL-SECRET-MUST-NOT-LEAK",
+            "block_long_sleep": False, "local_crictl": True,
+            "secret": "SENTINEL-SECRET-MUST-NOT-LEAK",
         }
         state.update(overrides)
         self.state.write_text(json.dumps(state))
@@ -172,11 +175,13 @@ elif name == "kubectl":
         out(json.dumps({"data":{"result":[{"value":[0,str(value)]}]}}))
 elif name == "node-executor":
     node, command=args[0],args[1]; idx=int(node[-1])-1
-    if "test -x" in command: sys.exit(0)
+    if "test -x" in command:
+        if "/usr/local/bin/crictl" in command and not state["local_crictl"]: sys.exit(1)
+        sys.exit(0)
     if "crictl pods --name" in command and "inspectp" not in command:
         if state["sandbox_fail"]: out("ambiguous\nsecond"); sys.exit(0)
         out(("a" if idx == 0 else "b")*12)
-    elif command.startswith("sudo crictl inspectp"):
+    elif command.startswith("sudo /usr/local/bin/crictl inspectp"):
         out(json.dumps({"status":{"labels":{"io.kubernetes.pod.uid":f"uid-{idx+1}"}},"info":{"pid":101+idx}}))
     elif command.startswith("readlink /proc/") or command.startswith("/usr/bin/readlink /proc/"):
         out(f"net:[{1001+idx}]")
@@ -319,6 +324,7 @@ def test_manual_node_plan_runs_read_only_preflights_and_renders_exact_ordered_co
         assert len(associated) == 3
         assert all(f"pod=connector-{number}" in line and f"uid=uid-{number}" in line for line in associated)
         assert all("crictl\\ pods" in line and "inspectp" in line and "readlink" in line for line in associated)
+        assert all(CRICTL in line for line in associated)
     assert all("systemctl" in lines[i] and "MainPID" in lines[i] for i in disruptions)
     assert all("delete\\ table\\ inet" in lines[i] and "list\\ ruleset" in lines[i] and "length\\ ==\\ 0" in lines[i] for i in cleanups)
     assert "BLOCKED: manual-node plan only; the drill was not executed and has not passed." in result.stdout
@@ -414,10 +420,44 @@ def test_wrong_context_revision_image_helm_and_ambiguous_pods_are_guarded() -> N
 
 
 def test_exact_network_namespace_resolution_is_required() -> None:
-    assert "crictl inspectp" in TEXT
+    assert "${CRICTL_PATH} inspectp" in TEXT
     assert 'io.kubernetes.pod.uid' in TEXT
     assert "readlink /proc/${pid}/ns/net" in TEXT
     assert "cannot prove exact pod network namespace identity" in TEXT
+
+
+def test_crictl_commands_use_only_the_immutable_approved_path() -> None:
+    assert "readonly CRICTL_PATH=/usr/local/bin/crictl" in TEXT
+    assert OBSOLETE_CRICTL not in TEXT
+    assert "command -v crictl" not in TEXT
+    assert 'test -x ${CRICTL_PATH}' in TEXT
+
+
+def test_missing_approved_crictl_path_fails_before_node_mutation(tmp_path: Path) -> None:
+    # Even if a different crictl exists on PATH, the exact approved path must pass
+    # the remote executable preflight before sandbox or namespace inspection.
+    harness = StatefulDrillHarness(tmp_path, local_crictl=False)
+    old_crictl = tmp_path / "crictl"
+    old_crictl.write_text("#!/bin/sh\nexit 0\n")
+    old_crictl.chmod(0o755)
+    result = harness.run()
+    assert result.returncode != 0
+    assert "required remote binary path missing" in result.stderr
+    node_commands = [
+        entry["args"][1]
+        for entry in harness.commands()
+        if entry["tool"] == "node-executor"
+    ]
+    assert node_commands and node_commands[0].startswith(f"test -x {CRICTL}")
+    assert not any(
+        marker in command
+        for command in node_commands
+        for marker in (" pods --name", "inspectp", "readlink /proc/", "nsenter", "nft ")
+        if not command.startswith("test -x ")
+    )
+    assert not any(
+        event.get("event") in {"watchdog", "table"} for event in harness.events()
+    )
 
 
 def test_owner_collision_is_refused() -> None:
@@ -631,6 +671,19 @@ def test_actual_helper_completes_stateful_interruption_and_recovery(tmp_path: Pa
     assert result.returncode == 0, result.stderr
     commands = harness.commands()
     node_commands = [entry["args"][1] for entry in commands if entry["tool"] == "node-executor"]
+    crictl_commands = [command for command in node_commands if "crictl" in command]
+    assert crictl_commands
+    assert all(
+        CRICTL in command and OBSOLETE_CRICTL not in command
+        for command in crictl_commands
+    )
+    for marker in (
+        "test -x", "pods --name", "inspectp", "systemd-run", "add table inet",
+        "delete table inet", "list ruleset",
+    ):
+        matching = [command for command in node_commands if marker in command and "crictl" in command]
+        assert matching, f"expected crictl coverage for {marker}"
+        assert all(CRICTL in command for command in matching)
     watchdogs = [i for i, command in enumerate(node_commands) if "systemd-run --unit" in command]
     installs = [i for i, command in enumerate(node_commands) if "add table inet" in command]
     deletes = [command for command in node_commands if "delete table inet" in command]
