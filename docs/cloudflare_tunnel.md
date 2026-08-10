@@ -533,12 +533,39 @@ part of this rollout.
    path and without signaling, deleting, or restarting cloudflared. It never adds a broad node firewall
    rule and never flushes a ruleset.
 
-   Execution remains **blocked unless every preflight passes**. In addition to `--execute`, the operator
-   must provide the approved Git revision, a safe executable node-command adapter, and the exact typed
-   confirmation printed by `--help`. The adapter boundary is intentional: the repository does not assume
+   Execution remains **blocked unless every preflight passes**. Before any live preflight (including
+   `--manual-node-plan`), obtain the current `monitoring/kube-prometheus-stack` Helm revision through a
+   separate read-only gate, review that capture, and explicitly approve the single deployed revision.
+   For example, capture it without starting this drill:
+
+   ```bash
+   helm -n monitoring history kube-prometheus-stack -o json | \
+     jq '[.[] | select(.status == "deployed") | {revision, status, updated, chart, app_version}]'
+   ```
+
+   Stop unless the reviewed result has exactly one deployed entry and its revision is a positive decimal
+   integer. The helper does not default, infer, or discover the approved coordinate. Pass the separately
+   reviewed value explicitly when rendering the live, read-only manual-node plan:
+
+   ```bash
+   CF_DRILL_APPROVED_REVISION=<approved-git-sha> \
+   CF_DRILL_EXPECTED_OBSERVABILITY_REVISION=<approved-observability-revision> \
+     just cf-tunnel-wan-dependency-loss-drill env=staging --manual-node-plan
+   ```
+
+   This command performs cluster preflights and renders node commands, but does not invoke a node executor
+   or perform disruption. The default invocation without `--manual-node-plan` remains fully offline and
+   does not require either coordinate. A later execution additionally requires a safe executable
+   `CF_DRILL_NODE_EXECUTOR` and the exact typed confirmation printed by `--help`. The adapter boundary is
+   intentional: the repository does not assume
    unattended remote access, weaken host-key checking, create keys, or handle login credentials. If
    authenticated privileged execution on both nodes cannot be guaranteed, stop at the plan and run
    nothing.
+
+   During live preflight, the helper reads the observability Helm history, requires exactly one deployed
+   entry, and compares it with the explicitly approved coordinate. The rendered manual plan and sanitized
+   evidence record both expected and observed revisions. Recovery revalidates the same approved revision
+   after exact cleanup and fails closed on drift.
 
    Before disruption, the helper records only sanitized pod, image, metric, Helm, Secret-metadata, and
    endpoint evidence, both Helm histories, and a canonical Deployment projection. It resolves each CRI

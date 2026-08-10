@@ -30,7 +30,9 @@ class StatefulDrillHarness:
         self.evidence = tmp_path / "evidence"
         state = {
             "context": "sugar-staging", "revision": "approved", "dirty": False,
-            "image_ok": True, "helm_revision": 2, "pod_count": 2,
+            "image_ok": True, "helm_revision": 2,
+            "observability_history": [{"status": "deployed", "revision": 10}],
+            "observability_history_after": None, "observability_calls": 0, "pod_count": 2,
             "same_node": False, "alerts": 0, "endpoint": 200,
             "sandbox_fail": False, "collision": False, "install_fail": -1,
             "restart": [0, 0], "tables": [False, False], "watchdogs": [False, False],
@@ -50,6 +52,7 @@ class StatefulDrillHarness:
             "HARNESS_STATE": str(self.state),
             "HARNESS_LOG": str(self.log),
             "CF_DRILL_APPROVED_REVISION": "approved",
+            "CF_DRILL_EXPECTED_OBSERVABILITY_REVISION": "10",
             "CF_DRILL_NODE_EXECUTOR": str(node),
         }
 
@@ -127,7 +130,12 @@ if name == "git":
 elif name == "helm":
     if "list" in args: out(json.dumps([{"name":"cloudflare-tunnel","status":"deployed","chart":"cloudflare-tunnel-0.3.2"}]))
     elif "cloudflare-tunnel" in args: out(json.dumps([{"status":"deployed","revision":state["helm_revision"]}]))
-    else: out('[{"status":"deployed","revision":9}]')
+    else:
+        state["observability_calls"] += 1
+        history = state["observability_history"]
+        if state["observability_calls"] > 1 and state.get("observability_history_after") is not None:
+            history = state["observability_history_after"]
+        save(); out(json.dumps(history))
 elif name == "just": sys.exit(0)
 elif name == "ruby":
     for i in range(16): out(f"https://endpoint-{i}.test")
@@ -215,6 +223,33 @@ def test_dry_run_performs_no_mutation_or_external_preflight(tmp_path: Path) -> N
     assert not marker.exists(), "dry-run should not even invoke cluster/node stubs"
 
 
+
+@pytest.mark.parametrize("mode", ["--manual-node-plan", "--execute"])
+def test_live_modes_require_explicit_observability_revision(tmp_path: Path, mode: str) -> None:
+    env = manual_plan_environment(tmp_path)
+    env.pop("CF_DRILL_EXPECTED_OBSERVABILITY_REVISION")
+    args = [mode]
+    if mode == "--execute":
+        args.append(f"--confirm={CONFIRM}")
+    result = run(*args, env=env)
+    assert result.returncode != 0
+    assert "CF_DRILL_EXPECTED_OBSERVABILITY_REVISION must be supplied" in result.stderr
+
+
+@pytest.mark.parametrize("value", ["", "0", "-1", "+1", "01", " 1", "1 ", "1.0", "ten", "10x"])
+def test_live_preflight_rejects_noncanonical_observability_revision(
+    tmp_path: Path, value: str
+) -> None:
+    env = manual_plan_environment(tmp_path) | {
+        "CF_DRILL_EXPECTED_OBSERVABILITY_REVISION": value,
+        "CF_DRILL_NODE_EXECUTOR": str(tmp_path / "must-not-run"),
+    }
+    result = run("--manual-node-plan", env=env)
+    assert result.returncode != 0
+    assert "canonical positive decimal integer" in result.stderr
+    assert not (tmp_path / "must-not-run").exists()
+
+
 def manual_plan_environment(tmp_path: Path, *, context: str = "sugar-staging") -> dict[str, str]:
     image = TEXT.split("readonly EXPECTED_IMAGE='", 1)[1].split("'", 1)[0]
     deployment = {
@@ -242,7 +277,11 @@ def manual_plan_environment(tmp_path: Path, *, context: str = "sugar-staging") -
     stub("ruby", "i=1; while [ $i -le 16 ]; do echo https://endpoint-$i.test; i=$((i+1)); done\n")
     stub("curl", "printf 200\n")
     stub("date", "printf 20260809T000000Z\n")
-    return {"PATH": f"{tmp_path}:/usr/bin:/bin", "CF_DRILL_APPROVED_REVISION": "approved"}
+    return {
+        "PATH": f"{tmp_path}:/usr/bin:/bin",
+        "CF_DRILL_APPROVED_REVISION": "approved",
+        "CF_DRILL_EXPECTED_OBSERVABILITY_REVISION": "9",
+    }
 
 
 def test_manual_node_plan_runs_read_only_preflights_and_renders_exact_ordered_commands(tmp_path: Path) -> None:
@@ -717,6 +756,64 @@ def test_node_execution_does_not_weaken_authentication() -> None:
     assert "sshpass" not in TEXT
     assert "authorized_keys" not in TEXT
     assert "CF_DRILL_NODE_EXECUTOR" in TEXT
+
+
+def test_matching_explicit_observability_revision_is_recorded_in_plan(tmp_path: Path) -> None:
+    env = manual_plan_environment(tmp_path)
+    result = run("--manual-node-plan", env=env)
+    assert result.returncode == 0, result.stderr
+    assert "OBSERVABILITY expected_revision=9 observed_revision=9" in result.stdout
+
+
+def test_later_explicit_observability_revision_needs_no_source_change(tmp_path: Path) -> None:
+    env = manual_plan_environment(tmp_path) | {"CF_DRILL_EXPECTED_OBSERVABILITY_REVISION": "27"}
+    helm = tmp_path / "helm"
+    helm.write_text(helm.read_text().replace('"revision":9', '"revision":27'))
+    result = run("--manual-node-plan", env=env)
+    assert result.returncode == 0, result.stderr
+    assert "expected_revision=27 observed_revision=27" in result.stdout
+    assert "== 27" not in TEXT
+
+
+@pytest.mark.parametrize(
+    ("history", "message"),
+    [
+        ([{"status": "deployed", "revision": 11}], "expected 10, observed 11"),
+        ([], "observed deployed entries 0"),
+        (
+            [{"status": "deployed", "revision": 10}, {"status": "deployed", "revision": 11}],
+            "observed deployed entries 2",
+        ),
+    ],
+)
+def test_observability_history_failures_precede_node_executor(
+    tmp_path: Path, history: list[dict[str, object]], message: str
+) -> None:
+    harness = StatefulDrillHarness(tmp_path, observability_history=history)
+    result = harness.run()
+    assert result.returncode != 0
+    assert message in result.stderr
+    assert not any(entry["tool"] == "node-executor" for entry in harness.commands())
+
+
+def test_expected_and_observed_observability_revisions_are_in_evidence(tmp_path: Path) -> None:
+    harness = StatefulDrillHarness(tmp_path)
+    result = harness.run()
+    assert result.returncode == 0, result.stderr
+    preflight = json.loads((harness.evidence / "preflight.json").read_text())
+    assert preflight["observability"] == {"expectedRevision": "10", "observedRevision": "10"}
+    assert "observability expected revision 10, observed revision 10" in result.stdout
+
+
+def test_post_cleanup_observability_revision_drift_is_rejected(tmp_path: Path) -> None:
+    harness = StatefulDrillHarness(
+        tmp_path,
+        observability_history_after=[{"status": "deployed", "revision": 11}],
+    )
+    result = harness.run()
+    assert result.returncode != 0
+    assert "expected 10, observed 11" in result.stderr
+    assert harness.current()["tables"] == [False, False]
 
 
 @pytest.mark.parametrize("arguments", [[], ["env=staging"]])
