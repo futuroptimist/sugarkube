@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -112,7 +113,7 @@ class StatefulDrillHarness:
 
 
 _STATEFUL_SHIM = r'''#!/usr/bin/env python3
-import json, os, pathlib, sys, time, urllib.parse
+import json, os, pathlib, re, sys, time, urllib.parse
 state_path = pathlib.Path(os.environ["HARNESS_STATE"])
 log_path = pathlib.Path(os.environ["HARNESS_LOG"])
 name, args = pathlib.Path(sys.argv[0]).name, sys.argv[1:]
@@ -173,6 +174,12 @@ elif name == "kubectl":
         out(json.dumps({"data":{"result":[{"value":[0,str(value)]}]}}))
 elif name == "node-executor":
     node, command=args[0],args[1]; idx=int(node[-1])-1
+    cross_process_read = re.compile(
+        r"(?:(?<!sudo )/usr/bin/readlink|(?<![/\w])readlink) /proc/(?!self(?:/|$))"
+    )
+    if cross_process_read.search(command):
+        event("unprivileged_cross_process_readlink", node=node, command=command)
+        sys.exit(1)
     if "test -x" in command:
         requested_path = command.split("test -x ", 1)[1].split()[0]
         sys.exit(0 if requested_path in state["crictl_paths"] else 1)
@@ -181,7 +188,7 @@ elif name == "node-executor":
         out(("a" if idx == 0 else "b")*12)
     elif command.startswith("sudo /usr/local/bin/crictl inspectp"):
         out(json.dumps({"status":{"labels":{"io.kubernetes.pod.uid":f"uid-{idx+1}"}},"info":{"pid":101+idx}}))
-    elif command.startswith("readlink /proc/") or command.startswith("/usr/bin/readlink /proc/"):
+    elif command.startswith("sudo /usr/bin/readlink /proc/"):
         out(f"net:[{1001+idx}]")
     elif "systemd-run" in command:
         state["watchdogs"][idx]=True; save(); event("watchdog", node=node, verified=False)
@@ -347,6 +354,7 @@ def test_manual_commands_expand_the_immutable_crictl_path(tmp_path: Path) -> Non
     ]
     assert len(command_records) == 6
     assert all("/usr/local/bin/crictl" in command for command in command_records)
+    assert all(r"sudo\ /usr/bin/readlink\ /proc/" in command for command in command_records)
 
 
 def test_later_matching_observability_revision_needs_no_source_change(tmp_path: Path) -> None:
@@ -440,8 +448,18 @@ def test_wrong_context_revision_image_helm_and_ambiguous_pods_are_guarded() -> N
 def test_exact_network_namespace_resolution_is_required() -> None:
     assert "${CRICTL} inspectp" in TEXT
     assert 'io.kubernetes.pod.uid' in TEXT
-    assert "readlink /proc/${pid}/ns/net" in TEXT
+    assert "sudo /usr/bin/readlink /proc/${pid}/ns/net" in TEXT
     assert "cannot prove exact pod network namespace identity" in TEXT
+
+
+def test_cross_process_namespace_reads_always_use_authorized_sudo_path() -> None:
+    reads = re.findall(r"(?:sudo )?(?:/usr/bin/)?readlink /proc/[^ )\"']+/ns/net", TEXT)
+    assert reads
+    cross_process_reads = [read for read in reads if "/proc/self/ns/net" not in read]
+    assert cross_process_reads
+    assert all(read.startswith("sudo /usr/bin/readlink ") for read in cross_process_reads)
+    assert "/usr/bin/readlink /proc/self/ns/net" in reads
+    assert "sudo /usr/bin/readlink /proc/self/ns/net" not in TEXT
 
 
 def test_owner_collision_is_refused() -> None:
@@ -462,6 +480,7 @@ def test_watchdogs_are_installed_on_both_nodes_before_disruption() -> None:
     assert "/usr/bin/systemctl is-active --quiet" in TEXT[watchdog:install]
     assert "/usr/bin/systemctl show --property MainPID --value" in TEXT[watchdog:install]
     assert "/proc/${watchdog_pid}/ns/net" in TEXT[watchdog:install]
+    assert "sudo /usr/bin/readlink /proc/${watchdog_pid}/ns/net" in TEXT[watchdog:install]
 
 
 @pytest.mark.parametrize(
@@ -659,6 +678,9 @@ def test_actual_helper_completes_stateful_interruption_and_recovery(tmp_path: Pa
     installs = [i for i, command in enumerate(node_commands) if "add table inet" in command]
     deletes = [command for command in node_commands if "delete table inet" in command]
     assert len(watchdogs) == len(installs) == len(deletes) == 2
+    assert not any(
+        event.get("event") == "unprivileged_cross_process_readlink" for event in harness.events()
+    )
     assert max(watchdogs) < min(installs)
     assert all("list ruleset" in command for command in deletes)
     assert harness.current()["tables"] == [False, False]
@@ -704,11 +726,23 @@ def test_execution_commands_use_only_the_approved_crictl_path(tmp_path: Path) ->
                for command in node_commands)
     assert any("crictl inspectp" in command and "delete table inet" in command
                for command in node_commands)
+    guarded_phases = [
+        command for command in node_commands
+        if "/proc/" in command
+        and any(
+            marker in command
+            for marker in ("list ruleset", "systemd-run", "add table inet", "delete table inet")
+        )
+    ]
+    assert guarded_phases
+    assert all("sudo /usr/bin/readlink /proc/" in command for command in guarded_phases)
 
     automatic_cleanup = TEXT.split("\ncleanup() {", 1)[1].split("\n}", 1)[0]
     manual_cleanup = TEXT.split("\nmanual_cleanup() {", 1)[1].split("\n}", 1)[0]
     assert "sudo ${CRICTL} inspectp" in automatic_cleanup
     assert "sudo ${CRICTL} inspectp" in manual_cleanup
+    assert "sudo /usr/bin/readlink /proc/" in automatic_cleanup
+    assert "sudo /usr/bin/readlink /proc/" in manual_cleanup
 
 
 def test_legacy_only_crictl_fails_before_any_followup_command(tmp_path: Path) -> None:
