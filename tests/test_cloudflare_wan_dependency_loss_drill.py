@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -112,7 +113,7 @@ class StatefulDrillHarness:
 
 
 _STATEFUL_SHIM = r'''#!/usr/bin/env python3
-import json, os, pathlib, sys, time, urllib.parse
+import json, os, pathlib, re, sys, time, urllib.parse
 state_path = pathlib.Path(os.environ["HARNESS_STATE"])
 log_path = pathlib.Path(os.environ["HARNESS_LOG"])
 name, args = pathlib.Path(sys.argv[0]).name, sys.argv[1:]
@@ -173,6 +174,8 @@ elif name == "kubectl":
         out(json.dumps({"data":{"result":[{"value":[0,str(value)]}]}}))
 elif name == "node-executor":
     node, command=args[0],args[1]; idx=int(node[-1])-1
+    if command.startswith("readlink /proc/") or re.search(r"(?<!sudo )/usr/bin/readlink /proc/(?!self/)", command):
+        event("readlink_denied", node=node, command=command); sys.exit(13)
     if "test -x" in command:
         requested_path = command.split("test -x ", 1)[1].split()[0]
         sys.exit(0 if requested_path in state["crictl_paths"] else 1)
@@ -181,7 +184,7 @@ elif name == "node-executor":
         out(("a" if idx == 0 else "b")*12)
     elif command.startswith("sudo /usr/local/bin/crictl inspectp"):
         out(json.dumps({"status":{"labels":{"io.kubernetes.pod.uid":f"uid-{idx+1}"}},"info":{"pid":101+idx}}))
-    elif command.startswith("readlink /proc/") or command.startswith("/usr/bin/readlink /proc/"):
+    elif command.startswith("sudo /usr/bin/readlink /proc/"):
         out(f"net:[{1001+idx}]")
     elif "systemd-run" in command:
         state["watchdogs"][idx]=True; save(); event("watchdog", node=node, verified=False)
@@ -440,8 +443,35 @@ def test_wrong_context_revision_image_helm_and_ambiguous_pods_are_guarded() -> N
 def test_exact_network_namespace_resolution_is_required() -> None:
     assert "${CRICTL} inspectp" in TEXT
     assert 'io.kubernetes.pod.uid' in TEXT
-    assert "readlink /proc/${pid}/ns/net" in TEXT
+    assert "sudo /usr/bin/readlink /proc/${pid}/ns/net" in TEXT
     assert "cannot prove exact pod network namespace identity" in TEXT
+
+
+def test_stateful_executor_models_cross_process_readlink_privilege_boundary(
+    tmp_path: Path,
+) -> None:
+    harness = StatefulDrillHarness(tmp_path)
+    executor = harness.root / "node-executor"
+    denied = subprocess.run(
+        [str(executor), "node-1", "/usr/bin/readlink /proc/101/ns/net"],
+        env=os.environ | harness.env, text=True, capture_output=True,
+    )
+    allowed = subprocess.run(
+        [str(executor), "node-1", "sudo /usr/bin/readlink /proc/101/ns/net"],
+        env=os.environ | harness.env, text=True, capture_output=True,
+    )
+    assert denied.returncode == 13
+    assert allowed.returncode == 0
+    assert allowed.stdout.strip() == "net:[1001]"
+
+
+def test_all_cross_process_namespace_reads_use_sudo_and_immutable_path() -> None:
+    assert not re.search(
+        r"(?<!sudo )/usr/bin/readlink /proc/(?!self/)", TEXT
+    )
+    assert '"readlink /proc/' not in TEXT
+    assert TEXT.count("/usr/bin/readlink /proc/self/ns/net") == 2
+    assert "sudo /usr/bin/readlink /proc/self/ns/net" not in TEXT
 
 
 def test_owner_collision_is_refused() -> None:
