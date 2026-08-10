@@ -28,9 +28,11 @@ Usage: cloudflare_wan_dependency_loss_drill.sh [--execute] [--env staging]
        cloudflare_wan_dependency_loss_drill.sh --manual-node-plan [--env staging]
        [--confirm 'DISRUPT STAGING CLOUDFLARE WAN FOR SAME-PROCESS RECOVERY']
 
-The default is a non-mutating plan. Execution also requires:
+The default offline plan requires no approval coordinates or cluster/node tools.
+Both --manual-node-plan and --execute require:
   CF_DRILL_APPROVED_REVISION=<full git revision>
   CF_DRILL_EXPECTED_OBSERVABILITY_REVISION=<separately reviewed positive integer>
+Execution additionally requires the exact confirmation and:
   CF_DRILL_NODE_EXECUTOR=<executable accepting NODE and COMMAND arguments>
 The executor is deliberately not SSH: authentication and sudo must be established separately.
 It must execute the supplied command verbatim on the named node and must not log credentials.
@@ -81,14 +83,15 @@ render_manual_node_plan() {
 }
 
 validate_observability_history() {
-  local history="$1" phase="$2" deployed_count revision
+  local history="$1" phase="$2" deployed_count revision revision_json
   deployed_count="$(jq '[.[] | select(.status == "deployed")] | length' <<<"${history}")" || \
     die "${phase} observability Helm history is not valid JSON"
   [[ "${deployed_count}" == 1 ]] || \
     die "${phase} observability Helm history must contain exactly one deployed entry (expected revision ${expected_observability_revision}; observed deployed entries ${deployed_count})"
-  revision="$(jq -r '[.[] | select(.status == "deployed")][0].revision' <<<"${history}")"
-  [[ "${revision}" =~ ^[1-9][0-9]*$ ]] || \
-    die "${phase} observability deployed revision is not a canonical positive decimal integer (expected ${expected_observability_revision}; observed ${revision})"
+  revision_json="$(jq -c '[.[] | select(.status == "deployed")][0].revision' <<<"${history}")"
+  jq -e 'type == "number" and . > 0 and floor == .' <<<"${revision_json}" >/dev/null || \
+    die "${phase} observability deployed revision is not a positive integer-valued JSON number (expected ${expected_observability_revision}; observed ${revision_json})"
+  revision="$(jq -r '.' <<<"${revision_json}")"
   [[ "${revision}" == "${expected_observability_revision}" ]] || \
     die "${phase} observability Helm revision mismatch (expected ${expected_observability_revision}; observed ${revision})"
   observed_observability_revision="${revision}"

@@ -223,6 +223,20 @@ def test_dry_run_performs_no_mutation_or_external_preflight(tmp_path: Path) -> N
     assert not marker.exists(), "dry-run should not even invoke cluster/node stubs"
 
 
+def test_help_distinguishes_offline_manual_and_execution_requirements() -> None:
+    result = run("--help")
+    assert result.returncode == 0
+    assert (
+        "default offline plan requires no approval coordinates or cluster/node tools"
+        in result.stdout
+    )
+    assert "Both --manual-node-plan and --execute require:" in result.stdout
+    assert "CF_DRILL_APPROVED_REVISION" in result.stdout
+    assert "CF_DRILL_EXPECTED_OBSERVABILITY_REVISION" in result.stdout
+    assert "Execution additionally requires the exact confirmation and:" in result.stdout
+    assert "CF_DRILL_NODE_EXECUTOR" in result.stdout
+
+
 @pytest.mark.parametrize("mode", ["manual", "execute"])
 def test_live_modes_require_explicit_observability_revision(
     tmp_path: Path, mode: str,
@@ -661,6 +675,20 @@ def test_revision_mismatch_never_invokes_node_executor(tmp_path: Path) -> None:
     assert result.returncode != 0
     assert "expected 10; observed 11" in result.stderr
     assert not any(entry["tool"] == "node-executor" for entry in harness.commands())
+
+
+@pytest.mark.parametrize("observed", ["10", 10.5])
+def test_invalid_observed_revision_type_never_reaches_disruption(
+    tmp_path: Path, observed: object,
+) -> None:
+    harness = StatefulDrillHarness(tmp_path, obs_revision=observed)
+    result = harness.run()
+    assert result.returncode != 0
+    assert "positive integer-valued JSON number" in result.stderr
+    assert not any(entry["tool"] == "node-executor" for entry in harness.commands())
+    assert not any(
+        event.get("event") in {"watchdog", "table"} for event in harness.events()
+    )
 
 
 def test_post_cleanup_observability_revision_drift_is_rejected(tmp_path: Path) -> None:
