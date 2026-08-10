@@ -526,6 +526,26 @@ part of this rollout.
    just cf-tunnel-wan-dependency-loss-drill env=staging
    ```
 
+   Before any live preflight, use a **separate, read-only approval gate** to inspect the
+   `monitoring/kube-prometheus-stack` Helm history. Confirm that it has exactly one deployed entry,
+   review that entry's positive-integer revision with the change approver, and record the approved
+   coordinate out of band. The drill deliberately does not query Helm to choose or approve this value,
+   and no revision shown by a prior capture is a permanent default. After that independent review,
+   enter the reviewed coordinate when prompted and run the read-only manual-node plan:
+
+   ```bash
+   read -r -p 'Approved observability Helm revision: ' APPROVED_OBSERVABILITY_REVISION
+   CF_DRILL_EXPECTED_OBSERVABILITY_REVISION="${APPROVED_OBSERVABILITY_REVISION}" \
+     CF_DRILL_APPROVED_REVISION="$(git rev-parse HEAD)" \
+     just cf-tunnel-wan-dependency-loss-drill env=staging --manual-node-plan
+   ```
+
+   Do not use a command substitution from `helm history` in this invocation: that would silently
+   discover rather than explicitly approve the coordinate. The default plan above remains fully
+   offline and needs neither approval variable. The manual-node-plan and execute paths require
+   `CF_DRILL_EXPECTED_OBSERVABILITY_REVISION` to be a canonical positive decimal integer and fail
+   closed unless exactly one deployed observability history entry matches it.
+
    The helper selects the two exact preflight-approved pod sandboxes and installs a uniquely named
    `nftables` output table inside each pod network namespace. Unlike a newly applied Kubernetes policy,
    the namespace-local output hook evaluates every packet in established QUIC and TCP flows. It drops
@@ -534,7 +554,8 @@ part of this rollout.
    rule and never flushes a ruleset.
 
    Execution remains **blocked unless every preflight passes**. In addition to `--execute`, the operator
-   must provide the approved Git revision, a safe executable node-command adapter, and the exact typed
+   must provide the approved Git revision, the separately approved observability Helm revision, a safe
+   executable node-command adapter, and the exact typed
    confirmation printed by `--help`. The adapter boundary is intentional: the repository does not assume
    unattended remote access, weaken host-key checking, create keys, or handle login credentials. If
    authenticated privileged execution on both nodes cannot be guaranteed, stop at the plan and run
@@ -554,7 +575,8 @@ part of this rollout.
    commands. The disruption is limited to three minutes, below the shortest five-minute alert threshold.
 6. Recovery must use the same UIDs with unchanged restart counts. Within five minutes both pods must be
    Ready with at least four HA connections apiece; all approved public endpoints must return HTTP 200;
-   Helm histories, Secret metadata, and Deployment state must be unchanged; and
+   Helm histories, including the single deployed observability release at the explicitly approved
+   revision, Secret metadata, and Deployment state must be unchanged; and
    `just cf-tunnel-verify env=staging` must pass. The helper never requests the Secret value. Finally,
    `unset CF_TUNNEL_TOKEN CF_TUNNEL_NAME CF_TUNNEL_ID`; retain the two healthy pods, Service,
    ServiceMonitor, and PDB.
