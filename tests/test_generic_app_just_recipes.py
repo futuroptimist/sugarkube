@@ -208,10 +208,16 @@ if [[ "$*" == *"get values"* ]]; then
     echo 'Error: Kubernetes cluster unreachable for context sugar-staging' >&2
     exit 1
   fi
-  printf '{{"image":{{"repository":"%s","tag":"%s","pullPolicy":"%s"}},"metrics":{{"enabled":false}},"serviceMonitor":{{"enabled":false}},"ingress":{{"host":"%s"}}}}\n' \
+  metrics='{{"enabled":false}}'; monitor='{{"enabled":false}}'
+  if [ "${{SUGARKUBE_STUB_NODE_ENV:-staging}}" = prod ]; then
+    metrics='{{"enabled":true,"auth":{{"existingSecret":"dspace-prod-metrics-token","secretKey":"token"}}}}'
+    monitor='{{"enabled":true,"interval":"30s","scrapeTimeout":"10s","additionalLabels":{{"release":"kube-prometheus-stack"}},"cluster":"sugarkube-prod"}}'
+  fi
+  printf '{{"image":{{"repository":"%s","tag":"%s","pullPolicy":"%s"}},"metrics":%s,"serviceMonitor":%s,"ingress":{{"host":"%s"}}}}\n' \
     "${{SUGARKUBE_STUB_HELM_REPOSITORY:-ghcr.io/democratizedspace/dspace}}" \
     "${{SUGARKUBE_STUB_HELM_TAG:-main-abcdef0}}" \
     "${{SUGARKUBE_STUB_HELM_PULL_POLICY:-Always}}" \
+    "${{metrics}}" "${{monitor}}" \
     "${{SUGARKUBE_STUB_HELM_HOST:-example.test}}"
   exit 0
 fi
@@ -308,6 +314,7 @@ spec:
     [[ "$*" != *danielsmith.values.prod.yaml* ]] || host=danielsmith.io
     [[ "$*" != *jobbot3000.values.staging.yaml* ]] || host=staging.jobbot3000.tech
     [[ "$*" != *jobbot3000.values.prod.yaml* ]] || host=jobbot3000.example.test
+    deploy_env=staging; [[ "$*" != *dspace.values.prod.yaml* ]] || deploy_env=prod
     cat <<YAML
 apiVersion: apps/v1
 kind: Deployment
@@ -329,7 +336,7 @@ spec:
             - name: TOKENPLACE_CHART_VERSION
               value: "0.1.4"
             - name: TOKENPLACE_DEPLOY_ENV
-              value: staging
+              value: ${{deploy_env}}
 ---
 apiVersion: v1
 kind: Service
@@ -404,6 +411,38 @@ spec:
       bearerTokenSecret:
         name: dspace-staging-metrics-token
         key: token
+YAML
+    fi
+    if [ "${{app}}" = dspace ] && [[ "$*" == *dspace.values.prod.yaml* ]]; then
+      cat <<'YAML'
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: dspace
+  labels:
+    app.kubernetes.io/instance: dspace
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames: [dspace]
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: dspace
+      app.kubernetes.io/name: dspace
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      bearerTokenSecret:
+        name: dspace-prod-metrics-token
+        key: token
+      relabelings:
+        - {{action: replace, targetLabel: app, replacement: dspace}}
+        - {{action: replace, targetLabel: environment, replacement: prod}}
+        - {{action: replace, targetLabel: release, replacement: dspace}}
+        - {{action: replace, targetLabel: cluster, replacement: sugarkube-prod}}
 YAML
     fi
   fi
@@ -5350,7 +5389,7 @@ import sys
 from scripts import observability_app_metrics as subject
 
 calls = []
-subject.assert_context = lambda: calls.append(["context"])
+subject.assert_context = lambda *args: calls.append(["context"])
 subject.install_secret = lambda cfg: calls.append(["secret-install", cfg["namespace"]])
 subject.check_secret = lambda cfg: calls.append(["secret-check", cfg["namespace"]])
 subject.verify = lambda app, env: calls.append(["verify", app, env])
@@ -5742,7 +5781,7 @@ def test_observability_app_metrics_verify_exercises_targets_metrics_and_public_4
             )
 
     monkeypatch.setattr(app_metrics, "appcfg", lambda app, env: cfg)
-    monkeypatch.setattr(app_metrics, "assert_context", lambda: None)
+    monkeypatch.setattr(app_metrics, "assert_context", lambda *args: None)
     monkeypatch.setattr(app_metrics, "check_secret", lambda cfg: None)
     monkeypatch.setattr(app_metrics, "derive_build_labels_live", lambda cfg: {"version": "main-deadbee", "revision": "main-deadbee"})
     monkeypatch.setattr(app_metrics, "kjson", fake_kjson)
@@ -5872,7 +5911,7 @@ def test_observability_app_metrics_verify_fails_on_public_200(monkeypatch):
     cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"]["tokenplace"]["environments"]["staging"]
     sm = {"spec": {"selector": {"matchLabels": cfg["serviceMonitor"]["selectorMatchLabels"]}, "endpoints": [{"path": "/metrics", "interval": cfg["serviceMonitor"]["interval"], "scrapeTimeout": cfg["serviceMonitor"]["scrapeTimeout"], "authorization": {"type": "Bearer", "credentials": cfg["secret"]}, "relabelings": cfg["serviceMonitor"]["relabelings"]}]}}
     monkeypatch.setattr(app_metrics, "appcfg", lambda app, env: cfg)
-    monkeypatch.setattr(app_metrics, "assert_context", lambda: None)
+    monkeypatch.setattr(app_metrics, "assert_context", lambda *args: None)
     monkeypatch.setattr(app_metrics, "check_secret", lambda cfg: None)
     monkeypatch.setattr(app_metrics, "derive_build_labels_live", lambda cfg: {"version": "main-deadbee", "revision": "main-deadbee"})
     monkeypatch.setattr(app_metrics, "kjson", lambda args: sm)
@@ -5933,7 +5972,7 @@ def _verify_base(monkeypatch, cfg, prom_func):
         def open(self, url, timeout):
             raise app_metrics.urllib.error.HTTPError(url, 401, "unauthorized", {}, None)
     monkeypatch.setattr(app_metrics, "appcfg", lambda app, env: cfg)
-    monkeypatch.setattr(app_metrics, "assert_context", lambda: None)
+    monkeypatch.setattr(app_metrics, "assert_context", lambda *args: None)
     monkeypatch.setattr(app_metrics, "check_secret", lambda cfg: None)
     monkeypatch.setattr(app_metrics, "derive_build_labels_live", lambda cfg: {"version": "main-deadbee", "revision": "main-deadbee"})
     monkeypatch.setattr(app_metrics, "kjson", lambda args: sm)
@@ -6119,7 +6158,7 @@ def test_observability_app_metrics_malformed_kubernetes_nested_objects_fail_cont
 ):
     cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"]["tokenplace"]["environments"]["staging"]
     monkeypatch.setattr(app_metrics, "appcfg", lambda app, env: cfg)
-    monkeypatch.setattr(app_metrics, "assert_context", lambda: None)
+    monkeypatch.setattr(app_metrics, "assert_context", lambda *args: None)
     monkeypatch.setattr(app_metrics, "check_secret", lambda cfg: None)
     monkeypatch.setattr(app_metrics, "derive_build_labels_live", lambda cfg: {})
     monkeypatch.setattr(app_metrics, "kjson", lambda args: service_monitor)
@@ -6271,7 +6310,7 @@ def test_observability_app_metrics_prom_rejects_non_object_data(monkeypatch, dat
 
 
 def test_observability_app_metrics_verify_all_uses_every_configured_app(monkeypatch):
-    doc = {"schemaVersion": 1, "applications": {"first": {}, "second": {}}}
+    doc = {"schemaVersion": 1, "applications": {"first": {"environments": {"staging": {}}}, "second": {"environments": {"staging": {}}}}}
     called = []
     monkeypatch.setattr(app_metrics, "load_config", lambda: doc)
     monkeypatch.setattr(app_metrics, "verify", lambda app, env: called.append((app, env)))
@@ -6281,7 +6320,7 @@ def test_observability_app_metrics_verify_all_uses_every_configured_app(monkeypa
 
 
 def test_observability_app_metrics_live_environment_normalization_and_rejection(monkeypatch):
-    forbidden = ["prod", "production", "", "dev", "qa"]
+    forbidden = ["production", "", "dev", "qa"]
     for env in forbidden:
         def fail_load_config(env=env):
             raise AssertionError(f"loaded config for {env!r}")
@@ -6289,11 +6328,12 @@ def test_observability_app_metrics_live_environment_normalization_and_rejection(
         monkeypatch.setattr(app_metrics, "load_config", fail_load_config)
         with pytest.raises(SystemExit) as excinfo:
             app_metrics.appcfg("tokenplace", env)
-        assert "staging only" in str(excinfo.value)
+        assert "unsupported" in str(excinfo.value)
         assert app_metrics.main(["verify-all", "--env", env]) == 2
 
     assert app_metrics.normalize_live_env("env=env=int") == "staging"
     assert app_metrics.normalize_live_env("env=staging") == "staging"
+    assert app_metrics.normalize_live_env("prod") == "prod"
 
 
 @pytest.mark.parametrize("app", ["app=", "app=foo=bar", "app=Bad_Name", "-bad"])
@@ -6304,7 +6344,7 @@ def test_observability_app_metrics_rejects_malformed_app_before_live_operations(
         app_metrics, "load_config", lambda: pytest.fail("inventory lookup must not run")
     )
     monkeypatch.setattr(
-        app_metrics, "assert_context", lambda: pytest.fail("context check must not run")
+        app_metrics, "assert_context", lambda *args: pytest.fail("context check must not run")
     )
     monkeypatch.setattr(
         app_metrics, "install_secret", lambda cfg: pytest.fail("credential handling must not run")
@@ -6327,7 +6367,7 @@ def test_observability_app_metrics_rejects_empty_application_argument(app):
 def test_observability_app_metrics_positional_values_remain_compatible(monkeypatch):
     calls = []
     monkeypatch.setattr(app_metrics, "appcfg", lambda app, env: {"namespace": app})
-    monkeypatch.setattr(app_metrics, "assert_context", lambda: calls.append("context"))
+    monkeypatch.setattr(app_metrics, "assert_context", lambda *args: calls.append("context"))
     monkeypatch.setattr(
         app_metrics, "check_secret", lambda cfg: calls.append((cfg["namespace"], "staging"))
     )
@@ -6337,7 +6377,7 @@ def test_observability_app_metrics_positional_values_remain_compatible(monkeypat
 
 
 def test_observability_app_metrics_verify_all_uses_normalized_requested_env(monkeypatch):
-    doc = {"schemaVersion": 1, "applications": {"first": {}, "second": {}}}
+    doc = {"schemaVersion": 1, "applications": {"first": {"environments": {"staging": {}}}, "second": {"environments": {"staging": {}}}}}
     called = []
     monkeypatch.setattr(app_metrics, "load_config", lambda: doc)
     monkeypatch.setattr(app_metrics, "verify", lambda app, env: called.append((app, env)))
@@ -6391,7 +6431,7 @@ def test_observability_app_metrics_public_redirect_is_not_followed_and_redacted(
             )
 
     monkeypatch.setattr(app_metrics, "appcfg", lambda app, env: cfg)
-    monkeypatch.setattr(app_metrics, "assert_context", lambda: None)
+    monkeypatch.setattr(app_metrics, "assert_context", lambda *args: None)
     monkeypatch.setattr(app_metrics, "check_secret", lambda cfg: None)
     monkeypatch.setattr(
         app_metrics,
@@ -6582,7 +6622,7 @@ def test_observability_app_metrics_main_dispatches_exactly(
         app_metrics, "validate_render", lambda *args: calls.append(args)
     )
     monkeypatch.setattr(app_metrics, "appcfg", lambda app, env: "cfg")
-    monkeypatch.setattr(app_metrics, "assert_context", lambda: None)
+    monkeypatch.setattr(app_metrics, "assert_context", lambda *args: None)
     monkeypatch.setattr(app_metrics, "check_secret", lambda cfg: calls.append((cfg,)))
     monkeypatch.setattr(app_metrics, "install_secret", lambda cfg: calls.append((cfg,)))
     monkeypatch.setattr(app_metrics, "verify", lambda app, env: calls.append((app, env)))
@@ -7040,9 +7080,9 @@ def test_observability_app_metrics_install_secret_subprocess_failures_are_redact
         (lambda d: d.update({"applications": []}), "applications"),
         (
             lambda d: d["applications"]["tokenplace"]["environments"].update(
-                {"prod": {}}
+                {"qa": {}}
             ),
-            "only staging",
+            "unsupported",
         ),
         (
             lambda d: d["applications"]["tokenplace"]["environments"][

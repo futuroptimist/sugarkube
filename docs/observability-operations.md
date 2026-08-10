@@ -739,9 +739,22 @@ expected unauthenticated public `401` response:
 just observability-app-metrics-verify app=tokenplace env=staging
 ```
 
-`just observability-verify env=staging` also runs every configured application
-metrics verifier after the existing DSPACE checks. Production application metrics
-verification is intentionally rejected until production observability is codified.
-Merging this repository support does not deploy any application, create any
+`just observability-verify env=staging` also runs every configured staging application
+metrics verifier after the existing DSPACE checks. DSPACE production application `3.0.1` and chart
+`3.0.2` use the production inventory contract with exactly two healthy targets and can be checked
+with explicit production access:
+
+```bash
+export KUBECONFIG="$HOME/.kube/config-sugarkube-prod"
+kubectl config use-context sugar-prod
+just observability-app-metrics-secret-install app=dspace env=prod
+just observability-app-metrics-secret-check app=dspace env=prod
+just observability-app-metrics-verify app=dspace env=prod
+```
+
+Run those commands from `sugarkube3` through the externally managed `127.0.0.1:16443` tunnel; do not
+use `just kubeconfig-env env=prod` there. Credential setup precedes the guarded values-only
+reconciliation and does not promote the application or chart. Merging this repository support does
+not deploy any application, create any
 Secret, dashboard, alert rule, schedulability check, shared-state check, or live
 drill.

@@ -682,9 +682,34 @@ def test_helm_stored_values_reject_production_staging_leaks_secret_safely(
         },
         **leak,
     }
-    with pytest.raises(manifest.ManifestError, match="staging-only settings") as raised:
+    with pytest.raises(manifest.ManifestError, match="approved contract") as raised:
         manifest.verify_helm_stored_values(value, stored, "prod")
     assert "dspace-staging-metrics-token" not in str(raised.value)
+
+
+def test_helm_stored_values_accept_exact_production_metrics_contract() -> None:
+    value = split_candidate("prod")
+    stored = {
+        "image": {
+            "repository": manifest.IMAGE_REF,
+            "tag": value["imageTag"],
+            "pullPolicy": "Always",
+        },
+        "metrics": {
+            "enabled": True,
+            "auth": {"existingSecret": "dspace-prod-metrics-token", "secretKey": "token"},
+        },
+        "serviceMonitor": {
+            "enabled": True,
+            "interval": "30s",
+            "scrapeTimeout": "10s",
+            "additionalLabels": {"release": "kube-prometheus-stack"},
+            "cluster": "sugarkube-prod",
+        },
+    }
+    result = manifest.verify_helm_stored_values(value, stored, "prod")
+    assert result["passed"] is True
+    assert "dspace-prod-metrics-token" not in str(result)
 
 
 @pytest.mark.parametrize(

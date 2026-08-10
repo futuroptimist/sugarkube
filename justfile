@@ -3528,15 +3528,15 @@ observability-watchdog-secret-check env='':
 observability-watchdog-verify env='':
     @scripts/observability_helm.sh watchdog-verify '{{ env }}'
 
-# Interactively install or rotate a staging application's metrics bearer token (hidden input).
+# Interactively install or rotate a configured application's metrics bearer token (hidden input).
 observability-app-metrics-secret-install app env='staging':
     @python3 scripts/observability_app_metrics.py secret-install --app '{{ app }}' --env '{{ env }}'
 
-# Check a staging application's metrics Secret/key contract without reading its value.
+# Check an application's metrics Secret/key contract without reading its value.
 observability-app-metrics-secret-check app env='staging':
     @python3 scripts/observability_app_metrics.py secret-check --app '{{ app }}' --env '{{ env }}'
 
-# Verify a staging application's authenticated Prometheus metrics contract.
+# Verify an application's authenticated Prometheus metrics contract.
 observability-app-metrics-verify app env='staging':
     @python3 scripts/observability_app_metrics.py verify --app '{{ app }}' --env '{{ env }}'
 

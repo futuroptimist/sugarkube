@@ -184,7 +184,7 @@ def dspace_production_metrics_token_is_unsafe(
     """Return whether an associated resource has a non-legacy METRICS_TOKEN form."""
     if not contains_exact_scalar(document, {"METRICS_TOKEN"}):
         return False
-    if metrics_enabled or scalar(document.get("kind")) not in {
+    if scalar(document.get("kind")) not in {
         "Deployment", "StatefulSet", "DaemonSet"
     }:
         return True
@@ -201,10 +201,22 @@ def dspace_production_metrics_token_is_unsafe(
             if not isinstance(entry, dict) or scalar(entry.get("name")) != "METRICS_TOKEN":
                 continue
             value_from = entry.get("valueFrom")
+            secret_ref = value_from.get("secretKeyRef") if isinstance(value_from, dict) else None
             field_ref = value_from.get("fieldRef") if isinstance(value_from, dict) else None
+            if (
+                metrics_enabled
+                and set(entry) == {"name", "valueFrom"}
+                and isinstance(value_from, dict)
+                and set(value_from) == {"secretKeyRef"}
+                and isinstance(secret_ref, dict)
+                and set(secret_ref) == {"name", "key"}
+                and secret_ref == {"name": "dspace-prod-metrics-token", "key": "token"}
+            ):
+                safe_entries.add(id(entry))
             # Chart 3.0.2 uses the pod UID as a safe, unpredictable token when metrics are off.
             if (
-                set(entry) == {"name", "valueFrom"}
+                not metrics_enabled
+                and set(entry) == {"name", "valueFrom"}
                 and isinstance(value_from, dict) and set(value_from) == {"fieldRef"}
                 and isinstance(field_ref, dict) and set(field_ref) == {"fieldPath"}
                 and field_ref.get("fieldPath") == "metadata.uid"
@@ -327,25 +339,45 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
                 errors.append(
                     "DSPACE ServiceMonitor bearerTokenSecret name and key must be nonempty"
                 )
-        production_leaks = {"dspace-staging-metrics-token", "sugarkube-int"}
+        production_leaks = {
+            "dspace-staging-metrics-token", "sugarkube-int",
+            "staging.democratized.space", "staging",
+        }
         metrics_enabled = (
             resolved_values_scalar(inputs.values, ("metrics", "enabled")).lower() == "true"
         )
-        if inputs.env == "prod" and (
-            service_monitors
-            or any(
-                isinstance(doc, dict)
-                and release_associated(doc, inputs.release, allow_name=False)
-                and (
-                    contains_exact_scalar(doc, production_leaks)
-                    or dspace_production_metrics_token_is_unsafe(
-                        doc, inputs, metrics_enabled=metrics_enabled
-                    )
-                )
-                for doc in documents
-            )
+        if inputs.env == "prod" and any(
+            isinstance(doc, dict)
+            and release_associated(doc, inputs.release, allow_name=False)
+            and (contains_exact_scalar(doc, production_leaks)
+                 or dspace_production_metrics_token_is_unsafe(
+                     doc, inputs, metrics_enabled=metrics_enabled))
+            for doc in documents
         ):
             errors.append("DSPACE production rendered staging-only metrics configuration")
+        if inputs.env == "prod" and service_monitors and not metrics_enabled:
+            errors.append("DSPACE production rendered staging-only metrics configuration")
+        if inputs.env == "prod" and metrics_enabled:
+            if len(service_monitors) != 1:
+                errors.append("DSPACE production must render exactly one ServiceMonitor")
+            for monitor in service_monitors:
+                metadata = monitor.get("metadata") if isinstance(monitor.get("metadata"), dict) else {}
+                labels = metadata.get("labels") if isinstance(metadata.get("labels"), dict) else {}
+                spec = monitor.get("spec") if isinstance(monitor.get("spec"), dict) else {}
+                endpoints = spec.get("endpoints")
+                endpoint = endpoints[0] if isinstance(endpoints, list) and len(endpoints) == 1 else None
+                auth = endpoint.get("bearerTokenSecret") if isinstance(endpoint, dict) else None
+                relabelings = endpoint.get("relabelings") if isinstance(endpoint, dict) else None
+                cluster_relabels = [item for item in relabelings if isinstance(item, dict)
+                                    and item.get("targetLabel") == "cluster"] if isinstance(relabelings, list) else []
+                if labels.get("release") != "kube-prometheus-stack":
+                    errors.append("DSPACE production ServiceMonitor discovery label mismatch")
+                if not isinstance(endpoint, dict) or endpoint.get("interval") != "30s" or endpoint.get("scrapeTimeout") != "10s":
+                    errors.append("DSPACE production ServiceMonitor timing contract mismatch")
+                if auth != {"name": "dspace-prod-metrics-token", "key": "token"}:
+                    errors.append("DSPACE production ServiceMonitor authentication contract mismatch")
+                if len(cluster_relabels) != 1 or cluster_relabels[0].get("replacement") != "sugarkube-prod":
+                    errors.append("DSPACE production ServiceMonitor cluster relabeling mismatch")
     return errors
 
 
@@ -513,6 +545,22 @@ def validate_dspace_values(manifest: str, inputs: ReleaseInputs) -> list[str]:
         for document in safe_yaml_documents(manifest)
     )
     errors: list[str] = []
+    if inputs.env == "prod":
+        expected = {
+            ("metrics", "enabled"): "true",
+            ("metrics", "auth", "existingSecret"): "dspace-prod-metrics-token",
+            ("metrics", "auth", "secretKey"): "token",
+            ("serviceMonitor", "enabled"): "true",
+            ("serviceMonitor", "interval"): "30s",
+            ("serviceMonitor", "scrapeTimeout"): "10s",
+            ("serviceMonitor", "additionalLabels", "release"): "kube-prometheus-stack",
+            ("serviceMonitor", "cluster"): "sugarkube-prod",
+        }
+        if any(
+            resolved_values_scalar(inputs.values, path).lower() != wanted.lower()
+            for path, wanted in expected.items()
+        ):
+            errors.append("DSPACE production values do not match the authenticated metrics contract")
     if rendered_monitor and not metrics_enabled:
         errors.append("DSPACE ServiceMonitor rendered while metrics.enabled is not true")
     if rendered_monitor and (not secret or not secret_key):

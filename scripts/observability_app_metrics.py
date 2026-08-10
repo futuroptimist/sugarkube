@@ -212,11 +212,9 @@ def validate_inventory(doc):
         environments = appdoc["environments"]
         if not isinstance(environments, dict) or not environments:
             fail(f"application {app}.environments must be a nonempty object")
-        if set(environments) != {"staging"}:
-            fail("only staging app metrics verification is supported")
         for env, cfg in environments.items():
-            if env != "staging":
-                fail("only staging app metrics verification is supported")
+            if env not in {"staging", "prod"}:
+                fail("app metrics environment is unsupported")
             expect_keys(
                 cfg,
                 {
@@ -366,8 +364,8 @@ def normalize_live_env(env: str) -> str:
         value = value[4:].strip()
     if value == "int":
         value = "staging"
-    if value != "staging":
-        fail("application metrics live operations support staging only")
+    if value not in {"staging", "prod"}:
+        fail("application metrics live environment is unsupported")
     return value
 
 
@@ -406,10 +404,18 @@ def kjson(args):
     return doc
 
 
-def assert_context():
+def assert_context(env="staging"):
+    expected = "sugar-prod" if env == "prod" else "sugar-staging"
+    if env == "prod":
+        kubeconfig = os.environ.get("KUBECONFIG", "")
+        if not kubeconfig or not os.path.isabs(kubeconfig):
+            fail("production requires an explicit absolute KUBECONFIG", 3)
     ctx = run(["kubectl", "config", "current-context"]).strip()
-    if ctx != "sugar-staging":
-        fail(f"context mismatch: expected sugar-staging, got {ctx or '<none>'}", 3)
+    if ctx != expected:
+        fail(f"context mismatch: expected {expected}, got {ctx or '<none>'}", 3)
+    if env == "prod":
+        run([sys.executable, str(ROOT / "scripts/cluster_identity.py"), "assert",
+             "--kubeconfig", os.environ["KUBECONFIG"], "--env", "prod"])
 
 
 def appcfg(app, env):
@@ -448,11 +454,14 @@ def check_secret(cfg):
 
 
 def install_secret(cfg):
+    if "xtrace" in os.environ.get("SHELLOPTS", "").split(":"):
+        fail("shell xtrace must be disabled before credential installation")
     for bad in (
         "TOKEN",
         "METRICS_TOKEN",
         "TOKENPLACE_METRICS_TOKEN",
         "SUGARKUBE_APP_METRICS_TOKEN",
+        "DSPACE_METRICS_TOKEN",
     ):
         if bad in __import__("os").environ:
             fail("credential environment variables are refused")
@@ -700,7 +709,7 @@ def query_required_families(cfg: dict[str, Any], derived_values: dict[str, str])
                 series_name = sample_labels.get("__name__") if isinstance(sample_labels, dict) else None
                 if not isinstance(series_name, str) or not PROM_METRIC.fullmatch(series_name):
                     fail("Prometheus query sample is structurally invalid (details redacted)", 1)
-                if metric_family_from_series(series_name) == metric:
+                if series_name == metric or metric_family_from_series(series_name) == metric:
                     found.add(metric)
     return found
 
@@ -708,7 +717,7 @@ def verify(app, env):
     app = normalize_application_argument(app)
     env = normalize_live_env(env)
     cfg = appcfg(app, env)
-    assert_context()
+    assert_context(env)
     check_secret(cfg)
     derived_values = derive_build_labels_live(cfg)
     sm = kjson(
@@ -734,6 +743,9 @@ def verify(app, env):
         fail("ServiceMonitor response is structurally invalid", 1)
     authorization = ep.get("authorization")
     auth = authorization.get("credentials") if isinstance(authorization, dict) else None
+    if auth is None and isinstance(ep.get("bearerTokenSecret"), dict):
+        auth = ep["bearerTokenSecret"]
+        authorization = {"type": "Bearer"}
     selector = spec.get("selector")
     if not isinstance(authorization, dict) or not isinstance(auth, dict) or not isinstance(selector, dict):
         fail("ServiceMonitor response is structurally invalid", 1)
@@ -891,6 +903,9 @@ def validate_render(app: str, env: str, input_path: str, release_namespace: str 
         fail("rendered ServiceMonitor endpoint is structurally invalid")
     auth = ep.get("authorization")
     creds = auth.get("credentials") if isinstance(auth, dict) else None
+    if creds is None and isinstance(ep.get("bearerTokenSecret"), dict):
+        creds = ep["bearerTokenSecret"]
+        auth = {"type": "Bearer"}
     if not isinstance(auth, dict) or not isinstance(creds, dict):
         fail("rendered ServiceMonitor authorization is structurally invalid")
     if (ep.get("path") != cfg["serviceMonitor"]["path"] or ep.get("interval") != cfg["serviceMonitor"]["interval"] or ep.get("scrapeTimeout") != cfg["serviceMonitor"]["scrapeTimeout"] or auth.get("type") != cfg["serviceMonitor"]["authorization"]["type"] or creds.get("name") != cfg["secret"]["name"] or creds.get("key") != cfg["secret"]["key"] or ep.get("relabelings") != cfg["serviceMonitor"]["relabelings"]):
@@ -925,15 +940,16 @@ def main(argv=None):
         if a.mode == "verify-all":
             env = normalize_live_env(a.env)
             inv = load_config()
-            for app in inv["applications"]:
-                verify(app, env)
+            for app, app_doc in inv["applications"].items():
+                if env in app_doc["environments"]:
+                    verify(app, env)
             return 0
         if not a.app:
             fail("--app is required")
         app = normalize_application_argument(a.app)
         env = normalize_live_env(a.env)
         cfg = appcfg(app, env)
-        assert_context()
+        assert_context(env)
         if a.mode == "secret-check":
             check_secret(cfg)
         elif a.mode == "secret-install":

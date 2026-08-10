@@ -354,7 +354,7 @@ Use these links before changing a deployment so the workflow runs, package versi
 - `env=staging`: HA staging on the staging Sugarkube cluster with host `staging.democratized.space` and values `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml`.
   The configured staging target injects `DSPACE_TOKEN_PLACE_URL=https://staging.token.place` and `DSPACE_TOKEN_PLACE_CHAT_MODEL=qwen3-8b-instruct`, uses provenance-bearing chart `3.1.1` for DSPACE application `3.1.0`, and persists the authenticated metrics ServiceMonitor configuration discovered by kube-prometheus-stack. The live staging release is Helm revision 28 from the immutable DSPACE `3.1.0` staging image `main-018687f`, with finalized evidence recorded at `deployment-evidence/dspace/staging/main-018687f-20260805T035722Z.json`; operators can use that final record as the promotion and reconciliation proof instead of creating a replacement candidate/evidence path for this deployment. The metrics bearer value is not committed; operators manage the existing `dspace-staging-metrics-token` Secret out of band.
 - `env=prod`: HA production on the production Sugarkube cluster with host `democratized.space` and values `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml`.
-  The production overlay injects `DSPACE_TOKEN_PLACE_URL=https://token.place` and `DSPACE_TOKEN_PLACE_CHAT_MODEL=llama-3.1-8b-instruct`. Production is pinned to recovery chart `3.0.2` and image `ghcr.io/democratizedspace/dspace:main-1a31a56`; it does not enable metrics or ServiceMonitor settings.
+  The production overlay injects `DSPACE_TOKEN_PLACE_URL=https://token.place` and `DSPACE_TOKEN_PLACE_CHAT_MODEL=llama-3.1-8b-instruct`. Production application `3.0.1` remains pinned to chart `3.0.2` and image `ghcr.io/democratizedspace/dspace:main-1a31a56`; the overlay enables authenticated metrics using the externally managed `dspace-prod-metrics-token` Secret. No application or chart promotion is involved, and merging these repository values deploys nothing.
 - Optional legacy/canary host `prod.democratized.space` uses `docs/examples/dspace.values.prod-subdomain.yaml`. The `dspace-oci-deploy-prod-subdomain` compatibility command selects the secret-free `docs/examples/apps/dspace-prod-subdomain.env` config, preserving that overlay while routing through the same manifest validation, OCI preflight, Helm deployment, and evidence finalization as the generic production path.
 
 ## Find or publish GHCR image
@@ -626,12 +626,32 @@ just dspace-oci-promote-prod tag="$APP_TAG" \
 
 ## Verify production
 
+Run production operations from `sugarkube3` with the externally managed tunnel already listening on
+`127.0.0.1:16443`. Export the explicit production kubeconfig; do **not** run
+`just kubeconfig-env env=prod` on `sugarkube3`:
+
+```bash
+export KUBECONFIG="$HOME/.kube/config-sugarkube-prod"
+kubectl config use-context sugar-prod
+just observability-app-metrics-secret-install app=dspace env=prod
+just observability-app-metrics-secret-check app=dspace env=prod
+```
+
+Install or rotate the credential before the guarded values-only reconciliation. Supply the genuine
+existing finalized production evidence as immutable provenance, an executable runtime smoke runner,
+and a fresh, nonexisting evidence destination. Discover the current and resulting Helm revisions at
+run time; never hard-code revision 9, use `--reuse-values`, or substitute a raw `helm upgrade` or
+`helm rollback`. A post-mutation failure requires review of the reserved evidence and a deliberate
+reconciliation decision, not an immediate retry or automatic rollback.
+
 ```bash
 just app-status app=dspace env=prod
 ```
 
 ```bash
 just app-verify app=dspace env=prod
+just observability-app-metrics-verify app=dspace env=prod
+just observability-dashboard-verify env=prod
 ```
 
 Print the generated curl commands without executing them when you need a manual fallback:
@@ -641,6 +661,11 @@ just app-verify app=dspace env=prod print_only=1
 ```
 
 The runtime config check is a required production routing gate before opening `/chat`; browser Network should show production DSPACE calling production token.place. The immutable DSPACE image remains environment-neutral, and this production overlay selects the production token.place origin without rebuilding the image. If `/chat` fails after `/config.json` is correct, capture the browser CORS error plus the token.place response headers and escalate to the token.place operator; do not change DSPACE values to work around token.place CORS policy.
+
+After reconciliation, repeat the bounded DSPACE runtime and `/chat` checks, the production
+observability verification, the dashboard API verification, and a manual dashboard inspection.
+DSPACE HTTP, runtime, and feature panels should populate. Production release-integrity, blackbox,
+token.place, and alerting panels may remain `NO DATA` until those separate integrations are deployed.
 
 ```bash
 curl -fsS https://democratized.space/config.json \
