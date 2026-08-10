@@ -526,6 +526,21 @@ part of this rollout.
    just cf-tunnel-wan-dependency-loss-drill env=staging
    ```
 
+   Before any live read-only preflight, obtain the current
+   `monitoring/kube-prometheus-stack` revision through a **separate read-only review gate** and have
+   the operator approve that coordinate. The helper deliberately does not discover, infer, or default
+   it. Pass the reviewed positive decimal revision explicitly when rendering the read-only manual node
+   plan (replace `<approved-observability-revision>` with the separately approved value):
+
+   ```bash
+   CF_DRILL_EXPECTED_OBSERVABILITY_REVISION='<approved-observability-revision>' \
+     CF_DRILL_APPROVED_REVISION="$(git rev-parse HEAD)" \
+     just cf-tunnel-wan-dependency-loss-drill env=staging --manual-node-plan
+   ```
+
+   This command performs cluster preflight and renders commands, but does not invoke a node executor.
+   A later healthy Helm revision can be reviewed and supplied without changing this repository.
+
    The helper selects the two exact preflight-approved pod sandboxes and installs a uniquely named
    `nftables` output table inside each pod network namespace. Unlike a newly applied Kubernetes policy,
    the namespace-local output hook evaluates every packet in established QUIC and TCP flows. It drops
@@ -534,7 +549,8 @@ part of this rollout.
    rule and never flushes a ruleset.
 
    Execution remains **blocked unless every preflight passes**. In addition to `--execute`, the operator
-   must provide the approved Git revision, a safe executable node-command adapter, and the exact typed
+   must provide the approved Git revision, the separately approved observability Helm revision, a safe
+   executable node-command adapter, and the exact typed
    confirmation printed by `--help`. The adapter boundary is intentional: the repository does not assume
    unattended remote access, weaken host-key checking, create keys, or handle login credentials. If
    authenticated privileged execution on both nodes cannot be guaranteed, stop at the plan and run
