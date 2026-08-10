@@ -84,7 +84,7 @@ class ReleaseInputs:
 
 def safe_yaml_documents(text: str) -> list[object]:
     """Parse JSON-compatible YAML via Psych's AST, rejecting tags and aliases."""
-    ruby = r'''
+    ruby = r"""
 require "psych"
 require "json"
 scanner = Psych::ScalarScanner.new(Psych::ClassLoader::Restricted.new([], []))
@@ -103,7 +103,7 @@ def convert(node, scanner)
   end
 end
 puts JSON.generate(convert(Psych.parse_stream(STDIN.read), scanner))
-'''
+"""
     try:
         parsed = subprocess.run(
             ["ruby", "-e", ruby], input=text, capture_output=True, text=True, check=False
@@ -158,7 +158,9 @@ def release_associated(
 ) -> bool:
     metadata = document.get("metadata") if isinstance(document.get("metadata"), dict) else {}
     labels = metadata.get("labels") if isinstance(metadata.get("labels"), dict) else {}
-    annotations = metadata.get("annotations") if isinstance(metadata.get("annotations"), dict) else {}
+    annotations = (
+        metadata.get("annotations") if isinstance(metadata.get("annotations"), dict) else {}
+    )
     return (
         scalar(labels.get("app.kubernetes.io/instance")) == release
         or scalar(labels.get("release")) == release
@@ -184,9 +186,42 @@ def dspace_production_metrics_token_is_unsafe(
     """Return whether an associated resource has a non-legacy METRICS_TOKEN form."""
     if not contains_exact_scalar(document, {"METRICS_TOKEN"}):
         return False
-    if metrics_enabled or scalar(document.get("kind")) not in {
-        "Deployment", "StatefulSet", "DaemonSet"
-    }:
+    if metrics_enabled:
+        found, containers = nested_value(document, ("spec", "template", "spec", "containers"))
+        if not found or not isinstance(containers, list):
+            return True
+        candidates = {inputs.app, inputs.release, *APP_CONTAINER_NAMES.get(inputs.app, set())}
+        safe_entries: set[int] = set()
+        for container in containers:
+            if not isinstance(container, dict) or scalar(container.get("name")) not in candidates:
+                continue
+            env = container.get("env")
+            for entry in env if isinstance(env, list) else []:
+                ref = entry.get("valueFrom") if isinstance(entry, dict) else None
+                secret_ref = ref.get("secretKeyRef") if isinstance(ref, dict) else None
+                if (
+                    scalar(entry.get("name")) == "METRICS_TOKEN"
+                    and set(entry) == {"name", "valueFrom"}
+                    and isinstance(ref, dict)
+                    and set(ref) == {"secretKeyRef"}
+                    and isinstance(secret_ref, dict)
+                    and set(secret_ref) == {"name", "key"}
+                    and secret_ref == {"name": "dspace-prod-metrics-token", "key": "token"}
+                ):
+                    safe_entries.add(id(entry))
+
+        def has_unsafe_enabled_token(value: object) -> bool:
+            if isinstance(value, dict):
+                return id(value) not in safe_entries and any(
+                    has_unsafe_enabled_token(key) or has_unsafe_enabled_token(item)
+                    for key, item in value.items()
+                )
+            if isinstance(value, list):
+                return any(has_unsafe_enabled_token(item) for item in value)
+            return value == "METRICS_TOKEN"
+
+        return has_unsafe_enabled_token(document)
+    if scalar(document.get("kind")) not in {"Deployment", "StatefulSet", "DaemonSet"}:
         return True
     found, containers = nested_value(document, ("spec", "template", "spec", "containers"))
     if not found or not isinstance(containers, list):
@@ -205,8 +240,10 @@ def dspace_production_metrics_token_is_unsafe(
             # Chart 3.0.2 uses the pod UID as a safe, unpredictable token when metrics are off.
             if (
                 set(entry) == {"name", "valueFrom"}
-                and isinstance(value_from, dict) and set(value_from) == {"fieldRef"}
-                and isinstance(field_ref, dict) and set(field_ref) == {"fieldPath"}
+                and isinstance(value_from, dict)
+                and set(value_from) == {"fieldRef"}
+                and isinstance(field_ref, dict)
+                and set(field_ref) == {"fieldPath"}
                 and field_ref.get("fieldPath") == "metadata.uid"
             ):
                 safe_entries.add(id(entry))
@@ -252,8 +289,7 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
             document,
             inputs.release,
             allow_name=(
-                inputs.app != "dspace"
-                and kind not in {"Deployment", "StatefulSet", "DaemonSet"}
+                inputs.app != "dspace" and kind not in {"Deployment", "StatefulSet", "DaemonSet"}
             ),
         )
         if inputs.app == "dspace" and kind == "Secret":
@@ -272,10 +308,15 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
                 found, containers = nested_value(
                     document, ("spec", "template", "spec", "containers")
                 )
-                intended = [
-                    item
-                    for item in containers if isinstance(item, dict) and scalar(item.get("name")) in candidates
-                ] if found and isinstance(containers, list) else []
+                intended = (
+                    [
+                        item
+                        for item in containers
+                        if isinstance(item, dict) and scalar(item.get("name")) in candidates
+                    ]
+                    if found and isinstance(containers, list)
+                    else []
+                )
                 intended_container_found = intended_container_found or bool(intended)
                 for item in intended:
                     if not scalar(item.get("image")).endswith(expected_suffix):
@@ -327,13 +368,18 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
                 errors.append(
                     "DSPACE ServiceMonitor bearerTokenSecret name and key must be nonempty"
                 )
-        production_leaks = {"dspace-staging-metrics-token", "sugarkube-int"}
+        production_leaks = {
+            "dspace-staging-metrics-token",
+            "sugarkube-int",
+            "staging.democratized.space",
+        }
         metrics_enabled = (
             resolved_values_scalar(inputs.values, ("metrics", "enabled")).lower() == "true"
         )
-        if inputs.env == "prod" and (
-            service_monitors
-            or any(
+        if inputs.env == "prod":
+            if service_monitors and not metrics_enabled:
+                errors.append("DSPACE production rendered staging-only metrics configuration")
+            if any(
                 isinstance(doc, dict)
                 and release_associated(doc, inputs.release, allow_name=False)
                 and (
@@ -343,16 +389,56 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
                     )
                 )
                 for doc in documents
-            )
-        ):
-            errors.append("DSPACE production rendered staging-only metrics configuration")
+            ):
+                errors.append("DSPACE production rendered staging-only metrics configuration")
+            if metrics_enabled:
+                if len(service_monitors) != 1:
+                    errors.append("DSPACE production must render exactly one ServiceMonitor")
+                else:
+                    monitor = service_monitors[0]
+                    labels = monitor.get("metadata", {}).get("labels", {})
+                    spec = monitor.get("spec", {})
+                    endpoints = spec.get("endpoints") if isinstance(spec, dict) else None
+                    endpoint = (
+                        endpoints[0]
+                        if isinstance(endpoints, list) and len(endpoints) == 1
+                        else None
+                    )
+                    auth = endpoint.get("bearerTokenSecret") if isinstance(endpoint, dict) else None
+                    relabelings = (
+                        endpoint.get("relabelings", []) if isinstance(endpoint, dict) else []
+                    )
+                    cluster = [
+                        r
+                        for r in relabelings
+                        if isinstance(r, dict) and r.get("targetLabel") == "cluster"
+                    ]
+                    if (
+                        not isinstance(labels, dict)
+                        or labels.get("release") != "kube-prometheus-stack"
+                    ):
+                        errors.append(
+                            "DSPACE production ServiceMonitor discovery label is incorrect"
+                        )
+                    if auth != {"name": "dspace-prod-metrics-token", "key": "token"}:
+                        errors.append(
+                            "DSPACE production ServiceMonitor authentication is incorrect"
+                        )
+                    if len(cluster) != 1 or cluster[0].get("replacement") != "sugarkube-prod":
+                        errors.append(
+                            "DSPACE production ServiceMonitor cluster relabeling is incorrect"
+                        )
     return errors
 
 
 def parse_chart_yaml(text: str) -> dict[str, str]:
     documents = safe_yaml_documents(text)
     document = documents[0] if documents else {}
-    return {str(key): scalar(value) for key, value in document.items()} if isinstance(document, dict) else {}
+    return (
+        {str(key): scalar(value) for key, value in document.items()}
+        if isinstance(document, dict)
+        else {}
+    )
 
 
 def semver_key(v: str) -> tuple[int, int, int, int, tuple[object, ...]]:
@@ -422,13 +508,15 @@ def deployment_app_container_env_sets(
             found.append(
                 (
                     container_name,
-                    {
-                        scalar(item.get("name"))
-                        for item in envs
-                        if isinstance(item, dict) and scalar(item.get("name"))
-                    }
-                    if isinstance(envs, list)
-                    else set(),
+                    (
+                        {
+                            scalar(item.get("name"))
+                            for item in envs
+                            if isinstance(item, dict) and scalar(item.get("name"))
+                        }
+                        if isinstance(envs, list)
+                        else set()
+                    ),
                 )
             )
     return found
@@ -488,7 +576,9 @@ def expected_ingress_host(values: tuple[str, ...], explicit: str) -> str:
     host = scalar(resolved_host)
     enabled = scalar(resolved_enabled).lower()
     if enabled == "true" and not host:
-        raise SystemExit("ERROR: ingress.enabled is true but no nonempty ingress.host was resolved.")
+        raise SystemExit(
+            "ERROR: ingress.enabled is true but no nonempty ingress.host was resolved."
+        )
     return host if enabled != "false" else ""
 
 
@@ -689,7 +779,9 @@ def cmd_resolve_host(args: argparse.Namespace) -> int:
     try:
         host = expected_ingress_host(values, args.host)
     except (ValueError, json.JSONDecodeError, SystemExit) as error:
-        print(f"ERROR: values parsing failed while resolving ingress host: {error}", file=sys.stderr)
+        print(
+            f"ERROR: values parsing failed while resolving ingress host: {error}", file=sys.stderr
+        )
         return 1
     print(host)
     return 0

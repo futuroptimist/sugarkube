@@ -711,6 +711,13 @@ PagerDuty incident recovers and resolves. Re-run live verification.
 
 ## Declarative application metrics verification
 
+Production DSPACE application 3.0.1/chart 3.0.2 uses this guarded lifecycle with
+`app=dspace env=prod`. Run it only from `sugarkube3` with the externally managed
+`127.0.0.1:16443` tunnel, explicit `$HOME/.kube/config-sugarkube-prod`, and `sugar-prod` context;
+do not use `just kubeconfig-env env=prod` there. Install and check the production credential before
+the guarded values-only reconciliation. No application/chart promotion is involved, and the
+repository change alone deploys nothing.
+
 Sugarkube keeps application-specific Prometheus metrics contracts in the
 strict JSON inventory at `platform/observability/app-metrics.json`. The live
 verifier is generic: application names, metric families, bounded labels, Secret

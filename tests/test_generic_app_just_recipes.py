@@ -6281,7 +6281,7 @@ def test_observability_app_metrics_verify_all_uses_every_configured_app(monkeypa
 
 
 def test_observability_app_metrics_live_environment_normalization_and_rejection(monkeypatch):
-    forbidden = ["prod", "production", "", "dev", "qa"]
+    forbidden = ["production", "", "dev", "qa"]
     for env in forbidden:
         def fail_load_config(env=env):
             raise AssertionError(f"loaded config for {env!r}")
@@ -6289,11 +6289,12 @@ def test_observability_app_metrics_live_environment_normalization_and_rejection(
         monkeypatch.setattr(app_metrics, "load_config", fail_load_config)
         with pytest.raises(SystemExit) as excinfo:
             app_metrics.appcfg("tokenplace", env)
-        assert "staging only" in str(excinfo.value)
+        assert "unsupported" in str(excinfo.value)
         assert app_metrics.main(["verify-all", "--env", env]) == 2
 
     assert app_metrics.normalize_live_env("env=env=int") == "staging"
     assert app_metrics.normalize_live_env("env=staging") == "staging"
+    assert app_metrics.normalize_live_env("env=prod") == "prod"
 
 
 @pytest.mark.parametrize("app", ["app=", "app=foo=bar", "app=Bad_Name", "-bad"])
@@ -7038,12 +7039,12 @@ def test_observability_app_metrics_install_secret_subprocess_failures_are_redact
     [
         (lambda d: d.update({"schemaVersion": 2}), "schemaVersion"),
         (lambda d: d.update({"applications": []}), "applications"),
-        (
-            lambda d: d["applications"]["tokenplace"]["environments"].update(
-                {"prod": {}}
+            (
+                lambda d: d["applications"]["tokenplace"]["environments"].update(
+                    {"qa": {}}
+                ),
+                "unsupported",
             ),
-            "only staging",
-        ),
         (
             lambda d: d["applications"]["tokenplace"]["environments"][
                 "staging"

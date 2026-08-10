@@ -168,12 +168,20 @@ def test_dspace_staging_values_enable_authenticated_metrics_servicemonitor() -> 
     assert "cluster: sugarkube-int" in text
 
 
-def test_dspace_prod_values_do_not_enable_metrics_or_servicemonitor() -> None:
+def test_dspace_prod_values_enable_exact_authenticated_metrics_contract() -> None:
     text = OVERLAYS["prod"].read_text(encoding="utf-8")
 
-    assert "metrics:" not in text
-    assert "serviceMonitor:" not in text
+    assert "metrics:\n  enabled: true" in text
+    assert "existingSecret: dspace-prod-metrics-token" in text
+    assert "secretKey: token" in text
+    assert text.count("serviceMonitor:") == 1
+    assert "serviceMonitor:\n  enabled: true" in text
+    assert "interval: 30s" in text
+    assert "scrapeTimeout: 10s" in text
+    assert "release: kube-prometheus-stack" in text
+    assert "cluster: sugarkube-prod" in text
     assert "dspace-staging-metrics-token" not in text
+    assert "sugarkube-int" not in text
 
 
 def test_dspace_fixtures_do_not_contain_real_credentials() -> None:
@@ -182,4 +190,6 @@ def test_dspace_fixtures_do_not_contain_real_credentials() -> None:
         assert (
             "dspace-staging-metrics-token" not in text or path.name == "dspace.values.staging.yaml"
         )
-        assert "secretKey: token" not in text or path.name == "dspace.values.staging.yaml"
+        assert "secretKey: token" not in text or path.name in {
+            "dspace.values.staging.yaml", "dspace.values.prod.yaml"
+        }

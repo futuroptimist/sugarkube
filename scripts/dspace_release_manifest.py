@@ -922,16 +922,28 @@ def verify_helm_stored_values(
         raise ManifestError("Helm stored image values do not match approved coordinates")
 
     if environment == "prod":
-        metrics = stored_values.get("metrics", {})
-        service_monitor = stored_values.get("serviceMonitor", {})
+        metrics = stored_values.get("metrics")
+        service_monitor = stored_values.get("serviceMonitor")
+        expected_metrics = {
+            "enabled": True,
+            "auth": {"existingSecret": "dspace-prod-metrics-token", "secretKey": "token"},
+        }
+        expected_monitor = {
+            "enabled": True,
+            "interval": "30s",
+            "scrapeTimeout": "10s",
+            "additionalLabels": {"release": "kube-prometheus-stack"},
+            "cluster": "sugarkube-prod",
+        }
         if (
-            not isinstance(metrics, dict)
-            or not isinstance(service_monitor, dict)
-            or metrics.get("enabled") is True
-            or service_monitor.get("enabled") is True
+            metrics != expected_metrics
+            or service_monitor != expected_monitor
             or contains_staging_reference(stored_values)
         ):
-            raise ManifestError("Helm stored production values contain staging-only settings")
+            raise ManifestError(
+                "Helm stored production values contain staging-only settings or do not match "
+                "the exact metrics contract"
+            )
     return {
         "check": "helmStoredValues",
         "passed": True,
