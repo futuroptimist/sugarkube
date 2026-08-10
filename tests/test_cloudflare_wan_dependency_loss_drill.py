@@ -36,6 +36,8 @@ class StatefulDrillHarness:
             "sandbox_fail": False, "collision": False, "install_fail": -1,
             "restart": [0, 0], "tables": [False, False], "watchdogs": [False, False],
             "block_long_sleep": False, "secret": "SENTINEL-SECRET-MUST-NOT-LEAK",
+            "approved_crictl": True,
+            "legacy_crictl": False,
         }
         state.update(overrides)
         self.state.write_text(json.dumps(state))
@@ -172,11 +174,13 @@ elif name == "kubectl":
         out(json.dumps({"data":{"result":[{"value":[0,str(value)]}]}}))
 elif name == "node-executor":
     node, command=args[0],args[1]; idx=int(node[-1])-1
-    if "test -x" in command: sys.exit(0)
+    if "test -x" in command:
+        approved = state["approved_crictl"] and "test -x /usr/local/bin/crictl" in command
+        sys.exit(0 if approved else 46)
     if "crictl pods --name" in command and "inspectp" not in command:
         if state["sandbox_fail"]: out("ambiguous\nsecond"); sys.exit(0)
         out(("a" if idx == 0 else "b")*12)
-    elif command.startswith("sudo crictl inspectp"):
+    elif command.startswith("sudo /usr/local/bin/crictl inspectp"):
         out(json.dumps({"status":{"labels":{"io.kubernetes.pod.uid":f"uid-{idx+1}"}},"info":{"pid":101+idx}}))
     elif command.startswith("readlink /proc/") or command.startswith("/usr/bin/readlink /proc/"):
         out(f"net:[{1001+idx}]")
@@ -325,6 +329,17 @@ def test_manual_node_plan_runs_read_only_preflights_and_renders_exact_ordered_co
     assert "Observability Helm revision: expected=10 observed=10" in result.stdout
 
 
+def test_manual_node_plan_uses_only_the_approved_crictl_path(tmp_path: Path) -> None:
+    result = run("--manual-node-plan", env=manual_plan_environment(tmp_path))
+    assert result.returncode == 0, result.stderr
+    records = [
+        line for line in result.stdout.splitlines()
+        if line.startswith(("WATCHDOG ", "DISRUPTION ", "CLEANUP "))
+    ]
+    assert len(records) == 6
+    assert all("/usr/local/bin/crictl" in record for record in records)
+
+
 def test_later_matching_observability_revision_needs_no_source_change(tmp_path: Path) -> None:
     result = run(
         "--manual-node-plan",
@@ -414,10 +429,58 @@ def test_wrong_context_revision_image_helm_and_ambiguous_pods_are_guarded() -> N
 
 
 def test_exact_network_namespace_resolution_is_required() -> None:
-    assert "crictl inspectp" in TEXT
+    assert "${CRICTL} inspectp" in TEXT
     assert 'io.kubernetes.pod.uid' in TEXT
     assert "readlink /proc/${pid}/ns/net" in TEXT
     assert "cannot prove exact pod network namespace identity" in TEXT
+
+
+def test_crictl_path_is_one_immutable_constant_used_by_all_command_builders() -> None:
+    assert "readonly CRICTL=/usr/local/bin/crictl" in TEXT
+    assert TEXT.count("/usr/local/bin/crictl") == 1
+    assert "command -v crictl" not in TEXT
+    assert "${CRICTL}" in TEXT
+
+
+def test_only_legacy_crictl_cannot_satisfy_execution_preflight(tmp_path: Path) -> None:
+    harness = StatefulDrillHarness(
+        tmp_path, approved_crictl=False, legacy_crictl=True,
+    )
+    result = harness.run()
+    assert result.returncode != 0
+    assert "required remote binary path missing" in result.stderr
+    node_commands = [
+        entry["args"][1] for entry in harness.commands()
+        if entry["tool"] == "node-executor"
+    ]
+    assert node_commands
+    assert "test -x /usr/local/bin/crictl" in node_commands[0]
+    assert not any(
+        event.get("event") in {"watchdog", "table"} for event in harness.events()
+    )
+    assert len(node_commands) == 1
+    assert "sudo /usr/bin/nsenter" not in node_commands[0]
+    assert "add table" not in node_commands[0]
+
+
+def test_executor_commands_use_only_the_approved_crictl_path(tmp_path: Path) -> None:
+    harness = StatefulDrillHarness(tmp_path)
+    harness.run()
+    commands = [
+        entry["args"][1] for entry in harness.commands()
+        if entry["tool"] == "node-executor"
+    ]
+    crictl_commands = [command for command in commands if "crictl" in command]
+    assert crictl_commands
+    assert all("/usr/local/bin/crictl" in command for command in crictl_commands)
+    assert any("pods --name" in command for command in crictl_commands)
+    assert any("inspectp" in command and "list ruleset" in command for command in crictl_commands)
+    assert any("inspectp" in command and "systemd-run" in command for command in crictl_commands)
+    assert any("inspectp" in command and "add table inet" in command for command in crictl_commands)
+    assert any(
+        "inspectp" in command and "delete table inet" in command
+        for command in crictl_commands
+    )
 
 
 def test_owner_collision_is_refused() -> None:
