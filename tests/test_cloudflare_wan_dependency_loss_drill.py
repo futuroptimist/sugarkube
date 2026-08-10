@@ -31,6 +31,7 @@ class StatefulDrillHarness:
         state = {
             "context": "sugar-staging", "revision": "approved", "dirty": False,
             "image_ok": True, "helm_revision": 2, "pod_count": 2,
+            "obs_revision": 10, "obs_deployed_entries": 1, "obs_revision_after_cleanup": None,
             "same_node": False, "alerts": 0, "endpoint": 200,
             "sandbox_fail": False, "collision": False, "install_fail": -1,
             "restart": [0, 0], "tables": [False, False], "watchdogs": [False, False],
@@ -50,6 +51,7 @@ class StatefulDrillHarness:
             "HARNESS_STATE": str(self.state),
             "HARNESS_LOG": str(self.log),
             "CF_DRILL_APPROVED_REVISION": "approved",
+            "CF_DRILL_EXPECTED_OBSERVABILITY_REVISION": "10",
             "CF_DRILL_NODE_EXECUTOR": str(node),
         }
 
@@ -127,7 +129,13 @@ if name == "git":
 elif name == "helm":
     if "list" in args: out(json.dumps([{"name":"cloudflare-tunnel","status":"deployed","chart":"cloudflare-tunnel-0.3.2"}]))
     elif "cloudflare-tunnel" in args: out(json.dumps([{"status":"deployed","revision":state["helm_revision"]}]))
-    else: out('[{"status":"deployed","revision":9}]')
+    else:
+        state["obs_history_calls"] = state.get("obs_history_calls", 0) + 1
+        revision = state["obs_revision"]
+        if state["obs_history_calls"] > 1 and state["obs_revision_after_cleanup"] is not None:
+            revision = state["obs_revision_after_cleanup"]
+        entries = [{"status":"deployed","revision":revision} for _ in range(state["obs_deployed_entries"])]
+        out(json.dumps(entries)); save()
 elif name == "just": sys.exit(0)
 elif name == "ruby":
     for i in range(16): out(f"https://endpoint-{i}.test")
@@ -215,7 +223,48 @@ def test_dry_run_performs_no_mutation_or_external_preflight(tmp_path: Path) -> N
     assert not marker.exists(), "dry-run should not even invoke cluster/node stubs"
 
 
-def manual_plan_environment(tmp_path: Path, *, context: str = "sugar-staging") -> dict[str, str]:
+def test_help_distinguishes_offline_manual_and_execution_requirements() -> None:
+    result = run("--help")
+    assert result.returncode == 0
+    assert (
+        "default offline plan requires no approval coordinates or cluster/node tools"
+        in result.stdout
+    )
+    assert "Both --manual-node-plan and --execute require:" in result.stdout
+    assert "CF_DRILL_APPROVED_REVISION" in result.stdout
+    assert "CF_DRILL_EXPECTED_OBSERVABILITY_REVISION" in result.stdout
+    assert "Execution additionally requires the exact confirmation and:" in result.stdout
+    assert "CF_DRILL_NODE_EXECUTOR" in result.stdout
+
+
+@pytest.mark.parametrize("mode", ["manual", "execute"])
+def test_live_modes_require_explicit_observability_revision(
+    tmp_path: Path, mode: str,
+) -> None:
+    env = manual_plan_environment(tmp_path)
+    env.pop("CF_DRILL_EXPECTED_OBSERVABILITY_REVISION")
+    args = ["--manual-node-plan"] if mode == "manual" else ["--execute", f"--confirm={CONFIRM}"]
+    result = run(*args, env=env)
+    assert result.returncode != 0
+    assert "CF_DRILL_EXPECTED_OBSERVABILITY_REVISION is required" in result.stderr
+
+
+@pytest.mark.parametrize("value", ["", "0", "-1", "+10", "01", " 10", "10 ", "ten", "10x"])
+def test_live_modes_reject_noncanonical_observability_revision(
+    tmp_path: Path, value: str,
+) -> None:
+    env = manual_plan_environment(tmp_path)
+    env["CF_DRILL_EXPECTED_OBSERVABILITY_REVISION"] = value
+    result = run("--manual-node-plan", env=env)
+    assert result.returncode != 0
+    assert "canonical positive decimal integer" in result.stderr
+    assert not (tmp_path / "node-executor-called").exists()
+
+
+def manual_plan_environment(
+    tmp_path: Path, *, context: str = "sugar-staging", obs_revision: int = 10,
+    obs_deployed_entries: int = 1,
+) -> dict[str, str]:
     image = TEXT.split("readonly EXPECTED_IMAGE='", 1)[1].split("'", 1)[0]
     deployment = {
         "metadata": {"labels": {"app.kubernetes.io/managed-by": "Helm", "app.kubernetes.io/name": "cloudflare-tunnel", "app.kubernetes.io/instance": "cloudflare-tunnel"}},
@@ -236,13 +285,20 @@ def manual_plan_environment(tmp_path: Path, *, context: str = "sugar-staging") -
         path.chmod(0o755)
 
     stub("git", "case \"$*\" in *status*) exit 0;; *rev-parse*) echo approved;; esac\n")
-    stub("helm", "case \"$*\" in *' list '*) printf '%s\\n' '[{\"name\":\"cloudflare-tunnel\",\"status\":\"deployed\",\"chart\":\"cloudflare-tunnel-0.3.2\"}]';; *cloudflare-tunnel*) printf '%s\\n' '[{\"status\":\"deployed\",\"revision\":2}]';; *) printf '%s\\n' '[{\"status\":\"deployed\",\"revision\":9}]';; esac\n")
+    obs_history = json.dumps(
+        [{"status": "deployed", "revision": obs_revision}] * obs_deployed_entries
+    )
+    stub("helm", f"case \"$*\" in *' list '*) printf '%s\\n' '[{{\"name\":\"cloudflare-tunnel\",\"status\":\"deployed\",\"chart\":\"cloudflare-tunnel-0.3.2\"}}]';; *cloudflare-tunnel*) printf '%s\\n' '[{{\"status\":\"deployed\",\"revision\":2}}]';; *) printf '%s\\n' {json.dumps(obs_history)};; esac\n")
     stub("kubectl", f"case \"$*\" in *current-context*) echo {context};; *'get deployment'*) printf '%s\\n' {json.dumps(json.dumps(deployment))};; *'get pods'*) printf '%s\\n' {json.dumps(json.dumps(pods))};; *'get secret'*) printf 'secret-uid\\t12\\t2026-08-09T00:00:00Z\\n';; *ALERTS*) printf '%s\\n' '{{\"data\":{{\"result\":[{{\"value\":[0,\"0\"]}}]}}}}';; *get\\ --raw*) printf '%s\\n' '{{\"data\":{{\"result\":[{{\"value\":[0,\"2\"]}}]}}}}';; esac\n")
     stub("just", "exit 0\n")
     stub("ruby", "i=1; while [ $i -le 16 ]; do echo https://endpoint-$i.test; i=$((i+1)); done\n")
     stub("curl", "printf 200\n")
     stub("date", "printf 20260809T000000Z\n")
-    return {"PATH": f"{tmp_path}:/usr/bin:/bin", "CF_DRILL_APPROVED_REVISION": "approved"}
+    return {
+        "PATH": f"{tmp_path}:/usr/bin:/bin",
+        "CF_DRILL_APPROVED_REVISION": "approved",
+        "CF_DRILL_EXPECTED_OBSERVABILITY_REVISION": str(obs_revision),
+    }
 
 
 def test_manual_node_plan_runs_read_only_preflights_and_renders_exact_ordered_commands(tmp_path: Path) -> None:
@@ -266,6 +322,39 @@ def test_manual_node_plan_runs_read_only_preflights_and_renders_exact_ordered_co
     assert all("systemctl" in lines[i] and "MainPID" in lines[i] for i in disruptions)
     assert all("delete\\ table\\ inet" in lines[i] and "list\\ ruleset" in lines[i] and "length\\ ==\\ 0" in lines[i] for i in cleanups)
     assert "BLOCKED: manual-node plan only; the drill was not executed and has not passed." in result.stdout
+    assert "Observability Helm revision: expected=10 observed=10" in result.stdout
+
+
+def test_later_matching_observability_revision_needs_no_source_change(tmp_path: Path) -> None:
+    result = run(
+        "--manual-node-plan",
+        env=manual_plan_environment(tmp_path, obs_revision=42),
+    )
+    assert result.returncode == 0, result.stderr
+    assert "expected=42 observed=42" in result.stdout
+
+
+def test_observability_revision_mismatch_fails_before_node_executor(tmp_path: Path) -> None:
+    env = manual_plan_environment(tmp_path, obs_revision=10)
+    env["CF_DRILL_EXPECTED_OBSERVABILITY_REVISION"] = "11"
+    result = run("--manual-node-plan", env=env)
+    assert result.returncode != 0
+    assert "expected 11; observed 10" in result.stderr
+    assert "WATCHDOG " not in result.stdout
+
+
+@pytest.mark.parametrize("deployed_entries", [0, 2])
+def test_observability_history_requires_exactly_one_deployed_entry(
+    tmp_path: Path, deployed_entries: int,
+) -> None:
+    env = manual_plan_environment(
+        tmp_path, obs_revision=10, obs_deployed_entries=deployed_entries
+    )
+    env["CF_DRILL_EXPECTED_OBSERVABILITY_REVISION"] = "10"
+    result = run("--manual-node-plan", env=env)
+    assert result.returncode != 0
+    assert "exactly one deployed entry" in result.stderr
+    assert "WATCHDOG " not in result.stdout
 
 
 def test_manual_node_plan_preflight_failure_emits_no_actionable_commands(tmp_path: Path) -> None:
@@ -561,10 +650,53 @@ def test_actual_helper_completes_stateful_interruption_and_recovery(tmp_path: Pa
     assert sum(entry["tool"] == "just" for entry in commands) == 2
     assert len([event for event in events if event.get("event") == "endpoint"]) == 32
     preflight = json.loads((harness.evidence / "preflight.json").read_text())
+    assert preflight["observabilityRevision"] == {"expected": "10", "observed": "10"}
+    assert "observability revision expected=10 observed=10" in result.stdout
     assert [pod["restartCount"] for pod in preflight["pods"]] == [0, 0]
     assert all(pod["image"].startswith("cloudflare/cloudflared:") for pod in preflight["pods"])
     assert (harness.evidence / "interruption-metrics.json").exists()
     assert (harness.evidence / "recovery-metrics.json").exists()
+
+
+@pytest.mark.parametrize("expected", ["", "0", "-1", "+10", "01", " 10", "ten"])
+def test_invalid_coordinate_never_invokes_node_executor(
+    tmp_path: Path, expected: str,
+) -> None:
+    harness = StatefulDrillHarness(tmp_path)
+    harness.env["CF_DRILL_EXPECTED_OBSERVABILITY_REVISION"] = expected
+    result = harness.run()
+    assert result.returncode != 0
+    assert not any(entry["tool"] == "node-executor" for entry in harness.commands())
+
+
+def test_revision_mismatch_never_invokes_node_executor(tmp_path: Path) -> None:
+    harness = StatefulDrillHarness(tmp_path, obs_revision=11)
+    result = harness.run()
+    assert result.returncode != 0
+    assert "expected 10; observed 11" in result.stderr
+    assert not any(entry["tool"] == "node-executor" for entry in harness.commands())
+
+
+@pytest.mark.parametrize("observed", ["10", 10.5])
+def test_invalid_observed_revision_type_never_reaches_disruption(
+    tmp_path: Path, observed: object,
+) -> None:
+    harness = StatefulDrillHarness(tmp_path, obs_revision=observed)
+    result = harness.run()
+    assert result.returncode != 0
+    assert "positive integer-valued JSON number" in result.stderr
+    assert not any(entry["tool"] == "node-executor" for entry in harness.commands())
+    assert not any(
+        event.get("event") in {"watchdog", "table"} for event in harness.events()
+    )
+
+
+def test_post_cleanup_observability_revision_drift_is_rejected(tmp_path: Path) -> None:
+    harness = StatefulDrillHarness(tmp_path, obs_revision_after_cleanup=11)
+    result = harness.run()
+    assert result.returncode != 0
+    assert "post-cleanup observability Helm revision mismatch" in result.stderr
+    assert harness.current()["tables"] == [False, False]
 
 
 @pytest.mark.parametrize(

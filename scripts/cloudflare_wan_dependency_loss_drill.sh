@@ -28,8 +28,11 @@ Usage: cloudflare_wan_dependency_loss_drill.sh [--execute] [--env staging]
        cloudflare_wan_dependency_loss_drill.sh --manual-node-plan [--env staging]
        [--confirm 'DISRUPT STAGING CLOUDFLARE WAN FOR SAME-PROCESS RECOVERY']
 
-The default is a non-mutating plan. Execution also requires:
+The default offline plan requires no approval coordinates or cluster/node tools.
+Both --manual-node-plan and --execute require:
   CF_DRILL_APPROVED_REVISION=<full git revision>
+  CF_DRILL_EXPECTED_OBSERVABILITY_REVISION=<separately reviewed positive integer>
+Execution additionally requires the exact confirmation and:
   CF_DRILL_NODE_EXECUTOR=<executable accepting NODE and COMMAND arguments>
 The executor is deliberately not SSH: authentication and sudo must be established separately.
 It must execute the supplied command verbatim on the named node and must not log credentials.
@@ -49,6 +52,7 @@ render_manual_node_plan() {
   local -a disruptions=() cleanups=()
   table="$(table_for)"
   printf 'MANUAL NODE PLAN -- commands were rendered but NOT EXECUTED.\n'
+  printf 'Observability Helm revision: expected=%s observed=%s\n' "${expected_observability_revision}" "${observed_observability_revision}"
   printf 'Run each record through a separately authenticated, host-key-verified session for its exact node.\n'
   printf 'Complete and verify both watchdog commands successfully before running either DISRUPTION command.\n'
   printf 'After the observation window, run both CLEANUP commands.\n'
@@ -76,6 +80,21 @@ render_manual_node_plan() {
     printf 'CLEANUP node=%q pod=%q uid=%q owner=%q table=%q command=%q\n' "${pod_nodes[$i]}" "${pod_names[$i]}" "${pod_uids[$i]}" "${owner}" "${table}" "${cleanups[$i]}"
   done
   printf 'BLOCKED: manual-node plan only; the drill was not executed and has not passed.\n'
+}
+
+validate_observability_history() {
+  local history="$1" phase="$2" deployed_count revision revision_json
+  deployed_count="$(jq '[.[] | select(.status == "deployed")] | length' <<<"${history}")" || \
+    die "${phase} observability Helm history is not valid JSON"
+  [[ "${deployed_count}" == 1 ]] || \
+    die "${phase} observability Helm history must contain exactly one deployed entry (expected revision ${expected_observability_revision}; observed deployed entries ${deployed_count})"
+  revision_json="$(jq -c '[.[] | select(.status == "deployed")][0].revision' <<<"${history}")"
+  jq -e 'type == "number" and . > 0 and floor == .' <<<"${revision_json}" >/dev/null || \
+    die "${phase} observability deployed revision is not a positive integer-valued JSON number (expected ${expected_observability_revision}; observed ${revision_json})"
+  revision="$(jq -r '.' <<<"${revision_json}")"
+  [[ "${revision}" == "${expected_observability_revision}" ]] || \
+    die "${phase} observability Helm revision mismatch (expected ${expected_observability_revision}; observed ${revision})"
+  observed_observability_revision="${revision}"
 }
 
 manual_cleanup() {
@@ -137,6 +156,9 @@ owner="cfwandrill-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 if ((execute)); then
   [[ "${confirmation}" == "${CONFIRMATION}" ]] || die "confirmation must exactly equal: ${CONFIRMATION}"
 fi
+expected_observability_revision="${CF_DRILL_EXPECTED_OBSERVABILITY_REVISION:-}"
+[[ "${expected_observability_revision}" =~ ^[1-9][0-9]*$ ]] || \
+  die 'CF_DRILL_EXPECTED_OBSERVABILITY_REVISION is required and must be a canonical positive decimal integer (for example, 10; no signs, whitespace, or leading zeros)'
 [[ -n "${CF_DRILL_APPROVED_REVISION:-}" ]] || die 'CF_DRILL_APPROVED_REVISION is required'
 [[ "$(kubectl config current-context)" == "${EXPECTED_CONTEXT}" ]] || die "context must be ${EXPECTED_CONTEXT}"
 [[ -z "$(git status --porcelain)" ]] || die 'repository worktree must be clean'
@@ -150,7 +172,8 @@ releases="$(helm -n cloudflare list -o json)"
 cf_history="$(helm -n cloudflare history cloudflare-tunnel -o json)"
 [[ "$(jq -r '[.[]|select(.status=="deployed")][0].revision' <<<"${cf_history}")" == "${EXPECTED_HELM_REVISION}" ]] || die 'Cloudflare Helm revision must be 2'
 obs_history="$(helm -n monitoring history kube-prometheus-stack -o json)"
-[[ "$(jq -r '[.[]|select(.status=="deployed")][0].revision' <<<"${obs_history}")" == 9 ]] || die 'observability Helm revision must be 9'
+observed_observability_revision=''
+validate_observability_history "${obs_history}" 'preflight'
 
 deployment="$(kubectl -n cloudflare get deployment cloudflare-tunnel -o json)"
 jq -e --arg image "${EXPECTED_IMAGE}" '
@@ -230,10 +253,11 @@ done
 evidence_dir="${evidence_dir:-${HOME}/operator-evidence/cloudflare-wan-dependency-loss-drill-${owner}}"
 umask 077; mkdir -p "${evidence_dir}"
 jq -n --arg owner "${owner}" --arg revision "${head_revision}" --arg secret "${secret_metadata}" \
+  --arg expectedObservabilityRevision "${expected_observability_revision}" --arg observedObservabilityRevision "${observed_observability_revision}" \
   --argjson pods "$(for i in 0 1; do jq -n --arg name "${pod_names[$i]}" --arg uid "${pod_uids[$i]}" --arg node "${pod_nodes[$i]}" --arg sandbox "${pod_sandboxes[$i]}" --arg pid "${pod_pids[$i]}" --arg netns "${pod_netns[$i]}" --argjson restartCount "${pod_restarts[$i]}" --arg image "${EXPECTED_IMAGE}" '{name:$name,uid:$uid,node:$node,sandbox:$sandbox,pid:$pid,netns:$netns,restartCount:$restartCount,image:$image}'; done | jq -s .)" \
   --argjson deployment "$(jq -S '{metadata:{labels:.metadata.labels,annotations:.metadata.annotations,uid:.metadata.uid,resourceVersion:.metadata.resourceVersion,generation:.metadata.generation},spec:.spec,status:{observedGeneration:.status.observedGeneration}}' <<<"${deployment}")" \
   --argjson metrics "$(jq -n --arg targets "$(prom_query 'count(up{namespace="cloudflare",service="cloudflare-tunnel-metrics"} == 1)' | jq -r '.data.result[0].value[1]//"0"')" --arg ha "$(prom_query 'count(cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel-metrics"} >= 4)' | jq -r '.data.result[0].value[1]//"0"')" '{targets:$targets,ha:$ha}')" \
-  '{owner:$owner,revision:$revision,secretMetadata:$secret,pods:$pods,deployment:$deployment,preflightMetrics:$metrics}' >"${evidence_dir}/preflight.json"
+  '{owner:$owner,revision:$revision,observabilityRevision:{expected:$expectedObservabilityRevision,observed:$observedObservabilityRevision},secretMetadata:$secret,pods:$pods,deployment:$deployment,preflightMetrics:$metrics}' >"${evidence_dir}/preflight.json"
 printf '%s\n' "${preflight_http[@]}" >"${evidence_dir}/endpoints-before.tsv"
 printf '%s\n' "${cf_history}" >"${evidence_dir}/cloudflare-helm-history.json"
 printf '%s\n' "${obs_history}" >"${evidence_dir}/observability-helm-history.json"
@@ -316,8 +340,10 @@ done
 prom_query 'count(cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel-metrics"} >= 4)' >"${evidence_dir}/recovery-metrics.json"
 [[ "$(kubectl -n cloudflare get secret tunnel-token -o jsonpath='{.metadata.uid}{"\t"}{.metadata.resourceVersion}{"\t"}{.metadata.creationTimestamp}{"\n"}')" == "${secret_metadata}" ]] || die 'Secret metadata changed'
 [[ "$(helm -n cloudflare history cloudflare-tunnel -o json)" == "${cf_history}" ]] || die 'Cloudflare Helm history changed'
-[[ "$(helm -n monitoring history kube-prometheus-stack -o json)" == "${obs_history}" ]] || die 'observability Helm history changed'
+recovery_obs_history="$(helm -n monitoring history kube-prometheus-stack -o json)"
+validate_observability_history "${recovery_obs_history}" 'post-cleanup'
+[[ "${recovery_obs_history}" == "${obs_history}" ]] || die "observability Helm history changed (expected deployed revision ${expected_observability_revision}; observed ${observed_observability_revision})"
 final_deployment="$(kubectl -n cloudflare get deployment cloudflare-tunnel -o json)"
 [[ "$(jq -S '{metadata:{labels:.metadata.labels,annotations:.metadata.annotations,uid:.metadata.uid,resourceVersion:.metadata.resourceVersion,generation:.metadata.generation},spec:.spec,statusObserved:.status.observedGeneration}' <<<"${final_deployment}" | sha256sum | cut -d' ' -f1)" == "${deployment_fingerprint}" ]] || die 'Deployment state changed'
 just cf-tunnel-verify env=staging
-printf 'PASS: same cloudflared processes recovered; sanitized evidence: %s\n' "${evidence_dir}"
+printf 'PASS: same cloudflared processes recovered; observability revision expected=%s observed=%s; sanitized evidence: %s\n' "${expected_observability_revision}" "${observed_observability_revision}" "${evidence_dir}"
