@@ -827,7 +827,9 @@ def test_configuration_reconciliation_completes_all_production_gates(
 
     before_pods = [ready("1"), ready("2")]
     after_pods = [ready("3"), ready("4")]
-    state = {"upgraded": False, "description": ""}
+    terminating_pods = [{**ready("2"), "terminating": True}, *after_pods]
+    state = {"upgraded": False, "description": "", "post_upgrade_pod_reads": 0}
+    monkeypatch.setattr(rollback.time, "sleep", lambda _seconds: None)
 
     def status(*_args: object) -> dict[str, object]:
         return {
@@ -842,13 +844,16 @@ def test_configuration_reconciliation_completes_all_production_gates(
         }
 
     monkeypatch.setattr(rollback, "helm_status", status)
-    monkeypatch.setattr(
-        rollback,
-        "pods",
-        lambda *_args, **_kwargs: json.loads(
-            json.dumps(after_pods if state["upgraded"] else before_pods)
-        ),
-    )
+
+    def observed_pods(*_args: object, **_kwargs: object) -> list[dict[str, object]]:
+        if not state["upgraded"]:
+            observed = before_pods
+        else:
+            state["post_upgrade_pod_reads"] += 1
+            observed = terminating_pods if state["post_upgrade_pod_reads"] == 1 else after_pods
+        return json.loads(json.dumps(observed))
+
+    monkeypatch.setattr(rollback, "pods", observed_pods)
 
     def runner(command: list[str]) -> str:
         commands.append(command)
@@ -913,6 +918,7 @@ def test_configuration_reconciliation_completes_all_production_gates(
         if "observability_app_metrics.py" in " ".join(command) and "verify" in command
     ]
     assert len(metrics_verifications) == 1
+    assert state["post_upgrade_pod_reads"] == 2
 
 
 def test_staging_is_non_interactive_and_reservation_collision_is_immutable(
