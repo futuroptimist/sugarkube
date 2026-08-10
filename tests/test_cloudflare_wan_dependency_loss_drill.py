@@ -31,6 +31,8 @@ class StatefulDrillHarness:
         state = {
             "context": "sugar-staging", "revision": "approved", "dirty": False,
             "image_ok": True, "helm_revision": 2, "pod_count": 2,
+            "observability_revision": 9, "observability_deployed_count": 1,
+            "observability_revision_after_cleanup": None, "was_disrupted": False,
             "same_node": False, "alerts": 0, "endpoint": 200,
             "sandbox_fail": False, "collision": False, "install_fail": -1,
             "restart": [0, 0], "tables": [False, False], "watchdogs": [False, False],
@@ -50,6 +52,7 @@ class StatefulDrillHarness:
             "HARNESS_STATE": str(self.state),
             "HARNESS_LOG": str(self.log),
             "CF_DRILL_APPROVED_REVISION": "approved",
+            "CF_DRILL_EXPECTED_OBSERVABILITY_REVISION": "9",
             "CF_DRILL_NODE_EXECUTOR": str(node),
         }
 
@@ -127,7 +130,11 @@ if name == "git":
 elif name == "helm":
     if "list" in args: out(json.dumps([{"name":"cloudflare-tunnel","status":"deployed","chart":"cloudflare-tunnel-0.3.2"}]))
     elif "cloudflare-tunnel" in args: out(json.dumps([{"status":"deployed","revision":state["helm_revision"]}]))
-    else: out('[{"status":"deployed","revision":9}]')
+    else:
+        revision = state["observability_revision"]
+        if state["was_disrupted"] and state["observability_revision_after_cleanup"] is not None:
+            revision = state["observability_revision_after_cleanup"]
+        out(json.dumps([{"status":"deployed","revision":revision} for _ in range(state["observability_deployed_count"])]))
 elif name == "just": sys.exit(0)
 elif name == "ruby":
     for i in range(16): out(f"https://endpoint-{i}.test")
@@ -179,7 +186,7 @@ elif name == "node-executor":
         event("watchdog", node=node, verified=True)
         out(str(501+idx))
     elif "add table inet" in command:
-        state["tables"][idx]=True; save(); event("table", node=node, present=True)
+        state["tables"][idx]=True; state["was_disrupted"]=True; save(); event("table", node=node, present=True)
         if state["install_fail"] == idx: sys.exit(44)
     elif "delete table inet" in command:
         state["tables"][idx]=False; save(); event("table", node=node, present=False); out("")
@@ -215,7 +222,57 @@ def test_dry_run_performs_no_mutation_or_external_preflight(tmp_path: Path) -> N
     assert not marker.exists(), "dry-run should not even invoke cluster/node stubs"
 
 
-def manual_plan_environment(tmp_path: Path, *, context: str = "sugar-staging") -> dict[str, str]:
+@pytest.mark.parametrize("mode", ["--manual-node-plan", "--execute"])
+def test_live_modes_require_explicit_observability_revision(
+    tmp_path: Path, mode: str
+) -> None:
+    env = manual_plan_environment(tmp_path)
+    env.pop("CF_DRILL_EXPECTED_OBSERVABILITY_REVISION")
+    args = [mode]
+    if mode == "--execute":
+        args.append(f"--confirm={CONFIRM}")
+    result = run(*args, env=env)
+    assert result.returncode != 0
+    assert "CF_DRILL_EXPECTED_OBSERVABILITY_REVISION is required" in result.stderr
+    assert not (tmp_path / "node-executor-called").exists()
+
+
+@pytest.mark.parametrize(
+    "value", ["", "0", "-1", "+1", "01", " 9", "9 ", "nine", "9x"]
+)
+def test_live_preflight_rejects_noncanonical_observability_revision(
+    tmp_path: Path, value: str
+) -> None:
+    env = manual_plan_environment(tmp_path)
+    env["CF_DRILL_EXPECTED_OBSERVABILITY_REVISION"] = value
+    result = run("--manual-node-plan", env=env)
+    assert result.returncode != 0
+    expected = "is required" if value == "" else "canonical positive decimal integer"
+    assert expected in result.stderr
+    assert not any(path.name == "node-executor-called" for path in tmp_path.iterdir())
+
+
+def test_manual_plan_accepts_later_reviewed_revision_without_source_change(tmp_path: Path) -> None:
+    result = run(
+        "--manual-node-plan",
+        env=manual_plan_environment(tmp_path, observability_revision=27),
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Observability Helm revision: expected=27 observed=27" in result.stdout
+
+
+def test_manual_plan_revision_mismatch_fails_before_node_execution(tmp_path: Path) -> None:
+    env = manual_plan_environment(tmp_path, observability_revision=27)
+    env["CF_DRILL_EXPECTED_OBSERVABILITY_REVISION"] = "26"
+    result = run("--manual-node-plan", env=env)
+    assert result.returncode != 0
+    assert "expected=26 observed=27" in result.stderr
+    assert "WATCHDOG " not in result.stdout
+
+
+def manual_plan_environment(
+    tmp_path: Path, *, context: str = "sugar-staging", observability_revision: int = 9
+) -> dict[str, str]:
     image = TEXT.split("readonly EXPECTED_IMAGE='", 1)[1].split("'", 1)[0]
     deployment = {
         "metadata": {"labels": {"app.kubernetes.io/managed-by": "Helm", "app.kubernetes.io/name": "cloudflare-tunnel", "app.kubernetes.io/instance": "cloudflare-tunnel"}},
@@ -236,13 +293,17 @@ def manual_plan_environment(tmp_path: Path, *, context: str = "sugar-staging") -
         path.chmod(0o755)
 
     stub("git", "case \"$*\" in *status*) exit 0;; *rev-parse*) echo approved;; esac\n")
-    stub("helm", "case \"$*\" in *' list '*) printf '%s\\n' '[{\"name\":\"cloudflare-tunnel\",\"status\":\"deployed\",\"chart\":\"cloudflare-tunnel-0.3.2\"}]';; *cloudflare-tunnel*) printf '%s\\n' '[{\"status\":\"deployed\",\"revision\":2}]';; *) printf '%s\\n' '[{\"status\":\"deployed\",\"revision\":9}]';; esac\n")
+    stub("helm", f"case \"$*\" in *' list '*) printf '%s\\n' '[{{\"name\":\"cloudflare-tunnel\",\"status\":\"deployed\",\"chart\":\"cloudflare-tunnel-0.3.2\"}}]';; *cloudflare-tunnel*) printf '%s\\n' '[{{\"status\":\"deployed\",\"revision\":2}}]';; *) printf '%s\\n' '[{{\"status\":\"deployed\",\"revision\":{observability_revision}}}]';; esac\n")
     stub("kubectl", f"case \"$*\" in *current-context*) echo {context};; *'get deployment'*) printf '%s\\n' {json.dumps(json.dumps(deployment))};; *'get pods'*) printf '%s\\n' {json.dumps(json.dumps(pods))};; *'get secret'*) printf 'secret-uid\\t12\\t2026-08-09T00:00:00Z\\n';; *ALERTS*) printf '%s\\n' '{{\"data\":{{\"result\":[{{\"value\":[0,\"0\"]}}]}}}}';; *get\\ --raw*) printf '%s\\n' '{{\"data\":{{\"result\":[{{\"value\":[0,\"2\"]}}]}}}}';; esac\n")
     stub("just", "exit 0\n")
     stub("ruby", "i=1; while [ $i -le 16 ]; do echo https://endpoint-$i.test; i=$((i+1)); done\n")
     stub("curl", "printf 200\n")
     stub("date", "printf 20260809T000000Z\n")
-    return {"PATH": f"{tmp_path}:/usr/bin:/bin", "CF_DRILL_APPROVED_REVISION": "approved"}
+    return {
+        "PATH": f"{tmp_path}:/usr/bin:/bin",
+        "CF_DRILL_APPROVED_REVISION": "approved",
+        "CF_DRILL_EXPECTED_OBSERVABILITY_REVISION": str(observability_revision),
+    }
 
 
 def test_manual_node_plan_runs_read_only_preflights_and_renders_exact_ordered_commands(tmp_path: Path) -> None:
@@ -266,6 +327,7 @@ def test_manual_node_plan_runs_read_only_preflights_and_renders_exact_ordered_co
     assert all("systemctl" in lines[i] and "MainPID" in lines[i] for i in disruptions)
     assert all("delete\\ table\\ inet" in lines[i] and "list\\ ruleset" in lines[i] and "length\\ ==\\ 0" in lines[i] for i in cleanups)
     assert "BLOCKED: manual-node plan only; the drill was not executed and has not passed." in result.stdout
+    assert "Observability Helm revision: expected=9 observed=9" in result.stdout
 
 
 def test_manual_node_plan_preflight_failure_emits_no_actionable_commands(tmp_path: Path) -> None:
@@ -563,6 +625,9 @@ def test_actual_helper_completes_stateful_interruption_and_recovery(tmp_path: Pa
     preflight = json.loads((harness.evidence / "preflight.json").read_text())
     assert [pod["restartCount"] for pod in preflight["pods"]] == [0, 0]
     assert all(pod["image"].startswith("cloudflare/cloudflared:") for pod in preflight["pods"])
+    assert preflight["expectedObservabilityRevision"] == "9"
+    assert preflight["observedObservabilityRevision"] == "9"
+    assert "observability revision expected=9 observed=9" in result.stdout
     assert (harness.evidence / "interruption-metrics.json").exists()
     assert (harness.evidence / "recovery-metrics.json").exists()
 
@@ -594,6 +659,33 @@ def test_actual_helper_preflights_fail_closed(
         "add table inet" in entry["args"][1]
         for entry in harness.commands() if entry["tool"] == "node-executor"
     )
+
+
+@pytest.mark.parametrize("deployed_count", [0, 2])
+def test_observability_history_requires_exactly_one_deployed_entry_before_executor(
+    tmp_path: Path, deployed_count: int
+) -> None:
+    harness = StatefulDrillHarness(tmp_path, observability_deployed_count=deployed_count)
+    result = harness.run()
+    assert result.returncode != 0
+    assert "exactly one deployed entry" in result.stderr
+    assert not any(entry["tool"] == "node-executor" for entry in harness.commands())
+
+
+def test_observability_revision_mismatch_fails_before_executor(tmp_path: Path) -> None:
+    harness = StatefulDrillHarness(tmp_path, observability_revision=10)
+    result = harness.run()
+    assert result.returncode != 0
+    assert "expected=9 observed=10" in result.stderr
+    assert not any(entry["tool"] == "node-executor" for entry in harness.commands())
+
+
+def test_post_cleanup_observability_revision_drift_fails_closed(tmp_path: Path) -> None:
+    harness = StatefulDrillHarness(tmp_path, observability_revision_after_cleanup=10)
+    result = harness.run()
+    assert result.returncode != 0
+    assert "revision drift after cleanup: expected=9 observed=10" in result.stderr
+    assert harness.current()["tables"] == [False, False]
 
 
 def test_actual_helper_rejects_confirmation_without_external_calls(tmp_path: Path) -> None:

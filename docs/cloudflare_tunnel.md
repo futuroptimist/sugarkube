@@ -534,13 +534,32 @@ part of this rollout.
    rule and never flushes a ruleset.
 
    Execution remains **blocked unless every preflight passes**. In addition to `--execute`, the operator
-   must provide the approved Git revision, a safe executable node-command adapter, and the exact typed
-   confirmation printed by `--help`. The adapter boundary is intentional: the repository does not assume
+   must provide the approved Git revision, an explicitly approved observability Helm revision, a safe
+   executable node-command adapter, and the exact typed confirmation printed by `--help`. The adapter boundary is intentional: the repository does not assume
    unattended remote access, weaken host-key checking, create keys, or handle login credentials. If
    authenticated privileged execution on both nodes cannot be guaranteed, stop at the plan and run
    nothing.
 
-   Before disruption, the helper records only sanitized pod, image, metric, Helm, Secret-metadata, and
+   Obtain the current observability revision through a **separate, read-only approval gate**. First,
+   review `helm -n monitoring history kube-prometheus-stack -o json` outside the drill and confirm that
+   exactly one entry is deployed. Record its positive numeric revision in the authorization record; do
+   not pipe or derive that value into the drill automatically. After another operator has reviewed and
+   approved the coordinate, render the live, read-only manual node plan by replacing
+   `<approved-observability-revision>` with that reviewed integer:
+
+   ```bash
+   CF_DRILL_APPROVED_REVISION="$(git rev-parse HEAD)" \
+   CF_DRILL_EXPECTED_OBSERVABILITY_REVISION=<approved-observability-revision> \
+   just cf-tunnel-wan-dependency-loss-drill --manual-node-plan env=staging
+   ```
+
+   The helper has no observability revision default and does not discover an approved value. A later
+   release is supplied through the same environment coordinate after a fresh review; no revision is a
+   permanent documentation or source-code constant. The manual-node-plan path performs live read-only
+   preflights, but does not require or invoke `CF_DRILL_NODE_EXECUTOR` and does not mutate the cluster.
+
+   Before disruption, the helper records the expected and observed observability revisions plus only
+   sanitized pod, image, metric, Helm, Secret-metadata, and
    endpoint evidence, both Helm histories, and a canonical Deployment projection. It resolves each CRI
    sandbox to its PID and network-namespace inode, revalidates those three identities before every
    privileged namespace operation, and rejects an ambiguous sandbox or pre-existing owner table. Each
@@ -554,7 +573,8 @@ part of this rollout.
    commands. The disruption is limited to three minutes, below the shortest five-minute alert threshold.
 6. Recovery must use the same UIDs with unchanged restart counts. Within five minutes both pods must be
    Ready with at least four HA connections apiece; all approved public endpoints must return HTTP 200;
-   Helm histories, Secret metadata, and Deployment state must be unchanged; and
+   the observability release must still have exactly one deployed entry at the explicitly approved
+   revision; Cloudflare Helm history, Secret metadata, and Deployment state must be unchanged; and
    `just cf-tunnel-verify env=staging` must pass. The helper never requests the Secret value. Finally,
    `unset CF_TUNNEL_TOKEN CF_TUNNEL_NAME CF_TUNNEL_ID`; retain the two healthy pods, Service,
    ServiceMonitor, and PDB.
