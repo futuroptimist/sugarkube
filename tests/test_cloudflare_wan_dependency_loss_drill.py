@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -112,7 +113,7 @@ class StatefulDrillHarness:
 
 
 _STATEFUL_SHIM = r'''#!/usr/bin/env python3
-import json, os, pathlib, sys, time, urllib.parse
+import json, os, pathlib, re, sys, time, urllib.parse
 state_path = pathlib.Path(os.environ["HARNESS_STATE"])
 log_path = pathlib.Path(os.environ["HARNESS_LOG"])
 name, args = pathlib.Path(sys.argv[0]).name, sys.argv[1:]
@@ -173,6 +174,9 @@ elif name == "kubectl":
         out(json.dumps({"data":{"result":[{"value":[0,str(value)]}]}}))
 elif name == "node-executor":
     node, command=args[0],args[1]; idx=int(node[-1])-1
+    cross_process_readlinks = re.findall(r"(?:sudo )?/usr/bin/readlink /proc/(?!self/)[^ )\"']+/ns/net", command)
+    if any(not readlink.startswith("sudo ") for readlink in cross_process_readlinks):
+        event("readlink_denied", node=node, command=command); sys.exit(1)
     if "test -x" in command:
         requested_path = command.split("test -x ", 1)[1].split()[0]
         sys.exit(0 if requested_path in state["crictl_paths"] else 1)
@@ -181,7 +185,7 @@ elif name == "node-executor":
         out(("a" if idx == 0 else "b")*12)
     elif command.startswith("sudo /usr/local/bin/crictl inspectp"):
         out(json.dumps({"status":{"labels":{"io.kubernetes.pod.uid":f"uid-{idx+1}"}},"info":{"pid":101+idx}}))
-    elif command.startswith("readlink /proc/") or command.startswith("/usr/bin/readlink /proc/"):
+    elif command.startswith("sudo /usr/bin/readlink /proc/"):
         out(f"net:[{1001+idx}]")
     elif "systemd-run" in command:
         state["watchdogs"][idx]=True; save(); event("watchdog", node=node, verified=False)
@@ -347,6 +351,46 @@ def test_manual_commands_expand_the_immutable_crictl_path(tmp_path: Path) -> Non
     ]
     assert len(command_records) == 6
     assert all("/usr/local/bin/crictl" in command for command in command_records)
+
+
+def test_manual_commands_sudo_every_cross_process_namespace_read(tmp_path: Path) -> None:
+    result = run("--manual-node-plan", env=manual_plan_environment(tmp_path))
+    assert result.returncode == 0, result.stderr
+    command_records = [
+        line for line in result.stdout.splitlines()
+        if line.startswith(("WATCHDOG ", "DISRUPTION ", "CLEANUP "))
+    ]
+    for command in command_records:
+        reads = re.findall(r"(?:sudo\\ )?/usr/bin/readlink\\ /proc/(?!self/)", command)
+        assert reads
+        assert all(read == "sudo\\ /usr/bin/readlink\\ /proc/" for read in reads)
+
+
+def test_no_unprivileged_cross_process_namespace_reads_are_encoded() -> None:
+    reads = re.finditer(r"(?:sudo )?/usr/bin/readlink /proc/(?!self/)", TEXT)
+    assert all(match.group().startswith("sudo ") for match in reads)
+    assert "/usr/bin/readlink /proc/self/ns/net" in TEXT
+    assert "sudo /usr/bin/readlink /proc/self/ns/net" not in TEXT
+
+
+def test_stateful_executor_models_cross_process_readlink_permission(tmp_path: Path) -> None:
+    harness = StatefulDrillHarness(tmp_path)
+    executor = harness.env["CF_DRILL_NODE_EXECUTOR"]
+    denied = subprocess.run(
+        [executor, "node-1", "/usr/bin/readlink /proc/101/ns/net"],
+        env=os.environ | harness.env,
+        text=True,
+        capture_output=True,
+    )
+    allowed = subprocess.run(
+        [executor, "node-1", "sudo /usr/bin/readlink /proc/101/ns/net"],
+        env=os.environ | harness.env,
+        text=True,
+        capture_output=True,
+    )
+    assert denied.returncode == 1
+    assert allowed.returncode == 0
+    assert allowed.stdout.strip() == "net:[1001]"
 
 
 def test_later_matching_observability_revision_needs_no_source_change(tmp_path: Path) -> None:
@@ -655,6 +699,16 @@ def test_actual_helper_completes_stateful_interruption_and_recovery(tmp_path: Pa
     assert result.returncode == 0, result.stderr
     commands = harness.commands()
     node_commands = [entry["args"][1] for entry in commands if entry["tool"] == "node-executor"]
+    cross_process_reads = [
+        read
+        for command in node_commands
+        for read in re.findall(
+            r"(?:sudo )?/usr/bin/readlink /proc/(?!self/)[^ )\"']+/ns/net", command
+        )
+    ]
+    assert cross_process_reads
+    assert all(read.startswith("sudo ") for read in cross_process_reads)
+    assert not any(event.get("event") == "readlink_denied" for event in harness.events())
     watchdogs = [i for i, command in enumerate(node_commands) if "systemd-run --unit" in command]
     installs = [i for i, command in enumerate(node_commands) if "add table inet" in command]
     deletes = [command for command in node_commands if "delete table inet" in command]
@@ -709,6 +763,8 @@ def test_execution_commands_use_only_the_approved_crictl_path(tmp_path: Path) ->
     manual_cleanup = TEXT.split("\nmanual_cleanup() {", 1)[1].split("\n}", 1)[0]
     assert "sudo ${CRICTL} inspectp" in automatic_cleanup
     assert "sudo ${CRICTL} inspectp" in manual_cleanup
+    assert "sudo /usr/bin/readlink /proc/" in automatic_cleanup
+    assert "sudo /usr/bin/readlink /proc/" in manual_cleanup
 
 
 def test_legacy_only_crictl_fails_before_any_followup_command(tmp_path: Path) -> None:
