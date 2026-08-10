@@ -977,7 +977,9 @@ def contains_staging_reference(value: object) -> bool:
 def contains_inline_credential(value: object) -> bool:
     """Detect inline credential material while allowing references and empty defaults."""
     sensitive = re.compile(
-        r"(?:authorization|bearer|credential|pass" r"word|passwd|secret|token)", re.I
+        r"(?:authorization|bearer|credential|pass"
+        r"word|passwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key)",
+        re.I,
     )
     reference_keys = {
         "automountserviceaccounttoken",
@@ -1000,16 +1002,26 @@ def contains_inline_credential(value: object) -> bool:
         ):
             return True
         for key, item in value.items():
+            if isinstance(key, str) and key.lower() == "secret" and isinstance(item, dict):
+                if item.get("enabled") is True:
+                    return True
+                if not is_empty(item.get("data")) or not is_empty(item.get("stringData")):
+                    return True
+                if contains_inline_credential(
+                    {
+                        child_key: child_value
+                        for child_key, child_value in item.items()
+                        if child_key not in {"enabled", "data", "stringData"}
+                    }
+                ):
+                    return True
+                continue
             if isinstance(key, str) and sensitive.search(key):
                 if key.lower() in reference_keys:
                     if isinstance(item, (dict, list)) and contains_inline_credential(item):
                         return True
                     continue
                 if is_empty(item):
-                    continue
-                if key.lower() == "secret" and isinstance(item, dict):
-                    if contains_inline_credential(item):
-                        return True
                     continue
                 return True
             if contains_inline_credential(item):

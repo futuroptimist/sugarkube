@@ -683,7 +683,7 @@ def production_stored_values() -> dict[str, object]:
         },
         "ingress": {"tls": {"enabled": False, "secretName": ""}},
         "serviceAccount": {"automountServiceAccountToken": False},
-        "secret": {"enabled": False, "name": "", "data": {}},
+        "secret": {"enabled": False, "stringData": {}},
     }
 
 
@@ -750,6 +750,38 @@ def test_helm_stored_values_reject_inline_credential_redacted(
         inline = {shape: sentinel}
     stored = production_stored_values()
     stored.update(inline)
+    with pytest.raises(manifest.ManifestError, match="approved contract") as raised:
+        manifest.verify_helm_stored_values(split_candidate("prod"), stored, "prod")
+    assert sentinel not in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    "secret",
+    [
+        {"enabled": True, "stringData": {}},
+        {
+            "enabled": False,
+            "stringData": {"opaque": "".join(("credential", "-sentinel"))},
+        },
+        {"enabled": False, "data": {"opaque": "".join(("credential", "-sentinel"))}},
+    ],
+)
+def test_helm_stored_values_reject_enabled_or_populated_secret_redacted(
+    secret: dict[str, object],
+) -> None:
+    sentinel = "".join(("credential", "-sentinel"))
+    stored = production_stored_values()
+    stored["secret"] = secret
+    with pytest.raises(manifest.ManifestError, match="approved contract") as raised:
+        manifest.verify_helm_stored_values(split_candidate("prod"), stored, "prod")
+    assert sentinel not in str(raised.value)
+
+
+@pytest.mark.parametrize("name", ["METRICS_TOKEN", "DSPACE_API_KEY"])
+def test_helm_stored_values_reject_credential_environment_plain_value(name: str) -> None:
+    sentinel = "".join(("credential", "-sentinel"))
+    stored = production_stored_values()
+    stored["env"] = [{"name": name, "value": sentinel}]
     with pytest.raises(manifest.ManifestError, match="approved contract") as raised:
         manifest.verify_helm_stored_values(split_candidate("prod"), stored, "prod")
     assert sentinel not in str(raised.value)
