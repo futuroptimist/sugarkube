@@ -3538,7 +3538,9 @@ observability-watchdog-verify env='':
 
 # Interactively install or rotate an application's metrics bearer token (hidden input).
 observability-app-metrics-secret-install app env='staging':
-    @python3 scripts/observability_app_metrics.py secret-install --app '{{ app }}' --env '{{ env }}'
+    #!/usr/bin/env bash
+    case "$-" in *x*) printf '%s\n' 'error: shell xtrace is refused' >&2; exit 2;; esac
+    python3 scripts/observability_app_metrics.py secret-install --app '{{ app }}' --env '{{ env }}'
 
 # Check an application's metrics Secret/key contract without reading its value.
 observability-app-metrics-secret-check app env='staging':

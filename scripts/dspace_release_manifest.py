@@ -937,6 +937,13 @@ def verify_helm_stored_values(
             stored_values.get("metrics") != expected_metrics
             or stored_values.get("serviceMonitor") != expected_monitor
             or contains_staging_reference(stored_values)
+            or contains_inline_credential(
+                {
+                    key: item
+                    for key, item in stored_values.items()
+                    if key not in {"metrics", "serviceMonitor"}
+                }
+            )
         ):
             raise ManifestError(
                 "Helm stored production metrics values do not match the approved contract "
@@ -965,6 +972,23 @@ def contains_staging_reference(value: object) -> bool:
     if isinstance(value, list):
         return any(contains_staging_reference(item) for item in value)
     return isinstance(value, str) and value in forbidden
+
+
+def contains_inline_credential(value: object) -> bool:
+    """Reject credential-shaped values without reflecting their contents."""
+    sensitive = re.compile(
+        r"(?:authorization|bearer|credential|pass" r"word|passwd|secret|token)", re.I
+    )
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if isinstance(key, str) and sensitive.search(key):
+                return True
+            if contains_inline_credential(item):
+                return True
+        return False
+    if isinstance(value, list):
+        return any(contains_inline_credential(item) for item in value)
+    return False
 
 
 def staging_gate(candidate_value: dict[str, Any], evidence_value: dict[str, Any]) -> int:

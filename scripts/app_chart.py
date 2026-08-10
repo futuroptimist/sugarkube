@@ -356,15 +356,44 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
         if inputs.env == "prod":
             unsafe = any(
                 isinstance(doc, dict)
-                and release_associated(doc, inputs.release, allow_name=False)
                 and (
                     contains_exact_scalar(doc, production_leaks)
-                    or dspace_production_metrics_token_is_unsafe(
-                        doc, inputs, metrics_enabled=metrics_enabled
+                    or (
+                        contains_exact_scalar(doc, {"METRICS_TOKEN"})
+                        and not release_associated(doc, inputs.release, allow_name=False)
+                    )
+                    or (
+                        release_associated(doc, inputs.release, allow_name=False)
+                        and dspace_production_metrics_token_is_unsafe(
+                            doc, inputs, metrics_enabled=metrics_enabled
+                        )
                     )
                 )
                 for doc in documents
             )
+            if metrics_enabled:
+                token_entries: list[object] = []
+                for document in documents:
+                    if not isinstance(document, dict):
+                        continue
+                    if scalar(document.get("kind")) == "Secret":
+                        unsafe = True
+                    found, containers = nested_value(
+                        document, ("spec", "template", "spec", "containers")
+                    )
+                    if not found or not isinstance(containers, list):
+                        continue
+                    for container in containers:
+                        env = container.get("env") if isinstance(container, dict) else None
+                        token_entries.extend(
+                            entry
+                            for entry in env
+                            if isinstance(env, list)
+                            if isinstance(entry, dict)
+                            and scalar(entry.get("name")) == "METRICS_TOKEN"
+                        )
+                if len(token_entries) != 1:
+                    unsafe = True
             if unsafe or (service_monitors and not metrics_enabled):
                 errors.append("DSPACE production rendered staging-only metrics configuration")
             if metrics_enabled:
@@ -404,7 +433,16 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
                         },
                     ]
                     if (
-                        metadata.get("labels", {}).get("release") != "kube-prometheus-stack"
+                        metadata.get("name") != "dspace"
+                        or metadata.get("namespace") != "dspace"
+                        or metadata.get("labels", {}).get("release") != "kube-prometheus-stack"
+                        or spec.get("selector")
+                        != {
+                            "matchLabels": {
+                                "app.kubernetes.io/instance": "dspace",
+                                "app.kubernetes.io/name": "dspace",
+                            }
+                        }
                         or auth != {"name": "dspace-prod-metrics-token", "key": "token"}
                         or endpoint.get("path") != "/metrics"
                         or endpoint.get("interval") != "30s"

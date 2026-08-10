@@ -330,6 +330,11 @@ spec:
         - name: ${{container}}
           image: ghcr.io/example/${{app}}:${{tag}}
           env:
+            - name: METRICS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: dspace-prod-metrics-token
+                  key: token
             - name: TOKENPLACE_IMAGE_TAG
               value: ${{tag}}
             - name: TOKENPLACE_RELEASE_VERSION
@@ -428,6 +433,7 @@ apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: dspace
+  namespace: dspace
   labels:
     app.kubernetes.io/instance: dspace
     release: kube-prometheus-stack
@@ -1612,7 +1618,7 @@ spec:
 @pytest.mark.parametrize(
     "leak", ["METRICS_TOKEN", "dspace-staging-metrics-token", "sugarkube-int"]
 )
-def test_dspace_production_checks_only_release_associated_structure(leak: str) -> None:
+def test_dspace_production_rejects_staging_scalars_anywhere(leak: str) -> None:
     inputs = app_chart.ReleaseInputs(
         "dspace", "prod", "dspace", "dspace", "chart", "3.1.0", (),
         "main-deadbee", "democratized.space",
@@ -1646,7 +1652,7 @@ data:
   value: {leak}
 """
 
-    assert "DSPACE production rendered staging-only metrics configuration" not in (
+    assert "DSPACE production rendered staging-only metrics configuration" in (
         app_chart.validate_rendered_manifest(unrelated, inputs)
     )
     assert "DSPACE production rendered staging-only metrics configuration" in (
@@ -6180,6 +6186,19 @@ def test_observability_app_metrics_malformed_samples_fail_immediately(monkeypatc
     with pytest.raises(app_metrics.Error):
         app_metrics.query_required_families(cfg, {"version": "main-deadbee", "revision": "main-deadbee"})
     assert slept == []
+
+
+def test_observability_app_metrics_accepts_exact_bucket_family(monkeypatch):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"]["dspace"]["environments"]["prod"]
+    cfg = {**cfg, "requiredMetricFamilies": ["dspace_http_request_duration_seconds_bucket"]}
+    monkeypatch.setattr(app_metrics, "prom", lambda path: {
+        "resultType": "vector",
+        "result": [{"metric": {"__name__": "dspace_http_request_duration_seconds_bucket", **cfg["targetLabels"]}}],
+    })
+
+    assert app_metrics.query_required_families(cfg, {}) == {
+        "dspace_http_request_duration_seconds_bucket"
+    }
 
 
 @pytest.mark.parametrize(

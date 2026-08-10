@@ -507,6 +507,9 @@ def install_secret(cfg):
         "TOKEN",
         "METRICS_TOKEN",
         "TOKENPLACE_METRICS_TOKEN",
+        "DSPACE_METRICS_TOKEN",
+        "DSPACE_PROD_METRICS_TOKEN",
+        "DSPACE_METRICS_CREDENTIAL",
         "SUGARKUBE_APP_METRICS_TOKEN",
     ):
         if bad in __import__("os").environ:
@@ -791,7 +794,10 @@ def query_required_families(cfg: dict[str, Any], derived_values: dict[str, str])
                 )
                 if not isinstance(series_name, str) or not PROM_METRIC.fullmatch(series_name):
                     fail("Prometheus query sample is structurally invalid (details redacted)", 1)
-                if metric_family_from_series(series_name) == metric:
+                # A required family may itself include a Prometheus suffix (for
+                # example the histogram family explicitly named ``*_bucket``).
+                # Prefer exact identity before normalizing conventional suffixes.
+                if series_name == metric or metric_family_from_series(series_name) == metric:
                     found.add(metric)
     return found
 
@@ -820,10 +826,15 @@ def verify(app, env):
         fail("ServiceMonitor response is structurally invalid", 1)
     metadata = sm.get("metadata")
     labels = metadata.get("labels") if isinstance(metadata, dict) else None
-    if env == "prod" and (
-        not isinstance(labels, dict) or labels.get("release") != "kube-prometheus-stack"
-    ):
-        fail("ServiceMonitor discovery label mismatch", 1)
+    if env == "prod":
+        if (
+            not isinstance(metadata, dict)
+            or metadata.get("name") != cfg["serviceMonitorName"]
+            or metadata.get("namespace") != cfg["namespace"]
+        ):
+            fail("ServiceMonitor identity mismatch", 1)
+        if not isinstance(labels, dict) or labels.get("release") != "kube-prometheus-stack":
+            fail("ServiceMonitor discovery label mismatch", 1)
     endpoints = spec.get("endpoints")
     if not isinstance(endpoints, list) or len(endpoints) != 1:
         fail("ServiceMonitor must expose exactly one endpoint", 1)
