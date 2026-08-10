@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -173,6 +174,8 @@ elif name == "kubectl":
         out(json.dumps({"data":{"result":[{"value":[0,str(value)]}]}}))
 elif name == "node-executor":
     node, command=args[0],args[1]; idx=int(node[-1])-1
+    if "/usr/bin/readlink /proc/" in command and "sudo /usr/bin/readlink /proc/" not in command:
+        event("readlink_denied", node=node, command=command); sys.exit(1)
     if "test -x" in command:
         requested_path = command.split("test -x ", 1)[1].split()[0]
         sys.exit(0 if requested_path in state["crictl_paths"] else 1)
@@ -181,7 +184,7 @@ elif name == "node-executor":
         out(("a" if idx == 0 else "b")*12)
     elif command.startswith("sudo /usr/local/bin/crictl inspectp"):
         out(json.dumps({"status":{"labels":{"io.kubernetes.pod.uid":f"uid-{idx+1}"}},"info":{"pid":101+idx}}))
-    elif command.startswith("readlink /proc/") or command.startswith("/usr/bin/readlink /proc/"):
+    elif command.startswith("sudo /usr/bin/readlink /proc/"):
         out(f"net:[{1001+idx}]")
     elif "systemd-run" in command:
         state["watchdogs"][idx]=True; save(); event("watchdog", node=node, verified=False)
@@ -347,6 +350,29 @@ def test_manual_commands_expand_the_immutable_crictl_path(tmp_path: Path) -> Non
     ]
     assert len(command_records) == 6
     assert all("/usr/local/bin/crictl" in command for command in command_records)
+    assert all("sudo\\ /usr/bin/readlink\\ /proc/" in command for command in command_records)
+
+
+def test_stateful_executor_enforces_cross_process_readlink_privilege_boundary(
+    tmp_path: Path,
+) -> None:
+    harness = StatefulDrillHarness(tmp_path)
+    executor = harness.env["CF_DRILL_NODE_EXECUTOR"]
+    denied = subprocess.run(
+        [executor, "node-1", "/usr/bin/readlink /proc/101/ns/net"],
+        env=os.environ | harness.env,
+        text=True,
+        capture_output=True,
+    )
+    allowed = subprocess.run(
+        [executor, "node-1", "sudo /usr/bin/readlink /proc/101/ns/net"],
+        env=os.environ | harness.env,
+        text=True,
+        capture_output=True,
+    )
+    assert denied.returncode == 1
+    assert allowed.returncode == 0
+    assert allowed.stdout.strip() == "net:[1001]"
 
 
 def test_later_matching_observability_revision_needs_no_source_change(tmp_path: Path) -> None:
@@ -440,8 +466,16 @@ def test_wrong_context_revision_image_helm_and_ambiguous_pods_are_guarded() -> N
 def test_exact_network_namespace_resolution_is_required() -> None:
     assert "${CRICTL} inspectp" in TEXT
     assert 'io.kubernetes.pod.uid' in TEXT
-    assert "readlink /proc/${pid}/ns/net" in TEXT
+    assert "sudo /usr/bin/readlink /proc/${pid}/ns/net" in TEXT
     assert "cannot prove exact pod network namespace identity" in TEXT
+
+
+def test_cross_process_namespace_reads_always_use_sudo_but_watchdog_self_read_does_not() -> None:
+    reads = re.findall(r"(?<![A-Za-z])(?:sudo )?/usr/bin/readlink /proc/[^\s\"']+/ns/net", TEXT)
+    assert reads
+    assert "/usr/bin/readlink /proc/self/ns/net" in reads
+    assert reads.count("/usr/bin/readlink /proc/self/ns/net") == 2
+    assert all(read.startswith("sudo ") for read in reads if "/proc/self/" not in read)
 
 
 def test_owner_collision_is_refused() -> None:
@@ -501,7 +535,7 @@ def test_stateful_watchdog_stub_fails_closed(
             'set -e; x=$1; "$x" n "systemd-run"; '
             '"$x" n "systemctl is-active"; p=$("$x" n "MainPID"); '
             '[[ $p =~ ^[1-9][0-9]*$ ]] || exit 20; '
-            '[[ $("$x" n "/proc/$p/ns/net") == "net:[100]" ]] || exit 21; '
+            '[[ $("$x" n "sudo /usr/bin/readlink /proc/$p/ns/net") == "net:[100]" ]] || exit 21; '
             '"$x" n "nft add table"',
             "test", str(stub),
         ], capture_output=True, text=True,
@@ -709,6 +743,8 @@ def test_execution_commands_use_only_the_approved_crictl_path(tmp_path: Path) ->
     manual_cleanup = TEXT.split("\nmanual_cleanup() {", 1)[1].split("\n}", 1)[0]
     assert "sudo ${CRICTL} inspectp" in automatic_cleanup
     assert "sudo ${CRICTL} inspectp" in manual_cleanup
+    assert "sudo /usr/bin/readlink /proc/" in automatic_cleanup
+    assert "sudo /usr/bin/readlink /proc/" in manual_cleanup
 
 
 def test_legacy_only_crictl_fails_before_any_followup_command(tmp_path: Path) -> None:
