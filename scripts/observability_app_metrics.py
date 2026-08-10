@@ -452,7 +452,17 @@ def assert_production_context():
     ctx = run(["kubectl", "config", "current-context"]).strip()
     if ctx != "sugar-prod":
         fail(f"context mismatch: expected sugar-prod, got {ctx or '<none>'}", 3)
-    run([sys.executable, str(ROOT / "scripts" / "cluster_identity.py"), "assert", "--env", "prod"])
+    run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "cluster_identity.py"),
+            "assert",
+            "--kubeconfig",
+            kubeconfig,
+            "--env",
+            "prod",
+        ]
+    )
 
 
 def appcfg(app, env):
@@ -918,13 +928,31 @@ def load_rendered_docs(input_path: str) -> list[dict[str, Any]]:
         raw = (
             sys.stdin.read() if input_path == "-" else Path(input_path).read_text(encoding="utf-8")
         )
+        ruby = r"""
+require "psych"
+require "json"
+scanner = Psych::ScalarScanner.new(Psych::ClassLoader::Restricted.new([], []))
+def convert(node, scanner)
+  case node
+  when Psych::Nodes::Stream then node.children.map { |child| convert(child, scanner) }
+  when Psych::Nodes::Document then convert(node.root, scanner)
+  when Psych::Nodes::Mapping
+    Hash[*node.children.map { |child| convert(child, scanner) }]
+  when Psych::Nodes::Sequence then node.children.map { |child| convert(child, scanner) }
+  when Psych::Nodes::Scalar
+    raise "unsafe YAML tag #{node.tag}" if node.tag && !node.tag.start_with?("tag:yaml.org,2002:")
+    node.quoted ? node.value : scanner.tokenize(node.value)
+  when Psych::Nodes::Alias then raise "YAML aliases are not allowed"
+  else raise "unsupported YAML node #{node.class}"
+  end
+end
+puts JSON.generate(convert(Psych.parse_stream(STDIN.read), scanner))
+"""
         converted = subprocess.run(
             [
                 "ruby",
-                "-ryaml",
-                "-rjson",
                 "-e",
-                "puts JSON.generate(YAML.load_stream(STDIN.read).compact)",
+                ruby,
             ],
             input=raw,
             text=True,

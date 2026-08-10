@@ -385,18 +385,31 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
                     )
                     auth = endpoint.get("bearerTokenSecret")
                     relabelings = endpoint.get("relabelings")
-                    cluster_ok = isinstance(relabelings, list) and any(
-                        isinstance(item, dict)
-                        and item.get("targetLabel") == "cluster"
-                        and item.get("replacement") == "sugarkube-prod"
-                        for item in relabelings
-                    )
+                    expected_relabelings = [
+                        {"action": "replace", "targetLabel": "app", "replacement": "dspace"},
+                        {
+                            "action": "replace",
+                            "targetLabel": "environment",
+                            "replacement": "prod",
+                        },
+                        {
+                            "action": "replace",
+                            "targetLabel": "release",
+                            "replacement": "dspace",
+                        },
+                        {
+                            "action": "replace",
+                            "targetLabel": "cluster",
+                            "replacement": "sugarkube-prod",
+                        },
+                    ]
                     if (
                         metadata.get("labels", {}).get("release") != "kube-prometheus-stack"
                         or auth != {"name": "dspace-prod-metrics-token", "key": "token"}
+                        or endpoint.get("path") != "/metrics"
                         or endpoint.get("interval") != "30s"
                         or endpoint.get("scrapeTimeout") != "10s"
-                        or not cluster_ok
+                        or relabelings != expected_relabelings
                     ):
                         errors.append("DSPACE production ServiceMonitor contract mismatch")
     return errors

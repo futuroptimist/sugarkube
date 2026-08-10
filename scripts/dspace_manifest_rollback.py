@@ -852,6 +852,31 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             ],
             "DSPACE pods",
         )
+        helm_stored_values_result = None
+        if approved["schemaVersion"] == 2:
+            stored_values = json_command(
+                runner,
+                [
+                    "helm",
+                    "--kubeconfig",
+                    args.kubeconfig,
+                    "get",
+                    "values",
+                    "dspace",
+                    "--namespace",
+                    "dspace",
+                    "--all",
+                    "-o",
+                    "json",
+                ],
+                "Helm stored values",
+            )
+            try:
+                helm_stored_values_result = release.verify_helm_stored_values(
+                    approved, stored_values, args.environment
+                )
+            except release.ManifestError as exc:
+                raise RollbackError("post-upgrade Helm stored values are invalid") from exc
         finalizer_proof = release.finalize(
             approved,
             after_helm,
@@ -868,6 +893,7 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             expected_image_coordinate=(
                 f"{release.IMAGE_REF}:{target['imageTag']}@{target['imageDigest']}"
             ),
+            helm_stored_values_result=helm_stored_values_result,
         )
         verifier_command = [
             str(args.verifier),

@@ -1388,6 +1388,70 @@ data:
     )
 
 
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda manifest: manifest.replace("path: /metrics", "path: /healthz"),
+        lambda manifest: manifest.replace(
+            "replacement: dspace\n        - action: replace\n          targetLabel: environment",
+            "replacement: other\n        - action: replace\n          targetLabel: environment",
+            1,
+        ),
+        lambda manifest: manifest.replace("replacement: prod", "replacement: staging"),
+        lambda manifest: manifest.replace("targetLabel: release", "targetLabel: namespace"),
+    ],
+)
+def test_dspace_production_requires_exact_metrics_path_and_relabelings(
+    tmp_path: Path, mutation
+) -> None:
+    values = tmp_path / "prod.yaml"
+    values.write_text(
+        (REPO_ROOT / "docs/examples/dspace.values.prod.yaml").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    inputs = app_chart.ReleaseInputs(
+        "dspace",
+        "prod",
+        "dspace",
+        "dspace",
+        "chart",
+        "3.0.2",
+        (str(values),),
+        "main-deadbee",
+    )
+    monitor = """kind: ServiceMonitor
+metadata:
+  labels:
+    app.kubernetes.io/instance: dspace
+    release: kube-prometheus-stack
+spec:
+  endpoints:
+    - path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      bearerTokenSecret:
+        name: dspace-prod-metrics-token
+        key: token
+      relabelings:
+        - action: replace
+          targetLabel: app
+          replacement: dspace
+        - action: replace
+          targetLabel: environment
+          replacement: prod
+        - action: replace
+          targetLabel: release
+          replacement: dspace
+        - action: replace
+          targetLabel: cluster
+          replacement: sugarkube-prod
+"""
+
+    assert "DSPACE production ServiceMonitor contract mismatch" in (
+        app_chart.validate_rendered_manifest(mutation(monitor), inputs)
+    )
+
+
 def test_dspace_production_allows_legacy_pod_uid_metrics_token() -> None:
     inputs = app_chart.ReleaseInputs(
         "dspace", "prod", "dspace", "dspace", "chart", "3.0.2", (), "main-deadbee"
@@ -6743,6 +6807,41 @@ def test_observability_app_metrics_load_rendered_docs_malformed_is_redacted(
         app_metrics.load_rendered_docs(str(candidate))
     assert "rendered manifests are malformed" in str(excinfo.value)
     assert "credential-looking-render" not in str(excinfo.value)
+
+
+def test_observability_app_metrics_load_rendered_docs_rejects_aliases(tmp_path):
+    candidate = tmp_path / "candidate.yaml"
+    candidate.write_text("first: &value secret\nsecond: *value\n", encoding="utf-8")
+
+    with pytest.raises(app_metrics.Error, match="rendered manifests are malformed"):
+        app_metrics.load_rendered_docs(str(candidate))
+
+
+def test_observability_app_metrics_production_identity_uses_selected_kubeconfig(
+    monkeypatch, tmp_path
+):
+    kubeconfig = str((tmp_path / "prod-kubeconfig").resolve())
+    calls = []
+    monkeypatch.setenv("KUBECONFIG", kubeconfig)
+    monkeypatch.setattr(
+        app_metrics,
+        "run",
+        lambda command: calls.append(command) or (
+            "sugar-prod\n" if command[:3] == ["kubectl", "config", "current-context"] else ""
+        ),
+    )
+
+    app_metrics.assert_production_context()
+
+    assert calls[-1] == [
+        app_metrics.sys.executable,
+        str(app_metrics.ROOT / "scripts" / "cluster_identity.py"),
+        "assert",
+        "--kubeconfig",
+        kubeconfig,
+        "--env",
+        "prod",
+    ]
 
 
 class _AppMetricsFakeTty:
