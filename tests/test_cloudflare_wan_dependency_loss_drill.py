@@ -34,6 +34,7 @@ class StatefulDrillHarness:
             "obs_revision": 10, "obs_deployed_entries": 1, "obs_revision_after_cleanup": None,
             "same_node": False, "alerts": 0, "endpoint": 200,
             "sandbox_fail": False, "collision": False, "install_fail": -1,
+            "crictl_paths": ["/usr/local/bin/crictl"],
             "restart": [0, 0], "tables": [False, False], "watchdogs": [False, False],
             "block_long_sleep": False, "secret": "SENTINEL-SECRET-MUST-NOT-LEAK",
         }
@@ -172,11 +173,13 @@ elif name == "kubectl":
         out(json.dumps({"data":{"result":[{"value":[0,str(value)]}]}}))
 elif name == "node-executor":
     node, command=args[0],args[1]; idx=int(node[-1])-1
-    if "test -x" in command: sys.exit(0)
+    if "test -x" in command:
+        requested_path = command.split("test -x ", 1)[1].split()[0]
+        sys.exit(0 if requested_path in state["crictl_paths"] else 1)
     if "crictl pods --name" in command and "inspectp" not in command:
         if state["sandbox_fail"]: out("ambiguous\nsecond"); sys.exit(0)
         out(("a" if idx == 0 else "b")*12)
-    elif command.startswith("sudo crictl inspectp"):
+    elif command.startswith("sudo /usr/local/bin/crictl inspectp"):
         out(json.dumps({"status":{"labels":{"io.kubernetes.pod.uid":f"uid-{idx+1}"}},"info":{"pid":101+idx}}))
     elif command.startswith("readlink /proc/") or command.startswith("/usr/bin/readlink /proc/"):
         out(f"net:[{1001+idx}]")
@@ -319,10 +322,31 @@ def test_manual_node_plan_runs_read_only_preflights_and_renders_exact_ordered_co
         assert len(associated) == 3
         assert all(f"pod=connector-{number}" in line and f"uid=uid-{number}" in line for line in associated)
         assert all("crictl\\ pods" in line and "inspectp" in line and "readlink" in line for line in associated)
+        assert all("/usr/local/bin/crictl" in line for line in associated)
     assert all("systemctl" in lines[i] and "MainPID" in lines[i] for i in disruptions)
     assert all("delete\\ table\\ inet" in lines[i] and "list\\ ruleset" in lines[i] and "length\\ ==\\ 0" in lines[i] for i in cleanups)
     assert "BLOCKED: manual-node plan only; the drill was not executed and has not passed." in result.stdout
     assert "Observability Helm revision: expected=10 observed=10" in result.stdout
+
+
+def test_only_approved_crictl_path_is_encoded_in_the_helper() -> None:
+    obsolete = "/usr/bin/" + "crictl"
+    assert "readonly CRICTL='/usr/local/bin/crictl'" in TEXT
+    assert obsolete not in TEXT
+    assert "command -v crictl" not in TEXT
+    assert "sudo crictl" not in TEXT
+    assert 'test -x ${CRICTL}' in TEXT
+
+
+def test_manual_commands_expand_the_immutable_crictl_path(tmp_path: Path) -> None:
+    result = run("--manual-node-plan", env=manual_plan_environment(tmp_path))
+    assert result.returncode == 0, result.stderr
+    command_records = [
+        line for line in result.stdout.splitlines()
+        if line.startswith(("WATCHDOG ", "DISRUPTION ", "CLEANUP "))
+    ]
+    assert len(command_records) == 6
+    assert all("/usr/local/bin/crictl" in command for command in command_records)
 
 
 def test_later_matching_observability_revision_needs_no_source_change(tmp_path: Path) -> None:
@@ -414,7 +438,7 @@ def test_wrong_context_revision_image_helm_and_ambiguous_pods_are_guarded() -> N
 
 
 def test_exact_network_namespace_resolution_is_required() -> None:
-    assert "crictl inspectp" in TEXT
+    assert "${CRICTL} inspectp" in TEXT
     assert 'io.kubernetes.pod.uid' in TEXT
     assert "readlink /proc/${pid}/ns/net" in TEXT
     assert "cannot prove exact pod network namespace identity" in TEXT
@@ -656,6 +680,57 @@ def test_actual_helper_completes_stateful_interruption_and_recovery(tmp_path: Pa
     assert all(pod["image"].startswith("cloudflare/cloudflared:") for pod in preflight["pods"])
     assert (harness.evidence / "interruption-metrics.json").exists()
     assert (harness.evidence / "recovery-metrics.json").exists()
+
+
+def test_execution_commands_use_only_the_approved_crictl_path(tmp_path: Path) -> None:
+    harness = StatefulDrillHarness(tmp_path)
+    result = harness.run()
+    assert result.returncode == 0, result.stderr
+    node_commands = [
+        entry["args"][1]
+        for entry in harness.commands()
+        if entry["tool"] == "node-executor"
+    ]
+    crictl_commands = [command for command in node_commands if "crictl" in command]
+    assert crictl_commands
+    assert all("/usr/local/bin/crictl" in command for command in crictl_commands)
+    assert any("test -x /usr/local/bin/crictl" in command for command in node_commands)
+    assert any("crictl pods --name" in command for command in node_commands)
+    assert any("crictl inspectp" in command and "list ruleset" in command
+               for command in node_commands)
+    assert any("crictl inspectp" in command and "systemd-run" in command
+               for command in node_commands)
+    assert any("crictl inspectp" in command and "add table inet" in command
+               for command in node_commands)
+    assert any("crictl inspectp" in command and "delete table inet" in command
+               for command in node_commands)
+
+    automatic_cleanup = TEXT.split("\ncleanup() {", 1)[1].split("\n}", 1)[0]
+    manual_cleanup = TEXT.split("\nmanual_cleanup() {", 1)[1].split("\n}", 1)[0]
+    assert "sudo ${CRICTL} inspectp" in automatic_cleanup
+    assert "sudo ${CRICTL} inspectp" in manual_cleanup
+
+
+def test_legacy_only_crictl_fails_before_any_followup_command(tmp_path: Path) -> None:
+    legacy_path = "/usr/bin/" + "crictl"
+    harness = StatefulDrillHarness(tmp_path, crictl_paths=[legacy_path])
+    result = harness.run()
+    assert result.returncode != 0
+    assert "required remote binary path missing" in result.stderr
+    node_commands = [
+        entry["args"][1]
+        for entry in harness.commands()
+        if entry["tool"] == "node-executor"
+    ]
+    assert node_commands == [
+        next(command for command in node_commands
+             if "test -x /usr/local/bin/crictl" in command)
+    ]
+    assert not any(
+        event.get("event") in {"watchdog", "table"} for event in harness.events()
+    )
+    assert harness.current()["tables"] == [False, False]
+    assert harness.current()["watchdogs"] == [False, False]
 
 
 @pytest.mark.parametrize("expected", ["", "0", "-1", "+10", "01", " 10", "ten"])
