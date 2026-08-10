@@ -922,16 +922,26 @@ def verify_helm_stored_values(
         raise ManifestError("Helm stored image values do not match approved coordinates")
 
     if environment == "prod":
-        metrics = stored_values.get("metrics", {})
-        service_monitor = stored_values.get("serviceMonitor", {})
+        expected_metrics = {
+            "enabled": True,
+            "auth": {"existingSecret": "dspace-prod-metrics-token", "secretKey": "token"},
+        }
+        expected_monitor = {
+            "enabled": True,
+            "interval": "30s",
+            "scrapeTimeout": "10s",
+            "additionalLabels": {"release": "kube-prometheus-stack"},
+            "cluster": "sugarkube-prod",
+        }
         if (
-            not isinstance(metrics, dict)
-            or not isinstance(service_monitor, dict)
-            or metrics.get("enabled") is True
-            or service_monitor.get("enabled") is True
+            stored_values.get("metrics") != expected_metrics
+            or stored_values.get("serviceMonitor") != expected_monitor
             or contains_staging_reference(stored_values)
         ):
-            raise ManifestError("Helm stored production values contain staging-only settings")
+            raise ManifestError(
+                "Helm stored production metrics values do not match the approved contract "
+                "or contain staging-only settings"
+            )
     return {
         "check": "helmStoredValues",
         "passed": True,
@@ -941,7 +951,12 @@ def verify_helm_stored_values(
 
 def contains_staging_reference(value: object) -> bool:
     """Detect known staging-only scalar values without reflecting them in diagnostics."""
-    forbidden = {"METRICS_TOKEN", "dspace-staging-metrics-token", "sugarkube-int"}
+    forbidden = {
+        "METRICS_TOKEN",
+        "dspace-staging-metrics-token",
+        "sugarkube-int",
+        "staging.democratized.space",
+    }
     if isinstance(value, dict):
         return any(
             contains_staging_reference(key) or contains_staging_reference(item)

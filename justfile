@@ -1794,6 +1794,14 @@ dspace-manifest-rollback env manifest evidence verifier="{{ justfile_directory()
     fi
     "${rollback_command[@]}"
 
+# Values-only production DSPACE metrics reconciliation at finalized immutable coordinates.
+dspace-prod-metrics-reconcile manifest evidence smoke_runner kubeconfig verifier="{{ justfile_directory() }}/scripts/dspace_runtime_verifier.py" confirm='' config='':
+    python3 "{{ justfile_directory() }}/scripts/dspace_manifest_rollback.py" \
+      --configuration-reconciliation --environment prod \
+      --manifest '{{ manifest }}' --evidence '{{ evidence }}' \
+      --smoke-runner '{{ smoke_runner }}' --kubeconfig '{{ kubeconfig }}' \
+      --verifier '{{ verifier }}' --confirm '{{ confirm }}' --config '{{ config }}'
+
 # Read-only DSPACE runtime, frontend, replica, and remote /chat proof.
 dspace-release-verify env manifest smoke_runner config='' kubeconfig='' expected_helm_revision='':
     #!/usr/bin/env bash
@@ -3528,15 +3536,15 @@ observability-watchdog-secret-check env='':
 observability-watchdog-verify env='':
     @scripts/observability_helm.sh watchdog-verify '{{ env }}'
 
-# Interactively install or rotate a staging application's metrics bearer token (hidden input).
+# Interactively install or rotate an application's metrics bearer token (hidden input).
 observability-app-metrics-secret-install app env='staging':
     @python3 scripts/observability_app_metrics.py secret-install --app '{{ app }}' --env '{{ env }}'
 
-# Check a staging application's metrics Secret/key contract without reading its value.
+# Check an application's metrics Secret/key contract without reading its value.
 observability-app-metrics-secret-check app env='staging':
     @python3 scripts/observability_app_metrics.py secret-check --app '{{ app }}' --env '{{ env }}'
 
-# Verify a staging application's authenticated Prometheus metrics contract.
+# Verify an application's authenticated Prometheus metrics contract.
 observability-app-metrics-verify app env='staging':
     @python3 scripts/observability_app_metrics.py verify --app '{{ app }}' --env '{{ env }}'
 

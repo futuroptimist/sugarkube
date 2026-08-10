@@ -208,11 +208,19 @@ if [[ "$*" == *"get values"* ]]; then
     echo 'Error: Kubernetes cluster unreachable for context sugar-staging' >&2
     exit 1
   fi
-  printf '{{"image":{{"repository":"%s","tag":"%s","pullPolicy":"%s"}},"metrics":{{"enabled":false}},"serviceMonitor":{{"enabled":false}},"ingress":{{"host":"%s"}}}}\n' \
-    "${{SUGARKUBE_STUB_HELM_REPOSITORY:-ghcr.io/democratizedspace/dspace}}" \
-    "${{SUGARKUBE_STUB_HELM_TAG:-main-abcdef0}}" \
-    "${{SUGARKUBE_STUB_HELM_PULL_POLICY:-Always}}" \
-    "${{SUGARKUBE_STUB_HELM_HOST:-example.test}}"
+  if [ "${{SUGARKUBE_STUB_NODE_ENV:-staging}}" = prod ]; then
+    printf '{{"image":{{"repository":"%s","tag":"%s","pullPolicy":"%s"}},"metrics":{{"enabled":true,"auth":{{"existingSecret":"dspace-prod-metrics-token","secretKey":"token"}}}},"serviceMonitor":{{"enabled":true,"interval":"30s","scrapeTimeout":"10s","additionalLabels":{{"release":"kube-prometheus-stack"}},"cluster":"sugarkube-prod"}},"ingress":{{"host":"%s"}}}}\n' \
+      "${{SUGARKUBE_STUB_HELM_REPOSITORY:-ghcr.io/democratizedspace/dspace}}" \
+      "${{SUGARKUBE_STUB_HELM_TAG:-main-abcdef0}}" \
+      "${{SUGARKUBE_STUB_HELM_PULL_POLICY:-Always}}" \
+      "${{SUGARKUBE_STUB_HELM_HOST:-example.test}}"
+  else
+    printf '{{"image":{{"repository":"%s","tag":"%s","pullPolicy":"%s"}},"metrics":{{"enabled":false}},"serviceMonitor":{{"enabled":false}},"ingress":{{"host":"%s"}}}}\n' \
+      "${{SUGARKUBE_STUB_HELM_REPOSITORY:-ghcr.io/democratizedspace/dspace}}" \
+      "${{SUGARKUBE_STUB_HELM_TAG:-main-abcdef0}}" \
+      "${{SUGARKUBE_STUB_HELM_PULL_POLICY:-Always}}" \
+      "${{SUGARKUBE_STUB_HELM_HOST:-example.test}}"
+  fi
   exit 0
 fi
 if [[ "$*" == show\ chart* ]]; then
@@ -399,11 +407,59 @@ metadata:
   labels:
     app.kubernetes.io/instance: dspace
 spec:
+  namespaceSelector:
+    matchNames:
+      - dspace
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: dspace
+      app.kubernetes.io/name: dspace
   endpoints:
     - port: http
       bearerTokenSecret:
         name: dspace-staging-metrics-token
         key: token
+YAML
+    fi
+    if [ "${{app}}" = dspace ] && [[ "$*" == *dspace.values.prod.yaml* ]]; then
+      cat <<'YAML'
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: dspace
+  labels:
+    app.kubernetes.io/instance: dspace
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - dspace
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: dspace
+      app.kubernetes.io/name: dspace
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      bearerTokenSecret:
+        name: dspace-prod-metrics-token
+        key: token
+      relabelings:
+        - action: replace
+          targetLabel: app
+          replacement: dspace
+        - action: replace
+          targetLabel: environment
+          replacement: prod
+        - action: replace
+          targetLabel: release
+          replacement: dspace
+        - action: replace
+          targetLabel: cluster
+          replacement: sugarkube-prod
 YAML
     fi
   fi
@@ -6281,7 +6337,7 @@ def test_observability_app_metrics_verify_all_uses_every_configured_app(monkeypa
 
 
 def test_observability_app_metrics_live_environment_normalization_and_rejection(monkeypatch):
-    forbidden = ["prod", "production", "", "dev", "qa"]
+    forbidden = ["production", "", "dev", "qa"]
     for env in forbidden:
         def fail_load_config(env=env):
             raise AssertionError(f"loaded config for {env!r}")
@@ -6289,11 +6345,18 @@ def test_observability_app_metrics_live_environment_normalization_and_rejection(
         monkeypatch.setattr(app_metrics, "load_config", fail_load_config)
         with pytest.raises(SystemExit) as excinfo:
             app_metrics.appcfg("tokenplace", env)
-        assert "staging only" in str(excinfo.value)
+        assert "unsupported" in str(excinfo.value)
         assert app_metrics.main(["verify-all", "--env", env]) == 2
 
     assert app_metrics.normalize_live_env("env=env=int") == "staging"
     assert app_metrics.normalize_live_env("env=staging") == "staging"
+    assert app_metrics.normalize_live_env("env=prod") == "prod"
+    monkeypatch.setattr(
+        app_metrics,
+        "load_config",
+        lambda: {"applications": {"dspace": {"environments": {"prod": "prod-cfg"}}}},
+    )
+    assert app_metrics.appcfg("dspace", "prod") == "prod-cfg"
 
 
 @pytest.mark.parametrize("app", ["app=", "app=foo=bar", "app=Bad_Name", "-bad"])

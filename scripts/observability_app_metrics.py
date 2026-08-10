@@ -19,7 +19,6 @@ import warnings
 from pathlib import Path
 from typing import Any
 
-
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "platform/observability/app-metrics.json"
 PROM = "/api/v1/namespaces/monitoring/services/http:kube-prometheus-stack-prometheus:9090/proxy"
@@ -32,9 +31,7 @@ SAFE_VALUE = re.compile(r"[-A-Za-z0-9_./:*]+")
 PROM_LABEL = re.compile(r"[a-zA-Z_][a-zA-Z0-9_]*")
 PROM_METRIC = re.compile(r"[a-zA-Z_:][a-zA-Z0-9_:]*")
 K8S_LABEL_NAME = re.compile(r"[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?")
-K8S_LABEL_PREFIX = re.compile(
-    r"[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*"
-)
+K8S_LABEL_PREFIX = re.compile(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*")
 STANDARD_LABELS = {
     "__name__",
     "job",
@@ -212,11 +209,11 @@ def validate_inventory(doc):
         environments = appdoc["environments"]
         if not isinstance(environments, dict) or not environments:
             fail(f"application {app}.environments must be a nonempty object")
-        if set(environments) != {"staging"}:
-            fail("only staging app metrics verification is supported")
         for env, cfg in environments.items():
-            if env != "staging":
-                fail("only staging app metrics verification is supported")
+            if env not in {"staging", "prod"}:
+                fail("application metrics environment is unsupported")
+            if env == "prod" and app != "dspace":
+                fail("only staging app metrics verification is supported for this application")
             expect_keys(
                 cfg,
                 {
@@ -249,7 +246,14 @@ def validate_inventory(doc):
             sm = cfg["serviceMonitor"]
             expect_keys(
                 sm,
-                {"selectorMatchLabels", "path", "interval", "scrapeTimeout", "authorization", "relabelings"},
+                {
+                    "selectorMatchLabels",
+                    "path",
+                    "interval",
+                    "scrapeTimeout",
+                    "authorization",
+                    "relabelings",
+                },
                 "serviceMonitor",
             )
             if sm["path"] != "/metrics":
@@ -260,7 +264,9 @@ def validate_inventory(doc):
             expect_keys(sm["authorization"], {"type", "credentials"}, "authorization")
             if sm["authorization"]["type"] != "Bearer":
                 fail("authorization.type must be Bearer")
-            expect_keys(sm["authorization"].get("credentials"), {"name", "key"}, "authorization.credentials")
+            expect_keys(
+                sm["authorization"].get("credentials"), {"name", "key"}, "authorization.credentials"
+            )
             name(sm["authorization"]["credentials"]["name"], "authorization.credentials.name")
             name(sm["authorization"]["credentials"]["key"], "authorization.credentials.key")
             if sm["authorization"]["credentials"] != cfg["secret"]:
@@ -275,7 +281,11 @@ def validate_inventory(doc):
             if not isinstance(relabelings, list) or len(relabelings) != 4:
                 fail("serviceMonitor.relabelings must contain exactly four entries")
             for idx, relabeling in enumerate(relabelings):
-                expect_keys(relabeling, {"action", "targetLabel", "replacement"}, f"serviceMonitor.relabelings[{idx}]")
+                expect_keys(
+                    relabeling,
+                    {"action", "targetLabel", "replacement"},
+                    f"serviceMonitor.relabelings[{idx}]",
+                )
                 if relabeling["action"] != "replace":
                     fail("serviceMonitor.relabelings action must be replace")
                 prometheus_label(relabeling["targetLabel"], "relabeling targetLabel")
@@ -284,13 +294,18 @@ def validate_inventory(doc):
             if not isinstance(labels, dict):
                 fail("targetLabels must be an object")
             if set(labels) != {"app", "environment", "release", "cluster", "namespace"}:
-                fail("targetLabels must contain exactly app, environment, release, cluster, and namespace")
+                fail(
+                    "targetLabels must contain exactly app, environment, release, cluster, and namespace"
+                )
             for k, v in labels.items():
                 prometheus_label(k, "target label name")
                 nonempty(v, "target label value")
             if labels["app"] != app or labels["environment"] != env:
                 fail("targetLabels must match application and environment")
-            if labels["release"] != cfg["serviceMonitorName"] or labels["namespace"] != cfg["namespace"]:
+            if (
+                labels["release"] != cfg["serviceMonitorName"]
+                or labels["namespace"] != cfg["namespace"]
+            ):
                 fail("targetLabels must match ServiceMonitor and namespace")
             mapping = {r["targetLabel"]: r["replacement"] for r in relabelings}
             if len(mapping) != len(relabelings):
@@ -302,20 +317,28 @@ def validate_inventory(doc):
                 "cluster": labels.get("cluster"),
             }
             if mapping != required_mapping:
-                fail("serviceMonitor.relabelings must map app, environment, release, and cluster exactly")
+                fail(
+                    "serviceMonitor.relabelings must map app, environment, release, and cluster exactly"
+                )
             if "namespace" in mapping:
                 fail("namespace must be supplied by discovery, not relabel replacement")
             pm = cfg["publicMetrics"]
             expect_keys(pm, {"url", "expectedUnauthenticatedStatus"}, "publicMetrics")
             public_metrics_url(pm["url"])
-            if isinstance(pm["expectedUnauthenticatedStatus"], bool) or not isinstance(pm["expectedUnauthenticatedStatus"], int) or not STATUS.fullmatch(
-                str(pm["expectedUnauthenticatedStatus"])
+            if (
+                isinstance(pm["expectedUnauthenticatedStatus"], bool)
+                or not isinstance(pm["expectedUnauthenticatedStatus"], int)
+                or not STATUS.fullmatch(str(pm["expectedUnauthenticatedStatus"]))
             ):
                 fail("public status is malformed")
             rt = cfg["retries"]
             expect_keys(rt, {"attempts", "delaySeconds"}, "retries")
             for key in ("attempts", "delaySeconds"):
-                if isinstance(rt[key], bool) or not isinstance(rt[key], int) or not 1 <= rt[key] <= 60:
+                if (
+                    isinstance(rt[key], bool)
+                    or not isinstance(rt[key], int)
+                    or not 1 <= rt[key] <= 60
+                ):
                     fail("retry settings must be bounded integers")
             metrics = cfg["requiredMetricFamilies"]
             unique_string_list(metrics, "requiredMetricFamilies", prometheus_metric)
@@ -341,13 +364,23 @@ def validate_inventory(doc):
                 fail("static and derived application labels conflict")
             for label, source in derived.items():
                 prometheus_label(label, "derived label name")
-                expect_keys(source, {"workload", "container", "env", "normalizer"}, f"derivedApplicationLabels.{label}")
-                expect_keys(source["workload"], {"kind", "name"}, f"derivedApplicationLabels.{label}.workload")
+                expect_keys(
+                    source,
+                    {"workload", "container", "env", "normalizer"},
+                    f"derivedApplicationLabels.{label}",
+                )
+                expect_keys(
+                    source["workload"],
+                    {"kind", "name"},
+                    f"derivedApplicationLabels.{label}.workload",
+                )
                 if source["workload"]["kind"] != "Deployment":
                     fail("derived workload kind is unsupported")
                 name(source["workload"]["name"], "derived workload name")
                 name(source["container"], "derived container")
-                if not isinstance(source["env"], str) or not re.fullmatch(r"[A-Z_][A-Z0-9_]{0,62}", source["env"]):
+                if not isinstance(source["env"], str) or not re.fullmatch(
+                    r"[A-Z_][A-Z0-9_]{0,62}", source["env"]
+                ):
                     fail("derived environment variable name is unsafe")
                 if source["normalizer"] != "identity":
                     fail("derived normalizer is unsupported")
@@ -366,8 +399,8 @@ def normalize_live_env(env: str) -> str:
         value = value[4:].strip()
     if value == "int":
         value = "staging"
-    if value != "staging":
-        fail("application metrics live operations support staging only")
+    if value not in {"staging", "prod"}:
+        fail("application metrics environment is unsupported")
     return value
 
 
@@ -412,6 +445,16 @@ def assert_context():
         fail(f"context mismatch: expected sugar-staging, got {ctx or '<none>'}", 3)
 
 
+def assert_production_context():
+    kubeconfig = os.environ.get("KUBECONFIG", "")
+    if not kubeconfig or ":" in kubeconfig or not Path(kubeconfig).is_absolute():
+        fail("production requires one explicit absolute KUBECONFIG", 3)
+    ctx = run(["kubectl", "config", "current-context"]).strip()
+    if ctx != "sugar-prod":
+        fail(f"context mismatch: expected sugar-prod, got {ctx or '<none>'}", 3)
+    run([sys.executable, str(ROOT / "scripts" / "cluster_identity.py"), "assert", "--env", "prod"])
+
+
 def appcfg(app, env):
     app = normalize_application_argument(app)
     env = normalize_live_env(env)
@@ -448,6 +491,8 @@ def check_secret(cfg):
 
 
 def install_secret(cfg):
+    if "xtrace" in os.environ.get("SHELLOPTS", "").split(":"):
+        fail("shell xtrace is refused")
     for bad in (
         "TOKEN",
         "METRICS_TOKEN",
@@ -470,8 +515,10 @@ def install_secret(cfg):
         use_stdin_fallback = True
     try:
         with tty_context:
-            if not tty.isatty() or not tty.readable() or (
-                not use_stdin_fallback and not tty.writable()
+            if (
+                not tty.isatty()
+                or not tty.readable()
+                or (not use_stdin_fallback and not tty.writable())
             ):
                 fail("an interactive controlling terminal is required")
             prompt = "Enter application metrics bearer token (input hidden): "
@@ -545,7 +592,9 @@ def find_env_value(workload: dict[str, Any], source: dict[str, Any]) -> str:
     containers = pod_spec.get("containers") if isinstance(pod_spec, dict) else None
     if not isinstance(containers, list):
         fail("workload source contract is malformed (details redacted)", 1)
-    matches = [c for c in containers if isinstance(c, dict) and c.get("name") == source["container"]]
+    matches = [
+        c for c in containers if isinstance(c, dict) and c.get("name") == source["container"]
+    ]
     if len(matches) != 1:
         fail("workload container source is absent or ambiguous (details redacted)", 1)
     env_entries = matches[0].get("env")
@@ -596,7 +645,20 @@ def derive_build_labels_live(cfg):
         if key in seen:
             continue
         seen.add(key)
-        docs.append(kjson(["kubectl", "-n", cfg["namespace"], "get", workload["kind"].lower(), workload["name"], "-o", "json"]))
+        docs.append(
+            kjson(
+                [
+                    "kubectl",
+                    "-n",
+                    cfg["namespace"],
+                    "get",
+                    workload["kind"].lower(),
+                    workload["name"],
+                    "-o",
+                    "json",
+                ]
+            )
+        )
     return derive_build_labels_from_docs(cfg, docs)
 
 
@@ -605,25 +667,36 @@ def validate_metric_labels(cfg, labels, derived_values=None):
     if not isinstance(labels, dict):
         fail("metric labels were malformed (details redacted)", 1)
     for label, value in labels.items():
-        if not isinstance(label, str) or not PROM_LABEL.fullmatch(label) or not isinstance(value, str):
+        if (
+            not isinstance(label, str)
+            or not PROM_LABEL.fullmatch(label)
+            or not isinstance(value, str)
+        ):
             fail("metric labels were malformed (details redacted)", 1)
         low = label.lower()
         is_standard = label in STANDARD_LABELS
-        if not is_standard and label not in cfg["allowedApplicationLabels"] and label not in cfg.get("derivedApplicationLabels", {}):
+        if (
+            not is_standard
+            and label not in cfg["allowedApplicationLabels"]
+            and label not in cfg.get("derivedApplicationLabels", {})
+        ):
             fail("unbounded application metric label observed (details redacted)", 1)
         if not is_standard and (
             any(w in low for w in cfg["forbiddenApplicationLabels"])
             or any(w in low for w in FORBIDDEN_WORDS)
         ):
             fail("forbidden application metric label observed (details redacted)", 1)
-        if label in cfg["allowedApplicationLabels"] and value not in cfg["allowedApplicationLabels"][label]:
+        if (
+            label in cfg["allowedApplicationLabels"]
+            and value not in cfg["allowedApplicationLabels"][label]
+        ):
             fail("application metric label enum mismatch (details redacted)", 1)
         if label in cfg.get("derivedApplicationLabels", {}) and value != derived_values.get(label):
             fail("derived application metric label mismatch (details redacted)", 1)
 
 
 def prometheus_label_escape(value: str) -> str:
-    return value.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
 
 
 def promql_selector(labels: dict[str, str]) -> str:
@@ -654,12 +727,18 @@ def is_relevant_target(cfg: dict[str, Any], target: dict[str, Any]) -> bool:
     if not isinstance(labels, dict) or not isinstance(discovered, dict):
         fail("Prometheus target response is structurally invalid (details redacted)", 1)
     identities = target_discovery_identities(cfg)
-    for field in (target.get("scrapePool"), target.get("scrapeConfig"), labels.get("job"), discovered.get("job")):
+    for field in (
+        target.get("scrapePool"),
+        target.get("scrapeConfig"),
+        labels.get("job"),
+        discovered.get("job"),
+    ):
         if isinstance(field, str) and field in identities:
             return True
     if (
         discovered.get("__meta_kubernetes_namespace") == cfg["namespace"]
-        and discovered.get("__meta_prometheus_operator_service_monitor_name") == cfg["serviceMonitorName"]
+        and discovered.get("__meta_prometheus_operator_service_monitor_name")
+        == cfg["serviceMonitorName"]
     ):
         return True
     return False
@@ -697,18 +776,21 @@ def query_required_families(cfg: dict[str, Any], derived_values: dict[str, str])
                     fail("Prometheus query response is structurally invalid (details redacted)", 1)
                 sample_labels = sample.get("metric")
                 validate_metric_labels(cfg, sample_labels, derived_values)
-                series_name = sample_labels.get("__name__") if isinstance(sample_labels, dict) else None
+                series_name = (
+                    sample_labels.get("__name__") if isinstance(sample_labels, dict) else None
+                )
                 if not isinstance(series_name, str) or not PROM_METRIC.fullmatch(series_name):
                     fail("Prometheus query sample is structurally invalid (details redacted)", 1)
                 if metric_family_from_series(series_name) == metric:
                     found.add(metric)
     return found
 
+
 def verify(app, env):
     app = normalize_application_argument(app)
     env = normalize_live_env(env)
     cfg = appcfg(app, env)
-    assert_context()
+    assert_production_context() if env == "prod" else assert_context()
     check_secret(cfg)
     derived_values = derive_build_labels_live(cfg)
     sm = kjson(
@@ -726,6 +808,12 @@ def verify(app, env):
     spec = sm.get("spec")
     if not isinstance(spec, dict):
         fail("ServiceMonitor response is structurally invalid", 1)
+    metadata = sm.get("metadata")
+    labels = metadata.get("labels") if isinstance(metadata, dict) else None
+    if env == "prod" and (
+        not isinstance(labels, dict) or labels.get("release") != "kube-prometheus-stack"
+    ):
+        fail("ServiceMonitor discovery label mismatch", 1)
     endpoints = spec.get("endpoints")
     if not isinstance(endpoints, list) or len(endpoints) != 1:
         fail("ServiceMonitor must expose exactly one endpoint", 1)
@@ -734,8 +822,15 @@ def verify(app, env):
         fail("ServiceMonitor response is structurally invalid", 1)
     authorization = ep.get("authorization")
     auth = authorization.get("credentials") if isinstance(authorization, dict) else None
+    if app == "dspace" and env == "prod":
+        auth = ep.get("bearerTokenSecret")
+        authorization = {"type": "Bearer"} if isinstance(auth, dict) else authorization
     selector = spec.get("selector")
-    if not isinstance(authorization, dict) or not isinstance(auth, dict) or not isinstance(selector, dict):
+    if (
+        not isinstance(authorization, dict)
+        or not isinstance(auth, dict)
+        or not isinstance(selector, dict)
+    ):
         fail("ServiceMonitor response is structurally invalid", 1)
     if (
         ep.get("path") != "/metrics"
@@ -747,10 +842,7 @@ def verify(app, env):
         or auth.get("key") != cfg["secret"]["key"]
     ):
         fail("ServiceMonitor endpoint/auth contract mismatch", 1)
-    if (
-        selector.get("matchLabels")
-        != cfg["serviceMonitor"]["selectorMatchLabels"]
-    ):
+    if selector.get("matchLabels") != cfg["serviceMonitor"]["selectorMatchLabels"]:
         fail("ServiceMonitor selector mismatch", 1)
     targets = []
     attempts = cfg["retries"]["attempts"]
@@ -767,7 +859,10 @@ def verify(app, env):
         if i + 1 < attempts:
             time.sleep(cfg["retries"]["delaySeconds"])
     if not target_state_converged(cfg, targets):
-        fail("Prometheus targets are absent, down, mislabeled, or have unexpected count (details redacted)", 1)
+        fail(
+            "Prometheus targets are absent, down, mislabeled, or have unexpected count (details redacted)",
+            1,
+        )
 
     required = set(cfg["requiredMetricFamilies"])
     found: set[str] = set()
@@ -780,6 +875,7 @@ def verify(app, env):
     missing = required - found
     if missing:
         fail(f"required metric family missing: {sorted(missing)[0]}", 1)
+
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, req, fp, code, msg, headers, newurl):
             return None
@@ -819,9 +915,17 @@ def verify(app, env):
 
 def load_rendered_docs(input_path: str) -> list[dict[str, Any]]:
     try:
-        raw = sys.stdin.read() if input_path == "-" else Path(input_path).read_text(encoding="utf-8")
+        raw = (
+            sys.stdin.read() if input_path == "-" else Path(input_path).read_text(encoding="utf-8")
+        )
         converted = subprocess.run(
-            ["ruby", "-ryaml", "-rjson", "-e", "puts JSON.generate(YAML.load_stream(STDIN.read).compact)"],
+            [
+                "ruby",
+                "-ryaml",
+                "-rjson",
+                "-e",
+                "puts JSON.generate(YAML.load_stream(STDIN.read).compact)",
+            ],
             input=raw,
             text=True,
             capture_output=True,
@@ -832,7 +936,9 @@ def load_rendered_docs(input_path: str) -> list[dict[str, Any]]:
         fail("rendered manifests are malformed (details redacted)")
 
 
-def validate_render(app: str, env: str, input_path: str, release_namespace: str = "", release_name: str = "") -> None:
+def validate_render(
+    app: str, env: str, input_path: str, release_namespace: str = "", release_name: str = ""
+) -> None:
     inv = load_config()
     cfg = inv.get("applications", {}).get(app, {}).get("environments", {}).get(env)
     if cfg is None:
@@ -857,7 +963,9 @@ def validate_render(app: str, env: str, input_path: str, release_namespace: str 
     sms = []
     for candidate in named_sms:
         rendered_ns = candidate.get("metadata", {}).get("namespace")
-        if rendered_ns == cfg["namespace"] or (rendered_ns is None and release_namespace == cfg["namespace"]):
+        if rendered_ns == cfg["namespace"] or (
+            rendered_ns is None and release_namespace == cfg["namespace"]
+        ):
             sms.append(candidate)
     if len(sms) != 1:
         fail("rendered manifests must include exactly one configured ServiceMonitor")
@@ -891,15 +999,35 @@ def validate_render(app: str, env: str, input_path: str, release_namespace: str 
         fail("rendered ServiceMonitor endpoint is structurally invalid")
     auth = ep.get("authorization")
     creds = auth.get("credentials") if isinstance(auth, dict) else None
+    if app == "dspace" and env == "prod":
+        creds = ep.get("bearerTokenSecret")
+        auth = {"type": "Bearer"} if isinstance(creds, dict) else auth
     if not isinstance(auth, dict) or not isinstance(creds, dict):
         fail("rendered ServiceMonitor authorization is structurally invalid")
-    if (ep.get("path") != cfg["serviceMonitor"]["path"] or ep.get("interval") != cfg["serviceMonitor"]["interval"] or ep.get("scrapeTimeout") != cfg["serviceMonitor"]["scrapeTimeout"] or auth.get("type") != cfg["serviceMonitor"]["authorization"]["type"] or creds.get("name") != cfg["secret"]["name"] or creds.get("key") != cfg["secret"]["key"] or ep.get("relabelings") != cfg["serviceMonitor"]["relabelings"]):
+    if (
+        ep.get("path") != cfg["serviceMonitor"]["path"]
+        or ep.get("interval") != cfg["serviceMonitor"]["interval"]
+        or ep.get("scrapeTimeout") != cfg["serviceMonitor"]["scrapeTimeout"]
+        or auth.get("type") != cfg["serviceMonitor"]["authorization"]["type"]
+        or creds.get("name") != cfg["secret"]["name"]
+        or creds.get("key") != cfg["secret"]["key"]
+        or ep.get("relabelings") != cfg["serviceMonitor"]["relabelings"]
+    ):
         fail("rendered ServiceMonitor endpoint/auth/relabeling contract mismatch")
+
 
 def main(argv=None):
     p = argparse.ArgumentParser()
     p.add_argument(
-        "mode", choices=["validate", "validate-render", "secret-check", "secret-install", "verify", "verify-all"]
+        "mode",
+        choices=[
+            "validate",
+            "validate-render",
+            "secret-check",
+            "secret-install",
+            "verify",
+            "verify-all",
+        ],
     )
     p.add_argument("--app")
     p.add_argument("--env", default="staging")
@@ -925,15 +1053,16 @@ def main(argv=None):
         if a.mode == "verify-all":
             env = normalize_live_env(a.env)
             inv = load_config()
-            for app in inv["applications"]:
-                verify(app, env)
+            for app, appdoc in inv["applications"].items():
+                if "environments" not in appdoc or env in appdoc["environments"]:
+                    verify(app, env)
             return 0
         if not a.app:
             fail("--app is required")
         app = normalize_application_argument(a.app)
         env = normalize_live_env(a.env)
         cfg = appcfg(app, env)
-        assert_context()
+        assert_production_context() if env == "prod" else assert_context()
         if a.mode == "secret-check":
             check_secret(cfg)
         elif a.mode == "secret-install":
