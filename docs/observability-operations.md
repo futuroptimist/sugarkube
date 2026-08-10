@@ -3,7 +3,10 @@
 This runbook covers the staging and production observability lifecycles. It is intentionally
 non-Flux: operators use guarded Helm commands from this repository, with the chart version and
 full values chain committed in Git. The production core stack has live acceptance evidence; the
-application integrations listed below remain separately deferred.
+application integrations listed below remain separately deferred. Authenticated DSPACE metrics are
+supported separately on the existing application 3.0.1/chart 3.0.2 coordinates; this repository
+change alone does not deploy them or promote a release. Follow the
+[DSPACE production procedure](apps/dspace.md#production-authenticated-metrics-at-the-existing-release).
 
 ## Canonical sources
 

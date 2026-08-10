@@ -661,6 +661,132 @@ def test_helm_stored_values_reject_image_mismatch(field: str, wrong: str) -> Non
         manifest.verify_helm_stored_values(value, {"image": image}, "prod")
 
 
+def production_stored_values() -> dict[str, object]:
+    value = split_candidate("prod")
+    return {
+        "image": {
+            "repository": manifest.IMAGE_REF,
+            "tag": value["imageTag"],
+            "pullPolicy": "Always",
+        },
+        "metrics": {
+            "enabled": True,
+            "path": "/metrics",
+            "auth": {"existingSecret": "dspace-prod-metrics-token", "secretKey": "token"},
+        },
+        "serviceMonitor": {
+            "enabled": True,
+            "interval": "30s",
+            "scrapeTimeout": "10s",
+            "additionalLabels": {"release": "kube-prometheus-stack"},
+            "cluster": "sugarkube-prod",
+        },
+        "ingress": {"tls": {"enabled": False, "secretName": ""}},
+        "serviceAccount": {"automountServiceAccountToken": False},
+        "secret": {"enabled": False, "stringData": {}},
+    }
+
+
+def test_helm_stored_values_accept_chart_defaults_and_safe_references() -> None:
+    value = split_candidate("prod")
+    stored = production_stored_values()
+    stored["env"] = [
+        {
+            "name": "METRICS_TOKEN",
+            "valueFrom": {
+                "secretKeyRef": {"name": "dspace-prod-metrics-token", "key": "token"}
+            },
+        }
+    ]
+    assert manifest.verify_helm_stored_values(value, stored, "prod")["passed"] is True
+
+
+@pytest.mark.parametrize(
+    ("section", "field", "wrong"),
+    [
+        ("metrics", "path", None),
+        ("metrics", "path", "/wrong"),
+        ("metrics", "auth", {"existingSecret": "wrong", "secretKey": "token"}),
+        (
+            "metrics",
+            "auth",
+            {"existingSecret": "dspace-prod-metrics-token", "secretKey": "wrong"},
+        ),
+        ("serviceMonitor", "enabled", False),
+        ("serviceMonitor", "interval", "60s"),
+        ("serviceMonitor", "scrapeTimeout", "30s"),
+        ("serviceMonitor", "additionalLabels", {}),
+        ("serviceMonitor", "cluster", "wrong"),
+    ],
+)
+def test_helm_stored_values_reject_weakened_production_contract(
+    section: str, field: str, wrong: object
+) -> None:
+    stored = production_stored_values()
+    mapping = stored[section]
+    assert isinstance(mapping, dict)
+    if wrong is None:
+        mapping.pop(field)
+    else:
+        mapping[field] = wrong
+    with pytest.raises(manifest.ManifestError, match="approved contract"):
+        manifest.verify_helm_stored_values(split_candidate("prod"), stored, "prod")
+
+
+@pytest.mark.parametrize(
+    "shape",
+    ["".join(("pass", "word")), "secret", "environment"],
+)
+def test_helm_stored_values_reject_inline_credential_redacted(
+    shape: str,
+) -> None:
+    sentinel = "".join(("credential", "-sentinel"))
+    inline: dict[str, object]
+    if shape == "environment":
+        environment_entry = {"name": "METRICS_TOKEN"}
+        environment_entry["".join(("val", "ue"))] = sentinel
+        inline = {"env": [environment_entry]}
+    else:
+        inline = {shape: sentinel}
+    stored = production_stored_values()
+    stored.update(inline)
+    with pytest.raises(manifest.ManifestError, match="approved contract") as raised:
+        manifest.verify_helm_stored_values(split_candidate("prod"), stored, "prod")
+    assert sentinel not in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    "secret",
+    [
+        {"enabled": True, "stringData": {}},
+        {
+            "enabled": False,
+            "stringData": {"opaque": "".join(("credential", "-sentinel"))},
+        },
+        {"enabled": False, "data": {"opaque": "".join(("credential", "-sentinel"))}},
+    ],
+)
+def test_helm_stored_values_reject_enabled_or_populated_secret_redacted(
+    secret: dict[str, object],
+) -> None:
+    sentinel = "".join(("credential", "-sentinel"))
+    stored = production_stored_values()
+    stored["secret"] = secret
+    with pytest.raises(manifest.ManifestError, match="approved contract") as raised:
+        manifest.verify_helm_stored_values(split_candidate("prod"), stored, "prod")
+    assert sentinel not in str(raised.value)
+
+
+@pytest.mark.parametrize("name", ["METRICS_TOKEN", "DSPACE_API_KEY"])
+def test_helm_stored_values_reject_credential_environment_plain_value(name: str) -> None:
+    sentinel = "".join(("credential", "-sentinel"))
+    stored = production_stored_values()
+    stored["env"] = [{"name": name, "value": sentinel}]
+    with pytest.raises(manifest.ManifestError, match="approved contract") as raised:
+        manifest.verify_helm_stored_values(split_candidate("prod"), stored, "prod")
+    assert sentinel not in str(raised.value)
+
+
 @pytest.mark.parametrize(
     "leak",
     [

@@ -2,6 +2,60 @@
 
 This is the canonical runbook for deploying DSPACE from GHCR artifacts to Sugarkube. The generic `just app-*` recipes are the preferred future path. The `dspace-oci-*` recipes remain compatibility shims and are scheduled for later removal only after the generic flow has been exercised across routine releases.
 
+## Production authenticated metrics at the existing release
+
+DSPACE production metrics are supported by the already deployed application **3.0.1** and chart
+**3.0.2**. This repository change does not deploy application or chart code, and it is not a
+promotion. It supplies the reviewed values contract for an upgrade-only configuration
+reconciliation at the existing immutable coordinates.
+
+Run production operations from `sugarkube3` with the externally managed API tunnel listening on
+`127.0.0.1:16443`. Use the explicit production kubeconfig and context; **do not** run
+`just kubeconfig-env env=prod` on that host:
+
+```bash
+export KUBECONFIG="$HOME/.kube/config-sugarkube-prod"
+test "$(kubectl config current-context)" = sugar-prod
+python3 scripts/cluster_identity.py assert --kubeconfig "$KUBECONFIG" --env prod
+just observability-app-metrics-secret-install app=dspace env=prod
+just observability-app-metrics-secret-check app=dspace env=prod
+```
+
+The hidden-input installer creates or rotates only `dspace/dspace-prod-metrics-token` key `token`;
+the check proves that the key is nonempty without reading it. Install and check it before any
+reconciliation. Never put the credential in an argument, environment variable, transcript, or
+evidence file.
+
+The reconciliation operator must supply the genuine existing finalized production evidence, the
+executable DSPACE runtime smoke runner, and a fresh, nonexisting evidence destination. Discover the
+current Helm revision immediately before the operation rather than assuming revision 9. Review the
+digest-qualified chart render and transient live-versus-desired values comparison: the only
+permitted difference is the committed `metrics` and `serviceMonitor` contract. Retain application
+3.0.1, chart 3.0.2, their immutable image/chart digests, and both replicas; never use
+`--reuse-values`, a semantic or mutable tag, raw `helm upgrade`, or `helm rollback`.
+
+```bash
+just dspace-prod-metrics-reconcile \
+  manifest="$GENUINE_FINALIZED_PROD_EVIDENCE" \
+  evidence="$FRESH_NONEXISTING_EVIDENCE" \
+  smoke_runner="$DSPACE_SMOKE_RUNNER" \
+  kubeconfig="$HOME/.kube/config-sugarkube-prod" \
+  confirm="dspace:prod:<40-character-application-SHA>"
+```
+
+After rollout, run the DSPACE runtime and `/chat` verification, then run:
+
+```bash
+just observability-app-metrics-verify app=dspace env=prod
+just observability-dashboard-verify env=prod
+```
+
+Inspect the production dashboard manually. DSPACE HTTP, runtime, and feature panels should
+populate. Release-integrity, blackbox, token.place, and alerting panels may remain `NO DATA` until
+those separate production integrations are deployed. A failure after mutation is not permission
+to rerun or roll back immediately: preserve and review the reserved failure evidence, discover the
+new live revision, and plan a deliberate reconciliation.
+
 ## Production Helm reconciliation for application 3.0.1
 
 This section **prepares but does not execute** the incident reconciliation tracked by

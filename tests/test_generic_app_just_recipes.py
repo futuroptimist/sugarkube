@@ -208,11 +208,19 @@ if [[ "$*" == *"get values"* ]]; then
     echo 'Error: Kubernetes cluster unreachable for context sugar-staging' >&2
     exit 1
   fi
-  printf '{{"image":{{"repository":"%s","tag":"%s","pullPolicy":"%s"}},"metrics":{{"enabled":false}},"serviceMonitor":{{"enabled":false}},"ingress":{{"host":"%s"}}}}\n' \
-    "${{SUGARKUBE_STUB_HELM_REPOSITORY:-ghcr.io/democratizedspace/dspace}}" \
-    "${{SUGARKUBE_STUB_HELM_TAG:-main-abcdef0}}" \
-    "${{SUGARKUBE_STUB_HELM_PULL_POLICY:-Always}}" \
-    "${{SUGARKUBE_STUB_HELM_HOST:-example.test}}"
+  if [ "${{SUGARKUBE_STUB_NODE_ENV:-staging}}" = prod ]; then
+    printf '{{"image":{{"repository":"%s","tag":"%s","pullPolicy":"%s"}},"metrics":{{"enabled":true,"auth":{{"existingSecret":"dspace-prod-metrics-token","secretKey":"token"}}}},"serviceMonitor":{{"enabled":true,"interval":"30s","scrapeTimeout":"10s","additionalLabels":{{"release":"kube-prometheus-stack"}},"cluster":"sugarkube-prod"}},"ingress":{{"host":"%s"}}}}\n' \
+      "${{SUGARKUBE_STUB_HELM_REPOSITORY:-ghcr.io/democratizedspace/dspace}}" \
+      "${{SUGARKUBE_STUB_HELM_TAG:-main-abcdef0}}" \
+      "${{SUGARKUBE_STUB_HELM_PULL_POLICY:-Always}}" \
+      "${{SUGARKUBE_STUB_HELM_HOST:-example.test}}"
+  else
+    printf '{{"image":{{"repository":"%s","tag":"%s","pullPolicy":"%s"}},"metrics":{{"enabled":false}},"serviceMonitor":{{"enabled":false}},"ingress":{{"host":"%s"}}}}\n' \
+      "${{SUGARKUBE_STUB_HELM_REPOSITORY:-ghcr.io/democratizedspace/dspace}}" \
+      "${{SUGARKUBE_STUB_HELM_TAG:-main-abcdef0}}" \
+      "${{SUGARKUBE_STUB_HELM_PULL_POLICY:-Always}}" \
+      "${{SUGARKUBE_STUB_HELM_HOST:-example.test}}"
+  fi
   exit 0
 fi
 if [[ "$*" == show\ chart* ]]; then
@@ -322,6 +330,11 @@ spec:
         - name: ${{container}}
           image: ghcr.io/example/${{app}}:${{tag}}
           env:
+            - name: METRICS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: dspace-prod-metrics-token
+                  key: token
             - name: TOKENPLACE_IMAGE_TAG
               value: ${{tag}}
             - name: TOKENPLACE_RELEASE_VERSION
@@ -399,11 +412,60 @@ metadata:
   labels:
     app.kubernetes.io/instance: dspace
 spec:
+  namespaceSelector:
+    matchNames:
+      - dspace
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: dspace
+      app.kubernetes.io/name: dspace
   endpoints:
     - port: http
       bearerTokenSecret:
         name: dspace-staging-metrics-token
         key: token
+YAML
+    fi
+    if [ "${{app}}" = dspace ] && [[ "$*" == *dspace.values.prod.yaml* ]]; then
+      cat <<'YAML'
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: dspace
+  namespace: dspace
+  labels:
+    app.kubernetes.io/instance: dspace
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - dspace
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: dspace
+      app.kubernetes.io/name: dspace
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      bearerTokenSecret:
+        name: dspace-prod-metrics-token
+        key: token
+      relabelings:
+        - action: replace
+          targetLabel: app
+          replacement: dspace
+        - action: replace
+          targetLabel: environment
+          replacement: prod
+        - action: replace
+          targetLabel: release
+          replacement: dspace
+        - action: replace
+          targetLabel: cluster
+          replacement: sugarkube-prod
 YAML
     fi
   fi
@@ -1332,6 +1394,113 @@ data:
     )
 
 
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda manifest: manifest.replace("path: /metrics", "path: /healthz"),
+        lambda manifest: manifest.replace(
+            "replacement: dspace\n        - action: replace\n          targetLabel: environment",
+            "replacement: other\n        - action: replace\n          targetLabel: environment",
+            1,
+        ),
+        lambda manifest: manifest.replace("replacement: prod", "replacement: staging"),
+        lambda manifest: manifest.replace("targetLabel: release", "targetLabel: namespace"),
+    ],
+)
+def test_dspace_production_requires_exact_metrics_path_and_relabelings(
+    tmp_path: Path, mutation
+) -> None:
+    values = tmp_path / "prod.yaml"
+    values.write_text(
+        (REPO_ROOT / "docs/examples/dspace.values.prod.yaml").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    inputs = app_chart.ReleaseInputs(
+        "dspace",
+        "prod",
+        "dspace",
+        "dspace",
+        "chart",
+        "3.0.2",
+        (str(values),),
+        "main-deadbee",
+    )
+    monitor = """kind: Deployment
+metadata:
+  name: dspace
+  namespace: dspace
+  labels:
+    app.kubernetes.io/instance: dspace
+spec:
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: dspace
+        app.kubernetes.io/name: dspace
+    spec:
+      containers:
+        - name: dspace
+          image: ghcr.io/democratizedspace/dspace:main-deadbee
+          env:
+            - name: METRICS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: dspace-prod-metrics-token
+                  key: token
+---
+kind: Service
+metadata:
+  name: dspace
+  namespace: dspace
+  labels:
+    app.kubernetes.io/instance: dspace
+spec:
+  selector:
+    app.kubernetes.io/instance: dspace
+    app.kubernetes.io/name: dspace
+---
+kind: ServiceMonitor
+metadata:
+  name: dspace
+  namespace: dspace
+  labels:
+    app.kubernetes.io/instance: dspace
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: dspace
+      app.kubernetes.io/name: dspace
+  endpoints:
+    - path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      bearerTokenSecret:
+        name: dspace-prod-metrics-token
+        key: token
+      relabelings:
+        - action: replace
+          targetLabel: app
+          replacement: dspace
+        - action: replace
+          targetLabel: environment
+          replacement: prod
+        - action: replace
+          targetLabel: release
+          replacement: dspace
+        - action: replace
+          targetLabel: cluster
+          replacement: sugarkube-prod
+"""
+
+    assert app_chart.validate_rendered_manifest(monitor, inputs) == []
+    mutated = mutation(monitor)
+    assert mutated != monitor
+    assert "DSPACE production ServiceMonitor contract mismatch" in (
+        app_chart.validate_rendered_manifest(mutated, inputs)
+    )
+
+
 def test_dspace_production_allows_legacy_pod_uid_metrics_token() -> None:
     inputs = app_chart.ReleaseInputs(
         "dspace", "prod", "dspace", "dspace", "chart", "3.0.2", (), "main-deadbee"
@@ -1492,7 +1661,7 @@ spec:
 @pytest.mark.parametrize(
     "leak", ["METRICS_TOKEN", "dspace-staging-metrics-token", "sugarkube-int"]
 )
-def test_dspace_production_checks_only_release_associated_structure(leak: str) -> None:
+def test_dspace_production_rejects_staging_scalars_anywhere(leak: str) -> None:
     inputs = app_chart.ReleaseInputs(
         "dspace", "prod", "dspace", "dspace", "chart", "3.1.0", (),
         "main-deadbee", "democratized.space",
@@ -1526,7 +1695,7 @@ data:
   value: {leak}
 """
 
-    assert "DSPACE production rendered staging-only metrics configuration" not in (
+    assert "DSPACE production rendered staging-only metrics configuration" in (
         app_chart.validate_rendered_manifest(unrelated, inputs)
     )
     assert "DSPACE production rendered staging-only metrics configuration" in (
@@ -6062,6 +6231,19 @@ def test_observability_app_metrics_malformed_samples_fail_immediately(monkeypatc
     assert slept == []
 
 
+def test_observability_app_metrics_accepts_exact_bucket_family(monkeypatch):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"]["dspace"]["environments"]["prod"]
+    cfg = {**cfg, "requiredMetricFamilies": ["dspace_http_request_duration_seconds_bucket"]}
+    monkeypatch.setattr(app_metrics, "prom", lambda path: {
+        "resultType": "vector",
+        "result": [{"metric": {"__name__": "dspace_http_request_duration_seconds_bucket", **cfg["targetLabels"]}}],
+    })
+
+    assert app_metrics.query_required_families(cfg, {}) == {
+        "dspace_http_request_duration_seconds_bucket"
+    }
+
+
 @pytest.mark.parametrize(
     ("present", "result_type"),
     [
@@ -6281,7 +6463,7 @@ def test_observability_app_metrics_verify_all_uses_every_configured_app(monkeypa
 
 
 def test_observability_app_metrics_live_environment_normalization_and_rejection(monkeypatch):
-    forbidden = ["prod", "production", "", "dev", "qa"]
+    forbidden = ["production", "", "dev", "qa"]
     for env in forbidden:
         def fail_load_config(env=env):
             raise AssertionError(f"loaded config for {env!r}")
@@ -6289,11 +6471,18 @@ def test_observability_app_metrics_live_environment_normalization_and_rejection(
         monkeypatch.setattr(app_metrics, "load_config", fail_load_config)
         with pytest.raises(SystemExit) as excinfo:
             app_metrics.appcfg("tokenplace", env)
-        assert "staging only" in str(excinfo.value)
+        assert "unsupported" in str(excinfo.value)
         assert app_metrics.main(["verify-all", "--env", env]) == 2
 
     assert app_metrics.normalize_live_env("env=env=int") == "staging"
     assert app_metrics.normalize_live_env("env=staging") == "staging"
+    assert app_metrics.normalize_live_env("env=prod") == "prod"
+    monkeypatch.setattr(
+        app_metrics,
+        "load_config",
+        lambda: {"applications": {"dspace": {"environments": {"prod": "prod-cfg"}}}},
+    )
+    assert app_metrics.appcfg("dspace", "prod") == "prod-cfg"
 
 
 @pytest.mark.parametrize("app", ["app=", "app=foo=bar", "app=Bad_Name", "-bad"])
@@ -6680,6 +6869,41 @@ def test_observability_app_metrics_load_rendered_docs_malformed_is_redacted(
         app_metrics.load_rendered_docs(str(candidate))
     assert "rendered manifests are malformed" in str(excinfo.value)
     assert "credential-looking-render" not in str(excinfo.value)
+
+
+def test_observability_app_metrics_load_rendered_docs_rejects_aliases(tmp_path):
+    candidate = tmp_path / "candidate.yaml"
+    candidate.write_text("first: &value secret\nsecond: *value\n", encoding="utf-8")
+
+    with pytest.raises(app_metrics.Error, match="rendered manifests are malformed"):
+        app_metrics.load_rendered_docs(str(candidate))
+
+
+def test_observability_app_metrics_production_identity_uses_selected_kubeconfig(
+    monkeypatch, tmp_path
+):
+    kubeconfig = str((tmp_path / "prod-kubeconfig").resolve())
+    calls = []
+    monkeypatch.setenv("KUBECONFIG", kubeconfig)
+    monkeypatch.setattr(
+        app_metrics,
+        "run",
+        lambda command: calls.append(command) or (
+            "sugar-prod\n" if command[:3] == ["kubectl", "config", "current-context"] else ""
+        ),
+    )
+
+    app_metrics.assert_production_context()
+
+    assert calls[-1] == [
+        app_metrics.sys.executable,
+        str(app_metrics.ROOT / "scripts" / "cluster_identity.py"),
+        "assert",
+        "--kubeconfig",
+        kubeconfig,
+        "--env",
+        "prod",
+    ]
 
 
 class _AppMetricsFakeTty:

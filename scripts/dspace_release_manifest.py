@@ -922,16 +922,34 @@ def verify_helm_stored_values(
         raise ManifestError("Helm stored image values do not match approved coordinates")
 
     if environment == "prod":
-        metrics = stored_values.get("metrics", {})
-        service_monitor = stored_values.get("serviceMonitor", {})
+        expected_metrics = {
+            "enabled": True,
+            "path": "/metrics",
+            "auth": {"existingSecret": "dspace-prod-metrics-token", "secretKey": "token"},
+        }
+        expected_monitor = {
+            "enabled": True,
+            "interval": "30s",
+            "scrapeTimeout": "10s",
+            "additionalLabels": {"release": "kube-prometheus-stack"},
+            "cluster": "sugarkube-prod",
+        }
         if (
-            not isinstance(metrics, dict)
-            or not isinstance(service_monitor, dict)
-            or metrics.get("enabled") is True
-            or service_monitor.get("enabled") is True
+            stored_values.get("metrics") != expected_metrics
+            or stored_values.get("serviceMonitor") != expected_monitor
             or contains_staging_reference(stored_values)
+            or contains_inline_credential(
+                {
+                    key: item
+                    for key, item in stored_values.items()
+                    if key not in {"metrics", "serviceMonitor"}
+                }
+            )
         ):
-            raise ManifestError("Helm stored production values contain staging-only settings")
+            raise ManifestError(
+                "Helm stored production metrics values do not match the approved contract "
+                "or contain staging-only settings"
+            )
     return {
         "check": "helmStoredValues",
         "passed": True,
@@ -941,7 +959,11 @@ def verify_helm_stored_values(
 
 def contains_staging_reference(value: object) -> bool:
     """Detect known staging-only scalar values without reflecting them in diagnostics."""
-    forbidden = {"METRICS_TOKEN", "dspace-staging-metrics-token", "sugarkube-int"}
+    forbidden = {
+        "dspace-staging-metrics-token",
+        "sugarkube-int",
+        "staging.democratized.space",
+    }
     if isinstance(value, dict):
         return any(
             contains_staging_reference(key) or contains_staging_reference(item)
@@ -950,6 +972,64 @@ def contains_staging_reference(value: object) -> bool:
     if isinstance(value, list):
         return any(contains_staging_reference(item) for item in value)
     return isinstance(value, str) and value in forbidden
+
+
+def contains_inline_credential(value: object) -> bool:
+    """Detect inline credential material while allowing references and empty defaults."""
+    sensitive = re.compile(
+        r"(?:authorization|bearer|credential|pass"
+        r"word|passwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key)",
+        re.I,
+    )
+    reference_keys = {
+        "automountserviceaccounttoken",
+        "existingsecret",
+        "secretkey",
+        "secretkeyref",
+        "secretname",
+    }
+
+    def is_empty(item: object) -> bool:
+        return item is None or item is False or item == "" or item == {} or item == []
+
+    if isinstance(value, dict):
+        name = value.get("name")
+        if (
+            isinstance(name, str)
+            and sensitive.search(name)
+            and "value" in value
+            and not is_empty(value["value"])
+        ):
+            return True
+        for key, item in value.items():
+            if isinstance(key, str) and key.lower() == "secret" and isinstance(item, dict):
+                if item.get("enabled") is True:
+                    return True
+                if not is_empty(item.get("data")) or not is_empty(item.get("stringData")):
+                    return True
+                if contains_inline_credential(
+                    {
+                        child_key: child_value
+                        for child_key, child_value in item.items()
+                        if child_key not in {"enabled", "data", "stringData"}
+                    }
+                ):
+                    return True
+                continue
+            if isinstance(key, str) and sensitive.search(key):
+                if key.lower() in reference_keys:
+                    if isinstance(item, (dict, list)) and contains_inline_credential(item):
+                        return True
+                    continue
+                if is_empty(item):
+                    continue
+                return True
+            if contains_inline_credential(item):
+                return True
+        return False
+    if isinstance(value, list):
+        return any(contains_inline_credential(item) for item in value)
+    return False
 
 
 def staging_gate(candidate_value: dict[str, Any], evidence_value: dict[str, Any]) -> int:

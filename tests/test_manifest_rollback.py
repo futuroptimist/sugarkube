@@ -503,6 +503,572 @@ def test_confirmation_and_verifier_gates_precede_reservation_and_mutation(
         assert not any("template" in command for command in commands)
 
 
+def test_configuration_reconciliation_invalid_render_fails_before_reservation_and_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    args, commands, evidence, _verifier = pre_reservation_case(
+        tmp_path, monkeypatch, environment="prod"
+    )
+    args.configuration_reconciliation = True
+    args.kubeconfig = str(tmp_path / "kubeconfig")
+    args.confirm = f"dspace:prod:{SHA}"
+    desired = {
+        "image": {
+            "repository": manifest.IMAGE_REF,
+            "tag": "main-abcdef0",
+            "pullPolicy": "Always",
+        },
+        "metrics": {"enabled": True},
+        "serviceMonitor": {"enabled": True},
+    }
+    monkeypatch.setattr(rollback.app_chart, "merged_values_document", lambda _paths: desired)
+    monkeypatch.setattr(rollback.app_chart, "validate_rendered_manifest", lambda *_args: ["bad"])
+    monkeypatch.setattr(rollback.release, "verify_helm_stored_values", lambda *_args: None)
+    monkeypatch.setattr(
+        rollback,
+        "pods",
+        lambda *_args, **_kwargs: [
+            {
+                "ready": True,
+                "applicationImage": f"{manifest.IMAGE_REF}:main-abcdef0",
+                "applicationImageID": f"{manifest.IMAGE_REF}@{DIGEST}",
+            },
+            {
+                "ready": True,
+                "applicationImage": f"{manifest.IMAGE_REF}:main-abcdef0",
+                "applicationImageID": f"{manifest.IMAGE_REF}@{DIGEST}",
+            },
+        ],
+    )
+    monkeypatch.setattr(
+        rollback,
+        "helm_status",
+        lambda *_args: {
+            "version": 7,
+            "info": {"status": "deployed"},
+            "chart": {"metadata": {"name": "dspace", "version": "3.2.0"}},
+        },
+    )
+
+    template_calls = 0
+
+    def runner(command: list[str]) -> str:
+        nonlocal template_calls
+        commands.append(command)
+        if "values" in command and "get" in command:
+            return json.dumps({"image": desired["image"]})
+        if "template" in command:
+            template_calls += 1
+            return "invalid target render" if template_calls == 1 else "live render"
+        if "get" in command and "manifest" in command:
+            return "live render"
+        return ""
+
+    staged = tmp_path / "staged"
+    staged.mkdir()
+    with pytest.raises(
+        rollback.RollbackError, match="strict application chart render validation failed"
+    ):
+        rollback._rollback(args, runner, staged)
+    assert not evidence.exists()
+    assert_no_mutation(commands)
+
+
+@pytest.mark.parametrize("kubeconfig", ("", "relative/kubeconfig", "/tmp/one:/tmp/two"))
+def test_configuration_reconciliation_requires_one_absolute_kubeconfig(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kubeconfig: str
+) -> None:
+    args, commands, evidence, _verifier = pre_reservation_case(
+        tmp_path, monkeypatch, environment="prod"
+    )
+    args.configuration_reconciliation = True
+    args.kubeconfig = kubeconfig
+
+    with pytest.raises(rollback.RollbackError, match="one explicit absolute kubeconfig"):
+        rollback.rollback(args, lambda command: commands.append(command) or "")
+    assert commands == []
+    assert not evidence.exists()
+
+
+@pytest.mark.parametrize(
+    ("failure", "message"),
+    (
+        ("revision", "live Helm revision differs"),
+        ("chart", "live chart coordinate differs"),
+        ("pods", "exactly two Ready"),
+        ("desired", "desired values are structurally invalid"),
+        ("manifest", "live manifest does not match"),
+        ("contract", "desired production metrics contract is invalid"),
+        ("baseline", "approved disabled baseline"),
+        ("drift", "unrelated Helm values drift"),
+        ("image", "live image coordinate differs"),
+    ),
+)
+def test_configuration_reconciliation_preconditions_fail_before_reservation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+    message: str,
+) -> None:
+    args, commands, evidence, _verifier = pre_reservation_case(
+        tmp_path, monkeypatch, environment="prod"
+    )
+    args.configuration_reconciliation = True
+    args.confirm = f"dspace:prod:{SHA}"
+    image = {
+        "repository": manifest.IMAGE_REF,
+        "tag": "main-abcdef0",
+        "pullPolicy": "Always",
+    }
+    desired: object = {
+        "image": image,
+        "metrics": {"enabled": True},
+        "serviceMonitor": {"enabled": True},
+    }
+    live = {"image": image}
+    if failure == "desired":
+        desired = []
+    elif failure == "baseline":
+        live["metrics"] = {"enabled": True}
+    elif failure == "drift":
+        live["unrelated"] = True
+
+    monkeypatch.setattr(rollback.app_chart, "merged_values_document", lambda _paths: desired)
+    monkeypatch.setattr(rollback.app_chart, "validate_rendered_manifest", lambda *_args: [])
+
+    def verify_stored(*_args: object) -> None:
+        if failure == "contract":
+            raise manifest.ManifestError("sensitive details must be redacted")
+
+    monkeypatch.setattr(rollback.release, "verify_helm_stored_values", verify_stored)
+    ready = {
+        "ready": True,
+        "applicationImage": f"{manifest.IMAGE_REF}:main-abcdef0",
+        "applicationImageID": f"{manifest.IMAGE_REF}@{DIGEST}",
+    }
+    observed = [ready, ready]
+    if failure == "pods":
+        observed = [ready]
+    elif failure == "image":
+        observed = [{**ready, "applicationImageID": f"{manifest.IMAGE_REF}@sha256:{'9' * 64}"}] * 2
+    monkeypatch.setattr(rollback, "pods", lambda *_args, **_kwargs: observed)
+    monkeypatch.setattr(
+        rollback,
+        "helm_status",
+        lambda *_args: {
+            "version": 8 if failure == "revision" else 7,
+            "info": {"status": "deployed"},
+            "chart": {
+                "metadata": {
+                    "name": "dspace",
+                    "version": "0.0.0" if failure == "chart" else "3.2.0",
+                }
+            },
+        },
+    )
+    template_calls = 0
+
+    def runner(command: list[str]) -> str:
+        nonlocal template_calls
+        commands.append(command)
+        if "values" in command and "get" in command:
+            return json.dumps(live)
+        if "template" in command:
+            template_calls += 1
+            if template_calls == 1:
+                return "target render"
+            return "different render" if failure == "manifest" else "live render"
+        if "get" in command and "manifest" in command:
+            return "live render"
+        return ""
+
+    staged = tmp_path / "staged"
+    staged.mkdir()
+    with pytest.raises(rollback.RollbackError, match=message):
+        rollback._rollback(args, runner, staged)
+    assert not evidence.exists()
+    assert_no_mutation(commands)
+
+
+@pytest.mark.parametrize("drift", ("context", "identity"))
+def test_configuration_reconciliation_reasserts_trusted_target_after_reservation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, drift: str
+) -> None:
+    args, commands, evidence, _verifier = pre_reservation_case(
+        tmp_path, monkeypatch, environment="prod"
+    )
+    args.configuration_reconciliation = True
+    args.confirm = f"dspace:prod:{SHA}"
+    desired = {
+        "image": {
+            "repository": manifest.IMAGE_REF,
+            "tag": "main-abcdef0",
+            "pullPolicy": "Always",
+        },
+        "metrics": {"enabled": True},
+        "serviceMonitor": {"enabled": True},
+    }
+    live = {"image": desired["image"]}
+    ready_pods = [
+        {
+            "ready": True,
+            "applicationImage": f"{manifest.IMAGE_REF}:main-abcdef0",
+            "applicationImageID": f"{manifest.IMAGE_REF}@{DIGEST}",
+        }
+    ] * 2
+    monkeypatch.setattr(rollback.app_chart, "merged_values_document", lambda _paths: desired)
+    monkeypatch.setattr(rollback.app_chart, "validate_rendered_manifest", lambda *_args: [])
+    monkeypatch.setattr(rollback.release, "verify_helm_stored_values", lambda *_args: None)
+    helm_reads = []
+    pod_reads = []
+
+    def status(*args: object) -> dict[str, object]:
+        helm_reads.append(args)
+        return {
+            "name": "dspace",
+            "namespace": "dspace",
+            "version": 7,
+            "info": {"status": "deployed"},
+            "chart": {"metadata": {"name": "dspace", "version": "3.2.0"}},
+        }
+
+    def pod_read(*args: object, **kwargs: object) -> list[dict[str, object]]:
+        pod_reads.append((args, kwargs))
+        return ready_pods
+
+    monkeypatch.setattr(rollback, "helm_status", status)
+    monkeypatch.setattr(rollback, "pods", pod_read)
+    reserved_at = []
+    real_reserve = rollback.reserve
+
+    def reserve(path: Path, record: dict[str, object]) -> None:
+        real_reserve(path, record)
+        reserved_at.append((len(commands), len(helm_reads), len(pod_reads)))
+
+    monkeypatch.setattr(rollback, "reserve", reserve)
+    sentinel = "TOP-SECRET-drift-diagnostic"
+    template_calls = 0
+
+    def runner(command: list[str]) -> str:
+        nonlocal template_calls
+        commands.append(command)
+        if command[:3] == ["git", "rev-parse", "HEAD"]:
+            return "f" * 40
+        if "current-context" in command:
+            if drift == "context" and reserved_at:
+                return "sugar-staging"
+            return "sugar-prod"
+        if any("cluster_identity.py" in part for part in command):
+            if drift == "identity" and reserved_at:
+                raise rollback.RollbackError(sentinel)
+            return ""
+        if "get" in command and "values" in command:
+            return json.dumps(live)
+        if "template" in command:
+            template_calls += 1
+            return "target render" if template_calls == 1 else "live render"
+        if "get" in command and "manifest" in command:
+            return "live render"
+        return ""
+
+    staged = tmp_path / "staged"
+    staged.mkdir()
+    with pytest.raises(rollback.RollbackError, match="preserved evidence"):
+        rollback._rollback(args, runner, staged)
+
+    command_count, helm_count, pod_count = reserved_at[0]
+    after_reservation = commands[command_count:]
+    assert "current-context" in after_reservation[0]
+    assert not any("secret-check" in command for command in after_reservation)
+    assert_no_mutation(after_reservation)
+    assert len(helm_reads) == helm_count
+    assert len(pod_reads) == pod_count
+    written = json.loads(evidence.read_text(encoding="utf-8"))
+    assert written["state"] == "failed"
+    assert written["failedStage"] == "pre-mutation-revalidation"
+    assert written["clusterMayHaveChanged"] is False
+    assert written["diagnostics"] == {}
+    assert sentinel not in evidence.read_text(encoding="utf-8")
+    original = evidence.read_bytes()
+    with pytest.raises(rollback.RollbackError, match="overwrite"):
+        rollback.reserve(evidence, {"state": "reserved"})
+    assert evidence.read_bytes() == original
+
+
+@pytest.mark.parametrize(
+    ("diagnostic_failure", "state_drift"),
+    (
+        (None, None),
+        ("helm", None),
+        ("pods", None),
+        (None, "helm"),
+        (None, "pods"),
+        (None, "values"),
+    ),
+)
+def test_configuration_reconciliation_reasserts_target_immediately_before_upgrade(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    diagnostic_failure: str | None,
+    state_drift: str | None,
+) -> None:
+    args, commands, evidence, _verifier = pre_reservation_case(
+        tmp_path, monkeypatch, environment="prod"
+    )
+    args.configuration_reconciliation = True
+    args.confirm = f"dspace:prod:{SHA}"
+    image = {
+        "repository": manifest.IMAGE_REF,
+        "tag": "main-abcdef0",
+        "pullPolicy": "Always",
+    }
+    desired = {
+        "image": image,
+        "metrics": {"enabled": True},
+        "serviceMonitor": {"enabled": True},
+    }
+    monkeypatch.setattr(rollback.app_chart, "merged_values_document", lambda _paths: desired)
+    monkeypatch.setattr(rollback.app_chart, "validate_rendered_manifest", lambda *_args: [])
+    monkeypatch.setattr(rollback.release, "verify_helm_stored_values", lambda *_args: None)
+    upgrade_attempted = False
+
+    def status(*_args: object) -> dict[str, object]:
+        if upgrade_attempted and diagnostic_failure == "helm":
+            raise RuntimeError("bounded diagnostic failure")
+        return {
+            "name": "dspace",
+            "namespace": "dspace",
+            "version": 8 if state_drift == "helm" and evidence.exists() else 7,
+            "info": {"status": "deployed"},
+            "chart": {"metadata": {"name": "dspace", "version": "3.2.0"}},
+        }
+
+    def observed_pods(*_args: object, **_kwargs: object) -> list[dict[str, object]]:
+        if upgrade_attempted and diagnostic_failure == "pods":
+            raise RuntimeError("bounded diagnostic failure")
+        result = [
+            {
+                "ready": True,
+                "applicationImage": f"{manifest.IMAGE_REF}:main-abcdef0",
+                "applicationImageID": f"{manifest.IMAGE_REF}@{DIGEST}",
+            }
+        ] * 2
+        if state_drift == "pods" and evidence.exists():
+            result[0] = {**result[0], "ready": False}
+        return result
+
+    monkeypatch.setattr(rollback, "helm_status", status)
+    monkeypatch.setattr(rollback, "pods", observed_pods)
+    template_calls = 0
+
+    def runner(command: list[str]) -> str:
+        nonlocal template_calls, upgrade_attempted
+        commands.append(command)
+        if command[:3] == ["git", "rev-parse", "HEAD"]:
+            return "f" * 40
+        if "current-context" in command:
+            return "sugar-prod"
+        if "get" in command and "values" in command:
+            values = {"image": image}
+            if state_drift == "values" and evidence.exists():
+                values["unexpected"] = True
+            return json.dumps(values)
+        if "template" in command:
+            template_calls += 1
+            return "target render" if template_calls == 1 else "live render"
+        if "get" in command and "manifest" in command:
+            return "live render"
+        if "upgrade" in command:
+            upgrade_attempted = True
+            raise rollback.RollbackError("bounded failure")
+        return ""
+
+    staged = tmp_path / "staged"
+    staged.mkdir()
+    with pytest.raises(rollback.RollbackError, match="preserved evidence"):
+        rollback._rollback(args, runner, staged)
+
+    written = json.loads(evidence.read_text(encoding="utf-8"))
+    if state_drift:
+        assert_no_mutation(commands)
+        assert written["failedStage"] == "pre-mutation-revalidation"
+        assert written["clusterMayHaveChanged"] is False
+        return
+
+    upgrade_index = next(i for i, command in enumerate(commands) if "upgrade" in command)
+    secret_index = max(i for i, command in enumerate(commands) if "secret-check" in command)
+    final_context = max(i for i, command in enumerate(commands) if "current-context" in command)
+    final_identity = max(
+        i
+        for i, command in enumerate(commands)
+        if any("cluster_identity.py" in part for part in command)
+    )
+    assert secret_index < final_context < final_identity < upgrade_index
+    assert not any("rollout" in command for command in commands)
+    assert written["failedStage"] == "helm-upgrade"
+    assert written["clusterMayHaveChanged"] is True
+    if diagnostic_failure:
+        assert written["diagnostics"][diagnostic_failure] == "unavailable"
+
+
+def test_configuration_reconciliation_completes_all_production_gates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    args, commands, evidence, verifier = pre_reservation_case(
+        tmp_path, monkeypatch, environment="prod"
+    )
+    selected = target("prod", schema_version=2)
+    args.manifest.write_text(manifest._canonical(selected), encoding="utf-8")
+    kubeconfig = tmp_path / "kubeconfig"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    args.configuration_reconciliation = True
+    args.kubeconfig = str(kubeconfig)
+    args.confirm = f"dspace:prod:{SHA}"
+    image = {
+        "repository": manifest.IMAGE_REF,
+        "tag": selected["imageTag"],
+        "pullPolicy": "Always",
+    }
+    desired = {
+        "replicaCount": 2,
+        "image": image,
+        "metrics": {
+            "enabled": True,
+            "path": "/metrics",
+            "auth": {
+                "existingSecret": "dspace-prod-metrics-token",
+                "secretKey": "token",
+            },
+        },
+        "serviceMonitor": {
+            "enabled": True,
+            "interval": "30s",
+            "scrapeTimeout": "10s",
+            "additionalLabels": {"release": "kube-prometheus-stack"},
+            "cluster": "sugarkube-prod",
+        },
+    }
+    live = {"replicaCount": 2, "image": image}
+    stored_proof = [{"check": "helmStoredValues", "passed": True, "details": "safe"}]
+    finalized: dict[str, object] = {}
+    monkeypatch.setattr(rollback.app_chart, "merged_values_document", lambda _paths: desired)
+    monkeypatch.setattr(rollback.app_chart, "validate_rendered_manifest", lambda *_args: [])
+
+    def verify_stored(_approved: object, values: object, _environment: str) -> object:
+        assert values == desired
+        return stored_proof
+
+    def finalize(*_args: object, **kwargs: object) -> dict[str, object]:
+        finalized.update(kwargs)
+        return {"verificationResults": [{"check": "finalized", "passed": True}]}
+
+    monkeypatch.setattr(rollback.release, "verify_helm_stored_values", verify_stored)
+    monkeypatch.setattr(rollback.release, "finalize", finalize)
+    monkeypatch.setattr(rollback, "verifier_accepts_runtime_arguments", lambda *_args: True)
+
+    def ready(uid: str) -> dict[str, object]:
+        return {
+            **pod(uid),
+            "applicationImage": f"{manifest.IMAGE_REF}:{selected['imageTag']}",
+            "applicationImageID": f"{manifest.IMAGE_REF}@{DIGEST}",
+        }
+
+    before_pods = [ready("1"), ready("2")]
+    after_pods = [ready("3"), ready("4")]
+    terminating_pods = [{**ready("2"), "terminating": True}, *after_pods]
+    state = {"upgraded": False, "description": "", "post_upgrade_pod_reads": 0}
+    monkeypatch.setattr(rollback.time, "sleep", lambda _seconds: None)
+
+    def status(*_args: object) -> dict[str, object]:
+        return {
+            "name": "dspace",
+            "namespace": "dspace",
+            "version": 8 if state["upgraded"] else 7,
+            "info": {
+                "status": "deployed",
+                "description": state["description"] if state["upgraded"] else "previous",
+            },
+            "chart": {"metadata": {"name": "dspace", "version": selected["chartVersion"]}},
+        }
+
+    monkeypatch.setattr(rollback, "helm_status", status)
+
+    def observed_pods(*_args: object, **_kwargs: object) -> list[dict[str, object]]:
+        if not state["upgraded"]:
+            observed = before_pods
+        else:
+            state["post_upgrade_pod_reads"] += 1
+            observed = terminating_pods if state["post_upgrade_pod_reads"] == 1 else after_pods
+        return json.loads(json.dumps(observed))
+
+    monkeypatch.setattr(rollback, "pods", observed_pods)
+
+    def runner(command: list[str]) -> str:
+        commands.append(command)
+        if "current-context" in command:
+            return "sugar-prod"
+        if command[:3] == ["git", "rev-parse", "HEAD"]:
+            return "f" * 40
+        if command[0] == "helm" and "upgrade" in command:
+            state["description"] = command[command.index("--description") + 1]
+            state["upgraded"] = True
+        elif command[0] == "helm" and "values" in command and "get" in command:
+            return json.dumps(desired if "--all" in command else live)
+        elif command[0] == "helm" and "template" in command:
+            return "live render" if "live-values.json" in " ".join(command) else "target render"
+        elif command[0] == "helm" and "manifest" in command:
+            return "live render"
+        elif command[:2] == [str(verifier), "verify"]:
+            return json.dumps(verifier_result(environment="prod"))
+        elif command[0] == "kubectl" and (
+            "replicasets,deployments" in command or "pods" in command
+        ):
+            return '{"items": []}'
+        return ""
+
+    result = rollback.rollback(args, runner)
+
+    upgrade = next(command for command in commands if "upgrade" in command)
+    assert upgrade[upgrade.index("--kubeconfig") + 1] == str(kubeconfig)
+    assert f"oci://{manifest.CHART_REF}@{selected['chartDigest']}" in upgrade
+    assert f"image.tag={selected['imageTag']}" in upgrade
+    forbidden = ("--reuse-values", "--version", selected["semanticTag"], "rollback")
+    assert not any(item in upgrade for item in forbidden)
+    assert DIGEST not in next(item for item in upgrade if item.startswith("image.tag="))
+    assert finalized["helm_stored_values_result"] is stored_proof
+    assert finalized["expected_image_coordinate"] == (
+        f"{manifest.IMAGE_REF}:{selected['imageTag']}"
+    )
+    assert result["state"] == "succeeded"
+    assert result["helm"]["beforeRevision"] == 7
+    assert result["helm"]["afterRevision"] == 8
+    assert result["verification"]["helmStoredValues"] == stored_proof
+    assert result["verification"]["runtime"]["sourceRevision"] == SHA
+    journeys = {item["name"] for item in result["verification"]["journeys"]}
+    assert journeys == {"/", "/chat"}
+    assert result["verification"]["productionMetrics"] == {
+        "secretContract": True,
+        "serviceMonitor": True,
+        "healthyTargets": 2,
+        "requiredFamilies": True,
+        "unauthenticatedStatus": 401,
+    }
+    assert json.loads(evidence.read_text(encoding="utf-8")) == result
+    assert "dspace-prod-metrics-token" not in evidence.read_text(encoding="utf-8")
+    original = evidence.read_bytes()
+    with pytest.raises(rollback.RollbackError, match="overwrite"):
+        rollback.reserve(evidence, {"state": "reserved"})
+    assert evidence.read_bytes() == original
+    assert sum("secret-check" in command for command in commands) == 2
+    metrics_verifications = [
+        command
+        for command in commands
+        if "observability_app_metrics.py" in " ".join(command) and "verify" in command
+    ]
+    assert len(metrics_verifications) == 1
+    assert state["post_upgrade_pod_reads"] == 2
+
+
 def test_staging_is_non_interactive_and_reservation_collision_is_immutable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

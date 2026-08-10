@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import datetime as dt
 import hashlib
 import json
@@ -23,6 +24,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts import app_config  # noqa: E402
+from scripts import app_chart  # noqa: E402
 from scripts import dspace_release_manifest as release  # noqa: E402
 
 SCHEMA_VERSION = 1
@@ -444,7 +446,12 @@ def replace_reserved(path: Path, value: dict[str, Any]) -> None:
 
 
 def verify_post_pods(
-    after: list[dict[str, Any]], before: list[dict[str, Any]], target: dict[str, Any], changed: bool
+    after: list[dict[str, Any]],
+    before: list[dict[str, Any]],
+    target: dict[str, Any],
+    changed: bool,
+    *,
+    retain_tag: bool = False,
 ) -> None:
     if any(p["terminating"] for p in after):
         raise RollbackError("terminating old DSPACE pods remain")
@@ -454,7 +461,9 @@ def verify_post_pods(
     new = {(p["uid"], p["startTime"]) for p in after}
     if changed and (old & new or old == new):
         raise RollbackError("DSPACE pod replacement was not proved")
-    expected_image = f"{release.IMAGE_REF}:{target['imageTag']}@{target['imageDigest']}"
+    expected_image = f"{release.IMAGE_REF}:{target['imageTag']}"
+    if not retain_tag:
+        expected_image += f"@{target['imageDigest']}"
     for pod in after:
         if application_image(pod) != expected_image:
             raise RollbackError("DSPACE container image coordinate does not match target")
@@ -474,7 +483,38 @@ def application_image_id(pod: dict[str, Any]) -> str | None:
     return pod.get("applicationImageID", pod.get("imageIDs", {}).get("dspace"))
 
 
+def assert_production_target(kubeconfig: str, runner: Runner) -> None:
+    context = runner(
+        ["kubectl", "--kubeconfig", kubeconfig, "config", "current-context"]
+    ).strip()
+    if context != "sugar-prod":
+        raise RollbackError("metrics configuration reconciliation requires sugar-prod")
+    runner(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts" / "cluster_identity.py"),
+            "assert",
+            "--kubeconfig",
+            kubeconfig,
+            "--env",
+            "prod",
+        ]
+    )
+
+
 def rollback(args: argparse.Namespace, runner: Runner = run) -> dict[str, Any]:
+    if getattr(args, "configuration_reconciliation", False):
+        if not args.kubeconfig or ":" in args.kubeconfig:
+            raise RollbackError(
+                "metrics configuration reconciliation requires one explicit absolute kubeconfig"
+            )
+        kubeconfig = Path(args.kubeconfig).expanduser()
+        if not kubeconfig.is_absolute():
+            raise RollbackError(
+                "metrics configuration reconciliation requires one explicit absolute kubeconfig"
+            )
+        assert_production_target(str(kubeconfig), runner)
+        args.kubeconfig = str(kubeconfig)
     with tempfile.TemporaryDirectory(prefix="dspace-rollback-values-") as temporary:
         os.chmod(temporary, 0o700)
         return _rollback(args, runner, Path(temporary))
@@ -491,6 +531,10 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
         raise RollbackError(f"target must be finalized DSPACE release evidence: {exc}") from exc
     if target["environment"] != args.environment:
         raise RollbackError("target manifest environment does not match selected environment")
+    configuration_reconciliation = getattr(args, "configuration_reconciliation", False)
+    image_value = target["imageTag"]
+    if not configuration_reconciliation:
+        image_value += f"@{target['imageDigest']}"
     # The manifest module's OCI and cluster proof functions deliberately accept
     # candidate records. Project the exact candidate portion of the validated
     # final record rather than reimplementing or weakening those validators.
@@ -547,11 +591,112 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             "--set-string",
             f"image.repository={release.IMAGE_REF}",
             "--set-string",
-            f"image.tag={target['imageTag']}@{target['imageDigest']}",
+            f"image.tag={image_value}",
         ]
     )
     before_helm = helm_status(runner, args.kubeconfig, "dspace", "dspace")
     before_pods = pods(runner, args.kubeconfig, "dspace", "dspace", require_any=False)
+    if configuration_reconciliation:
+        if args.environment != "prod":
+            raise RollbackError("metrics configuration reconciliation is production-only")
+        if revision(before_helm) != target["helmRevision"]:
+            raise RollbackError("live Helm revision differs from finalized provenance")
+        runner(
+            [
+                "env",
+                f"KUBECONFIG={args.kubeconfig}",
+                sys.executable,
+                str(REPO_ROOT / "scripts" / "observability_app_metrics.py"),
+                "secret-check",
+                "--app",
+                "dspace",
+                "--env",
+                "prod",
+            ]
+        )
+        if chart_version(before_helm) != target["chartVersion"]:
+            raise RollbackError("live chart coordinate differs from finalized provenance")
+        if len(before_pods) != 2 or any(not pod.get("ready") for pod in before_pods):
+            raise RollbackError("live release must have exactly two Ready DSPACE pods")
+        live_values = json_command(
+            runner,
+            [
+                "helm",
+                "--kubeconfig",
+                args.kubeconfig,
+                "get",
+                "values",
+                "dspace",
+                "--namespace",
+                "dspace",
+                "-o",
+                "json",
+            ],
+            "Helm stored values",
+        )
+        desired_values = app_chart.merged_values_document(tuple(str(path) for path in values))
+        if not isinstance(desired_values, dict):
+            raise RollbackError("desired values are structurally invalid")
+        desired_values["image"] = {
+            "repository": release.IMAGE_REF,
+            "tag": target["imageTag"],
+            "pullPolicy": "Always",
+        }
+        current_values_path = staged_directory / "live-values.json"
+        current_values_path.write_text(release._canonical(live_values), encoding="utf-8")
+        os.chmod(current_values_path, 0o600)
+        installed_manifest = runner(
+            [
+                "helm",
+                "--kubeconfig",
+                args.kubeconfig,
+                "get",
+                "manifest",
+                "dspace",
+                "--namespace",
+                "dspace",
+            ]
+        )
+        approved_current_render = runner(
+            [
+                "helm",
+                "--kubeconfig",
+                args.kubeconfig,
+                "template",
+                "dspace",
+                coordinate,
+                "--namespace",
+                "dspace",
+                "--values",
+                str(current_values_path),
+            ]
+        )
+        if installed_manifest.strip() != approved_current_render.strip():
+            raise RollbackError("live manifest does not match the approved chart digest")
+        try:
+            release.verify_helm_stored_values(
+                approved,
+                desired_values,
+                "prod",
+            )
+        except release.ManifestError as exc:
+            raise RollbackError("desired production metrics contract is invalid") from exc
+
+        live_metrics = live_values.get("metrics")
+        live_monitor = live_values.get("serviceMonitor")
+        if live_metrics not in (None, {"enabled": False}) or live_monitor not in (
+            None,
+            {"enabled": False},
+        ):
+            raise RollbackError("live metrics values are not the approved disabled baseline")
+        baseline = copy.deepcopy(live_values)
+        baseline.pop("metrics", None)
+        baseline.pop("serviceMonitor", None)
+        desired_baseline = copy.deepcopy(desired_values)
+        desired_baseline.pop("metrics", None)
+        desired_baseline.pop("serviceMonitor", None)
+        if baseline != desired_baseline:
+            raise RollbackError("unrelated Helm values drift blocks configuration reconciliation")
     # Keep the registry proof fresh: no tag resolution occurs between this
     # exact-digest check and confirmation/reservation/mutation.
     try:
@@ -581,6 +726,11 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             # identities in pod evidence and recover rather than crashing.
             current_ids.clear()
             break
+    if configuration_reconciliation and (
+        current_images != {f"{release.IMAGE_REF}:{target['imageTag']}"}
+        or current_ids != {target["imageDigest"]}
+    ):
+        raise RollbackError("live image coordinate differs from finalized provenance")
     try:
         installed_render = runner(
             [
@@ -596,7 +746,7 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
         )
     except RollbackError:
         installed_render = None
-    expected_image = f"{release.IMAGE_REF}:{target['imageTag']}@{target['imageDigest']}"
+    expected_image = f"{release.IMAGE_REF}:{image_value}"
     if (
         installed_render is not None
         and installed_render == rendered_target
@@ -604,6 +754,22 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
         and current_ids == {target["imageDigest"]}
     ):
         raise RollbackError("current rendered release is already the exact approved target")
+    if configuration_reconciliation:
+        render_errors = app_chart.validate_rendered_manifest(
+            rendered_target,
+            app_chart.ReleaseInputs(
+                "dspace",
+                args.environment,
+                "dspace",
+                "dspace",
+                coordinate,
+                target["chartVersion"],
+                tuple(str(path) for path in values),
+                target["imageTag"],
+            ),
+        )
+        if render_errors:
+            raise RollbackError("strict application chart render validation failed")
     # Matching chart version and image identity alone is not exact proof: Helm
     # status cannot establish the installed OCI chart digest.
     confirmation(args.environment, args.confirm, target)
@@ -617,7 +783,9 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
     target_fingerprint = hashlib.sha256(release._canonical(target).encode()).hexdigest()
     evidence: dict[str, Any] = {
         "schemaVersion": SCHEMA_VERSION,
-        "operation": OPERATION,
+        "operation": (
+            "dspaceProductionMetricsReconciliation" if configuration_reconciliation else OPERATION
+        ),
         "state": "reserved",
         "invocationId": invocation,
         "targetManifestFingerprint": target_fingerprint,
@@ -651,11 +819,61 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
     }
     reserve(args.evidence, evidence)
     mutated = False
+    production_target_verified = not configuration_reconciliation
     failed_stage = "pre-mutation-revalidation"
-    description = f"sugarkube-dspace-manifest-rollback:{invocation}"
+    operation = "metrics-reconciliation" if configuration_reconciliation else "manifest-rollback"
+    description = f"sugarkube-dspace-{operation}:{invocation}"
     try:
+        if configuration_reconciliation:
+            production_target_verified = False
+            assert_production_target(args.kubeconfig, runner)
+            production_target_verified = True
         if runner(["git", "rev-parse", "HEAD"]).strip() != sugarkube_revision:
             raise RollbackError("Sugarkube revision changed before mutation")
+        if configuration_reconciliation:
+            current_status = helm_status(runner, args.kubeconfig, "dspace", "dspace")
+            if (
+                revision(current_status) != revision(before_helm)
+                or chart_version(current_status) != target["chartVersion"]
+            ):
+                raise RollbackError("Helm coordinates changed before mutation")
+            current_pods = pods(runner, args.kubeconfig, "dspace", "dspace")
+            if current_pods != before_pods:
+                raise RollbackError("DSPACE pods changed before mutation")
+            current_values = json_command(
+                runner,
+                [
+                    "helm",
+                    "--kubeconfig",
+                    args.kubeconfig,
+                    "get",
+                    "values",
+                    "dspace",
+                    "--namespace",
+                    "dspace",
+                    "-o",
+                    "json",
+                ],
+                "Helm stored values",
+            )
+            if current_values != live_values:
+                raise RollbackError("Helm values changed before mutation")
+            runner(
+                [
+                    "env",
+                    f"KUBECONFIG={args.kubeconfig}",
+                    sys.executable,
+                    str(REPO_ROOT / "scripts" / "observability_app_metrics.py"),
+                    "secret-check",
+                    "--app",
+                    "dspace",
+                    "--env",
+                    "prod",
+                ]
+            )
+            production_target_verified = False
+            assert_production_target(args.kubeconfig, runner)
+            production_target_verified = True
         command = [
             "helm",
             "--kubeconfig",
@@ -671,7 +889,7 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             "--set-string",
             f"image.repository={release.IMAGE_REF}",
             "--set-string",
-            f"image.tag={target['imageTag']}@{target['imageDigest']}",
+            f"image.tag={image_value}",
             "--wait",
             "--timeout",
             args.timeout,
@@ -722,13 +940,21 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             or chart_version(after_helm) != target["chartVersion"]
         ):
             raise RollbackError("installed chart name/version does not match target")
-        changed = (
+        changed = configuration_reconciliation or (
             chart_version(before_helm) != target["chartVersion"]
             or current_ids != {target["imageDigest"]}
             or current_images
             != {f"{release.IMAGE_REF}:{target['imageTag']}@{target['imageDigest']}"}
         )
-        verify_post_pods(after_pods, before_pods, target, changed)
+        verify_post_pods(
+            after_pods,
+            before_pods,
+            target,
+            changed,
+            retain_tag=configuration_reconciliation,
+        )
+        if configuration_reconciliation and len(after_pods) != 2:
+            raise RollbackError("reconciliation did not produce exactly two Ready DSPACE pods")
         # Reuse finalization's strict Deployment/ReplicaSet ownership validator.
         failed_stage = "ownership-and-finalization-proof"
         workloads = json_command(
@@ -765,6 +991,31 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             ],
             "DSPACE pods",
         )
+        helm_stored_values_result = None
+        if approved["schemaVersion"] == 2:
+            stored_values = json_command(
+                runner,
+                [
+                    "helm",
+                    "--kubeconfig",
+                    args.kubeconfig,
+                    "get",
+                    "values",
+                    "dspace",
+                    "--namespace",
+                    "dspace",
+                    "--all",
+                    "-o",
+                    "json",
+                ],
+                "Helm stored values",
+            )
+            try:
+                helm_stored_values_result = release.verify_helm_stored_values(
+                    approved, stored_values, args.environment
+                )
+            except release.ManifestError as exc:
+                raise RollbackError("post-upgrade Helm stored values are invalid") from exc
         finalizer_proof = release.finalize(
             approved,
             after_helm,
@@ -778,9 +1029,8 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             namespace="dspace",
             cluster_environment=args.environment,
             invocation_description=description,
-            expected_image_coordinate=(
-                f"{release.IMAGE_REF}:{target['imageTag']}@{target['imageDigest']}"
-            ),
+            expected_image_coordinate=f"{release.IMAGE_REF}:{image_value}",
+            helm_stored_values_result=helm_stored_values_result,
         )
         verifier_command = [
             str(args.verifier),
@@ -813,6 +1063,21 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
         verifier = validate_verifier_result(
             json_command(runner, verifier_command, "runtime verifier"), target, args.environment
         )
+        if configuration_reconciliation:
+            failed_stage = "production-metrics-verification"
+            runner(
+                [
+                    "env",
+                    f"KUBECONFIG={args.kubeconfig}",
+                    sys.executable,
+                    str(REPO_ROOT / "scripts" / "observability_app_metrics.py"),
+                    "verify",
+                    "--app",
+                    "dspace",
+                    "--env",
+                    "prod",
+                ]
+            )
         failed_stage = "revision-stability-collection"
         stable = helm_status(runner, args.kubeconfig, "dspace", "dspace")
         if revision(stable) != after_revision:
@@ -842,33 +1107,49 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
                 "frontend": {"sourceRevision": verifier["frontendSourceRevision"]},
                 "provider": {"default": verifier["defaultProvider"]},
                 "journeys": verifier["journeys"],
+                **(
+                    {
+                        "helmStoredValues": helm_stored_values_result,
+                        "productionMetrics": {
+                            "secretContract": True,
+                            "serviceMonitor": True,
+                            "healthyTargets": 2,
+                            "requiredFamilies": True,
+                            "unauthenticatedStatus": 401,
+                        },
+                    }
+                    if configuration_reconciliation
+                    else {}
+                ),
             },
         }
         replace_reserved(args.evidence, result)
         return result
     except Exception as exc:
         diagnostics: dict[str, Any] = {}
-        try:
-            observed_helm = helm_status(runner, args.kubeconfig, "dspace", "dspace")
-            observed_info = observed_helm.get("info", {})
-            observed_chart = observed_helm.get("chart", {}).get("metadata", {})
-            diagnostics["helm"] = {
-                "release": observed_helm.get("name"),
-                "namespace": observed_helm.get("namespace"),
-                "revision": revision(observed_helm),
-                "status": observed_info.get("status"),
-                "chartName": observed_chart.get("name"),
-                "chartVersion": chart_version(observed_helm),
-                "invocationDescriptionMatches": observed_info.get("description") == description,
-            }
-        except Exception:
-            diagnostics["helm"] = "unavailable"
-        try:
-            diagnostics["pods"] = pods(
-                runner, args.kubeconfig, "dspace", "dspace", require_any=False
-            )
-        except Exception:
-            diagnostics["pods"] = "unavailable"
+        if production_target_verified:
+            try:
+                observed_helm = helm_status(runner, args.kubeconfig, "dspace", "dspace")
+                observed_info = observed_helm.get("info", {})
+                observed_chart = observed_helm.get("chart", {}).get("metadata", {})
+                diagnostics["helm"] = {
+                    "release": observed_helm.get("name"),
+                    "namespace": observed_helm.get("namespace"),
+                    "revision": revision(observed_helm),
+                    "status": observed_info.get("status"),
+                    "chartName": observed_chart.get("name"),
+                    "chartVersion": chart_version(observed_helm),
+                    "invocationDescriptionMatches": observed_info.get("description")
+                    == description,
+                }
+            except Exception:
+                diagnostics["helm"] = "unavailable"
+            try:
+                diagnostics["pods"] = pods(
+                    runner, args.kubeconfig, "dspace", "dspace", require_any=False
+                )
+            except Exception:
+                diagnostics["pods"] = "unavailable"
         evidence.update(
             state="failed",
             failedStage=failed_stage,
@@ -894,10 +1175,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--smoke-runner", type=Path)
     parser.add_argument("--confirm", default="")
     parser.add_argument("--config", default="")
-    parser.add_argument("--kubeconfig", default=str(Path.home() / ".kube" / "config-sugarkube"))
+    parser.add_argument("--kubeconfig")
     parser.add_argument("--oras", default=os.environ.get("SUGARKUBE_ORAS_COMMAND", "oras"))
     parser.add_argument("--timeout", default="10m")
+    parser.add_argument("--configuration-reconciliation", action="store_true")
     args = parser.parse_args(argv)
+    if args.kubeconfig is None and not args.configuration_reconciliation:
+        args.kubeconfig = str(Path.home() / ".kube" / "config-sugarkube")
     try:
         rollback(args)
     except (RollbackError, app_config.AppConfigError) as exc:

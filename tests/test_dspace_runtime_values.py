@@ -168,12 +168,21 @@ def test_dspace_staging_values_enable_authenticated_metrics_servicemonitor() -> 
     assert "cluster: sugarkube-int" in text
 
 
-def test_dspace_prod_values_do_not_enable_metrics_or_servicemonitor() -> None:
+def test_dspace_prod_values_enable_authenticated_metrics_without_a_credential() -> None:
     text = OVERLAYS["prod"].read_text(encoding="utf-8")
 
-    assert "metrics:" not in text
-    assert "serviceMonitor:" not in text
-    assert "dspace-staging-metrics-token" not in text
+    values = merged_values_document((str(OVERLAYS["prod"]),))
+    assert values["metrics"] == {
+        "enabled": True,
+        "auth": {"existingSecret": "dspace-prod-metrics-token", "secretKey": "token"},
+    }
+    assert values["serviceMonitor"] == {
+        "enabled": True,
+        "interval": "30s",
+        "scrapeTimeout": "10s",
+        "additionalLabels": {"release": "kube-prometheus-stack"},
+        "cluster": "sugarkube-prod",
+    }
 
 
 def test_dspace_fixtures_do_not_contain_real_credentials() -> None:
@@ -182,4 +191,7 @@ def test_dspace_fixtures_do_not_contain_real_credentials() -> None:
         assert (
             "dspace-staging-metrics-token" not in text or path.name == "dspace.values.staging.yaml"
         )
-        assert "secretKey: token" not in text or path.name == "dspace.values.staging.yaml"
+        assert "secretKey: token" not in text or path.name in {
+            "dspace.values.staging.yaml",
+            "dspace.values.prod.yaml",
+        }
