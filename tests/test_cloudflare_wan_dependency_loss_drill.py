@@ -34,7 +34,7 @@ class StatefulDrillHarness:
             "obs_revision": 10, "obs_deployed_entries": 1, "obs_revision_after_cleanup": None,
             "same_node": False, "alerts": 0, "endpoint": 200,
             "sandbox_fail": False, "collision": False, "install_fail": -1,
-            "approved_crictl": True, "legacy_crictl": True,
+            "approved_crictl": True,
             "restart": [0, 0], "tables": [False, False], "watchdogs": [False, False],
             "block_long_sleep": False, "secret": "SENTINEL-SECRET-MUST-NOT-LEAK",
         }
@@ -712,10 +712,7 @@ def test_execution_commands_use_only_the_approved_crictl_path(tmp_path: Path) ->
 
 
 def test_missing_approved_crictl_fails_before_any_mutation(tmp_path: Path) -> None:
-    # A legacy binary being present is deliberately irrelevant to the exact-path preflight.
-    harness = StatefulDrillHarness(
-        tmp_path, approved_crictl=False, legacy_crictl=True
-    )
+    harness = StatefulDrillHarness(tmp_path, approved_crictl=False)
     result = harness.run()
     assert result.returncode != 0
     assert "required remote binary path missing" in result.stderr
