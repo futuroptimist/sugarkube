@@ -188,6 +188,161 @@
           }
         }
       }
+    },
+    "dspace": {
+      "environments": {
+        "prod": {
+          "namespace": "dspace",
+          "serviceMonitorName": "dspace",
+          "expectedTargetCount": 2,
+          "secret": {
+            "name": "dspace-prod-metrics-token",
+            "key": "token"
+          },
+          "serviceMonitor": {
+            "selectorMatchLabels": {
+              "app.kubernetes.io/instance": "dspace",
+              "app.kubernetes.io/name": "dspace"
+            },
+            "path": "/metrics",
+            "interval": "30s",
+            "scrapeTimeout": "10s",
+            "authorization": {
+              "type": "Bearer",
+              "credentials": {
+                "name": "dspace-prod-metrics-token",
+                "key": "token"
+              }
+            },
+            "relabelings": [
+              {
+                "action": "replace",
+                "targetLabel": "app",
+                "replacement": "dspace"
+              },
+              {
+                "action": "replace",
+                "targetLabel": "environment",
+                "replacement": "prod"
+              },
+              {
+                "action": "replace",
+                "targetLabel": "release",
+                "replacement": "dspace"
+              },
+              {
+                "action": "replace",
+                "targetLabel": "cluster",
+                "replacement": "sugarkube-prod"
+              }
+            ]
+          },
+          "targetLabels": {
+            "app": "dspace",
+            "environment": "prod",
+            "release": "dspace",
+            "cluster": "sugarkube-prod",
+            "namespace": "dspace"
+          },
+          "publicMetrics": {
+            "url": "https://democratized.space/metrics",
+            "expectedUnauthenticatedStatus": 401
+          },
+          "retries": {
+            "attempts": 6,
+            "delaySeconds": 10
+          },
+          "requiredMetricFamilies": [
+            "dspace_http_requests_total",
+            "dspace_http_request_duration_seconds_bucket",
+            "dspace_dchat_requests_total",
+            "dspace_dependency_requests_total",
+            "dspace_instrumentation_up",
+            "dspace_build_info"
+          ],
+          "allowedApplicationLabels": {
+            "app": [
+              "dspace"
+            ],
+            "environment": [
+              "prod"
+            ],
+            "release": [
+              "dspace"
+            ],
+            "cluster": [
+              "sugarkube-prod"
+            ],
+            "method": [
+              "GET",
+              "POST",
+              "PUT",
+              "PATCH",
+              "DELETE",
+              "OPTIONS",
+              "HEAD",
+              "other"
+            ],
+            "route": [
+              "/metrics",
+              "/chat",
+              "/health",
+              "/healthz",
+              "/",
+              "other"
+            ],
+            "status_class": [
+              "1xx",
+              "2xx",
+              "3xx",
+              "4xx",
+              "5xx",
+              "unknown"
+            ],
+            "provider": [
+              "token.place",
+              "other",
+              "unknown"
+            ],
+            "dependency": [
+              "token.place",
+              "other",
+              "unknown"
+            ],
+            "outcome": [
+              "success",
+              "error",
+              "completed",
+              "failed",
+              "unknown"
+            ],
+            "feature": [
+              "chat",
+              "http",
+              "dependency",
+              "other"
+            ]
+          },
+          "forbiddenApplicationLabels": [
+            "authorization",
+            "bearer",
+            "cookie",
+            "email",
+            "hostname",
+            "jwt",
+            "node",
+            "passwd",
+            "passcode",
+            "remote_addr",
+            "secret",
+            "session",
+            "token",
+            "url",
+            "user"
+          ],
+          "derivedApplicationLabels": {}
+        }
+      }
     }
   }
 }

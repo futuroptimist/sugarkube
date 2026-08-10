@@ -354,7 +354,34 @@ Use these links before changing a deployment so the workflow runs, package versi
 - `env=staging`: HA staging on the staging Sugarkube cluster with host `staging.democratized.space` and values `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml`.
   The configured staging target injects `DSPACE_TOKEN_PLACE_URL=https://staging.token.place` and `DSPACE_TOKEN_PLACE_CHAT_MODEL=qwen3-8b-instruct`, uses provenance-bearing chart `3.1.1` for DSPACE application `3.1.0`, and persists the authenticated metrics ServiceMonitor configuration discovered by kube-prometheus-stack. The live staging release is Helm revision 28 from the immutable DSPACE `3.1.0` staging image `main-018687f`, with finalized evidence recorded at `deployment-evidence/dspace/staging/main-018687f-20260805T035722Z.json`; operators can use that final record as the promotion and reconciliation proof instead of creating a replacement candidate/evidence path for this deployment. The metrics bearer value is not committed; operators manage the existing `dspace-staging-metrics-token` Secret out of band.
 - `env=prod`: HA production on the production Sugarkube cluster with host `democratized.space` and values `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml`.
-  The production overlay injects `DSPACE_TOKEN_PLACE_URL=https://token.place` and `DSPACE_TOKEN_PLACE_CHAT_MODEL=llama-3.1-8b-instruct`. Production is pinned to recovery chart `3.0.2` and image `ghcr.io/democratizedspace/dspace:main-1a31a56`; it does not enable metrics or ServiceMonitor settings.
+  The production overlay injects `DSPACE_TOKEN_PLACE_URL=https://token.place` and `DSPACE_TOKEN_PLACE_CHAT_MODEL=llama-3.1-8b-instruct`. Production remains pinned to application `3.0.1`, recovery chart `3.0.2`, and image `ghcr.io/democratizedspace/dspace:main-1a31a56`; authenticated metrics and its ServiceMonitor are supported without an application or chart promotion.
+
+### Production metrics values reconciliation
+
+The repository change alone deploys nothing. Run from `sugarkube3` with the
+externally managed API tunnel active, explicit
+`KUBECONFIG=$HOME/.kube/config-sugarkube-prod`, and context `sugar-prod`; never use
+`just kubeconfig-env env=prod` on that host. Install and check
+`dspace/dspace-prod-metrics-token` first with the application-metrics commands in
+the observability operations guide.
+
+A production values-only change must use the guarded reconciliation machinery,
+the genuine existing finalized production evidence as immutable provenance, an
+executable runtime smoke runner, and an explicit fresh evidence destination. The
+operator discovers the current Helm revision dynamically—revision 9 is evidence,
+not a command argument—and verifies the exact digest-qualified chart `3.0.2`
+render with the complete dev-plus-production values chain. Do not use
+`--reuse-values`, a mutable or semantic tag, raw `helm upgrade`, `helm rollback`,
+or a staging promotion.
+
+After the guarded upgrade, run DSPACE runtime and `/chat` verification,
+`just observability-app-metrics-verify app=dspace env=prod`,
+`just observability-dashboard-verify env=prod`, and manually inspect the unified
+dashboard. DSPACE HTTP, runtime, and feature panels should populate. Production
+release-integrity, blackbox, token.place, and alerting panels can remain `NO DATA`
+until those separate integrations are deployed. A failure after mutation requires
+reviewing the reserved evidence and a deliberate reconciliation; do not immediately
+rerun or roll back.
 - Optional legacy/canary host `prod.democratized.space` uses `docs/examples/dspace.values.prod-subdomain.yaml`. The `dspace-oci-deploy-prod-subdomain` compatibility command selects the secret-free `docs/examples/apps/dspace-prod-subdomain.env` config, preserving that overlay while routing through the same manifest validation, OCI preflight, Helm deployment, and evidence finalization as the generic production path.
 
 ## Find or publish GHCR image

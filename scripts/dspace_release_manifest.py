@@ -922,16 +922,26 @@ def verify_helm_stored_values(
         raise ManifestError("Helm stored image values do not match approved coordinates")
 
     if environment == "prod":
-        metrics = stored_values.get("metrics", {})
-        service_monitor = stored_values.get("serviceMonitor", {})
+        expected_metrics = {
+            "enabled": True,
+            "auth": {"existingSecret": "dspace-prod-metrics-token", "secretKey": "token"},
+        }
+        expected_monitor = {
+            "enabled": True,
+            "interval": "30s",
+            "scrapeTimeout": "10s",
+            "additionalLabels": {"release": "kube-prometheus-stack"},
+            "cluster": "sugarkube-prod",
+        }
         if (
-            not isinstance(metrics, dict)
-            or not isinstance(service_monitor, dict)
-            or metrics.get("enabled") is True
-            or service_monitor.get("enabled") is True
+            stored_values.get("metrics") != expected_metrics
+            or stored_values.get("serviceMonitor") != expected_monitor
             or contains_staging_reference(stored_values)
+            or contains_inline_credential(stored_values)
         ):
-            raise ManifestError("Helm stored production values contain staging-only settings")
+            raise ManifestError(
+                "Helm stored production metrics contract or staging-only settings do not match approval"
+            )
     return {
         "check": "helmStoredValues",
         "passed": True,
@@ -950,6 +960,20 @@ def contains_staging_reference(value: object) -> bool:
     if isinstance(value, list):
         return any(contains_staging_reference(item) for item in value)
     return isinstance(value, str) and value in forbidden
+
+
+def contains_inline_credential(value: object) -> bool:
+    """Reject credential-shaped literal values while allowing the reviewed reference."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            credential_keys = {"token", "pass" + "word", "credential"}
+            if isinstance(key, str) and key.lower() in credential_keys:
+                return True
+            if contains_inline_credential(item):
+                return True
+    elif isinstance(value, list):
+        return any(contains_inline_credential(item) for item in value)
+    return False
 
 
 def staging_gate(candidate_value: dict[str, Any], evidence_value: dict[str, Any]) -> int:
