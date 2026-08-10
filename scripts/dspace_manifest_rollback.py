@@ -750,21 +750,22 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
         and current_ids == {target["imageDigest"]}
     ):
         raise RollbackError("current rendered release is already the exact approved target")
-    render_errors = app_chart.validate_rendered_manifest(
-        rendered_target,
-        app_chart.ReleaseInputs(
-            "dspace",
-            args.environment,
-            "dspace",
-            "dspace",
-            coordinate,
-            target["chartVersion"],
-            tuple(str(path) for path in values),
-            target["imageTag"],
-        ),
-    )
-    if render_errors:
-        raise RollbackError("strict application chart render validation failed")
+    if configuration_reconciliation:
+        render_errors = app_chart.validate_rendered_manifest(
+            rendered_target,
+            app_chart.ReleaseInputs(
+                "dspace",
+                args.environment,
+                "dspace",
+                "dspace",
+                coordinate,
+                target["chartVersion"],
+                tuple(str(path) for path in values),
+                target["imageTag"],
+            ),
+        )
+        if render_errors:
+            raise RollbackError("strict application chart render validation failed")
     # Matching chart version and image identity alone is not exact proof: Helm
     # status cannot establish the installed OCI chart digest.
     confirmation(args.environment, args.confirm, target)

@@ -503,6 +503,77 @@ def test_confirmation_and_verifier_gates_precede_reservation_and_mutation(
         assert not any("template" in command for command in commands)
 
 
+def test_configuration_reconciliation_invalid_render_fails_before_reservation_and_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    args, commands, evidence, _verifier = pre_reservation_case(
+        tmp_path, monkeypatch, environment="prod"
+    )
+    args.configuration_reconciliation = True
+    args.kubeconfig = str(tmp_path / "kubeconfig")
+    args.confirm = f"dspace:prod:{SHA}"
+    desired = {
+        "image": {
+            "repository": manifest.IMAGE_REF,
+            "tag": "main-abcdef0",
+            "pullPolicy": "Always",
+        },
+        "metrics": {"enabled": True},
+        "serviceMonitor": {"enabled": True},
+    }
+    monkeypatch.setattr(rollback.app_chart, "merged_values_document", lambda _paths: desired)
+    monkeypatch.setattr(rollback.app_chart, "validate_rendered_manifest", lambda *_args: ["bad"])
+    monkeypatch.setattr(rollback.release, "verify_helm_stored_values", lambda *_args: None)
+    monkeypatch.setattr(
+        rollback,
+        "pods",
+        lambda *_args, **_kwargs: [
+            {
+                "ready": True,
+                "applicationImage": f"{manifest.IMAGE_REF}:main-abcdef0",
+                "applicationImageID": f"{manifest.IMAGE_REF}@{DIGEST}",
+            },
+            {
+                "ready": True,
+                "applicationImage": f"{manifest.IMAGE_REF}:main-abcdef0",
+                "applicationImageID": f"{manifest.IMAGE_REF}@{DIGEST}",
+            },
+        ],
+    )
+    monkeypatch.setattr(
+        rollback,
+        "helm_status",
+        lambda *_args: {
+            "version": 7,
+            "info": {"status": "deployed"},
+            "chart": {"metadata": {"name": "dspace", "version": "3.2.0"}},
+        },
+    )
+
+    template_calls = 0
+
+    def runner(command: list[str]) -> str:
+        nonlocal template_calls
+        commands.append(command)
+        if "values" in command and "get" in command:
+            return json.dumps({"image": desired["image"]})
+        if "template" in command:
+            template_calls += 1
+            return "invalid target render" if template_calls == 1 else "live render"
+        if "get" in command and "manifest" in command:
+            return "live render"
+        return ""
+
+    staged = tmp_path / "staged"
+    staged.mkdir()
+    with pytest.raises(
+        rollback.RollbackError, match="strict application chart render validation failed"
+    ):
+        rollback._rollback(args, runner, staged)
+    assert not evidence.exists()
+    assert_no_mutation(commands)
+
+
 def test_staging_is_non_interactive_and_reservation_collision_is_immutable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
