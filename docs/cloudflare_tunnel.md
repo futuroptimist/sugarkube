@@ -567,19 +567,41 @@ part of this rollout.
    privileged namespace operation, and rejects an ambiguous sandbox or pre-existing owner table. Each
    transient watchdog enters and holds the validated namespace before disruption, avoiding delayed PID
    reuse, and all watchdog binary paths are preflighted on both affected nodes. It then proves the
-   original UIDs become NotReady with zero HA connections and
-   unchanged restart counts. Cleanup deletes only the exact owner table, including after signals and
-   partial or ambiguously reported setup. A node remains cleanup-eligible until both exact deletion and
+   original UIDs become NotReady with unchanged restart counts, while an identity-guarded query of
+   each original process's `/ready` endpoint from its validated network namespace returns HTTP 503
+   and a sanitized `readyConnections: 0`. Both Prometheus targets must remain up. The helper records
+   the HA gauge as supporting evidence, but does not require it to reach zero: cloudflared 2026.7.3
+   increments that gauge when a `Serve` attempt starts and decrements it only when the attempt returns,
+   so one retrying attempt per connector can leave an aggregate value of two after connected edge
+   sessions have reached zero. Every interruption poll is appended to sanitized JSONL, including on
+   failure; connector IDs and raw readiness responses are never retained. Cleanup deletes only the
+   exact owner table, including after signals and partial or ambiguously reported setup. A node
+   remains cleanup-eligible until both exact deletion and
    table absence are proven; normal-cleanup failure leaves it available to the EXIT retry. Failure to
    prove automatic cleanup fails closed and prints exact UID/inode-guarded, node-specific manual cleanup
    commands. The disruption is limited to three minutes, below the shortest five-minute alert threshold.
 6. Recovery must use the same UIDs with unchanged restart counts. Within five minutes both pods must be
    Ready with at least four HA connections apiece; all approved public endpoints must return HTTP 200;
    Helm histories, including the single deployed observability release at the explicitly approved
-   revision, Secret metadata, and Deployment state must be unchanged; and
+   revision, Secret metadata, and Deployment desired/ownership state (UID, generation, labels,
+   annotations, and spec) must be unchanged; and
    `just cf-tunnel-verify env=staging` must pass. The helper never requests the Secret value. Finally,
    `unset CF_TUNNEL_TOKEN CF_TUNNEL_NAME CF_TUNNEL_ID`; retain the two healthy pods, Service,
    ServiceMonitor, and PDB.
+
+   The Deployment `resourceVersion` may advance during status-only readiness reconciliation and is
+   therefore recorded as evidence rather than included in the desired-state fingerprint. Final
+   `status.observedGeneration` must still equal the unchanged generation.
+
+   On August 11, 2026, the first authorized execution of the namespace-local drill safely cleaned up
+   after the old helper rejected the real HA floor of two. Both original pods became NotReady without
+   UID or restart changes, their two metrics targets stayed up, and subsequent reconciliation proved
+   the exact nftables tables and watchdog units absent, both original connectors healthy, all 16
+   staging endpoints HTTP 200, unchanged Helm histories and Secret metadata, and a passing repository
+   verifier. This was a **failed proof contract**, not a passing drill and not evidence for #2407.
+   A live retry requires this fix to be merged, a fresh read-only gate, newly approved exact main and
+   observability revisions, and separate explicit staging authorization. Production remains out of
+   scope, and no Helm deployment is required for this helper-only correction.
 
 Rollback immediately if no connector stays Ready, a public endpoint fails for two consecutive
 one-minute checks, a replacement does not reach four HA connections within five minutes, metrics

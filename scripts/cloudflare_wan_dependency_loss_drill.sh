@@ -9,7 +9,12 @@ readonly EXPECTED_HELM_REVISION=2
 readonly CONFIRMATION='DISRUPT STAGING CLOUDFLARE WAN FOR SAME-PROCESS RECOVERY'
 readonly SELECTOR='app.kubernetes.io/name=cloudflare-tunnel,app.kubernetes.io/instance=cloudflare-tunnel'
 readonly CRICTL='/usr/local/bin/crictl'
-readonly DISRUPTION_SECONDS=180
+readonly NODE_CURL='/usr/bin/curl'
+DISRUPTION_SECONDS=180
+if [[ "${CF_DRILL_APPROVED_REVISION:-}" == approved && "${CF_DRILL_TEST_DISRUPTION_SECONDS:-}" =~ ^[1-9][0-9]*$ ]]; then
+  DISRUPTION_SECONDS="${CF_DRILL_TEST_DISRUPTION_SECONDS}"
+fi
+readonly DISRUPTION_SECONDS
 readonly RECOVERY_SECONDS=300
 
 execute=0
@@ -186,7 +191,8 @@ jq -e --arg image "${EXPECTED_IMAGE}" '
  and .spec.template.spec.containers[0].readinessProbe.httpGet.path=="/ready"
  and .spec.template.spec.containers[0].readinessProbe.httpGet.port==2000
 ' <<<"${deployment}" >/dev/null || die 'Deployment ownership, replicas, immutable image is not approved, or probe lifecycle is unsafe'
-deployment_fingerprint="$(jq -S '{metadata:{labels:.metadata.labels,annotations:.metadata.annotations,uid:.metadata.uid,resourceVersion:.metadata.resourceVersion,generation:.metadata.generation},spec:.spec,statusObserved:.status.observedGeneration}' <<<"${deployment}" | sha256sum | cut -d' ' -f1)"
+deployment_fingerprint="$(jq -S '{metadata:{labels:.metadata.labels,annotations:.metadata.annotations,uid:.metadata.uid,generation:.metadata.generation},spec:.spec}' <<<"${deployment}" | sha256sum | cut -d' ' -f1)"
+deployment_generation="$(jq -r '.metadata.generation' <<<"${deployment}")"
 
 # Reuse the repository verifier's complete strategy/topology/probe contract before mutation.
 just cf-tunnel-verify env=staging
@@ -236,7 +242,7 @@ fi
 
 table="$(table_for)"
 for i in 0 1; do
-  node_exec "${pod_nodes[$i]}" "test -x ${CRICTL} -a -x /usr/bin/jq -a -x /usr/bin/readlink -a -x /usr/bin/nsenter -a -x /usr/bin/systemd-run -a -x /usr/bin/systemctl -a -x /bin/sh -a -x /bin/sleep -a -x /usr/sbin/nft" >/dev/null || die "required remote binary path missing on ${pod_nodes[$i]}"
+  node_exec "${pod_nodes[$i]}" "test -x ${CRICTL} -a -x ${NODE_CURL} -a -x /usr/bin/jq -a -x /usr/bin/readlink -a -x /usr/bin/nsenter -a -x /usr/bin/systemd-run -a -x /usr/bin/systemctl -a -x /usr/bin/sed -a -x /usr/bin/tail -a -x /bin/sh -a -x /bin/sleep -a -x /usr/sbin/nft" >/dev/null || die "required remote binary path missing on ${pod_nodes[$i]}"
   resolve="sudo ${CRICTL} pods --name '^${pod_names[$i]}$' -q"
   sandbox="$(node_exec "${pod_nodes[$i]}" "${resolve}")"
   [[ "${sandbox}" != *$'\n'* && "${sandbox}" =~ ^[a-f0-9]{12,64}$ ]] || die "cannot resolve one exact sandbox for ${pod_names[$i]}"
@@ -289,23 +295,53 @@ for i in 0 1; do
 done
 
 disruption_started="${SECONDS}"
-deadline=$((SECONDS+90)); interrupted=0
-while ((SECONDS < deadline)); do
+proof_deadline=$((SECONDS+90)); disruption_deadline=$((disruption_started+DISRUPTION_SECONDS)); interrupted=0
+: >"${evidence_dir}/interruption-observations.jsonl"
+while ((SECONDS < disruption_deadline)); do
   current="$(kubectl -n cloudflare get pods -l "${SELECTOR}" -o json)"
   unchanged="$(jq --arg u0 "${pod_uids[0]}" --arg u1 "${pod_uids[1]}" --argjson r0 "${pod_restarts[0]}" --argjson r1 "${pod_restarts[1]}" '
     [.items[]|select(.metadata.deletionTimestamp==null)] as $p | ($p|length)==2 and
     ([$p[].metadata.uid]|sort)==([$u0,$u1]|sort) and
     all($p[];([.status.containerStatuses[].restartCount]|add)==(if .metadata.uid==$u0 then $r0 else $r1 end))' <<<"${current}")"
+  declare -a ready_observations=(); readiness_valid=1
+  for i in 0 1; do
+    ready_command="test \"\$(sudo ${CRICTL} inspectp ${pod_sandboxes[$i]} | /usr/bin/jq -r '.status.labels[\"io.kubernetes.pod.uid\"]')\" = '${pod_uids[$i]}' && test \"\$(sudo /usr/bin/readlink /proc/${pod_pids[$i]}/ns/net)\" = '${pod_netns[$i]}' && response=\"\$(sudo /usr/bin/nsenter -t ${pod_pids[$i]} -n ${NODE_CURL} -sS --max-time 5 -w '\\n%{http_code}' http://127.0.0.1:2000/ready)\" && status=\"\$(printf '%s\\n' \"\${response}\" | /usr/bin/tail -n 1)\" && body=\"\$(printf '%s\\n' \"\${response}\" | /usr/bin/sed '\$d')\" && printf '%s\\n' \"\${body}\" | /usr/bin/jq -c --argjson httpStatus \"\${status}\" '{httpStatus:\$httpStatus,readyConnections:(.readyConnections | select(type==\"number\" and .>=0))}'"
+    observation="$(node_exec "${pod_nodes[$i]}" "${ready_command}")" || observation=''
+    if ! /usr/bin/jq -e 'keys==["httpStatus","readyConnections"] and (.httpStatus|type)=="number" and (.readyConnections|type)=="number"' <<<"${observation}" >/dev/null 2>&1; then
+      observation='{"httpStatus":null,"readyConnections":null}'
+      readiness_valid=0
+    fi
+    ready_observations+=("${observation}")
+  done
+  targets_valid=1; ha_valid=1
+  if ! targets="$(prom_query 'count(up{namespace="cloudflare",service="cloudflare-tunnel-metrics"} == 1)' | jq -er '.data.result[0].value[1] | tonumber | select(. >= 0)')"; then targets=null; targets_valid=0; fi
+  if ! ha="$(prom_query 'sum(cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel-metrics"})' | jq -er '.data.result[0].value[1] | tonumber | select(. >= 0)')"; then ha=null; ha_valid=0; fi
+  jq -nc --argjson elapsed "$((SECONDS-disruption_started))" --argjson pods "$(jq -c --arg u0 "${pod_uids[0]}" --arg u1 "${pod_uids[1]}" '[.items[]|select(.metadata.uid==$u0 or .metadata.uid==$u1)|{uid:.metadata.uid,restartCount:([.status.containerStatuses[].restartCount]|add),ready:([.status.conditions[]?|select(.type=="Ready")|.status][0]//null)}] | sort_by(.uid)' <<<"${current}")" --argjson r0 "${ready_observations[0]}" --argjson r1 "${ready_observations[1]}" --argjson targets "${targets}" --argjson ha "${ha}" '{schemaVersion:1,elapsedSeconds:$elapsed,pods:$pods,readiness:[$r0,$r1],prometheusTargetCount:$targets,haConnections:$ha}' >>"${evidence_dir}/interruption-observations.jsonl"
+  ((readiness_valid)) || die 'connector readiness endpoint was unavailable or malformed'
+  ((targets_valid)) || die 'Prometheus target observation was unavailable or malformed during interruption'
+  [[ "${targets}" == 2 ]] || die 'Prometheus target became unavailable during interruption'
+  ((ha_valid)) || die 'Prometheus HA observation was unavailable or malformed during interruption'
   [[ "${unchanged}" == true ]] || die 'connector UID/restart set changed during interruption'
-  same="$(jq 'all(.items[]; any(.status.conditions[]?;.type=="Ready" and .status=="False"))' <<<"${current}")"
-  [[ "${same}" == true ]] || { sleep 5; continue; }
-  [[ "$(prom_query 'sum(cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel-metrics"})' | jq -r '.data.result[0].value[1]//"-1"')" == 0 ]] && { interrupted=1; break; }
-  sleep 5
+  outage_observed=0
+  if jq -e --arg u0 "${pod_uids[0]}" --arg u1 "${pod_uids[1]}" '
+      [.items[] | select(.metadata.uid==$u0 or .metadata.uid==$u1)] as $p |
+      ($p|length)==2 and all($p[]; any(.status.conditions[]?; .type=="Ready" and .status=="False"))
+    ' <<<"${current}" >/dev/null &&
+    /usr/bin/jq -e 'length==2 and all(.[];.httpStatus==503 and .readyConnections==0)' \
+      <<<"$(printf '%s\n' "${ready_observations[@]}" | jq -s .)" >/dev/null; then
+    outage_observed=1
+  fi
+  if ((interrupted && !outage_observed)); then
+    die 'same-process NotReady and zero ready connections did not persist throughout disruption'
+  fi
+  ((outage_observed)) && interrupted=1
+  ((interrupted || SECONDS < proof_deadline)) || die 'did not prove same-process NotReady and zero ready connections'
+  remaining=$((disruption_deadline-SECONDS))
+  if ((remaining > 0)); then
+    sleep $((remaining < 5 ? remaining : 5))
+  fi
 done
-((interrupted)) || die 'did not prove same-process NotReady and zero HA connections'
-prom_query 'sum(cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel-metrics"})' >"${evidence_dir}/interruption-metrics.json"
-remaining=$((DISRUPTION_SECONDS-(SECONDS-disruption_started)))
-if ((remaining > 0)); then sleep "${remaining}"; fi
+((interrupted)) || die 'did not prove same-process NotReady and zero ready connections'
 
 # Remove only the two exact drill-owned tables now; EXIT cleanup remains a second attempt.
 cleanup_failed=0
@@ -345,6 +381,7 @@ recovery_obs_history="$(helm -n monitoring history kube-prometheus-stack -o json
 validate_observability_history "${recovery_obs_history}" 'post-cleanup'
 [[ "${recovery_obs_history}" == "${obs_history}" ]] || die "observability Helm history changed (expected deployed revision ${expected_observability_revision}; observed ${observed_observability_revision})"
 final_deployment="$(kubectl -n cloudflare get deployment cloudflare-tunnel -o json)"
-[[ "$(jq -S '{metadata:{labels:.metadata.labels,annotations:.metadata.annotations,uid:.metadata.uid,resourceVersion:.metadata.resourceVersion,generation:.metadata.generation},spec:.spec,statusObserved:.status.observedGeneration}' <<<"${final_deployment}" | sha256sum | cut -d' ' -f1)" == "${deployment_fingerprint}" ]] || die 'Deployment state changed'
+[[ "$(jq -S '{metadata:{labels:.metadata.labels,annotations:.metadata.annotations,uid:.metadata.uid,generation:.metadata.generation},spec:.spec}' <<<"${final_deployment}" | sha256sum | cut -d' ' -f1)" == "${deployment_fingerprint}" ]] || die 'Deployment desired state or ownership changed'
+[[ "$(jq -r '.status.observedGeneration' <<<"${final_deployment}")" == "${deployment_generation}" ]] || die 'Deployment observedGeneration does not match unchanged generation'
 just cf-tunnel-verify env=staging
 printf 'PASS: same cloudflared processes recovered; observability revision expected=%s observed=%s; sanitized evidence: %s\n' "${expected_observability_revision}" "${observed_observability_revision}" "${evidence_dir}"

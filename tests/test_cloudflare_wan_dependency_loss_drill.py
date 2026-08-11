@@ -26,6 +26,7 @@ class StatefulDrillHarness:
 
     def __init__(self, tmp_path: Path, **overrides: object) -> None:
         self.root = tmp_path
+        self.root.mkdir(parents=True, exist_ok=True)
         self.state = tmp_path / "state.json"
         self.log = tmp_path / "commands.jsonl"
         self.evidence = tmp_path / "evidence"
@@ -35,8 +36,15 @@ class StatefulDrillHarness:
             "obs_revision": 10, "obs_deployed_entries": 1, "obs_revision_after_cleanup": None,
             "same_node": False, "alerts": 0, "endpoint": 200,
             "sandbox_fail": False, "collision": False, "install_fail": -1,
-            "crictl_paths": ["/usr/local/bin/crictl"],
+            "binary_paths": ["/usr/local/bin/crictl", "/usr/bin/curl", "/usr/bin/jq",
+                             "/usr/bin/readlink", "/usr/bin/nsenter", "/usr/bin/systemd-run",
+                             "/usr/bin/systemctl", "/usr/bin/sed", "/usr/bin/tail",
+                             "/bin/sh", "/bin/sleep", "/usr/sbin/nft"],
             "restart": [0, 0], "tables": [False, False], "watchdogs": [False, False],
+            "ready_connections": [0, 0], "ready_malformed": -1, "metrics_targets_during": 2,
+            "prometheus_failure": None, "metrics_drop_after_poll": None,
+            "recover_after_poll": None,
+            "deployment_change": False, "restart_during": -1, "uid_during": -1,
             "block_long_sleep": False, "secret": "SENTINEL-SECRET-MUST-NOT-LEAK",
         }
         state.update(overrides)
@@ -55,6 +63,9 @@ class StatefulDrillHarness:
             "CF_DRILL_APPROVED_REVISION": "approved",
             "CF_DRILL_EXPECTED_OBSERVABILITY_REVISION": "10",
             "CF_DRILL_NODE_EXECUTOR": str(node),
+            # Signal/timeout tests need enough budget to reach and block in the
+            # disruption sleep even on a heavily loaded CI worker.
+            "CF_DRILL_TEST_DISRUPTION_SECONDS": "30" if state["block_long_sleep"] else "1",
         }
 
     def start(self, wrapper: list[str] | None = None) -> subprocess.Popen[str]:
@@ -144,7 +155,7 @@ elif name == "ruby":
 elif name == "curl": event("endpoint", response=state["endpoint"]); out(str(state["endpoint"]))
 elif name == "date": out("20260809T000000Z")
 elif name == "sleep":
-    if state["block_long_sleep"] and args and int(args[0]) > 30:
+    if state["block_long_sleep"] and args:
         state["sleeping"] = True; save()
         while True: time.sleep(.05)
 elif name == "kubectl":
@@ -152,13 +163,20 @@ elif name == "kubectl":
     if "current-context" in joined: out(state["context"])
     elif "get deployment" in joined:
         used = image if state["image_ok"] else "cloudflare/cloudflared:wrong"
-        out(json.dumps({"metadata":{"labels":{"app.kubernetes.io/managed-by":"Helm","app.kubernetes.io/name":"cloudflare-tunnel","app.kubernetes.io/instance":"cloudflare-tunnel"}},"spec":{"replicas":2,"template":{"spec":{"containers":[{"image":used,"readinessProbe":{"httpGet":{"path":"/ready","port":2000}}}]}}},"status":{"observedGeneration":1}}))
+        disrupted = any(state["tables"])
+        labels={"app.kubernetes.io/managed-by":"Helm","app.kubernetes.io/name":"cloudflare-tunnel","app.kubernetes.io/instance":"cloudflare-tunnel"}
+        if state["deployment_change"] and state.get("was_disrupted"): labels["changed"]="true"
+        out(json.dumps({"metadata":{"uid":"deployment-uid","resourceVersion":"2" if state.get("was_disrupted") else "1","generation":1,"labels":labels,"annotations":{}},"spec":{"replicas":2,"template":{"spec":{"containers":[{"image":used,"readinessProbe":{"httpGet":{"path":"/ready","port":2000}}}]}}},"status":{"observedGeneration":1}}))
     elif "get pods" in joined:
         items=[]
         for i in range(state["pod_count"]):
             disrupted = i < 2 and state["tables"][i]
+            recovered_during = (disrupted and state["recover_after_poll"] is not None
+                                and state.get("disrupted_target_polls", 0) >= state["recover_after_poll"])
             restart = state["restart"][i] if i < 2 else 0
-            items.append({"metadata":{"name":f"connector-{i+1}","uid":f"uid-{i+1}","labels":{"app.kubernetes.io/name":"cloudflare-tunnel","app.kubernetes.io/instance":"cloudflare-tunnel"}},"spec":{"nodeName":"node-1" if state["same_node"] else f"node-{i+1}","containers":[{"image":image}]},"status":{"phase":"Running","conditions":[{"type":"Ready","status":"False" if disrupted else "True"}],"containerStatuses":[{"restartCount":restart}]}})
+            if disrupted and state["restart_during"] == i: restart += 1
+            uid = f"replacement-{i+1}" if disrupted and state["uid_during"] == i else f"uid-{i+1}"
+            items.append({"metadata":{"name":f"connector-{i+1}","uid":uid,"labels":{"app.kubernetes.io/name":"cloudflare-tunnel","app.kubernetes.io/instance":"cloudflare-tunnel"}},"spec":{"nodeName":"node-1" if state["same_node"] else f"node-{i+1}","containers":[{"image":image}]},"status":{"phase":"Running","conditions":[{"type":"Ready","status":"False" if disrupted and not recovered_during else "True"}],"containerStatuses":[{"restartCount":restart}]}})
         out(json.dumps({"items":items}))
         event("pods", uids=[p["metadata"]["uid"] for p in items], restarts=[p["status"]["containerStatuses"][0]["restartCount"] for p in items], ready=[p["status"]["conditions"][0]["status"] for p in items])
     elif "get secret" in joined:
@@ -167,8 +185,19 @@ elif name == "kubectl":
         out("secret-uid\t12\t2026-08-09T00:00:00Z")
     elif "get --raw" in joined:
         query=urllib.parse.unquote(joined)
+        metric = "ha" if "sum(cloudflared" in query else "target" if "count(up" in query else None
+        failure = state["prometheus_failure"]
+        if all(state["tables"]) and failure and failure[0] == metric:
+            if failure[1] == "request": sys.exit(52)
+            if failure[1] == "malformed": out("not-json"); sys.exit(0)
+            if failure[1] == "no_result": out(json.dumps({"data":{"result":[]}})); sys.exit(0)
         if "ALERTS" in query: value=state["alerts"]
-        elif "sum(cloudflared" in query: value=0 if all(state["tables"]) else 8
+        elif "sum(cloudflared" in query: value=2 if all(state["tables"]) else 8
+        elif "count(up" in query:
+            count = state.get("disrupted_target_polls", 0)
+            if all(state["tables"]): state["disrupted_target_polls"] = count + 1
+            drop = state["metrics_drop_after_poll"]
+            value = 1 if all(state["tables"]) and drop is not None and count >= drop else (state["metrics_targets_during"] if all(state["tables"]) else 2)
         else: value=2
         event("prometheus", query=query, value=value)
         out(json.dumps({"data":{"result":[{"value":[0,str(value)]}]}}))
@@ -181,8 +210,8 @@ elif name == "node-executor":
         event("unprivileged_cross_process_readlink", node=node, command=command)
         sys.exit(1)
     if "test -x" in command:
-        requested_path = command.split("test -x ", 1)[1].split()[0]
-        sys.exit(0 if requested_path in state["crictl_paths"] else 1)
+        required = re.findall(r"(?:test| -a) -x ([^ ]+)", command)
+        sys.exit(0 if all(path in state["binary_paths"] for path in required) else 1)
     if "crictl pods --name" in command and "inspectp" not in command:
         if state["sandbox_fail"]: out("ambiguous\nsecond"); sys.exit(0)
         out(("a" if idx == 0 else "b")*12)
@@ -190,6 +219,12 @@ elif name == "node-executor":
         out(json.dumps({"status":{"labels":{"io.kubernetes.pod.uid":f"uid-{idx+1}"}},"info":{"pid":101+idx}}))
     elif command.startswith("sudo /usr/bin/readlink /proc/"):
         out(f"net:[{1001+idx}]")
+    elif "http://127.0.0.1:2000/ready" in command:
+        if state["ready_malformed"] == idx: out("not-json"); sys.exit(0)
+        recovered_during = (state["tables"][idx] and state["recover_after_poll"] is not None
+                            and state.get("disrupted_target_polls", 0) >= state["recover_after_poll"])
+        connected = state["ready_connections"][idx] if state["tables"][idx] and not recovered_during else 4
+        out(json.dumps({"httpStatus":503 if connected == 0 else 200,"readyConnections":connected}))
     elif "systemd-run" in command:
         state["watchdogs"][idx]=True; save(); event("watchdog", node=node, verified=False)
     elif "systemctl is-active" in command:
@@ -197,7 +232,7 @@ elif name == "node-executor":
         event("watchdog", node=node, verified=True)
         out(str(501+idx))
     elif "add table inet" in command:
-        state["tables"][idx]=True; save(); event("table", node=node, present=True)
+        state["tables"][idx]=True; state["was_disrupted"]=True; save(); event("table", node=node, present=True)
         if state["install_fail"] == idx: sys.exit(44)
     elif "delete table inet" in command:
         state["tables"][idx]=False; save(); event("table", node=node, present=False); out("")
@@ -628,7 +663,7 @@ def test_lifecycle_contract_is_checked_before_disruption() -> None:
 
 
 def test_interruption_requires_same_uids_and_restart_counts() -> None:
-    assert "did not prove same-process NotReady and zero HA connections" in TEXT
+    assert "did not prove same-process NotReady and zero ready connections" in TEXT
     interruption = TEXT.split("deadline=$((SECONDS+90))", 1)[1].split(
         'sleep "${DISRUPTION_SECONDS}"', 1
     )[0]
@@ -637,13 +672,21 @@ def test_interruption_requires_same_uids_and_restart_counts() -> None:
     assert 'status=="False"' in interruption
 
 
+def test_deployment_fingerprint_excludes_resource_version_and_status() -> None:
+    fingerprint = TEXT.split('deployment_fingerprint="', 1)[1].split('"\n', 1)[0]
+    assert "resourceVersion" not in fingerprint
+    assert "status" not in fingerprint
+    assert "labels" in fingerprint and "annotations" in fingerprint and "spec" in fingerprint
+    assert "Deployment observedGeneration does not match unchanged generation" in TEXT
+
+
 def test_accidental_restart_is_rejected() -> None:
     assert TEXT.count("status.containerStatuses[].restartCount") >= 3
     assert "same-process" in TEXT
 
 
 def test_timeout_and_signals_run_cleanup() -> None:
-    assert "DISRUPTION_SECONDS=180" in TEXT
+    assert "CF_DRILL_TEST_DISRUPTION_SECONDS" in TEXT
     assert "RECOVERY_SECONDS=300" in TEXT
     assert "trap 'exit 130' INT" in TEXT
     assert "trap 'exit 143' TERM" in TEXT
@@ -692,7 +735,7 @@ def test_actual_helper_completes_stateful_interruption_and_recovery(tmp_path: Pa
     assert any(event["ready"] == ["False", "False"] for event in pod_events)
     assert pod_events[-1]["ready"] == ["True", "True"]
     assert all(event["uids"] == ["uid-1", "uid-2"] and event["restarts"] == [0, 0] for event in pod_events)
-    assert any("sum(cloudflared" in str(event["query"]) and event["value"] == 0 for event in events if event.get("event") == "prometheus")
+    assert any("sum(cloudflared" in str(event["query"]) and event["value"] == 2 for event in events if event.get("event") == "prometheus")
     assert sum(entry["tool"] == "just" for entry in commands) == 2
     assert len([event for event in events if event.get("event") == "endpoint"]) == 32
     preflight = json.loads((harness.evidence / "preflight.json").read_text())
@@ -700,9 +743,135 @@ def test_actual_helper_completes_stateful_interruption_and_recovery(tmp_path: Pa
     assert "observability revision expected=10 observed=10" in result.stdout
     assert [pod["restartCount"] for pod in preflight["pods"]] == [0, 0]
     assert all(pod["image"].startswith("cloudflare/cloudflared:") for pod in preflight["pods"])
-    assert (harness.evidence / "interruption-metrics.json").exists()
+    observations = [json.loads(line) for line in (harness.evidence / "interruption-observations.jsonl").read_text().splitlines()]
+    assert observations[-1]["readiness"] == [{"httpStatus": 503, "readyConnections": 0}] * 2
+    assert observations[-1]["prometheusTargetCount"] == 2
+    assert observations[-1]["haConnections"] == 2
     assert (harness.evidence / "recovery-metrics.json").exists()
 
+
+@pytest.mark.parametrize(
+    ("override", "message"),
+    [
+        ({"ready_connections": [1, 0]}, "zero ready connections"),
+        ({"ready_malformed": 1}, "readiness endpoint was unavailable or malformed"),
+        ({"metrics_targets_during": 1}, "Prometheus target became unavailable"),
+        ({"restart_during": 0}, "connector UID/restart set changed"),
+        ({"uid_during": 1}, "connector UID/restart set changed"),
+        ({"deployment_change": True}, "Deployment desired state or ownership changed"),
+    ],
+)
+def test_interruption_and_invariance_fail_closed(tmp_path: Path, override: dict[str, object], message: str) -> None:
+    harness = StatefulDrillHarness(tmp_path, **override)
+    result = harness.run()
+    assert result.returncode != 0
+    assert message in result.stderr
+    if harness.evidence.exists():
+        assert (harness.evidence / "interruption-observations.jsonl").exists()
+
+
+@pytest.mark.parametrize("metric", ["target", "ha"])
+@pytest.mark.parametrize("failure", ["request", "malformed", "no_result"])
+def test_prometheus_failure_is_recorded_before_fail_closed(
+    tmp_path: Path, metric: str, failure: str,
+) -> None:
+    harness = StatefulDrillHarness(tmp_path, prometheus_failure=[metric, failure])
+    result = harness.run()
+    assert result.returncode != 0
+    label = "HA" if metric == "ha" else "target"
+    assert f"Prometheus {label} observation was unavailable or malformed" in result.stderr
+    path = harness.evidence / "interruption-observations.jsonl"
+    observations = [json.loads(line) for line in path.read_text().splitlines()]
+    assert len(observations) == 1
+    observation = observations[0]
+    unavailable = "prometheusTargetCount" if metric == "target" else "haConnections"
+    available = "haConnections" if metric == "target" else "prometheusTargetCount"
+    assert observation[unavailable] is None
+    assert observation[available] == 2
+    assert observation["schemaVersion"] == 1
+    assert observation["readiness"] == [
+        {"httpStatus": 503, "readyConnections": 0},
+        {"httpStatus": 503, "readyConnections": 0},
+    ]
+    evidence = path.read_text()
+    assert "connectorId" not in evidence
+    assert "SENTINEL-SECRET-MUST-NOT-LEAK" not in evidence
+    assert harness.current()["tables"] == [False, False]
+
+
+def test_invariants_are_polled_for_full_disruption_window(tmp_path: Path) -> None:
+    harness = StatefulDrillHarness(tmp_path, metrics_drop_after_poll=1)
+    harness.env["CF_DRILL_TEST_DISRUPTION_SECONDS"] = "7"
+    result = harness.run()
+    assert result.returncode != 0
+    assert "Prometheus target became unavailable" in result.stderr
+    path = harness.evidence / "interruption-observations.jsonl"
+    assert len(path.read_text().splitlines()) >= 2
+
+
+def test_full_disruption_rejects_recovery_after_initial_proof(tmp_path: Path) -> None:
+    harness = StatefulDrillHarness(tmp_path, recover_after_poll=1)
+    harness.env["CF_DRILL_TEST_DISRUPTION_SECONDS"] = "7"
+    result = harness.run()
+    assert result.returncode != 0
+    assert "did not persist throughout disruption" in result.stderr
+    observations = [
+        json.loads(line)
+        for line in (harness.evidence / "interruption-observations.jsonl").read_text().splitlines()
+    ]
+    assert len(observations) >= 2
+    assert observations[0]["pods"][0]["ready"] == "False"
+    assert observations[0]["readiness"] == [
+        {"httpStatus": 503, "readyConnections": 0},
+        {"httpStatus": 503, "readyConnections": 0},
+    ]
+    assert observations[-1]["pods"][0]["ready"] == "True"
+    assert observations[-1]["readiness"] == [
+        {"httpStatus": 200, "readyConnections": 4},
+        {"httpStatus": 200, "readyConnections": 4},
+    ]
+    assert harness.current()["tables"] == [False, False]
+
+
+def test_disruption_duration_default_override_gate_and_capped_sleep() -> None:
+    assert "DISRUPTION_SECONDS=180" in TEXT
+    assert '[[ "${CF_DRILL_APPROVED_REVISION:-}" == approved' in TEXT
+    assert 'DISRUPTION_SECONDS="${CF_DRILL_TEST_DISRUPTION_SECONDS}"' in TEXT
+    assert "readonly DISRUPTION_SECONDS" in TEXT
+    assert "remaining=$((disruption_deadline-SECONDS))" in TEXT
+    assert "sleep $((remaining < 5 ? remaining : 5))" in TEXT
+
+
+@pytest.mark.parametrize(
+    "missing",
+    ["/usr/local/bin/crictl", "/usr/bin/curl", "/usr/bin/jq", "/usr/bin/nsenter",
+     "/usr/bin/sed", "/usr/bin/tail"],
+)
+def test_missing_required_remote_binary_fails_closed(
+    tmp_path: Path, missing: str,
+) -> None:
+    paths = list(StatefulDrillHarness(tmp_path).current()["binary_paths"])
+    paths.remove(missing)
+    harness = StatefulDrillHarness(tmp_path / "missing", binary_paths=paths)
+    result = harness.run()
+    assert result.returncode != 0
+    assert "required remote binary path missing" in result.stderr
+    assert not any(
+        "add table inet" in entry["args"][1]
+        for entry in harness.commands() if entry["tool"] == "node-executor"
+    )
+
+
+def test_missing_exact_node_curl_fails_before_watchdog_or_tables(tmp_path: Path) -> None:
+    paths = list(StatefulDrillHarness(tmp_path).current()["binary_paths"])
+    paths.remove("/usr/bin/curl")
+    harness = StatefulDrillHarness(tmp_path / "missing-curl", binary_paths=paths)
+    result = harness.run()
+    assert result.returncode != 0
+    assert "required remote binary path missing" in result.stderr
+    assert not any(event.get("event") in {"watchdog", "table"} for event in harness.events())
+    assert harness.current()["tables"] == [False, False]
+    assert harness.current()["watchdogs"] == [False, False]
 
 def test_execution_commands_use_only_the_approved_crictl_path(tmp_path: Path) -> None:
     harness = StatefulDrillHarness(tmp_path)
@@ -747,7 +916,7 @@ def test_execution_commands_use_only_the_approved_crictl_path(tmp_path: Path) ->
 
 def test_legacy_only_crictl_fails_before_any_followup_command(tmp_path: Path) -> None:
     legacy_path = "/usr/bin/" + "crictl"
-    harness = StatefulDrillHarness(tmp_path, crictl_paths=[legacy_path])
+    harness = StatefulDrillHarness(tmp_path, binary_paths=[legacy_path])
     result = harness.run()
     assert result.returncode != 0
     assert "required remote binary path missing" in result.stderr
