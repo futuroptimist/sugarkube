@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts import app_chart, app_config
 from scripts import dspace_release_manifest as manifest
 
 SHA = "abcdef0123456789abcdef0123456789abcdef01"
@@ -685,6 +686,54 @@ def production_stored_values() -> dict[str, object]:
         "serviceAccount": {"automountServiceAccountToken": False},
         "secret": {"enabled": False, "stringData": {}},
     }
+
+
+def test_committed_production_values_chain_satisfies_stored_values_contract() -> None:
+    config = app_config.load_config("dspace", "prod")
+    values = tuple(config["SUGARKUBE_VALUES"].split(","))
+    desired = app_chart.merged_values_document(values)
+    assert isinstance(desired, dict)
+
+    approved = json.loads(
+        Path("docs/apps/dspace.prod-recovery-coordinates.json").read_text(encoding="utf-8")
+    )
+    candidate = manifest.candidate(
+        approved, "prod", "openai", "2026-08-11T00:00:00Z", "contract-test"
+    )
+    desired["image"] = {
+        "repository": manifest.IMAGE_REF,
+        "tag": candidate["imageTag"],
+        "pullPolicy": "Always",
+    }
+
+    assert manifest.verify_helm_stored_values(candidate, desired, "prod")["passed"] is True
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("DSPACE_TOKEN_PLACE_URL", "https://token.place"),
+        ("DSPACE_TOKEN_PLACE_CHAT_MODEL", "llama-3.1-8b-instruct"),
+    ],
+)
+def test_public_token_place_environment_settings_are_not_credentials(
+    name: str, value: str
+) -> None:
+    assert manifest.contains_inline_credential({"env": [{"name": name, "value": value}]}) is False
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "METRICS_TOKEN",
+        "DSPACE_" + "API" + "_KEY",
+        "DSPACE_TOKEN_PLACE_URL_TOKEN",
+        "DSPACE_TOKEN_PLACE_CHAT_MODELS",
+    ],
+)
+def test_credential_and_near_miss_environment_names_remain_sensitive(name: str) -> None:
+    sentinel = "".join(("credential", "-sentinel"))
+    assert manifest.contains_inline_credential({"env": [{"name": name, "value": sentinel}]}) is True
 
 
 def test_helm_stored_values_accept_chart_defaults_and_safe_references() -> None:
