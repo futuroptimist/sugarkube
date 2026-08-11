@@ -180,8 +180,12 @@ elif name == "kubectl":
         out("secret-uid\t12\t2026-08-09T00:00:00Z")
     elif "get --raw" in joined:
         query=urllib.parse.unquote(joined)
-        if state["prometheus_failure"] == "request" and all(state["tables"]): sys.exit(52)
-        if state["prometheus_failure"] == "parse" and all(state["tables"]): out("not-json"); sys.exit(0)
+        metric = "ha" if "sum(cloudflared" in query else "target" if "count(up" in query else None
+        failure = state["prometheus_failure"]
+        if all(state["tables"]) and failure and failure[0] == metric:
+            if failure[1] == "request": sys.exit(52)
+            if failure[1] == "malformed": out("not-json"); sys.exit(0)
+            if failure[1] == "no_result": out(json.dumps({"data":{"result":[]}})); sys.exit(0)
         if "ALERTS" in query: value=state["alerts"]
         elif "sum(cloudflared" in query: value=2 if all(state["tables"]) else 8
         elif "count(up" in query:
@@ -201,7 +205,7 @@ elif name == "node-executor":
         event("unprivileged_cross_process_readlink", node=node, command=command)
         sys.exit(1)
     if "test -x" in command:
-        required = re.findall(r"(?:^| -a )-x ([^ ]+)", command)
+        required = re.findall(r"(?:test| -a) -x ([^ ]+)", command)
         sys.exit(0 if all(path in state["binary_paths"] for path in required) else 1)
     if "crictl pods --name" in command and "inspectp" not in command:
         if state["sandbox_fail"]: out("ambiguous\nsecond"); sys.exit(0)
@@ -759,22 +763,38 @@ def test_interruption_and_invariance_fail_closed(tmp_path: Path, override: dict[
         assert (harness.evidence / "interruption-observations.jsonl").exists()
 
 
-@pytest.mark.parametrize("failure", ["request", "parse"])
+@pytest.mark.parametrize("metric", ["target", "ha"])
+@pytest.mark.parametrize("failure", ["request", "malformed", "no_result"])
 def test_prometheus_failure_is_recorded_before_fail_closed(
-    tmp_path: Path, failure: str,
+    tmp_path: Path, metric: str, failure: str,
 ) -> None:
-    harness = StatefulDrillHarness(tmp_path, prometheus_failure=failure)
+    harness = StatefulDrillHarness(tmp_path, prometheus_failure=[metric, failure])
     result = harness.run()
     assert result.returncode != 0
-    assert "Prometheus observation was unavailable or malformed" in result.stderr
+    label = "HA" if metric == "ha" else "target"
+    assert f"Prometheus {label} observation was unavailable or malformed" in result.stderr
     path = harness.evidence / "interruption-observations.jsonl"
     observations = [json.loads(line) for line in path.read_text().splitlines()]
-    assert observations[-1]["prometheusTargetCount"] is None
-    assert observations[-1]["haConnections"] is None
+    assert len(observations) == 1
+    observation = observations[0]
+    unavailable = "prometheusTargetCount" if metric == "target" else "haConnections"
+    available = "haConnections" if metric == "target" else "prometheusTargetCount"
+    assert observation[unavailable] is None
+    assert observation[available] == 2
+    assert observation["schemaVersion"] == 1
+    assert observation["readiness"] == [
+        {"httpStatus": 503, "readyConnections": 0},
+        {"httpStatus": 503, "readyConnections": 0},
+    ]
+    evidence = path.read_text()
+    assert "connectorId" not in evidence
+    assert "SENTINEL-SECRET-MUST-NOT-LEAK" not in evidence
+    assert harness.current()["tables"] == [False, False]
 
 
 def test_invariants_are_polled_for_full_disruption_window(tmp_path: Path) -> None:
     harness = StatefulDrillHarness(tmp_path, metrics_drop_after_poll=1)
+    harness.env["CF_DRILL_TEST_DISRUPTION_SECONDS"] = "7"
     result = harness.run()
     assert result.returncode != 0
     assert "Prometheus target became unavailable" in result.stderr
@@ -800,6 +820,18 @@ def test_missing_required_remote_binary_fails_closed(
         "add table inet" in entry["args"][1]
         for entry in harness.commands() if entry["tool"] == "node-executor"
     )
+
+
+def test_missing_exact_node_curl_fails_before_watchdog_or_tables(tmp_path: Path) -> None:
+    paths = list(StatefulDrillHarness(tmp_path).current()["binary_paths"])
+    paths.remove("/usr/bin/curl")
+    harness = StatefulDrillHarness(tmp_path / "missing-curl", binary_paths=paths)
+    result = harness.run()
+    assert result.returncode != 0
+    assert "required remote binary path missing" in result.stderr
+    assert not any(event.get("event") in {"watchdog", "table"} for event in harness.events())
+    assert harness.current()["tables"] == [False, False]
+    assert harness.current()["watchdogs"] == [False, False]
 
 def test_execution_commands_use_only_the_approved_crictl_path(tmp_path: Path) -> None:
     harness = StatefulDrillHarness(tmp_path)

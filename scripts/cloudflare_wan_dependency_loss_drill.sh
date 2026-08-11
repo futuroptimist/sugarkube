@@ -309,15 +309,16 @@ while ((SECONDS < disruption_deadline)); do
     fi
     ready_observations+=("${observation}")
   done
-  prometheus_valid=1
-  if ! targets="$(prom_query 'count(up{namespace="cloudflare",service="cloudflare-tunnel-metrics"} == 1)' | jq -er '.data.result[0].value[1] | tonumber')"; then targets=null; prometheus_valid=0; fi
-  if ! ha="$(prom_query 'sum(cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel-metrics"})' | jq -er '.data.result[0].value[1] | tonumber')"; then ha=null; prometheus_valid=0; fi
+  targets_valid=1; ha_valid=1
+  if ! targets="$(prom_query 'count(up{namespace="cloudflare",service="cloudflare-tunnel-metrics"} == 1)' | jq -er '.data.result[0].value[1] | tonumber | select(. >= 0)')"; then targets=null; targets_valid=0; fi
+  if ! ha="$(prom_query 'sum(cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel-metrics"})' | jq -er '.data.result[0].value[1] | tonumber | select(. >= 0)')"; then ha=null; ha_valid=0; fi
   jq -nc --argjson elapsed "$((SECONDS-disruption_started))" --argjson pods "$(jq -c --arg u0 "${pod_uids[0]}" --arg u1 "${pod_uids[1]}" '[.items[]|select(.metadata.uid==$u0 or .metadata.uid==$u1)|{uid:.metadata.uid,restartCount:([.status.containerStatuses[].restartCount]|add),ready:([.status.conditions[]?|select(.type=="Ready")|.status][0]//null)}] | sort_by(.uid)' <<<"${current}")" --argjson r0 "${ready_observations[0]}" --argjson r1 "${ready_observations[1]}" --argjson targets "${targets}" --argjson ha "${ha}" '{schemaVersion:1,elapsedSeconds:$elapsed,pods:$pods,readiness:[$r0,$r1],prometheusTargetCount:$targets,haConnections:$ha}' >>"${evidence_dir}/interruption-observations.jsonl"
   ((readiness_valid)) || die 'connector readiness endpoint was unavailable or malformed'
-  ((prometheus_valid)) || die 'Prometheus observation was unavailable or malformed during interruption'
+  ((targets_valid)) || die 'Prometheus target observation was unavailable or malformed during interruption'
+  [[ "${targets}" == 2 ]] || die 'Prometheus target became unavailable during interruption'
+  ((ha_valid)) || die 'Prometheus HA observation was unavailable or malformed during interruption'
   [[ "${unchanged}" == true ]] || die 'connector UID/restart set changed during interruption'
   same="$(jq 'all(.items[]; any(.status.conditions[]?;.type=="Ready" and .status=="False"))' <<<"${current}")"
-  [[ "${targets}" == 2 ]] || die 'Prometheus target became unavailable during interruption'
   if [[ "${same}" == true ]] && /usr/bin/jq -e 'all(.[];.httpStatus==503 and .readyConnections==0)' <<<"$(printf '%s\n' "${ready_observations[@]}" | jq -s .)" >/dev/null; then interrupted=1; fi
   if [[ "${same}" == true ]] && /usr/bin/jq -e 'any(.[];.readyConnections>0)' <<<"$(printf '%s\n' "${ready_observations[@]}" | jq -s .)" >/dev/null; then
     die 'did not prove same-process NotReady and zero ready connections'
