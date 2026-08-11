@@ -374,6 +374,94 @@ def test_summary_never_invents_current_chart_digest() -> None:
     )
 
 
+def helm_319_status(revision: int = 9) -> dict[str, object]:
+    return {
+        "config": {"redacted": "must-not-escape"},
+        "info": {"status": "deployed", "description": "safe"},
+        "manifest": "raw-manifest-must-not-escape",
+        "name": "dspace",
+        "namespace": "dspace",
+        "version": revision,
+    }
+
+
+def helm_history(revision: int = 9, chart: str = "dspace-3.0.2") -> list[dict[str, object]]:
+    return [
+        {"revision": revision - 1, "chart": "dspace-3.0.1", "status": "superseded"},
+        {"revision": revision, "chart": chart, "status": "deployed"},
+    ]
+
+
+def test_helm_319_snapshot_resolves_current_history_without_leaking_raw_documents(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands: list[list[str]] = []
+    monkeypatch.setattr(rollback, "helm_status", lambda *_args: helm_319_status())
+
+    def runner(command: list[str]) -> str:
+        commands.append(command)
+        return json.dumps(helm_history())
+
+    snapshot = rollback.helm_snapshot(runner, "kubeconfig", "dspace", "dspace", "3.0.2")
+
+    assert (snapshot.chart_name, snapshot.chart_version, snapshot.revision) == (
+        "dspace",
+        "3.0.2",
+        9,
+    )
+    assert len(commands) == 1 and "history" in commands[0]
+    text = rollback.summary(snapshot, [], {**target(), "chartVersion": "3.0.2"}, [])
+    assert "chartName=dspace chartVersion=3.0.2" in text
+    assert "raw-manifest" not in text
+    assert "must-not-escape" not in text
+
+
+def test_helm_snapshot_does_not_query_history_when_status_has_chart_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        rollback,
+        "helm_status",
+        lambda *_args: {
+            **helm_319_status(),
+            "chart": {"metadata": {"name": "dspace", "version": "3.0.2"}},
+        },
+    )
+    snapshot = rollback.helm_snapshot(
+        lambda _command: pytest.fail("history must not be queried"),
+        "kubeconfig",
+        "dspace",
+        "dspace",
+        "3.0.2",
+    )
+    assert snapshot.history is None
+
+
+@pytest.mark.parametrize(
+    "history",
+    [
+        None,
+        [],
+        [{"revision": 9, "chart": "dspace-3.0.2"}] * 2,
+        [{"revision": "9", "chart": "dspace-3.0.2"}],
+        [{"revision": 8, "chart": "dspace-3.0.2"}],
+        [{"revision": 9, "chart": "other-3.0.2"}],
+    ],
+)
+def test_helm_319_snapshot_rejects_invalid_current_history(
+    history: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(rollback, "helm_status", lambda *_args: helm_319_status())
+    with pytest.raises(rollback.RollbackError, match="invalid Helm release identity"):
+        rollback.helm_snapshot(
+            lambda _command: json.dumps(history),
+            "kubeconfig",
+            "dspace",
+            "dspace",
+            "3.0.2",
+        )
+
+
 def pre_reservation_case(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -988,7 +1076,6 @@ def test_configuration_reconciliation_completes_all_production_gates(
                 "status": "deployed",
                 "description": state["description"] if state["upgraded"] else "previous",
             },
-            "chart": {"metadata": {"name": "dspace", "version": selected["chartVersion"]}},
         }
 
     monkeypatch.setattr(rollback, "helm_status", status)
@@ -1005,6 +1092,11 @@ def test_configuration_reconciliation_completes_all_production_gates(
 
     def runner(command: list[str]) -> str:
         commands.append(command)
+        if command[0] == "helm" and "history" in command:
+            current_revision = 8 if state["upgraded"] else 7
+            return json.dumps(
+                [{"revision": current_revision, "chart": f"dspace-{selected['chartVersion']}"}]
+            )
         if "current-context" in command:
             return "sugar-prod"
         if command[:3] == ["git", "rev-parse", "HEAD"]:
@@ -1036,6 +1128,7 @@ def test_configuration_reconciliation_completes_all_production_gates(
     assert not any(item in upgrade for item in forbidden)
     assert DIGEST not in next(item for item in upgrade if item.startswith("image.tag="))
     assert finalized["helm_stored_values_result"] is stored_proof
+    assert finalized["helm_history"] == [{"revision": 8, "chart": "dspace-3.2.0"}]
     assert finalized["expected_image_coordinate"] == (
         f"{manifest.IMAGE_REF}:{selected['imageTag']}"
     )
