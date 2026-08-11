@@ -728,6 +728,10 @@ cf-tunnel-install env='dev' token='':
 cf-tunnel-verify env='staging':
     scripts/verify_cloudflare_tunnel.sh {{ quote(env) }}
 
+# Strictly read-only production DNS/ingress and Cloudflare Tunnel parity evidence collection.
+prod-resilience-audit *args:
+    python3 "{{ justfile_directory() }}/scripts/production_resilience_audit.py" "${@}"
+
 # Plan (default) or execute the staging-only, same-process Cloudflare WAN dependency-loss drill.
 cf-tunnel-wan-dependency-loss-drill *args:
     scripts/cloudflare_wan_dependency_loss_drill.sh "$@"
