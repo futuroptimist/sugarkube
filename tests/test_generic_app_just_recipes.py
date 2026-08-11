@@ -24,6 +24,106 @@ from scripts.app_verify import base_url_from_host, tokenplace_meta_failure
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
+def _run_dspace_prod_metrics_reconcile(
+    tmp_path: Path, ensure_just_available: Path, arguments: list[str]
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(parents=True)
+    argv_log = tmp_path / "argv.json"
+    _write_executable(
+        bin_dir / "python3",
+        f"#!{sys.executable}\n"
+        "import json, os, sys\n"
+        "open(os.environ['ARGV_LOG'], 'w', encoding='utf-8').write(json.dumps(sys.argv[1:]))\n",
+    )
+    env = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}", "ARGV_LOG": str(argv_log)}
+    result = subprocess.run(
+        [str(ensure_just_available), "dspace-prod-metrics-reconcile", *arguments],
+        cwd=REPO_ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return result, json.loads(argv_log.read_text(encoding="utf-8")) if argv_log.exists() else []
+
+
+def _reconcile_values(tmp_path: Path) -> list[str]:
+    return [
+        str(tmp_path / "approved manifest.json"),
+        str(tmp_path / "fresh evidence.json"),
+        str(tmp_path / "smoke runner"),
+        str(tmp_path / "prod kubeconfig"),
+    ]
+
+
+def test_dspace_prod_metrics_reconcile_documented_and_positional_forms_match(
+    tmp_path: Path, ensure_just_available: Path
+) -> None:
+    values = _reconcile_values(tmp_path)
+    documented = [
+        f"manifest={values[0]}",
+        f"evidence={values[1]}",
+        f"smoke_runner={values[2]}",
+        f"kubeconfig={values[3]}",
+        "confirm=dspace:prod:" + "a" * 40,
+    ]
+    documented_result, documented_argv = _run_dspace_prod_metrics_reconcile(
+        tmp_path / "documented", ensure_just_available, documented
+    )
+    positional_result, positional_argv = _run_dspace_prod_metrics_reconcile(
+        tmp_path / "positional",
+        ensure_just_available,
+        [*values, str(REPO_ROOT / "scripts/dspace_runtime_verifier.py"), documented[-1][8:], ""],
+    )
+
+    assert documented_result.returncode == positional_result.returncode == 0
+    assert documented_argv == positional_argv
+    assert documented_argv[documented_argv.index("--verifier") + 1] == str(
+        REPO_ROOT / "scripts/dspace_runtime_verifier.py"
+    )
+    assert documented_argv[documented_argv.index("--config") + 1] == ""
+    for value in values:
+        assert value in documented_argv
+    assert not any(
+        argument.startswith(("manifest=", "evidence=", "smoke_runner=", "kubeconfig="))
+        for argument in documented_argv
+    )
+
+
+def test_dspace_prod_metrics_reconcile_preserves_optional_verifier_and_config(
+    tmp_path: Path, ensure_just_available: Path
+) -> None:
+    values = _reconcile_values(tmp_path)
+    verifier = str(tmp_path / "custom verifier")
+    config = str(tmp_path / "optional config.json")
+    result, argv = _run_dspace_prod_metrics_reconcile(
+        tmp_path / "optional",
+        ensure_just_available,
+        [*values, f"verifier={verifier}", "confirm=confirmed", f"config={config}"],
+    )
+
+    assert result.returncode == 0
+    assert argv[argv.index("--verifier") + 1] == verifier
+    assert argv[argv.index("--config") + 1] == config
+    assert argv[argv.index("--confirm") + 1] == "confirmed"
+
+
+def test_dspace_prod_metrics_reconcile_rejects_wrong_required_prefix_before_python(
+    tmp_path: Path, ensure_just_available: Path
+) -> None:
+    values = _reconcile_values(tmp_path)
+    result, argv = _run_dspace_prod_metrics_reconcile(
+        tmp_path / "wrong-prefix",
+        ensure_just_available,
+        [f"evidence={values[0]}", *values[1:]],
+    )
+
+    assert result.returncode == 2
+    assert argv == []
+    assert "manifest must be a non-empty value or use the manifest= prefix" in result.stderr
+
+
 def _release_deployment(app: str, body: str = "") -> str:
     container = "relay" if app == "tokenplace" else app
     return f"""apiVersion: apps/v1
