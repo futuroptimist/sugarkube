@@ -157,7 +157,11 @@ def resolve_helm_identity(
             raise ManifestError("invalid Helm release identity")
         if record_revision == revision:
             matches.append(record)
-    if len(matches) != 1 or matches[0]["chart"] != f"{expected_name}-{expected_version}":
+    if (
+        len(matches) != 1
+        or max(record["revision"] for record in history) != revision
+        or matches[0]["chart"] != f"{expected_name}-{expected_version}"
+    ):
         raise ManifestError("invalid Helm release identity")
     return expected_name, expected_version, revision
 
