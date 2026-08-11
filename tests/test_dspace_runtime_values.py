@@ -174,6 +174,7 @@ def test_dspace_prod_values_enable_authenticated_metrics_without_a_credential() 
     values = merged_values_document((str(OVERLAYS["prod"]),))
     assert values["metrics"] == {
         "enabled": True,
+        "path": "/metrics",
         "auth": {"existingSecret": "dspace-prod-metrics-token", "secretKey": "token"},
     }
     assert values["serviceMonitor"] == {

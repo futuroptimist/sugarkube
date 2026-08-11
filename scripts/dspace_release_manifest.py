@@ -996,14 +996,8 @@ def contains_inline_credential(value: object) -> bool:
     # Keeping the values explicit prevents an exempt variable from carrying an
     # authenticated URL, query token, or other credential material.
     public_token_place_settings = {
-        "DSPACE_TOKEN_PLACE_URL": {
-            "https://token.place",
-            "https://staging.token.place",
-        },
-        "DSPACE_TOKEN_PLACE_CHAT_MODEL": {
-            "llama-3.1-8b-instruct",
-            "qwen3-8b-instruct",
-        },
+        "DSPACE_TOKEN_PLACE_URL": "https://token.place",
+        "DSPACE_TOKEN_PLACE_CHAT_MODEL": "llama-3.1-8b-instruct",
     }
 
     def is_empty(item: object) -> bool:
@@ -1014,10 +1008,7 @@ def contains_inline_credential(value: object) -> bool:
         approved_public_value = (
             isinstance(name, str)
             and "value" in value
-            and any(
-                value["value"] == approved
-                for approved in public_token_place_settings.get(name, set())
-            )
+            and value["value"] == public_token_place_settings.get(name)
         )
         if (
             isinstance(name, str)

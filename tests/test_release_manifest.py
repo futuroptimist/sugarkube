@@ -812,9 +812,7 @@ def test_helm_stored_values_reject_credential_environment_plain_value(name: str)
     ("name", "plain_value"),
     [
         ("DSPACE_TOKEN_PLACE_URL", "https://token.place"),
-        ("DSPACE_TOKEN_PLACE_URL", "https://staging.token.place"),
         ("DSPACE_TOKEN_PLACE_CHAT_MODEL", "llama-3.1-8b-instruct"),
-        ("DSPACE_TOKEN_PLACE_CHAT_MODEL", "qwen3-8b-instruct"),
     ],
 )
 def test_inline_credential_check_accepts_public_token_place_settings(
@@ -834,7 +832,9 @@ def test_inline_credential_check_accepts_public_token_place_settings(
             "DSPACE_TOKEN_PLACE_URL",
             "".join(("https://token.place?", "token", "=credential-sentinel")),
         ),
+        ("DSPACE_TOKEN_PLACE_URL", "https://staging.token.place"),
         ("DSPACE_TOKEN_PLACE_URL", "https://other.example"),
+        ("DSPACE_TOKEN_PLACE_CHAT_MODEL", "qwen3-8b-instruct"),
         ("DSPACE_TOKEN_PLACE_CHAT_MODEL", "".join(("credential", "-sentinel"))),
     ],
 )
