@@ -3674,3 +3674,7 @@ staging-ingress-ha-verify env='staging':
 
 staging-ingress-ha-rollback env='staging':
     scripts/staging_ingress_ha.sh rollback "{{ env }}"
+
+# Strictly read-only inventory of production DNS, ingress, and Cloudflare Tunnel parity.
+prod-resilience-audit env *args:
+    python3 scripts/prod_resilience_audit.py --env '{{ env }}' "$@"

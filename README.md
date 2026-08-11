@@ -44,6 +44,8 @@ New to sugarkube? Start with the 3-node HA happy path and follow it end-to-end:
 - **[Observability design](docs/observability-design.md)** — canonical Prometheus/Grafana
   design, ownership contract, privacy rules, dashboards, alerts, and release gates for Sugarkube,
   DSPACE, token.place, and danielsmith.io.
+- **[Production resilience parity audit](docs/production-resilience-audit.md)** — collect
+  read-only, sanitized evidence before a separately reviewed DNS, ingress, or tunnel rollout.
 - **[Future-app onboarding guide](docs/app_onboarding.md)** — checklist and decision tree for
   adding apps such as wove and later services.
 - **Current app runbooks** use the same GHCR-first staging, verification,
