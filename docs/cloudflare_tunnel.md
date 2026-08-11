@@ -567,8 +567,15 @@ part of this rollout.
    privileged namespace operation, and rejects an ambiguous sandbox or pre-existing owner table. Each
    transient watchdog enters and holds the validated namespace before disruption, avoiding delayed PID
    reuse, and all watchdog binary paths are preflighted on both affected nodes. It then proves the
-   original UIDs become NotReady with zero HA connections and
-   unchanged restart counts. Cleanup deletes only the exact owner table, including after signals and
+   original UIDs become NotReady with unchanged restart counts. For each original process it enters
+   the already validated network namespace and queries `/ready`, retaining only the HTTP status and
+   `readyConnections`; a pass requires HTTP 503 with zero ready connections from both processes while
+   both Prometheus scrape targets remain up. The HA gauge is still recorded as supporting evidence,
+   but is not the authoritative interruption check: cloudflared 2026.7.3 increments that gauge when a
+   `Serve` attempt starts and decrements it only when the attempt returns, so one retrying attempt per
+   connector can leave an aggregate value of two after connected edge sessions have fallen to zero.
+   Every poll is appended to sanitized JSONL evidence even when the drill fails. Cleanup deletes only
+   the exact owner table, including after signals and
    partial or ambiguously reported setup. A node remains cleanup-eligible until both exact deletion and
    table absence are proven; normal-cleanup failure leaves it available to the EXIT retry. Failure to
    prove automatic cleanup fails closed and prints exact UID/inode-guarded, node-specific manual cleanup
@@ -576,10 +583,28 @@ part of this rollout.
 6. Recovery must use the same UIDs with unchanged restart counts. Within five minutes both pods must be
    Ready with at least four HA connections apiece; all approved public endpoints must return HTTP 200;
    Helm histories, including the single deployed observability release at the explicitly approved
-   revision, Secret metadata, and Deployment state must be unchanged; and
+   revision, Secret metadata, and Deployment desired/ownership state must be unchanged; and
    `just cf-tunnel-verify env=staging` must pass. The helper never requests the Secret value. Finally,
    `unset CF_TUNNEL_TOKEN CF_TUNNEL_NAME CF_TUNNEL_ID`; retain the two healthy pods, Service,
    ServiceMonitor, and PDB.
+
+   Deployment `metadata.resourceVersion` is not desired state and may advance when Kubernetes
+   reconciles status during the readiness transition. The helper therefore compares the Deployment
+   UID, generation, labels, annotations, and spec, excludes dynamic status and resource version from
+   that fingerprint, and separately requires final `status.observedGeneration` to equal the unchanged
+   generation.
+
+   The first authorized execution of the namespace-local helper on August 11, 2026 was a **safely
+   cleaned-up failed proof**, not a passing drill and not evidence for #2407. Both original pods became
+   NotReady without UID or restart-count changes, both metrics targets remained up, and readiness
+   telemetry reached zero connected sessions; however, the old contract incorrectly required the HA
+   gauge to reach zero. It remained at two retrying `Serve` attempts. EXIT cleanup removed both exact
+   tables and watchdog units, and subsequent reconciliation proved the same pods healthy, all 16
+   staging endpoints HTTP 200, unchanged Helm histories and Secret metadata, and no residual drill
+   objects. The Deployment resource version also advanced due to the status transition, exposing the
+   second invalid fingerprint assumption. A new live retry requires this fix to be merged, a fresh
+   read-only gate, newly approved exact main and observability revisions, and separate explicit staging
+   authorization. Production remains explicitly out of scope.
 
 Rollback immediately if no connector stays Ready, a public endpoint fails for two consecutive
 one-minute checks, a replacement does not reach four HA connections within five minutes, metrics
