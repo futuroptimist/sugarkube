@@ -125,7 +125,7 @@ def resolve_helm_identity(
     status: object,
     history: object,
     expected_name: str,
-    expected_version: str,
+    expected_version: str | None,
 ) -> tuple[str, str, int]:
     """Resolve an exact chart identity, using history only when status omits it."""
     metadata_missing = helm_status_needs_history(status)
@@ -136,17 +136,26 @@ def resolve_helm_identity(
         if not isinstance(metadata, dict):
             raise ManifestError("invalid Helm release identity")
         name, version = metadata.get("name"), metadata.get("version")
-        if name != expected_name or version != expected_version:
+        if (
+            name != expected_name
+            or not isinstance(version, str)
+            or not version
+            or (expected_version is not None and version != expected_version)
+        ):
             raise ManifestError("invalid Helm release identity")
         return name, version, revision
 
     if not isinstance(history, list):
         raise ManifestError("invalid Helm release identity")
     matches = []
+    history_revisions = []
     for record in history:
         if not isinstance(record, dict):
             raise ManifestError("invalid Helm release identity")
-        record_revision = record.get("revision")
+        raw_revision = record.get("revision")
+        record_revision = raw_revision
+        if isinstance(raw_revision, str) and re.fullmatch(r"[1-9][0-9]*", raw_revision):
+            record_revision = int(raw_revision)
         coordinate = record.get("chart")
         if (
             type(record_revision) is not int
@@ -155,11 +164,21 @@ def resolve_helm_identity(
             or not coordinate
         ):
             raise ManifestError("invalid Helm release identity")
+        history_revisions.append(record_revision)
         if record_revision == revision:
             matches.append(record)
-    if len(matches) != 1 or matches[0]["chart"] != f"{expected_name}-{expected_version}":
+    coordinate = matches[0]["chart"] if len(matches) == 1 else None
+    prefix = f"{expected_name}-"
+    if (
+        len(matches) != 1
+        or max(history_revisions, default=0) != revision
+        or not isinstance(coordinate, str)
+        or not coordinate.startswith(prefix)
+        or not coordinate[len(prefix) :]
+        or (expected_version is not None and coordinate != f"{expected_name}-{expected_version}")
+    ):
         raise ManifestError("invalid Helm release identity")
-    return expected_name, expected_version, revision
+    return expected_name, coordinate[len(prefix) :], revision
 
 
 def _object(path: Path) -> dict[str, Any]:
