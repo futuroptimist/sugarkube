@@ -1796,11 +1796,55 @@ dspace-manifest-rollback env manifest evidence verifier="{{ justfile_directory()
 
 # Values-only production DSPACE metrics reconciliation at finalized immutable coordinates.
 dspace-prod-metrics-reconcile manifest evidence smoke_runner kubeconfig verifier="{{ justfile_directory() }}/scripts/dspace_runtime_verifier.py" confirm='' config='':
-    python3 "{{ justfile_directory() }}/scripts/dspace_manifest_rollback.py" \
-      --configuration-reconciliation --environment prod \
-      --manifest '{{ manifest }}' --evidence '{{ evidence }}' \
-      --smoke-runner '{{ smoke_runner }}' --kubeconfig '{{ kubeconfig }}' \
-      --verifier '{{ verifier }}' --confirm '{{ confirm }}' --config '{{ config }}'
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+
+    values=(
+      {{ quote(manifest) }}
+      {{ quote(evidence) }}
+      {{ quote(smoke_runner) }}
+      {{ quote(kubeconfig) }}
+      {{ quote(verifier) }}
+      {{ quote(confirm) }}
+      {{ quote(config) }}
+    )
+    prefixes=(manifest evidence smoke_runner kubeconfig verifier confirm config)
+    required=(manifest evidence smoke_runner kubeconfig verifier confirm)
+    for index in "${!values[@]}"; do
+      value="${values[index]}"
+      prefix="${prefixes[index]}"
+      if [ "${index}" = 4 ] && [[ "${value}" == confirm=* ]]; then
+        values[5]="${value#confirm=}"
+        values[4]="{{ justfile_directory() }}/scripts/dspace_runtime_verifier.py"
+        continue
+      fi
+      if [[ "${value}" == "${prefix}="* ]]; then
+        value="${value#${prefix}=}"
+      elif [[ "${value}" == *=* ]]; then
+        echo "ERROR: expected ${prefix}=... or a plain positional value, got '${value%%=*}=...'" >&2
+        exit 2
+      fi
+      if [[ "${value}" == *=* ]]; then
+        echo "ERROR: malformed ${prefix} argument." >&2
+        exit 2
+      fi
+      values[index]="${value}"
+    done
+    for index in "${!required[@]}"; do
+      if [ -z "${values[index]}" ]; then
+        echo "ERROR: ${required[index]} must not be empty." >&2
+        exit 2
+      fi
+    done
+
+    reconcile_command=(
+      python3 "{{ justfile_directory() }}/scripts/dspace_manifest_rollback.py"
+      --configuration-reconciliation --environment prod
+      --manifest "${values[0]}" --evidence "${values[1]}"
+      --smoke-runner "${values[2]}" --kubeconfig "${values[3]}"
+      --verifier "${values[4]}" --confirm "${values[5]}" --config "${values[6]}"
+    )
+    "${reconcile_command[@]}"
 
 # Read-only DSPACE runtime, frontend, replica, and remote /chat proof.
 dspace-release-verify env manifest smoke_runner config='' kubeconfig='' expected_helm_revision='':

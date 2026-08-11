@@ -2958,6 +2958,120 @@ def _run_dspace_manifest_rollback(
     return result, log.read_text(encoding="utf-8").splitlines() if log.exists() else []
 
 
+def _run_dspace_prod_metrics_reconcile(
+    tmp_path: Path, args: list[str]
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    bin_dir = tmp_path / "metrics-reconcile-bin"
+    bin_dir.mkdir(parents=True)
+    log = tmp_path / "metrics-reconcile-argv.log"
+    _write_executable(bin_dir / "python3", f"#!/bin/sh\nprintf '%s\\n' \"$@\" > {str(log)!r}\n")
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+    result = _run_just(["dspace-prod-metrics-reconcile", *args], env)
+    return result, log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_dspace_prod_metrics_reconcile_normalizes_documented_and_positional_arguments(
+    tmp_path: Path,
+) -> None:
+    values = [
+        str(tmp_path / "finalized prod evidence.json"),
+        str(tmp_path / "fresh evidence.json"),
+        str(tmp_path / "smoke runner"),
+        str(tmp_path / "production kubeconfig"),
+        "dspace:prod:" + "a" * 40,
+    ]
+    prefixed = [
+        f"{name}={value}"
+        for name, value in zip(
+            ("manifest", "evidence", "smoke_runner", "kubeconfig", "confirm"),
+            values,
+            strict=True,
+        )
+    ]
+
+    documented_result, documented_argv = _run_dspace_prod_metrics_reconcile(
+        tmp_path / "documented", prefixed
+    )
+    positional_result, positional_argv = _run_dspace_prod_metrics_reconcile(
+        tmp_path / "positional",
+        [*values[:4], str(REPO_ROOT / "scripts/dspace_runtime_verifier.py"), values[4]],
+    )
+
+    assert documented_result.returncode == 0, documented_result.stderr
+    assert positional_result.returncode == 0, positional_result.stderr
+    expected = [
+        str(REPO_ROOT / "scripts/dspace_manifest_rollback.py"),
+        "--configuration-reconciliation",
+        "--environment",
+        "prod",
+        "--manifest",
+        values[0],
+        "--evidence",
+        values[1],
+        "--smoke-runner",
+        values[2],
+        "--kubeconfig",
+        values[3],
+        "--verifier",
+        str(REPO_ROOT / "scripts/dspace_runtime_verifier.py"),
+        "--confirm",
+        values[4],
+        "--config",
+        "",
+    ]
+    assert documented_argv == expected
+    assert positional_argv == expected
+    assert all("credential" not in argument.lower() for argument in documented_argv)
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_dspace_prod_metrics_reconcile_preserves_default_verifier_and_empty_config(
+    tmp_path: Path,
+) -> None:
+    result, argv = _run_dspace_prod_metrics_reconcile(
+        tmp_path,
+        ["manifest.json", "evidence.json", "smoke", "kubeconfig", "confirm=confirm-value"],
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert argv[argv.index("--verifier") + 1] == str(
+        REPO_ROOT / "scripts/dspace_runtime_verifier.py"
+    )
+    assert argv[argv.index("--config") + 1] == ""
+
+    custom_verifier = str(tmp_path / "custom verifier")
+    custom_config = str(tmp_path / "custom config.env")
+    custom_result, custom_argv = _run_dspace_prod_metrics_reconcile(
+        tmp_path / "custom",
+        [
+            "manifest=m.json",
+            "evidence=e.json",
+            "smoke_runner=smoke",
+            "kubeconfig=kubeconfig",
+            f"verifier={custom_verifier}",
+            "confirm=confirm-value",
+            f"config={custom_config}",
+        ],
+    )
+    assert custom_result.returncode == 0, custom_result.stderr
+    assert custom_argv[custom_argv.index("--verifier") + 1] == custom_verifier
+    assert custom_argv[custom_argv.index("--config") + 1] == custom_config
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_dspace_prod_metrics_reconcile_rejects_wrong_prefix_before_python(tmp_path: Path) -> None:
+    result, argv = _run_dspace_prod_metrics_reconcile(
+        tmp_path,
+        ["evidence=manifest.json", "evidence.json", "smoke", "kubeconfig", "confirm=confirm-value"],
+    )
+
+    assert result.returncode != 0
+    assert "expected manifest=... or a plain positional value" in result.stderr
+    assert argv == []
+
+
 @pytest.mark.usefixtures("ensure_just_available")
 def test_dspace_recovery_staging_config_uses_production_chart_pin(
     tmp_path: Path, generic_app_stub_env: dict[str, str]
