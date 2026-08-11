@@ -280,6 +280,70 @@ def helm_status(
     )
 
 
+def helm_release_snapshot(
+    runner: Runner,
+    kubeconfig: str,
+    release_name: str,
+    namespace: str,
+    expected_chart_version: str | None = None,
+) -> tuple[dict[str, Any], object, tuple[str, str, int]]:
+    """Read and validate a release identity without retaining raw Helm documents."""
+    status = helm_status(runner, kubeconfig, release_name, namespace)
+    history: object = None
+    try:
+        if release.helm_status_needs_history(status):
+            try:
+                history = json.loads(
+                    runner(
+                        [
+                            "helm",
+                            "--kubeconfig",
+                            kubeconfig,
+                            "history",
+                            release_name,
+                            "--namespace",
+                            namespace,
+                            "-o",
+                            "json",
+                        ]
+                    )
+                )
+            except (json.JSONDecodeError, OSError) as exc:
+                raise RollbackError("Helm history did not return valid JSON") from exc
+        resolved_version = expected_chart_version
+        if resolved_version is None:
+            if history is None:
+                resolved_version = status.get("chart", {}).get("metadata", {}).get("version")
+            elif isinstance(history, list):
+                revision_value = status.get("version")
+                coordinates = [
+                    record.get("chart")
+                    for record in history
+                    if isinstance(record, dict) and record.get("revision") == revision_value
+                ]
+                prefix = "dspace-"
+                if len(coordinates) == 1 and isinstance(coordinates[0], str):
+                    resolved_version = (
+                        coordinates[0][len(prefix) :] if coordinates[0].startswith(prefix) else None
+                    )
+        if not isinstance(resolved_version, str) or not release.SEMVER_RE.fullmatch(
+            resolved_version
+        ):
+            raise release.ManifestError("invalid Helm release identity")
+        identity = release.resolve_helm_identity(status, history, "dspace", resolved_version)
+    except release.ManifestError as exc:
+        raise RollbackError("invalid installed Helm chart identity") from exc
+    info = status.get("info")
+    if (
+        status.get("name") != release_name
+        or status.get("namespace") != namespace
+        or not isinstance(info, dict)
+        or info.get("status") != "deployed"
+    ):
+        raise RollbackError("Helm status does not match the deployed release and namespace")
+    return status, history, identity
+
+
 def cluster_environment(runner: Runner, kubeconfig: str) -> str:
     nodes = json_command(
         runner,
@@ -379,7 +443,15 @@ def summary(
     current_pods: list[dict[str, Any]],
     target: dict[str, Any],
     values: list[dict[str, str]],
+    current_identity: tuple[str, str, int] | None = None,
 ) -> str:
+    if current_identity is None:
+        metadata = current.get("chart", {}).get("metadata", {})
+        current_identity = (
+            metadata.get("name") or "unknown",
+            chart_version(current) or "unknown",
+            revision(current),
+        )
     images = sorted({application_image(pod) for pod in current_pods if application_image(pod)})
     image_ids = sorted(
         {application_image_id(pod) for pod in current_pods if application_image_id(pod)}
@@ -390,9 +462,8 @@ def summary(
         (
             "  current: release=dspace namespace=dspace "
             f"helmStatus={info.get('status') or 'unknown'} "
-            f"helmRevision={revision(current)} chartName="
-            f"{current.get('chart', {}).get('metadata', {}).get('name') or 'unknown'} "
-            f"chartVersion={chart_version(current) or 'unknown'} chartDigest=unknown"
+            f"helmRevision={current_identity[2]} chartName={current_identity[0]} "
+            f"chartVersion={current_identity[1]} chartDigest=unknown"
         ),
         (
             f"           images={','.join(images) or 'unknown'} "
@@ -594,13 +665,17 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             f"image.tag={image_value}",
         ]
     )
-    before_helm = helm_status(runner, args.kubeconfig, "dspace", "dspace")
+    before_helm, before_history, before_identity = helm_release_snapshot(
+        runner, args.kubeconfig, "dspace", "dspace"
+    )
     before_pods = pods(runner, args.kubeconfig, "dspace", "dspace", require_any=False)
     if configuration_reconciliation:
         if args.environment != "prod":
             raise RollbackError("metrics configuration reconciliation is production-only")
         if revision(before_helm) != target["helmRevision"]:
             raise RollbackError("live Helm revision differs from finalized provenance")
+        if before_identity[:2] != ("dspace", target["chartVersion"]):
+            raise RollbackError("live chart coordinate differs from finalized provenance")
         runner(
             [
                 "env",
@@ -614,8 +689,6 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
                 "prod",
             ]
         )
-        if chart_version(before_helm) != target["chartVersion"]:
-            raise RollbackError("live chart coordinate differs from finalized provenance")
         if len(before_pods) != 2 or any(not pod.get("ready") for pod in before_pods):
             raise RollbackError("live release must have exactly two Ready DSPACE pods")
         live_values = json_command(
@@ -712,7 +785,7 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
         )
     except release.ManifestError as exc:
         raise RollbackError("OCI preflight validation failed") from exc
-    print(summary(before_helm, before_pods, target, values_proof))
+    print(summary(before_helm, before_pods, target, values_proof, before_identity))
     current_images = {application_image(pod) for pod in before_pods if application_image(pod)}
     current_ids: set[str] = set()
     for pod in before_pods:
@@ -776,8 +849,11 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
     sugarkube_revision = runner(["git", "rev-parse", "HEAD"]).strip()
     if not re.fullmatch(r"[0-9a-f]{40}", sugarkube_revision):
         raise RollbackError("could not capture the Sugarkube revision")
-    if revision(helm_status(runner, args.kubeconfig, "dspace", "dspace")) != revision(before_helm):
-        raise RollbackError("Helm revision changed during preflight")
+    _, _, confirmed_identity = helm_release_snapshot(
+        runner, args.kubeconfig, "dspace", "dspace"
+    )
+    if confirmed_identity != before_identity:
+        raise RollbackError("Helm identity changed during preflight")
 
     invocation = uuid.uuid4().hex
     target_fingerprint = hashlib.sha256(release._canonical(target).encode()).hexdigest()
@@ -810,9 +886,10 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
         },
         "values": values_proof,
         "before": {
-            "helmRevision": revision(before_helm),
+            "helmRevision": before_identity[2],
             "helmStatus": before_helm.get("info", {}).get("status"),
-            "chartVersion": chart_version(before_helm),
+            "chartName": before_identity[0],
+            "chartVersion": before_identity[1],
             "pods": before_pods,
         },
         "ociPreflight": oci,
@@ -831,11 +908,10 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
         if runner(["git", "rev-parse", "HEAD"]).strip() != sugarkube_revision:
             raise RollbackError("Sugarkube revision changed before mutation")
         if configuration_reconciliation:
-            current_status = helm_status(runner, args.kubeconfig, "dspace", "dspace")
-            if (
-                revision(current_status) != revision(before_helm)
-                or chart_version(current_status) != target["chartVersion"]
-            ):
+            _current_status, _current_history, current_identity = helm_release_snapshot(
+                runner, args.kubeconfig, "dspace", "dspace", target["chartVersion"]
+            )
+            if current_identity != before_identity:
                 raise RollbackError("Helm coordinates changed before mutation")
             current_pods = pods(runner, args.kubeconfig, "dspace", "dspace")
             if current_pods != before_pods:
@@ -923,8 +999,10 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             if time.monotonic() >= deadline:
                 raise RollbackError("timed out waiting for old terminating pods to disappear")
             time.sleep(POLL_INTERVAL)
-        after_helm = helm_status(runner, args.kubeconfig, "dspace", "dspace")
-        after_revision = revision(after_helm)
+        after_helm, after_history, after_identity = helm_release_snapshot(
+            runner, args.kubeconfig, "dspace", "dspace", target["chartVersion"]
+        )
+        after_revision = after_identity[2]
         if (
             after_helm.get("name") != "dspace"
             or after_helm.get("namespace") != "dspace"
@@ -935,13 +1013,8 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             raise RollbackError("Helm release description is not bound to this invocation")
         if after_revision <= revision(before_helm):
             raise RollbackError("Helm revision did not advance")
-        if (
-            after_helm.get("chart", {}).get("metadata", {}).get("name") != "dspace"
-            or chart_version(after_helm) != target["chartVersion"]
-        ):
-            raise RollbackError("installed chart name/version does not match target")
         changed = configuration_reconciliation or (
-            chart_version(before_helm) != target["chartVersion"]
+            before_identity[1] != target["chartVersion"]
             or current_ids != {target["imageDigest"]}
             or current_images
             != {f"{release.IMAGE_REF}:{target['imageTag']}@{target['imageDigest']}"}
@@ -1031,6 +1104,7 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             invocation_description=description,
             expected_image_coordinate=f"{release.IMAGE_REF}:{image_value}",
             helm_stored_values_result=helm_stored_values_result,
+            helm_history=after_history,
         )
         verifier_command = [
             str(args.verifier),
@@ -1079,20 +1153,22 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
                 ]
             )
         failed_stage = "revision-stability-collection"
-        stable = helm_status(runner, args.kubeconfig, "dspace", "dspace")
-        if revision(stable) != after_revision:
-            raise RollbackError("Helm revision changed concurrently during evidence collection")
+        _stable, _stable_history, stable_identity = helm_release_snapshot(
+            runner, args.kubeconfig, "dspace", "dspace", target["chartVersion"]
+        )
+        if stable_identity != after_identity:
+            raise RollbackError("Helm identity changed concurrently during evidence collection")
         result = {
             **evidence,
             "state": "succeeded",
             "completedAt": timestamp(),
             "sugarkubeRevision": sugarkube_revision,
             "helm": {
-                "beforeRevision": revision(before_helm),
+                "beforeRevision": before_identity[2],
                 "afterRevision": after_revision,
                 "status": "deployed",
                 "chartName": "dspace",
-                "chartVersion": chart_version(after_helm),
+                "chartVersion": after_identity[1],
             },
             "pods": {"before": before_pods, "after": after_pods},
             "verification": {
@@ -1129,16 +1205,17 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
         diagnostics: dict[str, Any] = {}
         if production_target_verified:
             try:
-                observed_helm = helm_status(runner, args.kubeconfig, "dspace", "dspace")
+                observed_helm, _observed_history, observed_identity = helm_release_snapshot(
+                    runner, args.kubeconfig, "dspace", "dspace"
+                )
                 observed_info = observed_helm.get("info", {})
-                observed_chart = observed_helm.get("chart", {}).get("metadata", {})
                 diagnostics["helm"] = {
                     "release": observed_helm.get("name"),
                     "namespace": observed_helm.get("namespace"),
-                    "revision": revision(observed_helm),
+                    "revision": observed_identity[2],
                     "status": observed_info.get("status"),
-                    "chartName": observed_chart.get("name"),
-                    "chartVersion": chart_version(observed_helm),
+                    "chartName": observed_identity[0],
+                    "chartVersion": observed_identity[1],
                     "invocationDescriptionMatches": observed_info.get("description")
                     == description,
                 }
