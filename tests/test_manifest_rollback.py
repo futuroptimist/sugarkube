@@ -450,13 +450,14 @@ def test_helm_snapshot_rejects_non_object_status_metadata(
     status = helm_319_status(chart={"metadata": metadata})
     monkeypatch.setattr(rollback, "helm_status", lambda *_args: status)
 
-    with pytest.raises(rollback.RollbackError, match="identity"):
+    with pytest.raises(rollback.RollbackError, match="identity") as exc_info:
         rollback.helm_snapshot(
             lambda _command: pytest.fail("history must not be queried"),
             "kubeconfig",
             "dspace",
             "dspace",
         )
+    assert "must-not-be-reported" not in str(exc_info.value)
 
 
 @pytest.mark.parametrize(
@@ -951,13 +952,16 @@ def test_configuration_reconciliation_reasserts_target_immediately_before_upgrad
     def status(*_args: object) -> dict[str, object]:
         if upgrade_attempted and diagnostic_failure == "helm":
             raise RuntimeError("bounded diagnostic failure")
-        return {
+        observed: dict[str, object] = {
             "name": "dspace",
             "namespace": "dspace",
             "version": 8 if state_drift == "helm" and evidence.exists() else 7,
             "info": {"status": "deployed"},
             "chart": {"metadata": {"name": "dspace", "version": "3.2.0"}},
         }
+        if state_drift == "helm":
+            observed.pop("chart")
+        return observed
 
     def observed_pods(*_args: object, **_kwargs: object) -> list[dict[str, object]]:
         if upgrade_attempted and diagnostic_failure == "pods":
@@ -989,6 +993,11 @@ def test_configuration_reconciliation_reasserts_target_immediately_before_upgrad
             if state_drift == "values" and evidence.exists():
                 values["unexpected"] = True
             return json.dumps(values)
+        if command[0] == "helm" and "history" in command:
+            history = [{"revision": 7, "chart": "dspace-3.2.0"}]
+            if evidence.exists():
+                history.append({"revision": 8, "chart": "dspace-3.2.0"})
+            return json.dumps(history)
         if "template" in command:
             template_calls += 1
             return "target render" if template_calls == 1 else "live render"
@@ -1304,13 +1313,19 @@ def test_orchestration_preserves_complete_success_and_failure_evidence(
             }
         post_status_calls[0] += 1
         revision = 9 if failure == "revision" and post_status_calls[0] >= 2 else 8
-        return {
+        observed: dict[str, object] = {
             "name": "dspace",
             "namespace": "dspace",
             "version": revision,
-            "info": {"status": "deployed", "description": description[0]},
+            "info": {
+                "status": "failed" if failure == "helm" else "deployed",
+                "description": description[0],
+            },
             "chart": {"metadata": {"name": "dspace", "version": "3.2.0"}},
         }
+        if failure == "helm":
+            observed.pop("chart")
+        return observed
 
     description = [""]
     monkeypatch.setattr(rollback, "helm_status", status)
@@ -1336,6 +1351,8 @@ def test_orchestration_preserves_complete_success_and_failure_evidence(
             description[0] = command[command.index("--description") + 1]
             if failure == "helm":
                 raise rollback.RollbackError(sentinel)
+        if command[0] == "helm" and "history" in command:
+            return json.dumps([{"revision": 8, "chart": "dspace-3.2.0"}])
         if command[0] == "kubectl" and "rollout" in command and failure == "rollout":
             raise rollback.RollbackError(sentinel)
         if command[:2] == [str(verifier), "verify"]:
@@ -1381,7 +1398,7 @@ def test_orchestration_preserves_complete_success_and_failure_evidence(
             "release": "dspace",
             "namespace": "dspace",
             "revision": 7 if failure == "pre-mutation" else (9 if failure == "revision" else 8),
-            "status": "deployed",
+            "status": "failed" if failure == "helm" else "deployed",
             "chartName": "dspace",
             "chartVersion": "3.1.0" if failure == "pre-mutation" else "3.2.0",
             "invocationDescriptionMatches": failure != "pre-mutation",

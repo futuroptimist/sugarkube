@@ -310,17 +310,22 @@ def helm_snapshot(
     namespace: str,
     *,
     require_deployed: bool = True,
-) -> tuple[dict[str, Any], object | None, tuple[str, str, int]]:
+) -> tuple[
+    dict[str, Any], list[dict[str, Any]] | None, tuple[str, str, int]
+]:
     """Read a redaction-safe, revision-bound Helm release identity."""
     status = helm_status(runner, kubeconfig, release_name, namespace)
-    history = None
+    history: list[dict[str, Any]] | None = None
     try:
         needs_history = release.helm_status_needs_history(status)
         if needs_history:
-            history = helm_history(runner, kubeconfig, release_name, namespace)
+            history_payload = helm_history(runner, kubeconfig, release_name, namespace)
             revision_value = status["version"]
-            if not isinstance(history, list):
+            if not isinstance(history_payload, list) or not all(
+                isinstance(item, dict) for item in history_payload
+            ):
                 raise release.ManifestError("invalid Helm release identity")
+            history = history_payload
             matches = [
                 item
                 for item in history
