@@ -43,6 +43,7 @@ class StatefulDrillHarness:
             "restart": [0, 0], "tables": [False, False], "watchdogs": [False, False],
             "ready_connections": [0, 0], "ready_malformed": -1, "metrics_targets_during": 2,
             "prometheus_failure": None, "metrics_drop_after_poll": None,
+            "recover_after_poll": None,
             "deployment_change": False, "restart_during": -1, "uid_during": -1,
             "block_long_sleep": False, "secret": "SENTINEL-SECRET-MUST-NOT-LEAK",
         }
@@ -62,7 +63,9 @@ class StatefulDrillHarness:
             "CF_DRILL_APPROVED_REVISION": "approved",
             "CF_DRILL_EXPECTED_OBSERVABILITY_REVISION": "10",
             "CF_DRILL_NODE_EXECUTOR": str(node),
-            "CF_DRILL_TEST_DISRUPTION_SECONDS": "1",
+            # Signal/timeout tests need enough budget to reach and block in the
+            # disruption sleep even on a heavily loaded CI worker.
+            "CF_DRILL_TEST_DISRUPTION_SECONDS": "30" if state["block_long_sleep"] else "1",
         }
 
     def start(self, wrapper: list[str] | None = None) -> subprocess.Popen[str]:
@@ -168,10 +171,12 @@ elif name == "kubectl":
         items=[]
         for i in range(state["pod_count"]):
             disrupted = i < 2 and state["tables"][i]
+            recovered_during = (disrupted and state["recover_after_poll"] is not None
+                                and state.get("disrupted_target_polls", 0) >= state["recover_after_poll"])
             restart = state["restart"][i] if i < 2 else 0
             if disrupted and state["restart_during"] == i: restart += 1
             uid = f"replacement-{i+1}" if disrupted and state["uid_during"] == i else f"uid-{i+1}"
-            items.append({"metadata":{"name":f"connector-{i+1}","uid":uid,"labels":{"app.kubernetes.io/name":"cloudflare-tunnel","app.kubernetes.io/instance":"cloudflare-tunnel"}},"spec":{"nodeName":"node-1" if state["same_node"] else f"node-{i+1}","containers":[{"image":image}]},"status":{"phase":"Running","conditions":[{"type":"Ready","status":"False" if disrupted else "True"}],"containerStatuses":[{"restartCount":restart}]}})
+            items.append({"metadata":{"name":f"connector-{i+1}","uid":uid,"labels":{"app.kubernetes.io/name":"cloudflare-tunnel","app.kubernetes.io/instance":"cloudflare-tunnel"}},"spec":{"nodeName":"node-1" if state["same_node"] else f"node-{i+1}","containers":[{"image":image}]},"status":{"phase":"Running","conditions":[{"type":"Ready","status":"False" if disrupted and not recovered_during else "True"}],"containerStatuses":[{"restartCount":restart}]}})
         out(json.dumps({"items":items}))
         event("pods", uids=[p["metadata"]["uid"] for p in items], restarts=[p["status"]["containerStatuses"][0]["restartCount"] for p in items], ready=[p["status"]["conditions"][0]["status"] for p in items])
     elif "get secret" in joined:
@@ -216,7 +221,9 @@ elif name == "node-executor":
         out(f"net:[{1001+idx}]")
     elif "http://127.0.0.1:2000/ready" in command:
         if state["ready_malformed"] == idx: out("not-json"); sys.exit(0)
-        connected = state["ready_connections"][idx] if state["tables"][idx] else 4
+        recovered_during = (state["tables"][idx] and state["recover_after_poll"] is not None
+                            and state.get("disrupted_target_polls", 0) >= state["recover_after_poll"])
+        connected = state["ready_connections"][idx] if state["tables"][idx] and not recovered_during else 4
         out(json.dumps({"httpStatus":503 if connected == 0 else 200,"readyConnections":connected}))
     elif "systemd-run" in command:
         state["watchdogs"][idx]=True; save(); event("watchdog", node=node, verified=False)
@@ -800,6 +807,39 @@ def test_invariants_are_polled_for_full_disruption_window(tmp_path: Path) -> Non
     assert "Prometheus target became unavailable" in result.stderr
     path = harness.evidence / "interruption-observations.jsonl"
     assert len(path.read_text().splitlines()) >= 2
+
+
+def test_full_disruption_rejects_recovery_after_initial_proof(tmp_path: Path) -> None:
+    harness = StatefulDrillHarness(tmp_path, recover_after_poll=1)
+    harness.env["CF_DRILL_TEST_DISRUPTION_SECONDS"] = "7"
+    result = harness.run()
+    assert result.returncode != 0
+    assert "did not persist throughout disruption" in result.stderr
+    observations = [
+        json.loads(line)
+        for line in (harness.evidence / "interruption-observations.jsonl").read_text().splitlines()
+    ]
+    assert len(observations) >= 2
+    assert observations[0]["pods"][0]["ready"] == "False"
+    assert observations[0]["readiness"] == [
+        {"httpStatus": 503, "readyConnections": 0},
+        {"httpStatus": 503, "readyConnections": 0},
+    ]
+    assert observations[-1]["pods"][0]["ready"] == "True"
+    assert observations[-1]["readiness"] == [
+        {"httpStatus": 200, "readyConnections": 4},
+        {"httpStatus": 200, "readyConnections": 4},
+    ]
+    assert harness.current()["tables"] == [False, False]
+
+
+def test_disruption_duration_default_override_gate_and_capped_sleep() -> None:
+    assert "DISRUPTION_SECONDS=180" in TEXT
+    assert '[[ "${CF_DRILL_APPROVED_REVISION:-}" == approved' in TEXT
+    assert 'DISRUPTION_SECONDS="${CF_DRILL_TEST_DISRUPTION_SECONDS}"' in TEXT
+    assert "readonly DISRUPTION_SECONDS" in TEXT
+    assert "remaining=$((disruption_deadline-SECONDS))" in TEXT
+    assert "sleep $((remaining < 5 ? remaining : 5))" in TEXT
 
 
 @pytest.mark.parametrize(

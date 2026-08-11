@@ -10,7 +10,11 @@ readonly CONFIRMATION='DISRUPT STAGING CLOUDFLARE WAN FOR SAME-PROCESS RECOVERY'
 readonly SELECTOR='app.kubernetes.io/name=cloudflare-tunnel,app.kubernetes.io/instance=cloudflare-tunnel'
 readonly CRICTL='/usr/local/bin/crictl'
 readonly NODE_CURL='/usr/bin/curl'
-readonly DISRUPTION_SECONDS="$([[ "${CF_DRILL_APPROVED_REVISION:-}" == approved && "${CF_DRILL_TEST_DISRUPTION_SECONDS:-}" =~ ^[1-9][0-9]*$ ]] && printf '%s' "${CF_DRILL_TEST_DISRUPTION_SECONDS}" || printf 180)"
+DISRUPTION_SECONDS=180
+if [[ "${CF_DRILL_APPROVED_REVISION:-}" == approved && "${CF_DRILL_TEST_DISRUPTION_SECONDS:-}" =~ ^[1-9][0-9]*$ ]]; then
+  DISRUPTION_SECONDS="${CF_DRILL_TEST_DISRUPTION_SECONDS}"
+fi
+readonly DISRUPTION_SECONDS
 readonly RECOVERY_SECONDS=300
 
 execute=0
@@ -318,13 +322,24 @@ while ((SECONDS < disruption_deadline)); do
   [[ "${targets}" == 2 ]] || die 'Prometheus target became unavailable during interruption'
   ((ha_valid)) || die 'Prometheus HA observation was unavailable or malformed during interruption'
   [[ "${unchanged}" == true ]] || die 'connector UID/restart set changed during interruption'
-  same="$(jq 'all(.items[]; any(.status.conditions[]?;.type=="Ready" and .status=="False"))' <<<"${current}")"
-  if [[ "${same}" == true ]] && /usr/bin/jq -e 'all(.[];.httpStatus==503 and .readyConnections==0)' <<<"$(printf '%s\n' "${ready_observations[@]}" | jq -s .)" >/dev/null; then interrupted=1; fi
-  if [[ "${same}" == true ]] && /usr/bin/jq -e 'any(.[];.readyConnections>0)' <<<"$(printf '%s\n' "${ready_observations[@]}" | jq -s .)" >/dev/null; then
-    die 'did not prove same-process NotReady and zero ready connections'
+  outage_observed=0
+  if jq -e --arg u0 "${pod_uids[0]}" --arg u1 "${pod_uids[1]}" '
+      [.items[] | select(.metadata.uid==$u0 or .metadata.uid==$u1)] as $p |
+      ($p|length)==2 and all($p[]; any(.status.conditions[]?; .type=="Ready" and .status=="False"))
+    ' <<<"${current}" >/dev/null &&
+    /usr/bin/jq -e 'length==2 and all(.[];.httpStatus==503 and .readyConnections==0)' \
+      <<<"$(printf '%s\n' "${ready_observations[@]}" | jq -s .)" >/dev/null; then
+    outage_observed=1
   fi
+  if ((interrupted && !outage_observed)); then
+    die 'same-process NotReady and zero ready connections did not persist throughout disruption'
+  fi
+  ((outage_observed)) && interrupted=1
   ((interrupted || SECONDS < proof_deadline)) || die 'did not prove same-process NotReady and zero ready connections'
-  sleep 5
+  remaining=$((disruption_deadline-SECONDS))
+  if ((remaining > 0)); then
+    sleep $((remaining < 5 ? remaining : 5))
+  fi
 done
 ((interrupted)) || die 'did not prove same-process NotReady and zero ready connections'
 
