@@ -992,6 +992,14 @@ def contains_inline_credential(value: object) -> bool:
         "secretkeyref",
         "secretname",
     }
+    # These exact environment variables configure the public token.place service;
+    # despite their names, neither carries authentication material. Keep this
+    # allowlist at the environment-variable boundary so similar credential names
+    # and sensitive keys elsewhere continue to fail closed.
+    public_token_place_environment_names = {
+        "DSPACE_TOKEN_PLACE_URL",
+        "DSPACE_TOKEN_PLACE_CHAT_MODEL",
+    }
 
     def is_empty(item: object) -> bool:
         return item is None or item is False or item == "" or item == {} or item == []
@@ -1001,6 +1009,7 @@ def contains_inline_credential(value: object) -> bool:
         if (
             isinstance(name, str)
             and sensitive.search(name)
+            and name not in public_token_place_environment_names
             and "value" in value
             and not is_empty(value["value"])
         ):
