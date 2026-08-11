@@ -992,11 +992,18 @@ def contains_inline_credential(value: object) -> bool:
         "secretkeyref",
         "secretname",
     }
-    # These exact DSPACE environment variables configure the public token.place
-    # service and model; despite their names, neither carries credential material.
+    # Only these reviewed public name/value pairs may bypass the name-based check.
+    # Keeping the values explicit prevents an exempt variable from carrying an
+    # authenticated URL, query token, or other credential material.
     public_token_place_settings = {
-        "DSPACE_TOKEN_PLACE_URL",
-        "DSPACE_TOKEN_PLACE_CHAT_MODEL",
+        "DSPACE_TOKEN_PLACE_URL": {
+            "https://token.place",
+            "https://staging.token.place",
+        },
+        "DSPACE_TOKEN_PLACE_CHAT_MODEL": {
+            "llama-3.1-8b-instruct",
+            "qwen3-8b-instruct",
+        },
     }
 
     def is_empty(item: object) -> bool:
@@ -1004,10 +1011,18 @@ def contains_inline_credential(value: object) -> bool:
 
     if isinstance(value, dict):
         name = value.get("name")
+        approved_public_value = (
+            isinstance(name, str)
+            and "value" in value
+            and any(
+                value["value"] == approved
+                for approved in public_token_place_settings.get(name, set())
+            )
+        )
         if (
             isinstance(name, str)
             and sensitive.search(name)
-            and name not in public_token_place_settings
+            and not approved_public_value
             and "value" in value
             and not is_empty(value["value"])
         ):

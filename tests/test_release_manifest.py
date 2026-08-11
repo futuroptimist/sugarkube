@@ -812,13 +812,43 @@ def test_helm_stored_values_reject_credential_environment_plain_value(name: str)
     ("name", "plain_value"),
     [
         ("DSPACE_TOKEN_PLACE_URL", "https://token.place"),
+        ("DSPACE_TOKEN_PLACE_URL", "https://staging.token.place"),
         ("DSPACE_TOKEN_PLACE_CHAT_MODEL", "llama-3.1-8b-instruct"),
+        ("DSPACE_TOKEN_PLACE_CHAT_MODEL", "qwen3-8b-instruct"),
     ],
 )
 def test_inline_credential_check_accepts_public_token_place_settings(
     name: str, plain_value: str
 ) -> None:
     assert manifest.contains_inline_credential({"name": name, "value": plain_value}) is False
+
+
+@pytest.mark.parametrize(
+    ("name", "plain_value"),
+    [
+        (
+            "DSPACE_TOKEN_PLACE_URL",
+            "".join(("https://user:", "pass", "word@token.place")),
+        ),
+        (
+            "DSPACE_TOKEN_PLACE_URL",
+            "".join(("https://token.place?", "token", "=credential-sentinel")),
+        ),
+        ("DSPACE_TOKEN_PLACE_URL", "https://other.example"),
+        ("DSPACE_TOKEN_PLACE_CHAT_MODEL", "".join(("credential", "-sentinel"))),
+    ],
+)
+def test_inline_credential_check_rejects_unapproved_token_place_values(
+    name: str, plain_value: str
+) -> None:
+    value = {"name": name, "value": plain_value}
+    assert manifest.contains_inline_credential(value) is True
+
+    stored = production_stored_values()
+    stored["env"] = [value]
+    with pytest.raises(manifest.ManifestError, match="approved contract") as raised:
+        manifest.verify_helm_stored_values(split_candidate("prod"), stored, "prod")
+    assert plain_value not in str(raised.value)
 
 
 @pytest.mark.parametrize(
