@@ -3674,3 +3674,7 @@ staging-ingress-ha-verify env='staging':
 
 staging-ingress-ha-rollback env='staging':
     scripts/staging_ingress_ha.sh rollback "{{ env }}"
+
+# Collect sanitized, read-only production DNS/ingress and tunnel parity evidence.
+prod-resilience-audit env *args:
+    scripts/prod_resilience_audit.sh "{{ env }}" {{ args }}
