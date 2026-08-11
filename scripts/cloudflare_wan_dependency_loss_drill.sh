@@ -10,7 +10,7 @@ readonly CONFIRMATION='DISRUPT STAGING CLOUDFLARE WAN FOR SAME-PROCESS RECOVERY'
 readonly SELECTOR='app.kubernetes.io/name=cloudflare-tunnel,app.kubernetes.io/instance=cloudflare-tunnel'
 readonly CRICTL='/usr/local/bin/crictl'
 readonly NODE_CURL='/usr/bin/curl'
-readonly DISRUPTION_SECONDS=180
+readonly DISRUPTION_SECONDS="$([[ "${CF_DRILL_APPROVED_REVISION:-}" == approved && "${CF_DRILL_TEST_DISRUPTION_SECONDS:-}" =~ ^[1-9][0-9]*$ ]] && printf '%s' "${CF_DRILL_TEST_DISRUPTION_SECONDS}" || printf 180)"
 readonly RECOVERY_SECONDS=300
 
 execute=0
@@ -238,7 +238,7 @@ fi
 
 table="$(table_for)"
 for i in 0 1; do
-  node_exec "${pod_nodes[$i]}" "test -x ${CRICTL} -a -x ${NODE_CURL} -a -x /usr/bin/jq -a -x /usr/bin/readlink -a -x /usr/bin/nsenter -a -x /usr/bin/systemd-run -a -x /usr/bin/systemctl -a -x /bin/sh -a -x /bin/sleep -a -x /usr/sbin/nft" >/dev/null || die "required remote binary path missing on ${pod_nodes[$i]}"
+  node_exec "${pod_nodes[$i]}" "test -x ${CRICTL} -a -x ${NODE_CURL} -a -x /usr/bin/jq -a -x /usr/bin/readlink -a -x /usr/bin/nsenter -a -x /usr/bin/systemd-run -a -x /usr/bin/systemctl -a -x /usr/bin/sed -a -x /usr/bin/tail -a -x /bin/sh -a -x /bin/sleep -a -x /usr/sbin/nft" >/dev/null || die "required remote binary path missing on ${pod_nodes[$i]}"
   resolve="sudo ${CRICTL} pods --name '^${pod_names[$i]}$' -q"
   sandbox="$(node_exec "${pod_nodes[$i]}" "${resolve}")"
   [[ "${sandbox}" != *$'\n'* && "${sandbox}" =~ ^[a-f0-9]{12,64}$ ]] || die "cannot resolve one exact sandbox for ${pod_names[$i]}"
@@ -291,9 +291,9 @@ for i in 0 1; do
 done
 
 disruption_started="${SECONDS}"
-deadline=$((SECONDS+90)); interrupted=0
+proof_deadline=$((SECONDS+90)); disruption_deadline=$((disruption_started+DISRUPTION_SECONDS)); interrupted=0
 : >"${evidence_dir}/interruption-observations.jsonl"
-while ((SECONDS < deadline)); do
+while ((SECONDS < disruption_deadline)); do
   current="$(kubectl -n cloudflare get pods -l "${SELECTOR}" -o json)"
   unchanged="$(jq --arg u0 "${pod_uids[0]}" --arg u1 "${pod_uids[1]}" --argjson r0 "${pod_restarts[0]}" --argjson r1 "${pod_restarts[1]}" '
     [.items[]|select(.metadata.deletionTimestamp==null)] as $p | ($p|length)==2 and
@@ -301,7 +301,7 @@ while ((SECONDS < deadline)); do
     all($p[];([.status.containerStatuses[].restartCount]|add)==(if .metadata.uid==$u0 then $r0 else $r1 end))' <<<"${current}")"
   declare -a ready_observations=(); readiness_valid=1
   for i in 0 1; do
-    ready_command="test \"\$(sudo ${CRICTL} inspectp ${pod_sandboxes[$i]} | /usr/bin/jq -r '.status.labels[\"io.kubernetes.pod.uid\"]')\" = '${pod_uids[$i]}' && test \"\$(sudo /usr/bin/readlink /proc/${pod_pids[$i]}/ns/net)\" = '${pod_netns[$i]}' && sudo /usr/bin/nsenter -t ${pod_pids[$i]} -n ${NODE_CURL} -sS --max-time 5 -w '\\n%{http_code}\\n' http://127.0.0.1:2000/ready | /bin/sh -c 'IFS= read -r body && IFS= read -r status && printf \"%s\\n\" \"\$body\" | /usr/bin/jq -c --argjson httpStatus \"\$status\" '\"'\"'{httpStatus:\$httpStatus,readyConnections:(.readyConnections | select(type==\"number\" and .>=0))}'\"'\"''"
+    ready_command="test \"\$(sudo ${CRICTL} inspectp ${pod_sandboxes[$i]} | /usr/bin/jq -r '.status.labels[\"io.kubernetes.pod.uid\"]')\" = '${pod_uids[$i]}' && test \"\$(sudo /usr/bin/readlink /proc/${pod_pids[$i]}/ns/net)\" = '${pod_netns[$i]}' && response=\"\$(sudo /usr/bin/nsenter -t ${pod_pids[$i]} -n ${NODE_CURL} -sS --max-time 5 -w '\\n%{http_code}' http://127.0.0.1:2000/ready)\" && status=\"\$(printf '%s\\n' \"\${response}\" | /usr/bin/tail -n 1)\" && body=\"\$(printf '%s\\n' \"\${response}\" | /usr/bin/sed '\$d')\" && printf '%s\\n' \"\${body}\" | /usr/bin/jq -c --argjson httpStatus \"\${status}\" '{httpStatus:\$httpStatus,readyConnections:(.readyConnections | select(type==\"number\" and .>=0))}'"
     observation="$(node_exec "${pod_nodes[$i]}" "${ready_command}")" || observation=''
     if ! /usr/bin/jq -e 'keys==["httpStatus","readyConnections"] and (.httpStatus|type)=="number" and (.readyConnections|type)=="number"' <<<"${observation}" >/dev/null 2>&1; then
       observation='{"httpStatus":null,"readyConnections":null}'
@@ -309,22 +309,23 @@ while ((SECONDS < deadline)); do
     fi
     ready_observations+=("${observation}")
   done
-  targets="$(prom_query 'count(up{namespace="cloudflare",service="cloudflare-tunnel-metrics"} == 1)' | jq -r '.data.result[0].value[1]//"-1"')"
-  ha="$(prom_query 'sum(cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel-metrics"})' | jq -r '.data.result[0].value[1]//"-1"')"
+  prometheus_valid=1
+  if ! targets="$(prom_query 'count(up{namespace="cloudflare",service="cloudflare-tunnel-metrics"} == 1)' | jq -er '.data.result[0].value[1] | tonumber')"; then targets=null; prometheus_valid=0; fi
+  if ! ha="$(prom_query 'sum(cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel-metrics"})' | jq -er '.data.result[0].value[1] | tonumber')"; then ha=null; prometheus_valid=0; fi
   jq -nc --argjson elapsed "$((SECONDS-disruption_started))" --argjson pods "$(jq -c --arg u0 "${pod_uids[0]}" --arg u1 "${pod_uids[1]}" '[.items[]|select(.metadata.uid==$u0 or .metadata.uid==$u1)|{uid:.metadata.uid,restartCount:([.status.containerStatuses[].restartCount]|add),ready:([.status.conditions[]?|select(.type=="Ready")|.status][0]//null)}] | sort_by(.uid)' <<<"${current}")" --argjson r0 "${ready_observations[0]}" --argjson r1 "${ready_observations[1]}" --argjson targets "${targets}" --argjson ha "${ha}" '{schemaVersion:1,elapsedSeconds:$elapsed,pods:$pods,readiness:[$r0,$r1],prometheusTargetCount:$targets,haConnections:$ha}' >>"${evidence_dir}/interruption-observations.jsonl"
   ((readiness_valid)) || die 'connector readiness endpoint was unavailable or malformed'
+  ((prometheus_valid)) || die 'Prometheus observation was unavailable or malformed during interruption'
   [[ "${unchanged}" == true ]] || die 'connector UID/restart set changed during interruption'
   same="$(jq 'all(.items[]; any(.status.conditions[]?;.type=="Ready" and .status=="False"))' <<<"${current}")"
   [[ "${targets}" == 2 ]] || die 'Prometheus target became unavailable during interruption'
-  if [[ "${same}" == true ]] && /usr/bin/jq -e 'all(.[];.httpStatus==503 and .readyConnections==0)' <<<"$(printf '%s\n' "${ready_observations[@]}" | jq -s .)" >/dev/null; then interrupted=1; break; fi
+  if [[ "${same}" == true ]] && /usr/bin/jq -e 'all(.[];.httpStatus==503 and .readyConnections==0)' <<<"$(printf '%s\n' "${ready_observations[@]}" | jq -s .)" >/dev/null; then interrupted=1; fi
   if [[ "${same}" == true ]] && /usr/bin/jq -e 'any(.[];.readyConnections>0)' <<<"$(printf '%s\n' "${ready_observations[@]}" | jq -s .)" >/dev/null; then
     die 'did not prove same-process NotReady and zero ready connections'
   fi
+  ((interrupted || SECONDS < proof_deadline)) || die 'did not prove same-process NotReady and zero ready connections'
   sleep 5
 done
 ((interrupted)) || die 'did not prove same-process NotReady and zero ready connections'
-remaining=$((DISRUPTION_SECONDS-(SECONDS-disruption_started)))
-if ((remaining > 0)); then sleep "${remaining}"; fi
 
 # Remove only the two exact drill-owned tables now; EXIT cleanup remains a second attempt.
 cleanup_failed=0

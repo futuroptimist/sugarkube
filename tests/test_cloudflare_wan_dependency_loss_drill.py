@@ -26,6 +26,7 @@ class StatefulDrillHarness:
 
     def __init__(self, tmp_path: Path, **overrides: object) -> None:
         self.root = tmp_path
+        self.root.mkdir(parents=True, exist_ok=True)
         self.state = tmp_path / "state.json"
         self.log = tmp_path / "commands.jsonl"
         self.evidence = tmp_path / "evidence"
@@ -35,9 +36,13 @@ class StatefulDrillHarness:
             "obs_revision": 10, "obs_deployed_entries": 1, "obs_revision_after_cleanup": None,
             "same_node": False, "alerts": 0, "endpoint": 200,
             "sandbox_fail": False, "collision": False, "install_fail": -1,
-            "crictl_paths": ["/usr/local/bin/crictl"],
+            "binary_paths": ["/usr/local/bin/crictl", "/usr/bin/curl", "/usr/bin/jq",
+                             "/usr/bin/readlink", "/usr/bin/nsenter", "/usr/bin/systemd-run",
+                             "/usr/bin/systemctl", "/usr/bin/sed", "/usr/bin/tail",
+                             "/bin/sh", "/bin/sleep", "/usr/sbin/nft"],
             "restart": [0, 0], "tables": [False, False], "watchdogs": [False, False],
             "ready_connections": [0, 0], "ready_malformed": -1, "metrics_targets_during": 2,
+            "prometheus_failure": None, "metrics_drop_after_poll": None,
             "deployment_change": False, "restart_during": -1, "uid_during": -1,
             "block_long_sleep": False, "secret": "SENTINEL-SECRET-MUST-NOT-LEAK",
         }
@@ -57,6 +62,7 @@ class StatefulDrillHarness:
             "CF_DRILL_APPROVED_REVISION": "approved",
             "CF_DRILL_EXPECTED_OBSERVABILITY_REVISION": "10",
             "CF_DRILL_NODE_EXECUTOR": str(node),
+            "CF_DRILL_TEST_DISRUPTION_SECONDS": "1",
         }
 
     def start(self, wrapper: list[str] | None = None) -> subprocess.Popen[str]:
@@ -146,7 +152,7 @@ elif name == "ruby":
 elif name == "curl": event("endpoint", response=state["endpoint"]); out(str(state["endpoint"]))
 elif name == "date": out("20260809T000000Z")
 elif name == "sleep":
-    if state["block_long_sleep"] and args and int(args[0]) > 30:
+    if state["block_long_sleep"] and args:
         state["sleeping"] = True; save()
         while True: time.sleep(.05)
 elif name == "kubectl":
@@ -174,9 +180,15 @@ elif name == "kubectl":
         out("secret-uid\t12\t2026-08-09T00:00:00Z")
     elif "get --raw" in joined:
         query=urllib.parse.unquote(joined)
+        if state["prometheus_failure"] == "request" and all(state["tables"]): sys.exit(52)
+        if state["prometheus_failure"] == "parse" and all(state["tables"]): out("not-json"); sys.exit(0)
         if "ALERTS" in query: value=state["alerts"]
         elif "sum(cloudflared" in query: value=2 if all(state["tables"]) else 8
-        elif "count(up" in query: value=state["metrics_targets_during"] if all(state["tables"]) else 2
+        elif "count(up" in query:
+            count = state.get("disrupted_target_polls", 0)
+            if all(state["tables"]): state["disrupted_target_polls"] = count + 1
+            drop = state["metrics_drop_after_poll"]
+            value = 1 if all(state["tables"]) and drop is not None and count >= drop else (state["metrics_targets_during"] if all(state["tables"]) else 2)
         else: value=2
         event("prometheus", query=query, value=value)
         out(json.dumps({"data":{"result":[{"value":[0,str(value)]}]}}))
@@ -189,7 +201,8 @@ elif name == "node-executor":
         event("unprivileged_cross_process_readlink", node=node, command=command)
         sys.exit(1)
     if "test -x" in command:
-        sys.exit(0 if "/usr/local/bin/crictl" in state["crictl_paths"] else 1)
+        required = re.findall(r"(?:^| -a )-x ([^ ]+)", command)
+        sys.exit(0 if all(path in state["binary_paths"] for path in required) else 1)
     if "crictl pods --name" in command and "inspectp" not in command:
         if state["sandbox_fail"]: out("ambiguous\nsecond"); sys.exit(0)
         out(("a" if idx == 0 else "b")*12)
@@ -662,7 +675,7 @@ def test_accidental_restart_is_rejected() -> None:
 
 
 def test_timeout_and_signals_run_cleanup() -> None:
-    assert "DISRUPTION_SECONDS=180" in TEXT
+    assert "CF_DRILL_TEST_DISRUPTION_SECONDS" in TEXT
     assert "RECOVERY_SECONDS=300" in TEXT
     assert "trap 'exit 130' INT" in TEXT
     assert "trap 'exit 143' TERM" in TEXT
@@ -746,6 +759,48 @@ def test_interruption_and_invariance_fail_closed(tmp_path: Path, override: dict[
         assert (harness.evidence / "interruption-observations.jsonl").exists()
 
 
+@pytest.mark.parametrize("failure", ["request", "parse"])
+def test_prometheus_failure_is_recorded_before_fail_closed(
+    tmp_path: Path, failure: str,
+) -> None:
+    harness = StatefulDrillHarness(tmp_path, prometheus_failure=failure)
+    result = harness.run()
+    assert result.returncode != 0
+    assert "Prometheus observation was unavailable or malformed" in result.stderr
+    path = harness.evidence / "interruption-observations.jsonl"
+    observations = [json.loads(line) for line in path.read_text().splitlines()]
+    assert observations[-1]["prometheusTargetCount"] is None
+    assert observations[-1]["haConnections"] is None
+
+
+def test_invariants_are_polled_for_full_disruption_window(tmp_path: Path) -> None:
+    harness = StatefulDrillHarness(tmp_path, metrics_drop_after_poll=1)
+    result = harness.run()
+    assert result.returncode != 0
+    assert "Prometheus target became unavailable" in result.stderr
+    path = harness.evidence / "interruption-observations.jsonl"
+    assert len(path.read_text().splitlines()) >= 2
+
+
+@pytest.mark.parametrize(
+    "missing",
+    ["/usr/local/bin/crictl", "/usr/bin/curl", "/usr/bin/jq", "/usr/bin/nsenter",
+     "/usr/bin/sed", "/usr/bin/tail"],
+)
+def test_missing_required_remote_binary_fails_closed(
+    tmp_path: Path, missing: str,
+) -> None:
+    paths = list(StatefulDrillHarness(tmp_path).current()["binary_paths"])
+    paths.remove(missing)
+    harness = StatefulDrillHarness(tmp_path / "missing", binary_paths=paths)
+    result = harness.run()
+    assert result.returncode != 0
+    assert "required remote binary path missing" in result.stderr
+    assert not any(
+        "add table inet" in entry["args"][1]
+        for entry in harness.commands() if entry["tool"] == "node-executor"
+    )
+
 def test_execution_commands_use_only_the_approved_crictl_path(tmp_path: Path) -> None:
     harness = StatefulDrillHarness(tmp_path)
     result = harness.run()
@@ -789,7 +844,7 @@ def test_execution_commands_use_only_the_approved_crictl_path(tmp_path: Path) ->
 
 def test_legacy_only_crictl_fails_before_any_followup_command(tmp_path: Path) -> None:
     legacy_path = "/usr/bin/" + "crictl"
-    harness = StatefulDrillHarness(tmp_path, crictl_paths=[legacy_path])
+    harness = StatefulDrillHarness(tmp_path, binary_paths=[legacy_path])
     result = harness.run()
     assert result.returncode != 0
     assert "required remote binary path missing" in result.stderr
