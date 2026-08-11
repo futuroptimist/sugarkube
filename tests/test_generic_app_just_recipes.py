@@ -2958,6 +2958,87 @@ def _run_dspace_manifest_rollback(
     return result, log.read_text(encoding="utf-8").splitlines() if log.exists() else []
 
 
+def _run_dspace_prod_metrics_reconcile(
+    tmp_path: Path, args: list[str]
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    bin_dir = tmp_path / "reconcile-bin"
+    bin_dir.mkdir()
+    log = tmp_path / "reconcile-argv.log"
+    _write_executable(
+        bin_dir / "python3",
+        f"#!/bin/sh\nprintf '%s\\n' \"$@\" > {str(log)!r}\n",
+    )
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+    result = _run_just(["dspace-prod-metrics-reconcile", *args], env)
+    return result, log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+
+
+@pytest.mark.parametrize("named", [True, False])
+@pytest.mark.usefixtures("ensure_just_available")
+def test_dspace_prod_metrics_reconcile_normalizes_documented_and_positional_forms(
+    tmp_path: Path, named: bool
+) -> None:
+    values = {
+        "manifest": str(tmp_path / "finalized manifest.json"),
+        "evidence": str(tmp_path / "fresh evidence.json"),
+        "smoke_runner": str(tmp_path / "smoke runner"),
+        "kubeconfig": str(tmp_path / "production kubeconfig"),
+        "verifier": str(tmp_path / "runtime verifier"),
+        "confirm": "dspace:prod:0123456789abcdef0123456789abcdef01234567",
+        "config": str(tmp_path / "production config.env"),
+    }
+    args = [f"{name}={value}" if named else value for name, value in values.items()]
+
+    result, argv = _run_dspace_prod_metrics_reconcile(tmp_path, args)
+
+    assert result.returncode == 0, result.stderr
+    for name, value in values.items():
+        option = f"--{name.replace('_', '-')}"
+        assert argv[argv.index(option) + 1] == value
+    assert not any(value.startswith(tuple(f"{name}=" for name in values)) for value in argv)
+    assert not any("token" in value.lower() or "credential" in value.lower() for value in argv)
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_dspace_prod_metrics_reconcile_preserves_default_verifier_and_empty_config(
+    tmp_path: Path,
+) -> None:
+    result, argv = _run_dspace_prod_metrics_reconcile(
+        tmp_path,
+        [
+            "manifest=/tmp/manifest.json",
+            "evidence=/tmp/evidence.json",
+            "smoke_runner=/tmp/smoke-runner",
+            "kubeconfig=/tmp/kubeconfig",
+            "confirm=dspace:prod:0123456789abcdef0123456789abcdef01234567",
+        ],
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert argv[argv.index("--verifier") + 1] == str(
+        REPO_ROOT / "scripts/dspace_runtime_verifier.py"
+    )
+    assert argv[argv.index("--config") + 1] == ""
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_dspace_prod_metrics_reconcile_rejects_wrong_prefix_before_python(tmp_path: Path) -> None:
+    result, argv = _run_dspace_prod_metrics_reconcile(
+        tmp_path,
+        [
+            "evidence=/tmp/manifest.json",
+            "/tmp/evidence.json",
+            "/tmp/smoke-runner",
+            "/tmp/kubeconfig",
+        ],
+    )
+
+    assert result.returncode != 0
+    assert "manifest must be positional or use the manifest= prefix" in result.stderr
+    assert argv == []
+
+
 @pytest.mark.usefixtures("ensure_just_available")
 def test_dspace_recovery_staging_config_uses_production_chart_pin(
     tmp_path: Path, generic_app_stub_env: dict[str, str]
