@@ -354,7 +354,11 @@ def test_summary_never_invents_current_chart_digest() -> None:
         "chart": {"metadata": {"name": "dspace", "version": "3.1.0"}},
     }
     text = rollback.summary(
-        current, [pod("1")], target(), [{"path": "values.yaml", "sha256": "3" * 64}]
+        current,
+        ("dspace", "3.1.0", 8),
+        [pod("1")],
+        target(),
+        [{"path": "values.yaml", "sha256": "3" * 64}],
     )
     assert text == "\n".join(
         [
@@ -372,6 +376,148 @@ def test_summary_never_invents_current_chart_digest() -> None:
             f"  values:  values.yaml={'3' * 64}",
         ]
     )
+
+
+def helm_319_status(**changes: object) -> dict[str, object]:
+    value = {
+        "config": {},
+        "info": {"status": "deployed"},
+        "manifest": "must-not-be-reported",
+        "name": "dspace",
+        "namespace": "dspace",
+        "version": 9,
+    }
+    value.update(changes)
+    return value
+
+
+def test_helm_319_snapshot_resolves_exact_current_history_without_leaking_raw_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands: list[list[str]] = []
+
+    def runner(command: list[str]) -> str:
+        commands.append(command)
+        return json.dumps(
+            [
+                {"revision": 8, "chart": "dspace-3.0.1"},
+                {"revision": 9, "chart": "dspace-3.0.2"},
+            ]
+        )
+
+    status = helm_319_status()
+    monkeypatch.setattr(rollback, "helm_status", lambda *_args: status)
+    observed, history, identity = rollback.helm_snapshot(
+        runner, "kubeconfig", "dspace", "dspace"
+    )
+
+    assert identity == ("dspace", "3.0.2", 9)
+    assert observed is status
+    assert history is not None
+    assert len(commands) == 1 and "history" in commands[0]
+    rendered = rollback.summary(
+        observed,
+        identity,
+        [],
+        {**target(), "chartVersion": "3.0.2"},
+        [{"path": "values.yaml", "sha256": "3" * 64}],
+    )
+    assert "chartName=dspace chartVersion=3.0.2" in rendered
+    assert "must-not-be-reported" not in rendered
+
+
+def test_helm_snapshot_uses_status_metadata_without_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    status = helm_319_status(
+        chart={"metadata": {"name": "dspace", "version": "3.0.2"}}
+    )
+    monkeypatch.setattr(rollback, "helm_status", lambda *_args: status)
+    _status, history, identity = rollback.helm_snapshot(
+        lambda _command: pytest.fail("history must not be queried"),
+        "kubeconfig",
+        "dspace",
+        "dspace",
+    )
+    assert history is None
+    assert identity == ("dspace", "3.0.2", 9)
+
+
+@pytest.mark.parametrize("metadata", ["dspace-3.0.2", ["dspace", "3.0.2"]])
+def test_helm_snapshot_rejects_non_object_status_metadata(
+    monkeypatch: pytest.MonkeyPatch, metadata: object
+) -> None:
+    status = helm_319_status(chart={"metadata": metadata})
+    monkeypatch.setattr(rollback, "helm_status", lambda *_args: status)
+
+    with pytest.raises(rollback.RollbackError, match="identity") as exc_info:
+        rollback.helm_snapshot(
+            lambda _command: pytest.fail("history must not be queried"),
+            "kubeconfig",
+            "dspace",
+            "dspace",
+        )
+    assert "must-not-be-reported" not in str(exc_info.value)
+
+
+def test_helm_history_rejects_invalid_json() -> None:
+    with pytest.raises(rollback.RollbackError, match="valid JSON"):
+        rollback.helm_history(
+            lambda _command: "not-json", "kubeconfig", "dspace", "dspace"
+        )
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"name": "other"},
+        {"info": {"status": "failed"}},
+    ],
+)
+def test_helm_snapshot_rejects_status_identity_or_state(
+    monkeypatch: pytest.MonkeyPatch, changes: dict[str, object]
+) -> None:
+    status = helm_319_status(
+        chart={"metadata": {"name": "dspace", "version": "3.0.2"}}, **changes
+    )
+    monkeypatch.setattr(rollback, "helm_status", lambda *_args: status)
+
+    with pytest.raises(rollback.RollbackError, match="identity"):
+        rollback.helm_snapshot(
+            lambda _command: pytest.fail("history must not be queried"),
+            "kubeconfig",
+            "dspace",
+            "dspace",
+        )
+
+
+@pytest.mark.parametrize(
+    "history",
+    [
+        [],
+        ["not-an-object"],
+        [{"revision": 8, "chart": "dspace-3.0.2"}],
+        [
+            {"revision": 9, "chart": "dspace-3.0.2"},
+            {"revision": 9, "chart": "dspace-3.0.2"},
+        ],
+        [{"revision": "9", "chart": "dspace-3.0.2"}],
+        [{"revision": 9, "chart": "other-3.0.2"}],
+        [{"revision": 9, "chart": "dspace-not-semver"}],
+        [
+            {"revision": 9, "chart": "dspace-3.0.2"},
+            {"revision": 10, "chart": "dspace-3.0.2"},
+        ],
+    ],
+)
+def test_helm_snapshot_rejects_missing_malformed_ambiguous_or_drifting_history(
+    monkeypatch: pytest.MonkeyPatch, history: object
+) -> None:
+    monkeypatch.setattr(rollback, "helm_status", lambda *_args: helm_319_status())
+    with pytest.raises(rollback.RollbackError, match="identity"):
+        rollback.helm_snapshot(
+            lambda _command: json.dumps(history), "kubeconfig", "dspace", "dspace"
+        )
 
 
 def pre_reservation_case(
@@ -544,6 +690,8 @@ def test_configuration_reconciliation_invalid_render_fails_before_reservation_an
         rollback,
         "helm_status",
         lambda *_args: {
+            "name": "dspace",
+            "namespace": "dspace",
             "version": 7,
             "info": {"status": "deployed"},
             "chart": {"metadata": {"name": "dspace", "version": "3.2.0"}},
@@ -656,6 +804,8 @@ def test_configuration_reconciliation_preconditions_fail_before_reservation(
         rollback,
         "helm_status",
         lambda *_args: {
+            "name": "dspace",
+            "namespace": "dspace",
             "version": 8 if failure == "revision" else 7,
             "info": {"status": "deployed"},
             "chart": {
@@ -835,13 +985,16 @@ def test_configuration_reconciliation_reasserts_target_immediately_before_upgrad
     def status(*_args: object) -> dict[str, object]:
         if upgrade_attempted and diagnostic_failure == "helm":
             raise RuntimeError("bounded diagnostic failure")
-        return {
+        observed: dict[str, object] = {
             "name": "dspace",
             "namespace": "dspace",
             "version": 8 if state_drift == "helm" and evidence.exists() else 7,
             "info": {"status": "deployed"},
             "chart": {"metadata": {"name": "dspace", "version": "3.2.0"}},
         }
+        if state_drift == "helm":
+            observed.pop("chart")
+        return observed
 
     def observed_pods(*_args: object, **_kwargs: object) -> list[dict[str, object]]:
         if upgrade_attempted and diagnostic_failure == "pods":
@@ -873,6 +1026,11 @@ def test_configuration_reconciliation_reasserts_target_immediately_before_upgrad
             if state_drift == "values" and evidence.exists():
                 values["unexpected"] = True
             return json.dumps(values)
+        if command[0] == "helm" and "history" in command:
+            history = [{"revision": 7, "chart": "dspace-3.2.0"}]
+            if evidence.exists():
+                history.append({"revision": 8, "chart": "dspace-3.2.0"})
+            return json.dumps(history)
         if "template" in command:
             template_calls += 1
             return "target render" if template_calls == 1 else "live render"
@@ -988,7 +1146,6 @@ def test_configuration_reconciliation_completes_all_production_gates(
                 "status": "deployed",
                 "description": state["description"] if state["upgraded"] else "previous",
             },
-            "chart": {"metadata": {"name": "dspace", "version": selected["chartVersion"]}},
         }
 
     monkeypatch.setattr(rollback, "helm_status", status)
@@ -1012,6 +1169,15 @@ def test_configuration_reconciliation_completes_all_production_gates(
         if command[0] == "helm" and "upgrade" in command:
             state["description"] = command[command.index("--description") + 1]
             state["upgraded"] = True
+        elif command[0] == "helm" and "history" in command:
+            return json.dumps(
+                [
+                    {
+                        "revision": 8 if state["upgraded"] else 7,
+                        "chart": f"dspace-{selected['chartVersion']}",
+                    }
+                ]
+            )
         elif command[0] == "helm" and "values" in command and "get" in command:
             return json.dumps(desired if "--all" in command else live)
         elif command[0] == "helm" and "template" in command:
@@ -1036,6 +1202,9 @@ def test_configuration_reconciliation_completes_all_production_gates(
     assert not any(item in upgrade for item in forbidden)
     assert DIGEST not in next(item for item in upgrade if item.startswith("image.tag="))
     assert finalized["helm_stored_values_result"] is stored_proof
+    assert finalized["helm_history"] == [
+        {"revision": 8, "chart": f"dspace-{selected['chartVersion']}"}
+    ]
     assert finalized["expected_image_coordinate"] == (
         f"{manifest.IMAGE_REF}:{selected['imageTag']}"
     )
@@ -1177,13 +1346,19 @@ def test_orchestration_preserves_complete_success_and_failure_evidence(
             }
         post_status_calls[0] += 1
         revision = 9 if failure == "revision" and post_status_calls[0] >= 2 else 8
-        return {
+        observed: dict[str, object] = {
             "name": "dspace",
             "namespace": "dspace",
             "version": revision,
-            "info": {"status": "deployed", "description": description[0]},
+            "info": {
+                "status": "failed" if failure == "helm" else "deployed",
+                "description": description[0],
+            },
             "chart": {"metadata": {"name": "dspace", "version": "3.2.0"}},
         }
+        if failure == "helm":
+            observed.pop("chart")
+        return observed
 
     description = [""]
     monkeypatch.setattr(rollback, "helm_status", status)
@@ -1209,6 +1384,8 @@ def test_orchestration_preserves_complete_success_and_failure_evidence(
             description[0] = command[command.index("--description") + 1]
             if failure == "helm":
                 raise rollback.RollbackError(sentinel)
+        if command[0] == "helm" and "history" in command:
+            return json.dumps([{"revision": 8, "chart": "dspace-3.2.0"}])
         if command[0] == "kubectl" and "rollout" in command and failure == "rollout":
             raise rollback.RollbackError(sentinel)
         if command[:2] == [str(verifier), "verify"]:
@@ -1254,7 +1431,7 @@ def test_orchestration_preserves_complete_success_and_failure_evidence(
             "release": "dspace",
             "namespace": "dspace",
             "revision": 7 if failure == "pre-mutation" else (9 if failure == "revision" else 8),
-            "status": "deployed",
+            "status": "failed" if failure == "helm" else "deployed",
             "chartName": "dspace",
             "chartVersion": "3.1.0" if failure == "pre-mutation" else "3.2.0",
             "invocationDescriptionMatches": failure != "pre-mutation",
