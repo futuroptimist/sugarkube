@@ -460,10 +460,42 @@ def test_helm_snapshot_rejects_non_object_status_metadata(
     assert "must-not-be-reported" not in str(exc_info.value)
 
 
+def test_helm_history_rejects_invalid_json() -> None:
+    with pytest.raises(rollback.RollbackError, match="valid JSON"):
+        rollback.helm_history(
+            lambda _command: "not-json", "kubeconfig", "dspace", "dspace"
+        )
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"name": "other"},
+        {"info": {"status": "failed"}},
+    ],
+)
+def test_helm_snapshot_rejects_status_identity_or_state(
+    monkeypatch: pytest.MonkeyPatch, changes: dict[str, object]
+) -> None:
+    status = helm_319_status(
+        chart={"metadata": {"name": "dspace", "version": "3.0.2"}}, **changes
+    )
+    monkeypatch.setattr(rollback, "helm_status", lambda *_args: status)
+
+    with pytest.raises(rollback.RollbackError, match="identity"):
+        rollback.helm_snapshot(
+            lambda _command: pytest.fail("history must not be queried"),
+            "kubeconfig",
+            "dspace",
+            "dspace",
+        )
+
+
 @pytest.mark.parametrize(
     "history",
     [
         [],
+        ["not-an-object"],
         [{"revision": 8, "chart": "dspace-3.0.2"}],
         [
             {"revision": 9, "chart": "dspace-3.0.2"},
@@ -471,6 +503,7 @@ def test_helm_snapshot_rejects_non_object_status_metadata(
         ],
         [{"revision": "9", "chart": "dspace-3.0.2"}],
         [{"revision": 9, "chart": "other-3.0.2"}],
+        [{"revision": 9, "chart": "dspace-not-semver"}],
         [
             {"revision": 9, "chart": "dspace-3.0.2"},
             {"revision": 10, "chart": "dspace-3.0.2"},
