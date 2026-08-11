@@ -519,6 +519,16 @@ part of this rollout.
    service impact. Treat the attempt as an **inconclusive dependency-loss test**, not evidence that the
    same processes survive and reconnect after WAN loss. Operator captures remain local and must not be
    committed.
+
+   The first authorized namespace-local attempt on August 11, 2026 also did **not** pass. Both original
+   pods became NotReady with unchanged UIDs and restart counts, both metrics targets stayed up, and the
+   aggregate HA gauge fell from eight to two rather than zero. Cleanup removed both drill-owned tables
+   and watchdog units, and reconciliation proved healthy connectors and endpoints with unchanged Helm
+   histories and Secret metadata. The old helper incorrectly treated the HA gauge as authoritative and
+   included Deployment `resourceVersion` in its invariance fingerprint. This was a safely cleaned-up
+   failed proof, not evidence for issue #2407. A retry requires this fix to be merged, a fresh read-only
+   gate, newly approved exact main and observability revisions, and separate explicit staging
+   authorization. Production remains out of scope.
 5. Use the repository-owned helper for any future, separately authorized attempt. Its default is a
    non-mutating plan:
 
@@ -566,9 +576,14 @@ part of this rollout.
    sandbox to its PID and network-namespace inode, revalidates those three identities before every
    privileged namespace operation, and rejects an ambiguous sandbox or pre-existing owner table. Each
    transient watchdog enters and holds the validated namespace before disruption, avoiding delayed PID
-   reuse, and all watchdog binary paths are preflighted on both affected nodes. It then proves the
-   original UIDs become NotReady with zero HA connections and
-   unchanged restart counts. Cleanup deletes only the exact owner table, including after signals and
+   reuse, and all watchdog binary paths, including the exact `curl` path, are preflighted on both
+   affected nodes. It then proves that the original UIDs become NotReady with unchanged restart counts,
+   each validated process network namespace returns a sanitized `/ready` result of HTTP 503 with
+   `readyConnections: 0`, and both Prometheus targets remain up. The HA gauge remains supporting
+   evidence, not an outage oracle: cloudflared increments it when a Serve attempt starts and decrements
+   it only when that attempt returns, so WAN loss can leave one retrying Serve attempt per connector
+   even though the readiness connection tracker has no connected edge session. Every poll is persisted
+   as sanitized JSONL, including on a failed proof. Cleanup deletes only the exact owner table, including after signals and
    partial or ambiguously reported setup. A node remains cleanup-eligible until both exact deletion and
    table absence are proven; normal-cleanup failure leaves it available to the EXIT retry. Failure to
    prove automatic cleanup fails closed and prints exact UID/inode-guarded, node-specific manual cleanup
@@ -576,10 +591,14 @@ part of this rollout.
 6. Recovery must use the same UIDs with unchanged restart counts. Within five minutes both pods must be
    Ready with at least four HA connections apiece; all approved public endpoints must return HTTP 200;
    Helm histories, including the single deployed observability release at the explicitly approved
-   revision, Secret metadata, and Deployment state must be unchanged; and
+   revision, Secret metadata, and Deployment desired/ownership state must be unchanged; and
    `just cf-tunnel-verify env=staging` must pass. The helper never requests the Secret value. Finally,
    `unset CF_TUNNEL_TOKEN CF_TUNNEL_NAME CF_TUNNEL_ID`; retain the two healthy pods, Service,
    ServiceMonitor, and PDB.
+
+   Deployment `metadata.resourceVersion` may advance during status-only readiness reconciliation, so it
+   is recorded but excluded from desired-state equality. UID, generation, labels, annotations, and spec
+   must remain identical, and final `status.observedGeneration` must equal the unchanged generation.
 
 Rollback immediately if no connector stays Ready, a public endpoint fails for two consecutive
 one-minute checks, a replacement does not reach four HA connections within five minutes, metrics
