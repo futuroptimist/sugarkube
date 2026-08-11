@@ -36,7 +36,10 @@ class StatefulDrillHarness:
             "same_node": False, "alerts": 0, "endpoint": 200,
             "sandbox_fail": False, "collision": False, "install_fail": -1,
             "crictl_paths": ["/usr/local/bin/crictl"],
-            "restart": [0, 0], "tables": [False, False], "watchdogs": [False, False],
+            "restart": [0, 0], "pod_uids": ["uid-1", "uid-2"],
+            "tables": [False, False], "watchdogs": [False, False],
+            "ready_connections": [0, 0], "ready_malformed": [False, False],
+            "targets_during_disruption": 2, "deployment_change": False,
             "block_long_sleep": False, "secret": "SENTINEL-SECRET-MUST-NOT-LEAK",
         }
         state.update(overrides)
@@ -152,13 +155,16 @@ elif name == "kubectl":
     if "current-context" in joined: out(state["context"])
     elif "get deployment" in joined:
         used = image if state["image_ok"] else "cloudflare/cloudflared:wrong"
-        out(json.dumps({"metadata":{"labels":{"app.kubernetes.io/managed-by":"Helm","app.kubernetes.io/name":"cloudflare-tunnel","app.kubernetes.io/instance":"cloudflare-tunnel"}},"spec":{"replicas":2,"template":{"spec":{"containers":[{"image":used,"readinessProbe":{"httpGet":{"path":"/ready","port":2000}}}]}}},"status":{"observedGeneration":1}}))
+        changed = state.get("disrupted_once", False)
+        labels={"app.kubernetes.io/managed-by":"Helm","app.kubernetes.io/name":"cloudflare-tunnel","app.kubernetes.io/instance":"cloudflare-tunnel"}
+        if changed and state["deployment_change"]: labels["unauthorized"]="change"
+        out(json.dumps({"metadata":{"uid":"deployment-uid","generation":1,"resourceVersion":"2" if changed else "1","labels":labels},"spec":{"replicas":2,"template":{"spec":{"containers":[{"image":used,"readinessProbe":{"httpGet":{"path":"/ready","port":2000}}}]}}},"status":{"observedGeneration":1}}))
     elif "get pods" in joined:
         items=[]
         for i in range(state["pod_count"]):
             disrupted = i < 2 and state["tables"][i]
             restart = state["restart"][i] if i < 2 else 0
-            items.append({"metadata":{"name":f"connector-{i+1}","uid":f"uid-{i+1}","labels":{"app.kubernetes.io/name":"cloudflare-tunnel","app.kubernetes.io/instance":"cloudflare-tunnel"}},"spec":{"nodeName":"node-1" if state["same_node"] else f"node-{i+1}","containers":[{"image":image}]},"status":{"phase":"Running","conditions":[{"type":"Ready","status":"False" if disrupted else "True"}],"containerStatuses":[{"restartCount":restart}]}})
+            items.append({"metadata":{"name":f"connector-{i+1}","uid":state["pod_uids"][i],"labels":{"app.kubernetes.io/name":"cloudflare-tunnel","app.kubernetes.io/instance":"cloudflare-tunnel"}},"spec":{"nodeName":"node-1" if state["same_node"] else f"node-{i+1}","containers":[{"image":image}]},"status":{"phase":"Running","conditions":[{"type":"Ready","status":"False" if disrupted else "True"}],"containerStatuses":[{"restartCount":restart}]}})
         out(json.dumps({"items":items}))
         event("pods", uids=[p["metadata"]["uid"] for p in items], restarts=[p["status"]["containerStatuses"][0]["restartCount"] for p in items], ready=[p["status"]["conditions"][0]["status"] for p in items])
     elif "get secret" in joined:
@@ -168,7 +174,8 @@ elif name == "kubectl":
     elif "get --raw" in joined:
         query=urllib.parse.unquote(joined)
         if "ALERTS" in query: value=state["alerts"]
-        elif "sum(cloudflared" in query: value=0 if all(state["tables"]) else 8
+        elif "sum(cloudflared" in query: value=2 if all(state["tables"]) else 8
+        elif "count(up" in query: value=state["targets_during_disruption"] if all(state["tables"]) else 2
         else: value=2
         event("prometheus", query=query, value=value)
         out(json.dumps({"data":{"result":[{"value":[0,str(value)]}]}}))
@@ -183,11 +190,14 @@ elif name == "node-executor":
     if "test -x" in command:
         requested_path = command.split("test -x ", 1)[1].split()[0]
         sys.exit(0 if requested_path in state["crictl_paths"] else 1)
+    if "http://127.0.0.1:2000/ready" in command:
+        if state["ready_malformed"][idx]: sys.exit(22)
+        out(json.dumps({"httpStatus":503,"readyConnections":state["ready_connections"][idx]}))
     if "crictl pods --name" in command and "inspectp" not in command:
         if state["sandbox_fail"]: out("ambiguous\nsecond"); sys.exit(0)
         out(("a" if idx == 0 else "b")*12)
     elif command.startswith("sudo /usr/local/bin/crictl inspectp"):
-        out(json.dumps({"status":{"labels":{"io.kubernetes.pod.uid":f"uid-{idx+1}"}},"info":{"pid":101+idx}}))
+        out(json.dumps({"status":{"labels":{"io.kubernetes.pod.uid":state["pod_uids"][idx]}},"info":{"pid":101+idx}}))
     elif command.startswith("sudo /usr/bin/readlink /proc/"):
         out(f"net:[{1001+idx}]")
     elif "systemd-run" in command:
@@ -197,7 +207,7 @@ elif name == "node-executor":
         event("watchdog", node=node, verified=True)
         out(str(501+idx))
     elif "add table inet" in command:
-        state["tables"][idx]=True; save(); event("table", node=node, present=True)
+        state["tables"][idx]=True; state["disrupted_once"]=True; save(); event("table", node=node, present=True)
         if state["install_fail"] == idx: sys.exit(44)
     elif "delete table inet" in command:
         state["tables"][idx]=False; save(); event("table", node=node, present=False); out("")
@@ -628,7 +638,7 @@ def test_lifecycle_contract_is_checked_before_disruption() -> None:
 
 
 def test_interruption_requires_same_uids_and_restart_counts() -> None:
-    assert "did not prove same-process NotReady and zero HA connections" in TEXT
+    assert "did not prove same-process NotReady and zero ready connections" in TEXT
     interruption = TEXT.split("deadline=$((SECONDS+90))", 1)[1].split(
         'sleep "${DISRUPTION_SECONDS}"', 1
     )[0]
@@ -692,7 +702,7 @@ def test_actual_helper_completes_stateful_interruption_and_recovery(tmp_path: Pa
     assert any(event["ready"] == ["False", "False"] for event in pod_events)
     assert pod_events[-1]["ready"] == ["True", "True"]
     assert all(event["uids"] == ["uid-1", "uid-2"] and event["restarts"] == [0, 0] for event in pod_events)
-    assert any("sum(cloudflared" in str(event["query"]) and event["value"] == 0 for event in events if event.get("event") == "prometheus")
+    assert any("sum(cloudflared" in str(event["query"]) and event["value"] == 2 for event in events if event.get("event") == "prometheus")
     assert sum(entry["tool"] == "just" for entry in commands) == 2
     assert len([event for event in events if event.get("event") == "endpoint"]) == 32
     preflight = json.loads((harness.evidence / "preflight.json").read_text())
@@ -700,8 +710,45 @@ def test_actual_helper_completes_stateful_interruption_and_recovery(tmp_path: Pa
     assert "observability revision expected=10 observed=10" in result.stdout
     assert [pod["restartCount"] for pod in preflight["pods"]] == [0, 0]
     assert all(pod["image"].startswith("cloudflare/cloudflared:") for pod in preflight["pods"])
-    assert (harness.evidence / "interruption-metrics.json").exists()
+    observations = [json.loads(line) for line in (harness.evidence / "interruption-observations.jsonl").read_text().splitlines()]
+    assert observations[-1]["prometheusTargetCount"] == 2
+    assert observations[-1]["haConnections"] == 2
+    assert observations[-1]["readiness"] == [{"httpStatus": 503, "readyConnections": 0}] * 2
     assert (harness.evidence / "recovery-metrics.json").exists()
+
+
+@pytest.mark.parametrize(("override", "message"), [
+    ({"ready_connections": [1, 0]}, "zero ready connections"),
+    ({"ready_malformed": [False, True]}, "could not be queried and parsed"),
+    ({"targets_during_disruption": 1}, "Prometheus target became unavailable"),
+])
+def test_interruption_authoritative_proof_fails_closed_with_evidence(
+    tmp_path: Path, override: dict[str, object], message: str
+) -> None:
+    harness = StatefulDrillHarness(tmp_path, **override)
+    result = harness.run()
+    assert result.returncode != 0
+    assert message in result.stderr
+    observations = [json.loads(line) for line in (harness.evidence / "interruption-observations.jsonl").read_text().splitlines()]
+    assert observations
+    assert set(observations[-1]) == {"elapsedSeconds", "pods", "readiness", "prometheusTargetCount", "haConnections"}
+    assert harness.current()["tables"] == [False, False]
+
+
+def test_deployment_resource_version_only_change_passes(tmp_path: Path) -> None:
+    harness = StatefulDrillHarness(tmp_path)
+    result = harness.run()
+    assert result.returncode == 0, result.stderr
+    preflight = json.loads((harness.evidence / "preflight.json").read_text())
+    assert preflight["deployment"]["metadata"]["resourceVersion"] == "1"
+    assert harness.current()["disrupted_once"] is True
+
+
+def test_deployment_desired_or_ownership_change_fails(tmp_path: Path) -> None:
+    harness = StatefulDrillHarness(tmp_path, deployment_change=True)
+    result = harness.run()
+    assert result.returncode != 0
+    assert "Deployment desired state or ownership changed" in result.stderr
 
 
 def test_execution_commands_use_only_the_approved_crictl_path(tmp_path: Path) -> None:
