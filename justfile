@@ -1796,11 +1796,75 @@ dspace-manifest-rollback env manifest evidence verifier="{{ justfile_directory()
 
 # Values-only production DSPACE metrics reconciliation at finalized immutable coordinates.
 dspace-prod-metrics-reconcile manifest evidence smoke_runner kubeconfig verifier="{{ justfile_directory() }}/scripts/dspace_runtime_verifier.py" confirm='' config='':
-    python3 "{{ justfile_directory() }}/scripts/dspace_manifest_rollback.py" \
-      --configuration-reconciliation --environment prod \
-      --manifest '{{ manifest }}' --evidence '{{ evidence }}' \
-      --smoke-runner '{{ smoke_runner }}' --kubeconfig '{{ kubeconfig }}' \
-      --verifier '{{ verifier }}' --confirm '{{ confirm }}' --config '{{ config }}'
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    manifest_path={{ quote(manifest) }}
+    evidence_path={{ quote(evidence) }}
+    smoke_path={{ quote(smoke_runner) }}
+    kubeconfig_path={{ quote(kubeconfig) }}
+
+    required_values=("${manifest_path}" "${evidence_path}" "${smoke_path}" "${kubeconfig_path}")
+    required_names=(manifest evidence smoke_runner kubeconfig)
+    for index in "${!required_values[@]}"; do
+      value="${required_values[index]}"
+      name="${required_names[index]}"
+      if [[ "${value}" == "${name}="* ]]; then
+        value="${value#*=}"
+      elif [[ "${value}" == *=* ]]; then
+        echo "ERROR: expected ${name}=... or a plain positional ${name} value." >&2
+        exit 2
+      fi
+      if [ -z "${value}" ]; then
+        echo "ERROR: ${name} must not be empty." >&2
+        exit 2
+      fi
+      required_values[index]="${value}"
+    done
+    manifest_path="${required_values[0]}"
+    evidence_path="${required_values[1]}"
+    smoke_path="${required_values[2]}"
+    kubeconfig_path="${required_values[3]}"
+
+    verifier_path="{{ justfile_directory() }}/scripts/dspace_runtime_verifier.py"
+    confirmation=''
+    config_path=''
+    optional_values=({{ quote(verifier) }} {{ quote(confirm) }} {{ quote(config) }})
+    optional_names=(verifier confirm config)
+    for index in "${!optional_values[@]}"; do
+      value="${optional_values[index]}"
+      [ -n "${value}" ] || continue
+      case "${value}" in
+        verifier=*) verifier_path="${value#verifier=}" ;;
+        confirm=*) confirmation="${value#confirm=}" ;;
+        config=*) config_path="${value#config=}" ;;
+        *=*) echo "ERROR: unexpected argument prefix in ${value%%=*}=..." >&2; exit 2 ;;
+        *)
+          case "${optional_names[index]}" in
+            verifier) verifier_path="${value}" ;;
+            confirm) confirmation="${value}" ;;
+            config) config_path="${value}" ;;
+          esac
+          ;;
+      esac
+    done
+    if [ -z "${verifier_path}" ]; then
+      echo "ERROR: verifier must not be empty." >&2
+      exit 2
+    fi
+
+    reconcile_command=(
+      python3 "{{ justfile_directory() }}/scripts/dspace_manifest_rollback.py"
+      --configuration-reconciliation
+      --environment prod
+      --manifest "${manifest_path}"
+      --evidence "${evidence_path}"
+      --smoke-runner "${smoke_path}"
+      --kubeconfig "${kubeconfig_path}"
+      --verifier "${verifier_path}"
+      --confirm "${confirmation}"
+      --config "${config_path}"
+    )
+    "${reconcile_command[@]}"
 
 # Read-only DSPACE runtime, frontend, replica, and remote /chat proof.
 dspace-release-verify env manifest smoke_runner config='' kubeconfig='' expected_helm_revision='':

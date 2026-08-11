@@ -46,6 +46,125 @@ def _write_executable(path: Path, body: str) -> None:
     path.chmod(0o755)
 
 
+def _run_dspace_metrics_reconcile_recipe(
+    tmp_path: Path, ensure_just_available: Path, arguments: list[str]
+) -> tuple[subprocess.CompletedProcess[str], list[str] | None]:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(parents=True)
+    argv_log = tmp_path / "argv.json"
+    _write_executable(
+        bin_dir / "python3",
+        f"""#!/usr/bin/env python3
+import json
+import sys
+with open({str(argv_log)!r}, "w", encoding="utf-8") as stream:
+    json.dump(sys.argv[1:], stream)
+""",
+    )
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+    env["SUGARKUBE_TEST_CREDENTIAL"] = "metrics-credential-must-not-leak"
+    result = subprocess.run(
+        [str(ensure_just_available), "dspace-prod-metrics-reconcile", *arguments],
+        cwd=REPO_ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    argv = json.loads(argv_log.read_text(encoding="utf-8")) if argv_log.exists() else None
+    return result, argv
+
+
+def _flag_value(arguments: list[str], flag: str) -> str:
+    return arguments[arguments.index(flag) + 1]
+
+
+def test_dspace_prod_metrics_reconcile_normalizes_documented_and_positional_forms(
+    tmp_path, ensure_just_available
+) -> None:
+    values = [
+        str(tmp_path / "final manifest.json"),
+        str(tmp_path / "fresh evidence.json"),
+        str(tmp_path / "smoke runner"),
+        str(tmp_path / "prod kubeconfig"),
+    ]
+    confirmation = "dspace:prod:" + "a" * 40
+    documented = [
+        f"manifest={values[0]}",
+        f"evidence={values[1]}",
+        f"smoke_runner={values[2]}",
+        f"kubeconfig={values[3]}",
+        f"confirm={confirmation}",
+    ]
+    documented_result, documented_argv = _run_dspace_metrics_reconcile_recipe(
+        tmp_path / "documented", ensure_just_available, documented
+    )
+    positional_result, positional_argv = _run_dspace_metrics_reconcile_recipe(
+        tmp_path / "positional", ensure_just_available, values + ["", confirmation]
+    )
+
+    assert documented_result.returncode == positional_result.returncode == 0
+    assert documented_argv == positional_argv
+    assert documented_argv is not None
+    assert [
+        _flag_value(documented_argv, flag)
+        for flag in ("--manifest", "--evidence", "--smoke-runner", "--kubeconfig")
+    ] == values
+    assert _flag_value(documented_argv, "--confirm") == confirmation
+    assert _flag_value(documented_argv, "--config") == ""
+    assert _flag_value(documented_argv, "--verifier") == str(
+        REPO_ROOT / "scripts/dspace_runtime_verifier.py"
+    )
+    assert all(
+        not value.startswith(("manifest=", "evidence=", "smoke_runner=", "kubeconfig="))
+        for value in documented_argv
+    )
+    assert "metrics-credential-must-not-leak" not in "\n".join(documented_argv)
+    assert "metrics-credential-must-not-leak" not in (
+        documented_result.stdout + documented_result.stderr
+    )
+
+
+def test_dspace_prod_metrics_reconcile_preserves_prefixed_verifier_and_config(
+    tmp_path, ensure_just_available
+) -> None:
+    verifier = str(tmp_path / "custom verifier")
+    config = str(tmp_path / "custom config.yaml")
+    result, argv = _run_dspace_metrics_reconcile_recipe(
+        tmp_path / "optional",
+        ensure_just_available,
+        [
+            "manifest.json",
+            "evidence.json",
+            "smoke runner",
+            "prod config",
+            f"verifier={verifier}",
+            "confirm=dspace:prod:" + "b" * 40,
+            f"config={config}",
+        ],
+    )
+
+    assert result.returncode == 0
+    assert argv is not None
+    assert _flag_value(argv, "--verifier") == verifier
+    assert _flag_value(argv, "--config") == config
+
+
+def test_dspace_prod_metrics_reconcile_rejects_wrong_prefix_before_python(
+    tmp_path, ensure_just_available
+) -> None:
+    result, argv = _run_dspace_metrics_reconcile_recipe(
+        tmp_path / "wrong-prefix",
+        ensure_just_available,
+        ["evidence=manifest.json", "evidence.json", "smoke", "kubeconfig"],
+    )
+
+    assert result.returncode == 2
+    assert argv is None
+    assert "expected manifest=" in result.stderr
+
+
 @pytest.fixture()
 def generic_app_stub_env(tmp_path: Path, ensure_just_available: Path) -> dict[str, str]:
     assert ensure_just_available.exists()
