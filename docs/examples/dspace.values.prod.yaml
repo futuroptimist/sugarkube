@@ -15,6 +15,7 @@ env:
 
 metrics:
   enabled: true
+  path: /metrics
   auth:
     existingSecret: dspace-prod-metrics-token
     secretKey: token
