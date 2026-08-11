@@ -1803,9 +1803,13 @@ dspace-prod-metrics-reconcile manifest evidence smoke_runner kubeconfig verifier
       local name="$1" value="$2" required="$3"
       if [[ "${value}" == "${name}="* ]]; then
         value="${value#"${name}="}"
-      elif [[ "${value}" == *=* ]]; then
-        echo "ERROR: ${name} must be positional or use the ${name}= prefix." >&2
-        return 2
+      else
+        case "${value}" in
+          manifest=*|evidence=*|smoke_runner=*|kubeconfig=*|verifier=*|confirm=*|config=*)
+            echo "ERROR: ${name} must be positional or use the ${name}= prefix." >&2
+            return 2
+            ;;
+        esac
       fi
       if [[ "${required}" == true && -z "${value}" ]]; then
         echo "ERROR: ${name} must not be empty." >&2
@@ -1834,7 +1838,10 @@ dspace-prod-metrics-reconcile manifest evidence smoke_runner kubeconfig verifier
         verifier=*) verifier_path="$(normalize_argument verifier "${value}" true)" ;;
         confirm=*) confirmation="$(normalize_argument confirm "${value}" false)" ;;
         config=*) config_path="$(normalize_argument config "${value}" false)" ;;
-        *=*) echo "ERROR: unexpected argument prefix in ${value%%=*}=." >&2; exit 2 ;;
+        manifest=*|evidence=*|smoke_runner=*|kubeconfig=*|verifier=*|confirm=*|config=*)
+          echo "ERROR: unexpected argument prefix in ${value%%=*}=." >&2
+          exit 2
+          ;;
         *) printf -v "${optional_names[index]}" '%s' "${value}" ;;
       esac
     done

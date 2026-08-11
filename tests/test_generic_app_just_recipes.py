@@ -2980,13 +2980,13 @@ def test_dspace_prod_metrics_reconcile_normalizes_documented_and_positional_form
     tmp_path: Path, named: bool
 ) -> None:
     values = {
-        "manifest": str(tmp_path / "finalized manifest.json"),
-        "evidence": str(tmp_path / "fresh evidence.json"),
-        "smoke_runner": str(tmp_path / "smoke runner"),
-        "kubeconfig": str(tmp_path / "production kubeconfig"),
-        "verifier": str(tmp_path / "runtime verifier"),
-        "confirm": "dspace:prod:0123456789abcdef0123456789abcdef01234567",
-        "config": str(tmp_path / "production config.env"),
+        "manifest": str(tmp_path / "finalized manifest=approved.json"),
+        "evidence": str(tmp_path / "fresh evidence=run-42.json"),
+        "smoke_runner": str(tmp_path / "smoke runner=production"),
+        "kubeconfig": str(tmp_path / "production kubeconfig=primary"),
+        "verifier": str(tmp_path / "runtime verifier=v2"),
+        "confirm": "dspace:prod:revision=0123456789abcdef0123456789abcdef01234567",
+        "config": str(tmp_path / "production config=final.env"),
     }
     args = [f"{name}={value}" if named else value for name, value in values.items()]
 
