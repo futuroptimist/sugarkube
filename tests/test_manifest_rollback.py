@@ -443,6 +443,22 @@ def test_helm_snapshot_uses_status_metadata_without_history(
     assert identity == ("dspace", "3.0.2", 9)
 
 
+@pytest.mark.parametrize("metadata", ["dspace-3.0.2", ["dspace", "3.0.2"]])
+def test_helm_snapshot_rejects_non_object_status_metadata(
+    monkeypatch: pytest.MonkeyPatch, metadata: object
+) -> None:
+    status = helm_319_status(chart={"metadata": metadata})
+    monkeypatch.setattr(rollback, "helm_status", lambda *_args: status)
+
+    with pytest.raises(rollback.RollbackError, match="identity"):
+        rollback.helm_snapshot(
+            lambda _command: pytest.fail("history must not be queried"),
+            "kubeconfig",
+            "dspace",
+            "dspace",
+        )
+
+
 @pytest.mark.parametrize(
     "history",
     [

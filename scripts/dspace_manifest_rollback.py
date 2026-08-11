@@ -310,7 +310,7 @@ def helm_snapshot(
     namespace: str,
     *,
     require_deployed: bool = True,
-) -> tuple[dict[str, Any], object, tuple[str, str, int]]:
+) -> tuple[dict[str, Any], object | None, tuple[str, str, int]]:
     """Read a redaction-safe, revision-bound Helm release identity."""
     status = helm_status(runner, kubeconfig, release_name, namespace)
     history = None
@@ -334,7 +334,10 @@ def helm_snapshot(
                 raise release.ManifestError("invalid Helm release identity")
             expected_version = coordinate[len(prefix) :]
         else:
-            metadata = status.get("chart", {}).get("metadata", {})
+            chart = status.get("chart")
+            metadata = chart.get("metadata") if isinstance(chart, dict) else None
+            if not isinstance(metadata, dict):
+                raise release.ManifestError("invalid Helm release identity")
             expected_version = metadata.get("version")
         if not isinstance(expected_version, str) or not release.SEMVER_RE.fullmatch(
             expected_version
