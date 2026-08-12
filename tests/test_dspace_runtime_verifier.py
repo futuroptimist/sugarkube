@@ -691,9 +691,14 @@ def test_exact_recovery_uses_legacy_contract_and_truthful_journeys(
     ]
 
 
-def test_exact_302_coordinates_remain_on_legacy_contract() -> None:
+@pytest.mark.parametrize(
+    "coordinates",
+    [verifier.LEGACY_302_COORDINATES, verifier.LEGACY_RECOVERY_COORDINATES],
+    ids=["chart-3.0.2", "chart-3.0.3"],
+)
+def test_exact_recovery_coordinates_use_legacy_contract(coordinates: dict[str, object]) -> None:
     assert (
-        verifier.identity_contract(dict(verifier.LEGACY_302_COORDINATES))
+        verifier.identity_contract(dict(coordinates))
         == verifier.LEGACY_IDENTITY_CONTRACT
     )
 
@@ -719,16 +724,17 @@ def test_exact_310_token_place_uses_legacy_contract_and_truthful_journeys(
     ]
 
 
+@pytest.mark.parametrize(
+    "coordinates",
+    [verifier.LEGACY_302_COORDINATES, verifier.LEGACY_RECOVERY_COORDINATES],
+    ids=["chart-3.0.2", "chart-3.0.3"],
+)
 @pytest.mark.parametrize("field", list(verifier.LEGACY_RECOVERY_COORDINATES))
-def test_any_recovery_coordinate_drift_prevents_legacy_selection(field: str) -> None:
-    candidate = dict(verifier.LEGACY_RECOVERY_COORDINATES)
-    candidate[field] = "different"
-    assert verifier.identity_contract(candidate) == verifier.MODERN_IDENTITY_CONTRACT
-
-
-@pytest.mark.parametrize("field", list(verifier.LEGACY_302_COORDINATES))
-def test_any_302_coordinate_drift_prevents_legacy_selection(field: str) -> None:
-    candidate = dict(verifier.LEGACY_302_COORDINATES)
+def test_any_recovery_coordinate_drift_prevents_legacy_selection(
+    coordinates: dict[str, object],
+    field: str,
+) -> None:
+    candidate = dict(coordinates)
     candidate[field] = "different"
     assert verifier.identity_contract(candidate) == verifier.MODERN_IDENTITY_CONTRACT
 

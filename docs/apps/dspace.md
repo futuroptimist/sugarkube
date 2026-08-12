@@ -30,8 +30,9 @@ evidence file.
 in its finalized evidence. Genuine evidence for the live 3.0.2 release therefore keeps chart 3.0.2;
 evidence for 3.0.3 is rejected while 3.0.2 is live. **Do not use that recipe to perform the chart
 transition.** To retain application 3.0.1, image `main-1a31a56`, and both replicas while moving from
-the installed chart 3.0.2 to the approved chart 3.0.3, follow the read-only preparation and the
-[guarded production mutation](#4-guarded-production-mutation-and-verification) below. Never use
+the installed chart 3.0.2 to the approved chart 3.0.3, complete the required staging rehearsal and
+finalize its staging evidence, then use the guarded `just app-promote-prod` workflow in
+[production mutation](#4-guarded-production-mutation-and-verification) below. Never use
 `--reuse-values`, a semantic or mutable tag, raw `helm upgrade`, or `helm rollback`.
 
 After rollout, run the DSPACE runtime and `/chat` verification, then run:
