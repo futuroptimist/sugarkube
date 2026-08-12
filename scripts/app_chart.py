@@ -213,7 +213,7 @@ def dspace_production_metrics_token_is_unsafe(
                 and secret_ref == {"name": "dspace-prod-metrics-token", "key": "token"}
             ):
                 safe_entries.add(id(entry))
-            # Chart 3.0.2 uses the pod UID as a safe, unpredictable token when metrics are off.
+            # DSPACE charts use the pod UID as a safe, unpredictable token when metrics are off.
             if (
                 not metrics_enabled
                 and set(entry) == {"name", "valueFrom"}
@@ -423,6 +423,11 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
                         },
                         {
                             "action": "replace",
+                            "targetLabel": "namespace",
+                            "replacement": "dspace",
+                        },
+                        {
+                            "action": "replace",
                             "targetLabel": "release",
                             "replacement": "dspace",
                         },
@@ -434,7 +439,12 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
                     ]
                     if (
                         metadata.get("name") != "dspace"
-                        or metadata.get("namespace") != "dspace"
+                        or (
+                            metadata.get("namespace")
+                            if "namespace" in metadata
+                            else inputs.namespace
+                        )
+                        != "dspace"
                         or metadata.get("labels", {}).get("release") != "kube-prometheus-stack"
                         or spec.get("selector")
                         != {

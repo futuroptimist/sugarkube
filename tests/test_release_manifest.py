@@ -111,11 +111,11 @@ def test_versioned_recovery_coordinates_are_exact_and_candidate_consumable() -> 
         "app": "dspace",
         "applicationVersion": "3.0.1",
         "sourceRevision": "1a31a569aff2dbeb238e8c2688b9e85140d2077d",
-        "chartSourceRevision": "63063e287adb92a4158ce2c8e7d378b73f52c1c5",
+        "chartSourceRevision": "62da11005354e9f9a89c2e58584cdce4c8ec35aa",
         "imageTag": "main-1a31a56",
         "imageDigest": "sha256:23dbc573377549136c1f10b05706b3c176ffbabaf04a3194381a24752104a401",
-        "chartVersion": "3.0.2",
-        "chartDigest": "sha256:8b862135e52146f301a41259d6dabb053ed891d798fc1c8c95ca775b2b8e9575",
+        "chartVersion": "3.0.3",
+        "chartDigest": "sha256:6ee663c426673bc0e516ed8f8b0ab11a918d2f2bb81fc9047b3eb37b78329f5c",
         "semanticTag": "v3.0.1",
     }
     made = manifest.candidate(value, "prod", "openai", "2026-07-31T12:00:00Z", "operator")
@@ -696,9 +696,7 @@ def test_committed_production_values_pass_stored_values_contract() -> None:
     recovery = json.loads(
         Path("docs/apps/dspace.prod-recovery-coordinates.json").read_text(encoding="utf-8")
     )
-    approved = manifest.candidate(
-        recovery, "prod", "openai", "2026-07-31T12:00:00Z", "operator"
-    )
+    approved = manifest.candidate(recovery, "prod", "openai", "2026-07-31T12:00:00Z", "operator")
     values["image"] = {
         "repository": manifest.IMAGE_REF,
         "tag": approved["imageTag"],
@@ -714,9 +712,7 @@ def test_helm_stored_values_accept_chart_defaults_and_safe_references() -> None:
     stored["env"] = [
         {
             "name": "METRICS_TOKEN",
-            "valueFrom": {
-                "secretKeyRef": {"name": "dspace-prod-metrics-token", "key": "token"}
-            },
+            "valueFrom": {"secretKeyRef": {"name": "dspace-prod-metrics-token", "key": "token"}},
         }
     ]
     assert manifest.verify_helm_stored_values(value, stored, "prod")["passed"] is True

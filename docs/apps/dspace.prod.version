@@ -1,2 +1,2 @@
-# DSPACE production chart pin. Keep aligned with the recovered production deployment.
-3.0.2
+# Production/recovery chart pin; intentionally independent from shared/dev and staging.
+3.0.3
