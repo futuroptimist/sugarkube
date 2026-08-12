@@ -33,6 +33,11 @@ def slices(endpoints_by_slice):
     }
 
 
+def test_list_shape_rejects_non_list_values() -> None:
+    with pytest.raises(audit.HardFailure, match="^malformed list canary$"):
+        audit.list_shape({}, "malformed list canary")
+
+
 def test_endpoint_slices_aggregate_all_slices_and_effective_conditions() -> None:
     document = slices(
         [
