@@ -194,7 +194,7 @@ if [ "${{1:-}}" = upgrade ]; then
 fi
 if [[ "$*" == *"status dspace --namespace dspace -o json" ]]; then
   chart_version="${{SUGARKUBE_STUB_CHART_VERSION:-3.1.1}}"
-  if [ -z "${{SUGARKUBE_STUB_CHART_VERSION:-}}" ] && [ "${{SUGARKUBE_STUB_NODE_ENV:-staging}}" = prod ]; then chart_version=3.0.2; fi
+  if [ -z "${{SUGARKUBE_STUB_CHART_VERSION:-}}" ] && [ "${{SUGARKUBE_STUB_NODE_ENV:-staging}}" = prod ]; then chart_version=3.0.3; fi
   description="$(cat {str(tmp_path / "helm-description")!r} 2>/dev/null || true)"
   revision=7
   if [[ "$*" == *"staging-kubeconfig"* ]]; then
@@ -228,7 +228,7 @@ if [[ "$*" == show\ chart* ]]; then
     version="${{*: -1}}"
     if [[ "$version" == oci://*@sha256:* ]]; then
       version="${{SUGARKUBE_STUB_CHART_VERSION:-3.1.1}}"
-      if [ -z "${{SUGARKUBE_STUB_CHART_VERSION:-}}" ] && [ "${{SUGARKUBE_STUB_NODE_ENV:-staging}}" = prod ]; then version=3.0.2; fi
+      if [ -z "${{SUGARKUBE_STUB_CHART_VERSION:-}}" ] && [ "${{SUGARKUBE_STUB_NODE_ENV:-staging}}" = prod ]; then version=3.0.3; fi
     fi
     printf 'apiVersion: v2\nname: dspace\nversion: %s\nappVersion: main-abcdef0\n' "$version"
     exit 0
@@ -460,6 +460,9 @@ spec:
         - action: replace
           targetLabel: environment
           replacement: prod
+        - action: replace
+          targetLabel: namespace
+          replacement: dspace
         - action: replace
           targetLabel: release
           replacement: dspace
@@ -1405,6 +1408,35 @@ data:
         ),
         lambda manifest: manifest.replace("replacement: prod", "replacement: staging"),
         lambda manifest: manifest.replace("targetLabel: release", "targetLabel: namespace"),
+        lambda manifest: manifest.replace(
+            "        - action: replace\n          targetLabel: namespace\n"
+            "          replacement: dspace\n",
+            "",
+        ),
+        lambda manifest: manifest.replace(
+            "        - action: replace\n          targetLabel: namespace\n"
+            "          replacement: dspace\n"
+            "        - action: replace\n          targetLabel: release\n"
+            "          replacement: dspace\n",
+            "        - action: replace\n          targetLabel: release\n"
+            "          replacement: dspace\n"
+            "        - action: replace\n          targetLabel: namespace\n"
+            "          replacement: dspace\n",
+        ),
+        lambda manifest: manifest.replace(
+            "          targetLabel: namespace\n          replacement: dspace",
+            "          targetLabel: namespace\n          replacement: other",
+        ),
+        lambda manifest: manifest.replace(
+            "          targetLabel: cluster\n          replacement: sugarkube-prod",
+            "          targetLabel: cluster\n          replacement: sugarkube-prod\n"
+            "        - action: replace\n          targetLabel: extra\n"
+            "          replacement: forbidden",
+        ),
+        lambda manifest: manifest.replace(
+            "kind: ServiceMonitor\nmetadata:\n  name: dspace",
+            "kind: ServiceMonitor\nmetadata:\n  name: dspace\n  namespace: wrong",
+        ),
     ],
 )
 def test_dspace_production_requires_exact_metrics_path_and_relabelings(
@@ -1462,7 +1494,6 @@ spec:
 kind: ServiceMonitor
 metadata:
   name: dspace
-  namespace: dspace
   labels:
     app.kubernetes.io/instance: dspace
     release: kube-prometheus-stack
@@ -1485,6 +1516,9 @@ spec:
         - action: replace
           targetLabel: environment
           replacement: prod
+        - action: replace
+          targetLabel: namespace
+          replacement: dspace
         - action: replace
           targetLabel: release
           replacement: dspace
@@ -2928,7 +2962,7 @@ def _write_dspace_candidate(
         "sourceRevision": "abcdef0123456789abcdef0123456789abcdef01",
         "imageTag": "main-abcdef0",
         "imageDigest": image_digest or "sha256:" + "1" * 64,
-        "chartVersion": "3.1.1" if environment == "staging" else "3.0.2",
+        "chartVersion": "3.1.1" if environment == "staging" else "3.0.3",
         "chartDigest": "sha256:" + "2" * 64,
         "semanticTag": "v3.2.0",
         "recordType": "candidate",
@@ -3072,10 +3106,10 @@ def test_dspace_recovery_staging_config_uses_production_chart_pin(
     evidence = tmp_path / "recovery-staging-evidence.json"
     _write_dspace_candidate(manifest, "staging")
     candidate = json.loads(manifest.read_text(encoding="utf-8"))
-    candidate["chartVersion"] = "3.0.2"
+    candidate["chartVersion"] = "3.0.3"
     manifest.write_text(json.dumps(candidate) + "\n", encoding="utf-8")
     env = generic_app_stub_env.copy()
-    env["SUGARKUBE_STUB_CHART_VERSION"] = "3.0.2"
+    env["SUGARKUBE_STUB_CHART_VERSION"] = "3.0.3"
 
     result = _run_just(
         [
@@ -3095,7 +3129,7 @@ def test_dspace_recovery_staging_config_uses_production_chart_pin(
     commands = (tmp_path / "commands.log").read_text(encoding="utf-8")
     assert "release-manifest preflight" in commands
     assert "helm template " in commands
-    assert "charts/dspace:3.0.2" in commands
+    assert "charts/dspace:3.0.3" in commands
     assert "docs/examples/dspace.values.staging.yaml" in commands
     assert "main-abcdef0" in commands
 
@@ -3690,12 +3724,12 @@ def test_dspace_prod_verifier_failure_preserves_post_mutation_reservation(
     )
     assert staged.returncode == 0, staged.stderr + staged.stdout
     staging_record = json.loads(staging_evidence.read_text(encoding="utf-8"))
-    staging_record["chartVersion"] = "3.0.2"
+    staging_record["chartVersion"] = "3.0.3"
     staging_evidence.write_text(json.dumps(staging_record) + "\n", encoding="utf-8")
     _write_dspace_candidate(prod_manifest, "prod")
     env = generic_app_stub_env.copy()
     env["SUGARKUBE_STUB_NODE_ENV"] = "prod"
-    env["SUGARKUBE_STUB_CHART_VERSION"] = "3.0.2"
+    env["SUGARKUBE_STUB_CHART_VERSION"] = "3.0.3"
     env["SUGARKUBE_STUB_PROD_VERIFIER_FAIL"] = "1"
     for name in ("helm.log", "commands.log", "runtime-verifier.log"):
         (tmp_path / name).write_text("", encoding="utf-8")
@@ -5691,6 +5725,17 @@ def test_observability_app_metrics_inventory_tokenplace_contract_is_strict_and_c
         },
     }
     assert "token" in cfg["forbiddenApplicationLabels"]
+
+
+def test_observability_app_metrics_inventory_dspace_declares_exact_five_labels():
+    doc = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))
+    app_metrics.validate_inventory(doc)
+    cfg = doc["applications"]["dspace"]["environments"]["prod"]
+
+    assert cfg["serviceMonitor"]["relabelings"] == [
+        {"action": "replace", "targetLabel": key, "replacement": cfg["targetLabels"][key]}
+        for key in ("app", "environment", "namespace", "release", "cluster")
+    ]
 
 
 def test_observability_app_metrics_inventory_rejects_unknown_keys_duplicates_and_bad_status():
