@@ -174,6 +174,29 @@ def test_runner_failure_is_bounded_and_redacted(monkeypatch) -> None:
     assert len(message) < 100
 
 
+def test_kubectl_rejects_malformed_json_shapes(monkeypatch) -> None:
+    monkeypatch.setattr(
+        audit,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args, 0, stdout="not-json"),
+    )
+    with pytest.raises(audit.HardFailure, match="malformed JSON"):
+        audit.kubectl("get", "nodes")
+
+    monkeypatch.setattr(
+        audit,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args, 0, stdout="[]"),
+    )
+    with pytest.raises(audit.HardFailure, match="must be an object"):
+        audit.kubectl("get", "nodes")
+
+
+def test_empty_command_is_rejected() -> None:
+    with pytest.raises(audit.HardFailure, match="empty command"):
+        audit.operation([])
+
+
 def test_successful_status_with_transport_error_is_unhealthy() -> None:
     assert audit.probes_unhealthy([{"status": 200, "error": "transport"}])
     assert not audit.probes_unhealthy([{"status": 204, "error": "none"}])
@@ -214,7 +237,7 @@ def test_traefik_desired_snapshot_never_retains_raw_values() -> None:
     assert "do-not-retain" not in json.dumps(result)
 
 
-FAKE_TOOL = r"""#!/usr/bin/env python3
+FAKE_TOOL = r"""#!/usr/bin/python3 -S
 import json, os, sys
 from pathlib import Path
 
@@ -348,7 +371,7 @@ def audit_harness(tmp_path):
     state = tmp_path / "state.json"
     log = tmp_path / "commands.jsonl"
 
-    def execute(label, *, cli_env="prod", require_parity=False, **scenario):
+    def configure(label, *, cli_env="prod", require_parity=False, **scenario):
         state.write_text(json.dumps(scenario))
         evidence = tmp_path / label
         env = os.environ.copy()
@@ -369,9 +392,16 @@ def audit_harness(tmp_path):
         ]
         if require_parity:
             command.append("--require-parity")
+        return command, env, evidence
+
+    def execute(label, *, cli_env="prod", require_parity=False, **scenario):
+        command, env, evidence = configure(
+            label, cli_env=cli_env, require_parity=require_parity, **scenario
+        )
         result = subprocess.run(command, text=True, capture_output=True, env=env, check=False)
         return result, evidence
 
+    execute.configure = configure
     return execute, log
 
 
@@ -462,3 +492,15 @@ def test_cli_completed_gap_exit_contract(audit_harness) -> None:
     assert required.returncode == 1
     assert json.loads((evidence / "audit.json").read_text())["result"] == "PARITY_GAPS"
     assert required_evidence.exists()
+
+
+def test_cli_compliant_fixture_covers_in_process_collection(audit_harness, monkeypatch) -> None:
+    """Exercise collector branches in-process so patch coverage observes the CLI work."""
+    execute, _ = audit_harness
+    command, env, evidence = execute.configure("covered-compliant")
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(sys, "argv", command[1:])
+
+    assert audit.main() == 0
+    assert json.loads((evidence / "audit.json").read_text())["result"] == "PARITY_OK"
