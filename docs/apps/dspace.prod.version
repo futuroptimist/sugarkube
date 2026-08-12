@@ -1,2 +1,2 @@
-# DSPACE production chart pin. Keep aligned with the recovered production deployment.
-3.0.2
+# DSPACE approved production recovery target; the live release may remain on an older chart.
+3.0.3
