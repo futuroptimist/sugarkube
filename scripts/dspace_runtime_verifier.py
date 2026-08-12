@@ -59,17 +59,11 @@ LEGACY_302_COORDINATES = {
     "semanticTag": "v3.0.1",
     "expectedDefaultChatProvider": "openai",
 }
-LEGACY_RECOVERY_COORDINATES = {
-    "schemaVersion": 2,
-    "applicationVersion": "3.0.1",
-    "sourceRevision": "1a31a569aff2dbeb238e8c2688b9e85140d2077d",
+LEGACY_303_COORDINATES = {
+    **LEGACY_302_COORDINATES,
     "chartSourceRevision": "62da11005354e9f9a89c2e58584cdce4c8ec35aa",
-    "imageTag": "main-1a31a56",
-    "imageDigest": "sha256:23dbc573377549136c1f10b05706b3c176ffbabaf04a3194381a24752104a401",
     "chartVersion": "3.0.3",
     "chartDigest": "sha256:6ee663c426673bc0e516ed8f8b0ab11a918d2f2bb81fc9047b3eb37b78329f5c",
-    "semanticTag": "v3.0.1",
-    "expectedDefaultChatProvider": "openai",
 }
 LEGACY_310_COORDINATES = {
     "schemaVersion": 2,
@@ -85,7 +79,7 @@ LEGACY_310_COORDINATES = {
 }
 LEGACY_IDENTITY_COORDINATES = (
     LEGACY_302_COORDINATES,
-    LEGACY_RECOVERY_COORDINATES,
+    LEGACY_303_COORDINATES,
     LEGACY_310_COORDINATES,
 )
 META_RE = re.compile(
@@ -465,10 +459,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
             fail("pod/replica identity")
         if metadata.get("deletionTimestamp") is not None or status.get("phase") != "Running":
             fail("pod/replica identity")
-        if not any(
-            c.get("type") == "Ready" and c.get("status") == "True"
-            for c in conditions
-        ):
+        if not any(c.get("type") == "Ready" and c.get("status") == "True" for c in conditions):
             fail("pod/replica identity")
         owner = controller_owner(metadata.get("ownerReferences", []), "ReplicaSet")
         replica_set_name, replica_set_uid = owner.get("name"), owner.get("uid")
