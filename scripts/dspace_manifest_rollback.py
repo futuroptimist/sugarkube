@@ -1129,6 +1129,8 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             raise RollbackError("Helm release description is not bound to this invocation")
         if configuration_reconciliation and after_revision != before_identity[2] + 1:
             raise RollbackError("Helm revision did not advance exactly once")
+        if not configuration_reconciliation and after_revision <= before_identity[2]:
+            raise RollbackError("Helm revision did not advance")
         if after_identity[0] != "dspace" or after_identity[1] != target["chartVersion"]:
             raise RollbackError("installed chart name/version does not match target")
         changed = configuration_reconciliation or (
