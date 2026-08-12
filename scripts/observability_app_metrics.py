@@ -278,8 +278,8 @@ def validate_inventory(doc):
                 k8s_label_key(k, "selector label name")
                 k8s_label_value(v, "selector label value")
             relabelings = sm["relabelings"]
-            if not isinstance(relabelings, list) or len(relabelings) != 4:
-                fail("serviceMonitor.relabelings must contain exactly four entries")
+            if not isinstance(relabelings, list) or not relabelings:
+                fail("serviceMonitor.relabelings must be a nonempty list")
             for idx, relabeling in enumerate(relabelings):
                 expect_keys(
                     relabeling,
@@ -310,18 +310,13 @@ def validate_inventory(doc):
             mapping = {r["targetLabel"]: r["replacement"] for r in relabelings}
             if len(mapping) != len(relabelings):
                 fail("serviceMonitor.relabelings target labels must be unique")
-            required_mapping = {
-                "app": app,
-                "environment": env,
-                "release": cfg["serviceMonitorName"],
-                "cluster": labels.get("cluster"),
-            }
-            if mapping != required_mapping:
+            discovery_mapping = {key: value for key, value in labels.items() if key != "namespace"}
+            explicit_namespace_mapping = dict(labels)
+            if mapping not in (discovery_mapping, explicit_namespace_mapping):
                 fail(
-                    "serviceMonitor.relabelings must map app, environment, release, and cluster exactly"
+                    "serviceMonitor.relabelings must exactly match targetLabels, with namespace "
+                    "either explicit or supplied by discovery"
                 )
-            if "namespace" in mapping:
-                fail("namespace must be supplied by discovery, not relabel replacement")
             pm = cfg["publicMetrics"]
             expect_keys(pm, {"url", "expectedUnauthenticatedStatus"}, "publicMetrics")
             public_metrics_url(pm["url"])
@@ -1027,9 +1022,6 @@ def validate_render(
         fail("rendered ServiceMonitor namespace selector mismatch")
     if selector.get("matchLabels") != cfg["serviceMonitor"]["selectorMatchLabels"]:
         fail("rendered ServiceMonitor selector mismatch")
-    for relabeling in cfg["serviceMonitor"].get("relabelings", []):
-        if relabeling.get("targetLabel") == "namespace":
-            fail("namespace must be supplied by discovery, not relabel replacement")
     endpoints = spec.get("endpoints")
     if not isinstance(endpoints, list) or len(endpoints) != 1:
         fail("rendered ServiceMonitor must have exactly one endpoint")
