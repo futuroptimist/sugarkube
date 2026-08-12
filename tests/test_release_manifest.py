@@ -1890,3 +1890,19 @@ def test_finalize_rejects_noncanonical_image_id() -> None:
     item["status"]["containerStatuses"][0]["imageID"] = "not-a-digest"
     with pytest.raises(manifest.ManifestError, match="non-canonical pod imageID"):
         finalize(pods_json={"items": [item]})
+
+
+def test_production_metrics_chart_target_is_exact_chart_only_coordinate() -> None:
+    target_path = Path(__file__).parents[1] / "docs/apps/dspace.prod-metrics-chart-target.json"
+    assert json.loads(target_path.read_text(encoding="utf-8")) == {
+        "schemaVersion": 2,
+        "app": "dspace",
+        "applicationVersion": "3.0.1",
+        "sourceRevision": "1a31a569aff2dbeb238e8c2688b9e85140d2077d",
+        "chartSourceRevision": "62da11005354e9f9a89c2e58584cdce4c8ec35aa",
+        "imageTag": "main-1a31a56",
+        "imageDigest": "sha256:23dbc573377549136c1f10b05706b3c176ffbabaf04a3194381a24752104a401",
+        "chartVersion": "3.0.3",
+        "chartDigest": "sha256:6ee663c426673bc0e516ed8f8b0ab11a918d2f2bb81fc9047b3eb37b78329f5c",
+        "semanticTag": "v3.0.1",
+    }

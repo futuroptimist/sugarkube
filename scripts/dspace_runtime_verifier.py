@@ -71,7 +71,17 @@ LEGACY_310_COORDINATES = {
     "semanticTag": "v3.1.0",
     "expectedDefaultChatProvider": "token-place",
 }
-LEGACY_IDENTITY_COORDINATES = (LEGACY_RECOVERY_COORDINATES, LEGACY_310_COORDINATES)
+LEGACY_METRICS_CHART_COORDINATES = {
+    **LEGACY_RECOVERY_COORDINATES,
+    "chartSourceRevision": "62da11005354e9f9a89c2e58584cdce4c8ec35aa",
+    "chartVersion": "3.0.3",
+    "chartDigest": "sha256:6ee663c426673bc0e516ed8f8b0ab11a918d2f2bb81fc9047b3eb37b78329f5c",
+}
+LEGACY_IDENTITY_COORDINATES = (
+    LEGACY_RECOVERY_COORDINATES,
+    LEGACY_METRICS_CHART_COORDINATES,
+    LEGACY_310_COORDINATES,
+)
 META_RE = re.compile(
     r'<meta\s+[^>]*name=["\']dspace-build-revision["\'][^>]*content=["\']([^"\']+)',
     re.IGNORECASE,
@@ -449,10 +459,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
             fail("pod/replica identity")
         if metadata.get("deletionTimestamp") is not None or status.get("phase") != "Running":
             fail("pod/replica identity")
-        if not any(
-            c.get("type") == "Ready" and c.get("status") == "True"
-            for c in conditions
-        ):
+        if not any(c.get("type") == "Ready" and c.get("status") == "True" for c in conditions):
             fail("pod/replica identity")
         owner = controller_owner(metadata.get("ownerReferences", []), "ReplicaSet")
         replica_set_name, replica_set_uid = owner.get("name"), owner.get("uid")

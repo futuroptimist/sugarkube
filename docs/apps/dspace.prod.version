@@ -1,2 +1,2 @@
-# DSPACE production chart pin. Keep aligned with the recovered production deployment.
-3.0.2
+# DSPACE production chart pin. Keep aligned with the reviewed chart-only target.
+3.0.3

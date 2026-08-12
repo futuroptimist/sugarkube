@@ -1518,3 +1518,32 @@ def test_orchestration_preserves_complete_success_and_failure_evidence(
     assert written["targetManifestFingerprint"] == result["targetManifestFingerprint"]
     assert written["helm"]["beforeRevision"] == 7
     assert written["helm"]["afterRevision"] == 8
+
+
+def test_chart_maintenance_target_is_strict_and_chart_only(tmp_path: Path) -> None:
+    baseline = target("prod", schema_version=2)
+    reviewed = {field: baseline[field] for field in manifest.UPSTREAM_FIELDS_V2}
+    reviewed.update(
+        chartSourceRevision="3" * 40,
+        chartVersion="3.2.1",
+        chartDigest="sha256:" + "4" * 64,
+    )
+    path = tmp_path / "maintenance.json"
+    path.write_text(manifest._canonical(reviewed), encoding="utf-8")
+    combined = rollback.maintenance_target(baseline, path)
+    assert combined["helmRevision"] == baseline["helmRevision"]
+    assert combined["expectedDefaultChatProvider"] == baseline["expectedDefaultChatProvider"]
+    assert combined["chartVersion"] == "3.2.1"
+    assert baseline["chartVersion"] == "3.2.0"
+
+    reviewed["unknown"] = True
+    path.write_text(manifest._canonical(reviewed), encoding="utf-8")
+    with pytest.raises(rollback.RollbackError, match="unknown fields"):
+        rollback.maintenance_target(baseline, path)
+
+    reviewed.pop("unknown")
+    reviewed["imageTag"] = "main-0000000"
+    reviewed["sourceRevision"] = "0" * 40
+    path.write_text(manifest._canonical(reviewed), encoding="utf-8")
+    with pytest.raises(rollback.RollbackError, match="application or image"):
+        rollback.maintenance_target(baseline, path)

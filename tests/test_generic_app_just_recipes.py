@@ -2980,7 +2980,8 @@ def test_dspace_prod_metrics_reconcile_normalizes_documented_and_positional_form
     tmp_path: Path,
 ) -> None:
     values = {
-        "manifest": str(tmp_path / "finalized manifest=approved.json"),
+        "baseline_manifest": str(tmp_path / "finalized baseline=approved.json"),
+        "maintenance_target": str(tmp_path / "reviewed target=approved.json"),
         "evidence": str(tmp_path / "fresh evidence=run-42.json"),
         "smoke_runner": str(tmp_path / "smoke runner=production"),
         "kubeconfig": str(tmp_path / "production kubeconfig=primary"),
@@ -3021,7 +3022,8 @@ def test_dspace_prod_metrics_reconcile_preserves_default_verifier_and_empty_conf
     result, argv = _run_dspace_prod_metrics_reconcile(
         tmp_path,
         [
-            "manifest=/tmp/manifest.json",
+            "baseline_manifest=/tmp/baseline.json",
+            "maintenance_target=/tmp/target.json",
             "evidence=/tmp/evidence.json",
             "smoke_runner=/tmp/smoke-runner",
             "kubeconfig=/tmp/kubeconfig",
@@ -3045,11 +3047,12 @@ def test_dspace_prod_metrics_reconcile_rejects_wrong_prefix_before_python(tmp_pa
             "/tmp/evidence.json",
             "/tmp/smoke-runner",
             "/tmp/kubeconfig",
+            "/tmp/verifier",
         ],
     )
 
     assert result.returncode != 0
-    assert "manifest must be positional or use the manifest= prefix" in result.stderr
+    assert "baseline_manifest must be positional or use the baseline_manifest= prefix" in result.stderr
     assert argv == []
 
 
