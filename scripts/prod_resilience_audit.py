@@ -287,14 +287,91 @@ def required_hostname_anti_affinity(affinity: Any, labels: dict[str, Any]) -> bo
 
 def traefik_desired_snapshot(content: Any) -> dict[str, Any]:
     """Extract only the two approved fields from K3s Helm values (never raw values)."""
-    text = content if isinstance(content, str) else ""
-    replica = re.search(r"(?m)^\s{2}replicas:\s*([0-9]+)\s*$", text)
+    if not isinstance(content, str) or "\t" in content:
+        return {"replicas": None, "requiredHostnameAntiAffinity": False}
+
+    replicas: list[int] = []
+    required_lists = 0
+    terms: list[dict[str, str]] = []
+    current_term: dict[str, str] | None = None
+    parents: dict[int, str] = {}
+    malformed = False
+    for raw_line in content.splitlines():
+        if not raw_line.strip() or raw_line.lstrip().startswith("#"):
+            continue
+        indent = len(raw_line) - len(raw_line.lstrip(" "))
+        if indent % 2:
+            malformed = True
+            break
+        line = raw_line[indent:]
+        is_list_item = line.startswith("- ")
+        if is_list_item:
+            line = line[2:]
+        if ":" not in line:
+            malformed = True
+            break
+        key, value = (part.strip() for part in line.split(":", 1))
+        if not key:
+            malformed = True
+            break
+        parents = {level: name for level, name in parents.items() if level < indent}
+        path = tuple(parents[level] for level in sorted(parents))
+
+        if path == ("deployment",) and indent == 2 and key == "replicas":
+            if not value.isdecimal():
+                malformed = True
+                break
+            replicas.append(int(value))
+        if (
+            path == ("affinity", "podAntiAffinity")
+            and indent == 4
+            and key == "requiredDuringSchedulingIgnoredDuringExecution"
+        ):
+            required_lists += 1
+        if (
+            path
+            == (
+                "affinity",
+                "podAntiAffinity",
+                "requiredDuringSchedulingIgnoredDuringExecution",
+            )
+            and indent == 6
+            and is_list_item
+        ):
+            current_term = {}
+            terms.append(current_term)
+        elif is_list_item:
+            current_term = None
+
+        if current_term is not None:
+            if (
+                path[-2:] == ("labelSelector", "matchLabels")
+                and indent == 12
+                and key == "app.kubernetes.io/name"
+            ):
+                if "label" in current_term:
+                    malformed = True
+                current_term["label"] = value
+            elif indent == 8 and key == "topologyKey":
+                if "topology" in current_term:
+                    malformed = True
+                current_term["topology"] = value
+
+        if not value:
+            parents[indent] = key
+
+    approved_term = any(
+        term
+        == {
+            "label": "traefik",
+            "topology": "kubernetes.io/hostname",
+        }
+        for term in terms
+    )
     return {
-        "replicas": int(replica.group(1)) if replica else None,
+        "replicas": replicas[0] if not malformed and len(replicas) == 1 else None,
         "requiredHostnameAntiAffinity": bool(
-            re.search(r"(?m)^\s*requiredDuringSchedulingIgnoredDuringExecution:\s*$", text)
-            and re.search(r"(?m)^\s*topologyKey:\s*kubernetes\.io/hostname\s*$", text)
-            and re.search(r"(?m)^\s*app\.kubernetes\.io/name:\s*traefik\s*$", text)
+            not malformed and required_lists == 1 and approved_term
         ),
     }
 
@@ -649,9 +726,7 @@ def main(argv: list[str] | None = None) -> int:
             "internalTrafficPolicy", "Cluster"
         )
     }
-    add_gap(
-        gaps, "TRAEFIK_TRAFFIC_POLICY_MISMATCH", ingress_service["internalTrafficPolicy"] != "Local"
-    )
+    # The staging-proven contract does not select Local; retain the observation only.
     traefik = components.get("traefik", {})
     add_gap(
         gaps,

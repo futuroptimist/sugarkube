@@ -269,15 +269,53 @@ def test_required_hostname_anti_affinity_matches_workload() -> None:
     assert not audit.required_hostname_anti_affinity(affinity, {"app": "unrelated"})
 
 
+APPROVED_TRAEFIK_VALUES = """deployment:
+  replicas: 2
+affinity:
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: traefik
+        topologyKey: kubernetes.io/hostname
+secret: do-not-retain
+"""
+
+
 def test_traefik_desired_snapshot_never_retains_raw_values() -> None:
-    result = audit.traefik_desired_snapshot(
-        "deployment:\n  replicas: 2\naffinity:\n  "
-        "requiredDuringSchedulingIgnoredDuringExecution:\n"
-        "    app.kubernetes.io/name: traefik\n"
-        "    topologyKey: kubernetes.io/hostname\nsecret: do-not-retain\n"
-    )
+    result = audit.traefik_desired_snapshot(APPROVED_TRAEFIK_VALUES)
     assert result == {"replicas": 2, "requiredHostnameAntiAffinity": True}
     assert "do-not-retain" not in json.dumps(result)
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "unrelated:\n  replicas: 2\n",
+        "deployment:\n  replicas: 2\naffinity:\n  requiredDuringSchedulingIgnoredDuringExecution:\n    app.kubernetes.io/name: traefik\n    topologyKey: kubernetes.io/hostname\n",
+        APPROVED_TRAEFIK_VALUES.replace(
+            "        topologyKey: kubernetes.io/hostname",
+            "      - topologyKey: kubernetes.io/hostname",
+        ),
+        APPROVED_TRAEFIK_VALUES.replace("traefik", "not-traefik"),
+        APPROVED_TRAEFIK_VALUES.replace("kubernetes.io/hostname", "topology.kubernetes.io/zone"),
+        APPROVED_TRAEFIK_VALUES + "deployment:\n  replicas: 2\n",
+        APPROVED_TRAEFIK_VALUES.replace(
+            "    requiredDuringSchedulingIgnoredDuringExecution:",
+            "    requiredDuringSchedulingIgnoredDuringExecution:\n"
+            "      - labelSelector:\n"
+            "          matchLabels:\n"
+            "            app.kubernetes.io/name: traefik\n"
+            "        topologyKey: kubernetes.io/hostname\n"
+            "    requiredDuringSchedulingIgnoredDuringExecution:",
+        ),
+    ],
+)
+def test_traefik_desired_snapshot_rejects_decoys_and_ambiguity(content) -> None:
+    assert audit.traefik_desired_snapshot(content) != {
+        "replicas": 2,
+        "requiredHostnameAntiAffinity": True,
+    }
 
 
 FAKE_TOOL = r"""#!/usr/bin/python3 -S
@@ -417,11 +455,14 @@ elif kind == "endpointslices.discovery.k8s.io":
                      "endpoints": [{"addresses": ["10.0.0.1"], "nodeName": "sugarkube0", "conditions": {}},
                                    {"addresses": ["10.0.0.2"], "nodeName": "sugarkube1", "conditions": {}}]}]})
 elif kind == "service" and name == "traefik":
-    emit({"spec": {"internalTrafficPolicy": "Local"}})
+    emit({"spec": {} if state.get("traffic_policy_absent") else
+          {"internalTrafficPolicy": state.get("traffic_policy", "Cluster")}})
 elif kind == "helmchartconfig":
     emit({"metadata": {"uid": "hcc"}, "spec": {"valuesContent":
-          "deployment:\n  replicas: 2\naffinity:\n  requiredDuringSchedulingIgnoredDuringExecution:\n"
-          "    app.kubernetes.io/name: traefik\n    topologyKey: kubernetes.io/hostname\n"}})
+          "deployment:\n  replicas: 2\naffinity:\n  podAntiAffinity:\n"
+          "    requiredDuringSchedulingIgnoredDuringExecution:\n      - labelSelector:\n"
+          "          matchLabels:\n            app.kubernetes.io/name: traefik\n"
+          "        topologyKey: kubernetes.io/hostname\n"}})
 elif kind == "service":
     emit({"items": [{"metadata": {"name": "cloudflare-metrics", "labels": {"monitor": "cloudflare"}},
                      "spec": {"selector": pod_labels, "ports": [{"name": "metrics", "port": 2000,
@@ -569,6 +610,21 @@ def test_cli_completed_gap_exit_contract(audit_harness) -> None:
     assert required.returncode == 1
     assert json.loads((evidence / "audit.json").read_text())["result"] == "PARITY_GAPS"
     assert required_evidence.exists()
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [{"traffic_policy_absent": True}, {"traffic_policy": "Cluster"}, {"traffic_policy": "Local"}],
+)
+def test_cli_traffic_policy_is_observed_without_an_unsupported_gap(audit_harness, scenario) -> None:
+    execute, _ = audit_harness
+    result, evidence = execute("traffic-policy-" + str(scenario), **scenario)
+    assert result.returncode == 0
+    document = json.loads((evidence / "audit.json").read_text())
+    assert "TRAEFIK_TRAFFIC_POLICY_MISMATCH" not in document["gaps"]
+    assert document["observed"]["traefikService"]["internalTrafficPolicy"] == scenario.get(
+        "traffic_policy", "Cluster"
+    )
 
 
 @pytest.mark.parametrize("scenario", [{}, {"helm_revision": 1}])
