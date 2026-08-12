@@ -112,6 +112,40 @@ def test_chart_maintenance_target_rejects_matching_but_unapproved_application(
         rollback.chart_maintenance_target(baseline, path)
 
 
+def test_chart_maintenance_target_rejects_unapproved_baseline_tuple() -> None:
+    baseline = manifest.validate(manifest._object(PROD_BASELINE), True)
+    baseline["chartVersion"] = "3.0.1"
+
+    with pytest.raises(rollback.RollbackError, match="approved finalized production chart tuple"):
+        rollback.chart_maintenance_target(baseline, PROD_MAINTENANCE_TARGET)
+
+
+@pytest.mark.parametrize(
+    ("contents", "message"),
+    (
+        ("not JSON", "chart maintenance target is invalid"),
+        (
+            json.dumps(
+                {
+                    **manifest._object(PROD_MAINTENANCE_TARGET),
+                    "schemaVersion": 1,
+                }
+            ),
+            "schema 2 for dspace",
+        ),
+    ),
+)
+def test_chart_maintenance_target_rejects_invalid_records(
+    tmp_path: Path, contents: str, message: str
+) -> None:
+    baseline = manifest.validate(manifest._object(PROD_BASELINE), True)
+    path = tmp_path / "maintenance-target.json"
+    path.write_text(contents, encoding="utf-8")
+
+    with pytest.raises(rollback.RollbackError, match=message):
+        rollback.chart_maintenance_target(baseline, path)
+
+
 @pytest.mark.parametrize("field", ("chartSourceRevision", "chartDigest"))
 def test_chart_maintenance_target_drift_fails_before_reservation_or_mutation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str
@@ -331,6 +365,30 @@ def test_missing_or_candidate_target_fails_before_any_external_command(
     assert rollback.main(["--manifest", str(source), *common]) == 2
     assert called == []
     assert not (tmp_path / "rollback.json").exists()
+
+
+@pytest.mark.parametrize(
+    "coordinates",
+    (
+        ("--manifest", "baseline.json", "--configuration-reconciliation"),
+        ("--baseline-manifest", "baseline.json"),
+        ("--manifest", "baseline.json", "--maintenance-target", "target.json"),
+    ),
+)
+def test_main_rejects_mixed_or_incomplete_maintenance_coordinates(
+    tmp_path: Path, coordinates: tuple[str, ...]
+) -> None:
+    common = (
+        "--environment",
+        "prod",
+        "--evidence",
+        str(tmp_path / "evidence.json"),
+        "--verifier",
+        str(tmp_path / "verifier"),
+    )
+
+    with pytest.raises(SystemExit, match="2"):
+        rollback.main([*coordinates, *common])
 
 
 @pytest.mark.parametrize(
