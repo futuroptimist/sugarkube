@@ -213,7 +213,7 @@ def dspace_production_metrics_token_is_unsafe(
                 and secret_ref == {"name": "dspace-prod-metrics-token", "key": "token"}
             ):
                 safe_entries.add(id(entry))
-            # Chart 3.0.2 uses the pod UID as a safe, unpredictable token when metrics are off.
+            # Recovery charts use the pod UID as a safe, unpredictable token when metrics are off.
             if (
                 not metrics_enabled
                 and set(entry) == {"name", "valueFrom"}
@@ -414,12 +414,22 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
                     )
                     auth = endpoint.get("bearerTokenSecret")
                     relabelings = endpoint.get("relabelings")
+                    namespace_is_explicit = "namespace" in metadata
+                    explicit_namespace = scalar(metadata.get("namespace"))
+                    effective_namespace = (
+                        explicit_namespace if namespace_is_explicit else inputs.namespace
+                    )
                     expected_relabelings = [
                         {"action": "replace", "targetLabel": "app", "replacement": "dspace"},
                         {
                             "action": "replace",
                             "targetLabel": "environment",
                             "replacement": "prod",
+                        },
+                        {
+                            "action": "replace",
+                            "targetLabel": "namespace",
+                            "replacement": "dspace",
                         },
                         {
                             "action": "replace",
@@ -434,7 +444,8 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
                     ]
                     if (
                         metadata.get("name") != "dspace"
-                        or metadata.get("namespace") != "dspace"
+                        or (namespace_is_explicit and not explicit_namespace)
+                        or effective_namespace != "dspace"
                         or metadata.get("labels", {}).get("release") != "kube-prometheus-stack"
                         or spec.get("selector")
                         != {
