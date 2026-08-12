@@ -13,6 +13,8 @@ from scripts import dspace_release_manifest as manifest
 
 SHA = "abcdef0123456789abcdef0123456789abcdef01"
 DIGEST = "sha256:" + "1" * 64
+PROD_BASELINE = Path("deployment-evidence/dspace/prod/main-1a31a56-20260801T093443Z.json")
+PROD_MAINTENANCE_TARGET = Path("docs/apps/dspace.prod-metrics-chart-target.json")
 
 
 def target(environment: str = "staging", schema_version: int = 1) -> dict[str, object]:
@@ -45,13 +47,158 @@ def target(environment: str = "staging", schema_version: int = 1) -> dict[str, o
     }
     if schema_version == 2:
         value["chartSourceRevision"] = "1234567890abcdef1234567890abcdef12345678"
-    checks = sorted(manifest.required_final_checks(value)) + [
-        "imagePlatformSourceRevision[0]"
-    ]
+    checks = sorted(manifest.required_final_checks(value)) + ["imagePlatformSourceRevision[0]"]
     value["verificationResults"] = [
         {"check": check, "passed": True, "details": "observed"} for check in checks
     ]
     return manifest.validate(value, True)
+
+
+def test_chart_pin_ignores_comments_and_blank_lines(tmp_path: Path) -> None:
+    pin = tmp_path / "dspace.prod.version"
+    pin.write_text(
+        "# application remains at 3.0.1\n\n  3.0.3  # reviewed chart\n", encoding="utf-8"
+    )
+
+    assert rollback.chart_pin(pin) == "3.0.3"
+
+
+def test_chart_pin_failure_is_redacted(tmp_path: Path) -> None:
+    missing = tmp_path / "sensitive" / "dspace.prod.version"
+
+    with pytest.raises(rollback.RollbackError, match="unreadable or invalid") as error:
+        rollback.chart_pin(missing)
+
+    assert str(missing) not in str(error.value)
+
+
+def test_chart_maintenance_target_preserves_application_and_changes_only_chart() -> None:
+    baseline = manifest.validate(manifest._object(PROD_BASELINE), True)
+    selected = rollback.chart_maintenance_target(baseline, PROD_MAINTENANCE_TARGET)
+
+    changed = {field for field in baseline if baseline[field] != selected[field]}
+    assert changed == {"chartSourceRevision", "chartVersion", "chartDigest"}
+    assert selected["chartVersion"] == "3.0.3"
+    assert selected["chartDigest"] == (
+        "sha256:6ee663c426673bc0e516ed8f8b0ab11a918d2f2bb81fc9047b3eb37b78329f5c"
+    )
+
+
+@pytest.mark.parametrize("drift", ("applicationVersion", "unknown"))
+def test_chart_maintenance_target_rejects_drift_and_unknown_fields(
+    tmp_path: Path, drift: str
+) -> None:
+    baseline = manifest.validate(manifest._object(PROD_BASELINE), True)
+    reviewed = manifest._object(PROD_MAINTENANCE_TARGET)
+    reviewed[drift] = "unexpected"
+    path = tmp_path / "target.json"
+    path.write_text(json.dumps(reviewed), encoding="utf-8")
+
+    with pytest.raises(rollback.RollbackError, match="application or image|schema mismatch"):
+        rollback.chart_maintenance_target(baseline, path)
+
+
+def test_chart_maintenance_target_rejects_matching_but_unapproved_application(
+    tmp_path: Path,
+) -> None:
+    baseline = manifest.validate(manifest._object(PROD_BASELINE), True)
+    reviewed = manifest._object(PROD_MAINTENANCE_TARGET)
+    baseline["applicationVersion"] = reviewed["applicationVersion"] = "3.0.0"
+    baseline["semanticTag"] = reviewed["semanticTag"] = "v3.0.0"
+    path = tmp_path / "target.json"
+    path.write_text(json.dumps(reviewed), encoding="utf-8")
+
+    with pytest.raises(rollback.RollbackError, match="approved application tuple"):
+        rollback.chart_maintenance_target(baseline, path)
+
+
+def test_chart_maintenance_target_rejects_unapproved_baseline_tuple() -> None:
+    baseline = manifest.validate(manifest._object(PROD_BASELINE), True)
+    baseline["chartVersion"] = "3.0.1"
+
+    with pytest.raises(rollback.RollbackError, match="approved finalized production chart tuple"):
+        rollback.chart_maintenance_target(baseline, PROD_MAINTENANCE_TARGET)
+
+
+@pytest.mark.parametrize(
+    ("contents", "message"),
+    (
+        ("not JSON", "chart maintenance target is invalid"),
+        (
+            json.dumps(
+                {
+                    **manifest._object(PROD_MAINTENANCE_TARGET),
+                    "schemaVersion": 1,
+                }
+            ),
+            "schema 2 for dspace",
+        ),
+    ),
+)
+def test_chart_maintenance_target_rejects_invalid_records(
+    tmp_path: Path, contents: str, message: str
+) -> None:
+    baseline = manifest.validate(manifest._object(PROD_BASELINE), True)
+    path = tmp_path / "maintenance-target.json"
+    path.write_text(contents, encoding="utf-8")
+
+    with pytest.raises(rollback.RollbackError, match=message):
+        rollback.chart_maintenance_target(baseline, path)
+
+
+@pytest.mark.parametrize("field", ("chartSourceRevision", "chartDigest"))
+def test_chart_maintenance_target_drift_fails_before_reservation_or_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str
+) -> None:
+    args, commands, evidence, _verifier = pre_reservation_case(
+        tmp_path, monkeypatch, environment="prod"
+    )
+    args.manifest.write_text(PROD_BASELINE.read_text(encoding="utf-8"), encoding="utf-8")
+    reviewed = manifest._object(PROD_MAINTENANCE_TARGET)
+    reviewed[field] = "sha256:" + "0" * 64 if field == "chartDigest" else "0" * 40
+    maintenance_target = tmp_path / "maintenance-target.json"
+    maintenance_target.write_text(json.dumps(reviewed), encoding="utf-8")
+    args.configuration_reconciliation = True
+    args.maintenance_target = maintenance_target
+    staged = tmp_path / "staged"
+    staged.mkdir()
+
+    with pytest.raises(rollback.RollbackError, match="reviewed production chart tuple"):
+        rollback._rollback(args, lambda command: commands.append(command) or "", staged)
+
+    assert not evidence.exists()
+    assert commands == []
+
+
+def test_configuration_reconciliation_rejects_mismatched_production_pin_before_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    args, commands, evidence, _verifier = pre_reservation_case(
+        tmp_path, monkeypatch, environment="prod"
+    )
+    args.manifest.write_text(PROD_BASELINE.read_text(encoding="utf-8"), encoding="utf-8")
+    version_file = tmp_path / "dspace.prod.version"
+    version_file.write_text("3.0.2\n", encoding="utf-8")
+    monkeypatch.setattr(
+        rollback.app_config,
+        "load_config",
+        lambda *_args: {
+            "SUGARKUBE_CHART": f"oci://{manifest.CHART_REF}",
+            "SUGARKUBE_RELEASE": "dspace",
+            "SUGARKUBE_NAMESPACE": "dspace",
+            "SUGARKUBE_VERSION_FILE": version_file.name,
+        },
+    )
+    args.configuration_reconciliation = True
+    args.maintenance_target = PROD_MAINTENANCE_TARGET
+    staged = tmp_path / "staged"
+    staged.mkdir()
+
+    with pytest.raises(rollback.RollbackError, match="production chart pin differs"):
+        rollback._rollback(args, lambda command: commands.append(command) or "", staged)
+
+    assert not evidence.exists()
+    assert commands == []
 
 
 def test_schema_v2_final_target_projects_split_provenance_for_rollback() -> None:
@@ -249,6 +396,60 @@ def test_missing_or_candidate_target_fails_before_any_external_command(
     assert rollback.main(["--manifest", str(source), *common]) == 2
     assert called == []
     assert not (tmp_path / "rollback.json").exists()
+
+
+@pytest.mark.parametrize(
+    "coordinates",
+    (
+        ("--manifest", "baseline.json", "--configuration-reconciliation"),
+        ("--baseline-manifest", "baseline.json"),
+        ("--manifest", "baseline.json", "--maintenance-target", "target.json"),
+    ),
+)
+def test_main_rejects_mixed_or_incomplete_maintenance_coordinates(
+    tmp_path: Path, coordinates: tuple[str, ...]
+) -> None:
+    common = (
+        "--environment",
+        "prod",
+        "--evidence",
+        str(tmp_path / "evidence.json"),
+        "--verifier",
+        str(tmp_path / "verifier"),
+    )
+
+    with pytest.raises(SystemExit, match="2"):
+        rollback.main([*coordinates, *common])
+
+
+def test_main_forwards_complete_maintenance_coordinates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    baseline = tmp_path / "baseline.json"
+    maintenance_target = tmp_path / "target.json"
+    captured: list[Namespace] = []
+    monkeypatch.setattr(rollback, "rollback", lambda args: captured.append(args) or {})
+
+    result = rollback.main(
+        [
+            "--baseline-manifest",
+            str(baseline),
+            "--maintenance-target",
+            str(maintenance_target),
+            "--configuration-reconciliation",
+            "--environment",
+            "prod",
+            "--evidence",
+            str(tmp_path / "evidence.json"),
+            "--verifier",
+            str(tmp_path / "verifier"),
+        ]
+    )
+
+    assert result == 0
+    assert len(captured) == 1
+    assert captured[0].manifest == baseline
+    assert captured[0].maintenance_target == maintenance_target
 
 
 @pytest.mark.parametrize(
@@ -461,9 +662,7 @@ def test_helm_319_snapshot_resolves_exact_current_history_without_leaking_raw_ou
 
     status = helm_319_status()
     monkeypatch.setattr(rollback, "helm_status", lambda *_args: status)
-    observed, history, identity = rollback.helm_snapshot(
-        runner, "kubeconfig", "dspace", "dspace"
-    )
+    observed, history, identity = rollback.helm_snapshot(runner, "kubeconfig", "dspace", "dspace")
 
     assert identity == ("dspace", "3.0.2", 9)
     assert observed is status
@@ -483,9 +682,7 @@ def test_helm_319_snapshot_resolves_exact_current_history_without_leaking_raw_ou
 def test_helm_snapshot_uses_status_metadata_without_history(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    status = helm_319_status(
-        chart={"metadata": {"name": "dspace", "version": "3.0.2"}}
-    )
+    status = helm_319_status(chart={"metadata": {"name": "dspace", "version": "3.0.2"}})
     monkeypatch.setattr(rollback, "helm_status", lambda *_args: status)
     _status, history, identity = rollback.helm_snapshot(
         lambda _command: pytest.fail("history must not be queried"),
@@ -516,9 +713,7 @@ def test_helm_snapshot_rejects_non_object_status_metadata(
 
 def test_helm_history_rejects_invalid_json() -> None:
     with pytest.raises(rollback.RollbackError, match="valid JSON"):
-        rollback.helm_history(
-            lambda _command: "not-json", "kubeconfig", "dspace", "dspace"
-        )
+        rollback.helm_history(lambda _command: "not-json", "kubeconfig", "dspace", "dspace")
 
 
 @pytest.mark.parametrize(
@@ -531,9 +726,7 @@ def test_helm_history_rejects_invalid_json() -> None:
 def test_helm_snapshot_rejects_status_identity_or_state(
     monkeypatch: pytest.MonkeyPatch, changes: dict[str, object]
 ) -> None:
-    status = helm_319_status(
-        chart={"metadata": {"name": "dspace", "version": "3.0.2"}}, **changes
-    )
+    status = helm_319_status(chart={"metadata": {"name": "dspace", "version": "3.0.2"}}, **changes)
     monkeypatch.setattr(rollback, "helm_status", lambda *_args: status)
 
     with pytest.raises(rollback.RollbackError, match="identity"):
@@ -1126,19 +1319,40 @@ def test_configuration_reconciliation_reasserts_target_immediately_before_upgrad
         assert written["diagnostics"][diagnostic_failure] == "unavailable"
 
 
+@pytest.mark.parametrize("after_revision", (10, 11))
 def test_configuration_reconciliation_completes_all_production_gates(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, after_revision: int
 ) -> None:
     args, commands, evidence, verifier = pre_reservation_case(
         tmp_path, monkeypatch, environment="prod"
     )
-    selected = target("prod", schema_version=2)
-    args.manifest.write_text(manifest._canonical(selected), encoding="utf-8")
+    baseline = manifest.validate(manifest._object(PROD_BASELINE), True)
+    selected = rollback.chart_maintenance_target(baseline, PROD_MAINTENANCE_TARGET)
+    args.manifest.write_text(manifest._canonical(baseline), encoding="utf-8")
+    maintenance_target = tmp_path / "maintenance-target.json"
+    maintenance_target.write_text(
+        PROD_MAINTENANCE_TARGET.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    version_file = tmp_path / "dspace.prod.version"
+    version_file.write_text("# application remains 3.0.1\n3.0.3\n", encoding="utf-8")
+    values_file = tmp_path / "values.yaml"
+    monkeypatch.setattr(
+        rollback.app_config,
+        "load_config",
+        lambda *_args: {
+            "SUGARKUBE_CHART": f"oci://{manifest.CHART_REF}",
+            "SUGARKUBE_RELEASE": "dspace",
+            "SUGARKUBE_NAMESPACE": "dspace",
+            "SUGARKUBE_VALUES": str(values_file),
+            "SUGARKUBE_VERSION_FILE": version_file.name,
+        },
+    )
     kubeconfig = tmp_path / "kubeconfig"
     kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
     args.configuration_reconciliation = True
+    args.maintenance_target = maintenance_target
     args.kubeconfig = str(kubeconfig)
-    args.confirm = f"dspace:prod:{SHA}"
+    args.confirm = f"dspace:prod:{selected['sourceRevision']}"
     image = {
         "repository": manifest.IMAGE_REF,
         "tag": selected["imageTag"],
@@ -1188,20 +1402,21 @@ def test_configuration_reconciliation_completes_all_production_gates(
         return {
             **pod(uid),
             "applicationImage": f"{manifest.IMAGE_REF}:{selected['imageTag']}",
-            "applicationImageID": f"{manifest.IMAGE_REF}@{DIGEST}",
+            "applicationImageID": f"{manifest.IMAGE_REF}@{selected['imageDigest']}",
         }
 
     before_pods = [ready("1"), ready("2")]
     after_pods = [ready("3"), ready("4")]
     terminating_pods = [{**ready("2"), "terminating": True}, *after_pods]
     state = {"upgraded": False, "description": "", "post_upgrade_pod_reads": 0}
+    staged_target: dict[str, object] = {}
     monkeypatch.setattr(rollback.time, "sleep", lambda _seconds: None)
 
     def status(*_args: object) -> dict[str, object]:
         return {
             "name": "dspace",
             "namespace": "dspace",
-            "version": 8 if state["upgraded"] else 7,
+            "version": after_revision if state["upgraded"] else 9,
             "info": {
                 "status": "deployed",
                 "description": state["description"] if state["upgraded"] else "previous",
@@ -1233,8 +1448,13 @@ def test_configuration_reconciliation_completes_all_production_gates(
             return json.dumps(
                 [
                     {
-                        "revision": 8 if state["upgraded"] else 7,
-                        "chart": f"dspace-{selected['chartVersion']}",
+                        "revision": after_revision if state["upgraded"] else 9,
+                        "chart": "dspace-"
+                        + (
+                            selected["chartVersion"]
+                            if state["upgraded"]
+                            else baseline["chartVersion"]
+                        ),
                     }
                 ]
             )
@@ -1245,34 +1465,61 @@ def test_configuration_reconciliation_completes_all_production_gates(
         elif command[0] == "helm" and "manifest" in command:
             return "live render"
         elif command[:2] == [str(verifier), "verify"]:
-            return json.dumps(verifier_result(environment="prod"))
+            staged_target.update(
+                json.loads(
+                    Path(command[command.index("--manifest") + 1]).read_text(encoding="utf-8")
+                )
+            )
+            return json.dumps(
+                verifier_result(
+                    environment="prod",
+                    applicationVersion=selected["applicationVersion"],
+                    runtimeSourceRevision=selected["sourceRevision"],
+                    frontendSourceRevision=selected["sourceRevision"],
+                    defaultProvider=selected["expectedDefaultChatProvider"],
+                )
+            )
         elif command[0] == "kubectl" and (
             "replicasets,deployments" in command or "pods" in command
         ):
             return '{"items": []}'
         return ""
 
+    if after_revision == 11:
+        with pytest.raises(rollback.RollbackError, match="preserved evidence"):
+            rollback.rollback(args, runner)
+        written = json.loads(evidence.read_text(encoding="utf-8"))
+        assert written["state"] == "failed"
+        assert written["failedStage"] == "pod-settling-and-proof"
+        assert written["clusterMayHaveChanged"] is True
+        assert sum("upgrade" in command for command in commands) == 1
+        assert not any("rollback" in command or "uninstall" in command for command in commands)
+        return
+
     result = rollback.rollback(args, runner)
 
     upgrade = next(command for command in commands if "upgrade" in command)
+    assert sum("upgrade" in command for command in commands) == 1
     assert upgrade[upgrade.index("--kubeconfig") + 1] == str(kubeconfig)
     assert f"oci://{manifest.CHART_REF}@{selected['chartDigest']}" in upgrade
     assert f"image.tag={selected['imageTag']}" in upgrade
     forbidden = ("--reuse-values", "--version", selected["semanticTag"], "rollback")
     assert not any(item in upgrade for item in forbidden)
-    assert DIGEST not in next(item for item in upgrade if item.startswith("image.tag="))
+    assert selected["imageDigest"] not in next(
+        item for item in upgrade if item.startswith("image.tag=")
+    )
     assert finalized["helm_stored_values_result"] is stored_proof
     assert finalized["helm_history"] == [
-        {"revision": 8, "chart": f"dspace-{selected['chartVersion']}"}
+        {"revision": 10, "chart": f"dspace-{selected['chartVersion']}"}
     ]
     assert finalized["expected_image_coordinate"] == (
         f"{manifest.IMAGE_REF}:{selected['imageTag']}"
     )
     assert result["state"] == "succeeded"
-    assert result["helm"]["beforeRevision"] == 7
-    assert result["helm"]["afterRevision"] == 8
+    assert result["helm"]["beforeRevision"] == 9
+    assert result["helm"]["afterRevision"] == 10
     assert result["verification"]["helmStoredValues"] == stored_proof
-    assert result["verification"]["runtime"]["sourceRevision"] == SHA
+    assert result["verification"]["runtime"]["sourceRevision"] == selected["sourceRevision"]
     journeys = {item["name"] for item in result["verification"]["journeys"]}
     assert journeys == {"/", "/chat"}
     assert result["verification"]["productionMetrics"] == {
@@ -1296,6 +1543,15 @@ def test_configuration_reconciliation_completes_all_production_gates(
     ]
     assert len(metrics_verifications) == 1
     assert state["post_upgrade_pod_reads"] == 2
+    assert staged_target["recordType"] == "candidate"
+    for field in manifest.candidate_fields(selected):
+        if field == "recordType":
+            continue
+        assert staged_target[field] == selected[field]
+    verifier_command = next(
+        command for command in commands if command[:2] == [str(verifier), "verify"]
+    )
+    assert verifier_command[verifier_command.index("--manifest") + 1] != str(args.manifest)
 
 
 def test_staging_is_non_interactive_and_reservation_collision_is_immutable(
@@ -1348,6 +1604,8 @@ def test_just_recipe_has_no_revision_rollback_or_reuse_values() -> None:
         ("rollout", "rollout-wait", True),
         ("verifier", "runtime-verification", True),
         ("revision", "revision-stability-collection", True),
+        ("unchanged-revision", "pod-settling-and-proof", True),
+        ("lower-revision", "pod-settling-and-proof", True),
     ],
 )
 def test_orchestration_preserves_complete_success_and_failure_evidence(
@@ -1406,6 +1664,10 @@ def test_orchestration_preserves_complete_success_and_failure_evidence(
             }
         post_status_calls[0] += 1
         revision = 9 if failure == "revision" and post_status_calls[0] >= 2 else 8
+        if failure == "unchanged-revision":
+            revision = 7
+        elif failure == "lower-revision":
+            revision = 6
         observed: dict[str, object] = {
             "name": "dspace",
             "namespace": "dspace",
@@ -1445,7 +1707,8 @@ def test_orchestration_preserves_complete_success_and_failure_evidence(
             if failure == "helm":
                 raise rollback.RollbackError(sentinel)
         if command[0] == "helm" and "history" in command:
-            return json.dumps([{"revision": 8, "chart": "dspace-3.2.0"}])
+            revision = {"unchanged-revision": 7, "lower-revision": 6}.get(failure, 8)
+            return json.dumps([{"revision": revision, "chart": "dspace-3.2.0"}])
         if command[0] == "kubectl" and "rollout" in command and failure == "rollout":
             raise rollback.RollbackError(sentinel)
         if command[:2] == [str(verifier), "verify"]:
@@ -1490,7 +1753,11 @@ def test_orchestration_preserves_complete_success_and_failure_evidence(
         assert observed["helm"] == {
             "release": "dspace",
             "namespace": "dspace",
-            "revision": 7 if failure == "pre-mutation" else (9 if failure == "revision" else 8),
+            "revision": (
+                7
+                if failure in ("pre-mutation", "unchanged-revision")
+                else 6 if failure == "lower-revision" else 9 if failure == "revision" else 8
+            ),
             "status": "failed" if failure == "helm" else "deployed",
             "chartName": "dspace",
             "chartVersion": "3.1.0" if failure == "pre-mutation" else "3.2.0",
@@ -1501,6 +1768,9 @@ def test_orchestration_preserves_complete_success_and_failure_evidence(
         assert observed["pods"][0]["images"]["dspace"]
         assert observed["pods"][0]["imageIDs"]["dspace"]
         assert "ownerReferences" in observed["pods"][0]
+        if failure in ("unchanged-revision", "lower-revision"):
+            assert sum("upgrade" in command for command in commands) == 1
+            assert not any("rollback" in command or "uninstall" in command for command in commands)
         return
 
     result = rollback.rollback(args, runner)

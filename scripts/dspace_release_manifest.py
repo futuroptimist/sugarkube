@@ -1097,7 +1097,7 @@ def main(argv: list[str] | None = None) -> int:
     make.add_argument("--approved-by", required=True)
     check = sub.add_parser("validate")
     check.add_argument("--manifest", type=Path, required=True)
-    check.add_argument("--final", action="store_true")
+    check.add_argument("--final", action="store_const", const=True, default=None)
     flight = sub.add_parser("preflight")
     flight.add_argument("--manifest", type=Path, required=True)
     flight.add_argument("--image-ref", default=IMAGE_REF)

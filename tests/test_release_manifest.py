@@ -484,6 +484,17 @@ def test_generated_final_record_validates_through_cli(tmp_path: Path) -> None:
     assert manifest.main(["validate", "--manifest", str(output), "--final"]) == 0
 
 
+def test_validate_cli_auto_detects_candidate_and_final_records(tmp_path: Path) -> None:
+    candidate_path = tmp_path / "candidate.json"
+    final_path = tmp_path / "final.json"
+    candidate_path.write_text(manifest._canonical(candidate()), encoding="utf-8")
+    final_path.write_text(manifest._canonical(finalize()), encoding="utf-8")
+
+    assert manifest.main(["validate", "--manifest", str(candidate_path)]) == 0
+    assert manifest.main(["validate", "--manifest", str(final_path)]) == 0
+    assert manifest.main(["validate", "--manifest", str(candidate_path), "--final"]) == 2
+
+
 def test_runtime_proof_and_complete_runtime_checks_validate() -> None:
     value = runtime_final()
     assert manifest.validate(value, True) == value
