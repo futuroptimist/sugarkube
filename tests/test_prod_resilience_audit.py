@@ -425,7 +425,7 @@ def test_traefik_desired_snapshot_does_not_complete_term_after_dedent(term, unre
 
 
 FAKE_TOOL = r"""#!/usr/bin/python3 -S
-import json, os, sys
+import json, os, sys, time
 from pathlib import Path
 
 state = json.loads(Path(os.environ["AUDIT_FAKE_STATE"]).read_text())
@@ -439,12 +439,24 @@ def emit(value):
 labels = {"sugarkube.env": "prod", "sugarkube.cluster": "sugar-prod"}
 node_names = state.get("nodes", ["sugarkube0", "sugarkube1", "sugarkube2"])
 nodes = {"items": [{"metadata": {"name": n, "labels": labels},
-                    "status": {"conditions": [{"type": "Ready", "status": "True"}]}}
+                    "status": {"conditions": [{"type": "Ready", "status":
+                               "False" if state.get("nodes_unready") and n == "sugarkube0"
+                               else "True"}]}}
                    for n in node_names]}
 if tool == "git":
     emit("0123456789abcdef0123456789abcdef01234567"); raise SystemExit()
 if tool == "curl":
     print("credential=SECRET-CANARY connector=CONNECTOR-CANARY", file=sys.stderr)
+    if state.get("timeout_isolation"):
+        marker = Path(os.environ["AUDIT_TIMEOUT_MARKER"])
+        if args[-1] == "https://danielsmith.io/":
+            for _ in range(100):
+                if marker.exists():
+                    Path(os.environ["AUDIT_TIMEOUT_OBSERVED"]).write_text("observed")
+                    emit("000\t0.01\t0.00\t0.02"); raise SystemExit(28)
+                time.sleep(0.01)
+            emit("000\t0.01\t0.00\t0.02"); raise SystemExit(9)
+        marker.write_text("FAST-BODY-CANARY SECRET-CANARY CONNECTOR-CANARY")
     if state.get("failed_probe") and args[-1].endswith("/healthz"):
         emit("000\t0.01\t0.00\t0.02"); raise SystemExit(28)
     emit("204\t0.01\t0.02\t0.03"); raise SystemExit()
@@ -496,7 +508,8 @@ if args[:2] == ["get", "nodes"]:
 if args[:3] == ["config", "view", "--minify"]:
     emit("https://sanitized.invalid"); raise SystemExit()
 if args[:3] == ["get", "--raw", "/readyz?verbose"]:
-    emit("readyz check passed\n[+]etcd ok"); raise SystemExit()
+    emit("readyz check failed\n[-]etcd failed" if state.get("readyz_failed") else
+         "readyz check passed\n[+]etcd ok"); raise SystemExit()
 if args[:2] == ["get", "--raw"]:
     if args[2].endswith("/api/v1/rules?type=alert"):
         if state.get("alert_malformed"):
@@ -526,7 +539,12 @@ if args[:2] == ["get", "--raw"]:
             response["status"] = "error"
         emit(response)
         raise SystemExit()
-    count = 0 if "ALERTS" in args[2] else 2
+    if "ALERTS" in args[2]:
+        count = 0
+    elif "cloudflared_tunnel_ha_connections" in args[2]:
+        count = state.get("ha_connections", 2)
+    else:
+        count = state.get("healthy_targets", 2)
     emit({"status": "success", "data": {"result": [
         {"metric": {"connector": "CONNECTOR-CANARY", "credential": "SECRET-CANARY"},
          "value": [0, str(count)]}]}}); raise SystemExit()
@@ -544,15 +562,23 @@ traefik_anti = {"podAntiAffinity": {"requiredDuringSchedulingIgnoredDuringExecut
     {"topologyKey": "kubernetes.io/hostname",
      "labelSelector": {"matchLabels": {"app.kubernetes.io/name": "traefik"}}}
 ]}}
-def pod(uid, node):
+def pod(uid, node, ready=True):
     return {"metadata": {"uid": uid}, "spec": {"nodeName": node},
-            "status": {"conditions": [{"type": "Ready", "status": "True"}],
+            "status": {"conditions": [{"type": "Ready", "status": "True" if ready else "False"}],
                        "containerStatuses": [{"restartCount": 0}]}}
 def deployment(dep_name, labels_, affinity):
     container = {"name": dep_name, "image": "unused"}
     if dep_name == "cloudflare":
         container = {"name": "cloudflared", "image": os.environ["AUDIT_EXPECTED_IMAGE"],
                      "readinessProbe": {"httpGet": {"path": "/ready", "port": 2000}}}
+        if state.get("image_unpinned"):
+            container["image"] = "cloudflare/cloudflared:latest"
+        if state.get("probe_path_wrong"):
+            container["readinessProbe"]["httpGet"]["path"] = "/wrong"
+        if state.get("probe_port_wrong"):
+            container["readinessProbe"]["httpGet"]["port"] = 2001
+        if state.get("liveness_probe"):
+            container["livenessProbe"] = {"httpGet": {"path": "/ready", "port": 2000}}
     return {"metadata": {"name": dep_name, "namespace": ns or "cloudflare", "uid": dep_name,
                          "generation": 1, "labels": dict(labels_)},
             "spec": {"replicas": 2, "selector": {"matchLabels": dict(labels_)},
@@ -602,11 +628,23 @@ if kind == "deployment" and args[2:3] == ["-A"]:
         items.append(second)
     emit({"items": [] if state.get("zero_candidates") else items}); raise SystemExit()
 if kind == "deployment" and name in ("coredns", "coredns-ha", "traefik"):
+    if state.get("missing_component") == name:
+        emit({}); raise SystemExit()
     lab = {"app.kubernetes.io/name": name}
     emit(deployment(name, lab, traefik_anti if name == "traefik" else anti)); raise SystemExit()
 if kind == "pods":
-    one = state.get("gap") and ns == "kube-system"
-    emit({"items": [pod("a", "sugarkube0")] + ([] if one else [pod("b", "sugarkube1")])})
+    selector = next((value for value in args if "=" in value), "")
+    component = "cloudflare" if ns == "cloudflare" else selector.rsplit("=", 1)[-1]
+    selected = state.get("pod_component")
+    applies = selected == component or (selected == "coredns" and component.startswith("coredns"))
+    mode = state.get("pod_mode") if applies else None
+    if state.get("gap") and ns == "kube-system":
+        mode = "singleton"
+    items = [pod("a", "sugarkube0")]
+    if mode != "singleton":
+        items.append(pod("b", "sugarkube0" if mode == "unspread" else "sugarkube1",
+                         ready=mode != "unhealthy"))
+    emit({"items": items})
 elif kind == "pdb":
     pdb_selector = {"other": "workload"} if state.get("pdb_selector_mismatch") else pod_labels
     pdb_items = [
@@ -620,9 +658,12 @@ elif kind == "pdb":
     emit({"items": [] if ns == "kube-system" else pdb_items})
 elif kind == "endpointslices.discovery.k8s.io":
     service = next(x.split("=", 1)[1] for x in args if x.startswith("kubernetes.io/service-name="))
+    insufficient = state.get("endpoint_insufficient") == service
     emit({"items": [{"metadata": {"labels": {"kubernetes.io/service-name": service}},
                      "endpoints": [{"addresses": ["10.0.0.1"], "nodeName": "sugarkube0", "conditions": {}},
-                                   {"addresses": ["10.0.0.2"], "nodeName": "sugarkube1", "conditions": {}}]}]})
+                                   {"addresses": ["10.0.0.2"], "nodeName":
+                                    "sugarkube0" if insufficient else "sugarkube1",
+                                    "conditions": {}}]}]})
 elif kind == "service" and name == "traefik":
     emit({"spec": {} if state.get("traffic_policy_absent") else
           {"internalTrafficPolicy": state.get("traffic_policy", "Cluster")}})
@@ -687,6 +728,8 @@ def audit_harness(tmp_path):
             AUDIT_FAKE_STATE=str(state),
             AUDIT_COMMAND_LOG=str(log),
             AUDIT_EXPECTED_IMAGE=audit.EXPECTED_IMAGE,
+            AUDIT_TIMEOUT_MARKER=str(tmp_path / "timeout-marker-SECRET-CANARY"),
+            AUDIT_TIMEOUT_OBSERVED=str(tmp_path / "timeout-observed-CONNECTOR-CANARY"),
             SUGARKUBE_AUDIT_TIMESTAMP="2026-08-12T00:00:00Z",
         )
         command = [
@@ -803,6 +846,137 @@ def test_cli_completed_gap_exit_contract(audit_harness) -> None:
     assert required.returncode == 1
     assert json.loads((evidence / "audit.json").read_text())["result"] == "PARITY_GAPS"
     assert required_evidence.exists()
+
+
+@pytest.mark.parametrize(
+    ("scenario", "added_gaps"),
+    [
+        ({"missing_component": "coredns"}, {"COREDNS_MISSING"}),
+        ({"missing_component": "coredns-ha"}, {"COREDNS_HA_MISSING"}),
+        (
+            {"missing_component": "traefik"},
+            {
+                "TRAEFIK_MISSING",
+                "TRAEFIK_SINGLETON",
+                "TRAEFIK_UNSPREAD",
+                "TRAEFIK_SCHEDULING_CONTRACT_MISMATCH",
+            },
+        ),
+        (
+            {
+                "missing_component": "coredns-ha",
+                "pod_component": "coredns",
+                "pod_mode": "singleton",
+            },
+            {"COREDNS_HA_MISSING", "COREDNS_SINGLETON", "COREDNS_UNSPREAD"},
+        ),
+        (
+            {"pod_component": "traefik", "pod_mode": "singleton"},
+            {"TRAEFIK_SINGLETON", "TRAEFIK_UNSPREAD"},
+        ),
+        (
+            {"pod_component": "cloudflare", "pod_mode": "singleton"},
+            {"CF_CONNECTORS_INSUFFICIENT", "CF_CONNECTORS_UNSPREAD"},
+        ),
+        ({"pod_component": "coredns", "pod_mode": "unspread"}, {"COREDNS_UNSPREAD"}),
+        ({"pod_component": "traefik", "pod_mode": "unspread"}, {"TRAEFIK_UNSPREAD"}),
+        (
+            {"pod_component": "cloudflare", "pod_mode": "unspread"},
+            {"CF_CONNECTORS_UNSPREAD"},
+        ),
+        ({"nodes_unready": True}, {"NODE_NOT_READY"}),
+        ({"readyz_failed": True}, {"API_OR_ETCD_NOT_READY"}),
+        (
+            {
+                "missing_component": "coredns-ha",
+                "pod_component": "coredns",
+                "pod_mode": "unhealthy",
+            },
+            {"COREDNS_HA_MISSING", "COREDNS_SINGLETON", "COREDNS_UNSPREAD"},
+        ),
+        (
+            {"pod_component": "traefik", "pod_mode": "unhealthy"},
+            {"TRAEFIK_SINGLETON", "TRAEFIK_UNSPREAD"},
+        ),
+        (
+            {"pod_component": "cloudflare", "pod_mode": "unhealthy"},
+            {"CF_CONNECTORS_INSUFFICIENT", "CF_CONNECTORS_UNSPREAD"},
+        ),
+        ({"endpoint_insufficient": "kube-dns"}, {"KUBE_DNS_ENDPOINTS_INSUFFICIENT"}),
+        ({"endpoint_insufficient": "traefik"}, {"TRAEFIK_ENDPOINTS_INSUFFICIENT"}),
+        ({"image_unpinned": True}, {"CF_IMAGE_NOT_IMMUTABLE_PIN"}),
+        ({"probe_path_wrong": True}, {"CF_PROBE_CONTRACT"}),
+        ({"probe_port_wrong": True}, {"CF_PROBE_CONTRACT"}),
+        ({"liveness_probe": True}, {"CF_PROBE_CONTRACT"}),
+        ({"healthy_targets": 1}, {"CF_METRICS_TARGETS_UNHEALTHY"}),
+        ({"ha_connections": 1}, {"CF_HA_CONNECTIONS_INSUFFICIENT"}),
+    ],
+    ids=[
+        "missing-coredns",
+        "missing-coredns-ha",
+        "missing-traefik",
+        "singleton-coredns",
+        "singleton-traefik",
+        "singleton-cloudflare",
+        "unspread-coredns",
+        "unspread-traefik",
+        "unspread-cloudflare",
+        "unready-node",
+        "api-etcd-unready",
+        "unready-coredns-pod",
+        "unready-traefik-pod",
+        "unready-cloudflare-pod",
+        "kube-dns-endpoints",
+        "traefik-endpoints",
+        "cloudflare-image",
+        "probe-path",
+        "probe-port",
+        "liveness-probe",
+        "prometheus-targets",
+        "prometheus-ha",
+    ],
+)
+def test_cli_prompt_gap_matrix(audit_harness, scenario, added_gaps) -> None:
+    execute, _ = audit_harness
+    baseline_result, baseline_dir = execute("matrix-compliant")
+    baseline = json.loads((baseline_dir / "audit.json").read_text())
+    assert baseline_result.returncode == 0
+    assert baseline["result"] == "PARITY_OK"
+    assert baseline["gaps"] == []
+    assert baseline["gapCount"] == 0
+
+    result, evidence = execute("matrix-" + next(iter(scenario)), **scenario)
+    document = json.loads((evidence / "audit.json").read_text())
+    assert result.returncode == 0
+    assert set(document["gaps"]) - set(baseline["gaps"]) == added_gaps
+    assert document["gapCount"] == len(added_gaps)
+
+
+def test_cli_endpoint_timeout_isolation_is_concurrent_and_sanitized(audit_harness) -> None:
+    execute, _ = audit_harness
+    command, env, evidence = execute.configure("timeout-isolation", timeout_isolation=True)
+    result = subprocess.run(
+        command, text=True, capture_output=True, env=env, check=False, timeout=15
+    )
+
+    assert result.returncode == 0
+    rows = (evidence / "endpoints.tsv").read_text().splitlines()
+    assert any(
+        row.startswith("https://danielsmith.io/\t0\t") and row.endswith("\ttimeout") for row in rows
+    )
+    assert any(row.endswith("\tnone") for row in rows)
+    assert Path(env["AUDIT_TIMEOUT_OBSERVED"]).read_text() == "observed"
+    combined = (
+        result.stdout + result.stderr + "".join(path.read_text() for path in evidence.iterdir())
+    )
+    for canary in (
+        "SECRET-CANARY",
+        "CONNECTOR-CANARY",
+        "FAST-BODY-CANARY",
+        env["AUDIT_TIMEOUT_MARKER"],
+        env["AUDIT_TIMEOUT_OBSERVED"],
+    ):
+        assert canary not in combined
 
 
 @pytest.mark.parametrize(
