@@ -246,6 +246,11 @@ def helm_status(value: Any) -> str:
     return value
 
 
+def canonical_json(value: Any) -> str:
+    """Return a stable key for an already-sanitized set-like evidence record."""
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
 def probe_urls(target_map: Any) -> list[str]:
     """Expand the public target manifest, failing closed when it has no URLs."""
     if not isinstance(target_map, dict):
@@ -885,7 +890,7 @@ def main(argv: list[str] | None = None) -> int:
         raise HardFailure("malformed Helm history record")
     history = [
         {
-            "revision": h.get("revision"),
+            "revision": helm_revision(h.get("revision")),
             "updated": h.get("updated"),
             "status": helm_status(h.get("status")),
             "chart": h.get("chart"),
@@ -893,6 +898,7 @@ def main(argv: list[str] | None = None) -> int:
         }
         for h in history_raw
     ]
+    history.sort(key=lambda item: (item["revision"], canonical_json(item)))
     current_revision = helm_revision(release.get("revision"))
     current_history = [
         h for h in history_raw if helm_revision(h.get("revision")) == current_revision
@@ -908,7 +914,7 @@ def main(argv: list[str] | None = None) -> int:
             "release": release_name,
             "chart": release.get("chart"),
             "appVersion": release.get("app_version"),
-            "revision": release.get("revision"),
+            "revision": current_revision,
             "helmListStatus": list_status,
             "helmCurrentHistoryStatus": current_history_status,
             "helmOwnership": helm_ownership,
@@ -975,6 +981,7 @@ def main(argv: list[str] | None = None) -> int:
         for x in pdbs
         if selector_matches(x.get("spec", {}).get("selector"), workload_labels)
     ]
+    tunnel["pdb"].sort(key=canonical_json)
     matching_services = []
     service_snapshots = []
     for service in services:
@@ -1033,8 +1040,8 @@ def main(argv: list[str] | None = None) -> int:
         if selector_targets and namespace_targets and valid_endpoint:
             matching_monitors.append(monitor)
     tunnel["metrics"] = {
-        "services": service_snapshots,
-        "serviceMonitors": monitor_snapshots,
+        "services": sorted(service_snapshots, key=canonical_json),
+        "serviceMonitors": sorted(monitor_snapshots, key=canonical_json),
     }
     add_gap(
         gaps,

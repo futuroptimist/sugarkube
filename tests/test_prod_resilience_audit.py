@@ -456,20 +456,27 @@ if tool == "helm":
         releases = [{ "name": "cloudflare", "namespace": "cloudflare",
                 "status": state.get("helm_list_status", "deployed"),
                 "chart": "cloudflare-tunnel-0.3.2", "app_version": "2026.7.3",
-                "revision": state.get("helm_revision", "1"),
+                "revision": state.get("helm_revision", 2 if state.get("reverse_order") else "2"),
                 "config": "credential=SECRET-CANARY", "manifest": "CONNECTOR-CANARY"}]
         if state.get("multiple_candidates"):
             releases.append({**releases[0], "name": "cloudflare-second"})
         emit(releases)
     elif clean[0] == "history":
-        entries = [{"revision": 1, "updated": "fixed",
-                    "status": state.get("helm_history_status", "deployed"),
-                    "chart": "cloudflare-tunnel-0.3.2", "app_version": "2026.7.3",
-                    "config": "credential=SECRET-CANARY", "manifest": "CONNECTOR-CANARY"}]
+        revision = (lambda value: str(value)) if state.get("reverse_order") else (lambda value: value)
+        entries = [
+            {"revision": revision(1), "updated": "older", "status": "superseded",
+             "chart": "cloudflare-tunnel-0.3.1", "app_version": "2026.7.2"},
+            {"revision": revision(2), "updated": "fixed",
+             "status": state.get("helm_history_status", "deployed"),
+             "chart": "cloudflare-tunnel-0.3.2", "app_version": "2026.7.3",
+             "config": "credential=SECRET-CANARY", "manifest": "CONNECTOR-CANARY"},
+        ]
         if state.get("helm_history_missing"):
-            entries[0]["revision"] = 2
+            entries[1]["revision"] = revision(3)
         if state.get("helm_history_duplicate"):
-            entries.append(dict(entries[0]))
+            entries.append(dict(entries[1]))
+        if state.get("reverse_order"):
+            entries.reverse()
         emit(entries)
     raise SystemExit()
 
@@ -602,9 +609,15 @@ if kind == "pods":
     emit({"items": [pod("a", "sugarkube0")] + ([] if one else [pod("b", "sugarkube1")])})
 elif kind == "pdb":
     pdb_selector = {"other": "workload"} if state.get("pdb_selector_mismatch") else pod_labels
-    emit({"items": [] if ns == "kube-system" else
-          [{"metadata": {"name": "cloudflare-pdb"},
-            "spec": {"selector": {"matchLabels": pdb_selector}, "minAvailable": 1}}]})
+    pdb_items = [
+        {"metadata": {"name": "cloudflare-pdb"},
+         "spec": {"selector": {"matchLabels": pdb_selector}, "minAvailable": 1}},
+        {"metadata": {"name": "cloudflare-pdb-secondary"},
+         "spec": {"selector": {"matchLabels": pdb_selector}, "minAvailable": 1}},
+    ]
+    if state.get("reverse_order"):
+        pdb_items.reverse()
+    emit({"items": [] if ns == "kube-system" else pdb_items})
 elif kind == "endpointslices.discovery.k8s.io":
     service = next(x.split("=", 1)[1] for x in args if x.startswith("kubernetes.io/service-name="))
     emit({"items": [{"metadata": {"labels": {"kubernetes.io/service-name": service}},
@@ -620,17 +633,34 @@ elif kind == "helmchartconfig":
           "          matchLabels:\n            app.kubernetes.io/name: traefik\n"
           "        topologyKey: kubernetes.io/hostname\n"}})
 elif kind == "service":
-    emit({"items": [{"metadata": {"name": "cloudflare-metrics", "labels": {"monitor": "cloudflare"}},
-                     "spec": {"selector": ({"other": "workload"}
-                                             if state.get("service_selector_mismatch") else pod_labels),
-                              "ports": [{"name": "metrics", "port": (9090 if state.get("port_mismatch") else 2000),
-                                         "targetPort": 2000}]}}]})
+    service_items = [
+        {"metadata": {"name": "cloudflare-metrics", "labels": {"monitor": "cloudflare"}},
+         "spec": {"selector": ({"other": "workload"}
+                                 if state.get("service_selector_mismatch") else pod_labels),
+                  "ports": [{"name": "metrics", "port": (9090 if state.get("port_mismatch") else 2000),
+                             "targetPort": 2000}]}},
+        {"metadata": {"name": "unrelated-metrics", "labels": {"monitor": "unrelated"}},
+         "spec": {"selector": {"other": "workload"},
+                  "ports": [{"name": "metrics", "port": 9090, "targetPort": 9090}]}},
+    ]
+    if state.get("reverse_order"):
+        service_items.reverse()
+    emit({"items": service_items})
 elif kind == "servicemonitor":
-    emit({"items": [{"metadata": {"name": "cloudflare"},
-                     "spec": {"selector": {"matchLabels": ({"other": "service"}
-                                      if state.get("monitor_selector_mismatch") else {"monitor": "cloudflare"})},
-                              "namespaceSelector": {"matchNames": ["other" if state.get("namespace_mismatch") else "cloudflare"]},
-                              "endpoints": [{"port": "metrics", "path": ("/wrong" if state.get("path_mismatch") else "/metrics")}]}}]})
+    monitor_items = [
+        {"metadata": {"name": "cloudflare"},
+         "spec": {"selector": {"matchLabels": ({"other": "service"}
+                          if state.get("monitor_selector_mismatch") else {"monitor": "cloudflare"})},
+                  "namespaceSelector": {"matchNames": ["other" if state.get("namespace_mismatch") else "cloudflare"]},
+                  "endpoints": [{"port": "metrics", "path": ("/wrong" if state.get("path_mismatch") else "/metrics")}]}},
+        {"metadata": {"name": "unrelated"},
+         "spec": {"selector": {"matchLabels": {"monitor": "unrelated"}},
+                  "namespaceSelector": {"matchNames": ["other"]},
+                  "endpoints": [{"port": "other", "path": "/other"}]}},
+    ]
+    if state.get("reverse_order"):
+        monitor_items.reverse()
+    emit({"items": monitor_items})
 else:
     print("unexpected fake kubectl invocation", args, file=sys.stderr); raise SystemExit(9)
 """
@@ -701,10 +731,14 @@ def test_cli_identity_guards_fail_without_evidence(audit_harness, label, scenari
 def test_cli_compliant_gap_determinism_sanitization_and_read_only_log(audit_harness) -> None:
     execute, log = audit_harness
     first, first_dir = execute("compliant-one")
-    second, second_dir = execute("compliant-two")
+    second, second_dir = execute("compliant-two", reverse_order=True)
     failed, failed_dir = execute("endpoint-error", failed_probe=True)
     assert first.returncode == second.returncode == failed.returncode == 0
-    assert json.loads((first_dir / "audit.json").read_text())["result"] == "PARITY_OK"
+    first_audit = json.loads((first_dir / "audit.json").read_text())
+    assert first_audit["result"] == "PARITY_OK"
+    tunnel = first_audit["observed"]["cloudflareTunnel"]
+    assert tunnel["revision"] == 2
+    assert [record["revision"] for record in tunnel["history"]] == [1, 2]
     assert json.loads((failed_dir / "audit.json").read_text())["result"] == "PARITY_GAPS"
     assert {p.name for p in first_dir.iterdir()} == {
         "audit.json",
@@ -809,7 +843,13 @@ def test_cli_cloudflare_evidence_proves_sanitized_helm_ownership_and_bindings(
             "minAvailable": 1,
             "maxUnavailable": None,
             "selectorTargetsWorkload": True,
-        }
+        },
+        {
+            "name": "cloudflare-pdb-secondary",
+            "minAvailable": 1,
+            "maxUnavailable": None,
+            "selectorTargetsWorkload": True,
+        },
     ]
     assert tunnel["metrics"] == {
         "services": [
@@ -820,7 +860,15 @@ def test_cli_cloudflare_evidence_proves_sanitized_helm_ownership_and_bindings(
                 "metricsPortName": "metrics",
                 "port": 2000,
                 "targetPort": 2000,
-            }
+            },
+            {
+                "name": "unrelated-metrics",
+                "type": "ClusterIP",
+                "selectorTargetsWorkload": False,
+                "metricsPortName": "metrics",
+                "port": 9090,
+                "targetPort": 9090,
+            },
         ],
         "serviceMonitors": [
             {
@@ -829,7 +877,14 @@ def test_cli_cloudflare_evidence_proves_sanitized_helm_ownership_and_bindings(
                 "namespaceTargetsRelease": True,
                 "endpointPort": "metrics",
                 "endpointPath": "/metrics",
-            }
+            },
+            {
+                "name": "unrelated",
+                "selectorTargetsService": False,
+                "namespaceTargetsRelease": False,
+                "endpointPort": "other",
+                "endpointPath": "/other",
+            },
         ],
     }
     encoded = "".join(path.read_text() for path in evidence.iterdir())
@@ -918,7 +973,7 @@ def test_cli_traffic_policy_is_observed_without_an_unsupported_gap(audit_harness
     )
 
 
-@pytest.mark.parametrize("scenario", [{}, {"helm_revision": 1}])
+@pytest.mark.parametrize("scenario", [{}, {"helm_revision": 2}])
 def test_cli_helm_list_and_current_history_deployed_pass(audit_harness, scenario) -> None:
     execute, _ = audit_harness
     result, evidence = execute("helm-deployed-" + str(scenario), **scenario)
