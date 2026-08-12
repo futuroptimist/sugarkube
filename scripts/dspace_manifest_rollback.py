@@ -49,6 +49,26 @@ VERIFIER_FIELDS = (
 )
 POD_TIMEOUT = 60.0
 POLL_INTERVAL = 2.0
+METRICS_TARGET_FIELDS = (
+    "schemaVersion",
+    "app",
+    "applicationVersion",
+    "sourceRevision",
+    "imageTag",
+    "imageDigest",
+    "semanticTag",
+    "chartSourceRevision",
+    "chartVersion",
+    "chartDigest",
+)
+APP_COORDINATE_FIELDS = (
+    "app",
+    "applicationVersion",
+    "sourceRevision",
+    "imageTag",
+    "imageDigest",
+    "semanticTag",
+)
 
 
 class RollbackError(ValueError):
@@ -84,6 +104,31 @@ def exact_fields(value: dict[str, Any], fields: tuple[str, ...], label: str) -> 
             f"{label} schema mismatch (missing={','.join(missing) or '-'}; "
             f"unknown={','.join(unknown) or '-'})"
         )
+
+
+def reviewed_metrics_target(path: Path, baseline: dict[str, Any]) -> dict[str, Any]:
+    """Validate the narrow chart-maintenance record and project a final target."""
+    try:
+        reviewed = release._object(path)
+    except release.ManifestError as exc:
+        raise RollbackError(f"reviewed chart target is invalid: {exc}") from exc
+    exact_fields(reviewed, METRICS_TARGET_FIELDS, "reviewed chart target")
+    if reviewed.get("schemaVersion") != 2 or reviewed.get("app") != "dspace":
+        raise RollbackError("reviewed chart target identity is invalid")
+    for field in APP_COORDINATE_FIELDS:
+        if reviewed.get(field) != baseline.get(field):
+            raise RollbackError(f"reviewed chart target changes application field {field}")
+    approved_chart = {
+        "chartSourceRevision": "62da11005354e9f9a89c2e58584cdce4c8ec35aa",
+        "chartVersion": "3.0.3",
+        "chartDigest": "sha256:6ee663c426673bc0e516ed8f8b0ab11a918d2f2bb81fc9047b3eb37b78329f5c",
+    }
+    if any(reviewed.get(field) != value for field, value in approved_chart.items()):
+        raise RollbackError("reviewed chart target is not the approved chart-only tuple")
+    target = copy.deepcopy(baseline)
+    target.update(approved_chart)
+    # The target is constructed, never obtained by mutating historical evidence.
+    return target
 
 
 def verifier_capabilities(
@@ -280,9 +325,7 @@ def helm_status(
     )
 
 
-def helm_history(
-    runner: Runner, kubeconfig: str, release_name: str, namespace: str
-) -> object:
+def helm_history(runner: Runner, kubeconfig: str, release_name: str, namespace: str) -> object:
     try:
         return json.loads(
             runner(
@@ -310,9 +353,7 @@ def helm_snapshot(
     namespace: str,
     *,
     require_deployed: bool = True,
-) -> tuple[
-    dict[str, Any], list[dict[str, Any]] | None, tuple[str, str, int]
-]:
+) -> tuple[dict[str, Any], list[dict[str, Any]] | None, tuple[str, str, int]]:
     """Read a redaction-safe, revision-bound Helm release identity."""
     status = helm_status(runner, kubeconfig, release_name, namespace)
     history: list[dict[str, Any]] | None = None
@@ -348,9 +389,7 @@ def helm_snapshot(
             expected_version
         ):
             raise release.ManifestError("invalid Helm release identity")
-        identity = release.resolve_helm_identity(
-            status, history, release_name, expected_version
-        )
+        identity = release.resolve_helm_identity(status, history, release_name, expected_version)
     except release.ManifestError as exc:
         raise RollbackError("Helm release identity is invalid") from exc
     if status.get("name") != release_name or status.get("namespace") != namespace:
@@ -564,9 +603,7 @@ def application_image_id(pod: dict[str, Any]) -> str | None:
 
 
 def assert_production_target(kubeconfig: str, runner: Runner) -> None:
-    context = runner(
-        ["kubectl", "--kubeconfig", kubeconfig, "config", "current-context"]
-    ).strip()
+    context = runner(["kubectl", "--kubeconfig", kubeconfig, "config", "current-context"]).strip()
     if context != "sugar-prod":
         raise RollbackError("metrics configuration reconciliation requires sugar-prod")
     runner(
@@ -629,12 +666,20 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
     args.evidence = args.evidence.expanduser()
     args.verifier = args.verifier.expanduser()
     try:
-        target = release.validate(release._object(args.manifest), True)
+        baseline = release.validate(release._object(args.manifest), True)
     except release.ManifestError as exc:
         raise RollbackError(f"target must be finalized DSPACE release evidence: {exc}") from exc
-    if target["environment"] != args.environment:
+    if baseline["environment"] != args.environment:
         raise RollbackError("target manifest environment does not match selected environment")
     configuration_reconciliation = getattr(args, "configuration_reconciliation", False)
+    target = baseline
+    reviewed_reconciliation = configuration_reconciliation and hasattr(
+        args, "chart_maintenance_target"
+    )
+    if reviewed_reconciliation:
+        if args.chart_maintenance_target is None:
+            raise RollbackError("metrics reconciliation requires --chart-maintenance-target")
+        target = reviewed_metrics_target(args.chart_maintenance_target.expanduser(), baseline)
     image_value = target["imageTag"]
     if not configuration_reconciliation:
         image_value += f"@{target['imageDigest']}"
@@ -644,12 +689,22 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
     approved = {field: target[field] for field in release.candidate_fields(target)}
     approved["recordType"] = "candidate"
     release.validate(approved, False)
+    baseline_approved = {field: baseline[field] for field in release.candidate_fields(baseline)}
+    baseline_approved["recordType"] = "candidate"
+    release.validate(baseline_approved, False)
     root = REPO_ROOT
     config = app_config.load_config("dspace", args.environment, args.config or None)
     if config["SUGARKUBE_CHART"] != f"oci://{release.CHART_REF}":
         raise RollbackError("DSPACE config chart repository is not canonical")
     if config["SUGARKUBE_RELEASE"] != "dspace" or config["SUGARKUBE_NAMESPACE"] != "dspace":
         raise RollbackError("DSPACE release and namespace must both be dspace")
+    if reviewed_reconciliation:
+        try:
+            configured_version = app_chart.read_pin(config["SUGARKUBE_VERSION_FILE"])
+        except (OSError, ValueError) as exc:
+            raise RollbackError("configured production chart pin is invalid") from exc
+        if configured_version != target["chartVersion"]:
+            raise RollbackError("configured production chart pin does not match reviewed target")
     values, values_proof = stage_values(config, root, staged_directory)
     environment = cluster_environment(runner, args.kubeconfig)
     if environment != args.environment:
@@ -704,7 +759,7 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
     if configuration_reconciliation:
         if args.environment != "prod":
             raise RollbackError("metrics configuration reconciliation is production-only")
-        if before_identity[2] != target["helmRevision"]:
+        if before_identity[2] != baseline["helmRevision"]:
             raise RollbackError("live Helm revision differs from finalized provenance")
         runner(
             [
@@ -719,7 +774,7 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
                 "prod",
             ]
         )
-        if before_identity[:2] != ("dspace", target["chartVersion"]):
+        if before_identity[:2] != ("dspace", baseline["chartVersion"]):
             raise RollbackError("live chart coordinate differs from finalized provenance")
         if len(before_pods) != 2 or any(not pod.get("ready") for pod in before_pods):
             raise RollbackError("live release must have exactly two Ready DSPACE pods")
@@ -769,7 +824,7 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
                 args.kubeconfig,
                 "template",
                 "dspace",
-                coordinate,
+                release.chart_coordinate(baseline_approved),
                 "--namespace",
                 "dspace",
                 "--values",
@@ -794,10 +849,10 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             {"enabled": False},
         ):
             raise RollbackError("live metrics values are not the approved disabled baseline")
-        baseline, desired_baseline = configuration_comparison_baselines(
+        live_baseline, desired_baseline = configuration_comparison_baselines(
             live_values, desired_values
         )
-        if baseline != desired_baseline:
+        if live_baseline != desired_baseline:
             raise RollbackError("unrelated Helm values drift blocks configuration reconciliation")
     # Keep the registry proof fresh: no tag resolution occurs between this
     # exact-digest check and confirmation/reservation/mutation.
@@ -829,8 +884,8 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             current_ids.clear()
             break
     if configuration_reconciliation and (
-        current_images != {f"{release.IMAGE_REF}:{target['imageTag']}"}
-        or current_ids != {target["imageDigest"]}
+        current_images != {f"{release.IMAGE_REF}:{baseline['imageTag']}"}
+        or current_ids != {baseline["imageDigest"]}
     ):
         raise RollbackError("live image coordinate differs from finalized provenance")
     try:
@@ -1038,12 +1093,9 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             raise RollbackError("Helm did not report the expected deployed release")
         if after_helm.get("info", {}).get("description") != description:
             raise RollbackError("Helm release description is not bound to this invocation")
-        if after_revision <= before_identity[2]:
-            raise RollbackError("Helm revision did not advance")
-        if (
-            after_identity[0] != "dspace"
-            or after_identity[1] != target["chartVersion"]
-        ):
+        if after_revision != before_identity[2] + 1:
+            raise RollbackError("Helm revision did not advance exactly once")
+        if after_identity[0] != "dspace" or after_identity[1] != target["chartVersion"]:
             raise RollbackError("installed chart name/version does not match target")
         changed = configuration_reconciliation or (
             before_identity[1] != target["chartVersion"]
@@ -1252,8 +1304,7 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
                     "status": observed_info.get("status"),
                     "chartName": observed_identity[0],
                     "chartVersion": observed_identity[1],
-                    "invocationDescriptionMatches": observed_info.get("description")
-                    == description,
+                    "invocationDescriptionMatches": observed_info.get("description") == description,
                 }
             except Exception:
                 diagnostics["helm"] = "unavailable"
@@ -1292,6 +1343,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--oras", default=os.environ.get("SUGARKUBE_ORAS_COMMAND", "oras"))
     parser.add_argument("--timeout", default="10m")
     parser.add_argument("--configuration-reconciliation", action="store_true")
+    parser.add_argument("--chart-maintenance-target", type=Path)
     args = parser.parse_args(argv)
     if args.kubeconfig is None and not args.configuration_reconciliation:
         args.kubeconfig = str(Path.home() / ".kube" / "config-sugarkube")
