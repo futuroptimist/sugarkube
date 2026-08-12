@@ -62,6 +62,40 @@ def test_schema_v2_final_target_projects_split_provenance_for_rollback() -> None
     assert manifest.validate(projected, False)["chartSourceRevision"] != projected["sourceRevision"]
 
 
+def test_chart_maintenance_target_changes_only_reviewed_chart_tuple(tmp_path: Path) -> None:
+    baseline = target("prod", schema_version=2)
+    baseline.update(rollback.APPROVED_PRODUCTION_BASELINE)
+    reviewed = {field: baseline[field] for field in rollback.MAINTENANCE_TARGET_FIELDS}
+    reviewed.update(
+        chartSourceRevision="62da11005354e9f9a89c2e58584cdce4c8ec35aa",
+        chartVersion="3.0.3",
+        chartDigest="sha256:6ee663c426673bc0e516ed8f8b0ab11a918d2f2bb81fc9047b3eb37b78329f5c",
+    )
+    path = tmp_path / "reviewed.json"
+    path.write_text(manifest._canonical(reviewed), encoding="utf-8")
+
+    approved = rollback.production_chart_maintenance_target(baseline, path)
+
+    assert approved["chartVersion"] == "3.0.3"
+    assert approved["imageDigest"] == baseline["imageDigest"]
+    assert baseline["chartVersion"] == "3.0.2"
+
+
+@pytest.mark.parametrize("change", ({"unknown": True}, {"imageTag": "main-0000000"}))
+def test_chart_maintenance_target_rejects_unknown_fields_and_application_drift(
+    tmp_path: Path, change: dict[str, object]
+) -> None:
+    baseline = target("prod", schema_version=2)
+    baseline.update(rollback.APPROVED_PRODUCTION_BASELINE)
+    reviewed = {field: baseline[field] for field in rollback.MAINTENANCE_TARGET_FIELDS}
+    reviewed.update(change)
+    path = tmp_path / "reviewed.json"
+    path.write_text(manifest._canonical(reviewed), encoding="utf-8")
+
+    with pytest.raises(rollback.RollbackError, match="schema mismatch|application artifact"):
+        rollback.production_chart_maintenance_target(baseline, path)
+
+
 def verifier_result(**changes: object) -> dict[str, object]:
     value = {
         "schemaVersion": 1,
@@ -584,7 +618,27 @@ def pre_reservation_case(
     evidence_path = tmp_path / "rollback.json"
     verifier = tmp_path / "verifier"
     values = tmp_path / "values.yaml"
-    manifest_path.write_text(manifest._canonical(target(environment)), encoding="utf-8")
+    selected = target(environment, schema_version=2)
+    monkeypatch.setattr(
+        rollback,
+        "APPROVED_PRODUCTION_BASELINE",
+        {field: selected[field] for field in rollback.APPROVED_PRODUCTION_BASELINE},
+    )
+    monkeypatch.setattr(
+        rollback,
+        "APPROVED_PRODUCTION_TARGET",
+        {field: selected[field] for field in rollback.APPROVED_PRODUCTION_TARGET},
+    )
+    manifest_path.write_text(manifest._canonical(selected), encoding="utf-8")
+    maintenance_path = tmp_path / "maintenance-target.json"
+    maintenance_path.write_text(
+        manifest._canonical(
+            {field: selected[field] for field in rollback.MAINTENANCE_TARGET_FIELDS}
+        ),
+        encoding="utf-8",
+    )
+    version_file = tmp_path / "version"
+    version_file.write_text(selected["chartVersion"] + "\n", encoding="utf-8")
     verifier.write_text("#!/bin/sh\n", encoding="utf-8")
     verifier.chmod(0o755)
     values.write_text("environment: test\n", encoding="utf-8")
@@ -596,6 +650,7 @@ def pre_reservation_case(
             "SUGARKUBE_RELEASE": "dspace",
             "SUGARKUBE_NAMESPACE": "dspace",
             "SUGARKUBE_VALUES": str(values),
+            "SUGARKUBE_VERSION_FILE": str(version_file),
         },
     )
     monkeypatch.setattr(rollback, "REPO_ROOT", tmp_path)
@@ -630,6 +685,7 @@ def pre_reservation_case(
         kubeconfig="kubeconfig",
         oras="oras",
         timeout="10m",
+        chart_maintenance_target=maintenance_path,
     )
     return args, commands, evidence_path, verifier
 

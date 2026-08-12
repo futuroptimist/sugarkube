@@ -1,2 +1,2 @@
-# DSPACE production chart pin. Keep aligned with the recovered production deployment.
-3.0.2
+# DSPACE production chart pin. Application/image remain at the approved 3.0.1 artifact.
+3.0.3

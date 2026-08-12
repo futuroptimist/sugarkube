@@ -1146,7 +1146,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             _write_new(args.output, result)
         elif args.command == "validate":
-            result = validate(_object(args.manifest), args.final)
+            result = validate(_object(args.manifest), True if args.final else None)
             sys.stdout.write(_canonical(result))
         elif args.command == "preflight":
             source = _object(args.manifest)

@@ -2,12 +2,15 @@
 
 This is the canonical runbook for deploying DSPACE from GHCR artifacts to Sugarkube. The generic `just app-*` recipes are the preferred future path. The `dspace-oci-*` recipes remain compatibility shims and are scheduled for later removal only after the generic flow has been exercised across routine releases.
 
-## Production authenticated metrics at the existing release
+## Production authenticated metrics chart maintenance
 
-DSPACE production metrics are supported by the already deployed application **3.0.1** and chart
-**3.0.2**. This repository change does not deploy application or chart code, and it is not a
-promotion. It supplies the reviewed values contract for an upgrade-only configuration
-reconciliation at the existing immutable coordinates.
+DSPACE production metrics are supported by deployed application **3.0.1**. The guarded
+reconciliation upgrades only its chart from **3.0.2** to **3.0.3** at the reviewed immutable OCI
+digest, enabling authenticated metrics and the corrected ServiceMonitor contract. This is not an
+application promotion: source revision, semantic version, image tag and digest, provider, two
+replicas, routing, and credentials remain unchanged. Historical finalized 3.0.2 evidence remains
+unchanged; the chart-maintenance target is stored separately in
+`docs/apps/dspace.prod-metrics-chart-target.json`.
 
 Run production operations from `sugarkube3` with the externally managed API tunnel listening on
 `127.0.0.1:16443`. Use the explicit production kubeconfig and context; **do not** run
@@ -26,17 +29,18 @@ the check proves that the key is nonempty without reading it. Install and check 
 reconciliation. Never put the credential in an argument, environment variable, transcript, or
 evidence file.
 
-The reconciliation operator must supply the genuine existing finalized production evidence, the
-executable DSPACE runtime smoke runner, and a fresh, nonexisting evidence destination. Discover the
-current Helm revision immediately before the operation rather than assuming revision 9. Review the
-digest-qualified chart render and transient live-versus-desired values comparison: the only
-permitted difference is the committed `metrics` and `serviceMonitor` contract. Retain application
-3.0.1, chart 3.0.2, their immutable image/chart digests, and both replicas; never use
+The operator must supply both the genuine finalized production baseline and reviewed 3.0.3 target,
+plus the executable runtime smoke runner and a fresh, nonexisting evidence destination. For the
+currently verified baseline, the expected transition is revision 9 to 10. Tooling derives the
+revision from the baseline and requires exactly one increment rather than blindly hard-coding it.
+The only permitted values difference is the committed `metrics` and `serviceMonitor` contract.
+Retain application 3.0.1, its immutable image, provider, and both replicas; never use
 `--reuse-values`, a semantic or mutable tag, raw `helm upgrade`, or `helm rollback`.
 
 ```bash
 just dspace-prod-metrics-reconcile \
-  manifest="$GENUINE_FINALIZED_PROD_EVIDENCE" \
+  baseline_manifest="deployment-evidence/dspace/prod/main-1a31a56-20260801T093443Z.json" \
+  chart_maintenance_target="docs/apps/dspace.prod-metrics-chart-target.json" \
   evidence="$FRESH_NONEXISTING_EVIDENCE" \
   smoke_runner="$DSPACE_SMOKE_RUNNER" \
   kubeconfig="$HOME/.kube/config-sugarkube-prod" \
@@ -52,9 +56,10 @@ just observability-dashboard-verify env=prod
 
 Inspect the production dashboard manually. DSPACE HTTP, runtime, and feature panels should
 populate. Release-integrity, blackbox, token.place, and alerting panels may remain `NO DATA` until
-those separate production integrations are deployed. A failure after mutation is not permission
-to rerun or roll back immediately: preserve and review the reserved failure evidence, discover the
-new live revision, and plan a deliberate reconciliation.
+those separate production integrations are deployed. A failure after evidence reservation is not
+permission to rerun or roll back: review the preserved failure evidence before further mutation,
+discover the new live revision, and plan a deliberate reconciliation. The tool never automatically
+retries, uninstalls, rolls back, deletes, or rotates the metrics Secret.
 
 ## Production Helm reconciliation for application 3.0.1
 
