@@ -304,6 +304,8 @@ if tool == "curl":
 if tool == "helm":
     clean = args[2:] if args[:1] in (["-n"], ["--namespace"]) else args
     if clean[0] == "list":
+        if state.get("malformed_helm"):
+            emit(["credential=SECRET-CANARY connector=CONNECTOR-CANARY"]); raise SystemExit()
         emit([{ "name": "cloudflare", "namespace": "cloudflare", "status": "deployed",
                 "chart": "cloudflare-tunnel-0.3.2", "app_version": "2026.7.3", "revision": "1"}])
     elif clean[0] == "history":
@@ -322,6 +324,9 @@ if identity and args[:2] == ["get", "nodes"] and state.get("identity_fail"):
     print("credential=SECRET-CANARY connector=CONNECTOR-CANARY", file=sys.stderr)
     raise SystemExit(1)
 if args[:2] == ["get", "nodes"]:
+    if state.get("malformed_nodes"):
+        emit({"items": [{"metadata": "credential=SECRET-CANARY connector=CONNECTOR-CANARY"}]})
+        raise SystemExit()
     emit(nodes); raise SystemExit()
 if args[:3] == ["config", "view", "--minify"]:
     emit("https://sanitized.invalid"); raise SystemExit()
@@ -552,6 +557,51 @@ def test_cli_completed_gap_exit_contract(audit_harness) -> None:
     assert required.returncode == 1
     assert json.loads((evidence / "audit.json").read_text())["result"] == "PARITY_GAPS"
     assert required_evidence.exists()
+
+
+@pytest.mark.parametrize("scenario", [{"malformed_nodes": True}, {"malformed_helm": True}])
+def test_cli_malformed_external_shapes_are_sanitized(audit_harness, scenario) -> None:
+    execute, _ = audit_harness
+    result, evidence = execute("malformed-" + next(iter(scenario)), **scenario)
+    assert result.returncode == 2
+    assert not evidence.exists()
+    combined = result.stdout + result.stderr
+    assert "HARD_FAILURE:" in result.stderr
+    assert "Traceback" not in combined
+    assert "SECRET-CANARY" not in combined
+    assert "CONNECTOR-CANARY" not in combined
+
+
+def test_cli_filesystem_failure_is_generic_and_leaves_no_partial_evidence(
+    audit_harness, monkeypatch, capsys
+) -> None:
+    execute, _ = audit_harness
+    command, env, evidence = execute.configure("filesystem-failure")
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    original_write_text = Path.write_text
+
+    def fail_audit_write(path, *args, **kwargs):
+        if path.name == "audit.json":
+            raise OSError("FILESYSTEM-CANARY /private/path")
+        return original_write_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", fail_audit_write)
+    assert audit.cli(command[2:]) == 2
+    captured = capsys.readouterr()
+    assert captured.err.strip() == "HARD_FAILURE: unexpected collection failure"
+    assert "FILESYSTEM-CANARY" not in captured.out + captured.err
+    assert not evidence.exists()
+    assert not list(evidence.parent.glob(".prod-audit-*"))
+
+
+def test_cli_boundary_does_not_catch_keyboard_interrupt(monkeypatch) -> None:
+    def interrupted(argv=None):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(audit, "main", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        audit.cli([])
 
 
 @pytest.mark.parametrize(

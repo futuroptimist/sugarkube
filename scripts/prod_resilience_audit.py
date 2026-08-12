@@ -40,6 +40,18 @@ class HardFailure(RuntimeError):
     pass
 
 
+def object_shape(value: Any, message: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise HardFailure(message)
+    return value
+
+
+def list_shape(value: Any, message: str) -> list[Any]:
+    if not isinstance(value, list):
+        raise HardFailure(message)
+    return value
+
+
 def operation(argv: list[str]) -> str:
     """Return a safe operation identifier or reject before process execution."""
     if not argv:
@@ -268,24 +280,34 @@ def ready(pod: dict[str, Any]) -> bool:
 
 def pods_snapshot(document: dict[str, Any]) -> list[dict[str, Any]]:
     result = []
-    for pod in document.get("items", []):
+    for value in list_shape(document.get("items"), "malformed Kubernetes pod list"):
+        pod = object_shape(value, "malformed Kubernetes pod record")
+        metadata = object_shape(pod.get("metadata"), "malformed Kubernetes pod record")
+        spec = object_shape(pod.get("spec"), "malformed Kubernetes pod record")
+        status = object_shape(pod.get("status"), "malformed Kubernetes pod record")
+        list_shape(status.get("conditions", []), "malformed Kubernetes pod record")
+        statuses = list_shape(
+            status.get("containerStatuses", []), "malformed Kubernetes pod record"
+        )
+        if not all(isinstance(item, dict) for item in statuses):
+            raise HardFailure("malformed Kubernetes pod record")
         result.append(
             {
-                "uid": pod.get("metadata", {}).get("uid"),
-                "node": pod.get("spec", {}).get("nodeName"),
+                "uid": metadata.get("uid"),
+                "node": spec.get("nodeName"),
                 "ready": ready(pod),
-                "restarts": sum(
-                    int(c.get("restartCount", 0))
-                    for c in pod.get("status", {}).get("containerStatuses", [])
-                ),
+                "restarts": sum(int(c.get("restartCount", 0)) for c in statuses),
             }
         )
     return sorted(result, key=lambda p: (p["node"] or "", p["uid"] or ""))
 
 
 def deployment_snapshot(dep: dict[str, Any]) -> dict[str, Any]:
-    meta, spec, status = dep.get("metadata", {}), dep.get("spec", {}), dep.get("status", {})
-    pod_spec = spec.get("template", {}).get("spec", {})
+    meta = object_shape(dep.get("metadata"), "malformed Kubernetes Deployment")
+    spec = object_shape(dep.get("spec"), "malformed Kubernetes Deployment")
+    status = object_shape(dep.get("status", {}), "malformed Kubernetes Deployment")
+    template = object_shape(spec.get("template"), "malformed Kubernetes Deployment")
+    pod_spec = object_shape(template.get("spec"), "malformed Kubernetes Deployment")
     containers = []
 
     def safe_probe(value: Any) -> dict[str, Any] | None:
@@ -304,9 +326,15 @@ def deployment_snapshot(dep: dict[str, Any]) -> dict[str, Any]:
             "failureThreshold": value.get("failureThreshold"),
         }
 
-    for c in pod_spec.get("containers", []):
+    for value in list_shape(
+        pod_spec.get("containers"), "malformed Kubernetes Deployment containers"
+    ):
+        c = object_shape(value, "malformed Kubernetes Deployment container")
         refs = []
-        for env in c.get("env", []):
+        for env_value in list_shape(
+            c.get("env", []), "malformed Kubernetes Deployment environment"
+        ):
+            env = object_shape(env_value, "malformed Kubernetes Deployment environment")
             ref = env.get("valueFrom", {}).get("secretKeyRef")
             if ref:
                 refs.append(
@@ -343,17 +371,24 @@ def endpoints(document: dict[str, Any], service: str) -> dict[str, Any]:
     if not isinstance(items, list):
         raise HardFailure("malformed EndpointSlice list")
     for item in items:
-        if item.get("metadata", {}).get("labels", {}).get("kubernetes.io/service-name") != service:
+        item = object_shape(item, "malformed EndpointSlice entry")
+        metadata = object_shape(item.get("metadata"), "malformed EndpointSlice entry")
+        labels = object_shape(metadata.get("labels"), "malformed EndpointSlice entry")
+        if labels.get("kubernetes.io/service-name") != service:
             raise HardFailure("EndpointSlice selector returned an unrelated Service")
-        for endpoint in item.get("endpoints", []):
-            cond = endpoint.get("conditions", {})
+        for value in list_shape(item.get("endpoints"), "malformed EndpointSlice entry"):
+            endpoint = object_shape(value, "malformed EndpointSlice entry")
+            cond = object_shape(endpoint.get("conditions", {}), "malformed EndpointSlice entry")
             effective_ready = cond.get("ready", True)
             serving = cond.get("serving", effective_ready)
             terminating = cond.get("terminating", False)
-            target = endpoint.get("targetRef", {})
+            addresses = list_shape(endpoint.get("addresses"), "malformed EndpointSlice entry")
+            if not all(isinstance(address, str) for address in addresses):
+                raise HardFailure("malformed EndpointSlice entry")
+            target = object_shape(endpoint.get("targetRef", {}), "malformed EndpointSlice entry")
             key = (
                 endpoint.get("nodeName") or "",
-                tuple(sorted(set(endpoint.get("addresses", [])))),
+                tuple(sorted(set(addresses))),
                 tuple(str(target.get(k, "")) for k in ("kind", "namespace", "name", "uid")),
             )
             grouped.setdefault(key, []).append((effective_ready, serving, terminating))
@@ -373,6 +408,8 @@ def list_items(*args: str) -> list[dict[str, Any]]:
     items = value.get("items", [])
     if not isinstance(items, list):
         raise HardFailure("Kubernetes list response is malformed")
+    if not all(isinstance(item, dict) for item in items):
+        raise HardFailure("Kubernetes list contains a malformed record")
     return items
 
 
@@ -463,12 +500,12 @@ def probe(url: str) -> dict[str, Any]:
     return row
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("env")
     parser.add_argument("--evidence-dir", required=True, type=Path)
     parser.add_argument("--require-parity", action="store_true")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.env.removeprefix("env=") != "prod":
         raise HardFailure("env must normalize exactly to prod")
     for tool in ("kubectl", "helm", "curl", "git"):
@@ -494,15 +531,25 @@ def main() -> int:
 
     gaps: set[str] = set()
     nodes_doc = kubectl("get", "nodes", "-o", "json")
-    names = {n.get("metadata", {}).get("name") for n in nodes_doc.get("items", [])}
+    node_items = list_shape(nodes_doc.get("items"), "malformed Kubernetes node list")
+    nodes_by_name = []
+    for value in node_items:
+        node = object_shape(value, "malformed Kubernetes node record")
+        metadata = object_shape(node.get("metadata"), "malformed Kubernetes node record")
+        status = object_shape(node.get("status"), "malformed Kubernetes node record")
+        conditions = list_shape(status.get("conditions"), "malformed Kubernetes node conditions")
+        if not isinstance(metadata.get("name"), str) or not all(
+            isinstance(condition, dict) for condition in conditions
+        ):
+            raise HardFailure("malformed Kubernetes node record")
+        nodes_by_name.append((node, metadata, conditions))
+    names = {metadata["name"] for _, metadata, _ in nodes_by_name}
     if names != EXPECTED_NODES:
         raise HardFailure("observed node set is not exactly sugarkube0, sugarkube1, sugarkube2")
     nodes = []
-    for node in nodes_doc["items"]:
-        conditions = {
-            c.get("type"): c.get("status") for c in node.get("status", {}).get("conditions", [])
-        }
-        nodes.append({"name": node["metadata"]["name"], "ready": conditions.get("Ready") == "True"})
+    for node, metadata, node_conditions in nodes_by_name:
+        conditions = {c.get("type"): c.get("status") for c in node_conditions}
+        nodes.append({"name": metadata["name"], "ready": conditions.get("Ready") == "True"})
     add_gap(gaps, "NODE_NOT_READY", not all(n["ready"] for n in nodes))
     readyz = run(["kubectl", "get", "--raw", "/readyz?verbose"]).stdout
     readyz_summary = {
@@ -617,12 +664,20 @@ def main() -> int:
     deployments = list_items(
         "get", "deployment", "-A", "-l", "app.kubernetes.io/name=cloudflare-tunnel", "-o", "json"
     )
-    releases = json.loads(run(["helm", "list", "-A", "-o", "json"]).stdout)
+    releases = list_shape(
+        json.loads(run(["helm", "list", "-A", "-o", "json"]).stdout),
+        "malformed Helm release list",
+    )
+    if not all(isinstance(item, dict) for item in releases):
+        raise HardFailure("malformed Helm release record")
     candidates = []
     for dep in deployments:
-        meta = dep.get("metadata", {})
-        labels = meta.get("labels", {})
-        release_name = labels.get("app.kubernetes.io/instance") or meta.get("annotations", {}).get(
+        meta = object_shape(dep.get("metadata"), "malformed Kubernetes Deployment metadata")
+        labels = object_shape(meta.get("labels", {}), "malformed Kubernetes Deployment metadata")
+        annotations = object_shape(
+            meta.get("annotations", {}), "malformed Kubernetes Deployment metadata"
+        )
+        release_name = labels.get("app.kubernetes.io/instance") or annotations.get(
             "meta.helm.sh/release-name"
         )
         match = [
@@ -637,13 +692,26 @@ def main() -> int:
             f"expected exactly one live Cloudflare release candidate; found {len(candidates)}"
         )
     tunnel_dep, release = candidates[0]
-    ns, release_name = tunnel_dep["metadata"]["namespace"], release["name"]
-    history_raw = json.loads(run(["helm", "-n", ns, "history", release_name, "-o", "json"]).stdout)
+    tunnel_meta = object_shape(
+        tunnel_dep.get("metadata"), "malformed Kubernetes Deployment metadata"
+    )
+    ns, release_name = tunnel_meta.get("namespace"), release.get("name")
+    if not isinstance(ns, str) or not isinstance(release_name, str):
+        raise HardFailure("malformed Cloudflare release identity")
+    history_raw = list_shape(
+        json.loads(run(["helm", "-n", ns, "history", release_name, "-o", "json"]).stdout),
+        "malformed Helm release history",
+    )
+    if not all(isinstance(item, dict) for item in history_raw):
+        raise HardFailure("malformed Helm history record")
     history = [
         {k: h.get(k) for k in ("revision", "updated", "status", "chart", "app_version")}
         for h in history_raw
     ]
-    status_raw = json.loads(run(["helm", "-n", ns, "status", release_name, "-o", "json"]).stdout)
+    status_raw = object_shape(
+        json.loads(run(["helm", "-n", ns, "status", release_name, "-o", "json"]).stdout),
+        "malformed Helm release status",
+    )
     tunnel = deployment_snapshot(tunnel_dep)
     tunnel.update(
         {
@@ -655,9 +723,18 @@ def main() -> int:
             "history": history,
         }
     )
-    selector = ",".join(
-        f"{k}={v}" for k, v in sorted(tunnel_dep["spec"]["selector"]["matchLabels"].items())
+    tunnel_spec = object_shape(tunnel_dep.get("spec"), "malformed Kubernetes Deployment selector")
+    tunnel_selector = object_shape(
+        tunnel_spec.get("selector"), "malformed Kubernetes Deployment selector"
     )
+    match_labels = object_shape(
+        tunnel_selector.get("matchLabels"), "malformed Kubernetes Deployment selector"
+    )
+    if not match_labels or not all(
+        isinstance(key, str) and isinstance(value, str) for key, value in match_labels.items()
+    ):
+        raise HardFailure("malformed Kubernetes Deployment selector")
+    selector = ",".join(f"{k}={v}" for k, v in sorted(match_labels.items()))
     workload_labels = (
         tunnel_dep.get("spec", {}).get("template", {}).get("metadata", {}).get("labels", {})
     )
@@ -869,9 +946,17 @@ def main() -> int:
     return 1 if args.require_parity and gaps else 0
 
 
-if __name__ == "__main__":
+def cli(argv: list[str] | None = None) -> int:
+    """Run the CLI with a sanitized hard-failure boundary."""
     try:
-        raise SystemExit(main())
-    except (HardFailure, json.JSONDecodeError, subprocess.TimeoutExpired) as error:
+        return main(argv)
+    except HardFailure as error:
         print(f"HARD_FAILURE: {error}", file=sys.stderr)
-        raise SystemExit(2)
+        return 2
+    except Exception:
+        print("HARD_FAILURE: unexpected collection failure", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(cli())
