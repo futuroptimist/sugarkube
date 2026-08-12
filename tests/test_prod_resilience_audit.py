@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -135,3 +136,40 @@ def test_target_manifest_is_canonical_and_narrow() -> None:
     targets = json.loads((ROOT / "config/prod-resilience-audit-targets.json").read_text())
     assert sorted(targets) == ["danielsmith.io", "democratized.space", "token.place"]
     assert all(path.startswith("/") for paths in targets.values() for path in paths)
+
+
+@pytest.mark.parametrize("value", [0, "0"])
+def test_int_or_string_comparison_accepts_kubernetes_encodings(value) -> None:
+    assert audit.int_or_string_equals(value, 0)
+
+
+@pytest.mark.parametrize("value", [None, 1, "1", False])
+def test_int_or_string_comparison_rejects_other_values(value) -> None:
+    assert not audit.int_or_string_equals(value, 0)
+
+
+def test_runner_failure_includes_bounded_diagnostics(monkeypatch) -> None:
+    result = subprocess.CompletedProcess(
+        ["kubectl", "get", "nodes"], 7, stderr="permission denied " + "x" * 600
+    )
+    monkeypatch.setattr(audit.subprocess, "run", lambda *args, **kwargs: result)
+
+    with pytest.raises(audit.HardFailure) as caught:
+        audit.run(["kubectl", "get", "nodes"])
+
+    message = str(caught.value)
+    assert "exit 7" in message
+    assert "kubectl get nodes" in message
+    assert "permission denied" in message
+    assert len(message) < 600
+
+
+def test_successful_status_with_transport_error_is_unhealthy() -> None:
+    assert audit.probes_unhealthy([{"status": 200, "error": "transport"}])
+    assert not audit.probes_unhealthy([{"status": 204}])
+
+
+@pytest.mark.parametrize("targets", [{}, {"example.com": []}, []])
+def test_empty_probe_targets_fail_closed(targets) -> None:
+    with pytest.raises(audit.HardFailure, match="target manifest"):
+        audit.probe_urls(targets)

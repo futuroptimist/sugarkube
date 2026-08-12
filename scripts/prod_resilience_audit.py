@@ -9,6 +9,7 @@ import datetime as dt
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -46,8 +47,11 @@ def run(argv: list[str], *, ok=(0,), timeout=30) -> subprocess.CompletedProcess[
         raise HardFailure("internal safety policy rejected a mutating helm command")
     proc = subprocess.run(argv, text=True, capture_output=True, timeout=timeout, check=False)
     if proc.returncode not in ok:
-        operation = argv[1] if len(argv) > 1 else ""
-        raise HardFailure(f"read-only command failed: {argv[0]} {operation}")
+        stderr = " ".join(proc.stderr.split())[:500] or "<empty>"
+        raise HardFailure(
+            f"read-only command failed (exit {proc.returncode}): {shlex.join(argv)}; "
+            f"stderr: {stderr}"
+        )
     return proc
 
 
@@ -69,6 +73,30 @@ def kubectl(*args: str, allow_missing=False) -> dict[str, Any]:
 def add_gap(gaps: set[str], code: str, condition: bool) -> None:
     if condition:
         gaps.add(code)
+
+
+def int_or_string_equals(value: Any, expected: int) -> bool:
+    """Compare a Kubernetes IntOrString value with an expected integer."""
+    return not isinstance(value, bool) and str(value) == str(expected)
+
+
+def probe_urls(target_map: Any) -> list[str]:
+    """Expand the public target manifest, failing closed when it has no URLs."""
+    if not isinstance(target_map, dict):
+        raise HardFailure("production probe target manifest must be an object")
+    urls = sorted(
+        f"https://{host}{path}"
+        for host, paths in target_map.items()
+        if isinstance(paths, list)
+        for path in paths
+    )
+    if not urls:
+        raise HardFailure("production probe target manifest contains no URLs")
+    return urls
+
+
+def probes_unhealthy(rows: list[dict[str, Any]]) -> bool:
+    return any(row.get("error") or not 200 <= row["status"] < 400 for row in rows)
 
 
 def ready(pod: dict[str, Any]) -> bool:
@@ -421,18 +449,22 @@ def main() -> int:
     strategy = tunnel["strategy"].get("rollingUpdate", {})
     add_gap(gaps, "CF_IMAGE_NOT_IMMUTABLE_PIN", container.get("image") != EXPECTED_IMAGE)
     add_gap(gaps, "CF_CHART_VERSION_MISMATCH", release.get("chart") != "cloudflare-tunnel-0.3.2")
+    add_gap(gaps, "CF_HELM_RELEASE_NOT_DEPLOYED", tunnel["helmStatus"] != "deployed")
     add_gap(gaps, "CF_CONNECTORS_INSUFFICIENT", len(ready_tunnel) < 2)
     add_gap(gaps, "CF_CONNECTORS_UNSPREAD", len({p["node"] for p in ready_tunnel}) < 2)
     add_gap(
         gaps,
         "CF_UNSAFE_ROLLOUT",
-        strategy.get("maxUnavailable") != 0 or strategy.get("maxSurge") != 1,
+        not int_or_string_equals(strategy.get("maxUnavailable"), 0)
+        or not int_or_string_equals(strategy.get("maxSurge"), 1),
     )
     probe_spec = (container.get("readinessProbe") or {}).get("httpGet", {})
     add_gap(
         gaps,
         "CF_PROBE_CONTRACT",
-        probe_spec.get("path") != "/ready" or bool(container.get("livenessProbe")),
+        probe_spec.get("path") != "/ready"
+        or not int_or_string_equals(probe_spec.get("port"), 2000)
+        or bool(container.get("livenessProbe")),
     )
     pdbs = list_items(
         "-n", ns, "get", "pdb", "-l", f"app.kubernetes.io/instance={release_name}", "-o", "json"
@@ -499,11 +531,13 @@ def main() -> int:
     add_gap(gaps, "CF_ALERTS_FIRING", metrics["firingRelevantAlerts"] != 0)
 
     target_map = json.loads(TARGETS.read_text())
-    urls = sorted(f"https://{host}{path}" for host, paths in target_map.items() for path in paths)
+    urls = probe_urls(target_map)
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(urls)) as pool:
         probe_rows = sorted(pool.map(probe, urls), key=lambda row: row["url"])
     add_gap(
-        gaps, "PUBLIC_ENDPOINT_UNHEALTHY", any(not 200 <= row["status"] < 400 for row in probe_rows)
+        gaps,
+        "PUBLIC_ENDPOINT_UNHEALTHY",
+        probes_unhealthy(probe_rows),
     )
     revision = run(["git", "rev-parse", "HEAD"]).stdout.strip()
     timestamp = os.environ.get("SUGARKUBE_AUDIT_TIMESTAMP") or dt.datetime.now(
