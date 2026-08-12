@@ -141,7 +141,7 @@ def operation(argv: list[str]) -> str:
         if len(args) == 6 and args[0] in ("-n", "--namespace"):
             namespace, verb, release = args[1:4]
             if (
-                verb in ("status", "history")
+                verb == "history"
                 and re.fullmatch(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?", namespace)
                 and re.fullmatch(r"[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?", release)
                 and args[4:] == ["-o", "json"]
@@ -215,6 +215,34 @@ def add_gap(gaps: set[str], code: str, condition: bool) -> None:
 def int_or_string_equals(value: Any, expected: int) -> bool:
     """Compare a Kubernetes IntOrString value with an expected integer."""
     return not isinstance(value, bool) and str(value) == str(expected)
+
+
+def helm_revision(value: Any) -> int:
+    """Normalize Helm's integer/string revision encoding without coercing other values."""
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise HardFailure("malformed Helm release revision")
+    text = str(value)
+    if not text.isdigit() or int(text) < 1:
+        raise HardFailure("malformed Helm release revision")
+    return int(text)
+
+
+def helm_status(value: Any) -> str:
+    """Retain only Helm's documented, non-sensitive release status values."""
+    allowed = {
+        "deployed",
+        "failed",
+        "pending-install",
+        "pending-rollback",
+        "pending-upgrade",
+        "superseded",
+        "uninstalled",
+        "uninstalling",
+        "unknown",
+    }
+    if value not in allowed:
+        raise HardFailure("malformed Helm release status")
+    return value
 
 
 def probe_urls(target_map: Any) -> list[str]:
@@ -705,13 +733,24 @@ def main(argv: list[str] | None = None) -> int:
     if not all(isinstance(item, dict) for item in history_raw):
         raise HardFailure("malformed Helm history record")
     history = [
-        {k: h.get(k) for k in ("revision", "updated", "status", "chart", "app_version")}
+        {
+            "revision": h.get("revision"),
+            "updated": h.get("updated"),
+            "status": helm_status(h.get("status")),
+            "chart": h.get("chart"),
+            "app_version": h.get("app_version"),
+        }
         for h in history_raw
     ]
-    status_raw = object_shape(
-        json.loads(run(["helm", "-n", ns, "status", release_name, "-o", "json"]).stdout),
-        "malformed Helm release status",
-    )
+    current_revision = helm_revision(release.get("revision"))
+    current_history = [
+        h for h in history_raw if helm_revision(h.get("revision")) == current_revision
+    ]
+    if len(current_history) != 1:
+        raise HardFailure("unable to identify unique current Helm history revision")
+    # Never use `helm status -o json`: it can expose release config, manifests, and hooks.
+    current_history_status = helm_status(current_history[0].get("status"))
+    list_status = helm_status(release.get("status"))
     tunnel = deployment_snapshot(tunnel_dep)
     tunnel.update(
         {
@@ -719,7 +758,8 @@ def main(argv: list[str] | None = None) -> int:
             "chart": release.get("chart"),
             "appVersion": release.get("app_version"),
             "revision": release.get("revision"),
-            "helmStatus": status_raw.get("info", {}).get("status"),
+            "helmListStatus": list_status,
+            "helmCurrentHistoryStatus": current_history_status,
             "history": history,
         }
     )
@@ -744,11 +784,10 @@ def main(argv: list[str] | None = None) -> int:
     strategy = tunnel["strategy"].get("rollingUpdate", {})
     add_gap(gaps, "CF_IMAGE_NOT_IMMUTABLE_PIN", container.get("image") != EXPECTED_IMAGE)
     add_gap(gaps, "CF_CHART_VERSION_MISMATCH", release.get("chart") != "cloudflare-tunnel-0.3.2")
-    tunnel["helmListStatus"] = release.get("status")
     add_gap(
         gaps,
         "CF_HELM_RELEASE_NOT_DEPLOYED",
-        tunnel["helmStatus"] != "deployed" or tunnel["helmListStatus"] != "deployed",
+        tunnel["helmListStatus"] != "deployed" or tunnel["helmCurrentHistoryStatus"] != "deployed",
     )
     add_gap(gaps, "CF_CONNECTORS_INSUFFICIENT", len(ready_tunnel) < 2)
     add_gap(gaps, "CF_CONNECTORS_UNSPREAD", len({p["node"] for p in ready_tunnel}) < 2)

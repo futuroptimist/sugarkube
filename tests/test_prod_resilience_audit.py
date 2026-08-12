@@ -155,6 +155,9 @@ def test_internal_runner_rejects_mutation_before_execution(monkeypatch, argv) ->
         ["kubectl", "get", "nodes", "-o", "json", "--show-labels"],
         ["kubectl", "get", "nodes", "--unknown"],
         ["helm", "list", "-A", "-o", "json", "--pending"],
+        ["helm", "status", "release"],
+        ["helm", "-n", "default", "status", "release", "-o", "json"],
+        ["helm", "--namespace", "default", "status", "release", "-o", "json"],
         ["helm", "-n", "default", "status", "release", "-o", "json", "--show-resources"],
         ["helm", "-n", "default", "history", "release", "-o", "json", "--max", "1"],
     ],
@@ -306,13 +309,21 @@ if tool == "helm":
     if clean[0] == "list":
         if state.get("malformed_helm"):
             emit(["credential=SECRET-CANARY connector=CONNECTOR-CANARY"]); raise SystemExit()
-        emit([{ "name": "cloudflare", "namespace": "cloudflare", "status": "deployed",
-                "chart": "cloudflare-tunnel-0.3.2", "app_version": "2026.7.3", "revision": "1"}])
+        emit([{ "name": "cloudflare", "namespace": "cloudflare",
+                "status": state.get("helm_list_status", "deployed"),
+                "chart": "cloudflare-tunnel-0.3.2", "app_version": "2026.7.3",
+                "revision": state.get("helm_revision", "1"),
+                "config": "credential=SECRET-CANARY", "manifest": "CONNECTOR-CANARY"}])
     elif clean[0] == "history":
-        emit([{"revision": 1, "updated": "fixed", "status": "deployed",
-               "chart": "cloudflare-tunnel-0.3.2", "app_version": "2026.7.3"}])
-    else:
-        emit({"info": {"status": "deployed"}})
+        entries = [{"revision": 1, "updated": "fixed",
+                    "status": state.get("helm_history_status", "deployed"),
+                    "chart": "cloudflare-tunnel-0.3.2", "app_version": "2026.7.3",
+                    "config": "credential=SECRET-CANARY", "manifest": "CONNECTOR-CANARY"}]
+        if state.get("helm_history_missing"):
+            entries[0]["revision"] = 2
+        if state.get("helm_history_duplicate"):
+            entries.append(dict(entries[0]))
+        emit(entries)
     raise SystemExit()
 
 identity = args[:1] == ["--kubeconfig"]
@@ -547,6 +558,7 @@ def test_cli_compliant_gap_determinism_sanitization_and_read_only_log(audit_harn
         if command[0] == "kubectl"
     )
     assert all((command[1] in {"list", "-n"}) for command in commands if command[0] == "helm")
+    assert not any(command[0] == "helm" and "status" in command for command in commands)
 
 
 def test_cli_completed_gap_exit_contract(audit_harness) -> None:
@@ -557,6 +569,56 @@ def test_cli_completed_gap_exit_contract(audit_harness) -> None:
     assert required.returncode == 1
     assert json.loads((evidence / "audit.json").read_text())["result"] == "PARITY_GAPS"
     assert required_evidence.exists()
+
+
+@pytest.mark.parametrize("scenario", [{}, {"helm_revision": 1}])
+def test_cli_helm_list_and_current_history_deployed_pass(audit_harness, scenario) -> None:
+    execute, _ = audit_harness
+    result, evidence = execute("helm-deployed-" + str(scenario), **scenario)
+    assert result.returncode == 0
+    document = json.loads((evidence / "audit.json").read_text())
+    assert "CF_HELM_RELEASE_NOT_DEPLOYED" not in document["gaps"]
+    tunnel = document["observed"]["cloudflareTunnel"]
+    assert tunnel["helmListStatus"] == "deployed"
+    assert tunnel["helmCurrentHistoryStatus"] == "deployed"
+    assert "helmStatus" not in tunnel
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        {"helm_list_status": "failed"},
+        {"helm_list_status": "pending-upgrade"},
+        {"helm_history_status": "failed"},
+        {"helm_history_status": "pending-upgrade"},
+    ],
+)
+def test_cli_helm_non_deployed_status_is_a_gap(audit_harness, scenario) -> None:
+    execute, _ = audit_harness
+    result, evidence = execute("helm-status-gap-" + str(scenario), **scenario)
+    assert result.returncode == 0
+    assert (
+        "CF_HELM_RELEASE_NOT_DEPLOYED" in json.loads((evidence / "audit.json").read_text())["gaps"]
+    )
+
+
+@pytest.mark.parametrize(
+    "scenario", [{"helm_history_missing": True}, {"helm_history_duplicate": True}]
+)
+def test_cli_current_helm_history_revision_must_be_unique_and_sanitized(
+    audit_harness, scenario
+) -> None:
+    execute, _ = audit_harness
+    result, evidence = execute("helm-history-" + str(scenario), **scenario)
+    assert result.returncode == 2
+    assert (
+        result.stderr.strip()
+        == "HARD_FAILURE: unable to identify unique current Helm history revision"
+    )
+    assert not evidence.exists()
+    combined = result.stdout + result.stderr
+    for canary in ("SECRET-CANARY", "CONNECTOR-CANARY", "credential", "manifest"):
+        assert canary not in combined
 
 
 @pytest.mark.parametrize("scenario", [{"malformed_nodes": True}, {"malformed_helm": True}])
