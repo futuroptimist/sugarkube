@@ -582,6 +582,29 @@ def assert_production_target(kubeconfig: str, runner: Runner) -> None:
     )
 
 
+def configuration_comparison_baselines(
+    live_values: dict[str, Any], desired_values: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Build strict baselines, canonicalizing only an omitted live image repository."""
+    baseline = copy.deepcopy(live_values)
+    baseline.pop("metrics", None)
+    baseline.pop("serviceMonitor", None)
+    desired_baseline = copy.deepcopy(desired_values)
+    desired_baseline.pop("metrics", None)
+    desired_baseline.pop("serviceMonitor", None)
+
+    live_image = baseline.get("image")
+    desired_image = desired_baseline.get("image")
+    if not isinstance(live_image, dict) or not isinstance(desired_image, dict):
+        raise RollbackError("unrelated Helm values drift blocks configuration reconciliation")
+    desired_repository = desired_image.get("repository")
+    if not isinstance(desired_repository, str) or desired_repository != release.IMAGE_REF:
+        raise RollbackError("unrelated Helm values drift blocks configuration reconciliation")
+    if "repository" not in live_image:
+        live_image["repository"] = release.IMAGE_REF
+    return baseline, desired_baseline
+
+
 def rollback(args: argparse.Namespace, runner: Runner = run) -> dict[str, Any]:
     if getattr(args, "configuration_reconciliation", False):
         if not args.kubeconfig or ":" in args.kubeconfig:
@@ -771,12 +794,9 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             {"enabled": False},
         ):
             raise RollbackError("live metrics values are not the approved disabled baseline")
-        baseline = copy.deepcopy(live_values)
-        baseline.pop("metrics", None)
-        baseline.pop("serviceMonitor", None)
-        desired_baseline = copy.deepcopy(desired_values)
-        desired_baseline.pop("metrics", None)
-        desired_baseline.pop("serviceMonitor", None)
+        baseline, desired_baseline = configuration_comparison_baselines(
+            live_values, desired_values
+        )
         if baseline != desired_baseline:
             raise RollbackError("unrelated Helm values drift blocks configuration reconciliation")
     # Keep the registry proof fresh: no tag resolution occurs between this
