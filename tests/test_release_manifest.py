@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts import app_chart, app_config
 from scripts import dspace_release_manifest as manifest
 
 SHA = "abcdef0123456789abcdef0123456789abcdef01"
@@ -687,6 +688,26 @@ def production_stored_values() -> dict[str, object]:
     }
 
 
+def test_committed_production_values_pass_stored_values_contract() -> None:
+    config = app_config.load_config("dspace", "prod")
+    values = app_chart.merged_values_document(tuple(config["SUGARKUBE_VALUES"].split(",")))
+    assert isinstance(values, dict)
+
+    recovery = json.loads(
+        Path("docs/apps/dspace.prod-recovery-coordinates.json").read_text(encoding="utf-8")
+    )
+    approved = manifest.candidate(
+        recovery, "prod", "openai", "2026-07-31T12:00:00Z", "operator"
+    )
+    values["image"] = {
+        "repository": manifest.IMAGE_REF,
+        "tag": approved["imageTag"],
+        "pullPolicy": "Always",
+    }
+
+    assert manifest.verify_helm_stored_values(approved, values, "prod")["passed"] is True
+
+
 def test_helm_stored_values_accept_chart_defaults_and_safe_references() -> None:
     value = split_candidate("prod")
     stored = production_stored_values()
@@ -782,6 +803,69 @@ def test_helm_stored_values_reject_credential_environment_plain_value(name: str)
     sentinel = "".join(("credential", "-sentinel"))
     stored = production_stored_values()
     stored["env"] = [{"name": name, "value": sentinel}]
+    with pytest.raises(manifest.ManifestError, match="approved contract") as raised:
+        manifest.verify_helm_stored_values(split_candidate("prod"), stored, "prod")
+    assert sentinel not in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    ("name", "plain_value"),
+    [
+        ("DSPACE_TOKEN_PLACE_URL", "https://token.place"),
+        ("DSPACE_TOKEN_PLACE_CHAT_MODEL", "llama-3.1-8b-instruct"),
+    ],
+)
+def test_inline_credential_check_accepts_public_token_place_settings(
+    name: str, plain_value: str
+) -> None:
+    assert manifest.contains_inline_credential({"name": name, "value": plain_value}) is False
+
+
+@pytest.mark.parametrize(
+    ("name", "plain_value"),
+    [
+        (
+            "DSPACE_TOKEN_PLACE_URL",
+            "".join(("https://user:", "pass", "word@token.place")),
+        ),
+        (
+            "DSPACE_TOKEN_PLACE_URL",
+            "".join(("https://token.place?", "token", "=credential-sentinel")),
+        ),
+        ("DSPACE_TOKEN_PLACE_URL", "https://staging.token.place"),
+        ("DSPACE_TOKEN_PLACE_URL", "https://other.example"),
+        ("DSPACE_TOKEN_PLACE_CHAT_MODEL", "qwen3-8b-instruct"),
+        ("DSPACE_TOKEN_PLACE_CHAT_MODEL", "".join(("credential", "-sentinel"))),
+    ],
+)
+def test_inline_credential_check_rejects_unapproved_token_place_values(
+    name: str, plain_value: str
+) -> None:
+    value = {"name": name, "value": plain_value}
+    assert manifest.contains_inline_credential(value) is True
+
+    stored = production_stored_values()
+    stored["env"] = [value]
+    with pytest.raises(manifest.ManifestError, match="approved contract") as raised:
+        manifest.verify_helm_stored_values(split_candidate("prod"), stored, "prod")
+    assert plain_value not in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "_".join(("DSPACE_TOKEN_PLACE_URL", "TOKEN")),
+        "_".join(("DSPACE_TOKEN_PLACE_CHAT_MODEL", "SECRET")),
+        "_".join(("DSPACE_TOKEN_PLACE", "".join(("PASS", "WORD")))),
+    ],
+)
+def test_inline_credential_check_does_not_exempt_close_names(name: str) -> None:
+    sentinel = "".join(("credential", "-sentinel"))
+    value = {"name": name, "value": sentinel}
+    assert manifest.contains_inline_credential(value) is True
+
+    stored = production_stored_values()
+    stored["env"] = [value]
     with pytest.raises(manifest.ManifestError, match="approved contract") as raised:
         manifest.verify_helm_stored_values(split_candidate("prod"), stored, "prod")
     assert sentinel not in str(raised.value)

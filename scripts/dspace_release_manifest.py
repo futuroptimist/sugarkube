@@ -992,15 +992,28 @@ def contains_inline_credential(value: object) -> bool:
         "secretkeyref",
         "secretname",
     }
+    # Only these reviewed public name/value pairs may bypass the name-based check.
+    # Keeping the values explicit prevents an exempt variable from carrying an
+    # authenticated URL, query token, or other credential material.
+    public_token_place_settings = {
+        "DSPACE_TOKEN_PLACE_URL": "https://token.place",
+        "DSPACE_TOKEN_PLACE_CHAT_MODEL": "llama-3.1-8b-instruct",
+    }
 
     def is_empty(item: object) -> bool:
         return item is None or item is False or item == "" or item == {} or item == []
 
     if isinstance(value, dict):
         name = value.get("name")
+        approved_public_value = (
+            isinstance(name, str)
+            and "value" in value
+            and value["value"] == public_token_place_settings.get(name)
+        )
         if (
             isinstance(name, str)
             and sensitive.search(name)
+            and not approved_public_value
             and "value" in value
             and not is_empty(value["value"])
         ):
