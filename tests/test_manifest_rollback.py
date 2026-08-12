@@ -174,6 +174,52 @@ def test_production_confirmation_is_bound_to_full_target_sha() -> None:
     rollback.confirmation("staging", "", target())
 
 
+def test_configuration_baselines_accept_only_canonical_repository_omission() -> None:
+    image = {"tag": "main-abcdef0", "pullPolicy": "Always"}
+    desired = {"replicaCount": 2, "image": {**image, "repository": manifest.IMAGE_REF}}
+
+    omitted, expected = rollback.configuration_comparison_baselines(
+        {"replicaCount": 2, "image": image}, desired
+    )
+    explicit, _ = rollback.configuration_comparison_baselines(desired, desired)
+
+    assert omitted == expected == explicit
+    assert "repository" not in image
+
+
+@pytest.mark.parametrize(
+    ("live_image", "desired_repository", "extra_live_value"),
+    [
+        ({"repository": "example.invalid/dspace", "tag": "main-abcdef0"}, manifest.IMAGE_REF, None),
+        ({"tag": "main-abcdef0", "pullPolicy": "Always"}, manifest.IMAGE_REF, True),
+        ("not-a-mapping", manifest.IMAGE_REF, None),
+        ({"tag": "main-abcdef0", "pullPolicy": "Always"}, None, None),
+        ({"tag": "main-abcdef0", "pullPolicy": "Always"}, "", None),
+        ({"tag": "main-abcdef0", "pullPolicy": "Always"}, "example.invalid/dspace", None),
+    ],
+)
+def test_configuration_baselines_keep_all_other_drift_fail_closed(
+    live_image: object, desired_repository: object, extra_live_value: object
+) -> None:
+    live = {"image": live_image}
+    if extra_live_value is not None:
+        live["unrelated"] = extra_live_value
+    desired = {
+        "image": {
+            "repository": desired_repository,
+            "tag": "main-abcdef0",
+            "pullPolicy": "Always",
+        }
+    }
+
+    with pytest.raises(rollback.RollbackError, match="unrelated Helm values drift"):
+        live_baseline, desired_baseline = rollback.configuration_comparison_baselines(live, desired)
+        if live_baseline != desired_baseline:
+            raise rollback.RollbackError(
+                "unrelated Helm values drift blocks configuration reconciliation"
+            )
+
+
 def test_missing_or_candidate_target_fails_before_any_external_command(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -748,6 +794,7 @@ def test_configuration_reconciliation_requires_one_absolute_kubeconfig(
         ("manifest", "live manifest does not match"),
         ("contract", "desired production metrics contract is invalid"),
         ("baseline", "approved disabled baseline"),
+        ("monitor", "approved disabled baseline"),
         ("drift", "unrelated Helm values drift"),
         ("image", "live image coordinate differs"),
     ),
@@ -778,6 +825,8 @@ def test_configuration_reconciliation_preconditions_fail_before_reservation(
         desired = []
     elif failure == "baseline":
         live["metrics"] = {"enabled": True}
+    elif failure == "monitor":
+        live["serviceMonitor"] = {"enabled": True}
     elif failure == "drift":
         live["unrelated"] = True
 
@@ -1106,7 +1155,10 @@ def test_configuration_reconciliation_completes_all_production_gates(
             "cluster": "sugarkube-prod",
         },
     }
-    live = {"replicaCount": 2, "image": image}
+    live = {
+        "replicaCount": 2,
+        "image": {"tag": selected["imageTag"], "pullPolicy": "Always"},
+    }
     stored_proof = [{"check": "helmStoredValues", "passed": True, "details": "safe"}]
     finalized: dict[str, object] = {}
     monkeypatch.setattr(rollback.app_chart, "merged_values_document", lambda _paths: desired)
