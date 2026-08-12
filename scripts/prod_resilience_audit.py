@@ -39,15 +39,91 @@ def operation(argv: list[str]) -> str:
     if argv[0] == "kubectl":
         if args == ["config", "current-context"]:
             return "kubectl/config-current-context"
-        while len(args) >= 2 and args[0] in ("-n", "--namespace"):
-            args = args[2:]
-        if args and args[0] == "get":
+        namespace = None
+        if len(args) >= 2 and args[0] in ("-n", "--namespace"):
+            namespace, args = args[1], args[2:]
+            if not re.fullmatch(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?", namespace):
+                raise HardFailure("internal safety policy rejected a non-allowlisted operation")
+        if namespace is None and args == ["get", "nodes", "-o", "json"]:
             return "kubectl/get"
+        if namespace is None and args == [
+            "get",
+            "deployment",
+            "-A",
+            "-l",
+            "app.kubernetes.io/name=cloudflare-tunnel",
+            "-o",
+            "json",
+        ]:
+            return "kubectl/get"
+        if args[:2] == ["get", "--raw"] and len(args) == 3:
+            path = args[2]
+            if namespace is None and path == "/readyz?verbose":
+                return "kubectl/get-raw-readyz"
+            prom_prefix = (
+                "/api/v1/namespaces/monitoring/services/"
+                "http:kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query="
+            )
+            if namespace is None and path.startswith(prom_prefix) and len(path) <= 1000:
+                from urllib.parse import unquote
+
+                query = unquote(path[len(prom_prefix) :])
+                if re.fullmatch(
+                    r'count\((?:up|cloudflared_tunnel_ha_connections)\{namespace="[-a-z0-9]+",service="[-a-z0-9]*"\} (?:== 1|>= 4)\)'
+                    r'|count\(ALERTS\{alertname=~"CloudflareTunnel\(NoHealthyConnections\|ConnectionsDegraded\|MetricsTargetsDown\)",alertstate="firing"\}\)',
+                    query,
+                ):
+                    return "kubectl/get-raw-prometheus-query"
+        namespaced_gets = {
+            ("deployment", "coredns"),
+            ("deployment", "coredns-ha"),
+            ("deployment", "traefik"),
+            ("service", "traefik"),
+            ("helmchartconfig", "traefik"),
+        }
+        if namespace == "kube-system" and len(args) == 5 and args[:1] == ["get"]:
+            if tuple(args[1:3]) in namespaced_gets and args[3:] == ["-o", "json"]:
+                return "kubectl/get"
+        if namespace is not None and args[:2] == ["get", "pods"] and len(args) == 6:
+            if (
+                args[2] == "-l"
+                and re.fullmatch(r"[-A-Za-z0-9_./=,]+", args[3])
+                and args[4:] == ["-o", "json"]
+            ):
+                return "kubectl/get"
+        if namespace is not None and args in (
+            ["get", "pdb", "-o", "json"],
+            ["get", "service", "-o", "json"],
+            ["get", "servicemonitor", "-o", "json"],
+        ):
+            return "kubectl/get"
+        if (
+            namespace == "kube-system"
+            and len(args) == 6
+            and args[:2]
+            == [
+                "get",
+                "endpointslices.discovery.k8s.io",
+            ]
+        ):
+            if (
+                args[2] == "-l"
+                and re.fullmatch(r"kubernetes\.io/service-name=[-a-z0-9]+", args[3])
+                and args[4:] == ["-o", "json"]
+            ):
+                return "kubectl/get"
     elif argv[0] == "helm":
-        while len(args) >= 2 and args[0] in ("-n", "--namespace"):
-            args = args[2:]
-        if args and args[0] in ("list", "status", "history"):
-            return f"helm/{args[0]}"
+        if args == ["list", "-A", "-o", "json"]:
+            return "helm/list"
+        if len(args) == 6 and args[0] in ("-n", "--namespace"):
+            namespace, verb, release = args[1:4]
+            if (
+                verb in ("status", "history")
+                and re.fullmatch(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?", namespace)
+                and re.fullmatch(r"[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?", release)
+                and args[4:] == ["-o", "json"]
+            ):
+                return f"helm/{verb}"
     elif argv[0] == "git" and args == ["rev-parse", "HEAD"]:
         return "git/rev-parse-head"
     elif argv[0] == sys.executable and args == [

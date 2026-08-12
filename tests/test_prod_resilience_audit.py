@@ -132,6 +132,33 @@ def test_internal_runner_rejects_mutation_before_execution(monkeypatch, argv) ->
     assert called is False
 
 
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["kubectl", "get", "secrets", "-A", "-o", "json"],
+        ["kubectl", "-n", "default", "get", "secret", "token", "-o", "json"],
+        ["kubectl", "get", "--raw", "/api/v1/namespaces/default/secrets"],
+        ["kubectl", "get", "nodes", "-o", "yaml"],
+        ["kubectl", "get", "nodes", "-o", "json", "--show-labels"],
+        ["kubectl", "get", "nodes", "--unknown"],
+        ["helm", "list", "-A", "-o", "json", "--pending"],
+        ["helm", "-n", "default", "status", "release", "-o", "json", "--show-resources"],
+        ["helm", "-n", "default", "history", "release", "-o", "json", "--max", "1"],
+    ],
+)
+def test_operation_rejects_non_allowlisted_read_shapes_before_execution(monkeypatch, argv) -> None:
+    called = False
+
+    def forbidden(*args, **kwargs):
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(audit.subprocess, "run", forbidden)
+    with pytest.raises(audit.HardFailure, match="safety policy"):
+        audit.run(argv)
+    assert called is False
+
+
 def test_source_has_no_cluster_mutation_or_dormant_flux_discovery() -> None:
     source = (ROOT / "scripts/prod_resilience_audit.py").read_text()
     for forbidden in ("flux reconcile", "systemctl", "nftables", "poweroff"):
@@ -164,7 +191,7 @@ def test_runner_failure_is_bounded_and_redacted(monkeypatch) -> None:
     monkeypatch.setattr(audit.subprocess, "run", lambda *args, **kwargs: result)
 
     with pytest.raises(audit.HardFailure) as caught:
-        audit.run(["kubectl", "get", "nodes"])
+        audit.run(["kubectl", "get", "nodes", "-o", "json"])
 
     message = str(caught.value)
     assert "exit 7" in message
