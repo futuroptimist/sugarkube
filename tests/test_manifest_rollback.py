@@ -190,7 +190,15 @@ def test_configuration_baselines_accept_only_canonical_repository_omission() -> 
 @pytest.mark.parametrize(
     ("live_image", "desired_repository", "extra_live_value"),
     [
-        ({"repository": "example.invalid/dspace", "tag": "main-abcdef0"}, manifest.IMAGE_REF, None),
+        (
+            {
+                "repository": "example.invalid/dspace",
+                "tag": "main-abcdef0",
+                "pullPolicy": "Always",
+            },
+            manifest.IMAGE_REF,
+            None,
+        ),
         ({"tag": "main-abcdef0", "pullPolicy": "Always"}, manifest.IMAGE_REF, True),
         ("not-a-mapping", manifest.IMAGE_REF, None),
         ({"tag": "main-abcdef0", "pullPolicy": "Always"}, None, None),
