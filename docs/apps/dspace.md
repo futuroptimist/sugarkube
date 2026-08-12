@@ -2,59 +2,43 @@
 
 This is the canonical runbook for deploying DSPACE from GHCR artifacts to Sugarkube. The generic `just app-*` recipes are the preferred future path. The `dspace-oci-*` recipes remain compatibility shims and are scheduled for later removal only after the generic flow has been exercised across routine releases.
 
-## Production authenticated metrics at the existing release
+## Production authenticated metrics chart maintenance
 
-DSPACE production metrics are supported by the already deployed application **3.0.1** and chart
-**3.0.2**. This repository change does not deploy application or chart code, and it is not a
-promotion. It supplies the reviewed values contract for an upgrade-only configuration
-reconciliation at the existing immutable coordinates.
+This guarded operation is a **chart-only maintenance upgrade** from immutable DSPACE chart 3.0.2
+to 3.0.3 so authenticated production metrics can be enabled. It is not an application promotion:
+application 3.0.1, source `1a31a569aff2dbeb238e8c2688b9e85140d2077d`, image
+`main-1a31a56` and its digest, provider `openai`, two replicas, routing, and credentials remain
+unchanged. The finalized 3.0.2 production evidence remains historical, byte-for-byte unchanged;
+the separately reviewed chart target is `docs/apps/dspace.prod-metrics-chart-target.json`.
 
-Run production operations from `sugarkube3` with the externally managed API tunnel listening on
-`127.0.0.1:16443`. Use the explicit production kubeconfig and context; **do not** run
-`just kubeconfig-env env=prod` on that host:
+Run from `sugarkube3` with the externally managed API tunnel on `127.0.0.1:16443`. Supply the
+explicit production kubeconfig. The operation checks context `sugar-prod`, production cluster
+identity, the genuine finalized baseline, exact live revision/chart/pods, the metrics Secret
+contract without reading its value, strict values drift, the digest-qualified render, and fresh OCI
+provenance before reserving evidence or mutating Helm. Do not install or rotate
+`dspace-prod-metrics-token` as part of this operation.
 
-```bash
-export KUBECONFIG="$HOME/.kube/config-sugarkube-prod"
-test "$(kubectl config current-context)" = sugar-prod
-python3 scripts/cluster_identity.py assert --kubeconfig "$KUBECONFIG" --env prod
-just observability-app-metrics-secret-install app=dspace env=prod
-just observability-app-metrics-secret-check app=dspace env=prod
-```
-
-The hidden-input installer creates or rotates only `dspace/dspace-prod-metrics-token` key `token`;
-the check proves that the key is nonempty without reading it. Install and check it before any
-reconciliation. Never put the credential in an argument, environment variable, transcript, or
-evidence file.
-
-The reconciliation operator must supply the genuine existing finalized production evidence, the
-executable DSPACE runtime smoke runner, and a fresh, nonexisting evidence destination. Discover the
-current Helm revision immediately before the operation rather than assuming revision 9. Review the
-digest-qualified chart render and transient live-versus-desired values comparison: the only
-permitted difference is the committed `metrics` and `serviceMonitor` contract. Retain application
-3.0.1, chart 3.0.2, their immutable image/chart digests, and both replicas; never use
-`--reuse-values`, a semantic or mutable tag, raw `helm upgrade`, or `helm rollback`.
+The currently verified transition is revision 9 to 10. Tooling derives revision 9 from the baseline
+and requires exactly one revision advance; it does not blindly hard-code either revision. Use a
+fresh, nonexisting evidence destination and the executable remote `/chat` smoke runner:
 
 ```bash
 just dspace-prod-metrics-reconcile \
-  manifest="$GENUINE_FINALIZED_PROD_EVIDENCE" \
+  baseline_manifest=deployment-evidence/dspace/prod/main-1a31a56-20260801T093443Z.json \
+  maintenance_target=docs/apps/dspace.prod-metrics-chart-target.json \
   evidence="$FRESH_NONEXISTING_EVIDENCE" \
   smoke_runner="$DSPACE_SMOKE_RUNNER" \
   kubeconfig="$HOME/.kube/config-sugarkube-prod" \
-  confirm="dspace:prod:<40-character-application-SHA>"
+  confirm="dspace:prod:1a31a569aff2dbeb238e8c2688b9e85140d2077d"
 ```
 
-After rollout, run the DSPACE runtime and `/chat` verification, then run:
-
-```bash
-just observability-app-metrics-verify app=dspace env=prod
-just observability-dashboard-verify env=prod
-```
-
-Inspect the production dashboard manually. DSPACE HTTP, runtime, and feature panels should
-populate. Release-integrity, blackbox, token.place, and alerting panels may remain `NO DATA` until
-those separate production integrations are deployed. A failure after mutation is not permission
-to rerun or roll back immediately: preserve and review the reserved failure evidence, discover the
-new live revision, and plan a deliberate reconciliation.
+The command uses only the exact digest-qualified 3.0.3 OCI chart, the complete committed production
+values chain, and an invocation-bound opaque Helm description; it never uses `--reuse-values`.
+Afterward it proves replacement Ready pods retain the exact image digest, runs strict runtime,
+frontend, provider, remote `/chat`, and production metrics verification, and finalizes evidence.
+Any failure after reservation preserves failed evidence. Review that evidence and live Helm history
+before any further mutation; never automatically rerun, uninstall, roll back, delete, or rotate the
+Secret.
 
 ## Production Helm reconciliation for application 3.0.1
 
@@ -300,6 +284,12 @@ contract explicitly to the smoke runner. This is not a fallback: any coordinate 
 modern contract and a modern identity failure remains fatal. The exception changes neither the
 immutable recovery coordinates nor candidate approval.
 
+The separately reviewed production metrics target selects chart 3.0.3 at source revision
+`62da11005354e9f9a89c2e58584cdce4c8ec35aa` and digest
+`sha256:6ee663c426673bc0e516ed8f8b0ab11a918d2f2bb81fc9047b3eb37b78329f5c` while retaining every
+3.0.1 application coordinate above. That exact tuple is also eligible for the same bounded legacy
+identity contract; this is not a general version fallback.
+
 The exact immutable DSPACE 3.1.0 artifact (source `018687f5a7f4de45508c6e36eb28afb3e44da24d`,
 image `main-018687f`, and chart `3.1.1`) also predates `build-info-v1` and is explicitly allowlisted
 for the same strict legacy contract. This is not a general fallback: every coordinate must match,
@@ -380,7 +370,7 @@ verification uses the same command with `env=prod` and a production candidate or
 | Release | `dspace` |
 | Namespace | `dspace` |
 | App config | `docs/examples/apps/dspace.env` |
-| Chart version pins | Shared/default `docs/apps/dspace.version`; staging `docs/apps/dspace.staging.version` (chart `3.1.1` for application `3.1.0`); production `docs/apps/dspace.prod.version` (`3.0.2`) |
+| Chart version pins | Shared/default `docs/apps/dspace.version`; staging `docs/apps/dspace.staging.version` (chart `3.1.1` for application `3.1.0`); production `docs/apps/dspace.prod.version` (`3.0.3`, chart-only application 3.0.1 maintenance) |
 | Production tag pin | `docs/apps/dspace.prod.tag` |
 | Verify paths | `/config.json`, `/healthz`, `/livez` |
 

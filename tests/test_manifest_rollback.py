@@ -13,6 +13,8 @@ from scripts import dspace_release_manifest as manifest
 
 SHA = "abcdef0123456789abcdef0123456789abcdef01"
 DIGEST = "sha256:" + "1" * 64
+PROD_BASELINE = Path("deployment-evidence/dspace/prod/main-1a31a56-20260801T093443Z.json")
+PROD_MAINTENANCE_TARGET = Path("docs/apps/dspace.prod-metrics-chart-target.json")
 
 
 def target(environment: str = "staging", schema_version: int = 1) -> dict[str, object]:
@@ -45,13 +47,37 @@ def target(environment: str = "staging", schema_version: int = 1) -> dict[str, o
     }
     if schema_version == 2:
         value["chartSourceRevision"] = "1234567890abcdef1234567890abcdef12345678"
-    checks = sorted(manifest.required_final_checks(value)) + [
-        "imagePlatformSourceRevision[0]"
-    ]
+    checks = sorted(manifest.required_final_checks(value)) + ["imagePlatformSourceRevision[0]"]
     value["verificationResults"] = [
         {"check": check, "passed": True, "details": "observed"} for check in checks
     ]
     return manifest.validate(value, True)
+
+
+def test_chart_maintenance_target_preserves_application_and_changes_only_chart() -> None:
+    baseline = manifest.validate(manifest._object(PROD_BASELINE), True)
+    selected = rollback.chart_maintenance_target(baseline, PROD_MAINTENANCE_TARGET)
+
+    changed = {field for field in baseline if baseline[field] != selected[field]}
+    assert changed == {"chartSourceRevision", "chartVersion", "chartDigest"}
+    assert selected["chartVersion"] == "3.0.3"
+    assert selected["chartDigest"] == (
+        "sha256:6ee663c426673bc0e516ed8f8b0ab11a918d2f2bb81fc9047b3eb37b78329f5c"
+    )
+
+
+@pytest.mark.parametrize("drift", ("applicationVersion", "unknown"))
+def test_chart_maintenance_target_rejects_drift_and_unknown_fields(
+    tmp_path: Path, drift: str
+) -> None:
+    baseline = manifest.validate(manifest._object(PROD_BASELINE), True)
+    reviewed = manifest._object(PROD_MAINTENANCE_TARGET)
+    reviewed[drift] = "unexpected"
+    path = tmp_path / "target.json"
+    path.write_text(json.dumps(reviewed), encoding="utf-8")
+
+    with pytest.raises(rollback.RollbackError, match="application or image|schema mismatch"):
+        rollback.chart_maintenance_target(baseline, path)
 
 
 def test_schema_v2_final_target_projects_split_provenance_for_rollback() -> None:
@@ -461,9 +487,7 @@ def test_helm_319_snapshot_resolves_exact_current_history_without_leaking_raw_ou
 
     status = helm_319_status()
     monkeypatch.setattr(rollback, "helm_status", lambda *_args: status)
-    observed, history, identity = rollback.helm_snapshot(
-        runner, "kubeconfig", "dspace", "dspace"
-    )
+    observed, history, identity = rollback.helm_snapshot(runner, "kubeconfig", "dspace", "dspace")
 
     assert identity == ("dspace", "3.0.2", 9)
     assert observed is status
@@ -483,9 +507,7 @@ def test_helm_319_snapshot_resolves_exact_current_history_without_leaking_raw_ou
 def test_helm_snapshot_uses_status_metadata_without_history(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    status = helm_319_status(
-        chart={"metadata": {"name": "dspace", "version": "3.0.2"}}
-    )
+    status = helm_319_status(chart={"metadata": {"name": "dspace", "version": "3.0.2"}})
     monkeypatch.setattr(rollback, "helm_status", lambda *_args: status)
     _status, history, identity = rollback.helm_snapshot(
         lambda _command: pytest.fail("history must not be queried"),
@@ -516,9 +538,7 @@ def test_helm_snapshot_rejects_non_object_status_metadata(
 
 def test_helm_history_rejects_invalid_json() -> None:
     with pytest.raises(rollback.RollbackError, match="valid JSON"):
-        rollback.helm_history(
-            lambda _command: "not-json", "kubeconfig", "dspace", "dspace"
-        )
+        rollback.helm_history(lambda _command: "not-json", "kubeconfig", "dspace", "dspace")
 
 
 @pytest.mark.parametrize(
@@ -531,9 +551,7 @@ def test_helm_history_rejects_invalid_json() -> None:
 def test_helm_snapshot_rejects_status_identity_or_state(
     monkeypatch: pytest.MonkeyPatch, changes: dict[str, object]
 ) -> None:
-    status = helm_319_status(
-        chart={"metadata": {"name": "dspace", "version": "3.0.2"}}, **changes
-    )
+    status = helm_319_status(chart={"metadata": {"name": "dspace", "version": "3.0.2"}}, **changes)
     monkeypatch.setattr(rollback, "helm_status", lambda *_args: status)
 
     with pytest.raises(rollback.RollbackError, match="identity"):

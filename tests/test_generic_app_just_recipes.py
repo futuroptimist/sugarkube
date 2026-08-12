@@ -2980,7 +2980,8 @@ def test_dspace_prod_metrics_reconcile_normalizes_documented_and_positional_form
     tmp_path: Path,
 ) -> None:
     values = {
-        "manifest": str(tmp_path / "finalized manifest=approved.json"),
+        "baseline_manifest": str(tmp_path / "finalized manifest=approved.json"),
+        "maintenance_target": str(tmp_path / "reviewed chart target=3.0.3.json"),
         "evidence": str(tmp_path / "fresh evidence=run-42.json"),
         "smoke_runner": str(tmp_path / "smoke runner=production"),
         "kubeconfig": str(tmp_path / "production kubeconfig=primary"),
@@ -3021,7 +3022,8 @@ def test_dspace_prod_metrics_reconcile_preserves_default_verifier_and_empty_conf
     result, argv = _run_dspace_prod_metrics_reconcile(
         tmp_path,
         [
-            "manifest=/tmp/manifest.json",
+            "baseline_manifest=/tmp/manifest.json",
+            "maintenance_target=/tmp/target.json",
             "evidence=/tmp/evidence.json",
             "smoke_runner=/tmp/smoke-runner",
             "kubeconfig=/tmp/kubeconfig",
@@ -3042,6 +3044,7 @@ def test_dspace_prod_metrics_reconcile_rejects_wrong_prefix_before_python(tmp_pa
         tmp_path,
         [
             "evidence=/tmp/manifest.json",
+            "/tmp/target.json",
             "/tmp/evidence.json",
             "/tmp/smoke-runner",
             "/tmp/kubeconfig",
@@ -3049,7 +3052,7 @@ def test_dspace_prod_metrics_reconcile_rejects_wrong_prefix_before_python(tmp_pa
     )
 
     assert result.returncode != 0
-    assert "manifest must be positional or use the manifest= prefix" in result.stderr
+    assert "baseline_manifest must be positional or use the baseline_manifest= prefix" in result.stderr
     assert argv == []
 
 
@@ -3072,10 +3075,10 @@ def test_dspace_recovery_staging_config_uses_production_chart_pin(
     evidence = tmp_path / "recovery-staging-evidence.json"
     _write_dspace_candidate(manifest, "staging")
     candidate = json.loads(manifest.read_text(encoding="utf-8"))
-    candidate["chartVersion"] = "3.0.2"
+    candidate["chartVersion"] = "3.0.3"
     manifest.write_text(json.dumps(candidate) + "\n", encoding="utf-8")
     env = generic_app_stub_env.copy()
-    env["SUGARKUBE_STUB_CHART_VERSION"] = "3.0.2"
+    env["SUGARKUBE_STUB_CHART_VERSION"] = "3.0.3"
 
     result = _run_just(
         [
@@ -3095,7 +3098,7 @@ def test_dspace_recovery_staging_config_uses_production_chart_pin(
     commands = (tmp_path / "commands.log").read_text(encoding="utf-8")
     assert "release-manifest preflight" in commands
     assert "helm template " in commands
-    assert "charts/dspace:3.0.2" in commands
+    assert "charts/dspace:3.0.3" in commands
     assert "docs/examples/dspace.values.staging.yaml" in commands
     assert "main-abcdef0" in commands
 
@@ -3690,12 +3693,15 @@ def test_dspace_prod_verifier_failure_preserves_post_mutation_reservation(
     )
     assert staged.returncode == 0, staged.stderr + staged.stdout
     staging_record = json.loads(staging_evidence.read_text(encoding="utf-8"))
-    staging_record["chartVersion"] = "3.0.2"
+    staging_record["chartVersion"] = "3.0.3"
     staging_evidence.write_text(json.dumps(staging_record) + "\n", encoding="utf-8")
     _write_dspace_candidate(prod_manifest, "prod")
+    prod_candidate = json.loads(prod_manifest.read_text(encoding="utf-8"))
+    prod_candidate["chartVersion"] = "3.0.3"
+    prod_manifest.write_text(json.dumps(prod_candidate) + "\n", encoding="utf-8")
     env = generic_app_stub_env.copy()
     env["SUGARKUBE_STUB_NODE_ENV"] = "prod"
-    env["SUGARKUBE_STUB_CHART_VERSION"] = "3.0.2"
+    env["SUGARKUBE_STUB_CHART_VERSION"] = "3.0.3"
     env["SUGARKUBE_STUB_PROD_VERIFIER_FAIL"] = "1"
     for name in ("helm.log", "commands.log", "runtime-verifier.log"):
         (tmp_path / name).write_text("", encoding="utf-8")

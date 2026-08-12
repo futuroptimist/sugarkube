@@ -1795,7 +1795,7 @@ dspace-manifest-rollback env manifest evidence verifier="{{ justfile_directory()
     "${rollback_command[@]}"
 
 # Values-only production DSPACE metrics reconciliation at finalized immutable coordinates.
-dspace-prod-metrics-reconcile manifest evidence smoke_runner kubeconfig verifier="{{ justfile_directory() }}/scripts/dspace_runtime_verifier.py" confirm='' config='':
+dspace-prod-metrics-reconcile baseline_manifest maintenance_target evidence smoke_runner kubeconfig verifier="{{ justfile_directory() }}/scripts/dspace_runtime_verifier.py" confirm='' config='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
@@ -1805,7 +1805,7 @@ dspace-prod-metrics-reconcile manifest evidence smoke_runner kubeconfig verifier
         value="${value#"${name}="}"
       else
         case "${value}" in
-          manifest=*|evidence=*|smoke_runner=*|kubeconfig=*|verifier=*|confirm=*|config=*)
+          baseline_manifest=*|maintenance_target=*|evidence=*|smoke_runner=*|kubeconfig=*|verifier=*|confirm=*|config=*)
             echo "ERROR: ${name} must be positional or use the ${name}= prefix." >&2
             return 2
             ;;
@@ -1818,7 +1818,8 @@ dspace-prod-metrics-reconcile manifest evidence smoke_runner kubeconfig verifier
       printf '%s' "${value}"
     }
 
-    manifest_path="$(normalize_argument manifest {{ quote(manifest) }} true)"
+    baseline_path="$(normalize_argument baseline_manifest {{ quote(baseline_manifest) }} true)"
+    target_path="$(normalize_argument maintenance_target {{ quote(maintenance_target) }} true)"
     evidence_path="$(normalize_argument evidence {{ quote(evidence) }} true)"
     smoke_path="$(normalize_argument smoke_runner {{ quote(smoke_runner) }} true)"
     kubeconfig_path="$(normalize_argument kubeconfig {{ quote(kubeconfig) }} true)"
@@ -1838,7 +1839,7 @@ dspace-prod-metrics-reconcile manifest evidence smoke_runner kubeconfig verifier
         verifier=*) verifier_path="$(normalize_argument verifier "${value}" true)" ;;
         confirm=*) confirmation="$(normalize_argument confirm "${value}" false)" ;;
         config=*) config_path="$(normalize_argument config "${value}" false)" ;;
-        manifest=*|evidence=*|smoke_runner=*|kubeconfig=*|verifier=*|confirm=*|config=*)
+        baseline_manifest=*|maintenance_target=*|evidence=*|smoke_runner=*|kubeconfig=*|verifier=*|confirm=*|config=*)
           echo "ERROR: unexpected argument prefix in ${value%%=*}=." >&2
           exit 2
           ;;
@@ -1850,7 +1851,8 @@ dspace-prod-metrics-reconcile manifest evidence smoke_runner kubeconfig verifier
       python3 "{{ justfile_directory() }}/scripts/dspace_manifest_rollback.py"
       --configuration-reconciliation
       --environment prod
-      --manifest "${manifest_path}"
+      --baseline-manifest "${baseline_path}"
+      --maintenance-target "${target_path}"
       --evidence "${evidence_path}"
       --smoke-runner "${smoke_path}"
       --kubeconfig "${kubeconfig_path}"
