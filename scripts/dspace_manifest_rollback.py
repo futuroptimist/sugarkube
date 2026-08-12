@@ -525,6 +525,24 @@ def replace_reserved(path: Path, value: dict[str, Any]) -> None:
     release._sync_directory(path.parent)
 
 
+def configuration_baselines_match(
+    live_baseline: dict[str, Any], desired_baseline: dict[str, Any]
+) -> bool:
+    """Compare baselines while accepting the chart-default image repository omission."""
+    live_image = live_baseline.get("image")
+    desired_image = desired_baseline.get("image")
+    if not isinstance(live_image, dict) or not isinstance(desired_image, dict):
+        return False
+    if desired_image.get("repository") != release.IMAGE_REF:
+        return False
+
+    live_comparison = copy.deepcopy(live_baseline)
+    desired_comparison = copy.deepcopy(desired_baseline)
+    if "repository" not in live_image:
+        live_comparison["image"]["repository"] = release.IMAGE_REF
+    return live_comparison == desired_comparison
+
+
 def verify_post_pods(
     after: list[dict[str, Any]],
     before: list[dict[str, Any]],
@@ -777,7 +795,7 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
         desired_baseline = copy.deepcopy(desired_values)
         desired_baseline.pop("metrics", None)
         desired_baseline.pop("serviceMonitor", None)
-        if baseline != desired_baseline:
+        if not configuration_baselines_match(baseline, desired_baseline):
             raise RollbackError("unrelated Helm values drift blocks configuration reconciliation")
     # Keep the registry proof fresh: no tag resolution occurs between this
     # exact-digest check and confirmation/reservation/mutation.

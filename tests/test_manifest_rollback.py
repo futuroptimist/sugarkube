@@ -722,6 +722,81 @@ def test_configuration_reconciliation_invalid_render_fails_before_reservation_an
     assert_no_mutation(commands)
 
 
+@pytest.mark.parametrize(
+    ("live_image", "desired_repository", "extra_live", "matches"),
+    (
+        ({"tag": "main-abcdef0", "pullPolicy": "Always"}, manifest.IMAGE_REF, {}, True),
+        (
+            {
+                "repository": manifest.IMAGE_REF,
+                "tag": "main-abcdef0",
+                "pullPolicy": "Always",
+            },
+            manifest.IMAGE_REF,
+            {},
+            True,
+        ),
+        (
+            {"repository": "example.invalid/dspace", "tag": "main-abcdef0", "pullPolicy": "Always"},
+            manifest.IMAGE_REF,
+            {},
+            False,
+        ),
+        (
+            {"repository": None, "tag": "main-abcdef0", "pullPolicy": "Always"},
+            manifest.IMAGE_REF,
+            {},
+            False,
+        ),
+        (
+            {"repository": "", "tag": "main-abcdef0", "pullPolicy": "Always"},
+            manifest.IMAGE_REF,
+            {},
+            False,
+        ),
+        (
+            {"tag": "main-abcdef0", "pullPolicy": "Always"},
+            manifest.IMAGE_REF,
+            {"drift": True},
+            False,
+        ),
+        ("not-a-mapping", manifest.IMAGE_REF, {}, False),
+        ({"tag": "main-abcdef0", "pullPolicy": "Always"}, None, {}, False),
+        ({"tag": "main-abcdef0", "pullPolicy": "Always"}, "", {}, False),
+        (
+            {"tag": "main-abcdef0", "pullPolicy": "Always"},
+            "example.invalid/dspace",
+            {},
+            False,
+        ),
+    ),
+)
+def test_configuration_baseline_repository_normalization_is_narrow(
+    live_image: object,
+    desired_repository: object,
+    extra_live: dict[str, object],
+    matches: bool,
+) -> None:
+    live = {"replicaCount": 2, "image": live_image, **extra_live}
+    desired = {
+        "replicaCount": 2,
+        "image": {
+            "repository": desired_repository,
+            "tag": "main-abcdef0",
+            "pullPolicy": "Always",
+        },
+    }
+
+    assert rollback.configuration_baselines_match(live, desired) is matches
+    assert live["image"] is live_image
+
+
+def test_configuration_baseline_requires_desired_image_mapping() -> None:
+    live = {"image": {"tag": "main-abcdef0", "pullPolicy": "Always"}}
+
+    assert rollback.configuration_baselines_match(live, {"image": None}) is False
+
+
 @pytest.mark.parametrize("kubeconfig", ("", "relative/kubeconfig", "/tmp/one:/tmp/two"))
 def test_configuration_reconciliation_requires_one_absolute_kubeconfig(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kubeconfig: str
@@ -747,7 +822,8 @@ def test_configuration_reconciliation_requires_one_absolute_kubeconfig(
         ("desired", "desired values are structurally invalid"),
         ("manifest", "live manifest does not match"),
         ("contract", "desired production metrics contract is invalid"),
-        ("baseline", "approved disabled baseline"),
+        ("baseline_metrics", "approved disabled baseline"),
+        ("baseline_monitor", "approved disabled baseline"),
         ("drift", "unrelated Helm values drift"),
         ("image", "live image coordinate differs"),
     ),
@@ -776,9 +852,12 @@ def test_configuration_reconciliation_preconditions_fail_before_reservation(
     live = {"image": image}
     if failure == "desired":
         desired = []
-    elif failure == "baseline":
+    elif failure == "baseline_metrics":
         live["metrics"] = {"enabled": True}
+    elif failure == "baseline_monitor":
+        live["serviceMonitor"] = {"enabled": True}
     elif failure == "drift":
+        live["image"] = {"tag": "main-abcdef0", "pullPolicy": "Always"}
         live["unrelated"] = True
 
     monkeypatch.setattr(rollback.app_chart, "merged_values_document", lambda _paths: desired)
@@ -1106,7 +1185,10 @@ def test_configuration_reconciliation_completes_all_production_gates(
             "cluster": "sugarkube-prod",
         },
     }
-    live = {"replicaCount": 2, "image": image}
+    live = {
+        "replicaCount": 2,
+        "image": {"tag": selected["imageTag"], "pullPolicy": "Always"},
+    }
     stored_proof = [{"check": "helmStoredValues", "passed": True, "details": "safe"}]
     finalized: dict[str, object] = {}
     monkeypatch.setattr(rollback.app_chart, "merged_values_document", lambda _paths: desired)
