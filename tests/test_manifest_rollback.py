@@ -170,6 +170,37 @@ def test_chart_maintenance_target_drift_fails_before_reservation_or_mutation(
     assert commands == []
 
 
+def test_configuration_reconciliation_rejects_mismatched_production_pin_before_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    args, commands, evidence, _verifier = pre_reservation_case(
+        tmp_path, monkeypatch, environment="prod"
+    )
+    args.manifest.write_text(PROD_BASELINE.read_text(encoding="utf-8"), encoding="utf-8")
+    version_file = tmp_path / "dspace.prod.version"
+    version_file.write_text("3.0.2\n", encoding="utf-8")
+    monkeypatch.setattr(
+        rollback.app_config,
+        "load_config",
+        lambda *_args: {
+            "SUGARKUBE_CHART": f"oci://{manifest.CHART_REF}",
+            "SUGARKUBE_RELEASE": "dspace",
+            "SUGARKUBE_NAMESPACE": "dspace",
+            "SUGARKUBE_VERSION_FILE": version_file.name,
+        },
+    )
+    args.configuration_reconciliation = True
+    args.maintenance_target = PROD_MAINTENANCE_TARGET
+    staged = tmp_path / "staged"
+    staged.mkdir()
+
+    with pytest.raises(rollback.RollbackError, match="production chart pin differs"):
+        rollback._rollback(args, lambda command: commands.append(command) or "", staged)
+
+    assert not evidence.exists()
+    assert commands == []
+
+
 def test_schema_v2_final_target_projects_split_provenance_for_rollback() -> None:
     validated = target(schema_version=2)
     projected = {field: validated[field] for field in manifest.candidate_fields(validated)}
@@ -389,6 +420,36 @@ def test_main_rejects_mixed_or_incomplete_maintenance_coordinates(
 
     with pytest.raises(SystemExit, match="2"):
         rollback.main([*coordinates, *common])
+
+
+def test_main_forwards_complete_maintenance_coordinates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    baseline = tmp_path / "baseline.json"
+    maintenance_target = tmp_path / "target.json"
+    captured: list[Namespace] = []
+    monkeypatch.setattr(rollback, "rollback", lambda args: captured.append(args) or {})
+
+    result = rollback.main(
+        [
+            "--baseline-manifest",
+            str(baseline),
+            "--maintenance-target",
+            str(maintenance_target),
+            "--configuration-reconciliation",
+            "--environment",
+            "prod",
+            "--evidence",
+            str(tmp_path / "evidence.json"),
+            "--verifier",
+            str(tmp_path / "verifier"),
+        ]
+    )
+
+    assert result == 0
+    assert len(captured) == 1
+    assert captured[0].manifest == baseline
+    assert captured[0].maintenance_target == maintenance_target
 
 
 @pytest.mark.parametrize(
