@@ -47,6 +47,18 @@ BUILD_FIELDS = {"version", "revision", "shortRevision", "image"}
 LEGACY_BUILD_FIELDS = {"gitSha", "generatedAt", "source"}
 MODERN_IDENTITY_CONTRACT = "build-info-v1"
 LEGACY_IDENTITY_CONTRACT = "legacy-build-meta-v1"
+LEGACY_302_COORDINATES = {
+    "schemaVersion": 2,
+    "applicationVersion": "3.0.1",
+    "sourceRevision": "1a31a569aff2dbeb238e8c2688b9e85140d2077d",
+    "chartSourceRevision": "63063e287adb92a4158ce2c8e7d378b73f52c1c5",
+    "imageTag": "main-1a31a56",
+    "imageDigest": "sha256:23dbc573377549136c1f10b05706b3c176ffbabaf04a3194381a24752104a401",
+    "chartVersion": "3.0.2",
+    "chartDigest": "sha256:8b862135e52146f301a41259d6dabb053ed891d798fc1c8c95ca775b2b8e9575",
+    "semanticTag": "v3.0.1",
+    "expectedDefaultChatProvider": "openai",
+}
 LEGACY_RECOVERY_COORDINATES = {
     "schemaVersion": 2,
     "applicationVersion": "3.0.1",
@@ -71,7 +83,11 @@ LEGACY_310_COORDINATES = {
     "semanticTag": "v3.1.0",
     "expectedDefaultChatProvider": "token-place",
 }
-LEGACY_IDENTITY_COORDINATES = (LEGACY_RECOVERY_COORDINATES, LEGACY_310_COORDINATES)
+LEGACY_IDENTITY_COORDINATES = (
+    LEGACY_302_COORDINATES,
+    LEGACY_RECOVERY_COORDINATES,
+    LEGACY_310_COORDINATES,
+)
 META_RE = re.compile(
     r'<meta\s+[^>]*name=["\']dspace-build-revision["\'][^>]*content=["\']([^"\']+)',
     re.IGNORECASE,

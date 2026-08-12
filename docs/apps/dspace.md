@@ -26,23 +26,13 @@ the check proves that the key is nonempty without reading it. Install and check 
 reconciliation. Never put the credential in an argument, environment variable, transcript, or
 evidence file.
 
-The reconciliation operator must supply the genuine existing finalized production evidence, the
-executable DSPACE runtime smoke runner, and a fresh, nonexisting evidence destination. Discover the
-current Helm revision immediately before the operation rather than assuming revision 9. Review the
-digest-qualified chart render and transient live-versus-desired values comparison: the only
-permitted difference is the committed `metrics` and `serviceMonitor` contract. Retain application
-3.0.1, image `main-1a31a56`, and both replicas while moving from the currently installed chart
-3.0.2 to the approved chart 3.0.3; never use
+`dspace-prod-metrics-reconcile` is a values-only reconciliation at the chart coordinates recorded
+in its finalized evidence. Genuine evidence for the live 3.0.2 release therefore keeps chart 3.0.2;
+evidence for 3.0.3 is rejected while 3.0.2 is live. **Do not use that recipe to perform the chart
+transition.** To retain application 3.0.1, image `main-1a31a56`, and both replicas while moving from
+the installed chart 3.0.2 to the approved chart 3.0.3, follow the read-only preparation and the
+[guarded production mutation](#4-guarded-production-mutation-and-verification) below. Never use
 `--reuse-values`, a semantic or mutable tag, raw `helm upgrade`, or `helm rollback`.
-
-```bash
-just dspace-prod-metrics-reconcile \
-  manifest="$GENUINE_FINALIZED_PROD_EVIDENCE" \
-  evidence="$FRESH_NONEXISTING_EVIDENCE" \
-  smoke_runner="$DSPACE_SMOKE_RUNNER" \
-  kubeconfig="$HOME/.kube/config-sugarkube-prod" \
-  confirm="dspace:prod:<40-character-application-SHA>"
-```
 
 After rollout, run the DSPACE runtime and `/chat` verification, then run:
 

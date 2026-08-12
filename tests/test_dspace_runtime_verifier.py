@@ -691,6 +691,13 @@ def test_exact_recovery_uses_legacy_contract_and_truthful_journeys(
     ]
 
 
+def test_exact_302_coordinates_remain_on_legacy_contract() -> None:
+    assert (
+        verifier.identity_contract(dict(verifier.LEGACY_302_COORDINATES))
+        == verifier.LEGACY_IDENTITY_CONTRACT
+    )
+
+
 def test_exact_310_token_place_uses_legacy_contract_and_truthful_journeys(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -715,6 +722,13 @@ def test_exact_310_token_place_uses_legacy_contract_and_truthful_journeys(
 @pytest.mark.parametrize("field", list(verifier.LEGACY_RECOVERY_COORDINATES))
 def test_any_recovery_coordinate_drift_prevents_legacy_selection(field: str) -> None:
     candidate = dict(verifier.LEGACY_RECOVERY_COORDINATES)
+    candidate[field] = "different"
+    assert verifier.identity_contract(candidate) == verifier.MODERN_IDENTITY_CONTRACT
+
+
+@pytest.mark.parametrize("field", list(verifier.LEGACY_302_COORDINATES))
+def test_any_302_coordinate_drift_prevents_legacy_selection(field: str) -> None:
+    candidate = dict(verifier.LEGACY_302_COORDINATES)
     candidate[field] = "different"
     assert verifier.identity_contract(candidate) == verifier.MODERN_IDENTITY_CONTRACT
 
