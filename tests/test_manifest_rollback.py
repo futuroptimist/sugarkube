@@ -584,6 +584,71 @@ def assert_no_mutation(commands: list[list[str]]) -> None:
     assert not any("upgrade" in command or "rollout" in command for command in commands)
 
 
+@pytest.mark.parametrize(
+    ("live_image", "desired_repository", "expected"),
+    (
+        ({"tag": "main-abcdef0", "pullPolicy": "Always"}, manifest.IMAGE_REF, True),
+        (
+            {
+                "repository": manifest.IMAGE_REF,
+                "tag": "main-abcdef0",
+                "pullPolicy": "Always",
+            },
+            manifest.IMAGE_REF,
+            True,
+        ),
+        (
+            {"repository": "example.invalid/dspace", "tag": "main-abcdef0", "pullPolicy": "Always"},
+            manifest.IMAGE_REF,
+            False,
+        ),
+        ("not-a-mapping", manifest.IMAGE_REF, False),
+        ({"tag": "main-abcdef0", "pullPolicy": "Always"}, "", False),
+        ({"tag": "main-abcdef0", "pullPolicy": "Always"}, None, False),
+        ({"tag": "main-abcdef0", "pullPolicy": "Always"}, 123, False),
+        ({"tag": "main-abcdef0", "pullPolicy": "Always"}, "example.invalid/dspace", False),
+    ),
+)
+def test_configuration_baselines_match_only_normalizes_canonical_repository_omission(
+    live_image: object, desired_repository: object, expected: bool
+) -> None:
+    live = {"replicaCount": 2, "image": live_image}
+    desired = {
+        "replicaCount": 2,
+        "image": {
+            "repository": desired_repository,
+            "tag": "main-abcdef0",
+            "pullPolicy": "Always",
+        },
+    }
+
+    assert rollback.configuration_baselines_match(live, desired) is expected
+    assert live["image"] == live_image
+
+
+def test_configuration_baselines_match_rejects_omission_with_unrelated_drift() -> None:
+    live = {
+        "replicaCount": 1,
+        "image": {"tag": "main-abcdef0", "pullPolicy": "Always"},
+    }
+    desired = {
+        "replicaCount": 2,
+        "image": {
+            "repository": manifest.IMAGE_REF,
+            "tag": "main-abcdef0",
+            "pullPolicy": "Always",
+        },
+    }
+
+    assert not rollback.configuration_baselines_match(live, desired)
+
+
+def test_configuration_baselines_match_rejects_non_mapping_desired_image() -> None:
+    live = {"image": {"tag": "main-abcdef0", "pullPolicy": "Always"}}
+
+    assert not rollback.configuration_baselines_match(live, {"image": "not-a-mapping"})
+
+
 def test_render_failure_precedes_reservation_and_mutation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -748,6 +813,7 @@ def test_configuration_reconciliation_requires_one_absolute_kubeconfig(
         ("manifest", "live manifest does not match"),
         ("contract", "desired production metrics contract is invalid"),
         ("baseline", "approved disabled baseline"),
+        ("monitor-baseline", "approved disabled baseline"),
         ("drift", "unrelated Helm values drift"),
         ("image", "live image coordinate differs"),
     ),
@@ -778,7 +844,10 @@ def test_configuration_reconciliation_preconditions_fail_before_reservation(
         desired = []
     elif failure == "baseline":
         live["metrics"] = {"enabled": True}
+    elif failure == "monitor-baseline":
+        live["serviceMonitor"] = {"enabled": True}
     elif failure == "drift":
+        live["image"] = {"tag": "main-abcdef0", "pullPolicy": "Always"}
         live["unrelated"] = True
 
     monkeypatch.setattr(rollback.app_chart, "merged_values_document", lambda _paths: desired)
@@ -1106,7 +1175,10 @@ def test_configuration_reconciliation_completes_all_production_gates(
             "cluster": "sugarkube-prod",
         },
     }
-    live = {"replicaCount": 2, "image": image}
+    live = {
+        "replicaCount": 2,
+        "image": {"tag": selected["imageTag"], "pullPolicy": "Always"},
+    }
     stored_proof = [{"check": "helmStoredValues", "passed": True, "details": "safe"}]
     finalized: dict[str, object] = {}
     monkeypatch.setattr(rollback.app_chart, "merged_values_document", lambda _paths: desired)

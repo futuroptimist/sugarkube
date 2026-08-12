@@ -15,6 +15,7 @@ import sys
 import tempfile
 import time
 import uuid
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Callable
 
@@ -56,6 +57,23 @@ class RollbackError(ValueError):
 
 
 Runner = Callable[[list[str]], str]
+
+
+def configuration_baselines_match(
+    live_baseline: dict[str, Any], desired_baseline: dict[str, Any]
+) -> bool:
+    """Compare baselines, accepting only the canonical chart-default repository omission."""
+    live_comparison = copy.deepcopy(live_baseline)
+    desired_comparison = copy.deepcopy(desired_baseline)
+    live_image = live_comparison.get("image")
+    desired_image = desired_comparison.get("image")
+    if not isinstance(live_image, Mapping) or not isinstance(desired_image, Mapping):
+        return False
+    if desired_image.get("repository") != release.IMAGE_REF:
+        return False
+    if "repository" not in live_image:
+        live_comparison["image"] = {**live_image, "repository": release.IMAGE_REF}
+    return live_comparison == desired_comparison
 
 
 def run(command: list[str]) -> str:
@@ -777,7 +795,7 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
         desired_baseline = copy.deepcopy(desired_values)
         desired_baseline.pop("metrics", None)
         desired_baseline.pop("serviceMonitor", None)
-        if baseline != desired_baseline:
+        if not configuration_baselines_match(baseline, desired_baseline):
             raise RollbackError("unrelated Helm values drift blocks configuration reconciliation")
     # Keep the registry proof fresh: no tag resolution occurs between this
     # exact-digest check and confirmation/reservation/mutation.
