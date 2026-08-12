@@ -461,6 +461,9 @@ spec:
           targetLabel: environment
           replacement: prod
         - action: replace
+          targetLabel: namespace
+          replacement: dspace
+        - action: replace
           targetLabel: release
           replacement: dspace
         - action: replace
@@ -1404,7 +1407,13 @@ data:
             1,
         ),
         lambda manifest: manifest.replace("replacement: prod", "replacement: staging"),
-        lambda manifest: manifest.replace("targetLabel: release", "targetLabel: namespace"),
+        lambda manifest: manifest.replace("targetLabel: release", "targetLabel: app"),
+        lambda manifest: manifest.replace(
+            "        - action: replace\n          targetLabel: namespace\n          replacement: dspace\n", ""
+        ),
+        lambda manifest: manifest.replace("replacement: dspace\n        - action: replace\n          targetLabel: release", "replacement: other\n        - action: replace\n          targetLabel: release"),
+        lambda manifest: manifest.replace("        - action: replace\n          targetLabel: namespace\n          replacement: dspace\n", "        - action: replace\n          targetLabel: namespace\n          replacement: dspace\n        - action: replace\n          targetLabel: extra\n          replacement: value\n"),
+        lambda manifest: manifest.replace("        - action: replace\n          targetLabel: app\n          replacement: dspace\n        - action: replace\n          targetLabel: environment\n          replacement: prod\n", "        - action: replace\n          targetLabel: environment\n          replacement: prod\n        - action: replace\n          targetLabel: app\n          replacement: dspace\n"),
     ],
 )
 def test_dspace_production_requires_exact_metrics_path_and_relabelings(
@@ -1421,7 +1430,7 @@ def test_dspace_production_requires_exact_metrics_path_and_relabelings(
         "dspace",
         "dspace",
         "chart",
-        "3.0.2",
+        "3.0.3",
         (str(values),),
         "main-deadbee",
     )
@@ -1462,7 +1471,6 @@ spec:
 kind: ServiceMonitor
 metadata:
   name: dspace
-  namespace: dspace
   labels:
     app.kubernetes.io/instance: dspace
     release: kube-prometheus-stack
@@ -1486,6 +1494,9 @@ spec:
           targetLabel: environment
           replacement: prod
         - action: replace
+          targetLabel: namespace
+          replacement: dspace
+        - action: replace
           targetLabel: release
           replacement: dspace
         - action: replace
@@ -1498,6 +1509,25 @@ spec:
     assert mutated != monitor
     assert "DSPACE production ServiceMonitor contract mismatch" in (
         app_chart.validate_rendered_manifest(mutated, inputs)
+    )
+
+
+def test_dspace_production_rejects_explicit_wrong_service_monitor_namespace(tmp_path: Path) -> None:
+    values = tmp_path / "prod.yaml"
+    values.write_text("metrics:\n  enabled: true\n", encoding="utf-8")
+    inputs = app_chart.ReleaseInputs(
+        "dspace", "prod", "dspace", "dspace", "chart", "3.0.3", (str(values),), "main-deadbee"
+    )
+    manifest = """kind: ServiceMonitor
+metadata:
+  name: dspace
+  namespace: other
+  labels:
+    app.kubernetes.io/instance: dspace
+"""
+    assert any(
+        "namespace 'other'" in error
+        for error in app_chart.validate_rendered_manifest(manifest, inputs)
     )
 
 
@@ -2928,7 +2958,7 @@ def _write_dspace_candidate(
         "sourceRevision": "abcdef0123456789abcdef0123456789abcdef01",
         "imageTag": "main-abcdef0",
         "imageDigest": image_digest or "sha256:" + "1" * 64,
-        "chartVersion": "3.1.1" if environment == "staging" else "3.0.2",
+        "chartVersion": "3.1.1" if environment == "staging" else "3.0.3",
         "chartDigest": "sha256:" + "2" * 64,
         "semanticTag": "v3.2.0",
         "recordType": "candidate",
@@ -3072,10 +3102,10 @@ def test_dspace_recovery_staging_config_uses_production_chart_pin(
     evidence = tmp_path / "recovery-staging-evidence.json"
     _write_dspace_candidate(manifest, "staging")
     candidate = json.loads(manifest.read_text(encoding="utf-8"))
-    candidate["chartVersion"] = "3.0.2"
+    candidate["chartVersion"] = "3.0.3"
     manifest.write_text(json.dumps(candidate) + "\n", encoding="utf-8")
     env = generic_app_stub_env.copy()
-    env["SUGARKUBE_STUB_CHART_VERSION"] = "3.0.2"
+    env["SUGARKUBE_STUB_CHART_VERSION"] = "3.0.3"
 
     result = _run_just(
         [
@@ -3095,7 +3125,7 @@ def test_dspace_recovery_staging_config_uses_production_chart_pin(
     commands = (tmp_path / "commands.log").read_text(encoding="utf-8")
     assert "release-manifest preflight" in commands
     assert "helm template " in commands
-    assert "charts/dspace:3.0.2" in commands
+    assert "charts/dspace:3.0.3" in commands
     assert "docs/examples/dspace.values.staging.yaml" in commands
     assert "main-abcdef0" in commands
 
@@ -3690,12 +3720,12 @@ def test_dspace_prod_verifier_failure_preserves_post_mutation_reservation(
     )
     assert staged.returncode == 0, staged.stderr + staged.stdout
     staging_record = json.loads(staging_evidence.read_text(encoding="utf-8"))
-    staging_record["chartVersion"] = "3.0.2"
+    staging_record["chartVersion"] = "3.0.3"
     staging_evidence.write_text(json.dumps(staging_record) + "\n", encoding="utf-8")
     _write_dspace_candidate(prod_manifest, "prod")
     env = generic_app_stub_env.copy()
     env["SUGARKUBE_STUB_NODE_ENV"] = "prod"
-    env["SUGARKUBE_STUB_CHART_VERSION"] = "3.0.2"
+    env["SUGARKUBE_STUB_CHART_VERSION"] = "3.0.3"
     env["SUGARKUBE_STUB_PROD_VERIFIER_FAIL"] = "1"
     for name in ("helm.log", "commands.log", "runtime-verifier.log"):
         (tmp_path / name).write_text("", encoding="utf-8")
@@ -5957,6 +5987,37 @@ def test_observability_app_metrics_inventory_relabelings_match_rendered_replace_
         {"action": "replace", "targetLabel": "cluster", "replacement": "sugarkube-int"},
     ]
     assert "namespace" not in {r["targetLabel"] for r in relabelings}
+
+
+def test_dspace_inventory_declares_exact_five_relabeling_contract():
+    inventory = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))
+    cfg = inventory["applications"]["dspace"]["environments"]["prod"]
+    assert cfg["serviceMonitor"]["relabelings"] == [
+        {"action": "replace", "targetLabel": "app", "replacement": "dspace"},
+        {"action": "replace", "targetLabel": "environment", "replacement": "prod"},
+        {"action": "replace", "targetLabel": "namespace", "replacement": "dspace"},
+        {"action": "replace", "targetLabel": "release", "replacement": "dspace"},
+        {"action": "replace", "targetLabel": "cluster", "replacement": "sugarkube-prod"},
+    ]
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda entries: entries.pop(),
+        lambda entries: entries.append(dict(entries[0])),
+        lambda entries: entries[0].update(replacement="other"),
+        lambda entries: entries.append(
+            {"action": "replace", "targetLabel": "extra", "replacement": "value"}
+        ),
+    ],
+)
+def test_dspace_inventory_rejects_relabeling_drift(mutation):
+    inventory = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))
+    cfg = inventory["applications"]["dspace"]["environments"]["prod"]
+    mutation(cfg["serviceMonitor"]["relabelings"])
+    with pytest.raises(SystemExit):
+        app_metrics.validate_inventory(inventory)
 
 
 def test_observability_app_metrics_verify_exercises_targets_metrics_and_public_401(monkeypatch):
