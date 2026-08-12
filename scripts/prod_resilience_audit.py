@@ -294,6 +294,11 @@ def traefik_desired_snapshot(content: Any) -> dict[str, Any]:
     required_lists = 0
     terms: list[dict[str, str]] = []
     current_term: dict[str, str] | None = None
+    required_path = (
+        "affinity",
+        "podAntiAffinity",
+        "requiredDuringSchedulingIgnoredDuringExecution",
+    )
     parents: dict[int, str] = {}
     malformed = False
     for raw_line in content.splitlines():
@@ -317,6 +322,13 @@ def traefik_desired_snapshot(content: Any) -> dict[str, Any]:
         parents = {level: name for level, name in parents.items() if level < indent}
         path = tuple(parents[level] for level in sorted(parents))
 
+        # A required-list term ends before a sibling or any dedent outside its
+        # anchored path; later YAML must not be allowed to complete that term.
+        if current_term is not None and (
+            indent <= 6 or path[: len(required_path)] != required_path
+        ):
+            current_term = None
+
         if path == ("deployment",) and indent == 2 and key == "replicas":
             if not value.isdecimal():
                 malformed = True
@@ -328,16 +340,7 @@ def traefik_desired_snapshot(content: Any) -> dict[str, Any]:
             and key == "requiredDuringSchedulingIgnoredDuringExecution"
         ):
             required_lists += 1
-        if (
-            path
-            == (
-                "affinity",
-                "podAntiAffinity",
-                "requiredDuringSchedulingIgnoredDuringExecution",
-            )
-            and indent == 6
-            and is_list_item
-        ):
+        if path == required_path and indent == 6 and is_list_item:
             current_term = {}
             terms.append(current_term)
         elif is_list_item:
@@ -345,7 +348,7 @@ def traefik_desired_snapshot(content: Any) -> dict[str, Any]:
 
         if current_term is not None:
             if (
-                path[-2:] == ("labelSelector", "matchLabels")
+                path == required_path + ("labelSelector", "matchLabels")
                 and indent == 12
                 and key == "app.kubernetes.io/name"
             ):

@@ -318,6 +318,46 @@ def test_traefik_desired_snapshot_rejects_decoys_and_ambiguity(content) -> None:
     }
 
 
+@pytest.mark.parametrize(
+    "term, unrelated",
+    [
+        (
+            "      - labelSelector: {}\n",
+            "  labelSelector:\n"
+            "    matchLabels:\n"
+            "      app.kubernetes.io/name: traefik\n"
+            "  topologyKey: kubernetes.io/hostname\n",
+        ),
+        (
+            "      - labelSelector:\n"
+            "          matchLabels:\n"
+            "            app.kubernetes.io/name: traefik\n",
+            "  topologyKey: kubernetes.io/hostname\n",
+        ),
+        (
+            "      - topologyKey: kubernetes.io/hostname\n",
+            "  labelSelector:\n" "    matchLabels:\n" "      app.kubernetes.io/name: traefik\n",
+        ),
+    ],
+)
+def test_traefik_desired_snapshot_does_not_complete_term_after_dedent(term, unrelated) -> None:
+    content = (
+        "deployment:\n"
+        "  replicas: 2\n"
+        "affinity:\n"
+        "  podAntiAffinity:\n"
+        "    requiredDuringSchedulingIgnoredDuringExecution:\n"
+        f"{term}"
+        "unrelated:\n"
+        f"{unrelated}"
+    )
+
+    assert audit.traefik_desired_snapshot(content) == {
+        "replicas": 2,
+        "requiredHostnameAntiAffinity": False,
+    }
+
+
 FAKE_TOOL = r"""#!/usr/bin/python3 -S
 import json, os, sys
 from pathlib import Path
