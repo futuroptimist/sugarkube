@@ -783,21 +783,45 @@ def main(argv: list[str] | None = None) -> int:
         annotations = object_shape(
             meta.get("annotations", {}), "malformed Kubernetes Deployment metadata"
         )
-        release_name = labels.get("app.kubernetes.io/instance") or annotations.get(
-            "meta.helm.sh/release-name"
-        )
+        managed_by = labels.get("app.kubernetes.io/managed-by")
+        release_name = annotations.get("meta.helm.sh/release-name")
+        release_namespace = annotations.get("meta.helm.sh/release-namespace")
+        instance = labels.get("app.kubernetes.io/instance")
+        namespace = meta.get("namespace")
+        if not (
+            managed_by == "Helm"
+            and isinstance(release_name, str)
+            and isinstance(release_namespace, str)
+            and release_namespace == namespace
+            and (instance is None or instance == release_name)
+        ):
+            continue
         match = [
             r
             for r in releases
-            if r.get("name") == release_name and r.get("namespace") == meta.get("namespace")
+            if r.get("name") == release_name and r.get("namespace") == release_namespace
         ]
         if len(match) == 1:
-            candidates.append((dep, match[0]))
+            candidates.append(
+                (
+                    dep,
+                    match[0],
+                    {
+                        "managedBy": managed_by,
+                        "releaseName": release_name,
+                        "releaseNamespace": release_namespace,
+                        "managedByHelm": True,
+                        "instanceMatchesRelease": instance is None or instance == release_name,
+                        "namespaceMatchesDeployment": release_namespace == namespace,
+                        "matchesUniqueHelmRelease": True,
+                    },
+                )
+            )
     if len(candidates) != 1:
         raise HardFailure(
             f"expected exactly one live Cloudflare release candidate; found {len(candidates)}"
         )
-    tunnel_dep, release = candidates[0]
+    tunnel_dep, release, helm_ownership = candidates[0]
     tunnel_meta = object_shape(
         tunnel_dep.get("metadata"), "malformed Kubernetes Deployment metadata"
     )
@@ -838,6 +862,7 @@ def main(argv: list[str] | None = None) -> int:
             "revision": release.get("revision"),
             "helmListStatus": list_status,
             "helmCurrentHistoryStatus": current_history_status,
+            "helmOwnership": helm_ownership,
             "history": history,
         }
     )
@@ -896,43 +921,71 @@ def main(argv: list[str] | None = None) -> int:
             "name": x["metadata"]["name"],
             "minAvailable": x.get("spec", {}).get("minAvailable"),
             "maxUnavailable": x.get("spec", {}).get("maxUnavailable"),
+            "selectorTargetsWorkload": True,
         }
         for x in pdbs
         if selector_matches(x.get("spec", {}).get("selector"), workload_labels)
     ]
     matching_services = []
+    service_snapshots = []
     for service in services:
         spec = service.get("spec", {})
         ports = spec.get("ports", [])
-        if (
-            spec.get("type", "ClusterIP") == "ClusterIP"
-            and selector_matches({"matchLabels": spec.get("selector", {})}, workload_labels)
-            and any(
-                p.get("name") == "metrics"
-                and int_or_string_equals(p.get("port"), 2000)
-                and int_or_string_equals(p.get("targetPort"), 2000)
-                for p in ports
-            )
-        ):
+        selector_targets = selector_matches(
+            {"matchLabels": spec.get("selector", {})}, workload_labels
+        )
+        metrics_ports = [p for p in ports if p.get("name") == "metrics"]
+        valid_port = any(
+            int_or_string_equals(p.get("port"), 2000)
+            and int_or_string_equals(p.get("targetPort"), 2000)
+            for p in metrics_ports
+        )
+        service_snapshots.extend(
+            {
+                "name": service["metadata"]["name"],
+                "type": spec.get("type", "ClusterIP"),
+                "selectorTargetsWorkload": selector_targets,
+                "metricsPortName": port.get("name"),
+                "port": port.get("port"),
+                "targetPort": port.get("targetPort"),
+            }
+            for port in (metrics_ports or [{}])
+        )
+        if spec.get("type", "ClusterIP") == "ClusterIP" and selector_targets and valid_port:
             matching_services.append(service)
     service_labels = (
         matching_services[0].get("metadata", {}).get("labels", {})
         if len(matching_services) == 1
         else {}
     )
-    matching_monitors = [
-        monitor
-        for monitor in monitors
-        if selector_matches(monitor.get("spec", {}).get("selector"), service_labels)
-        and ns in monitor.get("spec", {}).get("namespaceSelector", {}).get("matchNames", [])
-        and any(
-            endpoint.get("port") == "metrics" and endpoint.get("path") == "/metrics"
-            for endpoint in monitor.get("spec", {}).get("endpoints", [])
+    matching_monitors = []
+    monitor_snapshots = []
+    for monitor in monitors:
+        spec = monitor.get("spec", {})
+        selector_targets = bool(service_labels) and selector_matches(
+            spec.get("selector"), service_labels
         )
-    ]
+        namespace_targets = ns in spec.get("namespaceSelector", {}).get("matchNames", [])
+        valid_endpoint = False
+        for endpoint in spec.get("endpoints", []) or [{}]:
+            endpoint_matches = (
+                endpoint.get("port") == "metrics" and endpoint.get("path") == "/metrics"
+            )
+            valid_endpoint = valid_endpoint or endpoint_matches
+            monitor_snapshots.append(
+                {
+                    "name": monitor["metadata"]["name"],
+                    "selectorTargetsService": selector_targets,
+                    "namespaceTargetsRelease": namespace_targets,
+                    "endpointPort": endpoint.get("port"),
+                    "endpointPath": endpoint.get("path"),
+                }
+            )
+        if selector_targets and namespace_targets and valid_endpoint:
+            matching_monitors.append(monitor)
     tunnel["metrics"] = {
-        "services": [x["metadata"]["name"] for x in matching_services],
-        "serviceMonitors": [x["metadata"]["name"] for x in matching_monitors],
+        "services": service_snapshots,
+        "serviceMonitors": monitor_snapshots,
     }
     add_gap(
         gaps,
@@ -944,7 +997,9 @@ def main(argv: list[str] | None = None) -> int:
         "CF_METRICS_DISCOVERY_MISSING",
         len(matching_services) != 1 or len(matching_monitors) != 1,
     )
-    metrics_service = tunnel["metrics"]["services"][0] if tunnel["metrics"]["services"] else ""
+    metrics_service = (
+        matching_services[0]["metadata"]["name"] if len(matching_services) == 1 else ""
+    )
     metrics = {
         "healthyTargets": prom_count(
             f'count(up{{namespace="{ns}",service="{metrics_service}"}} == 1)'

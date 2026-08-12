@@ -387,11 +387,14 @@ if tool == "helm":
     if clean[0] == "list":
         if state.get("malformed_helm"):
             emit(["credential=SECRET-CANARY connector=CONNECTOR-CANARY"]); raise SystemExit()
-        emit([{ "name": "cloudflare", "namespace": "cloudflare",
+        releases = [{ "name": "cloudflare", "namespace": "cloudflare",
                 "status": state.get("helm_list_status", "deployed"),
                 "chart": "cloudflare-tunnel-0.3.2", "app_version": "2026.7.3",
                 "revision": state.get("helm_revision", "1"),
-                "config": "credential=SECRET-CANARY", "manifest": "CONNECTOR-CANARY"}])
+                "config": "credential=SECRET-CANARY", "manifest": "CONNECTOR-CANARY"}]
+        if state.get("multiple_candidates"):
+            releases.append({**releases[0], "name": "cloudflare-second"})
+        emit(releases)
     elif clean[0] == "history":
         entries = [{"revision": 1, "updated": "fixed",
                     "status": state.get("helm_history_status", "deployed"),
@@ -468,17 +471,53 @@ def deployment(dep_name, labels_, affinity):
         container = {"name": "cloudflared", "image": os.environ["AUDIT_EXPECTED_IMAGE"],
                      "readinessProbe": {"httpGet": {"path": "/ready", "port": 2000}}}
     return {"metadata": {"name": dep_name, "namespace": ns or "cloudflare", "uid": dep_name,
-                         "generation": 1, "labels": labels_},
-            "spec": {"replicas": 2, "selector": {"matchLabels": labels_},
+                         "generation": 1, "labels": dict(labels_)},
+            "spec": {"replicas": 2, "selector": {"matchLabels": dict(labels_)},
                      "strategy": {"rollingUpdate": {"maxUnavailable": 0, "maxSurge": 1}},
-                     "template": {"metadata": {"labels": labels_},
+                     "template": {"metadata": {"labels": dict(labels_)},
                                   "spec": {"affinity": affinity, "containers": [container]}}},
             "status": {"readyReplicas": 2, "availableReplicas": 2}}
 if kind == "deployment" and args[2:3] == ["-A"]:
     dep = deployment("cloudflare", pod_labels, anti)
     dep["metadata"]["labels"]["app.kubernetes.io/name"] = "cloudflare-tunnel"
     dep["metadata"]["labels"]["app.kubernetes.io/instance"] = "cloudflare"
-    emit({"items": [dep]}); raise SystemExit()
+    dep["metadata"]["labels"]["app.kubernetes.io/managed-by"] = "Helm"
+    dep["metadata"]["labels"]["canary-label"] = "CONNECTOR-CANARY"
+    dep["metadata"]["annotations"] = {
+        "meta.helm.sh/release-name": "cloudflare",
+        "meta.helm.sh/release-namespace": "cloudflare",
+        "canary-annotation": "SECRET-CANARY",
+    }
+    ownership = state.get("ownership")
+    if ownership == "missing-managed-by":
+        dep["metadata"]["labels"].pop("app.kubernetes.io/managed-by")
+    elif ownership == "flux-managed":
+        dep["metadata"]["labels"]["app.kubernetes.io/managed-by"] = "Flux"
+    elif ownership == "missing-release-name":
+        dep["metadata"]["annotations"].pop("meta.helm.sh/release-name")
+    elif ownership == "wrong-release-namespace":
+        dep["metadata"]["annotations"]["meta.helm.sh/release-namespace"] = "other"
+    elif ownership == "conflicting-instance":
+        dep["metadata"]["labels"]["app.kubernetes.io/instance"] = "other"
+    items = [dep]
+    if state.get("dormant_flux"):
+        flux = deployment("dormant-flux", pod_labels, anti)
+        flux["metadata"]["labels"].update({"app.kubernetes.io/name": "cloudflare-tunnel",
+                                             "app.kubernetes.io/instance": "cloudflare",
+                                             "app.kubernetes.io/managed-by": "Flux",
+                                             "flux-canary": "CONNECTOR-CANARY"})
+        items.append(flux)
+    if state.get("multiple_candidates"):
+        second = deployment("cloudflare-second", pod_labels, anti)
+        second["metadata"]["labels"].update({"app.kubernetes.io/name": "cloudflare-tunnel",
+                                               "app.kubernetes.io/instance": "cloudflare-second",
+                                               "app.kubernetes.io/managed-by": "Helm"})
+        second["metadata"]["annotations"] = {
+            "meta.helm.sh/release-name": "cloudflare-second",
+            "meta.helm.sh/release-namespace": "cloudflare",
+        }
+        items.append(second)
+    emit({"items": [] if state.get("zero_candidates") else items}); raise SystemExit()
 if kind == "deployment" and name in ("coredns", "coredns-ha", "traefik"):
     lab = {"app.kubernetes.io/name": name}
     emit(deployment(name, lab, traefik_anti if name == "traefik" else anti)); raise SystemExit()
@@ -486,9 +525,10 @@ if kind == "pods":
     one = state.get("gap") and ns == "kube-system"
     emit({"items": [pod("a", "sugarkube0")] + ([] if one else [pod("b", "sugarkube1")])})
 elif kind == "pdb":
+    pdb_selector = {"other": "workload"} if state.get("pdb_selector_mismatch") else pod_labels
     emit({"items": [] if ns == "kube-system" else
           [{"metadata": {"name": "cloudflare-pdb"},
-            "spec": {"selector": {"matchLabels": pod_labels}, "minAvailable": 1}}]})
+            "spec": {"selector": {"matchLabels": pdb_selector}, "minAvailable": 1}}]})
 elif kind == "endpointslices.discovery.k8s.io":
     service = next(x.split("=", 1)[1] for x in args if x.startswith("kubernetes.io/service-name="))
     emit({"items": [{"metadata": {"labels": {"kubernetes.io/service-name": service}},
@@ -505,13 +545,16 @@ elif kind == "helmchartconfig":
           "        topologyKey: kubernetes.io/hostname\n"}})
 elif kind == "service":
     emit({"items": [{"metadata": {"name": "cloudflare-metrics", "labels": {"monitor": "cloudflare"}},
-                     "spec": {"selector": pod_labels, "ports": [{"name": "metrics", "port": 2000,
-                                                                   "targetPort": 2000}]}}]})
+                     "spec": {"selector": ({"other": "workload"}
+                                             if state.get("service_selector_mismatch") else pod_labels),
+                              "ports": [{"name": "metrics", "port": (9090 if state.get("port_mismatch") else 2000),
+                                         "targetPort": 2000}]}}]})
 elif kind == "servicemonitor":
     emit({"items": [{"metadata": {"name": "cloudflare"},
-                     "spec": {"selector": {"matchLabels": {"monitor": "cloudflare"}},
-                              "namespaceSelector": {"matchNames": ["cloudflare"]},
-                              "endpoints": [{"port": "metrics", "path": "/metrics"}]}}]})
+                     "spec": {"selector": {"matchLabels": ({"other": "service"}
+                                      if state.get("monitor_selector_mismatch") else {"monitor": "cloudflare"})},
+                              "namespaceSelector": {"matchNames": ["other" if state.get("namespace_mismatch") else "cloudflare"]},
+                              "endpoints": [{"port": "metrics", "path": ("/wrong" if state.get("path_mismatch") else "/metrics")}]}}]})
 else:
     print("unexpected fake kubectl invocation", args, file=sys.stderr); raise SystemExit(9)
 """
@@ -650,6 +693,122 @@ def test_cli_completed_gap_exit_contract(audit_harness) -> None:
     assert required.returncode == 1
     assert json.loads((evidence / "audit.json").read_text())["result"] == "PARITY_GAPS"
     assert required_evidence.exists()
+
+
+def test_cli_cloudflare_evidence_proves_sanitized_helm_ownership_and_bindings(
+    audit_harness,
+) -> None:
+    execute, _ = audit_harness
+    result, evidence = execute("ownership-evidence")
+    assert result.returncode == 0
+    tunnel = json.loads((evidence / "audit.json").read_text())["observed"]["cloudflareTunnel"]
+    assert tunnel["helmOwnership"] == {
+        "managedBy": "Helm",
+        "releaseName": "cloudflare",
+        "releaseNamespace": "cloudflare",
+        "managedByHelm": True,
+        "instanceMatchesRelease": True,
+        "namespaceMatchesDeployment": True,
+        "matchesUniqueHelmRelease": True,
+    }
+    assert tunnel["pdb"] == [
+        {
+            "name": "cloudflare-pdb",
+            "minAvailable": 1,
+            "maxUnavailable": None,
+            "selectorTargetsWorkload": True,
+        }
+    ]
+    assert tunnel["metrics"] == {
+        "services": [
+            {
+                "name": "cloudflare-metrics",
+                "type": "ClusterIP",
+                "selectorTargetsWorkload": True,
+                "metricsPortName": "metrics",
+                "port": 2000,
+                "targetPort": 2000,
+            }
+        ],
+        "serviceMonitors": [
+            {
+                "name": "cloudflare",
+                "selectorTargetsService": True,
+                "namespaceTargetsRelease": True,
+                "endpointPort": "metrics",
+                "endpointPath": "/metrics",
+            }
+        ],
+    }
+    encoded = "".join(path.read_text() for path in evidence.iterdir())
+    assert "canary-label" not in encoded
+    assert "canary-annotation" not in encoded
+    assert "SECRET-CANARY" not in encoded
+    assert "CONNECTOR-CANARY" not in encoded
+
+
+@pytest.mark.parametrize(
+    "ownership",
+    [
+        "missing-managed-by",
+        "flux-managed",
+        "missing-release-name",
+        "wrong-release-namespace",
+        "conflicting-instance",
+    ],
+)
+def test_cli_invalid_ownership_cannot_become_release_candidate(audit_harness, ownership) -> None:
+    execute, _ = audit_harness
+    result, evidence = execute("invalid-ownership-" + ownership, ownership=ownership)
+    assert result.returncode == 2
+    assert (
+        result.stderr
+        == "HARD_FAILURE: expected exactly one live Cloudflare release candidate; found 0\n"
+    )
+    assert not evidence.exists()
+
+
+def test_cli_dormant_flux_deployment_is_ignored(audit_harness) -> None:
+    execute, _ = audit_harness
+    result, evidence = execute("dormant-flux", dormant_flux=True)
+    assert result.returncode == 0
+    encoded = "".join(path.read_text() for path in evidence.iterdir())
+    assert '"managedBy": "Helm"' in encoded
+    assert "Flux" not in encoded
+    assert "CONNECTOR-CANARY" not in encoded
+
+
+@pytest.mark.parametrize(
+    ("scenario", "count"), [({"zero_candidates": True}, 0), ({"multiple_candidates": True}, 2)]
+)
+def test_cli_candidate_cardinality_is_a_sanitized_hard_failure(
+    audit_harness, scenario, count
+) -> None:
+    execute, _ = audit_harness
+    result, evidence = execute("candidate-cardinality-" + str(count), **scenario)
+    assert result.returncode == 2
+    assert result.stderr == (
+        f"HARD_FAILURE: expected exactly one live Cloudflare release candidate; found {count}\n"
+    )
+    assert not evidence.exists()
+
+
+@pytest.mark.parametrize(
+    ("scenario", "gap"),
+    [
+        ({"pdb_selector_mismatch": True}, "CF_PDB_MISSING"),
+        ({"service_selector_mismatch": True}, "CF_METRICS_DISCOVERY_MISSING"),
+        ({"monitor_selector_mismatch": True}, "CF_METRICS_DISCOVERY_MISSING"),
+        ({"port_mismatch": True}, "CF_METRICS_DISCOVERY_MISSING"),
+        ({"namespace_mismatch": True}, "CF_METRICS_DISCOVERY_MISSING"),
+        ({"path_mismatch": True}, "CF_METRICS_DISCOVERY_MISSING"),
+    ],
+)
+def test_cli_resource_binding_mismatches_retain_stable_gaps(audit_harness, scenario, gap) -> None:
+    execute, _ = audit_harness
+    result, evidence = execute("binding-mismatch-" + next(iter(scenario)), **scenario)
+    assert result.returncode == 0
+    assert gap in json.loads((evidence / "audit.json").read_text())["gaps"]
 
 
 @pytest.mark.parametrize(
