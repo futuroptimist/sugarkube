@@ -92,14 +92,16 @@ mkdir -p deployment-candidates/dspace
 # Keep the shared staging pin unchanged while selecting the independently
 # approved 3.0.2 production pin for this recovery only.
 RECOVERY_CONFIG=$(mktemp)
-trap 'rm -f "$RECOVERY_CONFIG"' EXIT
-python3 - "$RECOVERY_CONFIG" <<'PY'
+RECOVERY_VERSION=$(mktemp)
+trap 'rm -f "$RECOVERY_CONFIG" "$RECOVERY_VERSION"' EXIT
+printf '%s\n' 3.0.2 >"$RECOVERY_VERSION"
+python3 - "$RECOVERY_CONFIG" "$RECOVERY_VERSION" <<'PY'
 from pathlib import Path
 import sys
 
 source = Path("docs/examples/apps/dspace.env").read_text(encoding="utf-8")
 old = "SUGARKUBE_VERSION_FILE_STAGING=docs/apps/dspace.staging.version"
-new = "SUGARKUBE_VERSION_FILE_STAGING=docs/apps/dspace.prod.version"
+new = f"SUGARKUBE_VERSION_FILE_STAGING={Path(sys.argv[2]).resolve()}"
 if source.count(old) != 1:
     raise SystemExit("expected exactly one staging version-file assignment")
 Path(sys.argv[1]).write_text(source.replace(old, new), encoding="utf-8")

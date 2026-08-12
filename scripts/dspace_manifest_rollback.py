@@ -78,6 +78,14 @@ def run(command: list[str]) -> str:
     return completed.stdout
 
 
+def chart_pin(path: Path) -> str:
+    """Read a chart pin with the shared parser and redact filesystem failures."""
+    try:
+        return app_chart.read_pin(str(path))
+    except (OSError, SystemExit, ValueError) as exc:
+        raise RollbackError("configured production chart pin is unreadable or invalid") from exc
+
+
 def json_command(runner: Runner, command: list[str], label: str) -> dict[str, Any]:
     try:
         value = json.loads(runner(command))
@@ -96,15 +104,6 @@ def exact_fields(value: dict[str, Any], fields: tuple[str, ...], label: str) -> 
             f"{label} schema mismatch (missing={','.join(missing) or '-'}; "
             f"unknown={','.join(unknown) or '-'})"
         )
-
-
-def chart_pin(path: Path) -> str:
-    """Return the first non-comment, non-blank chart version pin."""
-    for line in path.read_text(encoding="utf-8").splitlines():
-        value = line.split("#", 1)[0].strip()
-        if value:
-            return value
-    return ""
 
 
 def verifier_capabilities(
@@ -642,6 +641,14 @@ def chart_maintenance_target(baseline: dict[str, Any], path: Path) -> dict[str, 
     exact_fields(reviewed, MAINTENANCE_TARGET_FIELDS, "chart maintenance target")
     if reviewed.get("schemaVersion") != 2 or reviewed.get("app") != "dspace":
         raise RollbackError("chart maintenance target must be schema 2 for dspace")
+    approved_application = {
+        "app": "dspace",
+        "applicationVersion": "3.0.1",
+        "sourceRevision": "1a31a569aff2dbeb238e8c2688b9e85140d2077d",
+        "imageTag": "main-1a31a56",
+        "imageDigest": "sha256:23dbc573377549136c1f10b05706b3c176ffbabaf04a3194381a24752104a401",
+        "semanticTag": "v3.0.1",
+    }
     preserved = (
         "app",
         "applicationVersion",
@@ -652,6 +659,8 @@ def chart_maintenance_target(baseline: dict[str, Any], path: Path) -> dict[str, 
     )
     if any(reviewed.get(field) != baseline.get(field) for field in preserved):
         raise RollbackError("chart maintenance target changes an application or image field")
+    if any(reviewed.get(field) != wanted for field, wanted in approved_application.items()):
+        raise RollbackError("chart maintenance target is not the approved application tuple")
     chart_tuple = (
         reviewed.get("chartSourceRevision"),
         reviewed.get("chartVersion"),
@@ -718,8 +727,8 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
     if config["SUGARKUBE_RELEASE"] != "dspace" or config["SUGARKUBE_NAMESPACE"] != "dspace":
         raise RollbackError("DSPACE release and namespace must both be dspace")
     if configuration_reconciliation and getattr(args, "maintenance_target", None):
-        version_path = root / config["SUGARKUBE_VERSION_FILE"]
-        if chart_pin(version_path) != target["chartVersion"]:
+        configured_version = chart_pin(root / config["SUGARKUBE_VERSION_FILE"])
+        if configured_version != target["chartVersion"]:
             raise RollbackError("configured production chart pin differs from maintenance target")
     values, values_proof = stage_values(config, root, staged_directory)
     environment = cluster_environment(runner, args.kubeconfig)
@@ -1118,7 +1127,7 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             raise RollbackError("Helm did not report the expected deployed release")
         if after_helm.get("info", {}).get("description") != description:
             raise RollbackError("Helm release description is not bound to this invocation")
-        if after_revision != before_identity[2] + 1:
+        if configuration_reconciliation and after_revision != before_identity[2] + 1:
             raise RollbackError("Helm revision did not advance exactly once")
         if after_identity[0] != "dspace" or after_identity[1] != target["chartVersion"]:
             raise RollbackError("installed chart name/version does not match target")

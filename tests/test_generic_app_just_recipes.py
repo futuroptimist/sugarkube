@@ -3094,10 +3094,12 @@ def test_dspace_recovery_staging_config_uses_production_chart_pin(
     staging_pin = "SUGARKUBE_VERSION_FILE_STAGING=docs/apps/dspace.staging.version"
     assert source.count(staging_pin) == 1
     recovery_config = tmp_path / "recovery-staging.env"
+    recovery_version = tmp_path / "recovery.version"
+    recovery_version.write_text("3.0.2\n", encoding="utf-8")
     recovery_config.write_text(
         source.replace(
             staging_pin,
-            "SUGARKUBE_VERSION_FILE_STAGING=docs/apps/dspace.prod.version",
+            f"SUGARKUBE_VERSION_FILE_STAGING={recovery_version}",
         ),
         encoding="utf-8",
     )
@@ -3105,10 +3107,10 @@ def test_dspace_recovery_staging_config_uses_production_chart_pin(
     evidence = tmp_path / "recovery-staging-evidence.json"
     _write_dspace_candidate(manifest, "staging")
     candidate = json.loads(manifest.read_text(encoding="utf-8"))
-    candidate["chartVersion"] = "3.0.3"
+    candidate["chartVersion"] = "3.0.2"
     manifest.write_text(json.dumps(candidate) + "\n", encoding="utf-8")
     env = generic_app_stub_env.copy()
-    env["SUGARKUBE_STUB_CHART_VERSION"] = "3.0.3"
+    env["SUGARKUBE_STUB_CHART_VERSION"] = "3.0.2"
 
     result = _run_just(
         [
@@ -3128,7 +3130,7 @@ def test_dspace_recovery_staging_config_uses_production_chart_pin(
     commands = (tmp_path / "commands.log").read_text(encoding="utf-8")
     assert "release-manifest preflight" in commands
     assert "helm template " in commands
-    assert "charts/dspace:3.0.3" in commands
+    assert "charts/dspace:3.0.2" in commands
     assert "docs/examples/dspace.values.staging.yaml" in commands
     assert "main-abcdef0" in commands
 

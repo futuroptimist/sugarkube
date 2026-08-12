@@ -63,6 +63,15 @@ def test_chart_pin_ignores_comments_and_blank_lines(tmp_path: Path) -> None:
     assert rollback.chart_pin(pin) == "3.0.3"
 
 
+def test_chart_pin_failure_is_redacted(tmp_path: Path) -> None:
+    missing = tmp_path / "sensitive" / "dspace.prod.version"
+
+    with pytest.raises(rollback.RollbackError, match="unreadable or invalid") as error:
+        rollback.chart_pin(missing)
+
+    assert str(missing) not in str(error.value)
+
+
 def test_chart_maintenance_target_preserves_application_and_changes_only_chart() -> None:
     baseline = manifest.validate(manifest._object(PROD_BASELINE), True)
     selected = rollback.chart_maintenance_target(baseline, PROD_MAINTENANCE_TARGET)
@@ -86,6 +95,20 @@ def test_chart_maintenance_target_rejects_drift_and_unknown_fields(
     path.write_text(json.dumps(reviewed), encoding="utf-8")
 
     with pytest.raises(rollback.RollbackError, match="application or image|schema mismatch"):
+        rollback.chart_maintenance_target(baseline, path)
+
+
+def test_chart_maintenance_target_rejects_matching_but_unapproved_application(
+    tmp_path: Path,
+) -> None:
+    baseline = manifest.validate(manifest._object(PROD_BASELINE), True)
+    reviewed = manifest._object(PROD_MAINTENANCE_TARGET)
+    baseline["applicationVersion"] = reviewed["applicationVersion"] = "3.0.0"
+    baseline["semanticTag"] = reviewed["semanticTag"] = "v3.0.0"
+    path = tmp_path / "target.json"
+    path.write_text(json.dumps(reviewed), encoding="utf-8")
+
+    with pytest.raises(rollback.RollbackError, match="approved application tuple"):
         rollback.chart_maintenance_target(baseline, path)
 
 
