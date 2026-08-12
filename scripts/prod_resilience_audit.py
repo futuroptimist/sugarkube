@@ -25,6 +25,15 @@ EXPECTED_IMAGE = (
 )
 TARGETS = ROOT / "config/prod-resilience-audit-targets.json"
 MAX_PROBE_WORKERS = 8
+PROMETHEUS_ALERT_RULES_PATH = (
+    "/api/v1/namespaces/monitoring/services/"
+    "http:kube-prometheus-stack-prometheus:9090/proxy/api/v1/rules?type=alert"
+)
+EXPECTED_CLOUDFLARE_ALERT_RULES = (
+    "CloudflareTunnelConnectionsDegraded",
+    "CloudflareTunnelMetricsTargetsDown",
+    "CloudflareTunnelNoHealthyConnections",
+)
 
 
 class HardFailure(RuntimeError):
@@ -60,6 +69,8 @@ def operation(argv: list[str]) -> str:
             path = args[2]
             if namespace is None and path == "/readyz?verbose":
                 return "kubectl/get-raw-readyz"
+            if namespace is None and path == PROMETHEUS_ALERT_RULES_PATH:
+                return "kubectl/get-raw-prometheus-alert-rules"
             prom_prefix = (
                 "/api/v1/namespaces/monitoring/services/"
                 "http:kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query="
@@ -378,6 +389,43 @@ def prom_count(query: str) -> int:
         return int(float(result[0]["value"][1])) if result else 0
     except (KeyError, TypeError, ValueError, IndexError) as exc:
         raise HardFailure("Prometheus returned an invalid aggregate") from exc
+
+
+def prometheus_alert_rules() -> dict[str, Any]:
+    """Return only repository-owned aggregate alert-rule health state."""
+    document = kubectl("get", "--raw", PROMETHEUS_ALERT_RULES_PATH)
+    data = document.get("data")
+    if document.get("status") != "success" or not isinstance(data, dict):
+        raise HardFailure("Prometheus returned malformed alert rules")
+    groups = data.get("groups")
+    if not isinstance(groups, list):
+        raise HardFailure("Prometheus returned malformed alert rules")
+
+    expected = set(EXPECTED_CLOUDFLARE_ALERT_RULES)
+    matches: list[tuple[str, str]] = []
+    for group in groups:
+        if not isinstance(group, dict) or not isinstance(group.get("rules"), list):
+            raise HardFailure("Prometheus returned malformed alert rules")
+        for rule in group["rules"]:
+            if (
+                not isinstance(rule, dict)
+                or not isinstance(rule.get("name"), str)
+                or not isinstance(rule.get("health"), str)
+            ):
+                raise HardFailure("Prometheus returned malformed alert rules")
+            if rule["name"] in expected:
+                matches.append((rule["name"], rule["health"]))
+
+    return {
+        "expectedNames": list(EXPECTED_CLOUDFLARE_ALERT_RULES),
+        "expectedCount": len(EXPECTED_CLOUDFLARE_ALERT_RULES),
+        "presentNames": sorted({name for name, _ in matches}),
+        "presentCount": len(matches),
+        "healthyCount": sum(health == "ok" for _, health in matches),
+        "ruleSetMatches": sorted(name for name, _ in matches)
+        == list(EXPECTED_CLOUDFLARE_ALERT_RULES),
+        "allPresentRulesHealthy": all(health == "ok" for _, health in matches),
+    }
 
 
 def probe(url: str) -> dict[str, Any]:
@@ -716,6 +764,7 @@ def main() -> int:
             'ConnectionsDegraded|MetricsTargetsDown)",alertstate="firing"})'
         ),
     }
+    metrics["alertRules"] = prometheus_alert_rules()
     add_gap(gaps, "CF_METRICS_TARGETS_UNHEALTHY", metrics["healthyTargets"] < len(ready_tunnel))
     add_gap(
         gaps,
@@ -723,6 +772,16 @@ def main() -> int:
         metrics["connectorsWithFourHAConnections"] < len(ready_tunnel),
     )
     add_gap(gaps, "CF_ALERTS_FIRING", metrics["firingRelevantAlerts"] != 0)
+    add_gap(
+        gaps,
+        "CF_ALERT_RULE_SET_MISMATCH",
+        not metrics["alertRules"]["ruleSetMatches"],
+    )
+    add_gap(
+        gaps,
+        "CF_ALERT_RULES_UNHEALTHY",
+        not metrics["alertRules"]["allPresentRulesHealthy"],
+    )
 
     target_map = json.loads(TARGETS.read_text())
     urls = probe_urls(target_map)

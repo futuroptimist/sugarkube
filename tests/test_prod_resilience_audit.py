@@ -138,6 +138,19 @@ def test_internal_runner_rejects_mutation_before_execution(monkeypatch, argv) ->
         ["kubectl", "get", "secrets", "-A", "-o", "json"],
         ["kubectl", "-n", "default", "get", "secret", "token", "-o", "json"],
         ["kubectl", "get", "--raw", "/api/v1/namespaces/default/secrets"],
+        ["kubectl", "get", "--raw", audit.PROMETHEUS_ALERT_RULES_PATH + "&x=1"],
+        [
+            "kubectl",
+            "get",
+            "--raw",
+            audit.PROMETHEUS_ALERT_RULES_PATH.replace("monitoring", "default"),
+        ],
+        [
+            "kubectl",
+            "get",
+            "--raw",
+            audit.PROMETHEUS_ALERT_RULES_PATH.replace("type=alert", "type=record"),
+        ],
         ["kubectl", "get", "nodes", "-o", "yaml"],
         ["kubectl", "get", "nodes", "-o", "json", "--show-labels"],
         ["kubectl", "get", "nodes", "--unknown"],
@@ -315,6 +328,26 @@ if args[:3] == ["config", "view", "--minify"]:
 if args[:3] == ["get", "--raw", "/readyz?verbose"]:
     emit("readyz check passed\n[+]etcd ok"); raise SystemExit()
 if args[:2] == ["get", "--raw"]:
+    if args[2].endswith("/api/v1/rules?type=alert"):
+        if state.get("alert_malformed"):
+            emit({"status": "success", "data": {"groups": "credential=SECRET-CANARY"}})
+            raise SystemExit()
+        rules = [
+            {"name": "CloudflareTunnelNoHealthyConnections", "health": "ok"},
+            {"name": "CloudflareTunnelConnectionsDegraded", "health": "ok"},
+            {"name": "CloudflareTunnelMetricsTargetsDown", "health": "ok"},
+        ]
+        if state.get("alert_missing"):
+            rules.pop()
+        if state.get("alert_unhealthy"):
+            rules[0]["health"] = "err"
+        if state.get("alert_duplicate"):
+            rules.append(dict(rules[0]))
+        for rule in rules:
+            rule.update({"query": "credential=SECRET-CANARY", "labels": {"connector": "CONNECTOR-CANARY"},
+                         "annotations": {"description": "SECRET-CANARY"}})
+        emit({"status": "success", "data": {"groups": [{"rules": rules}]}})
+        raise SystemExit()
     count = 0 if "ALERTS" in args[2] else 2
     emit({"data": {"result": [{"value": [0, str(count)]}]}}); raise SystemExit()
 
@@ -519,6 +552,41 @@ def test_cli_completed_gap_exit_contract(audit_harness) -> None:
     assert required.returncode == 1
     assert json.loads((evidence / "audit.json").read_text())["result"] == "PARITY_GAPS"
     assert required_evidence.exists()
+
+
+@pytest.mark.parametrize(
+    ("scenario", "gap"),
+    [
+        ({}, None),
+        ({"alert_missing": True}, "CF_ALERT_RULE_SET_MISMATCH"),
+        ({"alert_duplicate": True}, "CF_ALERT_RULE_SET_MISMATCH"),
+        ({"alert_unhealthy": True}, "CF_ALERT_RULES_UNHEALTHY"),
+    ],
+)
+def test_cli_alert_rule_parity_is_sanitized(audit_harness, scenario, gap) -> None:
+    execute, _ = audit_harness
+    result, evidence = execute("alerts-" + (gap or "healthy") + str(scenario), **scenario)
+    assert result.returncode == 0
+    document = json.loads((evidence / "audit.json").read_text())
+    assert (
+        (gap in document["gaps"])
+        if gap
+        else not any(code.startswith("CF_ALERT_RULE") for code in document["gaps"])
+    )
+    combined = (
+        result.stdout + result.stderr + "".join(path.read_text() for path in evidence.iterdir())
+    )
+    for canary in ("SECRET-CANARY", "CONNECTOR-CANARY", "credential", "annotations", "query"):
+        assert canary not in combined
+
+
+def test_cli_malformed_alert_rules_are_a_sanitized_hard_failure(audit_harness) -> None:
+    execute, _ = audit_harness
+    result, evidence = execute("alerts-malformed", alert_malformed=True)
+    assert result.returncode == 2
+    assert not evidence.exists()
+    assert result.stderr.strip() == "HARD_FAILURE: Prometheus returned malformed alert rules"
+    assert "SECRET-CANARY" not in result.stdout + result.stderr
 
 
 def test_cli_compliant_fixture_covers_in_process_collection(audit_harness, monkeypatch) -> None:
