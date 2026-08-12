@@ -72,6 +72,72 @@ def test_conflicting_duplicate_endpoint_fails_closed() -> None:
     assert result["unhealthyEndpoints"] == 1
 
 
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        {"addresses": ["10.0.0.1"], "conditions": {"ready": "false"}},
+        {"addresses": ["10.0.0.1"], "conditions": {"serving": 1}},
+        {"addresses": ["10.0.0.1"], "conditions": {"terminating": None}},
+        {"addresses": []},
+        {"addresses": [""]},
+        {"addresses": [1]},
+        {"addresses": ["10.0.0.1"], "nodeName": ""},
+        {"addresses": ["10.0.0.1"], "nodeName": 1},
+        {"addresses": ["10.0.0.1"], "targetRef": []},
+        {"addresses": ["10.0.0.1"], "targetRef": {"uid": 1}},
+    ],
+)
+def test_endpoint_slices_reject_malformed_endpoint_fields(endpoint) -> None:
+    with pytest.raises(audit.HardFailure, match="^malformed EndpointSlice entry$"):
+        audit.endpoints(slices([[endpoint]]), "traefik")
+
+
+def test_endpoint_target_api_version_is_part_of_duplicate_identity() -> None:
+    common = {
+        "addresses": ["10.0.0.1"],
+        "nodeName": "a",
+        "targetRef": {"kind": "Pod", "name": "pod", "uid": "uid"},
+    }
+    first = {**common, "targetRef": {**common["targetRef"], "apiVersion": "v1"}}
+    second = {**common, "targetRef": {**common["targetRef"], "apiVersion": "v2"}}
+    result = audit.endpoints(slices([[first, second]]), "traefik")
+    assert result["uniqueEndpoints"] == result["healthyEndpoints"] == 2
+    assert "apiVersion" not in json.dumps(result)
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {},
+        {"status": "error", "data": {"result": []}},
+        {"status": "success", "data": []},
+        {"status": "success", "data": {"result": {}}},
+        {"status": "success", "data": {"result": [{"value": [0, "1"]}, {"value": [0, "2"]}]}},
+        {"status": "success", "data": {"result": [{}]}},
+        {"status": "success", "data": {"result": [{"value": [0]}]}},
+        {"status": "success", "data": {"result": [{"value": ["bad", "1"]}]}},
+        {"status": "success", "data": {"result": [{"value": [0, "1.5"]}]}},
+        {"status": "success", "data": {"result": [{"value": [0, "-1"]}]}},
+        {"status": "success", "data": {"result": [{"value": [0, "NaN"]}]}},
+    ],
+)
+def test_prom_count_rejects_invalid_aggregates(monkeypatch, response) -> None:
+    monkeypatch.setattr(audit, "kubectl", lambda *args: response)
+    with pytest.raises(audit.HardFailure, match="^Prometheus returned an invalid aggregate$"):
+        audit.prom_count("sum(up)")
+
+
+@pytest.mark.parametrize(
+    ("result", "expected"),
+    [([], 0), ([{"metric": {"raw": "SECRET-CANARY"}, "value": [0, "2"]}], 2)],
+)
+def test_prom_count_accepts_valid_sanitized_aggregates(monkeypatch, result, expected) -> None:
+    monkeypatch.setattr(
+        audit, "kubectl", lambda *args: {"status": "success", "data": {"result": result}}
+    )
+    assert audit.prom_count("sum(up)") == expected
+
+
 def test_deployment_snapshot_keeps_secret_reference_but_not_value() -> None:
     dep = {
         "metadata": {"name": "tunnel", "namespace": "cf", "uid": "pod-uid"},
@@ -445,8 +511,18 @@ if args[:2] == ["get", "--raw"]:
                          "annotations": {"description": "SECRET-CANARY"}})
         emit({"status": "success", "data": {"groups": [{"rules": rules}]}})
         raise SystemExit()
+    if state.get("prom_invalid"):
+        response = {"data": {"result": [
+            {"metric": {"connector": "CONNECTOR-CANARY"},
+             "value": [0, "credential=SECRET-CANARY"]}]}}
+        if not state.get("prom_missing_status"):
+            response["status"] = "error"
+        emit(response)
+        raise SystemExit()
     count = 0 if "ALERTS" in args[2] else 2
-    emit({"data": {"result": [{"value": [0, str(count)]}]}}); raise SystemExit()
+    emit({"status": "success", "data": {"result": [
+        {"metric": {"connector": "CONNECTOR-CANARY", "credential": "SECRET-CANARY"},
+         "value": [0, str(count)]}]}}); raise SystemExit()
 
 ns = None
 if args[:1] in (["-n"], ["--namespace"]):
@@ -693,6 +769,22 @@ def test_cli_completed_gap_exit_contract(audit_harness) -> None:
     assert required.returncode == 1
     assert json.loads((evidence / "audit.json").read_text())["result"] == "PARITY_GAPS"
     assert required_evidence.exists()
+
+
+@pytest.mark.parametrize(
+    "scenario", [{"prom_invalid": True}, {"prom_invalid": True, "prom_missing_status": True}]
+)
+def test_cli_invalid_prometheus_aggregate_is_sanitized_hard_failure(
+    audit_harness, scenario
+) -> None:
+    execute, _ = audit_harness
+    result, evidence = execute("prometheus-invalid-" + str(scenario), **scenario)
+    combined = result.stdout + result.stderr
+    assert result.returncode == 2
+    assert result.stderr == "HARD_FAILURE: Prometheus returned an invalid aggregate\n"
+    assert "SECRET-CANARY" not in combined
+    assert "CONNECTOR-CANARY" not in combined
+    assert not evidence.exists()
 
 
 def test_cli_cloudflare_evidence_proves_sanitized_helm_ownership_and_bindings(

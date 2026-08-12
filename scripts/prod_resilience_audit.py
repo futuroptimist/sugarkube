@@ -8,6 +8,7 @@ import concurrent.futures
 import datetime as dt
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -487,17 +488,37 @@ def endpoints(document: dict[str, Any], service: str) -> dict[str, Any]:
         for value in list_shape(item.get("endpoints"), "malformed EndpointSlice entry"):
             endpoint = object_shape(value, "malformed EndpointSlice entry")
             cond = object_shape(endpoint.get("conditions", {}), "malformed EndpointSlice entry")
+            if any(
+                key in cond and not isinstance(cond[key], bool)
+                for key in ("ready", "serving", "terminating")
+            ):
+                raise HardFailure("malformed EndpointSlice entry")
             effective_ready = cond.get("ready", True)
             serving = cond.get("serving", effective_ready)
             terminating = cond.get("terminating", False)
             addresses = list_shape(endpoint.get("addresses"), "malformed EndpointSlice entry")
-            if not all(isinstance(address, str) for address in addresses):
+            if not addresses or not all(
+                isinstance(address, str) and address for address in addresses
+            ):
                 raise HardFailure("malformed EndpointSlice entry")
-            target = object_shape(endpoint.get("targetRef", {}), "malformed EndpointSlice entry")
+            node = endpoint.get("nodeName")
+            if node is not None and (not isinstance(node, str) or not node):
+                raise HardFailure("malformed EndpointSlice entry")
+            target_value = endpoint.get("targetRef")
+            target = (
+                {}
+                if target_value is None
+                else object_shape(target_value, "malformed EndpointSlice entry")
+            )
+            target_fields = tuple(
+                target.get(k, "") for k in ("apiVersion", "kind", "namespace", "name", "uid")
+            )
+            if not all(isinstance(field, str) for field in target_fields):
+                raise HardFailure("malformed EndpointSlice entry")
             key = (
-                endpoint.get("nodeName") or "",
+                node or "",
                 tuple(sorted(set(addresses))),
-                tuple(str(target.get(k, "")) for k in ("kind", "namespace", "name", "uid")),
+                target_fields,
             )
             grouped.setdefault(key, []).append((effective_ready, serving, terminating))
     healthy = [k for k, states in grouped.items() if all(r and s and not t for r, s, t in states)]
@@ -529,10 +550,38 @@ def prom_count(query: str) -> int:
         "http:kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query="
         + quote(query, safe="")
     )
-    result = kubectl("get", "--raw", path).get("data", {}).get("result", [])
+    document = kubectl("get", "--raw", path)
+    data = document.get("data")
+    if document.get("status") != "success" or not isinstance(data, dict):
+        raise HardFailure("Prometheus returned an invalid aggregate")
+    result = data.get("result")
+    if not isinstance(result, list) or len(result) > 1:
+        raise HardFailure("Prometheus returned an invalid aggregate")
+    if not result:
+        return 0
     try:
-        return int(float(result[0]["value"][1])) if result else 0
-    except (KeyError, TypeError, ValueError, IndexError) as exc:
+        sample = result[0]
+        if not isinstance(sample, dict):
+            raise TypeError
+        value = sample["value"]
+        if (
+            not isinstance(value, list)
+            or len(value) != 2
+            or isinstance(value[0], bool)
+            or isinstance(value[1], bool)
+        ):
+            raise TypeError
+        timestamp = float(value[0])
+        count = float(value[1])
+        if (
+            not math.isfinite(timestamp)
+            or not math.isfinite(count)
+            or count < 0
+            or not count.is_integer()
+        ):
+            raise ValueError
+        return int(count)
+    except (KeyError, TypeError, ValueError) as exc:
         raise HardFailure("Prometheus returned an invalid aggregate") from exc
 
 
