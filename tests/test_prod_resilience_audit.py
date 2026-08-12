@@ -108,6 +108,12 @@ def test_deployment_snapshot_keeps_secret_reference_but_not_value() -> None:
         ["kubectl", "exec", "pod/x"],
         ["helm", "upgrade", "x", "chart"],
         ["helm", "repo", "add", "x", "url"],
+        ["kubectl", "scale", "deployment/x"],
+        ["kubectl", "cp", "pod/x:/x", "."],
+        ["helm", "test", "x"],
+        ["flux", "reconcile", "kustomization", "x"],
+        ["sudo", "true"],
+        ["ssh", "host"],
     ],
 )
 def test_internal_runner_rejects_mutation_before_execution(monkeypatch, argv) -> None:
@@ -148,7 +154,7 @@ def test_int_or_string_comparison_rejects_other_values(value) -> None:
     assert not audit.int_or_string_equals(value, 0)
 
 
-def test_runner_failure_includes_bounded_diagnostics(monkeypatch) -> None:
+def test_runner_failure_is_bounded_and_redacted(monkeypatch) -> None:
     result = subprocess.CompletedProcess(
         ["kubectl", "get", "nodes"], 7, stderr="permission denied " + "x" * 600
     )
@@ -159,17 +165,47 @@ def test_runner_failure_includes_bounded_diagnostics(monkeypatch) -> None:
 
     message = str(caught.value)
     assert "exit 7" in message
-    assert "kubectl get nodes" in message
-    assert "permission denied" in message
-    assert len(message) < 600
+    assert "kubectl/get" in message
+    assert "permission denied" not in message
+    assert "x" * 20 not in message
+    assert len(message) < 100
 
 
 def test_successful_status_with_transport_error_is_unhealthy() -> None:
     assert audit.probes_unhealthy([{"status": 200, "error": "transport"}])
-    assert not audit.probes_unhealthy([{"status": 204}])
+    assert not audit.probes_unhealthy([{"status": 204, "error": "none"}])
 
 
-@pytest.mark.parametrize("targets", [{}, {"example.com": []}, []])
+@pytest.mark.parametrize(
+    "targets",
+    [{}, {"example.com": []}, [], {"example.com": "path"}, {1: ["/"]}, {"x": [1]}],
+)
 def test_empty_probe_targets_fail_closed(targets) -> None:
     with pytest.raises(audit.HardFailure, match="target manifest"):
         audit.probe_urls(targets)
+
+
+def test_required_hostname_anti_affinity_matches_workload() -> None:
+    affinity = {
+        "podAntiAffinity": {
+            "requiredDuringSchedulingIgnoredDuringExecution": [
+                {
+                    "topologyKey": "kubernetes.io/hostname",
+                    "labelSelector": {"matchLabels": {"app": "tunnel"}},
+                }
+            ]
+        }
+    }
+    assert audit.required_hostname_anti_affinity(affinity, {"app": "tunnel"})
+    assert not audit.required_hostname_anti_affinity(affinity, {"app": "unrelated"})
+
+
+def test_traefik_desired_snapshot_never_retains_raw_values() -> None:
+    result = audit.traefik_desired_snapshot(
+        "deployment:\n  replicas: 2\naffinity:\n  "
+        "requiredDuringSchedulingIgnoredDuringExecution:\n"
+        "    app.kubernetes.io/name: traefik\n"
+        "    topologyKey: kubernetes.io/hostname\nsecret: do-not-retain\n"
+    )
+    assert result == {"replicas": 2, "requiredHostnameAntiAffinity": True}
+    assert "do-not-retain" not in json.dumps(result)

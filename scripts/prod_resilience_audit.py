@@ -9,7 +9,7 @@ import datetime as dt
 import hashlib
 import json
 import os
-import shlex
+import re
 import shutil
 import subprocess
 import sys
@@ -24,34 +24,72 @@ EXPECTED_IMAGE = (
     "e39ee8da81ad5e05d77f38d2f51c60ca51bf2a8450ac3abab50c17fdb91d91bf"
 )
 TARGETS = ROOT / "config/prod-resilience-audit-targets.json"
-FORBIDDEN = {"apply", "create", "patch", "replace", "delete", "edit", "run", "exec", "port-forward"}
+MAX_PROBE_WORKERS = 8
 
 
 class HardFailure(RuntimeError):
     pass
 
 
-def run(argv: list[str], *, ok=(0,), timeout=30) -> subprocess.CompletedProcess[str]:
+def operation(argv: list[str]) -> str:
+    """Return a safe operation identifier or reject before process execution."""
+    if not argv:
+        raise HardFailure("internal safety policy rejected an empty command")
+    args = argv[1:]
     if argv[0] == "kubectl":
-        words = set(argv[1:])
-        if words & FORBIDDEN or ("rollout" in words and "restart" in words):
-            raise HardFailure("internal safety policy rejected a mutating kubectl command")
-    if argv[0] == "helm" and set(argv[1:]) & {
-        "install",
-        "upgrade",
-        "rollback",
-        "uninstall",
-        "repo",
-        "push",
-    }:
-        raise HardFailure("internal safety policy rejected a mutating helm command")
+        if args == ["config", "current-context"]:
+            return "kubectl/config-current-context"
+        while len(args) >= 2 and args[0] in ("-n", "--namespace"):
+            args = args[2:]
+        if args and args[0] == "get":
+            return "kubectl/get"
+    elif argv[0] == "helm":
+        while len(args) >= 2 and args[0] in ("-n", "--namespace"):
+            args = args[2:]
+        if args and args[0] in ("list", "status", "history"):
+            return f"helm/{args[0]}"
+    elif argv[0] == "git" and args == ["rev-parse", "HEAD"]:
+        return "git/rev-parse-head"
+    elif argv[0] == sys.executable and args == [
+        str(ROOT / "scripts/cluster_identity.py"),
+        "assert",
+        "--kubeconfig",
+        os.environ.get("KUBECONFIG", str(Path.home() / ".kube/config")),
+        "--env",
+        "prod",
+    ]:
+        return "python/cluster-identity-assert-prod"
+    elif (
+        argv[0] == "curl"
+        and len(argv) == 15
+        and args[:-1]
+        == [
+            "--silent",
+            "--show-error",
+            "--output",
+            "/dev/null",
+            "--max-time",
+            "8",
+            "--connect-timeout",
+            "3",
+            "--write-out",
+            "%{http_code}\t%{time_connect}\t%{time_starttransfer}\t%{time_total}",
+            "--proto",
+            "=https",
+            "--location",
+        ]
+        and args[-1] in probe_urls(json.loads(TARGETS.read_text()))
+    ):
+        return "curl/public-probe"
+    raise HardFailure("internal safety policy rejected a non-allowlisted operation")
+
+
+def run(argv: list[str], *, ok=(0,), timeout=30) -> subprocess.CompletedProcess[str]:
+    op = operation(argv)
     proc = subprocess.run(argv, text=True, capture_output=True, timeout=timeout, check=False)
     if proc.returncode not in ok:
-        stderr = " ".join(proc.stderr.split())[:500] or "<empty>"
-        raise HardFailure(
-            f"read-only command failed (exit {proc.returncode}): {shlex.join(argv)}; "
-            f"stderr: {stderr}"
-        )
+        # Raw argv and stderr can expose credentials, connector IDs, labels, or bodies.
+        raise HardFailure(f"read-only {op} failed (exit {proc.returncode}; external-error)")
     return proc
 
 
@@ -84,19 +122,54 @@ def probe_urls(target_map: Any) -> list[str]:
     """Expand the public target manifest, failing closed when it has no URLs."""
     if not isinstance(target_map, dict):
         raise HardFailure("production probe target manifest must be an object")
-    urls = sorted(
-        f"https://{host}{path}"
-        for host, paths in target_map.items()
-        if isinstance(paths, list)
-        for path in paths
-    )
+    urls = []
+    for host, paths in target_map.items():
+        if not isinstance(host, str) or not host or not isinstance(paths, list) or not paths:
+            raise HardFailure("production probe target manifest contains a malformed entry")
+        if any(not isinstance(path, str) or not path.startswith("/") for path in paths):
+            raise HardFailure("production probe target manifest contains a malformed path")
+        urls.extend(f"https://{host}{path}" for path in paths)
+    urls.sort()
     if not urls:
         raise HardFailure("production probe target manifest contains no URLs")
     return urls
 
 
 def probes_unhealthy(rows: list[dict[str, Any]]) -> bool:
-    return any(row.get("error") or not 200 <= row["status"] < 400 for row in rows)
+    return any(row.get("error") != "none" or not 200 <= row["status"] < 400 for row in rows)
+
+
+def selector_matches(selector: Any, labels: dict[str, Any]) -> bool:
+    match = selector.get("matchLabels", {}) if isinstance(selector, dict) else {}
+    return bool(match) and all(labels.get(k) == v for k, v in match.items())
+
+
+def required_hostname_anti_affinity(affinity: Any, labels: dict[str, Any]) -> bool:
+    if not isinstance(affinity, dict):
+        return False
+    terms = affinity.get("podAntiAffinity", {}).get(
+        "requiredDuringSchedulingIgnoredDuringExecution", []
+    )
+    return any(
+        isinstance(term, dict)
+        and term.get("topologyKey") == "kubernetes.io/hostname"
+        and selector_matches(term.get("labelSelector"), labels)
+        for term in terms
+    )
+
+
+def traefik_desired_snapshot(content: Any) -> dict[str, Any]:
+    """Extract only the two approved fields from K3s Helm values (never raw values)."""
+    text = content if isinstance(content, str) else ""
+    replica = re.search(r"(?m)^\s{2}replicas:\s*([0-9]+)\s*$", text)
+    return {
+        "replicas": int(replica.group(1)) if replica else None,
+        "requiredHostnameAntiAffinity": bool(
+            re.search(r"(?m)^\s*requiredDuringSchedulingIgnoredDuringExecution:\s*$", text)
+            and re.search(r"(?m)^\s*topologyKey:\s*kubernetes\.io/hostname\s*$", text)
+            and re.search(r"(?m)^\s*app\.kubernetes\.io/name:\s*traefik\s*$", text)
+        ),
+    }
 
 
 def ready(pod: dict[str, Any]) -> bool:
@@ -246,6 +319,9 @@ def probe(url: str) -> dict[str, Any]:
                 "3",
                 "--write-out",
                 "%{http_code}\t%{time_connect}\t%{time_starttransfer}\t%{time_total}",
+                "--proto",
+                "=https",
+                "--location",
                 url,
             ],
             ok=tuple(range(0, 100)),
@@ -255,7 +331,7 @@ def probe(url: str) -> dict[str, Any]:
         return {"url": url, "status": 0, "error": "timeout"}
     fields = proc.stdout.strip().split("\t")
     status = int(fields[0]) if fields and fields[0].isdigit() else 0
-    row: dict[str, Any] = {"url": url, "status": status}
+    row: dict[str, Any] = {"url": url, "status": status, "error": "none"}
     if len(fields) == 4:
         row.update(zip(("connectSeconds", "startTransferSeconds", "totalSeconds"), fields[1:]))
     if proc.returncode:
@@ -374,6 +450,17 @@ def main() -> int:
             "internalTrafficPolicy", "Cluster"
         )
     }
+    add_gap(
+        gaps, "TRAEFIK_TRAFFIC_POLICY_MISMATCH", ingress_service["internalTrafficPolicy"] != "Local"
+    )
+    traefik = components.get("traefik", {})
+    add_gap(
+        gaps,
+        "TRAEFIK_SCHEDULING_CONTRACT_MISMATCH",
+        not required_hostname_anti_affinity(
+            traefik.get("affinity", {}), {"app.kubernetes.io/name": "traefik"}
+        ),
+    )
     lifecycle = {}
     for kind, name in (("helmchartconfig", "traefik"), ("deployment", "coredns-ha")):
         obj = kubectl("-n", "kube-system", "get", kind, name, "-o", "json", allow_missing=True)
@@ -391,13 +478,17 @@ def main() -> int:
                     .get("affinity", {}),
                 }
                 if kind == "deployment"
-                else {
-                    "valuesContentSha256": hashlib.sha256(
-                        str(obj.get("spec", {}).get("valuesContent", "")).encode()
-                    ).hexdigest()
-                }
+                else traefik_desired_snapshot(obj.get("spec", {}).get("valuesContent"))
             ),
         }
+    desired_traefik = lifecycle["helmchartconfig/traefik"]["desired"]
+    add_gap(
+        gaps,
+        "TRAEFIK_DESIRED_CONFIG_MISMATCH",
+        desired_traefik.get("replicas") != 2
+        or not desired_traefik.get("requiredHostnameAntiAffinity"),
+    )
+    add_gap(gaps, "COREDNS_HA_MISSING", not lifecycle["deployment/coredns-ha"]["present"])
 
     deployments = list_items(
         "get", "deployment", "-A", "-l", "app.kubernetes.io/name=cloudflare-tunnel", "-o", "json"
@@ -443,15 +534,28 @@ def main() -> int:
     selector = ",".join(
         f"{k}={v}" for k, v in sorted(tunnel_dep["spec"]["selector"]["matchLabels"].items())
     )
+    workload_labels = (
+        tunnel_dep.get("spec", {}).get("template", {}).get("metadata", {}).get("labels", {})
+    )
     tunnel["pods"] = pods_snapshot(kubectl("-n", ns, "get", "pods", "-l", selector, "-o", "json"))
     ready_tunnel = [p for p in tunnel["pods"] if p["ready"]]
     container = tunnel["containers"][0] if tunnel["containers"] else {}
     strategy = tunnel["strategy"].get("rollingUpdate", {})
     add_gap(gaps, "CF_IMAGE_NOT_IMMUTABLE_PIN", container.get("image") != EXPECTED_IMAGE)
     add_gap(gaps, "CF_CHART_VERSION_MISMATCH", release.get("chart") != "cloudflare-tunnel-0.3.2")
-    add_gap(gaps, "CF_HELM_RELEASE_NOT_DEPLOYED", tunnel["helmStatus"] != "deployed")
+    tunnel["helmListStatus"] = release.get("status")
+    add_gap(
+        gaps,
+        "CF_HELM_RELEASE_NOT_DEPLOYED",
+        tunnel["helmStatus"] != "deployed" or tunnel["helmListStatus"] != "deployed",
+    )
     add_gap(gaps, "CF_CONNECTORS_INSUFFICIENT", len(ready_tunnel) < 2)
     add_gap(gaps, "CF_CONNECTORS_UNSPREAD", len({p["node"] for p in ready_tunnel}) < 2)
+    add_gap(
+        gaps,
+        "CF_ANTI_AFFINITY_MISSING",
+        not required_hostname_anti_affinity(tunnel.get("affinity"), workload_labels),
+    )
     add_gap(
         gaps,
         "CF_UNSAFE_ROLLOUT",
@@ -466,22 +570,9 @@ def main() -> int:
         or not int_or_string_equals(probe_spec.get("port"), 2000)
         or bool(container.get("livenessProbe")),
     )
-    pdbs = list_items(
-        "-n", ns, "get", "pdb", "-l", f"app.kubernetes.io/instance={release_name}", "-o", "json"
-    )
-    services = list_items(
-        "-n", ns, "get", "service", "-l", f"app.kubernetes.io/instance={release_name}", "-o", "json"
-    )
-    monitors = list_items(
-        "-n",
-        ns,
-        "get",
-        "servicemonitor",
-        "-l",
-        f"app.kubernetes.io/instance={release_name}",
-        "-o",
-        "json",
-    )
+    pdbs = list_items("-n", ns, "get", "pdb", "-o", "json")
+    services = list_items("-n", ns, "get", "service", "-o", "json")
+    monitors = list_items("-n", ns, "get", "servicemonitor", "-o", "json")
     tunnel["pdb"] = [
         {
             "name": x["metadata"]["name"],
@@ -489,25 +580,52 @@ def main() -> int:
             "maxUnavailable": x.get("spec", {}).get("maxUnavailable"),
         }
         for x in pdbs
+        if selector_matches(x.get("spec", {}).get("selector"), workload_labels)
+    ]
+    matching_services = []
+    for service in services:
+        spec = service.get("spec", {})
+        ports = spec.get("ports", [])
+        if (
+            spec.get("type", "ClusterIP") == "ClusterIP"
+            and selector_matches({"matchLabels": spec.get("selector", {})}, workload_labels)
+            and any(
+                p.get("name") == "metrics"
+                and int_or_string_equals(p.get("port"), 2000)
+                and int_or_string_equals(p.get("targetPort"), 2000)
+                for p in ports
+            )
+        ):
+            matching_services.append(service)
+    service_labels = (
+        matching_services[0].get("metadata", {}).get("labels", {})
+        if len(matching_services) == 1
+        else {}
+    )
+    matching_monitors = [
+        monitor
+        for monitor in monitors
+        if selector_matches(monitor.get("spec", {}).get("selector"), service_labels)
+        and ns in monitor.get("spec", {}).get("namespaceSelector", {}).get("matchNames", [])
+        and any(
+            endpoint.get("port") == "metrics" and endpoint.get("path") == "/metrics"
+            for endpoint in monitor.get("spec", {}).get("endpoints", [])
+        )
     ]
     tunnel["metrics"] = {
-        "services": [
-            x["metadata"]["name"]
-            for x in services
-            if x.get("spec", {}).get("type", "ClusterIP") == "ClusterIP"
-        ],
-        "serviceMonitors": [x["metadata"]["name"] for x in monitors],
+        "services": [x["metadata"]["name"] for x in matching_services],
+        "serviceMonitors": [x["metadata"]["name"] for x in matching_monitors],
     }
     add_gap(
         gaps,
         "CF_PDB_MISSING",
-        not any(
-            p.get("spec", {}).get("minAvailable") == 1
-            or p.get("spec", {}).get("maxUnavailable") == 1
-            for p in pdbs
-        ),
+        not any(int_or_string_equals(p.get("minAvailable"), 1) for p in tunnel["pdb"]),
     )
-    add_gap(gaps, "CF_METRICS_DISCOVERY_MISSING", not tunnel["metrics"]["services"] or not monitors)
+    add_gap(
+        gaps,
+        "CF_METRICS_DISCOVERY_MISSING",
+        len(matching_services) != 1 or len(matching_monitors) != 1,
+    )
     metrics_service = tunnel["metrics"]["services"][0] if tunnel["metrics"]["services"] else ""
     metrics = {
         "healthyTargets": prom_count(
@@ -532,7 +650,9 @@ def main() -> int:
 
     target_map = json.loads(TARGETS.read_text())
     urls = probe_urls(target_map)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(urls)) as pool:
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=min(MAX_PROBE_WORKERS, len(urls))
+    ) as pool:
         probe_rows = sorted(pool.map(probe, urls), key=lambda row: row["url"])
     add_gap(
         gaps,
