@@ -1805,7 +1805,7 @@ dspace-prod-metrics-reconcile baseline_manifest maintenance_target evidence smok
         value="${value#"${name}="}"
       else
         case "${value}" in
-          baseline_manifest=*|maintenance_target=*|evidence=*|smoke_runner=*|kubeconfig=*|verifier=*|confirm=*|config=*)
+          manifest=*|baseline_manifest=*|maintenance_target=*|evidence=*|smoke_runner=*|kubeconfig=*|verifier=*|confirm=*|config=*)
             echo "ERROR: ${name} must be positional or use the ${name}= prefix." >&2
             return 2
             ;;
@@ -1839,7 +1839,7 @@ dspace-prod-metrics-reconcile baseline_manifest maintenance_target evidence smok
         verifier=*) verifier_path="$(normalize_argument verifier "${value}" true)" ;;
         confirm=*) confirmation="$(normalize_argument confirm "${value}" false)" ;;
         config=*) config_path="$(normalize_argument config "${value}" false)" ;;
-        baseline_manifest=*|maintenance_target=*|evidence=*|smoke_runner=*|kubeconfig=*|verifier=*|confirm=*|config=*)
+        manifest=*|baseline_manifest=*|maintenance_target=*|evidence=*|smoke_runner=*|kubeconfig=*|verifier=*|confirm=*|config=*)
           echo "ERROR: unexpected argument prefix in ${value%%=*}=." >&2
           exit 2
           ;;

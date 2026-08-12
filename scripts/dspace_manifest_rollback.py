@@ -98,6 +98,15 @@ def exact_fields(value: dict[str, Any], fields: tuple[str, ...], label: str) -> 
         )
 
 
+def chart_pin(path: Path) -> str:
+    """Return the first non-comment, non-blank chart version pin."""
+    for line in path.read_text(encoding="utf-8").splitlines():
+        value = line.split("#", 1)[0].strip()
+        if value:
+            return value
+    return ""
+
+
 def verifier_capabilities(
     executable: Path, environment: str, release_name: str, namespace: str, runner: Runner = run
 ) -> dict[str, Any]:
@@ -710,7 +719,7 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
         raise RollbackError("DSPACE release and namespace must both be dspace")
     if configuration_reconciliation and getattr(args, "maintenance_target", None):
         version_path = root / config["SUGARKUBE_VERSION_FILE"]
-        if version_path.read_text(encoding="utf-8").strip() != target["chartVersion"]:
+        if chart_pin(version_path) != target["chartVersion"]:
             raise RollbackError("configured production chart pin differs from maintenance target")
     values, values_proof = stage_values(config, root, staged_directory)
     environment = cluster_environment(runner, args.kubeconfig)

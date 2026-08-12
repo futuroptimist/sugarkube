@@ -3057,6 +3057,36 @@ def test_dspace_prod_metrics_reconcile_rejects_wrong_prefix_before_python(tmp_pa
 
 
 @pytest.mark.usefixtures("ensure_just_available")
+@pytest.mark.parametrize("optional", (False, True))
+def test_dspace_prod_metrics_reconcile_rejects_legacy_manifest_prefix(
+    tmp_path: Path, optional: bool
+) -> None:
+    required = [
+        "/tmp/baseline.json",
+        "/tmp/target.json",
+        "/tmp/evidence.json",
+        "/tmp/smoke-runner",
+        "/tmp/kubeconfig",
+    ]
+    args = (
+        [*required, "manifest=/tmp/legacy.json"]
+        if optional
+        else ["manifest=/tmp/legacy.json", *required[1:]]
+    )
+
+    result, argv = _run_dspace_prod_metrics_reconcile(tmp_path, args)
+
+    assert result.returncode != 0
+    expected = (
+        "unexpected argument prefix in manifest="
+        if optional
+        else "baseline_manifest must be positional"
+    )
+    assert expected in result.stderr
+    assert argv == []
+
+
+@pytest.mark.usefixtures("ensure_just_available")
 def test_dspace_recovery_staging_config_uses_production_chart_pin(
     tmp_path: Path, generic_app_stub_env: dict[str, str]
 ) -> None:

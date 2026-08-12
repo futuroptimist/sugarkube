@@ -54,6 +54,15 @@ def target(environment: str = "staging", schema_version: int = 1) -> dict[str, o
     return manifest.validate(value, True)
 
 
+def test_chart_pin_ignores_comments_and_blank_lines(tmp_path: Path) -> None:
+    pin = tmp_path / "dspace.prod.version"
+    pin.write_text(
+        "# application remains at 3.0.1\n\n  3.0.3  # reviewed chart\n", encoding="utf-8"
+    )
+
+    assert rollback.chart_pin(pin) == "3.0.3"
+
+
 def test_chart_maintenance_target_preserves_application_and_changes_only_chart() -> None:
     baseline = manifest.validate(manifest._object(PROD_BASELINE), True)
     selected = rollback.chart_maintenance_target(baseline, PROD_MAINTENANCE_TARGET)
