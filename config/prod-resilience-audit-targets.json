@@ -1,0 +1,5 @@
+{
+  "democratized.space": ["/", "/healthz", "/livez", "/config.json", "/build-meta.json"],
+  "token.place": ["/", "/healthz", "/livez", "/api/v1/meta"],
+  "danielsmith.io": ["/", "/healthz", "/livez"]
+}
