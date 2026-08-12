@@ -584,6 +584,79 @@ def assert_no_mutation(commands: list[list[str]]) -> None:
     assert not any("upgrade" in command or "rollout" in command for command in commands)
 
 
+def test_configuration_reconciliation_baselines_normalize_only_canonical_omission() -> None:
+    image = {"tag": "main-abcdef0", "pullPolicy": "Always"}
+    desired = {"replicaCount": 2, "image": {**image, "repository": manifest.IMAGE_REF}}
+
+    baseline, desired_baseline = rollback.configuration_reconciliation_baselines(
+        {"replicaCount": 2, "image": image}, desired
+    )
+    assert baseline == desired_baseline
+    assert rollback.configuration_reconciliation_baselines(desired, desired)[0] == desired
+
+
+@pytest.mark.parametrize(
+    ("live_image", "desired_repository"),
+    (
+        (
+            {
+                "repository": "example.invalid/dspace",
+                "tag": "main-abcdef0",
+                "pullPolicy": "Always",
+            },
+            manifest.IMAGE_REF,
+        ),
+        (
+            {"repository": None, "tag": "main-abcdef0", "pullPolicy": "Always"},
+            manifest.IMAGE_REF,
+        ),
+        (
+            {"repository": "", "tag": "main-abcdef0", "pullPolicy": "Always"},
+            manifest.IMAGE_REF,
+        ),
+        (
+            {"repository": 42, "tag": "main-abcdef0", "pullPolicy": "Always"},
+            manifest.IMAGE_REF,
+        ),
+        ("not-a-mapping", manifest.IMAGE_REF),
+        ({"tag": "main-abcdef0", "pullPolicy": "Always"}, None),
+        ({"tag": "main-abcdef0", "pullPolicy": "Always"}, ""),
+        (
+            {"tag": "main-abcdef0", "pullPolicy": "Always"},
+            "example.invalid/dspace",
+        ),
+    ),
+)
+def test_configuration_reconciliation_baselines_reject_unsafe_image_shapes(
+    live_image: object, desired_repository: object
+) -> None:
+    live = {"image": live_image}
+    desired = {
+        "image": {
+            "repository": desired_repository,
+            "tag": "main-abcdef0",
+            "pullPolicy": "Always",
+        }
+    }
+    with pytest.raises(rollback.RollbackError, match="unrelated Helm values drift"):
+        baseline, desired_baseline = rollback.configuration_reconciliation_baselines(live, desired)
+        if baseline != desired_baseline:
+            raise rollback.RollbackError(
+                "unrelated Helm values drift blocks configuration reconciliation"
+            )
+
+
+def test_configuration_reconciliation_baselines_preserve_additional_drift() -> None:
+    image = {"tag": "main-abcdef0", "pullPolicy": "Always"}
+    live = {"image": image, "replicaCount": 1}
+    desired = {
+        "image": {**image, "repository": manifest.IMAGE_REF},
+        "replicaCount": 2,
+    }
+    baseline, desired_baseline = rollback.configuration_reconciliation_baselines(live, desired)
+    assert baseline != desired_baseline
+
+
 def test_render_failure_precedes_reservation_and_mutation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1106,7 +1179,10 @@ def test_configuration_reconciliation_completes_all_production_gates(
             "cluster": "sugarkube-prod",
         },
     }
-    live = {"replicaCount": 2, "image": image}
+    live = {
+        "replicaCount": 2,
+        "image": {"tag": selected["imageTag"], "pullPolicy": "Always"},
+    }
     stored_proof = [{"check": "helmStoredValues", "passed": True, "details": "safe"}]
     finalized: dict[str, object] = {}
     monkeypatch.setattr(rollback.app_chart, "merged_values_document", lambda _paths: desired)
