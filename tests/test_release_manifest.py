@@ -707,9 +707,7 @@ def test_committed_production_values_pass_stored_values_contract() -> None:
     recovery = json.loads(
         Path("docs/apps/dspace.prod-recovery-coordinates.json").read_text(encoding="utf-8")
     )
-    approved = manifest.candidate(
-        recovery, "prod", "openai", "2026-07-31T12:00:00Z", "operator"
-    )
+    approved = manifest.candidate(recovery, "prod", "openai", "2026-07-31T12:00:00Z", "operator")
     values["image"] = {
         "repository": manifest.IMAGE_REF,
         "tag": approved["imageTag"],
@@ -725,11 +723,16 @@ def test_helm_stored_values_accept_chart_defaults_and_safe_references() -> None:
     stored["env"] = [
         {
             "name": "METRICS_TOKEN",
-            "valueFrom": {
-                "secretKeyRef": {"name": "dspace-prod-metrics-token", "key": "token"}
-            },
+            "valueFrom": {"secretKeyRef": {"name": "dspace-prod-metrics-token", "key": "token"}},
         }
     ]
+    assert manifest.verify_helm_stored_values(value, stored, "prod")["passed"] is True
+
+
+def test_helm_stored_values_accept_exact_empty_servicemonitor_relabelings_default() -> None:
+    value = split_candidate("prod")
+    stored = production_stored_values()
+    stored["serviceMonitor"]["relabelings"] = []
     assert manifest.verify_helm_stored_values(value, stored, "prod")["passed"] is True
 
 

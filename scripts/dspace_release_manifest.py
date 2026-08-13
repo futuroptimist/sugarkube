@@ -938,9 +938,13 @@ def verify_helm_stored_values(
             "additionalLabels": {"release": "kube-prometheus-stack"},
             "cluster": "sugarkube-prod",
         }
+        observed_monitor = stored_values.get("serviceMonitor")
+        if isinstance(observed_monitor, dict) and observed_monitor.get("relabelings") == []:
+            observed_monitor = dict(observed_monitor)
+            observed_monitor.pop("relabelings")
         if (
             stored_values.get("metrics") != expected_metrics
-            or stored_values.get("serviceMonitor") != expected_monitor
+            or observed_monitor != expected_monitor
             or contains_staging_reference(stored_values)
             or contains_inline_credential(
                 {

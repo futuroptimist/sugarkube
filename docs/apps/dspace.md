@@ -40,6 +40,33 @@ Any failure after reservation preserves failed evidence. Review that evidence an
 before any further mutation; never automatically rerun, uninstall, roll back, delete, or rotate the
 Secret.
 
+### Revision-10 pull-policy recovery
+
+The normal reconciliation remains bound to the finalized revision-9/chart-3.0.2 baseline and must
+not be retried after Helm has advanced. For the single confirmed failure in which revision 10 is
+deployed on chart 3.0.3 with only the computed and workload pull policy left at `IfNotPresent`, use
+this separate operation **only after its implementation is independently reviewed and merged**:
+
+```bash
+just dspace-prod-metrics-pull-policy-recover \
+  original_evidence=/home/pi/operator-evidence/dspace-prod-metrics-reconcile-20260813T072927Z/reconciliation.json \
+  baseline_manifest=deployment-evidence/dspace/prod/main-1a31a56-20260801T093443Z.json \
+  maintenance_target=docs/apps/dspace.prod-metrics-chart-target.json \
+  evidence="$FRESH_NONEXISTING_RECOVERY_EVIDENCE" \
+  smoke_runner="$DSPACE_SMOKE_RUNNER" \
+  kubeconfig="$HOME/.kube/config-sugarkube-prod" \
+  confirm="dspace:prod:1a31a569aff2dbeb238e8c2688b9e85140d2077d"
+```
+
+Preflight binds the immutable SHA-256 and invocation ID of the original failed evidence to the
+exact live revision-10 state, validates the committed values, chart defaults, metrics resources,
+Secret reference (without reading its value), pods, image digest, and fresh OCI provenance, then
+reserves a new evidence file. The sole mutation is one digest-qualified chart-3.0.3 upgrade with
+the full committed production values chain and explicit `image.pullPolicy=Always`, advancing
+exactly from revision 10 to 11. An already repaired or otherwise drifted release fails closed. A
+failure after reservation records bounded sanitized diagnostics and never retries, rolls back,
+uninstalls, or changes the metrics Secret.
+
 ## Production Helm reconciliation for application 3.0.1
 
 This section **prepares but does not execute** the incident reconciliation tracked by

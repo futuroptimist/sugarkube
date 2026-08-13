@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import copy
+import hashlib
 import json
 from argparse import Namespace
 from pathlib import Path
@@ -1593,6 +1595,105 @@ def test_just_recipe_has_no_revision_rollback_or_reuse_values() -> None:
     assert "dspace_manifest_rollback.py" in block
     assert "--reuse-values" not in block
     assert "helm rollback" not in block
+
+
+def _recovery_target() -> dict[str, object]:
+    return {
+        "chartVersion": "3.0.3",
+        "chartDigest": "sha256:6ee663c426673bc0e516ed8f8b0ab11a918d2f2bb81fc9047b3eb37b78329f5c",
+        "imageTag": "main-1a31a56",
+        "imageDigest": "sha256:23dbc573377549136c1f10b05706b3c176ffbabaf04a3194381a24752104a401",
+        "sourceRevision": "1a31a569aff2dbeb238e8c2688b9e85140d2077d",
+        "chartSourceRevision": "62da11005354e9f9a89c2e58584cdce4c8ec35aa",
+        "applicationVersion": "3.0.1",
+        "expectedDefaultChatProvider": "openai",
+    }
+
+
+def _failed_reconciliation() -> dict[str, object]:
+    return {
+        "operation": "dspaceProductionMetricsReconciliation",
+        "state": "failed",
+        "failedStage": "ownership-and-finalization-proof",
+        "failureCode": "ownership-and-finalization-proof-failed",
+        "clusterMayHaveChanged": True,
+        "invocationId": "a" * 32,
+        "sugarkubeRevision": "b" * 40,
+        "before": {"helmRevision": 9, "chartName": "dspace", "chartVersion": "3.0.2"},
+        "target": _recovery_target(),
+    }
+
+
+@pytest.mark.parametrize(
+    ("field", "wrong"),
+    [
+        ("state", "reserved"),
+        ("state", "succeeded"),
+        ("operation", "dspaceManifestRollback"),
+        ("failedStage", "helm-upgrade"),
+        ("failureCode", "wrong-failed"),
+        ("clusterMayHaveChanged", False),
+    ],
+)
+def test_recovery_rejects_nonmatching_original_evidence(
+    tmp_path: Path, field: str, wrong: object
+) -> None:
+    value = _failed_reconciliation()
+    value[field] = wrong
+    path = tmp_path / "original.json"
+    path.write_text(json.dumps(value), encoding="utf-8")
+    with pytest.raises(rollback.RollbackError, match="confirmed failed reconciliation"):
+        rollback.failed_reconciliation_evidence(path, _recovery_target(), lambda _command: "")
+
+
+def test_recovery_original_evidence_is_validated_and_fingerprinted(tmp_path: Path) -> None:
+    path = tmp_path / "original.json"
+    raw = json.dumps(_failed_reconciliation()).encode()
+    path.write_bytes(raw)
+    value, digest = rollback.failed_reconciliation_evidence(
+        path, _recovery_target(), lambda _command: ""
+    )
+    assert value["invocationId"] == "a" * 32
+    assert digest == hashlib.sha256(raw).hexdigest()
+
+
+def test_recovery_values_accept_only_ifnotpresent_and_empty_chart_default() -> None:
+    baseline = manifest.validate(manifest._object(PROD_BASELINE), True)
+    selected = rollback.chart_maintenance_target(baseline, PROD_MAINTENANCE_TARGET)
+    approved = {field: selected[field] for field in manifest.candidate_fields(selected)}
+    approved["recordType"] = "candidate"
+    desired = {
+        "metrics": {
+            "enabled": True,
+            "path": "/metrics",
+            "auth": {"existingSecret": "dspace-prod-metrics-token", "secretKey": "token"},
+        },
+        "serviceMonitor": {
+            "enabled": True,
+            "interval": "30s",
+            "scrapeTimeout": "10s",
+            "additionalLabels": {"release": "kube-prometheus-stack"},
+            "cluster": "sugarkube-prod",
+        },
+    }
+    user = {
+        **desired,
+        "image": {"repository": rollback.release.IMAGE_REF, "tag": approved["imageTag"]},
+    }
+    computed = copy.deepcopy(user)
+    computed["image"]["pullPolicy"] = "IfNotPresent"
+    computed["serviceMonitor"]["relabelings"] = []
+    rollback.validate_recovery_values(user, computed, desired, approved)
+    for policy in ("Always", "Never"):
+        drifted = copy.deepcopy(computed)
+        drifted["image"]["pullPolicy"] = policy
+        with pytest.raises(rollback.RollbackError, match="exact known IfNotPresent"):
+            rollback.validate_recovery_values(user, drifted, desired, approved)
+
+
+def test_metrics_commands_explicitly_set_pull_policy() -> None:
+    source = Path("scripts/dspace_manifest_rollback.py").read_text(encoding="utf-8")
+    assert source.count('"image.pullPolicy=Always"') == 2
 
 
 @pytest.mark.parametrize(
