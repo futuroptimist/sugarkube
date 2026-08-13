@@ -1499,10 +1499,19 @@ def test_configuration_reconciliation_completes_all_production_gates(
     result = rollback.rollback(args, runner)
 
     upgrade = next(command for command in commands if "upgrade" in command)
+    target_render = next(
+        command
+        for command in commands
+        if command[0] == "helm"
+        and "template" in command
+        and "live-values.json" not in " ".join(command)
+    )
     assert sum("upgrade" in command for command in commands) == 1
     assert upgrade[upgrade.index("--kubeconfig") + 1] == str(kubeconfig)
     assert f"oci://{manifest.CHART_REF}@{selected['chartDigest']}" in upgrade
     assert f"image.tag={selected['imageTag']}" in upgrade
+    assert "image.pullPolicy=Always" in upgrade
+    assert "image.pullPolicy=Always" in target_render
     forbidden = ("--reuse-values", "--version", selected["semanticTag"], "rollback")
     assert not any(item in upgrade for item in forbidden)
     assert selected["imageDigest"] not in next(
@@ -1552,6 +1561,85 @@ def test_configuration_reconciliation_completes_all_production_gates(
         command for command in commands if command[:2] == [str(verifier), "verify"]
     )
     assert verifier_command[verifier_command.index("--manifest") + 1] != str(args.manifest)
+
+
+def test_pull_policy_recovery_evidence_binds_exact_failed_transition(tmp_path: Path) -> None:
+    baseline = manifest.validate(manifest._object(PROD_BASELINE), True)
+    target = rollback.chart_maintenance_target(baseline, PROD_MAINTENANCE_TARGET)
+    invocation = "a" * 32
+    evidence = {
+        "operation": "dspaceProductionMetricsReconciliation",
+        "state": "failed",
+        "failedStage": "ownership-and-finalization-proof",
+        "failureCode": "ownership-and-finalization-proof-failed",
+        "clusterMayHaveChanged": True,
+        "invocationId": invocation,
+        "sugarkubeRevision": "b" * 40,
+        "before": {"helmRevision": 9, "chartVersion": "3.0.2"},
+        "target": {
+            key: target[key]
+            for key in (
+                "chartVersion",
+                "chartDigest",
+                "imageTag",
+                "imageDigest",
+                "sourceRevision",
+                "chartSourceRevision",
+                "applicationVersion",
+                "expectedDefaultChatProvider",
+            )
+        },
+    }
+    path = tmp_path / "failed.json"
+    path.write_text(json.dumps(evidence), encoding="utf-8")
+    live = {"info": {"description": f"sugarkube-dspace-metrics-reconciliation:{invocation}"}}
+    commands: list[list[str]] = []
+
+    assert (
+        rollback.validate_pull_policy_recovery_evidence(
+            path, baseline, target, live, lambda command: commands.append(command) or ""
+        )
+        == evidence
+    )
+    assert commands == [["git", "merge-base", "--is-ancestor", "b" * 40, "HEAD"]]
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("operation", "dspaceProductionMetricsPullPolicyRecovery"),
+        ("state", "reserved"),
+        ("state", "succeeded"),
+        ("failedStage", "runtime-verification"),
+        ("failureCode", "runtime-verification-failed"),
+        ("clusterMayHaveChanged", False),
+    ),
+)
+def test_pull_policy_recovery_rejects_nonmatching_failure(
+    tmp_path: Path, field: str, value: object
+) -> None:
+    baseline = manifest.validate(manifest._object(PROD_BASELINE), True)
+    target = rollback.chart_maintenance_target(baseline, PROD_MAINTENANCE_TARGET)
+    path = tmp_path / "failed.json"
+    path.write_text(json.dumps({field: value}), encoding="utf-8")
+    with pytest.raises(rollback.RollbackError, match="confirmed failed reconciliation"):
+        rollback.validate_pull_policy_recovery_evidence(path, baseline, target, {}, lambda _c: "")
+
+
+def test_pull_policy_recovery_requires_exact_deployment_and_pod_policy() -> None:
+    container = {"name": "dspace", "imagePullPolicy": "IfNotPresent"}
+    workloads = {
+        "items": [
+            {
+                "kind": "Deployment",
+                "spec": {"template": {"spec": {"containers": [container]}}},
+            }
+        ]
+    }
+    raw_pods = {"items": [{"spec": {"containers": [container]}} for _ in range(2)]}
+    rollback.verify_resource_pull_policy(workloads, raw_pods, "IfNotPresent")
+    with pytest.raises(rollback.RollbackError, match="Deployment pull policy"):
+        rollback.verify_resource_pull_policy(workloads, raw_pods, "Always")
 
 
 def test_staging_is_non_interactive_and_reservation_collision_is_immutable(

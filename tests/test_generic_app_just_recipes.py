@@ -3011,6 +3011,35 @@ def _run_dspace_prod_metrics_reconcile(
 
 
 @pytest.mark.usefixtures("ensure_just_available")
+def test_dspace_pull_policy_recovery_exposes_separate_guarded_interface(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "recovery-bin"
+    bin_dir.mkdir()
+    log = tmp_path / "argv.log"
+    _write_executable(
+        bin_dir / "python3",
+        f"#!/bin/sh\nprintf '%s\\n' \"$@\" > {str(log)!r}\n",
+    )
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+    values = [
+        "original_evidence=/evidence/original-failed.json",
+        "baseline_manifest=/evidence/finalized-3.0.2.json",
+        "maintenance_target=/reviewed/chart-3.0.3.json",
+        "evidence=/evidence/fresh-recovery.json",
+        "smoke_runner=/tools/remote-chat-smoke",
+        "kubeconfig=/kube/production",
+        "verifier=/tools/runtime-verifier",
+        "confirm=dspace:prod:1a31a569aff2dbeb238e8c2688b9e85140d2077d",
+    ]
+    result = _run_just(["dspace-prod-metrics-pull-policy-recover", *values], env)
+    argv = log.read_text(encoding="utf-8").splitlines()
+    assert result.returncode == 0, result.stderr
+    assert "--pull-policy-recovery" in argv
+    assert "--configuration-reconciliation" not in argv
+    assert argv[argv.index("--original-evidence") + 1] == "/evidence/original-failed.json"
+
+
+@pytest.mark.usefixtures("ensure_just_available")
 def test_dspace_prod_metrics_reconcile_normalizes_documented_and_positional_forms(
     tmp_path: Path,
 ) -> None:

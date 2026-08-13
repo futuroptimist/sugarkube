@@ -1862,6 +1862,37 @@ dspace-prod-metrics-reconcile baseline_manifest maintenance_target evidence smok
     )
     "${reconciliation_command[@]}"
 
+# One-shot fix-forward for the invocation-bound revision-10 DSPACE pull-policy failure.
+dspace-prod-metrics-pull-policy-recover original_evidence baseline_manifest maintenance_target evidence smoke_runner kubeconfig verifier="{{ justfile_directory() }}/scripts/dspace_runtime_verifier.py" confirm='' config='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    original={{ quote(original_evidence) }}
+    baseline={{ quote(baseline_manifest) }}
+    target={{ quote(maintenance_target) }}
+    recovery={{ quote(evidence) }}
+    smoke={{ quote(smoke_runner) }}
+    kube={{ quote(kubeconfig) }}
+    verifier_path={{ quote(verifier) }}
+    confirmation={{ quote(confirm) }}
+    config_path={{ quote(config) }}
+    for binding in original_evidence:"${original}" baseline_manifest:"${baseline}" maintenance_target:"${target}" evidence:"${recovery}" smoke_runner:"${smoke}" kubeconfig:"${kube}"; do
+      name="${binding%%:*}"; value="${binding#*:}"
+      value="${value#${name}=}"
+      [ -n "${value}" ] || { echo "ERROR: ${name} must not be empty." >&2; exit 2; }
+      printf -v "${name}" '%s' "${value}"
+    done
+    verifier_path="${verifier_path#verifier=}"
+    confirmation="${confirmation#confirm=}"
+    config_path="${config_path#config=}"
+    exec python3 "{{ justfile_directory() }}/scripts/dspace_manifest_rollback.py" \
+      --pull-policy-recovery --environment prod \
+      --original-evidence "${original_evidence}" \
+      --baseline-manifest "${baseline_manifest}" \
+      --maintenance-target "${maintenance_target}" \
+      --evidence "${evidence}" --smoke-runner "${smoke_runner}" \
+      --kubeconfig "${kubeconfig}" --verifier "${verifier_path}" \
+      --confirm "${confirmation}" --config "${config_path}"
+
 # Read-only DSPACE runtime, frontend, replica, and remote /chat proof.
 dspace-release-verify env manifest smoke_runner config='' kubeconfig='' expected_helm_revision='':
     #!/usr/bin/env bash
