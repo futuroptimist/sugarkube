@@ -414,12 +414,20 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
                     )
                     auth = endpoint.get("bearerTokenSecret")
                     relabelings = endpoint.get("relabelings")
+                    effective_namespace = (
+                        metadata["namespace"] if "namespace" in metadata else inputs.namespace
+                    )
                     expected_relabelings = [
                         {"action": "replace", "targetLabel": "app", "replacement": "dspace"},
                         {
                             "action": "replace",
                             "targetLabel": "environment",
                             "replacement": "prod",
+                        },
+                        {
+                            "action": "replace",
+                            "targetLabel": "namespace",
+                            "replacement": "dspace",
                         },
                         {
                             "action": "replace",
@@ -434,8 +442,9 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
                     ]
                     if (
                         metadata.get("name") != "dspace"
-                        or metadata.get("namespace") != "dspace"
+                        or effective_namespace != "dspace"
                         or metadata.get("labels", {}).get("release") != "kube-prometheus-stack"
+                        or spec.get("namespaceSelector") != {"matchNames": ["dspace"]}
                         or spec.get("selector")
                         != {
                             "matchLabels": {
