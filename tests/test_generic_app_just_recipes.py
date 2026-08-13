@@ -3074,6 +3074,46 @@ def test_dspace_prod_metrics_reconcile_preserves_default_verifier_and_empty_conf
 
 
 @pytest.mark.usefixtures("ensure_just_available")
+def test_dspace_pull_policy_recovery_forwards_all_guarded_inputs(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "argv.log"
+    _write_executable(
+        bin_dir / "python3", f"#!/bin/sh\nprintf '%s\\n' \"$@\" > {str(log)!r}\n"
+    )
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+    values = [
+        "/evidence/original.json",
+        "/baseline/final.json",
+        "/target/3.0.3.json",
+        "/evidence/recovery.json",
+        "/runner/smoke",
+        "/kube/prod",
+        str(REPO_ROOT / "scripts/dspace_runtime_verifier.py"),
+        "dspace:prod:1a31a569aff2dbeb238e8c2688b9e85140d2077d",
+    ]
+
+    result = _run_just(["dspace-prod-metrics-pull-policy-recover", *values], env)
+
+    assert result.returncode == 0, result.stderr
+    argv = log.read_text(encoding="utf-8").splitlines()
+    assert "--pull-policy-recovery" in argv
+    options = (
+        "--original-evidence",
+        "--baseline-manifest",
+        "--maintenance-target",
+        "--evidence",
+        "--smoke-runner",
+        "--kubeconfig",
+        "--verifier",
+        "--confirm",
+    )
+    for option, value in zip(options, values, strict=True):
+        assert argv[argv.index(option) + 1] == value
+
+
+@pytest.mark.usefixtures("ensure_just_available")
 def test_dspace_prod_metrics_reconcile_rejects_wrong_prefix_before_python(tmp_path: Path) -> None:
     result, argv = _run_dspace_prod_metrics_reconcile(
         tmp_path,

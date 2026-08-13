@@ -938,9 +938,10 @@ def verify_helm_stored_values(
             "additionalLabels": {"release": "kube-prometheus-stack"},
             "cluster": "sugarkube-prod",
         }
+        monitor = stored_values.get("serviceMonitor")
         if (
             stored_values.get("metrics") != expected_metrics
-            or stored_values.get("serviceMonitor") != expected_monitor
+            or monitor not in (expected_monitor, {**expected_monitor, "relabelings": []})
             or contains_staging_reference(stored_values)
             or contains_inline_credential(
                 {
@@ -957,7 +958,58 @@ def verify_helm_stored_values(
     return {
         "check": "helmStoredValues",
         "passed": True,
-        "details": "stored image coordinates, pull policy, and environment isolation matched approval",
+        "details": (
+            "stored image coordinates, pull policy, and environment isolation matched approval"
+        ),
+    }
+
+
+def verify_helm_recovery_values(value: dict[str, Any], computed_values: object) -> dict[str, Any]:
+    """Accept only the known chart-3.0.3 computed pull-policy defect."""
+    validate(value, False)
+    if not isinstance(computed_values, dict):
+        raise ManifestError("Helm computed values must be a JSON object")
+    image = computed_values.get("image")
+    if not isinstance(image, dict) or {
+        key: image.get(key) for key in ("repository", "tag", "pullPolicy")
+    } != {
+        "repository": IMAGE_REF,
+        "tag": value["imageTag"],
+        "pullPolicy": "IfNotPresent",
+    }:
+        raise ManifestError("Helm computed image values are not the exact recovery state")
+    expected_metrics = {
+        "enabled": True,
+        "path": "/metrics",
+        "auth": {"existingSecret": "dspace-prod-metrics-token", "secretKey": "token"},
+    }
+    expected_monitor = {
+        "enabled": True,
+        "interval": "30s",
+        "scrapeTimeout": "10s",
+        "additionalLabels": {"release": "kube-prometheus-stack"},
+        "cluster": "sugarkube-prod",
+        "relabelings": [],
+    }
+    monitor = computed_values.get("serviceMonitor")
+    if (
+        computed_values.get("metrics") != expected_metrics
+        or not isinstance(monitor, dict)
+        or {key: monitor.get(key) for key in expected_monitor} != expected_monitor
+        or contains_staging_reference(computed_values)
+        or contains_inline_credential(
+            {
+                key: item
+                for key, item in computed_values.items()
+                if key not in {"metrics", "serviceMonitor"}
+            }
+        )
+    ):
+        raise ManifestError("Helm computed production values drift beyond the pull-policy defect")
+    return {
+        "check": "helmRecoveryValues",
+        "passed": True,
+        "details": "computed production values matched the isolated IfNotPresent defect",
     }
 
 

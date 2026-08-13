@@ -40,6 +40,32 @@ Any failure after reservation preserves failed evidence. Review that evidence an
 before any further mutation; never automatically rerun, uninstall, roll back, delete, or rotate the
 Secret.
 
+### One-time pull-policy recovery after the failed revision 10 finalization
+
+Do not rerun the normal reconciliation after it has advanced Helm to revision 10. After this change
+has been independently reviewed and merged, the separate recovery below is the only guarded path for
+the known chart 3.0.3 `IfNotPresent` state. It requires the untouched failed reconciliation record,
+fingerprints that record, binds revision 10 to its invocation, and fails closed on any additional
+values, workload, metrics, ServiceMonitor, image, or Helm drift. It then performs one digest-qualified
+fix-forward upgrade to revision 11 with `image.pullPolicy=Always`; it never reuses values, retries,
+rolls back, uninstalls, or changes the metrics Secret.
+
+```bash
+just dspace-prod-metrics-pull-policy-recover \
+  original_evidence=/home/pi/operator-evidence/dspace-prod-metrics-reconcile-20260813T072927Z/reconciliation.json \
+  baseline_manifest=deployment-evidence/dspace/prod/main-1a31a56-20260801T093443Z.json \
+  maintenance_target=docs/apps/dspace.prod-metrics-chart-target.json \
+  evidence="$FRESH_NONEXISTING_RECOVERY_EVIDENCE" \
+  smoke_runner="$DSPACE_SMOKE_RUNNER" \
+  kubeconfig="$HOME/.kube/config-sugarkube-prod" \
+  confirm="dspace:prod:1a31a569aff2dbeb238e8c2688b9e85140d2077d"
+```
+
+The original evidence is read-only and is referenced in the new bounded recovery record by its
+SHA-256 and invocation ID. Any failure after the new evidence path is reserved leaves a sanitized
+failed record and stops without another mutation. Preserve both records and inspect the live state
+before considering any separately reviewed follow-up.
+
 ## Production Helm reconciliation for application 3.0.1
 
 This section **prepares but does not execute** the incident reconciliation tracked by
