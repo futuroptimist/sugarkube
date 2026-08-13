@@ -403,6 +403,11 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
                     metadata = (
                         monitor.get("metadata") if isinstance(monitor.get("metadata"), dict) else {}
                     )
+                    effective_namespace = (
+                        metadata.get("namespace")
+                        if "namespace" in metadata
+                        else inputs.namespace
+                    )
                     spec = monitor.get("spec") if isinstance(monitor.get("spec"), dict) else {}
                     endpoints = spec.get("endpoints")
                     endpoint = (
@@ -423,6 +428,11 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
                         },
                         {
                             "action": "replace",
+                            "targetLabel": "namespace",
+                            "replacement": "dspace",
+                        },
+                        {
+                            "action": "replace",
                             "targetLabel": "release",
                             "replacement": "dspace",
                         },
@@ -434,8 +444,9 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
                     ]
                     if (
                         metadata.get("name") != "dspace"
-                        or metadata.get("namespace") != "dspace"
+                        or effective_namespace != "dspace"
                         or metadata.get("labels", {}).get("release") != "kube-prometheus-stack"
+                        or spec.get("namespaceSelector") != {"matchNames": ["dspace"]}
                         or spec.get("selector")
                         != {
                             "matchLabels": {
