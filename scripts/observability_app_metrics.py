@@ -278,18 +278,6 @@ def validate_inventory(doc):
                 k8s_label_key(k, "selector label name")
                 k8s_label_value(v, "selector label value")
             relabelings = sm["relabelings"]
-            if not isinstance(relabelings, list) or len(relabelings) != 4:
-                fail("serviceMonitor.relabelings must contain exactly four entries")
-            for idx, relabeling in enumerate(relabelings):
-                expect_keys(
-                    relabeling,
-                    {"action", "targetLabel", "replacement"},
-                    f"serviceMonitor.relabelings[{idx}]",
-                )
-                if relabeling["action"] != "replace":
-                    fail("serviceMonitor.relabelings action must be replace")
-                prometheus_label(relabeling["targetLabel"], "relabeling targetLabel")
-                nonempty(relabeling["replacement"], "relabeling replacement")
             labels = cfg["targetLabels"]
             if not isinstance(labels, dict):
                 fail("targetLabels must be an object")
@@ -307,21 +295,25 @@ def validate_inventory(doc):
                 or labels["namespace"] != cfg["namespace"]
             ):
                 fail("targetLabels must match ServiceMonitor and namespace")
-            mapping = {r["targetLabel"]: r["replacement"] for r in relabelings}
-            if len(mapping) != len(relabelings):
-                fail("serviceMonitor.relabelings target labels must be unique")
-            required_mapping = {
-                "app": app,
-                "environment": env,
-                "release": cfg["serviceMonitorName"],
-                "cluster": labels.get("cluster"),
-            }
-            if mapping != required_mapping:
-                fail(
-                    "serviceMonitor.relabelings must map app, environment, release, and cluster exactly"
-                )
-            if "namespace" in mapping:
-                fail("namespace must be supplied by discovery, not relabel replacement")
+            def replacement(target_label, replacement):
+                return {
+                    "action": "replace",
+                    "targetLabel": target_label,
+                    "replacement": replacement,
+                }
+
+            canonical_four = [
+                replacement("app", app),
+                replacement("environment", env),
+                replacement("release", cfg["serviceMonitorName"]),
+                replacement("cluster", labels["cluster"]),
+            ]
+            canonical_five = canonical_four[:2] + [
+                replacement("namespace", cfg["namespace"]),
+                *canonical_four[2:],
+            ]
+            if relabelings not in (canonical_four, canonical_five):
+                fail("serviceMonitor.relabelings must match a canonical ordered contract exactly")
             pm = cfg["publicMetrics"]
             expect_keys(pm, {"url", "expectedUnauthenticatedStatus"}, "publicMetrics")
             public_metrics_url(pm["url"])
@@ -1001,10 +993,11 @@ def validate_render(
             named_sms.append(doc)
     sms = []
     for candidate in named_sms:
-        rendered_ns = candidate.get("metadata", {}).get("namespace")
-        if rendered_ns == cfg["namespace"] or (
-            rendered_ns is None and release_namespace == cfg["namespace"]
-        ):
+        metadata = candidate["metadata"]
+        rendered_ns = (
+            metadata.get("namespace") if "namespace" in metadata else release_namespace
+        )
+        if rendered_ns == cfg["namespace"]:
             sms.append(candidate)
     if len(sms) != 1:
         fail("rendered manifests must include exactly one configured ServiceMonitor")
@@ -1027,9 +1020,6 @@ def validate_render(
         fail("rendered ServiceMonitor namespace selector mismatch")
     if selector.get("matchLabels") != cfg["serviceMonitor"]["selectorMatchLabels"]:
         fail("rendered ServiceMonitor selector mismatch")
-    for relabeling in cfg["serviceMonitor"].get("relabelings", []):
-        if relabeling.get("targetLabel") == "namespace":
-            fail("namespace must be supplied by discovery, not relabel replacement")
     endpoints = spec.get("endpoints")
     if not isinstance(endpoints, list) or len(endpoints) != 1:
         fail("rendered ServiceMonitor must have exactly one endpoint")
