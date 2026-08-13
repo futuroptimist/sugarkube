@@ -7783,3 +7783,22 @@ def test_observability_app_metrics_strict_inventory_boundaries_are_controlled(
     with pytest.raises(app_metrics.Error) as excinfo:
         app_metrics.validate_inventory(doc)
     assert message in str(excinfo.value)
+
+
+def test_dspace_pull_policy_recovery_recipe_is_separately_guarded() -> None:
+    source = Path("justfile").read_text(encoding="utf-8")
+    recipe = source.split("dspace-prod-metrics-pull-policy-recover", 1)[1].split(
+        "# Read-only DSPACE runtime", 1
+    )[0]
+    for required in (
+        "--pull-policy-recovery",
+        "--failed-evidence",
+        "--maintenance-target",
+        "--evidence",
+        "--smoke-runner",
+        "--kubeconfig",
+        "--verifier",
+        "--confirm",
+    ):
+        assert required in recipe
+    assert "--configuration-reconciliation" not in recipe

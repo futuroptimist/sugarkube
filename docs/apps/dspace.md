@@ -40,6 +40,42 @@ Any failure after reservation preserves failed evidence. Review that evidence an
 before any further mutation; never automatically rerun, uninstall, roll back, delete, or rotate the
 Secret.
 
+## One-time production pull-policy recovery (revision 10 to 11)
+
+The reviewed metrics reconciliation reached Helm revision 10 but correctly failed finalization
+because chart 3.0.3 computed `image.pullPolicy: IfNotPresent`. The original failed evidence is an
+immutable failure record: **do not edit it, mark it successful, or rerun
+`dspace-prod-metrics-reconcile`**. The normal reconciliation now sets `Always` in both its render and
+upgrade commands.
+
+The following is a one-time, separately authorized production recovery, not a general retry path.
+It accepts only that invocation's `ownership-and-finalization-proof` failure, revision 10/chart
+3.0.3 with the invocation-bound Helm description, two Ready pods at the approved tag and digest,
+and a complete desired-values match whose sole delta is `IfNotPresent` instead of `Always`. All
+cluster identity, Secret metadata, OCI provenance, strict render, runtime, public journey, remote
+chat, ownership, metrics, Prometheus, and Grafana checks remain mandatory. It reserves a new private
+record and performs at most one digest-qualified, bounded Helm upgrade without `--reuse-values`.
+Any failure preserves the recovery record and stops without retry, rollback, uninstall, or Secret
+mutation.
+
+After this change is merged and separate production authorization is recorded, run exactly once
+with an absolute production kubeconfig and fresh, nonexistent recovery evidence path (do not run
+this command during development):
+
+```bash
+just dspace-prod-metrics-pull-policy-recover \
+  failed_evidence="$PRESERVED_FAILED_RECONCILIATION_EVIDENCE" \
+  maintenance_target=docs/apps/dspace.prod-metrics-chart-target.json \
+  evidence="$FRESH_NONEXISTING_RECOVERY_EVIDENCE" \
+  smoke_runner="$DSPACE_SMOKE_RUNNER" \
+  kubeconfig="$HOME/.kube/config-sugarkube-prod" \
+  confirm="dspace:prod:recover-pull-policy:revision-10-to-11"
+```
+
+A success record links to the failed invocation by its non-secret invocation ID and evidence
+fingerprint and proves exactly revision 10 to 11 while retaining chart 3.0.3 and the approved image
+digest. Preserve both records; the recovery never rewrites the original evidence.
+
 ## Production Helm reconciliation for application 3.0.1
 
 This section **prepares but does not execute** the incident reconciliation tracked by
