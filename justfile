@@ -1862,6 +1862,31 @@ dspace-prod-metrics-reconcile baseline_manifest maintenance_target evidence smok
     )
     "${reconciliation_command[@]}"
 
+# One-shot, fail-closed repair of the known revision-10 DSPACE pull-policy defect.
+dspace-prod-metrics-pull-policy-recover original_evidence baseline_manifest maintenance_target evidence smoke_runner kubeconfig verifier="{{ justfile_directory() }}/scripts/dspace_runtime_verifier.py" confirm='' config='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    strip() { local name="$1" value="$2"; value="${value#"${name}"=}"; [[ -n "${value}" ]] || { echo "ERROR: ${name} must not be empty." >&2; return 2; }; printf '%s' "${value}"; }
+    original_path="$(strip original_evidence {{ quote(original_evidence) }})"
+    baseline_path="$(strip baseline_manifest {{ quote(baseline_manifest) }})"
+    target_path="$(strip maintenance_target {{ quote(maintenance_target) }})"
+    evidence_path="$(strip evidence {{ quote(evidence) }})"
+    smoke_path="$(strip smoke_runner {{ quote(smoke_runner) }})"
+    kubeconfig_path="$(strip kubeconfig {{ quote(kubeconfig) }})"
+    verifier_path={{ quote(verifier) }}; verifier_path="${verifier_path#verifier=}"
+    confirmation={{ quote(confirm) }}; confirmation="${confirmation#confirm=}"
+    config_path={{ quote(config) }}; config_path="${config_path#config=}"
+    python3 "{{ justfile_directory() }}/scripts/dspace_manifest_rollback.py" \
+      --pull-policy-recovery --environment prod \
+      --original-evidence "${original_path}" \
+      --baseline-manifest "${baseline_path}" \
+      --maintenance-target "${target_path}" \
+      --evidence "${evidence_path}" \
+      --smoke-runner "${smoke_path}" \
+      --kubeconfig "${kubeconfig_path}" \
+      --verifier "${verifier_path}" \
+      --confirm "${confirmation}" --config "${config_path}"
+
 # Read-only DSPACE runtime, frontend, replica, and remote /chat proof.
 dspace-release-verify env manifest smoke_runner config='' kubeconfig='' expected_helm_revision='':
     #!/usr/bin/env bash
