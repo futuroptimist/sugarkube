@@ -47,7 +47,7 @@ BUILD_FIELDS = {"version", "revision", "shortRevision", "image"}
 LEGACY_BUILD_FIELDS = {"gitSha", "generatedAt", "source"}
 MODERN_IDENTITY_CONTRACT = "build-info-v1"
 LEGACY_IDENTITY_CONTRACT = "legacy-build-meta-v1"
-LEGACY_RECOVERY_COORDINATES = {
+LEGACY_302_COORDINATES = {
     "schemaVersion": 2,
     "applicationVersion": "3.0.1",
     "sourceRevision": "1a31a569aff2dbeb238e8c2688b9e85140d2077d",
@@ -60,7 +60,7 @@ LEGACY_RECOVERY_COORDINATES = {
     "expectedDefaultChatProvider": "openai",
 }
 LEGACY_303_COORDINATES = {
-    **LEGACY_RECOVERY_COORDINATES,
+    **LEGACY_302_COORDINATES,
     "chartSourceRevision": "62da11005354e9f9a89c2e58584cdce4c8ec35aa",
     "chartVersion": "3.0.3",
     "chartDigest": "sha256:6ee663c426673bc0e516ed8f8b0ab11a918d2f2bb81fc9047b3eb37b78329f5c",
@@ -78,7 +78,7 @@ LEGACY_310_COORDINATES = {
     "expectedDefaultChatProvider": "token-place",
 }
 LEGACY_IDENTITY_COORDINATES = (
-    LEGACY_RECOVERY_COORDINATES,
+    LEGACY_302_COORDINATES,
     LEGACY_303_COORDINATES,
     LEGACY_310_COORDINATES,
 )

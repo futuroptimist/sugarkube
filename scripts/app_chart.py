@@ -213,7 +213,7 @@ def dspace_production_metrics_token_is_unsafe(
                 and secret_ref == {"name": "dspace-prod-metrics-token", "key": "token"}
             ):
                 safe_entries.add(id(entry))
-            # Chart 3.0.2 uses the pod UID as a safe, unpredictable token when metrics are off.
+            # Recovery charts use the pod UID as a safe, unpredictable token when metrics are off.
             if (
                 not metrics_enabled
                 and set(entry) == {"name", "valueFrom"}

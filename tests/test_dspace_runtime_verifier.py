@@ -41,7 +41,7 @@ def manifest(tmp_path: Path, provider: str = "token-place") -> Path:
 
 def recovery_manifest(tmp_path: Path, **changes: object) -> Path:
     value = {
-        **verifier.LEGACY_RECOVERY_COORDINATES,
+        **verifier.LEGACY_303_COORDINATES,
         "app": "dspace",
         "recordType": "candidate",
         "environment": "prod",
@@ -123,7 +123,7 @@ def _verify_setup(
     smoke.write_text("#!/bin/sh\nexit 0\n")
     smoke.chmod(0o700)
     coordinates = (
-        verifier.LEGACY_310_COORDINATES if legacy_310 else verifier.LEGACY_RECOVERY_COORDINATES
+        verifier.LEGACY_310_COORDINATES if legacy_310 else verifier.LEGACY_303_COORDINATES
     )
     is_legacy = legacy or legacy_310
     revision = str(coordinates["sourceRevision"]) if is_legacy else SHA
@@ -691,6 +691,18 @@ def test_exact_recovery_uses_legacy_contract_and_truthful_journeys(
     ]
 
 
+@pytest.mark.parametrize(
+    "coordinates",
+    [verifier.LEGACY_302_COORDINATES, verifier.LEGACY_303_COORDINATES],
+    ids=["chart-3.0.2", "chart-3.0.3"],
+)
+def test_exact_recovery_coordinates_use_legacy_contract(coordinates: dict[str, object]) -> None:
+    assert (
+        verifier.identity_contract(dict(coordinates))
+        == verifier.LEGACY_IDENTITY_CONTRACT
+    )
+
+
 def test_exact_310_token_place_uses_legacy_contract_and_truthful_journeys(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -712,9 +724,17 @@ def test_exact_310_token_place_uses_legacy_contract_and_truthful_journeys(
     ]
 
 
-@pytest.mark.parametrize("field", list(verifier.LEGACY_RECOVERY_COORDINATES))
-def test_any_recovery_coordinate_drift_prevents_legacy_selection(field: str) -> None:
-    candidate = dict(verifier.LEGACY_RECOVERY_COORDINATES)
+@pytest.mark.parametrize(
+    "coordinates",
+    [verifier.LEGACY_302_COORDINATES, verifier.LEGACY_303_COORDINATES],
+    ids=["chart-3.0.2", "chart-3.0.3"],
+)
+@pytest.mark.parametrize("field", list(verifier.LEGACY_303_COORDINATES))
+def test_any_recovery_coordinate_drift_prevents_legacy_selection(
+    coordinates: dict[str, object],
+    field: str,
+) -> None:
+    candidate = dict(coordinates)
     candidate[field] = "different"
     assert verifier.identity_contract(candidate) == verifier.MODERN_IDENTITY_CONTRACT
 

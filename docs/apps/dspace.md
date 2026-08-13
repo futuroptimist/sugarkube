@@ -66,11 +66,11 @@ test -x "$DSPACE_SMOKE_RUNNER"
 python3 scripts/app_config.py json --app dspace --env prod
 jq -e '.schemaVersion == 2 and .applicationVersion == "3.0.1" and
   .sourceRevision == "1a31a569aff2dbeb238e8c2688b9e85140d2077d" and
-  .chartSourceRevision == "63063e287adb92a4158ce2c8e7d378b73f52c1c5" and
+  .chartSourceRevision == "62da11005354e9f9a89c2e58584cdce4c8ec35aa" and
   .imageTag == "main-1a31a56" and
   .imageDigest == "sha256:23dbc573377549136c1f10b05706b3c176ffbabaf04a3194381a24752104a401" and
-  .chartVersion == "3.0.2" and
-  .chartDigest == "sha256:8b862135e52146f301a41259d6dabb053ed891d798fc1c8c95ca775b2b8e9575"' "$RECOVERY"
+  .chartVersion == "3.0.3" and
+  .chartDigest == "sha256:6ee663c426673bc0e516ed8f8b0ab11a918d2f2bb81fc9047b3eb37b78329f5c"' "$RECOVERY"
 ```
 
 Before encoding approval, inspect the immutable DSPACE 3.0.1 application contract at revision
@@ -90,11 +90,11 @@ APPROVED_BY='<operator-or-review-record>'
 EXPECTED_PROVIDER=openai
 mkdir -p deployment-candidates/dspace
 # Keep the shared staging pin unchanged while selecting the independently
-# approved 3.0.2 production pin for this recovery only.
+# approved 3.0.3 production pin for this recovery only.
 RECOVERY_CONFIG=$(mktemp)
 RECOVERY_VERSION=$(mktemp)
 trap 'rm -f "$RECOVERY_CONFIG" "$RECOVERY_VERSION"' EXIT
-printf '%s\n' 3.0.2 >"$RECOVERY_VERSION"
+printf '%s\n' 3.0.3 >"$RECOVERY_VERSION"
 python3 - "$RECOVERY_CONFIG" "$RECOVERY_VERSION" <<'PY'
 from pathlib import Path
 import sys
@@ -181,8 +181,9 @@ jq -e '{gitSha, generatedAt, source}' "$DIRECT_BUILD" \
   >"$CAPTURE/direct-build-identity.json"
 ```
 
-Do not run `dspace-release-verify` against the pre-change 3.0.2 candidate: the full verifier
-correctly rejects the currently installed 3.0.1 chart. The bounded captures above retain only the
+Do not run `dspace-release-verify` against the pre-change 3.0.2 deployment: the full verifier
+correctly rejects the currently installed chart 3.0.2 when validating the new target. The bounded
+captures above retain only the
 three allowlisted identity fields and cap each response at 16 KiB. Before evidence reservation or
 mutation, run the existing recipe's exact read-only digest-qualified render and structural
 validation sequence:
@@ -192,13 +193,13 @@ eval "$(python3 scripts/app_config.py shell --app dspace --env prod \
   --config docs/examples/apps/dspace.env --tag main-1a31a56 --require-tag)"
 CHART_VERSION=$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' \
   "$SUGARKUBE_VERSION_FILE" | head -n1)
-test "$CHART_VERSION" = 3.0.2
+test "$CHART_VERSION" = 3.0.3
 CHART_COORDINATE=$(python3 scripts/dspace_release_manifest.py preflight \
   --manifest deployment-candidates/dspace/recovery-prod.json --environment prod \
   --image-tag "$SUGARKUBE_TAG" --chart-version "$CHART_VERSION" \
   --chart-ref "$SUGARKUBE_CHART" --print-chart-coordinate)
 test "$CHART_COORDINATE" = \
-  'oci://ghcr.io/democratizedspace/charts/dspace@sha256:8b862135e52146f301a41259d6dabb053ed891d798fc1c8c95ca775b2b8e9575'
+  'oci://ghcr.io/democratizedspace/charts/dspace@sha256:6ee663c426673bc0e516ed8f8b0ab11a918d2f2bb81fc9047b3eb37b78329f5c'
 PROD_HOST=$(python3 scripts/app_chart.py resolve-host --values "$SUGARKUBE_VALUES")
 python3 scripts/app_chart.py preflight \
   --app "$SUGARKUBE_APP" --env "$SUGARKUBE_ENV" --tag "$SUGARKUBE_TAG" \
@@ -208,7 +209,7 @@ python3 scripts/app_chart.py preflight \
   --host "$PROD_HOST" --pull-policy Always
 ```
 
-This must prove chart 3.0.2 at the approved OCI digest and the immutable application image while
+This must prove chart 3.0.3 at the approved OCI digest and the immutable application image while
 rejecting staging metrics, the staging metrics Secret reference, ServiceMonitor leakage, or literal
 Secret material. Review that the resolved values chain is exactly the dev base plus production
 overlay. Legitimate production `secretKeyRef`/`existingSecret` names are allowed, but never print
@@ -233,7 +234,7 @@ python3 scripts/dspace_release_manifest.py validate --final --manifest "$PROD_EV
 
 Review the finalized record together with fresh bounded Helm status/history and Deployment/pod
 capture. All serving pods and Helm stored image values must use `main-1a31a56` and the approved
-image digest; installed chart version and OCI provenance must be 3.0.2 and its chart revision/digest.
+image digest; installed chart version and OCI provenance must be 3.0.3 and its chart revision/digest.
 Application, runtime, and frontend identity must remain the application revision, not the chart
 revision. Public and direct identity, replica agreement, health paths, configuration/provider, and
 `/chat` must all pass. Preserve candidate, finalized records, command exit statuses, timestamps, and
@@ -276,9 +277,9 @@ child output, browser artifacts, headers, cookies, credentials, and request payl
 The sole exception is the complete coordinate tuple in
 `docs/apps/dspace.prod-recovery-coordinates.json`, augmented by candidate provider `openai`: schema
 2, application `3.0.1`, source revision `1a31a569aff2dbeb238e8c2688b9e85140d2077d`, chart source
-revision `63063e287adb92a4158ce2c8e7d378b73f52c1c5`, image tag `main-1a31a56`, image digest
-`sha256:23dbc573377549136c1f10b05706b3c176ffbabaf04a3194381a24752104a401`, chart `3.0.2` with digest
-`sha256:8b862135e52146f301a41259d6dabb053ed891d798fc1c8c95ca775b2b8e9575`, and semantic tag
+revision `62da11005354e9f9a89c2e58584cdce4c8ec35aa`, image tag `main-1a31a56`, image digest
+`sha256:23dbc573377549136c1f10b05706b3c176ffbabaf04a3194381a24752104a401`, chart `3.0.3` with digest
+`sha256:6ee663c426673bc0e516ed8f8b0ab11a918d2f2bb81fc9047b3eb37b78329f5c`, and semantic tag
 `v3.0.1`. Only that exact candidate uses `legacy-build-meta-v1`. The verifier proves identical
 `gitSha`, valid non-empty `generatedAt`, and non-empty `source` through public and every direct
 `/build-meta.json`, while still validating bounded non-empty root documents, and passes the legacy
@@ -376,6 +377,18 @@ verification uses the same command with `env=prod` and a production candidate or
 | Production tag pin | `docs/apps/dspace.prod.tag` |
 | Verify paths | `/config.json`, `/healthz`, `/livez` |
 
+### Approved chart 3.0.3 publication provenance
+
+Chart `3.0.3` was published from chart source revision
+`62da11005354e9f9a89c2e58584cdce4c8ec35aa` by upstream PR
+`democratizedspace/dspace#4816` and tag `chart-v3.0.3`. Publication workflow
+[run 31632262039, attempt 2](https://github.com/democratizedspace/dspace/actions/runs/31632262039)
+completed successfully in job `94238380995`. The OCI manifest digest is
+`sha256:6ee663c426673bc0e516ed8f8b0ab11a918d2f2bb81fc9047b3eb37b78329f5c`; the independently
+verified packaged archive SHA-256 is
+`2b6528eefd487be8a52db8ea44f118310351976ee32b29fb6115c8081916280a`. The archive hash is
+publication provenance only and is intentionally not added to the release-manifest schema.
+
 ### Artifact links
 
 Use these links before changing a deployment so the workflow runs, package versions, and source paths all agree.
@@ -400,7 +413,7 @@ Use these links before changing a deployment so the workflow runs, package versi
 - `env=staging`: HA staging on the staging Sugarkube cluster with host `staging.democratized.space` and values `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml`.
   The configured staging target injects `DSPACE_TOKEN_PLACE_URL=https://staging.token.place` and `DSPACE_TOKEN_PLACE_CHAT_MODEL=qwen3-8b-instruct`, uses provenance-bearing chart `3.1.1` for DSPACE application `3.1.0`, and persists the authenticated metrics ServiceMonitor configuration discovered by kube-prometheus-stack. The live staging release is Helm revision 28 from the immutable DSPACE `3.1.0` staging image `main-018687f`, with finalized evidence recorded at `deployment-evidence/dspace/staging/main-018687f-20260805T035722Z.json`; operators can use that final record as the promotion and reconciliation proof instead of creating a replacement candidate/evidence path for this deployment. The metrics bearer value is not committed; operators manage the existing `dspace-staging-metrics-token` Secret out of band.
 - `env=prod`: HA production on the production Sugarkube cluster with host `democratized.space` and values `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml`.
-  The production overlay injects `DSPACE_TOKEN_PLACE_URL=https://token.place` and `DSPACE_TOKEN_PLACE_CHAT_MODEL=llama-3.1-8b-instruct`. Production is pinned to recovery chart `3.0.2` and image `ghcr.io/democratizedspace/dspace:main-1a31a56`; it does not enable metrics or ServiceMonitor settings.
+  The production overlay injects `DSPACE_TOKEN_PLACE_URL=https://token.place` and `DSPACE_TOKEN_PLACE_CHAT_MODEL=llama-3.1-8b-instruct`. The approved production target is recovery chart `3.0.3` and image `ghcr.io/democratizedspace/dspace:main-1a31a56`; the currently installed chart remains `3.0.2` until a separately authorized rollout. The production values enable authenticated metrics and the ServiceMonitor contract.
 - Optional legacy/canary host `prod.democratized.space` uses `docs/examples/dspace.values.prod-subdomain.yaml`. The `dspace-oci-deploy-prod-subdomain` compatibility command selects the secret-free `docs/examples/apps/dspace-prod-subdomain.env` config, preserving that overlay while routing through the same manifest validation, OCI preflight, Helm deployment, and evidence finalization as the generic production path.
 
 ## Find or publish GHCR image
@@ -650,7 +663,7 @@ For staging, the browser smoke must show DSPACE calling `https://staging.token.p
 
 ## Promote production
 
-This configuration change does not promote or mutate production. Promote only after staging sign-off. Prefer the generic command; it uses the prod values chain, resolves chart `3.0.2` from `docs/apps/dspace.prod.version`, and can read `docs/apps/dspace.prod.tag` (`main-1a31a56`) when `tag=` is omitted.
+This configuration change does not promote or mutate production. Promote only after staging sign-off. Prefer the generic command; it uses the prod values chain, resolves chart `3.0.3` from `docs/apps/dspace.prod.version`, and can read `docs/apps/dspace.prod.tag` (`main-1a31a56`) when `tag=` is omitted.
 
 ```bash
 just app-promote-prod app=dspace tag="$APP_TAG" \

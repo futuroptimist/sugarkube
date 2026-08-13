@@ -194,7 +194,7 @@ if [ "${{1:-}}" = upgrade ]; then
 fi
 if [[ "$*" == *"status dspace --namespace dspace -o json" ]]; then
   chart_version="${{SUGARKUBE_STUB_CHART_VERSION:-3.1.1}}"
-  if [ -z "${{SUGARKUBE_STUB_CHART_VERSION:-}}" ] && [ "${{SUGARKUBE_STUB_NODE_ENV:-staging}}" = prod ]; then chart_version=3.0.2; fi
+  if [ -z "${{SUGARKUBE_STUB_CHART_VERSION:-}}" ] && [ "${{SUGARKUBE_STUB_NODE_ENV:-staging}}" = prod ]; then chart_version=3.0.3; fi
   description="$(cat {str(tmp_path / "helm-description")!r} 2>/dev/null || true)"
   revision=7
   if [[ "$*" == *"staging-kubeconfig"* ]]; then
@@ -228,7 +228,7 @@ if [[ "$*" == show\ chart* ]]; then
     version="${{*: -1}}"
     if [[ "$version" == oci://*@sha256:* ]]; then
       version="${{SUGARKUBE_STUB_CHART_VERSION:-3.1.1}}"
-      if [ -z "${{SUGARKUBE_STUB_CHART_VERSION:-}}" ] && [ "${{SUGARKUBE_STUB_NODE_ENV:-staging}}" = prod ]; then version=3.0.2; fi
+      if [ -z "${{SUGARKUBE_STUB_CHART_VERSION:-}}" ] && [ "${{SUGARKUBE_STUB_NODE_ENV:-staging}}" = prod ]; then version=3.0.3; fi
     fi
     printf 'apiVersion: v2\nname: dspace\nversion: %s\nappVersion: main-abcdef0\n' "$version"
     exit 0
@@ -1405,8 +1405,12 @@ data:
         lambda manifest: manifest.replace('name: dspace\n  labels:', 'name: dspace\n  namespace: ""\n  labels:', 1),
         lambda manifest: manifest.replace("name: dspace\n  labels:", "name: dspace\n  namespace: wrong\n  labels:", 1),
         lambda manifest: manifest.replace(
-            "replacement: dspace\n        - action: replace\n          targetLabel: environment",
-            "replacement: other\n        - action: replace\n          targetLabel: environment",
+            "kind: ServiceMonitor\nmetadata:\n  name: dspace\n",
+            "kind: ServiceMonitor\nmetadata:\n  name: dspace\n  namespace: wrong\n",
+        ),
+        lambda manifest: manifest.replace(
+            "        - action: replace\n          targetLabel: namespace\n          replacement: dspace\n",
+            "",
             1,
         ),
         lambda manifest: manifest.replace("replacement: prod", "replacement: staging"),
@@ -2959,7 +2963,7 @@ def _write_dspace_candidate(
         "sourceRevision": "abcdef0123456789abcdef0123456789abcdef01",
         "imageTag": "main-abcdef0",
         "imageDigest": image_digest or "sha256:" + "1" * 64,
-        "chartVersion": "3.1.1" if environment == "staging" else "3.0.2",
+        "chartVersion": "3.1.1" if environment == "staging" else "3.0.3",
         "chartDigest": "sha256:" + "2" * 64,
         "semanticTag": "v3.2.0",
         "recordType": "candidate",
@@ -3126,7 +3130,7 @@ def test_dspace_recovery_staging_config_uses_production_chart_pin(
     assert source.count(staging_pin) == 1
     recovery_config = tmp_path / "recovery-staging.env"
     recovery_version = tmp_path / "recovery.version"
-    recovery_version.write_text("3.0.2\n", encoding="utf-8")
+    recovery_version.write_text("3.0.3\n", encoding="utf-8")
     recovery_config.write_text(
         source.replace(
             staging_pin,
@@ -3138,10 +3142,10 @@ def test_dspace_recovery_staging_config_uses_production_chart_pin(
     evidence = tmp_path / "recovery-staging-evidence.json"
     _write_dspace_candidate(manifest, "staging")
     candidate = json.loads(manifest.read_text(encoding="utf-8"))
-    candidate["chartVersion"] = "3.0.2"
+    candidate["chartVersion"] = "3.0.3"
     manifest.write_text(json.dumps(candidate) + "\n", encoding="utf-8")
     env = generic_app_stub_env.copy()
-    env["SUGARKUBE_STUB_CHART_VERSION"] = "3.0.2"
+    env["SUGARKUBE_STUB_CHART_VERSION"] = "3.0.3"
 
     result = _run_just(
         [
@@ -3161,7 +3165,7 @@ def test_dspace_recovery_staging_config_uses_production_chart_pin(
     commands = (tmp_path / "commands.log").read_text(encoding="utf-8")
     assert "release-manifest preflight" in commands
     assert "helm template " in commands
-    assert "charts/dspace:3.0.2" in commands
+    assert "charts/dspace:3.0.3" in commands
     assert "docs/examples/dspace.values.staging.yaml" in commands
     assert "main-abcdef0" in commands
 
