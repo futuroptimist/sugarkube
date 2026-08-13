@@ -18,6 +18,34 @@ contract without reading its value, strict values drift, the digest-qualified re
 provenance before reserving evidence or mutating Helm. Do not install or rotate
 `dspace-prod-metrics-token` as part of this operation.
 
+### One-time production pull-policy recovery
+
+The failed revision-9 to revision-10 metrics reconciliation must remain failed and immutable. Its
+chart render and upgrade omitted the approved `image.pullPolicy=Always` override, so chart 3.0.3
+stored its `IfNotPresent` default and strict finalization correctly stopped. Normal reconciliation
+now supplies the override explicitly.
+
+After this change is merged, a separately authorized operator may run the following command once.
+This is **not** a rerun of `dspace-prod-metrics-reconcile`; it accepts only the preserved
+`ownership-and-finalization-proof` failure, revision 10, and the sole reviewed pull-policy delta.
+Choose a fresh private output path and substitute the preserved evidence path, absolute production
+kubeconfig, and original invocation ID. Do not run it if any preflight assertion fails.
+
+```bash
+just dspace-prod-metrics-pull-policy-recover \
+  failed_evidence=/private/evidence/original-failed-reconciliation.json \
+  maintenance_target=docs/apps/dspace.prod-metrics-chart-target.json \
+  recovery_evidence=/private/evidence/dspace-pull-policy-recovery.json \
+  smoke_runner=/absolute/path/to/dspace-remote-chat-smoke \
+  kubeconfig=/absolute/path/to/production.kubeconfig \
+  verifier=scripts/dspace_runtime_verifier.py \
+  confirm=dspace:prod:pull-policy-recovery:ORIGINAL_INVOCATION_ID
+```
+
+The operation permits exactly one digest-qualified Helm upgrade from revision 10 to 11, never
+uses `--reuse-values`, and preserves a new failed recovery record without retry, rollback, or
+uninstall if any post-mutation proof fails. It never edits the original failed evidence.
+
 The currently verified transition is revision 9 to 10. Tooling derives revision 9 from the baseline
 and requires exactly one revision advance; it does not blindly hard-code either revision. Use a
 fresh, nonexisting evidence destination and the executable remote `/chat` smoke runner:

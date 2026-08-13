@@ -1503,6 +1503,15 @@ def test_configuration_reconciliation_completes_all_production_gates(
     assert upgrade[upgrade.index("--kubeconfig") + 1] == str(kubeconfig)
     assert f"oci://{manifest.CHART_REF}@{selected['chartDigest']}" in upgrade
     assert f"image.tag={selected['imageTag']}" in upgrade
+    assert "image.pullPolicy=Always" in upgrade
+    target_template = next(
+        command
+        for command in commands
+        if command[0] == "helm"
+        and "template" in command
+        and "live-values.json" not in " ".join(command)
+    )
+    assert "image.pullPolicy=Always" in target_template
     forbidden = ("--reuse-values", "--version", selected["semanticTag"], "rollback")
     assert not any(item in upgrade for item in forbidden)
     assert selected["imageDigest"] not in next(
@@ -1552,6 +1561,47 @@ def test_configuration_reconciliation_completes_all_production_gates(
         command for command in commands if command[:2] == [str(verifier), "verify"]
     )
     assert verifier_command[verifier_command.index("--manifest") + 1] != str(args.manifest)
+
+
+def test_pull_policy_recovery_accepts_only_preserved_exact_failure(tmp_path: Path) -> None:
+    invocation = "a" * 32
+    record = {
+        "schemaVersion": 1,
+        "operation": "dspaceProductionMetricsReconciliation",
+        "state": "failed",
+        "failedStage": "ownership-and-finalization-proof",
+        "failureCode": "ownership-and-finalization-proof-failed",
+        "clusterMayHaveChanged": True,
+        "environment": "prod",
+        "release": "dspace",
+        "namespace": "dspace",
+        "invocationId": invocation,
+        "targetManifestFingerprint": "b" * 64,
+        "before": {"helmRevision": 9, "chartName": "dspace", "chartVersion": "3.0.2"},
+        "target": {
+            "chartVersion": "3.0.3",
+            "chartDigest": "sha256:6ee663c426673bc0e516ed8f8b0ab11a918d2f2bb81fc9047"
+            "b3eb37b78329f5c",
+            "imageTag": "main-1a31a56",
+            "imageDigest": "sha256:23dbc573377549136c1f10b05706b3c176ffbabaf04a319438"
+            "1a24752104a401",
+            "sourceRevision": "1a31a569aff2dbeb238e8c2688b9e85140d2077d",
+            "chartSourceRevision": "62da11005354e9f9a89c2e58584cdce4c8ec35aa",
+            "applicationVersion": "3.0.1",
+            "expectedDefaultChatProvider": "openai",
+        },
+    }
+    evidence = tmp_path / "failed.json"
+    evidence.write_text(json.dumps(record), encoding="utf-8")
+    target, link = rollback.failed_reconciliation_target(evidence)
+    assert target["chartVersion"] == "3.0.3"
+    assert link == {"invocationId": invocation, "fingerprint": "b" * 64}
+
+    for field, bad in (("failedStage", "runtime-verification"), ("state", "succeeded")):
+        rejected = {**record, field: bad}
+        evidence.write_text(json.dumps(rejected), encoding="utf-8")
+        with pytest.raises(rollback.RollbackError, match="exact recoverable"):
+            rollback.failed_reconciliation_target(evidence)
 
 
 def test_staging_is_non_interactive_and_reservation_collision_is_immutable(

@@ -1862,6 +1862,26 @@ dspace-prod-metrics-reconcile baseline_manifest maintenance_target evidence smok
     )
     "${reconciliation_command[@]}"
 
+# One-time, separately authorized repair of the revision-10 DSPACE pull-policy incident.
+dspace-prod-metrics-pull-policy-recover failed_evidence maintenance_target recovery_evidence smoke_runner kubeconfig verifier="{{ justfile_directory() }}/scripts/dspace_runtime_verifier.py" confirm='' config='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    strip() { local n="$1" v="$2"; [[ "$v" == "$n="* ]] && v="${v#"$n="}"; [[ -n "$v" ]] || { echo "ERROR: $n must not be empty." >&2; return 2; }; printf '%s' "$v"; }
+    failed="$(strip failed_evidence {{ quote(failed_evidence) }})"
+    target="$(strip maintenance_target {{ quote(maintenance_target) }})"
+    output="$(strip recovery_evidence {{ quote(recovery_evidence) }})"
+    smoke="$(strip smoke_runner {{ quote(smoke_runner) }})"
+    kube="$(strip kubeconfig {{ quote(kubeconfig) }})"
+    verifier_path={{ quote(verifier) }}; verifier_path="${verifier_path#verifier=}"
+    confirmation={{ quote(confirm) }}; confirmation="${confirmation#confirm=}"
+    config_path={{ quote(config) }}; config_path="${config_path#config=}"
+    command=(python3 "{{ justfile_directory() }}/scripts/dspace_manifest_rollback.py"
+      --pull-policy-recovery --environment prod --failed-evidence "$failed"
+      --maintenance-target "$target" --evidence "$output" --smoke-runner "$smoke"
+      --kubeconfig "$kube" --verifier "$verifier_path" --confirm "$confirmation"
+      --config "$config_path")
+    "${command[@]}"
+
 # Read-only DSPACE runtime, frontend, replica, and remote /chat proof.
 dspace-release-verify env manifest smoke_runner config='' kubeconfig='' expected_helm_revision='':
     #!/usr/bin/env bash
