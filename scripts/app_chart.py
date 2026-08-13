@@ -414,10 +414,10 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
                     )
                     auth = endpoint.get("bearerTokenSecret")
                     relabelings = endpoint.get("relabelings")
-                    namespace_is_explicit = "namespace" in metadata
-                    explicit_namespace = scalar(metadata.get("namespace"))
                     effective_namespace = (
-                        explicit_namespace if namespace_is_explicit else inputs.namespace
+                        metadata.get("namespace")
+                        if "namespace" in metadata
+                        else inputs.namespace
                     )
                     expected_relabelings = [
                         {"action": "replace", "targetLabel": "app", "replacement": "dspace"},
@@ -444,7 +444,6 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
                     ]
                     if (
                         metadata.get("name") != "dspace"
-                        or (namespace_is_explicit and not explicit_namespace)
                         or effective_namespace != "dspace"
                         or metadata.get("labels", {}).get("release") != "kube-prometheus-stack"
                         or spec.get("selector")
@@ -454,6 +453,7 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
                                 "app.kubernetes.io/name": "dspace",
                             }
                         }
+                        or spec.get("namespaceSelector") != {"matchNames": ["dspace"]}
                         or auth != {"name": "dspace-prod-metrics-token", "key": "token"}
                         or endpoint.get("path") != "/metrics"
                         or endpoint.get("interval") != "30s"
