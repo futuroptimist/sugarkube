@@ -433,7 +433,6 @@ apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: dspace
-  namespace: dspace
   labels:
     app.kubernetes.io/instance: dspace
     release: kube-prometheus-stack
@@ -460,6 +459,9 @@ spec:
         - action: replace
           targetLabel: environment
           replacement: prod
+        - action: replace
+          targetLabel: namespace
+          replacement: dspace
         - action: replace
           targetLabel: release
           replacement: dspace
@@ -1421,7 +1423,7 @@ def test_dspace_production_requires_exact_metrics_path_and_relabelings(
         "dspace",
         "dspace",
         "chart",
-        "3.0.2",
+        "3.0.3",
         (str(values),),
         "main-deadbee",
     )
@@ -1462,11 +1464,13 @@ spec:
 kind: ServiceMonitor
 metadata:
   name: dspace
-  namespace: dspace
   labels:
     app.kubernetes.io/instance: dspace
     release: kube-prometheus-stack
 spec:
+  namespaceSelector:
+    matchNames:
+      - dspace
   selector:
     matchLabels:
       app.kubernetes.io/instance: dspace
@@ -1486,6 +1490,9 @@ spec:
           targetLabel: environment
           replacement: prod
         - action: replace
+          targetLabel: namespace
+          replacement: dspace
+        - action: replace
           targetLabel: release
           replacement: dspace
         - action: replace
@@ -1494,6 +1501,25 @@ spec:
 """
 
     assert app_chart.validate_rendered_manifest(monitor, inputs) == []
+    assert (
+        app_chart.validate_rendered_manifest(
+            monitor.replace(
+                "kind: ServiceMonitor\nmetadata:\n  name: dspace\n  labels:\n",
+                "kind: ServiceMonitor\nmetadata:\n  name: dspace\n  namespace: dspace\n  labels:\n",
+            ),
+            inputs,
+        )
+        == []
+    )
+    for namespace in ("null", "''", "wrong"):
+        invalid = monitor.replace(
+            "kind: ServiceMonitor\nmetadata:\n  name: dspace\n  labels:\n",
+            "kind: ServiceMonitor\nmetadata:\n  name: dspace\n"
+            f"  namespace: {namespace}\n  labels:\n",
+        )
+        assert "DSPACE production ServiceMonitor contract mismatch" in (
+            app_chart.validate_rendered_manifest(invalid, inputs)
+        )
     mutated = mutation(monitor)
     assert mutated != monitor
     assert "DSPACE production ServiceMonitor contract mismatch" in (
@@ -5731,6 +5757,49 @@ def test_observability_app_metrics_inventory_tokenplace_contract_is_strict_and_c
     assert "token" in cfg["forbiddenApplicationLabels"]
 
 
+def test_observability_app_metrics_inventory_accepts_both_canonical_relabeling_forms():
+    doc = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))
+
+    app_metrics.validate_inventory(doc)
+
+    tokenplace = doc["applications"]["tokenplace"]["environments"]["staging"]
+    dspace = doc["applications"]["dspace"]["environments"]["prod"]
+    assert [rule["targetLabel"] for rule in tokenplace["serviceMonitor"]["relabelings"]] == [
+        "app", "environment", "release", "cluster"
+    ]
+    assert [rule["targetLabel"] for rule in dspace["serviceMonitor"]["relabelings"]] == [
+        "app", "environment", "namespace", "release", "cluster"
+    ]
+
+
+@pytest.mark.parametrize(
+    "mutator",
+    [
+        lambda rules: rules.pop(),
+        lambda rules: rules.__setitem__(slice(1, 3), reversed(rules[1:3])),
+        lambda rules: rules.insert(2, dict(rules[2])),
+        lambda rules: rules[2].__setitem__("targetLabel", "other"),
+        lambda rules: rules[2].__setitem__("replacement", "wrong"),
+        lambda rules: rules[2].__setitem__("action", "keep"),
+        lambda rules: rules[2].__setitem__("extra", "value"),
+        lambda rules: rules.append(
+            {"action": "replace", "targetLabel": "extra", "replacement": "value"}
+        ),
+    ],
+)
+def test_observability_app_metrics_inventory_rejects_noncanonical_relabelings(mutator):
+    doc = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))
+    rules = doc["applications"]["dspace"]["environments"]["prod"]["serviceMonitor"][
+        "relabelings"
+    ]
+    mutator(rules)
+
+    with pytest.raises(SystemExit) as excinfo:
+        app_metrics.validate_inventory(doc)
+
+    assert "canonical ordered contract" in str(excinfo.value)
+
+
 def test_observability_app_metrics_inventory_rejects_unknown_keys_duplicates_and_bad_status():
     doc = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))
     doc["applications"]["tokenplace"]["environments"]["staging"]["extra"] = True
@@ -5839,11 +5908,88 @@ spec:
 """
 
 
+def _dspace_chart_like_service_monitor(namespace_entry: str = "") -> str:
+    namespace = f"  namespace: {namespace_entry}\n" if namespace_entry else ""
+    return f"""apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: dspace
+{namespace}  labels:
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - dspace
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: dspace
+      app.kubernetes.io/name: dspace
+  endpoints:
+    - path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      bearerTokenSecret:
+        name: dspace-prod-metrics-token
+        key: token
+      relabelings:
+        - action: replace
+          targetLabel: app
+          replacement: dspace
+        - action: replace
+          targetLabel: environment
+          replacement: prod
+        - action: replace
+          targetLabel: namespace
+          replacement: dspace
+        - action: replace
+          targetLabel: release
+          replacement: dspace
+        - action: replace
+          targetLabel: cluster
+          replacement: sugarkube-prod
+"""
+
+
 def test_observability_app_metrics_validate_render_accepts_chart_like_service_monitor(tmp_path: Path):
     rendered = tmp_path / "rendered.yaml"
     rendered.write_text(_tokenplace_chart_like_service_monitor(), encoding="utf-8")
 
     app_metrics.validate_render("tokenplace", "staging", str(rendered), "tokenplace")
+
+
+@pytest.mark.parametrize("namespace_entry", ["", "dspace"])
+def test_observability_app_metrics_validate_render_accepts_dspace_namespace_forms(
+    tmp_path: Path, namespace_entry: str
+):
+    rendered = tmp_path / "rendered.yaml"
+    rendered.write_text(_dspace_chart_like_service_monitor(namespace_entry), encoding="utf-8")
+
+    app_metrics.validate_render("dspace", "prod", str(rendered), "dspace")
+
+
+@pytest.mark.parametrize("namespace_entry", ["null", "''", "wrong"])
+def test_observability_app_metrics_validate_render_rejects_explicit_invalid_dspace_namespace(
+    tmp_path: Path, namespace_entry: str
+):
+    rendered = tmp_path / "rendered.yaml"
+    rendered.write_text(_dspace_chart_like_service_monitor(namespace_entry), encoding="utf-8")
+
+    with pytest.raises(SystemExit) as excinfo:
+        app_metrics.validate_render("dspace", "prod", str(rendered), "dspace")
+
+    assert "exactly one configured ServiceMonitor" in str(excinfo.value)
+
+
+def test_observability_app_metrics_validate_render_omitted_namespace_requires_matching_release(
+    tmp_path: Path,
+):
+    rendered = tmp_path / "rendered.yaml"
+    rendered.write_text(_dspace_chart_like_service_monitor(), encoding="utf-8")
+
+    with pytest.raises(SystemExit) as excinfo:
+        app_metrics.validate_render("dspace", "prod", str(rendered), "wrong")
+
+    assert "exactly one configured ServiceMonitor" in str(excinfo.value)
 
 
 def test_observability_app_metrics_validate_render_uses_configured_workload_name_not_release_name(tmp_path: Path):
