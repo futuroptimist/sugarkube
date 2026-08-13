@@ -1862,6 +1862,34 @@ dspace-prod-metrics-reconcile baseline_manifest maintenance_target evidence smok
     )
     "${reconciliation_command[@]}"
 
+# One-time, separately authorized repair for the revision-10 DSPACE pull-policy incident.
+dspace-prod-metrics-pull-policy-recover failed_evidence maintenance_target evidence smoke_runner kubeconfig confirm='' verifier="{{ justfile_directory() }}/scripts/dspace_runtime_verifier.py" config='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    strip_named() {
+      local name="$1" value="$2"
+      if [[ "${value}" == "${name}="* ]]; then value="${value#"${name}="}"; fi
+      if [[ -z "${value}" || "${value}" == *=* ]]; then
+        printf 'ERROR: %s must be nonempty and use only its own optional prefix.\n' "${name}" >&2
+        return 2
+      fi
+      printf '%s' "${value}"
+    }
+    failed_path="$(strip_named failed_evidence {{ quote(failed_evidence) }})"
+    target_path="$(strip_named maintenance_target {{ quote(maintenance_target) }})"
+    evidence_path="$(strip_named evidence {{ quote(evidence) }})"
+    smoke_path="$(strip_named smoke_runner {{ quote(smoke_runner) }})"
+    kubeconfig_path="$(strip_named kubeconfig {{ quote(kubeconfig) }})"
+    verifier_path={{ quote(verifier) }}; verifier_path="${verifier_path#verifier=}"
+    confirmation={{ quote(confirm) }}; confirmation="${confirmation#confirm=}"
+    config_path={{ quote(config) }}; config_path="${config_path#config=}"
+    python3 "{{ justfile_directory() }}/scripts/dspace_manifest_rollback.py" \
+      --pull-policy-recovery --environment prod \
+      --failed-evidence "${failed_path}" --maintenance-target "${target_path}" \
+      --evidence "${evidence_path}" --smoke-runner "${smoke_path}" \
+      --kubeconfig "${kubeconfig_path}" --verifier "${verifier_path}" \
+      --confirm "${confirmation}" --config "${config_path}"
+
 # Read-only DSPACE runtime, frontend, replica, and remote /chat proof.
 dspace-release-verify env manifest smoke_runner config='' kubeconfig='' expected_helm_revision='':
     #!/usr/bin/env bash

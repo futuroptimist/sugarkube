@@ -1499,10 +1499,18 @@ def test_configuration_reconciliation_completes_all_production_gates(
     result = rollback.rollback(args, runner)
 
     upgrade = next(command for command in commands if "upgrade" in command)
+    renders = [command for command in commands if command[0] == "helm" and "template" in command]
+    assert renders
+    assert all(
+        "image.pullPolicy=Always" in command
+        for command in renders
+        if "live-values.json" not in " ".join(command)
+    )
     assert sum("upgrade" in command for command in commands) == 1
     assert upgrade[upgrade.index("--kubeconfig") + 1] == str(kubeconfig)
     assert f"oci://{manifest.CHART_REF}@{selected['chartDigest']}" in upgrade
     assert f"image.tag={selected['imageTag']}" in upgrade
+    assert "image.pullPolicy=Always" in upgrade
     forbidden = ("--reuse-values", "--version", selected["semanticTag"], "rollback")
     assert not any(item in upgrade for item in forbidden)
     assert selected["imageDigest"] not in next(
