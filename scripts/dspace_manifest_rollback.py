@@ -800,6 +800,11 @@ def chart_maintenance_target(baseline: dict[str, Any], path: Path) -> dict[str, 
 def rollback(args: argparse.Namespace, runner: Runner = run) -> dict[str, Any]:
     recovery = getattr(args, "production_metrics_recovery", False)
     args.evidence = args.evidence.expanduser()
+    # These attributes cross the pre-reservation boundary deliberately: the
+    # outer lifecycle is responsible for preserving failures until an evidence
+    # file has been reserved, while _rollback owns the reserved lifecycle.
+    args._recovery_failed_stage = "kubeconfig-and-cluster-identity"
+    args._recovery_original_failure = None
     try:
         if getattr(args, "configuration_reconciliation", False):
             if not args.kubeconfig or ":" in args.kubeconfig:
@@ -821,16 +826,19 @@ def rollback(args: argparse.Namespace, runner: Runner = run) -> dict[str, Any]:
         # Preserve every pre-reservation recovery rejection. An existing path is
         # deliberately left byte-for-byte untouched.
         if recovery and not args.evidence.exists():
+            failed_stage = args._recovery_failed_stage
             failure = {
                 "schemaVersion": SCHEMA_VERSION,
                 "operation": RECOVERY_OPERATION,
                 "state": "failed",
-                "failedStage": "recovery-preflight",
-                "failureCode": "recovery-preflight-failed",
+                "failedStage": failed_stage,
+                "failureCode": f"{failed_stage}-failed",
                 "failedAt": timestamp(),
                 "clusterMayHaveChanged": False,
                 "diagnostics": {"failureType": type(exc).__name__},
             }
+            if args._recovery_original_failure is not None:
+                failure["originalFailure"] = args._recovery_original_failure
             reserve(args.evidence, failure)
         raise
 
@@ -840,6 +848,8 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
     args.manifest = args.manifest.expanduser()
     args.evidence = args.evidence.expanduser()
     args.verifier = args.verifier.expanduser()
+    if getattr(args, "production_metrics_recovery", False):
+        args._recovery_failed_stage = "failed-evidence-authorization"
     try:
         baseline = release.validate(release._object(args.manifest), True)
     except release.ManifestError as exc:
@@ -852,6 +862,12 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
     if configuration_reconciliation and getattr(args, "maintenance_target", None):
         target = chart_maintenance_target(baseline, args.maintenance_target)
     failed = failed_reconciliation(args.failed_evidence, target) if recovery else None
+    if recovery:
+        args._recovery_original_failure = {
+            "invocationId": failed["invocationId"],
+            "targetManifestFingerprint": failed["targetManifestFingerprint"],
+        }
+        args._recovery_failed_stage = "live-state-and-provenance"
     image_value = target["imageTag"]
     if not configuration_reconciliation:
         image_value += f"@{target['imageDigest']}"
@@ -1089,6 +1105,7 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             # Prove the complete incident state, including both public journeys,
             # bounded remote chat, replica/ownership identity and revision 10,
             # before asking for authorization or reserving/mutating anything.
+            args._recovery_failed_stage = "runtime-and-metrics-preflight"
             validate_verifier_result(
                 json_command(
                     runner,
@@ -1145,6 +1162,8 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
         )
     except release.ManifestError as exc:
         raise RollbackError("OCI preflight validation failed") from exc
+    if recovery:
+        args._recovery_failed_stage = "live-state-and-provenance"
     print(summary(before_helm, before_identity, before_pods, target, values_proof))
     current_images = {application_image(pod) for pod in before_pods if application_image(pod)}
     current_ids: set[str] = set()
@@ -1205,6 +1224,8 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             raise RollbackError("strict application chart render validation failed")
     # Matching chart version and image identity alone is not exact proof: Helm
     # status cannot establish the installed OCI chart digest.
+    if recovery:
+        args._recovery_failed_stage = "confirmation"
     (
         recovery_confirmation(args.confirm)
         if recovery
@@ -1267,6 +1288,8 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             "invocationId": failed["invocationId"],
             "targetManifestFingerprint": failed["targetManifestFingerprint"],
         }
+    if recovery:
+        args._recovery_failed_stage = "reservation"
     reserve(args.evidence, evidence)
     mutated = False
     production_target_verified = not configuration_reconciliation

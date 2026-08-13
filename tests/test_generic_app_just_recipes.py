@@ -3171,6 +3171,47 @@ def test_dspace_recovery_staging_config_uses_production_chart_pin(
 
 
 @pytest.mark.usefixtures("ensure_just_available")
+def test_dspace_pull_policy_recovery_recipe_forwards_exact_guard_inputs(tmp_path: Path) -> None:
+    inputs = {
+        "failed_evidence": tmp_path / "failed=x.json",
+        "maintenance_target": tmp_path / "reviewed-target.json",
+        "recovery_evidence": tmp_path / "fresh-output.json",
+        "smoke_runner": tmp_path / "remote-smoke",
+        "kubeconfig": tmp_path / "prod-kubeconfig",
+        "verifier": REPO_ROOT / "scripts/dspace_runtime_verifier.py",
+    }
+    confirmation = "dspace:prod:recover-revision-10-pull-policy"
+    result = subprocess.run(
+        [
+            "just",
+            "--dry-run",
+            "dspace-prod-metrics-pull-policy-recover",
+            *(f"{name}={path}" for name, path in inputs.items()),
+            f"confirm={confirmation}",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    # `just --dry-run` writes recipe lines to stderr so their stdout remains
+    # distinguishable from a command's output.
+    rendered = result.stdout + result.stderr
+    assert "--production-metrics-recovery --environment prod" in rendered
+    assert str(inputs["failed_evidence"]) in rendered
+    assert str(inputs["maintenance_target"]) in rendered
+    assert str(inputs["recovery_evidence"]) in rendered
+    assert str(inputs["smoke_runner"]) in rendered
+    assert str(inputs["kubeconfig"]) in rendered
+    assert str(inputs["verifier"]) in rendered
+    assert confirmation in rendered
+    assert "helm upgrade" not in rendered
+    assert "kubectl" not in rendered
+
+
+@pytest.mark.usefixtures("ensure_just_available")
 def test_dspace_manifest_rollback_preserves_legacy_positional_verifier(
     tmp_path: Path,
 ) -> None:

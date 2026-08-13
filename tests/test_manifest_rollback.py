@@ -943,11 +943,60 @@ def test_recovery_initial_production_assertion_failure_is_preserved(
         "schemaVersion": rollback.SCHEMA_VERSION,
         "operation": rollback.RECOVERY_OPERATION,
         "state": "failed",
-        "failedStage": "recovery-preflight",
-        "failureCode": "recovery-preflight-failed",
+        "failedStage": "kubeconfig-and-cluster-identity",
+        "failureCode": "kubeconfig-and-cluster-identity-failed",
         "clusterMayHaveChanged": False,
         "diagnostics": {"failureType": "RollbackError"},
     }
+    assert_no_mutation(commands)
+
+
+@pytest.mark.parametrize(
+    "failed_stage",
+    (
+        "failed-evidence-authorization",
+        "live-state-and-provenance",
+        "runtime-and-metrics-preflight",
+        "confirmation",
+        "reservation",
+    ),
+)
+def test_linked_recovery_pre_reservation_failures_preserve_precise_stage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failed_stage: str,
+) -> None:
+    args, commands, evidence, _verifier = pre_reservation_case(
+        tmp_path, monkeypatch, environment="prod"
+    )
+    kubeconfig = tmp_path / "kubeconfig"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    args.kubeconfig = str(kubeconfig)
+    args.configuration_reconciliation = True
+    args.production_metrics_recovery = True
+    original = {
+        "invocationId": "a" * 32,
+        "targetManifestFingerprint": "b" * 64,
+    }
+    monkeypatch.setattr(rollback, "assert_production_target", lambda *_args: None)
+
+    def reject(_args: Namespace, _runner: object, _staged: Path) -> dict[str, object]:
+        _args._recovery_failed_stage = failed_stage
+        _args._recovery_original_failure = original
+        raise rollback.RollbackError("sensitive diagnostic must not be persisted")
+
+    monkeypatch.setattr(rollback, "_rollback", reject)
+
+    with pytest.raises(rollback.RollbackError, match="sensitive diagnostic"):
+        rollback.rollback(args, commands.append)
+
+    written = json.loads(evidence.read_text(encoding="utf-8"))
+    assert written["failedStage"] == failed_stage
+    assert written["failureCode"] == f"{failed_stage}-failed"
+    assert written["clusterMayHaveChanged"] is False
+    assert written["originalFailure"] == original
+    assert written["diagnostics"] == {"failureType": "RollbackError"}
+    assert "sensitive" not in evidence.read_text(encoding="utf-8")
     assert_no_mutation(commands)
 
 
