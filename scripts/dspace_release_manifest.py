@@ -938,9 +938,15 @@ def verify_helm_stored_values(
             "additionalLabels": {"release": "kube-prometheus-stack"},
             "cluster": "sugarkube-prod",
         }
+        actual_monitor = stored_values.get("serviceMonitor")
+        # `helm get values --all` includes this immutable chart default, while
+        # user-supplied values omit it. Both representations are exact.
+        if isinstance(actual_monitor, dict) and actual_monitor.get("relabelings") == []:
+            actual_monitor = dict(actual_monitor)
+            actual_monitor.pop("relabelings")
         if (
             stored_values.get("metrics") != expected_metrics
-            or stored_values.get("serviceMonitor") != expected_monitor
+            or actual_monitor != expected_monitor
             or contains_staging_reference(stored_values)
             or contains_inline_credential(
                 {

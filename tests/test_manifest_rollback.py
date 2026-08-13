@@ -1503,6 +1503,13 @@ def test_configuration_reconciliation_completes_all_production_gates(
     assert upgrade[upgrade.index("--kubeconfig") + 1] == str(kubeconfig)
     assert f"oci://{manifest.CHART_REF}@{selected['chartDigest']}" in upgrade
     assert f"image.tag={selected['imageTag']}" in upgrade
+    assert "image.pullPolicy=Always" in upgrade
+    target_template = next(
+        command
+        for command in commands
+        if "template" in command and f"@{selected['chartDigest']}" in " ".join(command)
+    )
+    assert "image.pullPolicy=Always" in target_template
     forbidden = ("--reuse-values", "--version", selected["semanticTag"], "rollback")
     assert not any(item in upgrade for item in forbidden)
     assert selected["imageDigest"] not in next(
@@ -1788,3 +1795,42 @@ def test_orchestration_preserves_complete_success_and_failure_evidence(
     assert written["targetManifestFingerprint"] == result["targetManifestFingerprint"]
     assert written["helm"]["beforeRevision"] == 7
     assert written["helm"]["afterRevision"] == 8
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("state", "reserved"),
+        ("operation", "wrong"),
+        ("failedStage", "wrong"),
+        ("failureCode", "wrong"),
+        ("clusterMayHaveChanged", False),
+    ],
+)
+def test_pull_policy_recovery_rejects_wrong_original_failure(field: str, value: object) -> None:
+    evidence = {
+        "operation": "dspaceProductionMetricsReconciliation",
+        "state": "failed",
+        "failedStage": "ownership-and-finalization-proof",
+        "failureCode": "ownership-and-finalization-proof-failed",
+        "clusterMayHaveChanged": True,
+        "invocationId": "a" * 32,
+        "sugarkubeRevision": "b" * 40,
+        "before": {"helmRevision": 9, "chartName": "dspace", "chartVersion": "3.0.2"},
+        "target": {
+            "chartVersion": "3.0.3",
+            "chartDigest": (
+                "sha256:6ee663c426673bc0e516ed8f8b0ab11a918d2f2bb81fc9047b3eb37b78329f5c"
+            ),
+            "applicationVersion": "3.0.1",
+            "sourceRevision": "1a31a569aff2dbeb238e8c2688b9e85140d2077d",
+            "imageTag": "main-1a31a56",
+            "imageDigest": (
+                "sha256:23dbc573377549136c1f10b05706b3c176ffbabaf04a3194381a24752104a401"
+            ),
+            "expectedDefaultChatProvider": "openai",
+        },
+    }
+    evidence[field] = value
+    with pytest.raises(rollback.RollbackError, match="approved failed reconciliation"):
+        rollback.validate_failed_reconciliation_evidence(evidence)

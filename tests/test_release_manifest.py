@@ -722,6 +722,7 @@ def test_committed_production_values_pass_stored_values_contract() -> None:
 def test_helm_stored_values_accept_chart_defaults_and_safe_references() -> None:
     value = split_candidate("prod")
     stored = production_stored_values()
+    stored["serviceMonitor"]["relabelings"] = []
     stored["env"] = [
         {
             "name": "METRICS_TOKEN",

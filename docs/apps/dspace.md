@@ -32,6 +32,29 @@ just dspace-prod-metrics-reconcile \
   confirm="dspace:prod:1a31a569aff2dbeb238e8c2688b9e85140d2077d"
 ```
 
+### Pull-policy recovery for the failed revision-10 reconciliation
+
+The normal reconciliation remains bound to the finalized revision-9/chart-3.0.2 baseline and must
+not be retried after Helm has advanced. After this change is independently reviewed and merged, the
+single known revision-10/chart-3.0.3 failure may instead be repaired with the explicit operation:
+
+```bash
+just dspace-prod-metrics-pull-policy-recover \
+  original_evidence=/home/pi/operator-evidence/dspace-prod-metrics-reconcile-20260813T072927Z/reconciliation.json \
+  baseline_manifest=/path/to/finalized-chart-3.0.2.json \
+  maintenance_target=docs/apps/dspace.prod-metrics-chart-target.json \
+  evidence=/home/pi/operator-evidence/dspace-prod-metrics-pull-policy-recover-$(date -u +%Y%m%dT%H%M%SZ)/recovery.json \
+  smoke_runner=/path/to/executable/dspace-smoke-runner \
+  kubeconfig=/absolute/path/to/production.kubeconfig \
+  confirm=dspace:prod:1a31a569aff2dbeb238e8c2688b9e85140d2077d
+```
+
+The destination must not exist. The command accepts only the original bounded failure, proves that
+revision 10 differs solely by `image.pullPolicy=IfNotPresent`, and performs one digest-qualified
+revision 10 to 11 upgrade with `image.pullPolicy=Always`. Any mismatch or post-reservation failure
+fails closed without retry, rollback, uninstall, Secret access, or another mutation. Recovery
+evidence records the original file's SHA-256 and invocation ID; it never modifies that file.
+
 The command uses only the exact digest-qualified 3.0.3 OCI chart, the complete committed production
 values chain, and an invocation-bound opaque Helm description; it never uses `--reuse-values`.
 Afterward it proves replacement Ready pods retain the exact image digest, runs strict runtime,
