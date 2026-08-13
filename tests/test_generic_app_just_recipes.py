@@ -3010,6 +3010,47 @@ def _run_dspace_prod_metrics_reconcile(
     return result, log.read_text(encoding="utf-8").splitlines() if log.exists() else []
 
 
+def _run_dspace_pull_policy_recovery(
+    tmp_path: Path, args: list[str]
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    bin_dir = tmp_path / "recovery-bin"
+    bin_dir.mkdir(parents=True)
+    log = tmp_path / "recovery-argv.log"
+    _write_executable(
+        bin_dir / "python3", f"#!/bin/sh\nprintf '%s\\n' \"$@\" > {str(log)!r}\n"
+    )
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+    result = _run_just(["dspace-prod-metrics-pull-policy-recover", *args], env)
+    return result, log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_dspace_pull_policy_recovery_has_separate_fail_closed_argv(tmp_path: Path) -> None:
+    values = {
+        "failed_evidence": "/private/failed.json",
+        "maintenance_target": "docs/apps/dspace.prod-metrics-chart-target.json",
+        "evidence": "/private/new-recovery.json",
+        "smoke_runner": "/opt/dspace/run-remote-chat-smoke.mjs",
+        "kubeconfig": "/private/config-sugarkube-prod",
+    }
+    result, argv = _run_dspace_pull_policy_recovery(
+        tmp_path,
+        [*(f"{key}={value}" for key, value in values.items()),
+         "confirm=dspace:prod:recover-revision-10-pull-policy-to-revision-11"],
+    )
+    assert result.returncode == 0, result.stderr
+    assert "--pull-policy-recovery" in argv
+    assert "--configuration-reconciliation" not in argv
+    assert "--baseline-manifest" not in argv
+    for key, value in values.items():
+        option = f"--{key.replace('_', '-')}"
+        assert argv[argv.index(option) + 1] == value
+    assert argv[argv.index("--confirm") + 1] == (
+        "dspace:prod:recover-revision-10-pull-policy-to-revision-11"
+    )
+
+
 @pytest.mark.usefixtures("ensure_just_available")
 def test_dspace_prod_metrics_reconcile_normalizes_documented_and_positional_forms(
     tmp_path: Path,

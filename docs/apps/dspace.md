@@ -246,6 +246,33 @@ and reviewers accept the bounded pre/post capture. Otherwise the freeze remains.
 
 ### 5. Failure reconciliation and immutable recovery
 
+#### One-time revision-10 pull-policy recovery
+
+The production metrics reconciliation that created Helm revision 10 is preserved as a failed
+operation. Chart 3.0.3 defaulted `image.pullPolicy` to `IfNotPresent` because the render and upgrade
+commands did not override it, while finalization correctly required the reviewed value `Always`.
+Do not edit or replace that failed evidence and do not rerun `dspace-prod-metrics-reconcile`.
+
+After this fix is merged, a separately authorized operator may run the following command exactly
+once, substituting only the three private absolute paths. This is a narrowly guarded production
+recovery, not a reconciliation retry. It accepts only the preserved ownership/finalization failure,
+revision 10 at chart 3.0.3, and the sole stored-value delta `IfNotPresent`; it then performs one
+digest-qualified upgrade to revision 11 with `Always` and writes a new evidence record.
+
+```bash
+just dspace-prod-metrics-pull-policy-recover \
+  failed_evidence=/absolute/private/path/failed-reconciliation.json \
+  maintenance_target=docs/apps/dspace.prod-metrics-chart-target.json \
+  evidence=/absolute/private/path/new-pull-policy-recovery.json \
+  smoke_runner=/absolute/path/to/dspace/scripts/run-remote-chat-smoke.mjs \
+  kubeconfig=/absolute/private/path/config-sugarkube-prod \
+  confirm=dspace:prod:recover-revision-10-pull-policy-to-revision-11
+```
+
+The output path must not exist. The helper never retries, rolls back, uninstalls, rotates Secrets,
+or performs a second Helm mutation after failure; its sanitized failed record states the exact stage
+and whether the cluster may have changed. Preserve both records for review.
+
 There is deliberately no fabricated finalized record for the inconsistent pre-change revision 8,
 so it is not a valid rollback target. On any failure, stop, keep the freeze, preserve the reservation
 or redacted failure evidence and bounded post-failure status, and do not immediately mutate again.
