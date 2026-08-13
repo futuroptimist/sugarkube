@@ -227,6 +227,11 @@
               },
               {
                 "action": "replace",
+                "targetLabel": "namespace",
+                "replacement": "dspace"
+              },
+              {
+                "action": "replace",
                 "targetLabel": "release",
                 "replacement": "dspace"
               },
