@@ -66,6 +66,31 @@ PRODUCTION_BASELINE = (
 )
 RECOVERY_OPERATION = "dspaceProductionMetricsPullPolicyRecovery"
 RECOVERY_CONFIRMATION = "dspace:prod:recover-revision-10-pull-policy"
+FAILED_RECONCILIATION_FIELDS = (
+    "schemaVersion",
+    "operation",
+    "state",
+    "failedStage",
+    "failureCode",
+    "clusterMayHaveChanged",
+    "invocationId",
+    "targetManifestFingerprint",
+    "environment",
+    "release",
+    "namespace",
+    "before",
+    "target",
+)
+RECORDED_TARGET_FIELDS = (
+    "chartVersion",
+    "chartDigest",
+    "imageTag",
+    "imageDigest",
+    "sourceRevision",
+    "chartSourceRevision",
+    "applicationVersion",
+    "expectedDefaultChatProvider",
+)
 
 
 class RollbackError(ValueError):
@@ -524,14 +549,61 @@ def recovery_confirmation(supplied: str) -> None:
         raise RollbackError(f"recovery confirmation must exactly equal {RECOVERY_CONFIRMATION}")
 
 
+def runtime_verifier_command(
+    args: argparse.Namespace,
+    target: dict[str, Any],
+    manifest: Path,
+    *,
+    expected_revision: int | None = None,
+) -> list[str]:
+    """Build the repository verifier invocation used on both sides of mutation."""
+    command = [
+        str(args.verifier),
+        "verify",
+        "--environment",
+        args.environment,
+        "--release",
+        "dspace",
+        "--namespace",
+        "dspace",
+        "--application-version",
+        target["applicationVersion"],
+        "--source-revision",
+        target["sourceRevision"],
+        "--provider",
+        target["expectedDefaultChatProvider"],
+        "--manifest",
+        str(manifest),
+        "--smoke-runner",
+        str(args.smoke_runner),
+        "--kubeconfig",
+        str(args.kubeconfig),
+    ]
+    if args.config:
+        command.extend(("--config", str(args.config)))
+    if expected_revision is not None:
+        command.extend(("--expected-helm-revision", str(expected_revision)))
+    return command
+
+
 def failed_reconciliation(path: Path, target: dict[str, Any]) -> dict[str, Any]:
     """Validate the immutable failure that alone authorizes the revision-10 repair."""
     try:
         value = release._object(path.expanduser())
     except release.ManifestError as exc:
         raise RollbackError("preserved failed reconciliation evidence is unreadable") from exc
+    # Failure records may also contain the normal immutable lifecycle metadata,
+    # but every incident-authorizing field is mandatory.  In particular, do not
+    # use ``get``-based projections which silently ignore missing target fields.
+    missing = sorted(set(FAILED_RECONCILIATION_FIELDS) - value.keys())
+    if missing:
+        raise RollbackError("preserved failed reconciliation evidence schema is incomplete")
     if (
-        value.get("operation") != "dspaceProductionMetricsReconciliation"
+        value.get("schemaVersion") != SCHEMA_VERSION
+        or value.get("environment") != "prod"
+        or value.get("release") != "dspace"
+        or value.get("namespace") != "dspace"
+        or value.get("operation") != "dspaceProductionMetricsReconciliation"
         or value.get("state") != "failed"
         or value.get("failedStage") != "ownership-and-finalization-proof"
         or value.get("failureCode") != "ownership-and-finalization-proof-failed"
@@ -555,19 +627,8 @@ def failed_reconciliation(path: Path, target: dict[str, Any]) -> dict[str, Any]:
     ) != (9, "dspace", "3.0.2"):
         raise RollbackError("failed reconciliation before state is not revision 9/chart 3.0.2")
     recorded_target = value.get("target")
-    required = (
-        "applicationVersion",
-        "sourceRevision",
-        "imageTag",
-        "imageDigest",
-        "chartSourceRevision",
-        "chartVersion",
-        "chartDigest",
-        "expectedDefaultChatProvider",
-    )
-    if not isinstance(recorded_target, dict) or any(
-        recorded_target.get(field) != target.get(field) for field in required
-    ):
+    expected_target = {field: target[field] for field in RECORDED_TARGET_FIELDS}
+    if recorded_target != expected_target:
         raise RollbackError("failed reconciliation target differs from the reviewed target")
     return value
 
@@ -737,41 +798,41 @@ def chart_maintenance_target(baseline: dict[str, Any], path: Path) -> dict[str, 
 
 
 def rollback(args: argparse.Namespace, runner: Runner = run) -> dict[str, Any]:
-    if getattr(args, "configuration_reconciliation", False):
-        if not args.kubeconfig or ":" in args.kubeconfig:
-            raise RollbackError(
-                "metrics configuration reconciliation requires one explicit absolute kubeconfig"
-            )
-        kubeconfig = Path(args.kubeconfig).expanduser()
-        if not kubeconfig.is_absolute():
-            raise RollbackError(
-                "metrics configuration reconciliation requires one explicit absolute kubeconfig"
-            )
-        args.kubeconfig = str(kubeconfig)
-    with tempfile.TemporaryDirectory(prefix="dspace-rollback-values-") as temporary:
-        os.chmod(temporary, 0o700)
-        try:
+    recovery = getattr(args, "production_metrics_recovery", False)
+    args.evidence = args.evidence.expanduser()
+    try:
+        if getattr(args, "configuration_reconciliation", False):
+            if not args.kubeconfig or ":" in args.kubeconfig:
+                raise RollbackError(
+                    "metrics configuration reconciliation requires one explicit absolute kubeconfig"
+                )
+            kubeconfig = Path(args.kubeconfig).expanduser()
+            if not kubeconfig.is_absolute():
+                raise RollbackError(
+                    "metrics configuration reconciliation requires one explicit absolute kubeconfig"
+                )
+            args.kubeconfig = str(kubeconfig)
+        with tempfile.TemporaryDirectory(prefix="dspace-rollback-values-") as temporary:
+            os.chmod(temporary, 0o700)
             if getattr(args, "configuration_reconciliation", False):
                 assert_production_target(args.kubeconfig, runner)
             return _rollback(args, runner, Path(temporary))
-        except Exception:
-            # Recovery has its own evidence lifecycle. Preserve even a pre-mutation
-            # rejection, but never overwrite an existing reservation/final record.
-            if getattr(args, "production_metrics_recovery", False) and not args.evidence.exists():
-                reserve(
-                    args.evidence,
-                    {
-                        "schemaVersion": SCHEMA_VERSION,
-                        "operation": RECOVERY_OPERATION,
-                        "state": "failed",
-                        "failedStage": "recovery-preflight",
-                        "failureCode": "recovery-preflight-failed",
-                        "failedAt": timestamp(),
-                        "clusterMayHaveChanged": False,
-                        "diagnostics": {},
-                    },
-                )
-            raise
+    except Exception as exc:
+        # Preserve every pre-reservation recovery rejection. An existing path is
+        # deliberately left byte-for-byte untouched.
+        if recovery and not args.evidence.exists():
+            failure = {
+                "schemaVersion": SCHEMA_VERSION,
+                "operation": RECOVERY_OPERATION,
+                "state": "failed",
+                "failedStage": "recovery-preflight",
+                "failureCode": "recovery-preflight-failed",
+                "failedAt": timestamp(),
+                "clusterMayHaveChanged": False,
+                "diagnostics": {"failureType": type(exc).__name__},
+            }
+            reserve(args.evidence, failure)
+        raise
 
 
 def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) -> dict[str, Any]:
@@ -817,6 +878,8 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
     bundled_verifier = (
         args.verifier.resolve() == (REPO_ROOT / "scripts/dspace_runtime_verifier.py").resolve()
     )
+    if recovery and not bundled_verifier:
+        raise RollbackError("recovery requires the repository runtime verifier")
     if bundled_verifier:
         configured_smoke = getattr(args, "smoke_runner", None) or os.environ.get(
             "DSPACE_SMOKE_RUNNER", ""
@@ -995,20 +1058,63 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
                 ],
                 "Helm computed values",
             )
-            computed_image = computed_values.get("image")
-            if (
-                not isinstance(computed_image, dict)
-                or computed_image.get("pullPolicy") != "IfNotPresent"
-            ):
+            defaults_path = staged_directory / "chart-defaults.yaml"
+            defaults_path.write_text(
+                runner(["helm", "show", "values", coordinate]), encoding="utf-8"
+            )
+            os.chmod(defaults_path, 0o600)
+            expected_computed = app_chart.merged_values_document(
+                (str(defaults_path), *(str(path) for path in values))
+            )
+            if not isinstance(expected_computed, dict):
+                raise RollbackError("chart defaults produced invalid computed values")
+            expected_image_values = expected_computed.get("image")
+            if not isinstance(expected_image_values, dict):
+                raise RollbackError("chart defaults do not define image values")
+            expected_image_values.update(
+                repository=release.IMAGE_REF,
+                tag=target["imageTag"],
+                pullPolicy="IfNotPresent",
+            )
+            if computed_values != expected_computed:
                 raise RollbackError(
-                    "live computed pull policy is not the recoverable chart default"
+                    "live computed values differ from the exact recoverable chart defaults"
                 )
-            strict_computed = copy.deepcopy(computed_values)
+            strict_computed = copy.deepcopy(expected_computed)
             strict_computed["image"]["pullPolicy"] = "Always"
             try:
                 release.verify_helm_stored_values(approved, strict_computed, "prod")
             except release.ManifestError as exc:
                 raise RollbackError("live computed values violate the approved contract") from exc
+            # Prove the complete incident state, including both public journeys,
+            # bounded remote chat, replica/ownership identity and revision 10,
+            # before asking for authorization or reserving/mutating anything.
+            validate_verifier_result(
+                json_command(
+                    runner,
+                    runtime_verifier_command(
+                        args, target, verifier_manifest, expected_revision=10
+                    ),
+                    "recovery runtime preflight",
+                ),
+                target,
+                "prod",
+            )
+            # This repository verifier owns the Secret, ServiceMonitor, exactly
+            # two healthy targets, metric-family, and Grafana API contract.
+            runner(
+                [
+                    "env",
+                    f"KUBECONFIG={args.kubeconfig}",
+                    sys.executable,
+                    str(REPO_ROOT / "scripts" / "observability_app_metrics.py"),
+                    "verify",
+                    "--app",
+                    "dspace",
+                    "--env",
+                    "prod",
+                ]
+            )
         else:
             live_metrics = live_values.get("metrics")
             live_monitor = live_values.get("serviceMonitor")
@@ -1361,6 +1467,10 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
                 "Helm stored values",
             )
             try:
+                if recovery and stored_values != strict_computed:
+                    raise RollbackError(
+                        "post-upgrade computed values differ from the exact approved document"
+                    )
                 helm_stored_values_result = release.verify_helm_stored_values(
                     approved, stored_values, args.environment
                 )
@@ -1384,20 +1494,11 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             helm_history=after_history,
         )
         verifier_command = [
-            str(args.verifier),
-            "verify",
-            "--environment",
-            args.environment,
-            "--release",
-            "dspace",
-            "--namespace",
-            "dspace",
-            "--application-version",
-            target["applicationVersion"],
-            "--source-revision",
-            target["sourceRevision"],
-            "--provider",
-            target["expectedDefaultChatProvider"],
+            str(args.verifier), "verify", "--environment", args.environment,
+            "--release", "dspace", "--namespace", "dspace",
+            "--application-version", target["applicationVersion"],
+            "--source-revision", target["sourceRevision"],
+            "--provider", target["expectedDefaultChatProvider"],
         ]
         # The repository verifier owns these extended arguments.  Preserve the
         # original verify contract for compatible third-party verifiers rather
@@ -1410,6 +1511,8 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             verifier_command.extend(("--kubeconfig", str(args.kubeconfig)))
             if args.config:
                 verifier_command.extend(("--config", str(args.config)))
+            if recovery:
+                verifier_command.extend(("--expected-helm-revision", "11"))
         failed_stage = "runtime-verification"
         verifier = validate_verifier_result(
             json_command(runner, verifier_command, "runtime verifier"), target, args.environment

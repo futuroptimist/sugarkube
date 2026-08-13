@@ -22,6 +22,10 @@ def test_failed_reconciliation_accepts_only_exact_authorized_incident(tmp_path: 
     baseline = manifest.validate(manifest._object(PROD_BASELINE), True)
     selected = rollback.chart_maintenance_target(baseline, PROD_MAINTENANCE_TARGET)
     evidence = {
+        "schemaVersion": rollback.SCHEMA_VERSION,
+        "environment": "prod",
+        "release": "dspace",
+        "namespace": "dspace",
         "operation": "dspaceProductionMetricsReconciliation",
         "state": "failed",
         "failedStage": "ownership-and-finalization-proof",
@@ -51,7 +55,14 @@ def test_failed_reconciliation_accepts_only_exact_authorized_incident(tmp_path: 
     assert rollback.failed_reconciliation(path, selected)["invocationId"] == "a" * 32
 
     for field, wrong in (
+        ("schemaVersion", 2),
+        ("environment", "staging"),
+        ("release", "other"),
+        ("namespace", "other"),
+        ("operation", "other"),
+        ("state", "succeeded"),
         ("failedStage", "runtime-verification"),
+        ("failureCode", "runtime-verification-failed"),
         ("invocationId", "wrong"),
         ("clusterMayHaveChanged", False),
     ):
@@ -64,6 +75,16 @@ def test_failed_reconciliation_accepts_only_exact_authorized_incident(tmp_path: 
     path.write_text(json.dumps(changed), encoding="utf-8")
     with pytest.raises(rollback.RollbackError, match="revision 9"):
         rollback.failed_reconciliation(path, selected)
+
+    for target_change in ("missing", "extra"):
+        changed = json.loads(json.dumps(evidence))
+        if target_change == "missing":
+            changed["target"].pop("imageDigest")
+        else:
+            changed["target"]["ignored"] = "must-not-be-accepted"
+        path.write_text(json.dumps(changed), encoding="utf-8")
+        with pytest.raises(rollback.RollbackError, match="reviewed target"):
+            rollback.failed_reconciliation(path, selected)
 
 
 def target(environment: str = "staging", schema_version: int = 1) -> dict[str, object]:
@@ -925,7 +946,7 @@ def test_recovery_initial_production_assertion_failure_is_preserved(
         "failedStage": "recovery-preflight",
         "failureCode": "recovery-preflight-failed",
         "clusterMayHaveChanged": False,
-        "diagnostics": {},
+        "diagnostics": {"failureType": "RollbackError"},
     }
     assert_no_mutation(commands)
 
