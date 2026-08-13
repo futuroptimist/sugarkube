@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from argparse import Namespace
 from pathlib import Path
@@ -15,6 +16,54 @@ SHA = "abcdef0123456789abcdef0123456789abcdef01"
 DIGEST = "sha256:" + "1" * 64
 PROD_BASELINE = Path("deployment-evidence/dspace/prod/main-1a31a56-20260801T093443Z.json")
 PROD_MAINTENANCE_TARGET = Path("docs/apps/dspace.prod-metrics-chart-target.json")
+
+
+def test_failed_reconciliation_accepts_only_exact_authorized_incident(tmp_path: Path) -> None:
+    baseline = manifest.validate(manifest._object(PROD_BASELINE), True)
+    selected = rollback.chart_maintenance_target(baseline, PROD_MAINTENANCE_TARGET)
+    evidence = {
+        "operation": "dspaceProductionMetricsReconciliation",
+        "state": "failed",
+        "failedStage": "ownership-and-finalization-proof",
+        "failureCode": "ownership-and-finalization-proof-failed",
+        "clusterMayHaveChanged": True,
+        "invocationId": "a" * 32,
+        "targetManifestFingerprint": hashlib.sha256(
+            manifest._canonical(selected).encode()
+        ).hexdigest(),
+        "before": {"helmRevision": 9, "chartName": "dspace", "chartVersion": "3.0.2"},
+        "target": {
+            field: selected[field]
+            for field in (
+                "applicationVersion",
+                "sourceRevision",
+                "imageTag",
+                "imageDigest",
+                "chartSourceRevision",
+                "chartVersion",
+                "chartDigest",
+                "expectedDefaultChatProvider",
+            )
+        },
+    }
+    path = tmp_path / "failed.json"
+    path.write_text(json.dumps(evidence), encoding="utf-8")
+    assert rollback.failed_reconciliation(path, selected)["invocationId"] == "a" * 32
+
+    for field, wrong in (
+        ("failedStage", "runtime-verification"),
+        ("invocationId", "wrong"),
+        ("clusterMayHaveChanged", False),
+    ):
+        path.write_text(json.dumps({**evidence, field: wrong}), encoding="utf-8")
+        with pytest.raises(rollback.RollbackError):
+            rollback.failed_reconciliation(path, selected)
+
+    changed = json.loads(json.dumps(evidence))
+    changed["before"]["helmRevision"] = 10
+    path.write_text(json.dumps(changed), encoding="utf-8")
+    with pytest.raises(rollback.RollbackError, match="revision 9"):
+        rollback.failed_reconciliation(path, selected)
 
 
 def target(environment: str = "staging", schema_version: int = 1) -> dict[str, object]:
@@ -1503,6 +1552,9 @@ def test_configuration_reconciliation_completes_all_production_gates(
     assert upgrade[upgrade.index("--kubeconfig") + 1] == str(kubeconfig)
     assert f"oci://{manifest.CHART_REF}@{selected['chartDigest']}" in upgrade
     assert f"image.tag={selected['imageTag']}" in upgrade
+    assert "image.pullPolicy=Always" in upgrade
+    rendered = next(command for command in commands if "template" in command)
+    assert "image.pullPolicy=Always" in rendered
     forbidden = ("--reuse-values", "--version", selected["semanticTag"], "rollback")
     assert not any(item in upgrade for item in forbidden)
     assert selected["imageDigest"] not in next(

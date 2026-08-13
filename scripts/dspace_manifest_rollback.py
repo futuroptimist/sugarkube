@@ -61,6 +61,11 @@ MAINTENANCE_TARGET_FIELDS = (
     "chartVersion",
     "chartDigest",
 )
+PRODUCTION_BASELINE = (
+    REPO_ROOT / "deployment-evidence/dspace/prod/main-1a31a56-20260801T093443Z.json"
+)
+RECOVERY_OPERATION = "dspaceProductionMetricsPullPolicyRecovery"
+RECOVERY_CONFIRMATION = "dspace:prod:recover-revision-10-pull-policy"
 
 
 class RollbackError(ValueError):
@@ -514,6 +519,59 @@ def confirmation(environment: str, supplied: str, target: dict[str, Any]) -> Non
         raise RollbackError(f"production confirmation must exactly equal {expected}")
 
 
+def recovery_confirmation(supplied: str) -> None:
+    if supplied != RECOVERY_CONFIRMATION:
+        raise RollbackError(f"recovery confirmation must exactly equal {RECOVERY_CONFIRMATION}")
+
+
+def failed_reconciliation(path: Path, target: dict[str, Any]) -> dict[str, Any]:
+    """Validate the immutable failure that alone authorizes the revision-10 repair."""
+    try:
+        value = release._object(path.expanduser())
+    except release.ManifestError as exc:
+        raise RollbackError("preserved failed reconciliation evidence is unreadable") from exc
+    if (
+        value.get("operation") != "dspaceProductionMetricsReconciliation"
+        or value.get("state") != "failed"
+        or value.get("failedStage") != "ownership-and-finalization-proof"
+        or value.get("failureCode") != "ownership-and-finalization-proof-failed"
+        or value.get("clusterMayHaveChanged") is not True
+    ):
+        raise RollbackError("preserved evidence is not the authorized failed reconciliation")
+    invocation = value.get("invocationId")
+    fingerprint = value.get("targetManifestFingerprint")
+    if not isinstance(invocation, str) or not re.fullmatch(r"[0-9a-f]{32}", invocation):
+        raise RollbackError("failed reconciliation invocation binding is invalid")
+    if not isinstance(fingerprint, str) or not re.fullmatch(r"[0-9a-f]{64}", fingerprint):
+        raise RollbackError("failed reconciliation target binding is invalid")
+    expected_fingerprint = hashlib.sha256(release._canonical(target).encode()).hexdigest()
+    if fingerprint != expected_fingerprint:
+        raise RollbackError("failed reconciliation is not bound to the reviewed target")
+    before = value.get("before")
+    if not isinstance(before, dict) or (
+        before.get("helmRevision"),
+        before.get("chartName"),
+        before.get("chartVersion"),
+    ) != (9, "dspace", "3.0.2"):
+        raise RollbackError("failed reconciliation before state is not revision 9/chart 3.0.2")
+    recorded_target = value.get("target")
+    required = (
+        "applicationVersion",
+        "sourceRevision",
+        "imageTag",
+        "imageDigest",
+        "chartSourceRevision",
+        "chartVersion",
+        "chartDigest",
+        "expectedDefaultChatProvider",
+    )
+    if not isinstance(recorded_target, dict) or any(
+        recorded_target.get(field) != target.get(field) for field in required
+    ):
+        raise RollbackError("failed reconciliation target differs from the reviewed target")
+    return value
+
+
 def reserve(path: Path, metadata: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
@@ -693,7 +751,26 @@ def rollback(args: argparse.Namespace, runner: Runner = run) -> dict[str, Any]:
         args.kubeconfig = str(kubeconfig)
     with tempfile.TemporaryDirectory(prefix="dspace-rollback-values-") as temporary:
         os.chmod(temporary, 0o700)
-        return _rollback(args, runner, Path(temporary))
+        try:
+            return _rollback(args, runner, Path(temporary))
+        except Exception:
+            # Recovery has its own evidence lifecycle. Preserve even a pre-mutation
+            # rejection, but never overwrite an existing reservation/final record.
+            if getattr(args, "production_metrics_recovery", False) and not args.evidence.exists():
+                reserve(
+                    args.evidence,
+                    {
+                        "schemaVersion": SCHEMA_VERSION,
+                        "operation": RECOVERY_OPERATION,
+                        "state": "failed",
+                        "failedStage": "recovery-preflight",
+                        "failureCode": "recovery-preflight-failed",
+                        "failedAt": timestamp(),
+                        "clusterMayHaveChanged": False,
+                        "diagnostics": {},
+                    },
+                )
+            raise
 
 
 def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) -> dict[str, Any]:
@@ -708,9 +785,11 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
     if baseline["environment"] != args.environment:
         raise RollbackError("target manifest environment does not match selected environment")
     configuration_reconciliation = getattr(args, "configuration_reconciliation", False)
+    recovery = getattr(args, "production_metrics_recovery", False)
     target = baseline
     if configuration_reconciliation and getattr(args, "maintenance_target", None):
         target = chart_maintenance_target(baseline, args.maintenance_target)
+    failed = failed_reconciliation(args.failed_evidence, target) if recovery else None
     image_value = target["imageTag"]
     if not configuration_reconciliation:
         image_value += f"@{target['imageDigest']}"
@@ -780,6 +859,8 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             f"image.repository={release.IMAGE_REF}",
             "--set-string",
             f"image.tag={image_value}",
+            "--set-string",
+            "image.pullPolicy=Always",
         ]
     )
     before_helm, _before_history, before_identity = helm_snapshot(
@@ -789,8 +870,10 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
     if configuration_reconciliation:
         if args.environment != "prod":
             raise RollbackError("metrics configuration reconciliation is production-only")
-        if before_identity[2] != baseline["helmRevision"]:
-            raise RollbackError("live Helm revision differs from finalized provenance")
+        expected_before_revision = 10 if recovery else baseline["helmRevision"]
+        expected_before_chart = target["chartVersion"] if recovery else baseline["chartVersion"]
+        if before_identity[2] != expected_before_revision:
+            raise RollbackError("live Helm revision differs from authorized provenance")
         runner(
             [
                 "env",
@@ -804,8 +887,12 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
                 "prod",
             ]
         )
-        if before_identity[:2] != ("dspace", baseline["chartVersion"]):
+        if before_identity[:2] != ("dspace", expected_before_chart):
             raise RollbackError("live chart coordinate differs from finalized provenance")
+        if recovery and before_helm.get("info", {}).get("description") != (
+            f"sugarkube-dspace-metrics-reconciliation:{failed['invocationId']}"
+        ):
+            raise RollbackError("revision 10 is not bound to the failed invocation")
         if len(before_pods) != 2 or any(not pod.get("ready") for pod in before_pods):
             raise RollbackError("live release must have exactly two Ready DSPACE pods")
         live_values = json_command(
@@ -857,8 +944,12 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
                 release.chart_coordinate(
                     {
                         **approved,
-                        "chartVersion": baseline["chartVersion"],
-                        "chartDigest": baseline["chartDigest"],
+                        "chartVersion": (
+                            target["chartVersion"] if recovery else baseline["chartVersion"]
+                        ),
+                        "chartDigest": (
+                            target["chartDigest"] if recovery else baseline["chartDigest"]
+                        ),
                     }
                 ),
                 "--namespace",
@@ -878,16 +969,59 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
         except release.ManifestError as exc:
             raise RollbackError("desired production metrics contract is invalid") from exc
 
-        live_metrics = live_values.get("metrics")
-        live_monitor = live_values.get("serviceMonitor")
-        if live_metrics not in (None, {"enabled": False}) or live_monitor not in (
-            None,
-            {"enabled": False},
-        ):
-            raise RollbackError("live metrics values are not the approved disabled baseline")
-        baseline, desired_baseline = configuration_comparison_baselines(live_values, desired_values)
-        if baseline != desired_baseline:
-            raise RollbackError("unrelated Helm values drift blocks configuration reconciliation")
+        if recovery:
+            recovery_values = copy.deepcopy(desired_values)
+            recovery_values["image"].pop("pullPolicy")
+            if live_values != recovery_values:
+                raise RollbackError(
+                    "live values have drift beyond the sole recoverable pull policy"
+                )
+            computed_values = json_command(
+                runner,
+                [
+                    "helm",
+                    "--kubeconfig",
+                    args.kubeconfig,
+                    "get",
+                    "values",
+                    "dspace",
+                    "--namespace",
+                    "dspace",
+                    "--all",
+                    "-o",
+                    "json",
+                ],
+                "Helm computed values",
+            )
+            computed_image = computed_values.get("image")
+            if (
+                not isinstance(computed_image, dict)
+                or computed_image.get("pullPolicy") != "IfNotPresent"
+            ):
+                raise RollbackError(
+                    "live computed pull policy is not the recoverable chart default"
+                )
+            strict_computed = copy.deepcopy(computed_values)
+            strict_computed["image"]["pullPolicy"] = "Always"
+            try:
+                release.verify_helm_stored_values(approved, strict_computed, "prod")
+            except release.ManifestError as exc:
+                raise RollbackError("live computed values violate the approved contract") from exc
+        else:
+            live_metrics = live_values.get("metrics")
+            live_monitor = live_values.get("serviceMonitor")
+            if live_metrics not in (None, {"enabled": False}) or live_monitor not in (
+                None,
+                {"enabled": False},
+            ):
+                raise RollbackError("live metrics values are not the approved disabled baseline")
+            baseline_values, desired_baseline = configuration_comparison_baselines(
+                live_values, desired_values
+            )
+            if baseline_values != desired_baseline:
+                raise RollbackError(
+                    "unrelated Helm values drift blocks configuration reconciliation"
+                )
     # Keep the registry proof fresh: no tag resolution occurs between this
     # exact-digest check and confirmation/reservation/mutation.
     try:
@@ -963,7 +1097,11 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             raise RollbackError("strict application chart render validation failed")
     # Matching chart version and image identity alone is not exact proof: Helm
     # status cannot establish the installed OCI chart digest.
-    confirmation(args.environment, args.confirm, target)
+    (
+        recovery_confirmation(args.confirm)
+        if recovery
+        else confirmation(args.environment, args.confirm, target)
+    )
     sugarkube_revision = runner(["git", "rev-parse", "HEAD"]).strip()
     if not re.fullmatch(r"[0-9a-f]{40}", sugarkube_revision):
         raise RollbackError("could not capture the Sugarkube revision")
@@ -976,7 +1114,13 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
     evidence: dict[str, Any] = {
         "schemaVersion": SCHEMA_VERSION,
         "operation": (
-            "dspaceProductionMetricsReconciliation" if configuration_reconciliation else OPERATION
+            RECOVERY_OPERATION
+            if recovery
+            else (
+                "dspaceProductionMetricsReconciliation"
+                if configuration_reconciliation
+                else OPERATION
+            )
         ),
         "state": "reserved",
         "invocationId": invocation,
@@ -1010,11 +1154,20 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
         },
         "ociPreflight": oci,
     }
+    if recovery:
+        evidence["originalFailure"] = {
+            "invocationId": failed["invocationId"],
+            "targetManifestFingerprint": failed["targetManifestFingerprint"],
+        }
     reserve(args.evidence, evidence)
     mutated = False
     production_target_verified = not configuration_reconciliation
     failed_stage = "pre-mutation-revalidation"
-    operation = "metrics-reconciliation" if configuration_reconciliation else "manifest-rollback"
+    operation = (
+        "metrics-pull-policy-recovery"
+        if recovery
+        else ("metrics-reconciliation" if configuration_reconciliation else "manifest-rollback")
+    )
     description = f"sugarkube-dspace-{operation}:{invocation}"
     try:
         if configuration_reconciliation:
@@ -1082,6 +1235,8 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             f"image.repository={release.IMAGE_REF}",
             "--set-string",
             f"image.tag={image_value}",
+            "--set-string",
+            "image.pullPolicy=Always",
             "--wait",
             "--timeout",
             args.timeout,
@@ -1381,7 +1536,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--oras", default=os.environ.get("SUGARKUBE_ORAS_COMMAND", "oras"))
     parser.add_argument("--timeout", default="10m")
     parser.add_argument("--configuration-reconciliation", action="store_true")
+    parser.add_argument("--production-metrics-recovery", action="store_true")
+    parser.add_argument("--failed-evidence", type=Path)
     args = parser.parse_args(argv)
+    if args.production_metrics_recovery:
+        if (
+            args.configuration_reconciliation
+            or args.manifest is not None
+            or args.baseline_manifest is not None
+        ):
+            parser.error(
+                "production metrics recovery does not accept reconciliation or manifest flags"
+            )
+        if args.failed_evidence is None or args.maintenance_target is None:
+            parser.error(
+                "production metrics recovery requires --failed-evidence and --maintenance-target"
+            )
+        args.configuration_reconciliation = True
+        args.baseline_manifest = PRODUCTION_BASELINE
     if args.configuration_reconciliation:
         if (
             args.manifest is not None
