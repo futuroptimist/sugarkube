@@ -94,7 +94,7 @@ mkdir -p deployment-candidates/dspace
 RECOVERY_CONFIG=$(mktemp)
 RECOVERY_VERSION=$(mktemp)
 trap 'rm -f "$RECOVERY_CONFIG" "$RECOVERY_VERSION"' EXIT
-printf '%s\n' 3.0.2 >"$RECOVERY_VERSION"
+printf '%s\n' 3.0.3 >"$RECOVERY_VERSION"
 python3 - "$RECOVERY_CONFIG" "$RECOVERY_VERSION" <<'PY'
 from pathlib import Path
 import sys
