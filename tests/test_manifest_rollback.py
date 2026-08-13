@@ -72,6 +72,97 @@ def test_chart_pin_failure_is_redacted(tmp_path: Path) -> None:
     assert str(missing) not in str(error.value)
 
 
+def failed_evidence() -> dict[str, object]:
+    return {
+        "operation": "dspaceProductionMetricsReconciliation",
+        "state": "failed",
+        "failedStage": "ownership-and-finalization-proof",
+        "failureCode": "ownership-and-finalization-proof-failed",
+        "clusterMayHaveChanged": True,
+        "invocationId": "a" * 32,
+        "sugarkubeRevision": "b" * 40,
+        "before": {"helmRevision": 9, "chartVersion": "3.0.2"},
+        "target": {
+            "chartVersion": "3.0.3",
+            "applicationVersion": "3.0.1",
+            "sourceRevision": "1a31a569aff2dbeb238e8c2688b9e85140d2077d",
+            "imageTag": "main-1a31a56",
+            "imageDigest": (
+                "sha256:23dbc573377549136c1f10b05706b3c176ffbabaf04a3194381a24752104a401"
+            ),
+        },
+    }
+
+
+def test_failed_reconciliation_evidence_is_fingerprinted_and_ancestry_checked(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "failed.json"
+    path.write_text(json.dumps(failed_evidence()), encoding="utf-8")
+    commands: list[list[str]] = []
+
+    result = rollback.failed_reconciliation_evidence(
+        path, lambda command: commands.append(command) or ""
+    )
+
+    assert result["invocationId"] == "a" * 32
+    assert len(result["sha256"]) == 64
+    assert commands == [["git", "merge-base", "--is-ancestor", "b" * 40, "HEAD"]]
+
+
+@pytest.mark.parametrize(
+    ("field", "wrong"),
+    (
+        ("operation", "dspaceManifestRollback"),
+        ("state", "succeeded"),
+        ("failedStage", "runtime-verification"),
+        ("failureCode", "wrong"),
+        ("clusterMayHaveChanged", False),
+    ),
+)
+def test_failed_reconciliation_evidence_rejects_wrong_contract(
+    tmp_path: Path, field: str, wrong: object
+) -> None:
+    value = failed_evidence()
+    value[field] = wrong
+    path = tmp_path / "failed.json"
+    path.write_text(json.dumps(value), encoding="utf-8")
+
+    with pytest.raises(rollback.RollbackError, match="approved failed reconciliation"):
+        rollback.failed_reconciliation_evidence(path, lambda _command: "")
+
+
+@pytest.mark.parametrize("contents", ("not-json", "[]"))
+def test_failed_reconciliation_evidence_rejects_malformed(tmp_path: Path, contents: str) -> None:
+    path = tmp_path / "failed.json"
+    path.write_text(contents, encoding="utf-8")
+    with pytest.raises(rollback.RollbackError, match="unreadable or invalid|JSON object"):
+        rollback.failed_reconciliation_evidence(path, lambda _command: "")
+
+
+def test_recovery_deployment_requires_exact_two_replica_if_not_present_state() -> None:
+    deployment = {
+        "items": [
+            {
+                "spec": {
+                    "replicas": 2,
+                    "template": {
+                        "spec": {
+                            "containers": [{"name": "dspace", "imagePullPolicy": "IfNotPresent"}]
+                        }
+                    },
+                }
+            }
+        ]
+    }
+    rollback.verify_recovery_deployment(deployment)
+    deployment["items"][0]["spec"]["template"]["spec"]["containers"][0][
+        "imagePullPolicy"
+    ] = "Always"
+    with pytest.raises(rollback.RollbackError, match="exact two-replica"):
+        rollback.verify_recovery_deployment(deployment)
+
+
 def test_chart_maintenance_target_preserves_application_and_changes_only_chart() -> None:
     baseline = manifest.validate(manifest._object(PROD_BASELINE), True)
     selected = rollback.chart_maintenance_target(baseline, PROD_MAINTENANCE_TARGET)
@@ -1503,6 +1594,13 @@ def test_configuration_reconciliation_completes_all_production_gates(
     assert upgrade[upgrade.index("--kubeconfig") + 1] == str(kubeconfig)
     assert f"oci://{manifest.CHART_REF}@{selected['chartDigest']}" in upgrade
     assert f"image.tag={selected['imageTag']}" in upgrade
+    assert "image.pullPolicy=Always" in upgrade
+    render = next(
+        command
+        for command in commands
+        if "template" in command and "live-values.json" not in " ".join(command)
+    )
+    assert "image.pullPolicy=Always" in render
     forbidden = ("--reuse-values", "--version", selected["semanticTag"], "rollback")
     assert not any(item in upgrade for item in forbidden)
     assert selected["imageDigest"] not in next(

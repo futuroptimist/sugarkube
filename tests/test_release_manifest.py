@@ -699,6 +699,31 @@ def production_stored_values() -> dict[str, object]:
     }
 
 
+def test_recovery_values_accept_only_if_not_present_and_chart_default_relabelings() -> None:
+    value = split_candidate("prod")
+    computed = production_stored_values()
+    computed["image"]["pullPolicy"] = "IfNotPresent"
+    computed["serviceMonitor"]["relabelings"] = []
+
+    assert manifest.verify_helm_recovery_values(value, computed)["passed"] is True
+
+    computed["image"]["pullPolicy"] = "Always"
+    with pytest.raises(manifest.ManifestError, match="exact recovery state"):
+        manifest.verify_helm_recovery_values(value, computed)
+
+
+@pytest.mark.parametrize("drift", ("metrics", "serviceMonitor"))
+def test_recovery_values_reject_metrics_contract_drift(drift: str) -> None:
+    value = split_candidate("prod")
+    computed = production_stored_values()
+    computed["image"]["pullPolicy"] = "IfNotPresent"
+    computed["serviceMonitor"]["relabelings"] = []
+    computed[drift]["enabled"] = False
+
+    with pytest.raises(manifest.ManifestError, match="drift beyond"):
+        manifest.verify_helm_recovery_values(value, computed)
+
+
 def test_committed_production_values_pass_stored_values_contract() -> None:
     config = app_config.load_config("dspace", "prod")
     values = app_chart.merged_values_document(tuple(config["SUGARKUBE_VALUES"].split(",")))
@@ -707,9 +732,7 @@ def test_committed_production_values_pass_stored_values_contract() -> None:
     recovery = json.loads(
         Path("docs/apps/dspace.prod-recovery-coordinates.json").read_text(encoding="utf-8")
     )
-    approved = manifest.candidate(
-        recovery, "prod", "openai", "2026-07-31T12:00:00Z", "operator"
-    )
+    approved = manifest.candidate(recovery, "prod", "openai", "2026-07-31T12:00:00Z", "operator")
     values["image"] = {
         "repository": manifest.IMAGE_REF,
         "tag": approved["imageTag"],
@@ -725,9 +748,7 @@ def test_helm_stored_values_accept_chart_defaults_and_safe_references() -> None:
     stored["env"] = [
         {
             "name": "METRICS_TOKEN",
-            "valueFrom": {
-                "secretKeyRef": {"name": "dspace-prod-metrics-token", "key": "token"}
-            },
+            "valueFrom": {"secretKeyRef": {"name": "dspace-prod-metrics-token", "key": "token"}},
         }
     ]
     assert manifest.verify_helm_stored_values(value, stored, "prod")["passed"] is True
