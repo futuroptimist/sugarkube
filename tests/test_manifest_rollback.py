@@ -897,6 +897,39 @@ def test_render_failure_precedes_reservation_and_mutation(
     assert_no_mutation(commands)
 
 
+def test_recovery_initial_production_assertion_failure_is_preserved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    args, commands, evidence, _verifier = pre_reservation_case(
+        tmp_path, monkeypatch, environment="prod"
+    )
+    kubeconfig = tmp_path / "kubeconfig"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    args.kubeconfig = str(kubeconfig)
+    args.configuration_reconciliation = True
+    args.production_metrics_recovery = True
+
+    def runner(command: list[str]) -> str:
+        commands.append(command)
+        return "unexpected-context" if "current-context" in command else ""
+
+    with pytest.raises(rollback.RollbackError, match="requires sugar-prod"):
+        rollback.rollback(args, runner)
+
+    written = json.loads(evidence.read_text(encoding="utf-8"))
+    assert written.pop("failedAt")
+    assert written == {
+        "schemaVersion": rollback.SCHEMA_VERSION,
+        "operation": rollback.RECOVERY_OPERATION,
+        "state": "failed",
+        "failedStage": "recovery-preflight",
+        "failureCode": "recovery-preflight-failed",
+        "clusterMayHaveChanged": False,
+        "diagnostics": {},
+    }
+    assert_no_mutation(commands)
+
+
 def test_exact_no_op_is_rejected_before_reservation_and_mutation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1645,6 +1678,26 @@ def test_just_recipe_has_no_revision_rollback_or_reuse_values() -> None:
     assert "dspace_manifest_rollback.py" in block
     assert "--reuse-values" not in block
     assert "helm rollback" not in block
+
+
+def test_recovery_recipe_strips_only_the_matching_argument_prefix_once() -> None:
+    recipe = (Path(__file__).parents[1] / "justfile").read_text(encoding="utf-8")
+    block = recipe.split("dspace-prod-metrics-pull-policy-recover", 1)[1].split(
+        "\n# Read-only DSPACE", 1
+    )[0]
+    for prefix in (
+        "failed_evidence",
+        "maintenance_target",
+        "recovery_evidence",
+        "smoke_runner",
+        "kubeconfig",
+        "verifier",
+        "confirm",
+        "config",
+    ):
+        assert f"#{prefix}=" in block
+    assert "while [[" not in block
+    assert "${value#*=}" not in block
 
 
 @pytest.mark.parametrize(

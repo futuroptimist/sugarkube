@@ -1876,13 +1876,19 @@ dspace-prod-metrics-pull-policy-recover failed_evidence maintenance_target recov
     config_path={{ quote(config) }}
     for variable in failed_path target_path output_path smoke_path kubeconfig_path; do
       value="${!variable}"
-      while [[ "${value}" == *=* ]]; do value="${value#*=}"; done
+      case "${variable}:${value}" in
+        failed_path:failed_evidence=*) value="${value#failed_evidence=}" ;;
+        target_path:maintenance_target=*) value="${value#maintenance_target=}" ;;
+        output_path:recovery_evidence=*) value="${value#recovery_evidence=}" ;;
+        smoke_path:smoke_runner=*) value="${value#smoke_runner=}" ;;
+        kubeconfig_path:kubeconfig=*) value="${value#kubeconfig=}" ;;
+      esac
       [ -n "${value}" ] || { echo "ERROR: ${variable} must not be empty." >&2; exit 2; }
       printf -v "${variable}" '%s' "${value}"
     done
-    while [[ "${verifier_path}" == verifier=* ]]; do verifier_path="${verifier_path#verifier=}"; done
-    while [[ "${confirmation}" == confirm=* ]]; do confirmation="${confirmation#confirm=}"; done
-    while [[ "${config_path}" == config=* ]]; do config_path="${config_path#config=}"; done
+    [[ "${verifier_path}" != verifier=* ]] || verifier_path="${verifier_path#verifier=}"
+    [[ "${confirmation}" != confirm=* ]] || confirmation="${confirmation#confirm=}"
+    [[ "${config_path}" != config=* ]] || config_path="${config_path#config=}"
     python3 "{{ justfile_directory() }}/scripts/dspace_manifest_rollback.py" \
       --production-metrics-recovery --environment prod \
       --failed-evidence "${failed_path}" --maintenance-target "${target_path}" \

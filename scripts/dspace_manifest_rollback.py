@@ -747,11 +747,12 @@ def rollback(args: argparse.Namespace, runner: Runner = run) -> dict[str, Any]:
             raise RollbackError(
                 "metrics configuration reconciliation requires one explicit absolute kubeconfig"
             )
-        assert_production_target(str(kubeconfig), runner)
         args.kubeconfig = str(kubeconfig)
     with tempfile.TemporaryDirectory(prefix="dspace-rollback-values-") as temporary:
         os.chmod(temporary, 0o700)
         try:
+            if getattr(args, "configuration_reconciliation", False):
+                assert_production_target(args.kubeconfig, runner)
             return _rollback(args, runner, Path(temporary))
         except Exception:
             # Recovery has its own evidence lifecycle. Preserve even a pre-mutation
@@ -888,7 +889,8 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             ]
         )
         if before_identity[:2] != ("dspace", expected_before_chart):
-            raise RollbackError("live chart coordinate differs from finalized provenance")
+            provenance = "authorized live chart" if recovery else "finalized provenance"
+            raise RollbackError(f"live chart coordinate differs from {provenance}")
         if recovery and before_helm.get("info", {}).get("description") != (
             f"sugarkube-dspace-metrics-reconciliation:{failed['invocationId']}"
         ):
