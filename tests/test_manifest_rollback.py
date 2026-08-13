@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from argparse import Namespace
 from pathlib import Path
@@ -1788,3 +1789,52 @@ def test_orchestration_preserves_complete_success_and_failure_evidence(
     assert written["targetManifestFingerprint"] == result["targetManifestFingerprint"]
     assert written["helm"]["beforeRevision"] == 7
     assert written["helm"]["afterRevision"] == 8
+
+
+def test_pull_policy_recovery_evidence_is_narrowly_bound(tmp_path: Path) -> None:
+    baseline = manifest.validate(manifest._object(PROD_BASELINE), True)
+    target = rollback.chart_maintenance_target(baseline, PROD_MAINTENANCE_TARGET)
+    failed = {
+        "operation": "dspaceProductionMetricsReconciliation",
+        "state": "failed",
+        "failedStage": "ownership-and-finalization-proof",
+        "clusterMayHaveChanged": True,
+        "environment": "prod",
+        "release": "dspace",
+        "namespace": "dspace",
+        "invocationId": "a" * 32,
+        "targetManifestFingerprint": hashlib.sha256(manifest._canonical(target).encode()).hexdigest(),
+        "before": {"helmRevision": 9, "chartName": "dspace", "chartVersion": "3.0.2"},
+        "target": {
+            key: target[key]
+            for key in (
+                "chartVersion",
+                "chartDigest",
+                "imageTag",
+                "imageDigest",
+                "sourceRevision",
+                "chartSourceRevision",
+                "applicationVersion",
+                "expectedDefaultChatProvider",
+            )
+        },
+    }
+    evidence = tmp_path / "failed.json"
+    evidence.write_text(json.dumps(failed), encoding="utf-8")
+    assert rollback.validate_pull_policy_recovery_evidence(evidence, target) == failed
+
+    for field, replacement in (
+        ("failedStage", "runtime-verification"),
+        ("state", "succeeded"),
+        ("clusterMayHaveChanged", False),
+    ):
+        rejected = dict(failed)
+        rejected[field] = replacement
+        evidence.write_text(json.dumps(rejected), encoding="utf-8")
+        with pytest.raises(rollback.RollbackError, match="authorized post-mutation"):
+            rollback.validate_pull_policy_recovery_evidence(evidence, target)
+
+
+def test_reconciliation_render_and_upgrade_pin_approved_pull_policy() -> None:
+    source = Path("scripts/dspace_manifest_rollback.py").read_text(encoding="utf-8")
+    assert source.count('"image.pullPolicy=Always"') == 2
