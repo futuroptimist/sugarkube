@@ -40,6 +40,34 @@ Any failure after reservation preserves failed evidence. Review that evidence an
 before any further mutation; never automatically rerun, uninstall, roll back, delete, or rotate the
 Secret.
 
+### Pull-policy recovery for the failed revision-10 transition
+
+The normal reconciliation above remains bound to the finalized revision-9/chart-3.0.2 baseline and
+must not be rerun after Helm has advanced. After this change is independently reviewed and merged,
+the operator may use the separate recovery operation for the single known revision-10/chart-3.0.3
+state whose invocation-bound reconciliation failed only because the computed pull policy was
+`IfNotPresent`:
+
+```bash
+just dspace-prod-metrics-pull-policy-recover \
+  original_evidence=/home/pi/operator-evidence/dspace-prod-metrics-reconcile-20260813T072927Z/reconciliation.json \
+  baseline_manifest=deployment-evidence/dspace/prod/main-1a31a56-20260801T093443Z.json \
+  maintenance_target=docs/apps/dspace.prod-metrics-chart-target.json \
+  evidence="$FRESH_NONEXISTING_RECOVERY_EVIDENCE" \
+  smoke_runner="$DSPACE_SMOKE_RUNNER" \
+  kubeconfig="$HOME/.kube/config-sugarkube-prod" \
+  confirm="dspace:prod:1a31a569aff2dbeb238e8c2688b9e85140d2077d"
+```
+
+Preflight binds the live Helm description to the failed evidence, verifies its immutable SHA-256,
+requires exactly revision 10/chart 3.0.3 with the approved image digest and the sole
+`IfNotPresent` defect, and reuses the strict production metrics, ServiceMonitor, runtime, OCI, and
+finalization contracts. The only mutation is one digest-qualified Helm upgrade with the complete
+committed values chain and explicit `image.pullPolicy=Always`, advancing exactly from revision 10
+to 11. An already repaired or otherwise drifted release fails closed. After evidence reservation,
+any failure retains sanitized failed evidence and never triggers a retry, rollback, uninstall, or
+Secret mutation.
+
 ## Production Helm reconciliation for application 3.0.1
 
 This section **prepares but does not execute** the incident reconciliation tracked by
