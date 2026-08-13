@@ -3113,7 +3113,7 @@ def test_dspace_recovery_staging_config_uses_production_chart_pin(
     assert source.count(staging_pin) == 1
     recovery_config = tmp_path / "recovery-staging.env"
     recovery_version = tmp_path / "recovery.version"
-    recovery_version.write_text("3.0.2\n", encoding="utf-8")
+    recovery_version.write_text("3.0.3\n", encoding="utf-8")
     recovery_config.write_text(
         source.replace(
             staging_pin,
