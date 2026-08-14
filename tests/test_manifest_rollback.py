@@ -2079,12 +2079,16 @@ def recovery_execution_case(
         return {"image": True, "chart": True}
 
     monkeypatch.setattr(rollback.release, "preflight", preflight)
-    monkeypatch.setattr(
-        rollback.release,
-        "verify_helm_stored_values",
-        lambda *call_args: state["strict_calls"].append(call_args)
-        or [{"check": "helmStoredValues", "passed": True}],
-    )
+
+    def verify_stored(*call_args: object) -> list[dict[str, object]]:
+        state["strict_calls"].append(call_args)
+        if (fault == "stored-contract" and len(state["strict_calls"]) == 2) or (
+            fault == "post-stored-contract" and state["upgraded"]
+        ):
+            raise manifest.ManifestError("SENTINEL invalid stored values")
+        return [{"check": "helmStoredValues", "passed": True}]
+
+    monkeypatch.setattr(rollback.release, "verify_helm_stored_values", verify_stored)
     monkeypatch.setattr(
         rollback.release,
         "finalize",
@@ -2124,6 +2128,11 @@ def recovery_execution_case(
     )
 
     def merged(paths: object) -> dict[str, object]:
+        if any("chart-defaults" in str(p) for p in paths):
+            if fault == "invalid-chart-defaults":
+                return []  # type: ignore[return-value]
+            if fault == "missing-default-image":
+                return {"replicaCount": 2}
         return json.loads(
             json.dumps(
                 computed_before if any("chart-defaults" in str(p) for p in paths) else desired
@@ -2170,6 +2179,8 @@ def recovery_execution_case(
             if "--all" in command:
                 state["all_reads"] += 1
                 result = desired if state["upgraded"] else computed_before
+                if fault == "post-computed" and state["upgraded"]:
+                    result = {**desired, "unrelated": True}
                 if fault == "computed-drift" and state["all_reads"] == 1:
                     result = {**computed_before, "unrelated": True}
                 if fault == "concurrent-computed" and state["all_reads"] == 2:
@@ -2353,6 +2364,7 @@ def test_production_metrics_recovery_post_upgrade_failure_is_single_shot_and_san
     (
         ("failedStage", "runtime-verification"),
         ("invocationId", "not-an-invocation"),
+        ("targetManifestFingerprint", "not-a-fingerprint"),
         ("targetManifestFingerprint", "0" * 64),
     ),
 )
@@ -2412,6 +2424,9 @@ def test_production_metrics_recovery_output_collision_is_byte_immutable_and_non_
         ("render", "live-state-and-provenance"),
         ("user-drift", "live-state-and-provenance"),
         ("computed-drift", "live-state-and-provenance"),
+        ("invalid-chart-defaults", "live-state-and-provenance"),
+        ("missing-default-image", "live-state-and-provenance"),
+        ("stored-contract", "live-state-and-provenance"),
         ("runtime", "runtime-and-metrics-preflight"),
         ("metrics", "runtime-and-metrics-preflight"),
         ("provenance", "immutable-oci-provenance"),
@@ -2450,3 +2465,99 @@ def test_production_metrics_recovery_real_path_rejections_are_linked_and_non_mut
     }
     assert "SENTINEL" not in args.evidence.read_text(encoding="utf-8")
     assert (failed.read_bytes(), baseline.read_bytes()) == source_bytes
+
+
+@pytest.mark.parametrize(
+    ("fault", "failed_stage"),
+    (
+        ("post-computed", "ownership-and-finalization-proof"),
+        ("post-stored-contract", "ownership-and-finalization-proof"),
+    ),
+)
+def test_production_metrics_recovery_postflight_value_failures_are_single_shot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fault: str,
+    failed_stage: str,
+) -> None:
+    args, commands, failed, baseline, _selected = recovery_execution_case(
+        tmp_path, monkeypatch, fault=fault
+    )
+    source_bytes = (failed.read_bytes(), baseline.read_bytes())
+    with pytest.raises(rollback.RollbackError, match="preserved evidence"):
+        rollback.rollback(args, args._test_runner)
+    written = json.loads(args.evidence.read_text(encoding="utf-8"))
+    assert written["failedStage"] == failed_stage
+    assert written["clusterMayHaveChanged"] is True
+    assert written["originalFailure"]["invocationId"] == "a" * 32
+    assert "SENTINEL" not in args.evidence.read_text(encoding="utf-8")
+    assert sum(command[0] == "helm" and "upgrade" in command for command in commands) == 1
+    assert not any("rollback" in command or "uninstall" in command for command in commands)
+    assert (failed.read_bytes(), baseline.read_bytes()) == source_bytes
+
+
+def test_recovery_helpers_cover_optional_and_rejected_inputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    selected = target()
+    with pytest.raises(rollback.RollbackError, match="recovery confirmation"):
+        rollback.recovery_confirmation("wrong")
+
+    args = Namespace(
+        verifier=Path("verifier"),
+        environment="prod",
+        smoke_runner=Path("smoke"),
+        kubeconfig=Path("kubeconfig"),
+        config="runtime.json",
+    )
+    command = rollback.runtime_verifier_command(args, selected, Path("manifest.json"))
+    assert command[-2:] == ["--config", "runtime.json"]
+
+    unreadable = tmp_path / "unreadable.json"
+    unreadable.write_text("not-json", encoding="utf-8")
+    with pytest.raises(rollback.RollbackError, match="unreadable"):
+        rollback.failed_reconciliation(unreadable, selected)
+    incomplete = tmp_path / "incomplete.json"
+    incomplete.write_text("{}", encoding="utf-8")
+    with pytest.raises(rollback.RollbackError, match="schema is incomplete"):
+        rollback.failed_reconciliation(incomplete, selected)
+
+    recovery_dir = tmp_path / "recovery"
+    recovery_dir.mkdir()
+    args, commands, _failed, _baseline, _selected = recovery_execution_case(
+        recovery_dir, monkeypatch
+    )
+    args.verifier = tmp_path / "third-party-verifier"
+    with pytest.raises(rollback.RollbackError, match="repository runtime verifier"):
+        rollback.rollback(args, args._test_runner)
+    assert not any("upgrade" in command for command in commands)
+
+
+def test_main_validates_and_normalizes_production_recovery_flags(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    common = [
+        "--environment",
+        "prod",
+        "--evidence",
+        str(tmp_path / "out.json"),
+        "--verifier",
+        str(tmp_path / "verifier"),
+        "--production-metrics-recovery",
+    ]
+    with pytest.raises(SystemExit):
+        rollback.main([*common, "--manifest", str(tmp_path / "manifest.json")])
+    with pytest.raises(SystemExit):
+        rollback.main(common)
+
+    observed: list[Namespace] = []
+    monkeypatch.setattr(rollback, "rollback", lambda args: observed.append(args) or {})
+    assert rollback.main(
+        [
+            *common,
+            "--failed-evidence", str(tmp_path / "failed.json"),
+            "--maintenance-target", str(tmp_path / "target.json"),
+        ]
+    ) == 0
+    assert observed[0].configuration_reconciliation is True
+    assert observed[0].baseline_manifest == rollback.PRODUCTION_BASELINE
