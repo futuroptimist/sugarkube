@@ -1149,6 +1149,8 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
                 )
     # Keep the registry proof fresh: no tag resolution occurs between this
     # exact-digest check and confirmation/reservation/mutation.
+    if recovery:
+        args._recovery_failed_stage = "immutable-oci-provenance"
     try:
         oci = release.preflight(
             approved,
@@ -1334,6 +1336,26 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             )
             if current_values != live_values:
                 raise RollbackError("Helm values changed before mutation")
+            if recovery:
+                current_computed_values = json_command(
+                    runner,
+                    [
+                        "helm",
+                        "--kubeconfig",
+                        args.kubeconfig,
+                        "get",
+                        "values",
+                        "dspace",
+                        "--namespace",
+                        "dspace",
+                        "--all",
+                        "-o",
+                        "json",
+                    ],
+                    "Helm computed values",
+                )
+                if current_computed_values != computed_values:
+                    raise RollbackError("Helm computed values changed before mutation")
             runner(
                 [
                     "env",

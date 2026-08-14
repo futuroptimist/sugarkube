@@ -1966,7 +1966,11 @@ def test_orchestration_preserves_complete_success_and_failure_evidence(
 
 
 def recovery_execution_case(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, fail_after_upgrade: bool = False
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    fail_after_upgrade: bool = False,
+    fault: str | None = None,
 ) -> tuple[Namespace, list[list[str]], Path, Path, dict[str, object]]:
     """Build the reviewed revision-10 incident around the real recovery lifecycle."""
     baseline = manifest.validate(manifest._object(PROD_BASELINE), True)
@@ -2013,6 +2017,8 @@ def recovery_execution_case(
     smoke.chmod(0o700)
     values = tmp_path / "values.yaml"
     values.write_text("replicaCount: 2\n", encoding="utf-8")
+    production_values = tmp_path / "prod-values.yaml"
+    production_values.write_text("metrics:\n  enabled: true\n", encoding="utf-8")
     version = tmp_path / "version"
     version.write_text("3.0.3\n", encoding="utf-8")
     args = Namespace(
@@ -2046,7 +2052,18 @@ def recovery_execution_case(
     user_values["image"].pop("pullPolicy")
     computed_before = json.loads(json.dumps(desired))
     computed_before["image"]["pullPolicy"] = "IfNotPresent"
-    state = {"upgraded": False, "description": "", "pod_reads": 0, "all_reads": 0}
+    state = {
+        "upgraded": False,
+        "description": "",
+        "pod_reads": 0,
+        "all_reads": 0,
+        "status_reads": 0,
+        "user_reads": 0,
+        "strict_calls": [],
+        "finalize_calls": [],
+        "render_calls": [],
+        "preflight_calls": [],
+    }
     commands: list[list[str]] = []
 
     monkeypatch.setattr(rollback, "assert_production_target", lambda *_args: None)
@@ -2055,28 +2072,43 @@ def recovery_execution_case(
         rollback, "verifier_capabilities", lambda *_args: {"contract": "repository"}
     )
     monkeypatch.setattr(rollback, "verifier_accepts_runtime_arguments", lambda *_args: True)
-    monkeypatch.setattr(
-        rollback.release, "preflight", lambda *_args, **_kwargs: {"image": True, "chart": True}
-    )
+    def preflight(*call_args: object, **call_kwargs: object) -> dict[str, bool]:
+        state["preflight_calls"].append((call_args, call_kwargs))
+        if fault == "provenance":
+            raise manifest.ManifestError("SENTINEL missing immutable provenance")
+        return {"image": True, "chart": True}
+
+    monkeypatch.setattr(rollback.release, "preflight", preflight)
     monkeypatch.setattr(
         rollback.release,
         "verify_helm_stored_values",
-        lambda *_args: [{"check": "helmStoredValues", "passed": True}],
+        lambda *call_args: state["strict_calls"].append(call_args)
+        or [{"check": "helmStoredValues", "passed": True}],
     )
     monkeypatch.setattr(
         rollback.release,
         "finalize",
-        lambda *_args, **_kwargs: {"verificationResults": [{"check": "ownership", "passed": True}]},
+        lambda *call_args, **call_kwargs: state["finalize_calls"].append(
+            (call_args, call_kwargs)
+        )
+        or {"verificationResults": [{"check": "ownership", "passed": True}]},
     )
-    monkeypatch.setattr(rollback.app_chart, "validate_rendered_manifest", lambda *_args: [])
+    monkeypatch.setattr(
+        rollback.app_chart,
+        "validate_rendered_manifest",
+        lambda *call_args: state["render_calls"].append(call_args) or [],
+    )
     monkeypatch.setattr(rollback.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(rollback, "chart_pin", lambda _path: "3.0.3")
     monkeypatch.setattr(
         rollback,
         "stage_values",
         lambda _config, _root, _staged: (
-            [values],
-            [{"path": "values.yaml", "sha256": hashlib.sha256(values.read_bytes()).hexdigest()}],
+            [values, production_values],
+            [
+                {"path": path.name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+                for path in (values, production_values)
+            ],
         ),
     )
     monkeypatch.setattr(
@@ -2111,26 +2143,12 @@ def recovery_execution_case(
     monkeypatch.setattr(
         rollback,
         "pods",
-        lambda *_args, **_kwargs: json.loads(
-            json.dumps(after_pods if state["upgraded"] else before_pods)
-        ),
+        lambda *_args, **_kwargs: _recovery_pods(state, fault, before_pods, after_pods),
     )
     monkeypatch.setattr(
         rollback,
         "helm_status",
-        lambda *_args: {
-            "name": "dspace",
-            "namespace": "dspace",
-            "version": 11 if state["upgraded"] else 10,
-            "info": {
-                "status": "deployed",
-                "description": (
-                    state["description"]
-                    if state["upgraded"]
-                    else f"sugarkube-dspace-metrics-reconciliation:{original['invocationId']}"
-                ),
-            },
-        },
+        lambda *_args: _recovery_helm_status(state, fault, original),
     )
 
     def runner(command: list[str]) -> str:
@@ -2151,15 +2169,28 @@ def recovery_execution_case(
         if command[0] == "helm" and "get" in command and "values" in command:
             if "--all" in command:
                 state["all_reads"] += 1
-                return json.dumps(desired if state["upgraded"] else computed_before)
-            return json.dumps(user_values)
+                result = desired if state["upgraded"] else computed_before
+                if fault == "computed-drift" and state["all_reads"] == 1:
+                    result = {**computed_before, "unrelated": True}
+                if fault == "concurrent-computed" and state["all_reads"] == 2:
+                    result = {**computed_before, "unrelated": True}
+                return json.dumps(result)
+            state["user_reads"] += 1
+            result = user_values
+            if fault == "user-drift" and state["user_reads"] == 1:
+                result = {**user_values, "unrelated": True}
+            if fault == "concurrent-user" and state["user_reads"] == 2:
+                result = {**user_values, "unrelated": True}
+            return json.dumps(result)
         if command[0] == "helm" and "show" in command:
             return "image:\n  pullPolicy: IfNotPresent\n"
         if command[0] == "helm" and "manifest" in command:
-            return "current render"
+            return "different render" if fault == "render" else "current render"
         if command[0] == "helm" and "template" in command:
             return "current render" if "live-values.json" in joined else "approved render"
         if command[:2] == [str(args.verifier), "verify"]:
+            if fault == "runtime":
+                raise rollback.RollbackError("runtime ownership failed")
             expected = command[command.index("--expected-helm-revision") + 1]
             assert expected == ("11" if state["upgraded"] else "10")
             return json.dumps(
@@ -2171,12 +2202,81 @@ def recovery_execution_case(
                     defaultProvider=selected["expectedDefaultChatProvider"],
                 )
             )
+        if (
+            "observability_app_metrics.py" in joined
+            and "secret-check" in command
+            and fault == "secret"
+        ):
+            raise rollback.RollbackError("Secret contract failed")
+        if "observability_app_metrics.py" in joined and "verify" in command and fault == "metrics":
+            raise rollback.RollbackError("metrics verification failed")
         if command[0] == "kubectl" and "get" in command:
             return '{"items": []}'
         return ""
 
+    args._test_state = state
+    args._test_values = [values, production_values]
     args._test_runner = runner
     return args, commands, failed_path, baseline_path, selected
+
+
+def _recovery_helm_status(
+    state: dict[str, object], fault: str | None, original: dict[str, object]
+) -> dict[str, object]:
+    state["status_reads"] += 1
+    revision = 11 if state["upgraded"] else 10
+    if not state["upgraded"] and state["status_reads"] == 1:
+        if fault == "revision":
+            revision = 9
+        elif fault == "already-recovered":
+            revision = 11
+    if fault == "concurrent-revision" and state["status_reads"] == 3:
+        revision = 12
+    return {
+            "name": "dspace",
+            "namespace": "dspace",
+            "version": revision,
+            "chart": {
+                "metadata": {
+                    "name": "dspace",
+                    "version": "3.0.2" if fault == "chart" else "3.0.3",
+                }
+            },
+            "info": {
+                "status": "deployed",
+                "description": (
+                    state["description"]
+                    if state["upgraded"]
+                    else (
+                        "wrong-description"
+                        if fault == "description"
+                        else f"sugarkube-dspace-metrics-reconciliation:{original['invocationId']}"
+                    )
+                ),
+            },
+    }
+
+
+def _recovery_pods(
+    state: dict[str, object],
+    fault: str | None,
+    before_pods: list[dict[str, object]],
+    after_pods: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    state["pod_reads"] += 1
+    result = json.loads(json.dumps(after_pods if state["upgraded"] else before_pods))
+    if not state["upgraded"] and state["pod_reads"] == 1:
+        if fault == "pod-count":
+            result.pop()
+        elif fault == "pod-readiness":
+            result[0]["ready"] = False
+        elif fault == "image-digest":
+            result[0]["applicationImageID"] = f"{manifest.IMAGE_REF}@sha256:{'0' * 64}"
+        elif fault == "image-tag":
+            result[0]["applicationImage"] = f"{manifest.IMAGE_REF}:wrong-tag"
+    if fault == "concurrent-pod" and state["pod_reads"] == 2:
+        result[0]["uid"] = "drifted"
+    return result
 
 
 def test_production_metrics_recovery_completes_revision_10_to_11(
@@ -2189,7 +2289,9 @@ def test_production_metrics_recovery_completes_revision_10_to_11(
     assert len(upgrades) == 1
     upgrade = upgrades[0]
     assert f"oci://{manifest.CHART_REF}@{selected['chartDigest']}" in upgrade
-    assert [upgrade[i + 1] for i, value in enumerate(upgrade) if value == "--values"]
+    assert [upgrade[i + 1] for i, value in enumerate(upgrade) if value == "--values"] == [
+        str(path) for path in args._test_values
+    ]
     assert f"image.repository={manifest.IMAGE_REF}" in upgrade
     assert f"image.tag={selected['imageTag']}" in upgrade
     assert "image.pullPolicy=Always" in upgrade
@@ -2214,6 +2316,12 @@ def test_production_metrics_recovery_completes_revision_10_to_11(
         sum("observability_app_metrics.py" in " ".join(c) and "verify" in c for c in commands) == 2
     )
     assert (failed.read_bytes(), baseline.read_bytes()) == source_bytes
+    assert len(args._test_state["preflight_calls"]) == 1
+    assert len(args._test_state["render_calls"]) == 1
+    assert len(args._test_state["strict_calls"]) == 3
+    assert len(args._test_state["finalize_calls"]) == 1
+    assert args._test_state["all_reads"] == 3
+    assert args._test_state["status_reads"] >= 4
 
 
 def test_production_metrics_recovery_post_upgrade_failure_is_single_shot_and_sanitized(
@@ -2287,3 +2395,58 @@ def test_production_metrics_recovery_output_collision_is_byte_immutable_and_non_
         and any(action in command for action in ("upgrade", "rollback", "uninstall"))
         for command in commands
     )
+
+
+@pytest.mark.parametrize(
+    ("fault", "failed_stage"),
+    (
+        ("revision", "live-state-and-provenance"),
+        ("already-recovered", "live-state-and-provenance"),
+        ("chart", "live-state-and-provenance"),
+        ("description", "live-state-and-provenance"),
+        ("image-tag", "live-state-and-provenance"),
+        ("image-digest", "live-state-and-provenance"),
+        ("pod-count", "live-state-and-provenance"),
+        ("pod-readiness", "live-state-and-provenance"),
+        ("secret", "live-state-and-provenance"),
+        ("render", "live-state-and-provenance"),
+        ("user-drift", "live-state-and-provenance"),
+        ("computed-drift", "live-state-and-provenance"),
+        ("runtime", "runtime-and-metrics-preflight"),
+        ("metrics", "runtime-and-metrics-preflight"),
+        ("provenance", "immutable-oci-provenance"),
+        ("concurrent-revision", "pre-mutation-revalidation"),
+        ("concurrent-pod", "pre-mutation-revalidation"),
+        ("concurrent-user", "pre-mutation-revalidation"),
+        ("concurrent-computed", "pre-mutation-revalidation"),
+    ),
+)
+def test_production_metrics_recovery_real_path_rejections_are_linked_and_non_mutating(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fault: str,
+    failed_stage: str,
+) -> None:
+    args, commands, failed, baseline, selected = recovery_execution_case(
+        tmp_path, monkeypatch, fault=fault
+    )
+    source_bytes = (failed.read_bytes(), baseline.read_bytes())
+    with pytest.raises(rollback.RollbackError):
+        rollback.rollback(args, args._test_runner)
+    assert not any(
+        command[0] == "helm"
+        and any(action in command for action in ("upgrade", "rollback", "uninstall"))
+        for command in commands
+    )
+    assert not any(command[0] == "kubectl" and "secret" in command for command in commands)
+    written = json.loads(args.evidence.read_text(encoding="utf-8"))
+    assert written["failedStage"] == failed_stage
+    assert written["clusterMayHaveChanged"] is False
+    assert written["originalFailure"] == {
+        "invocationId": "a" * 32,
+        "targetManifestFingerprint": hashlib.sha256(
+            manifest._canonical(selected).encode()
+        ).hexdigest(),
+    }
+    assert "SENTINEL" not in args.evidence.read_text(encoding="utf-8")
+    assert (failed.read_bytes(), baseline.read_bytes()) == source_bytes
