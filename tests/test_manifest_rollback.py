@@ -20,6 +20,75 @@ PROD_BASELINE = Path("deployment-evidence/dspace/prod/main-1a31a56-20260801T0934
 PROD_MAINTENANCE_TARGET = Path("docs/apps/dspace.prod-metrics-chart-target.json")
 
 
+def test_failed_reconciliation_accepts_only_exact_authorized_incident(tmp_path: Path) -> None:
+    baseline = manifest.validate(manifest._object(PROD_BASELINE), True)
+    selected = rollback.chart_maintenance_target(baseline, PROD_MAINTENANCE_TARGET)
+    evidence = {
+        "schemaVersion": rollback.SCHEMA_VERSION,
+        "environment": "prod",
+        "release": "dspace",
+        "namespace": "dspace",
+        "operation": "dspaceProductionMetricsReconciliation",
+        "state": "failed",
+        "failedStage": "ownership-and-finalization-proof",
+        "failureCode": "ownership-and-finalization-proof-failed",
+        "clusterMayHaveChanged": True,
+        "invocationId": "a" * 32,
+        "targetManifestFingerprint": hashlib.sha256(
+            manifest._canonical(selected).encode()
+        ).hexdigest(),
+        "before": {"helmRevision": 9, "chartName": "dspace", "chartVersion": "3.0.2"},
+        "target": {
+            field: selected[field]
+            for field in (
+                "applicationVersion",
+                "sourceRevision",
+                "imageTag",
+                "imageDigest",
+                "chartSourceRevision",
+                "chartVersion",
+                "chartDigest",
+                "expectedDefaultChatProvider",
+            )
+        },
+    }
+    path = tmp_path / "failed.json"
+    path.write_text(json.dumps(evidence), encoding="utf-8")
+    assert rollback.failed_reconciliation(path, selected)["invocationId"] == "a" * 32
+
+    for field, wrong in (
+        ("schemaVersion", 2),
+        ("environment", "staging"),
+        ("release", "other"),
+        ("namespace", "other"),
+        ("operation", "other"),
+        ("state", "succeeded"),
+        ("failedStage", "runtime-verification"),
+        ("failureCode", "runtime-verification-failed"),
+        ("invocationId", "wrong"),
+        ("clusterMayHaveChanged", False),
+    ):
+        path.write_text(json.dumps({**evidence, field: wrong}), encoding="utf-8")
+        with pytest.raises(rollback.RollbackError):
+            rollback.failed_reconciliation(path, selected)
+
+    changed = json.loads(json.dumps(evidence))
+    changed["before"]["helmRevision"] = 10
+    path.write_text(json.dumps(changed), encoding="utf-8")
+    with pytest.raises(rollback.RollbackError, match="revision 9"):
+        rollback.failed_reconciliation(path, selected)
+
+    for target_change in ("missing", "extra"):
+        changed = json.loads(json.dumps(evidence))
+        if target_change == "missing":
+            changed["target"].pop("imageDigest")
+        else:
+            changed["target"]["ignored"] = "must-not-be-accepted"
+        path.write_text(json.dumps(changed), encoding="utf-8")
+        with pytest.raises(rollback.RollbackError, match="reviewed target"):
+            rollback.failed_reconciliation(path, selected)
+
+
 def target(environment: str = "staging", schema_version: int = 1) -> dict[str, object]:
     value = {
         "schemaVersion": schema_version,
@@ -851,6 +920,88 @@ def test_render_failure_precedes_reservation_and_mutation(
     assert_no_mutation(commands)
 
 
+def test_recovery_initial_production_assertion_failure_is_preserved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    args, commands, evidence, _verifier = pre_reservation_case(
+        tmp_path, monkeypatch, environment="prod"
+    )
+    kubeconfig = tmp_path / "kubeconfig"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    args.kubeconfig = str(kubeconfig)
+    args.configuration_reconciliation = True
+    args.production_metrics_recovery = True
+
+    def runner(command: list[str]) -> str:
+        commands.append(command)
+        return "unexpected-context" if "current-context" in command else ""
+
+    with pytest.raises(rollback.RollbackError, match="requires sugar-prod"):
+        rollback.rollback(args, runner)
+
+    written = json.loads(evidence.read_text(encoding="utf-8"))
+    assert written.pop("failedAt")
+    assert written == {
+        "schemaVersion": rollback.SCHEMA_VERSION,
+        "operation": rollback.RECOVERY_OPERATION,
+        "state": "failed",
+        "failedStage": "kubeconfig-and-cluster-identity",
+        "failureCode": "kubeconfig-and-cluster-identity-failed",
+        "clusterMayHaveChanged": False,
+        "diagnostics": {"failureType": "RollbackError"},
+    }
+    assert_no_mutation(commands)
+
+
+@pytest.mark.parametrize(
+    "failed_stage",
+    (
+        "failed-evidence-authorization",
+        "live-state-and-provenance",
+        "runtime-and-metrics-preflight",
+        "confirmation",
+        "reservation",
+    ),
+)
+def test_linked_recovery_pre_reservation_failures_preserve_precise_stage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failed_stage: str,
+) -> None:
+    args, commands, evidence, _verifier = pre_reservation_case(
+        tmp_path, monkeypatch, environment="prod"
+    )
+    kubeconfig = tmp_path / "kubeconfig"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    args.kubeconfig = str(kubeconfig)
+    args.configuration_reconciliation = True
+    args.production_metrics_recovery = True
+    original = {
+        "invocationId": "a" * 32,
+        "targetManifestFingerprint": "b" * 64,
+    }
+    monkeypatch.setattr(rollback, "assert_production_target", lambda *_args: None)
+
+    def reject(_args: Namespace, _runner: object, _staged: Path) -> dict[str, object]:
+        _args._recovery_failed_stage = failed_stage
+        _args._recovery_original_failure = original
+        raise rollback.RollbackError("sensitive diagnostic must not be persisted")
+
+    monkeypatch.setattr(rollback, "_rollback", reject)
+
+    with pytest.raises(rollback.RollbackError, match="sensitive diagnostic"):
+        rollback.rollback(args, commands.append)
+
+    written = json.loads(evidence.read_text(encoding="utf-8"))
+    assert written["failedStage"] == failed_stage
+    assert written["failureCode"] == f"{failed_stage}-failed"
+    assert written["clusterMayHaveChanged"] is False
+    assert written["originalFailure"] == original
+    assert written["diagnostics"] == {"failureType": "RollbackError"}
+    assert "sensitive" not in evidence.read_text(encoding="utf-8")
+    assert_no_mutation(commands)
+
+
 def test_exact_no_op_is_rejected_before_reservation_and_mutation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1509,6 +1660,9 @@ def test_configuration_reconciliation_completes_all_production_gates(
     assert upgrade[upgrade.index("--kubeconfig") + 1] == str(kubeconfig)
     assert f"oci://{manifest.CHART_REF}@{selected['chartDigest']}" in upgrade
     assert f"image.tag={selected['imageTag']}" in upgrade
+    assert "image.pullPolicy=Always" in upgrade
+    rendered = next(command for command in commands if "template" in command)
+    assert "image.pullPolicy=Always" in rendered
     forbidden = ("--reuse-values", "--version", selected["semanticTag"], "rollback")
     assert not any(item in upgrade for item in forbidden)
     assert selected["imageDigest"] not in next(
@@ -1601,251 +1755,24 @@ def test_just_recipe_has_no_revision_rollback_or_reuse_values() -> None:
     assert "helm rollback" not in block
 
 
-def _recovery_target() -> dict[str, object]:
-    return {
-        "chartVersion": "3.0.3",
-        "chartDigest": "sha256:6ee663c426673bc0e516ed8f8b0ab11a918d2f2bb81fc9047b3eb37b78329f5c",
-        "imageTag": "main-1a31a56",
-        "imageDigest": "sha256:23dbc573377549136c1f10b05706b3c176ffbabaf04a3194381a24752104a401",
-        "sourceRevision": "1a31a569aff2dbeb238e8c2688b9e85140d2077d",
-        "chartSourceRevision": "62da11005354e9f9a89c2e58584cdce4c8ec35aa",
-        "applicationVersion": "3.0.1",
-        "expectedDefaultChatProvider": "openai",
-    }
-
-
-def _failed_reconciliation() -> dict[str, object]:
-    return {
-        "operation": "dspaceProductionMetricsReconciliation",
-        "state": "failed",
-        "failedStage": "ownership-and-finalization-proof",
-        "failureCode": "ownership-and-finalization-proof-failed",
-        "clusterMayHaveChanged": True,
-        "invocationId": "a" * 32,
-        "sugarkubeRevision": "b" * 40,
-        "before": {"helmRevision": 9, "chartName": "dspace", "chartVersion": "3.0.2"},
-        "target": _recovery_target(),
-    }
-
-
-@pytest.mark.parametrize(
-    ("field", "wrong"),
-    [
-        ("state", "reserved"),
-        ("state", "succeeded"),
-        ("operation", "dspaceManifestRollback"),
-        ("failedStage", "helm-upgrade"),
-        ("failureCode", "wrong-failed"),
-        ("clusterMayHaveChanged", False),
-    ],
-)
-def test_recovery_rejects_nonmatching_original_evidence(
-    tmp_path: Path, field: str, wrong: object
-) -> None:
-    value = _failed_reconciliation()
-    value[field] = wrong
-    path = tmp_path / "original.json"
-    path.write_text(json.dumps(value), encoding="utf-8")
-    with pytest.raises(rollback.RollbackError, match="confirmed failed reconciliation"):
-        rollback.failed_reconciliation_evidence(path, _recovery_target(), lambda _command: "")
-
-
-def test_recovery_original_evidence_is_validated_and_fingerprinted(tmp_path: Path) -> None:
-    path = tmp_path / "original.json"
-    raw = json.dumps(_failed_reconciliation()).encode()
-    path.write_bytes(raw)
-    value, digest = rollback.failed_reconciliation_evidence(
-        path, _recovery_target(), lambda _command: ""
-    )
-    assert value["invocationId"] == "a" * 32
-    assert digest == hashlib.sha256(raw).hexdigest()
-
-
-@pytest.mark.parametrize(
-    ("mutation", "message"),
-    [
-        (lambda value: value.update(invocationId=7), "invocation ID"),
-        (lambda value: value.update(sugarkubeRevision=[]), "Sugarkube revision"),
-        (lambda value: value["target"].pop("imageTag"), "target tuple"),
-        (lambda value: value["target"].update(extra="field"), "target tuple"),
-    ],
-)
-def test_recovery_rejects_non_string_identifiers_and_inexact_target(
-    tmp_path: Path, mutation: Callable[[dict[str, object]], None], message: str
-) -> None:
-    value = _failed_reconciliation()
-    mutation(value)
-    path = tmp_path / "original.json"
-    path.write_text(json.dumps(value), encoding="utf-8")
-    with pytest.raises(rollback.RollbackError, match=message):
-        rollback.failed_reconciliation_evidence(path, _recovery_target(), lambda _command: "")
-
-
-def test_recovery_rejects_original_evidence_with_invalid_utf8(tmp_path: Path) -> None:
-    path = tmp_path / "original.json"
-    path.write_bytes(b'\xff{"state":"failed"}')
-
-    with pytest.raises(rollback.RollbackError, match="missing or malformed"):
-        rollback.failed_reconciliation_evidence(path, _recovery_target(), lambda _command: "")
-
-
-def test_recovery_values_accept_only_ifnotpresent_and_empty_chart_default() -> None:
-    baseline = manifest.validate(manifest._object(PROD_BASELINE), True)
-    selected = rollback.chart_maintenance_target(baseline, PROD_MAINTENANCE_TARGET)
-    approved = {field: selected[field] for field in manifest.candidate_fields(selected)}
-    approved["recordType"] = "candidate"
-    desired = {
-        "metrics": {
-            "enabled": True,
-            "path": "/metrics",
-            "auth": {"existingSecret": "dspace-prod-metrics-token", "secretKey": "token"},
-        },
-        "serviceMonitor": {
-            "enabled": True,
-            "interval": "30s",
-            "scrapeTimeout": "10s",
-            "additionalLabels": {"release": "kube-prometheus-stack"},
-            "cluster": "sugarkube-prod",
-        },
-    }
-    user = {
-        **desired,
-        "image": {"repository": rollback.release.IMAGE_REF, "tag": approved["imageTag"]},
-    }
-    computed = copy.deepcopy(user)
-    computed["image"]["pullPolicy"] = "IfNotPresent"
-    computed["serviceMonitor"]["relabelings"] = []
-    rollback.validate_recovery_values(user, computed, desired, approved)
-    for policy in ("Always", "Never"):
-        drifted = copy.deepcopy(computed)
-        drifted["image"]["pullPolicy"] = policy
-        with pytest.raises(rollback.RollbackError, match="exact known IfNotPresent"):
-            rollback.validate_recovery_values(user, drifted, desired, approved)
-
-
-def _rendered_recovery_deployment() -> dict[str, object]:
-    return {
-        "apiVersion": "apps/v1",
-        "kind": "Deployment",
-        "metadata": {"name": "dspace"},
-        "spec": {
-            "replicas": 2,
-            "selector": {"matchLabels": {"app": "dspace"}},
-            "template": {
-                "metadata": {"labels": {"app": "dspace"}, "annotations": {"safe": "yes"}},
-                "spec": {
-                    "serviceAccountName": "dspace",
-                    "containers": [
-                        {
-                            "name": "dspace",
-                            "image": "ghcr.io/example/dspace:main-deadbee",
-                            "imagePullPolicy": "Always",
-                            "env": [
-                                {
-                                    "name": "TOKEN",
-                                    "valueFrom": {
-                                        "secretKeyRef": {"name": "dspace", "key": "token"}
-                                    },
-                                }
-                            ],
-                            "ports": [{"name": "http", "containerPort": 8080}],
-                            "securityContext": {"readOnlyRootFilesystem": True},
-                        }
-                    ],
-                    "volumes": [{"name": "tmp", "emptyDir": {}}],
-                    "nodeSelector": {"kubernetes.io/os": "linux"},
-                },
-            },
-        },
-    }
-
-
-def test_rendered_deployment_accepts_only_realistic_kubernetes_defaults() -> None:
-    rendered = _rendered_recovery_deployment()
-    live = copy.deepcopy(rendered)
-    live["spec"].update(  # type: ignore[union-attr]
-        {
-            "strategy": {
-                "type": "RollingUpdate",
-                "rollingUpdate": {"maxUnavailable": "25%", "maxSurge": "25%"},
-            },
-            "revisionHistoryLimit": 10,
-            "progressDeadlineSeconds": 600,
-        }
-    )
-    pod_spec = live["spec"]["template"]["spec"]  # type: ignore[index]
-    pod_spec.update(
-        {
-            "dnsPolicy": "ClusterFirst",
-            "restartPolicy": "Always",
-            "schedulerName": "default-scheduler",
-            "securityContext": {},
-            "terminationGracePeriodSeconds": 30,
-            "enableServiceLinks": True,
-            "preemptionPolicy": "PreemptLowerPriority",
-        }
-    )
-    pod_spec["containers"][0].update(
-        {"terminationMessagePath": "/dev/termination-log", "terminationMessagePolicy": "File"}
-    )
-
-    rollback.validate_rendered_deployment(json.dumps(rendered), {"items": [live]})
-
-
-@pytest.mark.parametrize(
-    "mutate",
-    [
-        lambda d: d["spec"].update(replicas=3),
-        lambda d: d["spec"]["template"]["spec"]["containers"][0].update(image="other"),
-        lambda d: d["spec"]["template"]["spec"]["containers"][0].update(imagePullPolicy="Never"),
-        lambda d: d["spec"]["template"]["spec"]["containers"][0]["env"][0]["valueFrom"][
-            "secretKeyRef"
-        ].update(name="other"),
-        lambda d: d["spec"]["template"]["spec"]["containers"].append(
-            {"name": "sidecar", "image": "other"}
-        ),
-        lambda d: d["spec"]["template"]["spec"]["volumes"].append(
-            {"name": "secret", "secret": {"secretName": "other"}}
-        ),
-        lambda d: d["spec"]["template"]["spec"].update(serviceAccountName="other"),
-        lambda d: d["spec"]["template"]["spec"]["containers"][0]["securityContext"].update(
-            privileged=True
-        ),
-        lambda d: d["spec"]["template"]["spec"].update(nodeSelector={"zone": "other"}),
-        lambda d: d["spec"]["template"]["metadata"]["labels"].update(extra="drift"),
-        lambda d: d["spec"]["template"]["metadata"]["annotations"].update(extra="drift"),
-    ],
-)
-def test_rendered_deployment_rejects_operator_controlled_drift(
-    mutate: Callable[[dict[str, object]], None],
-) -> None:
-    rendered = _rendered_recovery_deployment()
-    live = copy.deepcopy(rendered)
-    mutate(live)
-
-    with pytest.raises(rollback.RollbackError, match="rendered target"):
-        rollback.validate_rendered_deployment(json.dumps(rendered), {"items": [live]})
-
-
-def test_ordinary_manifest_rollback_does_not_override_pull_policy(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    args, commands, _evidence, _verifier = pre_reservation_case(tmp_path, monkeypatch)
-
-    def runner(command: list[str]) -> str:
-        commands.append(command)
-        if command[:3] == ["git", "rev-parse", "HEAD"]:
-            return "f" * 40
-        if "template" in command:
-            return "target render"
-        if "manifest" in command:
-            return "target render"
-        return ""
-
-    with pytest.raises(rollback.RollbackError):
-        rollback.rollback(args, runner)
-    template = next(command for command in commands if "template" in command)
-    assert "image.pullPolicy=Always" not in template
+def test_recovery_recipe_strips_only_the_matching_argument_prefix_once() -> None:
+    recipe = (Path(__file__).parents[1] / "justfile").read_text(encoding="utf-8")
+    block = recipe.split("dspace-prod-metrics-pull-policy-recover", 1)[1].split(
+        "\n# Read-only DSPACE", 1
+    )[0]
+    for prefix in (
+        "failed_evidence",
+        "maintenance_target",
+        "recovery_evidence",
+        "smoke_runner",
+        "kubeconfig",
+        "verifier",
+        "confirm",
+        "config",
+    ):
+        assert f"#{prefix}=" in block
+    assert "while [[" not in block
+    assert "${value#*=}" not in block
 
 
 @pytest.mark.parametrize(
@@ -2041,3 +1968,601 @@ def test_orchestration_preserves_complete_success_and_failure_evidence(
     assert written["targetManifestFingerprint"] == result["targetManifestFingerprint"]
     assert written["helm"]["beforeRevision"] == 7
     assert written["helm"]["afterRevision"] == 8
+
+
+def recovery_execution_case(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    fail_after_upgrade: bool = False,
+    fault: str | None = None,
+) -> tuple[Namespace, list[list[str]], Path, Path, dict[str, object]]:
+    """Build the reviewed revision-10 incident around the real recovery lifecycle."""
+    baseline = manifest.validate(manifest._object(PROD_BASELINE), True)
+    selected = rollback.chart_maintenance_target(baseline, PROD_MAINTENANCE_TARGET)
+    baseline_path = tmp_path / "baseline.json"
+    baseline_path.write_text(manifest._canonical(baseline), encoding="utf-8")
+    target_path = tmp_path / "target.json"
+    target_path.write_bytes(PROD_MAINTENANCE_TARGET.read_bytes())
+    failed_path = tmp_path / "failed.json"
+    fingerprint = hashlib.sha256(manifest._canonical(selected).encode()).hexdigest()
+    original = {
+        "schemaVersion": rollback.SCHEMA_VERSION,
+        "environment": "prod",
+        "release": "dspace",
+        "namespace": "dspace",
+        "operation": "dspaceProductionMetricsReconciliation",
+        "state": "failed",
+        "failedStage": "ownership-and-finalization-proof",
+        "failureCode": "ownership-and-finalization-proof-failed",
+        "clusterMayHaveChanged": True,
+        "invocationId": "a" * 32,
+        "targetManifestFingerprint": fingerprint,
+        "before": {"helmRevision": 9, "chartName": "dspace", "chartVersion": "3.0.2"},
+        "target": {
+            key: selected[key]
+            for key in (
+                "applicationVersion",
+                "sourceRevision",
+                "imageTag",
+                "imageDigest",
+                "chartSourceRevision",
+                "chartVersion",
+                "chartDigest",
+                "expectedDefaultChatProvider",
+            )
+        },
+    }
+    failed_path.write_text(json.dumps(original), encoding="utf-8")
+    evidence = tmp_path / "recovery.json"
+    kubeconfig = tmp_path / "kubeconfig"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    smoke = tmp_path / "smoke"
+    smoke.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    smoke.chmod(0o700)
+    values = tmp_path / "values.yaml"
+    values.write_text("replicaCount: 2\n", encoding="utf-8")
+    production_values = tmp_path / "prod-values.yaml"
+    production_values.write_text("metrics:\n  enabled: true\n", encoding="utf-8")
+    version = tmp_path / "version"
+    version.write_text("3.0.3\n", encoding="utf-8")
+    args = Namespace(
+        environment="prod",
+        manifest=baseline_path,
+        baseline_manifest=baseline_path,
+        maintenance_target=target_path,
+        failed_evidence=failed_path,
+        evidence=evidence,
+        verifier=rollback.REPO_ROOT / "scripts/dspace_runtime_verifier.py",
+        smoke_runner=smoke,
+        confirm=rollback.RECOVERY_CONFIRMATION,
+        config="",
+        kubeconfig=str(kubeconfig),
+        oras="oras",
+        timeout="7m",
+        configuration_reconciliation=True,
+        production_metrics_recovery=True,
+    )
+    desired = {
+        "replicaCount": 2,
+        "image": {
+            "repository": manifest.IMAGE_REF,
+            "tag": selected["imageTag"],
+            "pullPolicy": "Always",
+        },
+        "metrics": {"enabled": True},
+        "serviceMonitor": {"enabled": True},
+    }
+    user_values = json.loads(json.dumps(desired))
+    user_values["image"].pop("pullPolicy")
+    computed_before = json.loads(json.dumps(desired))
+    computed_before["image"]["pullPolicy"] = "IfNotPresent"
+    state = {
+        "upgraded": False,
+        "description": "",
+        "pod_reads": 0,
+        "all_reads": 0,
+        "status_reads": 0,
+        "user_reads": 0,
+        "strict_calls": [],
+        "finalize_calls": [],
+        "render_calls": [],
+        "preflight_calls": [],
+    }
+    commands: list[list[str]] = []
+
+    monkeypatch.setattr(rollback, "assert_production_target", lambda *_args: None)
+    monkeypatch.setattr(rollback, "cluster_environment", lambda *_args: "prod")
+    monkeypatch.setattr(
+        rollback, "verifier_capabilities", lambda *_args: {"contract": "repository"}
+    )
+    monkeypatch.setattr(rollback, "verifier_accepts_runtime_arguments", lambda *_args: True)
+    def preflight(*call_args: object, **call_kwargs: object) -> dict[str, bool]:
+        state["preflight_calls"].append((call_args, call_kwargs))
+        if fault == "provenance":
+            raise manifest.ManifestError("SENTINEL missing immutable provenance")
+        return {"image": True, "chart": True}
+
+    monkeypatch.setattr(rollback.release, "preflight", preflight)
+
+    def verify_stored(*call_args: object) -> list[dict[str, object]]:
+        state["strict_calls"].append(call_args)
+        if (fault == "stored-contract" and len(state["strict_calls"]) == 2) or (
+            fault == "post-stored-contract" and state["upgraded"]
+        ):
+            raise manifest.ManifestError("SENTINEL invalid stored values")
+        return [{"check": "helmStoredValues", "passed": True}]
+
+    monkeypatch.setattr(rollback.release, "verify_helm_stored_values", verify_stored)
+    monkeypatch.setattr(
+        rollback.release,
+        "finalize",
+        lambda *call_args, **call_kwargs: state["finalize_calls"].append(
+            (call_args, call_kwargs)
+        )
+        or {"verificationResults": [{"check": "ownership", "passed": True}]},
+    )
+    monkeypatch.setattr(
+        rollback.app_chart,
+        "validate_rendered_manifest",
+        lambda *call_args: state["render_calls"].append(call_args) or [],
+    )
+    monkeypatch.setattr(rollback.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(rollback, "chart_pin", lambda _path: "3.0.3")
+    monkeypatch.setattr(
+        rollback,
+        "stage_values",
+        lambda _config, _root, _staged: (
+            [values, production_values],
+            [
+                {"path": path.name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+                for path in (values, production_values)
+            ],
+        ),
+    )
+    monkeypatch.setattr(
+        rollback.app_config,
+        "load_config",
+        lambda *_args: {
+            "SUGARKUBE_CHART": f"oci://{manifest.CHART_REF}",
+            "SUGARKUBE_RELEASE": "dspace",
+            "SUGARKUBE_NAMESPACE": "dspace",
+            "SUGARKUBE_VALUES": str(values),
+            "SUGARKUBE_VERSION_FILE": str(version),
+        },
+    )
+
+    def merged(paths: object) -> dict[str, object]:
+        if any("chart-defaults" in str(p) for p in paths):
+            if fault == "invalid-chart-defaults":
+                return []  # type: ignore[return-value]
+            if fault == "missing-default-image":
+                return {"replicaCount": 2}
+        return json.loads(
+            json.dumps(
+                computed_before if any("chart-defaults" in str(p) for p in paths) else desired
+            )
+        )
+
+    monkeypatch.setattr(rollback.app_chart, "merged_values_document", merged)
+
+    def ready(uid: str) -> dict[str, object]:
+        return {
+            **pod(uid),
+            "applicationImage": f"{manifest.IMAGE_REF}:{selected['imageTag']}",
+            "applicationImageID": f"{manifest.IMAGE_REF}@{selected['imageDigest']}",
+        }
+
+    before_pods, after_pods = [ready("old-1"), ready("old-2")], [ready("new-1"), ready("new-2")]
+    monkeypatch.setattr(
+        rollback,
+        "pods",
+        lambda *_args, **_kwargs: _recovery_pods(state, fault, before_pods, after_pods),
+    )
+    monkeypatch.setattr(
+        rollback,
+        "helm_status",
+        lambda *_args: _recovery_helm_status(state, fault, original),
+    )
+
+    def runner(command: list[str]) -> str:
+        commands.append(command)
+        joined = " ".join(command)
+        if command[:3] == ["git", "rev-parse", "HEAD"]:
+            return "f" * 40
+        if command[0] == "helm" and "history" in command:
+            return json.dumps(
+                [{"revision": 11 if state["upgraded"] else 10, "chart": "dspace-3.0.3"}]
+            )
+        if command[0] == "helm" and "upgrade" in command:
+            state["description"] = command[command.index("--description") + 1]
+            state["upgraded"] = True
+            if fail_after_upgrade:
+                raise rollback.RollbackError("credential=secret SENTINEL raw command output")
+            return ""
+        if command[0] == "helm" and "get" in command and "values" in command:
+            if "--all" in command:
+                state["all_reads"] += 1
+                result = desired if state["upgraded"] else computed_before
+                if fault == "post-computed" and state["upgraded"]:
+                    result = {**desired, "unrelated": True}
+                if fault == "computed-drift" and state["all_reads"] == 1:
+                    result = {**computed_before, "unrelated": True}
+                if fault == "concurrent-computed" and state["all_reads"] == 2:
+                    result = {**computed_before, "unrelated": True}
+                return json.dumps(result)
+            state["user_reads"] += 1
+            result = user_values
+            if fault == "user-drift" and state["user_reads"] == 1:
+                result = {**user_values, "unrelated": True}
+            if fault == "concurrent-user" and state["user_reads"] == 2:
+                result = {**user_values, "unrelated": True}
+            return json.dumps(result)
+        if command[0] == "helm" and "show" in command:
+            return "image:\n  pullPolicy: IfNotPresent\n"
+        if command[0] == "helm" and "manifest" in command:
+            return "different render" if fault == "render" else "current render"
+        if command[0] == "helm" and "template" in command:
+            return "current render" if "live-values.json" in joined else "approved render"
+        if command[:2] == [str(args.verifier), "verify"]:
+            if fault == "runtime":
+                raise rollback.RollbackError("runtime ownership failed")
+            expected = command[command.index("--expected-helm-revision") + 1]
+            assert expected == ("11" if state["upgraded"] else "10")
+            return json.dumps(
+                verifier_result(
+                    environment="prod",
+                    applicationVersion=selected["applicationVersion"],
+                    runtimeSourceRevision=selected["sourceRevision"],
+                    frontendSourceRevision=selected["sourceRevision"],
+                    defaultProvider=selected["expectedDefaultChatProvider"],
+                )
+            )
+        if (
+            "observability_app_metrics.py" in joined
+            and "secret-check" in command
+            and fault == "secret"
+        ):
+            raise rollback.RollbackError("Secret contract failed")
+        if "observability_app_metrics.py" in joined and "verify" in command and fault == "metrics":
+            raise rollback.RollbackError("metrics verification failed")
+        if command[0] == "kubectl" and "get" in command:
+            return '{"items": []}'
+        return ""
+
+    args._test_state = state
+    args._test_values = [values, production_values]
+    args._test_runner = runner
+    return args, commands, failed_path, baseline_path, selected
+
+
+def _recovery_helm_status(
+    state: dict[str, object], fault: str | None, original: dict[str, object]
+) -> dict[str, object]:
+    state["status_reads"] += 1
+    revision = 11 if state["upgraded"] else 10
+    if not state["upgraded"] and state["status_reads"] == 1:
+        if fault == "revision":
+            revision = 9
+        elif fault == "already-recovered":
+            revision = 11
+    if fault == "concurrent-revision" and state["status_reads"] == 3:
+        revision = 12
+    return {
+            "name": "dspace",
+            "namespace": "dspace",
+            "version": revision,
+            "chart": {
+                "metadata": {
+                    "name": "dspace",
+                    "version": "3.0.2" if fault == "chart" else "3.0.3",
+                }
+            },
+            "info": {
+                "status": "deployed",
+                "description": (
+                    state["description"]
+                    if state["upgraded"]
+                    else (
+                        "wrong-description"
+                        if fault == "description"
+                        else f"sugarkube-dspace-metrics-reconciliation:{original['invocationId']}"
+                    )
+                ),
+            },
+    }
+
+
+def _recovery_pods(
+    state: dict[str, object],
+    fault: str | None,
+    before_pods: list[dict[str, object]],
+    after_pods: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    state["pod_reads"] += 1
+    result = json.loads(json.dumps(after_pods if state["upgraded"] else before_pods))
+    if not state["upgraded"] and state["pod_reads"] == 1:
+        if fault == "pod-count":
+            result.pop()
+        elif fault == "pod-readiness":
+            result[0]["ready"] = False
+        elif fault == "image-digest":
+            result[0]["applicationImageID"] = f"{manifest.IMAGE_REF}@sha256:{'0' * 64}"
+        elif fault == "image-tag":
+            result[0]["applicationImage"] = f"{manifest.IMAGE_REF}:wrong-tag"
+    if fault == "concurrent-pod" and state["pod_reads"] == 2:
+        result[0]["uid"] = "drifted"
+    return result
+
+
+def test_production_metrics_recovery_completes_revision_10_to_11(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    args, commands, failed, baseline, selected = recovery_execution_case(tmp_path, monkeypatch)
+    source_bytes = (failed.read_bytes(), baseline.read_bytes())
+    result = rollback.rollback(args, args._test_runner)
+    upgrades = [command for command in commands if command[0] == "helm" and "upgrade" in command]
+    assert len(upgrades) == 1
+    upgrade = upgrades[0]
+    assert f"oci://{manifest.CHART_REF}@{selected['chartDigest']}" in upgrade
+    assert [upgrade[i + 1] for i, value in enumerate(upgrade) if value == "--values"] == [
+        str(path) for path in args._test_values
+    ]
+    assert f"image.repository={manifest.IMAGE_REF}" in upgrade
+    assert f"image.tag={selected['imageTag']}" in upgrade
+    assert "image.pullPolicy=Always" in upgrade
+    assert "--wait" in upgrade and upgrade[upgrade.index("--timeout") + 1] == "7m"
+    assert "--reuse-values" not in upgrade
+    assert not any("rollback" in command or "uninstall" in command for command in commands)
+    assert result["helm"]["beforeRevision"] == 10
+    assert result["helm"]["afterRevision"] == 11
+    assert result["originalFailure"] == {
+        "invocationId": "a" * 32,
+        "targetManifestFingerprint": hashlib.sha256(
+            manifest._canonical(selected).encode()
+        ).hexdigest(),
+    }
+    verifier_revisions = [
+        command[command.index("--expected-helm-revision") + 1]
+        for command in commands
+        if command[:2] == [str(args.verifier), "verify"]
+    ]
+    assert verifier_revisions == ["10", "11"]
+    assert (
+        sum("observability_app_metrics.py" in " ".join(c) and "verify" in c for c in commands) == 2
+    )
+    assert (failed.read_bytes(), baseline.read_bytes()) == source_bytes
+    assert len(args._test_state["preflight_calls"]) == 1
+    assert len(args._test_state["render_calls"]) == 1
+    assert len(args._test_state["strict_calls"]) == 3
+    assert len(args._test_state["finalize_calls"]) == 1
+    assert args._test_state["all_reads"] == 3
+    assert args._test_state["status_reads"] >= 4
+
+
+def test_production_metrics_recovery_post_upgrade_failure_is_single_shot_and_sanitized(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    args, commands, failed, baseline, _selected = recovery_execution_case(
+        tmp_path, monkeypatch, fail_after_upgrade=True
+    )
+    source_bytes = (failed.read_bytes(), baseline.read_bytes())
+    with pytest.raises(rollback.RollbackError, match="preserved evidence"):
+        rollback.rollback(args, args._test_runner)
+    written = json.loads(args.evidence.read_text(encoding="utf-8"))
+    assert written["failedStage"] == "helm-upgrade"
+    assert written["clusterMayHaveChanged"] is True
+    assert written["originalFailure"]["invocationId"] == "a" * 32
+    serialized = args.evidence.read_text(encoding="utf-8")
+    assert not any(
+        secret in serialized
+        for secret in ("SENTINEL", "credential", "secret", "raw command output")
+    )
+    assert sum(command[0] == "helm" and "upgrade" in command for command in commands) == 1
+    assert not any("rollback" in command or "uninstall" in command for command in commands)
+    assert not any(command[0] == "kubectl" and "secret" in command for command in commands)
+    assert (failed.read_bytes(), baseline.read_bytes()) == source_bytes
+
+
+@pytest.mark.parametrize(
+    ("field", "wrong"),
+    (
+        ("failedStage", "runtime-verification"),
+        ("invocationId", "not-an-invocation"),
+        ("targetManifestFingerprint", "not-a-fingerprint"),
+        ("targetManifestFingerprint", "0" * 64),
+    ),
+)
+def test_production_metrics_recovery_rejects_bad_original_evidence_without_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str, wrong: object
+) -> None:
+    args, commands, failed, baseline, _selected = recovery_execution_case(tmp_path, monkeypatch)
+    changed = json.loads(failed.read_text(encoding="utf-8"))
+    changed[field] = wrong
+    failed.write_text(json.dumps(changed), encoding="utf-8")
+    source_bytes = (failed.read_bytes(), baseline.read_bytes())
+    with pytest.raises(rollback.RollbackError):
+        rollback.rollback(args, args._test_runner)
+    assert not any(
+        command[0] == "helm"
+        and any(action in command for action in ("upgrade", "rollback", "uninstall"))
+        for command in commands
+    )
+    assert not any(command[0] == "kubectl" and "secret" in command for command in commands)
+    assert (failed.read_bytes(), baseline.read_bytes()) == source_bytes
+    assert (
+        json.loads(args.evidence.read_text(encoding="utf-8"))["failedStage"]
+        == "failed-evidence-authorization"
+    )
+
+
+def test_production_metrics_recovery_output_collision_is_byte_immutable_and_non_mutating(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    args, commands, failed, baseline, _selected = recovery_execution_case(tmp_path, monkeypatch)
+    collision = b"existing recovery evidence = immutable\n"
+    args.evidence.write_bytes(collision)
+    source_bytes = (failed.read_bytes(), baseline.read_bytes())
+    with pytest.raises(rollback.RollbackError, match="overwrite"):
+        rollback.rollback(args, args._test_runner)
+    assert args.evidence.read_bytes() == collision
+    assert (failed.read_bytes(), baseline.read_bytes()) == source_bytes
+    assert not any(
+        command[0] == "helm"
+        and any(action in command for action in ("upgrade", "rollback", "uninstall"))
+        for command in commands
+    )
+
+
+@pytest.mark.parametrize(
+    ("fault", "failed_stage"),
+    (
+        ("revision", "live-state-and-provenance"),
+        ("already-recovered", "live-state-and-provenance"),
+        ("chart", "live-state-and-provenance"),
+        ("description", "live-state-and-provenance"),
+        ("image-tag", "live-state-and-provenance"),
+        ("image-digest", "live-state-and-provenance"),
+        ("pod-count", "live-state-and-provenance"),
+        ("pod-readiness", "live-state-and-provenance"),
+        ("secret", "live-state-and-provenance"),
+        ("render", "live-state-and-provenance"),
+        ("user-drift", "live-state-and-provenance"),
+        ("computed-drift", "live-state-and-provenance"),
+        ("invalid-chart-defaults", "live-state-and-provenance"),
+        ("missing-default-image", "live-state-and-provenance"),
+        ("stored-contract", "live-state-and-provenance"),
+        ("runtime", "runtime-and-metrics-preflight"),
+        ("metrics", "runtime-and-metrics-preflight"),
+        ("provenance", "immutable-oci-provenance"),
+        ("concurrent-revision", "pre-mutation-revalidation"),
+        ("concurrent-pod", "pre-mutation-revalidation"),
+        ("concurrent-user", "pre-mutation-revalidation"),
+        ("concurrent-computed", "pre-mutation-revalidation"),
+    ),
+)
+def test_production_metrics_recovery_real_path_rejections_are_linked_and_non_mutating(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fault: str,
+    failed_stage: str,
+) -> None:
+    args, commands, failed, baseline, selected = recovery_execution_case(
+        tmp_path, monkeypatch, fault=fault
+    )
+    source_bytes = (failed.read_bytes(), baseline.read_bytes())
+    with pytest.raises(rollback.RollbackError):
+        rollback.rollback(args, args._test_runner)
+    assert not any(
+        command[0] == "helm"
+        and any(action in command for action in ("upgrade", "rollback", "uninstall"))
+        for command in commands
+    )
+    assert not any(command[0] == "kubectl" and "secret" in command for command in commands)
+    written = json.loads(args.evidence.read_text(encoding="utf-8"))
+    assert written["failedStage"] == failed_stage
+    assert written["clusterMayHaveChanged"] is False
+    assert written["originalFailure"] == {
+        "invocationId": "a" * 32,
+        "targetManifestFingerprint": hashlib.sha256(
+            manifest._canonical(selected).encode()
+        ).hexdigest(),
+    }
+    assert "SENTINEL" not in args.evidence.read_text(encoding="utf-8")
+    assert (failed.read_bytes(), baseline.read_bytes()) == source_bytes
+
+
+@pytest.mark.parametrize(
+    ("fault", "failed_stage"),
+    (
+        ("post-computed", "ownership-and-finalization-proof"),
+        ("post-stored-contract", "ownership-and-finalization-proof"),
+    ),
+)
+def test_production_metrics_recovery_postflight_value_failures_are_single_shot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fault: str,
+    failed_stage: str,
+) -> None:
+    args, commands, failed, baseline, _selected = recovery_execution_case(
+        tmp_path, monkeypatch, fault=fault
+    )
+    source_bytes = (failed.read_bytes(), baseline.read_bytes())
+    with pytest.raises(rollback.RollbackError, match="preserved evidence"):
+        rollback.rollback(args, args._test_runner)
+    written = json.loads(args.evidence.read_text(encoding="utf-8"))
+    assert written["failedStage"] == failed_stage
+    assert written["clusterMayHaveChanged"] is True
+    assert written["originalFailure"]["invocationId"] == "a" * 32
+    assert "SENTINEL" not in args.evidence.read_text(encoding="utf-8")
+    assert sum(command[0] == "helm" and "upgrade" in command for command in commands) == 1
+    assert not any("rollback" in command or "uninstall" in command for command in commands)
+    assert (failed.read_bytes(), baseline.read_bytes()) == source_bytes
+
+
+def test_recovery_helpers_cover_optional_and_rejected_inputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    selected = target()
+    with pytest.raises(rollback.RollbackError, match="recovery confirmation"):
+        rollback.recovery_confirmation("wrong")
+
+    args = Namespace(
+        verifier=Path("verifier"),
+        environment="prod",
+        smoke_runner=Path("smoke"),
+        kubeconfig=Path("kubeconfig"),
+        config="runtime.json",
+    )
+    command = rollback.runtime_verifier_command(args, selected, Path("manifest.json"))
+    assert command[-2:] == ["--config", "runtime.json"]
+
+    unreadable = tmp_path / "unreadable.json"
+    unreadable.write_text("not-json", encoding="utf-8")
+    with pytest.raises(rollback.RollbackError, match="unreadable"):
+        rollback.failed_reconciliation(unreadable, selected)
+    incomplete = tmp_path / "incomplete.json"
+    incomplete.write_text("{}", encoding="utf-8")
+    with pytest.raises(rollback.RollbackError, match="schema is incomplete"):
+        rollback.failed_reconciliation(incomplete, selected)
+
+    recovery_dir = tmp_path / "recovery"
+    recovery_dir.mkdir()
+    args, commands, _failed, _baseline, _selected = recovery_execution_case(
+        recovery_dir, monkeypatch
+    )
+    args.verifier = tmp_path / "third-party-verifier"
+    with pytest.raises(rollback.RollbackError, match="repository runtime verifier"):
+        rollback.rollback(args, args._test_runner)
+    assert not any("upgrade" in command for command in commands)
+
+
+def test_main_validates_and_normalizes_production_recovery_flags(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    common = [
+        "--environment",
+        "prod",
+        "--evidence",
+        str(tmp_path / "out.json"),
+        "--verifier",
+        str(tmp_path / "verifier"),
+        "--production-metrics-recovery",
+    ]
+    with pytest.raises(SystemExit):
+        rollback.main([*common, "--manifest", str(tmp_path / "manifest.json")])
+    with pytest.raises(SystemExit):
+        rollback.main(common)
+
+    observed: list[Namespace] = []
+    monkeypatch.setattr(rollback, "rollback", lambda args: observed.append(args) or {})
+    assert rollback.main(
+        [
+            *common,
+            "--failed-evidence", str(tmp_path / "failed.json"),
+            "--maintenance-target", str(tmp_path / "target.json"),
+        ]
+    ) == 0
+    assert observed[0].configuration_reconciliation is True
+    assert observed[0].baseline_manifest == rollback.PRODUCTION_BASELINE
