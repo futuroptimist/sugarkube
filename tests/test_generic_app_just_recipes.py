@@ -193,7 +193,7 @@ if [ "${{1:-}}" = upgrade ]; then
   done
 fi
 if [[ "$*" == *"status dspace --namespace dspace -o json" ]]; then
-  chart_version="${{SUGARKUBE_STUB_CHART_VERSION:-3.1.1}}"
+  chart_version="${{SUGARKUBE_STUB_CHART_VERSION:-3.1.2}}"
   if [ -z "${{SUGARKUBE_STUB_CHART_VERSION:-}}" ] && [ "${{SUGARKUBE_STUB_NODE_ENV:-staging}}" = prod ]; then chart_version=3.0.3; fi
   description="$(cat {str(tmp_path / "helm-description")!r} 2>/dev/null || true)"
   revision=7
@@ -227,7 +227,7 @@ if [[ "$*" == show\ chart* ]]; then
   if [[ "$*" == *"charts/dspace"* ]]; then
     version="${{*: -1}}"
     if [[ "$version" == oci://*@sha256:* ]]; then
-      version="${{SUGARKUBE_STUB_CHART_VERSION:-3.1.1}}"
+      version="${{SUGARKUBE_STUB_CHART_VERSION:-3.1.2}}"
       if [ -z "${{SUGARKUBE_STUB_CHART_VERSION:-}}" ] && [ "${{SUGARKUBE_STUB_NODE_ENV:-staging}}" = prod ]; then version=3.0.3; fi
     fi
     printf 'apiVersion: v2\nname: dspace\nversion: %s\nappVersion: main-abcdef0\n' "$version"
@@ -2963,7 +2963,7 @@ def _write_dspace_candidate(
         "sourceRevision": "abcdef0123456789abcdef0123456789abcdef01",
         "imageTag": "main-abcdef0",
         "imageDigest": image_digest or "sha256:" + "1" * 64,
-        "chartVersion": "3.1.1" if environment == "staging" else "3.0.3",
+        "chartVersion": "3.1.2" if environment == "staging" else "3.0.3",
         "chartDigest": "sha256:" + "2" * 64,
         "semanticTag": "v3.2.0",
         "recordType": "candidate",
@@ -3624,7 +3624,7 @@ def test_dspace_promote_prod_routes_sparse_named_arguments_through_both_gates(
 
     _write_dspace_candidate(prod_manifest, "prod")
     prod_record = json.loads(prod_manifest.read_text(encoding="utf-8"))
-    prod_record["chartVersion"] = "3.1.1"
+    prod_record["chartVersion"] = "3.1.2"
     prod_manifest.write_text(json.dumps(prod_record) + "\n", encoding="utf-8")
     config = tmp_path / "dspace.env"
     config.write_text(
@@ -3634,7 +3634,7 @@ def test_dspace_promote_prod_routes_sparse_named_arguments_through_both_gates(
                 "SUGARKUBE_RELEASE=dspace",
                 "SUGARKUBE_NAMESPACE=dspace",
                 "SUGARKUBE_CHART=oci://ghcr.io/democratizedspace/charts/dspace",
-                "SUGARKUBE_VERSION=3.1.1",
+                "SUGARKUBE_VERSION=3.1.2",
                 "SUGARKUBE_PROD_TAG_FILE=docs/apps/dspace.prod.tag",
                 "SUGARKUBE_VALUES_DEV=docs/examples/dspace.values.dev.yaml",
                 "SUGARKUBE_VALUES_STAGING=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml",
@@ -3644,7 +3644,7 @@ def test_dspace_promote_prod_routes_sparse_named_arguments_through_both_gates(
         + "\n",
         encoding="utf-8",
     )
-    env["SUGARKUBE_STUB_CHART_VERSION"] = "3.1.1"
+    env["SUGARKUBE_STUB_CHART_VERSION"] = "3.1.2"
     env["SUGARKUBE_STUB_NODE_ENV"] = "prod"
     runtime_log = Path(env["RUNTIME_VERIFIER_LOG"])
     runtime_log.write_text("", encoding="utf-8")
@@ -3746,11 +3746,11 @@ def test_dspace_prod_staging_gate_failures_stop_before_production_work(
 
     _write_dspace_candidate(prod_manifest, "prod")
     prod_record = json.loads(prod_manifest.read_text(encoding="utf-8"))
-    prod_record["chartVersion"] = "3.1.1"
+    prod_record["chartVersion"] = "3.1.2"
     prod_manifest.write_text(json.dumps(prod_record) + "\n", encoding="utf-8")
     env = generic_app_stub_env.copy()
     env["SUGARKUBE_STUB_NODE_ENV"] = "prod"
-    env["SUGARKUBE_STUB_CHART_VERSION"] = "3.1.1"
+    env["SUGARKUBE_STUB_CHART_VERSION"] = "3.1.2"
     if staging_record_kind == "revision":
         env["SUGARKUBE_STUB_STAGING_HELM_REVISION"] = "8"
     for name in ("helm.log", "kubectl.log", "commands.log", "runtime-verifier.log"):

@@ -1,2 +1,2 @@
-# DSPACE staging chart pin. Chart 3.1.1 packages DSPACE application 3.1.0 and supplies the required immutable OCI provenance.
-3.1.1
+# DSPACE staging chart pin. Chart 3.1.2 packages the reviewed DSPACE 3.1.1 candidate.
+3.1.2
