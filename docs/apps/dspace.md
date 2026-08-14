@@ -1,5 +1,38 @@
 # democratized.space (dspace) on Sugarkube
 
+## 3.1.1 staging-first promotion preparation (no operation authorized)
+
+`docs/apps/dspace.promotion-target.json` is the reviewed, machine-readable preparation target for application `3.1.1` and chart `3.1.2`. It keeps application and chart source revisions explicit, pins the immutable branch image tag and both digests, and records semantic release tags only as provenance. A semantic image tag is never a deployment coordinate. The staging chart pin advances so a later approved staging candidate can exercise chart `3.1.2`; production pins and finalized baselines remain unchanged.
+
+The read-only planner accepts independently produced, bounded JSON reports and a local chart archive:
+
+```bash
+python3 scripts/dspace_promotion_plan.py \
+  --artifact-report /reviewed/dspace-3.1.1-artifacts.json \
+  --source-report /reviewed/dspace-3.1.1-metrics-source.json \
+  --classifier-report /home/pi/operator-evidence/dspace-prod-classifier.json \
+  --failed-reconciliation /home/pi/operator-evidence/dspace-prod-metrics-reconcile-20260813T072927Z/reconciliation.json \
+  --historical-staging-evidence deployment-evidence/dspace/staging/main-018687f-20260805T035722Z.json \
+  --chart-archive /reviewed/dspace-3.1.2.tgz
+```
+
+The artifact report must prove the exact image digest, Linux/ARM64 availability, OCI source revision, chart name/version/application version/digest/source revision, and release tags. The source report lists exactly the six privacy-safe `dspace_*` definitions and states that it contains no raw metrics. The classifier report is bounded: two healthy targets, zero scrape errors, public `401`, Secret existence without reading its value, two samples for each named default Node family, zero samples for every required application family, the established classification, and `clusterMutationPerformed=false`. Unknown fields (including Secret values or raw payloads), partial families, unhealthy targets, and mutation claims fail closed.
+
+The planner independently validates the preserved failed reconciliation against the reviewed 3.0.1 maintenance tuple. It recognizes finalized application 3.1.0/chart 3.1.1 staging evidence only as historical and emits `historicalStagingEvidenceAuthorizesTarget=false`. It renders staging and eventual production locally from the archive whose bytes match the reviewed immutable chart digest, with two replicas, `image.pullPolicy=Always`, and `main-22f506e`. It rejects rendered Secrets, staging values in production, semantic image tags, and `--reuse-values`. Its sanitized JSON contains no credentials or raw metrics and an empty `mutationCommands` list. It never runs Helm upgrade, kubectl, rollout, Secret mutation, artifact publication, approval creation, or evidence finalization.
+
+### Required future sequence
+
+This preparation is not approval or deployment evidence. A future operator must, in order:
+
+1. Record genuine operator approval metadata for the exact 3.1.1/3.1.2 coordinates.
+2. Create a fresh staging candidate for those coordinates and deploy it through the existing guarded release-manifest machinery.
+3. Prove exactly two Ready replicas at the reviewed image digest; matching runtime and frontend source identity; public/direct agreement; and the intended eventual production provider `openai`.
+4. Run a bounded remote `/chat` smoke and prove two healthy authenticated Prometheus targets with no scrape errors. Prove all six required families: `dspace_build_info`, `dspace_dchat_requests_total`, `dspace_dependency_requests_total`, `dspace_http_request_duration_seconds_bucket`, `dspace_http_requests_total`, and `dspace_instrumentation_up`. Where counters require traffic, capture a real server-observed chat/dependency journey without response bodies, tokens, Secret values, or raw metrics payloads.
+5. Finalize fresh, non-overwritable staging evidence only after every check succeeds. The optional `--staging-proof` input accepts it only when every coordinate, `openai`, identity, metrics, and smoke result matches.
+6. Only a separate future repository task may add a guarded, one-shot successor to production Helm revision 10. The old classifier and historical staging evidence cannot authorize it.
+
+The existing `dspace-prod-metrics-pull-policy-recover` operation remains ineligible for this incident: application 3.0.1 cannot supply the required metrics. Preserve its preflight and verifier unchanged; do not rerun, weaken, bypass, or repurpose it as an application promotion. Do not roll back or uninstall Helm, and do not read, rotate, or delete the metrics Secret. Issues #2325 and #2329 remain closed unless a human chooses otherwise, and issue #2408 is separate and must not be modified or conflated.
+
 This is the canonical runbook for deploying DSPACE from GHCR artifacts to Sugarkube. The generic `just app-*` recipes are the preferred future path. The `dspace-oci-*` recipes remain compatibility shims and are scheduled for later removal only after the generic flow has been exercised across routine releases.
 
 ## Production authenticated metrics chart maintenance
