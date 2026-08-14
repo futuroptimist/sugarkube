@@ -1862,6 +1862,40 @@ dspace-prod-metrics-reconcile baseline_manifest maintenance_target evidence smok
     )
     "${reconciliation_command[@]}"
 
+# One-time, separately authorized repair of the revision-10 DSPACE pull policy incident.
+dspace-prod-metrics-pull-policy-recover failed_evidence maintenance_target recovery_evidence smoke_runner kubeconfig verifier="{{ justfile_directory() }}/scripts/dspace_runtime_verifier.py" confirm='' config='':
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    failed_path={{ quote(failed_evidence) }}
+    target_path={{ quote(maintenance_target) }}
+    output_path={{ quote(recovery_evidence) }}
+    smoke_path={{ quote(smoke_runner) }}
+    kubeconfig_path={{ quote(kubeconfig) }}
+    verifier_path={{ quote(verifier) }}
+    confirmation={{ quote(confirm) }}
+    config_path={{ quote(config) }}
+    for variable in failed_path target_path output_path smoke_path kubeconfig_path; do
+      value="${!variable}"
+      case "${variable}:${value}" in
+        failed_path:failed_evidence=*) value="${value#failed_evidence=}" ;;
+        target_path:maintenance_target=*) value="${value#maintenance_target=}" ;;
+        output_path:recovery_evidence=*) value="${value#recovery_evidence=}" ;;
+        smoke_path:smoke_runner=*) value="${value#smoke_runner=}" ;;
+        kubeconfig_path:kubeconfig=*) value="${value#kubeconfig=}" ;;
+      esac
+      [ -n "${value}" ] || { echo "ERROR: ${variable} must not be empty." >&2; exit 2; }
+      printf -v "${variable}" '%s' "${value}"
+    done
+    [[ "${verifier_path}" != verifier=* ]] || verifier_path="${verifier_path#verifier=}"
+    [[ "${confirmation}" != confirm=* ]] || confirmation="${confirmation#confirm=}"
+    [[ "${config_path}" != config=* ]] || config_path="${config_path#config=}"
+    python3 "{{ justfile_directory() }}/scripts/dspace_manifest_rollback.py" \
+      --production-metrics-recovery --environment prod \
+      --failed-evidence "${failed_path}" --maintenance-target "${target_path}" \
+      --evidence "${output_path}" --smoke-runner "${smoke_path}" \
+      --kubeconfig "${kubeconfig_path}" --verifier "${verifier_path}" \
+      --confirm "${confirmation}" --config "${config_path}"
+
 # Read-only DSPACE runtime, frontend, replica, and remote /chat proof.
 dspace-release-verify env manifest smoke_runner config='' kubeconfig='' expected_helm_revision='':
     #!/usr/bin/env bash

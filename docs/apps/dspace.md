@@ -32,6 +32,32 @@ just dspace-prod-metrics-reconcile \
   confirm="dspace:prod:1a31a569aff2dbeb238e8c2688b9e85140d2077d"
 ```
 
+### One-time production pull-policy recovery
+
+The failed revision-10 reconciliation evidence is immutable and remains failed. After this change is
+merged, a separately authorized operator may repair only the reviewed incident state: revision 10,
+chart 3.0.3, and complete approved values with the sole delta
+`image.pullPolicy=IfNotPresent`. This is **not** a rerun of
+`dspace-prod-metrics-reconcile`. The command fails closed on any other revision, chart, invocation,
+pod, image, Secret contract, provenance, or values state; it performs at most one digest-qualified
+upgrade to revision 11 and writes a new private evidence record.
+
+Do not run this during development. Following explicit production authorization, use exactly:
+
+```bash
+just dspace-prod-metrics-pull-policy-recover \
+  failed_evidence=/private/evidence/dspace-prod-metrics-failed.json \
+  maintenance_target=docs/apps/dspace.prod-metrics-chart-target.json \
+  recovery_evidence=/private/evidence/dspace-prod-metrics-pull-policy-recovery.json \
+  smoke_runner="$HOME/dspace/scripts/run-remote-chat-smoke.mjs" \
+  kubeconfig="$HOME/.kube/config-sugarkube-prod" \
+  confirm=dspace:prod:recover-revision-10-pull-policy
+```
+
+The failed and recovery evidence paths must be private; the recovery destination must not exist.
+Never retry, roll back, uninstall, rotate Secrets, or issue a second Helm mutation automatically if
+the recovery fails. Preserve its failed-stage evidence and investigate the sanitized diagnostics.
+
 The command uses only the exact digest-qualified 3.0.3 OCI chart, the complete committed production
 values chain, and an invocation-bound opaque Helm description; it never uses `--reuse-values`.
 Afterward it proves replacement Ready pods retain the exact image digest, runs strict runtime,
