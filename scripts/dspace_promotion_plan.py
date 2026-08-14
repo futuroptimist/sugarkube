@@ -42,7 +42,6 @@ TARGET = {
     "imageDigest": "sha256:467890df969cc7938cb760f965fd8f90a8912b1dcb1f8425bc808216b7e1512b",
     "chartVersion": "3.1.2",
     "chartDigest": "sha256:544a3e31ab827e6d2bf28754a19d8af17b0402b75159c2a40c1b3dfe5eb60161",
-    "chartArchiveDigest": "sha256:cb35bcb01eeb668771fe6670fed64f7b79bb56e5f927910abc5362ec46a4879f",
     "semanticTag": "v3.1.1",
 }
 
@@ -68,17 +67,14 @@ def exact(value: dict[str, Any], fields: set[str], label: str) -> None:
 
 def target() -> dict[str, Any]:
     value = load(TARGET_PATH)
-    release_target = {
-        key: item for key, item in value.items() if key != "chartArchiveDigest"
-    }
-    release._exact_fields(release_target, release.UPSTREAM_FIELDS_V2)
-    release._validate_upstream(release_target)
+    release._exact_fields(value, release.UPSTREAM_FIELDS_V2)
+    release._validate_upstream(value)
     if value != {"schemaVersion": 2, "app": "dspace", **TARGET}:
         raise PlanError("promotion target is not the reviewed coordinate set")
     return value
 
 
-def artifact_report(value: dict[str, Any], wanted: dict[str, Any]) -> None:
+def artifact_report(value: dict[str, Any], wanted: dict[str, Any]) -> str:
     exact(value, {"schemaVersion", "image", "chart", "releaseTags"}, "artifact report")
     exact(value["image"], {"tag", "digest", "revisionAnnotation", "platforms"}, "image")
     exact(
@@ -96,7 +92,6 @@ def artifact_report(value: dict[str, Any], wanted: dict[str, Any]) -> None:
     expected_chart = {
         "version": wanted["chartVersion"],
         "digest": wanted["chartDigest"],
-        "archiveDigest": wanted["chartArchiveDigest"],
         "sourceRevision": wanted["chartSourceRevision"],
         "name": "dspace",
         "appVersion": wanted["applicationVersion"],
@@ -108,7 +103,9 @@ def artifact_report(value: dict[str, Any], wanted: dict[str, Any]) -> None:
         or not isinstance(image["platforms"], list)
         or len(image["platforms"]) != 2
         or set(image["platforms"]) != {"linux/amd64", "linux/arm64"}
-        or value["chart"] != expected_chart
+        or {key: value["chart"][key] for key in expected_chart} != expected_chart
+        or not isinstance(value["chart"]["archiveDigest"], str)
+        or not release.DIGEST_RE.fullmatch(value["chart"]["archiveDigest"])
     ):
         raise PlanError("artifact provenance does not match the reviewed target")
     if value["releaseTags"] != {
@@ -116,6 +113,7 @@ def artifact_report(value: dict[str, Any], wanted: dict[str, Any]) -> None:
         "chart": f"chart-v{wanted['chartVersion']}",
     }:
         raise PlanError("release tags do not match the reviewed target")
+    return value["chart"]["archiveDigest"]
 
 
 def source_report(value: dict[str, Any], wanted: dict[str, Any]) -> None:
@@ -193,7 +191,7 @@ def staging_proof(value: dict[str, Any], wanted: dict[str, Any]) -> None:
         "staging proof",
     )
     evidence = release.validate(value["evidence"], finalized=True)
-    release_fields = set(TARGET) - {"chartArchiveDigest"}
+    release_fields = set(TARGET)
     coordinates = {key: evidence[key] for key in release_fields}
     runtime = evidence.get("runtimeVerification")
     expected_runtime = {
@@ -252,9 +250,11 @@ def historical_staging_evidence(path: Path, wanted: dict[str, Any]) -> None:
         )
 
 
-def render(chart: Path, wanted: dict[str, Any], environment: str) -> None:
+def render(
+    chart: Path, wanted: dict[str, Any], archive_digest: str, environment: str
+) -> None:
     actual = "sha256:" + hashlib.sha256(chart.read_bytes()).hexdigest()
-    if actual != wanted["chartArchiveDigest"]:
+    if actual != archive_digest:
         raise PlanError("offline chart archive digest mismatch")
     values = [
         ROOT / "docs/examples/dspace.values.dev.yaml",
@@ -309,15 +309,15 @@ def render(chart: Path, wanted: dict[str, Any], environment: str) -> None:
 
 def plan(args: argparse.Namespace) -> dict[str, Any]:
     wanted = target()
-    artifact_report(load(args.artifact_report), wanted)
+    archive_digest = artifact_report(load(args.artifact_report), wanted)
     source_report(load(args.source_report), wanted)
     classifier_report(load(args.classifier_report))
     failed_reconciliation(args.failed_reconciliation)
     historical_staging_evidence(args.historical_staging_evidence, wanted)
     if args.staging_proof:
         staging_proof(load(args.staging_proof), wanted)
-    render(args.chart_archive, wanted, "staging")
-    render(args.chart_archive, wanted, "prod")
+    render(args.chart_archive, wanted, archive_digest, "staging")
+    render(args.chart_archive, wanted, archive_digest, "prod")
     return {
         "schemaVersion": 1,
         "mode": "read-only-offline-plan",

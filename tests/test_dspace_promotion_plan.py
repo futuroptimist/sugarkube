@@ -18,6 +18,7 @@ SPEC = importlib.util.spec_from_file_location(
 assert SPEC and SPEC.loader
 plan = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(plan)
+ARCHIVE_DIGEST = "sha256:cb35bcb01eeb668771fe6670fed64f7b79bb56e5f927910abc5362ec46a4879f"
 
 
 def artifact() -> dict:
@@ -32,7 +33,7 @@ def artifact() -> dict:
         "chart": {
             "version": plan.TARGET["chartVersion"],
             "digest": plan.TARGET["chartDigest"],
-            "archiveDigest": plan.TARGET["chartArchiveDigest"],
+            "archiveDigest": ARCHIVE_DIGEST,
             "sourceRevision": plan.TARGET["chartSourceRevision"],
             "name": "dspace",
             "appVersion": plan.TARGET["applicationVersion"],
@@ -58,7 +59,19 @@ def classifier() -> dict:
 
 
 def test_reviewed_target_has_exact_schema_and_coordinates():
-    assert plan.target() == {"schemaVersion": 2, "app": "dspace", **plan.TARGET}
+    reviewed = plan.target()
+    assert reviewed == {"schemaVersion": 2, "app": "dspace", **plan.TARGET}
+    assert set(reviewed) == set(plan.release.UPSTREAM_FIELDS_V2)
+
+
+def test_reviewed_target_rejects_archive_digest_extension(monkeypatch, tmp_path):
+    extended = {"schemaVersion": 2, "app": "dspace", **plan.TARGET}
+    extended["chartArchiveDigest"] = ARCHIVE_DIGEST
+    path = tmp_path / "target.json"
+    path.write_text(json.dumps(extended))
+    monkeypatch.setattr(plan, "TARGET_PATH", path)
+    with pytest.raises(plan.release.ManifestError, match="fields"):
+        plan.target()
 
 
 @pytest.mark.parametrize(
@@ -92,7 +105,28 @@ def test_artifact_report_accepts_platform_order_and_derives_release_tags():
     wanted = {"schemaVersion": 2, "app": "dspace", **plan.TARGET}
     wanted["semanticTag"] = "release-3.1.1"
     report["releaseTags"]["application"] = wanted["semanticTag"]
-    plan.artifact_report(report, wanted)
+    assert plan.artifact_report(report, wanted) == ARCHIVE_DIGEST
+
+
+def test_artifact_archive_digest_is_independent_of_oci_manifest_digest():
+    report = artifact()
+    report["chart"]["archiveDigest"] = "sha256:" + "a" * 64
+    wanted = {"schemaVersion": 2, "app": "dspace", **plan.TARGET}
+    assert report["chart"]["archiveDigest"] != wanted["chartDigest"]
+    assert plan.artifact_report(report, wanted) == report["chart"]["archiveDigest"]
+
+
+@pytest.mark.parametrize("archive_digest", [None, "SHA256:" + "a" * 64, "sha256:abc"])
+def test_artifact_report_rejects_missing_or_malformed_archive_digest(archive_digest):
+    report = artifact()
+    if archive_digest is None:
+        del report["chart"]["archiveDigest"]
+    else:
+        report["chart"]["archiveDigest"] = archive_digest
+    with pytest.raises(plan.PlanError):
+        plan.artifact_report(
+            report, {"schemaVersion": 2, "app": "dspace", **plan.TARGET}
+        )
 
 
 def test_artifact_report_rejects_duplicate_platforms():
@@ -188,8 +222,6 @@ def test_synthetic_exact_finalized_staging_proof_is_accepted():
     )
     evidence = copy.deepcopy(old)
     for key, value in plan.TARGET.items():
-        if key == "chartArchiveDigest":
-            continue
         evidence[key] = value
     evidence["expectedDefaultChatProvider"] = "openai"
     evidence["runtimeSourceRevision"] = plan.TARGET["sourceRevision"]
@@ -228,9 +260,7 @@ def test_offline_render_requires_two_replicas_always_and_rejects_prod_leaks(
     archive = tmp_path / "dspace.tgz"
     archive.write_bytes(b"offline chart")
     wanted = dict(plan.TARGET)
-    wanted["chartArchiveDigest"] = (
-        "sha256:" + hashlib.sha256(archive.read_bytes()).hexdigest()
-    )
+    archive_digest = "sha256:" + hashlib.sha256(archive.read_bytes()).hexdigest()
     manifest = """
 kind: Deployment
 metadata: {name: dspace}
@@ -283,8 +313,8 @@ spec:
             }
         ],
     )
-    plan.render(archive, wanted, "staging")
-    plan.render(archive, wanted, "prod")
+    plan.render(archive, wanted, archive_digest, "staging")
+    plan.render(archive, wanted, archive_digest, "prod")
     assert all("helm" == command[0] and "template" in command for command in calls)
     assert all(
         "upgrade" not in command and "--reuse-values" not in command
@@ -318,7 +348,7 @@ def test_render_rejects_secret_objects(monkeypatch, tmp_path):
     archive = tmp_path / "chart"
     archive.write_bytes(b"x")
     wanted = dict(plan.TARGET)
-    wanted["chartArchiveDigest"] = "sha256:" + hashlib.sha256(b"x").hexdigest()
+    archive_digest = "sha256:" + hashlib.sha256(b"x").hexdigest()
     monkeypatch.setattr(
         plan.subprocess,
         "run",
@@ -335,14 +365,14 @@ def test_render_rejects_secret_objects(monkeypatch, tmp_path):
         plan.app_chart, "validate_dspace_values", lambda text, inputs: []
     )
     with pytest.raises(plan.PlanError, match="Secret"):
-        plan.render(archive, wanted, "prod")
+        plan.render(archive, wanted, archive_digest, "prod")
 
 
 def test_render_failure_includes_sanitized_helm_stderr(monkeypatch, tmp_path):
     archive = tmp_path / "chart"
     archive.write_bytes(b"x")
     wanted = dict(plan.TARGET)
-    wanted["chartArchiveDigest"] = "sha256:" + hashlib.sha256(b"x").hexdigest()
+    archive_digest = "sha256:" + hashlib.sha256(b"x").hexdigest()
     monkeypatch.setattr(
         plan.subprocess,
         "run",
@@ -351,7 +381,7 @@ def test_render_failure_includes_sanitized_helm_stderr(monkeypatch, tmp_path):
         ),
     )
     with pytest.raises(plan.PlanError, match=r"<repo>/charts/bad.yaml"):
-        plan.render(archive, wanted, "prod")
+        plan.render(archive, wanted, archive_digest, "prod")
 
 
 def test_planner_contains_no_mutation_or_finalization_commands():
@@ -387,7 +417,7 @@ def source_report_fixture() -> dict:
 def staging_fixture() -> dict:
     old = json.loads(plan.HISTORICAL_STAGING_PATH.read_text())
     evidence = copy.deepcopy(old)
-    for key in set(plan.TARGET) - {"chartArchiveDigest"}:
+    for key in set(plan.TARGET):
         evidence[key] = plan.TARGET[key]
     evidence["expectedDefaultChatProvider"] = "openai"
     evidence["runtimeSourceRevision"] = plan.TARGET["sourceRevision"]
@@ -557,7 +587,7 @@ def test_render_fails_on_structural_helper_drift(monkeypatch, tmp_path, error):
     archive = tmp_path / "chart"
     archive.write_bytes(b"chart")
     wanted = dict(plan.TARGET)
-    wanted["chartArchiveDigest"] = "sha256:" + hashlib.sha256(b"chart").hexdigest()
+    archive_digest = "sha256:" + hashlib.sha256(b"chart").hexdigest()
     monkeypatch.setattr(
         plan.subprocess,
         "run",
@@ -568,7 +598,7 @@ def test_render_fails_on_structural_helper_drift(monkeypatch, tmp_path, error):
     )
     monkeypatch.setattr(plan.app_chart, "validate_dspace_values", lambda *_: [])
     with pytest.raises(plan.PlanError, match="validation failed"):
-        plan.render(archive, wanted, "prod")
+        plan.render(archive, wanted, archive_digest, "prod")
 
 
 def test_plan_end_to_end_is_two_templates_and_sanitized(monkeypatch, tmp_path):
@@ -587,9 +617,9 @@ def test_plan_end_to_end_is_two_templates_and_sanitized(monkeypatch, tmp_path):
     archive = tmp_path / "chart"
     archive.write_bytes(b"chart")
     wanted = {"schemaVersion": 2, "app": "dspace", **plan.TARGET}
-    wanted["chartArchiveDigest"] = "sha256:" + hashlib.sha256(b"chart").hexdigest()
+    archive_digest = "sha256:" + hashlib.sha256(b"chart").hexdigest()
     artifact_value = json.loads(paths["artifact_report"].read_text())
-    artifact_value["chart"]["archiveDigest"] = wanted["chartArchiveDigest"]
+    artifact_value["chart"]["archiveDigest"] = archive_digest
     paths["artifact_report"].write_text(json.dumps(artifact_value))
     monkeypatch.setattr(plan, "target", lambda: wanted)
     monkeypatch.setattr(plan, "failed_reconciliation", lambda path: None)
@@ -649,7 +679,7 @@ def test_render_rejects_wrong_repository_semantic_tag_pull_policy_or_replicas(
     archive = tmp_path / "chart"
     archive.write_bytes(b"chart")
     wanted = dict(plan.TARGET)
-    wanted["chartArchiveDigest"] = "sha256:" + hashlib.sha256(b"chart").hexdigest()
+    archive_digest = "sha256:" + hashlib.sha256(b"chart").hexdigest()
     deployment = {
         "kind": "Deployment",
         "metadata": {"labels": {"app.kubernetes.io/instance": "dspace"}},
@@ -681,4 +711,4 @@ def test_render_rejects_wrong_repository_semantic_tag_pull_policy_or_replicas(
     monkeypatch.setattr(plan.app_chart, "validate_dspace_values", lambda *_: [])
     monkeypatch.setattr(plan.app_chart, "safe_yaml_documents", lambda _: [deployment])
     with pytest.raises(plan.PlanError):
-        plan.render(archive, wanted, "staging")
+        plan.render(archive, wanted, archive_digest, "staging")
