@@ -399,7 +399,7 @@ verification uses the same command with `env=prod` and a production candidate or
 | Release | `dspace` |
 | Namespace | `dspace` |
 | App config | `docs/examples/apps/dspace.env` |
-| Chart version pins | Shared/default `docs/apps/dspace.version`; staging `docs/apps/dspace.staging.version` (chart `3.1.1` for application `3.1.0`); production `docs/apps/dspace.prod.version` (`3.0.3`, chart-only application 3.0.1 maintenance) |
+| Chart version pins | Shared/default `docs/apps/dspace.version`; staging `docs/apps/dspace.staging.version` (preparation pin `3.1.2` for application `3.1.1`); production `docs/apps/dspace.prod.version` (`3.0.3`, chart-only application 3.0.1 maintenance) |
 | Production tag pin | `docs/apps/dspace.prod.tag` |
 | Verify paths | `/config.json`, `/healthz`, `/livez` |
 
