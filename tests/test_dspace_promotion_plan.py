@@ -18,7 +18,9 @@ SPEC = importlib.util.spec_from_file_location(
 assert SPEC and SPEC.loader
 plan = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(plan)
-ARCHIVE_DIGEST = "sha256:cb35bcb01eeb668771fe6670fed64f7b79bb56e5f927910abc5362ec46a4879f"
+ARCHIVE_DIGEST = (
+    "sha256:cb35bcb01eeb668771fe6670fed64f7b79bb56e5f927910abc5362ec46a4879f"
+)
 
 
 def artifact() -> dict:
@@ -712,3 +714,108 @@ def test_render_rejects_wrong_repository_semantic_tag_pull_policy_or_replicas(
     monkeypatch.setattr(plan.app_chart, "safe_yaml_documents", lambda _: [deployment])
     with pytest.raises(plan.PlanError):
         plan.render(archive, wanted, archive_digest, "staging")
+
+
+def test_load_rejects_invalid_json_and_non_object(tmp_path):
+    report = tmp_path / "report.json"
+    report.write_text("{")
+    with pytest.raises(plan.PlanError, match="invalid JSON report"):
+        plan.load(report)
+    report.write_text("[]")
+    with pytest.raises(plan.PlanError, match="report must be an object"):
+        plan.load(report)
+
+
+def test_reviewed_target_rejects_valid_but_unreviewed_coordinates(
+    monkeypatch, tmp_path
+):
+    changed = {"schemaVersion": 2, "app": "dspace", **plan.TARGET}
+    changed["chartDigest"] = "sha256:" + "f" * 64
+    path = tmp_path / "target.json"
+    path.write_text(json.dumps(changed))
+    monkeypatch.setattr(plan, "TARGET_PATH", path)
+    with pytest.raises(plan.PlanError, match="reviewed coordinate set"):
+        plan.target()
+
+
+def test_historical_evidence_rejects_valid_noncanonical_record(tmp_path):
+    record = json.loads(plan.HISTORICAL_STAGING_PATH.read_text())
+    record["chartDigest"] = "sha256:" + "f" * 64
+    supplied = tmp_path / "historical.json"
+    supplied.write_text(json.dumps(record))
+    with pytest.raises(plan.PlanError, match="canonical repository record"):
+        plan.historical_staging_evidence(
+            supplied, {"schemaVersion": 2, "app": "dspace", **plan.TARGET}
+        )
+
+
+def test_historical_evidence_cannot_equal_reviewed_coordinates():
+    record = json.loads(plan.HISTORICAL_STAGING_PATH.read_text())
+    wanted = {key: record[key] for key in plan.release.UPSTREAM_FIELDS_V2}
+    with pytest.raises(plan.PlanError, match="unexpectedly matches"):
+        plan.historical_staging_evidence(plan.HISTORICAL_STAGING_PATH, wanted)
+
+
+def test_failed_reconciliation_delegates_to_existing_helpers(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(plan.release, "validate", lambda value, finalized: "baseline")
+    monkeypatch.setattr(
+        plan.rollback,
+        "chart_maintenance_target",
+        lambda baseline, path: calls.append((baseline, path)) or "old-target",
+    )
+    monkeypatch.setattr(
+        plan.rollback,
+        "failed_reconciliation",
+        lambda path, target: calls.append((path, target)),
+    )
+    monkeypatch.setattr(plan, "BASELINE_PATH", tmp_path / "baseline.json")
+    plan.BASELINE_PATH.write_text("{}")
+    failed = tmp_path / "failed.json"
+    plan.failed_reconciliation(failed)
+    assert calls == [
+        ("baseline", plan.MAINTENANCE_PATH),
+        (failed, "old-target"),
+    ]
+
+
+def test_render_rejects_archive_byte_mismatch(tmp_path):
+    archive = tmp_path / "chart"
+    archive.write_bytes(b"unexpected")
+    with pytest.raises(plan.PlanError, match="archive digest mismatch"):
+        plan.render(archive, dict(plan.TARGET), ARCHIVE_DIGEST, "staging")
+
+
+def test_parser_and_main_success_and_failure(monkeypatch, capsys):
+    parsed = plan.parser().parse_args(
+        [
+            "--artifact-report",
+            "artifact.json",
+            "--source-report",
+            "source.json",
+            "--classifier-report",
+            "classifier.json",
+            "--failed-reconciliation",
+            "failed.json",
+            "--historical-staging-evidence",
+            "historical.json",
+            "--chart-archive",
+            "chart.tgz",
+        ]
+    )
+    assert parsed.chart_archive == Path("chart.tgz")
+
+    monkeypatch.setattr(
+        plan,
+        "parser",
+        lambda: type("Parser", (), {"parse_args": lambda self: parsed})(),
+    )
+    monkeypatch.setattr(plan, "plan", lambda args: {"safe": True})
+    assert plan.main() == 0
+    assert json.loads(capsys.readouterr().out) == {"safe": True}
+
+    monkeypatch.setattr(
+        plan, "plan", lambda args: (_ for _ in ()).throw(plan.PlanError("unsafe"))
+    )
+    assert plan.main() == 2
+    assert "promotion plan rejected: unsafe" in capsys.readouterr().err
