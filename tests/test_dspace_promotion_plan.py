@@ -32,6 +32,7 @@ def artifact() -> dict:
         "chart": {
             "version": plan.TARGET["chartVersion"],
             "digest": plan.TARGET["chartDigest"],
+            "archiveDigest": plan.TARGET["chartArchiveDigest"],
             "sourceRevision": plan.TARGET["chartSourceRevision"],
             "name": "dspace",
             "appVersion": plan.TARGET["applicationVersion"],
@@ -74,6 +75,37 @@ def test_artifact_report_rejects_coordinate_changes(section: str, field: str):
     report[section][field] = "altered"
     with pytest.raises(plan.PlanError, match="provenance"):
         plan.artifact_report(report, {"schemaVersion": 2, "app": "dspace", **plan.TARGET})
+
+
+def test_artifact_report_accepts_platform_order_and_derives_release_tags():
+    report = artifact()
+    report["image"]["platforms"].reverse()
+    wanted = {"schemaVersion": 2, "app": "dspace", **plan.TARGET}
+    wanted["semanticTag"] = "release-3.1.1"
+    report["releaseTags"]["application"] = wanted["semanticTag"]
+    plan.artifact_report(report, wanted)
+
+
+def test_artifact_report_rejects_duplicate_platforms():
+    report = artifact()
+    report["image"]["platforms"] = ["linux/amd64", "linux/amd64"]
+    with pytest.raises(plan.PlanError, match="provenance"):
+        plan.artifact_report(report, {"schemaVersion": 2, "app": "dspace", **plan.TARGET})
+
+
+def test_source_report_accepts_definition_order_but_rejects_duplicates():
+    report = {
+        "schemaVersion": 1,
+        "sourceRevision": plan.TARGET["sourceRevision"],
+        "privacySafe": True,
+        "rawMetricsIncluded": False,
+        "metricDefinitions": list(reversed(plan.FAMILIES)),
+    }
+    wanted = {"schemaVersion": 2, "app": "dspace", **plan.TARGET}
+    plan.source_report(report, wanted)
+    report["metricDefinitions"][0] = report["metricDefinitions"][1]
+    with pytest.raises(plan.PlanError, match="source report"):
+        plan.source_report(report, wanted)
 
 
 @pytest.mark.parametrize(
@@ -132,6 +164,8 @@ def test_synthetic_exact_finalized_staging_proof_is_accepted():
     )
     evidence = copy.deepcopy(old)
     for key, value in plan.TARGET.items():
+        if key == "chartArchiveDigest":
+            continue
         evidence[key] = value
     evidence["expectedDefaultChatProvider"] = "openai"
     evidence["runtimeSourceRevision"] = plan.TARGET["sourceRevision"]
@@ -163,7 +197,7 @@ def test_offline_render_requires_two_replicas_always_and_rejects_prod_leaks(monk
     archive = tmp_path / "dspace.tgz"
     archive.write_bytes(b"offline chart")
     wanted = dict(plan.TARGET)
-    wanted["chartDigest"] = "sha256:" + hashlib.sha256(archive.read_bytes()).hexdigest()
+    wanted["chartArchiveDigest"] = "sha256:" + hashlib.sha256(archive.read_bytes()).hexdigest()
     manifest = """
 kind: Deployment
 metadata: {name: dspace}
@@ -221,7 +255,7 @@ def test_render_rejects_secret_objects(monkeypatch, tmp_path):
     archive = tmp_path / "chart"
     archive.write_bytes(b"x")
     wanted = dict(plan.TARGET)
-    wanted["chartDigest"] = "sha256:" + hashlib.sha256(b"x").hexdigest()
+    wanted["chartArchiveDigest"] = "sha256:" + hashlib.sha256(b"x").hexdigest()
     monkeypatch.setattr(
         plan.subprocess,
         "run",
@@ -235,6 +269,22 @@ def test_render_rejects_secret_objects(monkeypatch, tmp_path):
         lambda text: [{"kind": "Secret", "metadata": {"name": "bad"}}],
     )
     with pytest.raises(plan.PlanError, match="Secret"):
+        plan.render(archive, wanted, "prod")
+
+
+def test_render_failure_includes_sanitized_helm_stderr(monkeypatch, tmp_path):
+    archive = tmp_path / "chart"
+    archive.write_bytes(b"x")
+    wanted = dict(plan.TARGET)
+    wanted["chartArchiveDigest"] = "sha256:" + hashlib.sha256(b"x").hexdigest()
+    monkeypatch.setattr(
+        plan.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args[0], 1, "", f"Error: template failed in {plan.ROOT}/charts/bad.yaml\n"
+        ),
+    )
+    with pytest.raises(plan.PlanError, match=r"<repo>/charts/bad.yaml"):
         plan.render(archive, wanted, "prod")
 
 

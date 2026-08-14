@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -36,6 +37,7 @@ TARGET = {
     "imageDigest": "sha256:467890df969cc7938cb760f965fd8f90a8912b1dcb1f8425bc808216b7e1512b",
     "chartVersion": "3.1.2",
     "chartDigest": "sha256:544a3e31ab827e6d2bf28754a19d8af17b0402b75159c2a40c1b3dfe5eb60161",
+    "chartArchiveDigest": "sha256:cb35bcb01eeb668771fe6670fed64f7b79bb56e5f927910abc5362ec46a4879f",
     "semanticTag": "v3.1.1",
 }
 
@@ -61,8 +63,9 @@ def exact(value: dict[str, Any], fields: set[str], label: str) -> None:
 
 def target() -> dict[str, Any]:
     value = load(TARGET_PATH)
-    release._exact_fields(value, release.UPSTREAM_FIELDS_V2)
-    release._validate_upstream(value)
+    release_target = {key: item for key, item in value.items() if key != "chartArchiveDigest"}
+    release._exact_fields(release_target, release.UPSTREAM_FIELDS_V2)
+    release._validate_upstream(release_target)
     if value != {"schemaVersion": 2, "app": "dspace", **TARGET}:
         raise PlanError("promotion target is not the reviewed coordinate set")
     return value
@@ -71,28 +74,39 @@ def target() -> dict[str, Any]:
 def artifact_report(value: dict[str, Any], wanted: dict[str, Any]) -> None:
     exact(value, {"schemaVersion", "image", "chart", "releaseTags"}, "artifact report")
     exact(value["image"], {"tag", "digest", "revisionAnnotation", "platforms"}, "image")
-    exact(value["chart"], {"version", "digest", "sourceRevision", "name", "appVersion"}, "chart")
+    exact(
+        value["chart"],
+        {"version", "digest", "archiveDigest", "sourceRevision", "name", "appVersion"},
+        "chart",
+    )
     exact(value["releaseTags"], {"application", "chart"}, "release tags")
-    expected_image = {
+    image = value["image"]
+    expected_image_coordinates = {
         "tag": wanted["imageTag"],
         "digest": wanted["imageDigest"],
         "revisionAnnotation": wanted["sourceRevision"],
-        "platforms": ["linux/amd64", "linux/arm64"],
     }
     expected_chart = {
         "version": wanted["chartVersion"],
         "digest": wanted["chartDigest"],
+        "archiveDigest": wanted["chartArchiveDigest"],
         "sourceRevision": wanted["chartSourceRevision"],
         "name": "dspace",
         "appVersion": wanted["applicationVersion"],
     }
     if (
         value["schemaVersion"] != 1
-        or value["image"] != expected_image
+        or {key: image[key] for key in expected_image_coordinates} != expected_image_coordinates
+        or not isinstance(image["platforms"], list)
+        or len(image["platforms"]) != 2
+        or set(image["platforms"]) != {"linux/amd64", "linux/arm64"}
         or value["chart"] != expected_chart
     ):
         raise PlanError("artifact provenance does not match the reviewed target")
-    if value["releaseTags"] != {"application": "v3.1.1", "chart": "chart-v3.1.2"}:
+    if value["releaseTags"] != {
+        "application": wanted["semanticTag"],
+        "chart": f"chart-v{wanted['chartVersion']}",
+    }:
         raise PlanError("release tags do not match the reviewed target")
 
 
@@ -113,7 +127,9 @@ def source_report(value: dict[str, Any], wanted: dict[str, Any]) -> None:
         or value["sourceRevision"] != wanted["sourceRevision"]
         or value["privacySafe"] is not True
         or value["rawMetricsIncluded"] is not False
-        or value["metricDefinitions"] != list(FAMILIES)
+        or not isinstance(value["metricDefinitions"], list)
+        or len(value["metricDefinitions"]) != len(FAMILIES)
+        or set(value["metricDefinitions"]) != set(FAMILIES)
     ):
         raise PlanError("source report does not prove the privacy-safe required metric definitions")
 
@@ -161,12 +177,13 @@ def failed_reconciliation(path: Path) -> None:
 def staging_proof(value: dict[str, Any], wanted: dict[str, Any]) -> None:
     exact(value, {"schemaVersion", "evidence", "metricsResult", "smokeResult"}, "staging proof")
     evidence = release.validate(value["evidence"], finalized=True)
-    coordinates = {key: evidence[key] for key in TARGET}
+    release_fields = set(TARGET) - {"chartArchiveDigest"}
+    coordinates = {key: evidence[key] for key in release_fields}
     if (
         value["schemaVersion"] != 1
         or evidence["environment"] != "staging"
         or evidence["expectedDefaultChatProvider"] != "openai"
-        or coordinates != {key: wanted[key] for key in TARGET}
+        or coordinates != {key: wanted[key] for key in release_fields}
         or len(evidence["pods"]) != 2
         or "runtimeVerification" not in evidence
         or value["metricsResult"]
@@ -185,7 +202,7 @@ def staging_proof(value: dict[str, Any], wanted: dict[str, Any]) -> None:
 
 def render(chart: Path, wanted: dict[str, Any], environment: str) -> None:
     actual = "sha256:" + hashlib.sha256(chart.read_bytes()).hexdigest()
-    if actual != wanted["chartDigest"]:
+    if actual != wanted["chartArchiveDigest"]:
         raise PlanError("offline chart archive digest mismatch")
     values = [
         ROOT / "docs/examples/dspace.values.dev.yaml",
@@ -204,7 +221,9 @@ def render(chart: Path, wanted: dict[str, Any], environment: str) -> None:
     ]
     completed = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, check=False)
     if completed.returncode:
-        raise PlanError("offline Helm render failed")
+        detail = re.sub(r"\s+", " ", completed.stderr).strip().replace(str(ROOT), "<repo>")
+        detail = detail[:240] if detail else "no stderr"
+        raise PlanError(f"offline Helm render failed: {detail}")
     documents = app_chart.safe_yaml_documents(completed.stdout)
     if any(isinstance(doc, dict) and doc.get("kind") == "Secret" for doc in documents):
         raise PlanError("rendered Secret resources are forbidden")

@@ -8,5 +8,6 @@
   "imageDigest": "sha256:467890df969cc7938cb760f965fd8f90a8912b1dcb1f8425bc808216b7e1512b",
   "chartVersion": "3.1.2",
   "chartDigest": "sha256:544a3e31ab827e6d2bf28754a19d8af17b0402b75159c2a40c1b3dfe5eb60161",
+  "chartArchiveDigest": "sha256:cb35bcb01eeb668771fe6670fed64f7b79bb56e5f927910abc5362ec46a4879f",
   "semanticTag": "v3.1.1"
 }
