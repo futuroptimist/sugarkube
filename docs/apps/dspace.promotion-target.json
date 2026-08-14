@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 2,
+  "app": "dspace",
+  "applicationVersion": "3.1.1",
+  "sourceRevision": "22f506e07e0b5abfd0cf756e9c5827c0458fb4b2",
+  "chartSourceRevision": "22f506e07e0b5abfd0cf756e9c5827c0458fb4b2",
+  "imageTag": "main-22f506e",
+  "imageDigest": "sha256:467890df969cc7938cb760f965fd8f90a8912b1dcb1f8425bc808216b7e1512b",
+  "chartVersion": "3.1.2",
+  "chartDigest": "sha256:544a3e31ab827e6d2bf28754a19d8af17b0402b75159c2a40c1b3dfe5eb60161",
+  "semanticTag": "v3.1.1"
+}

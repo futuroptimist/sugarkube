@@ -1,5 +1,38 @@
 # democratized.space (dspace) on Sugarkube
 
+## 3.1.1 staging-first promotion preparation (no operation authorized)
+
+`docs/apps/dspace.promotion-target.json` is the reviewed, schema-v2 machine-readable preparation target for application `3.1.1` and chart `3.1.2`. It records the immutable image and chart release coordinates: explicit application and chart source revisions, the branch image tag, OCI image and chart manifest digests, and semantic release tag. A semantic image tag is never a deployment coordinate. The staging chart pin advances so a later approved staging candidate can exercise chart `3.1.2`; production pins and finalized baselines remain unchanged.
+
+The read-only planner accepts independently produced, bounded JSON reports and a local chart archive:
+
+```bash
+python3 scripts/dspace_promotion_plan.py \
+  --artifact-report /reviewed/dspace-3.1.1-artifacts.json \
+  --source-report /reviewed/dspace-3.1.1-metrics-source.json \
+  --classifier-report /home/pi/operator-evidence/dspace-prod-classifier.json \
+  --failed-reconciliation /home/pi/operator-evidence/dspace-prod-metrics-reconcile-20260813T072927Z/reconciliation.json \
+  --historical-staging-evidence deployment-evidence/dspace/staging/main-018687f-20260805T035722Z.json \
+  --chart-archive /reviewed/dspace-3.1.2.tgz
+```
+
+The independently generated artifact report must prove the exact image digest, Linux/ARM64 availability, OCI source revision, chart name/version/application version, OCI manifest digest, source revision, and release tags. It also records and binds the distinct chart-layer/archive digest to those reviewed target coordinates. The source report lists exactly the six privacy-safe `dspace_*` definitions and states that it contains no raw metrics. The classifier report is bounded: two healthy targets, zero scrape errors, public `401`, Secret existence without reading its value, two samples for each named default Node family, zero samples for every required application family, the established classification, and `clusterMutationPerformed=false`. Unknown fields (including Secret values or raw payloads), partial families, unhealthy targets, and mutation claims fail closed.
+
+The planner independently validates the preserved failed reconciliation against the reviewed 3.0.1 maintenance tuple. It recognizes finalized application 3.1.0/chart 3.1.1 staging evidence only as historical and emits `historicalStagingEvidenceAuthorizesTarget=false`. It renders staging and eventual production locally only after verifying the local archive bytes against the artifact report's validated archive digest, never against the distinct OCI manifest digest, with two replicas, `image.pullPolicy=Always`, and `main-22f506e`. It rejects rendered Secrets, staging values in production, semantic image tags, and `--reuse-values`. Its sanitized JSON contains no credentials or raw metrics and an empty `mutationCommands` list. It never runs Helm upgrade, kubectl, rollout, Secret mutation, artifact publication, approval creation, or evidence finalization.
+
+### Required future sequence
+
+This preparation is not approval or deployment evidence. A future operator must, in order:
+
+1. Record genuine operator approval metadata for the exact 3.1.1/3.1.2 coordinates.
+2. Create a fresh staging candidate for those coordinates and deploy it through the existing guarded release-manifest machinery.
+3. Prove exactly two Ready replicas at the reviewed image digest; matching runtime and frontend source identity; public/direct agreement; and the intended eventual production provider `openai`.
+4. Run a bounded remote `/chat` smoke and prove two healthy authenticated Prometheus targets with no scrape errors. Prove all six required families: `dspace_build_info`, `dspace_dchat_requests_total`, `dspace_dependency_requests_total`, `dspace_http_request_duration_seconds_bucket`, `dspace_http_requests_total`, and `dspace_instrumentation_up`. Where counters require traffic, capture a real server-observed chat/dependency journey without response bodies, tokens, Secret values, or raw metrics payloads.
+5. Finalize fresh, non-overwritable staging evidence only after every check succeeds. The optional `--staging-proof` input accepts it only when every coordinate, `openai`, identity, metrics, and smoke result matches.
+6. Only a separate future repository task may add a guarded, one-shot successor to production Helm revision 10. The old classifier and historical staging evidence cannot authorize it.
+
+The existing `dspace-prod-metrics-pull-policy-recover` operation remains ineligible for this incident: application 3.0.1 cannot supply the required metrics. Preserve its preflight and verifier unchanged; do not rerun, weaken, bypass, or repurpose it as an application promotion. Do not roll back or uninstall Helm, and do not read, rotate, or delete the metrics Secret. Issues #2325 and #2329 remain closed unless a human chooses otherwise, and issue #2408 is separate and must not be modified or conflated.
+
 This is the canonical runbook for deploying DSPACE from GHCR artifacts to Sugarkube. The generic `just app-*` recipes are the preferred future path. The `dspace-oci-*` recipes remain compatibility shims and are scheduled for later removal only after the generic flow has been exercised across routine releases.
 
 ## Production authenticated metrics chart maintenance
@@ -399,7 +432,7 @@ verification uses the same command with `env=prod` and a production candidate or
 | Release | `dspace` |
 | Namespace | `dspace` |
 | App config | `docs/examples/apps/dspace.env` |
-| Chart version pins | Shared/default `docs/apps/dspace.version`; staging `docs/apps/dspace.staging.version` (chart `3.1.1` for application `3.1.0`); production `docs/apps/dspace.prod.version` (`3.0.3`, chart-only application 3.0.1 maintenance) |
+| Chart version pins | Shared/default `docs/apps/dspace.version`; configured staging preparation pin `docs/apps/dspace.staging.version` (`3.1.2` for the application `3.1.1` candidate; the live historical release remains application `3.1.0`/chart `3.1.1`); production `docs/apps/dspace.prod.version` (`3.0.3`, chart-only application 3.0.1 maintenance) |
 | Production tag pin | `docs/apps/dspace.prod.tag` |
 | Verify paths | `/config.json`, `/healthz`, `/livez` |
 
@@ -437,7 +470,7 @@ Use these links before changing a deployment so the workflow runs, package versi
 - `env=dev`: future single-node/non-HA environment using `docs/examples/dspace.values.dev.yaml`.
   The dev overlay intentionally does not choose a token.place origin; developers who need local runtime routing can copy `docs/examples/apps/dspace.env` to a local app config and add chart-supported `env` entries to their private values file.
 - `env=staging`: HA staging on the staging Sugarkube cluster with host `staging.democratized.space` and values `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml`.
-  The configured staging target injects `DSPACE_TOKEN_PLACE_URL=https://staging.token.place` and `DSPACE_TOKEN_PLACE_CHAT_MODEL=qwen3-8b-instruct`, uses provenance-bearing chart `3.1.1` for DSPACE application `3.1.0`, and persists the authenticated metrics ServiceMonitor configuration discovered by kube-prometheus-stack. The live staging release is Helm revision 28 from the immutable DSPACE `3.1.0` staging image `main-018687f`, with finalized evidence recorded at `deployment-evidence/dspace/staging/main-018687f-20260805T035722Z.json`; operators can use that final record as the promotion and reconciliation proof instead of creating a replacement candidate/evidence path for this deployment. The metrics bearer value is not committed; operators manage the existing `dspace-staging-metrics-token` Secret out of band.
+  The configured repository pin now selects chart `3.1.2` for the prepared DSPACE application `3.1.1` candidate; no rollout is authorized by that pin change. The staging values inject `DSPACE_TOKEN_PLACE_URL=https://staging.token.place` and `DSPACE_TOKEN_PLACE_CHAT_MODEL=qwen3-8b-instruct` and persist the authenticated metrics ServiceMonitor configuration discovered by kube-prometheus-stack. The live historical staging release is still Helm revision 28, provenance-bearing chart `3.1.1`, and immutable DSPACE `3.1.0` image `main-018687f`, with finalized evidence recorded at `deployment-evidence/dspace/staging/main-018687f-20260805T035722Z.json`; that final record is historical evidence only and cannot authorize the prepared candidate. The metrics bearer value is not committed; operators manage the existing `dspace-staging-metrics-token` Secret out of band.
 - `env=prod`: HA production on the production Sugarkube cluster with host `democratized.space` and values `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml`.
   The production overlay injects `DSPACE_TOKEN_PLACE_URL=https://token.place` and `DSPACE_TOKEN_PLACE_CHAT_MODEL=llama-3.1-8b-instruct`. The approved production target is recovery chart `3.0.3` and image `ghcr.io/democratizedspace/dspace:main-1a31a56`; the currently installed chart remains `3.0.2` until a separately authorized rollout. The production values enable authenticated metrics and the ServiceMonitor contract.
 - Optional legacy/canary host `prod.democratized.space` uses `docs/examples/dspace.values.prod-subdomain.yaml`. The `dspace-oci-deploy-prod-subdomain` compatibility command selects the secret-free `docs/examples/apps/dspace-prod-subdomain.env` config, preserving that overlay while routing through the same manifest validation, OCI preflight, Helm deployment, and evidence finalization as the generic production path.
