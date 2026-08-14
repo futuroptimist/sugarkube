@@ -18,7 +18,12 @@ import dspace_release_manifest as release
 
 ROOT = Path(__file__).resolve().parents[1]
 TARGET_PATH = ROOT / "docs/apps/dspace.promotion-target.json"
-BASELINE_PATH = ROOT / "deployment-evidence/dspace/prod/main-1a31a56-20260801T093443Z.json"
+BASELINE_PATH = (
+    ROOT / "deployment-evidence/dspace/prod/main-1a31a56-20260801T093443Z.json"
+)
+HISTORICAL_STAGING_PATH = (
+    ROOT / "deployment-evidence/dspace/staging/main-018687f-20260805T035722Z.json"
+)
 MAINTENANCE_PATH = ROOT / "docs/apps/dspace.prod-metrics-chart-target.json"
 FAMILIES = (
     "dspace_build_info",
@@ -63,7 +68,9 @@ def exact(value: dict[str, Any], fields: set[str], label: str) -> None:
 
 def target() -> dict[str, Any]:
     value = load(TARGET_PATH)
-    release_target = {key: item for key, item in value.items() if key != "chartArchiveDigest"}
+    release_target = {
+        key: item for key, item in value.items() if key != "chartArchiveDigest"
+    }
     release._exact_fields(release_target, release.UPSTREAM_FIELDS_V2)
     release._validate_upstream(release_target)
     if value != {"schemaVersion": 2, "app": "dspace", **TARGET}:
@@ -96,7 +103,8 @@ def artifact_report(value: dict[str, Any], wanted: dict[str, Any]) -> None:
     }
     if (
         value["schemaVersion"] != 1
-        or {key: image[key] for key in expected_image_coordinates} != expected_image_coordinates
+        or {key: image[key] for key in expected_image_coordinates}
+        != expected_image_coordinates
         or not isinstance(image["platforms"], list)
         or len(image["platforms"]) != 2
         or set(image["platforms"]) != {"linux/amd64", "linux/arm64"}
@@ -131,7 +139,9 @@ def source_report(value: dict[str, Any], wanted: dict[str, Any]) -> None:
         or len(value["metricDefinitions"]) != len(FAMILIES)
         or set(value["metricDefinitions"]) != set(FAMILIES)
     ):
-        raise PlanError("source report does not prove the privacy-safe required metric definitions")
+        raise PlanError(
+            "source report does not prove the privacy-safe required metric definitions"
+        )
 
 
 def classifier_report(value: dict[str, Any]) -> None:
@@ -153,7 +163,9 @@ def classifier_report(value: dict[str, Any]) -> None:
     )
     exact(value["prometheusTargets"], {"total", "healthy", "scrapeErrors"}, "targets")
     exact(value["secretContract"], {"exists", "valueRead"}, "secret contract")
-    expected_samples = {name: 2 for name in DEFAULT_FAMILIES} | {name: 0 for name in FAMILIES}
+    expected_samples = {name: 2 for name in DEFAULT_FAMILIES} | {
+        name: 0 for name in FAMILIES
+    }
     if (
         value["schemaVersion"] != 1
         or value["reportType"] != "boundedDspaceMetricsClassifier"
@@ -175,17 +187,39 @@ def failed_reconciliation(path: Path) -> None:
 
 
 def staging_proof(value: dict[str, Any], wanted: dict[str, Any]) -> None:
-    exact(value, {"schemaVersion", "evidence", "metricsResult", "smokeResult"}, "staging proof")
+    exact(
+        value,
+        {"schemaVersion", "evidence", "metricsResult", "smokeResult"},
+        "staging proof",
+    )
     evidence = release.validate(value["evidence"], finalized=True)
     release_fields = set(TARGET) - {"chartArchiveDigest"}
     coordinates = {key: evidence[key] for key in release_fields}
+    runtime = evidence.get("runtimeVerification")
+    expected_runtime = {
+        "schemaVersion": 1,
+        "environment": "staging",
+        "release": "dspace",
+        "namespace": "dspace",
+        "applicationVersion": wanted["applicationVersion"],
+        "runtimeSourceRevision": wanted["sourceRevision"],
+        "frontendSourceRevision": wanted["sourceRevision"],
+        "defaultProvider": "openai",
+        "journeys": [
+            {"name": "/build-meta.json", "passed": True},
+            {"name": "/", "passed": True},
+            {"name": "/chat", "passed": True},
+        ],
+    }
+    expected_image_id = "ghcr.io/democratizedspace/dspace@" + wanted["imageDigest"]
     if (
         value["schemaVersion"] != 1
         or evidence["environment"] != "staging"
         or evidence["expectedDefaultChatProvider"] != "openai"
         or coordinates != {key: wanted[key] for key in release_fields}
         or len(evidence["pods"]) != 2
-        or "runtimeVerification" not in evidence
+        or any(pod.get("imageID") != expected_image_id for pod in evidence["pods"])
+        or runtime != expected_runtime
         or value["metricsResult"]
         != {
             "targets": 2,
@@ -200,6 +234,24 @@ def staging_proof(value: dict[str, Any], wanted: dict[str, Any]) -> None:
         raise PlanError("staging proof cannot authorize the reviewed target")
 
 
+def historical_staging_evidence(path: Path, wanted: dict[str, Any]) -> None:
+    supplied = release.validate(load(path), finalized=True)
+    canonical = release.validate(load(HISTORICAL_STAGING_PATH), finalized=True)
+    canonical_json = json.dumps(canonical, sort_keys=True, separators=(",", ":"))
+    supplied_json = json.dumps(supplied, sort_keys=True, separators=(",", ":"))
+    if supplied_json != canonical_json:
+        raise PlanError(
+            "historical staging evidence is not the canonical repository record"
+        )
+    upstream_fields = set(release.UPSTREAM_FIELDS_V2) - {"schemaVersion", "app"}
+    historical_coordinates = {key: supplied[key] for key in upstream_fields}
+    reviewed_coordinates = {key: wanted[key] for key in upstream_fields}
+    if historical_coordinates == reviewed_coordinates:
+        raise PlanError(
+            "historical staging evidence unexpectedly matches the reviewed target"
+        )
+
+
 def render(chart: Path, wanted: dict[str, Any], environment: str) -> None:
     actual = "sha256:" + hashlib.sha256(chart.read_bytes()).hexdigest()
     if actual != wanted["chartArchiveDigest"]:
@@ -208,27 +260,40 @@ def render(chart: Path, wanted: dict[str, Any], environment: str) -> None:
         ROOT / "docs/examples/dspace.values.dev.yaml",
         ROOT / f"docs/examples/dspace.values.{environment}.yaml",
     ]
-    command = ["helm", "template", "dspace", str(chart), "--namespace", "dspace"]
-    for item in values:
-        command += ["-f", str(item)]
-    command += [
-        "--set",
-        f"image.tag={wanted['imageTag']}",
-        "--set",
-        "image.pullPolicy=Always",
-        "--set",
-        "replicaCount=2",
-    ]
-    completed = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, check=False)
+    repository = "ghcr.io/democratizedspace/dspace"
+    inputs = app_chart.ReleaseInputs(
+        app="dspace",
+        env=environment,
+        release="dspace",
+        namespace="dspace",
+        chart=str(chart),
+        version=wanted["chartVersion"],
+        values=tuple(str(item) for item in values),
+        tag=wanted["imageTag"],
+        pull_policy="Always",
+    )
+    command = inputs.helm_template_command()
+    command += ["--set", f"image.repository={repository}", "--set", "replicaCount=2"]
+    completed = subprocess.run(
+        command, cwd=ROOT, text=True, capture_output=True, check=False
+    )
     if completed.returncode:
-        detail = re.sub(r"\s+", " ", completed.stderr).strip().replace(str(ROOT), "<repo>")
+        detail = (
+            re.sub(r"\s+", " ", completed.stderr).strip().replace(str(ROOT), "<repo>")
+        )
         detail = detail[:240] if detail else "no stderr"
         raise PlanError(f"offline Helm render failed: {detail}")
+    errors = app_chart.validate_rendered_manifest(completed.stdout, inputs)
+    errors += app_chart.validate_dspace_values(completed.stdout, inputs)
+    if errors:
+        raise PlanError("rendered manifest validation failed: " + "; ".join(errors))
     documents = app_chart.safe_yaml_documents(completed.stdout)
-    if any(isinstance(doc, dict) and doc.get("kind") == "Secret" for doc in documents):
-        raise PlanError("rendered Secret resources are forbidden")
     deployments = [
-        doc for doc in documents if isinstance(doc, dict) and doc.get("kind") == "Deployment"
+        doc
+        for doc in documents
+        if isinstance(doc, dict)
+        and doc.get("kind") == "Deployment"
+        and app_chart.release_associated(doc, "dspace", allow_name=False)
     ]
     if len(deployments) != 1 or deployments[0].get("spec", {}).get("replicas") != 2:
         raise PlanError("render must contain exactly one two-replica Deployment")
@@ -237,16 +302,9 @@ def render(chart: Path, wanted: dict[str, Any], environment: str) -> None:
     if (
         not app
         or app.get("imagePullPolicy") != "Always"
-        or not app.get("image", "").endswith(":" + wanted["imageTag"])
+        or app.get("image") != f"{repository}:{wanted['imageTag']}"
     ):
         raise PlanError("rendered image coordinate or pull policy mismatch")
-    text = completed.stdout
-    if environment == "prod" and (
-        "staging.token.place" in text
-        or "dspace-staging-metrics-token" in text
-        or "sugarkube-int" in text
-    ):
-        raise PlanError("staging-only configuration rendered in production")
 
 
 def plan(args: argparse.Namespace) -> dict[str, Any]:
@@ -255,13 +313,7 @@ def plan(args: argparse.Namespace) -> dict[str, Any]:
     source_report(load(args.source_report), wanted)
     classifier_report(load(args.classifier_report))
     failed_reconciliation(args.failed_reconciliation)
-    historical = release.validate(load(args.historical_staging_evidence), finalized=True)
-    if (
-        historical["environment"] != "staging"
-        or historical["applicationVersion"] != "3.1.0"
-        or historical["chartVersion"] != "3.1.1"
-    ):
-        raise PlanError("historical staging evidence is not the preserved 3.1.0/3.1.1 record")
+    historical_staging_evidence(args.historical_staging_evidence, wanted)
     if args.staging_proof:
         staging_proof(load(args.staging_proof), wanted)
     render(args.chart_archive, wanted, "staging")
