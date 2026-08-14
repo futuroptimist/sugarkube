@@ -2,6 +2,47 @@
 
 This is the canonical runbook for deploying DSPACE from GHCR artifacts to Sugarkube. The generic `just app-*` recipes are the preferred future path. The `dspace-oci-*` recipes remain compatibility shims and are scheduled for later removal only after the generic flow has been exercised across routine releases.
 
+## DSPACE 3.1.1 promotion preparation (no operation authorized)
+
+`dspace.promotion-target.json` records the reviewed immutable application 3.1.1/chart 3.1.2
+coordinates. Application and chart source revisions remain independent schema-v2 fields. The
+deployment coordinate is immutable branch tag `main-22f506e` plus its digest; semantic tag
+`v3.1.1` is provenance only. Only the staging chart pin has advanced. Production pins, the
+finalized baseline, failed reconciliation, and finalized staging evidence remain unchanged.
+
+`scripts/dspace_promotion_plan.py` is read-only and fail closed. It consumes bounded classifier and
+source reports, checks the preserved failure, verifies OCI provenance, requires exact finalized
+staging proof, and renders staging and production offline from a digest-matching archive. Reports
+contain counts and booleans only: Secret values, raw metrics/source, scrape errors, unhealthy
+targets, partial families, or cluster mutation fail. The planner rejects semantic image tags,
+`--reuse-values`, non-`Always` pull policy, rendered Secrets, staging data in production, and values
+drift. Its sanitized output says `mutationPerformed: false`; it cannot upgrade Helm, mutate
+Kubernetes, create approval, or finalize evidence. Existing 3.1.0/chart 3.1.1 staging evidence is
+historical and cannot authorize 3.1.1/chart 3.1.2. The old classifier is classification, not
+deployment evidence.
+
+A future operator must, in order:
+
+1. record genuine approval metadata for the exact target;
+2. create a fresh staging candidate and deploy it through existing guarded machinery;
+3. prove exactly two Ready replicas at the exact digest;
+4. prove runtime/frontend identity, replica agreement, and public/direct agreement;
+5. prove the intended production provider remains `openai` and pass bounded remote `/chat` smoke;
+6. prove two healthy authenticated Prometheus targets without scrape errors and all six families:
+   `dspace_build_info`, `dspace_dchat_requests_total`, `dspace_dependency_requests_total`,
+   `dspace_http_request_duration_seconds_bucket`, `dspace_http_requests_total`, and
+   `dspace_instrumentation_up`, using a real server-observed chat/dependency journey when needed;
+7. atomically finalize non-overwritable staging evidence; and
+8. only then open a separate repository task for a one-shot production revision-10 successor.
+
+This preparation performs no live operation, publication, approval, candidate creation, evidence
+finalization, recovery, or promotion. Do not automatically reopen #2325 or #2329, and do not
+modify or conflate #2408.
+
+The existing `dspace-prod-metrics-pull-policy-recover` operation remains ineligible: immutable
+application 3.0.1 lacks the required families. Do not rerun, weaken, bypass, or repurpose its
+fail-closed checks; roll Helm back; uninstall; or read, rotate, or delete the metrics Secret.
+
 ## Production authenticated metrics chart maintenance
 
 This guarded operation is a **chart-only maintenance upgrade** from immutable DSPACE chart 3.0.2
