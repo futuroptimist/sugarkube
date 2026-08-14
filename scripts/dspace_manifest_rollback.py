@@ -76,6 +76,7 @@ FAILED_RECONCILIATION_FIELDS = (
     "clusterMayHaveChanged",
     "invocationId",
     "targetManifestFingerprint",
+    "sugarkubeRevision",
     "environment",
     "release",
     "namespace",
@@ -587,11 +588,16 @@ def runtime_verifier_command(
     return command
 
 
-def failed_reconciliation(path: Path, target: dict[str, Any]) -> dict[str, Any]:
+def failed_reconciliation(
+    path: Path, target: dict[str, Any], runner: Runner
+) -> tuple[dict[str, Any], str]:
     """Validate the immutable failure that alone authorizes the revision-10 repair."""
     try:
-        value = release._object(path.expanduser())
-    except release.ManifestError as exc:
+        raw = path.expanduser().read_bytes()
+        value = json.loads(raw)
+        if not isinstance(value, dict):
+            raise json.JSONDecodeError("evidence is not an object", "", 0)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise RollbackError("preserved failed reconciliation evidence is unreadable") from exc
     # Failure records may also contain the normal immutable lifecycle metadata,
     # but every incident-authorizing field is mandatory.  In particular, do not
@@ -613,10 +619,19 @@ def failed_reconciliation(path: Path, target: dict[str, Any]) -> dict[str, Any]:
         raise RollbackError("preserved evidence is not the authorized failed reconciliation")
     invocation = value.get("invocationId")
     fingerprint = value.get("targetManifestFingerprint")
+    revision = value.get("sugarkubeRevision")
     if not isinstance(invocation, str) or not re.fullmatch(r"[0-9a-f]{32}", invocation):
         raise RollbackError("failed reconciliation invocation binding is invalid")
     if not isinstance(fingerprint, str) or not re.fullmatch(r"[0-9a-f]{64}", fingerprint):
         raise RollbackError("failed reconciliation target binding is invalid")
+    if not isinstance(revision, str) or not re.fullmatch(r"[0-9a-f]{40}", revision):
+        raise RollbackError("failed reconciliation Sugarkube revision is invalid")
+    try:
+        runner(["git", "merge-base", "--is-ancestor", revision, "HEAD"])
+    except RollbackError as exc:
+        raise RollbackError(
+            "failed reconciliation Sugarkube revision is not an ancestor of HEAD"
+        ) from exc
     expected_fingerprint = hashlib.sha256(release._canonical(target).encode()).hexdigest()
     if fingerprint != expected_fingerprint:
         raise RollbackError("failed reconciliation is not bound to the reviewed target")
@@ -631,7 +646,7 @@ def failed_reconciliation(path: Path, target: dict[str, Any]) -> dict[str, Any]:
     expected_target = {field: target[field] for field in RECORDED_TARGET_FIELDS}
     if recorded_target != expected_target:
         raise RollbackError("failed reconciliation target differs from the reviewed target")
-    return value
+    return value, hashlib.sha256(raw).hexdigest()
 
 
 def reserve(path: Path, metadata: dict[str, Any]) -> None:
@@ -855,6 +870,14 @@ def deployment_contract(value: dict[str, Any]) -> dict[str, Any]:
         "resourceClaims",
     )
     return {
+        "apiVersion": value.get("apiVersion"),
+        "kind": value.get("kind"),
+        "metadata": {
+            "name": value.get("metadata", {}).get("name"),
+            "namespace": value.get("metadata", {}).get("namespace"),
+            "labels": value.get("metadata", {}).get("labels", {}),
+            "annotations": value.get("metadata", {}).get("annotations", {}),
+        },
         "spec": {key: spec[key] for key in deployment_fields if key in spec},
         "templateMetadata": {
             key: template.get("metadata", {}).get(key, {}) for key in ("labels", "annotations")
@@ -1061,11 +1084,13 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
     target = baseline
     if metrics_operation and getattr(args, "maintenance_target", None):
         target = chart_maintenance_target(baseline, args.maintenance_target)
-    failed = failed_reconciliation(args.failed_evidence, target) if recovery else None
+    failed_result = failed_reconciliation(args.failed_evidence, target, runner) if recovery else None
+    failed, failed_evidence_sha256 = failed_result if failed_result else (None, None)
     if recovery:
         args._recovery_original_failure = {
             "invocationId": failed["invocationId"],
             "targetManifestFingerprint": failed["targetManifestFingerprint"],
+            "evidenceSha256": failed_evidence_sha256,
         }
         args._recovery_failed_stage = "live-state-and-provenance"
     image_value = target["imageTag"]
@@ -1142,8 +1167,7 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             f"image.repository={release.IMAGE_REF}",
             "--set-string",
             f"image.tag={image_value}",
-            "--set-string",
-            "image.pullPolicy=Always",
+            *pull_policy_args,
         ]
     )
     before_helm, _before_history, before_identity = helm_snapshot(
@@ -1503,6 +1527,7 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
         evidence["originalFailure"] = {
             "invocationId": failed["invocationId"],
             "targetManifestFingerprint": failed["targetManifestFingerprint"],
+            "evidenceSha256": failed_evidence_sha256,
         }
     if recovery:
         args._recovery_failed_stage = "reservation"
@@ -1627,8 +1652,7 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             f"image.repository={release.IMAGE_REF}",
             "--set-string",
             f"image.tag={image_value}",
-            "--set-string",
-            "image.pullPolicy=Always",
+            *pull_policy_args,
             "--wait",
             "--timeout",
             args.timeout,

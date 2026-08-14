@@ -34,6 +34,7 @@ def test_failed_reconciliation_accepts_only_exact_authorized_incident(tmp_path: 
         "failureCode": "ownership-and-finalization-proof-failed",
         "clusterMayHaveChanged": True,
         "invocationId": "a" * 32,
+        "sugarkubeRevision": "f" * 40,
         "targetManifestFingerprint": hashlib.sha256(
             manifest._canonical(selected).encode()
         ).hexdigest(),
@@ -54,7 +55,10 @@ def test_failed_reconciliation_accepts_only_exact_authorized_incident(tmp_path: 
     }
     path = tmp_path / "failed.json"
     path.write_text(json.dumps(evidence), encoding="utf-8")
-    assert rollback.failed_reconciliation(path, selected)["invocationId"] == "a" * 32
+    validated, _evidence_hash = rollback.failed_reconciliation(
+        path, selected, lambda _command: ""
+    )
+    assert validated["invocationId"] == "a" * 32
 
     for field, wrong in (
         ("schemaVersion", 2),
@@ -66,17 +70,18 @@ def test_failed_reconciliation_accepts_only_exact_authorized_incident(tmp_path: 
         ("failedStage", "runtime-verification"),
         ("failureCode", "runtime-verification-failed"),
         ("invocationId", "wrong"),
+        ("sugarkubeRevision", "wrong"),
         ("clusterMayHaveChanged", False),
     ):
         path.write_text(json.dumps({**evidence, field: wrong}), encoding="utf-8")
         with pytest.raises(rollback.RollbackError):
-            rollback.failed_reconciliation(path, selected)
+            rollback.failed_reconciliation(path, selected, lambda _command: "")
 
     changed = json.loads(json.dumps(evidence))
     changed["before"]["helmRevision"] = 10
     path.write_text(json.dumps(changed), encoding="utf-8")
     with pytest.raises(rollback.RollbackError, match="revision 9"):
-        rollback.failed_reconciliation(path, selected)
+        rollback.failed_reconciliation(path, selected, lambda _command: "")
 
     for target_change in ("missing", "extra"):
         changed = json.loads(json.dumps(evidence))
@@ -86,7 +91,61 @@ def test_failed_reconciliation_accepts_only_exact_authorized_incident(tmp_path: 
             changed["target"]["ignored"] = "must-not-be-accepted"
         path.write_text(json.dumps(changed), encoding="utf-8")
         with pytest.raises(rollback.RollbackError, match="reviewed target"):
-            rollback.failed_reconciliation(path, selected)
+            rollback.failed_reconciliation(path, selected, lambda _command: "")
+
+    path.write_text(json.dumps(evidence), encoding="utf-8")
+    with pytest.raises(rollback.RollbackError, match="not an ancestor"):
+        rollback.failed_reconciliation(
+            path,
+            selected,
+            lambda _command: (_ for _ in ()).throw(rollback.RollbackError("not ancestor")),
+        )
+
+
+def test_failed_reconciliation_rejects_invalid_utf8_and_unrelated_revision(
+    tmp_path: Path,
+) -> None:
+    selected = rollback.chart_maintenance_target(
+        manifest.validate(manifest._object(PROD_BASELINE), True), PROD_MAINTENANCE_TARGET
+    )
+    path = tmp_path / "failed.json"
+    path.write_bytes(b"\xff")
+    with pytest.raises(rollback.RollbackError, match="unreadable"):
+        rollback.failed_reconciliation(path, selected, lambda _command: "")
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    (
+        (("apiVersion",), "apps/v2"),
+        (("metadata", "name"), "other"),
+        (("metadata", "namespace"), "other"),
+        (("metadata", "labels"), {"app": "dspace", "unexpected": "drift"}),
+        (("metadata", "annotations"), {"unexpected": "drift"}),
+    ),
+)
+def test_rendered_deployment_rejects_identity_and_top_level_metadata_drift(
+    path: tuple[str, ...], value: object
+) -> None:
+    rendered = {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {
+            "name": "dspace",
+            "namespace": "dspace",
+            "labels": {"app": "dspace"},
+        },
+        "spec": {"replicas": 2, "template": {"spec": {"containers": []}}},
+    }
+    live = copy.deepcopy(rendered)
+    current: dict[str, object] = live
+    for key in path[:-1]:
+        current = current[key]  # type: ignore[assignment]
+    current[path[-1]] = value
+    with pytest.raises(rollback.RollbackError, match="contract differs"):
+        rollback.validate_rendered_deployment(
+            json.dumps(rendered), {"items": [live]}
+        )
 
 
 def target(environment: str = "staging", schema_version: int = 1) -> dict[str, object]:
@@ -1997,6 +2056,7 @@ def recovery_execution_case(
         "failureCode": "ownership-and-finalization-proof-failed",
         "clusterMayHaveChanged": True,
         "invocationId": "a" * 32,
+        "sugarkubeRevision": "f" * 40,
         "targetManifestFingerprint": fingerprint,
         "before": {"helmRevision": 9, "chartName": "dspace", "chartVersion": "3.0.2"},
         "target": {
@@ -2373,6 +2433,7 @@ def test_production_metrics_recovery_completes_revision_10_to_11(
         "targetManifestFingerprint": hashlib.sha256(
             manifest._canonical(selected).encode()
         ).hexdigest(),
+        "evidenceSha256": hashlib.sha256(failed.read_bytes()).hexdigest(),
     }
     verifier_revisions = [
         command[command.index("--expected-helm-revision") + 1]
@@ -2521,6 +2582,7 @@ def test_production_metrics_recovery_real_path_rejections_are_linked_and_non_mut
         "targetManifestFingerprint": hashlib.sha256(
             manifest._canonical(selected).encode()
         ).hexdigest(),
+        "evidenceSha256": hashlib.sha256(failed.read_bytes()).hexdigest(),
     }
     assert "SENTINEL" not in args.evidence.read_text(encoding="utf-8")
     assert (failed.read_bytes(), baseline.read_bytes()) == source_bytes
@@ -2591,11 +2653,11 @@ def test_recovery_helpers_cover_optional_and_rejected_inputs(
     unreadable = tmp_path / "unreadable.json"
     unreadable.write_text("not-json", encoding="utf-8")
     with pytest.raises(rollback.RollbackError, match="unreadable"):
-        rollback.failed_reconciliation(unreadable, selected)
+        rollback.failed_reconciliation(unreadable, selected, lambda _command: "")
     incomplete = tmp_path / "incomplete.json"
     incomplete.write_text("{}", encoding="utf-8")
     with pytest.raises(rollback.RollbackError, match="schema is incomplete"):
-        rollback.failed_reconciliation(incomplete, selected)
+        rollback.failed_reconciliation(incomplete, selected, lambda _command: "")
 
     recovery_dir = tmp_path / "recovery"
     recovery_dir.mkdir()
