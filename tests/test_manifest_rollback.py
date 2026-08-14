@@ -1723,6 +1723,110 @@ def test_recovery_values_accept_only_ifnotpresent_and_empty_chart_default() -> N
             rollback.validate_recovery_values(user, drifted, desired, approved)
 
 
+def _rendered_recovery_deployment() -> dict[str, object]:
+    return {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {"name": "dspace"},
+        "spec": {
+            "replicas": 2,
+            "selector": {"matchLabels": {"app": "dspace"}},
+            "template": {
+                "metadata": {"labels": {"app": "dspace"}, "annotations": {"safe": "yes"}},
+                "spec": {
+                    "serviceAccountName": "dspace",
+                    "containers": [
+                        {
+                            "name": "dspace",
+                            "image": "ghcr.io/example/dspace:main-deadbee",
+                            "imagePullPolicy": "Always",
+                            "env": [
+                                {
+                                    "name": "TOKEN",
+                                    "valueFrom": {
+                                        "secretKeyRef": {"name": "dspace", "key": "token"}
+                                    },
+                                }
+                            ],
+                            "ports": [{"name": "http", "containerPort": 8080}],
+                            "securityContext": {"readOnlyRootFilesystem": True},
+                        }
+                    ],
+                    "volumes": [{"name": "tmp", "emptyDir": {}}],
+                    "nodeSelector": {"kubernetes.io/os": "linux"},
+                },
+            },
+        },
+    }
+
+
+def test_rendered_deployment_accepts_only_realistic_kubernetes_defaults() -> None:
+    rendered = _rendered_recovery_deployment()
+    live = copy.deepcopy(rendered)
+    live["spec"].update(  # type: ignore[union-attr]
+        {
+            "strategy": {
+                "type": "RollingUpdate",
+                "rollingUpdate": {"maxUnavailable": "25%", "maxSurge": "25%"},
+            },
+            "revisionHistoryLimit": 10,
+            "progressDeadlineSeconds": 600,
+        }
+    )
+    pod_spec = live["spec"]["template"]["spec"]  # type: ignore[index]
+    pod_spec.update(
+        {
+            "dnsPolicy": "ClusterFirst",
+            "restartPolicy": "Always",
+            "schedulerName": "default-scheduler",
+            "securityContext": {},
+            "terminationGracePeriodSeconds": 30,
+            "enableServiceLinks": True,
+            "preemptionPolicy": "PreemptLowerPriority",
+        }
+    )
+    pod_spec["containers"][0].update(
+        {"terminationMessagePath": "/dev/termination-log", "terminationMessagePolicy": "File"}
+    )
+
+    rollback.validate_rendered_deployment(json.dumps(rendered), {"items": [live]})
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda d: d["spec"].update(replicas=3),
+        lambda d: d["spec"]["template"]["spec"]["containers"][0].update(image="other"),
+        lambda d: d["spec"]["template"]["spec"]["containers"][0].update(imagePullPolicy="Never"),
+        lambda d: d["spec"]["template"]["spec"]["containers"][0]["env"][0]["valueFrom"][
+            "secretKeyRef"
+        ].update(name="other"),
+        lambda d: d["spec"]["template"]["spec"]["containers"].append(
+            {"name": "sidecar", "image": "other"}
+        ),
+        lambda d: d["spec"]["template"]["spec"]["volumes"].append(
+            {"name": "secret", "secret": {"secretName": "other"}}
+        ),
+        lambda d: d["spec"]["template"]["spec"].update(serviceAccountName="other"),
+        lambda d: d["spec"]["template"]["spec"]["containers"][0]["securityContext"].update(
+            privileged=True
+        ),
+        lambda d: d["spec"]["template"]["spec"].update(nodeSelector={"zone": "other"}),
+        lambda d: d["spec"]["template"]["metadata"]["labels"].update(extra="drift"),
+        lambda d: d["spec"]["template"]["metadata"]["annotations"].update(extra="drift"),
+    ],
+)
+def test_rendered_deployment_rejects_operator_controlled_drift(
+    mutate: Callable[[dict[str, object]], None],
+) -> None:
+    rendered = _rendered_recovery_deployment()
+    live = copy.deepcopy(rendered)
+    mutate(live)
+
+    with pytest.raises(rollback.RollbackError, match="rendered target"):
+        rollback.validate_rendered_deployment(json.dumps(rendered), {"items": [live]})
+
+
 def test_ordinary_manifest_rollback_does_not_override_pull_policy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

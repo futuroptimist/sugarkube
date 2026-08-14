@@ -833,6 +833,59 @@ def deployment_contract(value: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+_KUBERNETES_DEPLOYMENT_DEFAULTS: dict[tuple[str, ...], Any] = {
+    ("spec", "strategy", "type"): "RollingUpdate",
+    ("spec", "strategy", "rollingUpdate", "maxUnavailable"): "25%",
+    ("spec", "strategy", "rollingUpdate", "maxSurge"): "25%",
+    ("spec", "revisionHistoryLimit"): 10,
+    ("spec", "progressDeadlineSeconds"): 600,
+    ("podSpec", "dnsPolicy"): "ClusterFirst",
+    ("podSpec", "restartPolicy"): "Always",
+    ("podSpec", "schedulerName"): "default-scheduler",
+    ("podSpec", "securityContext"): {},
+    ("podSpec", "terminationGracePeriodSeconds"): 30,
+    ("podSpec", "enableServiceLinks"): True,
+    ("podSpec", "preemptionPolicy"): "PreemptLowerPriority",
+    ("podSpec", "serviceAccountName"): "default",
+    ("podSpec", "containers", "*", "terminationMessagePath"): "/dev/termination-log",
+    ("podSpec", "containers", "*", "terminationMessagePolicy"): "File",
+    ("podSpec", "initContainers", "*", "terminationMessagePath"): "/dev/termination-log",
+    ("podSpec", "initContainers", "*", "terminationMessagePolicy"): "File",
+}
+
+
+def _is_defaulted_subtree(live: Any, path: tuple[str, ...]) -> bool:
+    if path in _KUBERNETES_DEPLOYMENT_DEFAULTS:
+        return _KUBERNETES_DEPLOYMENT_DEFAULTS[path] == live
+    if isinstance(live, dict):
+        return bool(live) and all(
+            _is_defaulted_subtree(value, (*path, key)) for key, value in live.items()
+        )
+    return False
+
+
+def _rendered_contract_matches(rendered: Any, live: Any, path: tuple[str, ...] = ()) -> bool:
+    """Compare a render with live state, accepting only explicit API defaults."""
+    if isinstance(rendered, dict):
+        if not isinstance(live, dict):
+            return False
+        for key, rendered_value in rendered.items():
+            if key not in live or not _rendered_contract_matches(
+                rendered_value, live[key], (*path, key)
+            ):
+                return False
+        for key in live.keys() - rendered.keys():
+            if not _is_defaulted_subtree(live[key], (*path, key)):
+                return False
+        return True
+    if isinstance(rendered, list):
+        return isinstance(live, list) and len(rendered) == len(live) and all(
+            _rendered_contract_matches(rendered_item, live_item, (*path, "*"))
+            for rendered_item, live_item in zip(rendered, live, strict=True)
+        )
+    return rendered == live
+
+
 def validate_rendered_deployment(rendered: str, workloads: dict[str, Any]) -> None:
     rendered_deployments = [
         item
@@ -846,8 +899,10 @@ def validate_rendered_deployment(rendered: str, workloads: dict[str, Any]) -> No
     ]
     if len(rendered_deployments) != 1 or len(live_deployments) != 1:
         raise RollbackError("expected exactly one rendered and live DSPACE Deployment")
-    if deployment_contract(rendered_deployments[0]) != deployment_contract(live_deployments[0]):
-        raise RollbackError("live Deployment contract differs from revision-10 render")
+    if not _rendered_contract_matches(
+        deployment_contract(rendered_deployments[0]), deployment_contract(live_deployments[0])
+    ):
+        raise RollbackError("live Deployment contract differs from rendered target")
 
 
 def chart_maintenance_target(baseline: dict[str, Any], path: Path) -> dict[str, Any]:
@@ -1594,6 +1649,7 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
         workloads, raw_pods = raw_release_objects(runner, args.kubeconfig)
         if pull_policy_recovery:
             validate_workload_pull_policy(workloads, "Always", raw_pods)
+            validate_rendered_deployment(rendered_target, workloads)
         helm_stored_values_result = None
         if approved["schemaVersion"] == 2:
             stored_values = json_command(

@@ -640,6 +640,46 @@ def _assert_chart_pin_reminder(output: str, app: str) -> None:
     assert f"Use `just app-chart-bump app={app} version=<version>`" in output
 
 
+def test_dspace_pull_policy_recovery_recipe_forwards_guarded_arguments(
+    generic_app_stub_env: dict[str, str], tmp_path: Path
+) -> None:
+    capture = tmp_path / "recovery-command.json"
+    python = Path(generic_app_stub_env["PATH"].split(os.pathsep, 1)[0]) / "python3"
+    _write_executable(
+        python,
+        f"#!{sys.executable}\n"
+        "import json, os, sys\n"
+        "open(os.environ['RECOVERY_CAPTURE'], 'w', encoding='utf-8').write(json.dumps(sys.argv))\n",
+    )
+    env = {**generic_app_stub_env, "RECOVERY_CAPTURE": str(capture)}
+    forwarded = {
+        "original_evidence": "/evidence/original.json",
+        "baseline_manifest": "/evidence/baseline.json",
+        "maintenance_target": "/evidence/target.json",
+        "evidence": "/evidence/recovery.json",
+        "smoke_runner": "/tools/smoke",
+        "kubeconfig": "/cluster/kubeconfig",
+        "verifier": "/tools/verifier",
+        "confirm": "dspace:prod:confirmed",
+        "config": "/config/prod.env",
+    }
+    result = _run_just(
+        [
+            "dspace-prod-metrics-pull-policy-recover",
+            *(f"{name}={value}" for name, value in forwarded.items()),
+        ],
+        env,
+    )
+    assert result.returncode == 0, result.stderr
+    command = json.loads(capture.read_text(encoding="utf-8"))
+    assert command[1] == str(REPO_ROOT / "scripts/dspace_manifest_rollback.py")
+    assert "--pull-policy-recovery" in command
+    assert command[command.index("--environment") + 1] == "prod"
+    for name, value in forwarded.items():
+        flag = "--" + name.replace("_", "-")
+        assert command[command.index(flag) + 1] == value
+
+
 def test_app_chart_semver_prefers_final_release_over_matching_prerelease() -> None:
     assert sorted(["1.2.3", "1.2.3-rc.1"], key=app_chart.semver_key)[-1] == "1.2.3"
 
