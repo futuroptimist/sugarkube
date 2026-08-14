@@ -2068,6 +2068,7 @@ def recovery_execution_case(
         "finalize_calls": [],
         "render_calls": [],
         "preflight_calls": [],
+        "raw_workload_reads": 0,
     }
     commands: list[list[str]] = []
 
@@ -2200,10 +2201,34 @@ def recovery_execution_case(
             return json.dumps(result)
         if command[0] == "helm" and "show" in command:
             return "image:\n  pullPolicy: IfNotPresent\n"
+        def deployment(policy: str) -> dict[str, object]:
+            return {
+                "apiVersion": "apps/v1",
+                "kind": "Deployment",
+                "metadata": {"name": "dspace"},
+                "spec": {
+                    "replicas": 2,
+                    "selector": {"matchLabels": {"app": "dspace"}},
+                    "template": {
+                        "metadata": {"labels": {"app": "dspace"}},
+                        "spec": {
+                            "containers": [
+                                {
+                                    "name": "dspace",
+                                    "image": f"{manifest.IMAGE_REF}:{selected['imageTag']}",
+                                    "imagePullPolicy": policy,
+                                }
+                            ]
+                        },
+                    },
+                },
+            }
+
         if command[0] == "helm" and "manifest" in command:
-            return "different render" if fault == "render" else "current render"
+            return "different render" if fault == "render" else json.dumps(deployment("IfNotPresent"))
         if command[0] == "helm" and "template" in command:
-            return "current render" if "live-values.json" in joined else "approved render"
+            policy = "IfNotPresent" if "live-values.json" in joined else "Always"
+            return json.dumps(deployment(policy))
         if command[:2] == [str(args.verifier), "verify"]:
             if fault == "runtime":
                 raise rollback.RollbackError("runtime ownership failed")
@@ -2227,7 +2252,34 @@ def recovery_execution_case(
         if "observability_app_metrics.py" in joined and "verify" in command and fault == "metrics":
             raise rollback.RollbackError("metrics verification failed")
         if command[0] == "kubectl" and "get" in command:
-            return '{"items": []}'
+            policy = "Always" if state["upgraded"] else "IfNotPresent"
+            if "replicasets,deployments" in command:
+                state["raw_workload_reads"] += 1
+                live = deployment(policy)
+                if fault == "concurrent-workload" and state["raw_workload_reads"] == 2:
+                    live["spec"]["replicas"] = 3  # type: ignore[index]
+                if fault == "post-workload" and state["upgraded"]:
+                    live["spec"]["template"]["metadata"]["annotations"] = {"drift": "yes"}  # type: ignore[index]
+                return json.dumps({"items": [live]})
+            raw_pods = {
+                "items": [
+                    {
+                        "spec": {
+                            "containers": [
+                                {"name": "dspace", "imagePullPolicy": policy}
+                            ]
+                        },
+                        "status": {
+                            "phase": "Running",
+                            "conditions": [{"type": "Ready", "status": "True"}],
+                        },
+                    }
+                    for _ in range(2)
+                ]
+            }
+            if fault == "post-policy" and state["upgraded"]:
+                raw_pods["items"][0]["spec"]["containers"][0]["imagePullPolicy"] = "IfNotPresent"
+            return json.dumps(raw_pods)
         return ""
 
     args._test_state = state
@@ -2337,6 +2389,7 @@ def test_production_metrics_recovery_completes_revision_10_to_11(
     assert len(args._test_state["strict_calls"]) == 3
     assert len(args._test_state["finalize_calls"]) == 1
     assert args._test_state["all_reads"] == 3
+    assert args._test_state["raw_workload_reads"] == 3
     assert args._test_state["status_reads"] >= 4
 
 
@@ -2439,6 +2492,7 @@ def test_production_metrics_recovery_output_collision_is_byte_immutable_and_non_
         ("concurrent-pod", "pre-mutation-revalidation"),
         ("concurrent-user", "pre-mutation-revalidation"),
         ("concurrent-computed", "pre-mutation-revalidation"),
+        ("concurrent-workload", "pre-mutation-revalidation"),
     ),
 )
 def test_production_metrics_recovery_real_path_rejections_are_linked_and_non_mutating(
@@ -2470,6 +2524,22 @@ def test_production_metrics_recovery_real_path_rejections_are_linked_and_non_mut
     }
     assert "SENTINEL" not in args.evidence.read_text(encoding="utf-8")
     assert (failed.read_bytes(), baseline.read_bytes()) == source_bytes
+
+
+@pytest.mark.parametrize("fault", ("post-workload", "post-policy"))
+def test_production_metrics_recovery_post_upgrade_workload_drift_is_single_shot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    args, commands, _failed, _baseline, _selected = recovery_execution_case(
+        tmp_path, monkeypatch, fault=fault
+    )
+    with pytest.raises(rollback.RollbackError, match="preserved evidence"):
+        rollback.rollback(args, args._test_runner)
+    written = json.loads(args.evidence.read_text(encoding="utf-8"))
+    assert written["failedStage"] == "ownership-and-finalization-proof"
+    assert written["clusterMayHaveChanged"] is True
+    assert sum(command[0] == "helm" and "upgrade" in command for command in commands) == 1
+    assert not any("rollback" in command or "uninstall" in command for command in commands)
 
 
 @pytest.mark.parametrize(

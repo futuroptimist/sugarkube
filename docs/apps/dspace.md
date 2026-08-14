@@ -71,20 +71,20 @@ Secret.
 The normal reconciliation remains bound to the finalized revision-9/chart-3.0.2 baseline and must
 not be retried after Helm has advanced. For the single confirmed failure in which revision 10 is
 deployed on chart 3.0.3 with only the computed and workload pull policy left at `IfNotPresent`, use
-this separate operation **only after its implementation is independently reviewed and merged**:
+this separate operation:
 
 ```bash
 just dspace-prod-metrics-pull-policy-recover \
-  original_evidence=/home/pi/operator-evidence/dspace-prod-metrics-reconcile-20260813T072927Z/reconciliation.json \
-  baseline_manifest=deployment-evidence/dspace/prod/main-1a31a56-20260801T093443Z.json \
+  failed_evidence=/home/pi/operator-evidence/dspace-prod-metrics-reconcile-20260813T072927Z/reconciliation.json \
   maintenance_target=docs/apps/dspace.prod-metrics-chart-target.json \
-  evidence="$FRESH_NONEXISTING_RECOVERY_EVIDENCE" \
+  recovery_evidence="$FRESH_NONEXISTING_RECOVERY_EVIDENCE" \
   smoke_runner="$DSPACE_SMOKE_RUNNER" \
   kubeconfig="$HOME/.kube/config-sugarkube-prod" \
-  confirm="dspace:prod:1a31a569aff2dbeb238e8c2688b9e85140d2077d"
+  confirm="dspace:prod:recover-revision-10-pull-policy"
 ```
 
-Preflight binds the immutable SHA-256 and invocation ID of the original failed evidence to the
+The recipe selects the finalized production baseline internally. Preflight binds the immutable
+SHA-256 and invocation ID of the failed evidence to the
 exact live revision-10 state, validates the committed values, chart defaults, metrics resources,
 Secret reference (without reading its value), pods, image digest, and fresh OCI provenance, then
 reserves a new evidence file. The sole mutation is one digest-qualified chart-3.0.3 upgrade with

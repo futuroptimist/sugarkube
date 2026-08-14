@@ -653,10 +653,9 @@ def test_dspace_pull_policy_recovery_recipe_forwards_guarded_arguments(
     )
     env = {**generic_app_stub_env, "RECOVERY_CAPTURE": str(capture)}
     forwarded = {
-        "original_evidence": "/evidence/original.json",
-        "baseline_manifest": "/evidence/baseline.json",
+        "failed_evidence": "/evidence/failed.json",
         "maintenance_target": "/evidence/target.json",
-        "evidence": "/evidence/recovery.json",
+        "recovery_evidence": "/evidence/recovery.json",
         "smoke_runner": "/tools/smoke",
         "kubeconfig": "/cluster/kubeconfig",
         "verifier": "/tools/verifier",
@@ -673,10 +672,15 @@ def test_dspace_pull_policy_recovery_recipe_forwards_guarded_arguments(
     assert result.returncode == 0, result.stderr
     command = json.loads(capture.read_text(encoding="utf-8"))
     assert command[1] == str(REPO_ROOT / "scripts/dspace_manifest_rollback.py")
-    assert "--pull-policy-recovery" in command
+    assert "--production-metrics-recovery" in command
     assert command[command.index("--environment") + 1] == "prod"
+    flags = {
+        "failed_evidence": "--failed-evidence",
+        "maintenance_target": "--maintenance-target",
+        "recovery_evidence": "--evidence",
+    }
     for name, value in forwarded.items():
-        flag = "--" + name.replace("_", "-")
+        flag = flags.get(name, "--" + name.replace("_", "-"))
         assert command[command.index(flag) + 1] == value
 
 
