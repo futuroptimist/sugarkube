@@ -7,6 +7,7 @@ import hashlib
 import json
 from argparse import Namespace
 from pathlib import Path
+from typing import Callable
 
 import pytest
 
@@ -1501,6 +1502,9 @@ def test_configuration_reconciliation_completes_all_production_gates(
     result = rollback.rollback(args, runner)
 
     upgrade = next(command for command in commands if "upgrade" in command)
+    templates = [command for command in commands if "template" in command]
+    assert "image.pullPolicy=Always" in templates[0]
+    assert "image.pullPolicy=Always" in upgrade
     assert sum("upgrade" in command for command in commands) == 1
     assert upgrade[upgrade.index("--kubeconfig") + 1] == str(kubeconfig)
     assert f"oci://{manifest.CHART_REF}@{selected['chartDigest']}" in upgrade
@@ -1657,6 +1661,26 @@ def test_recovery_original_evidence_is_validated_and_fingerprinted(tmp_path: Pat
     assert digest == hashlib.sha256(raw).hexdigest()
 
 
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (lambda value: value.update(invocationId=7), "invocation ID"),
+        (lambda value: value.update(sugarkubeRevision=[]), "Sugarkube revision"),
+        (lambda value: value["target"].pop("imageTag"), "target tuple"),
+        (lambda value: value["target"].update(extra="field"), "target tuple"),
+    ],
+)
+def test_recovery_rejects_non_string_identifiers_and_inexact_target(
+    tmp_path: Path, mutation: Callable[[dict[str, object]], None], message: str
+) -> None:
+    value = _failed_reconciliation()
+    mutation(value)
+    path = tmp_path / "original.json"
+    path.write_text(json.dumps(value), encoding="utf-8")
+    with pytest.raises(rollback.RollbackError, match=message):
+        rollback.failed_reconciliation_evidence(path, _recovery_target(), lambda _command: "")
+
+
 def test_recovery_rejects_original_evidence_with_invalid_utf8(tmp_path: Path) -> None:
     path = tmp_path / "original.json"
     path.write_bytes(b'\xff{"state":"failed"}')
@@ -1699,9 +1723,25 @@ def test_recovery_values_accept_only_ifnotpresent_and_empty_chart_default() -> N
             rollback.validate_recovery_values(user, drifted, desired, approved)
 
 
-def test_metrics_commands_explicitly_set_pull_policy() -> None:
-    source = Path("scripts/dspace_manifest_rollback.py").read_text(encoding="utf-8")
-    assert source.count('"image.pullPolicy=Always"') == 2
+def test_ordinary_manifest_rollback_does_not_override_pull_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    args, commands, _evidence, _verifier = pre_reservation_case(tmp_path, monkeypatch)
+
+    def runner(command: list[str]) -> str:
+        commands.append(command)
+        if command[:3] == ["git", "rev-parse", "HEAD"]:
+            return "f" * 40
+        if "template" in command:
+            return "target render"
+        if "manifest" in command:
+            return "target render"
+        return ""
+
+    with pytest.raises(rollback.RollbackError):
+        rollback.rollback(args, runner)
+    template = next(command for command in commands if "template" in command)
+    assert "image.pullPolicy=Always" not in template
 
 
 @pytest.mark.parametrize(

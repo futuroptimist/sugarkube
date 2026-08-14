@@ -664,8 +664,10 @@ def failed_reconciliation_evidence(
         "applicationVersion",
         "expectedDefaultChatProvider",
     )
-    if not isinstance(recorded_target, dict) or any(
-        recorded_target.get(field) != target.get(field) for field in target_fields
+    if (
+        not isinstance(recorded_target, dict)
+        or set(recorded_target) != set(target_fields)
+        or any(recorded_target[field] != target.get(field) for field in target_fields)
     ):
         raise RollbackError("original evidence target tuple differs from the reviewed target")
     try:
@@ -682,7 +684,7 @@ def validate_recovery_values(
     computed_values: dict[str, Any],
     desired_values: dict[str, Any],
     approved: dict[str, Any],
-) -> None:
+) -> dict[str, Any]:
     """Accept only the guarded revision-10 inputs and its single pull-policy defect."""
     expected_user = copy.deepcopy(desired_values)
     expected_user["image"] = {"repository": release.IMAGE_REF, "tag": approved["imageTag"]}
@@ -700,12 +702,14 @@ def validate_recovery_values(
     # that exact, already-validated empty default before reusing the strict contract.
     monitor.pop("relabelings")
     try:
-        release.verify_helm_stored_values(approved, repaired, "prod")
+        return release.verify_helm_stored_values(approved, repaired, "prod")
     except release.ManifestError as exc:
         raise RollbackError("computed production values have drift beyond pull policy") from exc
 
 
-def validate_workload_pull_policy(workloads: dict[str, Any], expected: str) -> None:
+def validate_workload_pull_policy(
+    workloads: dict[str, Any], expected: str, raw_pods: dict[str, Any] | None = None
+) -> None:
     deployments = [
         item
         for item in workloads.get("items", [])
@@ -713,12 +717,137 @@ def validate_workload_pull_policy(workloads: dict[str, Any], expected: str) -> N
     ]
     if len(deployments) != 1:
         raise RollbackError("expected exactly one DSPACE Deployment")
+    if deployments[0].get("spec", {}).get("replicas") != 2:
+        raise RollbackError("DSPACE Deployment must have exactly two replicas")
     containers = (
         deployments[0].get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
     )
     policies = [item.get("imagePullPolicy") for item in containers if item.get("name") == "dspace"]
     if policies != [expected]:
         raise RollbackError(f"Deployment and pod-template pull policy must be exactly {expected}")
+    if raw_pods is None:
+        return
+    pod_items = raw_pods.get("items")
+    if not isinstance(pod_items, list) or len(pod_items) != 2:
+        raise RollbackError("expected exactly two DSPACE pods")
+    for pod in pod_items:
+        if not isinstance(pod, dict):
+            raise RollbackError("DSPACE pod discovery returned an unexpected object")
+        status = pod.get("status", {})
+        ready = any(
+            item.get("type") == "Ready" and item.get("status") == "True"
+            for item in status.get("conditions", [])
+            if isinstance(item, dict)
+        )
+        containers = pod.get("spec", {}).get("containers", [])
+        policies = [
+            item.get("imagePullPolicy")
+            for item in containers
+            if isinstance(item, dict) and item.get("name") == "dspace"
+        ]
+        if status.get("phase") != "Running" or not ready or policies != [expected]:
+            raise RollbackError(f"exactly two Ready DSPACE pods must use {expected}")
+
+
+def raw_release_objects(
+    runner: Runner, kubeconfig: str
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    selector = "app.kubernetes.io/name=dspace,app.kubernetes.io/instance=dspace"
+    common = ["--namespace", "dspace", "-l", selector, "-o", "json"]
+    workloads = json_command(
+        runner,
+        [
+            "kubectl",
+            "--kubeconfig",
+            kubeconfig,
+            "get",
+            "replicasets,deployments",
+            *common,
+        ],
+        "DSPACE workloads",
+    )
+    raw_pods = json_command(
+        runner,
+        ["kubectl", "--kubeconfig", kubeconfig, "get", "pods", *common],
+        "DSPACE pods",
+    )
+    return workloads, raw_pods
+
+
+def deployment_contract(value: dict[str, Any]) -> dict[str, Any]:
+    """Select the full operator-controlled Deployment contract."""
+    spec = value.get("spec", {})
+    template = spec.get("template", {})
+    pod_spec = template.get("spec", {})
+    deployment_fields = (
+        "replicas",
+        "selector",
+        "strategy",
+        "minReadySeconds",
+        "revisionHistoryLimit",
+        "progressDeadlineSeconds",
+        "paused",
+    )
+    pod_fields = (
+        "containers",
+        "initContainers",
+        "ephemeralContainers",
+        "volumes",
+        "serviceAccountName",
+        "automountServiceAccountToken",
+        "securityContext",
+        "nodeSelector",
+        "affinity",
+        "tolerations",
+        "topologySpreadConstraints",
+        "schedulerName",
+        "priorityClassName",
+        "priority",
+        "runtimeClassName",
+        "dnsPolicy",
+        "dnsConfig",
+        "hostAliases",
+        "hostNetwork",
+        "hostPID",
+        "hostIPC",
+        "shareProcessNamespace",
+        "terminationGracePeriodSeconds",
+        "imagePullSecrets",
+        "restartPolicy",
+        "enableServiceLinks",
+        "preemptionPolicy",
+        "readinessGates",
+        "overhead",
+        "setHostnameAsFQDN",
+        "hostname",
+        "subdomain",
+        "os",
+        "resourceClaims",
+    )
+    return {
+        "spec": {key: spec[key] for key in deployment_fields if key in spec},
+        "templateMetadata": {
+            key: template.get("metadata", {}).get(key, {}) for key in ("labels", "annotations")
+        },
+        "podSpec": {key: pod_spec[key] for key in pod_fields if key in pod_spec},
+    }
+
+
+def validate_rendered_deployment(rendered: str, workloads: dict[str, Any]) -> None:
+    rendered_deployments = [
+        item
+        for item in app_chart.safe_yaml_documents(rendered)
+        if isinstance(item, dict) and item.get("kind") == "Deployment"
+    ]
+    live_deployments = [
+        item
+        for item in workloads.get("items", [])
+        if isinstance(item, dict) and item.get("kind") == "Deployment"
+    ]
+    if len(rendered_deployments) != 1 or len(live_deployments) != 1:
+        raise RollbackError("expected exactly one rendered and live DSPACE Deployment")
+    if deployment_contract(rendered_deployments[0]) != deployment_contract(live_deployments[0]):
+        raise RollbackError("live Deployment contract differs from revision-10 render")
 
 
 def chart_maintenance_target(baseline: dict[str, Any], path: Path) -> dict[str, Any]:
@@ -873,6 +1002,9 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
         raise RollbackError("repository runtime verifier rejected its required arguments")
     coordinate = release.chart_coordinate(approved)
     helm_values = [part for path in values for part in ("--values", str(path))]
+    pull_policy_args = (
+        ["--set-string", "image.pullPolicy=Always"] if metrics_operation else []
+    )
     rendered_target = runner(
         [
             "helm",
@@ -888,8 +1020,7 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             f"image.repository={release.IMAGE_REF}",
             "--set-string",
             f"image.tag={image_value}",
-            "--set-string",
-            "image.pullPolicy=Always",
+            *pull_policy_args,
         ]
     )
     before_helm, _before_history, before_identity = helm_snapshot(
@@ -898,6 +1029,10 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
     before_pods = pods(runner, args.kubeconfig, "dspace", "dspace", require_any=False)
     original_evidence = None
     original_evidence_sha256 = None
+    recovery_stored_values_proof = None
+    recovery_workloads = None
+    recovery_raw_pods = None
+    recovery_render = None
     if metrics_operation:
         if args.environment != "prod":
             raise RollbackError("metrics configuration reconciliation is production-only")
@@ -905,6 +1040,18 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             original_evidence, original_evidence_sha256 = failed_reconciliation_evidence(
                 args.original_evidence, target, runner
             )
+            history_payload = helm_history(runner, args.kubeconfig, "dspace", "dspace")
+            if not isinstance(history_payload, list) or not all(
+                isinstance(item, dict) for item in history_payload
+            ):
+                raise RollbackError("revision-10 Helm history is invalid")
+            _before_history = history_payload
+            try:
+                before_identity = release.resolve_helm_identity(
+                    before_helm, _before_history, "dspace", target["chartVersion"]
+                )
+            except release.ManifestError as exc:
+                raise RollbackError("revision-10 Helm history is invalid") from exc
             if before_identity != ("dspace", "3.0.3", 10):
                 raise RollbackError("recovery requires live revision 10/chart 3.0.3 exactly")
             if before_helm.get("info", {}).get("description") != (
@@ -977,25 +1124,13 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             )
             desired_without_image = copy.deepcopy(desired_values)
             desired_without_image.pop("image")
-            validate_recovery_values(live_values, computed_values, desired_without_image, approved)
-            workloads_before = json_command(
-                runner,
-                [
-                    "kubectl",
-                    "--kubeconfig",
-                    args.kubeconfig,
-                    "get",
-                    "replicasets,deployments",
-                    "--namespace",
-                    "dspace",
-                    "-l",
-                    "app.kubernetes.io/name=dspace,app.kubernetes.io/instance=dspace",
-                    "-o",
-                    "json",
-                ],
-                "DSPACE workloads",
+            recovery_stored_values_proof = validate_recovery_values(
+                live_values, computed_values, desired_without_image, approved
             )
-            validate_workload_pull_policy(workloads_before, "IfNotPresent")
+            recovery_workloads, recovery_raw_pods = raw_release_objects(runner, args.kubeconfig)
+            validate_workload_pull_policy(
+                recovery_workloads, "IfNotPresent", recovery_raw_pods
+            )
             runner(
                 [
                     "env",
@@ -1050,6 +1185,9 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
         )
         if installed_manifest.strip() != approved_current_render.strip():
             raise RollbackError("live manifest does not match the approved chart digest")
+        if pull_policy_recovery:
+            recovery_render = approved_current_render
+            validate_rendered_deployment(recovery_render, recovery_workloads)
         try:
             release.verify_helm_stored_values(
                 approved,
@@ -1090,6 +1228,30 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
         )
     except release.ManifestError as exc:
         raise RollbackError("OCI preflight validation failed") from exc
+    if pull_policy_recovery:
+        try:
+            release.finalize(
+                approved,
+                before_helm,
+                recovery_raw_pods,
+                recovery_workloads,
+                oci,
+                environment="prod",
+                image_tag=target["imageTag"],
+                chart_version=target["chartVersion"],
+                release="dspace",
+                namespace="dspace",
+                cluster_environment="prod",
+                invocation_description=(
+                    "sugarkube-dspace-metrics-reconciliation:"
+                    + original_evidence["invocationId"]
+                ),
+                expected_image_coordinate=f"{release.IMAGE_REF}:{target['imageTag']}",
+                helm_stored_values_result=recovery_stored_values_proof,
+                helm_history=_before_history,
+            )
+        except release.ManifestError as exc:
+            raise RollbackError("live revision-10 ownership proof is invalid") from exc
     print(summary(before_helm, before_identity, before_pods, target, values_proof))
     current_images = {application_image(pod) for pod in before_pods if application_image(pod)}
     current_ids: set[str] = set()
@@ -1226,9 +1388,27 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
         if runner(["git", "rev-parse", "HEAD"]).strip() != sugarkube_revision:
             raise RollbackError("Sugarkube revision changed before mutation")
         if metrics_operation:
-            _current_status, _current_history, current_identity = helm_snapshot(
+            current_status, current_history, current_identity = helm_snapshot(
                 runner, args.kubeconfig, "dspace", "dspace"
             )
+            if pull_policy_recovery:
+                history_payload = helm_history(runner, args.kubeconfig, "dspace", "dspace")
+                if not isinstance(history_payload, list) or not all(
+                    isinstance(item, dict) for item in history_payload
+                ):
+                    raise RollbackError("revision-10 Helm history changed before mutation")
+                current_history = history_payload
+                try:
+                    current_identity = release.resolve_helm_identity(
+                        current_status,
+                        current_history,
+                        "dspace",
+                        target["chartVersion"],
+                    )
+                except release.ManifestError as exc:
+                    raise RollbackError(
+                        "revision-10 Helm history changed before mutation"
+                    ) from exc
             if current_identity != before_identity:
                 raise RollbackError("Helm coordinates changed before mutation")
             current_pods = pods(runner, args.kubeconfig, "dspace", "dspace")
@@ -1252,6 +1432,64 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             )
             if current_values != live_values:
                 raise RollbackError("Helm values changed before mutation")
+            if pull_policy_recovery:
+                current_computed_values = json_command(
+                    runner,
+                    [
+                        "helm",
+                        "--kubeconfig",
+                        args.kubeconfig,
+                        "get",
+                        "values",
+                        "dspace",
+                        "--namespace",
+                        "dspace",
+                        "--all",
+                        "-o",
+                        "json",
+                    ],
+                    "Helm computed values",
+                )
+                current_proof = validate_recovery_values(
+                    current_values,
+                    current_computed_values,
+                    desired_without_image,
+                    approved,
+                )
+                current_workloads, current_raw_pods = raw_release_objects(
+                    runner, args.kubeconfig
+                )
+                validate_workload_pull_policy(
+                    current_workloads, "IfNotPresent", current_raw_pods
+                )
+                validate_rendered_deployment(recovery_render, current_workloads)
+                try:
+                    release.finalize(
+                        approved,
+                        current_status,
+                        current_raw_pods,
+                        current_workloads,
+                        oci,
+                        environment="prod",
+                        image_tag=target["imageTag"],
+                        chart_version=target["chartVersion"],
+                        release="dspace",
+                        namespace="dspace",
+                        cluster_environment="prod",
+                        invocation_description=(
+                            "sugarkube-dspace-metrics-reconciliation:"
+                            + original_evidence["invocationId"]
+                        ),
+                        expected_image_coordinate=(
+                            f"{release.IMAGE_REF}:{target['imageTag']}"
+                        ),
+                        helm_stored_values_result=current_proof,
+                        helm_history=current_history,
+                    )
+                except release.ManifestError as exc:
+                    raise RollbackError(
+                        "live revision-10 ownership proof changed before mutation"
+                    ) from exc
             runner(
                 [
                     "env",
@@ -1284,8 +1522,7 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             f"image.repository={release.IMAGE_REF}",
             "--set-string",
             f"image.tag={image_value}",
-            "--set-string",
-            "image.pullPolicy=Always",
+            *pull_policy_args,
             "--wait",
             "--timeout",
             args.timeout,
@@ -1354,42 +1591,9 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             raise RollbackError("reconciliation did not produce exactly two Ready DSPACE pods")
         # Reuse finalization's strict Deployment/ReplicaSet ownership validator.
         failed_stage = "ownership-and-finalization-proof"
-        workloads = json_command(
-            runner,
-            [
-                "kubectl",
-                "--kubeconfig",
-                args.kubeconfig,
-                "get",
-                "replicasets,deployments",
-                "--namespace",
-                "dspace",
-                "-l",
-                "app.kubernetes.io/name=dspace,app.kubernetes.io/instance=dspace",
-                "-o",
-                "json",
-            ],
-            "DSPACE workloads",
-        )
+        workloads, raw_pods = raw_release_objects(runner, args.kubeconfig)
         if pull_policy_recovery:
-            validate_workload_pull_policy(workloads, "Always")
-        raw_pods = json_command(
-            runner,
-            [
-                "kubectl",
-                "--kubeconfig",
-                args.kubeconfig,
-                "get",
-                "pods",
-                "--namespace",
-                "dspace",
-                "-l",
-                "app.kubernetes.io/name=dspace,app.kubernetes.io/instance=dspace",
-                "-o",
-                "json",
-            ],
-            "DSPACE pods",
-        )
+            validate_workload_pull_policy(workloads, "Always", raw_pods)
         helm_stored_values_result = None
         if approved["schemaVersion"] == 2:
             stored_values = json_command(
