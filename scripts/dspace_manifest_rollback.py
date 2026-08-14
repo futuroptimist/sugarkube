@@ -952,8 +952,37 @@ def validate_rendered_deployment(rendered: str, workloads: dict[str, Any]) -> No
     ]
     if len(rendered_deployments) != 1 or len(live_deployments) != 1:
         raise RollbackError("expected exactly one rendered and live DSPACE Deployment")
+    rendered_contract = deployment_contract(rendered_deployments[0])
+    live_contract = deployment_contract(live_deployments[0])
+
+    # Helm templates commonly omit the namespace, while the API always returns it.
+    # Normalize only the namespace of this fixed production release.
+    if rendered_contract["metadata"]["namespace"] is None:
+        rendered_contract["metadata"]["namespace"] = "dspace"
+    if live_contract["metadata"]["namespace"] != "dspace":
+        raise RollbackError("live Deployment contract differs from rendered target")
+
+    rendered_annotations = rendered_contract["metadata"]["annotations"]
+    live_annotations = live_contract["metadata"]["annotations"]
+    if not isinstance(rendered_annotations, dict) or not isinstance(live_annotations, dict):
+        raise RollbackError("live Deployment contract differs from rendered target")
+    live_only_annotations = {
+        "meta.helm.sh/release-name": "dspace",
+        "meta.helm.sh/release-namespace": "dspace",
+    }
+    for key, expected in live_only_annotations.items():
+        if live_annotations.get(key) != expected:
+            raise RollbackError("live Deployment contract differs from rendered target")
+        if key not in rendered_annotations:
+            live_annotations.pop(key)
+    revision_key = "deployment.kubernetes.io/revision"
+    revision = live_annotations.get(revision_key)
+    if not isinstance(revision, str) or re.fullmatch(r"[1-9][0-9]*", revision) is None:
+        raise RollbackError("live Deployment contract differs from rendered target")
+    if revision_key not in rendered_annotations:
+        live_annotations.pop(revision_key)
     if not _rendered_contract_matches(
-        deployment_contract(rendered_deployments[0]), deployment_contract(live_deployments[0])
+        rendered_contract, live_contract
     ):
         raise RollbackError("live Deployment contract differs from rendered target")
 

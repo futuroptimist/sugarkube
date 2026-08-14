@@ -148,6 +148,167 @@ def test_rendered_deployment_rejects_identity_and_top_level_metadata_drift(
         )
 
 
+def _chart_realistic_deployments() -> tuple[dict[str, object], dict[str, object]]:
+    rendered: dict[str, object] = {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {"name": "dspace", "labels": {"app": "dspace"}},
+        "spec": {
+            "replicas": 2,
+            "selector": {"matchLabels": {"app": "dspace"}},
+            "template": {
+                "metadata": {"labels": {"app": "dspace"}},
+                "spec": {
+                    "containers": [
+                        {
+                            "name": "dspace",
+                            "image": "example/dspace:fixed",
+                            "imagePullPolicy": "IfNotPresent",
+                        }
+                    ]
+                },
+            },
+        },
+    }
+    live = copy.deepcopy(rendered)
+    live["metadata"]["namespace"] = "dspace"  # type: ignore[index]
+    live["metadata"]["annotations"] = {  # type: ignore[index]
+        "meta.helm.sh/release-name": "dspace",
+        "meta.helm.sh/release-namespace": "dspace",
+        "deployment.kubernetes.io/revision": "10",
+    }
+    live_spec = live["spec"]  # type: ignore[assignment]
+    live_spec.update(  # type: ignore[union-attr]
+        {
+            "strategy": {
+                "type": "RollingUpdate",
+                "rollingUpdate": {"maxUnavailable": "25%", "maxSurge": "25%"},
+            },
+            "revisionHistoryLimit": 10,
+            "progressDeadlineSeconds": 600,
+        }
+    )
+    pod_spec = live_spec["template"]["spec"]  # type: ignore[index]
+    pod_spec.update(  # type: ignore[union-attr]
+        {
+            "dnsPolicy": "ClusterFirst",
+            "restartPolicy": "Always",
+            "schedulerName": "default-scheduler",
+            "securityContext": {},
+            "terminationGracePeriodSeconds": 30,
+            "enableServiceLinks": True,
+            "preemptionPolicy": "PreemptLowerPriority",
+            "serviceAccountName": "default",
+        }
+    )
+    pod_spec["containers"][0].update(  # type: ignore[index]
+        {"terminationMessagePath": "/dev/termination-log", "terminationMessagePolicy": "File"}
+    )
+    return rendered, live
+
+
+def test_rendered_deployment_accepts_real_chart_and_live_metadata() -> None:
+    rendered, live = _chart_realistic_deployments()
+    rollback.validate_rendered_deployment(json.dumps(rendered), {"items": [live]})
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("namespace", "other"),
+        ("release-name", "other"),
+        ("release-namespace", "other"),
+        ("revision", "not-a-revision"),
+        ("annotation", "unexpected"),
+        ("label", "unexpected"),
+        ("default", "unexpected"),
+    ),
+)
+def test_rendered_deployment_rejects_unproven_live_metadata(
+    field: str, value: str
+) -> None:
+    rendered, live = _chart_realistic_deployments()
+    metadata = live["metadata"]  # type: ignore[assignment]
+    if field == "namespace":
+        metadata["namespace"] = value  # type: ignore[index]
+    elif field in {"release-name", "release-namespace"}:
+        metadata["annotations"][f"meta.helm.sh/{field}"] = value  # type: ignore[index]
+    elif field == "revision":
+        metadata["annotations"]["deployment.kubernetes.io/revision"] = value  # type: ignore[index]
+    elif field == "annotation":
+        metadata["annotations"][value] = "drift"  # type: ignore[index]
+    elif field == "label":
+        metadata["labels"][value] = "drift"  # type: ignore[index]
+    else:
+        live["spec"]["template"]["spec"]["dnsPolicy"] = value  # type: ignore[index]
+    with pytest.raises(rollback.RollbackError, match="contract differs"):
+        rollback.validate_rendered_deployment(json.dumps(rendered), {"items": [live]})
+
+
+def test_raw_release_objects_uses_scoped_json_queries() -> None:
+    commands: list[list[str]] = []
+
+    def runner(command: list[str]) -> str:
+        commands.append(command)
+        return '{"items": []}'
+
+    assert rollback.raw_release_objects(runner, "/kubeconfig") == (
+        {"items": []},
+        {"items": []},
+    )
+    assert len(commands) == 2
+    assert "replicasets,deployments" in commands[0] and "pods" in commands[1]
+    assert all("--namespace" in command and "-l" in command for command in commands)
+
+
+def test_workload_pull_policy_checks_deployment_and_ready_pods() -> None:
+    deployment = {
+        "kind": "Deployment",
+        "spec": {
+            "replicas": 2,
+            "template": {
+                "spec": {"containers": [{"name": "dspace", "imagePullPolicy": "Always"}]}
+            },
+        },
+    }
+    pod = {
+        "spec": {"containers": [{"name": "dspace", "imagePullPolicy": "Always"}]},
+        "status": {
+            "phase": "Running",
+            "conditions": [{"type": "Ready", "status": "True"}],
+        },
+    }
+    rollback.validate_workload_pull_policy(
+        {"items": [deployment]}, "Always", {"items": [pod, copy.deepcopy(pod)]}
+    )
+    for workloads, pods in (
+        ({"items": []}, None),
+        ({"items": [{**deployment, "spec": {**deployment["spec"], "replicas": 1}}]}, None),
+        ({"items": [deployment]}, {"items": [pod]}),
+        (
+            {"items": [deployment]},
+            {"items": [{**pod, "status": {"phase": "Pending", "conditions": []}}, pod]},
+        ),
+    ):
+        with pytest.raises(rollback.RollbackError):
+            rollback.validate_workload_pull_policy(workloads, "Always", pods)
+
+
+def test_rendered_contract_default_branches_are_fail_closed() -> None:
+    assert rollback._is_defaulted_subtree("ClusterFirst", ("podSpec", "dnsPolicy"))
+    assert not rollback._is_defaulted_subtree("Default", ("podSpec", "dnsPolicy"))
+    assert rollback._is_defaulted_subtree(
+        {"terminationMessagePolicy": "File"}, ("podSpec", "containers", "*")
+    )
+    assert not rollback._is_defaulted_subtree({}, ("podSpec",))
+    assert rollback._rendered_contract_matches(
+        {"podSpec": {}}, {"podSpec": {"dnsPolicy": "ClusterFirst"}}
+    )
+    assert not rollback._rendered_contract_matches({"items": []}, {"items": {}})
+    assert not rollback._rendered_contract_matches([1], [1, 2])
+    assert not rollback._rendered_contract_matches("Always", "IfNotPresent")
+
+
 def target(environment: str = "staging", schema_version: int = 1) -> dict[str, object]:
     value = {
         "schemaVersion": schema_version,
@@ -2261,8 +2422,8 @@ def recovery_execution_case(
             return json.dumps(result)
         if command[0] == "helm" and "show" in command:
             return "image:\n  pullPolicy: IfNotPresent\n"
-        def deployment(policy: str) -> dict[str, object]:
-            return {
+        def deployment(policy: str, *, live: bool = False) -> dict[str, object]:
+            result: dict[str, object] = {
                 "apiVersion": "apps/v1",
                 "kind": "Deployment",
                 "metadata": {"name": "dspace"},
@@ -2283,6 +2444,17 @@ def recovery_execution_case(
                     },
                 },
             }
+            if live:
+                result["metadata"] = {
+                    "name": "dspace",
+                    "namespace": "dspace",
+                    "annotations": {
+                        "meta.helm.sh/release-name": "dspace",
+                        "meta.helm.sh/release-namespace": "dspace",
+                        "deployment.kubernetes.io/revision": "11" if state["upgraded"] else "10",
+                    },
+                }
+            return result
 
         if command[0] == "helm" and "manifest" in command:
             return "different render" if fault == "render" else json.dumps(deployment("IfNotPresent"))
@@ -2315,7 +2487,7 @@ def recovery_execution_case(
             policy = "Always" if state["upgraded"] else "IfNotPresent"
             if "replicasets,deployments" in command:
                 state["raw_workload_reads"] += 1
-                live = deployment(policy)
+                live = deployment(policy, live=True)
                 if fault == "concurrent-workload" and state["raw_workload_reads"] == 2:
                     live["spec"]["replicas"] = 3  # type: ignore[index]
                 if fault == "post-workload" and state["upgraded"]:
