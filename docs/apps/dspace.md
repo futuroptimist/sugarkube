@@ -18,9 +18,10 @@ contract without reading its value, strict values drift, the digest-qualified re
 provenance before reserving evidence or mutating Helm. Do not install or rotate
 `dspace-prod-metrics-token` as part of this operation.
 
-The currently verified transition is revision 9 to 10. Tooling derives revision 9 from the baseline
-and requires exactly one revision advance; it does not blindly hard-code either revision. Use a
-fresh, nonexisting evidence destination and the executable remote `/chat` smoke runner:
+The attempted revision-9-to-10 reconciliation has already advanced production to revision 10 on
+chart 3.0.3, with `image.pullPolicy=IfNotPresent`. Do not rerun normal reconciliation: the guarded
+recovery below is the only documented path that may advance this release to revision 11. The
+original reconciliation invocation is retained here only as a record of that operation's contract:
 
 ```bash
 just dspace-prod-metrics-reconcile \
@@ -34,9 +35,9 @@ just dspace-prod-metrics-reconcile \
 
 ### One-time production pull-policy recovery
 
-The failed revision-10 reconciliation evidence is immutable and remains failed. After this change is
-merged, a separately authorized operator may repair only the reviewed incident state: revision 10,
-chart 3.0.3, and complete approved values with the sole delta
+The failed revision-10 reconciliation evidence is immutable and remains failed. A separately
+authorized operator may repair only the reviewed incident state: revision 10, chart 3.0.3, and
+complete approved values with the sole delta
 `image.pullPolicy=IfNotPresent`. This is **not** a rerun of
 `dspace-prod-metrics-reconcile`. The command fails closed on any other revision, chart, invocation,
 pod, image, Secret contract, provenance, or values state; it performs at most one digest-qualified
@@ -46,10 +47,10 @@ Do not run this during development. Following explicit production authorization,
 
 ```bash
 just dspace-prod-metrics-pull-policy-recover \
-  failed_evidence=/private/evidence/dspace-prod-metrics-failed.json \
+  failed_evidence=/home/pi/operator-evidence/dspace-prod-metrics-reconcile-20260813T072927Z/reconciliation.json \
   maintenance_target=docs/apps/dspace.prod-metrics-chart-target.json \
-  recovery_evidence=/private/evidence/dspace-prod-metrics-pull-policy-recovery.json \
-  smoke_runner="$HOME/dspace/scripts/run-remote-chat-smoke.mjs" \
+  recovery_evidence="$FRESH_NONEXISTING_RECOVERY_EVIDENCE" \
+  smoke_runner="$DSPACE_SMOKE_RUNNER" \
   kubeconfig="$HOME/.kube/config-sugarkube-prod" \
   confirm=dspace:prod:recover-revision-10-pull-policy
 ```
@@ -58,40 +59,18 @@ The failed and recovery evidence paths must be private; the recovery destination
 Never retry, roll back, uninstall, rotate Secrets, or issue a second Helm mutation automatically if
 the recovery fails. Preserve its failed-stage evidence and investigate the sanitized diagnostics.
 
-The command uses only the exact digest-qualified 3.0.3 OCI chart, the complete committed production
-values chain, and an invocation-bound opaque Helm description; it never uses `--reuse-values`.
+The recipe selects the finalized production baseline internally. Preflight binds the immutable
+SHA-256 and invocation ID of the failed evidence to the exact live revision-10 state and validates
+the committed values, chart defaults, metrics resources, Secret reference (without reading its
+value), pods, image digest, and fresh OCI provenance before reserving a new evidence file. The
+command uses only the exact digest-qualified 3.0.3 OCI chart, the complete committed production
+values chain, an explicit `image.pullPolicy=Always`, and an invocation-bound opaque Helm
+description; it never uses `--reuse-values`.
 Afterward it proves replacement Ready pods retain the exact image digest, runs strict runtime,
 frontend, provider, remote `/chat`, and production metrics verification, and finalizes evidence.
 Any failure after reservation preserves failed evidence. Review that evidence and live Helm history
 before any further mutation; never automatically rerun, uninstall, roll back, delete, or rotate the
 Secret.
-
-### Revision-10 pull-policy recovery
-
-The normal reconciliation remains bound to the finalized revision-9/chart-3.0.2 baseline and must
-not be retried after Helm has advanced. For the single confirmed failure in which revision 10 is
-deployed on chart 3.0.3 with only the computed and workload pull policy left at `IfNotPresent`, use
-this separate operation:
-
-```bash
-just dspace-prod-metrics-pull-policy-recover \
-  failed_evidence=/home/pi/operator-evidence/dspace-prod-metrics-reconcile-20260813T072927Z/reconciliation.json \
-  maintenance_target=docs/apps/dspace.prod-metrics-chart-target.json \
-  recovery_evidence="$FRESH_NONEXISTING_RECOVERY_EVIDENCE" \
-  smoke_runner="$DSPACE_SMOKE_RUNNER" \
-  kubeconfig="$HOME/.kube/config-sugarkube-prod" \
-  confirm="dspace:prod:recover-revision-10-pull-policy"
-```
-
-The recipe selects the finalized production baseline internally. Preflight binds the immutable
-SHA-256 and invocation ID of the failed evidence to the
-exact live revision-10 state, validates the committed values, chart defaults, metrics resources,
-Secret reference (without reading its value), pods, image digest, and fresh OCI provenance, then
-reserves a new evidence file. The sole mutation is one digest-qualified chart-3.0.3 upgrade with
-the full committed production values chain and explicit `image.pullPolicy=Always`, advancing
-exactly from revision 10 to 11. An already repaired or otherwise drifted release fails closed. A
-failure after reservation records bounded sanitized diagnostics and never retries, rolls back,
-uninstalls, or changes the metrics Secret.
 
 ## Production Helm reconciliation for application 3.0.1
 
@@ -234,8 +213,8 @@ jq -e '{gitSha, generatedAt, source}' "$DIRECT_BUILD" \
   >"$CAPTURE/direct-build-identity.json"
 ```
 
-Do not run `dspace-release-verify` against the pre-change 3.0.2 deployment: the full verifier
-correctly rejects the currently installed chart 3.0.2 when validating the new target. The bounded
+Do not run `dspace-release-verify` against the historical pre-change 3.0.2 deployment: the full
+verifier correctly rejects chart 3.0.2 when validating the new target. The bounded
 captures above retain only the
 three allowlisted identity fields and cap each response at 16 KiB. Before evidence reservation or
 mutation, run the existing recipe's exact read-only digest-qualified render and structural
@@ -466,7 +445,7 @@ Use these links before changing a deployment so the workflow runs, package versi
 - `env=staging`: HA staging on the staging Sugarkube cluster with host `staging.democratized.space` and values `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml`.
   The configured staging target injects `DSPACE_TOKEN_PLACE_URL=https://staging.token.place` and `DSPACE_TOKEN_PLACE_CHAT_MODEL=qwen3-8b-instruct`, uses provenance-bearing chart `3.1.1` for DSPACE application `3.1.0`, and persists the authenticated metrics ServiceMonitor configuration discovered by kube-prometheus-stack. The live staging release is Helm revision 28 from the immutable DSPACE `3.1.0` staging image `main-018687f`, with finalized evidence recorded at `deployment-evidence/dspace/staging/main-018687f-20260805T035722Z.json`; operators can use that final record as the promotion and reconciliation proof instead of creating a replacement candidate/evidence path for this deployment. The metrics bearer value is not committed; operators manage the existing `dspace-staging-metrics-token` Secret out of band.
 - `env=prod`: HA production on the production Sugarkube cluster with host `democratized.space` and values `docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.prod.yaml`.
-  The production overlay injects `DSPACE_TOKEN_PLACE_URL=https://token.place` and `DSPACE_TOKEN_PLACE_CHAT_MODEL=llama-3.1-8b-instruct`. The approved production target is recovery chart `3.0.3` and image `ghcr.io/democratizedspace/dspace:main-1a31a56`; the currently installed chart remains `3.0.2` until a separately authorized rollout. The production values enable authenticated metrics and the ServiceMonitor contract.
+  The production overlay injects `DSPACE_TOKEN_PLACE_URL=https://token.place` and `DSPACE_TOKEN_PLACE_CHAT_MODEL=llama-3.1-8b-instruct`. Production is currently revision 10 on recovery chart `3.0.3` with image `ghcr.io/democratizedspace/dspace:main-1a31a56` and the known `image.pullPolicy=IfNotPresent` defect. Normal revision-9 reconciliation must not be rerun; only the separately authorized guarded recovery documented above may advance production to revision 11. The production values enable authenticated metrics and the ServiceMonitor contract.
 - Optional legacy/canary host `prod.democratized.space` uses `docs/examples/dspace.values.prod-subdomain.yaml`. The `dspace-oci-deploy-prod-subdomain` compatibility command selects the secret-free `docs/examples/apps/dspace-prod-subdomain.env` config, preserving that overlay while routing through the same manifest validation, OCI preflight, Helm deployment, and evidence finalization as the generic production path.
 
 ## Find or publish GHCR image
