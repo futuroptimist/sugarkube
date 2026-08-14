@@ -625,7 +625,7 @@ def failed_reconciliation_evidence(
     try:
         raw = path.expanduser().read_bytes()
         value = json.loads(raw)
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise RollbackError(
             "original failed reconciliation evidence is missing or malformed"
         ) from exc

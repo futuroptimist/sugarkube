@@ -1657,6 +1657,14 @@ def test_recovery_original_evidence_is_validated_and_fingerprinted(tmp_path: Pat
     assert digest == hashlib.sha256(raw).hexdigest()
 
 
+def test_recovery_rejects_original_evidence_with_invalid_utf8(tmp_path: Path) -> None:
+    path = tmp_path / "original.json"
+    path.write_bytes(b'\xff{"state":"failed"}')
+
+    with pytest.raises(rollback.RollbackError, match="missing or malformed"):
+        rollback.failed_reconciliation_evidence(path, _recovery_target(), lambda _command: "")
+
+
 def test_recovery_values_accept_only_ifnotpresent_and_empty_chart_default() -> None:
     baseline = manifest.validate(manifest._object(PROD_BASELINE), True)
     selected = rollback.chart_maintenance_target(baseline, PROD_MAINTENANCE_TARGET)
