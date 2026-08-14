@@ -869,7 +869,9 @@ def deployment_contract(value: dict[str, Any]) -> dict[str, Any]:
         "os",
         "resourceClaims",
     )
-    return {
+    # Validation normalizes proven live-only metadata on this projection. Keep
+    # the raw objects intact because release.finalize consumes them afterward.
+    contract = {
         "apiVersion": value.get("apiVersion"),
         "kind": value.get("kind"),
         "metadata": {
@@ -884,6 +886,7 @@ def deployment_contract(value: dict[str, Any]) -> dict[str, Any]:
         },
         "podSpec": {key: pod_spec[key] for key in pod_fields if key in pod_spec},
     }
+    return copy.deepcopy(contract)
 
 
 _KUBERNETES_DEPLOYMENT_DEFAULTS: dict[tuple[str, ...], Any] = {

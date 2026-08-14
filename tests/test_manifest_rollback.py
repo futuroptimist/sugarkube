@@ -2183,6 +2183,8 @@ def test_orchestration_preserves_complete_success_and_failure_evidence(
         template[i + 1] for i, item in enumerate(template) if item == "--values"
     ]
     assert "--reuse-values" not in upgrade
+    assert "image.pullPolicy=Always" not in template
+    assert "image.pullPolicy=Always" not in upgrade
     assert result["state"] == "succeeded"
     written = json.loads(evidence_path.read_text(encoding="utf-8"))
     assert written["targetManifestFingerprint"] == result["targetManifestFingerprint"]
@@ -2196,6 +2198,7 @@ def recovery_execution_case(
     *,
     fail_after_upgrade: bool = False,
     fault: str | None = None,
+    real_finalizer: bool = False,
 ) -> tuple[Namespace, list[list[str]], Path, Path, dict[str, object]]:
     """Build the reviewed revision-10 incident around the real recovery lifecycle."""
     baseline = manifest.validate(manifest._object(PROD_BASELINE), True)
@@ -2299,31 +2302,40 @@ def recovery_execution_case(
         rollback, "verifier_capabilities", lambda *_args: {"contract": "repository"}
     )
     monkeypatch.setattr(rollback, "verifier_accepts_runtime_arguments", lambda *_args: True)
-    def preflight(*call_args: object, **call_kwargs: object) -> dict[str, bool]:
+    def preflight(*call_args: object, **call_kwargs: object) -> list[dict[str, object]]:
         state["preflight_calls"].append((call_args, call_kwargs))
         if fault == "provenance":
             raise manifest.ManifestError("SENTINEL missing immutable provenance")
-        return {"image": True, "chart": True}
+        return [
+            {"check": check, "passed": True, "details": "observed"}
+            for check in (
+                "imageDigest",
+                "chartDigest",
+                "chartSourceRevision",
+                "imagePlatformSourceRevision[0]",
+            )
+        ]
 
     monkeypatch.setattr(rollback.release, "preflight", preflight)
 
-    def verify_stored(*call_args: object) -> list[dict[str, object]]:
+    def verify_stored(*call_args: object) -> dict[str, object]:
         state["strict_calls"].append(call_args)
         if (fault == "stored-contract" and len(state["strict_calls"]) == 2) or (
             fault == "post-stored-contract" and state["upgraded"]
         ):
             raise manifest.ManifestError("SENTINEL invalid stored values")
-        return [{"check": "helmStoredValues", "passed": True}]
+        return {"check": "helmStoredValues", "passed": True, "details": "observed"}
 
     monkeypatch.setattr(rollback.release, "verify_helm_stored_values", verify_stored)
-    monkeypatch.setattr(
-        rollback.release,
-        "finalize",
-        lambda *call_args, **call_kwargs: state["finalize_calls"].append(
-            (call_args, call_kwargs)
+    if not real_finalizer:
+        monkeypatch.setattr(
+            rollback.release,
+            "finalize",
+            lambda *call_args, **call_kwargs: state["finalize_calls"].append(
+                (call_args, call_kwargs)
+            )
+            or {"verificationResults": [{"check": "ownership", "passed": True}]},
         )
-        or {"verificationResults": [{"check": "ownership", "passed": True}]},
-    )
     monkeypatch.setattr(
         rollback.app_chart,
         "validate_rendered_manifest",
@@ -2426,7 +2438,14 @@ def recovery_execution_case(
             result: dict[str, object] = {
                 "apiVersion": "apps/v1",
                 "kind": "Deployment",
-                "metadata": {"name": "dspace"},
+                "metadata": {
+                    "name": "dspace",
+                    "labels": {
+                        "app.kubernetes.io/name": "dspace",
+                        "app.kubernetes.io/instance": "dspace",
+                        "app.kubernetes.io/managed-by": "Helm",
+                    },
+                },
                 "spec": {
                     "replicas": 2,
                     "selector": {"matchLabels": {"app": "dspace"}},
@@ -2448,6 +2467,12 @@ def recovery_execution_case(
                 result["metadata"] = {
                     "name": "dspace",
                     "namespace": "dspace",
+                    "uid": "deployment-uid",
+                    "labels": {
+                        "app.kubernetes.io/name": "dspace",
+                        "app.kubernetes.io/instance": "dspace",
+                        "app.kubernetes.io/managed-by": "Helm",
+                    },
                     "annotations": {
                         "meta.helm.sh/release-name": "dspace",
                         "meta.helm.sh/release-namespace": "dspace",
@@ -2492,21 +2517,73 @@ def recovery_execution_case(
                     live["spec"]["replicas"] = 3  # type: ignore[index]
                 if fault == "post-workload" and state["upgraded"]:
                     live["spec"]["template"]["metadata"]["annotations"] = {"drift": "yes"}  # type: ignore[index]
-                return json.dumps({"items": [live]})
+                replica_set = {
+                    "apiVersion": "apps/v1",
+                    "kind": "ReplicaSet",
+                    "metadata": {
+                        "name": "dspace-rs",
+                        "uid": "replicaset-uid",
+                        "labels": {
+                            "app.kubernetes.io/name": "dspace",
+                            "app.kubernetes.io/instance": "dspace",
+                        },
+                        "ownerReferences": [
+                            {
+                                "kind": "Deployment",
+                                "name": "dspace",
+                                "uid": "deployment-uid",
+                                "controller": True,
+                            }
+                        ],
+                    },
+                }
+                return json.dumps({"items": [live, replica_set]})
             raw_pods = {
                 "items": [
                     {
+                        "metadata": {
+                            "name": f"dspace-{index}",
+                            "uid": f"pod-{index}",
+                            "labels": {
+                                "app.kubernetes.io/name": "dspace",
+                                "app.kubernetes.io/instance": "dspace",
+                            },
+                            "ownerReferences": [
+                                {
+                                    "kind": "ReplicaSet",
+                                    "name": "dspace-rs",
+                                    "uid": "replicaset-uid",
+                                    "controller": True,
+                                }
+                            ],
+                        },
                         "spec": {
                             "containers": [
-                                {"name": "dspace", "imagePullPolicy": policy}
+                                {
+                                    "name": "dspace",
+                                    "image": f"{manifest.IMAGE_REF}:{selected['imageTag']}",
+                                    "imagePullPolicy": policy,
+                                }
                             ]
                         },
                         "status": {
                             "phase": "Running",
+                            "startTime": f"2026-08-14T00:00:0{index}Z",
                             "conditions": [{"type": "Ready", "status": "True"}],
+                            "containerStatuses": [
+                                {
+                                    "name": "dspace",
+                                    "imageID": (
+                                        f"{manifest.IMAGE_REF}@{selected['imageDigest']}"
+                                    ),
+                                    "state": {
+                                        "running": {"startedAt": "2026-08-14T00:00:00Z"}
+                                    },
+                                }
+                            ],
                         },
                     }
-                    for _ in range(2)
+                    for index in range(2)
                 ]
             }
             if fault == "post-policy" and state["upgraded"]:
@@ -2624,6 +2701,32 @@ def test_production_metrics_recovery_completes_revision_10_to_11(
     assert args._test_state["all_reads"] == 3
     assert args._test_state["raw_workload_reads"] == 3
     assert args._test_state["status_reads"] >= 4
+
+
+def test_production_metrics_recovery_uses_real_finalizer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    args, commands, _failed, _baseline, _selected = recovery_execution_case(
+        tmp_path, monkeypatch, real_finalizer=True
+    )
+
+    result = rollback.rollback(args, args._test_runner)
+
+    checks = {
+        item["check"]: item for item in result["verification"]["finalizerChecks"]
+    }
+    assert checks["releaseOwnershipAndReadiness"]["passed"] is True
+    assert checks["releaseOwnershipAndReadiness"]["details"].startswith("2 pod(s)")
+    assert checks["podImageCoordinates"]["passed"] is True
+    assert checks["podImageDigests"]["passed"] is True
+    assert checks["helmStoredValues"]["passed"] is True
+    assert result["helm"]["beforeRevision"] == 10
+    assert result["helm"]["afterRevision"] == 11
+    upgrades = [
+        command for command in commands if command[0] == "helm" and "upgrade" in command
+    ]
+    assert len(upgrades) == 1
+    assert "image.pullPolicy=Always" in upgrades[0]
 
 
 def test_production_metrics_recovery_post_upgrade_failure_is_single_shot_and_sanitized(
