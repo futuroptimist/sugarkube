@@ -21,7 +21,7 @@ The independently generated artifact report must prove the exact image digest, L
 Before creating the DSPACE 3.1.1 staging candidate, run all repository-owned read-only
 authenticated metrics prerequisites against staging. These commands check that the existing Secret
 and key are selected without returning the Secret value, verify the DSPACE contract directly, and
-then discover and verify every configured staging application (currently token.place and DSPACE):
+then discover and verify every application configured for staging:
 
 ```bash
 just observability-app-metrics-secret-check app=dspace env=staging

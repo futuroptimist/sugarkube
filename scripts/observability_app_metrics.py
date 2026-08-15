@@ -72,6 +72,8 @@ DSPACE_REQUIRED_METRIC_FAMILIES = [
     "dspace_build_info",
 ]
 DSPACE_SOURCE_LABELS = {
+    "version": ["3.1.1"],
+    "revision": ["22f506e07e0b5abfd0cf756e9c5827c0458fb4b2"],
     "method": ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "UNKNOWN"],
     "route": [
         "/metrics",

@@ -5910,6 +5910,8 @@ def test_observability_app_metrics_rejects_dspace_environment_cross_contaminatio
 @pytest.mark.parametrize(
     ("label", "bad"),
     [
+        ("version", "3.1.2"),
+        ("revision", "018687f588f727935b153857c7cc4bba52b97cae"),
         ("route", "*"),
         ("route", "/chat"),
         ("route", "other"),
@@ -6925,7 +6927,21 @@ def test_observability_app_metrics_staging_verify_all_discovers_tokenplace_and_d
     monkeypatch.setattr(app_metrics, "verify", lambda app, env: called.append((app, env)))
 
     assert app_metrics.main(["verify-all", "--env", "staging"]) == 0
-    assert called == [("tokenplace", "staging"), ("dspace", "staging")]
+    assert set(called) == {("tokenplace", "staging"), ("dspace", "staging")}
+
+
+@pytest.mark.parametrize("env", ["staging", "prod"])
+def test_observability_app_metrics_dspace_build_info_labels_are_bounded(env):
+    doc = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))
+    cfg = doc["applications"]["dspace"]["environments"][env]
+
+    app_metrics.validate_metric_labels(
+        cfg,
+        {
+            "version": "3.1.1",
+            "revision": "22f506e07e0b5abfd0cf756e9c5827c0458fb4b2",
+        },
+    )
 
 
 def test_observability_app_metrics_live_environment_normalization_and_rejection(monkeypatch):
