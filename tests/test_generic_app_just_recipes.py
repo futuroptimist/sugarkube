@@ -5931,6 +5931,20 @@ def test_observability_app_metrics_rejects_source_incompatible_dspace_labels(env
 
 
 @pytest.mark.parametrize(
+    ("label", "bad"), [("provider", "[provider]"), ("outcome", "[outcome]")]
+)
+def test_observability_app_metrics_rejects_brackets_outside_routes(label, bad):
+    doc = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))
+    allowed = doc["applications"]["dspace"]["environments"]["staging"][
+        "allowedApplicationLabels"
+    ]
+    allowed[label].append(bad)
+
+    with pytest.raises(app_metrics.Error, match="unsafe characters"):
+        app_metrics.validate_inventory(doc)
+
+
+@pytest.mark.parametrize(
     "mutation",
     [
         lambda rules: rules.pop(),
@@ -6363,6 +6377,92 @@ def test_observability_app_metrics_verify_exercises_targets_metrics_and_public_4
     assert request.get_header("User-agent") == app_metrics.USER_AGENT
     assert app_metrics.USER_AGENT == "sugarkube-observability-verifier/1.0"
     assert timeout == 10
+
+
+def test_observability_app_metrics_verify_dspace_staging_contract(monkeypatch, capsys):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
+        "dspace"
+    ]["environments"]["staging"]
+    service_monitor = {
+        "spec": {
+            "selector": {"matchLabels": cfg["serviceMonitor"]["selectorMatchLabels"]},
+            "endpoints": [
+                {
+                    "path": "/metrics",
+                    "interval": "30s",
+                    "scrapeTimeout": "10s",
+                    "bearerTokenSecret": cfg["secret"],
+                    "relabelings": cfg["serviceMonitor"]["relabelings"],
+                }
+            ],
+        }
+    }
+    commands = []
+    queried_families = set()
+
+    def fake_kjson(args):
+        commands.append(args)
+        return service_monitor
+
+    def fake_prom(path):
+        if path == "/api/v1/targets":
+            target = {
+                "health": "up",
+                "scrapePool": "serviceMonitor/dspace/dspace/0",
+                "labels": cfg["targetLabels"],
+                "discoveredLabels": {},
+            }
+            return {"activeTargets": [target, dict(target)]}
+        metric = app_metrics.urllib.parse.unquote(path.rsplit("query=", 1)[-1]).split(
+            "{", 1
+        )[0]
+        if metric not in cfg["requiredMetricFamilies"]:
+            return {"resultType": "vector", "result": []}
+        queried_families.add(metric)
+        labels = {"__name__": metric}
+        if metric == "dspace_build_info":
+            labels.update(
+                version="3.1.1",
+                revision="22f506e07e0b5abfd0cf756e9c5827c0458fb4b2",
+            )
+        return {"resultType": "vector", "result": [{"metric": labels}]}
+
+    class Opener:
+        def open(self, request, timeout):
+            assert request.full_url == cfg["publicMetrics"]["url"]
+            assert timeout == 10
+            raise app_metrics.urllib.error.HTTPError(
+                request.full_url, 401, "unauthorized", {}, None
+            )
+
+    monkeypatch.setattr(app_metrics, "appcfg", lambda app, env: cfg)
+    monkeypatch.setattr(app_metrics, "assert_context", lambda: None)
+    monkeypatch.setattr(app_metrics, "check_secret", lambda cfg: None)
+    monkeypatch.setattr(app_metrics, "derive_build_labels_live", lambda cfg: {})
+    monkeypatch.setattr(app_metrics, "kjson", fake_kjson)
+    monkeypatch.setattr(app_metrics, "prom", fake_prom)
+    monkeypatch.setattr(
+        app_metrics.urllib.request, "build_opener", lambda *args: Opener()
+    )
+
+    app_metrics.verify("dspace", "staging")
+
+    assert queried_families == set(cfg["requiredMetricFamilies"])
+    assert commands == [
+        [
+            "kubectl",
+            "-n",
+            "dspace",
+            "get",
+            "servicemonitor",
+            "dspace",
+            "-o",
+            "json",
+        ]
+    ]
+    assert capsys.readouterr().out == (
+        "Application metrics verified for dspace env=staging.\n"
+    )
 
 
 def test_observability_app_metrics_public_403_remains_adverse_and_redacted(
@@ -6938,10 +7038,42 @@ def test_observability_app_metrics_dspace_build_info_labels_are_bounded(env):
     app_metrics.validate_metric_labels(
         cfg,
         {
+            "__name__": "dspace_build_info",
             "version": "3.1.1",
             "revision": "22f506e07e0b5abfd0cf756e9c5827c0458fb4b2",
         },
     )
+
+
+@pytest.mark.parametrize(
+    "labels",
+    [
+        {
+            "__name__": "dspace_build_info",
+            "revision": "22f506e07e0b5abfd0cf756e9c5827c0458fb4b2",
+        },
+        {"__name__": "dspace_build_info", "version": "3.1.1"},
+        {
+            "__name__": "dspace_build_info",
+            "version": "3.1.2",
+            "revision": "22f506e07e0b5abfd0cf756e9c5827c0458fb4b2",
+        },
+        {
+            "__name__": "dspace_build_info",
+            "version": "3.1.1",
+            "revision": "wrong",
+        },
+    ],
+)
+def test_observability_app_metrics_dspace_build_info_rejects_wrong_or_missing_identity(
+    labels,
+):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
+        "dspace"
+    ]["environments"]["staging"]
+
+    with pytest.raises(app_metrics.Error, match="build identity label mismatch"):
+        app_metrics.validate_metric_labels(cfg, labels)
 
 
 def test_observability_app_metrics_live_environment_normalization_and_rejection(monkeypatch):

@@ -28,7 +28,7 @@ K8S_NAME = re.compile(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?")
 DURATION = re.compile(r"[1-9][0-9]*[smh]")
 STATUS = re.compile(r"[1-5][0-9][0-9]")
 SAFE_VALUE = re.compile(r"[-A-Za-z0-9_./:*]+")
-SAFE_ENUM_VALUE = re.compile(r"[-A-Za-z0-9_./:*\[\]]+")
+SAFE_ROUTE_VALUE = re.compile(r"[-A-Za-z0-9_./:*\[\]]+")
 PROM_LABEL = re.compile(r"[a-zA-Z_][a-zA-Z0-9_]*")
 PROM_METRIC = re.compile(r"[a-zA-Z_:][a-zA-Z0-9_:]*")
 K8S_LABEL_NAME = re.compile(r"[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?")
@@ -403,19 +403,20 @@ def validate_inventory(doc):
                 fail("allowedApplicationLabels must be an object")
             for k, vals in allowed.items():
                 prometheus_label(k, "allowed label name")
+                value_pattern = SAFE_ROUTE_VALUE if k == "route" else SAFE_VALUE
                 unique_string_list(
                     vals,
                     "allowed label enums",
                     lambda v, w: (
                         None
-                        if isinstance(v, str) and v and SAFE_ENUM_VALUE.fullmatch(v)
+                        if isinstance(v, str) and v and value_pattern.fullmatch(v)
                         else fail(f"{w} contains unsafe characters")
                     ),
                 )
                 if k in labels and vals != [labels[k]]:
                     fail("targetLabels and allowed label enums must agree")
                 for v in vals:
-                    if not SAFE_ENUM_VALUE.fullmatch(v):
+                    if not value_pattern.fullmatch(v):
                         fail(f"allowed enum for {k} contains unsafe characters")
             for key in ("app", "environment", "release", "cluster"):
                 vals = allowed.get(key)
@@ -770,6 +771,14 @@ def validate_metric_labels(cfg, labels, derived_values=None):
     derived_values = derived_values or {}
     if not isinstance(labels, dict):
         fail("metric labels were malformed (details redacted)", 1)
+    if labels.get("__name__") == "dspace_build_info" and any(
+        labels.get(label) != values[0]
+        for label, values in (
+            ("version", DSPACE_SOURCE_LABELS["version"]),
+            ("revision", DSPACE_SOURCE_LABELS["revision"]),
+        )
+    ):
+        fail("DSPACE build identity label mismatch (details redacted)", 1)
     for label, value in labels.items():
         if (
             not isinstance(label, str)

@@ -143,14 +143,42 @@ apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: dspace
+  namespace: dspace
   labels:
     app.kubernetes.io/instance: dspace
+    release: kube-prometheus-stack
 spec:
+  namespaceSelector:
+    matchNames:
+      - dspace
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: dspace
+      app.kubernetes.io/name: dspace
   endpoints:
     - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
       bearerTokenSecret:
         name: dspace-staging-metrics-token
         key: token
+      relabelings:
+        - action: replace
+          targetLabel: app
+          replacement: dspace
+        - action: replace
+          targetLabel: environment
+          replacement: staging
+        - action: replace
+          targetLabel: namespace
+          replacement: dspace
+        - action: replace
+          targetLabel: release
+          replacement: dspace
+        - action: replace
+          targetLabel: cluster
+          replacement: sugarkube-int
 YAML
     fi
     exit 0
@@ -348,7 +376,7 @@ upgrade_output="$(
         just helm-oci-upgrade \
         release=release=dspace namespace=namespace=dspace \
         chart=chart=oci://registry.test/charts/dspace \
-        values=values=docs/examples/dspace.values.dev.yaml \
+        values=values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml \
         version_file=version_file=docs/apps/dspace.version default_tag=v3-deadbee host=staging.democratized.space env=staging app=dspace
 )"
 
