@@ -28,6 +28,10 @@ K8S_NAME = re.compile(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?")
 DURATION = re.compile(r"[1-9][0-9]*[smh]")
 STATUS = re.compile(r"[1-5][0-9][0-9]")
 SAFE_VALUE = re.compile(r"[-A-Za-z0-9_./:*]+")
+SAFE_ROUTE_VALUE = re.compile(
+    r"/(?:[-A-Za-z0-9_.*]+|\[[A-Za-z][A-Za-z0-9]*\])"
+    r"(?:/(?:[-A-Za-z0-9_.*]+|\[[A-Za-z][A-Za-z0-9]*\]))*"
+)
 PROM_LABEL = re.compile(r"[a-zA-Z_][a-zA-Z0-9_]*")
 PROM_METRIC = re.compile(r"[a-zA-Z_:][a-zA-Z0-9_:]*")
 K8S_LABEL_NAME = re.compile(r"[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?")
@@ -59,6 +63,14 @@ FORBIDDEN_WORDS = (
     "ip",
     "url",
 )
+DSPACE_REQUIRED_METRIC_FAMILIES = [
+    "dspace_http_requests_total",
+    "dspace_http_request_duration_seconds_bucket",
+    "dspace_dchat_requests_total",
+    "dspace_dependency_requests_total",
+    "dspace_instrumentation_up",
+    "dspace_build_info",
+]
 
 
 class Error(SystemExit):
@@ -107,6 +119,12 @@ def nonempty(v, where):
         fail(f"{where} must be a nonempty string")
     if not SAFE_VALUE.fullmatch(v):
         fail(f"{where} contains unsafe characters")
+
+
+def allowed_enum_value(v, where, label):
+    if label == "route" and isinstance(v, str) and SAFE_ROUTE_VALUE.fullmatch(v):
+        return
+    nonempty(v, where)
 
 
 def integer(v, where, low, high=None):
@@ -295,6 +313,7 @@ def validate_inventory(doc):
                 or labels["namespace"] != cfg["namespace"]
             ):
                 fail("targetLabels must match ServiceMonitor and namespace")
+
             def replacement(target_label, replacement):
                 return {
                     "action": "replace",
@@ -339,11 +358,15 @@ def validate_inventory(doc):
                 fail("allowedApplicationLabels must be an object")
             for k, vals in allowed.items():
                 prometheus_label(k, "allowed label name")
-                unique_string_list(vals, "allowed label enums", lambda v, w: nonempty(v, w))
+                unique_string_list(
+                    vals,
+                    "allowed label enums",
+                    lambda v, w, label=k: allowed_enum_value(v, w, label),
+                )
                 if k in labels and vals != [labels[k]]:
                     fail("targetLabels and allowed label enums must agree")
                 for v in vals:
-                    nonempty(v, f"allowed enum for {k}")
+                    allowed_enum_value(v, f"allowed enum for {k}", k)
             for key in ("app", "environment", "release", "cluster"):
                 vals = allowed.get(key)
                 if vals != [labels[key]]:
@@ -381,6 +404,26 @@ def validate_inventory(doc):
             conflicts = set(forbidden) & (set(allowed) | set(derived))
             if conflicts:
                 fail("forbidden labels conflict with allowed or derived labels")
+            if app == "dspace":
+                expected_environment = {
+                    "staging": {
+                        "secret": "dspace-staging-metrics-token",
+                        "cluster": "sugarkube-int",
+                        "url": "https://staging.democratized.space/metrics",
+                    },
+                    "prod": {
+                        "secret": "dspace-prod-metrics-token",
+                        "cluster": "sugarkube-prod",
+                        "url": "https://democratized.space/metrics",
+                    },
+                }[env]
+                if (
+                    cfg["secret"]["name"] != expected_environment["secret"]
+                    or labels["cluster"] != expected_environment["cluster"]
+                    or pm["url"] != expected_environment["url"]
+                    or metrics != DSPACE_REQUIRED_METRIC_FAMILIES
+                ):
+                    fail("DSPACE environment or immutable source metrics contract mismatch")
 
 
 def normalize_live_env(env: str) -> str:
@@ -835,7 +878,7 @@ def verify(app, env):
         fail("ServiceMonitor response is structurally invalid", 1)
     authorization = ep.get("authorization")
     auth = authorization.get("credentials") if isinstance(authorization, dict) else None
-    if app == "dspace" and env == "prod":
+    if app == "dspace":
         auth = ep.get("bearerTokenSecret")
         authorization = {"type": "Bearer"} if isinstance(auth, dict) else authorization
     selector = spec.get("selector")
@@ -994,9 +1037,7 @@ def validate_render(
     sms = []
     for candidate in named_sms:
         metadata = candidate["metadata"]
-        rendered_ns = (
-            metadata.get("namespace") if "namespace" in metadata else release_namespace
-        )
+        rendered_ns = metadata.get("namespace") if "namespace" in metadata else release_namespace
         if rendered_ns == cfg["namespace"]:
             sms.append(candidate)
     if len(sms) != 1:
@@ -1028,7 +1069,7 @@ def validate_render(
         fail("rendered ServiceMonitor endpoint is structurally invalid")
     auth = ep.get("authorization")
     creds = auth.get("credentials") if isinstance(auth, dict) else None
-    if app == "dspace" and env == "prod":
+    if app == "dspace":
         creds = ep.get("bearerTokenSecret")
         auth = {"type": "Bearer"} if isinstance(creds, dict) else auth
     if not isinstance(auth, dict) or not isinstance(creds, dict):

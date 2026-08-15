@@ -411,6 +411,7 @@ metadata:
   name: dspace
   labels:
     app.kubernetes.io/instance: dspace
+    release: kube-prometheus-stack
 spec:
   namespaceSelector:
     matchNames:
@@ -421,9 +422,28 @@ spec:
       app.kubernetes.io/name: dspace
   endpoints:
     - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
       bearerTokenSecret:
         name: dspace-staging-metrics-token
         key: token
+      relabelings:
+        - action: replace
+          targetLabel: app
+          replacement: dspace
+        - action: replace
+          targetLabel: environment
+          replacement: staging
+        - action: replace
+          targetLabel: namespace
+          replacement: dspace
+        - action: replace
+          targetLabel: release
+          replacement: dspace
+        - action: replace
+          targetLabel: cluster
+          replacement: sugarkube-int
 YAML
     fi
     if [ "${{app}}" = dspace ] && [[ "$*" == *dspace.values.prod.yaml* ]]; then
