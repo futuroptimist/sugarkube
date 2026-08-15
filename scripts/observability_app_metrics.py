@@ -28,6 +28,7 @@ K8S_NAME = re.compile(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?")
 DURATION = re.compile(r"[1-9][0-9]*[smh]")
 STATUS = re.compile(r"[1-5][0-9][0-9]")
 SAFE_VALUE = re.compile(r"[-A-Za-z0-9_./:*]+")
+SAFE_ENUM_VALUE = re.compile(r"[-A-Za-z0-9_./:*\[\]]+")
 PROM_LABEL = re.compile(r"[a-zA-Z_][a-zA-Z0-9_]*")
 PROM_METRIC = re.compile(r"[a-zA-Z_:][a-zA-Z0-9_:]*")
 K8S_LABEL_NAME = re.compile(r"[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?")
@@ -59,6 +60,67 @@ FORBIDDEN_WORDS = (
     "ip",
     "url",
 )
+
+# Audited from democratizedspace/dspace revision 22f506e07e0b5abfd0cf756e9c5827c0458fb4b2,
+# frontend/src/utils/metrics.js blob a2a1fecf94cab58b3e05e785694a2ed745fb2831.
+DSPACE_REQUIRED_METRIC_FAMILIES = [
+    "dspace_http_requests_total",
+    "dspace_http_request_duration_seconds_bucket",
+    "dspace_dchat_requests_total",
+    "dspace_dependency_requests_total",
+    "dspace_instrumentation_up",
+    "dspace_build_info",
+]
+DSPACE_SOURCE_LABELS = {
+    "method": ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "UNKNOWN"],
+    "route": [
+        "/metrics",
+        "/api/chat",
+        "/",
+        "/health",
+        "/healthz",
+        "/livez",
+        "/config.json",
+        "/cache-version.js",
+        "/service-worker.js",
+        "/_astro/*",
+        "/assets/*",
+        "/docs/[slug]",
+        "/inventory/item/[itemId]/edit",
+        "/inventory/item/[itemId]",
+        "/processes/[processId]",
+        "/process/[slug]",
+        "/quests/[pathId]/[questId]",
+        "/unknown",
+    ],
+    "status_class": ["2xx", "4xx", "5xx", "unknown"],
+    "provider": ["tokenplace", "openai", "none", "unknown"],
+    "dependency": ["tokenplace", "openai", "unknown"],
+    "outcome": [
+        "success",
+        "timeout",
+        "rate_limited",
+        "validation_error",
+        "malformed_response",
+        "dependency_failure",
+        "server_error",
+        "fallback_used",
+        "fallback_unavailable",
+        "unknown_error",
+    ],
+}
+DSPACE_ENVIRONMENT_COORDINATES = {
+    "staging": {
+        "secret": {"name": "dspace-staging-metrics-token", "key": "token"},
+        "cluster": "sugarkube-int",
+        "url": "https://staging.democratized.space/metrics",
+    },
+    "prod": {
+        "secret": {"name": "dspace-prod-metrics-token", "key": "token"},
+        "cluster": "sugarkube-prod",
+        "url": "https://democratized.space/metrics",
+    },
+}
 
 
 class Error(SystemExit):
@@ -339,15 +401,50 @@ def validate_inventory(doc):
                 fail("allowedApplicationLabels must be an object")
             for k, vals in allowed.items():
                 prometheus_label(k, "allowed label name")
-                unique_string_list(vals, "allowed label enums", lambda v, w: nonempty(v, w))
+                unique_string_list(
+                    vals,
+                    "allowed label enums",
+                    lambda v, w: (
+                        None
+                        if isinstance(v, str) and v and SAFE_ENUM_VALUE.fullmatch(v)
+                        else fail(f"{w} contains unsafe characters")
+                    ),
+                )
                 if k in labels and vals != [labels[k]]:
                     fail("targetLabels and allowed label enums must agree")
                 for v in vals:
-                    nonempty(v, f"allowed enum for {k}")
+                    if not SAFE_ENUM_VALUE.fullmatch(v):
+                        fail(f"allowed enum for {k} contains unsafe characters")
             for key in ("app", "environment", "release", "cluster"):
                 vals = allowed.get(key)
                 if vals != [labels[key]]:
                     fail("targetLabels and allowed label enums must agree")
+            if app == "dspace":
+                coordinates = DSPACE_ENVIRONMENT_COORDINATES[env]
+                expected_allowed = {
+                    "app": ["dspace"],
+                    "environment": [env],
+                    "release": ["dspace"],
+                    "cluster": [labels["cluster"]],
+                    **DSPACE_SOURCE_LABELS,
+                }
+                if metrics != DSPACE_REQUIRED_METRIC_FAMILIES:
+                    fail("DSPACE required metric families must match the immutable source contract")
+                if allowed != expected_allowed:
+                    fail("DSPACE application labels must match the immutable source contract")
+                if (
+                    cfg["namespace"] != "dspace"
+                    or cfg["serviceMonitorName"] != "dspace"
+                    or cfg["expectedTargetCount"] != 2
+                    or cfg["secret"] != coordinates["secret"]
+                    or labels["cluster"] != coordinates["cluster"]
+                    or pm
+                    != {
+                        "url": coordinates["url"],
+                        "expectedUnauthenticatedStatus": 401,
+                    }
+                ):
+                    fail("DSPACE environment coordinates must match the canonical contract")
             derived = cfg["derivedApplicationLabels"]
             if not isinstance(derived, dict):
                 fail("derivedApplicationLabels must be an object")
@@ -835,7 +932,7 @@ def verify(app, env):
         fail("ServiceMonitor response is structurally invalid", 1)
     authorization = ep.get("authorization")
     auth = authorization.get("credentials") if isinstance(authorization, dict) else None
-    if app == "dspace" and env == "prod":
+    if app == "dspace":
         auth = ep.get("bearerTokenSecret")
         authorization = {"type": "Bearer"} if isinstance(auth, dict) else authorization
     selector = spec.get("selector")
@@ -1028,7 +1125,7 @@ def validate_render(
         fail("rendered ServiceMonitor endpoint is structurally invalid")
     auth = ep.get("authorization")
     creds = auth.get("credentials") if isinstance(auth, dict) else None
-    if app == "dspace" and env == "prod":
+    if app == "dspace":
         creds = ep.get("bearerTokenSecret")
         auth = {"type": "Bearer"} if isinstance(creds, dict) else auth
     if not isinstance(auth, dict) or not isinstance(creds, dict):
