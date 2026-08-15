@@ -527,6 +527,20 @@ gh workflow run ci-helm.yml --repo democratizedspace/dspace --ref main
 
 ### Release-manifest approval and evidence flow
 
+Before creating the DSPACE 3.1.1 staging candidate, complete the repository-owned read-only
+application-metrics prerequisites. These commands only check the existing staging Secret contract
+without returning its value, verify DSPACE alone, and run the staging-wide verifier (which includes
+both DSPACE and Tokenplace):
+
+```bash
+just observability-app-metrics-secret-check app=dspace env=staging
+just observability-app-metrics-verify app=dspace env=staging
+just observability-verify env=staging
+```
+
+Passing these checks is not candidate approval and does not authorize candidate creation or a
+deployment. Candidate creation and deployment remain separate, explicitly authorized operations.
+
 Download the `dspace-release-manifest` artifact from the successful upstream
 image workflow and extract `dspace-release-manifest/dspace-release-manifest.json`.
 Do not copy coordinates from mutable package tags. Create a canonical staging
