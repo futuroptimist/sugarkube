@@ -24,12 +24,26 @@ The planner independently validates the preserved failed reconciliation against 
 
 This preparation is not approval or deployment evidence. A future operator must, in order:
 
-1. Record genuine operator approval metadata for the exact 3.1.1/3.1.2 coordinates.
-2. Create a fresh staging candidate for those coordinates and deploy it through the existing guarded release-manifest machinery.
-3. Prove exactly two Ready replicas at the reviewed image digest; matching runtime and frontend source identity; public/direct agreement; and the intended eventual production provider `openai`.
-4. Run a bounded remote `/chat` smoke and prove two healthy authenticated Prometheus targets with no scrape errors. Prove all six required families: `dspace_build_info`, `dspace_dchat_requests_total`, `dspace_dependency_requests_total`, `dspace_http_request_duration_seconds_bucket`, `dspace_http_requests_total`, and `dspace_instrumentation_up`. Where counters require traffic, capture a real server-observed chat/dependency journey without response bodies, tokens, Secret values, or raw metrics payloads.
-5. Finalize fresh, non-overwritable staging evidence only after every check succeeds. The optional `--staging-proof` input accepts it only when every coordinate, `openai`, identity, metrics, and smoke result matches.
-6. Only a separate future repository task may add a guarded, one-shot successor to production Helm revision 10. The old classifier and historical staging evidence cannot authorize it.
+1. After this repository contract has merged, run the repository-owned read-only staging
+   prerequisites. The Secret check proves only the configured name/key and never returns its value;
+   the single-app check verifies DSPACE; and the full staging check discovers and verifies both
+   token.place and DSPACE:
+
+   ```bash
+   just observability-app-metrics-secret-check app=dspace env=staging
+   just observability-app-metrics-verify app=dspace env=staging
+   just observability-verify env=staging
+   ```
+
+   All three checks must pass freshly before creating the DSPACE 3.1.1 staging candidate. These
+   commands do not create a candidate, approve a release, deploy an application, or mutate either
+   cluster.
+2. Record genuine operator approval metadata for the exact 3.1.1/3.1.2 coordinates.
+3. Create a fresh staging candidate for those coordinates and deploy it through the existing guarded release-manifest machinery.
+4. Prove exactly two Ready replicas at the reviewed image digest; matching runtime and frontend source identity; public/direct agreement; and the intended eventual production provider `openai`.
+5. Run a bounded remote `/chat` smoke and prove two healthy authenticated Prometheus targets with no scrape errors. Prove all six required families: `dspace_build_info`, `dspace_dchat_requests_total`, `dspace_dependency_requests_total`, `dspace_http_request_duration_seconds_bucket`, `dspace_http_requests_total`, and `dspace_instrumentation_up`. Where counters require traffic, capture a real server-observed chat/dependency journey without response bodies, tokens, Secret values, or raw metrics payloads.
+6. Finalize fresh, non-overwritable staging evidence only after every check succeeds. The optional `--staging-proof` input accepts it only when every coordinate, `openai`, identity, metrics, and smoke result matches.
+7. Only a separate future repository task may add a guarded, one-shot successor to production Helm revision 10. The old classifier and historical staging evidence cannot authorize it.
 
 The existing `dspace-prod-metrics-pull-policy-recover` operation remains ineligible for this incident: application 3.0.1 cannot supply the required metrics. Preserve its preflight and verifier unchanged; do not rerun, weaken, bypass, or repurpose it as an application promotion. Do not roll back or uninstall Helm, and do not read, rotate, or delete the metrics Secret. Issues #2325 and #2329 remain closed unless a human chooses otherwise, and issue #2408 is separate and must not be modified or conflated.
 
