@@ -20,6 +20,22 @@ The independently generated artifact report must prove the exact image digest, L
 
 The planner independently validates the preserved failed reconciliation against the reviewed 3.0.1 maintenance tuple. It recognizes finalized application 3.1.0/chart 3.1.1 staging evidence only as historical and emits `historicalStagingEvidenceAuthorizesTarget=false`. It renders staging and eventual production locally only after verifying the local archive bytes against the artifact report's validated archive digest, never against the distinct OCI manifest digest, with two replicas, `image.pullPolicy=Always`, and `main-22f506e`. It rejects rendered Secrets, staging values in production, semantic image tags, and `--reuse-values`. Its sanitized JSON contains no credentials or raw metrics and an empty `mutationCommands` list. It never runs Helm upgrade, kubectl, rollout, Secret mutation, artifact publication, approval creation, or evidence finalization.
 
+### Repository-owned staging metrics prerequisites
+
+Before creating the DSPACE 3.1.1 staging candidate, an operator must run the repository-owned,
+read-only authenticated metrics checks below. They verify only the existing staging Secret contract,
+the DSPACE application target, and all configured staging applications (Tokenplace and DSPACE); they
+do not create a candidate, deploy, mutate a cluster, or read a Secret value.
+
+```bash
+just observability-app-metrics-secret-check app=dspace env=staging
+just observability-app-metrics-verify app=dspace env=staging
+just observability-verify env=staging
+```
+
+All three checks must pass freshly after this repository contract is merged. Candidate creation and
+deployment remain separate actions requiring explicit authorization.
+
 ### Required future sequence
 
 This preparation is not approval or deployment evidence. A future operator must, in order:
