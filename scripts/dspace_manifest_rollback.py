@@ -924,6 +924,9 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
         raise RollbackError("repository runtime verifier rejected its required arguments")
     coordinate = release.chart_coordinate(approved)
     helm_values = [part for path in values for part in ("--values", str(path))]
+    pull_policy_args = (
+        ["--set-string", "image.pullPolicy=Always"] if configuration_reconciliation else []
+    )
     rendered_target = runner(
         [
             "helm",
@@ -939,8 +942,7 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             f"image.repository={release.IMAGE_REF}",
             "--set-string",
             f"image.tag={image_value}",
-            "--set-string",
-            "image.pullPolicy=Always",
+            *pull_policy_args,
         ]
     )
     before_helm, _before_history, before_identity = helm_snapshot(
@@ -1388,8 +1390,7 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             f"image.repository={release.IMAGE_REF}",
             "--set-string",
             f"image.tag={image_value}",
-            "--set-string",
-            "image.pullPolicy=Always",
+            *pull_policy_args,
             "--wait",
             "--timeout",
             args.timeout,

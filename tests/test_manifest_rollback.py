@@ -1954,6 +1954,8 @@ def test_orchestration_preserves_complete_success_and_failure_evidence(
     assert f"image.tag=main-abcdef0@{DIGEST}" in upgrade
     assert upgrade.count("--values") == 2
     template = next(command for command in commands if "template" in command)
+    assert "image.pullPolicy=Always" not in template
+    assert "image.pullPolicy=Always" not in upgrade
     assert [upgrade[i + 1] for i, item in enumerate(upgrade) if item == "--values"] == [
         template[i + 1] for i, item in enumerate(template) if item == "--values"
     ]

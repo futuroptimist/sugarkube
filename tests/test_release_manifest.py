@@ -733,6 +733,13 @@ def test_helm_stored_values_accept_chart_defaults_and_safe_references() -> None:
     assert manifest.verify_helm_stored_values(value, stored, "prod")["passed"] is True
 
 
+def test_helm_stored_values_accept_exact_empty_servicemonitor_relabelings_default() -> None:
+    value = split_candidate("prod")
+    stored = production_stored_values()
+    stored["serviceMonitor"]["relabelings"] = []
+    assert manifest.verify_helm_stored_values(value, stored, "prod")["passed"] is True
+
+
 @pytest.mark.parametrize(
     ("section", "field", "wrong"),
     [
