@@ -1320,7 +1320,7 @@ case "$url" in */api/v2/silences) mode=$WATCHDOG_SILENCE_MODE ;; esac
 case "$mode" in
   transport) echo CURL_RESPONSE_SENTINEL >&2; exit 7 ;;
   forward-exit-during-curl) kill -9 "$(cat "$PAGERDUTY_PID")"; /bin/sleep 0.1; code=200 ;;
-  signal-wait) /bin/sleep 30; code=200 ;;
+  signal-wait) printf 'ready\n' > "$WATCHDOG_SIGNAL_READY"; /bin/sleep 30; code=200 ;;
   http000) code=000 ;;
   http415) code=415 ;;
   http400) code=400 ;;
@@ -1378,6 +1378,7 @@ printf '%s' "$code"
         "WATCHDOG_CREATE_STDIN": str(tmp_path / "watchdog-create-stdin"),
         "WATCHDOG_APPLY_STDIN": str(tmp_path / "watchdog-apply-stdin"),
         "WATCHDOG_SILENCE_PAYLOAD": str(tmp_path / "watchdog-silence-payload"),
+        "WATCHDOG_SIGNAL_READY": str(tmp_path / "watchdog-signal-ready"),
         "WATCHDOG_SILENCE_DELETIONS": str(tmp_path / "watchdog-silence-deletions"),
         "WATCHDOG_SILENCES": str(tmp_path / "watchdog-silences.json"),
         "WATCHDOG_LOG_TEXT": watchdog_log_text,
@@ -1476,9 +1477,7 @@ receivers:
         )
         readiness_deadline = time.monotonic() + 5
         while time.monotonic() < readiness_deadline:
-            if (tmp_path / "pagerduty.pid").exists() and list(
-                tmp_path.glob("sugarkube-watchdog-silence.*")
-            ):
+            if (tmp_path / "watchdog-signal-ready").exists():
                 break
             if process.poll() is not None:
                 break
@@ -1486,6 +1485,7 @@ receivers:
         assert process.poll() is None, "watchdog drill exited before signal injection"
         assert (tmp_path / "pagerduty.pid").exists(), "port-forward did not start"
         assert list(tmp_path.glob("sugarkube-watchdog-silence.*")), "temporary directory missing"
+        assert (tmp_path / "watchdog-signal-ready").exists(), "curl did not enter signal wait"
         os.killpg(process.pid, interrupt_signal)
         stdout, stderr = wait_for_watchdog_signal_cleanup(process, tmp_path)
         result = subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)

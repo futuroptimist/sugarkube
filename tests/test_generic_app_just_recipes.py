@@ -193,7 +193,7 @@ if [ "${{1:-}}" = upgrade ]; then
   done
 fi
 if [[ "$*" == *"status dspace --namespace dspace -o json" ]]; then
-  chart_version="${{SUGARKUBE_STUB_CHART_VERSION:-3.1.1}}"
+  chart_version="${{SUGARKUBE_STUB_CHART_VERSION:-3.1.2}}"
   if [ -z "${{SUGARKUBE_STUB_CHART_VERSION:-}}" ] && [ "${{SUGARKUBE_STUB_NODE_ENV:-staging}}" = prod ]; then chart_version=3.0.3; fi
   description="$(cat {str(tmp_path / "helm-description")!r} 2>/dev/null || true)"
   revision=7
@@ -227,7 +227,7 @@ if [[ "$*" == show\ chart* ]]; then
   if [[ "$*" == *"charts/dspace"* ]]; then
     version="${{*: -1}}"
     if [[ "$version" == oci://*@sha256:* ]]; then
-      version="${{SUGARKUBE_STUB_CHART_VERSION:-3.1.1}}"
+      version="${{SUGARKUBE_STUB_CHART_VERSION:-3.1.2}}"
       if [ -z "${{SUGARKUBE_STUB_CHART_VERSION:-}}" ] && [ "${{SUGARKUBE_STUB_NODE_ENV:-staging}}" = prod ]; then version=3.0.3; fi
     fi
     printf 'apiVersion: v2\nname: dspace\nversion: %s\nappVersion: main-abcdef0\n' "$version"
@@ -638,50 +638,6 @@ def _assert_chart_pin_reminder(output: str, app: str) -> None:
     assert "NOTE: chart pins are explicit. `tag=...` changes only the image tag." in output
     assert f"Run `just app-chart-status app={app}`" in output
     assert f"Use `just app-chart-bump app={app} version=<version>`" in output
-
-
-def test_dspace_pull_policy_recovery_recipe_forwards_guarded_arguments(
-    generic_app_stub_env: dict[str, str], tmp_path: Path
-) -> None:
-    capture = tmp_path / "recovery-command.json"
-    python = Path(generic_app_stub_env["PATH"].split(os.pathsep, 1)[0]) / "python3"
-    _write_executable(
-        python,
-        f"#!{sys.executable}\n"
-        "import json, os, sys\n"
-        "open(os.environ['RECOVERY_CAPTURE'], 'w', encoding='utf-8').write(json.dumps(sys.argv))\n",
-    )
-    env = {**generic_app_stub_env, "RECOVERY_CAPTURE": str(capture)}
-    forwarded = {
-        "failed_evidence": "/evidence/failed.json",
-        "maintenance_target": "/evidence/target.json",
-        "recovery_evidence": "/evidence/recovery.json",
-        "smoke_runner": "/tools/smoke",
-        "kubeconfig": "/cluster/kubeconfig",
-        "verifier": "/tools/verifier",
-        "confirm": "dspace:prod:confirmed",
-        "config": "/config/prod.env",
-    }
-    result = _run_just(
-        [
-            "dspace-prod-metrics-pull-policy-recover",
-            *(f"{name}={value}" for name, value in forwarded.items()),
-        ],
-        env,
-    )
-    assert result.returncode == 0, result.stderr
-    command = json.loads(capture.read_text(encoding="utf-8"))
-    assert command[1] == str(REPO_ROOT / "scripts/dspace_manifest_rollback.py")
-    assert "--production-metrics-recovery" in command
-    assert command[command.index("--environment") + 1] == "prod"
-    flags = {
-        "failed_evidence": "--failed-evidence",
-        "maintenance_target": "--maintenance-target",
-        "recovery_evidence": "--evidence",
-    }
-    for name, value in forwarded.items():
-        flag = flags.get(name, "--" + name.replace("_", "-"))
-        assert command[command.index(flag) + 1] == value
 
 
 def test_app_chart_semver_prefers_final_release_over_matching_prerelease() -> None:
@@ -3007,7 +2963,7 @@ def _write_dspace_candidate(
         "sourceRevision": "abcdef0123456789abcdef0123456789abcdef01",
         "imageTag": "main-abcdef0",
         "imageDigest": image_digest or "sha256:" + "1" * 64,
-        "chartVersion": "3.1.1" if environment == "staging" else "3.0.3",
+        "chartVersion": "3.1.2" if environment == "staging" else "3.0.3",
         "chartDigest": "sha256:" + "2" * 64,
         "semanticTag": "v3.2.0",
         "recordType": "candidate",
@@ -3668,7 +3624,7 @@ def test_dspace_promote_prod_routes_sparse_named_arguments_through_both_gates(
 
     _write_dspace_candidate(prod_manifest, "prod")
     prod_record = json.loads(prod_manifest.read_text(encoding="utf-8"))
-    prod_record["chartVersion"] = "3.1.1"
+    prod_record["chartVersion"] = "3.1.2"
     prod_manifest.write_text(json.dumps(prod_record) + "\n", encoding="utf-8")
     config = tmp_path / "dspace.env"
     config.write_text(
@@ -3678,7 +3634,7 @@ def test_dspace_promote_prod_routes_sparse_named_arguments_through_both_gates(
                 "SUGARKUBE_RELEASE=dspace",
                 "SUGARKUBE_NAMESPACE=dspace",
                 "SUGARKUBE_CHART=oci://ghcr.io/democratizedspace/charts/dspace",
-                "SUGARKUBE_VERSION=3.1.1",
+                "SUGARKUBE_VERSION=3.1.2",
                 "SUGARKUBE_PROD_TAG_FILE=docs/apps/dspace.prod.tag",
                 "SUGARKUBE_VALUES_DEV=docs/examples/dspace.values.dev.yaml",
                 "SUGARKUBE_VALUES_STAGING=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml",
@@ -3688,7 +3644,7 @@ def test_dspace_promote_prod_routes_sparse_named_arguments_through_both_gates(
         + "\n",
         encoding="utf-8",
     )
-    env["SUGARKUBE_STUB_CHART_VERSION"] = "3.1.1"
+    env["SUGARKUBE_STUB_CHART_VERSION"] = "3.1.2"
     env["SUGARKUBE_STUB_NODE_ENV"] = "prod"
     runtime_log = Path(env["RUNTIME_VERIFIER_LOG"])
     runtime_log.write_text("", encoding="utf-8")
@@ -3790,11 +3746,11 @@ def test_dspace_prod_staging_gate_failures_stop_before_production_work(
 
     _write_dspace_candidate(prod_manifest, "prod")
     prod_record = json.loads(prod_manifest.read_text(encoding="utf-8"))
-    prod_record["chartVersion"] = "3.1.1"
+    prod_record["chartVersion"] = "3.1.2"
     prod_manifest.write_text(json.dumps(prod_record) + "\n", encoding="utf-8")
     env = generic_app_stub_env.copy()
     env["SUGARKUBE_STUB_NODE_ENV"] = "prod"
-    env["SUGARKUBE_STUB_CHART_VERSION"] = "3.1.1"
+    env["SUGARKUBE_STUB_CHART_VERSION"] = "3.1.2"
     if staging_record_kind == "revision":
         env["SUGARKUBE_STUB_STAGING_HELM_REVISION"] = "8"
     for name in ("helm.log", "kubectl.log", "commands.log", "runtime-verifier.log"):
