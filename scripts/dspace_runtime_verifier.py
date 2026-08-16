@@ -43,7 +43,7 @@ RESULT_FIELDS = (
     "defaultProvider",
     "journeys",
 )
-BUILD_FIELDS = {"version", "revision", "shortRevision", "image"}
+BUILD_FIELDS = {"version", "revision", "shortRevision", "buildTimestamp", "image"}
 LEGACY_BUILD_FIELDS = {"gitSha", "generatedAt", "source"}
 MODERN_IDENTITY_CONTRACT = "build-info-v1"
 LEGACY_IDENTITY_CONTRACT = "legacy-build-meta-v1"
@@ -91,6 +91,7 @@ HTML_DOCUMENT_RE = re.compile(r"^\s*(?:<!doctype\s+html\b|<html\b)", re.IGNORECA
 PUBLIC_HTTP_USER_AGENT = "sugarkube-dspace-runtime-verifier/1.0"
 POD_SETTLE_TIMEOUT_SECONDS = 60.0
 POD_SETTLE_INTERVAL_SECONDS = 2.0
+BUILD_TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$")
 
 
 class VerificationError(ValueError):
@@ -218,14 +219,19 @@ def fetch(url: str, public_origin: tuple[str, str] | None = None) -> bytes:
 
 def identity(
     raw: bytes, version: str, revision: str, image: str, category: str
-) -> tuple[str, str, str]:
+) -> tuple[str, str, str, str]:
     if len(raw) > 1024 * 1024:
         fail(category)
     try:
         value = json.loads(raw)
     except (UnicodeDecodeError, json.JSONDecodeError):
         fail(category)
-    if not isinstance(value, dict) or set(value) - BUILD_FIELDS:
+    required_fields = BUILD_FIELDS - {"image"}
+    if (
+        not isinstance(value, dict)
+        or set(value) - BUILD_FIELDS
+        or not required_fields.issubset(value)
+    ):
         fail(category)
     if (
         value.get("version") != version
@@ -236,7 +242,24 @@ def identity(
     runtime_image = value.get("image")
     if runtime_image is not None and runtime_image != image:
         fail(category)
-    return version, revision, runtime_image or image
+    build_timestamp = value.get("buildTimestamp")
+    if (
+        not isinstance(build_timestamp, str)
+        or not build_timestamp
+        or len(build_timestamp) > 40
+        or BUILD_TIMESTAMP_RE.fullmatch(build_timestamp) is None
+    ):
+        fail(category)
+    try:
+        timestamp_format = (
+            "%Y-%m-%dT%H:%M:%SZ"
+            if "." not in build_timestamp
+            else "%Y-%m-%dT%H:%M:%S.%fZ"
+        )
+        datetime.strptime(build_timestamp, timestamp_format)
+    except ValueError:
+        fail(category)
+    return version, revision, runtime_image or image, build_timestamp
 
 
 def marker(raw: bytes, revision: str, category: str) -> None:
@@ -444,7 +467,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
 
     helm_before = helm_identity(args, expected["chart_version"])
 
-    replica_identity: tuple[str, str, str] | None = None
+    replica_identity: tuple[str, str, str] | tuple[str, str, str, str] | None = None
     for pod in pods:
         metadata, spec, status = pod.get("metadata", {}), pod.get("spec", {}), pod.get("status", {})
         if not all(isinstance(value, dict) for value in (metadata, spec, status)):
