@@ -463,7 +463,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
 
     helm_before = helm_identity(args, expected["chart_version"])
 
-    replica_identity: tuple[str, str, str, str] | None = None
+    replica_identity: tuple[str, str, str] | tuple[str, str, str, str] | None = None
     for pod in pods:
         metadata, spec, status = pod.get("metadata", {}), pod.get("spec", {}), pod.get("status", {})
         if not all(isinstance(value, dict) for value in (metadata, spec, status)):
