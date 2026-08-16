@@ -411,6 +411,7 @@ metadata:
   name: dspace
   labels:
     app.kubernetes.io/instance: dspace
+    release: kube-prometheus-stack
 spec:
   namespaceSelector:
     matchNames:
@@ -421,9 +422,28 @@ spec:
       app.kubernetes.io/name: dspace
   endpoints:
     - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
       bearerTokenSecret:
         name: dspace-staging-metrics-token
         key: token
+      relabelings:
+        - action: replace
+          targetLabel: app
+          replacement: dspace
+        - action: replace
+          targetLabel: environment
+          replacement: staging
+        - action: replace
+          targetLabel: namespace
+          replacement: dspace
+        - action: replace
+          targetLabel: release
+          replacement: dspace
+        - action: replace
+          targetLabel: cluster
+          replacement: sugarkube-int
 YAML
     fi
     if [ "${{app}}" = dspace ] && [[ "$*" == *dspace.values.prod.yaml* ]]; then
@@ -5822,6 +5842,108 @@ def test_observability_app_metrics_inventory_accepts_both_canonical_relabeling_f
     ]
 
 
+def test_observability_app_metrics_inventory_dspace_staging_and_prod_are_canonical():
+    doc = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))
+    app_metrics.validate_inventory(doc)
+    environments = doc["applications"]["dspace"]["environments"]
+
+    assert list(environments) == ["staging", "prod"]
+    staging = environments["staging"]
+    prod = environments["prod"]
+    assert staging["namespace"] == staging["serviceMonitorName"] == "dspace"
+    assert staging["expectedTargetCount"] == 2
+    assert staging["secret"] == {"name": "dspace-staging-metrics-token", "key": "token"}
+    assert staging["serviceMonitor"]["authorization"] == {
+        "type": "Bearer",
+        "credentials": staging["secret"],
+    }
+    assert staging["serviceMonitor"]["path"] == "/metrics"
+    assert staging["serviceMonitor"]["interval"] == "30s"
+    assert staging["serviceMonitor"]["scrapeTimeout"] == "10s"
+    assert staging["retries"] == {"attempts": 6, "delaySeconds": 10}
+    assert staging["publicMetrics"] == {
+        "url": "https://staging.democratized.space/metrics",
+        "expectedUnauthenticatedStatus": 401,
+    }
+    assert staging["requiredMetricFamilies"] == app_metrics.DSPACE_REQUIRED_METRIC_FAMILIES
+    assert prod["requiredMetricFamilies"] == app_metrics.DSPACE_REQUIRED_METRIC_FAMILIES
+    for env, cluster in (("staging", "sugarkube-int"), ("prod", "sugarkube-prod")):
+        cfg = environments[env]
+        assert cfg["targetLabels"] == {
+            "app": "dspace",
+            "environment": env,
+            "release": "dspace",
+            "cluster": cluster,
+            "namespace": "dspace",
+        }
+        assert [rule["targetLabel"] for rule in cfg["serviceMonitor"]["relabelings"]] == [
+            "app", "environment", "namespace", "release", "cluster"
+        ]
+        assert cfg["allowedApplicationLabels"] == {
+            "app": ["dspace"],
+            "environment": [env],
+            "release": ["dspace"],
+            "cluster": [cluster],
+            **app_metrics.DSPACE_SOURCE_LABELS,
+        }
+
+
+@pytest.mark.parametrize("env", ["staging", "prod"])
+@pytest.mark.parametrize(
+    ("section", "field", "bad"),
+    [
+        ("secret", "name", "dspace-other-metrics-token"),
+        ("targetLabels", "cluster", "sugarkube-wrong"),
+        ("targetLabels", "environment", "wrong"),
+        ("publicMetrics", "url", "https://wrong.example/metrics"),
+    ],
+)
+def test_observability_app_metrics_rejects_dspace_environment_cross_contamination(
+    env, section, field, bad
+):
+    doc = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))
+    doc["applications"]["dspace"]["environments"][env][section][field] = bad
+    with pytest.raises(app_metrics.Error):
+        app_metrics.validate_inventory(doc)
+
+
+@pytest.mark.parametrize(
+    ("label", "bad"),
+    [
+        ("version", "3.1.2"),
+        ("revision", "018687f588f727935b153857c7cc4bba52b97cae"),
+        ("route", "*"),
+        ("route", "/chat"),
+        ("route", "other"),
+        ("provider", "token-place"),
+        ("outcome", "error"),
+        ("dependency", "anything"),
+    ],
+)
+@pytest.mark.parametrize("env", ["staging", "prod"])
+def test_observability_app_metrics_rejects_source_incompatible_dspace_labels(env, label, bad):
+    doc = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))
+    doc["applications"]["dspace"]["environments"][env]["allowedApplicationLabels"][
+        label
+    ].append(bad)
+    with pytest.raises(app_metrics.Error, match="immutable source contract"):
+        app_metrics.validate_inventory(doc)
+
+
+@pytest.mark.parametrize(
+    ("label", "bad"), [("provider", "[provider]"), ("outcome", "[outcome]")]
+)
+def test_observability_app_metrics_rejects_brackets_outside_routes(label, bad):
+    doc = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))
+    allowed = doc["applications"]["dspace"]["environments"]["staging"][
+        "allowedApplicationLabels"
+    ]
+    allowed[label].append(bad)
+
+    with pytest.raises(app_metrics.Error, match="unsafe characters"):
+        app_metrics.validate_inventory(doc)
+
+
 @pytest.mark.parametrize(
     "mutation",
     [
@@ -5896,7 +6018,6 @@ def test_observability_app_metrics_verifier_has_no_tokenplace_specific_branch():
     text = APP_METRICS_SCRIPT.read_text(encoding="utf-8")
     assert 'if app == "tokenplace"' not in text
     assert 'elif app == "tokenplace"' not in text
-    assert text.count("tokenplace") == 0
 
 
 def _tokenplace_chart_like_service_monitor(namespace_line: str = "") -> str:
@@ -6256,6 +6377,92 @@ def test_observability_app_metrics_verify_exercises_targets_metrics_and_public_4
     assert request.get_header("User-agent") == app_metrics.USER_AGENT
     assert app_metrics.USER_AGENT == "sugarkube-observability-verifier/1.0"
     assert timeout == 10
+
+
+def test_observability_app_metrics_verify_dspace_staging_contract(monkeypatch, capsys):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
+        "dspace"
+    ]["environments"]["staging"]
+    service_monitor = {
+        "spec": {
+            "selector": {"matchLabels": cfg["serviceMonitor"]["selectorMatchLabels"]},
+            "endpoints": [
+                {
+                    "path": "/metrics",
+                    "interval": "30s",
+                    "scrapeTimeout": "10s",
+                    "bearerTokenSecret": cfg["secret"],
+                    "relabelings": cfg["serviceMonitor"]["relabelings"],
+                }
+            ],
+        }
+    }
+    commands = []
+    queried_families = set()
+
+    def fake_kjson(args):
+        commands.append(args)
+        return service_monitor
+
+    def fake_prom(path):
+        if path == "/api/v1/targets":
+            target = {
+                "health": "up",
+                "scrapePool": "serviceMonitor/dspace/dspace/0",
+                "labels": cfg["targetLabels"],
+                "discoveredLabels": {},
+            }
+            return {"activeTargets": [target, dict(target)]}
+        metric = app_metrics.urllib.parse.unquote(path.rsplit("query=", 1)[-1]).split(
+            "{", 1
+        )[0]
+        if metric not in cfg["requiredMetricFamilies"]:
+            return {"resultType": "vector", "result": []}
+        queried_families.add(metric)
+        labels = {"__name__": metric}
+        if metric == "dspace_build_info":
+            labels.update(
+                version="3.1.1",
+                revision="22f506e07e0b5abfd0cf756e9c5827c0458fb4b2",
+            )
+        return {"resultType": "vector", "result": [{"metric": labels}]}
+
+    class Opener:
+        def open(self, request, timeout):
+            assert request.full_url == cfg["publicMetrics"]["url"]
+            assert timeout == 10
+            raise app_metrics.urllib.error.HTTPError(
+                request.full_url, 401, "unauthorized", {}, None
+            )
+
+    monkeypatch.setattr(app_metrics, "appcfg", lambda app, env: cfg)
+    monkeypatch.setattr(app_metrics, "assert_context", lambda: None)
+    monkeypatch.setattr(app_metrics, "check_secret", lambda cfg: None)
+    monkeypatch.setattr(app_metrics, "derive_build_labels_live", lambda cfg: {})
+    monkeypatch.setattr(app_metrics, "kjson", fake_kjson)
+    monkeypatch.setattr(app_metrics, "prom", fake_prom)
+    monkeypatch.setattr(
+        app_metrics.urllib.request, "build_opener", lambda *args: Opener()
+    )
+
+    app_metrics.verify("dspace", "staging")
+
+    assert queried_families == set(cfg["requiredMetricFamilies"])
+    assert commands == [
+        [
+            "kubectl",
+            "-n",
+            "dspace",
+            "get",
+            "servicemonitor",
+            "dspace",
+            "-o",
+            "json",
+        ]
+    ]
+    assert capsys.readouterr().out == (
+        "Application metrics verified for dspace env=staging.\n"
+    )
 
 
 def test_observability_app_metrics_public_403_remains_adverse_and_redacted(
@@ -6666,6 +6873,32 @@ def test_observability_app_metrics_check_secret_uses_redacted_contract(monkeypat
     assert not captured.err
 
 
+def test_observability_app_metrics_dspace_staging_secret_check_never_returns_value(
+    monkeypatch, capsys
+):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
+        "dspace"
+    ]["environments"]["staging"]
+    seen = []
+    monkeypatch.setattr(
+        app_metrics,
+        "run",
+        lambda args: seen.append(args) or "dspace\tdspace-staging-metrics-token\tnonempty",
+    )
+
+    app_metrics.check_secret(cfg)
+
+    command = seen[0]
+    assert command[:5] == ["kubectl", "-n", "dspace", "get", "secret"]
+    assert command[5] == "dspace-staging-metrics-token"
+    assert command[-2] == "--template"
+    assert 'index .data "token"' in command[-1]
+    assert "{{index .data" not in command[-1]
+    captured = capsys.readouterr()
+    assert "value was not returned" in captured.out
+    assert captured.err == ""
+
+
 @pytest.mark.parametrize(
     "output",
     [
@@ -6787,6 +7020,60 @@ def test_observability_app_metrics_verify_all_uses_every_configured_app(monkeypa
 
     assert app_metrics.main(["verify-all"]) == 0
     assert called == [("first", "staging"), ("second", "staging")]
+
+
+def test_observability_app_metrics_staging_verify_all_discovers_tokenplace_and_dspace(monkeypatch):
+    called = []
+    monkeypatch.setattr(app_metrics, "verify", lambda app, env: called.append((app, env)))
+
+    assert app_metrics.main(["verify-all", "--env", "staging"]) == 0
+    assert set(called) == {("tokenplace", "staging"), ("dspace", "staging")}
+
+
+@pytest.mark.parametrize("env", ["staging", "prod"])
+def test_observability_app_metrics_dspace_build_info_labels_are_bounded(env):
+    doc = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))
+    cfg = doc["applications"]["dspace"]["environments"][env]
+
+    app_metrics.validate_metric_labels(
+        cfg,
+        {
+            "__name__": "dspace_build_info",
+            "version": "3.1.1",
+            "revision": "22f506e07e0b5abfd0cf756e9c5827c0458fb4b2",
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    "labels",
+    [
+        {
+            "__name__": "dspace_build_info",
+            "revision": "22f506e07e0b5abfd0cf756e9c5827c0458fb4b2",
+        },
+        {"__name__": "dspace_build_info", "version": "3.1.1"},
+        {
+            "__name__": "dspace_build_info",
+            "version": "3.1.2",
+            "revision": "22f506e07e0b5abfd0cf756e9c5827c0458fb4b2",
+        },
+        {
+            "__name__": "dspace_build_info",
+            "version": "3.1.1",
+            "revision": "wrong",
+        },
+    ],
+)
+def test_observability_app_metrics_dspace_build_info_rejects_wrong_or_missing_identity(
+    labels,
+):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
+        "dspace"
+    ]["environments"]["staging"]
+
+    with pytest.raises(app_metrics.Error, match="build identity label mismatch"):
+        app_metrics.validate_metric_labels(cfg, labels)
 
 
 def test_observability_app_metrics_live_environment_normalization_and_rejection(monkeypatch):

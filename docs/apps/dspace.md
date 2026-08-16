@@ -18,6 +18,21 @@ python3 scripts/dspace_promotion_plan.py \
 
 The independently generated artifact report must prove the exact image digest, Linux/ARM64 availability, OCI source revision, chart name/version/application version, OCI manifest digest, source revision, and release tags. It also records and binds the distinct chart-layer/archive digest to those reviewed target coordinates. The source report lists exactly the six privacy-safe `dspace_*` definitions and states that it contains no raw metrics. The classifier report is bounded: two healthy targets, zero scrape errors, public `401`, Secret existence without reading its value, two samples for each named default Node family, zero samples for every required application family, the established classification, and `clusterMutationPerformed=false`. Unknown fields (including Secret values or raw payloads), partial families, unhealthy targets, and mutation claims fail closed.
 
+Before creating the DSPACE 3.1.1 staging candidate, run all repository-owned read-only
+authenticated metrics prerequisites against staging. These commands check that the existing Secret
+and key are selected without returning the Secret value, verify the DSPACE contract directly, and
+then discover and verify every application configured for staging:
+
+```bash
+just observability-app-metrics-secret-check app=dspace env=staging
+just observability-app-metrics-verify app=dspace env=staging
+just observability-verify env=staging
+```
+
+All three checks must pass before candidate creation is considered. They do not create a candidate,
+approve a release, mutate either cluster, or authorize deployment; candidate creation and deployment
+remain separate, explicitly authorized future operations.
+
 The planner independently validates the preserved failed reconciliation against the reviewed 3.0.1 maintenance tuple. It recognizes finalized application 3.1.0/chart 3.1.1 staging evidence only as historical and emits `historicalStagingEvidenceAuthorizesTarget=false`. It renders staging and eventual production locally only after verifying the local archive bytes against the artifact report's validated archive digest, never against the distinct OCI manifest digest, with two replicas, `image.pullPolicy=Always`, and `main-22f506e`. It rejects rendered Secrets, staging values in production, semantic image tags, and `--reuse-values`. Its sanitized JSON contains no credentials or raw metrics and an empty `mutationCommands` list. It never runs Helm upgrade, kubectl, rollout, Secret mutation, artifact publication, approval creation, or evidence finalization.
 
 ### Required future sequence

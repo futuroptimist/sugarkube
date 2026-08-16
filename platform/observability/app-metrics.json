@@ -191,6 +191,178 @@
     },
     "dspace": {
       "environments": {
+        "staging": {
+          "namespace": "dspace",
+          "serviceMonitorName": "dspace",
+          "expectedTargetCount": 2,
+          "secret": {
+            "name": "dspace-staging-metrics-token",
+            "key": "token"
+          },
+          "serviceMonitor": {
+            "selectorMatchLabels": {
+              "app.kubernetes.io/instance": "dspace",
+              "app.kubernetes.io/name": "dspace"
+            },
+            "path": "/metrics",
+            "interval": "30s",
+            "scrapeTimeout": "10s",
+            "authorization": {
+              "type": "Bearer",
+              "credentials": {
+                "name": "dspace-staging-metrics-token",
+                "key": "token"
+              }
+            },
+            "relabelings": [
+              {
+                "action": "replace",
+                "targetLabel": "app",
+                "replacement": "dspace"
+              },
+              {
+                "action": "replace",
+                "targetLabel": "environment",
+                "replacement": "staging"
+              },
+              {
+                "action": "replace",
+                "targetLabel": "namespace",
+                "replacement": "dspace"
+              },
+              {
+                "action": "replace",
+                "targetLabel": "release",
+                "replacement": "dspace"
+              },
+              {
+                "action": "replace",
+                "targetLabel": "cluster",
+                "replacement": "sugarkube-int"
+              }
+            ]
+          },
+          "targetLabels": {
+            "app": "dspace",
+            "environment": "staging",
+            "release": "dspace",
+            "cluster": "sugarkube-int",
+            "namespace": "dspace"
+          },
+          "publicMetrics": {
+            "url": "https://staging.democratized.space/metrics",
+            "expectedUnauthenticatedStatus": 401
+          },
+          "retries": {
+            "attempts": 6,
+            "delaySeconds": 10
+          },
+          "requiredMetricFamilies": [
+            "dspace_http_requests_total",
+            "dspace_http_request_duration_seconds_bucket",
+            "dspace_dchat_requests_total",
+            "dspace_dependency_requests_total",
+            "dspace_instrumentation_up",
+            "dspace_build_info"
+          ],
+          "allowedApplicationLabels": {
+            "app": [
+              "dspace"
+            ],
+            "environment": [
+              "staging"
+            ],
+            "release": [
+              "dspace"
+            ],
+            "cluster": [
+              "sugarkube-int"
+            ],
+            "version": [
+              "3.1.1"
+            ],
+            "revision": [
+              "22f506e07e0b5abfd0cf756e9c5827c0458fb4b2"
+            ],
+            "method": [
+              "GET",
+              "HEAD",
+              "POST",
+              "PUT",
+              "PATCH",
+              "DELETE",
+              "OPTIONS",
+              "UNKNOWN"
+            ],
+            "route": [
+              "/metrics",
+              "/api/chat",
+              "/",
+              "/health",
+              "/healthz",
+              "/livez",
+              "/config.json",
+              "/cache-version.js",
+              "/service-worker.js",
+              "/_astro/*",
+              "/assets/*",
+              "/docs/[slug]",
+              "/inventory/item/[itemId]/edit",
+              "/inventory/item/[itemId]",
+              "/processes/[processId]",
+              "/process/[slug]",
+              "/quests/[pathId]/[questId]",
+              "/unknown"
+            ],
+            "status_class": [
+              "2xx",
+              "4xx",
+              "5xx",
+              "unknown"
+            ],
+            "provider": [
+              "tokenplace",
+              "openai",
+              "none",
+              "unknown"
+            ],
+            "dependency": [
+              "tokenplace",
+              "openai",
+              "unknown"
+            ],
+            "outcome": [
+              "success",
+              "timeout",
+              "rate_limited",
+              "validation_error",
+              "malformed_response",
+              "dependency_failure",
+              "server_error",
+              "fallback_used",
+              "fallback_unavailable",
+              "unknown_error"
+            ]
+          },
+          "derivedApplicationLabels": {},
+          "forbiddenApplicationLabels": [
+            "authorization",
+            "bearer",
+            "cookie",
+            "email",
+            "hostname",
+            "jwt",
+            "node",
+            "passwd",
+            "passcode",
+            "remote_addr",
+            "secret",
+            "session",
+            "token",
+            "url",
+            "user"
+          ]
+        },
         "prod": {
           "namespace": "dspace",
           "serviceMonitorName": "dspace",
@@ -278,49 +450,70 @@
             "cluster": [
               "sugarkube-prod"
             ],
+            "version": [
+              "3.1.1"
+            ],
+            "revision": [
+              "22f506e07e0b5abfd0cf756e9c5827c0458fb4b2"
+            ],
             "method": [
               "GET",
+              "HEAD",
               "POST",
               "PUT",
               "PATCH",
               "DELETE",
               "OPTIONS",
-              "HEAD",
-              "other"
+              "UNKNOWN"
             ],
             "route": [
-              "/",
               "/metrics",
+              "/api/chat",
+              "/",
               "/health",
               "/healthz",
-              "/build-info.json",
-              "/chat",
-              "other"
+              "/livez",
+              "/config.json",
+              "/cache-version.js",
+              "/service-worker.js",
+              "/_astro/*",
+              "/assets/*",
+              "/docs/[slug]",
+              "/inventory/item/[itemId]/edit",
+              "/inventory/item/[itemId]",
+              "/processes/[processId]",
+              "/process/[slug]",
+              "/quests/[pathId]/[questId]",
+              "/unknown"
             ],
             "status_class": [
-              "1xx",
               "2xx",
-              "3xx",
               "4xx",
               "5xx",
               "unknown"
             ],
             "provider": [
+              "tokenplace",
               "openai",
-              "token-place",
+              "none",
               "unknown"
             ],
             "dependency": [
+              "tokenplace",
               "openai",
-              "token-place",
               "unknown"
             ],
             "outcome": [
               "success",
-              "error",
               "timeout",
               "rate_limited",
-              "unknown"
+              "validation_error",
+              "malformed_response",
+              "dependency_failure",
+              "server_error",
+              "fallback_used",
+              "fallback_unavailable",
+              "unknown_error"
             ]
           },
           "derivedApplicationLabels": {},

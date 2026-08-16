@@ -11,6 +11,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.app_config import load_config  # noqa: E402
 from scripts.app_chart import contains_exact_scalar, merged_values_document  # noqa: E402
+from scripts.observability_app_metrics import load_config as load_metrics_config  # noqa: E402
 
 OVERLAYS = {
     "staging": REPO_ROOT / "docs/examples/dspace.values.staging.yaml",
@@ -166,6 +167,26 @@ def test_dspace_staging_values_enable_authenticated_metrics_servicemonitor() -> 
     assert "serviceMonitor:\n  enabled: true" in text
     assert "release: kube-prometheus-stack" in text
     assert "cluster: sugarkube-int" in text
+
+
+def test_dspace_staging_values_exactly_match_authenticated_metrics_inventory() -> None:
+    values = merged_values_document((str(OVERLAYS["staging"]),))
+    cfg = load_metrics_config()["applications"]["dspace"]["environments"]["staging"]
+
+    assert values["metrics"] == {
+        "enabled": True,
+        "auth": {
+            "existingSecret": cfg["secret"]["name"],
+            "secretKey": cfg["secret"]["key"],
+        },
+    }
+    assert values["serviceMonitor"] == {
+        "enabled": True,
+        "interval": cfg["serviceMonitor"]["interval"],
+        "scrapeTimeout": cfg["serviceMonitor"]["scrapeTimeout"],
+        "additionalLabels": {"release": "kube-prometheus-stack"},
+        "cluster": cfg["targetLabels"]["cluster"],
+    }
 
 
 def test_dspace_prod_values_enable_authenticated_metrics_without_a_credential() -> None:
