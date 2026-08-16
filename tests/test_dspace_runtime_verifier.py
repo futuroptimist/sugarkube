@@ -1647,6 +1647,21 @@ def test_modern_identity_accepts_exact_dspace_311_payload() -> None:
     )
 
 
+def test_modern_identity_rejects_null_image_without_leaking() -> None:
+    payload = json.loads(modern_payload())
+    payload["image"] = None
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.identity(
+            json.dumps(payload).encode(),
+            "3.1.0",
+            SHA,
+            "ghcr.io/democratizedspace/dspace:main-abcdef0",
+            "direct identity",
+        )
+    assert str(raised.value) == "direct identity"
+    assert SENTINEL not in str(raised.value)
+
+
 @pytest.mark.parametrize(
     "timestamp",
     [
