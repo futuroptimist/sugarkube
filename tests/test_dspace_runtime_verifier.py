@@ -1583,6 +1583,8 @@ def test_modern_identity_accepts_canonical_timestamp(timestamp: str) -> None:
         "2026-08-01T12:00:00.1Z",
         "2026-08-01T12:00:00.1234Z",
         "2026-08-01t12:00:00Z",
+        "2026-08-01T24:00:00Z",
+        "2026-08-01T24:00:00.000Z",
     ],
     ids=(
         "empty",
@@ -1595,6 +1597,8 @@ def test_modern_identity_accepts_canonical_timestamp(timestamp: str) -> None:
         "one-fractional-digit",
         "four-fractional-digits",
         "parseable-noncanonical",
+        "next-day-seconds",
+        "next-day-milliseconds",
     ),
 )
 def test_modern_identity_rejects_invalid_timestamp_without_leaking(timestamp: object) -> None:
