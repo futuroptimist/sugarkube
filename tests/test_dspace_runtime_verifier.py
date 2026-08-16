@@ -12,6 +12,25 @@ SHA = "abcdef0123456789abcdef0123456789abcdef01"
 DIGEST = "sha256:" + "1" * 64
 SENTINEL = "SENTINEL_SECRET"
 RECOVERY_SHA = "1a31a569aff2dbeb238e8c2688b9e85140d2077d"
+BUILD_TIMESTAMP = "2026-08-15T19:38:47.123Z"
+
+
+def modern_payload(
+    *,
+    version: str = "3.1.0",
+    revision: str = SHA,
+    image: str = "ghcr.io/democratizedspace/dspace:main-abcdef0",
+    timestamp: object = BUILD_TIMESTAMP,
+) -> str:
+    return json.dumps(
+        {
+            "version": version,
+            "revision": revision,
+            "shortRevision": revision[:7],
+            "buildTimestamp": timestamp,
+            "image": image,
+        }
+    )
 
 
 def manifest(tmp_path: Path, provider: str = "token-place") -> Path:
@@ -122,9 +141,7 @@ def _verify_setup(
     smoke = tmp_path / "smoke"
     smoke.write_text("#!/bin/sh\nexit 0\n")
     smoke.chmod(0o700)
-    coordinates = (
-        verifier.LEGACY_310_COORDINATES if legacy_310 else verifier.LEGACY_303_COORDINATES
-    )
+    coordinates = verifier.LEGACY_310_COORDINATES if legacy_310 else verifier.LEGACY_303_COORDINATES
     is_legacy = legacy or legacy_310
     revision = str(coordinates["sourceRevision"]) if is_legacy else SHA
     digest = str(coordinates["imageDigest"]) if is_legacy else DIGEST
@@ -135,13 +152,10 @@ def _verify_setup(
     declared = f"{canonical}@{digest}" if rollback else canonical
 
     def build(image: str = canonical, revision: str = SHA) -> str:
-        return json.dumps(
-            {
-                "version": version,
-                "revision": revision,
-                "shortRevision": revision[:7],
-                "image": image,
-            }
+        return modern_payload(
+            version=version,
+            revision=revision,
+            image=image,
         )
 
     pods = []
@@ -697,10 +711,7 @@ def test_exact_recovery_uses_legacy_contract_and_truthful_journeys(
     ids=["chart-3.0.2", "chart-3.0.3"],
 )
 def test_exact_recovery_coordinates_use_legacy_contract(coordinates: dict[str, object]) -> None:
-    assert (
-        verifier.identity_contract(dict(coordinates))
-        == verifier.LEGACY_IDENTITY_CONTRACT
-    )
+    assert verifier.identity_contract(dict(coordinates)) == verifier.LEGACY_IDENTITY_CONTRACT
 
 
 def test_exact_310_token_place_uses_legacy_contract_and_truthful_journeys(
@@ -972,6 +983,35 @@ def test_310_legacy_metadata_failures_remain_rejected(
     ids=("public-marker", "direct-marker", "public-json", "direct-json"),
 )
 def test_verify_redacts_failed_http_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    overrides: dict[str, object],
+    category: str,
+) -> None:
+    args, _ = _verify_setup(monkeypatch, tmp_path, overrides=overrides)
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.verify(args)
+    assert str(raised.value) == category
+    captured = capsys.readouterr()
+    assert SENTINEL not in str(raised.value) + captured.out + captured.err
+
+
+@pytest.mark.parametrize(
+    "overrides,category",
+    [
+        (
+            {"direct_builds": {"dspace-2": modern_payload(timestamp="2026-08-15T19:38:48Z")}},
+            "pod/replica identity",
+        ),
+        (
+            {"public_build": modern_payload(timestamp="2026-08-15T19:38:48Z")},
+            "public identity",
+        ),
+    ],
+    ids=("direct-replicas", "direct-public"),
+)
+def test_modern_build_timestamps_must_agree_without_leaking(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -1502,14 +1542,39 @@ def test_deployment_requires_matching_helm_annotations(annotation: str, value: s
 @pytest.mark.parametrize(
     "payload,category",
     [
-        ({"version": "wrong", "revision": SHA, "shortRevision": "abcdef0"}, "public identity"),
-        ({"version": "3.1.0", "revision": "wrong", "shortRevision": "abcdef0"}, "public identity"),
-        ({"version": "3.1.0", "revision": SHA, "shortRevision": "wrong"}, "public identity"),
+        (
+            {
+                "version": "wrong",
+                "revision": SHA,
+                "shortRevision": "abcdef0",
+                "buildTimestamp": BUILD_TIMESTAMP,
+            },
+            "public identity",
+        ),
+        (
+            {
+                "version": "3.1.0",
+                "revision": "wrong",
+                "shortRevision": "abcdef0",
+                "buildTimestamp": BUILD_TIMESTAMP,
+            },
+            "public identity",
+        ),
+        (
+            {
+                "version": "3.1.0",
+                "revision": SHA,
+                "shortRevision": "wrong",
+                "buildTimestamp": BUILD_TIMESTAMP,
+            },
+            "public identity",
+        ),
         (
             {
                 "version": "3.1.0",
                 "revision": SHA,
                 "shortRevision": "abcdef0",
+                "buildTimestamp": BUILD_TIMESTAMP,
                 "image": f"ghcr.io/democratizedspace/dspace:main-abcdef0@{DIGEST}",
             },
             "public identity",
@@ -1547,6 +1612,85 @@ def test_command_success_and_nonzero_failure_are_bounded(monkeypatch: pytest.Mon
     with pytest.raises(verifier.VerificationError) as raised:
         verifier.command(["kubectl", SENTINEL])
     assert str(raised.value) == "cluster identity"
+    assert SENTINEL not in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    "timestamp",
+    ["2026-08-15T19:38:47Z", "2026-08-15T19:38:47.123Z"],
+    ids=("seconds", "milliseconds"),
+)
+def test_modern_identity_accepts_canonical_utc_build_timestamp(timestamp: str) -> None:
+    payload = modern_payload(timestamp=timestamp)
+    assert verifier.identity(
+        payload.encode(),
+        "3.1.0",
+        SHA,
+        "ghcr.io/democratizedspace/dspace:main-abcdef0",
+        "direct identity",
+    ) == (
+        "3.1.0",
+        SHA,
+        "ghcr.io/democratizedspace/dspace:main-abcdef0",
+        timestamp,
+    )
+
+
+def test_modern_identity_accepts_exact_dspace_311_payload() -> None:
+    revision = "22f506e07e0b5abfd0cf756e9c5827c0458fb4b2"
+    image = "ghcr.io/democratizedspace/dspace:main-22f506e"
+    payload = modern_payload(
+        version="3.1.1", revision=revision, image=image, timestamp="2026-08-15T19:38:47.123Z"
+    )
+    assert verifier.identity(payload.encode(), "3.1.1", revision, image, "direct identity")[-1] == (
+        "2026-08-15T19:38:47.123Z"
+    )
+
+
+@pytest.mark.parametrize(
+    "timestamp",
+    [
+        None,
+        "",
+        1723750727,
+        "2026-08-15T19:38:47.123Z" + "x" * 20,
+        "2026-08-15T19:38:47Z\n" + SENTINEL,
+        "2026-02-30T19:38:47Z",
+        "2026-08-15T19:38:47+00:00",
+        "2026-08-15T19:38:47-04:00",
+        "2026-08-15T19:38:47.1Z",
+        "2026-08-15T19:38:47.1234Z",
+    ],
+    ids=(
+        "missing",
+        "empty",
+        "non-string",
+        "overlong",
+        "control-character",
+        "impossible-date",
+        "offset-utc",
+        "non-utc",
+        "short-fraction",
+        "long-fraction",
+    ),
+)
+def test_modern_identity_rejects_invalid_build_timestamp_without_leaking(
+    timestamp: object,
+) -> None:
+    payload = json.loads(modern_payload())
+    if timestamp is None:
+        del payload["buildTimestamp"]
+    else:
+        payload["buildTimestamp"] = timestamp
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.identity(
+            json.dumps(payload).encode(),
+            "3.1.0",
+            SHA,
+            "ghcr.io/democratizedspace/dspace:main-abcdef0",
+            "direct identity",
+        )
+    assert str(raised.value) == "direct identity"
     assert SENTINEL not in str(raised.value)
 
 
@@ -1609,7 +1753,13 @@ def test_fetch_success_and_network_failures_are_bounded(
         (
             lambda: verifier.identity(
                 json.dumps(
-                    {"version": "v", "revision": SHA, "shortRevision": SHA[:7], "extra": SENTINEL}
+                    {
+                        "version": "v",
+                        "revision": SHA,
+                        "shortRevision": SHA[:7],
+                        "buildTimestamp": BUILD_TIMESTAMP,
+                        "extra": SENTINEL,
+                    }
                 ).encode(),
                 "v",
                 SHA,
