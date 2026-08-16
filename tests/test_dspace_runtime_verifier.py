@@ -1145,7 +1145,14 @@ def test_verify_fails_closed_for_any_bad_replica_or_image(
 def test_verify_rejects_mixed_replica_and_public_direct_identity(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    mismatched = json.dumps({"version": "3.1.0", "revision": "f" * 40, "shortRevision": "fffffff"})
+    mismatched = json.dumps(
+        {
+            "version": "3.1.0",
+            "revision": "f" * 40,
+            "shortRevision": "fffffff",
+            "buildTimestamp": BUILD_TIMESTAMP,
+        }
+    )
     args, _ = _verify_setup(
         monkeypatch,
         tmp_path,
@@ -1161,7 +1168,9 @@ def test_verify_rejects_mixed_replica_and_public_direct_identity(
         raw: bytes, version: str, revision: str, image: str, category: str
     ):  # noqa: ANN202
         value = real_identity(raw, version, revision, image, category)
-        return (value[0], value[1], "different") if category == "public identity" else value
+        return (
+            (value[0], value[1], "different", value[3]) if category == "public identity" else value
+        )
 
     monkeypatch.setattr(verifier, "identity", disagree)
     with pytest.raises(verifier.VerificationError, match="public identity"):
@@ -1642,8 +1651,28 @@ def test_modern_identity_accepts_exact_dspace_311_payload() -> None:
     payload = modern_payload(
         version="3.1.1", revision=revision, image=image, timestamp="2026-08-15T19:38:47.123Z"
     )
-    assert verifier.identity(payload.encode(), "3.1.1", revision, image, "direct identity")[-1] == (
-        "2026-08-15T19:38:47.123Z"
+    assert verifier.identity(payload.encode(), "3.1.1", revision, image, "direct identity") == (
+        "3.1.1",
+        revision,
+        image,
+        "2026-08-15T19:38:47.123Z",
+    )
+
+
+def test_modern_identity_accepts_omitted_image() -> None:
+    payload = json.loads(modern_payload())
+    del payload["image"]
+    assert verifier.identity(
+        json.dumps(payload).encode(),
+        "3.1.0",
+        SHA,
+        "ghcr.io/democratizedspace/dspace:main-abcdef0",
+        "direct identity",
+    ) == (
+        "3.1.0",
+        SHA,
+        "ghcr.io/democratizedspace/dspace:main-abcdef0",
+        BUILD_TIMESTAMP,
     )
 
 
@@ -1660,6 +1689,37 @@ def test_modern_identity_rejects_null_image_without_leaking() -> None:
         )
     assert str(raised.value) == "direct identity"
     assert SENTINEL not in str(raised.value)
+
+
+def test_modern_identity_rejects_mismatched_image_without_leaking(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    payload = json.loads(modern_payload())
+    payload["image"] = SENTINEL
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.identity(
+            json.dumps(payload).encode(),
+            "3.1.0",
+            SHA,
+            "ghcr.io/democratizedspace/dspace:main-abcdef0",
+            "direct identity",
+        )
+    assert str(raised.value) == "direct identity"
+    captured = capsys.readouterr()
+    assert SENTINEL not in str(raised.value) + captured.out + captured.err
+
+
+def test_modern_image_validation_does_not_change_legacy_identity() -> None:
+    generated_at = "2026-08-01T12:00:00Z"
+    source = "dspace"
+    payload = json.dumps(
+        {"gitSha": RECOVERY_SHA, "generatedAt": generated_at, "source": source}
+    ).encode()
+    assert verifier.legacy_identity(payload, RECOVERY_SHA, "direct identity") == (
+        RECOVERY_SHA,
+        generated_at,
+        source,
+    )
 
 
 @pytest.mark.parametrize(
