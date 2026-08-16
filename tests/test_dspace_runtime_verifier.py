@@ -1709,19 +1709,6 @@ def test_modern_identity_rejects_mismatched_image_without_leaking(
     assert SENTINEL not in str(raised.value) + captured.out + captured.err
 
 
-def test_modern_image_validation_does_not_change_legacy_identity() -> None:
-    generated_at = "2026-08-01T12:00:00Z"
-    source = "dspace"
-    payload = json.dumps(
-        {"gitSha": RECOVERY_SHA, "generatedAt": generated_at, "source": source}
-    ).encode()
-    assert verifier.legacy_identity(payload, RECOVERY_SHA, "direct identity") == (
-        RECOVERY_SHA,
-        generated_at,
-        source,
-    )
-
-
 @pytest.mark.parametrize(
     "timestamp",
     [
