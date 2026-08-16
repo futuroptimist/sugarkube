@@ -43,7 +43,7 @@ RESULT_FIELDS = (
     "defaultProvider",
     "journeys",
 )
-BUILD_FIELDS = {"version", "revision", "shortRevision", "image"}
+BUILD_FIELDS = {"version", "revision", "shortRevision", "buildTimestamp", "image"}
 LEGACY_BUILD_FIELDS = {"gitSha", "generatedAt", "source"}
 MODERN_IDENTITY_CONTRACT = "build-info-v1"
 LEGACY_IDENTITY_CONTRACT = "legacy-build-meta-v1"
@@ -87,6 +87,9 @@ META_RE = re.compile(
     re.IGNORECASE,
 )
 IMAGE_ID_RE = re.compile(r"sha256:[0-9a-f]{64}$")
+BUILD_TIMESTAMP_RE = re.compile(
+    r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{3})?Z$"
+)
 HTML_DOCUMENT_RE = re.compile(r"^\s*(?:<!doctype\s+html\b|<html\b)", re.IGNORECASE)
 PUBLIC_HTTP_USER_AGENT = "sugarkube-dspace-runtime-verifier/1.0"
 POD_SETTLE_TIMEOUT_SECONDS = 60.0
@@ -218,7 +221,7 @@ def fetch(url: str, public_origin: tuple[str, str] | None = None) -> bytes:
 
 def identity(
     raw: bytes, version: str, revision: str, image: str, category: str
-) -> tuple[str, str, str]:
+) -> tuple[str, str, str, str]:
     if len(raw) > 1024 * 1024:
         fail(category)
     try:
@@ -226,6 +229,20 @@ def identity(
     except (UnicodeDecodeError, json.JSONDecodeError):
         fail(category)
     if not isinstance(value, dict) or set(value) - BUILD_FIELDS:
+        fail(category)
+    timestamp = value.get("buildTimestamp")
+    if (
+        not isinstance(timestamp, str)
+        or not timestamp
+        or len(timestamp) > 40
+        or BUILD_TIMESTAMP_RE.fullmatch(timestamp) is None
+    ):
+        fail(category)
+    try:
+        datetime.strptime(
+            timestamp, "%Y-%m-%dT%H:%M:%S.%fZ" if "." in timestamp else "%Y-%m-%dT%H:%M:%SZ"
+        )
+    except ValueError:
         fail(category)
     if (
         value.get("version") != version
@@ -236,7 +253,7 @@ def identity(
     runtime_image = value.get("image")
     if runtime_image is not None and runtime_image != image:
         fail(category)
-    return version, revision, runtime_image or image
+    return version, revision, runtime_image or image, timestamp
 
 
 def marker(raw: bytes, revision: str, category: str) -> None:
