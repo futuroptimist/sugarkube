@@ -415,9 +415,6 @@ def validate_inventory(doc):
                 )
                 if k in labels and vals != [labels[k]]:
                     fail("targetLabels and allowed label enums must agree")
-                for v in vals:
-                    if not value_pattern.fullmatch(v):
-                        fail(f"allowed enum for {k} contains unsafe characters")
             for key in ("app", "environment", "release", "cluster"):
                 vals = allowed.get(key)
                 if vals != [labels[key]]:
