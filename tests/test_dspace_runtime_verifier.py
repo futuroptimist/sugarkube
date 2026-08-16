@@ -12,6 +12,7 @@ SHA = "abcdef0123456789abcdef0123456789abcdef01"
 DIGEST = "sha256:" + "1" * 64
 SENTINEL = "SENTINEL_SECRET"
 RECOVERY_SHA = "1a31a569aff2dbeb238e8c2688b9e85140d2077d"
+BUILD_TIMESTAMP = "2026-08-01T12:00:00.123Z"
 
 
 def manifest(tmp_path: Path, provider: str = "token-place") -> Path:
@@ -140,6 +141,7 @@ def _verify_setup(
                 "version": version,
                 "revision": revision,
                 "shortRevision": revision[:7],
+                "buildTimestamp": BUILD_TIMESTAMP,
                 "image": image,
             }
         )
@@ -1105,7 +1107,14 @@ def test_verify_fails_closed_for_any_bad_replica_or_image(
 def test_verify_rejects_mixed_replica_and_public_direct_identity(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    mismatched = json.dumps({"version": "3.1.0", "revision": "f" * 40, "shortRevision": "fffffff"})
+    mismatched = json.dumps(
+        {
+            "version": "3.1.0",
+            "revision": "f" * 40,
+            "shortRevision": "fffffff",
+            "buildTimestamp": BUILD_TIMESTAMP,
+        }
+    )
     args, _ = _verify_setup(
         monkeypatch,
         tmp_path,
@@ -1121,7 +1130,7 @@ def test_verify_rejects_mixed_replica_and_public_direct_identity(
         raw: bytes, version: str, revision: str, image: str, category: str
     ):  # noqa: ANN202
         value = real_identity(raw, version, revision, image, category)
-        return (value[0], value[1], "different") if category == "public identity" else value
+        return (*value[:3], "2026-08-02T12:00:00Z") if category == "public identity" else value
 
     monkeypatch.setattr(verifier, "identity", disagree)
     with pytest.raises(verifier.VerificationError, match="public identity"):
@@ -1502,14 +1511,39 @@ def test_deployment_requires_matching_helm_annotations(annotation: str, value: s
 @pytest.mark.parametrize(
     "payload,category",
     [
-        ({"version": "wrong", "revision": SHA, "shortRevision": "abcdef0"}, "public identity"),
-        ({"version": "3.1.0", "revision": "wrong", "shortRevision": "abcdef0"}, "public identity"),
-        ({"version": "3.1.0", "revision": SHA, "shortRevision": "wrong"}, "public identity"),
+        (
+            {
+                "version": "wrong",
+                "revision": SHA,
+                "shortRevision": "abcdef0",
+                "buildTimestamp": BUILD_TIMESTAMP,
+            },
+            "public identity",
+        ),
+        (
+            {
+                "version": "3.1.0",
+                "revision": "wrong",
+                "shortRevision": "abcdef0",
+                "buildTimestamp": BUILD_TIMESTAMP,
+            },
+            "public identity",
+        ),
+        (
+            {
+                "version": "3.1.0",
+                "revision": SHA,
+                "shortRevision": "wrong",
+                "buildTimestamp": BUILD_TIMESTAMP,
+            },
+            "public identity",
+        ),
         (
             {
                 "version": "3.1.0",
                 "revision": SHA,
                 "shortRevision": "abcdef0",
+                "buildTimestamp": BUILD_TIMESTAMP,
                 "image": f"ghcr.io/democratizedspace/dspace:main-abcdef0@{DIGEST}",
             },
             "public identity",
@@ -1527,6 +1561,133 @@ def test_build_identity_requires_canonical_coordinates(
             "ghcr.io/democratizedspace/dspace:main-abcdef0",
             category,
         )
+
+
+def _modern_identity_payload(**changes: object) -> dict[str, object]:
+    return {
+        "version": "3.1.0",
+        "revision": SHA,
+        "shortRevision": SHA[:7],
+        "buildTimestamp": BUILD_TIMESTAMP,
+        **changes,
+    }
+
+
+@pytest.mark.parametrize(
+    "timestamp",
+    ["2026-08-01T12:00:00Z", BUILD_TIMESTAMP],
+    ids=("seconds", "milliseconds"),
+)
+@pytest.mark.parametrize("include_image", [False, True], ids=("without-image", "with-image"))
+def test_modern_identity_accepts_canonical_timestamps_and_optional_image(
+    timestamp: str, include_image: bool
+) -> None:
+    image = "ghcr.io/democratizedspace/dspace:main-abcdef0"
+    payload = _modern_identity_payload(buildTimestamp=timestamp)
+    if include_image:
+        payload["image"] = image
+
+    assert verifier.identity(
+        json.dumps(payload).encode(), "3.1.0", SHA, image, "direct identity"
+    ) == ("3.1.0", SHA, image, timestamp)
+
+
+@pytest.mark.parametrize(
+    "timestamp",
+    [
+        "",
+        123,
+        "2026-08-01T12:00:00Z" + "x" * 21,
+        "2026-08-01T12:00:00Z\n",
+        "2026-02-30T12:00:00Z",
+        "2026-08-01T12:00:00",
+        "2026-08-01T12:00:00+00:00",
+        "2026-08-01T12:00:00.1Z",
+        "2026-08-01T12:00:00.1234Z",
+        "2026-08-01T24:00:00Z",
+    ],
+    ids=(
+        "empty",
+        "nonstring",
+        "oversized",
+        "control-character",
+        "malformed-calendar",
+        "timezone-naive",
+        "non-utc-offset",
+        "one-fractional-digit",
+        "four-fractional-digits",
+        "parseable-noncanonical",
+    ),
+)
+def test_modern_identity_rejects_invalid_timestamp_without_leaking(timestamp: object) -> None:
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.identity(
+            json.dumps(_modern_identity_payload(buildTimestamp=timestamp)).encode(),
+            "3.1.0",
+            SHA,
+            "ghcr.io/democratizedspace/dspace:main-abcdef0",
+            "direct identity",
+        )
+    assert str(raised.value) == "direct identity"
+    if timestamp:
+        assert str(timestamp) not in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"version": "3.1.0", "revision": SHA, "shortRevision": SHA[:7]},
+        _modern_identity_payload(extra=SENTINEL),
+    ],
+    ids=("missing-timestamp", "unexpected-field"),
+)
+def test_modern_identity_requires_exact_base_fields(payload: dict[str, object]) -> None:
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.identity(
+            json.dumps(payload).encode(),
+            "3.1.0",
+            SHA,
+            "ghcr.io/democratizedspace/dspace:main-abcdef0",
+            "public identity",
+        )
+    assert str(raised.value) == "public identity"
+    assert SENTINEL not in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    "overrides,category",
+    [
+        (
+            {
+                "direct_builds": {
+                    "dspace-2": json.dumps(
+                        _modern_identity_payload(buildTimestamp="2026-08-02T12:00:00Z")
+                    )
+                }
+            },
+            "pod/replica identity",
+        ),
+        (
+            {
+                "public_build": json.dumps(
+                    _modern_identity_payload(buildTimestamp="2026-08-02T12:00:00Z")
+                )
+            },
+            "public identity",
+        ),
+    ],
+    ids=("replica-timestamp", "public-timestamp"),
+)
+def test_verify_rejects_modern_timestamp_disagreement(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    overrides: dict[str, object],
+    category: str,
+) -> None:
+    args, _ = _verify_setup(monkeypatch, tmp_path, overrides=overrides)
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.verify(args)
+    assert str(raised.value) == category
 
 
 def test_command_success_and_nonzero_failure_are_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
