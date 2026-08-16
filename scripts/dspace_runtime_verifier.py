@@ -43,7 +43,11 @@ RESULT_FIELDS = (
     "defaultProvider",
     "journeys",
 )
-BUILD_FIELDS = {"version", "revision", "shortRevision", "image"}
+BUILD_REQUIRED_FIELDS = {"version", "revision", "shortRevision", "buildTimestamp"}
+BUILD_FIELDS = BUILD_REQUIRED_FIELDS | {"image"}
+BUILD_TIMESTAMP_RE = re.compile(
+    r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{3})?Z$"
+)
 LEGACY_BUILD_FIELDS = {"gitSha", "generatedAt", "source"}
 MODERN_IDENTITY_CONTRACT = "build-info-v1"
 LEGACY_IDENTITY_CONTRACT = "legacy-build-meta-v1"
@@ -218,14 +222,18 @@ def fetch(url: str, public_origin: tuple[str, str] | None = None) -> bytes:
 
 def identity(
     raw: bytes, version: str, revision: str, image: str, category: str
-) -> tuple[str, str, str]:
+) -> tuple[str, str, str, str]:
     if len(raw) > 1024 * 1024:
         fail(category)
     try:
         value = json.loads(raw)
     except (UnicodeDecodeError, json.JSONDecodeError):
         fail(category)
-    if not isinstance(value, dict) or set(value) - BUILD_FIELDS:
+    if (
+        not isinstance(value, dict)
+        or not BUILD_REQUIRED_FIELDS <= set(value)
+        or set(value) - BUILD_FIELDS
+    ):
         fail(category)
     if (
         value.get("version") != version
@@ -236,7 +244,20 @@ def identity(
     runtime_image = value.get("image")
     if runtime_image is not None and runtime_image != image:
         fail(category)
-    return version, revision, runtime_image or image
+    build_timestamp = value.get("buildTimestamp")
+    if (
+        not isinstance(build_timestamp, str)
+        or not build_timestamp
+        or len(build_timestamp) > 40
+        or any(ord(character) < 32 or ord(character) == 127 for character in build_timestamp)
+        or BUILD_TIMESTAMP_RE.fullmatch(build_timestamp) is None
+    ):
+        fail(category)
+    try:
+        datetime.fromisoformat(build_timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        fail(category)
+    return version, revision, build_timestamp, runtime_image or image
 
 
 def marker(raw: bytes, revision: str, category: str) -> None:

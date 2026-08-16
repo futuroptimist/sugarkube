@@ -12,6 +12,7 @@ SHA = "abcdef0123456789abcdef0123456789abcdef01"
 DIGEST = "sha256:" + "1" * 64
 SENTINEL = "SENTINEL_SECRET"
 RECOVERY_SHA = "1a31a569aff2dbeb238e8c2688b9e85140d2077d"
+BUILD_TIMESTAMP = "2026-08-01T12:00:00Z"
 
 
 def manifest(tmp_path: Path, provider: str = "token-place") -> Path:
@@ -140,6 +141,7 @@ def _verify_setup(
                 "version": version,
                 "revision": revision,
                 "shortRevision": revision[:7],
+                "buildTimestamp": BUILD_TIMESTAMP,
                 "image": image,
             }
         )
@@ -770,6 +772,90 @@ def test_modern_identity_failure_never_requests_legacy_surface(
 
 
 @pytest.mark.parametrize(
+    "build_timestamp",
+    [BUILD_TIMESTAMP, "2026-08-01T12:00:00.123Z"],
+    ids=("seconds", "milliseconds"),
+)
+def test_modern_identity_accepts_canonical_build_timestamp(build_timestamp: str) -> None:
+    image = "ghcr.io/democratizedspace/dspace:main-abcdef0"
+    payload = {
+        "version": "3.1.0",
+        "revision": SHA,
+        "shortRevision": SHA[:7],
+        "buildTimestamp": build_timestamp,
+    }
+    assert verifier.identity(
+        json.dumps(payload).encode(), "3.1.0", SHA, image, "direct identity"
+    ) == ("3.1.0", SHA, build_timestamp, image)
+
+
+@pytest.mark.parametrize(
+    "build_timestamp",
+    [
+        pytest.param(None, id="missing"),
+        pytest.param("", id="empty"),
+        pytest.param(123, id="nonstring"),
+        pytest.param("2" * 41, id="oversized"),
+        pytest.param("2026-08-01T12:00:00Z\n" + SENTINEL, id="control-character"),
+        pytest.param("2026-08-01T12:00:00Z\x7f" + SENTINEL, id="delete-character"),
+        pytest.param("2026-02-30T12:00:00Z", id="malformed-calendar"),
+        pytest.param("2026-08-01T12:00:00", id="timezone-naive"),
+        pytest.param("2026-08-01T12:00:00+00:00", id="utc-offset"),
+        pytest.param("2026-08-01T12:00:00.12Z", id="two-fractional-digits"),
+        pytest.param("2026-08-01T12:00:00.1234Z", id="four-fractional-digits"),
+        pytest.param("2026-02-29T12:00:00Z", id="parseable-noncanonical"),
+    ],
+)
+def test_modern_identity_rejects_invalid_build_timestamp_without_leaking(
+    build_timestamp: object,
+) -> None:
+    payload: dict[str, object] = {
+        "version": "3.1.0",
+        "revision": SHA,
+        "shortRevision": SHA[:7],
+        "buildTimestamp": build_timestamp,
+    }
+    if build_timestamp is None:
+        del payload["buildTimestamp"]
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.identity(
+            json.dumps(payload).encode(),
+            "3.1.0",
+            SHA,
+            "ghcr.io/democratizedspace/dspace:main-abcdef0",
+            "direct identity",
+        )
+    assert str(raised.value) == "direct identity"
+    assert SENTINEL not in str(raised.value)
+
+
+def test_modern_identity_allows_only_optional_image() -> None:
+    image = "ghcr.io/democratizedspace/dspace:main-abcdef0"
+    payload = {
+        "version": "3.1.0",
+        "revision": SHA,
+        "shortRevision": SHA[:7],
+        "buildTimestamp": BUILD_TIMESTAMP,
+    }
+    without_image = verifier.identity(
+        json.dumps(payload).encode(), "3.1.0", SHA, image, "direct identity"
+    )
+    payload["image"] = image
+    with_image = verifier.identity(
+        json.dumps(payload).encode(), "3.1.0", SHA, image, "direct identity"
+    )
+    assert without_image == with_image == ("3.1.0", SHA, BUILD_TIMESTAMP, image)
+
+    payload["extra"] = SENTINEL
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.identity(
+            json.dumps(payload).encode(), "3.1.0", SHA, image, "direct identity"
+        )
+    assert str(raised.value) == "direct identity"
+    assert SENTINEL not in str(raised.value)
+
+
+@pytest.mark.parametrize(
     "payload",
     [
         b"{",
@@ -1126,6 +1212,44 @@ def test_verify_rejects_mixed_replica_and_public_direct_identity(
     monkeypatch.setattr(verifier, "identity", disagree)
     with pytest.raises(verifier.VerificationError, match="public identity"):
         verifier.verify(args)
+
+
+def test_verify_rejects_direct_replica_timestamp_disagreement(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    mismatched = json.dumps(
+        {
+            "version": "3.1.0",
+            "revision": SHA,
+            "shortRevision": SHA[:7],
+            "buildTimestamp": "2026-08-01T12:00:01Z",
+            "image": "ghcr.io/democratizedspace/dspace:main-abcdef0",
+        }
+    )
+    args, _ = _verify_setup(
+        monkeypatch, tmp_path, overrides={"direct_builds": {"dspace-2": mismatched}}
+    )
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.verify(args)
+    assert str(raised.value) == "pod/replica identity"
+
+
+def test_verify_rejects_public_direct_timestamp_disagreement(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    public_build = json.dumps(
+        {
+            "version": "3.1.0",
+            "revision": SHA,
+            "shortRevision": SHA[:7],
+            "buildTimestamp": "2026-08-01T12:00:01Z",
+            "image": "ghcr.io/democratizedspace/dspace:main-abcdef0",
+        }
+    )
+    args, _ = _verify_setup(monkeypatch, tmp_path, overrides={"public_build": public_build})
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.verify(args)
+    assert str(raised.value) == "public identity"
 
 
 def test_verify_redacts_nonzero_chat_output(
@@ -1502,14 +1626,39 @@ def test_deployment_requires_matching_helm_annotations(annotation: str, value: s
 @pytest.mark.parametrize(
     "payload,category",
     [
-        ({"version": "wrong", "revision": SHA, "shortRevision": "abcdef0"}, "public identity"),
-        ({"version": "3.1.0", "revision": "wrong", "shortRevision": "abcdef0"}, "public identity"),
-        ({"version": "3.1.0", "revision": SHA, "shortRevision": "wrong"}, "public identity"),
+        (
+            {
+                "version": "wrong",
+                "revision": SHA,
+                "shortRevision": "abcdef0",
+                "buildTimestamp": BUILD_TIMESTAMP,
+            },
+            "public identity",
+        ),
+        (
+            {
+                "version": "3.1.0",
+                "revision": "wrong",
+                "shortRevision": "abcdef0",
+                "buildTimestamp": BUILD_TIMESTAMP,
+            },
+            "public identity",
+        ),
+        (
+            {
+                "version": "3.1.0",
+                "revision": SHA,
+                "shortRevision": "wrong",
+                "buildTimestamp": BUILD_TIMESTAMP,
+            },
+            "public identity",
+        ),
         (
             {
                 "version": "3.1.0",
                 "revision": SHA,
                 "shortRevision": "abcdef0",
+                "buildTimestamp": BUILD_TIMESTAMP,
                 "image": f"ghcr.io/democratizedspace/dspace:main-abcdef0@{DIGEST}",
             },
             "public identity",
