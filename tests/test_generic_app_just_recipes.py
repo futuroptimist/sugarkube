@@ -416,6 +416,14 @@ spec:
   namespaceSelector:
     matchNames:
       - dspace
+  targetLabels:
+    - app.kubernetes.io/name
+    - app.kubernetes.io/instance
+    - app.kubernetes.io/managed-by
+    - dspace.dev/app
+    - dspace.dev/environment
+    - dspace.dev/release
+    - dspace.dev/cluster
   selector:
     matchLabels:
       app.kubernetes.io/instance: dspace
@@ -5867,6 +5875,14 @@ def test_observability_app_metrics_inventory_dspace_staging_and_prod_are_canonic
     }
     assert staging["requiredMetricFamilies"] == app_metrics.DSPACE_REQUIRED_METRIC_FAMILIES
     assert prod["requiredMetricFamilies"] == app_metrics.DSPACE_REQUIRED_METRIC_FAMILIES
+    assert staging["serviceMonitor"]["targetLabels"] == list(
+        app_metrics.DSPACE_STAGING_TRANSFERRED_LABELS
+    )
+    assert staging["metadataOnlyMetricFamilies"] == (
+        app_metrics.DSPACE_STAGING_METADATA_ONLY_FAMILIES
+    )
+    assert prod["serviceMonitor"]["targetLabels"] == []
+    assert prod["metadataOnlyMetricFamilies"] == {}
     for env, cluster in (("staging", "sugarkube-int"), ("prod", "sugarkube-prod")):
         cfg = environments[env]
         assert cfg["targetLabels"] == {
@@ -5885,6 +5901,16 @@ def test_observability_app_metrics_inventory_dspace_staging_and_prod_are_canonic
             "release": ["dspace"],
             "cluster": [cluster],
             **app_metrics.DSPACE_SOURCE_LABELS,
+            **(
+                {
+                    prometheus_label: [value]
+                    for prometheus_label, value in (
+                        app_metrics.DSPACE_STAGING_TRANSFERRED_LABELS.values()
+                    )
+                }
+                if env == "staging"
+                else {}
+            ),
         }
 
 
@@ -6116,6 +6142,52 @@ spec:
           targetLabel: cluster
           replacement: sugarkube-prod
 """
+
+
+def _dspace_311_staging_chart_like_service_monitor() -> str:
+    rendered = _dspace_303_chart_like_service_monitor("  namespace: dspace\n")
+    rendered = rendered.replace("dspace-prod-metrics-token", "dspace-staging-metrics-token")
+    rendered = rendered.replace("replacement: prod", "replacement: staging")
+    rendered = rendered.replace("replacement: sugarkube-prod", "replacement: sugarkube-int")
+    target_labels = """  targetLabels:
+    - app.kubernetes.io/name
+    - app.kubernetes.io/instance
+    - app.kubernetes.io/managed-by
+    - dspace.dev/app
+    - dspace.dev/environment
+    - dspace.dev/release
+    - dspace.dev/cluster
+"""
+    return rendered.replace("  selector:\n", target_labels + "  selector:\n")
+
+
+@pytest.mark.parametrize(
+    "mutator",
+    [
+        lambda labels: labels,
+        lambda labels: [labels[1], labels[0], *labels[2:]],
+        lambda labels: labels[:-1],
+        lambda labels: [*labels, labels[-1]],
+        lambda labels: [*labels, "example.com/unexpected"],
+    ],
+    ids=["exact", "reordered", "missing", "duplicate", "extra"],
+)
+def test_observability_app_metrics_render_enforces_ordered_dspace_target_labels(
+    tmp_path: Path, mutator
+):
+    expected = list(app_metrics.DSPACE_STAGING_TRANSFERRED_LABELS)
+    actual = mutator(expected)
+    rendered_text = _dspace_311_staging_chart_like_service_monitor()
+    original = "".join(f"    - {label}\n" for label in expected)
+    replacement = "".join(f"    - {label}\n" for label in actual)
+    rendered = tmp_path / "rendered.yaml"
+    rendered.write_text(rendered_text.replace(original, replacement), encoding="utf-8")
+
+    if actual == expected:
+        app_metrics.validate_render("dspace", "staging", str(rendered), "dspace")
+    else:
+        with pytest.raises(app_metrics.Error, match="targetLabels mismatch"):
+            app_metrics.validate_render("dspace", "staging", str(rendered), "dspace")
 
 
 def test_observability_app_metrics_validate_render_accepts_dspace_303_omitted_namespace(
@@ -6385,6 +6457,7 @@ def test_observability_app_metrics_verify_dspace_staging_contract(monkeypatch, c
     ]["environments"]["staging"]
     service_monitor = {
         "spec": {
+            "targetLabels": cfg["serviceMonitor"]["targetLabels"],
             "selector": {"matchLabels": cfg["serviceMonitor"]["selectorMatchLabels"]},
             "endpoints": [
                 {
@@ -6419,7 +6492,15 @@ def test_observability_app_metrics_verify_dspace_staging_contract(monkeypatch, c
         if metric not in cfg["requiredMetricFamilies"]:
             return {"resultType": "vector", "result": []}
         queried_families.add(metric)
-        labels = {"__name__": metric}
+        labels = {
+            "__name__": metric,
+            **{
+                prometheus_label: value
+                for prometheus_label, value in (
+                    app_metrics.DSPACE_STAGING_TRANSFERRED_LABELS.values()
+                )
+            },
+        }
         if metric == "dspace_build_info":
             labels.update(
                 version="3.1.1",
@@ -6778,6 +6859,137 @@ def test_observability_app_metrics_accepts_exact_bucket_family(monkeypatch):
     }
 
 
+def _dspace_transferred_prometheus_labels() -> dict[str, str]:
+    return {
+        prometheus_label: value
+        for prometheus_label, value in app_metrics.DSPACE_STAGING_TRANSFERRED_LABELS.values()
+    }
+
+
+@pytest.mark.parametrize("metric", list(app_metrics.DSPACE_STAGING_METADATA_ONLY_FAMILIES))
+def test_observability_app_metrics_accepts_opted_in_zero_series_metadata_counter(
+    monkeypatch, metric
+):
+    inventory = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))
+    app_metrics.validate_inventory(inventory)
+    cfg = inventory["applications"]["dspace"]["environments"]["staging"]
+    cfg = {
+        **cfg,
+        "requiredMetricFamilies": [metric],
+        "metadataOnlyMetricFamilies": {metric: "counter"},
+    }
+
+    def fake_prom(path):
+        if path.startswith("/api/v1/metadata?"):
+            return {metric: [{"type": "counter", "help": "bounded fixture", "unit": ""}]}
+        return {"resultType": "vector", "result": []}
+
+    monkeypatch.setattr(app_metrics, "prom", fake_prom)
+    assert app_metrics.query_required_families(cfg, {}) == {metric}
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {},
+        [],
+        {"dspace_dchat_requests_total": []},
+        {"dspace_dchat_requests_total": [{"type": "gauge"}]},
+        {"dspace_dchat_requests_total": [{"type": "counter"}, {"type": "counter"}]},
+        {"dspace_dependency_requests_total": [{"type": "counter"}]},
+        {"dspace_dchat_requests_total": ["counter"]},
+        {"dspace_dchat_requests_total": [{"type": "counter", "unexpected": "field"}]},
+    ],
+    ids=[
+        "absent",
+        "non-object",
+        "empty",
+        "wrong-type",
+        "conflicting",
+        "wrong-family",
+        "bad-entry",
+        "extra-field",
+    ],
+)
+def test_observability_app_metrics_metadata_fallback_fails_closed(monkeypatch, metadata):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
+        "dspace"
+    ]["environments"]["staging"]
+    metric = "dspace_dchat_requests_total"
+    cfg = {
+        **cfg,
+        "requiredMetricFamilies": [metric],
+        "metadataOnlyMetricFamilies": {metric: "counter"},
+    }
+    monkeypatch.setattr(
+        app_metrics,
+        "prom",
+        lambda path: metadata
+        if path.startswith("/api/v1/metadata?")
+        else {"resultType": "vector", "result": []},
+    )
+
+    with pytest.raises(app_metrics.Error):
+        app_metrics.query_required_families(cfg, {})
+
+
+def test_observability_app_metrics_missing_non_opted_in_family_still_fails(monkeypatch):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
+        "dspace"
+    ]["environments"]["staging"]
+    cfg = {
+        **cfg,
+        "requiredMetricFamilies": ["dspace_instrumentation_up"],
+        "metadataOnlyMetricFamilies": {},
+    }
+    monkeypatch.setattr(
+        app_metrics, "prom", lambda path: {"resultType": "vector", "result": []}
+    )
+    assert app_metrics.query_required_families(cfg, {}) == set()
+
+
+def test_observability_app_metrics_sample_bearing_opted_in_family_uses_full_label_validation(
+    monkeypatch,
+):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
+        "dspace"
+    ]["environments"]["staging"]
+    metric = "dspace_dchat_requests_total"
+    cfg = {
+        **cfg,
+        "requiredMetricFamilies": [metric],
+        "metadataOnlyMetricFamilies": {metric: "counter"},
+    }
+    metadata_queried = False
+
+    def fake_prom(path):
+        nonlocal metadata_queried
+        if path.startswith("/api/v1/metadata?"):
+            metadata_queried = True
+            return {}
+        return {
+            "resultType": "vector",
+            "result": [{"metric": {"__name__": metric, **_dspace_transferred_prometheus_labels()}}],
+        }
+
+    monkeypatch.setattr(app_metrics, "prom", fake_prom)
+    assert app_metrics.query_required_families(cfg, {}) == {metric}
+    assert not metadata_queried
+
+    bad_labels = _dspace_transferred_prometheus_labels()
+    bad_labels["dspace_dev_environment"] = "prod"
+    monkeypatch.setattr(
+        app_metrics,
+        "prom",
+        lambda path: {
+            "resultType": "vector",
+            "result": [{"metric": {"__name__": metric, **bad_labels}}],
+        },
+    )
+    with pytest.raises(app_metrics.Error, match="transferred metric label"):
+        app_metrics.query_required_families(cfg, {})
+
+
 @pytest.mark.parametrize(
     ("present", "result_type"),
     [
@@ -7041,6 +7253,7 @@ def test_observability_app_metrics_dspace_build_info_labels_are_bounded(env):
             "__name__": "dspace_build_info",
             "version": "3.1.1",
             "revision": "22f506e07e0b5abfd0cf756e9c5827c0458fb4b2",
+            **(_dspace_transferred_prometheus_labels() if env == "staging" else {}),
         },
     )
 

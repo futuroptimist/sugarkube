@@ -123,6 +123,19 @@ DSPACE_ENVIRONMENT_COORDINATES = {
         "url": "https://democratized.space/metrics",
     },
 }
+DSPACE_STAGING_TRANSFERRED_LABELS = {
+    "app.kubernetes.io/name": ("app_kubernetes_io_name", "dspace"),
+    "app.kubernetes.io/instance": ("app_kubernetes_io_instance", "dspace"),
+    "app.kubernetes.io/managed-by": ("app_kubernetes_io_managed_by", "Helm"),
+    "dspace.dev/app": ("dspace_dev_app", "dspace"),
+    "dspace.dev/environment": ("dspace_dev_environment", "staging"),
+    "dspace.dev/release": ("dspace_dev_release", "dspace"),
+    "dspace.dev/cluster": ("dspace_dev_cluster", "sugarkube-int"),
+}
+DSPACE_STAGING_METADATA_ONLY_FAMILIES = {
+    "dspace_dchat_requests_total": "counter",
+    "dspace_dependency_requests_total": "counter",
+}
 
 
 class Error(SystemExit):
@@ -290,6 +303,7 @@ def validate_inventory(doc):
                     "publicMetrics",
                     "retries",
                     "requiredMetricFamilies",
+                    "metadataOnlyMetricFamilies",
                     "allowedApplicationLabels",
                     "derivedApplicationLabels",
                     "forbiddenApplicationLabels",
@@ -317,6 +331,7 @@ def validate_inventory(doc):
                     "scrapeTimeout",
                     "authorization",
                     "relabelings",
+                    "targetLabels",
                 },
                 "serviceMonitor",
             )
@@ -342,6 +357,15 @@ def validate_inventory(doc):
                 k8s_label_key(k, "selector label name")
                 k8s_label_value(v, "selector label value")
             relabelings = sm["relabelings"]
+            transferred_labels = sm["targetLabels"]
+            if not isinstance(transferred_labels, list):
+                fail("serviceMonitor.targetLabels must be an array")
+            seen_transferred = set()
+            for transferred_label in transferred_labels:
+                k8s_label_key(transferred_label, "serviceMonitor target label")
+                if transferred_label in seen_transferred:
+                    fail("serviceMonitor.targetLabels must be unique")
+                seen_transferred.add(transferred_label)
             labels = cfg["targetLabels"]
             if not isinstance(labels, dict):
                 fail("targetLabels must be an object")
@@ -398,6 +422,15 @@ def validate_inventory(doc):
                     fail("retry settings must be bounded integers")
             metrics = cfg["requiredMetricFamilies"]
             unique_string_list(metrics, "requiredMetricFamilies", prometheus_metric)
+            metadata_only = cfg["metadataOnlyMetricFamilies"]
+            if not isinstance(metadata_only, dict):
+                fail("metadataOnlyMetricFamilies must be an object")
+            for metric, metric_type in metadata_only.items():
+                prometheus_metric(metric, "metadata-only metric family")
+                if metric not in metrics:
+                    fail("metadata-only metric family must also be required")
+                if metric_type not in {"counter", "gauge", "histogram", "summary"}:
+                    fail("metadata-only metric family type is unsupported")
             allowed = cfg["allowedApplicationLabels"]
             if not isinstance(allowed, dict):
                 fail("allowedApplicationLabels must be an object")
@@ -428,10 +461,22 @@ def validate_inventory(doc):
                     "cluster": [labels["cluster"]],
                     **DSPACE_SOURCE_LABELS,
                 }
+                expected_transferred = {}
+                if env == "staging":
+                    expected_transferred = DSPACE_STAGING_TRANSFERRED_LABELS
+                    expected_allowed.update(
+                        {prom_label: [value] for prom_label, value in expected_transferred.values()}
+                    )
                 if metrics != DSPACE_REQUIRED_METRIC_FAMILIES:
                     fail("DSPACE required metric families must match the immutable source contract")
                 if allowed != expected_allowed:
                     fail("DSPACE application labels must match the immutable source contract")
+                if transferred_labels != list(expected_transferred):
+                    fail("DSPACE ServiceMonitor targetLabels must match the ordered contract")
+                if metadata_only != (
+                    DSPACE_STAGING_METADATA_ONLY_FAMILIES if env == "staging" else {}
+                ):
+                    fail("DSPACE metadata-only metric families must match the environment contract")
                 if (
                     cfg["namespace"] != "dspace"
                     or cfg["serviceMonitorName"] != "dspace"
@@ -776,6 +821,11 @@ def validate_metric_labels(cfg, labels, derived_values=None):
         )
     ):
         fail("DSPACE build identity label mismatch (details redacted)", 1)
+    for kubernetes_label in cfg["serviceMonitor"]["targetLabels"]:
+        prometheus_label_name = re.sub(r"[^a-zA-Z0-9_]", "_", kubernetes_label)
+        expected_values = cfg["allowedApplicationLabels"].get(prometheus_label_name)
+        if expected_values is None or labels.get(prometheus_label_name) not in expected_values:
+            fail("transferred metric label missing or mismatched (details redacted)", 1)
     for label, value in labels.items():
         if (
             not isinstance(label, str)
@@ -896,6 +946,27 @@ def query_required_families(cfg: dict[str, Any], derived_values: dict[str, str])
                 # Prefer exact identity before normalizing conventional suffixes.
                 if series_name == metric or metric_family_from_series(series_name) == metric:
                     found.add(metric)
+        if metric not in found and metric in cfg["metadataOnlyMetricFamilies"]:
+            data = prom(
+                "/api/v1/metadata?metric=" + urllib.parse.quote(metric, safe="")
+            )
+            if not isinstance(data, dict) or set(data) != {metric}:
+                fail("Prometheus metric metadata family mismatch (details redacted)", 1)
+            entries = data[metric]
+            if (
+                not isinstance(entries, list)
+                or len(entries) != 1
+                or not isinstance(entries[0], dict)
+                or set(entries[0]) != {"type", "help", "unit"}
+                or not all(isinstance(value, str) for value in entries[0].values())
+                or entries[0].get("type") != cfg["metadataOnlyMetricFamilies"][metric]
+            ):
+                fail(
+                    "Prometheus metric metadata is absent, conflicting, or malformed "
+                    "(details redacted)",
+                    1,
+                )
+            found.add(metric)
     return found
 
 
@@ -962,6 +1033,8 @@ def verify(app, env):
         fail("ServiceMonitor endpoint/auth contract mismatch", 1)
     if selector.get("matchLabels") != cfg["serviceMonitor"]["selectorMatchLabels"]:
         fail("ServiceMonitor selector mismatch", 1)
+    if spec.get("targetLabels", []) != cfg["serviceMonitor"]["targetLabels"]:
+        fail("ServiceMonitor targetLabels mismatch", 1)
     targets = []
     attempts = cfg["retries"]["attempts"]
     for i in range(attempts):
@@ -1125,6 +1198,8 @@ def validate_render(
         fail("rendered ServiceMonitor namespace selector mismatch")
     if selector.get("matchLabels") != cfg["serviceMonitor"]["selectorMatchLabels"]:
         fail("rendered ServiceMonitor selector mismatch")
+    if spec.get("targetLabels", []) != cfg["serviceMonitor"]["targetLabels"]:
+        fail("rendered ServiceMonitor targetLabels mismatch")
     endpoints = spec.get("endpoints")
     if not isinstance(endpoints, list) or len(endpoints) != 1:
         fail("rendered ServiceMonitor must have exactly one endpoint")

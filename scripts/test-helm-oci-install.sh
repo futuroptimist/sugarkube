@@ -151,6 +151,14 @@ spec:
   namespaceSelector:
     matchNames:
       - dspace
+  targetLabels:
+    - app.kubernetes.io/name
+    - app.kubernetes.io/instance
+    - app.kubernetes.io/managed-by
+    - dspace.dev/app
+    - dspace.dev/environment
+    - dspace.dev/release
+    - dspace.dev/cluster
   selector:
     matchLabels:
       app.kubernetes.io/instance: dspace
