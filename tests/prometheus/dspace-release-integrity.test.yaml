@@ -5,7 +5,7 @@ tests:
 - name: approved_serving_revision_no_release_alerts
   interval: 1m
   input_series:
-  - series: dspace_build_info{namespace="dspace",pod="new",environment="staging",revision="018687f5a7f4de45508c6e36eb28afb3e44da24d"}
+  - series: dspace_build_info{namespace="dspace",pod="new",environment="staging",revision="22f506e07e0b5abfd0cf756e9c5827c0458fb4b2"}
     values: 1x20
   - series: kube_pod_container_status_ready{namespace="dspace",pod="new",container="dspace"}
     values: 1x20
@@ -36,7 +36,7 @@ tests:
         environment: staging
         cluster: sugarkube-int
         severity: critical
-        expected_revision: 018687f5a7f4de45508c6e36eb28afb3e44da24d
+        expected_revision: 22f506e07e0b5abfd0cf756e9c5827c0458fb4b2
         revision: ffffffffffffffffffffffffffffffffffffffff
       exp_annotations:
         summary: DSPACE runtime revision differs from the approved release
@@ -60,7 +60,7 @@ tests:
         environment: staging
         cluster: sugarkube-int
         severity: critical
-        expected_revision: 018687f5a7f4de45508c6e36eb28afb3e44da24d
+        expected_revision: 22f506e07e0b5abfd0cf756e9c5827c0458fb4b2
         namespace: dspace
         pod: missing
         container: dspace
@@ -74,7 +74,7 @@ tests:
 - name: approved_and_missing_runtime_identity_are_evaluated_per_pod
   interval: 1m
   input_series:
-  - series: dspace_build_info{namespace="dspace",pod="approved",environment="staging",revision="018687f5a7f4de45508c6e36eb28afb3e44da24d"}
+  - series: dspace_build_info{namespace="dspace",pod="approved",environment="staging",revision="22f506e07e0b5abfd0cf756e9c5827c0458fb4b2"}
     values: 1x20
   - series: kube_pod_container_status_ready{namespace="dspace",pod="approved",container="dspace"}
     values: 1x20
@@ -93,7 +93,7 @@ tests:
         environment: staging
         cluster: sugarkube-int
         severity: critical
-        expected_revision: 018687f5a7f4de45508c6e36eb28afb3e44da24d
+        expected_revision: 22f506e07e0b5abfd0cf756e9c5827c0458fb4b2
         namespace: dspace
         pod: missing
         container: dspace
@@ -107,7 +107,7 @@ tests:
 - name: approved_and_non_serving_missing_identity_remain_quiet
   interval: 1m
   input_series:
-  - series: dspace_build_info{namespace="dspace",pod="approved",environment="staging",revision="018687f5a7f4de45508c6e36eb28afb3e44da24d"}
+  - series: dspace_build_info{namespace="dspace",pod="approved",environment="staging",revision="22f506e07e0b5abfd0cf756e9c5827c0458fb4b2"}
     values: 1x20
   - series: kube_pod_container_status_ready{namespace="dspace",pod="approved",container="dspace"}
     values: 1x20
@@ -126,7 +126,7 @@ tests:
 - name: two_active_serving_revisions
   interval: 1m
   input_series:
-  - series: dspace_build_info{namespace="dspace",pod="one",environment="staging",revision="018687f5a7f4de45508c6e36eb28afb3e44da24d"}
+  - series: dspace_build_info{namespace="dspace",pod="one",environment="staging",revision="22f506e07e0b5abfd0cf756e9c5827c0458fb4b2"}
     values: 1x20
   - series: kube_pod_container_status_ready{namespace="dspace",pod="one",container="dspace"}
     values: 1x20
@@ -147,7 +147,7 @@ tests:
         environment: staging
         cluster: sugarkube-int
         severity: critical
-        expected_revision: 018687f5a7f4de45508c6e36eb28afb3e44da24d
+        expected_revision: 22f506e07e0b5abfd0cf756e9c5827c0458fb4b2
       exp_annotations:
         summary: DSPACE replicas report mixed build revisions
         description: More than one active revision persisted beyond the rollout settling window.
@@ -157,7 +157,7 @@ tests:
 - name: non_serving_historical_revisions_are_ignored
   interval: 1m
   input_series:
-  - series: dspace_build_info{namespace="dspace",pod="new",environment="staging",revision="018687f5a7f4de45508c6e36eb28afb3e44da24d"}
+  - series: dspace_build_info{namespace="dspace",pod="new",environment="staging",revision="22f506e07e0b5abfd0cf756e9c5827c0458fb4b2"}
     values: 1x20
   - series: kube_pod_container_status_ready{namespace="dspace",pod="new",container="dspace"}
     values: 1x20
@@ -193,7 +193,7 @@ tests:
 - name: canonical_image_id_is_accepted
   interval: 1m
   input_series:
-  - series: kube_pod_container_info{namespace="dspace",pod="good",container="dspace",image_id="ghcr.io/democratizedspace/dspace@sha256:2b95b7fdccdd011553c8d8617e3090ee27323996c532148fdb147cb9fd6e1b6c",image_spec="ghcr.io/democratizedspace/dspace:main-018687f"}
+  - series: kube_pod_container_info{namespace="dspace",pod="good",container="dspace",image_id="ghcr.io/democratizedspace/dspace@sha256:467890df969cc7938cb760f965fd8f90a8912b1dcb1f8425bc808216b7e1512b",image_spec="ghcr.io/democratizedspace/dspace:main-22f506e"}
     values: 1x20
   - series: kube_pod_container_status_ready{namespace="dspace",pod="good",container="dspace"}
     values: 1x20
@@ -206,7 +206,7 @@ tests:
 - name: runtime_prefixed_image_id_is_accepted
   interval: 1m
   input_series:
-  - series: kube_pod_container_info{namespace="dspace",pod="good",container="dspace",image_id="docker-pullable://ghcr.io/democratizedspace/dspace@sha256:2b95b7fdccdd011553c8d8617e3090ee27323996c532148fdb147cb9fd6e1b6c",image_spec="ghcr.io/democratizedspace/dspace:main-018687f"}
+  - series: kube_pod_container_info{namespace="dspace",pod="good",container="dspace",image_id="docker-pullable://ghcr.io/democratizedspace/dspace@sha256:467890df969cc7938cb760f965fd8f90a8912b1dcb1f8425bc808216b7e1512b",image_spec="ghcr.io/democratizedspace/dspace:main-22f506e"}
     values: 1x20
   - series: kube_pod_container_status_ready{namespace="dspace",pod="good",container="dspace"}
     values: 1x20
@@ -219,7 +219,7 @@ tests:
 - name: wrong_image_spec
   interval: 1m
   input_series:
-  - series: kube_pod_container_info{namespace="dspace",pod="wrong_image_spec",container="dspace",image_id="ghcr.io/democratizedspace/dspace@sha256:2b95b7fdccdd011553c8d8617e3090ee27323996c532148fdb147cb9fd6e1b6c",image_spec="ghcr.io/democratizedspace/dspace:latest"}
+  - series: kube_pod_container_info{namespace="dspace",pod="wrong_image_spec",container="dspace",image_id="ghcr.io/democratizedspace/dspace@sha256:467890df969cc7938cb760f965fd8f90a8912b1dcb1f8425bc808216b7e1512b",image_spec="ghcr.io/democratizedspace/dspace:latest"}
     values: 1x20
   - series: kube_pod_container_status_ready{namespace="dspace",pod="wrong_image_spec",container="dspace"}
     values: 1x20
@@ -234,9 +234,9 @@ tests:
         environment: staging
         cluster: sugarkube-int
         severity: critical
-        expected_revision: 018687f5a7f4de45508c6e36eb28afb3e44da24d
+        expected_revision: 22f506e07e0b5abfd0cf756e9c5827c0458fb4b2
         pod: wrong_image_spec
-        image_id: ghcr.io/democratizedspace/dspace@sha256:2b95b7fdccdd011553c8d8617e3090ee27323996c532148fdb147cb9fd6e1b6c
+        image_id: ghcr.io/democratizedspace/dspace@sha256:467890df969cc7938cb760f965fd8f90a8912b1dcb1f8425bc808216b7e1512b
         image_spec: ghcr.io/democratizedspace/dspace:latest
       exp_annotations:
         summary: DSPACE active pod image does not match the approved digest
@@ -247,7 +247,7 @@ tests:
 - name: wrong_image_digest
   interval: 1m
   input_series:
-  - series: kube_pod_container_info{namespace="dspace",pod="wrong_image_digest",container="dspace",image_id="ghcr.io/democratizedspace/dspace@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",image_spec="ghcr.io/democratizedspace/dspace:main-018687f"}
+  - series: kube_pod_container_info{namespace="dspace",pod="wrong_image_digest",container="dspace",image_id="ghcr.io/democratizedspace/dspace@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",image_spec="ghcr.io/democratizedspace/dspace:main-22f506e"}
     values: 1x20
   - series: kube_pod_container_status_ready{namespace="dspace",pod="wrong_image_digest",container="dspace"}
     values: 1x20
@@ -262,10 +262,10 @@ tests:
         environment: staging
         cluster: sugarkube-int
         severity: critical
-        expected_revision: 018687f5a7f4de45508c6e36eb28afb3e44da24d
+        expected_revision: 22f506e07e0b5abfd0cf756e9c5827c0458fb4b2
         pod: wrong_image_digest
         image_id: ghcr.io/democratizedspace/dspace@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
-        image_spec: ghcr.io/democratizedspace/dspace:main-018687f
+        image_spec: ghcr.io/democratizedspace/dspace:main-22f506e
       exp_annotations:
         summary: DSPACE active pod image does not match the approved digest
         description: An active DSPACE container has an unapproved immutable image digest.
@@ -288,7 +288,7 @@ tests:
         environment: staging
         cluster: sugarkube-int
         severity: critical
-        expected_revision: 018687f5a7f4de45508c6e36eb28afb3e44da24d
+        expected_revision: 22f506e07e0b5abfd0cf756e9c5827c0458fb4b2
         namespace: dspace
         pod: missing-image
         container: dspace
@@ -342,7 +342,7 @@ tests:
         environment: staging
         cluster: sugarkube-int
         severity: critical
-        expected_revision: 018687f5a7f4de45508c6e36eb28afb3e44da24d
+        expected_revision: 22f506e07e0b5abfd0cf756e9c5827c0458fb4b2
         state: executed_failure
       exp_annotations:
         summary: DSPACE isolated /chat synthetic failed, is stale, or is missing
@@ -366,7 +366,7 @@ tests:
         environment: staging
         cluster: sugarkube-int
         severity: critical
-        expected_revision: 018687f5a7f4de45508c6e36eb28afb3e44da24d
+        expected_revision: 22f506e07e0b5abfd0cf756e9c5827c0458fb4b2
         state: stale
       exp_annotations:
         summary: DSPACE isolated /chat synthetic failed, is stale, or is missing
@@ -388,7 +388,7 @@ tests:
         environment: staging
         cluster: sugarkube-int
         severity: critical
-        expected_revision: 018687f5a7f4de45508c6e36eb28afb3e44da24d
+        expected_revision: 22f506e07e0b5abfd0cf756e9c5827c0458fb4b2
         state: missing
       exp_annotations:
         summary: DSPACE isolated /chat synthetic failed, is stale, or is missing
@@ -410,7 +410,7 @@ tests:
         environment: staging
         cluster: sugarkube-int
         severity: critical
-        expected_revision: 018687f5a7f4de45508c6e36eb28afb3e44da24d
+        expected_revision: 22f506e07e0b5abfd0cf756e9c5827c0458fb4b2
         state: missing
       exp_annotations:
         summary: DSPACE isolated /chat synthetic failed, is stale, or is missing
@@ -430,7 +430,7 @@ tests:
         environment: staging
         cluster: sugarkube-int
         severity: critical
-        expected_revision: 018687f5a7f4de45508c6e36eb28afb3e44da24d
+        expected_revision: 22f506e07e0b5abfd0cf756e9c5827c0458fb4b2
         state: missing
       exp_annotations:
         summary: DSPACE isolated /chat synthetic failed, is stale, or is missing
@@ -481,7 +481,7 @@ tests:
         environment: staging
         cluster: sugarkube-int
         severity: critical
-        expected_revision: 018687f5a7f4de45508c6e36eb28afb3e44da24d
+        expected_revision: 22f506e07e0b5abfd0cf756e9c5827c0458fb4b2
         namespace: dspace
         service: dspace-metrics
         pod: two
@@ -513,7 +513,7 @@ tests:
         environment: staging
         cluster: sugarkube-int
         severity: critical
-        expected_revision: 018687f5a7f4de45508c6e36eb28afb3e44da24d
+        expected_revision: 22f506e07e0b5abfd0cf756e9c5827c0458fb4b2
         namespace: dspace
         pod: two
         container: dspace
@@ -544,7 +544,7 @@ tests:
         environment: staging
         cluster: sugarkube-int
         severity: critical
-        expected_revision: 018687f5a7f4de45508c6e36eb28afb3e44da24d
+        expected_revision: 22f506e07e0b5abfd0cf756e9c5827c0458fb4b2
         namespace: dspace
         pod: one
         container: dspace
@@ -560,7 +560,7 @@ tests:
         environment: staging
         cluster: sugarkube-int
         severity: critical
-        expected_revision: 018687f5a7f4de45508c6e36eb28afb3e44da24d
+        expected_revision: 22f506e07e0b5abfd0cf756e9c5827c0458fb4b2
         namespace: dspace
         pod: two
         container: dspace

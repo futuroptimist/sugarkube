@@ -12,7 +12,7 @@ from test_observability_helm import yaml_load
 
 ROOT = Path(__file__).parents[1]
 RULES = ROOT / "platform/observability/rules/dspace-release-integrity.yaml"
-STAGING = ROOT / "deployment-evidence/dspace/staging/main-018687f-20260805T035722Z.json"
+STAGING = ROOT / "deployment-evidence/dspace/staging/main-22f506e-20260817T094911Z.json"
 PROD = ROOT / "deployment-evidence/dspace/prod/main-1a31a56-20260801T093443Z.json"
 PRODUCER = ROOT / "scripts/dspace_chat_synthetic_metrics.py"
 NAMES = {
@@ -26,6 +26,9 @@ RUNBOOK = (
     "https://github.com/futuroptimist/sugarkube/blob/main/docs/"
     "observability-dspace-release-integrity.md"
 )
+RUNBOOK_DOC = ROOT / "docs/observability-dspace-release-integrity.md"
+APP_DOC = ROOT / "docs/apps/dspace.md"
+DESIGN_DOC = ROOT / "docs/observability-design.md"
 
 
 def rules():
@@ -87,6 +90,19 @@ def test_canonical_rules_agree_with_finalized_evidence():
         evidence["imageDigest"],
         str(STAGING.relative_to(ROOT)),
     )
+    assert set(approved.values()) >= {
+        "22f506e07e0b5abfd0cf756e9c5827c0458fb4b2",
+        "main-22f506e",
+        "sha256:467890df969cc7938cb760f965fd8f90a8912b1dcb1f8425bc808216b7e1512b",
+        "deployment-evidence/dspace/staging/main-22f506e-20260817T094911Z.json",
+    }
+    canonical = RULES.read_text()
+    assert not {
+        "018687f5a7f4de45508c6e36eb28afb3e44da24d",
+        "main-018687f",
+        "sha256:2b95b7fdccdd011553c8d8617e3090ee27323996c532148fdb147cb9fd6e1b6c",
+        "deployment-evidence/dspace/staging/main-018687f-20260805T035722Z.json",
+    }.intersection(canonical.split())
     prod = json.loads(PROD.read_text())
     assert (
         prod["sourceRevision"] == "1a31a569aff2dbeb238e8c2688b9e85140d2077d"
@@ -96,6 +112,39 @@ def test_canonical_rules_agree_with_finalized_evidence():
         evidence["semanticTag"] not in RULES.read_text()
         and prod["semanticTag"] not in RULES.read_text()
     )
+
+
+def test_current_documentation_agrees_with_finalized_staging_evidence():
+    evidence = json.loads(STAGING.read_text())
+    evidence_path = str(STAGING.relative_to(ROOT))
+
+    runbook = RUNBOOK_DOC.read_text()
+    runbook_current = runbook.split("## Signals and triage", 1)[0]
+    drill = runbook.split("## Staging post-merge drills", 1)[1].split(
+        "### Sanitized staging verification record", 1
+    )[0]
+    assert evidence_path in runbook_current
+    assert f"expected_revision: {evidence['sourceRevision']}" in drill
+
+    app_current = APP_DOC.read_text().split("## Environment topology", 1)[1].split(
+        "## Find or publish GHCR image", 1
+    )[0]
+    for coordinate in (
+        evidence["applicationVersion"],
+        evidence["chartVersion"],
+        f"Helm revision {evidence['helmRevision']}",
+        evidence["sourceRevision"],
+        evidence["imageTag"],
+        evidence_path,
+    ):
+        assert str(coordinate) in app_current
+
+    dspace_inventory = next(
+        line
+        for line in DESIGN_DOC.read_text().splitlines()
+        if line.startswith("| DSPACE |")
+    )
+    assert f"(chart `{evidence['chartVersion']}`)" in dspace_inventory
 
 
 def test_staging_alert_contracts_agree_with_canonical_rules():

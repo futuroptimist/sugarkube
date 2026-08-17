@@ -42,6 +42,15 @@ def test_generator_check_and_outputs_are_deterministic(dashboards):
     assert sum(item["type"] != "row" for item in staging["panels"]) == 49
 
 
+def test_finalized_staging_evidence_link_is_current(dashboards):
+    expected = "deployment-evidence/dspace/staging/main-22f506e-20260817T094911Z.json"
+    stale = "deployment-evidence/dspace/staging/main-018687f-20260805T035722Z.json"
+    for document in dashboards:
+        rendered = json.dumps(document)
+        assert expected in rendered
+        assert stale not in rendered
+
+
 def test_generator_write_check_and_stale_exit_paths(tmp_path, monkeypatch, capsys):
     profiles = {
         name: {**profile, "path": tmp_path / f"{name}.json"}
