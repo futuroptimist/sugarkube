@@ -6413,7 +6413,7 @@ def test_observability_app_metrics_verify_dspace_staging_contract(monkeypatch, c
         commands.append(args)
         return service_monitor
 
-    def fake_prom(path):
+    def fake_prom(path, expected_data_type=dict):
         if path == "/api/v1/targets":
             target = {
                 "health": "up",
@@ -6423,6 +6423,7 @@ def test_observability_app_metrics_verify_dspace_staging_contract(monkeypatch, c
             }
             return {"activeTargets": [target, dict(target)]}
         if path.startswith("/api/v1/targets/metadata?"):
+            assert expected_data_type is list
             metric = app_metrics.urllib.parse.parse_qs(path.split("?", 1)[1])["metric"][0]
             query_events.append(("metadata", metric))
             return [
@@ -8366,26 +8367,43 @@ def test_dspace_live_verifier_rejects_inexact_target_labels_before_queries(
 
 
 @pytest.mark.parametrize(
-    ("response", "message"),
+    ("entries", "message"),
     [
-        ({}, "structurally invalid"),
         ([], "exact scrape targets"),
-        ([{"target": {}, "metric": "other_total", "type": "counter"}], "exact scrape targets"),
-        (
-            [{"target": {}, "metric": "dspace_dchat_requests_total", "type": "gauge"}],
-            "exact scrape targets",
-        ),
-        (
-            [{"target": {}, "metric": "dspace_dchat_requests_total", "type": "counter"}],
-            "exact scrape targets",
-        ),
+        ("wrong-family", "exact metric family"),
+        ("wrong-type", "metric type mismatch"),
+        ("malformed-label", "exact scrape targets"),
+        ("conflicting-types", "metric type mismatch"),
     ],
-    ids=["absent", "wrong-family", "malformed", "wrong-type", "conflicting"],
 )
-def test_metadata_only_family_validation_fails_closed(monkeypatch, response, message):
+def test_metadata_only_family_validation_fails_closed(monkeypatch, entries, message):
     cfg = app_metrics.appcfg("dspace", "staging")
-    targets = [{"labels": cfg["targetLabels"]}, {"labels": cfg["targetLabels"]}]
-    monkeypatch.setattr(app_metrics, "prom", lambda path: response)
+    target_labels = [
+        cfg["targetLabels"] | {"instance": "10.0.0.1:8080"},
+        cfg["targetLabels"] | {"instance": "10.0.0.2:8080"},
+    ]
+    targets = [{"labels": labels} for labels in target_labels]
+    response = [
+        {
+            "target": labels,
+            "metric": "dspace_dchat_requests_total",
+            "type": "counter",
+        }
+        for labels in target_labels
+    ]
+    if entries == "wrong-family":
+        for entry in response:
+            entry["metric"] = "other_total"
+    elif entries == "wrong-type":
+        for entry in response:
+            entry["type"] = "gauge"
+    elif entries == "malformed-label":
+        response[0]["target"]["instance"] = ["unhashable"]
+    elif entries == "conflicting-types":
+        response[1]["type"] = "gauge"
+    else:
+        response = entries
+    monkeypatch.setattr(app_metrics, "prom", lambda path, expected_data_type=dict: response)
     with pytest.raises(app_metrics.Error, match=message):
         app_metrics.metadata_declares_family(
             cfg, targets, "dspace_dchat_requests_total", "counter"
@@ -8401,8 +8419,9 @@ def test_metadata_only_family_uses_verified_target_scoped_metadata(monkeypatch):
     targets = [{"labels": labels} for labels in target_labels]
     paths = []
 
-    def fake_prom(path):
+    def fake_prom(path, expected_data_type=dict):
         paths.append(path)
+        assert expected_data_type is list
         return [
             {
                 "target": labels,
@@ -8422,6 +8441,44 @@ def test_metadata_only_family_uses_verified_target_scoped_metadata(monkeypatch):
         "match_target": [app_metrics.promql_selector(cfg["targetLabels"])],
         "metric": ["dspace_dchat_requests_total"],
     }
+
+
+def test_metadata_only_family_accepts_list_at_real_prom_boundary(monkeypatch):
+    cfg = app_metrics.appcfg("dspace", "staging")
+    target_labels = [
+        cfg["targetLabels"] | {"instance": "10.0.0.1:8080"},
+        cfg["targetLabels"] | {"instance": "10.0.0.2:8080"},
+    ]
+    entries = [
+        {
+            "target": labels,
+            "metric": "dspace_dchat_requests_total",
+            "type": "counter",
+        }
+        for labels in target_labels
+    ]
+    monkeypatch.setattr(
+        app_metrics,
+        "kjson",
+        lambda args: {"status": "success", "data": entries},
+    )
+
+    assert app_metrics.metadata_declares_family(
+        cfg,
+        [{"labels": labels} for labels in target_labels],
+        "dspace_dchat_requests_total",
+        "counter",
+    )
+
+
+@pytest.mark.parametrize("path", ["/api/v1/query?query=up", "/api/v1/targets"])
+def test_prom_dict_endpoints_reject_list_data(monkeypatch, path):
+    monkeypatch.setattr(
+        app_metrics, "kjson", lambda args: {"status": "success", "data": []}
+    )
+
+    with pytest.raises(app_metrics.Error, match="structurally invalid"):
+        app_metrics.prom(path)
 
 
 def test_non_opted_in_missing_family_remains_missing(monkeypatch):

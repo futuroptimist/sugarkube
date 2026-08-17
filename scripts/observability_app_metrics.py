@@ -737,12 +737,12 @@ def install_secret(cfg):
     print("Application metrics Secret installed or rotated (value not displayed).")
 
 
-def prom(path):
+def prom(path, expected_data_type=dict):
     doc = kjson(["kubectl", "get", "--raw", PROM + path])
     if doc.get("status") != "success":
         fail("Prometheus API status was not success (response redacted)", 1)
     data = doc.get("data")
-    if not isinstance(data, dict):
+    if not isinstance(data, expected_data_type):
         fail("Prometheus API response is structurally invalid (response redacted)", 1)
     return data
 
@@ -977,17 +977,27 @@ def metadata_declares_family(
 ) -> bool:
     selector = promql_selector(cfg["targetLabels"])
     query = urllib.parse.urlencode({"match_target": selector, "metric": metric})
-    entries = prom("/api/v1/targets/metadata?" + query)
-    if not isinstance(entries, list) or not all(isinstance(entry, dict) for entry in entries):
+    entries = prom("/api/v1/targets/metadata?" + query, list)
+    if not all(isinstance(entry, dict) for entry in entries):
         fail("Prometheus metadata response is structurally invalid (details redacted)", 1)
     expected_targets = [target.get("labels") for target in targets]
     declared_targets = [entry.get("target") for entry in entries]
+    target_label_maps = expected_targets + declared_targets
     if (
         len(entries) != cfg["expectedTargetCount"]
-        or any(not isinstance(labels, dict) for labels in expected_targets + declared_targets)
-        or {tuple(sorted(labels.items())) for labels in declared_targets}
-        != {tuple(sorted(labels.items())) for labels in expected_targets}
+        or any(
+            not isinstance(labels, dict)
+            or any(
+                not isinstance(key, str) or not isinstance(value, str)
+                for key, value in labels.items()
+            )
+            for labels in target_label_maps
+        )
     ):
+        fail("Prometheus metadata did not identify the exact scrape targets (details redacted)", 1)
+    if {tuple(sorted(labels.items())) for labels in declared_targets} != {
+        tuple(sorted(labels.items())) for labels in expected_targets
+    }:
         fail("Prometheus metadata did not identify the exact scrape targets (details redacted)", 1)
     if any(entry.get("metric") != metric for entry in entries):
         fail("Prometheus metadata did not identify the exact metric family (details redacted)", 1)
