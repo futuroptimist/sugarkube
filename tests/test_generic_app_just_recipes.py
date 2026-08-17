@@ -6427,8 +6427,8 @@ def test_observability_app_metrics_verify_dspace_staging_contract(monkeypatch, c
             metric = app_metrics.urllib.parse.parse_qs(path.split("?", 1)[1])["metric"][0]
             query_events.append(("metadata", metric))
             return [
-                {"target": cfg["targetLabels"], "metric": metric, "type": "counter"},
-                {"target": cfg["targetLabels"], "metric": metric, "type": "counter"},
+                {"target": dict(cfg["targetLabels"]), "type": "counter"},
+                {"target": dict(cfg["targetLabels"]), "type": "counter"},
             ]
         metric = app_metrics.urllib.parse.unquote(path.rsplit("query=", 1)[-1]).split(
             "{", 1
@@ -8373,6 +8373,8 @@ def test_dspace_live_verifier_rejects_inexact_target_labels_before_queries(
         ("wrong-family", "exact metric family"),
         ("wrong-type", "metric type mismatch"),
         ("malformed-label", "exact scrape targets"),
+        ("non-dict-entry", "structurally invalid"),
+        ("wrong-target-set", "exact scrape targets"),
         ("conflicting-types", "metric type mismatch"),
     ],
 )
@@ -8385,8 +8387,7 @@ def test_metadata_only_family_validation_fails_closed(monkeypatch, entries, mess
     targets = [{"labels": labels} for labels in target_labels]
     response = [
         {
-            "target": labels,
-            "metric": "dspace_dchat_requests_total",
+            "target": dict(labels),
             "type": "counter",
         }
         for labels in target_labels
@@ -8399,6 +8400,10 @@ def test_metadata_only_family_validation_fails_closed(monkeypatch, entries, mess
             entry["type"] = "gauge"
     elif entries == "malformed-label":
         response[0]["target"]["instance"] = ["unhashable"]
+    elif entries == "non-dict-entry":
+        response[0] = "malformed"
+    elif entries == "wrong-target-set":
+        response[1]["target"] = dict(response[0]["target"])
     elif entries == "conflicting-types":
         response[1]["type"] = "gauge"
     else:
@@ -8424,8 +8429,7 @@ def test_metadata_only_family_uses_verified_target_scoped_metadata(monkeypatch):
         assert expected_data_type is list
         return [
             {
-                "target": labels,
-                "metric": "dspace_dchat_requests_total",
+                "target": dict(labels),
                 "type": "counter",
             }
             for labels in target_labels
@@ -8451,8 +8455,7 @@ def test_metadata_only_family_accepts_list_at_real_prom_boundary(monkeypatch):
     ]
     entries = [
         {
-            "target": labels,
-            "metric": "dspace_dchat_requests_total",
+            "target": dict(labels),
             "type": "counter",
         }
         for labels in target_labels

@@ -999,7 +999,9 @@ def metadata_declares_family(
         tuple(sorted(labels.items())) for labels in expected_targets
     }:
         fail("Prometheus metadata did not identify the exact scrape targets (details redacted)", 1)
-    if any(entry.get("metric") != metric for entry in entries):
+    # Filtered target-metadata responses omit ``metric`` because the request's
+    # exact metric parameter already identifies the family.
+    if any("metric" in entry and entry["metric"] != metric for entry in entries):
         fail("Prometheus metadata did not identify the exact metric family (details redacted)", 1)
     if any(entry.get("type") != expected_type for entry in entries):
         fail("Prometheus metadata metric type mismatch (details redacted)", 1)
