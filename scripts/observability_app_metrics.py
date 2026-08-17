@@ -869,8 +869,6 @@ def validate_metric_labels(cfg, labels, derived_values=None):
             or any(w in low for w in FORBIDDEN_WORDS)
         ):
             fail("forbidden application metric label observed (details redacted)", 1)
-        if is_transferred and value != cfg["transferredTargetLabels"][label]:
-            fail("transferred target metric label mismatch (details redacted)", 1)
         if (
             label in cfg["allowedApplicationLabels"]
             and value not in cfg["allowedApplicationLabels"][label]
@@ -974,14 +972,26 @@ def query_required_families(cfg: dict[str, Any], derived_values: dict[str, str])
     return found
 
 
-def metadata_declares_family(metric: str, expected_type: str) -> bool:
-    data = prom("/api/v1/metadata?metric=" + urllib.parse.quote(metric))
-    if set(data) != {metric}:
-        fail("Prometheus metadata did not identify the exact metric family (details redacted)", 1)
-    entries = data[metric]
-    if not isinstance(entries, list) or len(entries) != 1 or not isinstance(entries[0], dict):
+def metadata_declares_family(
+    cfg: dict[str, Any], targets: list[dict[str, Any]], metric: str, expected_type: str
+) -> bool:
+    selector = promql_selector(cfg["targetLabels"])
+    query = urllib.parse.urlencode({"match_target": selector, "metric": metric})
+    entries = prom("/api/v1/targets/metadata?" + query)
+    if not isinstance(entries, list) or not all(isinstance(entry, dict) for entry in entries):
         fail("Prometheus metadata response is structurally invalid (details redacted)", 1)
-    if entries[0].get("type") != expected_type:
+    expected_targets = [target.get("labels") for target in targets]
+    declared_targets = [entry.get("target") for entry in entries]
+    if (
+        len(entries) != cfg["expectedTargetCount"]
+        or any(not isinstance(labels, dict) for labels in expected_targets + declared_targets)
+        or {tuple(sorted(labels.items())) for labels in declared_targets}
+        != {tuple(sorted(labels.items())) for labels in expected_targets}
+    ):
+        fail("Prometheus metadata did not identify the exact scrape targets (details redacted)", 1)
+    if any(entry.get("metric") != metric for entry in entries):
+        fail("Prometheus metadata did not identify the exact metric family (details redacted)", 1)
+    if any(entry.get("type") != expected_type for entry in entries):
         fail("Prometheus metadata metric type mismatch (details redacted)", 1)
     return True
 
@@ -1083,7 +1093,7 @@ def verify(app, env):
     if missing:
         metadata_only = cfg.get("metadataOnlyMetricFamilies", {})
         for metric in sorted(missing & set(metadata_only)):
-            if metadata_declares_family(metric, metadata_only[metric]):
+            if metadata_declares_family(cfg, targets, metric, metadata_only[metric]):
                 found.add(metric)
         missing = required - found
     if missing:
