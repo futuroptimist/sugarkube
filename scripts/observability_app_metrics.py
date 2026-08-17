@@ -71,6 +71,28 @@ DSPACE_REQUIRED_METRIC_FAMILIES = [
     "dspace_instrumentation_up",
     "dspace_build_info",
 ]
+DSPACE_STAGING_TARGET_LABELS = [
+    "app.kubernetes.io/name",
+    "app.kubernetes.io/instance",
+    "app.kubernetes.io/managed-by",
+    "dspace.dev/app",
+    "dspace.dev/environment",
+    "dspace.dev/release",
+    "dspace.dev/cluster",
+]
+DSPACE_STAGING_TRANSFERRED_LABELS = {
+    "app_kubernetes_io_name": "dspace",
+    "app_kubernetes_io_instance": "dspace",
+    "app_kubernetes_io_managed_by": "Helm",
+    "dspace_dev_app": "dspace",
+    "dspace_dev_environment": "staging",
+    "dspace_dev_release": "dspace",
+    "dspace_dev_cluster": "sugarkube-int",
+}
+DSPACE_STAGING_METADATA_ONLY_FAMILIES = {
+    "dspace_dchat_requests_total": "counter",
+    "dspace_dependency_requests_total": "counter",
+}
 DSPACE_SOURCE_LABELS = {
     "version": ["3.1.1"],
     "revision": ["22f506e07e0b5abfd0cf756e9c5827c0458fb4b2"],
@@ -293,6 +315,8 @@ def validate_inventory(doc):
                     "allowedApplicationLabels",
                     "derivedApplicationLabels",
                     "forbiddenApplicationLabels",
+                    "transferredTargetLabels",
+                    "metadataOnlyMetricFamilies",
                 },
                 f"{app}/{env}",
             )
@@ -317,6 +341,7 @@ def validate_inventory(doc):
                     "scrapeTimeout",
                     "authorization",
                     "relabelings",
+                    "targetLabels",
                 },
                 "serviceMonitor",
             )
@@ -342,6 +367,15 @@ def validate_inventory(doc):
                 k8s_label_key(k, "selector label name")
                 k8s_label_value(v, "selector label value")
             relabelings = sm["relabelings"]
+            service_monitor_target_labels = sm["targetLabels"]
+            if not isinstance(service_monitor_target_labels, list):
+                fail("serviceMonitor.targetLabels must be an array")
+            if service_monitor_target_labels:
+                unique_string_list(
+                    service_monitor_target_labels,
+                    "serviceMonitor.targetLabels",
+                    k8s_label_key,
+                )
             labels = cfg["targetLabels"]
             if not isinstance(labels, dict):
                 fail("targetLabels must be an object")
@@ -398,6 +432,24 @@ def validate_inventory(doc):
                     fail("retry settings must be bounded integers")
             metrics = cfg["requiredMetricFamilies"]
             unique_string_list(metrics, "requiredMetricFamilies", prometheus_metric)
+            transferred = cfg["transferredTargetLabels"]
+            if not isinstance(transferred, dict):
+                fail("transferredTargetLabels must be an object")
+            for k, v in transferred.items():
+                prometheus_label(k, "transferred target label name")
+                nonempty(v, "transferred target label value")
+            metadata_only = cfg["metadataOnlyMetricFamilies"]
+            if not isinstance(metadata_only, dict):
+                fail("metadataOnlyMetricFamilies must be an object")
+            for metric, metric_type in metadata_only.items():
+                prometheus_metric(metric, "metadata-only metric family")
+                if metric not in metrics or metric_type not in {
+                    "counter",
+                    "gauge",
+                    "histogram",
+                    "summary",
+                }:
+                    fail("metadata-only metric family contract is invalid")
             allowed = cfg["allowedApplicationLabels"]
             if not isinstance(allowed, dict):
                 fail("allowedApplicationLabels must be an object")
@@ -445,6 +497,22 @@ def validate_inventory(doc):
                     }
                 ):
                     fail("DSPACE environment coordinates must match the canonical contract")
+                expected_sm_targets = DSPACE_STAGING_TARGET_LABELS if env == "staging" else []
+                expected_transferred = DSPACE_STAGING_TRANSFERRED_LABELS if env == "staging" else {}
+                expected_metadata_only = (
+                    DSPACE_STAGING_METADATA_ONLY_FAMILIES if env == "staging" else {}
+                )
+                if (
+                    sm["targetLabels"] != expected_sm_targets
+                    or transferred != expected_transferred
+                    or metadata_only != expected_metadata_only
+                ):
+                    fail("DSPACE transferred-label and zero-series contracts must be exact")
+            elif sm["targetLabels"] or transferred or metadata_only:
+                fail(
+                    "transferred-label and zero-series contracts are not enabled "
+                    "for this application"
+                )
             derived = cfg["derivedApplicationLabels"]
             if not isinstance(derived, dict):
                 fail("derivedApplicationLabels must be an object")
@@ -669,12 +737,12 @@ def install_secret(cfg):
     print("Application metrics Secret installed or rotated (value not displayed).")
 
 
-def prom(path):
+def prom(path, expected_data_type=dict):
     doc = kjson(["kubectl", "get", "--raw", PROM + path])
     if doc.get("status") != "success":
         fail("Prometheus API status was not success (response redacted)", 1)
     data = doc.get("data")
-    if not isinstance(data, dict):
+    if not isinstance(data, expected_data_type):
         fail("Prometheus API response is structurally invalid (response redacted)", 1)
     return data
 
@@ -776,6 +844,9 @@ def validate_metric_labels(cfg, labels, derived_values=None):
         )
     ):
         fail("DSPACE build identity label mismatch (details redacted)", 1)
+    for label, expected in cfg.get("transferredTargetLabels", {}).items():
+        if labels.get(label) != expected:
+            fail("transferred target metric label mismatch (details redacted)", 1)
     for label, value in labels.items():
         if (
             not isinstance(label, str)
@@ -785,8 +856,10 @@ def validate_metric_labels(cfg, labels, derived_values=None):
             fail("metric labels were malformed (details redacted)", 1)
         low = label.lower()
         is_standard = label in STANDARD_LABELS
+        is_transferred = label in cfg.get("transferredTargetLabels", {})
         if (
             not is_standard
+            and not is_transferred
             and label not in cfg["allowedApplicationLabels"]
             and label not in cfg.get("derivedApplicationLabels", {})
         ):
@@ -899,6 +972,42 @@ def query_required_families(cfg: dict[str, Any], derived_values: dict[str, str])
     return found
 
 
+def metadata_declares_family(
+    cfg: dict[str, Any], targets: list[dict[str, Any]], metric: str, expected_type: str
+) -> bool:
+    selector = promql_selector(cfg["targetLabels"])
+    query = urllib.parse.urlencode({"match_target": selector, "metric": metric})
+    entries = prom("/api/v1/targets/metadata?" + query, list)
+    if not all(isinstance(entry, dict) for entry in entries):
+        fail("Prometheus metadata response is structurally invalid (details redacted)", 1)
+    expected_targets = [target.get("labels") for target in targets]
+    declared_targets = [entry.get("target") for entry in entries]
+    target_label_maps = expected_targets + declared_targets
+    if (
+        len(entries) != cfg["expectedTargetCount"]
+        or any(
+            not isinstance(labels, dict)
+            or any(
+                not isinstance(key, str) or not isinstance(value, str)
+                for key, value in labels.items()
+            )
+            for labels in target_label_maps
+        )
+    ):
+        fail("Prometheus metadata did not identify the exact scrape targets (details redacted)", 1)
+    if {tuple(sorted(labels.items())) for labels in declared_targets} != {
+        tuple(sorted(labels.items())) for labels in expected_targets
+    }:
+        fail("Prometheus metadata did not identify the exact scrape targets (details redacted)", 1)
+    # Filtered target-metadata responses omit ``metric`` because the request's
+    # exact metric parameter already identifies the family.
+    if any("metric" in entry and entry["metric"] != metric for entry in entries):
+        fail("Prometheus metadata did not identify the exact metric family (details redacted)", 1)
+    if any(entry.get("type") != expected_type for entry in entries):
+        fail("Prometheus metadata metric type mismatch (details redacted)", 1)
+    return True
+
+
 def verify(app, env):
     app = normalize_application_argument(app)
     env = normalize_live_env(env)
@@ -962,6 +1071,8 @@ def verify(app, env):
         fail("ServiceMonitor endpoint/auth contract mismatch", 1)
     if selector.get("matchLabels") != cfg["serviceMonitor"]["selectorMatchLabels"]:
         fail("ServiceMonitor selector mismatch", 1)
+    if spec.get("targetLabels", []) != cfg["serviceMonitor"]["targetLabels"]:
+        fail("ServiceMonitor targetLabels mismatch", 1)
     targets = []
     attempts = cfg["retries"]["attempts"]
     for i in range(attempts):
@@ -991,6 +1102,12 @@ def verify(app, env):
         if i + 1 < attempts:
             time.sleep(cfg["retries"]["delaySeconds"])
     missing = required - found
+    if missing:
+        metadata_only = cfg.get("metadataOnlyMetricFamilies", {})
+        for metric in sorted(missing & set(metadata_only)):
+            if metadata_declares_family(cfg, targets, metric, metadata_only[metric]):
+                found.add(metric)
+        missing = required - found
     if missing:
         fail(f"required metric family missing: {sorted(missing)[0]}", 1)
 
@@ -1125,6 +1242,8 @@ def validate_render(
         fail("rendered ServiceMonitor namespace selector mismatch")
     if selector.get("matchLabels") != cfg["serviceMonitor"]["selectorMatchLabels"]:
         fail("rendered ServiceMonitor selector mismatch")
+    if spec.get("targetLabels", []) != cfg["serviceMonitor"]["targetLabels"]:
+        fail("rendered ServiceMonitor targetLabels mismatch")
     endpoints = spec.get("endpoints")
     if not isinstance(endpoints, list) or len(endpoints) != 1:
         fail("rendered ServiceMonitor must have exactly one endpoint")
