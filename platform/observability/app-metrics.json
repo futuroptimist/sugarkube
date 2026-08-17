@@ -47,7 +47,8 @@
                 "targetLabel": "cluster",
                 "replacement": "sugarkube-int"
               }
-            ]
+            ],
+            "targetLabels": []
           },
           "targetLabels": {
             "app": "tokenplace",
@@ -185,7 +186,9 @@
               "env": "TOKENPLACE_IMAGE_TAG",
               "normalizer": "identity"
             }
-          }
+          },
+          "transferredTargetLabels": {},
+          "metadataOnlyMetricFamilies": {}
         }
       }
     },
@@ -240,6 +243,15 @@
                 "targetLabel": "cluster",
                 "replacement": "sugarkube-int"
               }
+            ],
+            "targetLabels": [
+              "app.kubernetes.io/name",
+              "app.kubernetes.io/instance",
+              "app.kubernetes.io/managed-by",
+              "dspace.dev/app",
+              "dspace.dev/environment",
+              "dspace.dev/release",
+              "dspace.dev/cluster"
             ]
           },
           "targetLabels": {
@@ -361,7 +373,20 @@
             "token",
             "url",
             "user"
-          ]
+          ],
+          "transferredTargetLabels": {
+            "app_kubernetes_io_name": "dspace",
+            "app_kubernetes_io_instance": "dspace",
+            "app_kubernetes_io_managed_by": "Helm",
+            "dspace_dev_app": "dspace",
+            "dspace_dev_environment": "staging",
+            "dspace_dev_release": "dspace",
+            "dspace_dev_cluster": "sugarkube-int"
+          },
+          "metadataOnlyMetricFamilies": {
+            "dspace_dchat_requests_total": "counter",
+            "dspace_dependency_requests_total": "counter"
+          }
         },
         "prod": {
           "namespace": "dspace",
@@ -412,7 +437,8 @@
                 "targetLabel": "cluster",
                 "replacement": "sugarkube-prod"
               }
-            ]
+            ],
+            "targetLabels": []
           },
           "targetLabels": {
             "app": "dspace",
@@ -533,7 +559,9 @@
             "token",
             "url",
             "user"
-          ]
+          ],
+          "transferredTargetLabels": {},
+          "metadataOnlyMetricFamilies": {}
         }
       }
     }
