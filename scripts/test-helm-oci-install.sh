@@ -155,6 +155,14 @@ spec:
     matchLabels:
       app.kubernetes.io/instance: dspace
       app.kubernetes.io/name: dspace
+  targetLabels:
+    - app.kubernetes.io/name
+    - app.kubernetes.io/instance
+    - app.kubernetes.io/managed-by
+    - dspace.dev/app
+    - dspace.dev/environment
+    - dspace.dev/release
+    - dspace.dev/cluster
   endpoints:
     - port: http
       path: /metrics

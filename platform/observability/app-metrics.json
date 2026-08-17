@@ -79,6 +79,7 @@
             "tokenplace_instrumentation_up",
             "tokenplace_build_info"
           ],
+          "metadataOnlyMetricFamilies": {},
           "allowedApplicationLabels": {
             "app": [
               "tokenplace"
@@ -149,6 +150,8 @@
               "capacity_loss"
             ]
           },
+          "serviceMonitorTargetLabels": [],
+          "transferredTargetLabels": {},
           "forbiddenApplicationLabels": [
             "authorization",
             "bearer",
@@ -265,6 +268,10 @@
             "dspace_instrumentation_up",
             "dspace_build_info"
           ],
+          "metadataOnlyMetricFamilies": {
+            "dspace_dchat_requests_total": "counter",
+            "dspace_dependency_requests_total": "counter"
+          },
           "allowedApplicationLabels": {
             "app": [
               "dspace"
@@ -343,6 +350,24 @@
               "fallback_unavailable",
               "unknown_error"
             ]
+          },
+          "serviceMonitorTargetLabels": [
+            "app.kubernetes.io/name",
+            "app.kubernetes.io/instance",
+            "app.kubernetes.io/managed-by",
+            "dspace.dev/app",
+            "dspace.dev/environment",
+            "dspace.dev/release",
+            "dspace.dev/cluster"
+          ],
+          "transferredTargetLabels": {
+            "app_kubernetes_io_name": "dspace",
+            "app_kubernetes_io_instance": "dspace",
+            "app_kubernetes_io_managed_by": "Helm",
+            "dspace_dev_app": "dspace",
+            "dspace_dev_environment": "staging",
+            "dspace_dev_release": "dspace",
+            "dspace_dev_cluster": "sugarkube-int"
           },
           "derivedApplicationLabels": {},
           "forbiddenApplicationLabels": [
@@ -437,6 +462,7 @@
             "dspace_instrumentation_up",
             "dspace_build_info"
           ],
+          "metadataOnlyMetricFamilies": {},
           "allowedApplicationLabels": {
             "app": [
               "dspace"
@@ -516,6 +542,8 @@
               "unknown_error"
             ]
           },
+          "serviceMonitorTargetLabels": [],
+          "transferredTargetLabels": {},
           "derivedApplicationLabels": {},
           "forbiddenApplicationLabels": [
             "authorization",
