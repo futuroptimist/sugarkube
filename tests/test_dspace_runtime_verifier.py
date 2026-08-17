@@ -12,6 +12,7 @@ SHA = "abcdef0123456789abcdef0123456789abcdef01"
 DIGEST = "sha256:" + "1" * 64
 SENTINEL = "SENTINEL_SECRET"
 RECOVERY_SHA = "1a31a569aff2dbeb238e8c2688b9e85140d2077d"
+BUILD_TIMESTAMP = "2026-08-16T05:20:19.000Z"
 
 
 def manifest(tmp_path: Path, provider: str = "token-place") -> Path:
@@ -140,6 +141,7 @@ def _verify_setup(
                 "version": version,
                 "revision": revision,
                 "shortRevision": revision[:7],
+                "buildTimestamp": BUILD_TIMESTAMP,
                 "image": image,
             }
         )
@@ -1105,7 +1107,14 @@ def test_verify_fails_closed_for_any_bad_replica_or_image(
 def test_verify_rejects_mixed_replica_and_public_direct_identity(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    mismatched = json.dumps({"version": "3.1.0", "revision": "f" * 40, "shortRevision": "fffffff"})
+    mismatched = json.dumps(
+        {
+            "version": "3.1.0",
+            "revision": "f" * 40,
+            "shortRevision": "fffffff",
+            "buildTimestamp": BUILD_TIMESTAMP,
+        }
+    )
     args, _ = _verify_setup(
         monkeypatch,
         tmp_path,
@@ -1121,7 +1130,7 @@ def test_verify_rejects_mixed_replica_and_public_direct_identity(
         raw: bytes, version: str, revision: str, image: str, category: str
     ):  # noqa: ANN202
         value = real_identity(raw, version, revision, image, category)
-        return (value[0], value[1], "different") if category == "public identity" else value
+        return (*value[:3], "different") if category == "public identity" else value
 
     monkeypatch.setattr(verifier, "identity", disagree)
     with pytest.raises(verifier.VerificationError, match="public identity"):
@@ -1527,6 +1536,133 @@ def test_build_identity_requires_canonical_coordinates(
             "ghcr.io/democratizedspace/dspace:main-abcdef0",
             category,
         )
+
+
+@pytest.mark.parametrize(
+    "build_timestamp",
+    ["2026-08-16T05:20:19Z", "2026-08-16T05:20:19.123Z"],
+    ids=("seconds", "milliseconds"),
+)
+def test_modern_identity_accepts_canonical_utc_build_timestamp(build_timestamp: str) -> None:
+    image = "ghcr.io/democratizedspace/dspace:main-22f506e"
+    revision = "22f506e07e0b5abfd0cf756e9c5827c0458fb4b2"
+    payload = {
+        "version": "3.1.1",
+        "revision": revision,
+        "shortRevision": "22f506e",
+        "buildTimestamp": build_timestamp,
+        "image": image,
+    }
+
+    assert verifier.identity(
+        json.dumps(payload).encode(), "3.1.1", revision, image, "direct identity"
+    ) == ("3.1.1", revision, image, build_timestamp)
+
+
+@pytest.mark.parametrize(
+    "build_timestamp",
+    [
+        pytest.param(None, id="missing"),
+        pytest.param("", id="empty"),
+        pytest.param(123, id="non-string"),
+        pytest.param("2" * 41, id="overlong"),
+        pytest.param("2026-08-16T05:20:19Z\n" + SENTINEL, id="control-character"),
+        pytest.param("2026-02-30T05:20:19Z", id="impossible-date"),
+        pytest.param("2026-08-16T05:20:19+00:00", id="offset-timezone"),
+        pytest.param("2026-08-16T05:20:19", id="non-utc"),
+        pytest.param("2026-08-16T05:20:19.12Z", id="noncanonical-fraction"),
+        pytest.param("2026-08-16T05:20:19Z" + SENTINEL, id="trailing-data"),
+    ],
+)
+def test_modern_identity_rejects_bad_build_timestamp_without_leaking(
+    build_timestamp: object,
+) -> None:
+    payload = {
+        "version": "3.1.0",
+        "revision": SHA,
+        "shortRevision": SHA[:7],
+        "buildTimestamp": build_timestamp,
+    }
+    if build_timestamp is None:
+        del payload["buildTimestamp"]
+
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.identity(
+            json.dumps(payload).encode(),
+            "3.1.0",
+            SHA,
+            "ghcr.io/democratizedspace/dspace:main-abcdef0",
+            "direct identity",
+        )
+
+    assert str(raised.value) == "direct identity"
+    assert SENTINEL not in str(raised.value)
+
+
+def test_modern_identity_still_rejects_unknown_fields_without_leaking() -> None:
+    payload = {
+        "version": "3.1.0",
+        "revision": SHA,
+        "shortRevision": SHA[:7],
+        "buildTimestamp": BUILD_TIMESTAMP,
+        "unexpected": SENTINEL,
+    }
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.identity(
+            json.dumps(payload).encode(),
+            "3.1.0",
+            SHA,
+            "ghcr.io/democratizedspace/dspace:main-abcdef0",
+            "public identity",
+        )
+    assert str(raised.value) == "public identity"
+    assert SENTINEL not in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    "overrides,category",
+    [
+        (
+            {
+                "direct_builds": {
+                    "dspace-2": json.dumps(
+                        {
+                            "version": "3.1.0",
+                            "revision": SHA,
+                            "shortRevision": SHA[:7],
+                            "buildTimestamp": "2026-08-16T05:20:20Z",
+                        }
+                    )
+                }
+            },
+            "pod/replica identity",
+        ),
+        (
+            {
+                "public_build": json.dumps(
+                    {
+                        "version": "3.1.0",
+                        "revision": SHA,
+                        "shortRevision": SHA[:7],
+                        "buildTimestamp": "2026-08-16T05:20:20Z",
+                    }
+                )
+            },
+            "public identity",
+        ),
+    ],
+    ids=("replicas", "direct-public"),
+)
+def test_modern_build_timestamp_disagreement_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    overrides: dict[str, object],
+    category: str,
+) -> None:
+    args, _ = _verify_setup(monkeypatch, tmp_path, overrides=overrides)
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.verify(args)
+    assert str(raised.value) == category
 
 
 def test_command_success_and_nonzero_failure_are_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
