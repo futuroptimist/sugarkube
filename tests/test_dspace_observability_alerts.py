@@ -12,7 +12,7 @@ from test_observability_helm import yaml_load
 
 ROOT = Path(__file__).parents[1]
 RULES = ROOT / "platform/observability/rules/dspace-release-integrity.yaml"
-STAGING = ROOT / "deployment-evidence/dspace/staging/main-018687f-20260805T035722Z.json"
+STAGING = ROOT / "deployment-evidence/dspace/staging/main-22f506e-20260817T094911Z.json"
 PROD = ROOT / "deployment-evidence/dspace/prod/main-1a31a56-20260801T093443Z.json"
 PRODUCER = ROOT / "scripts/dspace_chat_synthetic_metrics.py"
 NAMES = {
@@ -87,6 +87,19 @@ def test_canonical_rules_agree_with_finalized_evidence():
         evidence["imageDigest"],
         str(STAGING.relative_to(ROOT)),
     )
+    assert set(approved.values()) >= {
+        "22f506e07e0b5abfd0cf756e9c5827c0458fb4b2",
+        "main-22f506e",
+        "sha256:467890df969cc7938cb760f965fd8f90a8912b1dcb1f8425bc808216b7e1512b",
+        "deployment-evidence/dspace/staging/main-22f506e-20260817T094911Z.json",
+    }
+    canonical = RULES.read_text()
+    assert not {
+        "018687f5a7f4de45508c6e36eb28afb3e44da24d",
+        "main-018687f",
+        "sha256:2b95b7fdccdd011553c8d8617e3090ee27323996c532148fdb147cb9fd6e1b6c",
+        "deployment-evidence/dspace/staging/main-018687f-20260805T035722Z.json",
+    }.intersection(canonical.split())
     prod = json.loads(PROD.read_text())
     assert (
         prod["sourceRevision"] == "1a31a569aff2dbeb238e8c2688b9e85140d2077d"

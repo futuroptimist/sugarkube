@@ -9,10 +9,10 @@ groups:
       application: dspace
       environment: staging
       cluster: sugarkube-int
-      revision: '018687f5a7f4de45508c6e36eb28afb3e44da24d'
-      image: main-018687f
-      image_digest: sha256:2b95b7fdccdd011553c8d8617e3090ee27323996c532148fdb147cb9fd6e1b6c
-      evidence: deployment-evidence/dspace/staging/main-018687f-20260805T035722Z.json
+      revision: '22f506e07e0b5abfd0cf756e9c5827c0458fb4b2'
+      image: main-22f506e
+      image_digest: sha256:467890df969cc7938cb760f965fd8f90a8912b1dcb1f8425bc808216b7e1512b
+      evidence: deployment-evidence/dspace/staging/main-22f506e-20260817T094911Z.json
   - alert: DspaceBuildRevisionMismatch
     expr: (max by (revision) (dspace_build_info{environment="staging"} and on (namespace, pod) (kube_pod_container_status_ready{namespace="dspace",container="dspace"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace="dspace",phase="Running"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace="dspace"})) unless on (revision) dspace_release_approved_info{environment="staging"}) or label_replace(((kube_pod_container_status_ready{namespace="dspace",container="dspace"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace="dspace",phase="Running"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace="dspace"}) unless on (namespace, pod) dspace_build_info{environment="staging"}), "revision", "unknown", "", "")
     for: 10m
@@ -21,7 +21,7 @@ groups:
       environment: staging
       cluster: sugarkube-int
       severity: critical
-      expected_revision: '018687f5a7f4de45508c6e36eb28afb3e44da24d'
+      expected_revision: '22f506e07e0b5abfd0cf756e9c5827c0458fb4b2'
     annotations:
       summary: DSPACE runtime revision differs from the approved release
       description: Runtime revision {{ $labels.revision }} is not approved; reconcile the immutable release coordinates.
@@ -36,7 +36,7 @@ groups:
       environment: staging
       cluster: sugarkube-int
       severity: critical
-      expected_revision: '018687f5a7f4de45508c6e36eb28afb3e44da24d'
+      expected_revision: '22f506e07e0b5abfd0cf756e9c5827c0458fb4b2'
     annotations:
       summary: DSPACE replicas report mixed build revisions
       description: More than one active revision persisted beyond the rollout settling window.
@@ -44,14 +44,14 @@ groups:
       remediation: Pause the rollout; inspect ReplicaSets and converge all ready pods on the approved revision.
       runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-dspace-release-integrity.md#dspacemixedbuildrevisions
   - alert: DspaceDeploymentImagePinMismatch
-    expr: max by (pod, image_id, image_spec) ((kube_pod_container_info{namespace="dspace",container="dspace"} unless on (namespace, pod, container) kube_pod_container_info{namespace="dspace",container="dspace",image_id=~"^(docker-pullable://)?ghcr.io/democratizedspace/dspace@sha256:2b95b7fdccdd011553c8d8617e3090ee27323996c532148fdb147cb9fd6e1b6c$",image_spec="ghcr.io/democratizedspace/dspace:main-018687f"}) and on (namespace, pod, container) (kube_pod_container_status_ready{namespace="dspace",container="dspace"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace="dspace",phase="Running"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace="dspace"})) or label_replace(label_replace((kube_pod_container_status_ready{namespace="dspace",container="dspace"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace="dspace",phase="Running"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace="dspace"}) unless on (namespace, pod, container) kube_pod_container_info{namespace="dspace",container="dspace"}, "image_id", "unknown", "", ""), "image_spec", "unknown", "", "")
+    expr: max by (pod, image_id, image_spec) ((kube_pod_container_info{namespace="dspace",container="dspace"} unless on (namespace, pod, container) kube_pod_container_info{namespace="dspace",container="dspace",image_id=~"^(docker-pullable://)?ghcr.io/democratizedspace/dspace@sha256:467890df969cc7938cb760f965fd8f90a8912b1dcb1f8425bc808216b7e1512b$",image_spec="ghcr.io/democratizedspace/dspace:main-22f506e"}) and on (namespace, pod, container) (kube_pod_container_status_ready{namespace="dspace",container="dspace"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace="dspace",phase="Running"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace="dspace"})) or label_replace(label_replace((kube_pod_container_status_ready{namespace="dspace",container="dspace"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace="dspace",phase="Running"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace="dspace"}) unless on (namespace, pod, container) kube_pod_container_info{namespace="dspace",container="dspace"}, "image_id", "unknown", "", ""), "image_spec", "unknown", "", "")
     for: 10m
     labels:
       application: dspace
       environment: staging
       cluster: sugarkube-int
       severity: critical
-      expected_revision: '018687f5a7f4de45508c6e36eb28afb3e44da24d'
+      expected_revision: '22f506e07e0b5abfd0cf756e9c5827c0458fb4b2'
     annotations:
       summary: DSPACE active pod image does not match the approved digest
       description: An active DSPACE container has an unapproved immutable image digest.
@@ -66,7 +66,7 @@ groups:
       environment: staging
       cluster: sugarkube-int
       severity: critical
-      expected_revision: '018687f5a7f4de45508c6e36eb28afb3e44da24d'
+      expected_revision: '22f506e07e0b5abfd0cf756e9c5827c0458fb4b2'
     annotations:
       summary: DSPACE isolated /chat synthetic failed, is stale, or is missing
       description: A zero success value is an executed failure; timestamp age or absence is a fail-closed producer failure.
@@ -81,7 +81,7 @@ groups:
       environment: staging
       cluster: sugarkube-int
       severity: critical
-      expected_revision: '018687f5a7f4de45508c6e36eb28afb3e44da24d'
+      expected_revision: '22f506e07e0b5abfd0cf756e9c5827c0458fb4b2'
     annotations:
       summary: Prometheus has no healthy DSPACE metrics target
       description: The DSPACE ServiceMonitor target is down or missing; this does not by itself prove the application is down.
