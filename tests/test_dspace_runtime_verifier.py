@@ -1639,6 +1639,52 @@ def test_modern_identity_optional_image_behavior_is_unchanged() -> None:
         ) == ("3.1.0", SHA, BUILD_TIMESTAMP, image)
 
 
+def test_modern_identity_rejects_null_image_without_leaking() -> None:
+    payload = modern_build_payload(image=None)
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.identity(
+            json.dumps(payload).encode(),
+            "3.1.0",
+            SHA,
+            "ghcr.io/democratizedspace/dspace:main-abcdef0",
+            "direct identity",
+        )
+    assert str(raised.value) == "direct identity"
+
+
+def test_modern_identity_rejects_mismatched_image_without_leaking(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    payload = modern_build_payload(image=SENTINEL)
+    with pytest.raises(verifier.VerificationError) as raised:
+        verifier.identity(
+            json.dumps(payload).encode(),
+            "3.1.0",
+            SHA,
+            "ghcr.io/democratizedspace/dspace:main-abcdef0",
+            "direct identity",
+        )
+    assert str(raised.value) == "direct identity"
+    captured = capsys.readouterr()
+    assert SENTINEL not in str(raised.value) + captured.out + captured.err
+
+
+def test_modern_identity_accepts_exact_dspace_311_payload() -> None:
+    revision = "22f506e07e0b5abfd0cf756e9c5827c0458fb4b2"
+    image = "ghcr.io/democratizedspace/dspace:main-22f506e"
+    timestamp = "2026-08-15T19:38:47.123Z"
+    payload = modern_build_payload(
+        version="3.1.1",
+        revision=revision,
+        shortRevision=revision[:7],
+        image=image,
+        buildTimestamp=timestamp,
+    )
+    assert verifier.identity(
+        json.dumps(payload).encode(), "3.1.1", revision, image, "direct identity"
+    ) == ("3.1.1", revision, timestamp, image)
+
+
 @pytest.mark.parametrize(
     "overrides,category",
     [
@@ -1666,13 +1712,17 @@ def test_modern_identity_optional_image_behavior_is_unchanged() -> None:
 def test_verify_rejects_modern_timestamp_disagreement(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
     overrides: dict[str, object],
     category: str,
 ) -> None:
+    differing_timestamp = "2026-08-02T12:00:00Z"
     args, _ = _verify_setup(monkeypatch, tmp_path, overrides=overrides)
     with pytest.raises(verifier.VerificationError) as raised:
         verifier.verify(args)
     assert str(raised.value) == category
+    captured = capsys.readouterr()
+    assert differing_timestamp not in str(raised.value) + captured.out + captured.err
 
 
 def test_command_success_and_nonzero_failure_are_bounded(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -237,7 +237,7 @@ def identity(
     ):
         fail(category)
     runtime_image = value.get("image")
-    if runtime_image is not None and runtime_image != image:
+    if "image" in value and runtime_image != image:
         fail(category)
     build_timestamp = value["buildTimestamp"]
     if (
