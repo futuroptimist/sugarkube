@@ -9,7 +9,7 @@ added the result-file producer contract at runner revision
 staging as recorded below. Production labels are part of the contract tests, but production
 observability installation, live testing, and all production mutation remain unsupported and
 unclaimed. The approved staging coordinate is derived from
-[`main-018687f-20260805T035722Z.json`](../deployment-evidence/dspace/staging/main-018687f-20260805T035722Z.json);
+[`main-22f506e-20260817T094911Z.json`](../deployment-evidence/dspace/staging/main-22f506e-20260817T094911Z.json);
 the production contract is checked against
 [`main-1a31a56-20260801T093443Z.json`](../deployment-evidence/dspace/prod/main-1a31a56-20260801T093443Z.json).
 Semantic tags are descriptive only and are never deployment identity.
@@ -188,7 +188,7 @@ spec:
             environment: staging
             cluster: sugarkube-int
             severity: critical
-            expected_revision: 018687f5a7f4de45508c6e36eb28afb3e44da24d
+            expected_revision: 22f506e07e0b5abfd0cf756e9c5827c0458fb4b2
             drill_owner: ${owner}
           annotations: &annotations
             summary: DSPACE drill revision mismatch

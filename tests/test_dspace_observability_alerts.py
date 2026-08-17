@@ -26,6 +26,9 @@ RUNBOOK = (
     "https://github.com/futuroptimist/sugarkube/blob/main/docs/"
     "observability-dspace-release-integrity.md"
 )
+RUNBOOK_DOC = ROOT / "docs/observability-dspace-release-integrity.md"
+APP_DOC = ROOT / "docs/apps/dspace.md"
+DESIGN_DOC = ROOT / "docs/observability-design.md"
 
 
 def rules():
@@ -109,6 +112,39 @@ def test_canonical_rules_agree_with_finalized_evidence():
         evidence["semanticTag"] not in RULES.read_text()
         and prod["semanticTag"] not in RULES.read_text()
     )
+
+
+def test_current_documentation_agrees_with_finalized_staging_evidence():
+    evidence = json.loads(STAGING.read_text())
+    evidence_path = str(STAGING.relative_to(ROOT))
+
+    runbook = RUNBOOK_DOC.read_text()
+    runbook_current = runbook.split("## Signals and triage", 1)[0]
+    drill = runbook.split("## Staging post-merge drills", 1)[1].split(
+        "### Sanitized staging verification record", 1
+    )[0]
+    assert evidence_path in runbook_current
+    assert f"expected_revision: {evidence['sourceRevision']}" in drill
+
+    app_current = APP_DOC.read_text().split("## Environment topology", 1)[1].split(
+        "## Find or publish GHCR image", 1
+    )[0]
+    for coordinate in (
+        evidence["applicationVersion"],
+        evidence["chartVersion"],
+        f"Helm revision {evidence['helmRevision']}",
+        evidence["sourceRevision"],
+        evidence["imageTag"],
+        evidence_path,
+    ):
+        assert str(coordinate) in app_current
+
+    dspace_inventory = next(
+        line
+        for line in DESIGN_DOC.read_text().splitlines()
+        if line.startswith("| DSPACE |")
+    )
+    assert f"(chart `{evidence['chartVersion']}`)" in dspace_inventory
 
 
 def test_staging_alert_contracts_agree_with_canonical_rules():
