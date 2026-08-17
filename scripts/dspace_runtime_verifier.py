@@ -87,11 +87,11 @@ META_RE = re.compile(
     re.IGNORECASE,
 )
 IMAGE_ID_RE = re.compile(r"sha256:[0-9a-f]{64}$")
-BUILD_TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$")
 HTML_DOCUMENT_RE = re.compile(r"^\s*(?:<!doctype\s+html\b|<html\b)", re.IGNORECASE)
 PUBLIC_HTTP_USER_AGENT = "sugarkube-dspace-runtime-verifier/1.0"
 POD_SETTLE_TIMEOUT_SECONDS = 60.0
 POD_SETTLE_INTERVAL_SECONDS = 2.0
+BUILD_TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$")
 
 
 class VerificationError(ValueError):
@@ -224,9 +224,11 @@ def identity(
         fail(category)
     try:
         value = json.loads(raw)
-    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError):
+    except (UnicodeDecodeError, json.JSONDecodeError):
         fail(category)
-    if not isinstance(value, dict) or set(value) not in (BUILD_FIELDS, BUILD_FIELDS - {"image"}):
+    if not isinstance(value, dict) or set(value) - BUILD_FIELDS:
+        fail(category)
+    if not {"version", "revision", "shortRevision", "buildTimestamp"} <= set(value):
         fail(category)
     if (
         value.get("version") != version
@@ -237,21 +239,23 @@ def identity(
     runtime_image = value.get("image")
     if "image" in value and runtime_image != image:
         fail(category)
-    build_timestamp = value.get("buildTimestamp")
+    build_timestamp = value["buildTimestamp"]
     if (
         not isinstance(build_timestamp, str)
-        or not 1 <= len(build_timestamp) <= 40
+        or not build_timestamp
+        or len(build_timestamp) > 40
+        or any(ord(character) < 32 or ord(character) == 127 for character in build_timestamp)
         or BUILD_TIMESTAMP_RE.fullmatch(build_timestamp) is None
     ):
         fail(category)
     try:
-        timestamp_format = (
-            "%Y-%m-%dT%H:%M:%SZ" if "." not in build_timestamp else "%Y-%m-%dT%H:%M:%S.%fZ"
-        )
-        datetime.strptime(build_timestamp, timestamp_format)
+        parsed_timestamp = datetime.fromisoformat(build_timestamp.replace("Z", "+00:00"))
     except ValueError:
         fail(category)
-    return version, revision, runtime_image or image, build_timestamp
+    timespec = "milliseconds" if "." in build_timestamp else "seconds"
+    if parsed_timestamp.isoformat(timespec=timespec).replace("+00:00", "Z") != build_timestamp:
+        fail(category)
+    return version, revision, build_timestamp, runtime_image or image
 
 
 def marker(raw: bytes, revision: str, category: str) -> None:
@@ -459,7 +463,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
 
     helm_before = helm_identity(args, expected["chart_version"])
 
-    replica_identity: tuple[str, ...] | None = None
+    replica_identity: tuple[str, str, str] | tuple[str, str, str, str] | None = None
     for pod in pods:
         metadata, spec, status = pod.get("metadata", {}), pod.get("spec", {}), pod.get("status", {})
         if not all(isinstance(value, dict) for value in (metadata, spec, status)):
