@@ -595,6 +595,17 @@ def test_staging_gate_returns_revision_despite_approval_metadata_difference() ->
     assert manifest.staging_gate(production, runtime_final()) == 17
 
 
+def test_production_authorization_is_explicit_and_release_bound() -> None:
+    production = prod_candidate()
+    manifest.authorize_production(
+        production, f"dspace:prod:{production['sourceRevision']}"
+    )
+    with pytest.raises(manifest.ManifestError, match="explicit production mutation authorization"):
+        manifest.authorize_production(production, "")
+    with pytest.raises(manifest.ManifestError, match="explicit production mutation authorization"):
+        manifest.authorize_production(production, "dspace:prod:" + "0" * 40)
+
+
 def test_schema_v2_finalization_and_staging_gate_preserve_chart_provenance() -> None:
     staging = split_candidate()
     final = finalize(
