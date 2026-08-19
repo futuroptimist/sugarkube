@@ -12,7 +12,8 @@ import pytest
 
 from scripts import dspace_chat_synthetic_runtime as runtime
 from scripts import install_dspace_chat_synthetic as installer
-from scripts import materialize_dspace_chat_runner as materializer
+
+materializer = installer
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "config/dspace-chat-synthetic.json"
@@ -75,7 +76,7 @@ def test_wrapper_safety_and_provider_is_in_actual_argv() -> None:
     wrapper = (ROOT / "scripts/dspace_chat_synthetic_wrapper.sh").read_text()
     assert "set +x\nset -Eeuo pipefail\numask 077\nexport PYTHONDONTWRITEBYTECODE=1" in wrapper
     source = (ROOT / "scripts/dspace_chat_synthetic_runtime.py").read_text()
-    assert '"--provider",' in source and 'config["provider"],' in source
+    assert '"--expected-provider",' in source and 'config["provider"],' in source
     assert 'subprocess.run(\n            ["runuser"' in source
     assert source.count("subprocess.DEVNULL") >= 4
 
@@ -137,7 +138,7 @@ def test_snapshot_validation_rejects_external_or_incomplete_dependencies(
     else:
         (target / "frontend/node_modules/broken").symlink_to("/absent")
     with pytest.raises(ValueError):
-        materializer.validate(target, revision)
+        materializer.validate_runner(target, revision)
 
 
 def test_runner_validation_rejects_coordinate_and_hash_mismatch(tmp_path: Path) -> None:
@@ -247,7 +248,7 @@ def test_installer_dry_run_status_apply_and_exact_rollback(tmp_path: Path, capsy
     installer.activate(retained, tmp_path, "a" * 40)
     with pytest.raises((OSError, ValueError)):
         installer.activate(current.parent / ("b" * 40), tmp_path, "b" * 40)
-    with pytest.raises(ValueError, match="40-character"):
+    with pytest.raises(ValueError, match="asset revision"):
         installer.activate(retained, tmp_path, "../escape")
 
 
@@ -285,7 +286,7 @@ def test_lifecycle_is_single_shot_owner_scoped_bounded_and_redacted() -> None:
     assert "LOCK_NB" in source and "INVOCATION_ID" in source
     assert 'f"uid-{account.pw_uid}-{invocation}"' in source
     assert 'timeout=config["timeoutSeconds"]' in source
-    assert "result.unlink()" in source and "invocation_dir.rmdir()" in source
+    assert "result.unlink(missing_ok=True)" in source and "invocation_dir.rmdir()" in source
     assert "glob(" not in source and "rmtree" not in source
     for forbidden in ("retry", "systemctl", "rollback", "restart"):
         assert forbidden not in source.lower()

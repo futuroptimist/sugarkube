@@ -23,6 +23,7 @@ INVOCATION = re.compile(r"[0-9a-f]{32}")
 APPROVED = ("3.1.1", "22f506e07e0b5abfd0cf756e9c5827c0458fb4b2")
 REQUIRED = {
     "runnerRevision",
+    "dspaceOrigin",
     "repositoryIdentity",
     "dspaceVersion",
     "dspaceSourceRevision",
@@ -63,6 +64,8 @@ def load_config(path: Path) -> dict:
         raise Invalid("legacy provider contract coordinate")
     if value["provider"] != "token-place" or not 1 <= value["timeoutSeconds"] <= 600:
         raise Invalid("provider or timeout")
+    if value["dspaceOrigin"] != "https://staging.democratized.space":
+        raise Invalid("DSPACE origin")
     for key in ("runnerRoot", "resultRoot", "metricPath", "metricsConsumer"):
         if not Path(value[key]).is_absolute():
             raise Invalid("configured path")
@@ -122,11 +125,34 @@ def validate_runner(config: dict) -> Path:
         target = runner / relative
         if target.is_symlink() or not target.is_file() or sha256(target) != expected:
             raise Invalid("critical file hash")
+    required = {
+        "scripts/run-remote-chat-smoke.mjs",
+        "scripts/remote-chat-smoke-completion.mjs",
+        "frontend/e2e/remote-chat-smoke.spec.ts",
+        "package.json",
+        "frontend/package.json",
+        "pnpm-workspace.yaml",
+        "pnpm-lock.yaml",
+        "playwright-browser/browser-executable",
+    }
+    if not required <= files.keys():
+        raise Invalid("critical file manifest")
     if not (runner / "node_modules/.pnpm").is_dir():
         raise Invalid("root pnpm store")
-    cli = runner / "node_modules/.bin/playwright"
+    cli = runner / "frontend/node_modules/.bin/playwright"
     if not cli.is_file() or not os.access(cli, os.X_OK):
         raise Invalid("Playwright CLI")
+    entrypoint = runner / "scripts/run-remote-chat-smoke.mjs"
+    browser = runner / "playwright-browser/browser-executable"
+    if not entrypoint.is_file() or not browser.is_file() or not os.access(browser, os.X_OK):
+        raise Invalid("runner or browser")
+    subprocess.run(
+        ["/usr/bin/node", "-e", "require.resolve('@playwright/test')"],
+        cwd=runner / "frontend",
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
     return runner
 
 
@@ -161,32 +187,42 @@ def run(config: dict) -> int:
     except BlockingIOError as error:
         raise Invalid("overlapping execution") from error
     invocation_dir = root / f"uid-{account.pw_uid}-{invocation}"
-    if invocation_dir.exists():
+    if os.path.lexists(invocation_dir):
+        lock.close()
         raise Invalid("pre-existing invocation path")
-    invocation_dir.mkdir(mode=0o770)
-    os.chown(invocation_dir, 0, account.pw_gid)
-    os.chmod(invocation_dir, 0o770)
+    try:
+        invocation_dir.mkdir(mode=0o770)
+        os.chown(invocation_dir, 0, account.pw_gid)
+        os.chmod(invocation_dir, 0o770)
+        validate_dir(invocation_dir, 0, account.pw_gid, 0o770)
+    except Exception:
+        lock.close()
+        raise
     result = invocation_dir / "result.json"
     started = int(time.time())
     argv = [
-        str(runner / "node_modules/.bin/playwright"),
-        "test",
-        "tests/remote-chat-smoke.spec.ts",
-        "--",
-        "--result-file",
-        str(result),
-        "--runner-revision",
-        config["runnerRevision"],
+        "/usr/bin/node",
+        str(runner / "scripts/run-remote-chat-smoke.mjs"),
+        "--base-url",
+        config["dspaceOrigin"],
+        "--expected-version",
+        config["dspaceVersion"],
+        "--expected-revision",
+        config["dspaceSourceRevision"],
         "--identity-contract",
         config["identityContract"],
         "--provider-config-contract",
         config["providerConfigContract"],
-        "--provider",
+        "--expected-provider",
         config["provider"],
-        "--token-place-origin",
+        "--expected-token-place-origin",
         config["tokenPlaceOrigin"],
-        "--token-place-model",
+        "--expected-token-place-model",
         config["tokenPlaceModel"],
+        "--result-file",
+        str(result),
+        "--runner-revision",
+        config["runnerRevision"],
     ]
     try:
         completed = subprocess.run(
@@ -194,19 +230,45 @@ def run(config: dict) -> int:
             cwd=runner,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            env={**os.environ, "PLAYWRIGHT_BROWSERS_PATH": str(runner / "playwright-browser")},
             timeout=config["timeoutSeconds"],
             check=False,
         )
         ended = int(time.time())
-        if not result.is_file():
+        try:
+            info = result.lstat()
+        except FileNotFoundError:
             raise Invalid("current result missing")
-        info = result.stat()
-        if (info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)) != (
+        if not stat.S_ISREG(info.st_mode) or (
+            info.st_uid,
+            info.st_gid,
+            stat.S_IMODE(info.st_mode),
+        ) != (
             account.pw_uid,
             account.pw_gid,
             0o600,
-        ) or not started <= int(info.st_mtime) <= ended + 1:
+        ):
             raise Invalid("current result provenance")
+        payload = json.loads(result.read_text(encoding="utf-8"))
+        expected_keys = {
+            "schemaVersion",
+            "journey",
+            "passed",
+            "executedAt",
+            "runnerRevision",
+            "transport",
+            "mutationEnabled",
+        }
+        if (
+            not isinstance(payload, dict)
+            or set(payload) != expected_keys
+            or payload.get("runnerRevision") != config["runnerRevision"]
+            or type(payload.get("passed")) is not bool
+            or type(payload.get("executedAt")) is not int
+            or not started <= payload["executedAt"] <= ended
+            or (completed.returncode == 0) != payload["passed"]
+        ):
+            raise Invalid("current result contract")
         # The bounded consumer validates the exact JSON schema and publishes atomically.
         subprocess.run(
             [
@@ -243,10 +305,12 @@ def run(config: dict) -> int:
         )
         return 1
     finally:
-        if result.exists() and result.parent == invocation_dir:
-            result.unlink()
-        if invocation_dir.exists():
+        try:
+            if result.parent == invocation_dir:
+                result.unlink(missing_ok=True)
             invocation_dir.rmdir()
+        finally:
+            lock.close()
 
 
 def main() -> int:

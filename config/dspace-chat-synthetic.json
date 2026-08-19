@@ -15,5 +15,6 @@
   "runnerRoot": "/var/lib/sugarkube/dspace-chat-runners",
   "resultRoot": "/run/sugarkube/dspace-chat-synthetic",
   "metricPath": "/var/lib/node_exporter/textfile_collector/dspace-chat.prom",
-  "metricsConsumer": "/usr/local/libexec/sugarkube-dspace-chat-synthetic-metrics"
+  "metricsConsumer": "/usr/local/libexec/sugarkube-dspace-chat-synthetic-metrics",
+  "dspaceOrigin": "https://staging.democratized.space"
 }

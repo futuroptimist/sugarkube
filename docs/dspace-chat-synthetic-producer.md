@@ -26,14 +26,16 @@ Use only an explicitly identified, clean local DSPACE checkout. Construction use
 lockfile, frozen and offline; it never contacts GitHub or resolves new package versions.
 
 ```bash
-python3 scripts/materialize_dspace_chat_runner.py \
+python3 scripts/install_dspace_chat_synthetic.py materialize \
   --source /absolute/path/to/local/dspace \
   --revision 97ab09f13fb098de928a878bf1fe9b8d13032cb5 \
   --repository-identity https://github.com/democratizedspace/dspace.git \
-  --output /absolute/staging/97ab09f13fb098de928a878bf1fe9b8d13032cb5
+  --output /absolute/staging/97ab09f13fb098de928a878bf1fe9b8d13032cb5 \
+  --pnpm /absolute/toolchain/pnpm --pnpm-version <exact-version> \
+  --browser-bundle /absolute/path/to/browser-bundle
 ```
 
-The local pnpm cache must already contain the exact lockfile's packages. Construction fails for a
+The explicitly selected pnpm executable must report the requested version. The supplied local browser bundle is copied into the runner and used through a runner-local `PLAYWRIGHT_BROWSERS_PATH`; no `$HOME` cache is trusted. The local pnpm cache must already contain the exact lockfile's packages. Construction fails for a
 missing object, wrong HEAD, dirty tracked/index state, alternates, missing root store, broken
 frontend link, unusable Playwright shim/module resolution, or missing critical file. Its manifest
 records hashes for the runner, spec, workspace manifests, and lockfile.
@@ -48,7 +50,7 @@ python3 scripts/install_dspace_chat_synthetic.py dry-run --root /tmp/rehearsal-r
 python3 scripts/install_dspace_chat_synthetic.py status --root /tmp/rehearsal-root
 ```
 
-Review all hashes and coordinates. `status` is read-only and reports unit activation without
+Review all hashes and coordinates. `status` is read-only and, for alternate roots, reports activation as not queried; only `/` queries unit activation without
 printing configuration secrets (the committed configuration contains none). A failed staging or
 preflight leaves installed fixtures unchanged.
 
@@ -57,8 +59,8 @@ preflight leaves installed fixtures unchanged.
 Only after separate approval, an operator may stage the runner at
 `/var/lib/sugarkube/dspace-chat-runners/<exact-revision>`, then invoke `apply`. Apply atomically
 replaces files only after validating the whole staged set and retains the prior validated revision.
-It reloads the systemd manager after replacing units so their in-memory definitions match disk, but
-never enables, starts, stops, restarts, disables, retries, or executes smoke. If replacement or
+After apply, the operator must run `sudo systemctl daemon-reload` as a separate mandatory
+step so the in-memory definitions match disk. The installer never enables, starts, stops, restarts, disables, retries, or executes smoke. If replacement or
 reload fails, it restores the prior asset set and leaves the `current` revision pointer unchanged.
 
 The required access model is exact: result root `root:pi` mode `0710`; each invocation directory
@@ -104,7 +106,11 @@ exact retained validated revision:
 
 ```bash
 python3 scripts/install_dspace_chat_synthetic.py rollback \
-  --revision <exact-retained-revision>
+  --revision <exact-retained-asset-revision>
+# After separate authorization:
+python3 scripts/install_dspace_chat_synthetic.py rollback --apply \
+  --revision <exact-retained-asset-revision>
+sudo systemctl daemon-reload
 ```
 
 The command rejects an absent, incomplete, or hash-mismatched retained revision and does not change
