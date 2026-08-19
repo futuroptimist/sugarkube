@@ -73,6 +73,125 @@ def test_configuration_selects_contracts_and_exact_legacy_coordinate(tmp_path: P
         runtime.load_config(path)
 
 
+@pytest.mark.parametrize(
+    ("key", "replacement", "message"),
+    [
+        ("repositoryIdentity", "https://example.invalid/dspace.git", "repository identity"),
+        ("tokenPlaceOrigin", "https://token.place", "token.place origin"),
+        ("tokenPlaceModel", "different-model", "token.place model"),
+        ("serviceAccount", "../../root", "service identifier"),
+        ("serviceGroup", "group name", "service identifier"),
+        ("serviceAccount", 123, "value type"),
+        ("runnerRevision", None, "value type"),
+        ("timeoutSeconds", "30", "value type"),
+        ("timeoutSeconds", True, "value type"),
+    ],
+)
+def test_configuration_rejects_coordinate_drift_and_malformed_types(
+    tmp_path: Path, key: str, replacement: object, message: str
+) -> None:
+    path = tmp_path / "config.json"
+    value = config(tmp_path)
+    value[key] = replacement
+    path.write_text(json.dumps(value))
+
+    with pytest.raises(runtime.Invalid, match=message):
+        runtime.load_config(path)
+
+
+def runtime_runner(tmp_path: Path) -> tuple[dict, Path]:
+    value = config(tmp_path)
+    runner = Path(value["runnerRoot"]) / "fixture"
+    runner.mkdir(parents=True)
+    git("init", cwd=runner)
+    git("config", "user.email", "tests@example.invalid", cwd=runner)
+    git("config", "user.name", "Tests", cwd=runner)
+    required = {
+        "scripts/run-remote-chat-smoke.mjs": "// runner\n",
+        "scripts/remote-chat-smoke-completion.mjs": "// completion\n",
+        "frontend/e2e/remote-chat-smoke.spec.ts": "// smoke\n",
+        "package.json": "{}\n",
+        "frontend/package.json": "{}\n",
+        "pnpm-workspace.yaml": "packages: []\n",
+        "pnpm-lock.yaml": "lockfileVersion: '9.0'\n",
+        "playwright-browser/browser-executable": "#!/bin/sh\nexit 0\n",
+    }
+    for relative, contents in required.items():
+        target = runner / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(contents)
+    (runner / "playwright-browser/browser-executable").chmod(0o755)
+    cli = runner / "frontend/node_modules/.bin/playwright"
+    cli.parent.mkdir(parents=True)
+    cli.write_text("#!/bin/sh\nexit 0\n")
+    cli.chmod(0o755)
+    (runner / "node_modules/.pnpm").mkdir(parents=True)
+    module = runner / "frontend/node_modules/@playwright/test"
+    module.mkdir(parents=True)
+    (module / "package.json").write_text('{"main":"index.js"}\n')
+    (module / "index.js").write_text("module.exports = {};\n")
+    git("add", ".", cwd=runner)
+    git("commit", "-m", "runtime fixture", cwd=runner)
+    revision = git("rev-parse", "HEAD", cwd=runner)
+    destination = Path(value["runnerRoot"]) / revision
+    runner.rename(destination)
+    value["runnerRevision"] = revision
+    manifest = {
+        "schemaVersion": 1,
+        "runnerRevision": revision,
+        "repositoryIdentity": runtime.APPROVED_REPOSITORY_IDENTITY,
+        "files": {relative: runtime.sha256(destination / relative) for relative in required},
+    }
+    (destination / "sugarkube-runner-manifest.json").write_text(json.dumps(manifest))
+    return value, destination
+
+
+def test_runner_validation_accepts_complete_independent_git_repository(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, runner = runtime_runner(tmp_path)
+    real_run = subprocess.run
+
+    def fake_node(argv, *args, **kwargs):
+        if argv[0] == "/usr/bin/node":
+            return subprocess.CompletedProcess(argv, 0)
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(runtime.subprocess, "run", fake_node)
+
+    assert runtime.validate_runner(value) == runner
+
+
+def test_runner_validation_rejects_missing_git_metadata(tmp_path: Path) -> None:
+    value, runner = runtime_runner(tmp_path)
+    (runner / ".git").rename(runner / "incomplete-git")
+
+    with pytest.raises(runtime.Invalid, match="complete Git metadata"):
+        runtime.validate_runner(value)
+
+
+@pytest.mark.parametrize("fault", ["shallow", "fsck"])
+def test_runner_validation_rejects_shallow_or_failed_fsck(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    value, _ = runtime_runner(tmp_path)
+    real_run = subprocess.run
+
+    def controlled_run(argv, *args, **kwargs):
+        if "--is-shallow-repository" in argv and fault == "shallow":
+            return subprocess.CompletedProcess(argv, 0, stdout="true\n", stderr="")
+        if "fsck" in argv and fault == "fsck":
+            raise subprocess.CalledProcessError(1, argv)
+        if argv[0] == "/usr/bin/node":
+            return subprocess.CompletedProcess(argv, 0)
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(runtime.subprocess, "run", controlled_run)
+    expected = runtime.Invalid if fault == "shallow" else subprocess.CalledProcessError
+    with pytest.raises(expected):
+        runtime.validate_runner(value)
+
+
 def test_wrapper_safety_and_provider_is_in_actual_argv() -> None:
     wrapper = (ROOT / "scripts/dspace_chat_synthetic_wrapper.sh").read_text()
     assert "set +x\nset -Eeuo pipefail\numask 077\nexport PYTHONDONTWRITEBYTECODE=1" in wrapper

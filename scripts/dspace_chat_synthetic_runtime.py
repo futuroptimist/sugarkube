@@ -21,6 +21,10 @@ SHA = re.compile(r"[0-9a-f]{40}")
 SHA256 = re.compile(r"[0-9a-f]{64}")
 INVOCATION = re.compile(r"[0-9a-f]{32}")
 APPROVED = ("3.1.1", "22f506e07e0b5abfd0cf756e9c5827c0458fb4b2")
+APPROVED_REPOSITORY_IDENTITY = "https://github.com/democratizedspace/dspace.git"
+APPROVED_TOKEN_PLACE_ORIGIN = "https://staging.token.place"
+APPROVED_TOKEN_PLACE_MODEL = "qwen3-8b-instruct"
+SERVICE_IDENTIFIER = re.compile(r"[a-z_][a-z0-9_-]{0,31}")
 REQUIRED = {
     "runnerRevision",
     "dspaceOrigin",
@@ -54,8 +58,25 @@ def load_config(path: Path) -> dict:
         or not REQUIRED <= value.keys()
     ):
         raise Invalid("configuration schema")
+    string_keys = REQUIRED - {"timeoutSeconds"}
+    if (
+        any(not isinstance(value[key], str) for key in string_keys)
+        or not isinstance(value["timeoutSeconds"], int)
+        or isinstance(value["timeoutSeconds"], bool)
+    ):
+        raise Invalid("configuration value type")
     if not SHA.fullmatch(value["runnerRevision"]):
         raise Invalid("runner coordinate")
+    if value["repositoryIdentity"] != APPROVED_REPOSITORY_IDENTITY:
+        raise Invalid("repository identity")
+    if value["tokenPlaceOrigin"] != APPROVED_TOKEN_PLACE_ORIGIN:
+        raise Invalid("token.place origin")
+    if value["tokenPlaceModel"] != APPROVED_TOKEN_PLACE_MODEL:
+        raise Invalid("token.place model")
+    if any(
+        not SERVICE_IDENTIFIER.fullmatch(value[key]) for key in ("serviceAccount", "serviceGroup")
+    ):
+        raise Invalid("service identifier")
     if value["identityContract"] != "build-info-v1":
         raise Invalid("identity contract")
     if value["providerConfigContract"] != "legacy-no-default-provider-v1":
@@ -102,6 +123,9 @@ def validate_runner(config: dict) -> Path:
             or not SHA256.fullmatch(expected)
         ):
             raise Invalid("critical file manifest")
+    git_metadata = runner / ".git"
+    if git_metadata.is_symlink() or not git_metadata.is_dir():
+        raise Invalid("complete Git metadata")
     if (
         subprocess.run(
             ["git", "-C", str(runner), "rev-parse", "HEAD"],
@@ -121,6 +145,22 @@ def validate_runner(config: dict) -> Path:
         raise Invalid("runner tracked state")
     if (runner / ".git/objects/info/alternates").exists():
         raise Invalid("external object store")
+    if (
+        subprocess.run(
+            ["git", "-C", str(runner), "rev-parse", "--is-shallow-repository"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        != "false"
+    ):
+        raise Invalid("shallow repository")
+    subprocess.run(
+        ["git", "-C", str(runner), "fsck", "--full"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
     for relative, expected in files.items():
         target = runner / relative
         if target.is_symlink() or not target.is_file() or sha256(target) != expected:
