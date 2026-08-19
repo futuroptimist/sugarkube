@@ -1,0 +1,13 @@
+[Unit]
+Description=Schedule the Sugarkube DSPACE staging chat synthetic producer
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+AccuracySec=30s
+RandomizedDelaySec=30s
+Persistent=true
+Unit=sugarkube-dspace-chat-synthetic.service
+
+[Install]
+WantedBy=timers.target
