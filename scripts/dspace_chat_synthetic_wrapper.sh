@@ -1,0 +1,8 @@
+#!/bin/bash
+set +x
+set -Eeuo pipefail
+umask 077
+export PYTHONDONTWRITEBYTECODE=1
+
+exec /usr/bin/python3 /usr/local/libexec/sugarkube-dspace-chat-synthetic-runtime \
+  --config /etc/sugarkube/dspace-chat-synthetic.json "$@"

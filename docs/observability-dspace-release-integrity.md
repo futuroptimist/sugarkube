@@ -50,104 +50,22 @@ blackbox probes. Conversely, an `up` target does not prove `/chat` works.
 
 ## Synthetic producer/consumer contract
 
-Sugarkube supplies a bounded textfile consumer, not the external smoke runner or scheduler. Install
-`scripts/dspace_chat_synthetic_metrics.py` on a trusted staging operator host that has a
-node-exporter textfile directory. Pin the external DSPACE smoke runner to a reviewed **full commit
-SHA** and install it from an immutable artifact out of band; never clone a branch or download code
-at runtime. Schedule it at least every ten minutes with intercepted/isolated transport and mutation
-disabled. It must write exactly this schema without secrets or free-form diagnostic fields:
+Sugarkube now owns the canonical producer lifecycle, pinned coordinate record, independent runner
+construction, bounded consumer, installer, service/timer units, deterministic tests, and operational
+runbook. See [Repository-owned DSPACE chat synthetic producer](dspace-chat-synthetic-producer.md) for
+the trust model and the deliberately separate construction, dry-run, installation, controlled
+execution, timer activation, observation, and exact-revision rollback steps.
 
-```json
-{"schemaVersion":1,"journey":"/chat","passed":true,"executedAt":1785988800,"runnerRevision":"0123456789abcdef0123456789abcdef01234567","transport":"intercepted","mutationEnabled":false}
-```
+The currently active private-derived staging installation is behavioral provenance, not repository
+source. It must not be copied or treated as the implementation. A later live cutover to these
+repository-owned artifacts requires separate review and explicit authorization. Repository
+validation does not access the operator host, mutate systemd, execute the real smoke producer,
+access a cluster, run Helm, or mutate production.
 
-Publish atomically after the runner succeeds:
-
-```bash
-python3 scripts/dspace_chat_synthetic_metrics.py \
-  --result /run/dspace-chat/result.json \
-  --output /var/lib/node_exporter/textfile_collector/dspace-chat.prom \
-  --runner-revision "$PINNED_DSPACE_SMOKE_RUNNER_SHA" --environment staging
-```
-
-Verify both metrics in Prometheus and check timestamp age. A malformed result leaves the prior file
-untouched, which becomes stale and alerts. Roll back by disabling only this scheduler and removing
-only `dspace-chat.prom`; the missing-series branch deliberately continues to alert until the route
-is removed or a valid producer is restored. In staging, a five-minute systemd producer is enabled
-on the trusted operator host and pinned to DSPACE runner revision
-`92dad0cba4414aa111fd78bf03607c0aacc4043e`; Prometheus ingests fresh, bounded
-`dspace_chat_synthetic_success` and `dspace_chat_synthetic_timestamp_seconds` series.
-
-The deployed scheduler is local to the trusted staging operator host `sugarkube3`, which provides the
-node-exporter textfile directory; it is not installed in the DSPACE pods or on an arbitrary cluster
-node. Its unit files are `/etc/systemd/system/dspace-chat-synthetic.service` and
-`/etc/systemd/system/dspace-chat-synthetic.timer`. Log in to that host and use these safe,
-read-only checks to confirm the installed paths, the five-minute cadence, and that exactly one timer
-is scheduled:
-
-```bash
-(
-if ! sudo systemctl cat dspace-chat-synthetic.service dspace-chat-synthetic.timer; then
-  echo "verification failed: producer units cannot be loaded or read" >&2
-  exit 1
-fi
-if ! systemctl is-enabled --quiet dspace-chat-synthetic.timer; then
-  echo "verification failed: dspace-chat-synthetic.timer is not enabled" >&2
-  exit 1
-fi
-if ! systemctl is-active --quiet dspace-chat-synthetic.timer; then
-  echo "verification failed: dspace-chat-synthetic.timer is not active" >&2
-  exit 1
-fi
-timer_count="$(systemctl list-timers --all --no-legend --no-pager | \
-  awk '$(NF - 1) == "dspace-chat-synthetic.timer" && NF { count++ } END { print count + 0 }')"
-if test "$timer_count" -ne 1; then
-  echo "verification failed: expected exactly one scheduled timer; found $timer_count" >&2
-  exit 1
-fi
-)
-```
-
-For producer-only rollback, run the following on the same operator host. `disable --now` stops and
-unschedules only this producer; it does not alter DSPACE or other timers. Removing the metrics file
-is intentional and causes the fail-closed missing-series alert until the route is removed or a valid
-producer is restored.
-
-```bash
-(
-if ! sudo systemctl disable --now dspace-chat-synthetic.timer; then
-  echo "rollback failed: could not disable and stop dspace-chat-synthetic.timer" >&2
-  exit 1
-fi
-if ! sudo systemctl stop dspace-chat-synthetic.service; then
-  echo "rollback failed: could not stop dspace-chat-synthetic.service" >&2
-  exit 1
-fi
-if ! sudo rm -f /var/lib/node_exporter/textfile_collector/dspace-chat.prom; then
-  echo "rollback failed: could not remove dspace-chat.prom" >&2
-  exit 1
-fi
-timer_enabled="$(systemctl is-enabled dspace-chat-synthetic.timer 2>&1)"
-if test "$timer_enabled" != disabled; then
-  echo "rollback failed: timer state is $timer_enabled, not disabled" >&2
-  exit 1
-fi
-timer_active="$(systemctl is-active dspace-chat-synthetic.timer 2>&1)"
-if test "$timer_active" != inactive; then
-  echo "rollback failed: timer state is $timer_active, not inactive" >&2
-  exit 1
-fi
-service_active="$(systemctl is-active dspace-chat-synthetic.service 2>&1)"
-if test "$service_active" != inactive; then
-  echo "rollback failed: service state is $service_active, not inactive" >&2
-  exit 1
-fi
-if test -e /var/lib/node_exporter/textfile_collector/dspace-chat.prom; then
-  echo "rollback failed: dspace-chat.prom remains present" >&2
-  exit 1
-fi
-)
-```
+The bounded result schema and existing metric names/labels remain unchanged. A malformed, absent,
+stale, shared, incorrectly owned/mode, pre-existing, or out-of-window current result preserves the
+previous metric byte-for-byte so it ages into the existing fail-closed stale alert. A passing
+Playwright summary alone does not prove result publication.
 
 ## Staging post-merge drills
 
