@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 
 SHA = re.compile(r"[0-9a-f]{40}")
+SHA256 = re.compile(r"[0-9a-f]{64}")
 INVOCATION = re.compile(r"[0-9a-f]{32}")
 APPROVED = ("3.1.1", "22f506e07e0b5abfd0cf756e9c5827c0458fb4b2")
 REQUIRED = {
@@ -46,7 +47,11 @@ class Invalid(RuntimeError):
 
 def load_config(path: Path) -> dict:
     value = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(value, dict) or not REQUIRED <= value.keys():
+    if (
+        not isinstance(value, dict)
+        or value.get("schemaVersion") != 1
+        or not REQUIRED <= value.keys()
+    ):
         raise Invalid("configuration schema")
     if not SHA.fullmatch(value["runnerRevision"]):
         raise Invalid("runner coordinate")
@@ -75,11 +80,25 @@ def sha256(path: Path) -> str:
 def validate_runner(config: dict) -> Path:
     runner = Path(config["runnerRoot"]) / config["runnerRevision"]
     manifest = json.loads((runner / "sugarkube-runner-manifest.json").read_text(encoding="utf-8"))
+    files = manifest.get("files")
     if (
-        manifest.get("runnerRevision") != config["runnerRevision"]
+        manifest.get("schemaVersion") != 1
+        or not isinstance(files, dict)
+        or not files
+        or manifest.get("runnerRevision") != config["runnerRevision"]
         or manifest.get("repositoryIdentity") != config["repositoryIdentity"]
     ):
         raise Invalid("wrapper/config coordinate mismatch")
+    for relative, expected in files.items():
+        if not isinstance(relative, str) or not isinstance(expected, str):
+            raise Invalid("critical file manifest")
+        relative_path = Path(relative)
+        if (
+            relative_path.is_absolute()
+            or ".." in relative_path.parts
+            or not SHA256.fullmatch(expected)
+        ):
+            raise Invalid("critical file manifest")
     if (
         subprocess.run(
             ["git", "-C", str(runner), "rev-parse", "HEAD"],
@@ -99,7 +118,7 @@ def validate_runner(config: dict) -> Path:
         raise Invalid("runner tracked state")
     if (runner / ".git/objects/info/alternates").exists():
         raise Invalid("external object store")
-    for relative, expected in manifest.get("files", {}).items():
+    for relative, expected in files.items():
         target = runner / relative
         if target.is_symlink() or not target.is_file() or sha256(target) != expected:
             raise Invalid("critical file hash")
@@ -146,6 +165,7 @@ def run(config: dict) -> int:
         raise Invalid("pre-existing invocation path")
     invocation_dir.mkdir(mode=0o770)
     os.chown(invocation_dir, 0, account.pw_gid)
+    os.chmod(invocation_dir, 0o770)
     result = invocation_dir / "result.json"
     started = int(time.time())
     argv = [
@@ -211,10 +231,15 @@ def run(config: dict) -> int:
         )
         print(summary)
         return 0 if completed.returncode == 0 else 1
-    except (OSError, subprocess.SubprocessError, Invalid):
+    except Invalid as error:
         print(
             f"invocation={invocation} outcome=preserved "
-            f"reason=invalid-current-result start={started}"
+            f"reason={str(error).replace(' ', '-')} start={started}"
+        )
+        return 1
+    except (OSError, subprocess.SubprocessError):
+        print(
+            f"invocation={invocation} outcome=preserved " f"reason=execution-error start={started}"
         )
         return 1
     finally:

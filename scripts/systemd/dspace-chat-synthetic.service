@@ -6,6 +6,9 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+Group=pi
+RuntimeDirectory=sugarkube/dspace-chat-synthetic
+RuntimeDirectoryMode=0710
 ExecStart=/usr/local/libexec/sugarkube-dspace-chat-synthetic
 TimeoutStartSec=300
 UMask=0077

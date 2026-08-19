@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -29,6 +30,7 @@ ASSETS = {
     ),
     "etc/systemd/system/dspace-chat-synthetic.timer": "scripts/systemd/dspace-chat-synthetic.timer",
 }
+REVISION = re.compile(r"[0-9a-f]{40}")
 
 
 def sha(path: Path) -> str:
@@ -91,20 +93,53 @@ def status(root: Path) -> int:
 
 
 def activate(retained: Path, root: Path, revision: str) -> None:
+    if not REVISION.fullmatch(revision):
+        raise ValueError("revision must be a 40-character lowercase hexadecimal SHA")
     validate(retained)
     current = retained.parent / "current"
     temporary = retained.parent / ".current.new"
-    temporary.symlink_to(revision)
-    os.replace(temporary, current)
-    for target in ASSETS:
-        destination = root / target
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        temp = destination.with_name(f".{destination.name}.new")
-        shutil.copy2(retained / target, temp)
-        os.replace(temp, destination)
+    prepared = []
+    backups = []
+    try:
+        # Prepare every replacement before changing the live installation.
+        for target in ASSETS:
+            destination = root / target
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            temp = destination.with_name(f".{destination.name}.new")
+            backup = destination.with_name(f".{destination.name}.old")
+            temp.unlink(missing_ok=True)
+            backup.unlink(missing_ok=True)
+            shutil.copy2(retained / target, temp)
+            prepared.append((destination, temp, backup))
+        for destination, temp, backup in prepared:
+            existed = destination.exists()
+            if existed:
+                os.replace(destination, backup)
+            backups.append((destination, backup, existed))
+            os.replace(temp, destination)
+        if root.resolve() == Path("/"):
+            subprocess.run(["systemctl", "daemon-reload"], check=True)
+        temporary.unlink(missing_ok=True)
+        temporary.symlink_to(revision)
+        os.replace(temporary, current)
+    except Exception:
+        for destination, backup, existed in reversed(backups):
+            destination.unlink(missing_ok=True)
+            if existed and backup.exists():
+                os.replace(backup, destination)
+        if backups and root.resolve() == Path("/"):
+            subprocess.run(["systemctl", "daemon-reload"], check=False)
+        raise
+    finally:
+        temporary.unlink(missing_ok=True)
+        for destination, temp, backup in prepared:
+            temp.unlink(missing_ok=True)
+            backup.unlink(missing_ok=True)
 
 
 def install(staged: Path, root: Path, revision: str) -> None:
+    if not REVISION.fullmatch(revision):
+        raise ValueError("revision must be a 40-character lowercase hexadecimal SHA")
     validate(staged)
     retained = root / "var/lib/sugarkube/dspace-chat-installations" / revision
     if retained.exists():

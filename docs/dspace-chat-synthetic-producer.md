@@ -57,11 +57,14 @@ preflight leaves installed fixtures unchanged.
 Only after separate approval, an operator may stage the runner at
 `/var/lib/sugarkube/dspace-chat-runners/<exact-revision>`, then invoke `apply`. Apply atomically
 replaces files only after validating the whole staged set and retains the prior validated revision.
-It never runs `systemctl`, enables, starts, stops, restarts, disables, retries, or executes smoke.
+It reloads the systemd manager after replacing units so their in-memory definitions match disk, but
+never enables, starts, stops, restarts, disables, retries, or executes smoke. If replacement or
+reload fails, it restores the prior asset set and leaves the `current` revision pointer unchanged.
 
 The required access model is exact: result root `root:pi` mode `0710`; each invocation directory
 `root:pi` mode `0770`; the child-created, same-directory temporary-and-renamed result `pi:pi` mode
-`0600`. The browser runs as `pi`. The service binds the path to systemd's exact 32-hex
+`0600`. The browser runs as `pi`. systemd creates the volatile result root on each boot. The service
+binds the path to systemd's exact 32-hex
 `INVOCATION_ID` and UTC epoch start/end window. It cleans only that invocation's path.
 
 After inspecting status, a controlled one-shot and timer activation are distinct, explicit operator

@@ -64,6 +64,11 @@ def test_configuration_selects_contracts_and_exact_legacy_coordinate(tmp_path: P
     path.write_text(json.dumps(broken))
     with pytest.raises(runtime.Invalid, match="coordinate"):
         runtime.load_config(path)
+    broken = copy.deepcopy(value)
+    broken["schemaVersion"] = 2
+    path.write_text(json.dumps(broken))
+    with pytest.raises(runtime.Invalid, match="schema"):
+        runtime.load_config(path)
 
 
 def test_wrapper_safety_and_provider_is_in_actual_argv() -> None:
@@ -141,6 +146,22 @@ def test_runner_validation_rejects_coordinate_and_hash_mismatch(tmp_path: Path) 
     runner.mkdir(parents=True)
     (runner / "sugarkube-runner-manifest.json").write_text(json.dumps({"runnerRevision": "0" * 40}))
     with pytest.raises(runtime.Invalid, match="coordinate"):
+        runtime.validate_runner(value)
+
+
+@pytest.mark.parametrize("files", [{}, {"../outside": "0" * 64}, {"package.json": "bad"}])
+def test_runner_validation_rejects_invalid_manifest_files(tmp_path: Path, files: dict) -> None:
+    value = config(tmp_path)
+    runner = Path(value["runnerRoot"]) / value["runnerRevision"]
+    runner.mkdir(parents=True)
+    manifest = {
+        "schemaVersion": 1,
+        "runnerRevision": value["runnerRevision"],
+        "repositoryIdentity": value["repositoryIdentity"],
+        "files": files,
+    }
+    (runner / "sugarkube-runner-manifest.json").write_text(json.dumps(manifest))
+    with pytest.raises(runtime.Invalid, match="manifest|coordinate"):
         runtime.validate_runner(value)
 
 
@@ -226,6 +247,8 @@ def test_installer_dry_run_status_apply_and_exact_rollback(tmp_path: Path, capsy
     installer.activate(retained, tmp_path, "a" * 40)
     with pytest.raises((OSError, ValueError)):
         installer.activate(current.parent / ("b" * 40), tmp_path, "b" * 40)
+    with pytest.raises(ValueError, match="40-character"):
+        installer.activate(retained, tmp_path, "../escape")
 
 
 def test_failed_installer_preflight_leaves_installation_unchanged(tmp_path: Path) -> None:
@@ -244,6 +267,8 @@ def test_units_are_bounded_persistent_hardened_and_never_implicitly_activated() 
     timer = (ROOT / "scripts/systemd/dspace-chat-synthetic.timer").read_text()
     install = (ROOT / "scripts/install_dspace_chat_synthetic.py").read_text()
     assert "Type=oneshot" in service and "TimeoutStartSec=300" in service
+    assert "RuntimeDirectory=sugarkube/dspace-chat-synthetic" in service
+    assert "RuntimeDirectoryMode=0710" in service and "Group=pi" in service
     assert "ProtectSystem=strict" in service and "Persistent=true" in timer
     for mutation in (
         "systemctl enable",
