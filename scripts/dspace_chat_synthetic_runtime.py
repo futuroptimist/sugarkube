@@ -25,6 +25,7 @@ APPROVED_REPOSITORY_IDENTITY = "https://github.com/democratizedspace/dspace.git"
 APPROVED_TOKEN_PLACE_ORIGIN = "https://staging.token.place"
 APPROVED_TOKEN_PLACE_MODEL = "qwen3-8b-instruct"
 SERVICE_IDENTIFIER = re.compile(r"[a-z_][a-z0-9_-]{0,31}")
+MAX_RESULT_BYTES = 16 * 1024
 REQUIRED = {
     "runnerRevision",
     "dspaceOrigin",
@@ -206,6 +207,49 @@ def validate_dir(path: Path, uid: int, gid: int, mode: int) -> None:
         raise Invalid("ownership or mode")
 
 
+def read_result(path: Path, uid: int, gid: int) -> dict:
+    flags = os.O_RDONLY | os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags)
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode) or (
+            info.st_uid,
+            info.st_gid,
+            stat.S_IMODE(info.st_mode),
+        ) != (uid, gid, 0o600):
+            raise Invalid("current result provenance")
+        if info.st_size > MAX_RESULT_BYTES:
+            raise Invalid("current result size")
+        contents = os.read(descriptor, MAX_RESULT_BYTES + 1)
+        if len(contents) > MAX_RESULT_BYTES:
+            raise Invalid("current result size")
+        return json.loads(contents.decode("utf-8"))
+    finally:
+        os.close(descriptor)
+
+
+def cleanup_invocation(invocation_dir: Path) -> None:
+    """Remove only direct children of this invocation, without following links."""
+    try:
+        entries = list(os.scandir(invocation_dir))
+    except OSError:
+        return
+    for entry in entries:
+        try:
+            if entry.is_dir(follow_symlinks=False):
+                os.rmdir(entry.path)
+            else:
+                os.unlink(entry.path)
+        except OSError:
+            pass
+    try:
+        invocation_dir.rmdir()
+    except OSError:
+        pass
+
+
 def run(config: dict) -> int:
     invocation = os.environ.get("INVOCATION_ID", "")
     if not INVOCATION.fullmatch(invocation):
@@ -221,136 +265,124 @@ def run(config: dict) -> int:
     runner = validate_runner(config)
     root = Path(config["resultRoot"])
     validate_dir(root, 0, account.pw_gid, 0o710)
-    lock = (root / ".lock").open("a+b")
-    try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError as error:
-        raise Invalid("overlapping execution") from error
     invocation_dir = root / f"uid-{account.pw_uid}-{invocation}"
-    if os.path.lexists(invocation_dir):
-        lock.close()
-        raise Invalid("pre-existing invocation path")
-    try:
-        invocation_dir.mkdir(mode=0o770)
-        os.chown(invocation_dir, 0, account.pw_gid)
-        os.chmod(invocation_dir, 0o770)
-        validate_dir(invocation_dir, 0, account.pw_gid, 0o770)
-    except Exception:
-        lock.close()
-        raise
-    result = invocation_dir / "result.json"
-    started = int(time.time())
-    argv = [
-        "/usr/bin/node",
-        str(runner / "scripts/run-remote-chat-smoke.mjs"),
-        "--base-url",
-        config["dspaceOrigin"],
-        "--expected-version",
-        config["dspaceVersion"],
-        "--expected-revision",
-        config["dspaceSourceRevision"],
-        "--identity-contract",
-        config["identityContract"],
-        "--provider-config-contract",
-        config["providerConfigContract"],
-        "--expected-provider",
-        config["provider"],
-        "--expected-token-place-origin",
-        config["tokenPlaceOrigin"],
-        "--expected-token-place-model",
-        config["tokenPlaceModel"],
-        "--result-file",
-        str(result),
-        "--runner-revision",
-        config["runnerRevision"],
-    ]
-    try:
-        completed = subprocess.run(
-            ["runuser", "--user", config["serviceAccount"], "--", *argv],
-            cwd=runner,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            env={**os.environ, "PLAYWRIGHT_BROWSERS_PATH": str(runner / "playwright-browser")},
-            timeout=config["timeoutSeconds"],
-            check=False,
-        )
-        ended = int(time.time())
+    with (root / ".lock").open("a+b") as lock:
         try:
-            info = result.lstat()
-        except FileNotFoundError:
-            raise Invalid("current result missing")
-        if not stat.S_ISREG(info.st_mode) or (
-            info.st_uid,
-            info.st_gid,
-            stat.S_IMODE(info.st_mode),
-        ) != (
-            account.pw_uid,
-            account.pw_gid,
-            0o600,
-        ):
-            raise Invalid("current result provenance")
-        payload = json.loads(result.read_text(encoding="utf-8"))
-        expected_keys = {
-            "schemaVersion",
-            "journey",
-            "passed",
-            "executedAt",
-            "runnerRevision",
-            "transport",
-            "mutationEnabled",
-        }
-        if (
-            not isinstance(payload, dict)
-            or set(payload) != expected_keys
-            or payload.get("runnerRevision") != config["runnerRevision"]
-            or type(payload.get("passed")) is not bool
-            or type(payload.get("executedAt")) is not int
-            or not started <= payload["executedAt"] <= ended
-            or (completed.returncode == 0) != payload["passed"]
-        ):
-            raise Invalid("current result contract")
-        # The bounded consumer validates the exact JSON schema and publishes atomically.
-        subprocess.run(
-            [
-                "/usr/bin/python3",
-                config["metricsConsumer"],
-                "--result",
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise Invalid("overlapping execution") from error
+        if os.path.lexists(invocation_dir):
+            raise Invalid("pre-existing invocation path")
+        invocation_dir.mkdir(mode=0o770)
+        try:
+            os.chown(invocation_dir, 0, account.pw_gid)
+            os.chmod(invocation_dir, 0o770)
+            validate_dir(invocation_dir, 0, account.pw_gid, 0o770)
+            result = invocation_dir / "result.json"
+            started = int(time.time())
+            argv = [
+                "/usr/bin/node",
+                str(runner / "scripts/run-remote-chat-smoke.mjs"),
+                "--base-url",
+                config["dspaceOrigin"],
+                "--expected-version",
+                config["dspaceVersion"],
+                "--expected-revision",
+                config["dspaceSourceRevision"],
+                "--identity-contract",
+                config["identityContract"],
+                "--provider-config-contract",
+                config["providerConfigContract"],
+                "--expected-provider",
+                config["provider"],
+                "--expected-token-place-origin",
+                config["tokenPlaceOrigin"],
+                "--expected-token-place-model",
+                config["tokenPlaceModel"],
+                "--result-file",
                 str(result),
-                "--output",
-                config["metricPath"],
                 "--runner-revision",
                 config["runnerRevision"],
-                "--environment",
-                "staging",
-            ],
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        summary = (
-            f"invocation={invocation} outcome=published "
-            f"child_status={completed.returncode} start={started} end={ended}"
-        )
-        print(summary)
-        return 0 if completed.returncode == 0 else 1
-    except Invalid as error:
-        print(
-            f"invocation={invocation} outcome=preserved "
-            f"reason={str(error).replace(' ', '-')} start={started}"
-        )
-        return 1
-    except (OSError, subprocess.SubprocessError):
-        print(
-            f"invocation={invocation} outcome=preserved " f"reason=execution-error start={started}"
-        )
-        return 1
-    finally:
-        try:
-            if result.parent == invocation_dir:
-                result.unlink(missing_ok=True)
-            invocation_dir.rmdir()
+            ]
+            try:
+                completed = subprocess.run(
+                    ["runuser", "--user", config["serviceAccount"], "--", *argv],
+                    cwd=runner,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    env={
+                        "HOME": account.pw_dir,
+                        "LANG": "C.UTF-8",
+                        "LC_ALL": "C.UTF-8",
+                        "LOGNAME": account.pw_name,
+                        "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                        "PLAYWRIGHT_BROWSERS_PATH": str(runner / "playwright-browser"),
+                        "USER": account.pw_name,
+                    },
+                    timeout=config["timeoutSeconds"],
+                    check=False,
+                )
+                ended = int(time.time())
+                try:
+                    payload = read_result(result, account.pw_uid, account.pw_gid)
+                except FileNotFoundError:
+                    raise Invalid("current result missing")
+                expected_keys = {
+                    "schemaVersion",
+                    "journey",
+                    "passed",
+                    "executedAt",
+                    "runnerRevision",
+                    "transport",
+                    "mutationEnabled",
+                }
+                if (
+                    not isinstance(payload, dict)
+                    or set(payload) != expected_keys
+                    or payload.get("runnerRevision") != config["runnerRevision"]
+                    or type(payload.get("passed")) is not bool
+                    or type(payload.get("executedAt")) is not int
+                    or not started <= payload["executedAt"] <= ended
+                    or (completed.returncode == 0) != payload["passed"]
+                ):
+                    raise Invalid("current result contract")
+                # The bounded consumer validates the schema and publishes atomically.
+                subprocess.run(
+                    [
+                        "/usr/bin/python3",
+                        config["metricsConsumer"],
+                        "--result",
+                        str(result),
+                        "--output",
+                        config["metricPath"],
+                        "--runner-revision",
+                        config["runnerRevision"],
+                        "--environment",
+                        "staging",
+                    ],
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                print(
+                    f"invocation={invocation} outcome=published "
+                    f"child_status={completed.returncode} start={started} end={ended}"
+                )
+                return 0 if completed.returncode == 0 else 1
+            except Invalid as error:
+                print(
+                    f"invocation={invocation} outcome=preserved "
+                    f"reason={str(error).replace(' ', '-')} start={started}"
+                )
+                return 1
+            except (OSError, subprocess.SubprocessError):
+                print(
+                    f"invocation={invocation} outcome=preserved "
+                    f"reason=execution-error start={started}"
+                )
+                return 1
         finally:
-            lock.close()
+            cleanup_invocation(invocation_dir)
 
 
 def main() -> int:

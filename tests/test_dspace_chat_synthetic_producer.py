@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import sys
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -192,12 +193,114 @@ def test_runner_validation_rejects_shallow_or_failed_fsck(
         runtime.validate_runner(value)
 
 
+def prepare_runtime_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, result_kind: str = "valid"
+) -> tuple[dict, Path, Path, list[dict]]:
+    value = config(tmp_path)
+    root = Path(value["resultRoot"])
+    root.mkdir()
+    runner = tmp_path / "runner"
+    runner.mkdir()
+    consumer = Path(value["metricsConsumer"])
+    consumer.write_text("#!/bin/sh\n")
+    consumer.chmod(0o755)
+    metric = Path(value["metricPath"])
+    metric.write_bytes(b"previous metric\n")
+    sibling = root / f"uid-1000-{'b' * 32}"
+    sibling.mkdir()
+    (sibling / "keep").write_text("untouched")
+    account = SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid(), pw_dir="/tmp", pw_name="pi")
+    monkeypatch.setenv("INVOCATION_ID", "a" * 32)
+    monkeypatch.setenv("SECRET_PARENT_TOKEN", "must-not-leak")
+    monkeypatch.setattr(runtime.pwd, "getpwnam", lambda _name: account)
+    monkeypatch.setattr(runtime.grp, "getgrnam", lambda _name: SimpleNamespace(gr_gid=os.getgid()))
+    monkeypatch.setattr(runtime, "validate_runner", lambda _config: runner)
+    monkeypatch.setattr(runtime, "validate_dir", lambda *_args: None)
+    monkeypatch.setattr(runtime.os, "chown", lambda *_args: None)
+    calls: list[dict] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append({"argv": argv, **kwargs})
+        if argv[0] == "runuser":
+            result = root / f"uid-{os.getuid()}-{'a' * 32}" / "result.json"
+            if result_kind == "oversized":
+                result.write_bytes(b"x" * (runtime.MAX_RESULT_BYTES + 1))
+            elif result_kind == "symlink":
+                outside = tmp_path / "outside-result"
+                outside.write_text("{}")
+                result.symlink_to(outside)
+            else:
+                result.write_text(
+                    json.dumps(
+                        {
+                            "schemaVersion": 1,
+                            "journey": "chat",
+                            "passed": True,
+                            "executedAt": 100,
+                            "runnerRevision": value["runnerRevision"],
+                            "transport": "remote",
+                            "mutationEnabled": False,
+                        }
+                    )
+                )
+                result.chmod(0o600)
+                (result.parent / ".result.tmp").write_text("temporary")
+            return subprocess.CompletedProcess(argv, 0)
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(runtime.subprocess, "run", fake_run)
+    monkeypatch.setattr(runtime.time, "time", lambda: 100)
+    return value, metric, sibling, calls
+
+
+def test_runtime_run_uses_minimal_environment_and_cleans_direct_entries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, _metric, sibling, calls = prepare_runtime_run(tmp_path, monkeypatch)
+
+    assert runtime.run(value) == 0
+    child = next(call for call in calls if call["argv"][0] == "runuser")
+    assert "SECRET_PARENT_TOKEN" not in child["env"]
+    assert child["env"]["PLAYWRIGHT_BROWSERS_PATH"].endswith("playwright-browser")
+    assert not (Path(value["resultRoot"]) / f"uid-{os.getuid()}-{'a' * 32}").exists()
+    assert (sibling / "keep").read_text() == "untouched"
+
+
+@pytest.mark.parametrize("result_kind", ["oversized", "symlink"])
+def test_runtime_run_rejects_unbounded_or_replaced_result_without_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, result_kind: str
+) -> None:
+    value, metric, sibling, calls = prepare_runtime_run(tmp_path, monkeypatch, result_kind)
+
+    assert runtime.run(value) == 1
+    assert metric.read_bytes() == b"previous metric\n"
+    assert not any(call["argv"][0] == "/usr/bin/python3" for call in calls)
+    assert (sibling / "keep").read_text() == "untouched"
+
+
+def test_runtime_overlap_closes_lock_and_does_not_publish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, metric, _sibling, calls = prepare_runtime_run(tmp_path, monkeypatch)
+    before = len(list(Path("/proc/self/fd").iterdir()))
+    monkeypatch.setattr(
+        runtime.fcntl, "flock", lambda *_args: (_ for _ in ()).throw(BlockingIOError())
+    )
+
+    with pytest.raises(runtime.Invalid, match="overlapping"):
+        runtime.run(value)
+
+    assert len(list(Path("/proc/self/fd").iterdir())) == before
+    assert metric.read_bytes() == b"previous metric\n"
+    assert not calls
+
+
 def test_wrapper_safety_and_provider_is_in_actual_argv() -> None:
     wrapper = (ROOT / "scripts/dspace_chat_synthetic_wrapper.sh").read_text()
     assert "set +x\nset -Eeuo pipefail\numask 077\nexport PYTHONDONTWRITEBYTECODE=1" in wrapper
     source = (ROOT / "scripts/dspace_chat_synthetic_runtime.py").read_text()
     assert '"--expected-provider",' in source and 'config["provider"],' in source
-    assert 'subprocess.run(\n            ["runuser"' in source
+    assert '["runuser", "--user", config["serviceAccount"], "--", *argv]' in source
     assert source.count("subprocess.DEVNULL") >= 4
 
 
@@ -498,7 +601,8 @@ def test_lifecycle_is_single_shot_owner_scoped_bounded_and_redacted() -> None:
     assert "LOCK_NB" in source and "INVOCATION_ID" in source
     assert 'f"uid-{account.pw_uid}-{invocation}"' in source
     assert 'timeout=config["timeoutSeconds"]' in source
-    assert "result.unlink(missing_ok=True)" in source and "invocation_dir.rmdir()" in source
+    assert "cleanup_invocation(invocation_dir)" in source
+    assert "entry.is_dir(follow_symlinks=False)" in source and "invocation_dir.rmdir()" in source
     assert "glob(" not in source and "rmtree" not in source
     for forbidden in ("retry", "systemctl", "rollback", "restart"):
         assert forbidden not in source.lower()
