@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "repository": "https://github.com/democratizedspace/dspace.git",
+  "runnerRevision": "97ab09f13fb098de928a878bf1fe9b8d13032cb5",
+  "dspaceVersion": "3.1.1",
+  "dspaceSourceRevision": "22f506e07e0b5abfd0cf756e9c5827c0458fb4b2",
+  "identityContract": "build-info-v1",
+  "providerConfigContract": "legacy-no-default-provider-v1",
+  "provider": "token-place",
+  "origin": "https://staging.token.place",
+  "model": "qwen3-8b-instruct",
+  "timeoutSeconds": 180,
+  "serviceUser": "pi",
+  "serviceGroup": "pi",
+  "runnerRoot": "/var/lib/sugarkube/dspace-chat-runner",
+  "resultRoot": "/run/sugarkube/dspace-chat-synthetic",
+  "metricPath": "/var/lib/node_exporter/textfile_collector/dspace-chat-synthetic.prom",
+  "runnerCommand": "frontend/node_modules/.bin/playwright",
+  "runnerArguments": ["test", "frontend/tests/remote-chat-smoke.spec.ts"]
+}
