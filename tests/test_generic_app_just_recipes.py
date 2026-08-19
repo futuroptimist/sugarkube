@@ -3690,6 +3690,7 @@ def test_dspace_promote_prod_routes_sparse_named_arguments_through_both_gates(
             f"kubeconfig={tmp_path / 'prod-kubeconfig'}",
             f"staging_kubeconfig={tmp_path / 'staging-kubeconfig'}",
             f"evidence={prod_evidence}",
+            "confirm=dspace:prod:abcdef0123456789abcdef0123456789abcdef01",
         ],
         env,
     )
@@ -3731,11 +3732,62 @@ def test_dspace_promote_prod_routes_sparse_named_arguments_through_both_gates(
             f"kubeconfig={identical}",
             f"staging_kubeconfig={identical}",
             f"evidence={tmp_path / 'rejected-evidence.json'}",
+            "confirm=dspace:prod:abcdef0123456789abcdef0123456789abcdef01",
         ],
         env,
     )
     assert rejected.returncode != 0
     assert "kubeconfigs must be distinct" in rejected.stderr
+    assert "upgrade " not in Path(env["HELM_LOG"]).read_text(encoding="utf-8")
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_dspace_staging_proof_does_not_authorize_production_mutation(
+    tmp_path: Path, generic_app_stub_env: dict[str, str]
+) -> None:
+    staging_manifest = tmp_path / "staging.json"
+    staging_evidence = tmp_path / "staging-evidence.json"
+    production_manifest = tmp_path / "production.json"
+    _write_dspace_candidate(staging_manifest, "staging")
+    staged = _run_just(
+        [
+            "app-deploy",
+            "dspace",
+            "staging",
+            "main-abcdef0",
+            "",
+            str(staging_manifest),
+            str(staging_evidence),
+        ],
+        generic_app_stub_env,
+    )
+    assert staged.returncode == 0, staged.stderr + staged.stdout
+    _write_dspace_candidate(production_manifest, "prod")
+    record = json.loads(production_manifest.read_text(encoding="utf-8"))
+    record["chartVersion"] = "3.1.2"
+    production_manifest.write_text(json.dumps(record) + "\n", encoding="utf-8")
+    env = generic_app_stub_env.copy()
+    env["SUGARKUBE_STUB_NODE_ENV"] = "prod"
+    env["SUGARKUBE_STUB_CHART_VERSION"] = "3.1.2"
+    Path(env["HELM_LOG"]).write_text("", encoding="utf-8")
+
+    result = _run_just(
+        [
+            "app-promote-prod",
+            "app=dspace",
+            "tag=main-abcdef0",
+            f"manifest={production_manifest}",
+            f"staging_evidence={staging_evidence}",
+            f"smoke_runner={env['DSPACE_SMOKE_RUNNER']}",
+            f"kubeconfig={tmp_path / 'prod-kubeconfig'}",
+            f"staging_kubeconfig={tmp_path / 'staging-kubeconfig'}",
+            f"evidence={tmp_path / 'production-evidence.json'}",
+        ],
+        env,
+    )
+
+    assert result.returncode != 0
+    assert "explicit production mutation authorization is required" in result.stderr
     assert "upgrade " not in Path(env["HELM_LOG"]).read_text(encoding="utf-8")
 
 
@@ -3796,6 +3848,7 @@ def test_dspace_prod_staging_gate_failures_stop_before_production_work(
             f"smoke_runner={env['DSPACE_SMOKE_RUNNER']}",
             f"kubeconfig={tmp_path / 'prod-kubeconfig'}",
             f"staging_kubeconfig={tmp_path / 'staging-kubeconfig'}",
+            "confirm=dspace:prod:abcdef0123456789abcdef0123456789abcdef01",
         ],
         env,
     )
@@ -3853,6 +3906,7 @@ def test_dspace_prod_verifier_failure_preserves_post_mutation_reservation(
             f"smoke_runner={env['DSPACE_SMOKE_RUNNER']}",
             f"kubeconfig={tmp_path / 'prod-kubeconfig'}",
             f"staging_kubeconfig={tmp_path / 'staging-kubeconfig'}",
+            "confirm=dspace:prod:abcdef0123456789abcdef0123456789abcdef01",
         ],
         env,
     )

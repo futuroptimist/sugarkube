@@ -1089,6 +1089,19 @@ def staging_gate(candidate_value: dict[str, Any], evidence_value: dict[str, Any]
     return evidence_value["helmRevision"]
 
 
+def authorize_production(candidate_value: dict[str, Any], confirmation: str) -> None:
+    """Require an explicit, release-bound authorization for production mutation."""
+    validate(candidate_value, False)
+    if candidate_value["environment"] != "prod":
+        raise ManifestError("production authorization requires a prod candidate")
+    expected = f"dspace:prod:{candidate_value['sourceRevision']}"
+    if confirmation != expected:
+        raise ManifestError(
+            "explicit production mutation authorization is required; "
+            "pass confirm=dspace:prod:<approved-source-revision>"
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1128,6 +1141,9 @@ def main(argv: list[str] | None = None) -> int:
     gate = sub.add_parser("staging-gate")
     gate.add_argument("--manifest", type=Path, required=True)
     gate.add_argument("--staging-evidence", type=Path, required=True)
+    authorize = sub.add_parser("authorize-production")
+    authorize.add_argument("--manifest", type=Path, required=True)
+    authorize.add_argument("--confirm", required=True)
     available = sub.add_parser("check-output")
     available.add_argument("--output", type=Path, required=True)
     destination = sub.add_parser("evidence-path")
@@ -1340,6 +1356,8 @@ def main(argv: list[str] | None = None) -> int:
             _sync_directory(args.output.expanduser().resolve(strict=False).parent)
         elif args.command == "staging-gate":
             print(staging_gate(_object(args.manifest), _object(args.staging_evidence)))
+        elif args.command == "authorize-production":
+            authorize_production(_object(args.manifest), args.confirm)
         elif args.command == "check-output":
             if args.output.exists():
                 raise ManifestError(f"refusing to overwrite existing record: {args.output}")
