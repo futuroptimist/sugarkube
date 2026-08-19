@@ -2000,3 +2000,26 @@ def test_verifier_capabilities_requires_exact_ordered_v1_list(
     }
     with pytest.raises(manifest.ManifestError, match="ordered v1 contract"):
         manifest.validate_verifier_capabilities(value, "staging", "dspace", "dspace")
+
+
+@pytest.mark.parametrize(
+    "capabilities",
+    [
+        list(manifest.VERIFIER_CAPABILITIES_V1[:-1]),
+        list(reversed(manifest.VERIFIER_CAPABILITIES_V1)),
+        [*manifest.VERIFIER_CAPABILITIES_V1, "extra"],
+        [*manifest.VERIFIER_CAPABILITIES_V1, manifest.VERIFIER_CAPABILITIES_V1[-1]],
+    ],
+)
+def test_verifier_capabilities_requires_exact_ordered_v1_list(
+    capabilities: list[str],
+) -> None:
+    value = {
+        "schemaVersion": 1,
+        "environment": "staging",
+        "release": "dspace",
+        "namespace": "dspace",
+        "capabilities": capabilities,
+    }
+    with pytest.raises(manifest.ManifestError, match="ordered v1 contract"):
+        manifest.validate_verifier_capabilities(value, "staging", "dspace", "dspace")
