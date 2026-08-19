@@ -1908,3 +1908,95 @@ def test_finalize_rejects_noncanonical_image_id() -> None:
     item["status"]["containerStatuses"][0]["imageID"] = "not-a-digest"
     with pytest.raises(manifest.ManifestError, match="non-canonical pod imageID"):
         finalize(pods_json={"items": [item]})
+
+
+def test_production_authorization_is_explicit_and_source_bound() -> None:
+    value = split_candidate("prod")
+    manifest.production_authorization(value, f"dspace:prod:{SHA}")
+    for supplied in ("", "dspace:prod:staging", f"dspace:prod:{CHART_SHA}"):
+        with pytest.raises(manifest.ManifestError, match="exactly equal"):
+            manifest.production_authorization(value, supplied)
+
+
+def test_verifier_capabilities_fail_closed_without_exact_contract() -> None:
+    value = {
+        "schemaVersion": 1,
+        "environment": "staging",
+        "release": "dspace",
+        "namespace": "dspace",
+        "capabilities": ["applicationVersion", "publicJourneys"],
+    }
+    with pytest.raises(manifest.ManifestError, match="ordered v1 contract"):
+        manifest.validate_verifier_capabilities(value, "staging", "dspace", "dspace")
+
+
+@pytest.mark.parametrize("capability", [{"name": "publicJourneys"}, ["publicJourneys"]])
+def test_verifier_capabilities_reject_non_string_entries(capability: object) -> None:
+    value = {
+        "schemaVersion": 1,
+        "environment": "staging",
+        "release": "dspace",
+        "namespace": "dspace",
+        "capabilities": [capability],
+    }
+    with pytest.raises(manifest.ManifestError, match="list of strings"):
+        manifest.validate_verifier_capabilities(value, "staging", "dspace", "dspace")
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement", "message"),
+    [
+        ("schemaVersion", 2, "schemaVersion 1"),
+        ("environment", "prod", "environment mismatch"),
+        ("release", "other", "release mismatch"),
+        ("namespace", "other", "namespace mismatch"),
+    ],
+)
+def test_verifier_capabilities_identifies_metadata_mismatch(
+    field: str, replacement: object, message: str
+) -> None:
+    value = {
+        "schemaVersion": 1,
+        "environment": "staging",
+        "release": "dspace",
+        "namespace": "dspace",
+        "capabilities": [],
+    }
+    value[field] = replacement
+    with pytest.raises(manifest.ManifestError, match=message):
+        manifest.validate_verifier_capabilities(value, "staging", "dspace", "dspace")
+
+
+def test_verifier_capabilities_identifies_duplicate_entries() -> None:
+    value = {
+        "schemaVersion": 1,
+        "environment": "staging",
+        "release": "dspace",
+        "namespace": "dspace",
+        "capabilities": ["publicJourneys", "publicJourneys"],
+    }
+    with pytest.raises(manifest.ManifestError, match="ordered v1 contract"):
+        manifest.validate_verifier_capabilities(value, "staging", "dspace", "dspace")
+
+
+@pytest.mark.parametrize(
+    "capabilities",
+    [
+        list(manifest.VERIFIER_CAPABILITIES_V1[:-1]),
+        list(reversed(manifest.VERIFIER_CAPABILITIES_V1)),
+        [*manifest.VERIFIER_CAPABILITIES_V1, "extra"],
+        [*manifest.VERIFIER_CAPABILITIES_V1, manifest.VERIFIER_CAPABILITIES_V1[-1]],
+    ],
+)
+def test_verifier_capabilities_requires_exact_ordered_v1_list(
+    capabilities: list[str],
+) -> None:
+    value = {
+        "schemaVersion": 1,
+        "environment": "staging",
+        "release": "dspace",
+        "namespace": "dspace",
+        "capabilities": capabilities,
+    }
+    with pytest.raises(manifest.ManifestError, match="ordered v1 contract"):
+        manifest.validate_verifier_capabilities(value, "staging", "dspace", "dspace")

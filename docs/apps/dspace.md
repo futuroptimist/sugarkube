@@ -410,7 +410,8 @@ just app-deploy app=dspace env=staging tag=main-REPLACE_SHORTSHA \
 
 Production promotion additionally requires finalized staging evidence. Before production render,
 reservation, or mutation, Sugarkube compares immutable coordinates, checks the recorded staging
-Helm revision remains live, and reruns complete staging verification:
+Helm revision remains live, reruns complete staging verification, and separately requires an exact
+authorization bound to the production candidate's full source revision:
 
 ```bash
 just app-promote-prod \
@@ -420,7 +421,8 @@ just app-promote-prod \
   staging_evidence=deployment-evidence/dspace/staging/<finalized-record>.json \
   smoke_runner="$DSPACE_SMOKE_RUNNER" \
   kubeconfig="$PROD_KUBECONFIG" \
-  staging_kubeconfig="$STAGING_KUBECONFIG"
+  staging_kubeconfig="$STAGING_KUBECONFIG" \
+  confirm="dspace:prod:<40-character-application-SHA>"
 ```
 
 If staging used a nondefault app config, pass that distinct path as
@@ -616,12 +618,14 @@ python3 scripts/dspace_release_manifest.py candidate \
   --output deployment-candidates/dspace/prod.json \
   --environment prod --provider token-place \
   --approved-at 2026-07-26T13:00:00Z --approved-by '<operator-or-review-record>'
+TARGET_SHA=$(jq -er '.sourceRevision' deployment-candidates/dspace/prod.json)
 just app-promote-prod app=dspace tag="$APP_TAG" \
   manifest=deployment-candidates/dspace/prod.json \
   staging_evidence=deployment-evidence/dspace/staging/<finalized-record>.json \
   smoke_runner="$DSPACE_SMOKE_RUNNER" \
   kubeconfig="$PROD_KUBECONFIG" \
-  staging_kubeconfig="$STAGING_KUBECONFIG"
+  staging_kubeconfig="$STAGING_KUBECONFIG" \
+  confirm="dspace:prod:${TARGET_SHA}"
 EVIDENCE=$(python3 scripts/dspace_release_manifest.py evidence-path \
   --manifest deployment-candidates/dspace/prod.json)
 git add "$EVIDENCE"
@@ -740,21 +744,25 @@ For staging, the browser smoke must show DSPACE calling `https://staging.token.p
 This configuration change does not promote or mutate production. Promote only after staging sign-off. Prefer the generic command; it uses the prod values chain, resolves chart `3.0.3` from `docs/apps/dspace.prod.version`, and can read `docs/apps/dspace.prod.tag` (`main-1a31a56`) when `tag=` is omitted.
 
 ```bash
+TARGET_SHA=$(jq -er '.sourceRevision' deployment-candidates/dspace/prod.json)
 just app-promote-prod app=dspace tag="$APP_TAG" \
   manifest=deployment-candidates/dspace/prod.json \
   staging_evidence=deployment-evidence/dspace/staging/<finalized-record>.json \
   smoke_runner="$DSPACE_SMOKE_RUNNER" \
-  kubeconfig="$PROD_KUBECONFIG" staging_kubeconfig="$STAGING_KUBECONFIG"
+  kubeconfig="$PROD_KUBECONFIG" staging_kubeconfig="$STAGING_KUBECONFIG" \
+  confirm="dspace:prod:${TARGET_SHA}"
 ```
 
 Compatibility shim:
 
 ```bash
+TARGET_SHA=$(jq -er '.sourceRevision' deployment-candidates/dspace/prod.json)
 just dspace-oci-promote-prod tag="$APP_TAG" \
   manifest=deployment-candidates/dspace/prod.json \
   staging_evidence=deployment-evidence/dspace/staging/<finalized-record>.json \
   smoke_runner="$DSPACE_SMOKE_RUNNER" \
-  kubeconfig="$PROD_KUBECONFIG" staging_kubeconfig="$STAGING_KUBECONFIG"
+  kubeconfig="$PROD_KUBECONFIG" staging_kubeconfig="$STAGING_KUBECONFIG" \
+  confirm="dspace:prod:${TARGET_SHA}"
 ```
 
 ## Verify production

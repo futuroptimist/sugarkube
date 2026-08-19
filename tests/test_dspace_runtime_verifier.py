@@ -90,6 +90,56 @@ def test_capabilities_schema_and_order(capsys: pytest.CaptureFixture[str]) -> No
     assert value["capabilities"] == verifier.CAPABILITIES
 
 
+def test_provider_config_contract_is_bound_to_finalized_311_coordinates() -> None:
+    approved = dict(verifier.LEGACY_PROVIDER_CONFIG_311_COORDINATES)
+    assert verifier.provider_config_contract(approved) == "legacy-no-default-provider-v1"
+    approved["imageDigest"] = DIGEST
+    assert verifier.provider_config_contract(approved) is None
+
+
+@pytest.mark.parametrize(
+    "drift_field",
+    [None, *verifier.LEGACY_PROVIDER_CONFIG_311_COORDINATES.keys(), "unrelated-release"],
+)
+def test_verify_selects_provider_config_contract_only_for_exact_311_tuple(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, drift_field: str | None
+) -> None:
+    coordinates = dict(verifier.LEGACY_PROVIDER_CONFIG_311_COORDINATES)
+    expected = drift_field is None
+    if drift_field == "unrelated-release":
+        coordinates = {
+            **coordinates,
+            "applicationVersion": "3.2.0",
+            "semanticTag": "v3.2.0",
+            "chartVersion": "3.2.0",
+        }
+    elif drift_field is not None:
+        coordinates[drift_field] = (
+            1 if drift_field == "schemaVersion" else "drift"
+        )
+        # Use valid scalar shapes; load validation is isolated below so every selector
+        # field, including fields coupled by the manifest schema, is drifted independently.
+        if drift_field in {"sourceRevision", "chartSourceRevision"}:
+            coordinates[drift_field] = "f" * 40
+        elif drift_field in {"imageDigest", "chartDigest"}:
+            coordinates[drift_field] = "sha256:" + "f" * 64
+        elif drift_field == "imageTag":
+            coordinates[drift_field] = "release-" + str(coordinates["sourceRevision"])[:7]
+        elif drift_field in {"applicationVersion", "chartVersion"}:
+            coordinates[drift_field] = "9.9.9"
+        elif drift_field == "semanticTag":
+            coordinates[drift_field] = "v9.9.9"
+        elif drift_field == "expectedDefaultChatProvider":
+            coordinates[drift_field] = "openai"
+    args, calls = _verify_setup(monkeypatch, tmp_path, coordinates=coordinates)
+    monkeypatch.setattr(verifier, "load_manifest", lambda path: coordinates)
+    verifier.verify(args)
+    option = "--provider-config-contract"
+    assert (option in calls[0]) is expected
+    if expected:
+        assert calls[0][calls[0].index(option) + 1] == "legacy-no-default-provider-v1"
+
+
 def test_values_expectations_use_ordered_overlay(tmp_path: Path) -> None:
     base = tmp_path / "base.yaml"
     overlay = tmp_path / "overlay.yaml"
@@ -114,6 +164,7 @@ def _verify_setup(
     overrides: dict[str, object] | None = None,
     legacy: bool = False,
     legacy_310: bool = False,
+    coordinates: dict[str, object] | None = None,
 ) -> tuple[Namespace, list[list[str]]]:
     """Install a complete, mutable fake cluster and return verifier arguments."""
     if legacy and legacy_310:
@@ -123,24 +174,25 @@ def _verify_setup(
     smoke = tmp_path / "smoke"
     smoke.write_text("#!/bin/sh\nexit 0\n")
     smoke.chmod(0o700)
-    coordinates = (
+    selected_coordinates = coordinates or (
         verifier.LEGACY_310_COORDINATES if legacy_310 else verifier.LEGACY_303_COORDINATES
     )
     is_legacy = legacy or legacy_310
-    revision = str(coordinates["sourceRevision"]) if is_legacy else SHA
-    digest = str(coordinates["imageDigest"]) if is_legacy else DIGEST
-    image_tag = str(coordinates["imageTag"]) if is_legacy else "main-abcdef0"
-    version = str(coordinates["applicationVersion"]) if is_legacy else "3.1.0"
-    chart_version = str(coordinates["chartVersion"]) if is_legacy else "3.1.0"
+    use_coordinates = is_legacy or coordinates is not None
+    revision = str(selected_coordinates["sourceRevision"]) if use_coordinates else SHA
+    digest = str(selected_coordinates["imageDigest"]) if use_coordinates else DIGEST
+    image_tag = str(selected_coordinates["imageTag"]) if use_coordinates else "main-abcdef0"
+    version = str(selected_coordinates["applicationVersion"]) if use_coordinates else "3.1.0"
+    chart_version = str(selected_coordinates["chartVersion"]) if use_coordinates else "3.1.0"
     canonical = f"ghcr.io/democratizedspace/dspace:{image_tag}"
     declared = f"{canonical}@{digest}" if rollback else canonical
 
-    def build(image: str = canonical, revision: str = SHA) -> str:
+    def build(image: str = canonical, build_revision: str = revision) -> str:
         return json.dumps(
             {
                 "version": version,
-                "revision": revision,
-                "shortRevision": revision[:7],
+                "revision": build_revision,
+                "shortRevision": build_revision[:7],
                 "buildTimestamp": BUILD_TIMESTAMP,
                 "image": image,
             }
@@ -203,7 +255,7 @@ def _verify_setup(
     default_html = (
         "<!doctype html><html><head><title>DSPACE</title></head><body></body></html>"
         if is_legacy
-        else f'<meta name="dspace-build-revision" content="{SHA}">'
+        else f'<meta name="dspace-build-revision" content="{revision}">'
     )
     public_html = override.get("public_html", default_html)
     legacy_build = json.dumps(
@@ -322,6 +374,20 @@ def _verify_setup(
         manifest_path = legacy_310_manifest(tmp_path)
     elif legacy:
         manifest_path = recovery_manifest(tmp_path)
+    elif coordinates is not None:
+        manifest_path = tmp_path / "selected-coordinates.json"
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    **coordinates,
+                    "app": "dspace",
+                    "recordType": "candidate",
+                    "environment": "staging",
+                    "approvedAt": "2026-07-30T00:00:00Z",
+                    "approvedBy": "release-test",
+                }
+            )
+        )
     else:
         manifest_path = manifest(tmp_path, provider)
 

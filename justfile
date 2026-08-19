@@ -1953,17 +1953,30 @@ dspace-release-verify env manifest smoke_runner config='' kubeconfig='' expected
       --manifest "${manifest_path}" --smoke-runner "${smoke_path}" \
       --kubeconfig "${kubeconfig_path}" )
     [ -z "${config_path}" ] || verifier_args+=(--config "${config_path}")
+    umask 077
+    capability_proof="$(mktemp)"
+    runtime_proof="$(mktemp)"
+    trap 'rm -f "${capability_proof}" "${runtime_proof}"' EXIT
+    "{{ justfile_directory() }}/scripts/dspace_runtime_verifier.py" capabilities \
+      "${verifier_args[@]}" >"${capability_proof}"
+    python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" verifier-capabilities \
+      --input "${capability_proof}" --environment "${selected_env}" \
+      --release dspace --namespace dspace
     [ -z "${expected_revision}" ] || verifier_args+=(--expected-helm-revision "${expected_revision}")
-    "{{ justfile_directory() }}/scripts/dspace_runtime_verifier.py" verify "${verifier_args[@]}"
+    timeout 360 "{{ justfile_directory() }}/scripts/dspace_runtime_verifier.py" verify \
+      "${verifier_args[@]}" >"${runtime_proof}"
+    python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" verifier-proof \
+      --input "${runtime_proof}" --manifest "${manifest_path}" \
+      --environment "${selected_env}" --release dspace --namespace dspace
 
 # Generic immutable-tag app deploy backed by docs/examples/apps/*.env or local app configs.
-app-deploy app env='staging' tag='' config='' manifest='' evidence='' staging_evidence='' smoke_runner='' kubeconfig='' staging_config='' staging_kubeconfig='':
+app-deploy app env='staging' tag='' config='' manifest='' evidence='' staging_evidence='' smoke_runner='' kubeconfig='' staging_config='' staging_kubeconfig='' confirm='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    inputs=({{ quote(app) }} {{ quote(env) }} {{ quote(tag) }} {{ quote(config) }} {{ quote(manifest) }} {{ quote(evidence) }} {{ quote(staging_evidence) }} {{ quote(smoke_runner) }} {{ quote(kubeconfig) }} {{ quote(staging_config) }} {{ quote(staging_kubeconfig) }})
-    destinations=(app_input env_input tag_input config_input release_manifest evidence_output staging_record runtime_smoke kubeconfig_input staging_config_input staging_kubeconfig_input)
-    prefixes=(app env tag config manifest evidence staging_evidence smoke_runner kubeconfig staging_config staging_kubeconfig)
+    inputs=({{ quote(app) }} {{ quote(env) }} {{ quote(tag) }} {{ quote(config) }} {{ quote(manifest) }} {{ quote(evidence) }} {{ quote(staging_evidence) }} {{ quote(smoke_runner) }} {{ quote(kubeconfig) }} {{ quote(staging_config) }} {{ quote(staging_kubeconfig) }} {{ quote(confirm) }})
+    destinations=(app_input env_input tag_input config_input release_manifest evidence_output staging_record runtime_smoke kubeconfig_input staging_config_input staging_kubeconfig_input production_confirmation)
+    prefixes=(app env tag config manifest evidence staging_evidence smoke_runner kubeconfig staging_config staging_kubeconfig confirm)
     for destination in "${destinations[@]}"; do printf -v "${destination}" '%s' ''; done
     for index in "${!inputs[@]}"; do
       argument=${inputs[index]}; named=false
@@ -2011,6 +2024,8 @@ app-deploy app env='staging' tag='' config='' manifest='' evidence='' staging_ev
         just --justfile "{{ justfile_directory() }}/justfile" dspace-release-verify \
           staging "${staging_record}" "${runtime_smoke}" "${staging_config_input}" \
           "${staging_kubeconfig_path}" "${staging_revision}"
+        python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" authorize-production \
+          --manifest "${release_manifest}" --confirm "${production_confirmation}"
       fi
       chart_version="${SUGARKUBE_VERSION:-}"
       if [ -z "${chart_version}" ]; then
@@ -2074,13 +2089,13 @@ app-deploy app env='staging' tag='' config='' manifest='' evidence='' staging_ev
     fi
 
 # Generic upgrade-only app redeploy backed by app config files.
-app-redeploy app env='staging' tag='' config='' manifest='' evidence='' staging_evidence='' smoke_runner='' kubeconfig='' staging_config='' staging_kubeconfig='':
+app-redeploy app env='staging' tag='' config='' manifest='' evidence='' staging_evidence='' smoke_runner='' kubeconfig='' staging_config='' staging_kubeconfig='' confirm='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    inputs=({{ quote(app) }} {{ quote(env) }} {{ quote(tag) }} {{ quote(config) }} {{ quote(manifest) }} {{ quote(evidence) }} {{ quote(staging_evidence) }} {{ quote(smoke_runner) }} {{ quote(kubeconfig) }} {{ quote(staging_config) }} {{ quote(staging_kubeconfig) }})
-    destinations=(app_input env_input tag_input config_input release_manifest evidence_output staging_record runtime_smoke kubeconfig_input staging_config_input staging_kubeconfig_input)
-    prefixes=(app env tag config manifest evidence staging_evidence smoke_runner kubeconfig staging_config staging_kubeconfig)
+    inputs=({{ quote(app) }} {{ quote(env) }} {{ quote(tag) }} {{ quote(config) }} {{ quote(manifest) }} {{ quote(evidence) }} {{ quote(staging_evidence) }} {{ quote(smoke_runner) }} {{ quote(kubeconfig) }} {{ quote(staging_config) }} {{ quote(staging_kubeconfig) }} {{ quote(confirm) }})
+    destinations=(app_input env_input tag_input config_input release_manifest evidence_output staging_record runtime_smoke kubeconfig_input staging_config_input staging_kubeconfig_input production_confirmation)
+    prefixes=(app env tag config manifest evidence staging_evidence smoke_runner kubeconfig staging_config staging_kubeconfig confirm)
     for destination in "${destinations[@]}"; do printf -v "${destination}" '%s' ''; done
     for index in "${!inputs[@]}"; do
       argument=${inputs[index]}; named=false
@@ -2113,6 +2128,8 @@ app-redeploy app env='staging' tag='' config='' manifest='' evidence='' staging_
         if [ "${staging_kubeconfig_path}" = "${kubeconfig_input}" ]; then echo "ERROR: staging and production kubeconfigs must be distinct." >&2; exit 2; fi
         just --justfile "{{ justfile_directory() }}/justfile" assert-cluster-env staging "${staging_kubeconfig_path}" >/dev/null
         just --justfile "{{ justfile_directory() }}/justfile" dspace-release-verify staging "${staging_record}" "${runtime_smoke}" "${staging_config_input}" "${staging_kubeconfig_path}" "${staging_revision}"
+        python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" authorize-production \
+          --manifest "${release_manifest}" --confirm "${production_confirmation}"
       fi
       chart_version="${SUGARKUBE_VERSION:-}"
       if [ -z "${chart_version}" ]; then chart_version="$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' "${SUGARKUBE_VERSION_FILE}" | head -n1)"; fi
@@ -2166,13 +2183,13 @@ app-redeploy app env='staging' tag='' config='' manifest='' evidence='' staging_
     fi
 
 # Promote an app to prod with an explicit immutable tag, or the configured prod tag file.
-app-promote-prod app tag='' config='' manifest='' evidence='' staging_evidence='' smoke_runner='' kubeconfig='' staging_config='' staging_kubeconfig='':
+app-promote-prod app tag='' config='' manifest='' evidence='' staging_evidence='' smoke_runner='' kubeconfig='' staging_config='' staging_kubeconfig='' confirm='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    inputs=({{ quote(app) }} {{ quote(tag) }} {{ quote(config) }} {{ quote(manifest) }} {{ quote(evidence) }} {{ quote(staging_evidence) }} {{ quote(smoke_runner) }} {{ quote(kubeconfig) }} {{ quote(staging_config) }} {{ quote(staging_kubeconfig) }})
-    destinations=(app_input tag_input config_input manifest_input evidence_input staging_evidence_input smoke_runner_input kubeconfig_input staging_config_input staging_kubeconfig_input)
-    prefixes=(app tag config manifest evidence staging_evidence smoke_runner kubeconfig staging_config staging_kubeconfig)
+    inputs=({{ quote(app) }} {{ quote(tag) }} {{ quote(config) }} {{ quote(manifest) }} {{ quote(evidence) }} {{ quote(staging_evidence) }} {{ quote(smoke_runner) }} {{ quote(kubeconfig) }} {{ quote(staging_config) }} {{ quote(staging_kubeconfig) }} {{ quote(confirm) }})
+    destinations=(app_input tag_input config_input manifest_input evidence_input staging_evidence_input smoke_runner_input kubeconfig_input staging_config_input staging_kubeconfig_input production_confirmation)
+    prefixes=(app tag config manifest evidence staging_evidence smoke_runner kubeconfig staging_config staging_kubeconfig confirm)
     for destination in "${destinations[@]}"; do printf -v "${destination}" '%s' ''; done
     for index in "${!inputs[@]}"; do
       argument=${inputs[index]}; named=false
@@ -2195,7 +2212,7 @@ app-promote-prod app tag='' config='' manifest='' evidence='' staging_evidence='
     just --justfile "{{ justfile_directory() }}/justfile" app-deploy \
       "${SUGARKUBE_APP}" prod "${SUGARKUBE_TAG}" "${SUGARKUBE_CONFIG_PATH}" \
       "${manifest_input}" "${evidence_input}" "${staging_evidence_input}" "${smoke_runner_input}" \
-      "${kubeconfig_input}" "${staging_config_input}" "${staging_kubeconfig_input}"
+      "${kubeconfig_input}" "${staging_config_input}" "${staging_kubeconfig_input}" "${production_confirmation}"
 
 # Show the pinned chart version and whether a newer semver chart appears published.
 app-chart-status app env='staging' config='':
@@ -2320,13 +2337,13 @@ app-cors-verify app env='staging' config='' origin='https://cors-smoke.invalid' 
 #
 
 # Use this for steady-state release validation flows where explicit image pinning matters.
-dspace-oci-deploy env='staging' tag='' manifest='' evidence='' staging_evidence='' smoke_runner='' config='' kubeconfig='' staging_config='' staging_kubeconfig='':
+dspace-oci-deploy env='staging' tag='' manifest='' evidence='' staging_evidence='' smoke_runner='' config='' kubeconfig='' staging_config='' staging_kubeconfig='' confirm='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    inputs=({{ quote(env) }} {{ quote(tag) }} {{ quote(manifest) }} {{ quote(evidence) }} {{ quote(staging_evidence) }} {{ quote(smoke_runner) }} {{ quote(config) }} {{ quote(kubeconfig) }} {{ quote(staging_config) }} {{ quote(staging_kubeconfig) }})
-    values=('' '' '' '' '' '' '' '' '' ''); destinations=(0 1 6 2 3 4 5 7 8 9)
-    prefixes=(env tag config manifest evidence staging_evidence smoke_runner kubeconfig staging_config staging_kubeconfig)
+    inputs=({{ quote(env) }} {{ quote(tag) }} {{ quote(manifest) }} {{ quote(evidence) }} {{ quote(staging_evidence) }} {{ quote(smoke_runner) }} {{ quote(config) }} {{ quote(kubeconfig) }} {{ quote(staging_config) }} {{ quote(staging_kubeconfig) }} {{ quote(confirm) }})
+    values=('' '' '' '' '' '' '' '' '' '' ''); destinations=(0 1 6 2 3 4 5 7 8 9 10)
+    prefixes=(env tag config manifest evidence staging_evidence smoke_runner kubeconfig staging_config staging_kubeconfig confirm)
     for index in "${!inputs[@]}"; do
       named=false; for prefix in "${prefixes[@]}"; do [[ ${inputs[index]} == "${prefix}="* ]] && named=true; done
       ${named} || values[index]=${inputs[index]}
@@ -2335,15 +2352,15 @@ dspace-oci-deploy env='staging' tag='' manifest='' evidence='' staging_evidence=
       if [[ ${argument} == "${prefixes[prefix_index]}="* ]]; then values[${destinations[prefix_index]}]=${argument#*=}; break; fi
     done; done
     just --justfile "{{ justfile_directory() }}/justfile" app-deploy dspace "${values[0]}" "${values[1]}" \
-      "${values[6]}" "${values[2]}" "${values[3]}" "${values[4]}" "${values[5]}" "${values[7]}" "${values[8]}" "${values[9]}"
+      "${values[6]}" "${values[2]}" "${values[3]}" "${values[4]}" "${values[5]}" "${values[7]}" "${values[8]}" "${values[9]}" "${values[10]}"
 
 # Use this for optional canary/smoke testing before or alongside apex promotion workflows.
-dspace-oci-deploy-prod-subdomain tag='' manifest='' evidence='' staging_evidence='' smoke_runner='' kubeconfig='' staging_kubeconfig='':
+dspace-oci-deploy-prod-subdomain tag='' manifest='' evidence='' staging_evidence='' smoke_runner='' kubeconfig='' staging_kubeconfig='' confirm='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    inputs=({{ quote(tag) }} {{ quote(manifest) }} {{ quote(evidence) }} {{ quote(staging_evidence) }} {{ quote(smoke_runner) }} {{ quote(kubeconfig) }} {{ quote(staging_kubeconfig) }})
-    values=('' '' '' '' '' '' ''); prefixes=(tag manifest evidence staging_evidence smoke_runner kubeconfig staging_kubeconfig)
+    inputs=({{ quote(tag) }} {{ quote(manifest) }} {{ quote(evidence) }} {{ quote(staging_evidence) }} {{ quote(smoke_runner) }} {{ quote(kubeconfig) }} {{ quote(staging_kubeconfig) }} {{ quote(confirm) }})
+    values=('' '' '' '' '' '' '' ''); prefixes=(tag manifest evidence staging_evidence smoke_runner kubeconfig staging_kubeconfig confirm)
     for index in "${!inputs[@]}"; do
       named=false; for prefix in "${prefixes[@]}"; do [[ ${inputs[index]} == "${prefix}="* ]] && named=true; done
       ${named} || values[index]=${inputs[index]}
@@ -2353,17 +2370,17 @@ dspace-oci-deploy-prod-subdomain tag='' manifest='' evidence='' staging_evidence
     done; done
     just --justfile "{{ justfile_directory() }}/justfile" app-deploy dspace prod "${values[0]}" \
       "{{ justfile_directory() }}/docs/examples/apps/dspace-prod-subdomain.env" "${values[1]}" "${values[2]}" \
-      "${values[3]}" "${values[4]}" "${values[5]}" '' "${values[6]}"
+      "${values[3]}" "${values[4]}" "${values[5]}" '' "${values[6]}" "${values[7]}"
 
 # Promote dspace to production apex (democratized.space) using immutable tags.
 
 # If tag is omitted, this reads the pinned value from docs/apps/dspace.prod.tag.
-dspace-oci-promote-prod tag='' manifest='' evidence='' staging_evidence='' smoke_runner='' kubeconfig='' staging_kubeconfig='':
+dspace-oci-promote-prod tag='' manifest='' evidence='' staging_evidence='' smoke_runner='' kubeconfig='' staging_kubeconfig='' confirm='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    inputs=({{ quote(tag) }} {{ quote(manifest) }} {{ quote(evidence) }} {{ quote(staging_evidence) }} {{ quote(smoke_runner) }} {{ quote(kubeconfig) }} {{ quote(staging_kubeconfig) }})
-    values=('' '' '' '' '' '' ''); prefixes=(tag manifest evidence staging_evidence smoke_runner kubeconfig staging_kubeconfig)
+    inputs=({{ quote(tag) }} {{ quote(manifest) }} {{ quote(evidence) }} {{ quote(staging_evidence) }} {{ quote(smoke_runner) }} {{ quote(kubeconfig) }} {{ quote(staging_kubeconfig) }} {{ quote(confirm) }})
+    values=('' '' '' '' '' '' '' ''); prefixes=(tag manifest evidence staging_evidence smoke_runner kubeconfig staging_kubeconfig confirm)
     for index in "${!inputs[@]}"; do
       named=false; for prefix in "${prefixes[@]}"; do [[ ${inputs[index]} == "${prefix}="* ]] && named=true; done
       ${named} || values[index]=${inputs[index]}
@@ -2379,16 +2396,16 @@ dspace-oci-promote-prod tag='' manifest='' evidence='' staging_evidence='' smoke
       --require-tag)"
     eval "${config_exports}"
     just --justfile "{{ justfile_directory() }}/justfile" dspace-oci-deploy prod "${SUGARKUBE_TAG}" \
-      "${values[1]}" "${values[2]}" "${values[3]}" "${values[4]}" '' "${values[5]}" '' "${values[6]}"
+      "${values[1]}" "${values[2]}" "${values[3]}" "${values[4]}" '' "${values[5]}" '' "${values[6]}" "${values[7]}"
 
 # Fast redeploy of dspace from GHCR (emergency mutable-tag refresh).
-dspace-oci-redeploy env='staging' tag='' manifest='' evidence='' staging_evidence='' smoke_runner='' config='' kubeconfig='' staging_config='' staging_kubeconfig='':
+dspace-oci-redeploy env='staging' tag='' manifest='' evidence='' staging_evidence='' smoke_runner='' config='' kubeconfig='' staging_config='' staging_kubeconfig='' confirm='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    inputs=({{ quote(env) }} {{ quote(tag) }} {{ quote(manifest) }} {{ quote(evidence) }} {{ quote(staging_evidence) }} {{ quote(smoke_runner) }} {{ quote(config) }} {{ quote(kubeconfig) }} {{ quote(staging_config) }} {{ quote(staging_kubeconfig) }})
-    values=('' '' '' '' '' '' '' '' '' ''); destinations=(0 1 6 2 3 4 5 7 8 9)
-    prefixes=(env tag config manifest evidence staging_evidence smoke_runner kubeconfig staging_config staging_kubeconfig)
+    inputs=({{ quote(env) }} {{ quote(tag) }} {{ quote(manifest) }} {{ quote(evidence) }} {{ quote(staging_evidence) }} {{ quote(smoke_runner) }} {{ quote(config) }} {{ quote(kubeconfig) }} {{ quote(staging_config) }} {{ quote(staging_kubeconfig) }} {{ quote(confirm) }})
+    values=('' '' '' '' '' '' '' '' '' '' ''); destinations=(0 1 6 2 3 4 5 7 8 9 10)
+    prefixes=(env tag config manifest evidence staging_evidence smoke_runner kubeconfig staging_config staging_kubeconfig confirm)
     for index in "${!inputs[@]}"; do
       named=false; for prefix in "${prefixes[@]}"; do [[ ${inputs[index]} == "${prefix}="* ]] && named=true; done
       ${named} || values[index]=${inputs[index]}
@@ -2397,7 +2414,7 @@ dspace-oci-redeploy env='staging' tag='' manifest='' evidence='' staging_evidenc
       if [[ ${argument} == "${prefixes[prefix_index]}="* ]]; then values[${destinations[prefix_index]}]=${argument#*=}; break; fi
     done; done
     just --justfile "{{ justfile_directory() }}/justfile" app-redeploy dspace "${values[0]}" "${values[1]}" \
-      "${values[6]}" "${values[2]}" "${values[3]}" "${values[4]}" "${values[5]}" "${values[7]}" "${values[8]}" "${values[9]}"
+      "${values[6]}" "${values[2]}" "${values[3]}" "${values[4]}" "${values[5]}" "${values[7]}" "${values[8]}" "${values[9]}" "${values[10]}"
 
 # Dump dspace and Traefik logs for debugging HTTP 500s.
 dspace-debug-logs namespace='dspace':
