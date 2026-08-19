@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "runner_revision": "97ab09f13fb098de928a878bf1fe9b8d13032cb5",
+  "dspace_repository": "https://github.com/democratizedspace/dspace.git",
+  "dspace_version": "3.1.1",
+  "dspace_source_revision": "22f506e07e0b5abfd0cf756e9c5827c0458fb4b2",
+  "identity_contract": "build-info-v1",
+  "provider_config_contract": "legacy-no-default-provider-v1",
+  "provider": "token-place",
+  "origin": "https://staging.token.place",
+  "model": "qwen3-8b-instruct",
+  "timeout_seconds": 180,
+  "service_user": "pi",
+  "service_group": "pi",
+  "runner_root": "/var/lib/sugarkube/dspace-chat-runners",
+  "result_root": "/run/sugarkube/dspace-chat-results",
+  "metric_path": "/var/lib/node_exporter/textfile_collector/dspace-chat.prom",
+  "wrapper_path": "/usr/local/libexec/sugarkube-dspace-chat-synthetic"
+}
