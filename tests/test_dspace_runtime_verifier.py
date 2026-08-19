@@ -140,51 +140,6 @@ def test_verify_selects_provider_config_contract_only_for_exact_311_tuple(
         assert calls[0][calls[0].index(option) + 1] == "legacy-no-default-provider-v1"
 
 
-    coordinates: dict[str, object] | None = None,
-    selected_coordinates = coordinates or (
-    use_coordinates = is_legacy or coordinates is not None
-    revision = str(selected_coordinates["sourceRevision"]) if use_coordinates else SHA
-    digest = str(selected_coordinates["imageDigest"]) if use_coordinates else DIGEST
-    image_tag = str(selected_coordinates["imageTag"]) if use_coordinates else "main-abcdef0"
-    version = str(selected_coordinates["applicationVersion"]) if use_coordinates else "3.1.0"
-    chart_version = str(selected_coordinates["chartVersion"]) if use_coordinates else "3.1.0"
-    def build(image: str = canonical, build_revision: str = revision) -> str:
-                "revision": build_revision,
-                "shortRevision": build_revision[:7],
-    if drift_field == "unrelated-release":
-        coordinates = {
-            **coordinates,
-            "applicationVersion": "3.2.0",
-            "semanticTag": "v3.2.0",
-            "chartVersion": "3.2.0",
-        }
-    elif drift_field is not None:
-        coordinates[drift_field] = (
-            1 if drift_field == "schemaVersion" else "drift"
-        )
-        # Use valid scalar shapes; load validation is isolated below so every selector
-        # field, including fields coupled by the manifest schema, is drifted independently.
-        if drift_field in {"sourceRevision", "chartSourceRevision"}:
-            coordinates[drift_field] = "f" * 40
-        elif drift_field in {"imageDigest", "chartDigest"}:
-            coordinates[drift_field] = "sha256:" + "f" * 64
-        elif drift_field == "imageTag":
-            coordinates[drift_field] = "release-" + str(coordinates["sourceRevision"])[:7]
-        elif drift_field in {"applicationVersion", "chartVersion"}:
-            coordinates[drift_field] = "9.9.9"
-        elif drift_field == "semanticTag":
-            coordinates[drift_field] = "v9.9.9"
-        elif drift_field == "expectedDefaultChatProvider":
-            coordinates[drift_field] = "openai"
-    args, calls = _verify_setup(monkeypatch, tmp_path, coordinates=coordinates)
-    monkeypatch.setattr(verifier, "load_manifest", lambda path: coordinates)
-    verifier.verify(args)
-    option = "--provider-config-contract"
-    assert (option in calls[0]) is expected
-    if expected:
-        assert calls[0][calls[0].index(option) + 1] == "legacy-no-default-provider-v1"
-
-
 def test_values_expectations_use_ordered_overlay(tmp_path: Path) -> None:
     base = tmp_path / "base.yaml"
     overlay = tmp_path / "overlay.yaml"
@@ -230,7 +185,7 @@ def _verify_setup(
     version = str(selected_coordinates["applicationVersion"]) if use_coordinates else "3.1.0"
     chart_version = str(selected_coordinates["chartVersion"]) if use_coordinates else "3.1.0"
     canonical = f"ghcr.io/democratizedspace/dspace:{image_tag}"
-        else f'<meta name="dspace-build-revision" content="{revision}">'
+    declared = f"{canonical}@{digest}" if rollback else canonical
 
     def build(image: str = canonical, build_revision: str = revision) -> str:
         return json.dumps(
@@ -349,20 +304,6 @@ def _verify_setup(
                                                 "name": "DSPACE_TOKEN_PLACE_CHAT_MODEL",
                                                 "value": "model-a",
                                             },
-    elif coordinates is not None:
-        manifest_path = tmp_path / "selected-coordinates.json"
-        manifest_path.write_text(
-            json.dumps(
-                {
-                    **coordinates,
-                    "app": "dspace",
-                    "recordType": "candidate",
-                    "environment": "staging",
-                    "approvedAt": "2026-07-30T00:00:00Z",
-                    "approvedBy": "release-test",
-                }
-            )
-        )
                                         ],
                                     }
                                 ]

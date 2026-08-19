@@ -1954,13 +1954,7 @@ dspace-release-verify env manifest smoke_runner config='' kubeconfig='' expected
       --kubeconfig "${kubeconfig_path}" )
     [ -z "${config_path}" ] || verifier_args+=(--config "${config_path}")
     umask 077
-    runtime_proof="$(mktemp)"
-    trap 'rm -f "${capability_proof}" "${runtime_proof}"' EXIT
-    timeout 360 "{{ justfile_directory() }}/scripts/dspace_runtime_verifier.py" verify \
-      "${verifier_args[@]}" >"${runtime_proof}"
-    python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" verifier-proof \
-      --input "${runtime_proof}" --manifest "${manifest_path}" \
-      --environment "${selected_env}" --release dspace --namespace dspace
+    capability_proof="$(mktemp)"
     runtime_proof="$(mktemp)"
     trap 'rm -f "${capability_proof}" "${runtime_proof}"' EXIT
     "{{ justfile_directory() }}/scripts/dspace_runtime_verifier.py" capabilities \
