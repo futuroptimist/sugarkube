@@ -410,7 +410,8 @@ just app-deploy app=dspace env=staging tag=main-REPLACE_SHORTSHA \
 
 Production promotion additionally requires finalized staging evidence. Before production render,
 reservation, or mutation, Sugarkube compares immutable coordinates, checks the recorded staging
-Helm revision remains live, and reruns complete staging verification:
+Helm revision remains live, reruns complete staging verification, and separately requires an exact
+authorization bound to the production candidate's full source revision:
 
 ```bash
 just app-promote-prod \
@@ -420,7 +421,8 @@ just app-promote-prod \
   staging_evidence=deployment-evidence/dspace/staging/<finalized-record>.json \
   smoke_runner="$DSPACE_SMOKE_RUNNER" \
   kubeconfig="$PROD_KUBECONFIG" \
-  staging_kubeconfig="$STAGING_KUBECONFIG"
+  staging_kubeconfig="$STAGING_KUBECONFIG" \
+  confirm="dspace:prod:<40-character-application-SHA>"
 ```
 
 If staging used a nondefault app config, pass that distinct path as
@@ -621,7 +623,8 @@ just app-promote-prod app=dspace tag="$APP_TAG" \
   staging_evidence=deployment-evidence/dspace/staging/<finalized-record>.json \
   smoke_runner="$DSPACE_SMOKE_RUNNER" \
   kubeconfig="$PROD_KUBECONFIG" \
-  staging_kubeconfig="$STAGING_KUBECONFIG"
+  staging_kubeconfig="$STAGING_KUBECONFIG" \
+  confirm="dspace:prod:${TARGET_SHA}"
 EVIDENCE=$(python3 scripts/dspace_release_manifest.py evidence-path \
   --manifest deployment-candidates/dspace/prod.json)
 git add "$EVIDENCE"
@@ -744,7 +747,8 @@ just app-promote-prod app=dspace tag="$APP_TAG" \
   manifest=deployment-candidates/dspace/prod.json \
   staging_evidence=deployment-evidence/dspace/staging/<finalized-record>.json \
   smoke_runner="$DSPACE_SMOKE_RUNNER" \
-  kubeconfig="$PROD_KUBECONFIG" staging_kubeconfig="$STAGING_KUBECONFIG"
+  kubeconfig="$PROD_KUBECONFIG" staging_kubeconfig="$STAGING_KUBECONFIG" \
+  confirm="dspace:prod:${TARGET_SHA}"
 ```
 
 Compatibility shim:
@@ -754,7 +758,8 @@ just dspace-oci-promote-prod tag="$APP_TAG" \
   manifest=deployment-candidates/dspace/prod.json \
   staging_evidence=deployment-evidence/dspace/staging/<finalized-record>.json \
   smoke_runner="$DSPACE_SMOKE_RUNNER" \
-  kubeconfig="$PROD_KUBECONFIG" staging_kubeconfig="$STAGING_KUBECONFIG"
+  kubeconfig="$PROD_KUBECONFIG" staging_kubeconfig="$STAGING_KUBECONFIG" \
+  confirm="dspace:prod:${TARGET_SHA}"
 ```
 
 ## Verify production

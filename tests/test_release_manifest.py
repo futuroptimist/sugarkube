@@ -1908,3 +1908,23 @@ def test_finalize_rejects_noncanonical_image_id() -> None:
     item["status"]["containerStatuses"][0]["imageID"] = "not-a-digest"
     with pytest.raises(manifest.ManifestError, match="non-canonical pod imageID"):
         finalize(pods_json={"items": [item]})
+
+
+def test_production_authorization_is_explicit_and_source_bound() -> None:
+    value = split_candidate("prod")
+    manifest.production_authorization(value, f"dspace:prod:{SHA}")
+    for supplied in ("", "dspace:prod:staging", f"dspace:prod:{CHART_SHA}"):
+        with pytest.raises(manifest.ManifestError, match="exactly equal"):
+            manifest.production_authorization(value, supplied)
+
+
+def test_verifier_capabilities_fail_closed_without_mandatory_proof() -> None:
+    value = {
+        "schemaVersion": 1,
+        "environment": "staging",
+        "release": "dspace",
+        "namespace": "dspace",
+        "capabilities": ["applicationVersion", "publicJourneys"],
+    }
+    with pytest.raises(manifest.ManifestError, match="mandatory source-integrity or /chat"):
+        manifest.validate_verifier_capabilities(value, "staging", "dspace", "dspace")

@@ -90,6 +90,13 @@ def test_capabilities_schema_and_order(capsys: pytest.CaptureFixture[str]) -> No
     assert value["capabilities"] == verifier.CAPABILITIES
 
 
+def test_provider_config_contract_is_bound_to_finalized_311_coordinates() -> None:
+    approved = dict(verifier.LEGACY_PROVIDER_CONFIG_311_COORDINATES)
+    assert verifier.provider_config_contract(approved) == "legacy-no-default-provider-v1"
+    approved["imageDigest"] = DIGEST
+    assert verifier.provider_config_contract(approved) is None
+
+
 def test_values_expectations_use_ordered_overlay(tmp_path: Path) -> None:
     base = tmp_path / "base.yaml"
     overlay = tmp_path / "overlay.yaml"

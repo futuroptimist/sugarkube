@@ -1089,6 +1089,44 @@ def staging_gate(candidate_value: dict[str, Any], evidence_value: dict[str, Any]
     return evidence_value["helmRevision"]
 
 
+def production_authorization(candidate_value: dict[str, Any], supplied: str) -> None:
+    """Require approval that is independent of, and bound more tightly than, staging proof."""
+    validate(candidate_value, False)
+    if candidate_value["environment"] != "prod":
+        raise ManifestError("production authorization requires a prod candidate")
+    expected = f"dspace:prod:{candidate_value['sourceRevision']}"
+    if supplied != expected:
+        raise ManifestError(f"production authorization must exactly equal {expected}")
+
+
+def validate_verifier_capabilities(
+    value: object, environment: str, release: str, namespace: str
+) -> None:
+    """Fail closed unless the repository verifier advertises its complete v1 contract."""
+    expected_fields = {"schemaVersion", "environment", "release", "namespace", "capabilities"}
+    required = {
+        "applicationVersion",
+        "runtimeSourceRevision",
+        "frontendSourceRevision",
+        "defaultProvider",
+        "publicJourneys",
+    }
+    if not isinstance(value, dict) or set(value) != expected_fields:
+        raise ManifestError("runtime verifier capabilities are malformed")
+    capabilities = value.get("capabilities")
+    if (
+        type(value.get("schemaVersion")) is not int
+        or value["schemaVersion"] != 1
+        or value.get("environment") != environment
+        or value.get("release") != release
+        or value.get("namespace") != namespace
+        or not isinstance(capabilities, list)
+        or len(capabilities) != len(set(capabilities))
+        or not required <= set(capabilities)
+    ):
+        raise ManifestError("runtime verifier lacks mandatory source-integrity or /chat capability")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1128,6 +1166,14 @@ def main(argv: list[str] | None = None) -> int:
     gate = sub.add_parser("staging-gate")
     gate.add_argument("--manifest", type=Path, required=True)
     gate.add_argument("--staging-evidence", type=Path, required=True)
+    authorize = sub.add_parser("authorize-production")
+    authorize.add_argument("--manifest", type=Path, required=True)
+    authorize.add_argument("--confirm", default="")
+    capabilities = sub.add_parser("verifier-capabilities")
+    capabilities.add_argument("--input", type=Path, required=True)
+    capabilities.add_argument("--environment", required=True)
+    capabilities.add_argument("--release", required=True)
+    capabilities.add_argument("--namespace", required=True)
     available = sub.add_parser("check-output")
     available.add_argument("--output", type=Path, required=True)
     destination = sub.add_parser("evidence-path")
@@ -1340,6 +1386,12 @@ def main(argv: list[str] | None = None) -> int:
             _sync_directory(args.output.expanduser().resolve(strict=False).parent)
         elif args.command == "staging-gate":
             print(staging_gate(_object(args.manifest), _object(args.staging_evidence)))
+        elif args.command == "authorize-production":
+            production_authorization(_object(args.manifest), args.confirm)
+        elif args.command == "verifier-capabilities":
+            validate_verifier_capabilities(
+                _object(args.input), args.environment, args.release, args.namespace
+            )
         elif args.command == "check-output":
             if args.output.exists():
                 raise ManifestError(f"refusing to overwrite existing record: {args.output}")

@@ -3391,8 +3391,9 @@ def test_dspace_release_verify_ignores_runtime_verifier_override(
     assert result.returncode == 0, result.stderr + result.stdout
     assert not marker.exists()
     invocations = Path(env["RUNTIME_VERIFIER_LOG"]).read_text(encoding="utf-8").splitlines()
-    assert len(invocations) == 1
-    assert invocations[0].startswith(
+    assert len(invocations) == 2
+    assert " capabilities " in f" {invocations[0]} "
+    assert invocations[1].startswith(
         f"{REPO_ROOT / 'scripts/dspace_runtime_verifier.py'} verify "
     )
 
@@ -3460,10 +3461,11 @@ def test_dspace_release_verify_normalizes_public_arguments(
     result = _run_just(["dspace-release-verify", *arguments], generic_app_stub_env)
 
     assert result.returncode == 0, result.stderr + result.stdout
-    invocation = Path(generic_app_stub_env["RUNTIME_VERIFIER_LOG"]).read_text(
+    invocations = Path(generic_app_stub_env["RUNTIME_VERIFIER_LOG"]).read_text(
         encoding="utf-8"
-    )
-    argv = invocation.split()
+    ).splitlines()
+    assert len(invocations) == 2
+    argv = invocations[1].split()
     required = {
         "--environment": values["env"],
         "--manifest": values["manifest"],
@@ -3619,9 +3621,9 @@ def test_dspace_staging_wrappers_route_sparse_named_arguments_once(
     verifier_lines = Path(generic_app_stub_env["RUNTIME_VERIFIER_LOG"]).read_text(
         encoding="utf-8"
     ).splitlines()
-    assert len(verifier_lines) == 1
-    assert verifier_lines[0].count(f"--manifest {manifest}") == 1
-    assert verifier_lines[0].count(
+    assert len(verifier_lines) == 2
+    assert verifier_lines[1].count(f"--manifest {manifest}") == 1
+    assert verifier_lines[1].count(
         f"--smoke-runner {generic_app_stub_env['DSPACE_SMOKE_RUNNER']}"
     ) == 1
 
@@ -3690,17 +3692,18 @@ def test_dspace_promote_prod_routes_sparse_named_arguments_through_both_gates(
             f"kubeconfig={tmp_path / 'prod-kubeconfig'}",
             f"staging_kubeconfig={tmp_path / 'staging-kubeconfig'}",
             f"evidence={prod_evidence}",
+            "confirm=dspace:prod:abcdef0123456789abcdef0123456789abcdef01",
         ],
         env,
     )
 
     assert result.returncode == 0, result.stderr + result.stdout
     verifier_lines = runtime_log.read_text(encoding="utf-8").splitlines()
-    assert len(verifier_lines) == 2
+    assert len(verifier_lines) == 4
     assert "--environment staging" in verifier_lines[0]
     assert f"--manifest {staging_evidence}" in verifier_lines[0]
-    assert "--environment prod" in verifier_lines[1]
-    assert f"--manifest {prod_manifest}" in verifier_lines[1]
+    assert "--environment prod" in verifier_lines[2]
+    assert f"--manifest {prod_manifest}" in verifier_lines[2]
     assert json.loads(prod_evidence.read_text(encoding="utf-8"))["recordType"] == "final"
     helm_lines = Path(env["HELM_LOG"]).read_text(encoding="utf-8").splitlines()
     assert sum(line.startswith("upgrade ") for line in helm_lines) == 1
@@ -3708,6 +3711,7 @@ def test_dspace_promote_prod_routes_sparse_named_arguments_through_both_gates(
     ordered_events = [
         next(i for i, line in enumerate(commands) if line == "release-manifest staging-gate"),
         next(i for i, line in enumerate(commands) if line == "runtime-verifier staging"),
+        next(i for i, line in enumerate(commands) if line == "release-manifest authorize-production"),
         next(i for i, line in enumerate(commands) if line == "release-manifest preflight"),
         next(i for i, line in enumerate(commands) if line.startswith("helm template ")),
         next(i for i, line in enumerate(commands) if line == "release-manifest reserve"),
@@ -3718,6 +3722,25 @@ def test_dspace_promote_prod_routes_sparse_named_arguments_through_both_gates(
     assert ordered_events == sorted(ordered_events)
 
     Path(env["HELM_LOG"]).write_text("", encoding="utf-8")
+    unauthorized = _run_just(
+        [
+            "app-promote-prod",
+            "app=dspace",
+            "tag=main-abcdef0",
+            f"config={config}",
+            f"manifest={prod_manifest}",
+            f"staging_evidence={staging_evidence}",
+            f"smoke_runner={env['DSPACE_SMOKE_RUNNER']}",
+            f"kubeconfig={tmp_path / 'prod-kubeconfig'}",
+            f"staging_kubeconfig={tmp_path / 'staging-kubeconfig'}",
+            f"evidence={tmp_path / 'unauthorized-evidence.json'}",
+        ],
+        env,
+    )
+    assert unauthorized.returncode != 0
+    assert "production authorization must exactly equal" in unauthorized.stderr
+    assert "upgrade " not in Path(env["HELM_LOG"]).read_text(encoding="utf-8")
+
     identical = tmp_path / "same-kubeconfig"
     rejected = _run_just(
         [
@@ -3796,6 +3819,7 @@ def test_dspace_prod_staging_gate_failures_stop_before_production_work(
             f"smoke_runner={env['DSPACE_SMOKE_RUNNER']}",
             f"kubeconfig={tmp_path / 'prod-kubeconfig'}",
             f"staging_kubeconfig={tmp_path / 'staging-kubeconfig'}",
+            "confirm=dspace:prod:abcdef0123456789abcdef0123456789abcdef01",
         ],
         env,
     )
@@ -3853,6 +3877,7 @@ def test_dspace_prod_verifier_failure_preserves_post_mutation_reservation(
             f"smoke_runner={env['DSPACE_SMOKE_RUNNER']}",
             f"kubeconfig={tmp_path / 'prod-kubeconfig'}",
             f"staging_kubeconfig={tmp_path / 'staging-kubeconfig'}",
+            "confirm=dspace:prod:abcdef0123456789abcdef0123456789abcdef01",
         ],
         env,
     )
