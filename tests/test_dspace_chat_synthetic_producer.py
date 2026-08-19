@@ -6,6 +6,7 @@ import copy
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -261,6 +262,98 @@ def test_failed_installer_preflight_leaves_installation_unchanged(tmp_path: Path
     with pytest.raises(ValueError):
         installer.install(staged, tmp_path, "c" * 40)
     assert marker.read_bytes() == b"unchanged"
+
+
+def run_installer_main(monkeypatch: pytest.MonkeyPatch, *args: str) -> int:
+    monkeypatch.setattr(sys, "argv", ["install_dspace_chat_synthetic.py", *args])
+    return installer.main()
+
+
+@pytest.mark.parametrize("fault", ["absent", "incomplete", "hash-mismatch"])
+def test_rollback_cli_rejects_invalid_retained_revision_without_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    revision = "d" * 40
+    retained = tmp_path / "var/lib/sugarkube/dspace-chat-installations" / revision
+    if fault != "absent":
+        installer.render(retained)
+        if fault == "incomplete":
+            (retained / "manifest.json").write_text("{}")
+        else:
+            (retained / next(iter(installer.ASSETS))).write_bytes(b"tampered")
+    marker = tmp_path / "installed-marker"
+    marker.write_bytes(b"unchanged")
+    monkeypatch.setattr(
+        installer,
+        "activate",
+        lambda *args: pytest.fail("rollback activated before retained assets validated"),
+    )
+
+    with pytest.raises((FileNotFoundError, ValueError)):
+        run_installer_main(monkeypatch, "rollback", "--root", str(tmp_path), "--revision", revision)
+
+    assert marker.read_bytes() == b"unchanged"
+    assert not (retained.parent / "current").exists()
+
+
+def test_rollback_cli_rejects_traversal_without_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    marker = tmp_path / "installed-marker"
+    marker.write_bytes(b"unchanged")
+    with pytest.raises(ValueError, match="asset revision"):
+        run_installer_main(
+            monkeypatch, "rollback", "--root", str(tmp_path), "--revision", "../escape"
+        )
+    assert marker.read_bytes() == b"unchanged"
+    assert not (tmp_path / "var").exists()
+
+
+def test_rollback_cli_validates_dry_run_without_activation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    revision = "e" * 64
+    retained = tmp_path / "var/lib/sugarkube/dspace-chat-installations" / revision
+    installer.render(retained)
+    monkeypatch.setattr(
+        installer, "activate", lambda *args: pytest.fail("dry-run activated rollback")
+    )
+
+    assert (
+        run_installer_main(monkeypatch, "rollback", "--root", str(tmp_path), "--revision", revision)
+        == 0
+    )
+    assert capsys.readouterr().out == (
+        "validation=passed mutation=none rollback=authorization-required\n"
+    )
+    assert not (retained.parent / "current").exists()
+
+
+def test_rollback_cli_apply_activates_only_after_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    revision = "f" * 40
+    retained = tmp_path / "var/lib/sugarkube/dspace-chat-installations" / revision
+    installer.render(retained)
+    calls = []
+
+    def activate(validated: Path, root: Path, selected: str) -> None:
+        calls.append((validated, root, selected))
+
+    monkeypatch.setattr(installer, "activate", activate)
+    assert (
+        run_installer_main(
+            monkeypatch,
+            "rollback",
+            "--apply",
+            "--root",
+            str(tmp_path),
+            "--revision",
+            revision,
+        )
+        == 0
+    )
+    assert calls == [(retained, tmp_path, revision)]
 
 
 def test_units_are_bounded_persistent_hardened_and_never_implicitly_activated() -> None:

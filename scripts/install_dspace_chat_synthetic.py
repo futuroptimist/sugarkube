@@ -296,10 +296,13 @@ def main() -> int:
         )
         return 0
     if args.operation == "rollback":
+        if not ASSET_REVISION.fullmatch(args.revision):
+            raise ValueError("revision must be a lowercase hexadecimal asset revision")
+        retained = args.root / "var/lib/sugarkube/dspace-chat-installations" / args.revision
+        validate(retained)
         if not args.apply:
             print("validation=passed mutation=none rollback=authorization-required")
             return 0
-        retained = args.root / "var/lib/sugarkube/dspace-chat-installations" / args.revision
         activate(retained, args.root, args.revision)
         return 0
     with tempfile.TemporaryDirectory() as temporary:
