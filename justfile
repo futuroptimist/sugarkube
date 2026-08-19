@@ -1954,7 +1954,22 @@ dspace-release-verify env manifest smoke_runner config='' kubeconfig='' expected
       --kubeconfig "${kubeconfig_path}" )
     [ -z "${config_path}" ] || verifier_args+=(--config "${config_path}")
     [ -z "${expected_revision}" ] || verifier_args+=(--expected-helm-revision "${expected_revision}")
-    "{{ justfile_directory() }}/scripts/dspace_runtime_verifier.py" verify "${verifier_args[@]}"
+    capability_args=( \
+      --environment "${selected_env}" --release dspace --namespace dspace \
+      --manifest "${manifest_path}" --smoke-runner "${smoke_path}" \
+      --kubeconfig "${kubeconfig_path}" )
+    [ -z "${config_path}" ] || capability_args+=(--config "${config_path}")
+    capabilities_proof="$(mktemp)"
+    runtime_proof="$(mktemp)"
+    trap 'rm -f "${capabilities_proof}" "${runtime_proof}"' EXIT
+    "{{ justfile_directory() }}/scripts/dspace_runtime_verifier.py" capabilities \
+      "${capability_args[@]}" >"${capabilities_proof}"
+    python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" runtime-capabilities \
+      --input "${capabilities_proof}" --environment "${selected_env}"
+    "{{ justfile_directory() }}/scripts/dspace_runtime_verifier.py" verify \
+      "${verifier_args[@]}" >"${runtime_proof}"
+    python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" runtime-gate \
+      --manifest "${manifest_path}" --proof "${runtime_proof}" --environment "${selected_env}"
 
 # Generic immutable-tag app deploy backed by docs/examples/apps/*.env or local app configs.
 app-deploy app env='staging' tag='' config='' manifest='' evidence='' staging_evidence='' smoke_runner='' kubeconfig='' staging_config='' staging_kubeconfig='':
@@ -2011,6 +2026,8 @@ app-deploy app env='staging' tag='' config='' manifest='' evidence='' staging_ev
         just --justfile "{{ justfile_directory() }}/justfile" dspace-release-verify \
           staging "${staging_record}" "${runtime_smoke}" "${staging_config_input}" \
           "${staging_kubeconfig_path}" "${staging_revision}"
+        python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" production-authorization \
+          --manifest "${release_manifest}" --confirm "${SUGARKUBE_DSPACE_PROD_AUTHORIZATION:-}"
       fi
       chart_version="${SUGARKUBE_VERSION:-}"
       if [ -z "${chart_version}" ]; then
@@ -2113,6 +2130,8 @@ app-redeploy app env='staging' tag='' config='' manifest='' evidence='' staging_
         if [ "${staging_kubeconfig_path}" = "${kubeconfig_input}" ]; then echo "ERROR: staging and production kubeconfigs must be distinct." >&2; exit 2; fi
         just --justfile "{{ justfile_directory() }}/justfile" assert-cluster-env staging "${staging_kubeconfig_path}" >/dev/null
         just --justfile "{{ justfile_directory() }}/justfile" dspace-release-verify staging "${staging_record}" "${runtime_smoke}" "${staging_config_input}" "${staging_kubeconfig_path}" "${staging_revision}"
+        python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" production-authorization \
+          --manifest "${release_manifest}" --confirm "${SUGARKUBE_DSPACE_PROD_AUTHORIZATION:-}"
       fi
       chart_version="${SUGARKUBE_VERSION:-}"
       if [ -z "${chart_version}" ]; then chart_version="$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' "${SUGARKUBE_VERSION_FILE}" | head -n1)"; fi

@@ -75,15 +75,16 @@ else:
         bin_dir / "python3",
         f"""#!/bin/sh
 if [ "${{1:-}}" = {str(REPO_ROOT / 'scripts/dspace_runtime_verifier.py')!r} ]; then
-  printf '%s\\n' "$*" >> {str(runtime_verifier_log)!r}
   environment=""
   previous=""
   for argument in "$@"; do
     [ "$previous" != --environment ] || environment="$argument"
     previous="$argument"
   done
-  printf 'runtime-verifier %s\\n' "$environment" >> {str(tmp_path / 'commands.log')!r}
-  if [ "$environment" = prod ] && [ "${{SUGARKUBE_STUB_PROD_VERIFIER_FAIL:-}}" = 1 ]; then
+  phase="${{2:-unknown}}"
+  printf 'runtime-%s %s\\n' "$phase" "$environment" >> {str(tmp_path / 'commands.log')!r}
+  if [ "$phase" = verify ]; then printf '%s\\n' "$*" >> {str(runtime_verifier_log)!r}; fi
+  if [ "$phase" = verify ] && [ "$environment" = prod ] && [ "${{SUGARKUBE_STUB_PROD_VERIFIER_FAIL:-}}" = 1 ]; then
     exit 1
   fi
   shift
@@ -644,6 +645,9 @@ print(json.dumps(value))
     env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
     env["SUGARKUBE_HELM_ROLLOUT_TIMEOUT"] = "1s"
     env["DSPACE_SMOKE_RUNNER"] = str(smoke)
+    env["SUGARKUBE_DSPACE_PROD_AUTHORIZATION"] = (
+        "dspace:prod:abcdef0123456789abcdef0123456789abcdef01"
+    )
     env["HELM_LOG"] = str(log_path)
     env["RUNTIME_VERIFIER_LOG"] = str(runtime_verifier_log)
     env["KUBECTL_LOG"] = str(tmp_path / "kubectl.log")
@@ -3707,15 +3711,40 @@ def test_dspace_promote_prod_routes_sparse_named_arguments_through_both_gates(
     commands = (tmp_path / "commands.log").read_text(encoding="utf-8").splitlines()
     ordered_events = [
         next(i for i, line in enumerate(commands) if line == "release-manifest staging-gate"),
-        next(i for i, line in enumerate(commands) if line == "runtime-verifier staging"),
+        next(i for i, line in enumerate(commands) if line == "runtime-capabilities staging"),
+        next(i for i, line in enumerate(commands) if line == "runtime-verify staging"),
+        next(i for i, line in enumerate(commands) if line == "release-manifest production-authorization"),
         next(i for i, line in enumerate(commands) if line == "release-manifest preflight"),
         next(i for i, line in enumerate(commands) if line.startswith("helm template ")),
         next(i for i, line in enumerate(commands) if line == "release-manifest reserve"),
         next(i for i, line in enumerate(commands) if line.startswith("helm upgrade ")),
-        next(i for i, line in enumerate(commands) if line == "runtime-verifier prod"),
+        next(i for i, line in enumerate(commands) if line == "runtime-capabilities prod"),
+        next(i for i, line in enumerate(commands) if line == "runtime-verify prod"),
         next(i for i, line in enumerate(commands) if line == "release-manifest finalize"),
     ]
     assert ordered_events == sorted(ordered_events)
+
+    Path(env["HELM_LOG"]).write_text("", encoding="utf-8")
+    unauthorized_env = env.copy()
+    unauthorized_env.pop("SUGARKUBE_DSPACE_PROD_AUTHORIZATION")
+    unauthorized = _run_just(
+        [
+            "app-promote-prod",
+            "app=dspace",
+            "tag=main-abcdef0",
+            f"config={config}",
+            f"manifest={prod_manifest}",
+            f"staging_evidence={staging_evidence}",
+            f"smoke_runner={env['DSPACE_SMOKE_RUNNER']}",
+            f"kubeconfig={tmp_path / 'prod-kubeconfig'}",
+            f"staging_kubeconfig={tmp_path / 'staging-kubeconfig'}",
+            f"evidence={tmp_path / 'unauthorized-evidence.json'}",
+        ],
+        unauthorized_env,
+    )
+    assert unauthorized.returncode != 0
+    assert "production authorization" in unauthorized.stderr
+    assert "upgrade " not in Path(env["HELM_LOG"]).read_text(encoding="utf-8")
 
     Path(env["HELM_LOG"]).write_text("", encoding="utf-8")
     identical = tmp_path / "same-kubeconfig"
@@ -3862,7 +3891,7 @@ def test_dspace_prod_verifier_failure_preserves_post_mutation_reservation(
     assert sum(line.startswith("helm upgrade ") for line in commands) == 1, (
         result.stderr + result.stdout + "\n" + "\n".join(commands)
     )
-    assert "runtime-verifier prod" in commands
+    assert "runtime-verify prod" in commands
     assert "release-manifest finalize" not in commands
     assert not prod_evidence.exists()
     assert Path(str(prod_evidence.resolve()) + ".reservation").exists()
