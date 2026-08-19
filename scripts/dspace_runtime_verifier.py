@@ -77,6 +77,18 @@ LEGACY_310_COORDINATES = {
     "semanticTag": "v3.1.0",
     "expectedDefaultChatProvider": "token-place",
 }
+LEGACY_NO_DEFAULT_PROVIDER_V1_COORDINATES = {
+    "schemaVersion": 2,
+    "applicationVersion": "3.1.1",
+    "sourceRevision": "22f506e07e0b5abfd0cf756e9c5827c0458fb4b2",
+    "chartSourceRevision": "22f506e07e0b5abfd0cf756e9c5827c0458fb4b2",
+    "imageTag": "main-22f506e",
+    "imageDigest": "sha256:467890df969cc7938cb760f965fd8f90a8912b1dcb1f8425bc808216b7e1512b",
+    "chartVersion": "3.1.2",
+    "chartDigest": "sha256:544a3e31ab827e6d2bf28754a19d8af17b0402b75159c2a40c1b3dfe5eb60161",
+    "semanticTag": "v3.1.1",
+    "expectedDefaultChatProvider": "openai",
+}
 LEGACY_IDENTITY_COORDINATES = (
     LEGACY_302_COORDINATES,
     LEGACY_303_COORDINATES,
@@ -277,6 +289,16 @@ def identity_contract(manifest: dict[str, Any]) -> str:
     ):
         return LEGACY_IDENTITY_CONTRACT
     return MODERN_IDENTITY_CONTRACT
+
+
+def provider_config_contract(manifest: dict[str, Any]) -> str | None:
+    """Select a compatibility contract only for its reviewed immutable release tuple."""
+    if all(
+        manifest.get(key) == value
+        for key, value in LEGACY_NO_DEFAULT_PROVIDER_V1_COORDINATES.items()
+    ):
+        return "legacy-no-default-provider-v1"
+    return None
 
 
 def named_http_port(container: object, category: str) -> int:
@@ -584,6 +606,9 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         "--identity-contract",
         contract,
     ]
+    provider_contract = provider_config_contract(manifest)
+    if provider_contract is not None:
+        smoke_argv += ["--provider-config-contract", provider_contract]
     if expected["provider"] == "token-place":
         assert token_values is not None
         token_origin, token_model = token_values

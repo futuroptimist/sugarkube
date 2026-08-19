@@ -589,6 +589,52 @@ def prod_candidate() -> dict[str, object]:
     return value
 
 
+def test_runtime_gate_requires_exact_source_integrity_and_chat_contract() -> None:
+    selected = candidate()
+    assert (
+        manifest.validate_runtime_proof(selected, runtime_proof(), "staging")
+        == runtime_proof()
+    )
+    for change in (
+        {"runtimeSourceRevision": "0" * 40},
+        {"frontendSourceRevision": "0" * 40},
+        {"journeys": [{"name": "/chat", "passed": False}]},
+        {"journeys": [{"name": "/", "passed": True}]},
+        {"journeys": "skipped"},
+    ):
+        with pytest.raises(manifest.ManifestError):
+            manifest.validate_runtime_proof(selected, runtime_proof(**change), "staging")
+
+
+def test_runtime_capabilities_are_exact_and_fail_closed() -> None:
+    report = {
+        "schemaVersion": 1,
+        "environment": "staging",
+        "release": "dspace",
+        "namespace": "dspace",
+        "capabilities": list(manifest.RUNTIME_VERIFIER_CAPABILITIES),
+    }
+    assert manifest.validate_runtime_capabilities(report, "staging") == report
+    for capabilities in (
+        [],
+        list(manifest.RUNTIME_VERIFIER_CAPABILITIES[:-1]),
+        [*manifest.RUNTIME_VERIFIER_CAPABILITIES, "optionalSkip"],
+        "disabled",
+    ):
+        rejected = dict(report, capabilities=capabilities)
+        with pytest.raises(manifest.ManifestError, match="capabilities"):
+            manifest.validate_runtime_capabilities(rejected, "staging")
+
+
+def test_production_authorization_is_explicit_and_revision_bound() -> None:
+    selected = prod_candidate()
+    expected = f"dspace:prod:{selected['sourceRevision']}"
+    manifest.production_authorization(selected, expected)
+    for confirmation in ("", "dspace:prod:" + "0" * 40, "staging-proof"):
+        with pytest.raises(manifest.ManifestError, match="authorization"):
+            manifest.production_authorization(selected, confirmation)
+
+
 def test_staging_gate_returns_revision_despite_approval_metadata_difference() -> None:
     production = prod_candidate()
     production.update(approvedAt="2026-07-27T12:00:00Z", approvedBy="production-approver")

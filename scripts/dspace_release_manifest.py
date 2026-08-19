@@ -95,6 +95,13 @@ RUNTIME_VERIFICATION_CHECKS = {
     "defaultProvider",
     "remoteChatSmoke",
 }
+RUNTIME_VERIFIER_CAPABILITIES = (
+    "applicationVersion",
+    "runtimeSourceRevision",
+    "frontendSourceRevision",
+    "defaultProvider",
+    "publicJourneys",
+)
 PUBLIC_PATH_RE = re.compile(r"/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*")
 PLATFORM_CHECK_RE = re.compile(r"^imagePlatformSourceRevision\[(0|[1-9][0-9]*)\]$")
 POD_SETTLE_TIMEOUT_SECONDS = 60.0
@@ -103,6 +110,83 @@ POD_SETTLE_INTERVAL_SECONDS = 2.0
 
 class ManifestError(ValueError):
     """A release record is missing or inconsistent."""
+
+
+def validate_runtime_capabilities(
+    value: object, environment: str, release: str = "dspace", namespace: str = "dspace"
+) -> dict[str, Any]:
+    """Require the repository verifier's complete, versioned capability contract."""
+    if not isinstance(value, dict) or set(value) != {
+        "schemaVersion",
+        "environment",
+        "release",
+        "namespace",
+        "capabilities",
+    }:
+        raise ManifestError("runtime verifier capabilities are malformed")
+    if (
+        type(value["schemaVersion"]) is not int
+        or value["schemaVersion"] != 1
+        or value["environment"] != environment
+        or value["release"] != release
+        or value["namespace"] != namespace
+        or value["capabilities"] != list(RUNTIME_VERIFIER_CAPABILITIES)
+    ):
+        raise ManifestError("mandatory runtime verifier capabilities are unavailable")
+    return value
+
+
+def validate_runtime_proof(
+    candidate_value: dict[str, Any], proof: object, environment: str
+) -> dict[str, Any]:
+    """Validate a verifier result before it may authorize a deployment phase."""
+    candidate_value = validate(candidate_value)
+    if candidate_value["environment"] != environment:
+        raise ManifestError("runtime verification target environment mismatch")
+    if not isinstance(proof, dict) or set(proof) != set(RUNTIME_VERIFICATION_FIELDS):
+        raise ManifestError("runtime verification result is malformed")
+    expected = {
+        "schemaVersion": 1,
+        "environment": environment,
+        "release": "dspace",
+        "namespace": "dspace",
+        "applicationVersion": candidate_value["applicationVersion"],
+        "runtimeSourceRevision": candidate_value["sourceRevision"],
+        "frontendSourceRevision": candidate_value["sourceRevision"],
+        "defaultProvider": candidate_value["expectedDefaultChatProvider"],
+    }
+    if type(proof["schemaVersion"]) is not int or any(
+        proof.get(field) != wanted for field, wanted in expected.items()
+    ):
+        raise ManifestError("runtime verification does not match approved release")
+    journeys = proof["journeys"]
+    if not isinstance(journeys, list) or not journeys:
+        raise ManifestError("runtime verification lacks successful bounded journeys")
+    names: set[str] = set()
+    for journey in journeys:
+        if (
+            not isinstance(journey, dict)
+            or set(journey) != {"name", "passed"}
+            or not isinstance(journey["name"], str)
+            or not PUBLIC_PATH_RE.fullmatch(journey["name"])
+            or journey["name"] in names
+            or journey["passed"] is not True
+        ):
+            raise ManifestError("runtime verification lacks successful bounded journeys")
+        names.add(journey["name"])
+    if "/chat" not in names:
+        raise ManifestError("runtime verification lacks successful bounded /chat")
+    return proof
+
+
+def production_authorization(value: dict[str, Any], confirmation: str) -> None:
+    """Require authorization independently bound to the production candidate."""
+    value = validate(value, finalized=False)
+    if value["environment"] != "prod":
+        raise ManifestError("production authorization requires a production candidate")
+    expected = f"dspace:prod:{value['sourceRevision']}"
+    if not confirmation or not secrets.compare_digest(confirmation, expected):
+        raise ManifestError(f"production authorization must exactly equal {expected}")
 
 
 def helm_status_needs_history(status: object) -> bool:
@@ -1128,6 +1212,16 @@ def main(argv: list[str] | None = None) -> int:
     gate = sub.add_parser("staging-gate")
     gate.add_argument("--manifest", type=Path, required=True)
     gate.add_argument("--staging-evidence", type=Path, required=True)
+    capabilities = sub.add_parser("runtime-capabilities")
+    capabilities.add_argument("--input", type=Path, required=True)
+    capabilities.add_argument("--environment", required=True)
+    runtime_gate = sub.add_parser("runtime-gate")
+    runtime_gate.add_argument("--manifest", type=Path, required=True)
+    runtime_gate.add_argument("--proof", type=Path, required=True)
+    runtime_gate.add_argument("--environment", required=True)
+    authorization = sub.add_parser("production-authorization")
+    authorization.add_argument("--manifest", type=Path, required=True)
+    authorization.add_argument("--confirm", required=True)
     available = sub.add_parser("check-output")
     available.add_argument("--output", type=Path, required=True)
     destination = sub.add_parser("evidence-path")
@@ -1340,6 +1434,15 @@ def main(argv: list[str] | None = None) -> int:
             _sync_directory(args.output.expanduser().resolve(strict=False).parent)
         elif args.command == "staging-gate":
             print(staging_gate(_object(args.manifest), _object(args.staging_evidence)))
+        elif args.command == "runtime-capabilities":
+            validate_runtime_capabilities(_object(args.input), args.environment)
+        elif args.command == "runtime-gate":
+            validate_runtime_proof(
+                _object(args.manifest), _object(args.proof), args.environment
+            )
+            sys.stdout.write(_canonical(_object(args.proof)))
+        elif args.command == "production-authorization":
+            production_authorization(_object(args.manifest), args.confirm)
         elif args.command == "check-output":
             if args.output.exists():
                 raise ManifestError(f"refusing to overwrite existing record: {args.output}")
