@@ -1918,7 +1918,7 @@ def test_production_authorization_is_explicit_and_source_bound() -> None:
             manifest.production_authorization(value, supplied)
 
 
-def test_verifier_capabilities_fail_closed_without_mandatory_proof() -> None:
+def test_verifier_capabilities_fail_closed_without_exact_contract() -> None:
     value = {
         "schemaVersion": 1,
         "environment": "staging",
@@ -1926,7 +1926,7 @@ def test_verifier_capabilities_fail_closed_without_mandatory_proof() -> None:
         "namespace": "dspace",
         "capabilities": ["applicationVersion", "publicJourneys"],
     }
-    with pytest.raises(manifest.ManifestError, match="mandatory capabilities: defaultProvider"):
+    with pytest.raises(manifest.ManifestError, match="ordered v1 contract"):
         manifest.validate_verifier_capabilities(value, "staging", "dspace", "dspace")
 
 
@@ -1975,5 +1975,28 @@ def test_verifier_capabilities_identifies_duplicate_entries() -> None:
         "namespace": "dspace",
         "capabilities": ["publicJourneys", "publicJourneys"],
     }
-    with pytest.raises(manifest.ManifestError, match="duplicate entries"):
+    with pytest.raises(manifest.ManifestError, match="ordered v1 contract"):
+        manifest.validate_verifier_capabilities(value, "staging", "dspace", "dspace")
+
+
+@pytest.mark.parametrize(
+    "capabilities",
+    [
+        list(manifest.VERIFIER_CAPABILITIES_V1[:-1]),
+        list(reversed(manifest.VERIFIER_CAPABILITIES_V1)),
+        [*manifest.VERIFIER_CAPABILITIES_V1, "extra"],
+        [*manifest.VERIFIER_CAPABILITIES_V1, manifest.VERIFIER_CAPABILITIES_V1[-1]],
+    ],
+)
+def test_verifier_capabilities_requires_exact_ordered_v1_list(
+    capabilities: list[str],
+) -> None:
+    value = {
+        "schemaVersion": 1,
+        "environment": "staging",
+        "release": "dspace",
+        "namespace": "dspace",
+        "capabilities": capabilities,
+    }
+    with pytest.raises(manifest.ManifestError, match="ordered v1 contract"):
         manifest.validate_verifier_capabilities(value, "staging", "dspace", "dspace")

@@ -48,6 +48,13 @@ FINAL_SUFFIX = (
 CANDIDATE_FIELDS = UPSTREAM_FIELDS_V1 + CANDIDATE_SUFFIX
 FINAL_FIELDS = CANDIDATE_FIELDS + FINAL_SUFFIX
 OPTIONAL_FINAL_FIELDS = ("runtimeVerification",)
+VERIFIER_CAPABILITIES_V1 = (
+    "applicationVersion",
+    "runtimeSourceRevision",
+    "frontendSourceRevision",
+    "defaultProvider",
+    "publicJourneys",
+)
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 SEMVER_RE = re.compile(
@@ -248,6 +255,51 @@ def _validate_upstream(value: dict[str, Any]) -> None:
         raise ManifestError("semanticTag must equal v<applicationVersion>")
 
 
+def validate_runtime_verification(
+    proof: object,
+    manifest: dict[str, Any],
+    environment: str,
+    release: str = "dspace",
+    namespace: str = "dspace",
+) -> dict[str, Any]:
+    """Validate and return a standalone verifier proof without trusting its output."""
+    if not isinstance(proof, dict) or set(proof) != set(RUNTIME_VERIFICATION_FIELDS):
+        raise ManifestError("runtimeVerification has an incompatible verifier schema")
+    if type(proof["schemaVersion"]) is not int or proof["schemaVersion"] != 1:
+        raise ManifestError("runtimeVerification schemaVersion must be integer 1")
+    expected = {
+        "environment": environment,
+        "release": release,
+        "namespace": namespace,
+        "applicationVersion": manifest["applicationVersion"],
+        "runtimeSourceRevision": manifest["sourceRevision"],
+        "frontendSourceRevision": manifest["sourceRevision"],
+        "defaultProvider": manifest["expectedDefaultChatProvider"],
+    }
+    if manifest.get("environment") != environment or any(
+        proof[field] != expected_value for field, expected_value in expected.items()
+    ):
+        raise ManifestError("runtimeVerification does not match approved release")
+    journeys = proof["journeys"]
+    if not isinstance(journeys, list) or not journeys:
+        raise ManifestError("runtimeVerification lacks successful bounded journeys")
+    journey_names: set[str] = set()
+    for item in journeys:
+        if (
+            not isinstance(item, dict)
+            or set(item) != {"name", "passed"}
+            or not isinstance(item["name"], str)
+            or not PUBLIC_PATH_RE.fullmatch(item["name"])
+            or item["name"] in journey_names
+            or item["passed"] is not True
+        ):
+            raise ManifestError("runtimeVerification lacks successful bounded journeys")
+        journey_names.add(item["name"])
+    if "/chat" not in journey_names:
+        raise ManifestError("runtimeVerification lacks successful bounded journeys")
+    return proof
+
+
 def validate(value: dict[str, Any], finalized: bool | None = None) -> dict[str, Any]:
     record_type = value.get("recordType")
     if finalized is None:
@@ -303,41 +355,7 @@ def validate(value: dict[str, Any], finalized: bool | None = None) -> dict[str, 
         if value["runtimeSourceRevisionMethod"] != RUNTIME_METHOD:
             raise ManifestError(f"runtimeSourceRevisionMethod must be {RUNTIME_METHOD}")
         if "runtimeVerification" in value:
-            proof = value["runtimeVerification"]
-            if not isinstance(proof, dict) or set(proof) != set(RUNTIME_VERIFICATION_FIELDS):
-                raise ManifestError("runtimeVerification has an incompatible verifier schema")
-            if type(proof["schemaVersion"]) is not int or proof["schemaVersion"] != 1:
-                raise ManifestError("runtimeVerification schemaVersion must be integer 1")
-            if any(
-                proof[field] != expected_value
-                for field, expected_value in {
-                    "environment": value["environment"],
-                    "release": "dspace",
-                    "namespace": "dspace",
-                    "applicationVersion": value["applicationVersion"],
-                    "runtimeSourceRevision": value["sourceRevision"],
-                    "frontendSourceRevision": value["sourceRevision"],
-                    "defaultProvider": value["expectedDefaultChatProvider"],
-                }.items()
-            ):
-                raise ManifestError("runtimeVerification does not match approved release")
-            journeys = proof["journeys"]
-            if not isinstance(journeys, list) or not journeys:
-                raise ManifestError("runtimeVerification lacks successful bounded journeys")
-            journey_names: set[str] = set()
-            for item in journeys:
-                if (
-                    not isinstance(item, dict)
-                    or set(item) != {"name", "passed"}
-                    or not isinstance(item["name"], str)
-                    or not PUBLIC_PATH_RE.fullmatch(item["name"])
-                    or item["name"] in journey_names
-                    or item["passed"] is not True
-                ):
-                    raise ManifestError("runtimeVerification lacks successful bounded journeys")
-                journey_names.add(item["name"])
-            if "/chat" not in journey_names:
-                raise ManifestError("runtimeVerification lacks successful bounded journeys")
+            validate_runtime_verification(value["runtimeVerification"], value, value["environment"])
         results = value["verificationResults"]
         if not isinstance(results, list) or not results:
             raise ManifestError("verificationResults must be a non-empty list")
@@ -1104,13 +1122,6 @@ def validate_verifier_capabilities(
 ) -> None:
     """Fail closed unless the repository verifier advertises its complete v1 contract."""
     expected_fields = {"schemaVersion", "environment", "release", "namespace", "capabilities"}
-    required = {
-        "applicationVersion",
-        "runtimeSourceRevision",
-        "frontendSourceRevision",
-        "defaultProvider",
-        "publicJourneys",
-    }
     if not isinstance(value, dict) or set(value) != expected_fields:
         raise ManifestError("runtime verifier capabilities are malformed")
     capabilities = value.get("capabilities")
@@ -1126,12 +1137,8 @@ def validate_verifier_capabilities(
         isinstance(capability, str) for capability in capabilities
     ):
         raise ManifestError("runtime verifier capabilities must be a list of strings")
-    capability_set = set(capabilities)
-    if len(capabilities) != len(capability_set):
-        raise ManifestError("runtime verifier capabilities contain duplicate entries")
-    missing = sorted(required - capability_set)
-    if missing:
-        raise ManifestError("runtime verifier lacks mandatory capabilities: " + ", ".join(missing))
+    if capabilities != list(VERIFIER_CAPABILITIES_V1):
+        raise ManifestError("runtime verifier capabilities do not match the ordered v1 contract")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1181,6 +1188,12 @@ def main(argv: list[str] | None = None) -> int:
     capabilities.add_argument("--environment", required=True)
     capabilities.add_argument("--release", required=True)
     capabilities.add_argument("--namespace", required=True)
+    proof = sub.add_parser("verifier-proof")
+    proof.add_argument("--input", type=Path, required=True)
+    proof.add_argument("--manifest", type=Path, required=True)
+    proof.add_argument("--environment", required=True)
+    proof.add_argument("--release", required=True)
+    proof.add_argument("--namespace", required=True)
     available = sub.add_parser("check-output")
     available.add_argument("--output", type=Path, required=True)
     destination = sub.add_parser("evidence-path")
@@ -1399,6 +1412,16 @@ def main(argv: list[str] | None = None) -> int:
             validate_verifier_capabilities(
                 _object(args.input), args.environment, args.release, args.namespace
             )
+        elif args.command == "verifier-proof":
+            selected_manifest = validate(_object(args.manifest))
+            validated_proof = validate_runtime_verification(
+                _object(args.input),
+                selected_manifest,
+                args.environment,
+                args.release,
+                args.namespace,
+            )
+            sys.stdout.write(_canonical(validated_proof))
         elif args.command == "check-output":
             if args.output.exists():
                 raise ManifestError(f"refusing to overwrite existing record: {args.output}")
