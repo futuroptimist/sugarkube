@@ -1114,17 +1114,24 @@ def validate_verifier_capabilities(
     if not isinstance(value, dict) or set(value) != expected_fields:
         raise ManifestError("runtime verifier capabilities are malformed")
     capabilities = value.get("capabilities")
-    if (
-        type(value.get("schemaVersion")) is not int
-        or value["schemaVersion"] != 1
-        or value.get("environment") != environment
-        or value.get("release") != release
-        or value.get("namespace") != namespace
-        or not isinstance(capabilities, list)
-        or len(capabilities) != len(set(capabilities))
-        or not required <= set(capabilities)
+    if type(value.get("schemaVersion")) is not int or value["schemaVersion"] != 1:
+        raise ManifestError("runtime verifier capabilities require schemaVersion 1")
+    if value.get("environment") != environment:
+        raise ManifestError("runtime verifier capabilities environment mismatch")
+    if value.get("release") != release:
+        raise ManifestError("runtime verifier capabilities release mismatch")
+    if value.get("namespace") != namespace:
+        raise ManifestError("runtime verifier capabilities namespace mismatch")
+    if not isinstance(capabilities, list) or not all(
+        isinstance(capability, str) for capability in capabilities
     ):
-        raise ManifestError("runtime verifier lacks mandatory source-integrity or /chat capability")
+        raise ManifestError("runtime verifier capabilities must be a list of strings")
+    capability_set = set(capabilities)
+    if len(capabilities) != len(capability_set):
+        raise ManifestError("runtime verifier capabilities contain duplicate entries")
+    missing = sorted(required - capability_set)
+    if missing:
+        raise ManifestError("runtime verifier lacks mandatory capabilities: " + ", ".join(missing))
 
 
 def main(argv: list[str] | None = None) -> int:

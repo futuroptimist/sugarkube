@@ -618,6 +618,7 @@ python3 scripts/dspace_release_manifest.py candidate \
   --output deployment-candidates/dspace/prod.json \
   --environment prod --provider token-place \
   --approved-at 2026-07-26T13:00:00Z --approved-by '<operator-or-review-record>'
+TARGET_SHA=$(jq -er '.sourceRevision' deployment-candidates/dspace/prod.json)
 just app-promote-prod app=dspace tag="$APP_TAG" \
   manifest=deployment-candidates/dspace/prod.json \
   staging_evidence=deployment-evidence/dspace/staging/<finalized-record>.json \
@@ -743,6 +744,7 @@ For staging, the browser smoke must show DSPACE calling `https://staging.token.p
 This configuration change does not promote or mutate production. Promote only after staging sign-off. Prefer the generic command; it uses the prod values chain, resolves chart `3.0.3` from `docs/apps/dspace.prod.version`, and can read `docs/apps/dspace.prod.tag` (`main-1a31a56`) when `tag=` is omitted.
 
 ```bash
+TARGET_SHA=$(jq -er '.sourceRevision' deployment-candidates/dspace/prod.json)
 just app-promote-prod app=dspace tag="$APP_TAG" \
   manifest=deployment-candidates/dspace/prod.json \
   staging_evidence=deployment-evidence/dspace/staging/<finalized-record>.json \
@@ -754,6 +756,7 @@ just app-promote-prod app=dspace tag="$APP_TAG" \
 Compatibility shim:
 
 ```bash
+TARGET_SHA=$(jq -er '.sourceRevision' deployment-candidates/dspace/prod.json)
 just dspace-oci-promote-prod tag="$APP_TAG" \
   manifest=deployment-candidates/dspace/prod.json \
   staging_evidence=deployment-evidence/dspace/staging/<finalized-record>.json \
