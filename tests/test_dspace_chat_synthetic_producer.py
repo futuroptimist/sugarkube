@@ -1460,6 +1460,17 @@ def test_rollback_cli_apply_activates_only_after_validation(
     assert calls == [(retained, tmp_path, revision)]
 
 
+def test_install_rejects_invalid_asset_revision_without_mutation(tmp_path: Path) -> None:
+    staged = tmp_path / "staged"
+    installer.render(staged)
+    root = tmp_path / "root"
+
+    with pytest.raises(ValueError, match="asset revision"):
+        installer.install(staged, root, "../escape")
+
+    assert not root.exists()
+
+
 def test_units_are_bounded_persistent_hardened_and_never_implicitly_activated() -> None:
     service = (ROOT / "scripts/systemd/dspace-chat-synthetic.service").read_text()
     timer = (ROOT / "scripts/systemd/dspace-chat-synthetic.timer").read_text()
