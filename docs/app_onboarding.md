@@ -105,7 +105,7 @@ Create a base values file plus one overlay per environment.
 
 ## Questions before onboarding future apps
 
-Do not invent real configs for future apps such as `wove` until their app repos have the required image and chart details. jobbot3000 is now onboarded because its image and chart details are known. Capture these answers first:
+Do not invent real configs for future apps such as `wove` until their app repos have the required image and chart details. DSPACE, token.place, danielsmith.io, jobbot3000, and GitShelves are currently supported because their image and chart details are known. Capture these answers first:
 
 | Question | Why Sugarkube needs it |
 | --- | --- |

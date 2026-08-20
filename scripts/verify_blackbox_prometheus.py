@@ -22,6 +22,11 @@ EXPECTED = {
     "blackbox-jobbot3000-staging-livez": ("jobbot3000", "livez"),
     "blackbox-jobbot3000-staging-tracker": ("jobbot3000", "tracker"),
     "blackbox-jobbot3000-staging-manifest": ("jobbot3000", "manifest"),
+    "blackbox-gitshelves-staging-root": ("gitshelves", "root"),
+    "blackbox-gitshelves-staging-healthz": ("gitshelves", "healthz"),
+    "blackbox-gitshelves-staging-livez": ("gitshelves", "livez"),
+    "blackbox-gitshelves-staging-baseplate": ("gitshelves", "baseplate"),
+    "blackbox-gitshelves-staging-module": ("gitshelves", "module"),
 }
 EXPECTED_JOBS = {f"probe/monitoring/{name}": labels for name, labels in EXPECTED.items()}
 

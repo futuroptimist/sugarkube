@@ -1,0 +1,11 @@
+# Staging overlay layered on gitshelves.values.dev.yaml.
+ingress:
+  enabled: true
+  className: traefik
+  host: staging.gitshelves.com
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+  tls:
+    - secretName: gitshelves-staging-tls
+      hosts:
+        - staging.gitshelves.com
