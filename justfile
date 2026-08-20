@@ -1513,7 +1513,7 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     fi
     if [ -n "${app}" ]; then
       case "${app}" in
-        dspace|tokenplace|danielsmith|jobbot3000) ;;
+        dspace|tokenplace|danielsmith|jobbot3000|gitshelves) ;;
         *) echo "ERROR: app=${app} is not an onboarded Sugarkube application." >&2; exit 2 ;;
       esac
       if [ -z "${image_tag}" ]; then

@@ -316,6 +316,8 @@ spec:
     [[ "$*" != *danielsmith.values.prod.yaml* ]] || host=danielsmith.io
     [[ "$*" != *jobbot3000.values.staging.yaml* ]] || host=staging.jobbot3000.tech
     [[ "$*" != *jobbot3000.values.prod.yaml* ]] || host=jobbot3000.example.test
+    [[ "$*" != *gitshelves.values.staging.yaml* ]] || host=staging.gitshelves.com
+    [[ "$*" != *gitshelves.values.prod.yaml* ]] || host=gitshelves.com
     cat <<YAML
 apiVersion: apps/v1
 kind: Deployment
@@ -2544,6 +2546,15 @@ def test_app_deploy_danielsmith_passes_image_tag(generic_app_stub_env: dict[str,
             ],
         ),
         (
+            "gitshelves",
+            "oci://ghcr.io/futuroptimist/charts/gitshelves",
+            "gitshelves",
+            [
+                "docs/examples/gitshelves.values.dev.yaml",
+                "docs/examples/gitshelves.values.staging.yaml",
+            ],
+        ),
+        (
             "jobbot3000",
             "oci://ghcr.io/futuroptimist/charts/jobbot3000",
             "jobbot3000",
@@ -4375,6 +4386,7 @@ def test_app_verify_show_body_can_be_disabled(generic_app_stub_env: dict[str, st
         ("tokenplace", "/,/livez,/healthz,/relay/diagnostics,/api/v1/meta"),
         ("dspace", "/config.json,/healthz,/livez"),
         ("jobbot3000", "/,/healthz,/livez"),
+        ("gitshelves", "/,/healthz,/livez"),
     ],
 )
 def test_example_app_configs_preserve_verify_paths(app: str, expected_paths: str) -> None:
@@ -8531,3 +8543,51 @@ def test_non_opted_in_missing_family_remains_missing(monkeypatch):
     with pytest.raises(app_metrics.Error, match="required metric family missing"):
         app_metrics.verify("tokenplace", "staging")
     assert metadata_queries == []
+
+
+@pytest.mark.parametrize("env", ["dev", "staging", "prod"])
+def test_gitshelves_example_config_resolves_all_environments(env: str) -> None:
+    result = subprocess.run(
+        ["python3", "scripts/app_config.py", "json", "--app", "gitshelves", "--env", env],
+        cwd=REPO_ROOT, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert '"SUGARKUBE_CHART": "oci://ghcr.io/futuroptimist/charts/gitshelves"' in result.stdout
+    assert f'"SUGARKUBE_ENV": "{env}"' in result.stdout
+
+
+def test_gitshelves_values_and_pins_are_safe_and_exact() -> None:
+    paths = [REPO_ROOT / f"docs/examples/gitshelves.values.{env}.yaml" for env in ("dev", "staging", "prod")]
+    dev, staging, prod = [path.read_text(encoding="utf-8") for path in paths]
+    combined = "\n".join((dev, staging, prod)).lower()
+    assert "repository: ghcr.io/futuroptimist/gitshelves" in dev
+    assert "tag: main-REPLACE_SHORTSHA" in dev
+    assert "host: staging.gitshelves.com" in staging
+    assert "secretName: gitshelves-staging-tls" in staging
+    assert "- staging.gitshelves.com" in staging
+    assert "host: gitshelves.com" in prod
+    assert "secretName: gitshelves-prod-tls" in prod
+    assert "- gitshelves.com" in prod
+    assert "letsencrypt-production" in staging and "letsencrypt-production" in prod
+    assert (REPO_ROOT / "docs/apps/gitshelves.version").read_text().splitlines()[-1] == "0.1.0"
+    assert not [line for line in (REPO_ROOT / "docs/apps/gitshelves.prod.tag").read_text().splitlines() if line.strip() and not line.lstrip().startswith("#")]
+    for forbidden in ("secretkeyref", "kind: secret", "persistence:", "persistentvolumeclaim", "database", "queue:"):
+        assert forbidden not in combined
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_app_verify_print_only_gitshelves_paths(generic_app_stub_env: dict[str, str]) -> None:
+    result = _run_just(["app-verify", "app=gitshelves", "env=staging", "print_only=1"], generic_app_stub_env)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert result.stdout.splitlines() == [
+        "curl -fsS https://example.test/",
+        "curl -fsS https://example.test/healthz",
+        "curl -fsS https://example.test/livez",
+    ]
+
+
+@pytest.mark.parametrize("tag", ["latest", "main", "main-latest", "staging", "v1.2.3"])
+def test_gitshelves_generic_deploy_rejects_moving_tags(tag: str, generic_app_stub_env: dict[str, str]) -> None:
+    result = _run_just(["app-deploy", "app=gitshelves", "env=staging", f"tag={tag}"], generic_app_stub_env)
+    assert result.returncode != 0
+    assert "mutable tag" in (result.stderr + result.stdout).lower()

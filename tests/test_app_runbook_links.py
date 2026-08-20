@@ -10,6 +10,7 @@ DSPACE_REPO = "https://github.com/democratizedspace/dspace"
 TOKENPLACE_REPO = "https://github.com/futuroptimist/token.place"
 DANIELSMITH_REPO = "https://github.com/futuroptimist/danielsmith.io"
 JOBBOT3000_REPO = "https://github.com/futuroptimist/jobbot3000"
+GITSHELVES_REPO = "https://github.com/futuroptimist/gitshelves"
 DSPACE_CHART_PACKAGE_LOOKUP = (
     "https://github.com/orgs/democratizedspace/"
     "packages?repo_name=dspace&q=charts%2Fdspace"
@@ -63,6 +64,22 @@ APP_LINKS = {
             f"{DANIELSMITH_REPO}/blob/main/docs/ops/sugarkube-release.md",
         ],
     },
+    "gitshelves": {
+        "runbook": "docs/apps/gitshelves.md",
+        "urls": [
+            GITSHELVES_REPO,
+            f"{GITSHELVES_REPO}/actions/workflows/ci-image.yml",
+            f"{GITSHELVES_REPO}/actions/workflows/ci-image.yml?query=branch%3Amain+is%3Asuccess",
+            f"{GITSHELVES_REPO}/pkgs/container/gitshelves",
+            f"{GITSHELVES_REPO}/actions/workflows/ci-helm.yml",
+            f"{GITSHELVES_REPO}/pkgs/container/charts%2Fgitshelves",
+            f"{GITSHELVES_REPO}/blob/main/Dockerfile",
+            f"{GITSHELVES_REPO}/tree/main/charts/gitshelves",
+            f"{GITSHELVES_REPO}/blob/main/docs/release-ghcr.md",
+            f"{GITSHELVES_REPO}/blob/main/docs/release-helm.md",
+            f"{GITSHELVES_REPO}/tree/main/docs",
+        ],
+    },
     "jobbot3000": {
         "runbook": "docs/apps/jobbot3000.md",
         "urls": [
@@ -102,6 +119,13 @@ README_QUICK_LINKS = {
         f"{DANIELSMITH_REPO}/pkgs/container/danielsmith.io",
         f"{DANIELSMITH_REPO}/actions/workflows/ci-helm.yml",
         f"{DANIELSMITH_REPO}/pkgs/container/charts%2Fdanielsmith",
+    ],
+    "gitshelves": [
+        "docs/apps/gitshelves.md",
+        f"{GITSHELVES_REPO}/actions/workflows/ci-image.yml",
+        f"{GITSHELVES_REPO}/pkgs/container/gitshelves",
+        f"{GITSHELVES_REPO}/actions/workflows/ci-helm.yml",
+        f"{GITSHELVES_REPO}/pkgs/container/charts%2Fgitshelves",
     ],
     "jobbot3000": [
         "docs/apps/jobbot3000.md",

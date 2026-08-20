@@ -440,7 +440,7 @@ def test_render_stdout_is_a_clean_separated_kubernetes_stream(scenario):
     )
     docs = [doc for doc in json.loads(parsed.stdout) if doc]
     assert [doc["kind"] for doc in docs[:3]] == ["Deployment", "ServiceMonitor", "NetworkPolicy"]
-    assert [doc["kind"] for doc in docs[3:]] == ["Probe"] * 16
+    assert [doc["kind"] for doc in docs[3:]] == ["Probe"] * 21
     assert docs[2] == json.loads(Path(scenario.env["POLICY_JSON"]).read_text())
     assert "blackbox environment:" not in result.stdout
     assert "blackbox environment: staging" in result.stderr
@@ -583,7 +583,7 @@ def test_persistent_target_failure_is_bounded_and_redacted(scenario, failure):
     assert sum("targets?state=active" in line for line in scenario.log) == 2
     assert "https://" not in result.stderr
     assert "Authorization" not in result.stderr
-    assert len(result.stderr.splitlines()) <= 20
+    assert len(result.stderr.splitlines()) <= 25
 
 
 @pytest.mark.parametrize(
@@ -648,7 +648,7 @@ def test_prometheus_verifier_converges_then_reports_bounded_diagnostics():
         result = verify(payload, change != "family")
         assert result.returncode in {9, 10}
         assert "https://" not in result.stderr
-        assert len(result.stderr.splitlines()) <= 18
+        assert len(result.stderr.splitlines()) <= 23
 
 
 def test_prometheus_verifier_fails_immediately_on_bad_responses():
