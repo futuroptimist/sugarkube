@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the bounded DSPACE chat synthetic every five minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+AccuracySec=15s
+Persistent=true
+Unit=dspace-chat-synthetic.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,32 @@
+[Unit]
+Description=Sugarkube bounded DSPACE chat synthetic producer
+Documentation=https://github.com/futuroptimist/sugarkube/blob/main/docs/dspace-chat-synthetic-producer.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Group=pi
+RuntimeDirectory=sugarkube/dspace-chat-synthetic
+RuntimeDirectoryMode=0710
+ExecStart=/usr/local/libexec/sugarkube-dspace-chat-synthetic
+TimeoutStartSec=300
+UMask=0077
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+ReadOnlyPaths=/var/lib/sugarkube/dspace-chat-runners
+ReadWritePaths=/run/sugarkube/dspace-chat-synthetic /var/lib/node_exporter/textfile_collector
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+SystemCallArchitectures=native
