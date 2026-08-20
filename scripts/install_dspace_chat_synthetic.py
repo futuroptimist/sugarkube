@@ -10,6 +10,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
 from pathlib import Path
@@ -168,12 +169,39 @@ def render(destination: Path) -> dict[str, str]:
 
 
 def validate(tree: Path) -> dict[str, str]:
-    manifest = json.loads((tree / "manifest.json").read_text())
+    try:
+        tree_stat = tree.lstat()
+    except OSError as error:
+        raise ValueError("asset tree is missing or invalid") from error
+    if tree.is_symlink() or not stat.S_ISDIR(tree_stat.st_mode):
+        raise ValueError("asset tree must be a real directory")
+
+    def regular_file(relative: str) -> Path:
+        path = tree
+        parts = Path(relative).parts
+        for component in parts[:-1]:
+            path /= component
+            try:
+                component_stat = path.lstat()
+            except OSError as error:
+                raise ValueError("asset path is missing or invalid") from error
+            if path.is_symlink() or not stat.S_ISDIR(component_stat.st_mode):
+                raise ValueError("asset path contains an invalid directory")
+        path /= parts[-1]
+        try:
+            file_stat = path.lstat()
+        except OSError as error:
+            raise ValueError("asset file is missing or invalid") from error
+        if path.is_symlink() or not stat.S_ISREG(file_stat.st_mode):
+            raise ValueError("asset file must be a real regular file")
+        return path
+
+    manifest = json.loads(regular_file("manifest.json").read_text())
     if set(manifest) != set(ASSETS):
         raise ValueError("asset manifest is incomplete")
     for target, expected in manifest.items():
-        path = tree / target
-        if not path.is_file() or sha(path) != expected:
+        path = regular_file(target)
+        if sha(path) != expected:
             raise ValueError("staged asset hash mismatch")
     config = json.loads((tree / "etc/sugarkube/dspace-chat-synthetic.json").read_text())
     if config.get("runnerRevision") != "97ab09f13fb098de928a878bf1fe9b8d13032cb5":

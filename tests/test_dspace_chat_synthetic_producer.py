@@ -1044,6 +1044,87 @@ def test_apply_failure_preserves_prior_state_and_removes_only_new_paths(
     assert not (prior_runner.parent / revision).exists()
 
 
+@pytest.mark.parametrize(
+    "fault",
+    ["tree-symlink", "manifest-symlink", "asset-symlink", "intermediate-symlink"],
+)
+def test_validate_rejects_retained_asset_symlinks(tmp_path: Path, fault: str) -> None:
+    real = tmp_path / "real"
+    installer.render(real)
+    tree = real
+    if fault == "tree-symlink":
+        tree = tmp_path / "tree"
+        tree.symlink_to(real, target_is_directory=True)
+    elif fault == "manifest-symlink":
+        manifest = real / "manifest.json"
+        external = tmp_path / "external-manifest.json"
+        manifest.rename(external)
+        manifest.symlink_to(external)
+    elif fault == "asset-symlink":
+        asset = real / next(iter(installer.ASSETS))
+        external = tmp_path / "external-asset"
+        external.write_bytes(asset.read_bytes())
+        asset.unlink()
+        asset.symlink_to(external)
+    else:
+        intermediate = real / "usr/local"
+        external = tmp_path / "external-directory"
+        intermediate.rename(external)
+        intermediate.symlink_to(external, target_is_directory=True)
+
+    with pytest.raises(ValueError):
+        installer.validate(tree)
+
+
+def test_rollback_rejects_symlinked_retained_asset_before_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prior_revision = "1" * 64
+    prior = tmp_path / "var/lib/sugarkube/dspace-chat-installations" / prior_revision
+    installer.render(prior)
+    installer.activate(prior, tmp_path, prior_revision)
+    revision = "2" * 64
+    retained = prior.parent / revision
+    installer.render(retained)
+    asset = retained / next(iter(installer.ASSETS))
+    external = tmp_path / "matching-external-asset"
+    external.write_bytes(asset.read_bytes())
+    asset.unlink()
+    asset.symlink_to(external)
+    before = tree_bytes(tmp_path)
+    monkeypatch.setattr(
+        installer, "activate", lambda *args: pytest.fail("invalid rollback was activated")
+    )
+
+    with pytest.raises(ValueError):
+        run_installer_main(monkeypatch, "rollback", "--root", str(tmp_path), "--revision", revision)
+
+    assert tree_bytes(tmp_path) == before
+
+
+def test_status_rejects_symlinked_retained_asset_without_systemctl(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    revision = "3" * 64
+    retained = tmp_path / "var/lib/sugarkube/dspace-chat-installations" / revision
+    installer.render(retained)
+    current = retained.parent / "current"
+    current.symlink_to(revision)
+    asset = retained / next(iter(installer.ASSETS))
+    external = tmp_path / "matching-status-asset"
+    external.write_bytes(asset.read_bytes())
+    asset.unlink()
+    asset.symlink_to(external)
+    monkeypatch.setattr(
+        installer.subprocess,
+        "run",
+        lambda *args, **kwargs: pytest.fail("invalid status queried systemctl"),
+    )
+
+    with pytest.raises(ValueError):
+        installer.status(tmp_path)
+
+
 @pytest.mark.parametrize("fault", ["absent", "incomplete", "hash-mismatch"])
 def test_rollback_cli_rejects_invalid_retained_revision_without_mutation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
