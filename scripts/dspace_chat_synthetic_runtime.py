@@ -26,6 +26,7 @@ APPROVED_TOKEN_PLACE_ORIGIN = "https://staging.token.place"
 APPROVED_TOKEN_PLACE_MODEL = "qwen3-8b-instruct"
 SERVICE_IDENTIFIER = re.compile(r"[a-z_][a-z0-9_-]{0,31}")
 MAX_RESULT_BYTES = 16 * 1024
+MAX_BROWSER_PATH_BYTES = 4096
 REQUIRED = {
     "runnerRevision",
     "dspaceOrigin",
@@ -102,16 +103,56 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def discover_playwright_browser(runner: Path) -> Path:
+    """Return Playwright's executable only when it is runner-local and usable."""
+    browser_root = runner / "playwright-browser"
+    completed = subprocess.run(
+        [
+            "/usr/bin/node",
+            "-e",
+            "const {chromium}=require('@playwright/test');"
+            "const p=chromium.executablePath();"
+            f"if(typeof p!=='string'||Buffer.byteLength(p)>{MAX_BROWSER_PATH_BYTES})process.exit(2);"
+            "process.stdout.write(p);",
+        ],
+        cwd=runner / "frontend",
+        env={"PLAYWRIGHT_BROWSERS_PATH": str(browser_root)},
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    output = completed.stdout
+    if not isinstance(output, bytes) or not output or len(output) > MAX_BROWSER_PATH_BYTES:
+        raise Invalid("Playwright browser discovery")
+    try:
+        discovered = Path(output.decode("utf-8"))
+        resolved_root = browser_root.resolve(strict=True)
+        resolved = discovered.resolve(strict=True)
+        resolved.relative_to(resolved_root)
+    except (OSError, UnicodeError, ValueError):
+        raise Invalid("Playwright browser discovery") from None
+    info = discovered.lstat()
+    if (
+        discovered.is_symlink()
+        or not stat.S_ISREG(info.st_mode)
+        or not os.access(discovered, os.X_OK)
+    ):
+        raise Invalid("Playwright browser discovery")
+    return resolved
+
+
 def validate_runner(config: dict) -> Path:
     runner = Path(config["runnerRoot"]) / config["runnerRevision"]
     manifest = json.loads((runner / "sugarkube-runner-manifest.json").read_text(encoding="utf-8"))
     files = manifest.get("files")
+    browser_relative = manifest.get("playwrightBrowserExecutable")
     if (
         manifest.get("schemaVersion") != 1
         or not isinstance(files, dict)
         or not files
         or manifest.get("runnerRevision") != config["runnerRevision"]
         or manifest.get("repositoryIdentity") != config["repositoryIdentity"]
+        or not isinstance(browser_relative, str)
     ):
         raise Invalid("wrapper/config coordinate mismatch")
     for relative, expected in files.items():
@@ -124,6 +165,15 @@ def validate_runner(config: dict) -> Path:
             or not SHA256.fullmatch(expected)
         ):
             raise Invalid("critical file manifest")
+    browser_path = Path(browser_relative)
+    if (
+        browser_path.is_absolute()
+        or ".." in browser_path.parts
+        or not browser_path.parts
+        or browser_path.parts[0] != "playwright-browser"
+        or browser_relative not in files
+    ):
+        raise Invalid("Playwright browser manifest")
     git_metadata = runner / ".git"
     if git_metadata.is_symlink() or not git_metadata.is_dir():
         raise Invalid("complete Git metadata")
@@ -174,7 +224,6 @@ def validate_runner(config: dict) -> Path:
         "frontend/package.json",
         "pnpm-workspace.yaml",
         "pnpm-lock.yaml",
-        "playwright-browser/browser-executable",
     }
     if not required <= files.keys():
         raise Invalid("critical file manifest")
@@ -184,16 +233,11 @@ def validate_runner(config: dict) -> Path:
     if not cli.is_file() or not os.access(cli, os.X_OK):
         raise Invalid("Playwright CLI")
     entrypoint = runner / "scripts/run-remote-chat-smoke.mjs"
-    browser = runner / "playwright-browser/browser-executable"
-    if not entrypoint.is_file() or not browser.is_file() or not os.access(browser, os.X_OK):
-        raise Invalid("runner or browser")
-    subprocess.run(
-        ["/usr/bin/node", "-e", "require.resolve('@playwright/test')"],
-        cwd=runner / "frontend",
-        check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    if not entrypoint.is_file():
+        raise Invalid("runner entrypoint")
+    discovered = discover_playwright_browser(runner)
+    if discovered != (runner / browser_relative).resolve(strict=True):
+        raise Invalid("Playwright browser manifest")
     return runner
 
 

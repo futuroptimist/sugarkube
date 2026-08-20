@@ -87,12 +87,7 @@ def validate_runner(snapshot: Path, revision: str) -> None:
     cli = snapshot / "frontend/node_modules/.bin/playwright"
     if not cli.is_file() or not os.access(cli, os.X_OK):
         raise ValueError("frontend Playwright CLI missing")
-    subprocess.run(
-        ["/usr/bin/node", "-e", "require.resolve('@playwright/test')"],
-        cwd=snapshot / "frontend",
-        check=True,
-        capture_output=True,
-    )
+    runtime_module().discover_playwright_browser(snapshot)
     for link in (snapshot / "frontend/node_modules").rglob("*"):
         if link.is_symlink() and not link.exists():
             raise ValueError("broken frontend dependency link")
@@ -132,17 +127,17 @@ def materialize(
             env={**os.environ, "PLAYWRIGHT_BROWSERS_PATH": str(staging / "playwright-browser")},
         )
         shutil.copytree(browser_bundle, staging / "playwright-browser")
-        browser = staging / "playwright-browser/browser-executable"
-        if not browser.is_file() or not os.access(browser, os.X_OK):
-            raise ValueError("browser executable missing")
         validate_runner(staging, revision)
+        browser = runtime_module().discover_playwright_browser(staging)
+        browser_relative = str(browser.relative_to(staging))
         files = {relative: sha(staging / relative) for relative in CRITICAL}
-        files["playwright-browser/browser-executable"] = sha(browser)
+        files[browser_relative] = sha(browser)
         manifest = {
             "schemaVersion": 1,
             "runnerRevision": revision,
             "repositoryIdentity": identity.rstrip("/"),
             "pnpmVersion": pnpm_version,
+            "playwrightBrowserExecutable": browser_relative,
             "files": files,
         }
         (staging / "sugarkube-runner-manifest.json").write_text(

@@ -141,6 +141,7 @@ def runtime_runner(tmp_path: Path) -> tuple[dict, Path]:
         "schemaVersion": 1,
         "runnerRevision": revision,
         "repositoryIdentity": runtime.APPROVED_REPOSITORY_IDENTITY,
+        "playwrightBrowserExecutable": "playwright-browser/browser-executable",
         "files": {relative: runtime.sha256(destination / relative) for relative in required},
     }
     (destination / "sugarkube-runner-manifest.json").write_text(json.dumps(manifest))
@@ -155,7 +156,11 @@ def test_runner_validation_accepts_complete_independent_git_repository(
 
     def fake_node(argv, *args, **kwargs):
         if argv[0] == "/usr/bin/node":
-            return subprocess.CompletedProcess(argv, 0)
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout=str(runner / "playwright-browser/browser-executable").encode(),
+            )
         return real_run(argv, *args, **kwargs)
 
     monkeypatch.setattr(runtime.subprocess, "run", fake_node)
@@ -184,7 +189,12 @@ def test_runner_validation_rejects_shallow_or_failed_fsck(
         if "fsck" in argv and fault == "fsck":
             raise subprocess.CalledProcessError(1, argv)
         if argv[0] == "/usr/bin/node":
-            return subprocess.CompletedProcess(argv, 0)
+            runner = Path(value["runnerRoot"]) / value["runnerRevision"]
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout=str(runner / "playwright-browser/browser-executable").encode(),
+            )
         return real_run(argv, *args, **kwargs)
 
     monkeypatch.setattr(runtime.subprocess, "run", controlled_run)
@@ -327,6 +337,124 @@ def test_source_verification_rejects_incomplete_metadata(tmp_path: Path) -> None
     source.mkdir()
     with pytest.raises(ValueError, match="metadata"):
         materializer.verify_source(source, "0" * 40, "identity")
+
+
+def materialization_fixture(tmp_path: Path) -> tuple[Path, str, Path, Path]:
+    source, _ = source_repo(tmp_path)
+    for relative in materializer.CRITICAL:
+        target = source / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not target.exists():
+            target.write_text("{}\n" if target.suffix == ".json" else "fixture\n")
+    git("add", ".", cwd=source)
+    git("commit", "-m", "runner files", cwd=source)
+    revision = git("rev-parse", "HEAD", cwd=source)
+    browser_bundle = tmp_path / "browser-input"
+    browser = browser_bundle / "chromium/chrome"
+    browser.parent.mkdir(parents=True)
+    browser.write_text("#!/bin/sh\nexit 0\n")
+    browser.chmod(0o755)
+    pnpm = tmp_path / "fake-pnpm"
+    pnpm.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = --version ]; then echo 9.1.0; exit; fi\n'
+        "mkdir -p node_modules/.pnpm frontend/node_modules/.bin "
+        "frontend/node_modules/@playwright/test\n"
+        "printf '#!/bin/sh\\n' > frontend/node_modules/.bin/playwright\n"
+        "chmod +x frontend/node_modules/.bin/playwright\n"
+        'printf \'{"main":"index.js"}\\n\' > '
+        "frontend/node_modules/@playwright/test/package.json\n"
+        "printf \"const path=require('path'); exports.chromium={executablePath:()=>"
+        "path.join(process.env.PLAYWRIGHT_BROWSERS_PATH,'chromium/chrome')};\\n\" > "
+        "frontend/node_modules/@playwright/test/index.js\n"
+    )
+    pnpm.chmod(0o755)
+    return source, revision, browser_bundle, pnpm
+
+
+def test_materialize_discovers_browser_and_is_source_independent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, revision, browser_bundle, pnpm = materialization_fixture(tmp_path)
+    output = tmp_path / "output" / revision
+    real_run = subprocess.run
+
+    def fake_node(argv, *args, **kwargs):
+        if argv[0] == "/usr/bin/node":
+            browser = Path(kwargs["env"]["PLAYWRIGHT_BROWSERS_PATH"]) / "chromium/chrome"
+            return subprocess.CompletedProcess(argv, 0, stdout=str(browser).encode())
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(runtime.subprocess, "run", fake_node)
+    monkeypatch.setattr(installer, "runtime_module", lambda: runtime)
+
+    materializer.materialize(
+        source,
+        revision,
+        runtime.APPROVED_REPOSITORY_IDENTITY,
+        output,
+        str(pnpm),
+        "9.1.0",
+        browser_bundle,
+    )
+    manifest = json.loads((output / "sugarkube-runner-manifest.json").read_text())
+    relative = manifest["playwrightBrowserExecutable"]
+    assert relative == "playwright-browser/chromium/chrome"
+    assert manifest["files"][relative] == runtime.sha256(output / relative)
+
+    __import__("shutil").rmtree(source)
+    __import__("shutil").rmtree(browser_bundle)
+    value = config(tmp_path)
+    value.update(runnerRoot=str(output.parent), runnerRevision=revision)
+    assert runtime.validate_runner(value) == output
+
+
+@pytest.mark.parametrize("fault", ["outside", "missing", "non-executable"])
+def test_playwright_browser_discovery_rejects_invalid_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    runner = tmp_path / "runner"
+    (runner / "frontend").mkdir(parents=True)
+    browser = runner / "playwright-browser/chromium/chrome"
+    browser.parent.mkdir(parents=True)
+    browser.write_text("browser")
+    browser.chmod(0o755)
+    discovered = tmp_path / "outside" if fault == "outside" else browser
+    if fault == "missing":
+        browser.unlink()
+    elif fault == "non-executable":
+        browser.chmod(0o644)
+    monkeypatch.setattr(
+        runtime.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args[0], 0, stdout=str(discovered).encode()
+        ),
+    )
+
+    with pytest.raises(runtime.Invalid, match="discovery"):
+        runtime.discover_playwright_browser(runner)
+
+
+def test_runner_validation_rejects_discovered_browser_hash_tampering(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, runner = runtime_runner(tmp_path)
+    browser = runner / "playwright-browser/browser-executable"
+    browser.write_text("#!/bin/sh\nexit 7\n")
+    real_run = subprocess.run
+
+    def controlled_run(argv, *args, **kwargs):
+        if "status" in argv:
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+        if argv[0] == "/usr/bin/node":
+            return subprocess.CompletedProcess(argv, 0, stdout=str(browser).encode())
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(runtime.subprocess, "run", controlled_run)
+
+    with pytest.raises(runtime.Invalid, match="critical file hash"):
+        runtime.validate_runner(value)
 
 
 def snapshot(tmp_path: Path) -> tuple[Path, str]:
