@@ -32,7 +32,7 @@ Review the safety notes before working with power components.
 - [pi_support_bundles.md](pi_support_bundles.md) — collect diagnostics into shareable archives
 - [pi_image_telemetry.md](pi_image_telemetry.md) — opt-in anonymized telemetry for fleet dashboards
 - [observability-design.md](observability-design.md) — canonical Prometheus/Grafana observability
-  design across Sugarkube, DSPACE, token.place, danielsmith.io, and jobbot3000
+  design across Sugarkube, DSPACE, token.place, danielsmith.io, jobbot3000, and GitShelves
 - [observability-operations.md](observability-operations.md) — staging-only non-Flux kube-prometheus-stack operations runbook
 - [observability-blackbox.md](observability-blackbox.md) — staging blackbox exporter and public probe lifecycle runbook
 - [observability-alerting.md](observability-alerting.md) — canonical alerting strategy: PagerDuty/Healthchecks.io target architecture, routing policy, and rollout/drill plan
@@ -49,7 +49,8 @@ Review the safety notes before working with power components.
 - [docker_repo_walkthrough.md](docker_repo_walkthrough.md) — deploy any Docker-based repo
 - [projects-compose.md](projects-compose.md) — run token.place & dspace via docker compose
 - [app_deployment_contract.md](app_deployment_contract.md) — shared Sugarkube app artifact, tag, chart, config, and generic command contract
-- [app_onboarding.md](app_onboarding.md) — future-app onboarding checklist and release decision tree for wove, jobbot3000, and later apps
+- [app_onboarding.md](app_onboarding.md) — future-app onboarding checklist and release decision tree for wove and later apps
+- [apps/gitshelves.md](apps/gitshelves.md) — GitShelves staging, verification, promotion, and rollback runbook
 - [tokenplace_sugarkube_onboarding.md](tokenplace_sugarkube_onboarding.md) — legacy token.place-specific onboarding context
 - [apps/dspace.md](apps/dspace.md) — DSPACE GHCR-first deploy, verify, promote, rollback, and troubleshooting runbook
 - [apps/tokenplace.md](apps/tokenplace.md) — token.place GHCR-first deploy, verify, promote, rollback, and troubleshooting runbook

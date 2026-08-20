@@ -30,6 +30,11 @@ EXPECTED = {
         "https://staging.jobbot3000.tech/manifest.webmanifest",
         "static_content_2xx",
     ),
+    ("gitshelves", "root", "https://staging.gitshelves.com/", "https_2xx"),
+    ("gitshelves", "healthz", "https://staging.gitshelves.com/healthz", "json_health_2xx"),
+    ("gitshelves", "livez", "https://staging.gitshelves.com/livez", "json_health_2xx"),
+    ("gitshelves", "baseplate", "https://staging.gitshelves.com/models/baseplate_2x6.stl", "static_content_2xx"),
+    ("gitshelves", "module", "https://staging.gitshelves.com/models/contrib_cube.stl", "static_content_2xx"),
 }
 
 
@@ -83,7 +88,7 @@ def test_pinned_chart_values_are_private_and_bounded():
 
 def test_staging_probe_matrix_is_exact():
     docs = yaml(PROBES)
-    assert len(docs) == 16
+    assert len(docs) == 21
     actual = set()
     for doc in docs:
         labels = doc["metadata"]["labels"]

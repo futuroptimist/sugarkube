@@ -316,6 +316,8 @@ spec:
     [[ "$*" != *danielsmith.values.prod.yaml* ]] || host=danielsmith.io
     [[ "$*" != *jobbot3000.values.staging.yaml* ]] || host=staging.jobbot3000.tech
     [[ "$*" != *jobbot3000.values.prod.yaml* ]] || host=jobbot3000.example.test
+    [[ "$*" != *gitshelves.values.staging.yaml* ]] || host=staging.gitshelves.com
+    [[ "$*" != *gitshelves.values.prod.yaml* ]] || host=gitshelves.com
     cat <<YAML
 apiVersion: apps/v1
 kind: Deployment
@@ -2550,6 +2552,15 @@ def test_app_deploy_danielsmith_passes_image_tag(generic_app_stub_env: dict[str,
             [
                 "docs/examples/jobbot3000.values.dev.yaml",
                 "docs/examples/jobbot3000.values.staging.yaml",
+            ],
+        ),
+        (
+            "gitshelves",
+            "oci://ghcr.io/futuroptimist/charts/gitshelves",
+            "gitshelves",
+            [
+                "docs/examples/gitshelves.values.dev.yaml",
+                "docs/examples/gitshelves.values.staging.yaml",
             ],
         ),
     ],
@@ -8531,3 +8542,53 @@ def test_non_opted_in_missing_family_remains_missing(monkeypatch):
     with pytest.raises(app_metrics.Error, match="required metric family missing"):
         app_metrics.verify("tokenplace", "staging")
     assert metadata_queries == []
+
+
+@pytest.mark.parametrize("env", ["dev", "staging", "prod"])
+def test_gitshelves_example_config_resolves(env: str) -> None:
+    result = subprocess.run(
+        [
+            "python3", "scripts/app_config.py", "json", "--app", "gitshelves",
+            "--env", env, "--config", "",
+        ],
+        cwd=REPO_ROOT, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    data = json.loads(result.stdout)
+    assert data["SUGARKUBE_CHART"] == "oci://ghcr.io/futuroptimist/charts/gitshelves"
+    assert data["SUGARKUBE_VALUES"].startswith("docs/examples/gitshelves.values.dev.yaml")
+
+
+def test_gitshelves_values_and_pins_are_safe() -> None:
+    staging = (REPO_ROOT / "docs/examples/gitshelves.values.staging.yaml").read_text()
+    prod = (REPO_ROOT / "docs/examples/gitshelves.values.prod.yaml").read_text()
+    combined = "\n".join(
+        path.read_text().lower()
+        for path in (REPO_ROOT / "docs/examples").glob("gitshelves.values.*.yaml")
+    )
+    assert "host: staging.gitshelves.com" in staging
+    assert "secretName: gitshelves-staging-tls" in staging
+    assert "host: gitshelves.com" in prod
+    assert "secretName: gitshelves-prod-tls" in prod
+    assert (REPO_ROOT / "docs/apps/gitshelves.version").read_text().splitlines()[-1] == "0.1.0"
+    active = [line for line in (REPO_ROOT / "docs/apps/gitshelves.prod.tag").read_text().splitlines()
+              if line.strip() and not line.lstrip().startswith("#")]
+    assert not active
+    for forbidden in ("secret:", "persistence:", "persistentvolumeclaim", "database:", "queue:"):
+        assert forbidden not in combined
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_app_verify_print_only_gitshelves_paths(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    result = _run_just(
+        ["app-verify", "app=gitshelves", "env=staging", "print_only=1"],
+        generic_app_stub_env,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert result.stdout.splitlines() == [
+        "curl -fsS https://example.test/",
+        "curl -fsS https://example.test/healthz",
+        "curl -fsS https://example.test/livez",
+    ]
