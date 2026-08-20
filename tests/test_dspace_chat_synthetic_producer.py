@@ -441,6 +441,10 @@ def test_materialize_discovers_browser_and_is_source_independent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     if not Path("/usr/bin/node").is_file():
+        # TODO: Environments running this test should provide /usr/bin/node.
+        # Root cause: The test intentionally uses the absolute production Node path,
+        # while some development and test images omit it.
+        # Estimated fix: Provision Node at /usr/bin/node in the affected environment.
         pytest.skip("runtime contract requires /usr/bin/node")
     source, revision, browser_bundle, pnpm = materialization_fixture(tmp_path)
     output = tmp_path / "output" / revision
