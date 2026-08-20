@@ -68,6 +68,11 @@ New to sugarkube? Start with the 3-node HA happy path and follow it end-to-end:
     [image package](https://github.com/futuroptimist/jobbot3000/pkgs/container/jobbot3000),
     [chart workflow](https://github.com/futuroptimist/jobbot3000/actions/workflows/ci-helm.yml),
     [chart package](https://github.com/futuroptimist/jobbot3000/pkgs/container/charts%2Fjobbot3000).
+  - [GitShelves runbook](docs/apps/gitshelves.md) for `ghcr.io/futuroptimist/gitshelves`:
+    [image workflow](https://github.com/futuroptimist/gitshelves/actions/workflows/ci-image.yml),
+    [image package](https://github.com/futuroptimist/gitshelves/pkgs/container/gitshelves),
+    [chart workflow](https://github.com/futuroptimist/gitshelves/actions/workflows/ci-helm.yml),
+    [chart package](https://github.com/futuroptimist/gitshelves/pkgs/container/charts%2Fgitshelves).
 - **Environment shortcuts:** token.place
   [dev](docs/k3s-tokenplace-dev.md), [staging](docs/k3s-tokenplace-staging.md), and
   [production](docs/k3s-tokenplace-prod.md); danielsmith.io

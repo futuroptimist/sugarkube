@@ -303,7 +303,7 @@ spec:
     tag=main-deadbee
     previous=""
     for argument in "$@"; do
-      if [ "${{previous}}" = --set ] && [[ "${{argument}}" == image.tag=* ]]; then tag="${{argument#image.tag=}}"; fi
+      if [[ "${{previous}}" == --set || "${{previous}}" == --set-string ]] && [[ "${{argument}}" == image.tag=* ]]; then tag="${{argument#image.tag=}}"; fi
       previous="${{argument}}"
     done
     host=example.test
@@ -316,6 +316,8 @@ spec:
     [[ "$*" != *danielsmith.values.prod.yaml* ]] || host=danielsmith.io
     [[ "$*" != *jobbot3000.values.staging.yaml* ]] || host=staging.jobbot3000.tech
     [[ "$*" != *jobbot3000.values.prod.yaml* ]] || host=jobbot3000.example.test
+    [[ "$*" != *gitshelves.values.staging.yaml* ]] || host=staging.gitshelves.com
+    [[ "$*" != *gitshelves.values.prod.yaml* ]] || host=gitshelves.com
     cat <<YAML
 apiVersion: apps/v1
 kind: Deployment
@@ -4375,6 +4377,7 @@ def test_app_verify_show_body_can_be_disabled(generic_app_stub_env: dict[str, st
         ("tokenplace", "/,/livez,/healthz,/relay/diagnostics,/api/v1/meta"),
         ("dspace", "/config.json,/healthz,/livez"),
         ("jobbot3000", "/,/healthz,/livez"),
+        ("gitshelves", "/,/healthz,/livez"),
     ],
 )
 def test_example_app_configs_preserve_verify_paths(app: str, expected_paths: str) -> None:
@@ -8531,3 +8534,88 @@ def test_non_opted_in_missing_family_remains_missing(monkeypatch):
     with pytest.raises(app_metrics.Error, match="required metric family missing"):
         app_metrics.verify("tokenplace", "staging")
     assert metadata_queries == []
+
+
+def test_gitshelves_example_config_and_overlays_are_deployment_ready() -> None:
+    expected = {
+        "dev": "docs/examples/gitshelves.values.dev.yaml",
+        "staging": "docs/examples/gitshelves.values.dev.yaml,docs/examples/gitshelves.values.staging.yaml",
+        "prod": "docs/examples/gitshelves.values.dev.yaml,docs/examples/gitshelves.values.prod.yaml",
+    }
+    for env, values in expected.items():
+        result = subprocess.run(
+            ["python3", "scripts/app_config.py", "json", "--app", "gitshelves", "--env", env],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        config = json.loads(result.stdout)
+        assert config["SUGARKUBE_RELEASE"] == config["SUGARKUBE_NAMESPACE"] == "gitshelves"
+        assert config["SUGARKUBE_CHART"] == "oci://ghcr.io/futuroptimist/charts/gitshelves"
+        assert config["SUGARKUBE_VALUES"] == values
+    assert (REPO_ROOT / "docs/apps/gitshelves.version").read_text().strip() == "0.1.0"
+    prod_lines = [line.split("#", 1)[0].strip() for line in (REPO_ROOT / "docs/apps/gitshelves.prod.tag").read_text().splitlines()]
+    assert not any(prod_lines)
+    staging = (REPO_ROOT / "docs/examples/gitshelves.values.staging.yaml").read_text()
+    prod = (REPO_ROOT / "docs/examples/gitshelves.values.prod.yaml").read_text()
+    assert "host: staging.gitshelves.com" in staging and "secretName: gitshelves-staging-tls" in staging
+    assert "- staging.gitshelves.com" in staging
+    assert "host: gitshelves.com" in prod and "secretName: gitshelves-prod-tls" in prod
+    assert "- gitshelves.com" in prod
+
+
+def test_gitshelves_values_match_static_chart_contract() -> None:
+    paths = [REPO_ROOT / f"docs/examples/gitshelves.values.{env}.yaml" for env in ("dev", "staging", "prod")]
+    combined = "\n".join(path.read_text() for path in paths)
+    assert "repository: ghcr.io/futuroptimist/gitshelves" in combined
+    assert "tag: main-REPLACE_SHORTSHA" in combined
+    for unsupported in ("secretKeyRef", "kind: Secret", "database", "queue", "persistence", "persistentVolumeClaim", "github", "serviceMonitor"):
+        assert unsupported.lower() not in combined.lower()
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_app_verify_print_only_gitshelves_paths(generic_app_stub_env: dict[str, str]) -> None:
+    result = _run_just(
+        ["app-verify", "app=gitshelves", "env=staging", "print_only=1"],
+        generic_app_stub_env,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert result.stdout.splitlines() == [
+        "curl -fsS https://example.test/",
+        "curl -fsS https://example.test/healthz",
+        "curl -fsS https://example.test/livez",
+    ]
+
+
+@pytest.mark.parametrize("tag", ["latest", "main", "main-latest", "staging", "0.1.0"])
+def test_gitshelves_moving_image_tags_remain_rejected(tag: str) -> None:
+    result = subprocess.run(
+        ["python3", "scripts/app_config.py", "validate-tag", "--tag", tag, "--env", "staging"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+def test_gitshelves_generic_deploy_passes_exact_coordinates(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    result = _run_just(
+        ["app-deploy", "app=gitshelves", "env=staging", "tag=main-2125943cca1c"],
+        generic_app_stub_env,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text()
+    mutation = next(line for line in helm_log.splitlines() if line.startswith("upgrade "))
+    assert "upgrade gitshelves oci://ghcr.io/futuroptimist/charts/gitshelves" in mutation
+    assert "--install" in mutation
+    assert "--namespace gitshelves" in mutation
+    assert "--version 0.1.0" in mutation
+    assert "-f docs/examples/gitshelves.values.dev.yaml" in mutation
+    assert "-f docs/examples/gitshelves.values.staging.yaml" in mutation
+    assert "--set image.tag=main-2125943cca1c" in mutation

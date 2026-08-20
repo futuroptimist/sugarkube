@@ -145,6 +145,7 @@ The current apps map to that model as examples:
 | token.place | `ghcr.io/futuroptimist/tokenplace-relay` | `oci://ghcr.io/futuroptimist/charts/tokenplace` | `tokenplace` | `tokenplace` | `docs/apps/tokenplace.version` | `docs/apps/tokenplace.prod.tag` |
 | danielsmith.io | `ghcr.io/futuroptimist/danielsmith.io` | `oci://ghcr.io/futuroptimist/charts/danielsmith` | `danielsmith` | `danielsmith` | `docs/apps/danielsmith.version` | `docs/apps/danielsmith.prod.tag` |
 | jobbot3000 | `ghcr.io/futuroptimist/jobbot3000` | `oci://ghcr.io/futuroptimist/charts/jobbot3000` | `jobbot3000` | `jobbot3000` | `docs/apps/jobbot3000.version` | `docs/apps/jobbot3000.prod.tag` |
+| GitShelves | `ghcr.io/futuroptimist/gitshelves` | `oci://ghcr.io/futuroptimist/charts/gitshelves` | `gitshelves` | `gitshelves` | `docs/apps/gitshelves.version` | `docs/apps/gitshelves.prod.tag` |
 
 ## Standard image tag model
 
@@ -396,6 +397,7 @@ shared `SUGARKUBE_VERIFY_PATHS` value:
 - [`docs/examples/apps/tokenplace.env`](examples/apps/tokenplace.env)
 - [`docs/examples/apps/danielsmith.env`](examples/apps/danielsmith.env)
 - [`docs/examples/apps/jobbot3000.env`](examples/apps/jobbot3000.env)
+- [`docs/examples/apps/gitshelves.env`](examples/apps/gitshelves.env)
 
 Current values chains:
 
@@ -405,3 +407,4 @@ Current values chains:
 | token.place | `docs/examples/tokenplace.values.dev.yaml` | `docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.staging.yaml` | `docs/examples/tokenplace.values.dev.yaml,docs/examples/tokenplace.values.prod.yaml` | `/,/livez,/healthz,/relay/diagnostics` |
 | danielsmith.io | `docs/examples/danielsmith.values.dev.yaml` | `docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.staging.yaml` | `docs/examples/danielsmith.values.dev.yaml,docs/examples/danielsmith.values.prod.yaml` | `/,/livez,/healthz` |
 | jobbot3000 | `docs/examples/jobbot3000.values.dev.yaml` | `docs/examples/jobbot3000.values.dev.yaml,docs/examples/jobbot3000.values.staging.yaml` | `docs/examples/jobbot3000.values.dev.yaml,docs/examples/jobbot3000.values.prod.yaml` | `/,/healthz,/livez` |
+| GitShelves | `docs/examples/gitshelves.values.dev.yaml` | `docs/examples/gitshelves.values.dev.yaml,docs/examples/gitshelves.values.staging.yaml` | `docs/examples/gitshelves.values.dev.yaml,docs/examples/gitshelves.values.prod.yaml` | `/,/healthz,/livez` |

@@ -1,0 +1,23 @@
+# Base GitShelves values. The 0.1.0 chart consumes only these value groups.
+replicaCount: 1
+image:
+  repository: ghcr.io/futuroptimist/gitshelves
+  # Replace with an immutable branch-SHA image tag; never use a moving tag.
+  tag: main-REPLACE_SHORTSHA
+  pullPolicy: IfNotPresent
+service:
+  type: ClusterIP
+  port: 80
+ingress:
+  enabled: false
+  className: traefik
+  host: gitshelves.dev.example.test
+  annotations: {}
+  tls: []
+resources:
+  requests:
+    cpu: 25m
+    memory: 32Mi
+  limits:
+    cpu: 250m
+    memory: 128Mi
