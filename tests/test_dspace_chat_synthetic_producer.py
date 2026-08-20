@@ -100,6 +100,44 @@ def test_configuration_rejects_coordinate_drift_and_malformed_types(
         runtime.load_config(path)
 
 
+@pytest.mark.parametrize(
+    ("key", "replacement", "message"),
+    [
+        ("runnerRevision", "not-a-revision", "runner coordinate"),
+        ("identityContract", "unknown", "identity contract"),
+        ("providerConfigContract", "unknown", "provider contract"),
+        ("provider", "other", "provider or timeout"),
+        ("timeoutSeconds", 0, "provider or timeout"),
+        ("dspaceOrigin", "https://example.invalid", "DSPACE origin"),
+        ("runnerRoot", "relative", "configured path"),
+    ],
+)
+def test_configuration_rejects_remaining_invalid_contract_values(
+    tmp_path: Path, key: str, replacement: object, message: str
+) -> None:
+    path = tmp_path / "config.json"
+    value = config(tmp_path)
+    value[key] = replacement
+    path.write_text(json.dumps(value))
+
+    with pytest.raises(runtime.Invalid, match=message):
+        runtime.load_config(path)
+
+
+def test_runtime_main_reports_success_and_bounded_preflight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps(config(tmp_path)))
+    monkeypatch.setattr(sys, "argv", ["runtime", "--config", str(path)])
+    monkeypatch.setattr(runtime, "run", lambda value: 7)
+    assert runtime.main() == 7
+
+    monkeypatch.setattr(runtime, "run", lambda value: (_ for _ in ()).throw(runtime.Invalid("x")))
+    assert runtime.main() == 1
+    assert capsys.readouterr().out == "outcome=preserved reason=preflight\n"
+
+
 def runtime_runner(tmp_path: Path) -> tuple[dict, Path]:
     value = config(tmp_path)
     runner = Path(value["runnerRoot"]) / "fixture"
@@ -200,6 +238,58 @@ def test_runner_validation_rejects_shallow_or_failed_fsck(
     monkeypatch.setattr(runtime.subprocess, "run", controlled_run)
     expected = runtime.Invalid if fault == "shallow" else subprocess.CalledProcessError
     with pytest.raises(expected):
+        runtime.validate_runner(value)
+
+
+@pytest.mark.parametrize(
+    ("fault", "message"),
+    [
+        ("invalid-file-entry", "critical file manifest"),
+        ("unsafe-file-entry", "critical file manifest"),
+        ("browser-manifest", "Playwright browser manifest"),
+        ("missing-required", "critical file manifest"),
+        ("missing-store", "root pnpm store"),
+        ("missing-cli", "Playwright CLI"),
+        ("browser-mismatch", "Playwright browser manifest"),
+    ],
+)
+def test_runner_validation_rejects_incomplete_snapshot_contracts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str, message: str
+) -> None:
+    value, runner = runtime_runner(tmp_path)
+    manifest_path = runner / "sugarkube-runner-manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    if fault == "invalid-file-entry":
+        manifest["files"]["package.json"] = 1
+    elif fault == "unsafe-file-entry":
+        manifest["files"]["../outside"] = "0" * 64
+    elif fault == "browser-manifest":
+        manifest["playwrightBrowserExecutable"] = "package.json"
+    elif fault == "missing-required":
+        manifest["files"].pop("pnpm-lock.yaml")
+    elif fault == "missing-store":
+        (runner / "node_modules/.pnpm").rmdir()
+    elif fault == "missing-cli":
+        (runner / "frontend/node_modules/.bin/playwright").unlink()
+    manifest_path.write_text(json.dumps(manifest))
+
+    discovered = runner / "playwright-browser/browser-executable"
+    if fault == "browser-mismatch":
+        other = runner / "playwright-browser/other"
+        other.write_text("#!/bin/sh\n")
+        other.chmod(0o755)
+        discovered = other
+    real_run = subprocess.run
+
+    def controlled_run(argv, *args, **kwargs):
+        if argv[0] == "/usr/bin/node":
+            return subprocess.CompletedProcess(argv, 0, stdout=str(discovered).encode())
+        if "status" in argv:
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(runtime.subprocess, "run", controlled_run)
+    with pytest.raises(runtime.Invalid, match=message):
         runtime.validate_runner(value)
 
 
@@ -471,6 +561,84 @@ def test_materialize_discovers_browser_and_is_source_independent(
     assert runtime.validate_runner(value) == output
 
 
+def test_materialize_orchestrates_complete_snapshot_without_host_node(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cover deterministic snapshot construction independently of Node availability."""
+    source, revision, browser_bundle, pnpm = materialization_fixture(tmp_path)
+    output = tmp_path / "output" / revision
+    discovered = Path("playwright-browser/chromium/chrome")
+    validations = []
+
+    class CanonicalRuntime:
+        @staticmethod
+        def discover_playwright_browser(runner: Path) -> Path:
+            return runner / discovered
+
+    def validate_snapshot(snapshot: Path, expected_revision: str) -> None:
+        validations.append((snapshot, expected_revision))
+        assert (snapshot / discovered).is_file()
+
+    monkeypatch.setattr(installer, "runtime_module", lambda: CanonicalRuntime)
+    monkeypatch.setattr(installer, "validate_runner", validate_snapshot)
+
+    installer.materialize(
+        source,
+        revision,
+        runtime.APPROVED_REPOSITORY_IDENTITY,
+        output,
+        str(pnpm),
+        "9.1.0",
+        browser_bundle,
+    )
+
+    manifest = json.loads((output / "sugarkube-runner-manifest.json").read_text())
+    assert manifest["playwrightBrowserExecutable"] == str(discovered)
+    assert manifest["files"][str(discovered)] == runtime.sha256(output / discovered)
+    assert validations[-1] == (output, revision)
+
+
+def test_materialize_cli_dispatches_complete_coordinates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    output = tmp_path / "output"
+    browser = tmp_path / "browser"
+    captured = []
+    monkeypatch.setattr(installer, "materialize", lambda *args: captured.append(args))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "install_dspace_chat_synthetic.py",
+            "materialize",
+            "--source",
+            str(source),
+            "--output",
+            str(output),
+            "--pnpm",
+            "/fixture/pnpm",
+            "--pnpm-version",
+            "9.0.0",
+            "--browser-bundle",
+            str(browser),
+        ],
+    )
+
+    assert installer.main() == 0
+    assert captured == [
+        (
+            source.resolve(),
+            "97ab09f13fb098de928a878bf1fe9b8d13032cb5",
+            runtime.APPROVED_REPOSITORY_IDENTITY,
+            output.resolve(),
+            "/fixture/pnpm",
+            "9.0.0",
+            browser.resolve(),
+        )
+    ]
+
+
 @pytest.mark.parametrize("fault", ["outside", "missing", "non-executable"])
 def test_playwright_browser_discovery_rejects_invalid_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
@@ -494,6 +662,24 @@ def test_playwright_browser_discovery_rejects_invalid_path(
         ),
     )
 
+    with pytest.raises(runtime.Invalid, match="discovery"):
+        runtime.discover_playwright_browser(runner)
+
+
+def test_playwright_browser_discovery_rejects_missing_root_and_invalid_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runner = tmp_path / "runner"
+    (runner / "frontend").mkdir(parents=True)
+    with pytest.raises(runtime.Invalid, match="discovery"):
+        runtime.discover_playwright_browser(runner)
+
+    (runner / "playwright-browser").mkdir()
+    monkeypatch.setattr(
+        runtime.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout=b""),
+    )
     with pytest.raises(runtime.Invalid, match="discovery"):
         runtime.discover_playwright_browser(runner)
 
