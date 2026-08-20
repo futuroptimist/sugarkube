@@ -268,18 +268,26 @@ def read_result(path: Path, uid: int, gid: int) -> dict:
     descriptor = os.open(path, flags)
     try:
         info = os.fstat(descriptor)
-        if not stat.S_ISREG(info.st_mode) or (
-            info.st_uid,
-            info.st_gid,
-            stat.S_IMODE(info.st_mode),
-        ) != (uid, gid, 0o600):
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or (
+                info.st_uid,
+                info.st_gid,
+                stat.S_IMODE(info.st_mode),
+            )
+            != (uid, gid, 0o600)
+            or info.st_nlink != 1
+        ):
             raise Invalid("current result provenance")
         if info.st_size > MAX_RESULT_BYTES:
             raise Invalid("current result size")
         contents = os.read(descriptor, MAX_RESULT_BYTES + 1)
         if len(contents) > MAX_RESULT_BYTES:
             raise Invalid("current result size")
-        return json.loads(contents.decode("utf-8"))
+        try:
+            return json.loads(contents.decode("utf-8"))
+        except (UnicodeError, json.JSONDecodeError):
+            raise Invalid("current result contract") from None
     finally:
         os.close(descriptor)
 

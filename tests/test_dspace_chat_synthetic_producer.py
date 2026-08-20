@@ -233,28 +233,41 @@ def prepare_runtime_run(
         calls.append({"argv": argv, **kwargs})
         if argv[0] == "runuser":
             result = root / f"uid-{os.getuid()}-{'a' * 32}" / "result.json"
+            if result_kind == "timeout":
+                raise subprocess.TimeoutExpired(argv, value["timeoutSeconds"], output=b"secret")
             if result_kind == "oversized":
                 result.write_bytes(b"x" * (runtime.MAX_RESULT_BYTES + 1))
+                result.chmod(0o600)
             elif result_kind == "symlink":
                 outside = tmp_path / "outside-result"
                 outside.write_text("{}")
                 result.symlink_to(outside)
-            else:
-                result.write_text(
-                    json.dumps(
-                        {
-                            "schemaVersion": 1,
-                            "journey": "chat",
-                            "passed": True,
-                            "executedAt": 100,
-                            "runnerRevision": value["runnerRevision"],
-                            "transport": "remote",
-                            "mutationEnabled": False,
-                        }
-                    )
-                )
+            elif result_kind == "missing":
+                pass
+            elif result_kind == "malformed-json":
+                result.write_bytes(b"\xffnot-json")
                 result.chmod(0o600)
-                (result.parent / ".result.tmp").write_text("temporary")
+            else:
+                executed_at = (
+                    99 if result_kind == "stale" else 101 if result_kind == "future" else 100
+                )
+                payload = {
+                    "schemaVersion": 1,
+                    "journey": "chat",
+                    "passed": True,
+                    "executedAt": executed_at,
+                    "runnerRevision": value["runnerRevision"],
+                    "transport": "remote",
+                    "mutationEnabled": False,
+                }
+                if result_kind == "malformed-schema":
+                    payload.pop("journey")
+                temporary = result.parent / ".result.tmp"
+                temporary.write_text(json.dumps(payload))
+                temporary.chmod(0o600)
+                os.replace(temporary, result)
+                if result_kind == "hard-linked":
+                    os.link(result, sibling / "shared-result")
             return subprocess.CompletedProcess(argv, 0)
         return subprocess.CompletedProcess(argv, 0)
 
@@ -272,11 +285,29 @@ def test_runtime_run_uses_minimal_environment_and_cleans_direct_entries(
     child = next(call for call in calls if call["argv"][0] == "runuser")
     assert "SECRET_PARENT_TOKEN" not in child["env"]
     assert child["env"]["PLAYWRIGHT_BROWSERS_PATH"].endswith("playwright-browser")
+    separator = child["argv"].index("--")
+    node_argv = child["argv"][separator + 1 :]
+    assert node_argv[0] == "/usr/bin/node"
+    assert node_argv.count("--expected-provider") == 1
+    provider_index = node_argv.index("--expected-provider")
+    assert node_argv[provider_index + 1] == value["provider"] == "token-place"
     assert not (Path(value["resultRoot"]) / f"uid-{os.getuid()}-{'a' * 32}").exists()
     assert (sibling / "keep").read_text() == "untouched"
 
 
-@pytest.mark.parametrize("result_kind", ["oversized", "symlink"])
+@pytest.mark.parametrize(
+    "result_kind",
+    [
+        "oversized",
+        "symlink",
+        "hard-linked",
+        "stale",
+        "future",
+        "missing",
+        "malformed-json",
+        "malformed-schema",
+    ],
+)
 def test_runtime_run_rejects_unbounded_or_replaced_result_without_publication(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, result_kind: str
 ) -> None:
@@ -286,6 +317,42 @@ def test_runtime_run_rejects_unbounded_or_replaced_result_without_publication(
     assert metric.read_bytes() == b"previous metric\n"
     assert not any(call["argv"][0] == "/usr/bin/python3" for call in calls)
     assert (sibling / "keep").read_text() == "untouched"
+    if result_kind == "hard-linked":
+        assert (sibling / "shared-result").is_file()
+    assert not (Path(value["resultRoot"]) / f"uid-{os.getuid()}-{'a' * 32}").exists()
+
+
+def test_runtime_timeout_is_bounded_single_launch_and_owner_scoped_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    value, metric, sibling, calls = prepare_runtime_run(tmp_path, monkeypatch, "timeout")
+
+    assert runtime.run(value) == 1
+    output = capsys.readouterr().out
+    assert "reason=execution-error" in output
+    assert "secret" not in output
+    assert sum(call["argv"][0] == "runuser" for call in calls) == 1
+    assert not any(call["argv"][0] == "/usr/bin/python3" for call in calls)
+    assert metric.read_bytes() == b"previous metric\n"
+    assert (sibling / "keep").read_text() == "untouched"
+    assert not (Path(value["resultRoot"]) / f"uid-{os.getuid()}-{'a' * 32}").exists()
+
+
+def test_runtime_rejects_pre_existing_invocation_without_cleanup_or_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, metric, sibling, calls = prepare_runtime_run(tmp_path, monkeypatch)
+    invocation = Path(value["resultRoot"]) / f"uid-{os.getuid()}-{'a' * 32}"
+    invocation.mkdir()
+    (invocation / "pre-existing").write_text("untouched")
+
+    with pytest.raises(runtime.Invalid, match="pre-existing"):
+        runtime.run(value)
+
+    assert (invocation / "pre-existing").read_text() == "untouched"
+    assert (sibling / "keep").read_text() == "untouched"
+    assert metric.read_bytes() == b"previous metric\n"
+    assert not calls
 
 
 def test_runtime_overlap_closes_lock_and_does_not_publish(
@@ -305,12 +372,10 @@ def test_runtime_overlap_closes_lock_and_does_not_publish(
     assert not calls
 
 
-def test_wrapper_safety_and_provider_is_in_actual_argv() -> None:
+def test_wrapper_safety() -> None:
     wrapper = (ROOT / "scripts/dspace_chat_synthetic_wrapper.sh").read_text()
     assert "set +x\nset -Eeuo pipefail\numask 077\nexport PYTHONDONTWRITEBYTECODE=1" in wrapper
     source = (ROOT / "scripts/dspace_chat_synthetic_runtime.py").read_text()
-    assert '"--expected-provider",' in source and 'config["provider"],' in source
-    assert '["runuser", "--user", config["serviceAccount"], "--", *argv]' in source
     assert source.count("subprocess.DEVNULL") >= 4
 
 
@@ -375,17 +440,10 @@ def materialization_fixture(tmp_path: Path) -> tuple[Path, str, Path, Path]:
 def test_materialize_discovers_browser_and_is_source_independent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    if not Path("/usr/bin/node").is_file():
+        pytest.skip("runtime contract requires /usr/bin/node")
     source, revision, browser_bundle, pnpm = materialization_fixture(tmp_path)
     output = tmp_path / "output" / revision
-    real_run = subprocess.run
-
-    def fake_node(argv, *args, **kwargs):
-        if argv[0] == "/usr/bin/node":
-            browser = Path(kwargs["env"]["PLAYWRIGHT_BROWSERS_PATH"]) / "chromium/chrome"
-            return subprocess.CompletedProcess(argv, 0, stdout=str(browser).encode())
-        return real_run(argv, *args, **kwargs)
-
-    monkeypatch.setattr(runtime.subprocess, "run", fake_node)
     monkeypatch.setattr(installer, "runtime_module", lambda: runtime)
 
     materializer.materialize(
