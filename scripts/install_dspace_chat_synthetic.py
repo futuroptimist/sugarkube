@@ -265,28 +265,87 @@ def apply_installation(staged: Path, snapshot: Path, root: Path, asset_revision:
 
 
 def status(root: Path) -> int:
-    for target in ASSETS:
-        path = root / target
-        print(f"{target} sha256={sha(path) if path.is_file() else 'missing'}")
-    config = root / "etc/sugarkube/dspace-chat-synthetic.json"
-    if config.is_file():
-        value = json.loads(config.read_text())
-        runner = value.get("runnerRevision", "invalid")
-        source = value.get("dspaceSourceRevision", "invalid")
-        print(f"runner={runner} source={source}")
+    installations = root / "var/lib/sugarkube/dspace-chat-installations"
+    current = installations / "current"
+    live_paths = {target: root / target for target in ASSETS}
+    if not installations.exists() and not any(
+        path.exists() or path.is_symlink() for path in live_paths.values()
+    ):
+        for target in ASSETS:
+            print(f"{target} sha256=missing")
+        print("installation=absent")
+        if root.resolve() != Path("/"):
+            print("activation=not-queried")
+            return 0
+        return activation_status()
+
+    if not current.is_symlink():
+        raise ValueError("current asset revision pointer is missing or invalid")
+    revision = os.readlink(current)
+    target = Path(revision)
+    if target.is_absolute() or len(target.parts) != 1 or not ASSET_REVISION.fullmatch(revision):
+        raise ValueError("current asset revision pointer is invalid")
+    retained = installations / revision
+    if retained.is_symlink() or not retained.is_dir():
+        raise ValueError("current retained asset revision is missing or invalid")
+    manifest = validate(retained)
+    for target_name, expected in manifest.items():
+        path = live_paths[target_name]
+        if not path.is_file() or path.is_symlink() or sha(path) != expected:
+            raise ValueError("live asset does not match current retained revision")
+
+    runtime = runtime_module()
+    config = runtime.load_config(live_paths["etc/sugarkube/dspace-chat-synthetic.json"])
+    rooted_config = dict(config, runnerRoot=str(rooted(root, config["runnerRoot"])))
+    runner = runtime.validate_runner(rooted_config)
+    runner_manifest_path = runner / "sugarkube-runner-manifest.json"
+    runner_manifest = json.loads(runner_manifest_path.read_text())
+
+    print(f"assetRevision={revision}")
+    for target_name, path in live_paths.items():
+        print(f"{target_name} sha256={sha(path)}")
+    print("runnerValidation=passed")
+    print(f"runnerRevision={config['runnerRevision']}")
+    print(f"runnerManifestSha256={sha(runner_manifest_path)}")
+    for key in (
+        "dspaceVersion",
+        "dspaceSourceRevision",
+        "repositoryIdentity",
+        "identityContract",
+        "providerConfigContract",
+        "provider",
+        "tokenPlaceOrigin",
+        "tokenPlaceModel",
+        "dspaceOrigin",
+    ):
+        print(f"{key}={config[key]}")
+    print(f"pnpmVersion={runner_manifest['pnpmVersion']}")
+    print(f"playwrightBrowserExecutable={runner_manifest['playwrightBrowserExecutable']}")
     if root.resolve() != Path("/"):
         print("activation=not-queried")
         return 0
-    # Read-only activation inspection; absence of systemctl is reported, never repaired.
+    return activation_status()
+
+
+def activation_status() -> int:
+    """Report systemd state without changing the manager or its units."""
     for unit in ("dspace-chat-synthetic.service", "dspace-chat-synthetic.timer"):
-        result = (
-            subprocess.run(
-                ["systemctl", "is-active", unit], capture_output=True, text=True, check=False
+        states = []
+        for inspection in ("is-active", "is-enabled"):
+            result = (
+                subprocess.run(
+                    ["systemctl", inspection, unit],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=5,
+                )
+                if shutil.which("systemctl")
+                else None
             )
-            if shutil.which("systemctl")
-            else None
-        )
-        print(f"{unit} active={result.stdout.strip() if result else 'unknown'}")
+            state = result.stdout.strip()[:128] if result else "unknown"
+            states.append(f"{inspection.removeprefix('is-')}={state}")
+        print(f"{unit} {' '.join(states)}")
     return 0
 
 

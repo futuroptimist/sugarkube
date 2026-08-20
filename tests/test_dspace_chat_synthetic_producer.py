@@ -650,6 +650,152 @@ def test_installer_dry_run_status_apply_and_exact_rollback(tmp_path: Path, capsy
         installer.activate(retained, tmp_path, "../escape")
 
 
+class StatusRuntime:
+    @staticmethod
+    def load_config(path: Path) -> dict:
+        return json.loads(path.read_text())
+
+    @staticmethod
+    def validate_runner(value: dict) -> Path:
+        runner = Path(value["runnerRoot"]) / value["runnerRevision"]
+        if (runner / "invalid").exists():
+            raise ValueError("runner validation failed")
+        return runner
+
+
+def status_installation(tmp_path: Path) -> tuple[Path, Path, str]:
+    root = tmp_path / "root"
+    revision = "a" * 64
+    staged = tmp_path / "staged"
+    installer.render(staged)
+    installer.install(staged, root, revision)
+    config_value = json.loads(CONFIG.read_text())
+    runner = root / config_value["runnerRoot"].removeprefix("/") / config_value["runnerRevision"]
+    runner.mkdir(parents=True)
+    (runner / "sugarkube-runner-manifest.json").write_text(
+        json.dumps(
+            {
+                "pnpmVersion": "9.0.0",
+                "playwrightBrowserExecutable": "playwright-browser/chromium/chrome",
+            }
+        )
+    )
+    return root, runner, revision
+
+
+def tree_bytes(root: Path) -> list[tuple[str, str, bytes | str]]:
+    values = []
+    for path in sorted(root.rglob("*")):
+        relative = str(path.relative_to(root))
+        if path.is_symlink():
+            values.append((relative, "symlink", os.readlink(path)))
+        elif path.is_file():
+            values.append((relative, "file", path.read_bytes()))
+        else:
+            values.append((relative, "directory", b""))
+    return values
+
+
+def test_status_reports_validated_provenance_without_mutation_or_systemctl(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    root, runner, revision = status_installation(tmp_path)
+    before = tree_bytes(root)
+    monkeypatch.setattr(installer, "runtime_module", lambda: StatusRuntime())
+    monkeypatch.setattr(
+        installer.subprocess,
+        "run",
+        lambda *args, **kwargs: pytest.fail("alternate-root status queried systemctl"),
+    )
+
+    assert installer.status(root) == 0
+
+    output = capsys.readouterr().out
+    config_value = json.loads(CONFIG.read_text())
+    assert f"assetRevision={revision}" in output
+    assert f"runnerRevision={config_value['runnerRevision']}" in output
+    assert (
+        f"runnerManifestSha256={installer.sha(runner / 'sugarkube-runner-manifest.json')}" in output
+    )
+    for key in (
+        "dspaceVersion",
+        "dspaceSourceRevision",
+        "repositoryIdentity",
+        "identityContract",
+        "providerConfigContract",
+        "provider",
+        "tokenPlaceOrigin",
+        "tokenPlaceModel",
+        "dspaceOrigin",
+    ):
+        assert f"{key}={config_value[key]}" in output
+    assert "pnpmVersion=9.0.0" in output
+    assert "playwrightBrowserExecutable=playwright-browser/chromium/chrome" in output
+    assert "runnerValidation=passed" in output
+    assert "activation=not-queried" in output
+    assert tree_bytes(root) == before
+
+
+@pytest.mark.parametrize(
+    "fault",
+    ["current-absolute", "current-traversal", "missing-retained", "retained-hash", "live-hash"],
+)
+def test_status_fails_closed_for_invalid_asset_provenance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    root, _, revision = status_installation(tmp_path)
+    installations = root / "var/lib/sugarkube/dspace-chat-installations"
+    current = installations / "current"
+    if fault in {"current-absolute", "current-traversal"}:
+        current.unlink()
+        current.symlink_to("/tmp/external" if fault == "current-absolute" else "../escape")
+    elif fault == "missing-retained":
+        __import__("shutil").rmtree(installations / revision)
+    elif fault == "retained-hash":
+        (installations / revision / next(iter(installer.ASSETS))).write_bytes(b"tampered")
+    else:
+        (root / next(iter(installer.ASSETS))).write_bytes(b"tampered")
+    monkeypatch.setattr(installer, "runtime_module", lambda: StatusRuntime())
+
+    with pytest.raises((ValueError, FileNotFoundError, json.JSONDecodeError)):
+        installer.status(root)
+
+
+def test_status_fails_closed_on_runner_validation_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, runner, _ = status_installation(tmp_path)
+    (runner / "invalid").write_text("invalid\n")
+    monkeypatch.setattr(installer, "runtime_module", lambda: StatusRuntime())
+
+    with pytest.raises(ValueError, match="runner validation failed"):
+        installer.status(root)
+
+
+def test_activation_status_inspects_active_and_enabled_without_mutation(
+    monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    calls = []
+
+    def inspect(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return SimpleNamespace(stdout="active\n")
+
+    monkeypatch.setattr(installer.shutil, "which", lambda name: "/usr/bin/systemctl")
+    monkeypatch.setattr(installer.subprocess, "run", inspect)
+
+    assert installer.activation_status() == 0
+    assert [call[0] for call in calls] == [
+        ["systemctl", "is-active", "dspace-chat-synthetic.service"],
+        ["systemctl", "is-enabled", "dspace-chat-synthetic.service"],
+        ["systemctl", "is-active", "dspace-chat-synthetic.timer"],
+        ["systemctl", "is-enabled", "dspace-chat-synthetic.timer"],
+    ]
+    assert all(call[1]["capture_output"] and not call[1]["check"] for call in calls)
+    assert all(call[1]["timeout"] == 5 for call in calls)
+    assert "active=active enabled=active" in capsys.readouterr().out
+
+
 def test_failed_installer_preflight_leaves_installation_unchanged(tmp_path: Path) -> None:
     marker = tmp_path / "installed"
     marker.write_bytes(b"unchanged")
