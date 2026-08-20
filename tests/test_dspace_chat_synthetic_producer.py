@@ -772,6 +772,30 @@ def test_status_fails_closed_on_runner_validation_failure(
         installer.status(root)
 
 
+@pytest.mark.parametrize("fault", ["runner-symlink", "manifest-symlink", "missing-pnpm"])
+def test_status_fails_closed_on_invalid_runner_provenance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    root, runner, _ = status_installation(tmp_path)
+    manifest = runner / "sugarkube-runner-manifest.json"
+    if fault == "runner-symlink":
+        external = tmp_path / "external-runner"
+        runner.rename(external)
+        runner.symlink_to(external, target_is_directory=True)
+    elif fault == "manifest-symlink":
+        external = tmp_path / "external-manifest.json"
+        manifest.rename(external)
+        manifest.symlink_to(external)
+    else:
+        value = json.loads(manifest.read_text())
+        value.pop("pnpmVersion")
+        manifest.write_text(json.dumps(value))
+    monkeypatch.setattr(installer, "runtime_module", lambda: StatusRuntime())
+
+    with pytest.raises(ValueError, match="installed runner"):
+        installer.status(root)
+
+
 def test_activation_status_inspects_active_and_enabled_without_mutation(
     monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:

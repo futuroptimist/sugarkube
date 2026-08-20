@@ -296,10 +296,29 @@ def status(root: Path) -> int:
 
     runtime = runtime_module()
     config = runtime.load_config(live_paths["etc/sugarkube/dspace-chat-synthetic.json"])
-    rooted_config = dict(config, runnerRoot=str(rooted(root, config["runnerRoot"])))
-    runner = runtime.validate_runner(rooted_config)
-    runner_manifest_path = runner / "sugarkube-runner-manifest.json"
+    runner_parent = rooted(root, config["runnerRoot"])
+    expected_runner = runner_parent / config["runnerRevision"]
+    if expected_runner.is_symlink() or not expected_runner.is_dir():
+        raise ValueError("installed runner revision is missing or invalid")
+    runner_manifest_path = expected_runner / "sugarkube-runner-manifest.json"
+    if runner_manifest_path.is_symlink() or not runner_manifest_path.is_file():
+        raise ValueError("installed runner manifest is missing or invalid")
     runner_manifest = json.loads(runner_manifest_path.read_text())
+    if (
+        not isinstance(runner_manifest.get("pnpmVersion"), str)
+        or not runner_manifest["pnpmVersion"]
+    ):
+        raise ValueError("installed runner pnpm provenance is invalid")
+    if (
+        not isinstance(runner_manifest.get("playwrightBrowserExecutable"), str)
+        or not runner_manifest["playwrightBrowserExecutable"]
+    ):
+        raise ValueError("installed runner browser provenance is invalid")
+
+    rooted_config = dict(config, runnerRoot=str(runner_parent))
+    runner = runtime.validate_runner(rooted_config)
+    if runner != expected_runner:
+        raise ValueError("installed runner validation returned an unexpected revision")
 
     print(f"assetRevision={revision}")
     for target_name, path in live_paths.items():
