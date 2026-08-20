@@ -106,6 +106,12 @@ def sha256(path: Path) -> str:
 def discover_playwright_browser(runner: Path) -> Path:
     """Return Playwright's executable only when it is runner-local and usable."""
     browser_root = runner / "playwright-browser"
+    try:
+        browser_root_info = browser_root.lstat()
+    except OSError:
+        raise Invalid("Playwright browser discovery") from None
+    if browser_root.is_symlink() or not stat.S_ISDIR(browser_root_info.st_mode):
+        raise Invalid("Playwright browser discovery")
     completed = subprocess.run(
         [
             "/usr/bin/node",
@@ -126,9 +132,13 @@ def discover_playwright_browser(runner: Path) -> Path:
         raise Invalid("Playwright browser discovery")
     try:
         discovered = Path(output.decode("utf-8"))
+        if not discovered.is_absolute():
+            raise Invalid("Playwright browser discovery")
         resolved_root = browser_root.resolve(strict=True)
         resolved = discovered.resolve(strict=True)
         resolved.relative_to(resolved_root)
+    except Invalid:
+        raise
     except (OSError, UnicodeError, ValueError):
         raise Invalid("Playwright browser discovery") from None
     info = discovered.lstat()

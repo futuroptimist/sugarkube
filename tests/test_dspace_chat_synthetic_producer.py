@@ -436,6 +436,53 @@ def test_playwright_browser_discovery_rejects_invalid_path(
         runtime.discover_playwright_browser(runner)
 
 
+def test_playwright_browser_discovery_rejects_symlinked_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, runner = runtime_runner(tmp_path)
+    browser_root = runner / "playwright-browser"
+    external_root = tmp_path / "external-browser"
+    browser_root.rename(external_root)
+    browser_root.symlink_to(external_root, target_is_directory=True)
+    external_browser = external_root / "browser-executable"
+    real_run = subprocess.run
+
+    def controlled_run(argv, *args, **kwargs):
+        if argv[0] == "/usr/bin/node":
+            return subprocess.CompletedProcess(argv, 0, stdout=str(external_browser).encode())
+        if "status" in argv:
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(runtime.subprocess, "run", controlled_run)
+
+    with pytest.raises(runtime.Invalid, match="discovery"):
+        runtime.discover_playwright_browser(runner)
+    with pytest.raises(runtime.Invalid, match="discovery"):
+        runtime.validate_runner(value)
+
+
+def test_playwright_browser_discovery_rejects_relative_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runner = tmp_path / "runner"
+    browser = runner / "playwright-browser/chromium/chrome"
+    browser.parent.mkdir(parents=True)
+    browser.write_text("browser")
+    browser.chmod(0o755)
+    (runner / "frontend").mkdir()
+    monkeypatch.setattr(
+        runtime.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args[0], 0, stdout=b"playwright-browser/chromium/chrome"
+        ),
+    )
+
+    with pytest.raises(runtime.Invalid, match="discovery"):
+        runtime.discover_playwright_browser(runner)
+
+
 def test_runner_validation_rejects_discovered_browser_hash_tampering(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
