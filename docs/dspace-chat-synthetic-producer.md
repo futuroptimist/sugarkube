@@ -31,11 +31,12 @@ python3 scripts/install_dspace_chat_synthetic.py materialize \
   --revision 97ab09f13fb098de928a878bf1fe9b8d13032cb5 \
   --repository-identity https://github.com/democratizedspace/dspace.git \
   --output /absolute/staging/97ab09f13fb098de928a878bf1fe9b8d13032cb5 \
-  --pnpm /absolute/toolchain/pnpm --pnpm-version <exact-version> \
+  --pnpm /absolute/toolchain/pnpm --pnpm-version 9.0.0 \
   --browser-bundle /absolute/path/to/browser-bundle
 ```
 
-The explicitly selected pnpm executable must report the requested version. The supplied local browser bundle is copied into the runner and used through a runner-local `PLAYWRIGHT_BROWSERS_PATH`; no `$HOME` cache is trusted. The local pnpm cache must already contain the exact lockfile's packages. Construction fails for a
+The explicitly selected pnpm executable must report exactly `9.0.0`, matching the pinned DSPACE
+commit's `packageManager`. The supplied local browser bundle is copied into the runner and used through a runner-local `PLAYWRIGHT_BROWSERS_PATH`; no `$HOME` cache is trusted. The local pnpm cache must already contain the exact lockfile's packages. Construction fails for a
 missing object, wrong HEAD, dirty tracked/index state, alternates, missing root store, broken
 frontend link, unusable Playwright shim/module resolution, or missing critical file. Its manifest
 records hashes for the runner, spec, workspace manifests, and lockfile.
@@ -73,8 +74,12 @@ runner root, validates the copy again, and atomically exposes the exact immutabl
 identical pre-existing revision is validated and reused; older runner revisions are retained. Only
 then does apply transactionally replace the validated asset set and switch `current`.
 After apply, the operator must run `sudo systemctl daemon-reload` as a separate mandatory
-step so the in-memory definitions match disk. The installer never enables, starts, stops, restarts, disables, retries, or executes smoke. If replacement or
-reload fails, it restores the prior asset set and leaves the `current` revision pointer unchanged.
+step so the in-memory definitions match disk. The installer never enables, starts, stops, restarts, disables, retries, or executes smoke. A failure during the
+installer's transactional asset replacement restores the prior asset set and leaves `current`
+unchanged. A failure of the later, separately executed `systemctl daemon-reload` is outside that
+transaction and is not automatically rolled back. Stop, classify the reload failure read-only, and
+do not execute smoke or activate the timer. Perform an exact rollback only through the separately
+authorized rollback procedure before retrying `systemctl daemon-reload`.
 
 The required access model is exact: result root `root:pi` mode `0710`; each invocation directory
 `root:pi` mode `0770`; the child-created, same-directory temporary-and-renamed result `pi:pi` mode
