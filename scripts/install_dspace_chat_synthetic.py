@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -41,6 +42,17 @@ CRITICAL = (
     "pnpm-workspace.yaml",
     "pnpm-lock.yaml",
 )
+
+
+def runtime_module():
+    """Load the runtime's canonical snapshot validator without path assumptions."""
+    path = ROOT / "scripts/dspace_chat_synthetic_runtime.py"
+    spec = importlib.util.spec_from_file_location("dspace_chat_synthetic_runtime", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("runtime validator is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def command(*argv: str, cwd: Path | None = None) -> str:
@@ -179,6 +191,81 @@ def validate(tree: Path) -> dict[str, str]:
     return manifest
 
 
+def load_snapshot_config(staged: Path, snapshot: Path) -> dict:
+    """Load approved rendered coordinates and point them at a staged snapshot."""
+    runtime = runtime_module()
+    config = runtime.load_config(staged / "etc/sugarkube/dspace-chat-synthetic.json")
+    revision = config["runnerRevision"]
+    if snapshot.is_symlink() or not snapshot.is_dir() or snapshot.name != revision:
+        raise ValueError("runner snapshot must be a real exact-revision directory")
+    config["runnerRoot"] = str(snapshot.parent)
+    return config
+
+
+def validate_snapshot(staged: Path, snapshot: Path) -> str:
+    """Apply the runtime's complete runner contract to an installation input."""
+    runtime = runtime_module()
+    config = load_snapshot_config(staged, snapshot)
+    runtime.validate_runner(config)
+    return config["runnerRevision"]
+
+
+def rooted(root: Path, absolute: str) -> Path:
+    return root / Path(absolute).relative_to("/")
+
+
+def install_runner(staged: Path, snapshot: Path, root: Path) -> tuple[Path, bool]:
+    """Copy, revalidate, and atomically expose an immutable runner snapshot."""
+    runtime = runtime_module()
+    config = runtime.load_config(staged / "etc/sugarkube/dspace-chat-synthetic.json")
+    revision = config["runnerRevision"]
+    parent = rooted(root, config["runnerRoot"])
+    destination = parent / revision
+    rooted_config = dict(config, runnerRoot=str(parent))
+    if destination.exists() or destination.is_symlink():
+        if destination.is_symlink() or not destination.is_dir():
+            raise ValueError("runner revision destination is invalid")
+        runtime.validate_runner(rooted_config)
+        return destination, False
+    parent.mkdir(parents=True, exist_ok=True)
+    temporary = Path(tempfile.mkdtemp(prefix=f".{revision}.", dir=parent))
+    temporary.rmdir()
+    try:
+        shutil.copytree(snapshot, temporary, symlinks=True)
+        copied_config = dict(rooted_config, runnerRoot=str(temporary.parent))
+        # Validation expects the immutable revision basename, so validate through
+        # a private exact-name parent before the atomic destination rename.
+        validation_parent = Path(tempfile.mkdtemp(prefix=".validate.", dir=parent))
+        validation_runner = validation_parent / revision
+        os.replace(temporary, validation_runner)
+        try:
+            runtime.validate_runner(dict(copied_config, runnerRoot=str(validation_parent)))
+            os.replace(validation_runner, destination)
+        finally:
+            shutil.rmtree(validation_parent, ignore_errors=True)
+        return destination, True
+    except Exception:
+        shutil.rmtree(temporary, ignore_errors=True)
+        raise
+
+
+def apply_installation(staged: Path, snapshot: Path, root: Path, asset_revision: str) -> None:
+    """Install a fully validated runner and roll it back on later asset failure."""
+    validate(staged)
+    validate_snapshot(staged, snapshot)
+    retained = root / "var/lib/sugarkube/dspace-chat-installations" / asset_revision
+    if retained.exists():
+        raise ValueError("exact retained revision already exists")
+    runner, created = install_runner(staged, snapshot, root)
+    try:
+        install(staged, root, asset_revision)
+    except Exception:
+        shutil.rmtree(retained, ignore_errors=True)
+        if created:
+            shutil.rmtree(runner, ignore_errors=True)
+        raise
+
+
 def status(root: Path) -> int:
     for target in ASSETS:
         path = root / target
@@ -277,6 +364,7 @@ def main() -> int:
     parser.add_argument("--pnpm")
     parser.add_argument("--pnpm-version")
     parser.add_argument("--browser-bundle", type=Path)
+    parser.add_argument("--runner-snapshot", type=Path)
     args = parser.parse_args()
     if args.operation == "status":
         return status(args.root)
@@ -309,9 +397,13 @@ def main() -> int:
         staged = Path(temporary)
         render(staged)
         validate(staged)
+        if args.runner_snapshot is None:
+            parser.error(f"{args.operation} requires --runner-snapshot")
+        snapshot = args.runner_snapshot.absolute()
+        validate_snapshot(staged, snapshot)
         if args.operation == "apply":
             asset_revision = hashlib.sha256((staged / "manifest.json").read_bytes()).hexdigest()
-            install(staged, args.root, asset_revision)
+            apply_installation(staged, snapshot, args.root, asset_revision)
         else:
             print("validation=passed mutation=none")
     return 0

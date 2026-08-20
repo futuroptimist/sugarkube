@@ -42,23 +42,36 @@ records hashes for the runner, spec, workspace manifests, and lockfile.
 
 ## 2. Validate and dry-run installation
 
-The installer defaults to non-mutating validation and supports an alternate root for rehearsal:
+Complete installer validation requires the exact materialized snapshot and supports an alternate
+root for a non-mutating rehearsal:
 
 ```bash
-python3 scripts/install_dspace_chat_synthetic.py
-python3 scripts/install_dspace_chat_synthetic.py dry-run --root /tmp/rehearsal-root
+python3 scripts/install_dspace_chat_synthetic.py dry-run \
+  --runner-snapshot /absolute/staging/97ab09f13fb098de928a878bf1fe9b8d13032cb5
+python3 scripts/install_dspace_chat_synthetic.py dry-run --root /tmp/rehearsal-root \
+  --runner-snapshot /absolute/staging/97ab09f13fb098de928a878bf1fe9b8d13032cb5
 python3 scripts/install_dspace_chat_synthetic.py status --root /tmp/rehearsal-root
 ```
 
-Review all hashes and coordinates. `status` is read-only and, for alternate roots, reports activation as not queried; only `/` queries unit activation without
+The preflight first loads the rendered configuration and validates its exact runner revision against
+the snapshot basename, manifest hashes, independent Git metadata, dependencies, and Node/Playwright
+resolution. Review all hashes and coordinates. `status` is read-only and, for alternate roots, reports activation as not queried; only `/` queries unit activation without
 printing configuration secrets (the committed configuration contains none). A failed staging or
 preflight leaves installed fixtures unchanged.
 
 ## 3. Separately authorized installation and controlled execution
 
-Only after separate approval, an operator may stage the runner at
-`/var/lib/sugarkube/dspace-chat-runners/<exact-revision>`, then invoke `apply`. Apply atomically
-replaces files only after validating the whole staged set and retains the prior validated revision.
+Only after separate approval, invoke apply with the already materialized snapshot:
+
+```bash
+sudo python3 scripts/install_dspace_chat_synthetic.py apply \
+  --runner-snapshot /absolute/staging/97ab09f13fb098de928a878bf1fe9b8d13032cb5
+```
+
+Apply validates the source snapshot before any destination mutation, copies it beneath the configured
+runner root, validates the copy again, and atomically exposes the exact immutable revision. An
+identical pre-existing revision is validated and reused; older runner revisions are retained. Only
+then does apply transactionally replace the validated asset set and switch `current`.
 After apply, the operator must run `sudo systemctl daemon-reload` as a separate mandatory
 step so the in-memory definitions match disk. The installer never enables, starts, stops, restarts, disables, retries, or executes smoke. If replacement or
 reload fails, it restores the prior asset set and leaves the `current` revision pointer unchanged.

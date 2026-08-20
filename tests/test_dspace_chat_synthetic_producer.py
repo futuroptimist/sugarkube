@@ -491,6 +491,159 @@ def run_installer_main(monkeypatch: pytest.MonkeyPatch, *args: str) -> int:
     return installer.main()
 
 
+def runner_snapshot_fixture(tmp_path: Path) -> tuple[Path, str]:
+    revision = "97ab09f13fb098de928a878bf1fe9b8d13032cb5"
+    snapshot = tmp_path / "source" / revision
+    snapshot.mkdir(parents=True)
+    (snapshot / ".git").mkdir()
+    (snapshot / "dependency.ok").write_text("complete\n")
+    (snapshot / "sugarkube-runner-manifest.json").write_text("manifest\n")
+    return snapshot, revision
+
+
+class FakeSnapshotRuntime:
+    def __init__(self, fail_copy: bool = False):
+        self.fail_copy = fail_copy
+        self.validated = []
+
+    @staticmethod
+    def load_config(path: Path) -> dict:
+        return json.loads(path.read_text())
+
+    def validate_runner(self, config: dict) -> Path:
+        runner = Path(config["runnerRoot"]) / config["runnerRevision"]
+        self.validated.append(runner)
+        if not (runner / ".git").is_dir():
+            raise ValueError("complete Git metadata")
+        if not (runner / "sugarkube-runner-manifest.json").is_file():
+            raise ValueError("missing manifest")
+        if (runner / "hash-mismatch").exists():
+            raise ValueError("critical file hash")
+        if not (runner / "dependency.ok").is_file():
+            raise ValueError("dependency invalid")
+        if self.fail_copy and ".validate." in str(runner):
+            raise ValueError("copied runner validation failed")
+        return runner
+
+
+@pytest.mark.parametrize(
+    "fault",
+    ["absent", "wrong-revision", "symlink", "hash-mismatch", "incomplete-git", "dependency"],
+)
+def test_installer_snapshot_preflight_rejects_invalid_input_without_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    snapshot, revision = runner_snapshot_fixture(tmp_path)
+    if fault == "absent":
+        snapshot = snapshot.parent / revision
+        __import__("shutil").rmtree(snapshot)
+    elif fault == "wrong-revision":
+        wrong = snapshot.with_name("0" * 40)
+        snapshot.rename(wrong)
+        snapshot = wrong
+    elif fault == "symlink":
+        real = snapshot.with_name("real")
+        snapshot.rename(real)
+        snapshot.symlink_to(real, target_is_directory=True)
+    elif fault == "hash-mismatch":
+        (snapshot / "hash-mismatch").write_text("bad\n")
+    elif fault == "incomplete-git":
+        (snapshot / ".git").rmdir()
+    else:
+        (snapshot / "dependency.ok").unlink()
+    root = tmp_path / "root"
+    root.mkdir()
+    marker = root / "marker"
+    marker.write_bytes(b"unchanged")
+    fake = FakeSnapshotRuntime()
+    monkeypatch.setattr(installer, "runtime_module", lambda: fake)
+
+    with pytest.raises((ValueError, SystemExit)):
+        run_installer_main(
+            monkeypatch,
+            "apply",
+            "--root",
+            str(root),
+            "--runner-snapshot",
+            str(snapshot),
+        )
+
+    assert marker.read_bytes() == b"unchanged"
+    assert not (root / "var").exists()
+
+
+def test_complete_installer_dry_run_is_byte_for_byte_non_mutating(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    snapshot, _ = runner_snapshot_fixture(tmp_path)
+    root = tmp_path / "root"
+    root.mkdir()
+    marker = root / "marker"
+    marker.write_bytes(b"unchanged")
+    before = [(str(path.relative_to(root)), path.read_bytes()) for path in root.rglob("*")]
+    monkeypatch.setattr(installer, "runtime_module", lambda: FakeSnapshotRuntime())
+
+    assert (
+        run_installer_main(
+            monkeypatch, "dry-run", "--root", str(root), "--runner-snapshot", str(snapshot)
+        )
+        == 0
+    )
+
+    after = [(str(path.relative_to(root)), path.read_bytes()) for path in root.rglob("*")]
+    assert after == before
+
+
+def test_apply_installs_runner_only_after_copy_revalidation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    snapshot, revision = runner_snapshot_fixture(tmp_path)
+    root = tmp_path / "root"
+    fake = FakeSnapshotRuntime()
+    monkeypatch.setattr(installer, "runtime_module", lambda: fake)
+
+    assert (
+        run_installer_main(
+            monkeypatch, "apply", "--root", str(root), "--runner-snapshot", str(snapshot)
+        )
+        == 0
+    )
+
+    installed = root / "var/lib/sugarkube/dspace-chat-runners" / revision
+    assert (installed / "dependency.ok").read_bytes() == (snapshot / "dependency.ok").read_bytes()
+    assert any(".validate." in str(path) for path in fake.validated)
+    assert os.readlink(root / "var/lib/sugarkube/dspace-chat-installations/current")
+
+
+@pytest.mark.parametrize("failure", ["copied-runner", "asset-activation"])
+def test_apply_failure_preserves_prior_state_and_removes_only_new_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    snapshot, revision = runner_snapshot_fixture(tmp_path)
+    root = tmp_path / "root"
+    prior_runner = root / "var/lib/sugarkube/dspace-chat-runners" / ("1" * 40)
+    prior_runner.mkdir(parents=True)
+    (prior_runner / "kept").write_bytes(b"runner")
+    current = root / "var/lib/sugarkube/dspace-chat-installations/current"
+    current.parent.mkdir(parents=True)
+    current.symlink_to("1" * 64)
+    fake = FakeSnapshotRuntime(fail_copy=failure == "copied-runner")
+    monkeypatch.setattr(installer, "runtime_module", lambda: fake)
+    if failure == "asset-activation":
+        monkeypatch.setattr(
+            installer, "install", lambda *args: (_ for _ in ()).throw(OSError("injected"))
+        )
+
+    with pytest.raises((OSError, ValueError)):
+        run_installer_main(
+            monkeypatch, "apply", "--root", str(root), "--runner-snapshot", str(snapshot)
+        )
+
+    assert (prior_runner / "kept").read_bytes() == b"runner"
+    assert os.readlink(current) == "1" * 64
+    assert not (prior_runner.parent / revision).exists()
+
+
 @pytest.mark.parametrize("fault", ["absent", "incomplete", "hash-mismatch"])
 def test_rollback_cli_rejects_invalid_retained_revision_without_mutation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
