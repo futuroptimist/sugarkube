@@ -220,7 +220,7 @@ prom_query() { local encoded; encoded="$(jq -nr --arg q "$1" '$q|@uri')"; kubect
 [[ "$(prom_query 'count(ALERTS{alertname=~"CloudflareTunnel.*",alertstate="firing"})' | jq -r '.data.result[0].value[1]//"0"')" == 0 ]] || die 'a Cloudflare alert is active'
 
 mapfile -t endpoints < <(ruby -ryaml -e 'YAML.load_stream(File.read(ARGV[0])){|d| next unless d.is_a?(Hash); t=d.dig("spec","targets","staticConfig","static") || []; t.each{|x| puts x}}' clusters/staging/observability/probes/public-apps.yaml | sort -u)
-[[ "${#endpoints[@]}" == 16 ]] || die 'approved staging endpoint manifest must contain exactly 16 URLs'
+[[ "${#endpoints[@]}" == 21 ]] || die 'approved staging endpoint manifest must contain exactly 21 URLs'
 http_command="${CF_DRILL_HTTP_COMMAND:-curl}"
 for endpoint in "${endpoints[@]}"; do
   code="$(${http_command} -fsS -o /dev/null -w '%{http_code}' --max-time 15 "${endpoint}")"

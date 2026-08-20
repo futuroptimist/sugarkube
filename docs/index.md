@@ -55,6 +55,8 @@ Review the safety notes before working with power components.
 - [apps/tokenplace.md](apps/tokenplace.md) — token.place GHCR-first deploy, verify, promote, rollback, and troubleshooting runbook
 - [apps/tokenplace-relay.md](apps/tokenplace-relay.md) — relay-only token.place OCI staging/prod operations guide
 - [apps/danielsmith.md](apps/danielsmith.md) — danielsmith.io GHCR-first deploy, verify, promote, rollback, and troubleshooting runbook
+- [apps/jobbot3000.md](apps/jobbot3000.md) — jobbot3000 generic deployment runbook
+- [apps/gitshelves.md](apps/gitshelves.md) — GitShelves generic deployment and staging verification runbook
 - [k3s-tokenplace-dev.md](k3s-tokenplace-dev.md) — token.place dev runbook
 - [k3s-tokenplace-staging.md](k3s-tokenplace-staging.md) — token.place staging runbook
 - [k3s-tokenplace-prod.md](k3s-tokenplace-prod.md) — token.place production runbook

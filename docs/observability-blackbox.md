@@ -70,8 +70,11 @@ pruning or staging Probe deletion is used. Neither uses
 | token.place (`tokenplace`) | `https://staging.token.place` | `/` (`root`), `/healthz` (`healthz`), `/livez` (`livez`), `/api/v1/meta` (`metadata`) |
 | danielsmith.io (`danielsmith`) | `https://staging.danielsmith.io` | `/` (`root`), `/healthz` (`healthz`), `/livez` (`livez`) |
 | jobbot3000 | `https://staging.jobbot3000.tech` | `/` (`root`), `/healthz` (`healthz`), `/livez` (`livez`), `/tracker` (`tracker`), `/manifest.webmanifest` (`manifest`) |
+| GitShelves (`gitshelves`) | `https://staging.gitshelves.com` | `/` (`root`), `/healthz` (`healthz`), `/livez` (`livez`), `/models/baseplate_2x6.stl` (`baseplate`), `/models/contrib_cube.stl` (`module`) |
 
-These are exactly 16 Probes. Labels are bounded to `release`, `app`,
+Apply and verify the GitShelves Probe resources only after its staging workload and external Cloudflare Tunnel route exist. GitShelves exposes no `/metrics`, so it does not require a ServiceMonitor.
+
+These are exactly 21 Probes. Labels are bounded to `release`, `app`,
 `environment: staging`, `route`, and `criticality`. Verification uses the
 Prometheus Kubernetes service proxy and bounded polling to prove the exact
 app/route target matrix, `probe_success == 1`, and the duration, HTTP status,
