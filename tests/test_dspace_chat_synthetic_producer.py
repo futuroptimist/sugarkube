@@ -615,6 +615,61 @@ def test_apply_installs_runner_only_after_copy_revalidation(
     assert os.readlink(root / "var/lib/sugarkube/dspace-chat-installations/current")
 
 
+def test_install_runner_reuses_existing_runner_with_identical_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    snapshot, revision = runner_snapshot_fixture(tmp_path)
+    staged = tmp_path / "staged"
+    installer.render(staged)
+    root = tmp_path / "root"
+    destination = root / "var/lib/sugarkube/dspace-chat-runners" / revision
+    __import__("shutil").copytree(snapshot, destination)
+    marker = destination / "existing-only"
+    marker.write_bytes(b"preserved")
+    monkeypatch.setattr(installer, "runtime_module", lambda: FakeSnapshotRuntime())
+
+    installed, created = installer.install_runner(staged, snapshot, root)
+
+    assert (installed, created) == (destination, False)
+    assert marker.read_bytes() == b"preserved"
+
+
+def test_apply_rejects_different_valid_existing_runner_without_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    snapshot, revision = runner_snapshot_fixture(tmp_path)
+    staged = tmp_path / "staged"
+    installer.render(staged)
+    root = tmp_path / "root"
+    destination = root / "var/lib/sugarkube/dspace-chat-runners" / revision
+    __import__("shutil").copytree(snapshot, destination)
+    (destination / "sugarkube-runner-manifest.json").write_text("different-valid-manifest\n")
+    live_asset = root / next(iter(installer.ASSETS))
+    live_asset.parent.mkdir(parents=True)
+    live_asset.write_bytes(b"live asset")
+    retained = root / "var/lib/sugarkube/dspace-chat-installations" / ("1" * 64)
+    retained.mkdir(parents=True)
+    retained_marker = retained / "marker"
+    retained_marker.write_bytes(b"retained")
+    current = retained.parent / "current"
+    current.symlink_to(retained.name)
+    monkeypatch.setattr(installer, "runtime_module", lambda: FakeSnapshotRuntime())
+    monkeypatch.setattr(
+        installer, "install", lambda *args: pytest.fail("asset activation was invoked")
+    )
+
+    with pytest.raises(ValueError, match="existing runner manifest does not match snapshot"):
+        installer.apply_installation(staged, snapshot, root, "2" * 64)
+
+    assert live_asset.read_bytes() == b"live asset"
+    assert retained_marker.read_bytes() == b"retained"
+    assert (destination / "sugarkube-runner-manifest.json").read_text() == (
+        "different-valid-manifest\n"
+    )
+    assert os.readlink(current) == retained.name
+    assert not (retained.parent / ("2" * 64)).exists()
+
+
 @pytest.mark.parametrize("failure", ["copied-runner", "asset-activation"])
 def test_apply_failure_preserves_prior_state_and_removes_only_new_paths(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str

@@ -226,6 +226,9 @@ def install_runner(staged: Path, snapshot: Path, root: Path) -> tuple[Path, bool
         if destination.is_symlink() or not destination.is_dir():
             raise ValueError("runner revision destination is invalid")
         runtime.validate_runner(rooted_config)
+        manifest = "sugarkube-runner-manifest.json"
+        if (snapshot / manifest).read_bytes() != (destination / manifest).read_bytes():
+            raise ValueError("existing runner manifest does not match snapshot")
         return destination, False
     parent.mkdir(parents=True, exist_ok=True)
     temporary = Path(tempfile.mkdtemp(prefix=f".{revision}.", dir=parent))
