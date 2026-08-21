@@ -32,14 +32,29 @@ python3 scripts/install_dspace_chat_synthetic.py materialize \
   --repository-identity https://github.com/democratizedspace/dspace.git \
   --output /absolute/staging/97ab09f13fb098de928a878bf1fe9b8d13032cb5 \
   --pnpm /absolute/toolchain/pnpm --pnpm-version 9.0.0 \
-  --browser-bundle /absolute/path/to/browser-bundle
+  --browser-contract system-chromium-v1
 ```
 
 The explicitly selected pnpm executable must report exactly `9.0.0`, matching the pinned DSPACE
-commit's `packageManager`. The supplied local browser bundle is copied into the runner and used through a runner-local `PLAYWRIGHT_BROWSERS_PATH`; no `$HOME` cache is trusted. The local pnpm cache must already contain the exact lockfile's packages. Construction fails for a
+commit's `packageManager`. The staging configuration explicitly selects `system-chromium-v1`.
+Materialization sets `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`, accepts no browser bundle, and never
+installs, copies, or modifies Chromium. The local pnpm cache must already contain the exact lockfile's packages. Construction fails for a
 missing object, wrong HEAD, dirty tracked/index state, alternates, missing root store, broken
 frontend link, unusable Playwright shim/module resolution, or missing critical file. Its manifest
 records hashes for the runner, spec, workspace manifests, and lockfile.
+
+The alternative `runner-local-playwright-v1` contract preserves the original behavior and requires
+`--browser-bundle /absolute/path/to/browser-bundle`; it validates Playwright's discovered executable
+under that copied bundle and supplies only the runner-local `PLAYWRIGHT_BROWSERS_PATH`. Contract
+selection is mandatory. There is no `$PATH` search, browser discovery, or fallback between the two.
+
+For the staging ARM64 host, the system contract pins architecture `aarch64`, launcher
+`/usr/bin/chromium`, and executable `/usr/lib/chromium/chromium`, including their independent hashes,
+realpath expectations, `root:root` ownership, and mode `0755`. Preflight and every execution validate
+those exact coordinates before Playwright starts; the pinned runner consumes the executable only via
+its supported `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`. Drift preserves the previous metric. With
+`--root`, absolute browser coordinates are resolved inside that target root, never against live
+`/usr`; status and dry-run remain non-mutating and do not inspect live systemd for alternate roots.
 
 ## 2. Validate and dry-run installation
 
