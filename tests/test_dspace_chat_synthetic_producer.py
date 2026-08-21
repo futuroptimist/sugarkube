@@ -5,6 +5,8 @@ from __future__ import annotations
 import copy
 import json
 import os
+import grp
+import pwd
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -29,6 +31,7 @@ def config(tmp_path: Path) -> dict:
         metricPath=str(tmp_path / "metric.prom"),
         metricsConsumer=str(tmp_path / "consumer.py"),
     )
+    value["browserContract"] = {"name": "runner-local-playwright-v1"}
     return value
 
 
@@ -124,6 +127,89 @@ def test_configuration_rejects_remaining_invalid_contract_values(
         runtime.load_config(path)
 
 
+def system_browser_config(tmp_path: Path) -> tuple[dict, Path]:
+    value = config(tmp_path)
+    root = tmp_path / "target"
+    launcher = root / "usr/bin/chromium"
+    executable = root / "usr/lib/chromium/chromium"
+    launcher.parent.mkdir(parents=True)
+    executable.parent.mkdir(parents=True)
+    launcher.write_text('#!/bin/sh\nexec /usr/lib/chromium/chromium "$@"\n')
+    executable.write_text("browser\n")
+    launcher.chmod(0o755)
+    executable.chmod(0o755)
+    value["browserContract"] = {
+        "name": "system-chromium-v1",
+        "architecture": "aarch64",
+        "launcherPath": "/usr/bin/chromium",
+        "launcherRealPath": "/usr/bin/chromium",
+        "launcherSha256": runtime.sha256(launcher),
+        "executablePath": "/usr/lib/chromium/chromium",
+        "executableRealPath": "/usr/lib/chromium/chromium",
+        "executableSha256": runtime.sha256(executable),
+        "owner": pwd.getpwuid(os.getuid()).pw_name,
+        "group": grp.getgrgid(os.getgid()).gr_name,
+        "mode": "0755",
+    }
+    return value, root
+
+
+def test_explicit_system_browser_contract_validates_exact_target_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, root = system_browser_config(tmp_path)
+    monkeypatch.setattr(runtime.platform, "machine", lambda: "aarch64")
+    observed = runtime.validate_browser_contract(value, root)
+    assert observed["name"] == "system-chromium-v1"
+    assert observed["executablePath"] == "/usr/lib/chromium/chromium"
+    assert not (root / "playwright-browser").exists()
+
+
+@pytest.mark.parametrize(
+    "fault", ["architecture", "launcher-hash", "executable-hash", "mode", "realpath", "same-path"]
+)
+def test_system_browser_contract_drift_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    value, root = system_browser_config(tmp_path)
+    monkeypatch.setattr(
+        runtime.platform, "machine", lambda: "x86_64" if fault == "architecture" else "aarch64"
+    )
+    contract = value["browserContract"]
+    if fault == "launcher-hash":
+        contract["launcherSha256"] = "0" * 64
+    elif fault == "executable-hash":
+        contract["executableSha256"] = "0" * 64
+    elif fault == "mode":
+        (root / "usr/lib/chromium/chromium").chmod(0o700)
+    elif fault == "realpath":
+        contract["executableRealPath"] = "/usr/lib/chromium/other"
+    elif fault == "same-path":
+        contract["executablePath"] = contract["launcherPath"]
+    with pytest.raises((runtime.Invalid, FileNotFoundError)):
+        runtime.validate_browser_contract(value, root)
+
+
+def test_runtime_system_contract_plumbs_exact_executable_without_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, _metric, _sibling, calls = prepare_runtime_run(tmp_path, monkeypatch)
+    value["browserContract"] = {"name": "system-chromium-v1"}
+    monkeypatch.setattr(
+        runtime,
+        "validate_browser_contract",
+        lambda _config: {
+            "name": "system-chromium-v1",
+            "executablePath": "/usr/lib/chromium/chromium",
+        },
+    )
+    assert runtime.run(value) == 0
+    child = next(call for call in calls if call["argv"][0] == "runuser")
+    assert child["env"]["PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH"] == "/usr/lib/chromium/chromium"
+    assert child["env"]["PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD"] == "1"
+    assert "PLAYWRIGHT_BROWSERS_PATH" not in child["env"]
+
+
 def test_runtime_main_reports_success_and_bounded_preflight(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
@@ -179,6 +265,7 @@ def runtime_runner(tmp_path: Path) -> tuple[dict, Path]:
         "schemaVersion": 1,
         "runnerRevision": revision,
         "repositoryIdentity": runtime.APPROVED_REPOSITORY_IDENTITY,
+        "browserContract": {"name": "runner-local-playwright-v1"},
         "playwrightBrowserExecutable": "playwright-browser/browser-executable",
         "files": {relative: runtime.sha256(destination / relative) for relative in required},
     }
@@ -315,6 +402,14 @@ def prepare_runtime_run(
     monkeypatch.setattr(runtime.pwd, "getpwnam", lambda _name: account)
     monkeypatch.setattr(runtime.grp, "getgrnam", lambda _name: SimpleNamespace(gr_gid=os.getgid()))
     monkeypatch.setattr(runtime, "validate_runner", lambda _config: runner)
+    monkeypatch.setattr(
+        runtime,
+        "validate_browser_contract",
+        lambda _config: {
+            "name": "runner-local-playwright-v1",
+            "executablePath": str(runner / "playwright-browser/browser-executable"),
+        },
+    )
     monkeypatch.setattr(runtime, "validate_dir", lambda *_args: None)
     monkeypatch.setattr(runtime.os, "chown", lambda *_args: None)
     calls: list[dict] = []
@@ -572,6 +667,10 @@ def test_materialize_orchestrates_complete_snapshot_without_host_node(
 
     class CanonicalRuntime:
         @staticmethod
+        def load_config(_path: Path) -> dict:
+            return {"browserContract": {"name": "system-chromium-v1"}}
+
+        @staticmethod
         def discover_playwright_browser(runner: Path) -> Path:
             return runner / discovered
 
@@ -622,6 +721,8 @@ def test_materialize_cli_dispatches_complete_coordinates(
             "9.0.0",
             "--browser-bundle",
             str(browser),
+            "--browser-contract",
+            "runner-local-playwright-v1",
         ],
     )
 
@@ -635,6 +736,7 @@ def test_materialize_cli_dispatches_complete_coordinates(
             "/fixture/pnpm",
             "9.0.0",
             browser.resolve(),
+            "runner-local-playwright-v1",
         )
     ]
 
@@ -904,11 +1006,15 @@ class StatusRuntime:
         return json.loads(path.read_text())
 
     @staticmethod
-    def validate_runner(value: dict) -> Path:
+    def validate_runner(value: dict, _root: Path = Path("/")) -> Path:
         runner = Path(value["runnerRoot"]) / value["runnerRevision"]
         if (runner / "invalid").exists():
             raise ValueError("runner validation failed")
         return runner
+
+    @staticmethod
+    def validate_browser_contract(value: dict, _root: Path = Path("/")) -> dict:
+        return {"name": value["browserContract"]["name"], "architecture": "aarch64"}
 
 
 def status_installation(tmp_path: Path) -> tuple[Path, Path, str]:
@@ -924,7 +1030,8 @@ def status_installation(tmp_path: Path) -> tuple[Path, Path, str]:
         json.dumps(
             {
                 "pnpmVersion": "9.0.0",
-                "playwrightBrowserExecutable": "playwright-browser/chromium/chrome",
+                "playwrightBrowserExecutable": None,
+                "browserContract": config_value["browserContract"],
             }
         )
     )
@@ -978,7 +1085,8 @@ def test_status_reports_validated_provenance_without_mutation_or_systemctl(
     ):
         assert f"{key}={config_value[key]}" in output
     assert "pnpmVersion=9.0.0" in output
-    assert "playwrightBrowserExecutable=playwright-browser/chromium/chrome" in output
+    assert "browserName=system-chromium-v1" in output
+    assert "browserArchitecture=aarch64" in output
     assert "runnerValidation=passed" in output
     assert "activation=not-queried" in output
     assert tree_bytes(root) == before
@@ -1103,7 +1211,7 @@ class FakeSnapshotRuntime:
     def load_config(path: Path) -> dict:
         return json.loads(path.read_text())
 
-    def validate_runner(self, config: dict) -> Path:
+    def validate_runner(self, config: dict, _root: Path = Path("/")) -> Path:
         runner = Path(config["runnerRoot"]) / config["runnerRevision"]
         self.validated.append(runner)
         if not (runner / ".git").is_dir():
