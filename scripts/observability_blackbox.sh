@@ -233,7 +233,7 @@ verify_series() {
     done
     rc=0
     FINAL_ATTEMPT="$((attempt==attempts))" python3 "${ROOT}/scripts/verify_blackbox_prometheus.py" <<<"$(printf '{"targets":%s,"metrics":%s}' "${targets}" "${metrics}")" || rc=$?
-    case "${rc}" in 0) echo "All 16 staging blackbox targets and required metric families are healthy."; return;; 10) ((attempt<attempts)) && { echo "Blackbox targets are converging (attempt ${attempt}/${attempts}); retrying." >&2; sleep "${interval}"; };; *) exit "${rc}";; esac
+    case "${rc}" in 0) echo "All 21 staging blackbox targets and required metric families are healthy."; return;; 10) ((attempt<attempts)) && { echo "Blackbox targets are converging (attempt ${attempt}/${attempts}); retrying." >&2; sleep "${interval}"; };; *) exit "${rc}";; esac
   done
   exit 10
 }

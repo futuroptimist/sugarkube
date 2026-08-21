@@ -411,21 +411,21 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(min by (environment, app, route) (probe_success{job=~\"probe/monitoring/blackbox-(dspace|tokenplace|danielsmith|jobbot3000)-$environment-.*\",environment=~\"$environment\",app=~\"$app\",route=~\"$route\"}) == bool 1)",
+          "expr": "sum(min by (environment, app, route) (probe_success{job=~\"probe/monitoring/blackbox-(dspace|tokenplace|danielsmith|jobbot3000|gitshelves)-$environment-.*\",environment=~\"$environment\",app=~\"$app\",route=~\"$route\"}) == bool 1)",
           "legendFormat": "Healthy endpoints",
           "instant": true,
           "range": false
         },
         {
           "refId": "B",
-          "expr": "sum(min by (environment, app, route) (probe_success{job=~\"probe/monitoring/blackbox-(dspace|tokenplace|danielsmith|jobbot3000)-$environment-.*\",environment=~\"$environment\",app=~\"$app\",route=~\"$route\"}) == bool 0)",
+          "expr": "sum(min by (environment, app, route) (probe_success{job=~\"probe/monitoring/blackbox-(dspace|tokenplace|danielsmith|jobbot3000|gitshelves)-$environment-.*\",environment=~\"$environment\",app=~\"$app\",route=~\"$route\"}) == bool 0)",
           "legendFormat": "Failed endpoints",
           "instant": true,
           "range": false
         },
         {
           "refId": "C",
-          "expr": "sum(max by (environment, app, route) (max_over_time(up{job=~\"probe/monitoring/blackbox-(dspace|tokenplace|danielsmith|jobbot3000)-$environment-.*\",environment=~\"$environment\",app=~\"$app\",route=~\"$route\"}[7d])) >= bool 0) - (sum(min by (environment, app, route) (probe_success{job=~\"probe/monitoring/blackbox-(dspace|tokenplace|danielsmith|jobbot3000)-$environment-.*\",environment=~\"$environment\",app=~\"$app\",route=~\"$route\"}) >= bool 0) or vector(0))",
+          "expr": "sum(max by (environment, app, route) (max_over_time(up{job=~\"probe/monitoring/blackbox-(dspace|tokenplace|danielsmith|jobbot3000|gitshelves)-$environment-.*\",environment=~\"$environment\",app=~\"$app\",route=~\"$route\"}[7d])) >= bool 0) - (sum(min by (environment, app, route) (probe_success{job=~\"probe/monitoring/blackbox-(dspace|tokenplace|danielsmith|jobbot3000|gitshelves)-$environment-.*\",environment=~\"$environment\",app=~\"$app\",route=~\"$route\"}) >= bool 0) or vector(0))",
           "legendFormat": "Missing probe data",
           "instant": true,
           "range": false

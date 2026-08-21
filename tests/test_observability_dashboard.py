@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 STAGING = ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
 PROD = ROOT / "clusters/prod/observability/dashboards/sugarkube-prod-observability.json"
 GENERATOR = ROOT / "scripts/generate_observability_dashboards.py"
+TEMPLATE = ROOT / "platform/observability/dashboards/sugarkube-observability.template.json"
 sys.path.insert(0, str(ROOT))
 from scripts import generate_observability_dashboards as generator  # noqa: E402
 from scripts import validate_observability_dashboard as validator  # noqa: E402
@@ -40,6 +41,18 @@ def test_generator_check_and_outputs_are_deterministic(dashboards):
     assert len(staging["panels"]) == 60
     assert sum(item["type"] == "row" for item in staging["panels"]) == 11
     assert sum(item["type"] != "row" for item in staging["panels"]) == 49
+
+
+def test_public_availability_summary_includes_gitshelves_in_every_expression(dashboards):
+    expected_fleet = "blackbox-(dspace|tokenplace|danielsmith|jobbot3000|gitshelves)"
+    documents = [json.loads(TEMPLATE.read_text(encoding="utf-8")), *dashboards]
+    for document in documents:
+        expressions = [
+            target["expr"]
+            for target in panel(document, "Public availability summary")["targets"]
+        ]
+        assert len(expressions) == 3
+        assert all(expected_fleet in expression for expression in expressions)
 
 
 def test_finalized_staging_evidence_link_is_current(dashboards):

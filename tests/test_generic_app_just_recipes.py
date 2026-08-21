@@ -2592,6 +2592,33 @@ def test_app_deploy_uses_app_release_namespace_chart_values(
         assert "--version 9.9.9" not in helm_log
 
 
+@pytest.mark.usefixtures("ensure_just_available")
+def test_gitshelves_staging_deploy_uses_pinned_chart_and_immutable_image(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    result = _run_just(
+        [
+            "app-deploy",
+            "app=gitshelves",
+            "env=staging",
+            "tag=main-2125943cca1c",
+        ],
+        generic_app_stub_env,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
+    deploy = next(line for line in helm_log.splitlines() if line.startswith("upgrade "))
+    assert deploy.startswith(
+        "upgrade gitshelves oci://ghcr.io/futuroptimist/charts/gitshelves "
+    )
+    assert "--namespace gitshelves" in deploy
+    assert "-f docs/examples/gitshelves.values.dev.yaml" in deploy
+    assert "-f docs/examples/gitshelves.values.staging.yaml" in deploy
+    assert "--version 0.1.0" in deploy
+    assert "--set image.tag=main-2125943cca1c" in deploy
+
+
 def test_app_deploy_fails_tokenplace_when_manifest_metadata_env_missing(
     generic_app_stub_env: dict[str, str],
 ) -> None:
