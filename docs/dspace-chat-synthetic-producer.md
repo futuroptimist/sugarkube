@@ -20,6 +20,14 @@ without the source checkout, alternates, hard-linked objects, or a shared object
 `node_modules/.pnpm` store and frontend dependency links are retained because pnpm workspace links
 alone are not dependencies: their package targets live in that root content-addressed layout.
 
+Browser selection is also an explicit, fail-closed contract. The staging configuration selects
+`system-chromium-v1` for `aarch64` and pins the regular `root:root` mode `0755` launcher
+`/usr/bin/chromium` and scheduled executable `/usr/lib/chromium/chromium` by their separate SHA-256
+values and real paths. The launcher is provenance evidence; the executable is passed to the pinned
+DSPACE Playwright configuration as `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`, so the verified file is
+the file Playwright launches. The runtime does not search `$PATH`, infer a browser from files on the
+host, or fall back to a runner-local bundle. It repeats this validation before every invocation.
+
 ## 1. Construct an independent runner
 
 Use only an explicitly identified, clean local DSPACE checkout. Construction uses the exact
@@ -31,15 +39,19 @@ python3 scripts/install_dspace_chat_synthetic.py materialize \
   --revision 97ab09f13fb098de928a878bf1fe9b8d13032cb5 \
   --repository-identity https://github.com/democratizedspace/dspace.git \
   --output /absolute/staging/97ab09f13fb098de928a878bf1fe9b8d13032cb5 \
-  --pnpm /absolute/toolchain/pnpm --pnpm-version 9.0.0 \
-  --browser-bundle /absolute/path/to/browser-bundle
+  --pnpm /absolute/toolchain/pnpm --pnpm-version 9.0.0
 ```
 
 The explicitly selected pnpm executable must report exactly `9.0.0`, matching the pinned DSPACE
-commit's `packageManager`. The supplied local browser bundle is copied into the runner and used through a runner-local `PLAYWRIGHT_BROWSERS_PATH`; no `$HOME` cache is trusted. The local pnpm cache must already contain the exact lockfile's packages. Construction fails for a
+commit's `packageManager`. Under the selected system contract no browser is downloaded, copied, or
+installed and `--browser-bundle` is rejected. The local pnpm cache must already contain the exact lockfile's packages. Construction fails for a
 missing object, wrong HEAD, dirty tracked/index state, alternates, missing root store, broken
 frontend link, unusable Playwright shim/module resolution, or missing critical file. Its manifest
-records hashes for the runner, spec, workspace manifests, and lockfile.
+records hashes for the runner, spec, workspace manifests, and lockfile as well as the selected safe
+browser provenance. If a future repository configuration explicitly selects
+`runner-local-playwright-v1`, materialization instead requires `--browser-bundle`, copies and hashes
+the Playwright-selected executable below `playwright-browser`, and runtime sets only the
+runner-local `PLAYWRIGHT_BROWSERS_PATH`. Neither contract can fall back to the other.
 
 ## 2. Validate and dry-run installation
 
@@ -54,7 +66,18 @@ python3 scripts/install_dspace_chat_synthetic.py dry-run --root /tmp/rehearsal-r
 python3 scripts/install_dspace_chat_synthetic.py status --root /tmp/rehearsal-root
 ```
 
-The preflight first loads the rendered configuration and validates its exact runner revision against
+`--root` is both the installation target root and the source root for absolute system-browser
+coordinates: `/usr/bin/chromium` is therefore validated as
+`/tmp/rehearsal-root/usr/bin/chromium` in that example, never against the live host's `/usr`.
+Alternate-root status and dry-run remain non-mutating and never query live systemd. The configured
+architecture must match the platform being validated; private rehearsal roots should be validated
+on their target architecture. Do not populate a private root by copying from or changing the live
+host through this installer.
+
+The preflight first loads the rendered configuration and validates the complete browser contract,
+including architecture, paths, real paths, hashes, regular/executable state, owner, group, mode, and
+declared launcher/executable provenance relationship, before any installation mutation. It also
+validates its exact runner revision against
 the snapshot basename, manifest hashes, independent Git metadata, dependencies, and Node/Playwright
 resolution. Review all hashes and coordinates. `status` is read-only and, for alternate roots, reports activation as not queried; only `/` queries unit activation without
 printing configuration secrets (the committed configuration contains none). A failed staging or
