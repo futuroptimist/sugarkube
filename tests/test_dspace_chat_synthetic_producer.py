@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import platform
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -56,7 +57,7 @@ def test_configuration_selects_contracts_and_exact_legacy_coordinate(tmp_path: P
     value = config(tmp_path)
     path.write_text(json.dumps(value))
     assert runtime.load_config(path)["providerConfigContract"] == "legacy-no-default-provider-v1"
-    for key in ("identityContract", "providerConfigContract"):
+    for key in ("identityContract", "providerConfigContract", "browserContract"):
         broken = copy.deepcopy(value)
         broken.pop(key)
         path.write_text(json.dumps(broken))
@@ -124,6 +125,92 @@ def test_configuration_rejects_remaining_invalid_contract_values(
         runtime.load_config(path)
 
 
+def system_browser_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[dict, Path]:
+    root = tmp_path / "target"
+    launcher = root / "usr/bin/chromium"
+    executable = root / "usr/lib/chromium/chromium"
+    for path, contents in ((launcher, b"launcher"), (executable, b"executable")):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(contents)
+        path.chmod(0o755)
+    info = launcher.stat()
+    contract = {
+        "name": runtime.SYSTEM_CHROMIUM,
+        "architecture": "aarch64",
+        "launcherPath": "/usr/bin/chromium",
+        "launcherRealpath": "/usr/bin/chromium",
+        "launcherSha256": runtime.sha256(launcher),
+        "executablePath": "/usr/lib/chromium/chromium",
+        "executableRealpath": "/usr/lib/chromium/chromium",
+        "executableSha256": runtime.sha256(executable),
+        "owner": runtime.pwd.getpwuid(info.st_uid).pw_name,
+        "group": runtime.grp.getgrgid(info.st_gid).gr_name,
+        "mode": "0755",
+        "launcherExecutableRelationship": "distinct-files",
+    }
+    monkeypatch.setattr(runtime.platform, "machine", lambda: "aarch64")
+    return contract, root
+
+
+def test_explicit_system_browser_contract_validates_target_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    contract, root = system_browser_fixture(tmp_path, monkeypatch)
+    value = {"browserContract": contract}
+    provenance = runtime.validate_browser_contract(value, tmp_path / "runner", root)
+    assert provenance["executablePath"] == "/usr/lib/chromium/chromium"
+    assert provenance["executableSha256"] == contract["executableSha256"]
+
+
+@pytest.mark.parametrize(
+    ("fault", "field"),
+    [
+        ("architecture", None),
+        ("launcher-hash", "launcherSha256"),
+        ("executable-hash", "executableSha256"),
+        ("mode", "mode"),
+        ("owner", "owner"),
+        ("group", "group"),
+        ("launcher-realpath", "launcherRealpath"),
+        ("executable-realpath", "executableRealpath"),
+        ("relationship", "launcherExecutableRelationship"),
+    ],
+)
+def test_system_browser_contract_fails_closed_on_provenance_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str, field: str | None
+) -> None:
+    contract, root = system_browser_fixture(tmp_path, monkeypatch)
+    if fault == "architecture":
+        monkeypatch.setattr(runtime.platform, "machine", lambda: "x86_64")
+    elif fault in {"launcher-hash", "executable-hash"}:
+        contract[field] = "0" * 64
+    elif fault == "mode":
+        (root / "usr/bin/chromium").chmod(0o700)
+    elif fault in {"owner", "group"}:
+        contract[field] = "definitely-absent"
+    elif fault.endswith("realpath"):
+        contract[field] = "/unexpected"
+    else:
+        contract[field] = "same-file"
+    with pytest.raises(runtime.Invalid):
+        runtime.validate_browser_contract({"browserContract": contract}, tmp_path / "runner", root)
+
+
+def test_system_browser_contract_rejects_missing_nonregular_and_symlinked_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    contract, root = system_browser_fixture(tmp_path, monkeypatch)
+    launcher = root / "usr/bin/chromium"
+    launcher.unlink()
+    launcher.mkdir()
+    with pytest.raises(runtime.Invalid):
+        runtime.validate_browser_contract({"browserContract": contract}, tmp_path / "runner", root)
+    launcher.rmdir()
+    launcher.symlink_to(root / "usr/lib/chromium/chromium")
+    with pytest.raises(runtime.Invalid):
+        runtime.validate_browser_contract({"browserContract": contract}, tmp_path / "runner", root)
+
+
 def test_runtime_main_reports_success_and_bounded_preflight(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
@@ -140,6 +227,7 @@ def test_runtime_main_reports_success_and_bounded_preflight(
 
 def runtime_runner(tmp_path: Path) -> tuple[dict, Path]:
     value = config(tmp_path)
+    value["browserContract"] = {"name": runtime.RUNNER_LOCAL}
     runner = Path(value["runnerRoot"]) / "fixture"
     runner.mkdir(parents=True)
     git("init", cwd=runner)
@@ -179,8 +267,15 @@ def runtime_runner(tmp_path: Path) -> tuple[dict, Path]:
         "schemaVersion": 1,
         "runnerRevision": revision,
         "repositoryIdentity": runtime.APPROVED_REPOSITORY_IDENTITY,
+        "browserContract": value["browserContract"],
         "playwrightBrowserExecutable": "playwright-browser/browser-executable",
         "files": {relative: runtime.sha256(destination / relative) for relative in required},
+    }
+    manifest["browserProvenance"] = {
+        "name": runtime.RUNNER_LOCAL,
+        "architecture": platform.machine(),
+        "executablePath": "playwright-browser/browser-executable",
+        "executableSha256": runtime.sha256(destination / "playwright-browser/browser-executable"),
     }
     (destination / "sugarkube-runner-manifest.json").write_text(json.dumps(manifest))
     return value, destination
@@ -315,6 +410,23 @@ def prepare_runtime_run(
     monkeypatch.setattr(runtime.pwd, "getpwnam", lambda _name: account)
     monkeypatch.setattr(runtime.grp, "getgrnam", lambda _name: SimpleNamespace(gr_gid=os.getgid()))
     monkeypatch.setattr(runtime, "validate_runner", lambda _config: runner)
+    monkeypatch.setattr(
+        runtime,
+        "validate_browser_contract",
+        lambda *_args, **_kwargs: {
+            "name": runtime.RUNNER_LOCAL,
+            "architecture": platform.machine(),
+            "executablePath": "playwright-browser/browser-executable",
+            "executableSha256": "0" * 64,
+        },
+    )
+    (runner / "sugarkube-runner-manifest.json").write_text(
+        json.dumps(
+            {
+                "browserProvenance": runtime.validate_browser_contract(value, runner),
+            }
+        )
+    )
     monkeypatch.setattr(runtime, "validate_dir", lambda *_args: None)
     monkeypatch.setattr(runtime.os, "chown", lambda *_args: None)
     calls: list[dict] = []
@@ -383,6 +495,48 @@ def test_runtime_run_uses_minimal_environment_and_cleans_direct_entries(
     assert node_argv[provider_index + 1] == value["provider"] == "token-place"
     assert not (Path(value["resultRoot"]) / f"uid-{os.getuid()}-{'a' * 32}").exists()
     assert (sibling / "keep").read_text() == "untouched"
+
+
+def test_runtime_plumbs_exact_system_executable_and_not_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, _metric, _sibling, calls = prepare_runtime_run(tmp_path, monkeypatch)
+    provenance = {
+        "name": runtime.SYSTEM_CHROMIUM,
+        "architecture": "aarch64",
+        "executablePath": "/usr/lib/chromium/chromium",
+        "executableSha256": "f" * 64,
+    }
+    runner = tmp_path / "runner"
+    (runner / "sugarkube-runner-manifest.json").write_text(
+        json.dumps({"browserProvenance": provenance})
+    )
+    monkeypatch.setattr(runtime, "validate_browser_contract", lambda *_a, **_k: provenance)
+
+    assert runtime.run(value) == 0
+    child = next(call for call in calls if call["argv"][0] == "runuser")
+    assert child["env"]["PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH"] == provenance["executablePath"]
+    assert "PLAYWRIGHT_BROWSERS_PATH" not in child["env"]
+
+
+def test_runtime_browser_drift_blocks_playwright_and_preserves_metric(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, metric, _sibling, calls = prepare_runtime_run(tmp_path, monkeypatch)
+    provenance = runtime.validate_browser_contract(value, tmp_path / "runner")
+    validations = 0
+
+    def drift(*_args, **_kwargs):
+        nonlocal validations
+        validations += 1
+        if validations == 1:
+            return provenance
+        raise runtime.Invalid("system browser provenance")
+
+    monkeypatch.setattr(runtime, "validate_browser_contract", drift)
+    assert runtime.run(value) == 1
+    assert metric.read_bytes() == b"previous metric\n"
+    assert not any(call["argv"][0] == "runuser" for call in calls)
 
 
 @pytest.mark.parametrize(
@@ -548,6 +702,8 @@ def test_materialize_discovers_browser_and_is_source_independent(
         str(pnpm),
         "9.1.0",
         browser_bundle,
+        {"name": runtime.RUNNER_LOCAL},
+        Path("/"),
     )
     manifest = json.loads((output / "sugarkube-runner-manifest.json").read_text())
     relative = manifest["playwrightBrowserExecutable"]
@@ -558,6 +714,7 @@ def test_materialize_discovers_browser_and_is_source_independent(
     __import__("shutil").rmtree(browser_bundle)
     value = config(tmp_path)
     value.update(runnerRoot=str(output.parent), runnerRevision=revision)
+    value["browserContract"] = {"name": runtime.RUNNER_LOCAL}
     assert runtime.validate_runner(value) == output
 
 
@@ -571,9 +728,22 @@ def test_materialize_orchestrates_complete_snapshot_without_host_node(
     validations = []
 
     class CanonicalRuntime:
+        RUNNER_LOCAL = runtime.RUNNER_LOCAL
+        SYSTEM_CHROMIUM = runtime.SYSTEM_CHROMIUM
+
         @staticmethod
         def discover_playwright_browser(runner: Path) -> Path:
             return runner / discovered
+
+        @staticmethod
+        def validate_browser_contract(_config: dict, runner: Path, _root: Path) -> dict:
+            browser = runner / discovered
+            return {
+                "name": runtime.RUNNER_LOCAL,
+                "architecture": platform.machine(),
+                "executablePath": str(discovered),
+                "executableSha256": runtime.sha256(browser),
+            }
 
     def validate_snapshot(snapshot: Path, expected_revision: str) -> None:
         validations.append((snapshot, expected_revision))
@@ -590,12 +760,61 @@ def test_materialize_orchestrates_complete_snapshot_without_host_node(
         str(pnpm),
         "9.1.0",
         browser_bundle,
+        {"name": runtime.RUNNER_LOCAL},
+        Path("/"),
     )
 
     manifest = json.loads((output / "sugarkube-runner-manifest.json").read_text())
     assert manifest["playwrightBrowserExecutable"] == str(discovered)
     assert manifest["files"][str(discovered)] == runtime.sha256(output / discovered)
     assert validations[-1] == (output, revision)
+
+
+def test_system_materialize_skips_browser_bundle_and_download(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, revision, _browser_bundle, pnpm = materialization_fixture(tmp_path)
+    contract, browser_root = system_browser_fixture(tmp_path, monkeypatch)
+    output = tmp_path / "output" / revision
+    environments = []
+    real_run = installer.subprocess.run
+
+    def record_run(argv, **kwargs):
+        if argv[0] == str(pnpm) and argv[1] == "install":
+            environments.append(kwargs["env"])
+        return real_run(argv, **kwargs)
+
+    monkeypatch.setattr(installer.subprocess, "run", record_run)
+    installer.materialize(
+        source,
+        revision,
+        runtime.APPROVED_REPOSITORY_IDENTITY,
+        output,
+        str(pnpm),
+        "9.1.0",
+        None,
+        contract,
+        browser_root,
+    )
+    manifest = json.loads((output / "sugarkube-runner-manifest.json").read_text())
+    assert manifest["playwrightBrowserExecutable"] is None
+    assert manifest["browserContract"] == contract
+    assert not (output / "playwright-browser").exists()
+    assert environments[0]["PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD"] == "1"
+    assert "PLAYWRIGHT_BROWSERS_PATH" not in environments[0]
+
+    with pytest.raises(ValueError, match="forbids"):
+        installer.materialize(
+            source,
+            revision,
+            runtime.APPROVED_REPOSITORY_IDENTITY,
+            tmp_path / "another-output",
+            str(pnpm),
+            "9.1.0",
+            tmp_path,
+            contract,
+            browser_root,
+        )
 
 
 def test_materialize_cli_dispatches_complete_coordinates(
@@ -622,6 +841,8 @@ def test_materialize_cli_dispatches_complete_coordinates(
             "9.0.0",
             "--browser-bundle",
             str(browser),
+            "--browser-source-root",
+            "/",
         ],
     )
 
@@ -635,6 +856,8 @@ def test_materialize_cli_dispatches_complete_coordinates(
             "/fixture/pnpm",
             "9.0.0",
             browser.resolve(),
+            json.loads(CONFIG.read_text())["browserContract"],
+            Path("/").resolve(),
         )
     ]
 
@@ -899,6 +1122,9 @@ def test_installer_dry_run_status_apply_and_exact_rollback(tmp_path: Path, capsy
 
 
 class StatusRuntime:
+    RUNNER_LOCAL = runtime.RUNNER_LOCAL
+    SYSTEM_CHROMIUM = runtime.SYSTEM_CHROMIUM
+
     @staticmethod
     def load_config(path: Path) -> dict:
         return json.loads(path.read_text())
@@ -909,6 +1135,12 @@ class StatusRuntime:
         if (runner / "invalid").exists():
             raise ValueError("runner validation failed")
         return runner
+
+    @staticmethod
+    def validate_browser_contract(_value: dict, runner: Path, _root: Path) -> dict:
+        return json.loads((runner / "sugarkube-runner-manifest.json").read_text())[
+            "browserProvenance"
+        ]
 
 
 def status_installation(tmp_path: Path) -> tuple[Path, Path, str]:
@@ -924,7 +1156,25 @@ def status_installation(tmp_path: Path) -> tuple[Path, Path, str]:
         json.dumps(
             {
                 "pnpmVersion": "9.0.0",
-                "playwrightBrowserExecutable": "playwright-browser/chromium/chrome",
+                "playwrightBrowserExecutable": None,
+                "browserProvenance": {
+                    "name": runtime.SYSTEM_CHROMIUM,
+                    "architecture": "aarch64",
+                    "executablePath": "/usr/lib/chromium/chromium",
+                    "executableSha256": (
+                        "f8cf8a41a3406375dc9b9af5ce25a3fe" "ceca3d4e9e72d18671db07cdee7a75a6"
+                    ),
+                    "launcherPath": "/usr/bin/chromium",
+                    "launcherRealpath": "/usr/bin/chromium",
+                    "launcherSha256": (
+                        "be1d239c2a7a9298c202d506e589d230" "56064bd52b82fa3d3cf72a0a2de3337c"
+                    ),
+                    "executableRealpath": "/usr/lib/chromium/chromium",
+                    "owner": "root",
+                    "group": "root",
+                    "mode": "0755",
+                    "launcherExecutableRelationship": "distinct-files",
+                },
             }
         )
     )
@@ -978,7 +1228,7 @@ def test_status_reports_validated_provenance_without_mutation_or_systemctl(
     ):
         assert f"{key}={config_value[key]}" in output
     assert "pnpmVersion=9.0.0" in output
-    assert "playwrightBrowserExecutable=playwright-browser/chromium/chrome" in output
+    assert "playwrightBrowserExecutable=none" in output
     assert "runnerValidation=passed" in output
     assert "activation=not-queried" in output
     assert tree_bytes(root) == before
@@ -1090,11 +1340,16 @@ def runner_snapshot_fixture(tmp_path: Path) -> tuple[Path, str]:
     snapshot.mkdir(parents=True)
     (snapshot / ".git").mkdir()
     (snapshot / "dependency.ok").write_text("complete\n")
-    (snapshot / "sugarkube-runner-manifest.json").write_text("manifest\n")
+    (snapshot / "sugarkube-runner-manifest.json").write_text(
+        json.dumps({"browserProvenance": {"name": runtime.SYSTEM_CHROMIUM}})
+    )
     return snapshot, revision
 
 
 class FakeSnapshotRuntime:
+    RUNNER_LOCAL = runtime.RUNNER_LOCAL
+    SYSTEM_CHROMIUM = runtime.SYSTEM_CHROMIUM
+
     def __init__(self, fail_copy: bool = False):
         self.fail_copy = fail_copy
         self.validated = []
@@ -1117,6 +1372,10 @@ class FakeSnapshotRuntime:
         if self.fail_copy and ".validate." in str(runner):
             raise ValueError("copied runner validation failed")
         return runner
+
+    @staticmethod
+    def validate_browser_contract(_config: dict, _runner: Path, _root: Path) -> dict:
+        return {"name": runtime.SYSTEM_CHROMIUM}
 
 
 @pytest.mark.parametrize(
