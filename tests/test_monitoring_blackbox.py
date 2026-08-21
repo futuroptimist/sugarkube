@@ -23,8 +23,8 @@ EXPECTED = {
     ("gitshelves", "root", "https://staging.gitshelves.com/", "https_2xx"),
     ("gitshelves", "healthz", "https://staging.gitshelves.com/healthz", "json_health_2xx"),
     ("gitshelves", "livez", "https://staging.gitshelves.com/livez", "json_health_2xx"),
-    ("gitshelves", "baseplate", "https://staging.gitshelves.com/models/baseplate_2x6.stl", "static_content_2xx"),
-    ("gitshelves", "module", "https://staging.gitshelves.com/models/contrib_cube.stl", "static_content_2xx"),
+    ("gitshelves", "baseplate", "https://staging.gitshelves.com/models/baseplate_2x6.stl", "stl_content_2xx"),
+    ("gitshelves", "module", "https://staging.gitshelves.com/models/contrib_cube.stl", "stl_content_2xx"),
     ("jobbot3000", "root", "https://staging.jobbot3000.tech/", "https_2xx"),
     ("jobbot3000", "healthz", "https://staging.jobbot3000.tech/healthz", "json_health_2xx"),
     ("jobbot3000", "livez", "https://staging.jobbot3000.tech/livez", "json_health_2xx"),
@@ -77,13 +77,14 @@ def test_pinned_chart_values_are_private_and_bounded():
         )
     )
     modules = value["config"]["modules"]
-    assert set(modules) == {"https_2xx", "json_health_2xx", "static_content_2xx"}
+    assert set(modules) == {"https_2xx", "json_health_2xx", "static_content_2xx", "stl_content_2xx"}
     for module in modules.values():
         assert module["timeout"] == "10s"
         assert module["http"]["fail_if_not_ssl"] is True
         assert module["http"]["tls_config"]["insecure_skip_verify"] is False
     assert modules["json_health_2xx"]["http"]["body_size_limit"] == "1MiB"
     assert modules["static_content_2xx"]["http"]["body_size_limit"] == "1MiB"
+    assert modules["stl_content_2xx"]["http"]["body_size_limit"] == "10MiB"
 
 
 def test_staging_probe_matrix_is_exact():
@@ -106,6 +107,12 @@ def test_staging_probe_matrix_is_exact():
             )
         )
     assert actual == EXPECTED
+    pending = [
+        doc for doc in docs
+        if doc["metadata"].get("annotations", {}).get("sugarkube.dev/wan-drill") == "pending"
+    ]
+    assert len(pending) == 5
+    assert {doc["metadata"]["labels"]["app"] for doc in pending} == {"gitshelves"}
     assert "production" not in PROBES.read_text() and "environment: prod" not in PROBES.read_text()
 
 

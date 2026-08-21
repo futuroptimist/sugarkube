@@ -151,7 +151,7 @@ elif name == "helm":
         out(json.dumps(entries)); save()
 elif name == "just": sys.exit(0)
 elif name == "ruby":
-    for i in range(21): out(f"https://endpoint-{i}.test")
+    for i in range(16): out(f"https://endpoint-{i}.test")
 elif name == "curl": event("endpoint", response=state["endpoint"]); out(str(state["endpoint"]))
 elif name == "date": out("20260809T000000Z")
 elif name == "sleep":
@@ -336,7 +336,7 @@ def manual_plan_environment(
     stub("helm", f"case \"$*\" in *' list '*) printf '%s\\n' '[{{\"name\":\"cloudflare-tunnel\",\"status\":\"deployed\",\"chart\":\"cloudflare-tunnel-0.3.2\"}}]';; *cloudflare-tunnel*) printf '%s\\n' '[{{\"status\":\"deployed\",\"revision\":2}}]';; *) printf '%s\\n' {json.dumps(obs_history)};; esac\n")
     stub("kubectl", f"case \"$*\" in *current-context*) echo {context};; *'get deployment'*) printf '%s\\n' {json.dumps(json.dumps(deployment))};; *'get pods'*) printf '%s\\n' {json.dumps(json.dumps(pods))};; *'get secret'*) printf 'secret-uid\\t12\\t2026-08-09T00:00:00Z\\n';; *ALERTS*) printf '%s\\n' '{{\"data\":{{\"result\":[{{\"value\":[0,\"0\"]}}]}}}}';; *get\\ --raw*) printf '%s\\n' '{{\"data\":{{\"result\":[{{\"value\":[0,\"2\"]}}]}}}}';; esac\n")
     stub("just", "exit 0\n")
-    stub("ruby", "i=1; while [ $i -le 21 ]; do echo https://endpoint-$i.test; i=$((i+1)); done\n")
+    stub("ruby", "i=1; while [ $i -le 16 ]; do echo https://endpoint-$i.test; i=$((i+1)); done\n")
     stub("curl", "printf 200\n")
     stub("date", "printf 20260809T000000Z\n")
     return {
@@ -465,7 +465,7 @@ def test_operator_confirmation_is_enforced_before_preflight() -> None:
         "connector pods must be on distinct nodes",
         "Prometheus targets are unhealthy",
         "a Cloudflare alert is active",
-        "approved staging endpoint manifest must contain exactly 21 URLs",
+        "approved staging WAN-drill endpoint manifest must contain exactly 16 URLs",
     ],
 )
 def test_preflight_fail_closed_guards_are_present(needle: str) -> None:

@@ -1500,6 +1500,7 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
       oci://ghcr.io/futuroptimist/charts/tokenplace) chart_identity=tokenplace ;;
       oci://ghcr.io/futuroptimist/charts/danielsmith) chart_identity=danielsmith ;;
       oci://ghcr.io/futuroptimist/charts/jobbot3000) chart_identity=jobbot3000 ;;
+      oci://ghcr.io/futuroptimist/charts/gitshelves) chart_identity=gitshelves ;;
     esac
     if [ -z "${app}" ]; then
       app="${chart_identity}"
