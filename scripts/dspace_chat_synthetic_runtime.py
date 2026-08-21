@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import pwd
+import platform
 import re
 import shutil
 import stat
@@ -45,7 +46,10 @@ REQUIRED = {
     "resultRoot",
     "metricPath",
     "metricsConsumer",
+    "browserContract",
 }
+
+BROWSER_CONTRACTS = {"runner-local-playwright-v1", "system-chromium-v1"}
 
 
 class Invalid(RuntimeError):
@@ -60,10 +64,11 @@ def load_config(path: Path) -> dict:
         or not REQUIRED <= value.keys()
     ):
         raise Invalid("configuration schema")
-    string_keys = REQUIRED - {"timeoutSeconds"}
+    string_keys = REQUIRED - {"timeoutSeconds", "browserContract"}
     if (
         any(not isinstance(value[key], str) for key in string_keys)
         or not isinstance(value["timeoutSeconds"], int)
+        or not isinstance(value["browserContract"], dict)
         or isinstance(value["timeoutSeconds"], bool)
     ):
         raise Invalid("configuration value type")
@@ -76,7 +81,8 @@ def load_config(path: Path) -> dict:
     if value["tokenPlaceModel"] != APPROVED_TOKEN_PLACE_MODEL:
         raise Invalid("token.place model")
     if any(
-        not SERVICE_IDENTIFIER.fullmatch(value[key]) for key in ("serviceAccount", "serviceGroup")
+        not SERVICE_IDENTIFIER.fullmatch(value[key])
+        for key in ("serviceAccount", "serviceGroup")
     ):
         raise Invalid("service identifier")
     if value["identityContract"] != "build-info-v1":
@@ -92,6 +98,48 @@ def load_config(path: Path) -> dict:
     for key in ("runnerRoot", "resultRoot", "metricPath", "metricsConsumer"):
         if not Path(value[key]).is_absolute():
             raise Invalid("configured path")
+    contract = value["browserContract"]
+    name = contract.get("name")
+    if name not in BROWSER_CONTRACTS:
+        raise Invalid("browser contract must be selected explicitly")
+    expected = {"name"}
+    if name == "system-chromium-v1":
+        expected |= {
+            "architecture",
+            "launcherPath",
+            "launcherRealpath",
+            "launcherSha256",
+            "launcherSymlink",
+            "executablePath",
+            "executableRealpath",
+            "executableSha256",
+            "owner",
+            "group",
+            "mode",
+        }
+    if set(contract) != expected:
+        raise Invalid("browser contract schema")
+    if name == "system-chromium-v1":
+        if (
+            any(
+                not isinstance(contract[key], str)
+                for key in expected - {"launcherSymlink"}
+            )
+            or type(contract["launcherSymlink"]) is not bool
+            or not all(
+                Path(contract[key]).is_absolute()
+                for key in (
+                    "launcherPath",
+                    "launcherRealpath",
+                    "executablePath",
+                    "executableRealpath",
+                )
+            )
+            or not SHA256.fullmatch(contract["launcherSha256"])
+            or not SHA256.fullmatch(contract["executableSha256"])
+            or not re.fullmatch(r"0[0-7]{3}", contract["mode"])
+        ):
+            raise Invalid("browser contract value")
     return value
 
 
@@ -118,7 +166,8 @@ def discover_playwright_browser(runner: Path) -> Path:
             "-e",
             "const {chromium}=require('@playwright/test');"
             "const p=chromium.executablePath();"
-            f"if(typeof p!=='string'||Buffer.byteLength(p)>{MAX_BROWSER_PATH_BYTES})process.exit(2);"
+            "if(typeof p!=='string'||"
+            f"Buffer.byteLength(p)>{MAX_BROWSER_PATH_BYTES})process.exit(2);"
             "process.stdout.write(p);",
         ],
         cwd=runner / "frontend",
@@ -128,7 +177,11 @@ def discover_playwright_browser(runner: Path) -> Path:
         stderr=subprocess.DEVNULL,
     )
     output = completed.stdout
-    if not isinstance(output, bytes) or not output or len(output) > MAX_BROWSER_PATH_BYTES:
+    if (
+        not isinstance(output, bytes)
+        or not output
+        or len(output) > MAX_BROWSER_PATH_BYTES
+    ):
         raise Invalid("Playwright browser discovery")
     try:
         discovered = Path(output.decode("utf-8"))
@@ -151,18 +204,96 @@ def discover_playwright_browser(runner: Path) -> Path:
     return resolved
 
 
-def validate_runner(config: dict) -> Path:
+def _rooted(root: Path, absolute: str) -> Path:
+    return root / Path(absolute).relative_to("/")
+
+
+def _target_realpath(root: Path, configured: str) -> Path:
+    """Resolve one configured path without allowing absolute links to escape root."""
+    path = _rooted(root, configured)
+    if not path.is_symlink():
+        return path.resolve(strict=True)
+    link = Path(os.readlink(path))
+    candidate = _rooted(root, str(link)) if link.is_absolute() else path.parent / link
+    resolved = candidate.resolve(strict=True)
+    resolved.relative_to(root.resolve(strict=True))
+    return resolved
+
+
+def validate_browser_contract(
+    config: dict, runner: Path, root: Path = Path("/")
+) -> dict:
+    """Validate only the explicitly selected browser, confined to target root."""
+    contract = config["browserContract"]
+    name = contract["name"]
+    if name == "runner-local-playwright-v1":
+        browser = discover_playwright_browser(runner)
+        return {
+            "name": name,
+            "architecture": platform.machine(),
+            "executablePath": str(browser),
+            "executableSha256": sha256(browser),
+        }
+    if name != "system-chromium-v1" or platform.machine() != contract["architecture"]:
+        raise Invalid("browser architecture or contract")
+    launcher = _rooted(root, contract["launcherPath"])
+    executable = _rooted(root, contract["executablePath"])
+    try:
+        launcher_info = launcher.lstat()
+        executable_info = executable.lstat()
+    except OSError:
+        raise Invalid("system browser path") from None
+    if launcher.is_symlink() != contract["launcherSymlink"]:
+        raise Invalid("system browser launcher semantics")
+    try:
+        resolved = _target_realpath(root, contract["launcherPath"])
+        resolved_executable = _target_realpath(root, contract["executablePath"])
+    except (OSError, ValueError):
+        raise Invalid("system browser launcher resolution") from None
+    launcher_realpath = _rooted(root, contract["launcherRealpath"])
+    executable_realpath = _rooted(root, contract["executableRealpath"])
+    if resolved != launcher_realpath or resolved_executable != executable_realpath:
+        raise Invalid("system browser provenance mismatch")
+    owner = pwd.getpwuid(executable_info.st_uid).pw_name
+    group = grp.getgrgid(executable_info.st_gid).gr_name
+    launcher_owner = pwd.getpwuid(launcher_info.st_uid).pw_name
+    launcher_group = grp.getgrgid(launcher_info.st_gid).gr_name
+    if (
+        (not contract["launcherSymlink"] and not stat.S_ISREG(launcher_info.st_mode))
+        or not os.access(launcher, os.X_OK)
+        or not stat.S_ISREG(executable_info.st_mode)
+        or not os.access(executable, os.X_OK)
+        or (owner, group, f"0{stat.S_IMODE(executable_info.st_mode):03o}")
+        != (contract["owner"], contract["group"], contract["mode"])
+        or (
+            launcher_owner,
+            launcher_group,
+            f"0{stat.S_IMODE(launcher_info.st_mode):03o}",
+        )
+        != (contract["owner"], contract["group"], contract["mode"])
+        or sha256(launcher) != contract["launcherSha256"]
+        or sha256(executable) != contract["executableSha256"]
+    ):
+        raise Invalid("system browser provenance")
+    return {**contract}
+
+
+def validate_runner(config: dict, root: Path = Path("/")) -> Path:
     runner = Path(config["runnerRoot"]) / config["runnerRevision"]
-    manifest = json.loads((runner / "sugarkube-runner-manifest.json").read_text(encoding="utf-8"))
+    manifest = json.loads(
+        (runner / "sugarkube-runner-manifest.json").read_text(encoding="utf-8")
+    )
     files = manifest.get("files")
     browser_relative = manifest.get("playwrightBrowserExecutable")
+    contract_name = config["browserContract"]["name"]
     if (
         manifest.get("schemaVersion") != 1
         or not isinstance(files, dict)
         or not files
         or manifest.get("runnerRevision") != config["runnerRevision"]
         or manifest.get("repositoryIdentity") != config["repositoryIdentity"]
-        or not isinstance(browser_relative, str)
+        or manifest.get("browserContract") != contract_name
+        or not isinstance(manifest.get("browserProvenance"), dict)
     ):
         raise Invalid("wrapper/config coordinate mismatch")
     for relative, expected in files.items():
@@ -175,15 +306,25 @@ def validate_runner(config: dict) -> Path:
             or not SHA256.fullmatch(expected)
         ):
             raise Invalid("critical file manifest")
-    browser_path = Path(browser_relative)
+    if contract_name == "runner-local-playwright-v1":
+        if not isinstance(browser_relative, str):
+            raise Invalid("Playwright browser manifest")
+        browser_path = Path(browser_relative)
+        if (
+            browser_path.is_absolute()
+            or ".." in browser_path.parts
+            or not browser_path.parts
+            or browser_path.parts[0] != "playwright-browser"
+            or browser_relative not in files
+        ):
+            raise Invalid("Playwright browser manifest")
+    elif browser_relative is not None:
+        raise Invalid("system browser manifest")
     if (
-        browser_path.is_absolute()
-        or ".." in browser_path.parts
-        or not browser_path.parts
-        or browser_path.parts[0] != "playwright-browser"
-        or browser_relative not in files
+        contract_name == "system-chromium-v1"
+        and manifest["browserProvenance"] != config["browserContract"]
     ):
-        raise Invalid("Playwright browser manifest")
+        raise Invalid("system browser manifest")
     git_metadata = runner / ".git"
     if git_metadata.is_symlink() or not git_metadata.is_dir():
         raise Invalid("complete Git metadata")
@@ -245,15 +386,28 @@ def validate_runner(config: dict) -> Path:
     entrypoint = runner / "scripts/run-remote-chat-smoke.mjs"
     if not entrypoint.is_file():
         raise Invalid("runner entrypoint")
-    discovered = discover_playwright_browser(runner)
-    if discovered != (runner / browser_relative).resolve(strict=True):
+    provenance = validate_browser_contract(config, runner, root)
+    if contract_name == "runner-local-playwright-v1" and provenance[
+        "executablePath"
+    ] != str((runner / browser_relative).resolve(strict=True)):
+        raise Invalid("Playwright browser manifest")
+    if contract_name == "runner-local-playwright-v1" and manifest[
+        "browserProvenance"
+    ] != {
+        "executablePath": browser_relative,
+        "executableSha256": provenance["executableSha256"],
+    }:
         raise Invalid("Playwright browser manifest")
     return runner
 
 
 def validate_dir(path: Path, uid: int, gid: int, mode: int) -> None:
     info = path.stat()
-    if not stat.S_ISDIR(info.st_mode) or (info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)) != (
+    if not stat.S_ISDIR(info.st_mode) or (
+        info.st_uid,
+        info.st_gid,
+        stat.S_IMODE(info.st_mode),
+    ) != (
         uid,
         gid,
         mode,
@@ -321,10 +475,17 @@ def run(config: dict) -> int:
     if account.pw_gid != group.gr_gid:
         raise Invalid("service account/group")
     for executable in ("/usr/bin/python3", "git", "runuser", config["metricsConsumer"]):
-        resolved = executable if Path(executable).is_absolute() else shutil.which(executable)
-        if not resolved or not Path(resolved).is_file() or not os.access(resolved, os.X_OK):
+        resolved = (
+            executable if Path(executable).is_absolute() else shutil.which(executable)
+        )
+        if (
+            not resolved
+            or not Path(resolved).is_file()
+            or not os.access(resolved, os.X_OK)
+        ):
             raise Invalid("required executable")
     runner = validate_runner(config)
+    browser = validate_browser_contract(config, runner)
     root = Path(config["resultRoot"])
     validate_dir(root, 0, account.pw_gid, 0o710)
     invocation_dir = root / f"uid-{account.pw_uid}-{invocation}"
@@ -378,8 +539,20 @@ def run(config: dict) -> int:
                         "LC_ALL": "C.UTF-8",
                         "LOGNAME": account.pw_name,
                         "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-                        "PLAYWRIGHT_BROWSERS_PATH": str(runner / "playwright-browser"),
                         "USER": account.pw_name,
+                        **(
+                            {
+                                "PLAYWRIGHT_BROWSERS_PATH": str(
+                                    runner / "playwright-browser"
+                                )
+                            }
+                            if browser["name"] == "runner-local-playwright-v1"
+                            else {
+                                "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH": browser[
+                                    "executablePath"
+                                ]
+                            }
+                        ),
                     },
                     timeout=config["timeoutSeconds"],
                     check=False,
@@ -453,7 +626,14 @@ def main() -> int:
     args = parser.parse_args()
     try:
         return run(load_config(args.config))
-    except (OSError, KeyError, TypeError, ValueError, subprocess.SubprocessError, Invalid):
+    except (
+        OSError,
+        KeyError,
+        TypeError,
+        ValueError,
+        subprocess.SubprocessError,
+        Invalid,
+    ):
         print("outcome=preserved reason=preflight")
         return 1
 

@@ -16,5 +16,19 @@
   "resultRoot": "/run/sugarkube/dspace-chat-synthetic",
   "metricPath": "/var/lib/node_exporter/textfile_collector/dspace-chat.prom",
   "metricsConsumer": "/usr/local/libexec/sugarkube-dspace-chat-synthetic-metrics",
+  "browserContract": {
+    "name": "system-chromium-v1",
+    "architecture": "aarch64",
+    "launcherPath": "/usr/bin/chromium",
+    "launcherRealpath": "/usr/bin/chromium",
+    "launcherSha256": "be1d239c2a7a9298c202d506e589d23056064bd52b82fa3d3cf72a0a2de3337c",
+    "launcherSymlink": false,
+    "executablePath": "/usr/lib/chromium/chromium",
+    "executableRealpath": "/usr/lib/chromium/chromium",
+    "executableSha256": "f8cf8a41a3406375dc9b9af5ce25a3fececa3d4e9e72d18671db07cdee7a75a6",
+    "owner": "root",
+    "group": "root",
+    "mode": "0755"
+  },
   "dspaceOrigin": "https://staging.democratized.space"
 }

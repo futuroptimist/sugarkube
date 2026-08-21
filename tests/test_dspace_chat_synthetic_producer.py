@@ -29,6 +29,7 @@ def config(tmp_path: Path) -> dict:
         metricPath=str(tmp_path / "metric.prom"),
         metricsConsumer=str(tmp_path / "consumer.py"),
     )
+    value["browserContract"] = {"name": "runner-local-playwright-v1"}
     return value
 
 
@@ -44,18 +45,29 @@ def source_repo(tmp_path: Path) -> tuple[Path, str]:
     git("init", cwd=source)
     git("config", "user.email", "tests@example.invalid", cwd=source)
     git("config", "user.name", "Tests", cwd=source)
-    git("remote", "add", "origin", "https://github.com/democratizedspace/dspace.git", cwd=source)
+    git(
+        "remote",
+        "add",
+        "origin",
+        "https://github.com/democratizedspace/dspace.git",
+        cwd=source,
+    )
     (source / "package.json").write_text("{}\n")
     git("add", "package.json", cwd=source)
     git("commit", "-m", "fixture", cwd=source)
     return source, git("rev-parse", "HEAD", cwd=source)
 
 
-def test_configuration_selects_contracts_and_exact_legacy_coordinate(tmp_path: Path) -> None:
+def test_configuration_selects_contracts_and_exact_legacy_coordinate(
+    tmp_path: Path,
+) -> None:
     path = tmp_path / "config.json"
     value = config(tmp_path)
     path.write_text(json.dumps(value))
-    assert runtime.load_config(path)["providerConfigContract"] == "legacy-no-default-provider-v1"
+    assert (
+        runtime.load_config(path)["providerConfigContract"]
+        == "legacy-no-default-provider-v1"
+    )
     for key in ("identityContract", "providerConfigContract"):
         broken = copy.deepcopy(value)
         broken.pop(key)
@@ -77,7 +89,11 @@ def test_configuration_selects_contracts_and_exact_legacy_coordinate(tmp_path: P
 @pytest.mark.parametrize(
     ("key", "replacement", "message"),
     [
-        ("repositoryIdentity", "https://example.invalid/dspace.git", "repository identity"),
+        (
+            "repositoryIdentity",
+            "https://example.invalid/dspace.git",
+            "repository identity",
+        ),
         ("tokenPlaceOrigin", "https://token.place", "token.place origin"),
         ("tokenPlaceModel", "different-model", "token.place model"),
         ("serviceAccount", "../../root", "service identifier"),
@@ -124,6 +140,98 @@ def test_configuration_rejects_remaining_invalid_contract_values(
         runtime.load_config(path)
 
 
+def system_browser_fixture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[dict, Path]:
+    root = tmp_path / "target"
+    launcher = root / "usr/bin/chromium"
+    executable = root / "usr/lib/chromium/chromium"
+    launcher.parent.mkdir(parents=True)
+    executable.parent.mkdir(parents=True)
+    launcher.write_bytes(b'#!/bin/sh\nexec /usr/lib/chromium/chromium "$@"\n')
+    executable.write_bytes(b"ELF fixture")
+    launcher.chmod(0o755)
+    executable.chmod(0o755)
+    monkeypatch.setattr(runtime.platform, "machine", lambda: "aarch64")
+    monkeypatch.setattr(
+        runtime.pwd, "getpwuid", lambda _uid: SimpleNamespace(pw_name="root")
+    )
+    monkeypatch.setattr(
+        runtime.grp, "getgrgid", lambda _gid: SimpleNamespace(gr_name="root")
+    )
+    value = config(tmp_path)
+    value["browserContract"] = {
+        "name": "system-chromium-v1",
+        "architecture": "aarch64",
+        "launcherPath": "/usr/bin/chromium",
+        "launcherRealpath": "/usr/bin/chromium",
+        "launcherSha256": runtime.sha256(launcher),
+        "launcherSymlink": False,
+        "executablePath": "/usr/lib/chromium/chromium",
+        "executableRealpath": "/usr/lib/chromium/chromium",
+        "executableSha256": runtime.sha256(executable),
+        "owner": "root",
+        "group": "root",
+        "mode": "0755",
+    }
+    return value, root
+
+
+def test_system_browser_contract_validates_exact_target_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, root = system_browser_fixture(tmp_path, monkeypatch)
+    provenance = runtime.validate_browser_contract(value, tmp_path / "unused", root)
+    assert provenance["name"] == "system-chromium-v1"
+    assert provenance["executablePath"] == "/usr/lib/chromium/chromium"
+
+
+@pytest.mark.parametrize(
+    ("fault", "message"),
+    [
+        ("architecture", "architecture"),
+        ("launcher-hash", "provenance"),
+        ("executable-hash", "provenance"),
+        ("mode", "provenance"),
+        ("owner", "provenance"),
+        ("executable-bit", "provenance"),
+        ("missing-launcher", "path"),
+        ("missing-executable", "path"),
+        ("not-regular", "provenance"),
+        ("realpath", "mismatch"),
+    ],
+)
+def test_system_browser_contract_fails_closed_on_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str, message: str
+) -> None:
+    value, root = system_browser_fixture(tmp_path, monkeypatch)
+    contract = value["browserContract"]
+    if fault == "architecture":
+        contract["architecture"] = "x86_64"
+    elif fault == "launcher-hash":
+        contract["launcherSha256"] = "0" * 64
+    elif fault == "executable-hash":
+        contract["executableSha256"] = "0" * 64
+    elif fault == "mode":
+        (root / "usr/lib/chromium/chromium").chmod(0o700)
+    elif fault == "owner":
+        contract["owner"] = "unexpected"
+    elif fault == "executable-bit":
+        (root / "usr/lib/chromium/chromium").chmod(0o644)
+    elif fault == "missing-launcher":
+        (root / "usr/bin/chromium").unlink()
+    elif fault == "missing-executable":
+        (root / "usr/lib/chromium/chromium").unlink()
+    elif fault == "not-regular":
+        executable = root / "usr/lib/chromium/chromium"
+        executable.unlink()
+        executable.mkdir()
+    else:
+        contract["executableRealpath"] = "/usr/lib/chromium/other"
+    with pytest.raises(runtime.Invalid, match=message):
+        runtime.validate_browser_contract(value, tmp_path / "unused", root)
+
+
 def test_runtime_main_reports_success_and_bounded_preflight(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
@@ -133,7 +241,9 @@ def test_runtime_main_reports_success_and_bounded_preflight(
     monkeypatch.setattr(runtime, "run", lambda value: 7)
     assert runtime.main() == 7
 
-    monkeypatch.setattr(runtime, "run", lambda value: (_ for _ in ()).throw(runtime.Invalid("x")))
+    monkeypatch.setattr(
+        runtime, "run", lambda value: (_ for _ in ()).throw(runtime.Invalid("x"))
+    )
     assert runtime.main() == 1
     assert capsys.readouterr().out == "outcome=preserved reason=preflight\n"
 
@@ -179,8 +289,17 @@ def runtime_runner(tmp_path: Path) -> tuple[dict, Path]:
         "schemaVersion": 1,
         "runnerRevision": revision,
         "repositoryIdentity": runtime.APPROVED_REPOSITORY_IDENTITY,
+        "browserContract": "runner-local-playwright-v1",
         "playwrightBrowserExecutable": "playwright-browser/browser-executable",
-        "files": {relative: runtime.sha256(destination / relative) for relative in required},
+        "browserProvenance": {
+            "executablePath": "playwright-browser/browser-executable",
+            "executableSha256": runtime.sha256(
+                destination / "playwright-browser/browser-executable"
+            ),
+        },
+        "files": {
+            relative: runtime.sha256(destination / relative) for relative in required
+        },
     }
     (destination / "sugarkube-runner-manifest.json").write_text(json.dumps(manifest))
     return value, destination
@@ -309,12 +428,24 @@ def prepare_runtime_run(
     sibling = root / f"uid-1000-{'b' * 32}"
     sibling.mkdir()
     (sibling / "keep").write_text("untouched")
-    account = SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid(), pw_dir="/tmp", pw_name="pi")
+    account = SimpleNamespace(
+        pw_uid=os.getuid(), pw_gid=os.getgid(), pw_dir="/tmp", pw_name="pi"
+    )
     monkeypatch.setenv("INVOCATION_ID", "a" * 32)
     monkeypatch.setenv("SECRET_PARENT_TOKEN", "must-not-leak")
     monkeypatch.setattr(runtime.pwd, "getpwnam", lambda _name: account)
-    monkeypatch.setattr(runtime.grp, "getgrnam", lambda _name: SimpleNamespace(gr_gid=os.getgid()))
+    monkeypatch.setattr(
+        runtime.grp, "getgrnam", lambda _name: SimpleNamespace(gr_gid=os.getgid())
+    )
     monkeypatch.setattr(runtime, "validate_runner", lambda _config: runner)
+    monkeypatch.setattr(
+        runtime,
+        "validate_browser_contract",
+        lambda _config, _runner: {
+            "name": "runner-local-playwright-v1",
+            "executablePath": str(runner / "playwright-browser/browser-executable"),
+        },
+    )
     monkeypatch.setattr(runtime, "validate_dir", lambda *_args: None)
     monkeypatch.setattr(runtime.os, "chown", lambda *_args: None)
     calls: list[dict] = []
@@ -324,7 +455,9 @@ def prepare_runtime_run(
         if argv[0] == "runuser":
             result = root / f"uid-{os.getuid()}-{'a' * 32}" / "result.json"
             if result_kind == "timeout":
-                raise subprocess.TimeoutExpired(argv, value["timeoutSeconds"], output=b"secret")
+                raise subprocess.TimeoutExpired(
+                    argv, value["timeoutSeconds"], output=b"secret"
+                )
             if result_kind == "oversized":
                 result.write_bytes(b"x" * (runtime.MAX_RESULT_BYTES + 1))
                 result.chmod(0o600)
@@ -339,7 +472,11 @@ def prepare_runtime_run(
                 result.chmod(0o600)
             else:
                 executed_at = (
-                    99 if result_kind == "stale" else 101 if result_kind == "future" else 100
+                    99
+                    if result_kind == "stale"
+                    else 101
+                    if result_kind == "future"
+                    else 100
                 )
                 payload = {
                     "schemaVersion": 1,
@@ -385,6 +522,40 @@ def test_runtime_run_uses_minimal_environment_and_cleans_direct_entries(
     assert (sibling / "keep").read_text() == "untouched"
 
 
+def test_runtime_plumbs_exact_system_executable_and_drift_prevents_launch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, metric, _sibling, calls = prepare_runtime_run(tmp_path, monkeypatch)
+    value["browserContract"] = {"name": "system-chromium-v1"}
+    monkeypatch.setattr(
+        runtime,
+        "validate_browser_contract",
+        lambda *_args: {
+            "name": "system-chromium-v1",
+            "executablePath": "/usr/lib/chromium/chromium",
+        },
+    )
+    assert runtime.run(value) == 0
+    child = next(call for call in calls if call["argv"][0] == "runuser")
+    assert (
+        child["env"]["PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH"]
+        == "/usr/lib/chromium/chromium"
+    )
+    assert "PLAYWRIGHT_BROWSERS_PATH" not in child["env"]
+
+    calls.clear()
+    metric.write_bytes(b"previous metric\n")
+    monkeypatch.setattr(
+        runtime,
+        "validate_browser_contract",
+        lambda *_args: (_ for _ in ()).throw(runtime.Invalid("browser drift")),
+    )
+    with pytest.raises(runtime.Invalid, match="drift"):
+        runtime.run(value)
+    assert not any(call["argv"][0] == "runuser" for call in calls)
+    assert metric.read_bytes() == b"previous metric\n"
+
+
 @pytest.mark.parametrize(
     "result_kind",
     [
@@ -401,7 +572,9 @@ def test_runtime_run_uses_minimal_environment_and_cleans_direct_entries(
 def test_runtime_run_rejects_unbounded_or_replaced_result_without_publication(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, result_kind: str
 ) -> None:
-    value, metric, sibling, calls = prepare_runtime_run(tmp_path, monkeypatch, result_kind)
+    value, metric, sibling, calls = prepare_runtime_run(
+        tmp_path, monkeypatch, result_kind
+    )
 
     assert runtime.run(value) == 1
     assert metric.read_bytes() == b"previous metric\n"
@@ -415,7 +588,9 @@ def test_runtime_run_rejects_unbounded_or_replaced_result_without_publication(
 def test_runtime_timeout_is_bounded_single_launch_and_owner_scoped_cleanup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    value, metric, sibling, calls = prepare_runtime_run(tmp_path, monkeypatch, "timeout")
+    value, metric, sibling, calls = prepare_runtime_run(
+        tmp_path, monkeypatch, "timeout"
+    )
 
     assert runtime.run(value) == 1
     output = capsys.readouterr().out
@@ -464,13 +639,20 @@ def test_runtime_overlap_closes_lock_and_does_not_publish(
 
 def test_wrapper_safety() -> None:
     wrapper = (ROOT / "scripts/dspace_chat_synthetic_wrapper.sh").read_text()
-    assert "set +x\nset -Eeuo pipefail\numask 077\nexport PYTHONDONTWRITEBYTECODE=1" in wrapper
+    assert (
+        "set +x\nset -Eeuo pipefail\numask 077\nexport PYTHONDONTWRITEBYTECODE=1"
+        in wrapper
+    )
     source = (ROOT / "scripts/dspace_chat_synthetic_runtime.py").read_text()
     assert source.count("subprocess.DEVNULL") >= 4
 
 
-@pytest.mark.parametrize("condition", ["wrong-head", "dirty", "missing-object", "identity"])
-def test_source_verification_rejects_invalid_git_state(tmp_path: Path, condition: str) -> None:
+@pytest.mark.parametrize(
+    "condition", ["wrong-head", "dirty", "missing-object", "identity"]
+)
+def test_source_verification_rejects_invalid_git_state(
+    tmp_path: Path, condition: str
+) -> None:
     source, revision = source_repo(tmp_path)
     identity = "https://github.com/democratizedspace/dspace.git"
     if condition == "wrong-head":
@@ -547,6 +729,7 @@ def test_materialize_discovers_browser_and_is_source_independent(
         output,
         str(pnpm),
         "9.1.0",
+        "runner-local-playwright-v1",
         browser_bundle,
     )
     manifest = json.loads((output / "sugarkube-runner-manifest.json").read_text())
@@ -571,12 +754,16 @@ def test_materialize_orchestrates_complete_snapshot_without_host_node(
     validations = []
 
     class CanonicalRuntime:
+        BROWSER_CONTRACTS = {"runner-local-playwright-v1", "system-chromium-v1"}
+
         @staticmethod
         def discover_playwright_browser(runner: Path) -> Path:
             return runner / discovered
 
-    def validate_snapshot(snapshot: Path, expected_revision: str) -> None:
-        validations.append((snapshot, expected_revision))
+    def validate_snapshot(
+        snapshot: Path, expected_revision: str, contract: str
+    ) -> None:
+        validations.append((snapshot, expected_revision, contract))
         assert (snapshot / discovered).is_file()
 
     monkeypatch.setattr(installer, "runtime_module", lambda: CanonicalRuntime)
@@ -589,13 +776,47 @@ def test_materialize_orchestrates_complete_snapshot_without_host_node(
         output,
         str(pnpm),
         "9.1.0",
+        "runner-local-playwright-v1",
         browser_bundle,
     )
 
     manifest = json.loads((output / "sugarkube-runner-manifest.json").read_text())
     assert manifest["playwrightBrowserExecutable"] == str(discovered)
     assert manifest["files"][str(discovered)] == runtime.sha256(output / discovered)
-    assert validations[-1] == (output, revision)
+    assert validations[-1] == (output, revision, "runner-local-playwright-v1")
+
+
+def test_materialize_system_contract_forbids_and_does_not_require_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, revision, _browser_bundle, pnpm = materialization_fixture(tmp_path)
+    output = tmp_path / "output" / revision
+    validations = []
+    monkeypatch.setattr(
+        installer,
+        "validate_runner",
+        lambda snapshot, expected, contract: validations.append(
+            (snapshot, expected, contract)
+        ),
+    )
+
+    installer.materialize(
+        source,
+        revision,
+        runtime.APPROVED_REPOSITORY_IDENTITY,
+        output,
+        str(pnpm),
+        "9.1.0",
+        "system-chromium-v1",
+        None,
+    )
+
+    manifest = json.loads((output / "sugarkube-runner-manifest.json").read_text())
+    assert manifest["browserContract"] == "system-chromium-v1"
+    assert manifest["browserProvenance"]["architecture"] == "aarch64"
+    assert "playwrightBrowserExecutable" not in manifest
+    assert not (output / "playwright-browser").exists()
+    assert validations[-1] == (output, revision, "system-chromium-v1")
 
 
 def test_materialize_cli_dispatches_complete_coordinates(
@@ -620,6 +841,8 @@ def test_materialize_cli_dispatches_complete_coordinates(
             "/fixture/pnpm",
             "--pnpm-version",
             "9.0.0",
+            "--browser-contract",
+            "runner-local-playwright-v1",
             "--browser-bundle",
             str(browser),
         ],
@@ -634,6 +857,7 @@ def test_materialize_cli_dispatches_complete_coordinates(
             output.resolve(),
             "/fixture/pnpm",
             "9.0.0",
+            "runner-local-playwright-v1",
             browser.resolve(),
         )
     ]
@@ -697,7 +921,9 @@ def test_playwright_browser_discovery_rejects_symlinked_root(
 
     def controlled_run(argv, *args, **kwargs):
         if argv[0] == "/usr/bin/node":
-            return subprocess.CompletedProcess(argv, 0, stdout=str(external_browser).encode())
+            return subprocess.CompletedProcess(
+                argv, 0, stdout=str(external_browser).encode()
+            )
         if "status" in argv:
             return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
         return real_run(argv, *args, **kwargs)
@@ -791,13 +1017,19 @@ def test_runner_validation_rejects_coordinate_and_hash_mismatch(tmp_path: Path) 
     value = config(tmp_path)
     runner = Path(value["runnerRoot"]) / value["runnerRevision"]
     runner.mkdir(parents=True)
-    (runner / "sugarkube-runner-manifest.json").write_text(json.dumps({"runnerRevision": "0" * 40}))
+    (runner / "sugarkube-runner-manifest.json").write_text(
+        json.dumps({"runnerRevision": "0" * 40})
+    )
     with pytest.raises(runtime.Invalid, match="coordinate"):
         runtime.validate_runner(value)
 
 
-@pytest.mark.parametrize("files", [{}, {"../outside": "0" * 64}, {"package.json": "bad"}])
-def test_runner_validation_rejects_invalid_manifest_files(tmp_path: Path, files: dict) -> None:
+@pytest.mark.parametrize(
+    "files", [{}, {"../outside": "0" * 64}, {"package.json": "bad"}]
+)
+def test_runner_validation_rejects_invalid_manifest_files(
+    tmp_path: Path, files: dict
+) -> None:
     value = config(tmp_path)
     runner = Path(value["runnerRoot"]) / value["runnerRevision"]
     runner.mkdir(parents=True)
@@ -822,7 +1054,9 @@ def test_directory_mode_ownership_checks(tmp_path: Path) -> None:
         runtime.validate_dir(path, info.st_uid, info.st_gid, 0o710)
 
 
-def test_metrics_consumer_success_failure_malformed_and_atomic_preservation(tmp_path: Path) -> None:
+def test_metrics_consumer_success_failure_malformed_and_atomic_preservation(
+    tmp_path: Path,
+) -> None:
     from scripts.dspace_chat_synthetic_metrics import main as consumer_main
 
     revision = "9" * 40
@@ -858,15 +1092,18 @@ def test_metrics_consumer_success_failure_malformed_and_atomic_preservation(tmp_
         assert not list(tmp_path.glob(".dspace-chat.*"))
     previous = output.read_bytes()
     result.write_text('{"rawSecret":"do-not-print"}')
-    old, sys.argv = sys.argv, [
-        "consumer",
-        "--result",
-        str(result),
-        "--output",
-        str(output),
-        "--runner-revision",
-        revision,
-    ]
+    old, sys.argv = (
+        sys.argv,
+        [
+            "consumer",
+            "--result",
+            str(result),
+            "--output",
+            str(output),
+            "--runner-revision",
+            revision,
+        ],
+    )
     try:
         with pytest.raises(SystemExit):
             consumer_main()
@@ -875,7 +1112,9 @@ def test_metrics_consumer_success_failure_malformed_and_atomic_preservation(tmp_
     assert output.read_bytes() == previous
 
 
-def test_installer_dry_run_status_apply_and_exact_rollback(tmp_path: Path, capsys) -> None:
+def test_installer_dry_run_status_apply_and_exact_rollback(
+    tmp_path: Path, capsys
+) -> None:
     before = set(tmp_path.rglob("*"))
     with __import__("tempfile").TemporaryDirectory() as temporary:
         staged = Path(temporary)
@@ -904,11 +1143,15 @@ class StatusRuntime:
         return json.loads(path.read_text())
 
     @staticmethod
-    def validate_runner(value: dict) -> Path:
+    def validate_runner(value: dict, *_args) -> Path:
         runner = Path(value["runnerRoot"]) / value["runnerRevision"]
         if (runner / "invalid").exists():
             raise ValueError("runner validation failed")
         return runner
+
+    @staticmethod
+    def validate_browser_contract(value: dict, _runner: Path, _root: Path) -> dict:
+        return value["browserContract"]
 
 
 def status_installation(tmp_path: Path) -> tuple[Path, Path, str]:
@@ -918,13 +1161,17 @@ def status_installation(tmp_path: Path) -> tuple[Path, Path, str]:
     installer.render(staged)
     installer.install(staged, root, revision)
     config_value = json.loads(CONFIG.read_text())
-    runner = root / config_value["runnerRoot"].removeprefix("/") / config_value["runnerRevision"]
+    runner = (
+        root
+        / config_value["runnerRoot"].removeprefix("/")
+        / config_value["runnerRevision"]
+    )
     runner.mkdir(parents=True)
     (runner / "sugarkube-runner-manifest.json").write_text(
         json.dumps(
             {
                 "pnpmVersion": "9.0.0",
-                "playwrightBrowserExecutable": "playwright-browser/chromium/chrome",
+                "browserContract": "system-chromium-v1",
             }
         )
     )
@@ -963,7 +1210,8 @@ def test_status_reports_validated_provenance_without_mutation_or_systemctl(
     assert f"assetRevision={revision}" in output
     assert f"runnerRevision={config_value['runnerRevision']}" in output
     assert (
-        f"runnerManifestSha256={installer.sha(runner / 'sugarkube-runner-manifest.json')}" in output
+        f"runnerManifestSha256={installer.sha(runner / 'sugarkube-runner-manifest.json')}"
+        in output
     )
     for key in (
         "dspaceVersion",
@@ -978,7 +1226,8 @@ def test_status_reports_validated_provenance_without_mutation_or_systemctl(
     ):
         assert f"{key}={config_value[key]}" in output
     assert "pnpmVersion=9.0.0" in output
-    assert "playwrightBrowserExecutable=playwright-browser/chromium/chrome" in output
+    assert "browserContract=system-chromium-v1" in output
+    assert "browserExecutablePath=/usr/lib/chromium/chromium" in output
     assert "runnerValidation=passed" in output
     assert "activation=not-queried" in output
     assert tree_bytes(root) == before
@@ -986,7 +1235,13 @@ def test_status_reports_validated_provenance_without_mutation_or_systemctl(
 
 @pytest.mark.parametrize(
     "fault",
-    ["current-absolute", "current-traversal", "missing-retained", "retained-hash", "live-hash"],
+    [
+        "current-absolute",
+        "current-traversal",
+        "missing-retained",
+        "retained-hash",
+        "live-hash",
+    ],
 )
 def test_status_fails_closed_for_invalid_asset_provenance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
@@ -996,11 +1251,15 @@ def test_status_fails_closed_for_invalid_asset_provenance(
     current = installations / "current"
     if fault in {"current-absolute", "current-traversal"}:
         current.unlink()
-        current.symlink_to("/tmp/external" if fault == "current-absolute" else "../escape")
+        current.symlink_to(
+            "/tmp/external" if fault == "current-absolute" else "../escape"
+        )
     elif fault == "missing-retained":
         __import__("shutil").rmtree(installations / revision)
     elif fault == "retained-hash":
-        (installations / revision / next(iter(installer.ASSETS))).write_bytes(b"tampered")
+        (installations / revision / next(iter(installer.ASSETS))).write_bytes(
+            b"tampered"
+        )
     else:
         (root / next(iter(installer.ASSETS))).write_bytes(b"tampered")
     monkeypatch.setattr(installer, "runtime_module", lambda: StatusRuntime())
@@ -1020,7 +1279,9 @@ def test_status_fails_closed_on_runner_validation_failure(
         installer.status(root)
 
 
-@pytest.mark.parametrize("fault", ["runner-symlink", "manifest-symlink", "missing-pnpm"])
+@pytest.mark.parametrize(
+    "fault", ["runner-symlink", "manifest-symlink", "missing-pnpm"]
+)
 def test_status_fails_closed_on_invalid_runner_provenance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
 ) -> None:
@@ -1068,7 +1329,9 @@ def test_activation_status_inspects_active_and_enabled_without_mutation(
     assert "active=active enabled=active" in capsys.readouterr().out
 
 
-def test_failed_installer_preflight_leaves_installation_unchanged(tmp_path: Path) -> None:
+def test_failed_installer_preflight_leaves_installation_unchanged(
+    tmp_path: Path,
+) -> None:
     marker = tmp_path / "installed"
     marker.write_bytes(b"unchanged")
     staged = tmp_path / "bad-stage"
@@ -1103,7 +1366,7 @@ class FakeSnapshotRuntime:
     def load_config(path: Path) -> dict:
         return json.loads(path.read_text())
 
-    def validate_runner(self, config: dict) -> Path:
+    def validate_runner(self, config: dict, *_args) -> Path:
         runner = Path(config["runnerRoot"]) / config["runnerRevision"]
         self.validated.append(runner)
         if not (runner / ".git").is_dir():
@@ -1121,7 +1384,14 @@ class FakeSnapshotRuntime:
 
 @pytest.mark.parametrize(
     "fault",
-    ["absent", "wrong-revision", "symlink", "hash-mismatch", "incomplete-git", "dependency"],
+    [
+        "absent",
+        "wrong-revision",
+        "symlink",
+        "hash-mismatch",
+        "incomplete-git",
+        "dependency",
+    ],
 )
 def test_installer_snapshot_preflight_rejects_invalid_input_without_mutation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
@@ -1173,17 +1443,26 @@ def test_complete_installer_dry_run_is_byte_for_byte_non_mutating(
     root.mkdir()
     marker = root / "marker"
     marker.write_bytes(b"unchanged")
-    before = [(str(path.relative_to(root)), path.read_bytes()) for path in root.rglob("*")]
+    before = [
+        (str(path.relative_to(root)), path.read_bytes()) for path in root.rglob("*")
+    ]
     monkeypatch.setattr(installer, "runtime_module", lambda: FakeSnapshotRuntime())
 
     assert (
         run_installer_main(
-            monkeypatch, "dry-run", "--root", str(root), "--runner-snapshot", str(snapshot)
+            monkeypatch,
+            "dry-run",
+            "--root",
+            str(root),
+            "--runner-snapshot",
+            str(snapshot),
         )
         == 0
     )
 
-    after = [(str(path.relative_to(root)), path.read_bytes()) for path in root.rglob("*")]
+    after = [
+        (str(path.relative_to(root)), path.read_bytes()) for path in root.rglob("*")
+    ]
     assert after == before
 
 
@@ -1197,13 +1476,20 @@ def test_apply_installs_runner_only_after_copy_revalidation(
 
     assert (
         run_installer_main(
-            monkeypatch, "apply", "--root", str(root), "--runner-snapshot", str(snapshot)
+            monkeypatch,
+            "apply",
+            "--root",
+            str(root),
+            "--runner-snapshot",
+            str(snapshot),
         )
         == 0
     )
 
     installed = root / "var/lib/sugarkube/dspace-chat-runners" / revision
-    assert (installed / "dependency.ok").read_bytes() == (snapshot / "dependency.ok").read_bytes()
+    assert (installed / "dependency.ok").read_bytes() == (
+        snapshot / "dependency.ok"
+    ).read_bytes()
     assert any(".validate." in str(path) for path in fake.validated)
     assert os.readlink(root / "var/lib/sugarkube/dspace-chat-installations/current")
 
@@ -1236,7 +1522,9 @@ def test_apply_rejects_different_valid_existing_runner_without_mutation(
     root = tmp_path / "root"
     destination = root / "var/lib/sugarkube/dspace-chat-runners" / revision
     __import__("shutil").copytree(snapshot, destination)
-    (destination / "sugarkube-runner-manifest.json").write_text("different-valid-manifest\n")
+    (destination / "sugarkube-runner-manifest.json").write_text(
+        "different-valid-manifest\n"
+    )
     live_asset = root / next(iter(installer.ASSETS))
     live_asset.parent.mkdir(parents=True)
     live_asset.write_bytes(b"live asset")
@@ -1251,7 +1539,9 @@ def test_apply_rejects_different_valid_existing_runner_without_mutation(
         installer, "install", lambda *args: pytest.fail("asset activation was invoked")
     )
 
-    with pytest.raises(ValueError, match="existing runner manifest does not match snapshot"):
+    with pytest.raises(
+        ValueError, match="existing runner manifest does not match snapshot"
+    ):
         installer.apply_installation(staged, snapshot, root, "2" * 64)
 
     assert live_asset.read_bytes() == b"live asset"
@@ -1279,12 +1569,19 @@ def test_apply_failure_preserves_prior_state_and_removes_only_new_paths(
     monkeypatch.setattr(installer, "runtime_module", lambda: fake)
     if failure == "asset-activation":
         monkeypatch.setattr(
-            installer, "install", lambda *args: (_ for _ in ()).throw(OSError("injected"))
+            installer,
+            "install",
+            lambda *args: (_ for _ in ()).throw(OSError("injected")),
         )
 
     with pytest.raises((OSError, ValueError)):
         run_installer_main(
-            monkeypatch, "apply", "--root", str(root), "--runner-snapshot", str(snapshot)
+            monkeypatch,
+            "apply",
+            "--root",
+            str(root),
+            "--runner-snapshot",
+            str(snapshot),
         )
 
     assert (prior_runner / "kept").read_bytes() == b"runner"
@@ -1341,11 +1638,15 @@ def test_rollback_rejects_symlinked_retained_asset_before_mutation(
     asset.symlink_to(external)
     before = tree_bytes(tmp_path)
     monkeypatch.setattr(
-        installer, "activate", lambda *args: pytest.fail("invalid rollback was activated")
+        installer,
+        "activate",
+        lambda *args: pytest.fail("invalid rollback was activated"),
     )
 
     with pytest.raises(ValueError):
-        run_installer_main(monkeypatch, "rollback", "--root", str(tmp_path), "--revision", revision)
+        run_installer_main(
+            monkeypatch, "rollback", "--root", str(tmp_path), "--revision", revision
+        )
 
     assert tree_bytes(tmp_path) == before
 
@@ -1390,11 +1691,15 @@ def test_rollback_cli_rejects_invalid_retained_revision_without_mutation(
     monkeypatch.setattr(
         installer,
         "activate",
-        lambda *args: pytest.fail("rollback activated before retained assets validated"),
+        lambda *args: pytest.fail(
+            "rollback activated before retained assets validated"
+        ),
     )
 
     with pytest.raises((FileNotFoundError, ValueError)):
-        run_installer_main(monkeypatch, "rollback", "--root", str(tmp_path), "--revision", revision)
+        run_installer_main(
+            monkeypatch, "rollback", "--root", str(tmp_path), "--revision", revision
+        )
 
     assert marker.read_bytes() == b"unchanged"
     assert not (retained.parent / "current").exists()
@@ -1424,7 +1729,9 @@ def test_rollback_cli_validates_dry_run_without_activation(
     )
 
     assert (
-        run_installer_main(monkeypatch, "rollback", "--root", str(tmp_path), "--revision", revision)
+        run_installer_main(
+            monkeypatch, "rollback", "--root", str(tmp_path), "--revision", revision
+        )
         == 0
     )
     assert capsys.readouterr().out == (
@@ -1460,7 +1767,9 @@ def test_rollback_cli_apply_activates_only_after_validation(
     assert calls == [(retained, tmp_path, revision)]
 
 
-def test_install_rejects_invalid_asset_revision_without_mutation(tmp_path: Path) -> None:
+def test_install_rejects_invalid_asset_revision_without_mutation(
+    tmp_path: Path,
+) -> None:
     staged = tmp_path / "staged"
     installer.render(staged)
     root = tmp_path / "root"
@@ -1495,7 +1804,10 @@ def test_lifecycle_is_single_shot_owner_scoped_bounded_and_redacted() -> None:
     assert 'f"uid-{account.pw_uid}-{invocation}"' in source
     assert 'timeout=config["timeoutSeconds"]' in source
     assert "cleanup_invocation(invocation_dir)" in source
-    assert "entry.is_dir(follow_symlinks=False)" in source and "invocation_dir.rmdir()" in source
+    assert (
+        "entry.is_dir(follow_symlinks=False)" in source
+        and "invocation_dir.rmdir()" in source
+    )
     assert "glob(" not in source and "rmtree" not in source
     for forbidden in ("retry", "systemctl", "rollback", "restart"):
         assert forbidden not in source.lower()

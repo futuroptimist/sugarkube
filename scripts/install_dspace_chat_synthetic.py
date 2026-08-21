@@ -57,27 +57,38 @@ def runtime_module():
 
 
 def command(*argv: str, cwd: Path | None = None) -> str:
-    return subprocess.run(argv, cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+    return subprocess.run(
+        argv, cwd=cwd, check=True, capture_output=True, text=True
+    ).stdout.strip()
 
 
 def verify_source(source: Path, revision: str, identity: str) -> None:
     if not REVISION.fullmatch(revision) or not (source / ".git").is_dir():
         raise ValueError("complete Git metadata and an exact commit are required")
-    if command("git", "-C", str(source), "rev-parse", "--is-shallow-repository") != "false":
+    if (
+        command("git", "-C", str(source), "rev-parse", "--is-shallow-repository")
+        != "false"
+    ):
         raise ValueError("shallow Git metadata")
-    if (source / ".git/objects/info/alternates").exists() or (source / ".git").is_file():
+    if (source / ".git/objects/info/alternates").exists() or (
+        source / ".git"
+    ).is_file():
         raise ValueError("external or indirect Git metadata")
     if command("git", "-C", str(source), "rev-parse", "HEAD") != revision:
         raise ValueError("source HEAD does not equal revision")
     command("git", "-C", str(source), "cat-file", "-e", f"{revision}^{{commit}}")
     if command("git", "-C", str(source), "status", "--porcelain"):
         raise ValueError("source index or worktree is dirty")
-    origins = command("git", "-C", str(source), "remote", "get-url", "--all", "origin").splitlines()
+    origins = command(
+        "git", "-C", str(source), "remote", "get-url", "--all", "origin"
+    ).splitlines()
     if identity.rstrip("/") not in {origin.rstrip("/") for origin in origins}:
         raise ValueError("repository identity mismatch")
 
 
-def validate_runner(snapshot: Path, revision: str) -> None:
+def validate_runner(
+    snapshot: Path, revision: str, browser_contract: str = "runner-local-playwright-v1"
+) -> None:
     if command("git", "-C", str(snapshot), "rev-parse", "HEAD") != revision:
         raise ValueError("snapshot HEAD mismatch")
     command("git", "-C", str(snapshot), "fsck", "--full")
@@ -88,7 +99,10 @@ def validate_runner(snapshot: Path, revision: str) -> None:
     cli = snapshot / "frontend/node_modules/.bin/playwright"
     if not cli.is_file() or not os.access(cli, os.X_OK):
         raise ValueError("frontend Playwright CLI missing")
-    runtime_module().discover_playwright_browser(snapshot)
+    if browser_contract == "runner-local-playwright-v1":
+        runtime_module().discover_playwright_browser(snapshot)
+    elif browser_contract != "system-chromium-v1":
+        raise ValueError("browser contract must be selected explicitly")
     for link in (snapshot / "frontend/node_modules").rglob("*"):
         if link.is_symlink() and not link.exists():
             raise ValueError("broken frontend dependency link")
@@ -101,11 +115,19 @@ def materialize(
     output: Path,
     pnpm: str,
     pnpm_version: str,
-    browser_bundle: Path,
+    browser_contract: str,
+    browser_bundle: Path | None,
 ) -> None:
     verify_source(source, revision, identity)
-    if output.exists() or not browser_bundle.is_dir():
+    if browser_contract not in runtime_module().BROWSER_CONTRACTS:
+        raise ValueError("browser contract must be selected explicitly")
+    if output.exists() or (
+        browser_contract == "runner-local-playwright-v1"
+        and (browser_bundle is None or not browser_bundle.is_dir())
+    ):
         raise ValueError("output exists or browser bundle is invalid")
+    if browser_contract == "system-chromium-v1" and browser_bundle is not None:
+        raise ValueError("system browser contract forbids a browser bundle")
     if command(pnpm, "--version") != pnpm_version:
         raise ValueError("pnpm version mismatch")
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -125,27 +147,48 @@ def materialize(
             [pnpm, "install", "--frozen-lockfile", "--offline"],
             cwd=staging,
             check=True,
-            env={**os.environ, "PLAYWRIGHT_BROWSERS_PATH": str(staging / "playwright-browser")},
+            env={
+                **os.environ,
+                **(
+                    {"PLAYWRIGHT_BROWSERS_PATH": str(staging / "playwright-browser")}
+                    if browser_contract == "runner-local-playwright-v1"
+                    else {"PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD": "1"}
+                ),
+            },
         )
-        shutil.copytree(browser_bundle, staging / "playwright-browser")
-        validate_runner(staging, revision)
-        browser = runtime_module().discover_playwright_browser(staging)
-        browser_relative = str(browser.relative_to(staging))
+        if browser_bundle is not None:
+            shutil.copytree(browser_bundle, staging / "playwright-browser")
+        validate_runner(staging, revision, browser_contract)
         files = {relative: sha(staging / relative) for relative in CRITICAL}
-        files[browser_relative] = sha(browser)
         manifest = {
             "schemaVersion": 1,
             "runnerRevision": revision,
             "repositoryIdentity": identity.rstrip("/"),
             "pnpmVersion": pnpm_version,
-            "playwrightBrowserExecutable": browser_relative,
+            "browserContract": browser_contract,
             "files": files,
         }
+        if browser_contract == "runner-local-playwright-v1":
+            browser = runtime_module().discover_playwright_browser(staging)
+            browser_relative = str(browser.relative_to(staging))
+            files[browser_relative] = sha(browser)
+            manifest["playwrightBrowserExecutable"] = browser_relative
+            manifest["browserProvenance"] = {
+                "executablePath": browser_relative,
+                "executableSha256": sha(browser),
+            }
+        else:
+            repository_config = runtime_module().load_config(
+                ROOT / "config/dspace-chat-synthetic.json"
+            )
+            if repository_config["browserContract"]["name"] != browser_contract:
+                raise ValueError("repository browser contract mismatch")
+            manifest["browserProvenance"] = repository_config["browserContract"]
         (staging / "sugarkube-runner-manifest.json").write_text(
             json.dumps(manifest, sort_keys=True, indent=2) + "\n"
         )
         os.replace(staging, output)
-        validate_runner(output, revision)
+        validate_runner(output, revision, browser_contract)
     except Exception:
         shutil.rmtree(staging, ignore_errors=True)
         raise
@@ -164,7 +207,9 @@ def render(destination: Path) -> dict[str, str]:
         shutil.copyfile(src, out)
         out.chmod(0o755 if "/libexec/" in target else 0o644)
         hashes[target] = sha(out)
-    (destination / "manifest.json").write_text(json.dumps(hashes, sort_keys=True, indent=2) + "\n")
+    (destination / "manifest.json").write_text(
+        json.dumps(hashes, sort_keys=True, indent=2) + "\n"
+    )
     return hashes
 
 
@@ -225,11 +270,13 @@ def load_snapshot_config(staged: Path, snapshot: Path) -> dict:
     return config
 
 
-def validate_snapshot(staged: Path, snapshot: Path) -> str:
+def validate_snapshot(
+    staged: Path, snapshot: Path, browser_root: Path = Path("/")
+) -> str:
     """Apply the runtime's complete runner contract to an installation input."""
     runtime = runtime_module()
     config = load_snapshot_config(staged, snapshot)
-    runtime.validate_runner(config)
+    runtime.validate_runner(config, browser_root)
     return config["runnerRevision"]
 
 
@@ -248,7 +295,7 @@ def install_runner(staged: Path, snapshot: Path, root: Path) -> tuple[Path, bool
     if destination.exists() or destination.is_symlink():
         if destination.is_symlink() or not destination.is_dir():
             raise ValueError("runner revision destination is invalid")
-        runtime.validate_runner(rooted_config)
+        runtime.validate_runner(rooted_config, root)
         manifest = "sugarkube-runner-manifest.json"
         if (snapshot / manifest).read_bytes() != (destination / manifest).read_bytes():
             raise ValueError("existing runner manifest does not match snapshot")
@@ -265,7 +312,9 @@ def install_runner(staged: Path, snapshot: Path, root: Path) -> tuple[Path, bool
         validation_runner = validation_parent / revision
         os.replace(temporary, validation_runner)
         try:
-            runtime.validate_runner(dict(copied_config, runnerRoot=str(validation_parent)))
+            runtime.validate_runner(
+                dict(copied_config, runnerRoot=str(validation_parent)), root
+            )
             os.replace(validation_runner, destination)
         finally:
             shutil.rmtree(validation_parent, ignore_errors=True)
@@ -275,10 +324,12 @@ def install_runner(staged: Path, snapshot: Path, root: Path) -> tuple[Path, bool
         raise
 
 
-def apply_installation(staged: Path, snapshot: Path, root: Path, asset_revision: str) -> None:
+def apply_installation(
+    staged: Path, snapshot: Path, root: Path, asset_revision: str
+) -> None:
     """Install a fully validated runner and roll it back on later asset failure."""
     validate(staged)
-    validate_snapshot(staged, snapshot)
+    validate_snapshot(staged, snapshot, root)
     retained = root / "var/lib/sugarkube/dspace-chat-installations" / asset_revision
     if retained.exists():
         raise ValueError("exact retained revision already exists")
@@ -311,7 +362,11 @@ def status(root: Path) -> int:
         raise ValueError("current asset revision pointer is missing or invalid")
     revision = os.readlink(current)
     target = Path(revision)
-    if target.is_absolute() or len(target.parts) != 1 or not ASSET_REVISION.fullmatch(revision):
+    if (
+        target.is_absolute()
+        or len(target.parts) != 1
+        or not ASSET_REVISION.fullmatch(revision)
+    ):
         raise ValueError("current asset revision pointer is invalid")
     retained = installations / revision
     if retained.is_symlink() or not retained.is_dir():
@@ -337,14 +392,11 @@ def status(root: Path) -> int:
         or not runner_manifest["pnpmVersion"]
     ):
         raise ValueError("installed runner pnpm provenance is invalid")
-    if (
-        not isinstance(runner_manifest.get("playwrightBrowserExecutable"), str)
-        or not runner_manifest["playwrightBrowserExecutable"]
-    ):
+    if runner_manifest.get("browserContract") != config["browserContract"]["name"]:
         raise ValueError("installed runner browser provenance is invalid")
 
     rooted_config = dict(config, runnerRoot=str(runner_parent))
-    runner = runtime.validate_runner(rooted_config)
+    runner = runtime.validate_runner(rooted_config, root)
     if runner != expected_runner:
         raise ValueError("installed runner validation returned an unexpected revision")
 
@@ -367,7 +419,14 @@ def status(root: Path) -> int:
     ):
         print(f"{key}={config[key]}")
     print(f"pnpmVersion={runner_manifest['pnpmVersion']}")
-    print(f"playwrightBrowserExecutable={runner_manifest['playwrightBrowserExecutable']}")
+    browser = runtime.validate_browser_contract(rooted_config, runner, root)
+    print(f"browserContract={browser['name']}")
+    print(f"browserArchitecture={browser['architecture']}")
+    print(f"browserExecutablePath={browser['executablePath']}")
+    print(f"browserExecutableSha256={browser['executableSha256']}")
+    if browser["name"] == "system-chromium-v1":
+        print(f"browserLauncherPath={browser['launcherPath']}")
+        print(f"browserLauncherSha256={browser['launcherSha256']}")
     if root.resolve() != Path("/"):
         print("activation=not-queried")
         return 0
@@ -458,24 +517,41 @@ def main() -> int:
         default="dry-run",
     )
     parser.add_argument("--root", type=Path, default=Path("/"))
-    parser.add_argument("--revision", default="97ab09f13fb098de928a878bf1fe9b8d13032cb5")
-    parser.add_argument("--apply", action="store_true", help="authorize an explicit rollback")
+    parser.add_argument(
+        "--revision", default="97ab09f13fb098de928a878bf1fe9b8d13032cb5"
+    )
+    parser.add_argument(
+        "--apply", action="store_true", help="authorize an explicit rollback"
+    )
     parser.add_argument("--source", type=Path)
     parser.add_argument(
-        "--repository-identity", default="https://github.com/democratizedspace/dspace.git"
+        "--repository-identity",
+        default="https://github.com/democratizedspace/dspace.git",
     )
     parser.add_argument("--output", type=Path)
     parser.add_argument("--pnpm")
     parser.add_argument("--pnpm-version")
     parser.add_argument("--browser-bundle", type=Path)
+    parser.add_argument(
+        "--browser-contract",
+        choices=("runner-local-playwright-v1", "system-chromium-v1"),
+    )
     parser.add_argument("--runner-snapshot", type=Path)
     args = parser.parse_args()
     if args.operation == "status":
         return status(args.root)
     if args.operation == "materialize":
-        if not all((args.source, args.output, args.pnpm, args.pnpm_version, args.browser_bundle)):
+        if not all(
+            (
+                args.source,
+                args.output,
+                args.pnpm,
+                args.pnpm_version,
+                args.browser_contract,
+            )
+        ):
             parser.error(
-                "materialize requires source, output, pnpm, pnpm-version, and browser-bundle"
+                "materialize requires source, output, pnpm, pnpm-version, and browser-contract"
             )
         materialize(
             args.source.resolve(),
@@ -484,13 +560,16 @@ def main() -> int:
             args.output.resolve(),
             args.pnpm,
             args.pnpm_version,
-            args.browser_bundle.resolve(),
+            args.browser_contract,
+            args.browser_bundle.resolve() if args.browser_bundle else None,
         )
         return 0
     if args.operation == "rollback":
         if not ASSET_REVISION.fullmatch(args.revision):
             raise ValueError("revision must be a lowercase hexadecimal asset revision")
-        retained = args.root / "var/lib/sugarkube/dspace-chat-installations" / args.revision
+        retained = (
+            args.root / "var/lib/sugarkube/dspace-chat-installations" / args.revision
+        )
         validate(retained)
         if not args.apply:
             print("validation=passed mutation=none rollback=authorization-required")
@@ -504,9 +583,11 @@ def main() -> int:
         if args.runner_snapshot is None:
             parser.error(f"{args.operation} requires --runner-snapshot")
         snapshot = args.runner_snapshot.absolute()
-        validate_snapshot(staged, snapshot)
+        validate_snapshot(staged, snapshot, args.root)
         if args.operation == "apply":
-            asset_revision = hashlib.sha256((staged / "manifest.json").read_bytes()).hexdigest()
+            asset_revision = hashlib.sha256(
+                (staged / "manifest.json").read_bytes()
+            ).hexdigest()
             apply_installation(staged, snapshot, args.root, asset_revision)
         else:
             print("validation=passed mutation=none")

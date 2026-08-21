@@ -32,6 +32,7 @@ python3 scripts/install_dspace_chat_synthetic.py materialize \
   --repository-identity https://github.com/democratizedspace/dspace.git \
   --output /absolute/staging/97ab09f13fb098de928a878bf1fe9b8d13032cb5 \
   --pnpm /absolute/toolchain/pnpm --pnpm-version 9.0.0 \
+  --browser-contract runner-local-playwright-v1 \
   --browser-bundle /absolute/path/to/browser-bundle
 ```
 
@@ -40,6 +41,16 @@ commit's `packageManager`. The supplied local browser bundle is copied into the 
 missing object, wrong HEAD, dirty tracked/index state, alternates, missing root store, broken
 frontend link, unusable Playwright shim/module resolution, or missing critical file. Its manifest
 records hashes for the runner, spec, workspace manifests, and lockfile.
+
+The staging configuration instead explicitly selects `system-chromium-v1` for the proven ARM64
+host. For that contract, materialize with `--browser-contract system-chromium-v1` and omit
+`--browser-bundle`. Construction sets `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`; it neither downloads nor
+copies a browser. Installation and every execution require architecture `aarch64`, launcher
+`/usr/bin/chromium`, and executable `/usr/lib/chromium/chromium` to match the committed hashes,
+realpath/symlink expectations, `root:root` ownership, executable regular-file state, and mode
+`0755`. Playwright receives that exact executable through its pinned runner's supported
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` interface. No contract is inferred, `$PATH` is not searched,
+and there is no fallback between system and runner-local browsers.
 
 ## 2. Validate and dry-run installation
 
@@ -55,8 +66,10 @@ python3 scripts/install_dspace_chat_synthetic.py status --root /tmp/rehearsal-ro
 ```
 
 The preflight first loads the rendered configuration and validates its exact runner revision against
-the snapshot basename, manifest hashes, independent Git metadata, dependencies, and Node/Playwright
-resolution. Review all hashes and coordinates. `status` is read-only and, for alternate roots, reports activation as not queried; only `/` queries unit activation without
+the snapshot basename, manifest hashes, independent Git metadata, dependencies, and the explicitly
+selected browser contract. Review all hashes and coordinates. An alternate `--root` validates
+absolute browser coordinates beneath that target root, never against the live host. `status` is
+read-only and, for alternate roots, reports activation as not queried; only `/` queries unit activation without
 printing configuration secrets (the committed configuration contains none). A failed staging or
 preflight leaves installed fixtures unchanged.
 
