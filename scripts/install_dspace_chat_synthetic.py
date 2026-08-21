@@ -77,7 +77,7 @@ def verify_source(source: Path, revision: str, identity: str) -> None:
         raise ValueError("repository identity mismatch")
 
 
-def validate_runner(snapshot: Path, revision: str) -> None:
+def validate_runner(snapshot: Path, revision: str, browser_contract: dict) -> None:
     if command("git", "-C", str(snapshot), "rev-parse", "HEAD") != revision:
         raise ValueError("snapshot HEAD mismatch")
     command("git", "-C", str(snapshot), "fsck", "--full")
@@ -88,7 +88,8 @@ def validate_runner(snapshot: Path, revision: str) -> None:
     cli = snapshot / "frontend/node_modules/.bin/playwright"
     if not cli.is_file() or not os.access(cli, os.X_OK):
         raise ValueError("frontend Playwright CLI missing")
-    runtime_module().discover_playwright_browser(snapshot)
+    if browser_contract["name"] == "runner-local-playwright-v1":
+        runtime_module().discover_playwright_browser(snapshot)
     for link in (snapshot / "frontend/node_modules").rglob("*"):
         if link.is_symlink() and not link.exists():
             raise ValueError("broken frontend dependency link")
@@ -101,11 +102,23 @@ def materialize(
     output: Path,
     pnpm: str,
     pnpm_version: str,
-    browser_bundle: Path,
+    browser_bundle: Path | None,
+    browser_contract: dict | None = None,
 ) -> None:
     verify_source(source, revision, identity)
-    if output.exists() or not browser_bundle.is_dir():
+    runtime = runtime_module()
+    browser_contract = (
+        browser_contract
+        or runtime.load_config(ROOT / "config/dspace-chat-synthetic.json")["browserContract"]
+    )
+    runtime.validate_browser_contract_schema(browser_contract)
+    local_browser = browser_contract["name"] == "runner-local-playwright-v1"
+    if output.exists() or (
+        local_browser and (browser_bundle is None or not browser_bundle.is_dir())
+    ):
         raise ValueError("output exists or browser bundle is invalid")
+    if not local_browser and browser_bundle is not None:
+        raise ValueError("system browser contract rejects a browser bundle")
     if command(pnpm, "--version") != pnpm_version:
         raise ValueError("pnpm version mismatch")
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -125,27 +138,39 @@ def materialize(
             [pnpm, "install", "--frozen-lockfile", "--offline"],
             cwd=staging,
             check=True,
-            env={**os.environ, "PLAYWRIGHT_BROWSERS_PATH": str(staging / "playwright-browser")},
+            env={
+                **os.environ,
+                **(
+                    {"PLAYWRIGHT_BROWSERS_PATH": str(staging / "playwright-browser")}
+                    if local_browser
+                    else {"PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD": "1"}
+                ),
+            },
         )
-        shutil.copytree(browser_bundle, staging / "playwright-browser")
-        validate_runner(staging, revision)
-        browser = runtime_module().discover_playwright_browser(staging)
-        browser_relative = str(browser.relative_to(staging))
+        if local_browser:
+            shutil.copytree(browser_bundle, staging / "playwright-browser")
+        validate_runner(staging, revision, browser_contract)
         files = {relative: sha(staging / relative) for relative in CRITICAL}
-        files[browser_relative] = sha(browser)
         manifest = {
             "schemaVersion": 1,
             "runnerRevision": revision,
             "repositoryIdentity": identity.rstrip("/"),
             "pnpmVersion": pnpm_version,
-            "playwrightBrowserExecutable": browser_relative,
+            "browserContract": browser_contract["name"],
             "files": files,
         }
+        if local_browser:
+            browser = runtime.discover_playwright_browser(staging)
+            browser_relative = str(browser.relative_to(staging))
+            files[browser_relative] = sha(browser)
+            manifest["playwrightBrowserExecutable"] = browser_relative
+        else:
+            manifest["systemBrowser"] = browser_contract
         (staging / "sugarkube-runner-manifest.json").write_text(
             json.dumps(manifest, sort_keys=True, indent=2) + "\n"
         )
         os.replace(staging, output)
-        validate_runner(output, revision)
+        validate_runner(output, revision, browser_contract)
     except Exception:
         shutil.rmtree(staging, ignore_errors=True)
         raise
@@ -225,11 +250,13 @@ def load_snapshot_config(staged: Path, snapshot: Path) -> dict:
     return config
 
 
-def validate_snapshot(staged: Path, snapshot: Path) -> str:
+def validate_snapshot(staged: Path, snapshot: Path, target_root: Path = Path("/")) -> str:
     """Apply the runtime's complete runner contract to an installation input."""
     runtime = runtime_module()
     config = load_snapshot_config(staged, snapshot)
     runtime.validate_runner(config)
+    if config["browserContract"]["name"] == "system-chromium-v1":
+        runtime.validate_system_browser(config, target_root)
     return config["runnerRevision"]
 
 
@@ -278,7 +305,7 @@ def install_runner(staged: Path, snapshot: Path, root: Path) -> tuple[Path, bool
 def apply_installation(staged: Path, snapshot: Path, root: Path, asset_revision: str) -> None:
     """Install a fully validated runner and roll it back on later asset failure."""
     validate(staged)
-    validate_snapshot(staged, snapshot)
+    validate_snapshot(staged, snapshot, root)
     retained = root / "var/lib/sugarkube/dspace-chat-installations" / asset_revision
     if retained.exists():
         raise ValueError("exact retained revision already exists")
@@ -337,16 +364,24 @@ def status(root: Path) -> int:
         or not runner_manifest["pnpmVersion"]
     ):
         raise ValueError("installed runner pnpm provenance is invalid")
-    if (
-        not isinstance(runner_manifest.get("playwrightBrowserExecutable"), str)
-        or not runner_manifest["playwrightBrowserExecutable"]
-    ):
+    if runner_manifest.get("browserContract") != config["browserContract"]["name"]:
         raise ValueError("installed runner browser provenance is invalid")
 
     rooted_config = dict(config, runnerRoot=str(runner_parent))
     runner = runtime.validate_runner(rooted_config)
     if runner != expected_runner:
         raise ValueError("installed runner validation returned an unexpected revision")
+    browser_provenance = (
+        runtime.validate_system_browser(config, root)
+        if config["browserContract"]["name"] == "system-chromium-v1"
+        else {
+            "browserContract": config["browserContract"]["name"],
+            "playwrightBrowserExecutable": runner_manifest["playwrightBrowserExecutable"],
+            "playwrightBrowserSha256": runner_manifest["files"][
+                runner_manifest["playwrightBrowserExecutable"]
+            ],
+        }
+    )
 
     print(f"assetRevision={revision}")
     for target_name, path in live_paths.items():
@@ -367,7 +402,8 @@ def status(root: Path) -> int:
     ):
         print(f"{key}={config[key]}")
     print(f"pnpmVersion={runner_manifest['pnpmVersion']}")
-    print(f"playwrightBrowserExecutable={runner_manifest['playwrightBrowserExecutable']}")
+    for key, value in browser_provenance.items():
+        print(f"{key}={value}")
     if root.resolve() != Path("/"):
         print("activation=not-queried")
         return 0
@@ -473,10 +509,8 @@ def main() -> int:
     if args.operation == "status":
         return status(args.root)
     if args.operation == "materialize":
-        if not all((args.source, args.output, args.pnpm, args.pnpm_version, args.browser_bundle)):
-            parser.error(
-                "materialize requires source, output, pnpm, pnpm-version, and browser-bundle"
-            )
+        if not all((args.source, args.output, args.pnpm, args.pnpm_version)):
+            parser.error("materialize requires source, output, pnpm, and pnpm-version")
         materialize(
             args.source.resolve(),
             args.revision,
@@ -484,7 +518,7 @@ def main() -> int:
             args.output.resolve(),
             args.pnpm,
             args.pnpm_version,
-            args.browser_bundle.resolve(),
+            args.browser_bundle.resolve() if args.browser_bundle else None,
         )
         return 0
     if args.operation == "rollback":
@@ -504,7 +538,7 @@ def main() -> int:
         if args.runner_snapshot is None:
             parser.error(f"{args.operation} requires --runner-snapshot")
         snapshot = args.runner_snapshot.absolute()
-        validate_snapshot(staged, snapshot)
+        validate_snapshot(staged, snapshot, args.root)
         if args.operation == "apply":
             asset_revision = hashlib.sha256((staged / "manifest.json").read_bytes()).hexdigest()
             apply_installation(staged, snapshot, args.root, asset_revision)
