@@ -39,8 +39,7 @@ jobs:
         run: ansible-lint infra/ansible/playbooks/staging_preflight.yml
       - name: Parse and display staging inventory
         run: |
-          ansible-inventory \
-            --inventory infra/ansible/inventories/staging/hosts.yml --graph
+          ansible-inventory --graph
           ansible-inventory \
             --inventory infra/ansible/inventories/staging/hosts.yml --list
       - name: Check preflight syntax without connecting to hosts

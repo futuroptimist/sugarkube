@@ -35,13 +35,17 @@ export PATH="/tmp/sugarkube-ansible-validate/bin:$PATH"
 export ANSIBLE_CONFIG="$PWD/infra/ansible/ansible.cfg"
 
 ansible-config dump --only-changed
-ansible-inventory --inventory infra/ansible/inventories/staging/hosts.yml --graph
+ansible-inventory --graph
 ansible-inventory --inventory infra/ansible/inventories/staging/hosts.yml --list
 yamllint infra/ansible
 ansible-lint infra/ansible/playbooks/staging_preflight.yml
 ansible-playbook --inventory infra/ansible/inventories/staging/hosts.yml \
   --syntax-check infra/ansible/playbooks/staging_preflight.yml
 ```
+
+Ansible resolves the relative inventory and roles paths in `ansible.cfg` from the configuration
+file's directory. Consequently, `ansible-inventory --graph` uses the checked-in staging inventory
+when the command is run from the repository root with `ANSIBLE_CONFIG` set as shown above.
 
 The exact pins in `requirements.txt` keep local and CI validation reproducible. To update them,
 review the current stable `ansible-core`, `ansible-lint`, and `yamllint` releases for Python 3.12 and
