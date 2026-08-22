@@ -6,10 +6,11 @@ import copy
 import json
 import os
 import platform
+import stat
 import subprocess
 import sys
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -1359,6 +1360,17 @@ def tree_bytes(root: Path) -> list[tuple[str, str, bytes | str]]:
     return values
 
 
+def tree_metadata(root: Path) -> dict[str, tuple[int, int, int]]:
+    return {
+        str(path.relative_to(root)): (
+            path.lstat().st_uid,
+            path.lstat().st_gid,
+            stat.S_IMODE(path.lstat().st_mode),
+        )
+        for path in root.rglob("*")
+    }
+
+
 def test_status_reports_validated_provenance_without_mutation_or_systemctl(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
@@ -1740,6 +1752,409 @@ def test_apply_installs_runner_only_after_copy_revalidation(
     assert (installed / "dependency.ok").read_bytes() == (snapshot / "dependency.ok").read_bytes()
     assert any(".validate." in str(path) for path in fake.validated)
     assert os.readlink(root / "var/lib/sugarkube/dspace-chat-installations/current")
+
+
+def test_runner_install_normalizes_private_source_without_changing_content(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    revision = "97ab09f13fb098de928a878bf1fe9b8d13032cb5"
+    snapshot = tmp_path / "source" / revision
+    previous_umask = os.umask(0o077)
+    try:
+        snapshot.mkdir(parents=True)
+        git("init", cwd=snapshot)
+        git("config", "user.email", "tests@example.invalid", cwd=snapshot)
+        git("config", "user.name", "Tests", cwd=snapshot)
+        for relative in installer.CRITICAL:
+            path = snapshot / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f"fixture:{relative}\n")
+        (snapshot / "dependency.ok").write_text("complete\n")
+        pnpm_package = snapshot / "node_modules/.pnpm/example"
+        pnpm_package.mkdir(parents=True)
+        (pnpm_package / "index.js").write_text("export default true;\n")
+        playwright = snapshot / "frontend/node_modules/playwright-core/cli.sh"
+        playwright.parent.mkdir(parents=True)
+        playwright.write_bytes(b"#!/bin/sh\nexit 0\n")
+        playwright.chmod(0o700)
+        playwright_link = snapshot / "frontend/node_modules/.bin/playwright"
+        playwright_link.parent.mkdir(parents=True)
+        playwright_link.symlink_to("../playwright-core/cli.sh")
+        dependency_link = snapshot / "frontend/node_modules/example"
+        dependency_link.symlink_to("../../node_modules/.pnpm/example")
+        git("add", ".", cwd=snapshot)
+        git("commit", "-m", "private fixture", cwd=snapshot)
+        head = git("rev-parse", "HEAD", cwd=snapshot)
+        critical_hashes = {
+            relative: installer.sha(snapshot / relative) for relative in installer.CRITICAL
+        }
+        (snapshot / "sugarkube-runner-manifest.json").write_text(
+            json.dumps(
+                {
+                    "browserProvenance": {"name": runtime.SYSTEM_CHROMIUM},
+                    "files": critical_hashes,
+                }
+            )
+        )
+    finally:
+        os.umask(previous_umask)
+    script = playwright
+    before = tree_bytes(snapshot)
+    manifest_sha = installer.sha(snapshot / "sugarkube-runner-manifest.json")
+    link_text = {
+        str(path.relative_to(snapshot)): os.readlink(path)
+        for path in snapshot.rglob("*")
+        if path.is_symlink()
+    }
+    staged = tmp_path / "staged"
+    installer.render(staged)
+    root = tmp_path / "root"
+    root.mkdir()
+    monkeypatch.setattr(installer, "runtime_module", lambda: FakeSnapshotRuntime())
+
+    installed, created = installer.install_runner(staged, snapshot, root)
+
+    assert created and installed.name == revision
+    assert tree_bytes(installed) == before
+    assert stat.S_IMODE(script.stat().st_mode) == 0o700  # source remains private
+    assert stat.S_IMODE((installed / script.relative_to(snapshot)).stat().st_mode) == 0o750
+    assert stat.S_IMODE((installed / "package.json").stat().st_mode) == 0o640
+    assert {
+        str(path.relative_to(installed)): os.readlink(path)
+        for path in installed.rglob("*")
+        if path.is_symlink()
+    } == link_text
+    assert git("rev-parse", "HEAD", cwd=installed) == head
+    git("fsck", "--full", cwd=installed)
+    assert all(
+        installer.sha(installed / path) == expected for path, expected in critical_hashes.items()
+    )
+    assert installer.sha(installed / "sugarkube-runner-manifest.json") == manifest_sha
+    assert (installed / "node_modules/.pnpm/example/index.js").is_file()
+    assert (installed / "frontend/node_modules/example/index.js").is_file()
+    resolved_playwright = installed / "frontend/node_modules/.bin/playwright"
+    assert (
+        resolved_playwright.resolve() == installed / "frontend/node_modules/playwright-core/cli.sh"
+    )
+    assert os.access(resolved_playwright, os.X_OK)
+    for parent in (root / "var/lib/sugarkube", installed.parent):
+        assert stat.S_IMODE(parent.stat().st_mode) == 0o710
+        assert parent.stat().st_gid == os.getgid()
+    assert stat.S_IMODE(installed.stat().st_mode) == 0o750
+    assert installed.stat().st_gid == os.getgid()
+    for path in [installed, *installed.rglob("*")]:
+        if not path.is_symlink():
+            assert not stat.S_IMODE(path.stat().st_mode) & 0o022
+    config_value = json.loads((staged / "etc/sugarkube/dspace-chat-synthetic.json").read_text())
+    installer.validate_runner_access(config_value, installed, root)
+    installer.validate_runner(installed, head)
+
+
+@pytest.mark.parametrize("kind", ["executable", "symlink-target"])
+def test_child_access_validation_rejects_inaccessible_required_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    snapshot, _ = runner_snapshot_fixture(tmp_path)
+    executable = snapshot / "shim"
+    executable.write_text("#!/bin/sh\n")
+    executable.chmod(0o700)
+    (snapshot / "shim-link").symlink_to("shim")
+    staged = tmp_path / "staged"
+    installer.render(staged)
+    root = tmp_path / "root"
+    root.mkdir()
+    monkeypatch.setattr(installer, "runtime_module", lambda: FakeSnapshotRuntime())
+    runner, _ = installer.install_runner(staged, snapshot, root)
+    inaccessible = runner / ("shim" if kind == "executable" else "dependency.ok")
+    if kind == "symlink-target":
+        (runner / "shim-link").unlink()
+        (runner / "shim-link").symlink_to("dependency.ok")
+    inaccessible.chmod(0o600)
+    value = json.loads((staged / "etc/sugarkube/dspace-chat-synthetic.json").read_text())
+
+    with pytest.raises(ValueError, match="access metadata|cannot access"):
+        installer.validate_runner_access(value, runner, root)
+
+
+def test_child_access_validation_rejects_parent_and_file_modes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    snapshot, _ = runner_snapshot_fixture(tmp_path)
+    executable = snapshot / "shim"
+    executable.write_text("#!/bin/sh\n")
+    executable.chmod(0o755)
+    staged = tmp_path / "staged"
+    installer.render(staged)
+    root = tmp_path / "root"
+    root.mkdir()
+    monkeypatch.setattr(installer, "runtime_module", lambda: FakeSnapshotRuntime())
+    runner, _ = installer.install_runner(staged, snapshot, root)
+    value = json.loads((staged / "etc/sugarkube/dspace-chat-synthetic.json").read_text())
+    for path, mode in (
+        (root / "var/lib/sugarkube", 0o700),
+        (runner / "dependency.ok", 0o600),
+    ):
+        original = stat.S_IMODE(path.stat().st_mode)
+        path.chmod(mode)
+        with pytest.raises(ValueError, match="access metadata|cannot access"):
+            installer.validate_runner_access(value, runner, root)
+        path.chmod(original)
+
+
+def test_runner_access_paths_rejects_parent_outside_application_tree(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    outside = root / "etc"
+    outside.mkdir()
+    before = outside.stat()
+
+    with pytest.raises(ValueError, match="within /var/lib/sugarkube"):
+        installer.runner_access_paths(root, outside)
+
+    after = outside.stat()
+    assert (after.st_uid, after.st_gid, after.st_mode) == (
+        before.st_uid,
+        before.st_gid,
+        before.st_mode,
+    )
+
+
+def test_child_access_validation_rejects_unsupported_file_type(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    snapshot, _ = runner_snapshot_fixture(tmp_path)
+    staged = tmp_path / "staged"
+    installer.render(staged)
+    root = tmp_path / "root"
+    root.mkdir()
+    monkeypatch.setattr(installer, "runtime_module", lambda: FakeSnapshotRuntime())
+    runner, _ = installer.install_runner(staged, snapshot, root)
+    fifo = runner / "unexpected.fifo"
+    os.mkfifo(fifo, 0o640)
+    os.chown(fifo, os.getuid(), os.getgid())
+    value = json.loads((staged / "etc/sugarkube/dspace-chat-synthetic.json").read_text())
+
+    with pytest.raises(ValueError, match="unsupported file type"):
+        installer.validate_runner_access(value, runner, root)
+
+
+def test_non_executable_shebang_file_only_requires_read_access(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    snapshot, _ = runner_snapshot_fixture(tmp_path)
+    data = snapshot / "script-data"
+    data.write_text("#!/bin/sh\nnot executed\n")
+    data.chmod(0o600)
+    staged = tmp_path / "staged"
+    installer.render(staged)
+    root = tmp_path / "root"
+    root.mkdir()
+    monkeypatch.setattr(installer, "runtime_module", lambda: FakeSnapshotRuntime())
+
+    runner, _ = installer.install_runner(staged, snapshot, root)
+
+    assert stat.S_IMODE((runner / data.name).stat().st_mode) == 0o640
+
+
+def test_service_identity_rejects_account_with_different_primary_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import grp
+    import pwd
+
+    monkeypatch.setattr(pwd, "getpwnam", lambda _name: SimpleNamespace(pw_uid=1234, pw_gid=2345))
+    monkeypatch.setattr(grp, "getgrnam", lambda _name: SimpleNamespace(gr_gid=3456))
+
+    with pytest.raises(ValueError, match="primary group does not match"):
+        installer.service_identity(
+            {"serviceAccount": "synthetic", "serviceGroup": "synthetic"}, Path("/")
+        )
+
+
+def test_service_identity_rejects_unavailable_live_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import pwd
+
+    monkeypatch.setattr(pwd, "getpwnam", lambda _name: (_ for _ in ()).throw(KeyError()))
+
+    with pytest.raises(ValueError, match="identity is unavailable"):
+        installer.service_identity(
+            {"serviceAccount": "absent", "serviceGroup": "absent"}, Path("/")
+        )
+
+
+def test_service_identity_accepts_matching_live_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import grp
+    import pwd
+
+    monkeypatch.setattr(pwd, "getpwnam", lambda _name: SimpleNamespace(pw_uid=1234, pw_gid=2345))
+    monkeypatch.setattr(grp, "getgrnam", lambda _name: SimpleNamespace(gr_gid=2345))
+
+    assert installer.service_identity(
+        {"serviceAccount": "synthetic", "serviceGroup": "synthetic"}, Path("/")
+    ) == (1234, 2345)
+
+
+@pytest.mark.parametrize("fault", ["invalid-parent", "missing", "config-bytes"])
+def test_live_asset_validation_rejects_invalid_active_tree(tmp_path: Path, fault: str) -> None:
+    root = tmp_path / "root"
+    retained = tmp_path / "retained"
+    relative = Path("etc/sugarkube/dspace-chat-synthetic.json")
+    retained_config = retained / relative
+    retained_config.parent.mkdir(parents=True)
+    retained_config.write_bytes(b"retained config\n")
+    live_config = root / relative
+    live_config.parent.mkdir(parents=True)
+    live_config.write_bytes(retained_config.read_bytes())
+    manifest = {str(relative): installer.sha(retained_config)}
+
+    if fault == "invalid-parent":
+        live_config.unlink()
+        (root / "etc/sugarkube").rmdir()
+        (root / "etc/sugarkube").write_text("not a directory\n")
+        match = "invalid directory"
+    elif fault == "missing":
+        live_config.unlink()
+        match = "missing or invalid"
+    else:
+        live_config.write_bytes(b"different config bytes\n")
+        manifest[str(relative)] = installer.sha(live_config)
+        match = "configuration does not match"
+
+    with pytest.raises(ValueError, match=match):
+        installer.validate_live_assets(root, retained, manifest)
+
+
+@pytest.mark.parametrize("fault", ["dangling", "escaping"])
+def test_runner_access_rejects_unsafe_symlink_without_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    root, runner, _revision, _manifest_sha = access_repair_fixture(tmp_path, monkeypatch)
+    link = runner / "dependency-link"
+    link.symlink_to("missing" if fault == "dangling" else tmp_path / "outside")
+    before = tree_bytes(root)
+
+    with pytest.raises(ValueError, match="missing or escapes"):
+        installer.runner_access_plan(
+            json.loads((root / "etc/sugarkube/dspace-chat-synthetic.json").read_text()),
+            runner,
+            root,
+        )
+
+    assert tree_bytes(root) == before
+
+
+def access_repair_fixture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Path, Path, str, str]:
+    root = tmp_path / "root"
+    root.mkdir()
+    retained = root / "var/lib/sugarkube/dspace-chat-installations" / ("6" * 64)
+    installer.render(retained)
+    installer.activate(retained, root, retained.name)
+    snapshot, revision = runner_snapshot_fixture(tmp_path)
+    runner = root / "var/lib/sugarkube/dspace-chat-runners" / revision
+    __import__("shutil").copytree(snapshot, runner, symlinks=True)
+    for path in [runner.parent.parent, runner.parent, runner, *runner.rglob("*")]:
+        if not path.is_symlink():
+            path.chmod(0o700 if path.is_dir() else 0o600)
+    monkeypatch.setattr(installer, "runtime_module", lambda: FakeSnapshotRuntime())
+    return root, runner, revision, installer.sha(runner / "sugarkube-runner-manifest.json")
+
+
+def test_access_repair_report_only_and_explicit_apply_are_bounded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    root, runner, revision, manifest_sha = access_repair_fixture(tmp_path, monkeypatch)
+    before = tree_bytes(root)
+    metadata_before = tree_metadata(root)
+    assert installer.repair_runner_access(root, revision, "6" * 64, manifest_sha, False) == 0
+    assert tree_bytes(root) == before
+    assert tree_metadata(root) == metadata_before
+    report = capsys.readouterr().out
+    assert report.splitlines() == [
+        f"runnerRevision={revision}",
+        f"runnerManifestSha256={manifest_sha}",
+        "runnerAccess=repair-required mutation=none authorization=required",
+    ]
+    assert not any(word in report for word in ("credential", "result", "journal", "payload"))
+
+    assert installer.repair_runner_access(root, revision, "6" * 64, manifest_sha, True) == 0
+    assert "metadata-only" in capsys.readouterr().out
+    assert tree_bytes(root) == before
+    metadata_after = tree_metadata(root)
+    changed = {path for path in metadata_before if metadata_before[path] != metadata_after[path]}
+    approved = {
+        "var/lib/sugarkube",
+        "var/lib/sugarkube/dspace-chat-runners",
+    }
+    approved.update(str(path.relative_to(root)) for path in [runner, *runner.rglob("*")])
+    assert changed and changed <= approved
+    assert not any("dspace-chat-installations" in path for path in changed)
+    assert stat.S_IMODE(runner.stat().st_mode) == 0o750
+    assert installer.repair_runner_access(root, revision, "6" * 64, manifest_sha, True) == 0
+    assert "already-correct mutation=none" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("apply", [False, True])
+@pytest.mark.parametrize(
+    "asset",
+    [
+        "etc/sugarkube/dspace-chat-synthetic.json",
+        "usr/local/libexec/sugarkube-dspace-chat-synthetic",
+    ],
+)
+def test_access_repair_rejects_mismatched_current_asset_without_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    apply: bool,
+    asset: str,
+) -> None:
+    root, _runner, revision, manifest_sha = access_repair_fixture(tmp_path, monkeypatch)
+    live = root / asset
+    live.write_bytes(live.read_bytes() + b"tampered\n")
+    before_bytes = tree_bytes(root)
+    before_metadata = tree_metadata(root)
+    current = root / "var/lib/sugarkube/dspace-chat-installations/current"
+    current_target = os.readlink(current)
+
+    with pytest.raises(ValueError, match="live asset|live configuration"):
+        installer.repair_runner_access(root, revision, "6" * 64, manifest_sha, apply)
+
+    assert tree_bytes(root) == before_bytes
+    assert tree_metadata(root) == before_metadata
+    assert os.readlink(current) == current_target
+
+
+@pytest.mark.parametrize(
+    "fault", ["revision", "manifest", "current", "runner-symlink", "git", "dependency"]
+)
+def test_access_repair_rejects_ambiguous_or_invalid_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    root, runner, revision, manifest_sha = access_repair_fixture(tmp_path, monkeypatch)
+    selected = revision
+    if fault == "revision":
+        selected = "1" * 40
+    elif fault == "manifest":
+        manifest_sha = "0" * 64
+    elif fault == "current":
+        (root / "var/lib/sugarkube/dspace-chat-installations/current").unlink()
+    elif fault == "runner-symlink":
+        external = tmp_path / "external"
+        runner.rename(external)
+        runner.symlink_to(external, target_is_directory=True)
+    elif fault == "git":
+        __import__("shutil").rmtree(runner / ".git")
+    else:
+        (runner / "dependency.ok").unlink()
+    before = tree_bytes(root)
+    with pytest.raises((ValueError, OSError)):
+        installer.repair_runner_access(root, selected, "6" * 64, manifest_sha, True)
+    assert tree_bytes(root) == before
 
 
 def test_install_runner_reuses_existing_runner_with_identical_manifest(
