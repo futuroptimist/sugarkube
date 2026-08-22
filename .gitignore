@@ -60,4 +60,5 @@ infra/ansible/**/*.retry
 infra/ansible/**/inventory.local.*
 infra/ansible/**/inventories/**/*.local.*
 infra/ansible/**/vault*pass*
+infra/ansible/**/.vault*pass*
 infra/ansible/**/*.log
