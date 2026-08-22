@@ -1,6 +1,10 @@
 terraform {
   required_version = "= 1.15.9"
 
+  # HCP Terraform organization and workspace are selected at runtime with
+  # TF_CLOUD_ORGANIZATION and TF_WORKSPACE. Never commit either value here.
+  cloud {}
+
   required_providers {
     cloudflare = {
       source  = "cloudflare/cloudflare"
