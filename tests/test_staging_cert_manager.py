@@ -13,6 +13,35 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 
+def test_flux_and_nonflux_cert_manager_use_public_dns01_resolvers():
+    justfile = (ROOT / "justfile").read_text()
+    helmrelease = (
+        ROOT / "platform" / "cert-manager" / "helmrelease.yaml"
+    ).read_text()
+    _, install_marker, remaining_recipes = justfile.partition(
+        "cert-manager-install version="
+    )
+    assert install_marker, "cert-manager-install recipe marker not found"
+    recipe, next_recipe_marker, _ = remaining_recipes.partition(
+        "cert-manager-cloudflare-token-secret"
+    )
+    assert next_recipe_marker, "cert-manager-cloudflare-token-secret recipe marker not found"
+
+    recursive_only = "--dns01-recursive-nameservers-only"
+    recursive_servers = (
+        "--dns01-recursive-nameservers=1.1.1.1:53,8.8.8.8:53"
+    )
+
+    assert f"      - {recursive_only}" in helmrelease
+    assert f"      - {recursive_servers}" in helmrelease
+    assert (
+        f"--set-string extraArgs[0]={recursive_only}"
+        in recipe
+    )
+    escaped_servers = recursive_servers.replace(",", r"\,")
+    assert f"--set-string 'extraArgs[1]={escaped_servers}'" in recipe
+
+
 def resource(name, *, owner_kind=None, owner_name=None, status=None, spec=None, conditions=None):
     metadata = {"name": name}
     if owner_kind:
