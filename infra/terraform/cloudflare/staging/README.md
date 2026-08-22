@@ -110,7 +110,9 @@ and MINIMUM fields; it bounds later public-resolver waits.
 ```bash
 DNS_NAME=tf-lab.gitshelves.com
 DNS_ZONE=gitshelves.com
-EXPECTED_TXT="\"$TF_VAR_tf_lab_txt_content\""
+escaped_txt="${TF_VAR_tf_lab_txt_content//\\/\\\\}"
+escaped_txt="${escaped_txt//\"/\\\"}"
+EXPECTED_TXT="\"$escaped_txt\""
 ns_response="$(dig +time=5 +tries=1 +short NS "$DNS_ZONE")" || {
   echo 'Authoritative nameserver discovery failed' >&2; exit 1;
 }
