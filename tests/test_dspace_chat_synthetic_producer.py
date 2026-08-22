@@ -6,10 +6,11 @@ import copy
 import json
 import os
 import platform
+import stat
 import subprocess
 import sys
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -1759,6 +1760,171 @@ def test_install_runner_reuses_existing_runner_with_identical_manifest(
 
     assert (installed, created) == (destination, False)
     assert marker.read_bytes() == b"preserved"
+
+
+def test_install_runner_normalizes_restrictive_source_access_without_content_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    old_umask = os.umask(0o077)
+    try:
+        snapshot, revision = runner_snapshot_fixture(tmp_path)
+        script = snapshot / "script.sh"
+        script.write_bytes(b"#!/bin/sh\nexit 0\n")
+        script.chmod(0o700)
+        package = snapshot / "package.json"
+        package.write_bytes(b'{"private":true}\n')
+        package.chmod(0o600)
+        shim = snapshot / "node_modules/.bin/playwright"
+        shim.parent.mkdir(parents=True)
+        shim.symlink_to("../../script.sh")
+        (snapshot / ".git").rmdir()
+        git("init", cwd=snapshot)
+        git("config", "user.email", "tests@example.invalid", cwd=snapshot)
+        git("config", "user.name", "Tests", cwd=snapshot)
+        git("add", ".", cwd=snapshot)
+        git("commit", "-m", "restrictive fixture", cwd=snapshot)
+        source_head = git("rev-parse", "HEAD", cwd=snapshot)
+        assert git("fsck", "--full", cwd=snapshot) == ""
+    finally:
+        os.umask(old_umask)
+    staged = tmp_path / "staged"
+    installer.render(staged)
+    root = tmp_path / "root"
+    root.mkdir()
+    monkeypatch.setattr(installer, "runtime_module", lambda: FakeSnapshotRuntime())
+
+    installed, created = installer.install_runner(staged, snapshot, root)
+
+    assert created
+    assert installed == root / "var/lib/sugarkube/dspace-chat-runners" / revision
+    assert script.read_bytes() == (installed / "script.sh").read_bytes()
+    assert package.read_bytes() == (installed / "package.json").read_bytes()
+    assert os.readlink(installed / "node_modules/.bin/playwright") == "../../script.sh"
+    assert git("rev-parse", "HEAD", cwd=installed) == source_head
+    assert git("fsck", "--full", cwd=installed) == ""
+    assert stat.S_IMODE((installed / "script.sh").stat().st_mode) == 0o750
+    assert stat.S_IMODE((installed / "package.json").stat().st_mode) == 0o640
+    parent = installed.parent
+    assert stat.S_IMODE(parent.stat().st_mode) == 0o750
+    for path in (parent, installed, *installed.rglob("*")):
+        if not path.is_symlink():
+            assert stat.S_IMODE(path.stat().st_mode) & 0o022 == 0
+    installer.validate_runner_access(parent, installed, os.getuid(), os.getgid())
+
+
+@pytest.mark.parametrize("fault", ["parent", "directory", "file", "executable"])
+def test_child_access_validation_fails_closed_for_each_required_access_class(
+    tmp_path: Path, fault: str
+) -> None:
+    parent = tmp_path / "runners"
+    runner = parent / ("a" * 40)
+    directory = runner / "node_modules/.bin"
+    directory.mkdir(parents=True)
+    regular = runner / "package.json"
+    regular.write_text("{}\n")
+    executable = directory / "playwright"
+    executable.write_text("#!/bin/sh\n")
+    executable.chmod(0o700)
+    installer.normalize_runner_access(parent, runner, os.getuid(), os.getgid())
+    target = {"parent": parent, "directory": directory, "file": regular, "executable": executable}[
+        fault
+    ]
+    mode = stat.S_IMODE(target.stat().st_mode)
+    target.chmod(mode & ~(0o010 if target.is_dir() or fault == "executable" else 0o040))
+
+    with pytest.raises(ValueError, match="accessible"):
+        installer.validate_runner_access(parent, runner, os.getuid(), os.getgid())
+
+
+def recovery_fixture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Path, Path, str, str]:
+    root = tmp_path / "root"
+    root.mkdir()
+    asset_revision = "6" * 64
+    retained = root / "var/lib/sugarkube/dspace-chat-installations" / asset_revision
+    installer.render(retained)
+    installer.activate(retained, root, asset_revision)
+    revision = "97ab09f13fb098de928a878bf1fe9b8d13032cb5"
+    runner = root / "var/lib/sugarkube/dspace-chat-runners" / revision
+    runner.mkdir(parents=True)
+    (runner / ".git").mkdir()
+    (runner / "dependency.ok").write_text("complete\n")
+    manifest = runner / "sugarkube-runner-manifest.json"
+    manifest.write_text(json.dumps({"browserProvenance": {"name": runtime.SYSTEM_CHROMIUM}}))
+    runner.chmod(0o700)
+    for path in runner.rglob("*"):
+        path.chmod(0o700 if path.is_dir() else 0o600)
+    monkeypatch.setattr(installer, "runtime_module", lambda: FakeSnapshotRuntime())
+    monkeypatch.setattr(installer, "APPROVED_ASSET_REVISION", asset_revision)
+    monkeypatch.setattr(installer, "APPROVED_RUNNER_MANIFEST_SHA256", installer.sha(manifest))
+    return root, runner, asset_revision, installer.sha(manifest)
+
+
+def test_runner_access_recovery_report_only_is_byte_and_metadata_non_mutating(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    root, runner, asset_revision, manifest_sha = recovery_fixture(tmp_path, monkeypatch)
+    before = tree_bytes(root)
+    before_modes = {str(path.relative_to(root)): path.lstat().st_mode for path in root.rglob("*")}
+
+    installer.repair_runner_access(root, runner.name, manifest_sha, asset_revision, apply=False)
+
+    assert tree_bytes(root) == before
+    after_modes = {str(path.relative_to(root)): path.lstat().st_mode for path in root.rglob("*")}
+    assert after_modes == before_modes
+    assert (
+        capsys.readouterr().out == "runnerAccess=repair-required validation=passed mutation=none\n"
+    )
+
+
+def test_runner_access_recovery_apply_changes_only_access_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    root, runner, asset_revision, manifest_sha = recovery_fixture(tmp_path, monkeypatch)
+    before = tree_bytes(root)
+
+    installer.repair_runner_access(root, runner.name, manifest_sha, asset_revision, apply=True)
+
+    assert tree_bytes(root) == before
+    installer.validate_runner_access(runner.parent, runner, os.getuid(), os.getgid())
+    assert capsys.readouterr().out == (
+        "runnerAccess=repaired validation=passed mutation=access-metadata-only\n"
+    )
+    installer.repair_runner_access(root, runner.name, manifest_sha, asset_revision, apply=True)
+    assert capsys.readouterr().out == (
+        "runnerAccess=already-correct validation=passed mutation=none\n"
+    )
+
+
+@pytest.mark.parametrize(
+    "fault", ["revision", "manifest", "current", "symlink", "dependency", "git"]
+)
+def test_runner_access_recovery_rejects_ambiguous_or_invalid_state_without_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    root, runner, asset_revision, manifest_sha = recovery_fixture(tmp_path, monkeypatch)
+    revision = runner.name
+    if fault == "revision":
+        revision = "0" * 40
+    elif fault == "manifest":
+        manifest_sha = "0" * 64
+    elif fault == "current":
+        (root / "var/lib/sugarkube/dspace-chat-installations/current").unlink()
+    elif fault == "symlink":
+        real = runner.with_name("real")
+        runner.rename(real)
+        runner.symlink_to(real, target_is_directory=True)
+    elif fault == "dependency":
+        (runner / "dependency.ok").unlink()
+    else:
+        (runner / ".git").rmdir()
+    before = tree_bytes(root)
+
+    with pytest.raises(ValueError):
+        installer.repair_runner_access(root, revision, manifest_sha, asset_revision, apply=True)
+
+    assert tree_bytes(root) == before
 
 
 def test_apply_rejects_different_valid_existing_runner_without_mutation(

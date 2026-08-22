@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import grp
 import hashlib
 import importlib.util
 import json
 import os
+import pwd
 import re
 import shutil
 import stat
@@ -34,6 +36,8 @@ ASSETS = {
 }
 REVISION = re.compile(r"[0-9a-f]{40}")
 ASSET_REVISION = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+APPROVED_ASSET_REVISION = "68e002775771c087285cd5ba8e402e5d9ac7c2c426a802d44a179e74b925fd54"
+APPROVED_RUNNER_MANIFEST_SHA256 = "36fdab33edc0f1ad518a6d3d247a1bd32d233402387ba57493a9386d78ec9301"
 CRITICAL = (
     "scripts/run-remote-chat-smoke.mjs",
     "scripts/remote-chat-smoke-completion.mjs",
@@ -277,6 +281,61 @@ def rooted(root: Path, absolute: str) -> Path:
     return root / coordinate.relative_to("/")
 
 
+def service_identity(config: dict, root: Path) -> tuple[int, int]:
+    """Resolve live identities; use the caller as the alternate-root model."""
+    if root.resolve() != Path("/"):
+        return os.getuid(), os.getgid()
+    try:
+        account = pwd.getpwnam(config["serviceAccount"])
+        group = grp.getgrnam(config["serviceGroup"])
+    except KeyError:
+        raise ValueError("configured service identity is unavailable") from None
+    if group.gr_gid not in {account.pw_gid, *os.getgrouplist(account.pw_name, account.pw_gid)}:
+        raise ValueError("configured service account is not in service group")
+    return account.pw_uid, group.gr_gid
+
+
+def normalize_runner_access(parent: Path, runner: Path, owner_uid: int, group_gid: int) -> None:
+    """Make an immutable runner readable/traversable by its configured group."""
+    for path in (parent, runner, *runner.rglob("*")):
+        info = path.lstat()
+        if path.is_symlink():
+            os.chown(path, owner_uid, group_gid, follow_symlinks=False)
+            continue
+        if stat.S_ISDIR(info.st_mode):
+            mode = 0o750
+        elif stat.S_ISREG(info.st_mode):
+            mode = 0o750 if stat.S_IMODE(info.st_mode) & 0o111 else 0o640
+        else:
+            raise ValueError("runner contains an unsupported filesystem object")
+        os.chown(path, owner_uid, group_gid)
+        path.chmod(mode)
+
+
+def validate_runner_access(parent: Path, runner: Path, owner_uid: int, group_gid: int) -> None:
+    """Model the configured child's access without executing as that account."""
+    for path in (parent, runner, *runner.rglob("*")):
+        info = path.lstat()
+        if path.is_symlink():
+            try:
+                path.resolve(strict=True).relative_to(runner)
+            except (OSError, RuntimeError, ValueError):
+                raise ValueError("runner dependency link is inaccessible") from None
+            continue
+        mode = stat.S_IMODE(info.st_mode)
+        if info.st_uid != owner_uid or info.st_gid != group_gid or mode & 0o022:
+            raise ValueError("runner access metadata is invalid")
+        if stat.S_ISDIR(info.st_mode):
+            if mode & 0o050 != 0o050:
+                raise ValueError("runner directory is not accessible to service group")
+        elif stat.S_ISREG(info.st_mode):
+            required = 0o040 | (0o010 if mode & 0o100 else 0)
+            if mode & required != required:
+                raise ValueError("runner file is not accessible to service group")
+        else:
+            raise ValueError("runner contains an unsupported filesystem object")
+
+
 def install_runner(staged: Path, snapshot: Path, root: Path) -> tuple[Path, bool]:
     """Copy, revalidate, and atomically expose an immutable runner snapshot."""
     runtime = runtime_module()
@@ -284,6 +343,8 @@ def install_runner(staged: Path, snapshot: Path, root: Path) -> tuple[Path, bool
     revision = config["runnerRevision"]
     parent = rooted(root, config["runnerRoot"])
     destination = parent / revision
+    service_uid, service_gid = service_identity(config, root)
+    owner_uid = 0 if root.resolve() == Path("/") else service_uid
     if destination.exists() or destination.is_symlink():
         if destination.is_symlink() or not destination.is_dir():
             raise ValueError("runner revision destination is invalid")
@@ -291,12 +352,14 @@ def install_runner(staged: Path, snapshot: Path, root: Path) -> tuple[Path, bool
         if (snapshot / manifest).read_bytes() != (destination / manifest).read_bytes():
             raise ValueError("existing runner manifest does not match snapshot")
         validate_snapshot(staged, destination, root)
+        validate_runner_access(parent, destination, owner_uid, service_gid)
         return destination, False
     parent.mkdir(parents=True, exist_ok=True)
     temporary = Path(tempfile.mkdtemp(prefix=f".{revision}.", dir=parent))
     temporary.rmdir()
     try:
         shutil.copytree(snapshot, temporary, symlinks=True)
+        normalize_runner_access(parent, temporary, owner_uid, service_gid)
         # Validation expects the immutable revision basename, so validate through
         # a private exact-name parent before the atomic destination rename.
         validation_parent = Path(tempfile.mkdtemp(prefix=".validate.", dir=parent))
@@ -304,6 +367,7 @@ def install_runner(staged: Path, snapshot: Path, root: Path) -> tuple[Path, bool
         os.replace(temporary, validation_runner)
         try:
             validate_snapshot(staged, validation_runner, root)
+            validate_runner_access(parent, validation_runner, owner_uid, service_gid)
             os.replace(validation_runner, destination)
         finally:
             shutil.rmtree(validation_parent, ignore_errors=True)
@@ -311,6 +375,58 @@ def install_runner(staged: Path, snapshot: Path, root: Path) -> tuple[Path, bool
     except Exception:
         shutil.rmtree(temporary, ignore_errors=True)
         raise
+
+
+def repair_runner_access(
+    root: Path, revision: str, manifest_sha256: str, asset_revision: str, apply: bool
+) -> None:
+    """Validate and optionally repair only an exact installed runner's access metadata."""
+    if revision != "97ab09f13fb098de928a878bf1fe9b8d13032cb5":
+        raise ValueError("repair runner revision is not approved")
+    if manifest_sha256 != APPROVED_RUNNER_MANIFEST_SHA256:
+        raise ValueError("repair runner manifest SHA-256 is not approved")
+    if asset_revision != APPROVED_ASSET_REVISION:
+        raise ValueError("repair asset revision is not approved")
+    installations = root / "var/lib/sugarkube/dspace-chat-installations"
+    current = installations / "current"
+    if not current.is_symlink() or os.readlink(current) != asset_revision:
+        raise ValueError("repair current asset revision is invalid")
+    retained = installations / asset_revision
+    manifest = validate(retained)
+    for target, expected in manifest.items():
+        live = root / target
+        if live.is_symlink() or not live.is_file() or sha(live) != expected:
+            raise ValueError("repair live asset state is invalid")
+    runtime = runtime_module()
+    config = runtime.load_config(root / "etc/sugarkube/dspace-chat-synthetic.json")
+    if config["runnerRevision"] != revision:
+        raise ValueError("repair configured runner revision is invalid")
+    parent = rooted(root, config["runnerRoot"])
+    runner = parent / revision
+    if runner.is_symlink() or not runner.is_dir():
+        raise ValueError("repair runner destination is invalid")
+    manifest_path = runner / "sugarkube-runner-manifest.json"
+    if manifest_path.is_symlink() or sha(manifest_path) != manifest_sha256:
+        raise ValueError("repair runner manifest does not match")
+    validate_snapshot(retained, runner, root)
+    service_uid, service_gid = service_identity(config, root)
+    owner_uid = 0 if root.resolve() == Path("/") else service_uid
+    try:
+        validate_runner_access(parent, runner, owner_uid, service_gid)
+        state = "already-correct"
+    except ValueError:
+        state = "repair-required"
+    if not apply:
+        print(f"runnerAccess={state} validation=passed mutation=none")
+        return
+    mutation = "none"
+    if state == "repair-required":
+        normalize_runner_access(parent, runner, owner_uid, service_gid)
+        validate_snapshot(retained, runner, root)
+        validate_runner_access(parent, runner, owner_uid, service_gid)
+        state = "repaired"
+        mutation = "access-metadata-only"
+    print(f"runnerAccess={state} validation=passed mutation={mutation}")
 
 
 def apply_installation(staged: Path, snapshot: Path, root: Path, asset_revision: str) -> None:
@@ -386,6 +502,9 @@ def status(root: Path) -> int:
     runner = runtime.validate_runner(rooted_config)
     if runner != expected_runner:
         raise ValueError("installed runner validation returned an unexpected revision")
+    service_uid, service_gid = service_identity(config, root)
+    owner_uid = 0 if root.resolve() == Path("/") else service_uid
+    validate_runner_access(runner_parent, runner, owner_uid, service_gid)
     provenance = runtime.validate_browser_contract(rooted_config, runner, root)
     if provenance != runner_manifest.get("browserProvenance"):
         raise ValueError("installed runner browser provenance is invalid")
@@ -504,12 +623,23 @@ def main() -> int:
     parser.add_argument(
         "operation",
         nargs="?",
-        choices=("dry-run", "apply", "status", "rollback", "materialize"),
+        choices=(
+            "dry-run",
+            "apply",
+            "status",
+            "rollback",
+            "materialize",
+            "repair-runner-access",
+        ),
         default="dry-run",
     )
     parser.add_argument("--root", type=Path, default=Path("/"))
     parser.add_argument("--revision", default="97ab09f13fb098de928a878bf1fe9b8d13032cb5")
-    parser.add_argument("--apply", action="store_true", help="authorize an explicit rollback")
+    parser.add_argument(
+        "--apply", action="store_true", help="authorize an explicit rollback or access repair"
+    )
+    parser.add_argument("--manifest-sha256", default=APPROVED_RUNNER_MANIFEST_SHA256)
+    parser.add_argument("--asset-revision", default=APPROVED_ASSET_REVISION)
     parser.add_argument("--source", type=Path)
     parser.add_argument(
         "--repository-identity", default="https://github.com/democratizedspace/dspace.git"
@@ -525,6 +655,15 @@ def main() -> int:
     args.root = runtime.normalize_root(args.root)
     if args.operation == "status":
         return status(args.root)
+    if args.operation == "repair-runner-access":
+        repair_runner_access(
+            args.root,
+            args.revision,
+            args.manifest_sha256,
+            args.asset_revision,
+            args.apply,
+        )
+        return 0
     if args.operation == "materialize":
         if not all((args.source, args.output, args.pnpm, args.pnpm_version)):
             parser.error("materialize requires source, output, pnpm, and pnpm-version")

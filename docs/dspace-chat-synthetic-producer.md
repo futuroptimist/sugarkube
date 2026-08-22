@@ -88,7 +88,12 @@ sudo python3 scripts/install_dspace_chat_synthetic.py apply \
 ```
 
 Apply validates the source snapshot before any destination mutation, copies it beneath the configured
-runner root, validates the copy again, and atomically exposes the exact immutable revision. An
+runner root, normalizes the live copy to `root:<serviceGroup>` with directories and executable files
+`0750` and other regular files `0640`, validates the configured child's traversal/read/execute
+access, and atomically exposes the exact immutable revision. Source checkout ownership and a
+restrictive construction `umask` therefore cannot make the child copy unusable. Normalization does
+not alter bytes, symlink targets, Git identity, dependency layout, or manifest hashes; it grants no
+group/world write and no world access. An
 identical pre-existing revision is validated and reused; older runner revisions are retained. Only
 then does apply transactionally replace the validated asset set and switch `current`.
 After apply, the operator must run `sudo systemctl daemon-reload` as a separate mandatory
@@ -157,3 +162,39 @@ sudo systemctl daemon-reload
 The command rejects an absent, incomplete, or hash-mismatched retained revision and does not change
 timer/service activation. Observe the same status and metric-age evidence afterward. Any live
 cutover or recovery after merge remains a separate reviewed and explicitly authorized operation.
+
+### Runner-access-only recovery
+
+The installations/retained-assets store remains deliberately private (`root:root:0700`), so live
+`status` and recovery validation are root-only. Do not broaden that store merely to make a non-root
+`status` pass. If an exact, otherwise valid runner was copied from restrictive source permissions,
+use this separately authorized sequence. It is intentionally not an `apply`, retry, rollback, unit
+action, browser action, metric action, or smoke execution.
+
+First verify the exact retained asset revision, current pointer, installed runner content, and
+manifest in report-only mode. The approved coordinates for this recovery are asset revision
+`68e002775771c087285cd5ba8e402e5d9ac7c2c426a802d44a179e74b925fd54`, runner revision
+`97ab09f13fb098de928a878bf1fe9b8d13032cb5`, and runner-manifest SHA-256
+`36fdab33edc0f1ad518a6d3d247a1bd32d233402387ba57493a9386d78ec9301`:
+
+```bash
+sudo python3 scripts/install_dspace_chat_synthetic.py repair-runner-access \
+  --revision 97ab09f13fb098de928a878bf1fe9b8d13032cb5 \
+  --asset-revision 68e002775771c087285cd5ba8e402e5d9ac7c2c426a802d44a179e74b925fd54 \
+  --manifest-sha256 36fdab33edc0f1ad518a6d3d247a1bd32d233402387ba57493a9386d78ec9301
+```
+
+The default reports `mutation=none`. It fails closed for a wrong or ambiguous current pointer,
+asset hash, revision, manifest, Git/dependency validation, browser provenance, symlinked runner, or
+unavailable configured service identity. After reviewing that bounded output, obtain separate
+authorization before adding `--apply` to the identical command. Applied repair changes only the
+runner parent/tree owner, group, and modes, then repeats content, browser, and child-access
+validation. It does not touch retained assets, `current`, live application assets, metrics, browser
+paths, systemd, the timer, or an invocation.
+
+After repair, run report-only repair again and `sudo ... status` to revalidate exact content and
+child access. Only then, with separate authorization for each phase, run `systemctl daemon-reload`,
+one controlled service execution, and bounded scheduled-health observation. Do not reapply, retry
+automatically, roll back automatically, or change the timer while classifying this defect. In the
+known cutover state both disk units may continue to report `NeedDaemonReload=yes`; access repair
+does not resolve or act on that independent state.
