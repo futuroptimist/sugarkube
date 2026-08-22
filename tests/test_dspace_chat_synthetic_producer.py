@@ -125,6 +125,30 @@ def test_configuration_rejects_remaining_invalid_contract_values(
         runtime.load_config(path)
 
 
+@pytest.mark.parametrize(
+    "browser_contract",
+    [
+        None,
+        {"name": runtime.RUNNER_LOCAL, "unexpected": "field"},
+        {"name": runtime.SYSTEM_CHROMIUM},
+        dict(
+            json.loads(CONFIG.read_text())["browserContract"],
+            architecture="unsupported",
+        ),
+    ],
+)
+def test_configuration_rejects_malformed_browser_contracts(
+    tmp_path: Path, browser_contract: object
+) -> None:
+    path = tmp_path / "config.json"
+    value = config(tmp_path)
+    value["browserContract"] = browser_contract
+    path.write_text(json.dumps(value))
+
+    with pytest.raises(runtime.Invalid, match="browser contract"):
+        runtime.load_config(path)
+
+
 def system_browser_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[dict, Path]:
     root = tmp_path / "target"
     launcher = root / "usr/bin/chromium"
@@ -176,6 +200,36 @@ def test_system_browser_contract_resolves_relative_root_once(
     )
 
     assert relative == absolute
+
+
+def test_browser_contract_rejects_missing_source_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    contract, _root = system_browser_fixture(tmp_path, monkeypatch)
+
+    with pytest.raises(runtime.Invalid, match="source root"):
+        runtime.validate_browser_contract(
+            {"browserContract": contract}, tmp_path / "runner", tmp_path / "missing"
+        )
+
+
+def test_runner_local_browser_contract_reports_discovered_provenance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runner = tmp_path / "runner"
+    executable = runner / "playwright-browser/chromium/chrome"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"browser")
+    monkeypatch.setattr(runtime, "discover_playwright_browser", lambda _runner: executable)
+
+    assert runtime.validate_browser_contract(
+        {"browserContract": {"name": runtime.RUNNER_LOCAL}}, runner
+    ) == {
+        "name": runtime.RUNNER_LOCAL,
+        "architecture": platform.machine(),
+        "executablePath": "playwright-browser/chromium/chrome",
+        "executableSha256": runtime.sha256(executable),
+    }
 
 
 @pytest.mark.parametrize(
