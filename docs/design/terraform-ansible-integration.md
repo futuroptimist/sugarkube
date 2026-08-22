@@ -3,17 +3,18 @@ personas:
   - software
 ---
 
-# Terraform and Ansible Integration Design (Forward-Looking, Not Yet Implemented)
+# Terraform and Ansible Integration Design
 
-> **Status and authority:** This is a forward-looking, documentation-only design. It implements no
-> infrastructure, authorizes no live infrastructure change, and authorizes no production rollout.
-> Every proposed mutation requires a later, separately reviewed implementation and operator approval.
+> **Status and authority:** Phase B validation and Phase C repository support are implemented. This
+> design authorizes no live infrastructure change or production rollout. Every proposed mutation
+> requires a separately reviewed implementation and operator approval.
 
 ## Overview and current status
 
-> **Phase B status:** The credential-free Terraform and Ansible validation foundations now exist.
-> Live Ansible preflight, node convergence, Terraform state/backend selection, DNS resources,
-> Cloudflare adoption, and every production implementation remain unimplemented and unauthorized.
+> **Current status:** Phase B's credential-free Terraform and Ansible validation foundations are
+> complete. Phase C's disposable TXT-record configuration, mocked tests, and guarded runbook exist,
+> but its live lifecycle is unexecuted and unauthorized. Live Ansible work, adopted DNS resources,
+> and every production implementation remain unimplemented and unauthorized.
 
 Terraform and Ansible address different layers. Terraform manages stateful external resources through
 provider APIs and makes proposed changes, applies, and drift visible. Ansible manages idempotent
@@ -33,11 +34,9 @@ does not combine those writers. Image building, bootstrap scripts, operator proc
 managed in a provider dashboard or by a person is explicitly **manual/dashboard-owned** until it
 completes the handoff protocol below; “manual” does not mean “unowned.”
 
-GitShelves onboarding in [PR #2662](https://github.com/futuroptimist/sugarkube/pull/2662) was **open and
-in progress when this design was written on 2026-08-21**. It is not represented here as merged or
-deployed. This document neither duplicates that onboarding nor addresses its review comments. After
-that PR merges, GitShelves must remain deployed exclusively through the generic app/Helm contract it
-introduces.
+GitShelves onboarding [PR #2662](https://github.com/futuroptimist/sugarkube/pull/2662) has merged.
+Its checked-in [runbook](../apps/gitshelves.md) is authoritative for the generic app/Helm deployment
+contract. This design neither duplicates that onboarding nor changes its ownership boundaries.
 
 The registrar and its domain-transfer lock remain manually owned, with the transfer lock enabled.
 Adopting selected Cloudflare resources in Terraform requires neither unlocking the domain nor
@@ -143,6 +142,18 @@ inventories contain non-secret host metadata only and keep staging and productio
 
 ## Terraform state, authentication, and safety
 
+The pilot's remote-state decision is HCP Terraform with the workspace in local execution mode. The
+root's empty `cloud {}` block accepts organization and workspace at runtime through
+`TF_CLOUD_ORGANIZATION` and `TF_WORKSPACE`; the recommended pilot workspace is
+`sugarkube-cloudflare-staging-lab`. HashiCorp documents that
+[CLI integration stores state in HCP Terraform](https://developer.hashicorp.com/terraform/cli/cloud/settings),
+that [local mode runs on the operator workstation while the workspace stores state](https://developer.hashicorp.com/terraform/cloud-docs/workspaces/settings),
+and that workspaces retain [current and historical state versions](https://developer.hashicorp.com/terraform/cloud-docs/workspaces/state).
+This keeps state independent of k3s, supplies workspace locking, history, and access controls, and
+keeps reviewed commands on the operator machine. CI remains backend-disabled and credential-free.
+The pilot avoids bootstrapping another storage service for one training resource. HCP Terraform is
+an external dependency and may be reconsidered only through a separately reviewed state migration.
+
 - Remote state must be independent of the k3s cluster so a cluster outage cannot remove the recovery
   control plane. It requires encryption, locking, version history or backups, access controls, and
   separate staging and production state.
@@ -155,7 +166,7 @@ inventories contain non-secret host metadata only and keep staging and productio
   credentials must never intentionally enter Terraform configuration, plans, or state.
 - Credential-free CI may run formatting, `terraform init -backend=false`, validation, and tests. It
   may not run authenticated plans, applies, or destroys during the pilot.
-- Provider lock files belong in a later implementation PR, not this documentation task.
+- Provider lock files are committed by the completed Terraform validation foundation.
 - State locking prohibits concurrent applies. Normal operations never hand-edit state.
 
 ## Ansible inventory, authentication, and safety
@@ -197,17 +208,19 @@ sanitized dynamic inventory to Ansible; it must not turn Terraform into a comman
 
 ## GitShelves staging pilot
 
-Because PR #2662 is open, GitShelves onboarding is **in progress**, not deployed or merged. The pilot
-waits for that PR to merge, and then preserves its generic Helm/Just deployment contract.
+GitShelves onboarding PR #2662 is merged, and the pilot preserves its generic Helm/Just deployment
+contract and [runbook](../apps/gitshelves.md).
 
 ### Phases
 
 - **A — design:** merge only this documentation. Make no live change.
-- **B — scaffolding:** add credential-free Terraform and Ansible scaffolding in separate, reviewable
-  implementation PRs.
+- **B — scaffolding (complete):** credential-free Terraform and Ansible validation foundations exist.
 - **C — disposable DNS lab:** manage a disposable Cloudflare TXT record such as
-  `tf-lab.gitshelves.com`. Exercise plan, reviewed manual apply, DNS verification, deliberate drift,
-  explained reconciliation, no-op plan, and reviewed destroy. CI does not apply or destroy it.
+  `tf-lab.gitshelves.com`. Repository configuration, mocked tests, and a guarded
+  [operator runbook](../../infra/terraform/cloudflare/staging/README.md) are present. The live plan,
+  reviewed manual apply, DNS verification, deliberate drift, reconciliation, no-op plan, and reviewed
+  destroy remain unexecuted and unauthorized until after merge and separate approval. CI does not
+  apply or destroy it.
 - **D — adopt staging DNS:** inventory `staging.gitshelves.com`. Import its existing DNS record and
   require an exact zero-change plan before Terraform becomes authoritative. Create the record only if
   inspection proves it does not exist. Confirm that no dashboard operator, other Terraform state, or
@@ -231,8 +244,8 @@ every route and fallback represented and its prior writer retired.
 The production hostname, production artifact pin, production Cloudflare resources, and every
 production deployment action remain blocked pending separately reviewed promotion. Browser-local
 GitShelves data must never enter Terraform state, Ansible inventory, Kubernetes storage, or backups.
-This durable design intentionally pins no image tag, chart version, or probe count while PR #2662 is
-changing the application and observability matrix.
+This durable design intentionally pins no image tag, chart version, or probe count from the
+application and observability matrix.
 
 ## Existing-application operational roadmap
 
@@ -283,7 +296,6 @@ keeps private state in the browser.
 
 ### Follow-up decisions
 
-- Select the remote-state backend and its locking, recovery, retention, and access model.
 - Select the exact first Ansible-managed baseline responsibility.
 - Decide private inventory distribution without placing secrets or sensitive topology in Git.
 - Define and test the complete shared Cloudflare Tunnel import/adoption shape.
@@ -296,11 +308,11 @@ keeps private state in the browser.
 
 - The design establishes one authoritative writer per resource and makes current versus proposed
   behavior unambiguous.
-- GitShelves is described according to PR #2662's open status.
+- GitShelves is described according to PR #2662's merged status and checked-in runbook.
 - Terraform, Ansible, Helm/Just, Flux, image/bootstrap tooling, and manual ownership are explicit.
 - State, credential, secret, Tunnel, drift, handoff, failure, and rollback hazards are covered.
 - Every requested app has a concrete, non-disruptive operational roadmap.
-- The diff contains documentation only and no infrastructure implementation or live mutation.
+- Repository implementation remains distinct from separately authorized live mutation.
 
 ### Future pilot
 
@@ -320,7 +332,7 @@ keeps private state in the browser.
 - The [app deployment contract](../app_deployment_contract.md) defines Helm/Just artifact, deployment,
   verification, and rollback ownership.
 - The [app-agnostic platform design](app-agnostic-platform.md) describes the generic application
-  contract that GitShelves will use after its onboarding PR merges.
+  contract that GitShelves uses.
 - The [Cloudflare Tunnel runbook](../cloudflare_tunnel.md) describes the current remotely managed,
   token-based shared Tunnel and public-hostname procedure.
 - The [observability design](../observability-design.md) and
@@ -328,5 +340,5 @@ keeps private state in the browser.
 - App-specific authority and evidence live in the [DSPACE](../apps/dspace.md),
   [token.place](../apps/tokenplace.md), [danielsmith.io](../apps/danielsmith.md), and
   [jobbot3000](../apps/jobbot3000.md) runbooks.
-- Until it merges, GitShelves details belong to
-  [PR #2662](https://github.com/futuroptimist/sugarkube/pull/2662), not a broken local runbook link.
+- The [GitShelves runbook](../apps/gitshelves.md) records its application-specific authority and
+  procedures.
