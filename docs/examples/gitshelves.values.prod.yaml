@@ -1,0 +1,11 @@
+# Production desired state; promotion remains blocked pending staging approval.
+ingress:
+  enabled: true
+  className: traefik
+  host: gitshelves.com
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+  tls:
+    - secretName: gitshelves-prod-tls
+      hosts:
+        - gitshelves.com

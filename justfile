@@ -1500,6 +1500,7 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
       oci://ghcr.io/futuroptimist/charts/tokenplace) chart_identity=tokenplace ;;
       oci://ghcr.io/futuroptimist/charts/danielsmith) chart_identity=danielsmith ;;
       oci://ghcr.io/futuroptimist/charts/jobbot3000) chart_identity=jobbot3000 ;;
+      oci://ghcr.io/futuroptimist/charts/gitshelves) chart_identity=gitshelves ;;
     esac
     if [ -z "${app}" ]; then
       app="${chart_identity}"
@@ -1513,7 +1514,7 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     fi
     if [ -n "${app}" ]; then
       case "${app}" in
-        dspace|tokenplace|danielsmith|jobbot3000) ;;
+        dspace|tokenplace|danielsmith|jobbot3000|gitshelves) ;;
         *) echo "ERROR: app=${app} is not an onboarded Sugarkube application." >&2; exit 2 ;;
       esac
       if [ -z "${image_tag}" ]; then

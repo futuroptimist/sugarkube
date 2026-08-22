@@ -45,7 +45,8 @@ class StatefulDrillHarness:
             "prometheus_failure": None, "metrics_drop_after_poll": None,
             "recover_after_poll": None,
             "deployment_change": False, "restart_during": -1, "uid_during": -1,
-            "block_long_sleep": False, "secret": "SENTINEL-SECRET-MUST-NOT-LEAK",
+            "block_long_sleep": False, "endpoint_lifecycle": "pending",
+            "secret": "SENTINEL-SECRET-MUST-NOT-LEAK",
         }
         state.update(overrides)
         self.state.write_text(json.dumps(state))
@@ -151,7 +152,16 @@ elif name == "helm":
         out(json.dumps(entries)); save()
 elif name == "just": sys.exit(0)
 elif name == "ruby":
-    for i in range(16): out(f"https://endpoint-{i}.test")
+    lifecycle = state["endpoint_lifecycle"]
+    rows = [("other", "approved", f"https://endpoint-{i}.test") for i in range(16)]
+    pending_state = "approved" if lifecycle == "activated" else "pending"
+    rows += [("gitshelves", pending_state, f"https://gitshelves-{i}.test") for i in range(5)]
+    if lifecycle == "partial": rows[-1] = ("gitshelves", "approved", rows[-1][2])
+    elif lifecycle == "unexpected_app": rows[-1] = ("other", "pending", rows[-1][2])
+    elif lifecycle == "duplicate": rows[-1] = ("gitshelves", pending_state, rows[0][2])
+    elif lifecycle == "invalid_state": rows[-1] = ("gitshelves", "typo", rows[-1][2])
+    elif lifecycle == "short": rows.pop()
+    for row in rows: out("\t".join(row))
 elif name == "curl": event("endpoint", response=state["endpoint"]); out(str(state["endpoint"]))
 elif name == "date": out("20260809T000000Z")
 elif name == "sleep":
@@ -336,7 +346,14 @@ def manual_plan_environment(
     stub("helm", f"case \"$*\" in *' list '*) printf '%s\\n' '[{{\"name\":\"cloudflare-tunnel\",\"status\":\"deployed\",\"chart\":\"cloudflare-tunnel-0.3.2\"}}]';; *cloudflare-tunnel*) printf '%s\\n' '[{{\"status\":\"deployed\",\"revision\":2}}]';; *) printf '%s\\n' {json.dumps(obs_history)};; esac\n")
     stub("kubectl", f"case \"$*\" in *current-context*) echo {context};; *'get deployment'*) printf '%s\\n' {json.dumps(json.dumps(deployment))};; *'get pods'*) printf '%s\\n' {json.dumps(json.dumps(pods))};; *'get secret'*) printf 'secret-uid\\t12\\t2026-08-09T00:00:00Z\\n';; *ALERTS*) printf '%s\\n' '{{\"data\":{{\"result\":[{{\"value\":[0,\"0\"]}}]}}}}';; *get\\ --raw*) printf '%s\\n' '{{\"data\":{{\"result\":[{{\"value\":[0,\"2\"]}}]}}}}';; esac\n")
     stub("just", "exit 0\n")
-    stub("ruby", "i=1; while [ $i -le 16 ]; do echo https://endpoint-$i.test; i=$((i+1)); done\n")
+    stub(
+        "ruby",
+        "i=1; while [ $i -le 16 ]; do "
+        "printf 'other\tapproved\thttps://endpoint-%s.test\n' $i; i=$((i+1)); done; "
+        "i=1; while [ $i -le 5 ]; do "
+        "printf 'gitshelves\tpending\thttps://gitshelves-%s.test\n' $i; "
+        "i=$((i+1)); done\n",
+    )
     stub("curl", "printf 200\n")
     stub("date", "printf 20260809T000000Z\n")
     return {
@@ -465,7 +482,7 @@ def test_operator_confirmation_is_enforced_before_preflight() -> None:
         "connector pods must be on distinct nodes",
         "Prometheus targets are unhealthy",
         "a Cloudflare alert is active",
-        "approved staging endpoint manifest must contain exactly 16 URLs",
+        "staging WAN-drill manifest must contain exactly 21 endpoint entries",
     ],
 )
 def test_preflight_fail_closed_guards_are_present(needle: str) -> None:
@@ -711,8 +728,13 @@ def test_secret_values_are_never_requested_or_printed() -> None:
         assert forbidden not in TEXT
 
 
-def test_actual_helper_completes_stateful_interruption_and_recovery(tmp_path: Path) -> None:
-    harness = StatefulDrillHarness(tmp_path)
+@pytest.mark.parametrize(
+    ("lifecycle", "expected_endpoint_events"), [("pending", 32), ("activated", 42)]
+)
+def test_actual_helper_completes_stateful_interruption_and_recovery(
+    tmp_path: Path, lifecycle: str, expected_endpoint_events: int,
+) -> None:
+    harness = StatefulDrillHarness(tmp_path, endpoint_lifecycle=lifecycle)
     result = harness.run()
     assert result.returncode == 0, result.stderr
     commands = harness.commands()
@@ -737,7 +759,8 @@ def test_actual_helper_completes_stateful_interruption_and_recovery(tmp_path: Pa
     assert all(event["uids"] == ["uid-1", "uid-2"] and event["restarts"] == [0, 0] for event in pod_events)
     assert any("sum(cloudflared" in str(event["query"]) and event["value"] == 2 for event in events if event.get("event") == "prometheus")
     assert sum(entry["tool"] == "just" for entry in commands) == 2
-    assert len([event for event in events if event.get("event") == "endpoint"]) == 32
+    endpoint_events = [event for event in events if event.get("event") == "endpoint"]
+    assert len(endpoint_events) == expected_endpoint_events
     preflight = json.loads((harness.evidence / "preflight.json").read_text())
     assert preflight["observabilityRevision"] == {"expected": "10", "observed": "10"}
     assert "observability revision expected=10 observed=10" in result.stdout
@@ -975,6 +998,29 @@ def test_post_cleanup_observability_revision_drift_is_rejected(tmp_path: Path) -
     assert result.returncode != 0
     assert "post-cleanup observability Helm revision mismatch" in result.stderr
     assert harness.current()["tables"] == [False, False]
+
+
+@pytest.mark.parametrize(
+    ("lifecycle", "message"),
+    [
+        ("partial", "must be either 16 approved plus five pending"),
+        ("unexpected_app", "only GitShelves endpoints may be pending"),
+        ("duplicate", "duplicate URL"),
+        ("invalid_state", "invalid lifecycle state"),
+        ("short", "exactly 21 endpoint entries"),
+    ],
+)
+def test_endpoint_lifecycle_manifest_fails_closed(
+    tmp_path: Path, lifecycle: str, message: str,
+) -> None:
+    harness = StatefulDrillHarness(tmp_path, endpoint_lifecycle=lifecycle)
+    result = harness.run()
+    assert result.returncode != 0
+    assert message in result.stderr
+    assert not any(
+        "add table inet" in entry["args"][1]
+        for entry in harness.commands() if entry["tool"] == "node-executor"
+    )
 
 
 @pytest.mark.parametrize(

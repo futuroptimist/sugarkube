@@ -219,8 +219,32 @@ prom_query() { local encoded; encoded="$(jq -nr --arg q "$1" '$q|@uri')"; kubect
 [[ "$(prom_query 'count(cloudflared_tunnel_ha_connections{namespace="cloudflare",service="cloudflare-tunnel-metrics"} >= 4)' | jq -r '.data.result[0].value[1]//"0"')" == 2 ]] || die 'each connector must have at least four HA connections'
 [[ "$(prom_query 'count(ALERTS{alertname=~"CloudflareTunnel.*",alertstate="firing"})' | jq -r '.data.result[0].value[1]//"0"')" == 0 ]] || die 'a Cloudflare alert is active'
 
-mapfile -t endpoints < <(ruby -ryaml -e 'YAML.load_stream(File.read(ARGV[0])){|d| next unless d.is_a?(Hash); t=d.dig("spec","targets","staticConfig","static") || []; t.each{|x| puts x}}' clusters/staging/observability/probes/public-apps.yaml | sort -u)
-[[ "${#endpoints[@]}" == 16 ]] || die 'approved staging endpoint manifest must contain exactly 16 URLs'
+# Accept only the complete pre-rollout or activated manifest. Pending routes are
+# validated as desired state but are not contacted until all five are activated.
+mapfile -t manifest_endpoints < <(ruby -ryaml -e 'YAML.load_stream(File.read(ARGV[0])){|d| next unless d.is_a?(Hash); app=d.dig("metadata","labels","app"); annotation=d.dig("metadata","annotations","sugarkube.dev/wan-drill"); pending=annotation.nil? ? "approved" : annotation; (d.dig("spec","targets","staticConfig","static") || []).each{|url| puts [app,pending,url].join("\t")}}' clusters/staging/observability/probes/public-apps.yaml)
+[[ "${#manifest_endpoints[@]}" == 21 ]] || die 'staging WAN-drill manifest must contain exactly 21 endpoint entries'
+declare -A seen_endpoint=()
+endpoints=()
+pending_count=0
+approved_count=0
+for manifest_endpoint in "${manifest_endpoints[@]}"; do
+  IFS=$'\t' read -r endpoint_app endpoint_state endpoint <<<"${manifest_endpoint}"
+  [[ -n "${endpoint_app}" && "${endpoint}" == https://* ]] || die 'staging WAN-drill manifest contains a malformed endpoint entry'
+  [[ -z "${seen_endpoint[${endpoint}]:-}" ]] || die "staging WAN-drill manifest contains duplicate URL: ${endpoint}"
+  seen_endpoint["${endpoint}"]=1
+  if [[ "${endpoint_state}" == pending ]]; then
+    [[ "${endpoint_app}" == gitshelves ]] || die 'only GitShelves endpoints may be pending WAN-drill activation'
+    ((pending_count += 1))
+  elif [[ "${endpoint_state}" == approved ]]; then
+    endpoints+=("${endpoint}")
+    ((approved_count += 1))
+  else
+    die 'staging WAN-drill manifest contains an invalid lifecycle state'
+  fi
+done
+if ! { [[ "${pending_count}" == 5 && "${approved_count}" == 16 ]] || [[ "${pending_count}" == 0 && "${approved_count}" == 21 ]]; }; then
+  die 'staging WAN-drill manifest must be either 16 approved plus five pending GitShelves endpoints or all 21 approved'
+fi
 http_command="${CF_DRILL_HTTP_COMMAND:-curl}"
 for endpoint in "${endpoints[@]}"; do
   code="$(${http_command} -fsS -o /dev/null -w '%{http_code}' --max-time 15 "${endpoint}")"

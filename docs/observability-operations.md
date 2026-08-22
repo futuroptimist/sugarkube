@@ -390,8 +390,11 @@ health panels remain Phase 2 work and are not presented as implemented here.
   seven-day Prometheus retention horizon, so disappeared discovery targets remain
   visible throughout retained history. Exact long-term target inventory remains
   verified by `just observability-blackbox-verify env=staging`.
-  `16/0/0` is fully healthy, `15/1/0` has one observed failure, and `15/0/1`
-  identifies one expected target without current probe data. If no expected target
+  The repository-defined matrix contains 21 probes across five supported apps.
+  After the GitShelves workload, Cloudflare route, and Probes are separately applied,
+  `21/0/0` is fully healthy, `20/1/0` has one observed failure, and `20/0/1`
+  identifies one expected target without current probe data. The previously verified
+  live evidence covers 16 probes; it does not establish the five GitShelves probes as live. If no expected target
   data exists, all three values remain `NO DATA` rather than implying health. The
   detailed endpoint matrix remains the diagnostic view. DSPACE user
   request rate excludes `/healthz`, `/livez`, and
