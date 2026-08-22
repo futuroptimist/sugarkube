@@ -33,8 +33,7 @@ This is the canonical runbook for GitShelves. GitShelves is a static, browser-on
 | GHCR chart package | [GHCR chart package](https://github.com/futuroptimist/gitshelves/pkgs/container/charts%2Fgitshelves) |
 | Dockerfile | [Application Dockerfile](https://github.com/futuroptimist/gitshelves/blob/main/Dockerfile) |
 | Chart source path | [Helm chart source](https://github.com/futuroptimist/gitshelves/tree/main/charts/gitshelves) |
-| Image release guide | [Image release documentation](https://github.com/futuroptimist/gitshelves/blob/main/docs/release-ghcr.md) |
-| Helm release guide | [Chart release documentation](https://github.com/futuroptimist/gitshelves/blob/main/docs/release-helm.md) |
+| Image and Helm release guide | [Release documentation](https://github.com/futuroptimist/gitshelves/blob/main/docs/releasing.md) |
 | Release guide | [Application release documentation](https://github.com/futuroptimist/gitshelves/tree/main/docs) |
 
 Web UI shortcuts: use the image workflow and GHCR image package above to find an immutable build, and the chart workflow and GHCR chart package to confirm its chart.

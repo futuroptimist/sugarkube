@@ -75,8 +75,7 @@ APP_LINKS = {
             f"{GITSHELVES_REPO}/pkgs/container/charts%2Fgitshelves",
             f"{GITSHELVES_REPO}/blob/main/Dockerfile",
             f"{GITSHELVES_REPO}/tree/main/charts/gitshelves",
-            f"{GITSHELVES_REPO}/blob/main/docs/release-ghcr.md",
-            f"{GITSHELVES_REPO}/blob/main/docs/release-helm.md",
+            f"{GITSHELVES_REPO}/blob/main/docs/releasing.md",
             f"{GITSHELVES_REPO}/tree/main/docs",
         ],
     },
@@ -173,6 +172,12 @@ def test_dspace_docs_do_not_link_missing_chart_package_page() -> None:
         text = _read(relative_path)
         assert BROKEN_DSPACE_CHART_PACKAGE_URL not in text
         assert "chart package page pending" in text or "No public package page" in text
+
+
+def test_gitshelves_runbook_does_not_link_missing_release_guides() -> None:
+    text = _read("docs/apps/gitshelves.md")
+    assert "/docs/release-ghcr.md" not in text
+    assert "/docs/release-helm.md" not in text
 
 
 ONBOARDING_DISCOVERY_FIELDS = [
