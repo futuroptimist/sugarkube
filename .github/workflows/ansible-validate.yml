@@ -1,0 +1,49 @@
+name: Ansible validation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'infra/ansible/**'
+      - '.github/workflows/ansible-validate.yml'
+  pull_request:
+    paths:
+      - 'infra/ansible/**'
+      - '.github/workflows/ansible-validate.yml'
+
+permissions:
+  contents: read
+
+env:
+  ANSIBLE_CONFIG: ${{ github.workspace }}/infra/ansible/ansible.cfg
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: infra/ansible/requirements.txt
+      - name: Install pinned validation dependencies
+        run: python -m pip install --requirement infra/ansible/requirements.txt
+      - name: Inspect effective configuration
+        run: ansible-config dump --only-changed
+      - name: Lint YAML
+        run: yamllint infra/ansible
+      - name: Lint preflight playbook
+        run: ansible-lint infra/ansible/playbooks/staging_preflight.yml
+      - name: Parse and display staging inventory
+        run: |
+          ansible-inventory --graph
+          ansible-inventory \
+            --inventory infra/ansible/inventories/staging/hosts.yml --list
+      - name: Check preflight syntax without connecting to hosts
+        run: |
+          ansible-playbook \
+            --inventory infra/ansible/inventories/staging/hosts.yml \
+            --syntax-check infra/ansible/playbooks/staging_preflight.yml

@@ -50,3 +50,15 @@ infra/terraform/**/*.tfvars
 infra/terraform/**/*.tfvars.json
 infra/terraform/**/*.auto.tfvars
 infra/terraform/**/*.auto.tfvars.json
+
+# Ansible generated and local-only files (infra/ansible only)
+infra/ansible/**/.ansible/
+infra/ansible/**/.cache/
+infra/ansible/**/.venv/
+infra/ansible/**/venv/
+infra/ansible/**/*.retry
+infra/ansible/**/inventory.local.*
+infra/ansible/**/inventories/**/*.local.*
+infra/ansible/**/vault*pass*
+infra/ansible/**/.vault*pass*
+infra/ansible/**/*.log
