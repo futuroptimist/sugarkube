@@ -13,6 +13,29 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 
+def test_flux_and_nonflux_cert_manager_use_public_dns01_resolvers():
+    justfile = (ROOT / "justfile").read_text()
+    helmrelease = (
+        ROOT / "platform" / "cert-manager" / "helmrelease.yaml"
+    ).read_text()
+    recipe = justfile.split("cert-manager-install version=", 1)[1].split(
+        "cert-manager-cloudflare-token-secret", 1
+    )[0]
+
+    recursive_only = "--dns01-recursive-nameservers-only"
+    recursive_servers = (
+        "--dns01-recursive-nameservers=1.1.1.1:53,8.8.8.8:53"
+    )
+
+    assert f"      - {recursive_only}" in helmrelease
+    assert f"      - {recursive_servers}" in helmrelease
+    assert (
+        f"--set-string extraArgs[0]={recursive_only}"
+        in recipe
+    )
+    assert recursive_servers.replace(",", r"\,") in recipe
+
+
 def resource(name, *, owner_kind=None, owner_name=None, status=None, spec=None, conditions=None):
     metadata = {"name": name}
     if owner_kind:

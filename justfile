@@ -813,6 +813,7 @@ cert-manager-install version='v1.14.4':
         --set installCRDs=true \
         --set global.leaderElection.namespace=cert-manager \
         --set-string extraArgs[0]=--dns01-recursive-nameservers-only \
+        --set-string 'extraArgs[1]=--dns01-recursive-nameservers=1.1.1.1:53\,8.8.8.8:53' \
         --wait \
         --timeout 5m
 
