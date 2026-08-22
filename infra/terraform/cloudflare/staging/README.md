@@ -189,8 +189,24 @@ current state contains zero managed resources while its prior state versions rem
 
 ```bash
 terraform -chdir=infra/terraform/cloudflare/staging apply -input=false "$DESTROY_PLAN"
-test -z "$(dig +short TXT tf-lab.gitshelves.com @1.1.1.1)"
-test -z "$(dig +short TXT tf-lab.gitshelves.com @8.8.8.8)"
+wait_for_txt_absence() {
+  resolver="$1"
+  deadline=$((SECONDS + 330)) # The 300-second record TTL plus a small grace period.
+
+  while test "$SECONDS" -lt "$deadline"; do
+    if ! answer="$(dig +short TXT tf-lab.gitshelves.com "@$resolver")"; then
+      echo "DNS query through $resolver failed; cleanup is unverified" >&2
+      return 1
+    fi
+    test -z "$answer" && return 0
+    sleep 10
+  done
+
+  echo "TXT record remained visible through $resolver after the TTL window" >&2
+  return 1
+}
+wait_for_txt_absence 1.1.1.1
+wait_for_txt_absence 8.8.8.8
 terraform -chdir=infra/terraform/cloudflare/staging show -json |
   jq -e '([.values.root_module.resources[]?] | length) == 0'
 ```

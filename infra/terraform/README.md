@@ -17,10 +17,11 @@ mock-tested, disposable Cloudflare TXT-record contract and its
 is unauthorized until this change merges and receives separate operator approval. Phase D adoption
 of `staging.gitshelves.com` has not started.
 
-The root has no data lookups, imports, modules, provisioners, command execution, account or zone
-identifiers, credentials, or live operations. Its empty HCP Terraform cloud configuration accepts
-organization and workspace only at runtime. Production configuration and all infrastructure
-mutations remain future work.
+The root has no data lookups, imports, modules, provisioners, command execution, hard-coded account
+or zone IDs, credentials, or live operations. It declares the Cloudflare zone ID as a required
+runtime variable, while its empty HCP Terraform cloud configuration likewise accepts organization
+and workspace only at runtime. Production configuration and all infrastructure mutations remain
+future work.
 
 ```text
 infra/terraform/
