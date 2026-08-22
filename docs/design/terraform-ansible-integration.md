@@ -11,9 +11,10 @@ personas:
 
 ## Overview and current status
 
-> **Phase B status:** The credential-free Terraform and Ansible validation foundations now exist.
-> Live Ansible preflight, node convergence, Terraform state/backend selection, DNS resources,
-> Cloudflare adoption, and every production implementation remain unimplemented and unauthorized.
+> **Current status:** Phase B's credential-free Terraform and Ansible validation foundations are
+> complete. Phase C repository support for the disposable DNS lab is present, but its live lifecycle
+> remains unexecuted and unauthorized. Live Ansible preflight, node convergence, staging DNS adoption,
+> and every production implementation remain unimplemented and unauthorized.
 
 Terraform and Ansible address different layers. Terraform manages stateful external resources through
 provider APIs and makes proposed changes, applies, and drift visible. Ansible manages idempotent
@@ -33,11 +34,10 @@ does not combine those writers. Image building, bootstrap scripts, operator proc
 managed in a provider dashboard or by a person is explicitly **manual/dashboard-owned** until it
 completes the handoff protocol below; “manual” does not mean “unowned.”
 
-GitShelves onboarding in [PR #2662](https://github.com/futuroptimist/sugarkube/pull/2662) was **open and
-in progress when this design was written on 2026-08-21**. It is not represented here as merged or
-deployed. This document neither duplicates that onboarding nor addresses its review comments. After
-that PR merges, GitShelves must remain deployed exclusively through the generic app/Helm contract it
-introduces.
+GitShelves onboarding in [PR #2662](https://github.com/futuroptimist/sugarkube/pull/2662) is merged.
+Its [canonical runbook](../apps/gitshelves.md) defines the durable application contract. GitShelves
+remains deployed exclusively through that generic app/Helm contract; this design neither duplicates
+nor changes it.
 
 The registrar and its domain-transfer lock remain manually owned, with the transfer lock enabled.
 Adopting selected Cloudflare resources in Terraform requires neither unlocking the domain nor
@@ -143,6 +143,14 @@ inventories contain non-secret host metadata only and keep staging and productio
 
 ## Terraform state, authentication, and safety
 
+- The staging pilot selects HCP Terraform remote state with the workspace in local execution mode.
+  Organization and workspace are runtime inputs, and the recommended workspace is
+  `sugarkube-cloudflare-staging-lab`. This keeps state independent of k3s, provides remotely stored
+  state, locking, version history, and access controls, and keeps reviewed commands on the operator
+  machine. It avoids adding a storage service for one training resource. HCP Terraform is an external
+  dependency and may be reconsidered only through a separately reviewed state migration. The
+  [Phase C runbook](../../infra/terraform/cloudflare/staging/README.md#state-decision-and-boundaries)
+  records the official HashiCorp references and workspace safeguards.
 - Remote state must be independent of the k3s cluster so a cluster outage cannot remove the recovery
   control plane. It requires encryption, locking, version history or backups, access controls, and
   separate staging and production state.
@@ -155,7 +163,7 @@ inventories contain non-secret host metadata only and keep staging and productio
   credentials must never intentionally enter Terraform configuration, plans, or state.
 - Credential-free CI may run formatting, `terraform init -backend=false`, validation, and tests. It
   may not run authenticated plans, applies, or destroys during the pilot.
-- Provider lock files belong in a later implementation PR, not this documentation task.
+- The staging root's provider lock file is committed and updates require separate review.
 - State locking prohibits concurrent applies. Normal operations never hand-edit state.
 
 ## Ansible inventory, authentication, and safety
@@ -197,17 +205,21 @@ sanitized dynamic inventory to Ansible; it must not turn Terraform into a comman
 
 ## GitShelves staging pilot
 
-Because PR #2662 is open, GitShelves onboarding is **in progress**, not deployed or merged. The pilot
-waits for that PR to merge, and then preserves its generic Helm/Just deployment contract.
+PR #2662 is merged, and the pilot preserves the resulting generic Helm/Just deployment contract in
+the [GitShelves runbook](../apps/gitshelves.md). Phase C's repository configuration, mock tests, and
+guarded operator runbook are present; the live create, drift, reconciliation, and destroy lifecycle
+has not run and is not authorized by the repository change.
 
 ### Phases
 
 - **A — design:** merge only this documentation. Make no live change.
-- **B — scaffolding:** add credential-free Terraform and Ansible scaffolding in separate, reviewable
-  implementation PRs.
-- **C — disposable DNS lab:** manage a disposable Cloudflare TXT record such as
-  `tf-lab.gitshelves.com`. Exercise plan, reviewed manual apply, DNS verification, deliberate drift,
-  explained reconciliation, no-op plan, and reviewed destroy. CI does not apply or destroy it.
+- **B — scaffolding (complete):** credential-free Terraform and Ansible scaffolding is present from
+  separate, reviewed implementation PRs.
+- **C — disposable DNS lab (repository support present; live lifecycle unexecuted):** the mocked
+  `tf-lab.gitshelves.com` Cloudflare TXT contract and guarded runbook are checked in. Only after merge
+  and separate authorization may an operator exercise a plan, reviewed manual apply, DNS verification,
+  deliberate drift, explained reconciliation, no-op plan, and reviewed destroy. CI does not apply or
+  destroy it.
 - **D — adopt staging DNS:** inventory `staging.gitshelves.com`. Import its existing DNS record and
   require an exact zero-change plan before Terraform becomes authoritative. Create the record only if
   inspection proves it does not exist. Confirm that no dashboard operator, other Terraform state, or
@@ -283,7 +295,8 @@ keeps private state in the browser.
 
 ### Follow-up decisions
 
-- Select the remote-state backend and its locking, recovery, retention, and access model.
+- Reconsider HCP Terraform only if a separately reviewed state migration defines the replacement's
+  locking, recovery, retention, and access model.
 - Select the exact first Ansible-managed baseline responsibility.
 - Decide private inventory distribution without placing secrets or sensitive topology in Git.
 - Define and test the complete shared Cloudflare Tunnel import/adoption shape.
@@ -296,7 +309,7 @@ keeps private state in the browser.
 
 - The design establishes one authoritative writer per resource and makes current versus proposed
   behavior unambiguous.
-- GitShelves is described according to PR #2662's open status.
+- GitShelves is described according to PR #2662's merged status and canonical runbook.
 - Terraform, Ansible, Helm/Just, Flux, image/bootstrap tooling, and manual ownership are explicit.
 - State, credential, secret, Tunnel, drift, handoff, failure, and rollback hazards are covered.
 - Every requested app has a concrete, non-disruptive operational roadmap.
@@ -320,7 +333,7 @@ keeps private state in the browser.
 - The [app deployment contract](../app_deployment_contract.md) defines Helm/Just artifact, deployment,
   verification, and rollback ownership.
 - The [app-agnostic platform design](app-agnostic-platform.md) describes the generic application
-  contract that GitShelves will use after its onboarding PR merges.
+  contract that GitShelves uses.
 - The [Cloudflare Tunnel runbook](../cloudflare_tunnel.md) describes the current remotely managed,
   token-based shared Tunnel and public-hostname procedure.
 - The [observability design](../observability-design.md) and
@@ -328,5 +341,4 @@ keeps private state in the browser.
 - App-specific authority and evidence live in the [DSPACE](../apps/dspace.md),
   [token.place](../apps/tokenplace.md), [danielsmith.io](../apps/danielsmith.md), and
   [jobbot3000](../apps/jobbot3000.md) runbooks.
-- Until it merges, GitShelves details belong to
-  [PR #2662](https://github.com/futuroptimist/sugarkube/pull/2662), not a broken local runbook link.
+- GitShelves operational details belong to its checked-in [canonical runbook](../apps/gitshelves.md).
