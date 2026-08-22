@@ -1757,41 +1757,86 @@ def test_apply_installs_runner_only_after_copy_revalidation(
 def test_runner_install_normalizes_private_source_without_changing_content(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    snapshot, revision = runner_snapshot_fixture(tmp_path)
-    script = snapshot / "runner.sh"
-    script.write_bytes(b"#!/bin/sh\nexit 0\n")
-    script.chmod(0o700)
-    data = snapshot / "package.json"
-    data.write_bytes(b"{}\n")
-    data.chmod(0o600)
-    link = snapshot / "frontend-link"
-    link.symlink_to("package.json")
-    (snapshot / "pnpm-link").symlink_to("dependency.ok")
-    (snapshot / "playwright-link").symlink_to("dependency.ok")
-    for path in [snapshot, *snapshot.rglob("*")]:
-        if not path.is_symlink():
-            path.chmod(0o700 if path.is_dir() or path == script else 0o600)
+    revision = "97ab09f13fb098de928a878bf1fe9b8d13032cb5"
+    snapshot = tmp_path / "source" / revision
+    previous_umask = os.umask(0o077)
+    try:
+        snapshot.mkdir(parents=True)
+        git("init", cwd=snapshot)
+        git("config", "user.email", "tests@example.invalid", cwd=snapshot)
+        git("config", "user.name", "Tests", cwd=snapshot)
+        for relative in installer.CRITICAL:
+            path = snapshot / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f"fixture:{relative}\n")
+        (snapshot / "dependency.ok").write_text("complete\n")
+        pnpm_package = snapshot / "node_modules/.pnpm/example"
+        pnpm_package.mkdir(parents=True)
+        (pnpm_package / "index.js").write_text("export default true;\n")
+        playwright = snapshot / "frontend/node_modules/playwright-core/cli.sh"
+        playwright.parent.mkdir(parents=True)
+        playwright.write_bytes(b"#!/bin/sh\nexit 0\n")
+        playwright.chmod(0o700)
+        playwright_link = snapshot / "frontend/node_modules/.bin/playwright"
+        playwright_link.parent.mkdir(parents=True)
+        playwright_link.symlink_to("../playwright-core/cli.sh")
+        dependency_link = snapshot / "frontend/node_modules/example"
+        dependency_link.symlink_to("../../node_modules/.pnpm/example")
+        git("add", ".", cwd=snapshot)
+        git("commit", "-m", "private fixture", cwd=snapshot)
+        head = git("rev-parse", "HEAD", cwd=snapshot)
+        critical_hashes = {
+            relative: installer.sha(snapshot / relative) for relative in installer.CRITICAL
+        }
+        (snapshot / "sugarkube-runner-manifest.json").write_text(
+            json.dumps(
+                {
+                    "browserProvenance": {"name": runtime.SYSTEM_CHROMIUM},
+                    "files": critical_hashes,
+                }
+            )
+        )
+    finally:
+        os.umask(previous_umask)
+    script = playwright
     before = tree_bytes(snapshot)
+    manifest_sha = installer.sha(snapshot / "sugarkube-runner-manifest.json")
+    link_text = {
+        str(path.relative_to(snapshot)): os.readlink(path)
+        for path in snapshot.rglob("*")
+        if path.is_symlink()
+    }
     staged = tmp_path / "staged"
     installer.render(staged)
     root = tmp_path / "root"
     root.mkdir()
     monkeypatch.setattr(installer, "runtime_module", lambda: FakeSnapshotRuntime())
 
-    previous_umask = os.umask(0o077)
-    try:
-        installed, created = installer.install_runner(staged, snapshot, root)
-    finally:
-        os.umask(previous_umask)
+    installed, created = installer.install_runner(staged, snapshot, root)
 
     assert created and installed.name == revision
     assert tree_bytes(installed) == before
     assert stat.S_IMODE(script.stat().st_mode) == 0o700  # source remains private
-    assert stat.S_IMODE((installed / "runner.sh").stat().st_mode) == 0o750
+    assert stat.S_IMODE((installed / script.relative_to(snapshot)).stat().st_mode) == 0o750
     assert stat.S_IMODE((installed / "package.json").stat().st_mode) == 0o640
-    assert os.readlink(installed / "frontend-link") == "package.json"
-    assert os.readlink(installed / "pnpm-link") == "dependency.ok"
-    assert os.readlink(installed / "playwright-link") == "dependency.ok"
+    assert {
+        str(path.relative_to(installed)): os.readlink(path)
+        for path in installed.rglob("*")
+        if path.is_symlink()
+    } == link_text
+    assert git("rev-parse", "HEAD", cwd=installed) == head
+    git("fsck", "--full", cwd=installed)
+    assert all(
+        installer.sha(installed / path) == expected for path, expected in critical_hashes.items()
+    )
+    assert installer.sha(installed / "sugarkube-runner-manifest.json") == manifest_sha
+    assert (installed / "node_modules/.pnpm/example/index.js").is_file()
+    assert (installed / "frontend/node_modules/example/index.js").is_file()
+    resolved_playwright = installed / "frontend/node_modules/.bin/playwright"
+    assert (
+        resolved_playwright.resolve() == installed / "frontend/node_modules/playwright-core/cli.sh"
+    )
+    assert os.access(resolved_playwright, os.X_OK)
     for parent in (root / "var/lib/sugarkube", installed.parent):
         assert stat.S_IMODE(parent.stat().st_mode) == 0o710
         assert parent.stat().st_gid == os.getgid()
@@ -1802,6 +1847,33 @@ def test_runner_install_normalizes_private_source_without_changing_content(
             assert not stat.S_IMODE(path.stat().st_mode) & 0o022
     config_value = json.loads((staged / "etc/sugarkube/dspace-chat-synthetic.json").read_text())
     installer.validate_runner_access(config_value, installed, root)
+    installer.validate_runner(installed, head)
+
+
+@pytest.mark.parametrize("kind", ["executable", "symlink-target"])
+def test_child_access_validation_rejects_inaccessible_required_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    snapshot, _ = runner_snapshot_fixture(tmp_path)
+    executable = snapshot / "shim"
+    executable.write_text("#!/bin/sh\n")
+    executable.chmod(0o700)
+    (snapshot / "shim-link").symlink_to("shim")
+    staged = tmp_path / "staged"
+    installer.render(staged)
+    root = tmp_path / "root"
+    root.mkdir()
+    monkeypatch.setattr(installer, "runtime_module", lambda: FakeSnapshotRuntime())
+    runner, _ = installer.install_runner(staged, snapshot, root)
+    inaccessible = runner / ("shim" if kind == "executable" else "dependency.ok")
+    if kind == "symlink-target":
+        (runner / "shim-link").unlink()
+        (runner / "shim-link").symlink_to("dependency.ok")
+    inaccessible.chmod(0o600)
+    value = json.loads((staged / "etc/sugarkube/dspace-chat-synthetic.json").read_text())
+
+    with pytest.raises(ValueError, match="access metadata|cannot access"):
+        installer.validate_runner_access(value, runner, root)
 
 
 def test_child_access_validation_rejects_parent_and_file_modes(
@@ -1981,6 +2053,36 @@ def test_access_repair_report_only_and_explicit_apply_are_bounded(
     assert stat.S_IMODE(runner.stat().st_mode) == 0o750
     assert installer.repair_runner_access(root, revision, "6" * 64, manifest_sha, True) == 0
     assert "already-correct mutation=none" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("apply", [False, True])
+@pytest.mark.parametrize(
+    "asset",
+    [
+        "etc/sugarkube/dspace-chat-synthetic.json",
+        "usr/local/libexec/sugarkube-dspace-chat-synthetic",
+    ],
+)
+def test_access_repair_rejects_mismatched_current_asset_without_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    apply: bool,
+    asset: str,
+) -> None:
+    root, _runner, revision, manifest_sha = access_repair_fixture(tmp_path, monkeypatch)
+    live = root / asset
+    live.write_bytes(live.read_bytes() + b"tampered\n")
+    before_bytes = tree_bytes(root)
+    before_metadata = tree_metadata(root)
+    current = root / "var/lib/sugarkube/dspace-chat-installations/current"
+    current_target = os.readlink(current)
+
+    with pytest.raises(ValueError, match="live asset|live configuration"):
+        installer.repair_runner_access(root, revision, "6" * 64, manifest_sha, apply)
+
+    assert tree_bytes(root) == before_bytes
+    assert tree_metadata(root) == before_metadata
+    assert os.readlink(current) == current_target
 
 
 @pytest.mark.parametrize(

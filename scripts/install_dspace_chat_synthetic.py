@@ -247,6 +247,27 @@ def validate(tree: Path) -> dict[str, str]:
     return manifest
 
 
+def validate_live_assets(root: Path, retained: Path, manifest: dict[str, str]) -> None:
+    """Require every active asset to be the retained manifest's regular file."""
+    for relative, expected in manifest.items():
+        live = root
+        try:
+            for component in Path(relative).parts[:-1]:
+                live /= component
+                parent_info = live.lstat()
+                if live.is_symlink() or not stat.S_ISDIR(parent_info.st_mode):
+                    raise ValueError("live asset path contains an invalid directory")
+            live /= Path(relative).parts[-1]
+            live_info = live.lstat()
+        except OSError as error:
+            raise ValueError("live asset is missing or invalid") from error
+        if live.is_symlink() or not stat.S_ISREG(live_info.st_mode) or sha(live) != expected:
+            raise ValueError("live asset does not match current retained revision")
+    config = "etc/sugarkube/dspace-chat-synthetic.json"
+    if (root / config).read_bytes() != (retained / config).read_bytes():
+        raise ValueError("live configuration does not match current retained revision")
+
+
 def load_snapshot_config(staged: Path, snapshot: Path) -> dict:
     """Load approved rendered coordinates and point them at a staged snapshot."""
     runtime = runtime_module()
@@ -446,7 +467,8 @@ def repair_runner_access(
     ):
         raise ValueError("current asset revision pointer is invalid")
     retained = installations / asset_revision
-    validate(retained)
+    retained_manifest = validate(retained)
+    validate_live_assets(root, retained, retained_manifest)
     config = runtime_module().load_config(retained / "etc/sugarkube/dspace-chat-synthetic.json")
     if config["runnerRevision"] != revision:
         raise ValueError("installed runner revision does not match authorization")
@@ -528,10 +550,7 @@ def status(root: Path) -> int:
     if retained.is_symlink() or not retained.is_dir():
         raise ValueError("current retained asset revision is missing or invalid")
     manifest = validate(retained)
-    for target_name, expected in manifest.items():
-        path = live_paths[target_name]
-        if not path.is_file() or path.is_symlink() or sha(path) != expected:
-            raise ValueError("live asset does not match current retained revision")
+    validate_live_assets(root, retained, manifest)
 
     runtime = runtime_module()
     config = runtime.load_config(live_paths["etc/sugarkube/dspace-chat-synthetic.json"])
