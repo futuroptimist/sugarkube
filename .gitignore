@@ -34,3 +34,21 @@ artifacts/
 
 # kcov build directory (cloned during CI)
 kcov/
+
+# Sensitive or generated Terraform artifacts (Terraform lock files stay tracked)
+/infra/terraform/**/.terraform/
+/infra/terraform/**/*.tfstate
+/infra/terraform/**/*.tfstate.*
+/infra/terraform/**/*.tfplan
+/infra/terraform/**/*.plan
+/infra/terraform/**/crash.log
+/infra/terraform/**/crash.*.log
+/infra/terraform/**/override.tf
+/infra/terraform/**/override.tf.json
+/infra/terraform/**/*_override.tf
+/infra/terraform/**/*_override.tf.json
+/infra/terraform/**/*.tfvars
+/infra/terraform/**/*.tfvars.json
+/infra/terraform/**/*.auto.tfvars
+/infra/terraform/**/*.auto.tfvars.json
+!/infra/terraform/**/.terraform.lock.hcl

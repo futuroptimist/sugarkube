@@ -3,11 +3,12 @@ personas:
   - software
 ---
 
-# Terraform and Ansible Integration Design (Forward-Looking, Not Yet Implemented)
+# Terraform and Ansible Integration Design
 
-> **Status and authority:** This is a forward-looking, documentation-only design. It implements no
-> infrastructure, authorizes no live infrastructure change, and authorizes no production rollout.
-> Every proposed mutation requires a later, separately reviewed implementation and operator approval.
+> **Status and authority:** The credential-free Terraform validation scaffold described in Phase B
+> now exists, but it manages no resources. State-backend selection, Ansible, GitShelves adoption, and
+> every live infrastructure change remain unimplemented. This design authorizes no live mutation or
+> production rollout; each requires later, separately reviewed implementation and operator approval.
 
 ## Overview and current status
 
@@ -58,7 +59,8 @@ transferring its registration.
 
 ## Non-goals
 
-- No implementation, credential use, deployment, or live mutation occurs in this documentation task.
+- The validation-only Terraform scaffold uses no credentials and performs no deployment or live
+  mutation; all remaining implementation requires separate review.
 - No production rollout occurs during the pilot, and current automation is not rewritten wholesale.
 - Terraform does not manage Helm releases, Kubernetes objects or Secrets, or host configuration.
 - Ansible does not manage Cloudflare or other provider resources, Helm releases, or Kubernetes objects.
@@ -113,7 +115,8 @@ convenience.”
 
 ## Conceptual repository layout
 
-No paths below are created by this design. A first implementation PR may finalize the exact layout:
+The Terraform staging validation root now implements the relevant subset of this layout. Remaining
+paths are conceptual and require separately reviewed implementation:
 
 ```text
 infra/

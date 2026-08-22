@@ -1,0 +1,41 @@
+name: Terraform validation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/terraform-validate.yml
+      - infra/terraform/**
+  pull_request:
+    paths:
+      - .github/workflows/terraform-validate.yml
+      - infra/terraform/**
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+      - name: Read pinned Terraform version
+        id: terraform-version
+        shell: bash
+        run: echo "version=$(<infra/terraform/.terraform-version)" >> "$GITHUB_OUTPUT"
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: ${{ steps.terraform-version.outputs.version }}
+      - name: Check Terraform formatting
+        run: terraform fmt -check -recursive infra/terraform
+      - name: Initialize without a backend
+        working-directory: infra/terraform/cloudflare/staging
+        run: terraform init -backend=false -input=false
+      - name: Validate configuration
+        working-directory: infra/terraform/cloudflare/staging
+        run: terraform validate -no-color
