@@ -88,7 +88,12 @@ sudo python3 scripts/install_dspace_chat_synthetic.py apply \
 ```
 
 Apply validates the source snapshot before any destination mutation, copies it beneath the configured
-runner root, validates the copy again, and atomically exposes the exact immutable revision. An
+runner root, normalizes the copy to `root:<serviceGroup>` with group traversal/read access and only
+the source executable class retained, validates both content and modeled child access, and atomically
+exposes the exact immutable revision. Directories and executable files are `0750`; other regular
+files are `0640`. Group/world writes are forbidden. This covers Git metadata, the root pnpm store,
+frontend links, Playwright shims, scripts, manifests, and package metadata without making the tree
+world-readable. An
 identical pre-existing revision is validated and reused; older runner revisions are retained. Only
 then does apply transactionally replace the validated asset set and switch `current`.
 After apply, the operator must run `sudo systemctl daemon-reload` as a separate mandatory
@@ -141,6 +146,41 @@ coordinates, ownership/modes, activation state, bounded invocation summary, and 
 Invocation cleanup is expected lifecycle behavior, not evidence loss.
 
 ## 4. Explicit rollback/recovery
+
+### Runner-access incident recovery
+
+The retained-assets/installations store remains intentionally private (`root:root:0700`), so live
+`status` is a root-only validation operation; do not loosen that store merely to let `pi` run status.
+For the cutover where asset revision
+`68e002775771c087285cd5ba8e402e5d9ac7c2c426a802d44a179e74b925fd54` and runner
+`97ab09f13fb098de928a878bf1fe9b8d13032cb5` are exact but the copied access metadata is restrictive,
+use the repository-owned repair only after separately authorized review. It requires manifest
+SHA-256 `36fdab33edc0f1ad518a6d3d247a1bd32d233402387ba57493a9386d78ec9301` and validates the current
+retained/live assets, runner Git/content/dependencies, and browser provenance before reporting or
+changing metadata.
+
+```bash
+# Root-only, read-only verification of retained assets and installed content:
+sudo python3 scripts/install_dspace_chat_synthetic.py status
+# Report only (the default; mutation=none):
+sudo python3 scripts/install_dspace_chat_synthetic.py repair-runner-access \
+  --revision 97ab09f13fb098de928a878bf1fe9b8d13032cb5 \
+  --manifest-sha256 36fdab33edc0f1ad518a6d3d247a1bd32d233402387ba57493a9386d78ec9301
+# Only after separate authorization, repair access metadata and revalidate child access:
+sudo python3 scripts/install_dspace_chat_synthetic.py repair-runner-access --apply \
+  --revision 97ab09f13fb098de928a878bf1fe9b8d13032cb5 \
+  --manifest-sha256 36fdab33edc0f1ad518a6d3d247a1bd32d233402387ba57493a9386d78ec9301
+sudo python3 scripts/install_dspace_chat_synthetic.py status
+```
+
+The repair does not reapply or replace assets, change `current`, alter metrics or browser paths,
+touch units or timers, reload systemd, execute smoke, retry, or roll back. After access revalidation,
+obtain separate authorization for `systemctl daemon-reload`; only after its bounded verification
+obtain separate authorization for one controlled service execution, then separately observe bounded
+scheduled health. Do not mutate the timer. Preserve the previous successful metric while any step
+fails closed.
+
+### Asset rollback
 
 Rollback is never automatic. After read-only classification and separate authorization, select an
 exact retained validated revision:

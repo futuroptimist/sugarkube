@@ -6,10 +6,11 @@ import copy
 import json
 import os
 import platform
+import stat
 import subprocess
 import sys
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -1357,6 +1358,114 @@ def tree_bytes(root: Path) -> list[tuple[str, str, bytes | str]]:
         else:
             values.append((relative, "directory", b""))
     return values
+
+
+def test_runner_access_normalization_is_umask_independent_and_preserves_payload(
+    tmp_path: Path,
+) -> None:
+    parent = tmp_path / "runners"
+    runner = parent / installer.APPROVED_RUNNER_REVISION
+    old_umask = os.umask(0o077)
+    try:
+        (runner / ".git/objects").mkdir(parents=True)
+        (runner / "node_modules/.pnpm/pkg").mkdir(parents=True)
+        (runner / "frontend/node_modules/.bin").mkdir(parents=True)
+        script = runner / "scripts/run.mjs"
+        script.parent.mkdir()
+        script.write_bytes(b"#!/usr/bin/env node\n")
+        script.chmod(0o700)
+        data = runner / "package.json"
+        data.write_bytes(b"{}\n")
+        link = runner / "frontend/node_modules/.bin/playwright"
+        link.symlink_to("../../../scripts/run.mjs")
+    finally:
+        os.umask(old_umask)
+    before = tree_bytes(runner)
+
+    installer.normalize_runner_access(parent, runner, os.getgid(), os.getuid())
+    installer.validate_child_access(parent, runner, os.getuid() + 1, os.getgid())
+
+    assert tree_bytes(runner) == before
+    assert stat.S_IMODE(parent.stat().st_mode) == 0o750
+    assert stat.S_IMODE(script.stat().st_mode) == 0o750
+    assert stat.S_IMODE(data.stat().st_mode) == 0o640
+    for path in (parent, runner, *runner.rglob("*")):
+        if not path.is_symlink():
+            assert stat.S_IMODE(path.stat().st_mode) & 0o022 == 0
+
+
+@pytest.mark.parametrize("fault", ["parent", "file", "executable"])
+def test_child_access_validation_fails_closed(tmp_path: Path, fault: str) -> None:
+    parent = tmp_path / "runners"
+    runner = parent / "revision"
+    runner.mkdir(parents=True)
+    plain = runner / "package.json"
+    plain.write_text("{}\n")
+    executable = runner / "playwright"
+    executable.write_text("#!/bin/sh\n")
+    executable.chmod(0o755)
+    installer.normalize_runner_access(parent, runner, os.getgid(), os.getuid())
+    target = {"parent": parent, "file": plain, "executable": executable}[fault]
+    target.chmod(0o700 if fault != "executable" else 0o740)
+
+    with pytest.raises(ValueError, match="child access"):
+        installer.validate_child_access(parent, runner, os.getuid() + 1, os.getgid())
+
+
+def test_runner_access_repair_is_report_only_then_metadata_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    root, runner, _ = status_installation(tmp_path)
+    parent = runner.parent
+    parent.chmod(0o700)
+    runner.chmod(0o700)
+    manifest = runner / "sugarkube-runner-manifest.json"
+    manifest.chmod(0o600)
+    expected_hash = installer.sha(manifest)
+    monkeypatch.setattr(installer, "APPROVED_RUNNER_MANIFEST_SHA256", expected_hash)
+    monkeypatch.setattr(installer, "APPROVED_ASSET_REVISION", "a" * 64)
+    monkeypatch.setattr(installer, "runtime_module", lambda: StatusRuntime())
+    before = tree_bytes(root)
+
+    installer.repair_runner_access(root, installer.APPROVED_RUNNER_REVISION, expected_hash, False)
+    assert "access=repair-required mutation=none" in capsys.readouterr().out
+    assert tree_bytes(root) == before
+
+    installer.repair_runner_access(root, installer.APPROVED_RUNNER_REVISION, expected_hash, True)
+    assert "access=repaired mutation=metadata-only" in capsys.readouterr().out
+    assert tree_bytes(root) == before
+    installer.validate_child_access(parent, runner, os.getuid(), os.getgid())
+
+    modes = {path: stat.S_IMODE(path.lstat().st_mode) for path in (parent, runner, manifest)}
+    installer.repair_runner_access(root, installer.APPROVED_RUNNER_REVISION, expected_hash, True)
+    assert "access=correct mutation=none" in capsys.readouterr().out
+    assert modes == {path: stat.S_IMODE(path.lstat().st_mode) for path in modes}
+
+
+@pytest.mark.parametrize("fault", ["revision", "manifest", "current", "destination"])
+def test_runner_access_repair_rejects_ambiguous_or_mismatched_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    root, runner, _ = status_installation(tmp_path)
+    manifest = runner / "sugarkube-runner-manifest.json"
+    expected_hash = installer.sha(manifest)
+    monkeypatch.setattr(installer, "APPROVED_RUNNER_MANIFEST_SHA256", expected_hash)
+    monkeypatch.setattr(installer, "APPROVED_ASSET_REVISION", "a" * 64)
+    monkeypatch.setattr(installer, "runtime_module", lambda: StatusRuntime())
+    revision = installer.APPROVED_RUNNER_REVISION
+    if fault == "revision":
+        revision = "0" * 40
+    elif fault == "manifest":
+        manifest.write_text("{}")
+    elif fault == "current":
+        (root / "var/lib/sugarkube/dspace-chat-installations/current").unlink()
+    else:
+        external = tmp_path / "external"
+        runner.rename(external)
+        runner.symlink_to(external, target_is_directory=True)
+
+    with pytest.raises((ValueError, FileNotFoundError, KeyError)):
+        installer.repair_runner_access(root, revision, expected_hash, False)
 
 
 def test_status_reports_validated_provenance_without_mutation_or_systemctl(

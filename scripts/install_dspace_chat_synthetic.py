@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import grp
 import hashlib
 import importlib.util
 import json
 import os
+import pwd
 import re
 import shutil
 import stat
@@ -43,6 +45,9 @@ CRITICAL = (
     "pnpm-workspace.yaml",
     "pnpm-lock.yaml",
 )
+APPROVED_RUNNER_REVISION = "97ab09f13fb098de928a878bf1fe9b8d13032cb5"
+APPROVED_RUNNER_MANIFEST_SHA256 = "36fdab33edc0f1ad518a6d3d247a1bd32d233402387ba57493a9386d78ec9301"
+APPROVED_ASSET_REVISION = "68e002775771c087285cd5ba8e402e5d9ac7c2c426a802d44a179e74b925fd54"
 
 
 def runtime_module():
@@ -277,12 +282,79 @@ def rooted(root: Path, absolute: str) -> Path:
     return root / coordinate.relative_to("/")
 
 
+def service_identity(config: dict, root: Path) -> tuple[int, int]:
+    """Resolve the configured live identity, or model it safely in a private root."""
+    if root.resolve() != Path("/"):
+        # Alternate roots deliberately model a distinct child account while using
+        # the invoking group; no host account database entry is required.
+        return os.getuid() + 1, os.getgid()
+    account = pwd.getpwnam(config["serviceAccount"])
+    group = grp.getgrnam(config["serviceGroup"])
+    if account.pw_gid != group.gr_gid:
+        raise ValueError("configured service account/group mismatch")
+    return account.pw_uid, group.gr_gid
+
+
+def runner_access_metadata(runner: Path) -> dict[Path, tuple[int, int, int]]:
+    """Return the root-owned, group-readable immutable metadata for a runner."""
+    metadata = {runner: (0, 0, 0o750)}
+    for path in runner.rglob("*"):
+        info = path.lstat()
+        if stat.S_ISLNK(info.st_mode):
+            metadata[path] = (0, 0, stat.S_IMODE(info.st_mode))
+        elif stat.S_ISDIR(info.st_mode):
+            metadata[path] = (0, 0, 0o750)
+        elif stat.S_ISREG(info.st_mode):
+            executable = bool(stat.S_IMODE(info.st_mode) & 0o111)
+            metadata[path] = (0, 0, 0o750 if executable else 0o640)
+        else:
+            raise ValueError("runner contains an unsupported filesystem object")
+    return metadata
+
+
+def normalize_runner_access(
+    parent: Path, runner: Path, service_gid: int, owner_uid: int = 0
+) -> None:
+    """Normalize ownership/mode without following dependency symlinks."""
+    os.chown(parent, owner_uid, service_gid)
+    os.chmod(parent, 0o750)
+    for path, (_, _, mode) in runner_access_metadata(runner).items():
+        if path.is_symlink():
+            os.chown(path, owner_uid, service_gid, follow_symlinks=False)
+        else:
+            os.chown(path, owner_uid, service_gid)
+            os.chmod(path, mode)
+
+
+def validate_child_access(parent: Path, runner: Path, service_uid: int, service_gid: int) -> None:
+    """Model traversal/read/execute checks for the configured child identity."""
+    paths = [parent, *runner_access_metadata(runner)]
+    for path in paths:
+        info = path.lstat()
+        if path.is_symlink():
+            try:
+                target = path.resolve(strict=True)
+                target.relative_to(runner)
+            except (OSError, ValueError):
+                raise ValueError("runner child access contains an unsafe link") from None
+            continue
+        mode = stat.S_IMODE(info.st_mode)
+        shift = 6 if info.st_uid == service_uid else 3 if info.st_gid == service_gid else 0
+        granted = (mode >> shift) & 0o7
+        required = 0o5 if stat.S_ISDIR(info.st_mode) else 0o4
+        if stat.S_ISREG(info.st_mode) and mode & 0o111:
+            required |= 0o1
+        if granted & required != required or mode & 0o022:
+            raise ValueError("runner child access validation failed")
+
+
 def install_runner(staged: Path, snapshot: Path, root: Path) -> tuple[Path, bool]:
     """Copy, revalidate, and atomically expose an immutable runner snapshot."""
     runtime = runtime_module()
     config = runtime.load_config(staged / "etc/sugarkube/dspace-chat-synthetic.json")
     revision = config["runnerRevision"]
     parent = rooted(root, config["runnerRoot"])
+    service_uid, service_gid = service_identity(config, root)
     destination = parent / revision
     if destination.exists() or destination.is_symlink():
         if destination.is_symlink() or not destination.is_dir():
@@ -291,12 +363,15 @@ def install_runner(staged: Path, snapshot: Path, root: Path) -> tuple[Path, bool
         if (snapshot / manifest).read_bytes() != (destination / manifest).read_bytes():
             raise ValueError("existing runner manifest does not match snapshot")
         validate_snapshot(staged, destination, root)
+        validate_child_access(parent, destination, service_uid, service_gid)
         return destination, False
     parent.mkdir(parents=True, exist_ok=True)
     temporary = Path(tempfile.mkdtemp(prefix=f".{revision}.", dir=parent))
     temporary.rmdir()
     try:
         shutil.copytree(snapshot, temporary, symlinks=True)
+        owner_uid = 0 if root.resolve() == Path("/") else os.getuid()
+        normalize_runner_access(parent, temporary, service_gid, owner_uid)
         # Validation expects the immutable revision basename, so validate through
         # a private exact-name parent before the atomic destination rename.
         validation_parent = Path(tempfile.mkdtemp(prefix=".validate.", dir=parent))
@@ -304,6 +379,7 @@ def install_runner(staged: Path, snapshot: Path, root: Path) -> tuple[Path, bool
         os.replace(temporary, validation_runner)
         try:
             validate_snapshot(staged, validation_runner, root)
+            validate_child_access(parent, validation_runner, service_uid, service_gid)
             os.replace(validation_runner, destination)
         finally:
             shutil.rmtree(validation_parent, ignore_errors=True)
@@ -311,6 +387,77 @@ def install_runner(staged: Path, snapshot: Path, root: Path) -> tuple[Path, bool
     except Exception:
         shutil.rmtree(temporary, ignore_errors=True)
         raise
+
+
+def validate_current_assets(root: Path) -> dict:
+    """Validate the exact retained/live asset state without querying systemd."""
+    installations = root / "var/lib/sugarkube/dspace-chat-installations"
+    current = installations / "current"
+    if not current.is_symlink():
+        raise ValueError("current asset revision pointer is missing or invalid")
+    revision = os.readlink(current)
+    if (
+        Path(revision).is_absolute()
+        or len(Path(revision).parts) != 1
+        or not ASSET_REVISION.fullmatch(revision)
+    ):
+        raise ValueError("current asset revision pointer is invalid")
+    retained = installations / revision
+    manifest = validate(retained)
+    for target, expected in manifest.items():
+        live = root / target
+        if live.is_symlink() or not live.is_file() or sha(live) != expected:
+            raise ValueError("live asset does not match current retained revision")
+    return runtime_module().load_config(root / "etc/sugarkube/dspace-chat-synthetic.json")
+
+
+def repair_runner_access(root: Path, revision: str, manifest_sha256: str, apply: bool) -> None:
+    """Validate, report, and optionally repair only installed runner access metadata."""
+    if revision != APPROVED_RUNNER_REVISION or manifest_sha256 != APPROVED_RUNNER_MANIFEST_SHA256:
+        raise ValueError("repair coordinates are not the approved incident runner")
+    config = validate_current_assets(root)
+    current = root / "var/lib/sugarkube/dspace-chat-installations/current"
+    if os.readlink(current) != APPROVED_ASSET_REVISION:
+        raise ValueError("current asset revision is not the approved incident installation")
+    if config["runnerRevision"] != revision:
+        raise ValueError("installed runner revision mismatch")
+    parent = rooted(root, config["runnerRoot"])
+    runner = parent / revision
+    if runner.is_symlink() or not runner.is_dir():
+        raise ValueError("installed runner destination is invalid")
+    manifest = runner / "sugarkube-runner-manifest.json"
+    if manifest.is_symlink() or not manifest.is_file() or sha(manifest) != manifest_sha256:
+        raise ValueError("installed runner manifest mismatch")
+    rooted_config = dict(config, runnerRoot=str(parent))
+    runtime = runtime_module()
+    validated = runtime.validate_runner(rooted_config)
+    provenance = runtime.validate_browser_contract(rooted_config, validated, root)
+    if provenance != json.loads(manifest.read_text())["browserProvenance"]:
+        raise ValueError("installed runner browser provenance mismatch")
+    uid, gid = service_identity(config, root)
+    try:
+        validate_child_access(parent, runner, uid, gid)
+        print(
+            f"runnerRevision={revision} runnerManifestSha256={manifest_sha256} "
+            "access=correct mutation=none"
+        )
+        return
+    except ValueError:
+        pass
+    if not apply:
+        print(
+            f"runnerRevision={revision} runnerManifestSha256={manifest_sha256} "
+            "access=repair-required mutation=none"
+        )
+        return
+    owner_uid = 0 if root.resolve() == Path("/") else os.getuid()
+    normalize_runner_access(parent, runner, gid, owner_uid)
+    runtime.validate_runner(rooted_config)
+    validate_child_access(parent, runner, uid, gid)
+    print(
+        f"runnerRevision={revision} runnerManifestSha256={manifest_sha256} "
+        "access=repaired mutation=metadata-only"
+    )
 
 
 def apply_installation(staged: Path, snapshot: Path, root: Path, asset_revision: str) -> None:
@@ -504,7 +651,7 @@ def main() -> int:
     parser.add_argument(
         "operation",
         nargs="?",
-        choices=("dry-run", "apply", "status", "rollback", "materialize"),
+        choices=("dry-run", "apply", "status", "rollback", "repair-runner-access", "materialize"),
         default="dry-run",
     )
     parser.add_argument("--root", type=Path, default=Path("/"))
@@ -520,11 +667,15 @@ def main() -> int:
     parser.add_argument("--browser-bundle", type=Path)
     parser.add_argument("--browser-source-root", type=Path)
     parser.add_argument("--runner-snapshot", type=Path)
+    parser.add_argument("--manifest-sha256", default=APPROVED_RUNNER_MANIFEST_SHA256)
     args = parser.parse_args()
     runtime = runtime_module()
     args.root = runtime.normalize_root(args.root)
     if args.operation == "status":
         return status(args.root)
+    if args.operation == "repair-runner-access":
+        repair_runner_access(args.root, args.revision, args.manifest_sha256, args.apply)
+        return 0
     if args.operation == "materialize":
         if not all((args.source, args.output, args.pnpm, args.pnpm_version)):
             parser.error("materialize requires source, output, pnpm, and pnpm-version")
