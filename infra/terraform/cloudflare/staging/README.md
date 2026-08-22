@@ -17,6 +17,9 @@ provider's automatic-TTL value. Destruction is intentional, so the resource has 
 The pilot uses [HCP Terraform](https://developer.hashicorp.com/terraform/cloud-docs) for remote state
 and a workspace configured for **local execution**. HCP Terraform documents
 [workspace state storage and history](https://developer.hashicorp.com/terraform/cloud-docs/workspaces/state),
+[user-token access for local execution](https://developer.hashicorp.com/terraform/cloud-docs/workspaces/run/run-environment#user-token),
+[user API tokens](https://developer.hashicorp.com/terraform/cloud-docs/users-teams-organizations/api-tokens#user-api-tokens),
+[user token creation and revocation](https://developer.hashicorp.com/terraform/cloud-docs/users-teams-organizations/users#tokens),
 [workspace access controls](https://developer.hashicorp.com/terraform/cloud-docs/users-teams-organizations/permissions),
 and [state locking](https://developer.hashicorp.com/terraform/language/state/locking). Local execution
 means Terraform operations run on the operator's machine rather than HCP Terraform's execution
@@ -59,9 +62,14 @@ An operator must manually create or verify:
 - an HCP Terraform organization and the workspace `sugarkube-cloudflare-staging-lab`;
 - workspace execution mode **Local**, auto-apply disabled, and access restricted to the authorized
   operators;
-- an ephemeral HCP Terraform team token supplied only through the hidden
-  `TF_TOKEN_app_terraform_io` environment variable; do not create `credentials.tfrc.json` for this
-  disposable flow;
+- a short-duration HCP Terraform **user API token** that authenticates the individual authorized
+  operator. The associated user must have only the workspace permissions required to read and write
+  state versions, perform the intended local CLI operations, and lock and unlock the workspace when
+  this runbook requires it. Select the shortest practical expiration HCP Terraform supports for this
+  exercise, and revoke the token immediately afterward;
+- environment-only delivery of that user API token through `TF_TOKEN_app_terraform_io`. Do not
+  create or modify `credentials.tfrc.json`, and never put the token in command arguments, shell
+  history, logs, plans, state, evidence, or Git;
 - a separate least-privilege Cloudflare API token with only **Zone Read** and **DNS Edit** for the
   `gitshelves.com` zone—never reuse the Cloudflare Tunnel connector token; and
 - `jq`, `dig`, Terraform 1.15.9, and the reviewed merge commit on the operator machine.
@@ -93,7 +101,7 @@ trap cleanup EXIT HUP INT TERM
 
 read -r -p 'HCP Terraform organization: ' TF_CLOUD_ORGANIZATION
 TF_WORKSPACE=sugarkube-cloudflare-staging-lab
-read -r -s -p 'HCP Terraform credential: ' TF_TOKEN_app_terraform_io; printf '\n'
+read -r -s -p 'HCP Terraform user API token: ' TF_TOKEN_app_terraform_io; printf '\n'
 read -r -s -p 'Cloudflare API credential: ' CLOUDFLARE_API_TOKEN; printf '\n'
 read -r -s -p 'Cloudflare zone ID: ' TF_VAR_cloudflare_zone_id; printf '\n'
 read -r -p 'Non-secret lab TXT content (prefix required): ' TF_VAR_tf_lab_txt_content
@@ -319,8 +327,20 @@ terraform -chdir=infra/terraform/cloudflare/staging show -json |
 ```
 
 Finally, use HCP Terraform's workspace controls to lock or otherwise freeze the workspace against
-further runs until the next separately authorized phase. Let the trap erase the private plan
-directory and unset runtime values; explicitly run `cleanup` before leaving the shell if desired.
+further runs until the next separately authorized phase. The associated user must have the
+workspace permission needed to perform that lock (and to unlock it in a separately authorized
+session).
+
+Then complete both distinct credential-cleanup actions immediately:
+
+1. Explicitly run `cleanup` (or let the trap run when the shell exits) to erase the private plan
+   directory and unset the local `TF_TOKEN_app_terraform_io` environment variable and other runtime
+   values. Unsetting the environment variable does **not** revoke the user API token.
+2. In the individual operator's HCP Terraform account settings, revoke the user API token created
+   for this exercise and confirm it is removed. Do this even if its short expiration has not yet
+   arrived.
+
 Save only a sanitized summary of authorization, reviewed action counts, resolver outcomes, no-op
-results, drift/reconciliation, destruction, empty current state, and workspace freeze. Never save
-tokens, state, saved plans, plan JSON, environment dumps, complete TXT values, or credential files.
+results, drift/reconciliation, destruction, empty current state, workspace freeze, and token
+revocation. Never save tokens, state, saved plans, plan JSON, environment dumps, complete TXT
+values, or credential files.
