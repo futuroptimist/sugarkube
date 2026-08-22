@@ -32,14 +32,28 @@ python3 scripts/install_dspace_chat_synthetic.py materialize \
   --repository-identity https://github.com/democratizedspace/dspace.git \
   --output /absolute/staging/97ab09f13fb098de928a878bf1fe9b8d13032cb5 \
   --pnpm /absolute/toolchain/pnpm --pnpm-version 9.0.0 \
-  --browser-bundle /absolute/path/to/browser-bundle
+  --browser-source-root /absolute/private/target-root
 ```
 
 The explicitly selected pnpm executable must report exactly `9.0.0`, matching the pinned DSPACE
-commit's `packageManager`. The supplied local browser bundle is copied into the runner and used through a runner-local `PLAYWRIGHT_BROWSERS_PATH`; no `$HOME` cache is trusted. The local pnpm cache must already contain the exact lockfile's packages. Construction fails for a
+commit's `packageManager`. The staging configuration explicitly selects `system-chromium-v1` for
+architecture `aarch64`, launcher `/usr/bin/chromium`, and scheduled executable
+`/usr/lib/chromium/chromium`. Its committed SHA-256 values are validated along with realpaths,
+regular/executable state, `root:root:0755` ownership/mode, and the configured distinct-file
+relationship. `--browser-source-root` maps those absolute coordinates into a private root; it must
+never point a private rehearsal at the live host by accident. This contract neither accepts
+`--browser-bundle` nor installs, downloads, copies, searches for, or modifies a browser.
+
+The alternative explicit `runner-local-playwright-v1` contract preserves the original construction
+behavior: supply `--browser-bundle`, copy it into the runner, discover and hash Playwright's exact
+runner-local executable, and launch with runner-local `PLAYWRIGHT_BROWSERS_PATH`. No `$HOME` cache
+is trusted. Contract selection is mandatory: absence, ambiguity, an unsupported value, or resources
+belonging only to the other contract fails closed without fallback. The local pnpm cache must
+already contain the exact lockfile's packages. Construction fails for a
 missing object, wrong HEAD, dirty tracked/index state, alternates, missing root store, broken
 frontend link, unusable Playwright shim/module resolution, or missing critical file. Its manifest
-records hashes for the runner, spec, workspace manifests, and lockfile.
+records hashes for the runner, spec, workspace manifests, lockfile, selected browser contract, and
+safe browser provenance.
 
 ## 2. Validate and dry-run installation
 
@@ -54,11 +68,15 @@ python3 scripts/install_dspace_chat_synthetic.py dry-run --root /tmp/rehearsal-r
 python3 scripts/install_dspace_chat_synthetic.py status --root /tmp/rehearsal-root
 ```
 
-The preflight first loads the rendered configuration and validates its exact runner revision against
-the snapshot basename, manifest hashes, independent Git metadata, dependencies, and Node/Playwright
-resolution. Review all hashes and coordinates. `status` is read-only and, for alternate roots, reports activation as not queried; only `/` queries unit activation without
-printing configuration secrets (the committed configuration contains none). A failed staging or
-preflight leaves installed fixtures unchanged.
+For an alternate installation root, both runner and absolute browser coordinates are resolved under
+that root; the installer never substitutes the live host's `/usr`. Populate private fixtures before
+the command. The preflight first loads the rendered configuration and validates its exact runner
+revision against the snapshot basename, manifest hashes, independent Git metadata, dependencies,
+and Node/Playwright resolution. It also validates architecture and browser provenance before any
+installation mutation. Review all hashes and coordinates. `status` is read-only and, for alternate
+roots, reports activation as not queried; only `/` queries unit activation without printing
+configuration secrets (the committed configuration contains none). A failed staging or preflight
+leaves installed fixtures unchanged.
 
 ## 3. Separately authorized installation and controlled execution
 
@@ -86,6 +104,11 @@ The required access model is exact: result root `root:pi` mode `0710`; each invo
 `0600`. The browser runs as `pi`. systemd creates the volatile result root on each boot. The service
 binds the path to systemd's exact 32-hex
 `INVOCATION_ID` and UTC epoch start/end window. It cleans only that invocation's path.
+Immediately before every child launch the runtime revalidates the selected contract. For the system
+contract it passes the already validated exact executable through the pinned runner's supported
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`; it does not hash one binary while launching another. Drift
+blocks Playwright before result creation, preserves the previous metric, and therefore retains the
+existing stale-signal behavior.
 
 After inspecting status, a controlled one-shot and timer activation are distinct, explicit operator
 actions; neither is performed by installation:
