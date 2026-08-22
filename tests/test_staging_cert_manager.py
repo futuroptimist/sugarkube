@@ -18,9 +18,14 @@ def test_flux_and_nonflux_cert_manager_use_public_dns01_resolvers():
     helmrelease = (
         ROOT / "platform" / "cert-manager" / "helmrelease.yaml"
     ).read_text()
-    recipe = justfile.split("cert-manager-install version=", 1)[1].split(
-        "cert-manager-cloudflare-token-secret", 1
-    )[0]
+    _, install_marker, remaining_recipes = justfile.partition(
+        "cert-manager-install version="
+    )
+    assert install_marker, "cert-manager-install recipe marker not found"
+    recipe, next_recipe_marker, _ = remaining_recipes.partition(
+        "cert-manager-cloudflare-token-secret"
+    )
+    assert next_recipe_marker, "cert-manager-cloudflare-token-secret recipe marker not found"
 
     recursive_only = "--dns01-recursive-nameservers-only"
     recursive_servers = (
@@ -33,7 +38,8 @@ def test_flux_and_nonflux_cert_manager_use_public_dns01_resolvers():
         f"--set-string extraArgs[0]={recursive_only}"
         in recipe
     )
-    assert recursive_servers.replace(",", r"\,") in recipe
+    escaped_servers = recursive_servers.replace(",", r"\,")
+    assert f"--set-string 'extraArgs[1]={escaped_servers}'" in recipe
 
 
 def resource(name, *, owner_kind=None, owner_name=None, status=None, spec=None, conditions=None):
