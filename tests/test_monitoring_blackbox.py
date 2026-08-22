@@ -21,8 +21,14 @@ EXPECTED = {
     ("danielsmith", "healthz", "https://staging.danielsmith.io/healthz", "json_health_2xx"),
     ("danielsmith", "livez", "https://staging.danielsmith.io/livez", "json_health_2xx"),
     ("gitshelves", "root", "https://staging.gitshelves.com/", "https_2xx"),
-    ("gitshelves", "healthz", "https://staging.gitshelves.com/healthz", "json_health_2xx"),
-    ("gitshelves", "livez", "https://staging.gitshelves.com/livez", "json_health_2xx"),
+    (
+        "gitshelves", "healthz", "https://staging.gitshelves.com/healthz",
+        "gitshelves_text_health_2xx",
+    ),
+    (
+        "gitshelves", "livez", "https://staging.gitshelves.com/livez",
+        "gitshelves_text_health_2xx",
+    ),
     ("gitshelves", "baseplate", "https://staging.gitshelves.com/models/baseplate_2x6.stl", "stl_content_2xx"),
     ("gitshelves", "module", "https://staging.gitshelves.com/models/contrib_cube.stl", "stl_content_2xx"),
     ("jobbot3000", "root", "https://staging.jobbot3000.tech/", "https_2xx"),
@@ -77,14 +83,27 @@ def test_pinned_chart_values_are_private_and_bounded():
         )
     )
     modules = value["config"]["modules"]
-    assert set(modules) == {"https_2xx", "json_health_2xx", "static_content_2xx", "stl_content_2xx"}
+    assert set(modules) == {
+        "https_2xx", "json_health_2xx", "static_content_2xx",
+        "stl_content_2xx", "gitshelves_text_health_2xx",
+    }
     for module in modules.values():
         assert module["timeout"] == "10s"
         assert module["http"]["fail_if_not_ssl"] is True
         assert module["http"]["tls_config"]["insecure_skip_verify"] is False
     assert modules["json_health_2xx"]["http"]["body_size_limit"] == "1MiB"
     assert modules["static_content_2xx"]["http"]["body_size_limit"] == "1MiB"
-    assert modules["stl_content_2xx"]["http"]["body_size_limit"] == "10MiB"
+    stl_http = modules["stl_content_2xx"]["http"]
+    assert stl_http["body_size_limit"] == "10MiB"
+    assert stl_http["fail_if_body_not_matches_regexp"] == ["^OpenSCAD Model"]
+    assert not any(
+        token in stl_http["fail_if_body_not_matches_regexp"][0]
+        for token in ("solid", "facet", "endsolid")
+    )
+    health_http = modules["gitshelves_text_health_2xx"]["http"]
+    assert health_http["body_size_limit"] == "16B"
+    assert health_http["valid_status_codes"] == [200]
+    assert health_http["fail_if_body_not_matches_regexp"] == [r"^ok\n$"]
 
 
 def test_staging_probe_matrix_is_exact():

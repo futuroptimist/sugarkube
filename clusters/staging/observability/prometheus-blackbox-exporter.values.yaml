@@ -51,6 +51,20 @@ config:
         preferred_ip_protocol: ip4
         tls_config:
           insecure_skip_verify: false
+    gitshelves_text_health_2xx:
+      prober: http
+      timeout: 10s
+      http:
+        method: GET
+        follow_redirects: true
+        fail_if_not_ssl: true
+        valid_status_codes: [200]
+        body_size_limit: 16B
+        fail_if_body_not_matches_regexp:
+          - '^ok\n$'
+        preferred_ip_protocol: ip4
+        tls_config:
+          insecure_skip_verify: false
     static_content_2xx:
       prober: http
       timeout: 10s
@@ -75,7 +89,7 @@ config:
         valid_status_codes: [200]
         body_size_limit: 10MiB
         fail_if_body_not_matches_regexp:
-          - '(?i)(solid[[:space:]]|facet[[:space:]]+normal|endsolid)'
+          - '^OpenSCAD Model'
         preferred_ip_protocol: ip4
         tls_config:
           insecure_skip_verify: false

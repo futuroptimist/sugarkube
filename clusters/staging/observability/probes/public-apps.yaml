@@ -492,7 +492,7 @@ metadata:
     criticality: critical
 spec:
   interval: 60s
-  module: json_health_2xx
+  module: gitshelves_text_health_2xx
   prober:
     url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
     scheme: http
@@ -522,7 +522,7 @@ metadata:
     criticality: critical
 spec:
   interval: 60s
-  module: json_health_2xx
+  module: gitshelves_text_health_2xx
   prober:
     url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
     scheme: http
