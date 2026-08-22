@@ -101,44 +101,80 @@ export TF_CLOUD_ORGANIZATION TF_WORKSPACE TF_TOKEN_app_terraform_io
 export CLOUDFLARE_API_TOKEN TF_VAR_cloudflare_zone_id TF_VAR_tf_lab_txt_content
 ```
 
-Before Terraform initialization, define fail-closed DNS helpers. They query every authoritative
-Cloudflare nameserver directly, reject command errors, timeouts, SERVFAIL, and malformed replies,
-and treat only an authoritative `NOERROR` response with no TXT answer as absence. The SOA negative
-cache lifetime is the smaller of its TTL and MINIMUM fields; it bounds later public-resolver waits.
+Before Terraform initialization, define fail-closed DNS helpers. They classify the exact owner as
+`absent`, `present`, or `occupied`; valid `NXDOMAIN` and `NOERROR`/NODATA responses are absence, but
+unexpected values, mixed answers, and other record types are occupied. Query failures and malformed
+responses are errors rather than absence. The SOA negative cache lifetime is the smaller of its TTL
+and MINIMUM fields; it bounds later public-resolver waits.
 
 ```bash
 DNS_NAME=tf-lab.gitshelves.com
 DNS_ZONE=gitshelves.com
-mapfile -t AUTHORITATIVE_NS < <(dig +short NS "$DNS_ZONE" | sed 's/\.$//')
+EXPECTED_TXT="\"$TF_VAR_tf_lab_txt_content\""
+ns_response="$(dig +time=5 +tries=1 +short NS "$DNS_ZONE")" || {
+  echo 'Authoritative nameserver discovery failed' >&2; exit 1;
+}
+mapfile -t AUTHORITATIVE_NS < <(printf '%s\n' "$ns_response" | sed '/^$/d; s/\.$//')
 test "${#AUTHORITATIVE_NS[@]}" -gt 0 || { echo 'No authoritative nameservers found' >&2; exit 1; }
 
 dns_txt() {
-  resolver="$1"
+  resolver="$1" require_authoritative="${2:-false}"
+  DNS_STATE= DNS_ANSWER=
   response="$(dig +time=5 +tries=1 +noall +comments +answer TXT "$DNS_NAME" "@$resolver")" || {
     echo "DNS query to $resolver failed" >&2; return 1;
   }
-  printf '%s\n' "$response" | grep -q 'status: NOERROR' || {
-    echo "DNS query to $resolver did not return NOERROR" >&2; return 1;
-  }
-  if [[ " ${AUTHORITATIVE_NS[*]} " == *" $resolver "* ]]; then
+  header="$(printf '%s\n' "$response" | awk '/^;; ->>HEADER<<-/ { print; exit }')"
+  test -n "$header" || { echo "Malformed DNS header from $resolver" >&2; return 1; }
+  status="$(printf '%s\n' "$header" | sed -n 's/.*status: \([A-Z]*\),.*/\1/p')"
+  case "$status" in
+    NOERROR|NXDOMAIN) ;;
+    *) echo "DNS query to $resolver returned ${status:-a malformed status}" >&2; return 1 ;;
+  esac
+  if test "$require_authoritative" = true; then
     printf '%s\n' "$response" | grep -Eq 'flags: [^;]*aa([ ;])' || {
       echo "DNS response from $resolver was not authoritative" >&2; return 1;
     }
   fi
-  printf '%s\n' "$response" | awk '$4 == "TXT" { print substr($0, index($0, $5)) }'
+  answers="$(printf '%s\n' "$response" | awk '!/^;/ && NF { print }')"
+  if test "$status" = NXDOMAIN; then
+    test -z "$answers" || { echo "NXDOMAIN response from $resolver had answers" >&2; return 1; }
+    DNS_STATE=absent
+    return 0
+  fi
+  if test -z "$answers"; then
+    DNS_STATE=absent
+    return 0
+  fi
+  answer_count="$(printf '%s\n' "$answers" | awk 'END { print NR }')"
+  txt_count="$(printf '%s\n' "$answers" | awk '$1 == "'"$DNS_NAME"'." && $4 == "TXT" { count++ } END { print count+0 }')"
+  DNS_ANSWER="$(printf '%s\n' "$answers" | awk '$1 == "'"$DNS_NAME"'." && $4 == "TXT" { print substr($0, index($0, $5)) }')"
+  if test "$answer_count" -eq 1 && test "$txt_count" -eq 1 && test "$DNS_ANSWER" = "$EXPECTED_TXT"; then
+    DNS_STATE=present
+  else
+    DNS_STATE=occupied
+  fi
 }
 
-soa="$(dig +time=5 +tries=1 +noall +answer SOA "$DNS_ZONE" "@${AUTHORITATIVE_NS[0]}")" || exit 1
-read -r soa_ttl soa_minimum < <(printf '%s\n' "$soa" | awk '$4 == "SOA" { print $2, $NF; exit }')
+soa="$(dig +time=5 +tries=1 +noall +comments +answer SOA "$DNS_ZONE" "@${AUTHORITATIVE_NS[0]}")" || {
+  echo 'Authoritative SOA query failed' >&2; exit 1;
+}
+printf '%s\n' "$soa" | grep -q 'status: NOERROR' &&
+  printf '%s\n' "$soa" | grep -Eq 'flags: [^;]*aa([ ;])' || {
+    echo 'SOA response was not authoritative NOERROR' >&2; exit 1;
+  }
+soa_fields="$(printf '%s\n' "$soa" | awk '$1 == "'"$DNS_ZONE"'." && $4 == "SOA" { count++; ttl=$2; minimum=$NF } END { if (count == 1) print ttl, minimum }')"
+read -r soa_ttl soa_minimum <<<"$soa_fields"
 test "${soa_ttl:-}" -ge 0 2>/dev/null && test "${soa_minimum:-}" -ge 0 2>/dev/null || {
   echo 'Malformed or absent authoritative SOA response' >&2; exit 1;
 }
 NEGATIVE_TTL=$((soa_ttl < soa_minimum ? soa_ttl : soa_minimum))
 for ns in "${AUTHORITATIVE_NS[@]}"; do
-  test -z "$(dns_txt "$ns")" || { echo "TXT already exists at $ns" >&2; exit 1; }
+  dns_txt "$ns" true || exit 1
+  test "$DNS_STATE" = absent || { echo "DNS name is $DNS_STATE at $ns" >&2; exit 1; }
 done
 for resolver in 1.1.1.1 8.8.8.8; do
-  test -z "$(dns_txt "$resolver")" || { echo "TXT already exists through $resolver" >&2; exit 1; }
+  dns_txt "$resolver" || exit 1
+  test "$DNS_STATE" = absent || { echo "DNS name is $DNS_STATE through $resolver" >&2; exit 1; }
 done
 ```
 
@@ -171,18 +207,19 @@ run. Apply only the reviewed saved plan—never regenerate it implicitly:
 
 ```bash
 terraform -chdir=infra/terraform/cloudflare/staging apply -input=false "$CREATE_PLAN"
-EXPECTED_TXT="\"$TF_VAR_tf_lab_txt_content\""
 for ns in "${AUTHORITATIVE_NS[@]}"; do
-  test "$(dns_txt "$ns")" = "$EXPECTED_TXT" || {
-    echo "Expected TXT absent or incorrect at $ns" >&2; exit 1;
-  }
+  dns_txt "$ns" true || exit 1
+  test "$DNS_STATE" = present || { echo "DNS name is $DNS_STATE at $ns" >&2; exit 1; }
 done
 wait_for_txt_presence() {
   resolver="$1" deadline=$((SECONDS + NEGATIVE_TTL + 30))
   while test "$SECONDS" -lt "$deadline"; do
-    answer="$(dns_txt "$resolver")" || return 1
-    test "$answer" = "$EXPECTED_TXT" && return 0
-    sleep 10
+    dns_txt "$resolver" || return 1
+    case "$DNS_STATE" in
+      present) return 0 ;;
+      absent) sleep 10 ;;
+      *) echo "DNS name is $DNS_STATE through $resolver" >&2; return 1 ;;
+    esac
   done
   echo "TXT absent through $resolver after the negative-cache window" >&2; return 1
 }
@@ -254,16 +291,20 @@ current state contains zero managed resources while its prior state versions rem
 ```bash
 terraform -chdir=infra/terraform/cloudflare/staging apply -input=false "$DESTROY_PLAN"
 for ns in "${AUTHORITATIVE_NS[@]}"; do
-  test -z "$(dns_txt "$ns")" || { echo "TXT remains at $ns" >&2; exit 1; }
+  dns_txt "$ns" true || exit 1
+  test "$DNS_STATE" = absent || { echo "DNS name is $DNS_STATE at $ns" >&2; exit 1; }
 done
 wait_for_txt_absence() {
   resolver="$1"
   deadline=$((SECONDS + 330)) # Poll through the 300-second positive TTL plus grace.
 
   while test "$SECONDS" -lt "$deadline"; do
-    answer="$(dns_txt "$resolver")" || return 1
-    test -z "$answer" && return 0
-    sleep 10
+    dns_txt "$resolver" || return 1
+    case "$DNS_STATE" in
+      absent) return 0 ;;
+      present) sleep 10 ;;
+      *) echo "DNS name is $DNS_STATE through $resolver" >&2; return 1 ;;
+    esac
   done
 
   echo "TXT record remained visible through $resolver after the TTL window" >&2
