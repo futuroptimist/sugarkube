@@ -11,6 +11,11 @@ personas:
 
 ## Overview and current status
 
+**Phase B status (2026-08-22):** The credential-free Terraform and Ansible validation foundations
+now exist. Live Ansible preflight, node convergence, Terraform state/backend selection, DNS
+resources, Cloudflare adoption, and every production implementation remain unimplemented and require
+separate review and authorization.
+
 Terraform and Ansible address different layers. Terraform manages stateful external resources through
 provider APIs and makes proposed changes, applies, and drift visible. Ansible manages idempotent
 post-boot host configuration over SSH. They complement the existing platform rather than replacing it.

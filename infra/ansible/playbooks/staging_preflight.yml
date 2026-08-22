@@ -1,0 +1,22 @@
+---
+- name: Validate the staging node baseline without making changes
+  hosts: staging
+  gather_facts: true
+  become: false
+
+  tasks:
+    - name: Require Linux on an ARM64 architecture
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.system == "Linux"
+          - ansible_facts.architecture in ["aarch64", "arm64"]
+        fail_msg: >-
+          This staging node must report Linux on ARM64; it reported
+          {{ ansible_facts.system }} on {{ ansible_facts.architecture }}.
+        success_msg: "The node reports the required Linux ARM64 baseline."
+
+    - name: Report the validated non-sensitive baseline
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }} passed the read-only operating-system and
+          architecture preflight.
