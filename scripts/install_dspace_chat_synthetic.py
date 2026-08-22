@@ -288,12 +288,13 @@ def service_identity(config: dict, root: Path) -> tuple[int, int]:
     import pwd
 
     try:
-        return (
-            pwd.getpwnam(config["serviceAccount"]).pw_uid,
-            grp.getgrnam(config["serviceGroup"]).gr_gid,
-        )
+        account = pwd.getpwnam(config["serviceAccount"])
+        group = grp.getgrnam(config["serviceGroup"])
     except KeyError:
         raise ValueError("configured service identity is unavailable") from None
+    if account.pw_gid != group.gr_gid:
+        raise ValueError("configured service account primary group does not match service group")
+    return account.pw_uid, group.gr_gid
 
 
 def runner_access_paths(root: Path, runner_parent: Path) -> list[Path]:
@@ -302,7 +303,7 @@ def runner_access_paths(root: Path, runner_parent: Path) -> list[Path]:
     try:
         relative = runner_parent.relative_to(base)
     except ValueError:
-        return [runner_parent]
+        raise ValueError("runner parent must be within /var/lib/sugarkube") from None
     paths = [base]
     for component in relative.parts:
         paths.append(paths[-1] / component)
@@ -343,15 +344,13 @@ def validate_runner_access(config: dict, runner: Path, root: Path) -> None:
         info = path.lstat()
         if stat.S_ISLNK(info.st_mode):
             continue
+        if not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
+            raise ValueError("runner contains an unsupported file type")
         mode = stat.S_IMODE(info.st_mode)
         if info.st_uid != owner_uid or info.st_gid != group_gid or mode & 0o022:
             raise ValueError("installed runner access metadata is invalid")
         effective = (mode >> 6) if account_uid == info.st_uid else (mode >> 3)
-        shebang = False
-        if stat.S_ISREG(info.st_mode):
-            with path.open("rb") as stream:
-                shebang = stream.read(2) == b"#!"
-        needed = 0o5 if directory or mode & 0o111 or shebang else 0o4
+        needed = 0o5 if directory or mode & 0o111 else 0o4
         if effective & needed != needed:
             raise ValueError("configured child cannot access installed runner")
 

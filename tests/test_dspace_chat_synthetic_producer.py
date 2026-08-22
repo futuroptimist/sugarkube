@@ -1782,7 +1782,7 @@ def test_runner_install_normalizes_private_source_without_changing_content(
     installer.validate_runner_access(config_value, installed, root)
 
 
-def test_child_access_validation_rejects_parent_file_and_executable_modes(
+def test_child_access_validation_rejects_parent_and_file_modes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     snapshot, _ = runner_snapshot_fixture(tmp_path)
@@ -1799,13 +1799,82 @@ def test_child_access_validation_rejects_parent_file_and_executable_modes(
     for path, mode in (
         (root / "var/lib/sugarkube", 0o700),
         (runner / "dependency.ok", 0o600),
-        (runner / "shim", 0o640),
     ):
         original = stat.S_IMODE(path.stat().st_mode)
         path.chmod(mode)
         with pytest.raises(ValueError, match="cannot access"):
             installer.validate_runner_access(value, runner, root)
         path.chmod(original)
+
+
+def test_runner_access_paths_rejects_parent_outside_application_tree(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    outside = root / "etc"
+    outside.mkdir()
+    before = outside.stat()
+
+    with pytest.raises(ValueError, match="within /var/lib/sugarkube"):
+        installer.runner_access_paths(root, outside)
+
+    after = outside.stat()
+    assert (after.st_uid, after.st_gid, after.st_mode) == (
+        before.st_uid,
+        before.st_gid,
+        before.st_mode,
+    )
+
+
+def test_child_access_validation_rejects_unsupported_file_type(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    snapshot, _ = runner_snapshot_fixture(tmp_path)
+    staged = tmp_path / "staged"
+    installer.render(staged)
+    root = tmp_path / "root"
+    root.mkdir()
+    monkeypatch.setattr(installer, "runtime_module", lambda: FakeSnapshotRuntime())
+    runner, _ = installer.install_runner(staged, snapshot, root)
+    fifo = runner / "unexpected.fifo"
+    os.mkfifo(fifo, 0o640)
+    os.chown(fifo, os.getuid(), os.getgid())
+    value = json.loads((staged / "etc/sugarkube/dspace-chat-synthetic.json").read_text())
+
+    with pytest.raises(ValueError, match="unsupported file type"):
+        installer.validate_runner_access(value, runner, root)
+
+
+def test_non_executable_shebang_file_only_requires_read_access(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    snapshot, _ = runner_snapshot_fixture(tmp_path)
+    data = snapshot / "script-data"
+    data.write_text("#!/bin/sh\nnot executed\n")
+    data.chmod(0o600)
+    staged = tmp_path / "staged"
+    installer.render(staged)
+    root = tmp_path / "root"
+    root.mkdir()
+    monkeypatch.setattr(installer, "runtime_module", lambda: FakeSnapshotRuntime())
+
+    runner, _ = installer.install_runner(staged, snapshot, root)
+
+    assert stat.S_IMODE((runner / data.name).stat().st_mode) == 0o640
+
+
+def test_service_identity_rejects_account_with_different_primary_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import grp
+    import pwd
+
+    monkeypatch.setattr(pwd, "getpwnam", lambda _name: SimpleNamespace(pw_uid=1234, pw_gid=2345))
+    monkeypatch.setattr(grp, "getgrnam", lambda _name: SimpleNamespace(gr_gid=3456))
+
+    with pytest.raises(ValueError, match="primary group does not match"):
+        installer.service_identity(
+            {"serviceAccount": "synthetic", "serviceGroup": "synthetic"}, Path("/")
+        )
 
 
 def access_repair_fixture(
