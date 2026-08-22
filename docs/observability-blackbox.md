@@ -75,11 +75,10 @@ pruning or staging Probe deletion is used. Neither uses
 
 GitShelves Probes must be applied and verified only after its staging workload and external Cloudflare Tunnel route exist. GitShelves exposes no `/metrics`, so it has no ServiceMonitor.
 
-All five GitShelves Probes carry `sugarkube.dev/wan-drill: pending` during the
-pre-rollout state. The guarded WAN drill validates all 21 declared URLs but
-contacts only the 16 approved-live endpoints. After the workload, route, and
-all five probes are separately verified, one follow-up repository change must
-remove all five annotations together; partial activation is rejected.
+All five GitShelves Probes have been separately verified and activated. The
+guarded WAN drill now validates and contacts all 21 approved-live endpoints.
+GitShelves activation is all-or-none; partial activation remains invalid and is
+rejected.
 
 These are exactly 21 Probes. Labels are bounded to `release`, `app`,
 `environment: staging`, `route`, and `criticality`. Verification uses the
