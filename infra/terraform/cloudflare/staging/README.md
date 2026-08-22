@@ -59,8 +59,9 @@ An operator must manually create or verify:
 - an HCP Terraform organization and the workspace `sugarkube-cloudflare-staging-lab`;
 - workspace execution mode **Local**, auto-apply disabled, and access restricted to the authorized
   operators;
-- standard Terraform CLI authentication (for example, the documented `terraform login` mechanism),
-  without committing a credentials file;
+- an ephemeral HCP Terraform team token supplied only through the hidden
+  `TF_TOKEN_app_terraform_io` environment variable; do not create `credentials.tfrc.json` for this
+  disposable flow;
 - a separate least-privilege Cloudflare API token with only **Zone Read** and **DNS Edit** for the
   `gitshelves.com` zone—never reuse the Cloudflare Tunnel connector token; and
 - `jq`, `dig`, Terraform 1.15.9, and the reviewed merge commit on the operator machine.
@@ -77,6 +78,7 @@ Begin only with recorded authorization. Disable shell tracing before handling cr
 mode-`0700` plan directory, and arrange unconditional cleanup. Supply values without printing them:
 
 ```bash
+set -Eeuo pipefail
 set +x
 umask 077
 PLAN_DIR="$(mktemp -d)"
@@ -99,17 +101,51 @@ export TF_CLOUD_ORGANIZATION TF_WORKSPACE TF_TOKEN_app_terraform_io
 export CLOUDFLARE_API_TOKEN TF_VAR_cloudflare_zone_id TF_VAR_tf_lab_txt_content
 ```
 
-Before Terraform initialization, confirm in the registrar dashboard that the transfer lock remains
-enabled. The transfer lock prevents unauthorized registrar transfer; it does not prevent normal DNS
-management and is not a reason to disable it. Inspect Cloudflare and both authoritative/public DNS
-for the exact lab name. These reads are deliberately manual so the operator can identify any
-existing record or controller before Terraform can act:
+Before Terraform initialization, define fail-closed DNS helpers. They query every authoritative
+Cloudflare nameserver directly, reject command errors, timeouts, SERVFAIL, and malformed replies,
+and treat only an authoritative `NOERROR` response with no TXT answer as absence. The SOA negative
+cache lifetime is the smaller of its TTL and MINIMUM fields; it bounds later public-resolver waits.
 
 ```bash
-dig +short NS gitshelves.com
-dig +short TXT tf-lab.gitshelves.com @1.1.1.1
-dig +short TXT tf-lab.gitshelves.com @8.8.8.8
+DNS_NAME=tf-lab.gitshelves.com
+DNS_ZONE=gitshelves.com
+mapfile -t AUTHORITATIVE_NS < <(dig +short NS "$DNS_ZONE" | sed 's/\.$//')
+test "${#AUTHORITATIVE_NS[@]}" -gt 0 || { echo 'No authoritative nameservers found' >&2; exit 1; }
+
+dns_txt() {
+  resolver="$1"
+  response="$(dig +time=5 +tries=1 +noall +comments +answer TXT "$DNS_NAME" "@$resolver")" || {
+    echo "DNS query to $resolver failed" >&2; return 1;
+  }
+  printf '%s\n' "$response" | grep -q 'status: NOERROR' || {
+    echo "DNS query to $resolver did not return NOERROR" >&2; return 1;
+  }
+  if [[ " ${AUTHORITATIVE_NS[*]} " == *" $resolver "* ]]; then
+    printf '%s\n' "$response" | grep -Eq 'flags: [^;]*aa([ ;])' || {
+      echo "DNS response from $resolver was not authoritative" >&2; return 1;
+    }
+  fi
+  printf '%s\n' "$response" | awk '$4 == "TXT" { print substr($0, index($0, $5)) }'
+}
+
+soa="$(dig +time=5 +tries=1 +noall +answer SOA "$DNS_ZONE" "@${AUTHORITATIVE_NS[0]}")" || exit 1
+read -r soa_ttl soa_minimum < <(printf '%s\n' "$soa" | awk '$4 == "SOA" { print $2, $NF; exit }')
+test "${soa_ttl:-}" -ge 0 2>/dev/null && test "${soa_minimum:-}" -ge 0 2>/dev/null || {
+  echo 'Malformed or absent authoritative SOA response' >&2; exit 1;
+}
+NEGATIVE_TTL=$((soa_ttl < soa_minimum ? soa_ttl : soa_minimum))
+for ns in "${AUTHORITATIVE_NS[@]}"; do
+  test -z "$(dns_txt "$ns")" || { echo "TXT already exists at $ns" >&2; exit 1; }
+done
+for resolver in 1.1.1.1 8.8.8.8; do
+  test -z "$(dns_txt "$resolver")" || { echo "TXT already exists through $resolver" >&2; exit 1; }
+done
 ```
+
+Confirm in the registrar dashboard that the transfer lock remains
+enabled. The transfer lock prevents unauthorized registrar transfer; it does not prevent normal DNS
+management and is not a reason to disable it. Also inspect the exact name manually in Cloudflare's
+dashboard so the operator can identify any existing record or controller before Terraform can act.
 
 **Stop** if the name exists in either DNS inspection or the Cloudflare dashboard; if another
 controller claims it; if the HCP workspace has any unexpected managed resource or run; or if its
@@ -123,7 +159,7 @@ CREATE_PLAN="$PLAN_DIR/create.tfplan"
 CREATE_JSON="$PLAN_DIR/create.json"
 terraform -chdir=infra/terraform/cloudflare/staging plan -input=false -out="$CREATE_PLAN"
 terraform -chdir=infra/terraform/cloudflare/staging show -json "$CREATE_PLAN" >"$CREATE_JSON"
-jq '.resource_changes | map({address, actions: .change.actions})' "$CREATE_JSON"
+jq -e '.resource_changes | map({address, actions: .change.actions})' "$CREATE_JSON"
 test "$(jq '[.resource_changes[] | select(.address == "cloudflare_dns_record.tf_lab" and .change.actions == ["create"])] | length' "$CREATE_JSON")" -eq 1
 test "$(jq '.resource_changes | length' "$CREATE_JSON")" -eq 1
 ```
@@ -135,10 +171,28 @@ run. Apply only the reviewed saved plan—never regenerate it implicitly:
 
 ```bash
 terraform -chdir=infra/terraform/cloudflare/staging apply -input=false "$CREATE_PLAN"
-dig +short TXT tf-lab.gitshelves.com @1.1.1.1
-dig +short TXT tf-lab.gitshelves.com @8.8.8.8
-terraform -chdir=infra/terraform/cloudflare/staging plan -input=false -detailed-exitcode
-test "$?" -eq 0
+EXPECTED_TXT="\"$TF_VAR_tf_lab_txt_content\""
+for ns in "${AUTHORITATIVE_NS[@]}"; do
+  test "$(dns_txt "$ns")" = "$EXPECTED_TXT" || {
+    echo "Expected TXT absent or incorrect at $ns" >&2; exit 1;
+  }
+done
+wait_for_txt_presence() {
+  resolver="$1" deadline=$((SECONDS + NEGATIVE_TTL + 30))
+  while test "$SECONDS" -lt "$deadline"; do
+    answer="$(dns_txt "$resolver")" || return 1
+    test "$answer" = "$EXPECTED_TXT" && return 0
+    sleep 10
+  done
+  echo "TXT absent through $resolver after the negative-cache window" >&2; return 1
+}
+wait_for_txt_presence 1.1.1.1
+wait_for_txt_presence 8.8.8.8
+if terraform -chdir=infra/terraform/cloudflare/staging plan -input=false -detailed-exitcode; then
+  :
+else
+  status=$?; echo "No-op plan failed with exit code $status" >&2; exit "$status"
+fi
 ```
 
 Require the expected TXT response from Cloudflare and Google's independent public resolver. A
@@ -155,9 +209,16 @@ RECONCILE_PLAN="$PLAN_DIR/reconcile.tfplan"
 RECONCILE_JSON="$PLAN_DIR/reconcile.json"
 terraform -chdir=infra/terraform/cloudflare/staging plan -input=false -out="$RECONCILE_PLAN"
 terraform -chdir=infra/terraform/cloudflare/staging show -json "$RECONCILE_PLAN" >"$RECONCILE_JSON"
-jq '.resource_changes | map({address, actions: .change.actions})' "$RECONCILE_JSON"
-test "$(jq '[.resource_changes[] | select(.address == "cloudflare_dns_record.tf_lab" and .change.actions == ["update"])] | length' "$RECONCILE_JSON")" -eq 1
-test "$(jq '.resource_changes | length' "$RECONCILE_JSON")" -eq 1
+jq -e --arg content "$TF_VAR_tf_lab_txt_content" --arg zone "$TF_VAR_cloudflare_zone_id" '
+  .resource_changes | length == 1 and
+  .[0].address == "cloudflare_dns_record.tf_lab" and
+  .[0].change.actions == ["update"] and
+  .[0].change.before.content != .[0].change.after.content and
+  .[0].change.after.content == $content and
+  .[0].change.before.zone_id == $zone and .[0].change.after.zone_id == $zone and
+  (.[0].change as $change | ["name", "type", "ttl", "proxied", "comment"] |
+    all(. as $key | $change.before[$key] == $change.after[$key]))
+' "$RECONCILE_JSON" >/dev/null
 ```
 
 Human review must also show that the sole in-place update restores only the configured TXT content.
@@ -165,8 +226,11 @@ Stop on replacement or any other change. Then apply only that reviewed plan and 
 
 ```bash
 terraform -chdir=infra/terraform/cloudflare/staging apply -input=false "$RECONCILE_PLAN"
-terraform -chdir=infra/terraform/cloudflare/staging plan -input=false -detailed-exitcode
-test "$?" -eq 0
+if terraform -chdir=infra/terraform/cloudflare/staging plan -input=false -detailed-exitcode; then
+  :
+else
+  status=$?; echo "No-op plan failed with exit code $status" >&2; exit "$status"
+fi
 ```
 
 ## Reviewed destroy and cleanup
@@ -178,7 +242,7 @@ DESTROY_PLAN="$PLAN_DIR/destroy.tfplan"
 DESTROY_JSON="$PLAN_DIR/destroy.json"
 terraform -chdir=infra/terraform/cloudflare/staging plan -destroy -input=false -out="$DESTROY_PLAN"
 terraform -chdir=infra/terraform/cloudflare/staging show -json "$DESTROY_PLAN" >"$DESTROY_JSON"
-jq '.resource_changes | map({address, actions: .change.actions})' "$DESTROY_JSON"
+jq -e '.resource_changes | map({address, actions: .change.actions})' "$DESTROY_JSON"
 test "$(jq '[.resource_changes[] | select(.address == "cloudflare_dns_record.tf_lab" and .change.actions == ["delete"])] | length' "$DESTROY_JSON")" -eq 1
 test "$(jq '.resource_changes | length' "$DESTROY_JSON")" -eq 1
 ```
@@ -189,15 +253,15 @@ current state contains zero managed resources while its prior state versions rem
 
 ```bash
 terraform -chdir=infra/terraform/cloudflare/staging apply -input=false "$DESTROY_PLAN"
+for ns in "${AUTHORITATIVE_NS[@]}"; do
+  test -z "$(dns_txt "$ns")" || { echo "TXT remains at $ns" >&2; exit 1; }
+done
 wait_for_txt_absence() {
   resolver="$1"
-  deadline=$((SECONDS + 330)) # The 300-second record TTL plus a small grace period.
+  deadline=$((SECONDS + 330)) # Poll through the 300-second positive TTL plus grace.
 
   while test "$SECONDS" -lt "$deadline"; do
-    if ! answer="$(dig +short TXT tf-lab.gitshelves.com "@$resolver")"; then
-      echo "DNS query through $resolver failed; cleanup is unverified" >&2
-      return 1
-    fi
+    answer="$(dns_txt "$resolver")" || return 1
     test -z "$answer" && return 0
     sleep 10
   done

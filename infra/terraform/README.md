@@ -17,8 +17,9 @@ mock-tested, disposable Cloudflare TXT-record contract and its
 is unauthorized until this change merges and receives separate operator approval. Phase D adoption
 of `staging.gitshelves.com` has not started.
 
-The root has no data lookups, imports, modules, provisioners, command execution, hard-coded account
-or zone IDs, credentials, or live operations. It declares the Cloudflare zone ID as a required
+The root has no data lookups, imports, modules, provisioners, command execution, committed account
+or zone identifier values, credentials, or live operations. It intentionally declares the
+Cloudflare zone ID as a required
 runtime variable, while its empty HCP Terraform cloud configuration likewise accepts organization
 and workspace only at runtime. Production configuration and all infrastructure mutations remain
 future work.
@@ -32,7 +33,6 @@ infra/terraform/
         ├── .terraform.lock.hcl
         ├── README.md
         ├── main.tf
-        ├── outputs.tf
         ├── providers.tf
         ├── tests/
         │   └── tf_lab.tftest.hcl

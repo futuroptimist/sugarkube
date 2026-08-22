@@ -1,5 +1,6 @@
 variable "cloudflare_zone_id" {
   type        = string
+  nullable    = false
   description = "Cloudflare's 32-character hexadecimal zone identifier. It is an identifier, not a credential, but remains an uncommitted operator input."
 
   validation {
@@ -10,6 +11,7 @@ variable "cloudflare_zone_id" {
 
 variable "tf_lab_txt_content" {
   type        = string
+  nullable    = false
   description = "Non-secret, printable ASCII training content beginning with sugarkube-terraform-lab: and no more than one 255-octet TXT character-string."
 
   validation {
