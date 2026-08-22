@@ -59,9 +59,13 @@ An operator must manually create or verify:
 - an HCP Terraform organization and the workspace `sugarkube-cloudflare-staging-lab`;
 - workspace execution mode **Local**, auto-apply disabled, and access restricted to the authorized
   operators;
-- an ephemeral HCP Terraform team token supplied only through the hidden
-  `TF_TOKEN_app_terraform_io` environment variable; do not create `credentials.tfrc.json` for this
-  disposable flow;
+- a short-duration HCP Terraform **user API token** that authenticates the individual authorized
+  operator. The associated user must have only the workspace permissions required to read and
+  write state versions, perform the intended local CLI operations, and lock and unlock the
+  workspace when this runbook requires it. Choose the shortest practical expiration HCP Terraform
+  supports for this exercise, supply the token only through the hidden
+  `TF_TOKEN_app_terraform_io` environment variable, and revoke it immediately after the exercise;
+  do not create or modify `credentials.tfrc.json` for this disposable flow;
 - a separate least-privilege Cloudflare API token with only **Zone Read** and **DNS Edit** for the
   `gitshelves.com` zone—never reuse the Cloudflare Tunnel connector token; and
 - `jq`, `dig`, Terraform 1.15.9, and the reviewed merge commit on the operator machine.
@@ -70,7 +74,8 @@ The Cloudflare zone ID is an identifier rather than a credential, but it remains
 runtime operator input. The TXT value must be non-secret and start with
 `sugarkube-terraform-lab:`. Treat state and saved plans as sensitive anyway: a plan may contain
 provider and input data. Never retain state copies, plan JSON, environment dumps, credentials, or
-tokens as evidence.
+tokens as evidence. Do not put either token in command arguments, shell history, logs, plans, state,
+evidence, or Git.
 
 ## Authorized create and verification
 
@@ -93,7 +98,7 @@ trap cleanup EXIT HUP INT TERM
 
 read -r -p 'HCP Terraform organization: ' TF_CLOUD_ORGANIZATION
 TF_WORKSPACE=sugarkube-cloudflare-staging-lab
-read -r -s -p 'HCP Terraform credential: ' TF_TOKEN_app_terraform_io; printf '\n'
+read -r -s -p 'HCP Terraform user API token: ' TF_TOKEN_app_terraform_io; printf '\n'
 read -r -s -p 'Cloudflare API credential: ' CLOUDFLARE_API_TOKEN; printf '\n'
 read -r -s -p 'Cloudflare zone ID: ' TF_VAR_cloudflare_zone_id; printf '\n'
 read -r -p 'Non-secret lab TXT content (prefix required): ' TF_VAR_tf_lab_txt_content
@@ -320,7 +325,18 @@ terraform -chdir=infra/terraform/cloudflare/staging show -json |
 
 Finally, use HCP Terraform's workspace controls to lock or otherwise freeze the workspace against
 further runs until the next separately authorized phase. Let the trap erase the private plan
-directory and unset runtime values; explicitly run `cleanup` before leaving the shell if desired.
+directory and unset the local `TF_TOKEN_app_terraform_io` environment variable with the other
+runtime values; explicitly run `cleanup` before leaving the shell if desired. Separately, revoke
+the user API token immediately through the authorized operator's HCP Terraform account **Tokens**
+settings. Unsetting the environment variable only removes the local copy; it does not revoke the
+token.
 Save only a sanitized summary of authorization, reviewed action counts, resolver outcomes, no-op
 results, drift/reconciliation, destruction, empty current state, and workspace freeze. Never save
 tokens, state, saved plans, plan JSON, environment dumps, complete TXT values, or credential files.
+
+## HCP Terraform references
+
+- [User tokens in the run environment](https://developer.hashicorp.com/terraform/cloud-docs/workspaces/run/run-environment#user-token)
+- [Workspace state](https://developer.hashicorp.com/terraform/cloud-docs/workspaces/state)
+- [API tokens](https://developer.hashicorp.com/terraform/cloud-docs/users-teams-organizations/api-tokens)
+- [User token creation and revocation](https://developer.hashicorp.com/terraform/cloud-docs/users-teams-organizations/users#tokens)
