@@ -202,6 +202,29 @@ def test_system_browser_contract_resolves_relative_root_once(
     assert relative == absolute
 
 
+def test_root_normalization_rejects_symlink_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = tmp_path / "real"
+    real.mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(real, target_is_directory=True)
+
+    monkeypatch.chdir(tmp_path)
+    assert runtime.normalize_root(Path(real.name)) == real
+    assert runtime.normalize_root(real) == real
+    with pytest.raises(runtime.Invalid, match="source root"):
+        runtime.normalize_root(alias)
+
+
+@pytest.mark.parametrize("coordinate", ["relative/path", "/usr/../outside"])
+def test_rooted_coordinates_reject_relative_and_traversal(coordinate: str) -> None:
+    with pytest.raises(runtime.Invalid, match="rooted coordinate"):
+        runtime._rooted(Path("/private"), coordinate)
+    with pytest.raises(ValueError, match="rooted coordinate"):
+        installer.rooted(Path("/private"), coordinate)
+
+
 def test_browser_contract_rejects_missing_source_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -869,6 +892,8 @@ def test_materialize_orchestrates_complete_snapshot_without_host_node(
         RUNNER_LOCAL = runtime.RUNNER_LOCAL
         SYSTEM_CHROMIUM = runtime.SYSTEM_CHROMIUM
 
+        normalize_root = staticmethod(runtime.normalize_root)
+
         @staticmethod
         def discover_playwright_browser(runner: Path) -> Path:
             return runner / discovered
@@ -1263,6 +1288,8 @@ class StatusRuntime:
     RUNNER_LOCAL = runtime.RUNNER_LOCAL
     SYSTEM_CHROMIUM = runtime.SYSTEM_CHROMIUM
 
+    normalize_root = staticmethod(runtime.normalize_root)
+
     @staticmethod
     def load_config(path: Path) -> dict:
         return json.loads(path.read_text())
@@ -1492,6 +1519,8 @@ def test_system_browser_preflight_precedes_all_installer_mutation(
     class RejectingRuntime:
         SYSTEM_CHROMIUM = runtime.SYSTEM_CHROMIUM
 
+        normalize_root = staticmethod(runtime.normalize_root)
+
         @staticmethod
         def load_config(_path: Path) -> dict:
             return {"browserContract": {"name": runtime.SYSTEM_CHROMIUM}}
@@ -1501,6 +1530,7 @@ def test_system_browser_preflight_precedes_all_installer_mutation(
             raise runtime.Invalid("browser preflight")
 
     monkeypatch.chdir(tmp_path)
+    (tmp_path / "rehearsal-root").mkdir()
     monkeypatch.setattr(installer, "runtime_module", lambda: RejectingRuntime())
     monkeypatch.setattr(installer, "render", lambda _path: pytest.fail("render mutated output"))
 
@@ -1514,7 +1544,66 @@ def test_system_browser_preflight_precedes_all_installer_mutation(
             "snapshot",
         )
 
-    assert not (tmp_path / "rehearsal-root").exists()
+    assert not any((tmp_path / "rehearsal-root").iterdir())
+
+
+@pytest.mark.parametrize("operation", ["status", "dry-run", "apply", "rollback"])
+def test_installer_rejects_symlink_root_before_probe_or_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str
+) -> None:
+    real = tmp_path / "real"
+    real.mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(real, target_is_directory=True)
+    monkeypatch.setattr(installer, "status", lambda _root: pytest.fail("status probed"))
+    monkeypatch.setattr(installer, "render", lambda _root: pytest.fail("render mutated"))
+    monkeypatch.setattr(installer, "validate", lambda _root: pytest.fail("rollback probed"))
+
+    arguments = [operation, "--root", str(alias)]
+    if operation in {"dry-run", "apply"}:
+        arguments += ["--runner-snapshot", str(tmp_path / "snapshot")]
+    with pytest.raises(Exception, match="source root"):
+        run_installer_main(monkeypatch, *arguments)
+    assert not any(real.iterdir())
+
+
+def test_materialize_rejects_symlink_browser_root_before_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = tmp_path / "browser-root"
+    real.mkdir()
+    alias = tmp_path / "browser-alias"
+    alias.symlink_to(real, target_is_directory=True)
+    output = tmp_path / "output"
+    monkeypatch.setattr(
+        installer, "verify_source", lambda *_args: pytest.fail("source validation started")
+    )
+
+    with pytest.raises(Exception, match="source root"):
+        installer.materialize(
+            tmp_path / "source",
+            "0" * 40,
+            "identity",
+            output,
+            "pnpm",
+            "1.0",
+            None,
+            {"name": runtime.SYSTEM_CHROMIUM},
+            alias,
+        )
+    assert not output.exists()
+
+
+def test_explicit_live_root_reaches_status_only_after_mocked_normalization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = []
+    monkeypatch.setattr(runtime, "normalize_root", lambda root: seen.append(root) or Path("/"))
+    monkeypatch.setattr(installer, "runtime_module", lambda: runtime)
+    monkeypatch.setattr(installer, "status", lambda root: seen.append(root) or 0)
+
+    assert run_installer_main(monkeypatch, "status", "--root", "/") == 0
+    assert seen == [Path("/"), Path("/")]
 
 
 def runner_snapshot_fixture(tmp_path: Path) -> tuple[Path, str]:
@@ -1536,6 +1625,8 @@ class FakeSnapshotRuntime:
     def __init__(self, fail_copy: bool = False):
         self.fail_copy = fail_copy
         self.validated = []
+
+    normalize_root = staticmethod(runtime.normalize_root)
 
     @staticmethod
     def load_config(path: Path) -> dict:
@@ -1634,6 +1725,7 @@ def test_apply_installs_runner_only_after_copy_revalidation(
 ) -> None:
     snapshot, revision = runner_snapshot_fixture(tmp_path)
     root = tmp_path / "root"
+    root.mkdir()
     fake = FakeSnapshotRuntime()
     monkeypatch.setattr(installer, "runtime_module", lambda: fake)
 

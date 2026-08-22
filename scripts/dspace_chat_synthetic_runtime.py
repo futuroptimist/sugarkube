@@ -147,6 +147,21 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def normalize_root(root: Path) -> Path:
+    """Return an existing real root without dereferencing caller identity."""
+    if ".." in root.parts:
+        raise Invalid("filesystem source root")
+    supplied = Path(os.path.abspath(root))
+    try:
+        info = supplied.lstat()
+        resolved = supplied.resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise Invalid("filesystem source root") from None
+    if not stat.S_ISDIR(info.st_mode) or supplied != resolved:
+        raise Invalid("filesystem source root")
+    return resolved
+
+
 def discover_playwright_browser(runner: Path) -> Path:
     """Return Playwright's executable only when it is runner-local and usable."""
     browser_root = runner / "playwright-browser"
@@ -197,7 +212,10 @@ def discover_playwright_browser(runner: Path) -> Path:
 
 
 def _rooted(root: Path, absolute: str) -> Path:
-    return root / Path(absolute).relative_to("/")
+    coordinate = Path(absolute)
+    if not coordinate.is_absolute() or ".." in coordinate.parts:
+        raise Invalid("rooted coordinate")
+    return root / coordinate.relative_to("/")
 
 
 def validate_browser_contract(config: dict, runner: Path, root: Path = Path("/")) -> dict:
@@ -213,13 +231,7 @@ def validate_browser_contract(config: dict, runner: Path, root: Path = Path("/")
         }
     if contract["name"] != SYSTEM_CHROMIUM or platform.machine() != contract["architecture"]:
         raise Invalid("browser architecture or contract")
-    try:
-        # Browser coordinates are absolute host paths.  Resolve an alternate root
-        # once so relative rehearsal roots cannot accidentally compare against,
-        # or fall through to, the live filesystem.
-        root = root.resolve(strict=True)
-    except (OSError, RuntimeError):
-        raise Invalid("system browser source root") from None
+    root = normalize_root(root)
     validated = []
     for prefix in ("launcher", "executable"):
         configured = contract[f"{prefix}Path"]
@@ -227,9 +239,10 @@ def validate_browser_contract(config: dict, runner: Path, root: Path = Path("/")
         try:
             info = path.lstat()
             resolved = path.resolve(strict=True)
+            resolved.relative_to(root)
             owner = pwd.getpwuid(info.st_uid).pw_name
             group = grp.getgrgid(info.st_gid).gr_name
-        except (OSError, KeyError):
+        except (OSError, KeyError, ValueError):
             raise Invalid("system browser provenance") from None
         expected_realpath = _rooted(root, contract[f"{prefix}Realpath"])
         if (

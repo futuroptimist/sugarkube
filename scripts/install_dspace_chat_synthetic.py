@@ -104,10 +104,11 @@ def materialize(
     browser_contract: dict,
     browser_source_root: Path,
 ) -> None:
+    runtime = runtime_module()
+    browser_source_root = runtime.normalize_root(browser_source_root)
     verify_source(source, revision, identity)
     if output.exists():
         raise ValueError("output exists")
-    runtime = runtime_module()
     if browser_contract["name"] == runtime.RUNNER_LOCAL:
         if browser_bundle is None or not browser_bundle.is_dir():
             raise ValueError("browser bundle is invalid")
@@ -270,7 +271,10 @@ def validate_snapshot(staged: Path, snapshot: Path, root: Path = Path("/")) -> s
 
 
 def rooted(root: Path, absolute: str) -> Path:
-    return root / Path(absolute).relative_to("/")
+    coordinate = Path(absolute)
+    if not coordinate.is_absolute() or ".." in coordinate.parts:
+        raise ValueError("rooted coordinate must be absolute and confined")
+    return root / coordinate.relative_to("/")
 
 
 def install_runner(staged: Path, snapshot: Path, root: Path) -> tuple[Path, bool]:
@@ -327,6 +331,7 @@ def apply_installation(staged: Path, snapshot: Path, root: Path, asset_revision:
 
 
 def status(root: Path) -> int:
+    root = runtime_module().normalize_root(root)
     installations = root / "var/lib/sugarkube/dspace-chat-installations"
     current = installations / "current"
     live_paths = {target: root / target for target in ASSETS}
@@ -516,13 +521,13 @@ def main() -> int:
     parser.add_argument("--browser-source-root", type=Path)
     parser.add_argument("--runner-snapshot", type=Path)
     args = parser.parse_args()
-    args.root = args.root.resolve()
+    runtime = runtime_module()
+    args.root = runtime.normalize_root(args.root)
     if args.operation == "status":
         return status(args.root)
     if args.operation == "materialize":
         if not all((args.source, args.output, args.pnpm, args.pnpm_version)):
             parser.error("materialize requires source, output, pnpm, and pnpm-version")
-        runtime = runtime_module()
         browser_contract = runtime.load_config(ROOT / "config/dspace-chat-synthetic.json")[
             "browserContract"
         ]
@@ -537,7 +542,7 @@ def main() -> int:
             args.pnpm_version,
             args.browser_bundle.resolve() if args.browser_bundle else None,
             browser_contract,
-            args.browser_source_root.resolve() if args.browser_source_root else Path("/"),
+            args.browser_source_root if args.browser_source_root else Path("/"),
         )
         return 0
     if args.operation == "rollback":
@@ -552,7 +557,6 @@ def main() -> int:
         return 0
     # The system contract is independent of the copied runner. Check it before
     # rendering assets (and therefore before any installation-side output).
-    runtime = runtime_module()
     configured = runtime.load_config(ROOT / "config/dspace-chat-synthetic.json")
     if configured["browserContract"]["name"] == runtime.SYSTEM_CHROMIUM:
         runtime.validate_browser_contract(configured, Path("."), args.root)
