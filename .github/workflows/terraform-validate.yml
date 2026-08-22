@@ -37,3 +37,6 @@ jobs:
       - name: Validate configuration
         working-directory: infra/terraform/cloudflare/staging
         run: terraform validate -no-color
+      - name: Run mocked provider tests
+        working-directory: infra/terraform/cloudflare/staging
+        run: terraform test -no-color
