@@ -452,8 +452,6 @@ kind: Probe
 metadata:
   name: blackbox-gitshelves-staging-root
   namespace: monitoring
-  annotations:
-    sugarkube.dev/wan-drill: pending
   labels:
     release: kube-prometheus-stack
     app: gitshelves
@@ -482,8 +480,6 @@ kind: Probe
 metadata:
   name: blackbox-gitshelves-staging-healthz
   namespace: monitoring
-  annotations:
-    sugarkube.dev/wan-drill: pending
   labels:
     release: kube-prometheus-stack
     app: gitshelves
@@ -512,8 +508,6 @@ kind: Probe
 metadata:
   name: blackbox-gitshelves-staging-livez
   namespace: monitoring
-  annotations:
-    sugarkube.dev/wan-drill: pending
   labels:
     release: kube-prometheus-stack
     app: gitshelves
@@ -542,8 +536,6 @@ kind: Probe
 metadata:
   name: blackbox-gitshelves-staging-baseplate
   namespace: monitoring
-  annotations:
-    sugarkube.dev/wan-drill: pending
   labels:
     release: kube-prometheus-stack
     app: gitshelves
@@ -572,8 +564,6 @@ kind: Probe
 metadata:
   name: blackbox-gitshelves-staging-module
   namespace: monitoring
-  annotations:
-    sugarkube.dev/wan-drill: pending
   labels:
     release: kube-prometheus-stack
     app: gitshelves
