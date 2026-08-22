@@ -28,6 +28,22 @@ coverage.xml
 .coverage
 stl/
 
+# Terraform working and sensitive artifacts (lock files remain tracked)
+infra/terraform/**/.terraform/
+infra/terraform/**/*.tfstate
+infra/terraform/**/*.tfstate.*
+infra/terraform/**/*.tfplan
+infra/terraform/**/crash.log
+infra/terraform/**/crash.*.log
+infra/terraform/**/*_override.tf
+infra/terraform/**/*_override.tf.json
+infra/terraform/**/override.tf
+infra/terraform/**/override.tf.json
+infra/terraform/**/*.tfvars
+infra/terraform/**/*.tfvars.json
+infra/terraform/**/*.auto.tfvars
+infra/terraform/**/*.auto.tfvars.json
+
 # Temporary scripts from build_pi_image.ps1
 .pigen-build*.sh
 artifacts/

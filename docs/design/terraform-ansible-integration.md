@@ -3,11 +3,13 @@ personas:
   - software
 ---
 
-# Terraform and Ansible Integration Design (Forward-Looking, Not Yet Implemented)
+# Terraform and Ansible Integration Design
 
-> **Status and authority:** This is a forward-looking, documentation-only design. It implements no
-> infrastructure, authorizes no live infrastructure change, and authorizes no production rollout.
-> Every proposed mutation requires a later, separately reviewed implementation and operator approval.
+> **Status and authority:** Phase B now includes a credential-free Terraform validation scaffold,
+> which manages no resources. Resource management, state-backend selection, Ansible, GitShelves
+> adoption, and every live mutation remain unimplemented and require separately reviewed changes and
+> explicit operator approval. This design authorizes no live infrastructure change or production
+> rollout.
 
 ## Overview and current status
 
@@ -151,7 +153,8 @@ inventories contain non-secret host metadata only and keep staging and productio
   credentials must never intentionally enter Terraform configuration, plans, or state.
 - Credential-free CI may run formatting, `terraform init -backend=false`, validation, and tests. It
   may not run authenticated plans, applies, or destroys during the pilot.
-- Provider lock files belong in a later implementation PR, not this documentation task.
+- Provider lock files are committed by the credential-free Terraform scaffold for reproducible
+  validation; changing one requires a separately reviewed dependency update.
 - State locking prohibits concurrent applies. Normal operations never hand-edit state.
 
 ## Ansible inventory, authentication, and safety
