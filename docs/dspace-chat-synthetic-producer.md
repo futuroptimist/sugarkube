@@ -88,7 +88,11 @@ sudo python3 scripts/install_dspace_chat_synthetic.py apply \
 ```
 
 Apply validates the source snapshot before any destination mutation, copies it beneath the configured
-runner root, validates the copy again, and atomically exposes the exact immutable revision. An
+runner root, normalizes the copy to `root:<serviceGroup>` with group traversal/read access (and
+execute access only where the source executable bit requires it), validates both content and the
+configured child's access, and atomically exposes the exact immutable revision. Source checkout
+ownership and a restrictive source `umask` therefore cannot make the installed runner unusable.
+Neither group nor world receives write access. An
 identical pre-existing revision is validated and reused; older runner revisions are retained. Only
 then does apply transactionally replace the validated asset set and switch `current`.
 After apply, the operator must run `sudo systemctl daemon-reload` as a separate mandatory
@@ -99,9 +103,11 @@ transaction and is not automatically rolled back. Stop, classify the reload fail
 do not execute smoke or activate the timer. Perform an exact rollback only through the separately
 authorized rollback procedure before retrying `systemctl daemon-reload`.
 
-The required access model is exact: result root `root:pi` mode `0710`; each invocation directory
-`root:pi` mode `0770`; the child-created, same-directory temporary-and-renamed result `pi:pi` mode
-`0600`. The browser runs as `pi`. systemd creates the volatile result root on each boot. The service
+The required access model is exact: result root `root:<serviceGroup>` mode `0710`; each invocation
+directory `root:<serviceGroup>` mode `0770`; the child-created, same-directory
+temporary-and-renamed result `<serviceAccount>:<serviceGroup>` mode `0600`. The current explicit
+account and group are both `pi`; the browser runs as that configured account. systemd creates the
+volatile result root on each boot. The service
 binds the path to systemd's exact 32-hex
 `INVOCATION_ID` and UTC epoch start/end window. It cleans only that invocation's path.
 Immediately before every child launch the runtime revalidates the selected contract. For the system
@@ -141,6 +147,48 @@ coordinates, ownership/modes, activation state, bounded invocation summary, and 
 Invocation cleanup is expected lifecycle behavior, not evidence loss.
 
 ## 4. Explicit rollback/recovery
+
+### Repair an exact runner's access metadata
+
+The installations and retained-assets store remains intentionally private (`root:root:0700`), so
+live `status` and retained-asset validation are root-only operations. Do not weaken that store merely
+to let the child inspect it: the child needs only `/var/lib/sugarkube`, the runner root, and the exact
+installed runner. For the staging cutover incident, the approved runner revision is
+`97ab09f13fb098de928a878bf1fe9b8d13032cb5`, the approved retained asset revision is
+`68e002775771c087285cd5ba8e402e5d9ac7c2c426a802d44a179e74b925fd54`, and the validated runner
+manifest SHA-256 is `36fdab33edc0f1ad518a6d3d247a1bd32d233402387ba57493a9386d78ec9301`.
+
+First, as root, validate `current`, the exact retained assets, runner Git/content/dependencies,
+browser provenance, and the authorized manifest hash without mutation. The report contains only
+bounded coordinates and access state:
+
+```bash
+sudo python3 scripts/install_dspace_chat_synthetic.py repair-runner-access \
+  --revision 97ab09f13fb098de928a878bf1fe9b8d13032cb5 \
+  --asset-revision 68e002775771c087285cd5ba8e402e5d9ac7c2c426a802d44a179e74b925fd54 \
+  --runner-manifest-sha256 36fdab33edc0f1ad518a6d3d247a1bd32d233402387ba57493a9386d78ec9301
+```
+
+After separate authorization for this metadata-only repair, repeat with `--apply`. This operation
+changes only ownership/modes on the application-owned runner parents and exact runner; it does not
+replace assets, switch `current`, publish metrics, touch the browser, call systemd, execute smoke,
+retry, or roll back:
+
+```bash
+sudo python3 scripts/install_dspace_chat_synthetic.py repair-runner-access --apply \
+  --revision 97ab09f13fb098de928a878bf1fe9b8d13032cb5 \
+  --asset-revision 68e002775771c087285cd5ba8e402e5d9ac7c2c426a802d44a179e74b925fd54 \
+  --runner-manifest-sha256 36fdab33edc0f1ad518a6d3d247a1bd32d233402387ba57493a9386d78ec9301
+sudo python3 scripts/install_dspace_chat_synthetic.py status
+```
+
+Stop if any exact coordinate, content, dependency, Git, browser, retained asset, or child-access
+validation fails. Do not reapply the installation or alter the timer. Only after child access is
+revalidated may an operator seek separate authorization for `systemctl daemon-reload`, then one
+controlled execution, and then bounded scheduled-health observation. Each is a distinct decision;
+there is no automatic retry or rollback.
+
+### Roll back retained repository assets
 
 Rollback is never automatic. After read-only classification and separate authorization, select an
 exact retained validated revision:
