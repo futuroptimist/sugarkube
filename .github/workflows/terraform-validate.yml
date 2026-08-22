@@ -33,7 +33,7 @@ jobs:
         run: terraform fmt -check -recursive infra/terraform
       - name: Initialize without a backend
         working-directory: infra/terraform/cloudflare/staging
-        run: terraform init -backend=false -input=false
+        run: terraform init -backend=false -input=false -lockfile=readonly
       - name: Validate configuration
         working-directory: infra/terraform/cloudflare/staging
         run: terraform validate -no-color
