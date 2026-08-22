@@ -9,8 +9,8 @@ import platform
 import stat
 import subprocess
 import sys
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -1360,6 +1360,17 @@ def tree_bytes(root: Path) -> list[tuple[str, str, bytes | str]]:
     return values
 
 
+def tree_metadata(root: Path) -> dict[str, tuple[int, int, int]]:
+    return {
+        str(path.relative_to(root)): (
+            path.lstat().st_uid,
+            path.lstat().st_gid,
+            stat.S_IMODE(path.lstat().st_mode),
+        )
+        for path in root.rglob("*")
+    }
+
+
 def test_status_reports_validated_provenance_without_mutation_or_systemctl(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
@@ -1755,6 +1766,8 @@ def test_runner_install_normalizes_private_source_without_changing_content(
     data.chmod(0o600)
     link = snapshot / "frontend-link"
     link.symlink_to("package.json")
+    (snapshot / "pnpm-link").symlink_to("dependency.ok")
+    (snapshot / "playwright-link").symlink_to("dependency.ok")
     for path in [snapshot, *snapshot.rglob("*")]:
         if not path.is_symlink():
             path.chmod(0o700 if path.is_dir() or path == script else 0o600)
@@ -1765,7 +1778,11 @@ def test_runner_install_normalizes_private_source_without_changing_content(
     root.mkdir()
     monkeypatch.setattr(installer, "runtime_module", lambda: FakeSnapshotRuntime())
 
-    installed, created = installer.install_runner(staged, snapshot, root)
+    previous_umask = os.umask(0o077)
+    try:
+        installed, created = installer.install_runner(staged, snapshot, root)
+    finally:
+        os.umask(previous_umask)
 
     assert created and installed.name == revision
     assert tree_bytes(installed) == before
@@ -1773,8 +1790,13 @@ def test_runner_install_normalizes_private_source_without_changing_content(
     assert stat.S_IMODE((installed / "runner.sh").stat().st_mode) == 0o750
     assert stat.S_IMODE((installed / "package.json").stat().st_mode) == 0o640
     assert os.readlink(installed / "frontend-link") == "package.json"
+    assert os.readlink(installed / "pnpm-link") == "dependency.ok"
+    assert os.readlink(installed / "playwright-link") == "dependency.ok"
     for parent in (root / "var/lib/sugarkube", installed.parent):
-        assert stat.S_IMODE(parent.stat().st_mode) == 0o750
+        assert stat.S_IMODE(parent.stat().st_mode) == 0o710
+        assert parent.stat().st_gid == os.getgid()
+    assert stat.S_IMODE(installed.stat().st_mode) == 0o750
+    assert installed.stat().st_gid == os.getgid()
     for path in [installed, *installed.rglob("*")]:
         if not path.is_symlink():
             assert not stat.S_IMODE(path.stat().st_mode) & 0o022
@@ -1802,7 +1824,7 @@ def test_child_access_validation_rejects_parent_and_file_modes(
     ):
         original = stat.S_IMODE(path.stat().st_mode)
         path.chmod(mode)
-        with pytest.raises(ValueError, match="cannot access"):
+        with pytest.raises(ValueError, match="access metadata|cannot access"):
             installer.validate_runner_access(value, runner, root)
         path.chmod(original)
 
@@ -1877,6 +1899,38 @@ def test_service_identity_rejects_account_with_different_primary_group(
         )
 
 
+def test_service_identity_rejects_unavailable_live_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import pwd
+
+    monkeypatch.setattr(pwd, "getpwnam", lambda _name: (_ for _ in ()).throw(KeyError()))
+
+    with pytest.raises(ValueError, match="identity is unavailable"):
+        installer.service_identity(
+            {"serviceAccount": "absent", "serviceGroup": "absent"}, Path("/")
+        )
+
+
+@pytest.mark.parametrize("fault", ["dangling", "escaping"])
+def test_runner_access_rejects_unsafe_symlink_without_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    root, runner, _revision, _manifest_sha = access_repair_fixture(tmp_path, monkeypatch)
+    link = runner / "dependency-link"
+    link.symlink_to("missing" if fault == "dangling" else tmp_path / "outside")
+    before = tree_bytes(root)
+
+    with pytest.raises(ValueError, match="missing or escapes"):
+        installer.runner_access_plan(
+            json.loads((root / "etc/sugarkube/dspace-chat-synthetic.json").read_text()),
+            runner,
+            root,
+        )
+
+    assert tree_bytes(root) == before
+
+
 def access_repair_fixture(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[Path, Path, str, str]:
@@ -1900,13 +1954,30 @@ def test_access_repair_report_only_and_explicit_apply_are_bounded(
 ) -> None:
     root, runner, revision, manifest_sha = access_repair_fixture(tmp_path, monkeypatch)
     before = tree_bytes(root)
+    metadata_before = tree_metadata(root)
     assert installer.repair_runner_access(root, revision, "6" * 64, manifest_sha, False) == 0
     assert tree_bytes(root) == before
-    assert "mutation=none" in capsys.readouterr().out
+    assert tree_metadata(root) == metadata_before
+    report = capsys.readouterr().out
+    assert report.splitlines() == [
+        f"runnerRevision={revision}",
+        f"runnerManifestSha256={manifest_sha}",
+        "runnerAccess=repair-required mutation=none authorization=required",
+    ]
+    assert not any(word in report for word in ("credential", "result", "journal", "payload"))
 
     assert installer.repair_runner_access(root, revision, "6" * 64, manifest_sha, True) == 0
     assert "metadata-only" in capsys.readouterr().out
     assert tree_bytes(root) == before
+    metadata_after = tree_metadata(root)
+    changed = {path for path in metadata_before if metadata_before[path] != metadata_after[path]}
+    approved = {
+        "var/lib/sugarkube",
+        "var/lib/sugarkube/dspace-chat-runners",
+    }
+    approved.update(str(path.relative_to(root)) for path in [runner, *runner.rglob("*")])
+    assert changed and changed <= approved
+    assert not any("dspace-chat-installations" in path for path in changed)
     assert stat.S_IMODE(runner.stat().st_mode) == 0o750
     assert installer.repair_runner_access(root, revision, "6" * 64, manifest_sha, True) == 0
     assert "already-correct mutation=none" in capsys.readouterr().out

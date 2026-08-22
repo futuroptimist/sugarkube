@@ -312,45 +312,76 @@ def runner_access_paths(root: Path, runner_parent: Path) -> list[Path]:
 
 def normalize_runner_access(config: dict, runner: Path, root: Path) -> None:
     """Make an immutable root-owned runner usable by the configured child group."""
+    plan = runner_access_plan(config, runner, root)
+    for path, uid, gid, mode, follow_symlinks in plan:
+        os.chown(path, uid, gid, follow_symlinks=follow_symlinks)
+        if mode is not None:
+            path.chmod(mode)
+
+
+def runner_access_plan(
+    config: dict, runner: Path, root: Path
+) -> list[tuple[Path, int, int, int | None, bool]]:
+    """Validate the complete runner tree and return its metadata-only change plan."""
     _account_uid, group_gid = service_identity(config, root)
     owner_uid = 0 if root.resolve() == Path("/") else os.getuid()
+    plan: list[tuple[Path, int, int, int | None, bool]] = []
     for parent in runner_access_paths(root, runner.parent):
         if parent.is_symlink() or not parent.is_dir():
             raise ValueError("runner parent is missing or invalid")
-        os.chown(parent, owner_uid, group_gid)
-        parent.chmod(0o750)
+        plan.append((parent, owner_uid, group_gid, 0o710, True))
+    if runner.is_symlink() or not runner.is_dir():
+        raise ValueError("installed runner revision is missing or invalid")
+    runner_real = runner.resolve(strict=True)
     for path in [runner, *runner.rglob("*")]:
         info = path.lstat()
         if stat.S_ISLNK(info.st_mode):
-            os.chown(path, owner_uid, group_gid, follow_symlinks=False)
+            try:
+                target = path.resolve(strict=True)
+                target.relative_to(runner_real)
+            except (FileNotFoundError, RuntimeError, ValueError):
+                raise ValueError(
+                    "runner symlink target is missing or escapes runner tree"
+                ) from None
+            target_info = target.stat()
+            if not (stat.S_ISDIR(target_info.st_mode) or stat.S_ISREG(target_info.st_mode)):
+                raise ValueError("runner symlink target has an unsupported file type")
+            plan.append((path, owner_uid, group_gid, None, False))
         elif stat.S_ISDIR(info.st_mode):
-            os.chown(path, owner_uid, group_gid)
-            path.chmod(0o750)
+            plan.append((path, owner_uid, group_gid, 0o750, True))
         elif stat.S_ISREG(info.st_mode):
             executable = bool(stat.S_IMODE(info.st_mode) & 0o111)
-            os.chown(path, owner_uid, group_gid)
-            path.chmod(0o750 if executable else 0o640)
+            plan.append((path, owner_uid, group_gid, 0o750 if executable else 0o640, True))
         else:
             raise ValueError("runner contains an unsupported file type")
+    return plan
 
 
 def validate_runner_access(config: dict, runner: Path, root: Path) -> None:
     """Model access as the explicit account plus explicit service group."""
-    account_uid, group_gid = service_identity(config, root)
-    owner_uid = 0 if root.resolve() == Path("/") else os.getuid()
-    required = [(path, True) for path in runner_access_paths(root, runner.parent)]
-    required.extend((path, path.is_dir()) for path in [runner, *runner.rglob("*")])
-    for path, directory in required:
+    account_uid, _group_gid = service_identity(config, root)
+    plan = runner_access_plan(config, runner, root)
+    desired = {path: mode for path, _uid, _gid, mode, _follow in plan}
+    for path, owner_uid, expected_gid, expected_mode, _follow in plan:
         info = path.lstat()
         if stat.S_ISLNK(info.st_mode):
+            if info.st_uid != owner_uid or info.st_gid != expected_gid:
+                raise ValueError("installed runner access metadata is invalid")
+            target = path.resolve(strict=True)
+            target_mode = desired[target]
+            needed = 0o5 if target.is_dir() or target_mode & 0o111 else 0o4
+            target_info = target.stat()
+            effective = (
+                (target_mode >> 6) if account_uid == target_info.st_uid else (target_mode >> 3)
+            )
+            if effective & needed != needed:
+                raise ValueError("configured child cannot access runner symlink target")
             continue
-        if not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
-            raise ValueError("runner contains an unsupported file type")
         mode = stat.S_IMODE(info.st_mode)
-        if info.st_uid != owner_uid or info.st_gid != group_gid or mode & 0o022:
+        if info.st_uid != owner_uid or info.st_gid != expected_gid or mode != expected_mode:
             raise ValueError("installed runner access metadata is invalid")
         effective = (mode >> 6) if account_uid == info.st_uid else (mode >> 3)
-        needed = 0o5 if directory or mode & 0o111 else 0o4
+        needed = 0o1 if expected_mode == 0o710 else (0o5 if path.is_dir() or mode & 0o111 else 0o4)
         if effective & needed != needed:
             raise ValueError("configured child cannot access installed runner")
 
@@ -426,11 +457,14 @@ def repair_runner_access(
     if manifest.is_symlink() or not manifest.is_file() or sha(manifest) != manifest_sha256:
         raise ValueError("installed runner manifest does not match authorization")
     validate_snapshot(retained, runner, root)
-    try:
-        validate_runner_access(config, runner, root)
-        access = "already-correct"
-    except ValueError:
-        access = "repair-required"
+    plan = runner_access_plan(config, runner, root)
+    access = "already-correct"
+    for path, uid, gid, mode, _follow in plan:
+        info = path.lstat()
+        if info.st_uid != uid or info.st_gid != gid:
+            access = "repair-required"
+        if mode is not None and stat.S_IMODE(info.st_mode) != mode:
+            access = "repair-required"
     if not apply:
         print(f"runnerRevision={revision}")
         print(f"runnerManifestSha256={manifest_sha256}")
@@ -439,7 +473,10 @@ def repair_runner_access(
     if access == "already-correct":
         print("runnerAccess=already-correct mutation=none")
         return 0
-    normalize_runner_access(config, runner, root)
+    for path, uid, gid, mode, follow_symlinks in plan:
+        os.chown(path, uid, gid, follow_symlinks=follow_symlinks)
+        if mode is not None:
+            path.chmod(mode)
     validate_snapshot(retained, runner, root)
     validate_runner_access(config, runner, root)
     if sha(manifest) != manifest_sha256:

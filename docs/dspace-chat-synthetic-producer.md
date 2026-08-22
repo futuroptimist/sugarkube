@@ -92,7 +92,11 @@ runner root, normalizes the copy to `root:<serviceGroup>` with group traversal/r
 execute access only where the source executable bit requires it), validates both content and the
 configured child's access, and atomically exposes the exact immutable revision. Source checkout
 ownership and a restrictive source `umask` therefore cannot make the installed runner unusable.
-Neither group nor world receives write access. An
+The application-owned ancestors `/var/lib/sugarkube` and the configured runner root are
+`root:<serviceGroup>` mode `0710` (group traversal without directory listing); the exact runner
+revision and its directories are mode `0750`, executable files are `0750`, and data files are
+`0640`. The separate installations and retained-assets subtree remains private. Neither group nor
+world receives write access. An
 identical pre-existing revision is validated and reused; older runner revisions are retained. Only
 then does apply transactionally replace the validated asset set and switch `current`.
 After apply, the operator must run `sudo systemctl daemon-reload` as a separate mandatory
