@@ -1984,6 +1984,50 @@ def test_service_identity_rejects_unavailable_live_identity(
         )
 
 
+def test_service_identity_accepts_matching_live_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import grp
+    import pwd
+
+    monkeypatch.setattr(pwd, "getpwnam", lambda _name: SimpleNamespace(pw_uid=1234, pw_gid=2345))
+    monkeypatch.setattr(grp, "getgrnam", lambda _name: SimpleNamespace(gr_gid=2345))
+
+    assert installer.service_identity(
+        {"serviceAccount": "synthetic", "serviceGroup": "synthetic"}, Path("/")
+    ) == (1234, 2345)
+
+
+@pytest.mark.parametrize("fault", ["invalid-parent", "missing", "config-bytes"])
+def test_live_asset_validation_rejects_invalid_active_tree(tmp_path: Path, fault: str) -> None:
+    root = tmp_path / "root"
+    retained = tmp_path / "retained"
+    relative = Path("etc/sugarkube/dspace-chat-synthetic.json")
+    retained_config = retained / relative
+    retained_config.parent.mkdir(parents=True)
+    retained_config.write_bytes(b"retained config\n")
+    live_config = root / relative
+    live_config.parent.mkdir(parents=True)
+    live_config.write_bytes(retained_config.read_bytes())
+    manifest = {str(relative): installer.sha(retained_config)}
+
+    if fault == "invalid-parent":
+        live_config.unlink()
+        (root / "etc/sugarkube").rmdir()
+        (root / "etc/sugarkube").write_text("not a directory\n")
+        match = "invalid directory"
+    elif fault == "missing":
+        live_config.unlink()
+        match = "missing or invalid"
+    else:
+        live_config.write_bytes(b"different config bytes\n")
+        manifest[str(relative)] = installer.sha(live_config)
+        match = "configuration does not match"
+
+    with pytest.raises(ValueError, match=match):
+        installer.validate_live_assets(root, retained, manifest)
+
+
 @pytest.mark.parametrize("fault", ["dangling", "escaping"])
 def test_runner_access_rejects_unsafe_symlink_without_mutation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
