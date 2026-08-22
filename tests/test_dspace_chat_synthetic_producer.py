@@ -162,6 +162,90 @@ def test_explicit_system_browser_contract_validates_target_root(
     assert provenance["executableSha256"] == contract["executableSha256"]
 
 
+def test_system_browser_contract_resolves_relative_root_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    contract, root = system_browser_fixture(tmp_path, monkeypatch)
+    monkeypatch.chdir(tmp_path)
+
+    relative = runtime.validate_browser_contract(
+        {"browserContract": contract}, tmp_path / "runner", Path(root.name)
+    )
+    absolute = runtime.validate_browser_contract(
+        {"browserContract": contract}, tmp_path / "runner", root.resolve()
+    )
+
+    assert relative == absolute
+
+
+@pytest.mark.parametrize(
+    ("prefix", "fault"),
+    [
+        ("launcher", "missing-path"),
+        ("launcher", "wrong-path"),
+        ("executable", "missing-path"),
+        ("executable", "wrong-path"),
+        ("executable", "directory"),
+        ("executable", "symlink"),
+        ("executable", "non-executable"),
+    ],
+)
+def test_system_browser_contract_rejects_exact_path_and_executable_faults(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    prefix: str,
+    fault: str,
+) -> None:
+    contract, root = system_browser_fixture(tmp_path, monkeypatch)
+    path = root / contract[f"{prefix}Path"].removeprefix("/")
+    if fault == "missing-path":
+        contract[f"{prefix}Path"] = f"/missing/{prefix}"
+    elif fault == "wrong-path":
+        wrong = root / f"wrong/{prefix}"
+        wrong.parent.mkdir()
+        wrong.write_bytes(path.read_bytes())
+        wrong.chmod(0o755)
+        contract[f"{prefix}Path"] = f"/wrong/{prefix}"
+    elif fault == "directory":
+        path.unlink()
+        path.mkdir()
+    elif fault == "symlink":
+        path.unlink()
+        path.symlink_to(root / "usr/bin/chromium")
+    else:
+        path.chmod(0o644)
+        contract["mode"] = "0644"  # isolate the executable-bit requirement
+
+    with pytest.raises(runtime.Invalid, match="system browser provenance"):
+        runtime.validate_browser_contract({"browserContract": contract}, tmp_path / "runner", root)
+
+
+def test_browser_contracts_never_fallback_to_the_other_direction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    contract, root = system_browser_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        runtime,
+        "discover_playwright_browser",
+        lambda _runner: pytest.fail("system contract fell back to runner-local discovery"),
+    )
+    runtime.validate_browser_contract(
+        {"browserContract": contract}, tmp_path / "missing-runner", root
+    )
+
+    monkeypatch.setattr(
+        runtime,
+        "discover_playwright_browser",
+        lambda _runner: (_ for _ in ()).throw(runtime.Invalid("runner bundle missing")),
+    )
+    with pytest.raises(runtime.Invalid, match="runner bundle missing"):
+        runtime.validate_browser_contract(
+            {"browserContract": {"name": runtime.RUNNER_LOCAL}},
+            tmp_path / "missing-runner",
+            root,
+        )
+
+
 @pytest.mark.parametrize(
     ("fault", "field"),
     [
@@ -1230,6 +1314,20 @@ def test_status_reports_validated_provenance_without_mutation_or_systemctl(
     assert "pnpmVersion=9.0.0" in output
     assert "playwrightBrowserExecutable=none" in output
     assert "runnerValidation=passed" in output
+    provenance = json.loads((runner / "sugarkube-runner-manifest.json").read_text())[
+        "browserProvenance"
+    ]
+    for key in (
+        "architecture",
+        "executablePath",
+        "executableSha256",
+        "launcherPath",
+        "launcherSha256",
+    ):
+        assert str(provenance[key]) in output
+    assert "browserContract=system-chromium-v1" in output
+    assert "credential" not in output.lower()
+    assert "rawResult" not in output
     assert "activation=not-queried" in output
     assert tree_bytes(root) == before
 
@@ -1332,6 +1430,37 @@ def test_failed_installer_preflight_leaves_installation_unchanged(tmp_path: Path
 def run_installer_main(monkeypatch: pytest.MonkeyPatch, *args: str) -> int:
     monkeypatch.setattr(sys, "argv", ["install_dspace_chat_synthetic.py", *args])
     return installer.main()
+
+
+def test_system_browser_preflight_precedes_all_installer_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class RejectingRuntime:
+        SYSTEM_CHROMIUM = runtime.SYSTEM_CHROMIUM
+
+        @staticmethod
+        def load_config(_path: Path) -> dict:
+            return {"browserContract": {"name": runtime.SYSTEM_CHROMIUM}}
+
+        @staticmethod
+        def validate_browser_contract(*_args) -> dict:
+            raise runtime.Invalid("browser preflight")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(installer, "runtime_module", lambda: RejectingRuntime())
+    monkeypatch.setattr(installer, "render", lambda _path: pytest.fail("render mutated output"))
+
+    with pytest.raises(runtime.Invalid, match="browser preflight"):
+        run_installer_main(
+            monkeypatch,
+            "apply",
+            "--root",
+            "rehearsal-root",
+            "--runner-snapshot",
+            "snapshot",
+        )
+
+    assert not (tmp_path / "rehearsal-root").exists()
 
 
 def runner_snapshot_fixture(tmp_path: Path) -> tuple[Path, str]:

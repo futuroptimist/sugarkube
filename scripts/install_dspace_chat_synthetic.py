@@ -114,6 +114,12 @@ def materialize(
     elif browser_contract["name"] == runtime.SYSTEM_CHROMIUM:
         if browser_bundle is not None:
             raise ValueError("system browser contract forbids a browser bundle")
+        # Validate host-owned inputs before creating the staging directory or
+        # running dependency installation. Runner-local discovery intentionally
+        # remains below, after its bundle has been copied into the snapshot.
+        browser_provenance = runtime.validate_browser_contract(
+            {"browserContract": browser_contract}, output, browser_source_root
+        )
     else:
         raise ValueError("unsupported browser contract")
     if command(pnpm, "--version") != pnpm_version:
@@ -148,9 +154,10 @@ def materialize(
         if browser_bundle is not None:
             shutil.copytree(browser_bundle, staging / "playwright-browser")
         validate_runner(staging, revision)
-        browser_provenance = runtime.validate_browser_contract(
-            {"browserContract": browser_contract}, staging, browser_source_root
-        )
+        if browser_contract["name"] == runtime.RUNNER_LOCAL:
+            browser_provenance = runtime.validate_browser_contract(
+                {"browserContract": browser_contract}, staging, browser_source_root
+            )
         files = {relative: sha(staging / relative) for relative in CRITICAL}
         browser_relative = None
         if browser_contract["name"] == runtime.RUNNER_LOCAL:
@@ -509,6 +516,7 @@ def main() -> int:
     parser.add_argument("--browser-source-root", type=Path)
     parser.add_argument("--runner-snapshot", type=Path)
     args = parser.parse_args()
+    args.root = args.root.resolve()
     if args.operation == "status":
         return status(args.root)
     if args.operation == "materialize":
@@ -542,6 +550,12 @@ def main() -> int:
             return 0
         activate(retained, args.root, args.revision)
         return 0
+    # The system contract is independent of the copied runner. Check it before
+    # rendering assets (and therefore before any installation-side output).
+    runtime = runtime_module()
+    configured = runtime.load_config(ROOT / "config/dspace-chat-synthetic.json")
+    if configured["browserContract"]["name"] == runtime.SYSTEM_CHROMIUM:
+        runtime.validate_browser_contract(configured, Path("."), args.root)
     with tempfile.TemporaryDirectory() as temporary:
         staged = Path(temporary)
         render(staged)

@@ -213,6 +213,13 @@ def validate_browser_contract(config: dict, runner: Path, root: Path = Path("/")
         }
     if contract["name"] != SYSTEM_CHROMIUM or platform.machine() != contract["architecture"]:
         raise Invalid("browser architecture or contract")
+    try:
+        # Browser coordinates are absolute host paths.  Resolve an alternate root
+        # once so relative rehearsal roots cannot accidentally compare against,
+        # or fall through to, the live filesystem.
+        root = root.resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise Invalid("system browser source root") from None
     validated = []
     for prefix in ("launcher", "executable"):
         configured = contract[f"{prefix}Path"]
