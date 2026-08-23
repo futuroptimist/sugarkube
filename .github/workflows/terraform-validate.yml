@@ -31,6 +31,14 @@ jobs:
           terraform_wrapper: false
       - name: Check formatting
         run: terraform fmt -check -recursive infra/terraform
+      - name: Verify dependency lock platforms
+        working-directory: infra/terraform/cloudflare/staging
+        run: |
+          terraform providers lock \
+            -platform=linux_amd64 \
+            -platform=linux_arm64 \
+            registry.terraform.io/cloudflare/cloudflare
+          git diff --exit-code -- .terraform.lock.hcl
       - name: Initialize without a backend
         working-directory: infra/terraform/cloudflare/staging
         run: terraform init -backend=false -input=false -lockfile=readonly

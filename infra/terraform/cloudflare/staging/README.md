@@ -53,6 +53,17 @@ terraform -chdir=infra/terraform/cloudflare/staging validate -no-color
 terraform -chdir=infra/terraform/cloudflare/staging test -no-color
 ```
 
+The dependency lock supports GitHub Actions on Linux AMD64 and the `sugarkube3` operator host on
+Linux ARM64. Regenerate it from the origin registry with the pinned Terraform version and both
+platforms, then review and commit the result:
+
+```bash
+terraform -chdir=infra/terraform/cloudflare/staging providers lock \
+  -platform=linux_amd64 \
+  -platform=linux_arm64 \
+  registry.terraform.io/cloudflare/cloudflare
+```
+
 Stop here during repository work. Everything below is future live work.
 
 ## Prerequisites for a separately authorized live session
