@@ -44,6 +44,17 @@ Never adapt the commands below to touch them.
 
 These credential-free checks mock the provider and disable backend initialization:
 
+The dependency lock supports GitHub Actions on Linux AMD64 and the `sugarkube3` Raspberry Pi 5
+operator host on Linux ARM64. Regenerate it from the origin registry for both platforms with
+Terraform 1.15.9:
+
+```bash
+terraform -chdir=infra/terraform/cloudflare/staging providers lock \
+  -platform=linux_amd64 \
+  -platform=linux_arm64 \
+  registry.terraform.io/cloudflare/cloudflare
+```
+
 ```bash
 unset CLOUDFLARE_API_TOKEN TF_TOKEN_app_terraform_io
 unset TF_CLOUD_ORGANIZATION TF_WORKSPACE
