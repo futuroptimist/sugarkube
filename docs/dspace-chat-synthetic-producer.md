@@ -175,12 +175,12 @@ sudo python3 scripts/install_dspace_chat_synthetic.py repair-runner-access \
 ```
 
 After separate authorization for this metadata-only repair, repeat with `--apply`. This operation
-validates the complete runner tree and access plan, then changes only mismatched ownership or modes,
-and removes any Linux file capabilities from regular files
-on the application-owned runner parents and exact runner. Already-correct entries are not written,
-so a large immutable runner remains bounded by the number of mismatches. It does not replace assets,
-switch `current`, publish metrics, touch the browser, call systemd, execute smoke, retry, or roll
-back:
+inspects every entry in the complete runner access plan with `lstat()`, then writes only mismatched
+ownership or modes on the application-owned runner parents and exact runner. Already-correct
+entries are not passed to `chown` or `chmod`, so metadata writes for a large immutable runner are
+bounded by the number of mismatches, even though inspection still covers the complete plan. It does
+not replace assets, switch `current`, publish metrics, touch the browser, call systemd, execute
+smoke, retry, or roll back:
 
 ```bash
 sudo python3 scripts/install_dspace_chat_synthetic.py repair-runner-access --apply \

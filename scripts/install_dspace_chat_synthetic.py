@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import errno
 import hashlib
 import importlib.util
 import json
@@ -339,44 +338,28 @@ def normalize_runner_access(config: dict, runner: Path, root: Path) -> None:
 
 
 def apply_runner_access_plan(
-    plan: list[tuple[Path, int, int, int | None, bool, bool]],
+    plan: list[tuple[Path, int, int, int | None, bool]],
 ) -> None:
-    """Apply only metadata fields or capabilities that differ from the plan."""
-    for path, uid, gid, mode, follow_symlinks, has_capability in plan:
+    """Apply only metadata fields that differ from the fully validated plan."""
+    for path, uid, gid, mode, follow_symlinks in plan:
         info = path.lstat()
-        if has_capability:
-            os.removexattr(path, "security.capability", follow_symlinks=False)
         if info.st_uid != uid or info.st_gid != gid:
             os.chown(path, uid, gid, follow_symlinks=follow_symlinks)
         if mode is not None and stat.S_IMODE(info.st_mode) != mode:
             path.chmod(mode)
 
 
-def has_file_capability(path: Path) -> bool:
-    """Return whether a regular file carries Linux executable capabilities."""
-    try:
-        os.getxattr(path, "security.capability", follow_symlinks=False)
-    except OSError as error:
-        missing_xattr = {errno.ENODATA}
-        if hasattr(errno, "ENOATTR"):
-            missing_xattr.add(errno.ENOATTR)
-        if error.errno in missing_xattr:
-            return False
-        raise
-    return True
-
-
 def runner_access_plan(
     config: dict, runner: Path, root: Path
-) -> list[tuple[Path, int, int, int | None, bool, bool]]:
+) -> list[tuple[Path, int, int, int | None, bool]]:
     """Validate the complete runner tree and return its metadata-only change plan."""
     _account_uid, group_gid = service_identity(config, root)
     owner_uid = 0 if root.resolve() == Path("/") else os.getuid()
-    plan: list[tuple[Path, int, int, int | None, bool, bool]] = []
+    plan: list[tuple[Path, int, int, int | None, bool]] = []
     for parent in runner_access_paths(root, runner.parent):
         if parent.is_symlink() or not parent.is_dir():
             raise ValueError("runner parent is missing or invalid")
-        plan.append((parent, owner_uid, group_gid, 0o710, True, False))
+        plan.append((parent, owner_uid, group_gid, 0o710, True))
     if runner.is_symlink() or not runner.is_dir():
         raise ValueError("installed runner revision is missing or invalid")
     runner_real = runner.resolve(strict=True)
@@ -393,21 +376,12 @@ def runner_access_plan(
             target_info = target.stat()
             if not (stat.S_ISDIR(target_info.st_mode) or stat.S_ISREG(target_info.st_mode)):
                 raise ValueError("runner symlink target has an unsupported file type")
-            plan.append((path, owner_uid, group_gid, None, False, False))
+            plan.append((path, owner_uid, group_gid, None, False))
         elif stat.S_ISDIR(info.st_mode):
-            plan.append((path, owner_uid, group_gid, 0o750, True, False))
+            plan.append((path, owner_uid, group_gid, 0o750, True))
         elif stat.S_ISREG(info.st_mode):
             executable = bool(stat.S_IMODE(info.st_mode) & 0o111)
-            plan.append(
-                (
-                    path,
-                    owner_uid,
-                    group_gid,
-                    0o750 if executable else 0o640,
-                    True,
-                    has_file_capability(path),
-                )
-            )
+            plan.append((path, owner_uid, group_gid, 0o750 if executable else 0o640, True))
         else:
             raise ValueError("runner contains an unsupported file type")
     return plan
@@ -417,8 +391,8 @@ def validate_runner_access(config: dict, runner: Path, root: Path) -> None:
     """Model access as the explicit account plus explicit service group."""
     account_uid, _group_gid = service_identity(config, root)
     plan = runner_access_plan(config, runner, root)
-    desired = {path: mode for path, _uid, _gid, mode, _follow, _cap in plan}
-    for path, owner_uid, expected_gid, expected_mode, _follow, has_capability in plan:
+    desired = {path: mode for path, _uid, _gid, mode, _follow in plan}
+    for path, owner_uid, expected_gid, expected_mode, _follow in plan:
         info = path.lstat()
         if stat.S_ISLNK(info.st_mode):
             if info.st_uid != owner_uid or info.st_gid != expected_gid:
@@ -433,8 +407,6 @@ def validate_runner_access(config: dict, runner: Path, root: Path) -> None:
             if effective & needed != needed:
                 raise ValueError("configured child cannot access runner symlink target")
             continue
-        if has_capability:
-            raise ValueError("installed runner file capabilities are invalid")
         mode = stat.S_IMODE(info.st_mode)
         if info.st_uid != owner_uid or info.st_gid != expected_gid or mode != expected_mode:
             raise ValueError("installed runner access metadata is invalid")
@@ -518,9 +490,9 @@ def repair_runner_access(
     validate_snapshot(retained, runner, root)
     plan = runner_access_plan(config, runner, root)
     access = "already-correct"
-    for path, uid, gid, mode, _follow, has_capability in plan:
+    for path, uid, gid, mode, _follow in plan:
         info = path.lstat()
-        if info.st_uid != uid or info.st_gid != gid or has_capability:
+        if info.st_uid != uid or info.st_gid != gid:
             access = "repair-required"
         if mode is not None and stat.S_IMODE(info.st_mode) != mode:
             access = "repair-required"
