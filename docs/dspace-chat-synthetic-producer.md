@@ -53,7 +53,8 @@ already contain the exact lockfile's packages. Construction fails for a
 missing object, wrong HEAD, dirty tracked/index state, alternates, missing root store, broken
 frontend link, unusable Playwright shim/module resolution, or missing critical file. Its manifest
 records hashes for the runner, spec, workspace manifests, lockfile, selected browser contract, and
-safe browser provenance.
+safe browser provenance. Runner validation disables optional Git locks, including index refreshes,
+so read-only inspection cannot undo normalized access metadata during a metadata-only repair.
 
 ## 2. Validate and dry-run installation
 

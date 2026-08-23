@@ -9,8 +9,8 @@ import grp
 import hashlib
 import json
 import os
-import pwd
 import platform
+import pwd
 import re
 import shutil
 import stat
@@ -317,9 +317,11 @@ def validate_runner(config: dict) -> Path:
     git_metadata = runner / ".git"
     if git_metadata.is_symlink() or not git_metadata.is_dir():
         raise Invalid("complete Git metadata")
+    git_environment = {**os.environ, "GIT_OPTIONAL_LOCKS": "0"}
     if (
         subprocess.run(
             ["git", "-C", str(runner), "rev-parse", "HEAD"],
+            env=git_environment,
             capture_output=True,
             text=True,
             check=True,
@@ -329,6 +331,7 @@ def validate_runner(config: dict) -> Path:
         raise Invalid("runner HEAD")
     if subprocess.run(
         ["git", "-C", str(runner), "status", "--porcelain", "--untracked-files=no"],
+        env=git_environment,
         capture_output=True,
         text=True,
         check=True,
@@ -339,6 +342,7 @@ def validate_runner(config: dict) -> Path:
     if (
         subprocess.run(
             ["git", "-C", str(runner), "rev-parse", "--is-shallow-repository"],
+            env=git_environment,
             capture_output=True,
             text=True,
             check=True,
@@ -348,6 +352,7 @@ def validate_runner(config: dict) -> Path:
         raise Invalid("shallow repository")
     subprocess.run(
         ["git", "-C", str(runner), "fsck", "--full"],
+        env=git_environment,
         capture_output=True,
         text=True,
         check=True,
