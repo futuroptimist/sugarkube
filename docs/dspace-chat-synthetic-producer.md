@@ -187,7 +187,9 @@ sudo python3 scripts/install_dspace_chat_synthetic.py status
 ```
 
 Stop if any exact coordinate, content, dependency, Git, browser, retained asset, or child-access
-validation fails. Do not reapply the installation or alter the timer. Only after child access is
+validation fails. Runner validation sets `GIT_OPTIONAL_LOCKS=0` while preserving the inherited
+environment, so its Git inspection cannot refresh `.git/index` and undo normalized metadata.
+Do not reapply the installation or alter the timer. Only after child access is
 revalidated may an operator seek separate authorization for `systemctl daemon-reload`, then one
 controlled execution, and then bounded scheduled-health observation. Each is a distinct decision;
 there is no automatic retry or rollback.

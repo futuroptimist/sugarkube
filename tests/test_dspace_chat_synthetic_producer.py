@@ -463,6 +463,57 @@ def test_runner_validation_accepts_complete_independent_git_repository(
     assert runtime.validate_runner(value) == runner
 
 
+def test_runner_validation_disables_optional_git_index_refresh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, runner = runtime_runner(tmp_path)
+    index = runner / ".git/index"
+    tracked = runner / "package.json"
+    real_run = subprocess.run
+    git_environments = []
+
+    def fake_node(argv, *args, **kwargs):
+        if argv[0] == "/usr/bin/node":
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout=str(runner / "playwright-browser/browser-executable").encode(),
+            )
+        if argv[:2] == ["git", "-C"]:
+            git_environments.append(kwargs.get("env"))
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(runtime.subprocess, "run", fake_node)
+    monkeypatch.setenv("SUGARKUBE_TEST_INHERITED", "preserved")
+
+    index.chmod(0o640)
+    tracked.touch()
+    previous_umask = os.umask(0o077)
+    try:
+        git("status", "--porcelain", "--untracked-files=no", cwd=runner)
+    finally:
+        os.umask(previous_umask)
+    assert stat.S_IMODE(index.stat().st_mode) == 0o600
+
+    index.chmod(0o640)
+    tracked.touch()
+    previous_umask = os.umask(0o077)
+    try:
+        assert runtime.validate_runner(value) == runner
+    finally:
+        os.umask(previous_umask)
+    assert stat.S_IMODE(index.stat().st_mode) == 0o640
+    assert git_environments
+    assert all(environment["GIT_OPTIONAL_LOCKS"] == "0" for environment in git_environments)
+    assert all(
+        environment["SUGARKUBE_TEST_INHERITED"] == "preserved" for environment in git_environments
+    )
+
+    tracked.write_text("dirty\n")
+    with pytest.raises(runtime.Invalid, match="runner tracked state"):
+        runtime.validate_runner(value)
+
+
 def test_runner_validation_rejects_missing_git_metadata(tmp_path: Path) -> None:
     value, runner = runtime_runner(tmp_path)
     (runner / ".git").rename(runner / "incomplete-git")
@@ -2097,6 +2148,76 @@ def test_access_repair_report_only_and_explicit_apply_are_bounded(
     assert stat.S_IMODE(runner.stat().st_mode) == 0o750
     assert installer.repair_runner_access(root, revision, "6" * 64, manifest_sha, True) == 0
     assert "already-correct mutation=none" in capsys.readouterr().out
+
+
+def test_access_repair_keeps_real_git_index_metadata_stable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    value, fixture_runner = runtime_runner(tmp_path / "fixture")
+    revision = value["runnerRevision"]
+    value["runnerRoot"] = "/var/lib/sugarkube/dspace-chat-runners"
+    runner = rooted_runner = root / value["runnerRoot"].removeprefix("/") / revision
+    rooted_runner.parent.mkdir(parents=True)
+    fixture_runner.rename(rooted_runner)
+
+    asset_revision = "6" * 64
+    retained = root / "var/lib/sugarkube/dspace-chat-installations" / asset_revision
+    installer.render(retained)
+    config_relative = Path("etc/sugarkube/dspace-chat-synthetic.json")
+    retained_config = retained / config_relative
+    retained_config.write_text(json.dumps(value))
+    retained_manifest_path = retained / "manifest.json"
+    retained_manifest = json.loads(retained_manifest_path.read_text())
+    retained_manifest[str(config_relative)] = installer.sha(retained_config)
+    retained_manifest_path.write_text(
+        json.dumps(retained_manifest, sort_keys=True, indent=2) + "\n"
+    )
+    monkeypatch.setattr(
+        installer,
+        "validate",
+        lambda tree: json.loads((tree / "manifest.json").read_text()),
+    )
+    monkeypatch.setattr(runtime, "load_config", lambda path: json.loads(path.read_text()))
+    installer.activate(retained, root, asset_revision)
+
+    real_run = subprocess.run
+
+    def fake_node(argv, *args, **kwargs):
+        if argv[0] == "/usr/bin/node":
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout=str(runner / "playwright-browser/browser-executable").encode(),
+            )
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(runtime.subprocess, "run", fake_node)
+    installer.normalize_runner_access(value, runner, root)
+    index = runner / ".git/index"
+    index.chmod(0o600)
+    (runner / "package.json").touch()
+    before = tree_bytes(root)
+    manifest_sha = installer.sha(runner / "sugarkube-runner-manifest.json")
+    current = root / "var/lib/sugarkube/dspace-chat-installations/current"
+    current_target = os.readlink(current)
+
+    previous_umask = os.umask(0o077)
+    try:
+        assert (
+            installer.repair_runner_access(root, revision, asset_revision, manifest_sha, True) == 0
+        )
+    finally:
+        os.umask(previous_umask)
+
+    assert "runnerAccess=repaired mutation=metadata-only" in capsys.readouterr().out
+    assert tree_bytes(root) == before
+    assert os.readlink(current) == current_target
+    assert stat.S_IMODE(index.stat().st_mode) == 0o640
+    assert installer.repair_runner_access(root, revision, asset_revision, manifest_sha, False) == 0
+    assert "runnerAccess=already-correct mutation=none" in capsys.readouterr().out
+    assert tree_bytes(root) == before
 
 
 @pytest.mark.parametrize("apply", [False, True])

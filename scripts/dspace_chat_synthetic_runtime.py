@@ -9,8 +9,8 @@ import grp
 import hashlib
 import json
 import os
-import pwd
 import platform
+import pwd
 import re
 import shutil
 import stat
@@ -278,6 +278,8 @@ def validate_browser_contract(config: dict, runner: Path, root: Path = Path("/")
 
 def validate_runner(config: dict) -> Path:
     runner = Path(config["runnerRoot"]) / config["runnerRevision"]
+    git_environment = os.environ.copy()
+    git_environment["GIT_OPTIONAL_LOCKS"] = "0"
     manifest = json.loads((runner / "sugarkube-runner-manifest.json").read_text(encoding="utf-8"))
     files = manifest.get("files")
     browser_relative = manifest.get("playwrightBrowserExecutable")
@@ -323,6 +325,7 @@ def validate_runner(config: dict) -> Path:
             capture_output=True,
             text=True,
             check=True,
+            env=git_environment,
         ).stdout.strip()
         != config["runnerRevision"]
     ):
@@ -332,6 +335,7 @@ def validate_runner(config: dict) -> Path:
         capture_output=True,
         text=True,
         check=True,
+        env=git_environment,
     ).stdout:
         raise Invalid("runner tracked state")
     if (runner / ".git/objects/info/alternates").exists():
@@ -342,6 +346,7 @@ def validate_runner(config: dict) -> Path:
             capture_output=True,
             text=True,
             check=True,
+            env=git_environment,
         ).stdout.strip()
         != "false"
     ):
@@ -351,6 +356,7 @@ def validate_runner(config: dict) -> Path:
         capture_output=True,
         text=True,
         check=True,
+        env=git_environment,
     )
     for relative, expected in files.items():
         target = runner / relative
