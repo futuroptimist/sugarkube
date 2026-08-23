@@ -34,11 +34,11 @@ jobs:
       - name: Check provider lock platforms
         working-directory: infra/terraform/cloudflare/staging
         run: |
-          git ls-files --error-unmatch .terraform.lock.hcl
           terraform providers lock \
             -platform=linux_amd64 \
             -platform=linux_arm64 \
             registry.terraform.io/cloudflare/cloudflare
+          git ls-files --error-unmatch -- .terraform.lock.hcl >/dev/null
           git diff --exit-code -- .terraform.lock.hcl
       - name: Initialize without a backend
         working-directory: infra/terraform/cloudflare/staging
