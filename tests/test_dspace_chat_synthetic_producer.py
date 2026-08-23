@@ -2167,7 +2167,7 @@ def test_apply_runner_access_plan_writes_only_mismatched_fields(
         installer.os, "chown", lambda *args, **kwargs: chowns.append((args, kwargs))
     )
 
-    installer.apply_runner_access_plan([(path, *desired, mode, follow)])
+    installer.apply_runner_access_plan([(path, *desired, mode, follow, False)])
 
     assert len(chowns) == expected_chowns
     assert len(path.chmods) == expected_chmods
@@ -2186,13 +2186,50 @@ def test_apply_runner_access_plan_large_plan_scales_with_mismatches(
     monkeypatch.setattr(
         installer.os, "chown", lambda *args, **kwargs: chowns.append((args, kwargs))
     )
-    plan = [(path, 10, 20, 0o640, True) for path in [*exact, mismatch]]
+    plan = [(path, 10, 20, 0o640, True, False) for path in [*exact, mismatch]]
 
     installer.apply_runner_access_plan(plan)
 
     assert len(chowns) == 1
     assert sum(len(path.chmods) for path in [*exact, mismatch]) == 1
     assert all(not path.chmods for path in exact)
+
+
+def test_apply_runner_access_plan_strips_capability_when_metadata_matches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = PlannedPath(10, 20, 0o100640)
+    removals = []
+    monkeypatch.setattr(
+        installer.os,
+        "chown",
+        lambda *_args, **_kwargs: pytest.fail("matching ownership was rewritten"),
+    )
+    monkeypatch.setattr(
+        installer.os,
+        "removexattr",
+        lambda *args, **kwargs: removals.append((args, kwargs)),
+    )
+
+    installer.apply_runner_access_plan([(path, 10, 20, 0o640, True, True)])
+
+    assert path.chmods == []
+    assert removals == [((path, "security.capability"), {"follow_symlinks": False})]
+
+
+def test_has_file_capability_propagates_xattr_inspection_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "runner"
+    path.touch()
+    monkeypatch.setattr(
+        installer.os,
+        "getxattr",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(PermissionError("denied")),
+    )
+
+    with pytest.raises(PermissionError, match="denied"):
+        installer.has_file_capability(path)
 
 
 def test_apply_runner_access_plan_fails_without_retry_or_rollback(
@@ -2209,7 +2246,7 @@ def test_apply_runner_access_plan_fails_without_retry_or_rollback(
     monkeypatch.setattr(installer.os, "chown", fail)
 
     with pytest.raises(PermissionError, match="denied"):
-        installer.apply_runner_access_plan([(path, 10, 20, 0o640, True)])
+        installer.apply_runner_access_plan([(path, 10, 20, 0o640, True, False)])
     assert calls == 1
     assert path.chmods == []
 
@@ -2314,12 +2351,13 @@ def test_access_repair_preserves_normalized_git_index_through_post_validation(
     refresh_tracked_stat(runner)
     access_plan = installer.runner_access_plan(repair_config, runner, root)
     mismatches = []
-    for path, uid, gid, mode, _follow_symlinks in access_plan:
+    for path, uid, gid, mode, _follow_symlinks, has_capability in access_plan:
         info = path.lstat()
         if (
             (info.st_uid, info.st_gid) != (uid, gid)
             or mode is not None
             and stat.S_IMODE(info.st_mode) != mode
+            or has_capability
         ):
             mismatches.append((path, uid, gid, mode, info))
     assert len(mismatches) == 1
