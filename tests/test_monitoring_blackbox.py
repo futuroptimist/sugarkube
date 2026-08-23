@@ -126,12 +126,10 @@ def test_staging_probe_matrix_is_exact():
             )
         )
     assert actual == EXPECTED
-    pending = [
-        doc for doc in docs
-        if doc["metadata"].get("annotations", {}).get("sugarkube.dev/wan-drill") == "pending"
-    ]
-    assert len(pending) == 5
-    assert {doc["metadata"]["labels"]["app"] for doc in pending} == {"gitshelves"}
+    assert all(
+        "sugarkube.dev/wan-drill" not in doc["metadata"].get("annotations", {})
+        for doc in docs
+    )
     assert "production" not in PROBES.read_text() and "environment: prod" not in PROBES.read_text()
 
 
