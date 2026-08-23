@@ -2128,13 +2128,112 @@ def access_repair_fixture(
     return root, runner, revision, installer.sha(runner / "sugarkube-runner-manifest.json")
 
 
+class PlannedPath:
+    def __init__(self, uid: int, gid: int, mode: int) -> None:
+        self.info = SimpleNamespace(st_uid=uid, st_gid=gid, st_mode=mode)
+        self.chmods: list[int] = []
+
+    def lstat(self):
+        return self.info
+
+    def chmod(self, mode: int) -> None:
+        self.chmods.append(mode)
+
+
+@pytest.mark.parametrize(
+    ("actual", "desired", "mode", "follow", "expected_chowns", "expected_chmods"),
+    [
+        ((10, 20, 0o100640), (10, 20), 0o640, True, 0, 0),
+        ((10, 20, 0o040750), (10, 20), 0o750, True, 0, 0),
+        ((10, 20, 0o100600), (10, 20), 0o640, True, 0, 1),
+        ((10, 30, 0o100640), (10, 20), 0o640, True, 1, 0),
+        ((30, 30, 0o100600), (10, 20), 0o640, True, 1, 1),
+        ((10, 20, 0o120777), (10, 20), None, False, 0, 0),
+        ((30, 20, 0o120777), (10, 20), None, False, 1, 0),
+    ],
+)
+def test_apply_runner_access_plan_writes_only_mismatched_fields(
+    monkeypatch: pytest.MonkeyPatch,
+    actual: tuple[int, int, int],
+    desired: tuple[int, int],
+    mode: int | None,
+    follow: bool,
+    expected_chowns: int,
+    expected_chmods: int,
+) -> None:
+    path = PlannedPath(*actual)
+    chowns = []
+    monkeypatch.setattr(
+        installer.os, "chown", lambda *args, **kwargs: chowns.append((args, kwargs))
+    )
+
+    installer.apply_runner_access_plan([(path, *desired, mode, follow)])
+
+    assert len(chowns) == expected_chowns
+    assert path.chmods == ([mode] if expected_chmods else [])
+    if chowns:
+        assert chowns == [((path, *desired), {"follow_symlinks": follow})]
+    if mode is None:
+        assert path.chmods == []
+
+
+def test_apply_runner_access_plan_large_plan_scales_with_mismatches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    exact = [PlannedPath(10, 20, 0o100640) for _ in range(2048)]
+    mismatch = PlannedPath(30, 30, 0o100600)
+    chowns = []
+    monkeypatch.setattr(
+        installer.os, "chown", lambda *args, **kwargs: chowns.append((args, kwargs))
+    )
+    plan = [(path, 10, 20, 0o640, True) for path in [*exact, mismatch]]
+
+    installer.apply_runner_access_plan(plan)
+
+    assert len(chowns) == 1
+    assert sum(len(path.chmods) for path in [*exact, mismatch]) == 1
+    assert all(not path.chmods for path in exact)
+    assert chowns == [((mismatch, 10, 20), {"follow_symlinks": True})]
+    assert mismatch.chmods == [0o640]
+
+
+def test_apply_runner_access_plan_fails_without_retry_or_rollback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = PlannedPath(30, 20, 0o100640)
+    calls = 0
+
+    def fail(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(installer.os, "chown", fail)
+
+    with pytest.raises(PermissionError, match="denied"):
+        installer.apply_runner_access_plan([(path, 10, 20, 0o640, True)])
+    assert calls == 1
+    assert path.chmods == []
+
+
 def test_access_repair_report_only_and_explicit_apply_are_bounded(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
     root, runner, revision, manifest_sha = access_repair_fixture(tmp_path, monkeypatch)
     before = tree_bytes(root)
     metadata_before = tree_metadata(root)
-    assert installer.repair_runner_access(root, revision, "6" * 64, manifest_sha, False) == 0
+    with monkeypatch.context() as report_patch:
+        report_patch.setattr(
+            installer.os,
+            "chown",
+            lambda *_args, **_kwargs: pytest.fail("report-only attempted ownership mutation"),
+        )
+        report_patch.setattr(
+            Path,
+            "chmod",
+            lambda *_args, **_kwargs: pytest.fail("report-only attempted mode mutation"),
+        )
+        assert installer.repair_runner_access(root, revision, "6" * 64, manifest_sha, False) == 0
     assert tree_bytes(root) == before
     assert tree_metadata(root) == metadata_before
     report = capsys.readouterr().out
