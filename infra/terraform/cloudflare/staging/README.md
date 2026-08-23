@@ -53,6 +53,16 @@ terraform -chdir=infra/terraform/cloudflare/staging validate -no-color
 terraform -chdir=infra/terraform/cloudflare/staging test -no-color
 ```
 
+The dependency lock supports Linux AMD64 CI and the Linux ARM64 operator host. Regenerate it from
+the origin registry with the pinned Terraform CLI, then review the resulting checksums:
+
+```bash
+terraform -chdir=infra/terraform/cloudflare/staging providers lock \
+  -platform=linux_amd64 \
+  -platform=linux_arm64 \
+  registry.terraform.io/cloudflare/cloudflare
+```
+
 Stop here during repository work. Everything below is future live work.
 
 ## Prerequisites for a separately authorized live session
