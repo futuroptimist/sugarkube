@@ -2128,6 +2128,105 @@ def access_repair_fixture(
     return root, runner, revision, installer.sha(runner / "sugarkube-runner-manifest.json")
 
 
+class PlannedAccessPath:
+    def __init__(self, uid: int, gid: int, mode: int) -> None:
+        self.info = SimpleNamespace(st_uid=uid, st_gid=gid, st_mode=mode)
+        self.chmod_calls: list[int] = []
+
+    def lstat(self):
+        return self.info
+
+    def chmod(self, mode: int) -> None:
+        self.chmod_calls.append(mode)
+
+
+@pytest.mark.parametrize(
+    ("actual", "desired", "expected_chowns", "expected_chmods"),
+    [
+        ((10, 20, 0o640), (10, 20, 0o640), 0, 0),
+        ((10, 20, 0o600), (10, 20, 0o640), 0, 1),
+        ((10, 30, 0o640), (10, 20, 0o640), 1, 0),
+        ((30, 40, 0o600), (10, 20, 0o640), 1, 1),
+        ((10, 20, stat.S_IFDIR | 0o750), (10, 20, 0o750), 0, 0),
+    ],
+)
+def test_apply_runner_access_plan_mutates_only_differing_fields(
+    monkeypatch: pytest.MonkeyPatch,
+    actual: tuple[int, int, int],
+    desired: tuple[int, int, int],
+    expected_chowns: int,
+    expected_chmods: int,
+) -> None:
+    path = PlannedAccessPath(*actual)
+    chown_calls = []
+    monkeypatch.setattr(
+        installer.os, "chown", lambda *args, **kwargs: chown_calls.append((args, kwargs))
+    )
+
+    installer.apply_runner_access_plan([(path, *desired, True)])
+
+    assert len(chown_calls) == expected_chowns
+    assert len(path.chmod_calls) == expected_chmods
+    if chown_calls:
+        assert chown_calls == [((path, desired[0], desired[1]), {"follow_symlinks": True})]
+
+
+@pytest.mark.parametrize("ownership_mismatch", [False, True])
+def test_apply_runner_access_plan_never_chmods_symlinks(
+    monkeypatch: pytest.MonkeyPatch, ownership_mismatch: bool
+) -> None:
+    path = PlannedAccessPath(30 if ownership_mismatch else 10, 20, stat.S_IFLNK | 0o777)
+    chown_calls = []
+    monkeypatch.setattr(
+        installer.os, "chown", lambda *args, **kwargs: chown_calls.append((args, kwargs))
+    )
+
+    installer.apply_runner_access_plan([(path, 10, 20, None, False)])
+
+    assert path.chmod_calls == []
+    assert len(chown_calls) == int(ownership_mismatch)
+    if ownership_mismatch:
+        assert chown_calls == [((path, 10, 20), {"follow_symlinks": False})]
+
+
+def test_apply_runner_access_plan_large_plan_writes_are_proportional_to_mismatches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    exact = PlannedAccessPath(10, 20, stat.S_IFREG | 0o640)
+    mismatch = PlannedAccessPath(30, 40, stat.S_IFREG | 0o600)
+    chown_calls = []
+    monkeypatch.setattr(
+        installer.os, "chown", lambda *args, **kwargs: chown_calls.append((args, kwargs))
+    )
+    plan = [(exact, 10, 20, 0o640, True)] * 10_000
+    plan.append((mismatch, 10, 20, 0o640, True))
+
+    installer.apply_runner_access_plan(plan)
+
+    assert len(chown_calls) == 1
+    assert exact.chmod_calls == []
+    assert mismatch.chmod_calls == [0o640]
+
+
+def test_apply_runner_access_plan_failure_is_not_retried_or_rolled_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = PlannedAccessPath(30, 40, stat.S_IFREG | 0o600)
+    calls = []
+
+    def fail_once(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(installer.os, "chown", fail_once)
+
+    with pytest.raises(PermissionError, match="denied"):
+        installer.apply_runner_access_plan([(path, 10, 20, 0o640, True)])
+
+    assert len(calls) == 1
+    assert path.chmod_calls == []
+
+
 def test_access_repair_report_only_and_explicit_apply_are_bounded(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
