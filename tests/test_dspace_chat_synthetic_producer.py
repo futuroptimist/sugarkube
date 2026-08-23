@@ -463,6 +463,82 @@ def test_runner_validation_accepts_complete_independent_git_repository(
     assert runtime.validate_runner(value) == runner
 
 
+def test_runner_validation_git_inspection_cannot_refresh_index_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, runner = runtime_runner(tmp_path)
+    index = runner / ".git/index"
+    tracked = runner / "package.json"
+    index.chmod(0o640)
+    tracked_info = tracked.stat()
+    os.utime(
+        tracked,
+        ns=(tracked_info.st_atime_ns, tracked_info.st_mtime_ns + 2_000_000_000),
+    )
+    previous_umask = os.umask(0o077)
+    try:
+        subprocess.run(
+            ["git", "-C", str(runner), "status", "--porcelain", "--untracked-files=no"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    finally:
+        os.umask(previous_umask)
+    assert stat.S_IMODE(index.stat().st_mode) == 0o600
+
+    index.chmod(0o640)
+    tracked_info = tracked.stat()
+    os.utime(
+        tracked,
+        ns=(tracked_info.st_atime_ns, tracked_info.st_mtime_ns + 2_000_000_000),
+    )
+    real_run = subprocess.run
+    git_environments = []
+
+    def controlled_run(argv, *args, **kwargs):
+        if argv[0] == "/usr/bin/node":
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout=str(runner / "playwright-browser/browser-executable").encode(),
+            )
+        git_environments.append(kwargs["env"])
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setenv("SUGARKUBE_VALIDATION_ENV_TEST", "preserved")
+    monkeypatch.setattr(runtime.subprocess, "run", controlled_run)
+    previous_umask = os.umask(0o077)
+    try:
+        assert runtime.validate_runner(value) == runner
+    finally:
+        os.umask(previous_umask)
+    assert stat.S_IMODE(index.stat().st_mode) == 0o640
+    assert git_environments
+    assert all(environment["GIT_OPTIONAL_LOCKS"] == "0" for environment in git_environments)
+    assert all(
+        environment["SUGARKUBE_VALIDATION_ENV_TEST"] == "preserved"
+        for environment in git_environments
+    )
+
+
+def test_runner_validation_with_optional_locks_rejects_dirty_tracked_content(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, runner = runtime_runner(tmp_path)
+    (runner / "package.json").write_text("dirty tracked content\n")
+    real_run = subprocess.run
+
+    def controlled_run(argv, *args, **kwargs):
+        if argv[0] == "/usr/bin/node":
+            return subprocess.CompletedProcess(argv, 0, stdout=b"")
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(runtime.subprocess, "run", controlled_run)
+    with pytest.raises(runtime.Invalid, match="runner tracked state"):
+        runtime.validate_runner(value)
+
+
 def test_runner_validation_rejects_missing_git_metadata(tmp_path: Path) -> None:
     value, runner = runtime_runner(tmp_path)
     (runner / ".git").rename(runner / "incomplete-git")
@@ -1622,11 +1698,13 @@ def runner_snapshot_fixture(tmp_path: Path) -> tuple[Path, str]:
     revision = "97ab09f13fb098de928a878bf1fe9b8d13032cb5"
     snapshot = tmp_path / "source" / revision
     snapshot.mkdir(parents=True)
-    (snapshot / ".git").mkdir()
     (snapshot / "dependency.ok").write_text("complete\n")
     (snapshot / "sugarkube-runner-manifest.json").write_text(
         json.dumps({"browserProvenance": {"name": runtime.SYSTEM_CHROMIUM}})
     )
+    git("init", cwd=snapshot)
+    git("add", ".", cwd=snapshot)
+    git("commit", "-m", "runner fixture", cwd=snapshot)
     return snapshot, revision
 
 
@@ -1655,6 +1733,8 @@ class FakeSnapshotRuntime:
             raise ValueError("critical file hash")
         if not (runner / "dependency.ok").is_file():
             raise ValueError("dependency invalid")
+        if runtime.git_inspect(runner, "status", "--porcelain", "--untracked-files=no").stdout:
+            raise ValueError("tracked state invalid")
         if self.fail_copy and ".validate." in str(runner):
             raise ValueError("copied runner validation failed")
         return runner
@@ -1686,7 +1766,7 @@ def test_installer_snapshot_preflight_rejects_invalid_input_without_mutation(
     elif fault == "hash-mismatch":
         (snapshot / "hash-mismatch").write_text("bad\n")
     elif fault == "incomplete-git":
-        (snapshot / ".git").rmdir()
+        __import__("shutil").rmtree(snapshot / ".git")
     else:
         (snapshot / "dependency.ok").unlink()
     root = tmp_path / "root"
@@ -2082,7 +2162,11 @@ def test_access_repair_report_only_and_explicit_apply_are_bounded(
     ]
     assert not any(word in report for word in ("credential", "result", "journal", "payload"))
 
-    assert installer.repair_runner_access(root, revision, "6" * 64, manifest_sha, True) == 0
+    previous_umask = os.umask(0o077)
+    try:
+        assert installer.repair_runner_access(root, revision, "6" * 64, manifest_sha, True) == 0
+    finally:
+        os.umask(previous_umask)
     assert "metadata-only" in capsys.readouterr().out
     assert tree_bytes(root) == before
     metadata_after = tree_metadata(root)
@@ -2095,8 +2179,12 @@ def test_access_repair_report_only_and_explicit_apply_are_bounded(
     assert changed and changed <= approved
     assert not any("dspace-chat-installations" in path for path in changed)
     assert stat.S_IMODE(runner.stat().st_mode) == 0o750
-    assert installer.repair_runner_access(root, revision, "6" * 64, manifest_sha, True) == 0
-    assert "already-correct mutation=none" in capsys.readouterr().out
+    assert stat.S_IMODE((runner / ".git/index").stat().st_mode) == 0o640
+    repaired_metadata = tree_metadata(root)
+    assert installer.repair_runner_access(root, revision, "6" * 64, manifest_sha, False) == 0
+    assert "runnerAccess=already-correct mutation=none authorization=required" in capsys.readouterr().out
+    assert tree_bytes(root) == before
+    assert tree_metadata(root) == repaired_metadata
 
 
 @pytest.mark.parametrize("apply", [False, True])

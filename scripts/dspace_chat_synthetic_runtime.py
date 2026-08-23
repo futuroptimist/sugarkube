@@ -147,6 +147,19 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def git_inspect(runner: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    """Run validation-only Git inspection without allowing index lock writes."""
+    environment = os.environ.copy()
+    environment["GIT_OPTIONAL_LOCKS"] = "0"
+    return subprocess.run(
+        ["git", "-C", str(runner), *args],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=environment,
+    )
+
+
 def normalize_root(root: Path) -> Path:
     """Return an existing real root without dereferencing caller identity."""
     if ".." in root.parts:
@@ -318,40 +331,20 @@ def validate_runner(config: dict) -> Path:
     if git_metadata.is_symlink() or not git_metadata.is_dir():
         raise Invalid("complete Git metadata")
     if (
-        subprocess.run(
-            ["git", "-C", str(runner), "rev-parse", "HEAD"],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip()
+        git_inspect(runner, "rev-parse", "HEAD").stdout.strip()
         != config["runnerRevision"]
     ):
         raise Invalid("runner HEAD")
-    if subprocess.run(
-        ["git", "-C", str(runner), "status", "--porcelain", "--untracked-files=no"],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout:
+    if git_inspect(runner, "status", "--porcelain", "--untracked-files=no").stdout:
         raise Invalid("runner tracked state")
     if (runner / ".git/objects/info/alternates").exists():
         raise Invalid("external object store")
     if (
-        subprocess.run(
-            ["git", "-C", str(runner), "rev-parse", "--is-shallow-repository"],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip()
+        git_inspect(runner, "rev-parse", "--is-shallow-repository").stdout.strip()
         != "false"
     ):
         raise Invalid("shallow repository")
-    subprocess.run(
-        ["git", "-C", str(runner), "fsck", "--full"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    git_inspect(runner, "fsck", "--full")
     for relative, expected in files.items():
         target = runner / relative
         if target.is_symlink() or not target.is_file() or sha256(target) != expected:

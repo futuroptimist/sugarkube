@@ -164,7 +164,9 @@ manifest SHA-256 is `36fdab33edc0f1ad518a6d3d247a1bd32d233402387ba57493a9386d78e
 
 First, as root, validate `current`, the exact retained assets, runner Git/content/dependencies,
 browser provenance, and the authorized manifest hash without mutation. The report contains only
-bounded coordinates and access state:
+bounded coordinates and access state. Validation sets Git's supported `GIT_OPTIONAL_LOCKS=0`
+mechanism while preserving the process environment, preventing read-only inspection from refreshing
+`.git/index` and destabilizing repaired metadata:
 
 ```bash
 sudo python3 scripts/install_dspace_chat_synthetic.py repair-runner-access \
