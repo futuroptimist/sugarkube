@@ -161,6 +161,9 @@ installed runner. For the staging cutover incident, the approved runner revision
 `97ab09f13fb098de928a878bf1fe9b8d13032cb5`, the approved retained asset revision is
 `68e002775771c087285cd5ba8e402e5d9ac7c2c426a802d44a179e74b925fd54`, and the validated runner
 manifest SHA-256 is `36fdab33edc0f1ad518a6d3d247a1bd32d233402387ba57493a9386d78ec9301`.
+Runner validation disables Git optional locks, making its HEAD, tracked-state, shallow-repository,
+and full-fsck inspection read-only so a metadata-only repair remains stable under a restrictive
+umask.
 
 First, as root, validate `current`, the exact retained assets, runner Git/content/dependencies,
 browser provenance, and the authorized manifest hash without mutation. The report contains only

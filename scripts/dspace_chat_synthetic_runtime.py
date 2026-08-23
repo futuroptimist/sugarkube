@@ -9,8 +9,8 @@ import grp
 import hashlib
 import json
 import os
-import pwd
 import platform
+import pwd
 import re
 import shutil
 import stat
@@ -317,12 +317,14 @@ def validate_runner(config: dict) -> Path:
     git_metadata = runner / ".git"
     if git_metadata.is_symlink() or not git_metadata.is_dir():
         raise Invalid("complete Git metadata")
+    git_environment = {**os.environ, "GIT_OPTIONAL_LOCKS": "0"}
     if (
         subprocess.run(
             ["git", "-C", str(runner), "rev-parse", "HEAD"],
             capture_output=True,
             text=True,
             check=True,
+            env=git_environment,
         ).stdout.strip()
         != config["runnerRevision"]
     ):
@@ -332,6 +334,7 @@ def validate_runner(config: dict) -> Path:
         capture_output=True,
         text=True,
         check=True,
+        env=git_environment,
     ).stdout:
         raise Invalid("runner tracked state")
     if (runner / ".git/objects/info/alternates").exists():
@@ -342,6 +345,7 @@ def validate_runner(config: dict) -> Path:
             capture_output=True,
             text=True,
             check=True,
+            env=git_environment,
         ).stdout.strip()
         != "false"
     ):
@@ -351,6 +355,7 @@ def validate_runner(config: dict) -> Path:
         capture_output=True,
         text=True,
         check=True,
+        env=git_environment,
     )
     for relative, expected in files.items():
         target = runner / relative

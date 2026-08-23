@@ -463,6 +463,68 @@ def test_runner_validation_accepts_complete_independent_git_repository(
     assert runtime.validate_runner(value) == runner
 
 
+def test_runner_validation_disables_optional_locks_to_preserve_index_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, runner = runtime_runner(tmp_path)
+    index = runner / ".git/index"
+    tracked = runner / "package.json"
+    real_run = subprocess.run
+
+    def run_node_and_record_git_environment(argv, *args, **kwargs):
+        if argv[0] == "/usr/bin/node":
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout=str(runner / "playwright-browser/browser-executable").encode(),
+            )
+        if argv[0] == "git":
+            assert kwargs["env"]["GIT_OPTIONAL_LOCKS"] == "0"
+            assert kwargs["env"]["DSPACE_TEST_INHERITED"] == "preserved"
+        return real_run(argv, *args, **kwargs)
+
+    def refresh_opportunity() -> None:
+        info = tracked.stat()
+        os.utime(tracked, ns=(info.st_atime_ns, info.st_mtime_ns + 1_000_000_000))
+
+    index.chmod(0o640)
+    refresh_opportunity()
+    previous_umask = os.umask(0o077)
+    try:
+        git("status", "--porcelain", "--untracked-files=no", cwd=runner)
+    finally:
+        os.umask(previous_umask)
+    assert stat.S_IMODE(index.stat().st_mode) == 0o600
+
+    index.chmod(0o640)
+    refresh_opportunity()
+    monkeypatch.setenv("DSPACE_TEST_INHERITED", "preserved")
+    monkeypatch.setattr(runtime.subprocess, "run", run_node_and_record_git_environment)
+    previous_umask = os.umask(0o077)
+    try:
+        assert runtime.validate_runner(value) == runner
+    finally:
+        os.umask(previous_umask)
+    assert stat.S_IMODE(index.stat().st_mode) == 0o640
+
+
+def test_runner_validation_still_rejects_dirty_tracked_content_without_optional_locks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, runner = runtime_runner(tmp_path)
+    (runner / "package.json").write_text('{"dirty": true}\n')
+    real_run = subprocess.run
+
+    def fake_node(argv, *args, **kwargs):
+        if argv[0] == "/usr/bin/node":
+            return subprocess.CompletedProcess(argv, 0, stdout=b"")
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(runtime.subprocess, "run", fake_node)
+    with pytest.raises(runtime.Invalid, match="runner tracked state"):
+        runtime.validate_runner(value)
+
+
 def test_runner_validation_rejects_missing_git_metadata(tmp_path: Path) -> None:
     value, runner = runtime_runner(tmp_path)
     (runner / ".git").rename(runner / "incomplete-git")
@@ -2069,8 +2131,42 @@ def test_access_repair_report_only_and_explicit_apply_are_bounded(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
     root, runner, revision, manifest_sha = access_repair_fixture(tmp_path, monkeypatch)
+    (runner / ".git").rmdir()
+    git("init", cwd=runner)
+    git("config", "user.email", "tests@example.invalid", cwd=runner)
+    git("config", "user.name", "Tests", cwd=runner)
+    git("add", "dependency.ok", "sugarkube-runner-manifest.json", cwd=runner)
+    git("commit", "-m", "repair fixture", cwd=runner)
+    for path in [runner, *runner.rglob("*")]:
+        if not path.is_symlink():
+            path.chmod(0o700 if path.is_dir() else 0o600)
+
+    class ValidatingRuntime(FakeSnapshotRuntime):
+        def validate_runner(self, config: dict) -> Path:
+            selected = super().validate_runner(config)
+            tracked = selected / "dependency.ok"
+            info = tracked.stat()
+            os.utime(tracked, ns=(info.st_atime_ns, info.st_mtime_ns + 1_000_000_000))
+            previous_umask = os.umask(0o077)
+            try:
+                subprocess.run(
+                    ["git", "status", "--porcelain", "--untracked-files=no"],
+                    cwd=selected,
+                    check=True,
+                    capture_output=True,
+                    env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
+                )
+            finally:
+                os.umask(previous_umask)
+            return selected
+
+    monkeypatch.setattr(installer, "runtime_module", lambda: ValidatingRuntime())
     before = tree_bytes(root)
     metadata_before = tree_metadata(root)
+    current_before = os.readlink(root / "var/lib/sugarkube/dspace-chat-installations/current")
+    retained_manifest_before = (
+        root / "var/lib/sugarkube/dspace-chat-installations" / ("6" * 64) / "manifest.json"
+    ).read_bytes()
     assert installer.repair_runner_access(root, revision, "6" * 64, manifest_sha, False) == 0
     assert tree_bytes(root) == before
     assert tree_metadata(root) == metadata_before
@@ -2095,8 +2191,16 @@ def test_access_repair_report_only_and_explicit_apply_are_bounded(
     assert changed and changed <= approved
     assert not any("dspace-chat-installations" in path for path in changed)
     assert stat.S_IMODE(runner.stat().st_mode) == 0o750
-    assert installer.repair_runner_access(root, revision, "6" * 64, manifest_sha, True) == 0
+    assert stat.S_IMODE((runner / ".git/index").stat().st_mode) == 0o640
+    assert (
+        os.readlink(root / "var/lib/sugarkube/dspace-chat-installations/current") == current_before
+    )
+    assert (
+        root / "var/lib/sugarkube/dspace-chat-installations" / ("6" * 64) / "manifest.json"
+    ).read_bytes() == retained_manifest_before
+    assert installer.repair_runner_access(root, revision, "6" * 64, manifest_sha, False) == 0
     assert "already-correct mutation=none" in capsys.readouterr().out
+    assert tree_bytes(root) == before
 
 
 @pytest.mark.parametrize("apply", [False, True])
