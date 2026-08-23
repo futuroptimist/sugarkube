@@ -2158,8 +2158,8 @@ def test_access_repair_report_only_and_explicit_apply_are_bounded(
     assert changed and changed <= approved
     assert not any("dspace-chat-installations" in path for path in changed)
     assert stat.S_IMODE(runner.stat().st_mode) == 0o750
-    assert installer.repair_runner_access(root, revision, "6" * 64, manifest_sha, False) == 0
-    assert "runnerAccess=already-correct mutation=none" in capsys.readouterr().out
+    assert installer.repair_runner_access(root, revision, "6" * 64, manifest_sha, True) == 0
+    assert "already-correct mutation=none" in capsys.readouterr().out
 
 
 def test_access_repair_preserves_normalized_git_index_through_post_validation(
@@ -2212,8 +2212,26 @@ def test_access_repair_preserves_normalized_git_index_through_post_validation(
     monkeypatch.setattr(runtime.subprocess, "run", fake_node)
     repair_config = RepairRuntime.load_config(retained / "etc/sugarkube/dspace-chat-synthetic.json")
     installer.normalize_runner_access(repair_config, runner, root)
-    (runner / ".git/index").chmod(0o600)
+    index = runner / ".git/index"
+    index.chmod(0o600)
     refresh_tracked_stat(runner)
+    access_plan = installer.runner_access_plan(repair_config, runner, root)
+    mismatches = []
+    for path, uid, gid, mode, _follow_symlinks in access_plan:
+        info = path.lstat()
+        if (
+            (info.st_uid, info.st_gid) != (uid, gid)
+            or mode is not None
+            and stat.S_IMODE(info.st_mode) != mode
+        ):
+            mismatches.append((path, uid, gid, mode, info))
+    assert len(mismatches) == 1
+    path, uid, gid, mode, info = mismatches[0]
+    assert path == index
+    assert mode == 0o640
+    assert stat.S_IMODE(info.st_mode) == 0o600
+    assert (info.st_uid, info.st_gid) == (uid, gid)
+    assert info.st_nlink == 1
     manifest = runner / "sugarkube-runner-manifest.json"
     manifest_sha = installer.sha(manifest)
     bytes_before = tree_bytes(root)
