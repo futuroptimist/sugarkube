@@ -2128,6 +2128,136 @@ def access_repair_fixture(
     return root, runner, revision, installer.sha(runner / "sugarkube-runner-manifest.json")
 
 
+@pytest.mark.parametrize(
+    ("kind", "owner_differs", "mode_differs", "expected_chowns", "expected_chmods"),
+    [
+        ("file", False, False, 0, 0),
+        ("directory", False, False, 0, 0),
+        ("file", False, True, 0, 1),
+        ("file", True, False, 1, 0),
+        ("file", True, True, 1, 1),
+    ],
+)
+def test_apply_runner_access_plan_writes_only_mismatched_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+    owner_differs: bool,
+    mode_differs: bool,
+    expected_chowns: int,
+    expected_chmods: int,
+) -> None:
+    path = tmp_path / "entry"
+    if kind == "directory":
+        path.mkdir()
+        desired_mode = 0o750
+    else:
+        path.write_text("fixture\n")
+        desired_mode = 0o640
+    path.chmod(0o600 if mode_differs else desired_mode)
+    info = path.lstat()
+    desired_uid = info.st_uid + int(owner_differs)
+    chowns = []
+    chmods = []
+    real_chmod = Path.chmod
+    monkeypatch.setattr(
+        installer.os,
+        "chown",
+        lambda target, uid, gid, **kwargs: chowns.append((target, uid, gid, kwargs)),
+    )
+    monkeypatch.setattr(
+        Path,
+        "chmod",
+        lambda target, mode: (chmods.append((target, mode)), real_chmod(target, mode))[1],
+    )
+
+    installer.apply_runner_access_plan([(path, desired_uid, info.st_gid, desired_mode, True)])
+
+    assert len(chowns) == expected_chowns
+    assert len(chmods) == expected_chmods
+    if chowns:
+        assert chowns == [(path, desired_uid, info.st_gid, {"follow_symlinks": True})]
+
+
+def test_apply_runner_access_plan_symlink_ownership_is_no_follow_and_never_chmod(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "target"
+    target.write_text("fixture\n")
+    link = tmp_path / "link"
+    link.symlink_to(target.name)
+    info = link.lstat()
+    chowns = []
+    monkeypatch.setattr(
+        installer.os,
+        "chown",
+        lambda path, uid, gid, **kwargs: chowns.append((path, uid, gid, kwargs)),
+    )
+    monkeypatch.setattr(Path, "chmod", lambda *_args: pytest.fail("symlink was chmodded"))
+
+    installer.apply_runner_access_plan([(link, info.st_uid, info.st_gid, None, False)])
+    assert chowns == []
+
+    installer.apply_runner_access_plan([(link, info.st_uid + 1, info.st_gid, None, False)])
+
+    assert chowns == [(link, info.st_uid + 1, info.st_gid, {"follow_symlinks": False})]
+
+
+def test_apply_runner_access_plan_large_exact_plan_scales_with_mismatches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    exact = tmp_path / "exact"
+    exact.write_text("exact\n")
+    exact.chmod(0o640)
+    mismatch = tmp_path / "mismatch"
+    mismatch.write_text("mismatch\n")
+    mismatch.chmod(0o600)
+    exact_info = exact.lstat()
+    mismatch_info = mismatch.lstat()
+    chowns = []
+    chmods = []
+    real_chmod = Path.chmod
+    monkeypatch.setattr(
+        installer.os, "chown", lambda *args, **kwargs: chowns.append((args, kwargs))
+    )
+    monkeypatch.setattr(
+        Path,
+        "chmod",
+        lambda path, mode: (chmods.append((path, mode)), real_chmod(path, mode))[1],
+    )
+    plan = [(exact, exact_info.st_uid, exact_info.st_gid, 0o640, True)] * 10_000
+    plan.append((mismatch, mismatch_info.st_uid + 1, mismatch_info.st_gid, 0o640, True))
+
+    installer.apply_runner_access_plan(plan)
+
+    assert len(plan) == 10_001
+    assert len(chowns) == 1
+    assert chmods == [(mismatch, 0o640)]
+
+
+def test_apply_runner_access_plan_fails_without_retry_or_rollback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "entry"
+    path.write_text("fixture\n")
+    info = path.lstat()
+    attempts = []
+
+    def fail_chown(*args, **kwargs):
+        attempts.append((args, kwargs))
+        raise PermissionError("injected metadata failure")
+
+    monkeypatch.setattr(installer.os, "chown", fail_chown)
+    monkeypatch.setattr(Path, "chmod", lambda *_args: pytest.fail("mutation continued"))
+
+    with pytest.raises(PermissionError, match="injected metadata failure"):
+        installer.apply_runner_access_plan(
+            [(path, info.st_uid + 1, info.st_gid, stat.S_IMODE(info.st_mode), True)]
+        )
+
+    assert len(attempts) == 1
+
+
 def test_access_repair_report_only_and_explicit_apply_are_bounded(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
@@ -2243,6 +2373,26 @@ def test_access_repair_preserves_normalized_git_index_through_post_validation(
     retained_manifest_before = (retained / "manifest.json").read_bytes()
     runner_manifest_before = manifest.read_bytes()
     current_before = os.readlink(retained.parent / "current")
+    metadata_chowns = []
+    metadata_chmods = []
+    real_chown = os.chown
+    real_chmod = Path.chmod
+    monkeypatch.setattr(
+        installer.os,
+        "chown",
+        lambda path, uid, gid, **kwargs: (
+            metadata_chowns.append((path, uid, gid, kwargs)),
+            real_chown(path, uid, gid, **kwargs),
+        )[1],
+    )
+    monkeypatch.setattr(
+        Path,
+        "chmod",
+        lambda path, mode: (
+            metadata_chmods.append((path, mode)),
+            real_chmod(path, mode),
+        )[1],
+    )
 
     previous_umask = os.umask(0o077)
     try:
@@ -2252,6 +2402,8 @@ def test_access_repair_preserves_normalized_git_index_through_post_validation(
 
     assert result == 0
     assert "runnerAccess=repaired mutation=metadata-only" in capsys.readouterr().out
+    assert metadata_chowns == []
+    assert metadata_chmods == [(index, 0o640)]
     assert stat.S_IMODE((runner / ".git/index").stat().st_mode) == 0o640
     assert tree_bytes(root) == bytes_before
     assert retained_manifest_before == (retained / "manifest.json").read_bytes()

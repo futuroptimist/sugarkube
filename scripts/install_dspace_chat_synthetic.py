@@ -333,10 +333,18 @@ def runner_access_paths(root: Path, runner_parent: Path) -> list[Path]:
 
 def normalize_runner_access(config: dict, runner: Path, root: Path) -> None:
     """Make an immutable root-owned runner usable by the configured child group."""
-    plan = runner_access_plan(config, runner, root)
+    apply_runner_access_plan(runner_access_plan(config, runner, root))
+
+
+def apply_runner_access_plan(
+    plan: list[tuple[Path, int, int, int | None, bool]],
+) -> None:
+    """Apply only metadata differences from a completely validated access plan."""
     for path, uid, gid, mode, follow_symlinks in plan:
-        os.chown(path, uid, gid, follow_symlinks=follow_symlinks)
-        if mode is not None:
+        info = path.lstat()
+        if info.st_uid != uid or info.st_gid != gid:
+            os.chown(path, uid, gid, follow_symlinks=follow_symlinks)
+        if mode is not None and stat.S_IMODE(info.st_mode) != mode:
             path.chmod(mode)
 
 
@@ -495,10 +503,7 @@ def repair_runner_access(
     if access == "already-correct":
         print("runnerAccess=already-correct mutation=none")
         return 0
-    for path, uid, gid, mode, follow_symlinks in plan:
-        os.chown(path, uid, gid, follow_symlinks=follow_symlinks)
-        if mode is not None:
-            path.chmod(mode)
+    apply_runner_access_plan(plan)
     validate_snapshot(retained, runner, root)
     validate_runner_access(config, runner, root)
     if sha(manifest) != manifest_sha256:
