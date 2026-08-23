@@ -2110,6 +2110,119 @@ def test_runner_access_rejects_unsafe_symlink_without_mutation(
     assert tree_bytes(root) == before
 
 
+@pytest.mark.parametrize(
+    ("kind", "owner_differs", "mode_differs", "expected_chowns", "expected_chmods"),
+    [
+        ("file", False, False, 0, 0),
+        ("directory", False, False, 0, 0),
+        ("symlink", False, False, 0, 0),
+        ("file", False, True, 0, 1),
+        ("file", True, False, 1, 0),
+        ("file", True, True, 1, 1),
+        ("symlink", True, False, 1, 0),
+    ],
+)
+def test_apply_runner_access_plan_mutates_only_differing_fields(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+    owner_differs: bool,
+    mode_differs: bool,
+    expected_chowns: int,
+    expected_chmods: int,
+) -> None:
+    target = tmp_path / "target"
+    target.write_text("target\n")
+    if kind == "directory":
+        target.unlink()
+        target.mkdir()
+    path = target
+    mode = 0o750 if kind == "directory" else 0o640
+    if kind == "symlink":
+        path = tmp_path / "link"
+        path.symlink_to(target.name)
+        mode = None
+    elif mode_differs:
+        path.chmod(0o600)
+    else:
+        path.chmod(mode)
+
+    info = path.lstat()
+    uid = info.st_uid + int(owner_differs)
+    gid = info.st_gid
+    chowns: list[tuple[Path, int, int, bool]] = []
+    chmods: list[tuple[Path, int]] = []
+    monkeypatch.setattr(
+        installer.os,
+        "chown",
+        lambda selected, owner, group, *, follow_symlinks: chowns.append(
+            (selected, owner, group, follow_symlinks)
+        ),
+    )
+    monkeypatch.setattr(
+        Path, "chmod", lambda selected, selected_mode: chmods.append((selected, selected_mode))
+    )
+
+    installer.apply_runner_access_plan([(path, uid, gid, mode, kind != "symlink")])
+
+    assert len(chowns) == expected_chowns
+    assert len(chmods) == expected_chmods
+    if chowns:
+        assert chowns == [(path, uid, gid, kind != "symlink")]
+    if chmods:
+        assert chmods == [(path, mode)]
+
+
+def test_apply_runner_access_plan_scales_with_mismatches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = []
+    for number in range(512):
+        path = tmp_path / f"entry-{number}"
+        path.write_text("x")
+        path.chmod(0o640)
+        info = path.lstat()
+        paths.append((path, info.st_uid, info.st_gid, 0o640, True))
+    mismatch = paths[-1]
+    paths[-1] = (mismatch[0], mismatch[1] + 1, mismatch[2], 0o600, True)
+    chowns = []
+    chmods = []
+    monkeypatch.setattr(
+        installer.os, "chown", lambda *args, **kwargs: chowns.append((args, kwargs))
+    )
+    monkeypatch.setattr(Path, "chmod", lambda *args, **kwargs: chmods.append((args, kwargs)))
+
+    installer.apply_runner_access_plan(paths)
+
+    assert len(paths) == 512
+    assert len(chowns) == 1
+    assert len(chmods) == 1
+    assert chowns[0][0][0] == mismatch[0]
+    assert chmods[0][0][0] == mismatch[0]
+
+
+def test_apply_runner_access_plan_fails_without_retry_or_rollback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "entry"
+    path.write_text("x")
+    path.chmod(0o600)
+    info = path.lstat()
+    attempts = []
+
+    def fail(*args, **kwargs):
+        attempts.append((args, kwargs))
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(installer.os, "chown", fail)
+
+    with pytest.raises(PermissionError, match="denied"):
+        installer.apply_runner_access_plan([(path, info.st_uid + 1, info.st_gid, 0o640, True)])
+
+    assert len(attempts) == 1
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
 def access_repair_fixture(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[Path, Path, str, str]:
