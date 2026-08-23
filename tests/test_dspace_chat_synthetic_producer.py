@@ -463,6 +463,69 @@ def test_runner_validation_accepts_complete_independent_git_repository(
     assert runtime.validate_runner(value) == runner
 
 
+def refresh_tracked_stat(runner: Path) -> None:
+    """Make Git reconsider a tracked file without changing its bytes."""
+    tracked = runner / "package.json"
+    info = tracked.stat()
+    os.utime(tracked, ns=(info.st_atime_ns, info.st_mtime_ns + 2_000_000_000))
+
+
+def test_git_optional_locks_keep_validation_index_metadata_read_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, runner = runtime_runner(tmp_path)
+    index = runner / ".git/index"
+    index.chmod(0o640)
+    refresh_tracked_stat(runner)
+    previous_umask = os.umask(0o077)
+    try:
+        git("status", "--porcelain", "--untracked-files=no", cwd=runner)
+    finally:
+        os.umask(previous_umask)
+    assert stat.S_IMODE(index.stat().st_mode) == 0o600
+
+    index.chmod(0o640)
+    refresh_tracked_stat(runner)
+    real_run = subprocess.run
+    monkeypatch.setenv("SUGARKUBE_TEST_INHERITED", "preserved")
+
+    def fake_node(argv, *args, **kwargs):
+        if argv[0] == "/usr/bin/node":
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout=str(runner / "playwright-browser/browser-executable").encode(),
+            )
+        assert kwargs["env"]["GIT_OPTIONAL_LOCKS"] == "0"
+        assert kwargs["env"]["SUGARKUBE_TEST_INHERITED"] == "preserved"
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(runtime.subprocess, "run", fake_node)
+    previous_umask = os.umask(0o077)
+    try:
+        assert runtime.validate_runner(value) == runner
+    finally:
+        os.umask(previous_umask)
+    assert stat.S_IMODE(index.stat().st_mode) == 0o640
+
+
+def test_runner_validation_still_rejects_dirty_tracked_content_without_optional_locks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, runner = runtime_runner(tmp_path)
+    (runner / "package.json").write_text('{"dirty":true}\n')
+    real_run = subprocess.run
+
+    def fake_node(argv, *args, **kwargs):
+        if argv[0] == "/usr/bin/node":
+            pytest.fail("dirty tracked state must fail before browser discovery")
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(runtime.subprocess, "run", fake_node)
+    with pytest.raises(runtime.Invalid, match="runner tracked state"):
+        runtime.validate_runner(value)
+
+
 def test_runner_validation_rejects_missing_git_metadata(tmp_path: Path) -> None:
     value, runner = runtime_runner(tmp_path)
     (runner / ".git").rename(runner / "incomplete-git")
@@ -2097,6 +2160,113 @@ def test_access_repair_report_only_and_explicit_apply_are_bounded(
     assert stat.S_IMODE(runner.stat().st_mode) == 0o750
     assert installer.repair_runner_access(root, revision, "6" * 64, manifest_sha, True) == 0
     assert "already-correct mutation=none" in capsys.readouterr().out
+
+
+def test_access_repair_preserves_normalized_git_index_through_post_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    value, built_runner = runtime_runner(tmp_path)
+    revision = value["runnerRevision"]
+    root = tmp_path / "repair-root"
+    root.mkdir()
+    retained = root / "var/lib/sugarkube/dspace-chat-installations" / ("6" * 64)
+    installer.render(retained)
+    installer.activate(retained, root, retained.name)
+    runner = root / "var/lib/sugarkube/dspace-chat-runners" / revision
+    runner.parent.mkdir(parents=True)
+    __import__("shutil").copytree(built_runner, runner, symlinks=True)
+
+    class RepairRuntime:
+        RUNNER_LOCAL = runtime.RUNNER_LOCAL
+        SYSTEM_CHROMIUM = runtime.SYSTEM_CHROMIUM
+
+        @staticmethod
+        def load_config(path: Path) -> dict:
+            loaded = runtime.load_config(path)
+            loaded.update(
+                runnerRevision=revision,
+                browserContract={"name": runtime.RUNNER_LOCAL},
+            )
+            return loaded
+
+        validate_runner = staticmethod(runtime.validate_runner)
+
+        @staticmethod
+        def validate_browser_contract(_config: dict, selected: Path, _root: Path) -> dict:
+            return json.loads((selected / "sugarkube-runner-manifest.json").read_text())[
+                "browserProvenance"
+            ]
+
+    real_run = subprocess.run
+
+    def fake_node(argv, *args, **kwargs):
+        if argv[0] == "/usr/bin/node":
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout=str(runner / "playwright-browser/browser-executable").encode(),
+            )
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(installer, "runtime_module", lambda: RepairRuntime())
+    monkeypatch.setattr(runtime.subprocess, "run", fake_node)
+    repair_config = RepairRuntime.load_config(retained / "etc/sugarkube/dspace-chat-synthetic.json")
+    installer.normalize_runner_access(repair_config, runner, root)
+    index = runner / ".git/index"
+    index.chmod(0o600)
+    refresh_tracked_stat(runner)
+    access_plan = installer.runner_access_plan(repair_config, runner, root)
+    mismatches = []
+    for path, uid, gid, mode, _follow_symlinks in access_plan:
+        info = path.lstat()
+        if (
+            (info.st_uid, info.st_gid) != (uid, gid)
+            or mode is not None
+            and stat.S_IMODE(info.st_mode) != mode
+        ):
+            mismatches.append((path, uid, gid, mode, info))
+    assert len(mismatches) == 1
+    path, uid, gid, mode, info = mismatches[0]
+    assert path == index
+    assert mode == 0o640
+    assert stat.S_IMODE(info.st_mode) == 0o600
+    assert (info.st_uid, info.st_gid) == (uid, gid)
+    assert info.st_nlink == 1
+    manifest = runner / "sugarkube-runner-manifest.json"
+    manifest_sha = installer.sha(manifest)
+    bytes_before = tree_bytes(root)
+    symlinks_before = {
+        str(path.relative_to(root)): os.readlink(path)
+        for path in root.rglob("*")
+        if path.is_symlink()
+    }
+    retained_manifest_before = (retained / "manifest.json").read_bytes()
+    runner_manifest_before = manifest.read_bytes()
+    current_before = os.readlink(retained.parent / "current")
+
+    previous_umask = os.umask(0o077)
+    try:
+        result = installer.repair_runner_access(root, revision, retained.name, manifest_sha, True)
+    finally:
+        os.umask(previous_umask)
+
+    assert result == 0
+    assert "runnerAccess=repaired mutation=metadata-only" in capsys.readouterr().out
+    assert stat.S_IMODE((runner / ".git/index").stat().st_mode) == 0o640
+    assert tree_bytes(root) == bytes_before
+    assert retained_manifest_before == (retained / "manifest.json").read_bytes()
+    assert runner_manifest_before == manifest.read_bytes()
+    assert current_before == os.readlink(retained.parent / "current")
+    assert symlinks_before == {
+        str(path.relative_to(root)): os.readlink(path)
+        for path in root.rglob("*")
+        if path.is_symlink()
+    }
+    metadata_before_report = tree_metadata(root)
+    assert installer.repair_runner_access(root, revision, retained.name, manifest_sha, False) == 0
+    assert "runnerAccess=already-correct mutation=none" in capsys.readouterr().out
+    assert tree_metadata(root) == metadata_before_report
+    assert tree_bytes(root) == bytes_before
 
 
 @pytest.mark.parametrize("apply", [False, True])
