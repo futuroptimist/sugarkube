@@ -6,6 +6,7 @@ import copy
 import json
 import os
 import platform
+import shutil
 import stat
 import subprocess
 import sys
@@ -461,6 +462,118 @@ def test_runner_validation_accepts_complete_independent_git_repository(
     monkeypatch.setattr(runtime.subprocess, "run", fake_node)
 
     assert runtime.validate_runner(value) == runner
+
+
+def test_every_runner_git_call_uses_only_exact_command_scoped_trust(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, runner = runtime_runner(tmp_path)
+    real_run = subprocess.run
+    git_calls = []
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "safe.directory")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "*")
+
+    def inspect_run(argv, *args, **kwargs):
+        if argv[0] == "/usr/bin/node":
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout=str(runner / "playwright-browser/browser-executable").encode(),
+            )
+        git_calls.append((argv, kwargs))
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(runtime.subprocess, "run", inspect_run)
+
+    assert runtime.validate_runner(value) == runner
+    assert len(git_calls) == 4
+    for argv, kwargs in git_calls:
+        assert argv[:5] == [
+            "git",
+            "-c",
+            f"safe.directory={runner}",
+            "-C",
+            str(runner),
+        ]
+        assert "safe.directory=*" not in argv
+        assert kwargs["env"]["GIT_OPTIONAL_LOCKS"] == "0"
+        assert kwargs["env"]["GIT_CONFIG_NOSYSTEM"] == "1"
+        assert kwargs["env"]["GIT_CONFIG_GLOBAL"] == os.devnull
+        assert not any(key.startswith("GIT_CONFIG_KEY_") for key in kwargs["env"])
+
+
+@pytest.mark.parametrize("fault", ["relative", "missing", "root-symlink", "runner-symlink"])
+def test_runner_path_is_rejected_before_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    value, runner = runtime_runner(tmp_path)
+    if fault == "relative":
+        value["runnerRoot"] = "relative"
+    elif fault == "missing":
+        value["runnerRoot"] = str(tmp_path / "missing")
+    elif fault == "root-symlink":
+        alias = tmp_path / "root-alias"
+        alias.symlink_to(Path(value["runnerRoot"]), target_is_directory=True)
+        value["runnerRoot"] = str(alias)
+    else:
+        runner.rename(runner.with_name("real-runner"))
+        runner.symlink_to(runner.with_name("real-runner"), target_is_directory=True)
+
+    monkeypatch.setattr(
+        runtime.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail("invalid runner path reached subprocess"),
+    )
+    with pytest.raises(runtime.Invalid, match="runner path|filesystem source root"):
+        runtime.validate_runner(value)
+
+
+def test_command_scoped_trust_allows_read_only_cross_ownership_git() -> None:
+    if os.geteuid() != 0 or shutil.which("setpriv") is None:
+        pytest.skip("cross-ownership regression requires root and setpriv")
+    with __import__("tempfile").TemporaryDirectory(
+        prefix="sugarkube-runner-", dir="/tmp"
+    ) as directory:
+        root = Path(directory)
+        value, runner = runtime_runner(root)
+        # Model root-owned paths that remain traversable/readable by the service user.
+        for path in (root, *runner.rglob("*")):
+            if path.is_dir():
+                path.chmod(0o755)
+            elif path.is_file():
+                path.chmod(0o755 if os.access(path, os.X_OK) else 0o644)
+        observed = (runner, runner / ".git/index")
+        before = {
+            path: (path.stat().st_uid, path.stat().st_gid, stat.S_IMODE(path.stat().st_mode))
+            for path in observed
+        }
+        global_config = root / "service-global.gitconfig"
+        env = {
+            "PATH": os.environ["PATH"],
+            "HOME": str(root),
+            "GIT_CONFIG_GLOBAL": str(global_config),
+        }
+        command = [
+            "setpriv",
+            "--reuid=65534",
+            "--regid=65534",
+            "--clear-groups",
+            "git",
+            "-c",
+            f"safe.directory={runner}",
+            "-C",
+            str(runner),
+            "rev-parse",
+            "HEAD",
+        ]
+        completed = subprocess.run(command, env=env, capture_output=True, text=True, check=True)
+        assert completed.stdout.strip() == value["runnerRevision"]
+        assert not global_config.exists()
+        assert before == {
+            path: (path.stat().st_uid, path.stat().st_gid, stat.S_IMODE(path.stat().st_mode))
+            for path in observed
+        }
 
 
 def refresh_tracked_stat(runner: Path) -> None:
