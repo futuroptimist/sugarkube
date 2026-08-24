@@ -277,7 +277,25 @@ def validate_browser_contract(config: dict, runner: Path, root: Path = Path("/")
 
 
 def validate_runner(config: dict) -> Path:
-    runner = Path(config["runnerRoot"]) / config["runnerRevision"]
+    configured_root = Path(config["runnerRoot"])
+    if not configured_root.is_absolute() or ".." in configured_root.parts:
+        raise Invalid("runner path")
+    runner_root = normalize_root(configured_root)
+    runner = runner_root / config["runnerRevision"]
+    try:
+        runner_info = runner.lstat()
+        resolved_runner = runner.resolve(strict=True)
+        resolved_runner.relative_to(runner_root)
+    except (OSError, RuntimeError, ValueError):
+        raise Invalid("runner path") from None
+    if (
+        not stat.S_ISDIR(runner_info.st_mode)
+        or runner.is_symlink()
+        or runner != resolved_runner
+        or runner.parent != runner_root
+    ):
+        raise Invalid("runner path")
+    runner = resolved_runner
     manifest = json.loads((runner / "sugarkube-runner-manifest.json").read_text(encoding="utf-8"))
     files = manifest.get("files")
     browser_relative = manifest.get("playwrightBrowserExecutable")
@@ -318,45 +336,34 @@ def validate_runner(config: dict) -> Path:
     if git_metadata.is_symlink() or not git_metadata.is_dir():
         raise Invalid("complete Git metadata")
     git_environment = {**os.environ, "GIT_OPTIONAL_LOCKS": "0"}
-    if (
-        subprocess.run(
-            ["git", "-C", str(runner), "rev-parse", "HEAD"],
+    for key in tuple(git_environment):
+        if key in {"GIT_DIR", "GIT_WORK_TREE", "GIT_CONFIG_PARAMETERS"} or re.fullmatch(
+            r"GIT_CONFIG_(?:KEY|VALUE)_\d+", key
+        ):
+            del git_environment[key]
+    git_environment["GIT_CONFIG_COUNT"] = "0"
+    git_environment["GIT_CONFIG_NOSYSTEM"] = "1"
+    git_environment["GIT_CONFIG_GLOBAL"] = os.devnull
+
+    def runner_git(*arguments: str) -> subprocess.CompletedProcess[str]:
+        """Run read-only Git with trust scoped to this exact validated runner."""
+        return subprocess.run(
+            ["git", "-c", f"safe.directory={runner}", "-C", str(runner), *arguments],
             env=git_environment,
             capture_output=True,
             text=True,
             check=True,
-        ).stdout.strip()
-        != config["runnerRevision"]
-    ):
+        )
+
+    if runner_git("rev-parse", "HEAD").stdout.strip() != config["runnerRevision"]:
         raise Invalid("runner HEAD")
-    if subprocess.run(
-        ["git", "-C", str(runner), "status", "--porcelain", "--untracked-files=no"],
-        env=git_environment,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout:
+    if runner_git("status", "--porcelain", "--untracked-files=no").stdout:
         raise Invalid("runner tracked state")
     if (runner / ".git/objects/info/alternates").exists():
         raise Invalid("external object store")
-    if (
-        subprocess.run(
-            ["git", "-C", str(runner), "rev-parse", "--is-shallow-repository"],
-            env=git_environment,
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip()
-        != "false"
-    ):
+    if runner_git("rev-parse", "--is-shallow-repository").stdout.strip() != "false":
         raise Invalid("shallow repository")
-    subprocess.run(
-        ["git", "-C", str(runner), "fsck", "--full"],
-        env=git_environment,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    runner_git("fsck", "--full")
     for relative, expected in files.items():
         target = runner / relative
         if target.is_symlink() or not target.is_file() or sha256(target) != expected:

@@ -53,8 +53,12 @@ already contain the exact lockfile's packages. Construction fails for a
 missing object, wrong HEAD, dirty tracked/index state, alternates, missing root store, broken
 frontend link, unusable Playwright shim/module resolution, or missing critical file. Its manifest
 records hashes for the runner, spec, workspace manifests, lockfile, selected browser contract, and
-safe browser provenance. Runner validation disables optional Git locks, including index refreshes,
-so read-only inspection cannot undo normalized access metadata during a metadata-only repair.
+safe browser provenance. Runner validation first resolves the exact revision directory, rejects
+symlinks and paths outside the configured runner root, and then gives every Git inspection
+command-scoped trust only for that resolved directory. It ignores persistent and environment-injected
+Git configuration and never writes Git configuration. Optional Git locks, including index refreshes,
+remain disabled so read-only inspection cannot undo normalized access metadata during a metadata-only
+repair. Wildcard or parent-directory trust is never used.
 
 ## 2. Validate and dry-run installation
 
