@@ -121,6 +121,12 @@ contract it passes the already validated exact executable through the pinned run
 blocks Playwright before result creation, preserves the previous metric, and therefore retains the
 existing stale-signal behavior.
 
+Runner validation resolves and confines the configured immutable runner before invoking Git. Every
+validation Git command supplies `safe.directory` only for that exact resolved runner with `git -c`
+and keeps `GIT_OPTIONAL_LOCKS=0`; it never trusts a wildcard or parent and never writes repository,
+global, or system Git configuration. This permits the unprivileged service account to validate the
+root-owned runner without changing its ownership, modes, index, or persistent Git configuration.
+
 After inspecting status, a controlled one-shot and timer activation are distinct, explicit operator
 actions; neither is performed by installation:
 

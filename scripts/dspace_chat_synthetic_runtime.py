@@ -218,6 +218,60 @@ def _rooted(root: Path, absolute: str) -> Path:
     return root / coordinate.relative_to("/")
 
 
+def validated_runner_path(config: dict) -> Path:
+    """Resolve the configured immutable runner without accepting path indirection."""
+    root_coordinate = Path(config["runnerRoot"])
+    if not root_coordinate.is_absolute() or ".." in root_coordinate.parts:
+        raise Invalid("runner path")
+    root = Path(os.path.abspath(root_coordinate))
+    runner = root / config["runnerRevision"]
+    try:
+        root_info = root.lstat()
+        runner_info = runner.lstat()
+        resolved_root = root.resolve(strict=True)
+        resolved_runner = runner.resolve(strict=True)
+        resolved_runner.relative_to(resolved_root)
+    except (OSError, RuntimeError, ValueError):
+        raise Invalid("runner path") from None
+    if (
+        not stat.S_ISDIR(root_info.st_mode)
+        or not stat.S_ISDIR(runner_info.st_mode)
+        or root != resolved_root
+        or runner != resolved_runner
+        or runner.parent != root
+    ):
+        raise Invalid("runner path")
+    return resolved_runner
+
+
+def runner_git(runner: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
+    """Run read-only Git validation with trust scoped to one validated runner."""
+    # The empty value resets any inherited multi-valued safe.directory entries.
+    command = [
+        "git",
+        "-c",
+        "safe.directory=",
+        "-c",
+        f"safe.directory={runner}",
+        "-C",
+        str(runner),
+        *arguments,
+    ]
+    environment = {**os.environ, "GIT_OPTIONAL_LOCKS": "0"}
+    environment.pop("GIT_CONFIG_PARAMETERS", None)
+    environment.pop("GIT_CONFIG_COUNT", None)
+    for key in tuple(environment):
+        if key.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")):
+            environment.pop(key)
+    return subprocess.run(
+        command,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+
 def validate_browser_contract(config: dict, runner: Path, root: Path = Path("/")) -> dict:
     """Validate and describe the explicitly selected browser without fallback."""
     contract = config["browserContract"]
@@ -277,7 +331,7 @@ def validate_browser_contract(config: dict, runner: Path, root: Path = Path("/")
 
 
 def validate_runner(config: dict) -> Path:
-    runner = Path(config["runnerRoot"]) / config["runnerRevision"]
+    runner = validated_runner_path(config)
     manifest = json.loads((runner / "sugarkube-runner-manifest.json").read_text(encoding="utf-8"))
     files = manifest.get("files")
     browser_relative = manifest.get("playwrightBrowserExecutable")
@@ -317,46 +371,15 @@ def validate_runner(config: dict) -> Path:
     git_metadata = runner / ".git"
     if git_metadata.is_symlink() or not git_metadata.is_dir():
         raise Invalid("complete Git metadata")
-    git_environment = {**os.environ, "GIT_OPTIONAL_LOCKS": "0"}
-    if (
-        subprocess.run(
-            ["git", "-C", str(runner), "rev-parse", "HEAD"],
-            env=git_environment,
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip()
-        != config["runnerRevision"]
-    ):
+    if runner_git(runner, "rev-parse", "HEAD").stdout.strip() != config["runnerRevision"]:
         raise Invalid("runner HEAD")
-    if subprocess.run(
-        ["git", "-C", str(runner), "status", "--porcelain", "--untracked-files=no"],
-        env=git_environment,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout:
+    if runner_git(runner, "status", "--porcelain", "--untracked-files=no").stdout:
         raise Invalid("runner tracked state")
     if (runner / ".git/objects/info/alternates").exists():
         raise Invalid("external object store")
-    if (
-        subprocess.run(
-            ["git", "-C", str(runner), "rev-parse", "--is-shallow-repository"],
-            env=git_environment,
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip()
-        != "false"
-    ):
+    if runner_git(runner, "rev-parse", "--is-shallow-repository").stdout.strip() != "false":
         raise Invalid("shallow repository")
-    subprocess.run(
-        ["git", "-C", str(runner), "fsck", "--full"],
-        env=git_environment,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    runner_git(runner, "fsck", "--full")
     for relative, expected in files.items():
         target = runner / relative
         if target.is_symlink() or not target.is_file() or sha256(target) != expected:

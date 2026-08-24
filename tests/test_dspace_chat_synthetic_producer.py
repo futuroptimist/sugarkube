@@ -509,6 +509,177 @@ def test_git_optional_locks_keep_validation_index_metadata_read_only(
     assert stat.S_IMODE(index.stat().st_mode) == 0o640
 
 
+def test_all_runner_git_calls_use_exact_command_scoped_trust(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, runner = runtime_runner(tmp_path)
+    calls = []
+    real_run = subprocess.run
+
+    def recording_run(argv, *args, **kwargs):
+        if argv[0] == "/usr/bin/node":
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout=str(runner / "playwright-browser/browser-executable").encode(),
+            )
+        calls.append((argv, kwargs))
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(runtime.subprocess, "run", recording_run)
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "safe.directory")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "*")
+    assert runtime.validate_runner(value) == runner
+
+    assert len(calls) == 4
+    for argv, kwargs in calls:
+        assert argv[:7] == [
+            "git",
+            "-c",
+            "safe.directory=",
+            "-c",
+            f"safe.directory={runner}",
+            "-C",
+            str(runner),
+        ]
+        assert "safe.directory=*" not in argv
+        assert kwargs["env"]["GIT_OPTIONAL_LOCKS"] == "0"
+        assert "GIT_CONFIG_COUNT" not in kwargs["env"]
+        assert "GIT_CONFIG_KEY_0" not in kwargs["env"]
+        assert "GIT_CONFIG_VALUE_0" not in kwargs["env"]
+        assert kwargs["check"] is True
+
+
+@pytest.mark.parametrize("fault", ["relative", "parent", "missing", "root-link", "runner-link"])
+def test_runner_path_is_rejected_before_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    value, runner = runtime_runner(tmp_path)
+    if fault == "relative":
+        value["runnerRoot"] = "relative"
+    elif fault == "parent":
+        value["runnerRoot"] = str(tmp_path / "unused" / ".." / "runners")
+    elif fault == "missing":
+        value["runnerRoot"] = str(tmp_path / "missing")
+    elif fault == "root-link":
+        linked = tmp_path / "linked-runners"
+        linked.symlink_to(runner.parent, target_is_directory=True)
+        value["runnerRoot"] = str(linked)
+    else:
+        moved = tmp_path / "moved-runner"
+        runner.rename(moved)
+        runner.symlink_to(moved, target_is_directory=True)
+
+    monkeypatch.setattr(
+        runtime.subprocess,
+        "run",
+        lambda *args, **kwargs: pytest.fail("invalid runner path reached subprocess execution"),
+    )
+    with pytest.raises(runtime.Invalid, match="runner path"):
+        runtime.validate_runner(value)
+
+
+def test_runner_git_failure_remains_fail_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, _ = runtime_runner(tmp_path)
+
+    def fail_git(*args, **kwargs):
+        raise subprocess.CalledProcessError(128, args[0], stderr="private remote payload")
+
+    monkeypatch.setattr(runtime, "runner_git", fail_git)
+    with pytest.raises(subprocess.CalledProcessError):
+        runtime.validate_runner(value)
+
+
+def test_command_scoped_runner_trust_does_not_persist_configuration(tmp_path: Path) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    git("init", cwd=repository)
+    global_config = tmp_path / "global.gitconfig"
+    system_config = tmp_path / "system.gitconfig"
+    environment = {
+        **os.environ,
+        "GIT_CONFIG_GLOBAL": str(global_config),
+        "GIT_CONFIG_SYSTEM": str(system_config),
+    }
+    subprocess.run(
+        ["git", "-c", f"safe.directory={repository}", "-C", str(repository), "status"],
+        env=environment,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert not global_config.exists()
+    assert not system_config.exists()
+
+
+@pytest.mark.skipif(os.geteuid() != 0, reason="requires root to exercise a distinct service uid")
+def test_validated_root_owned_runner_succeeds_as_unprivileged_service_user(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, runner = runtime_runner(tmp_path)
+    service = runtime.pwd.getpwnam("nobody")
+    browser = runner / "playwright-browser/browser-executable"
+    monkeypatch.setattr(runtime, "discover_playwright_browser", lambda _runner: browser)
+    for parent in tmp_path.parents:
+        if parent == Path("/"):
+            break
+        parent.chmod(stat.S_IMODE(parent.stat().st_mode) | 0o001)
+    for parent in (tmp_path, runner.parent):
+        parent.chmod(0o755)
+    for directory, directories, filenames in os.walk(runner):
+        Path(directory).chmod(0o755)
+        for name in directories:
+            path = Path(directory) / name
+            if not path.is_symlink():
+                path.chmod(0o755)
+        for name in filenames:
+            path = Path(directory) / name
+            if not path.is_symlink():
+                path.chmod(0o755 if os.access(path, os.X_OK) else 0o644)
+    before = {
+        str(path.relative_to(runner)): (
+            path.lstat().st_uid,
+            path.lstat().st_gid,
+            path.lstat().st_mode,
+        )
+        for path in (runner, *runner.rglob("*"))
+    }
+
+    pid = os.fork()
+    if pid == 0:
+        try:
+            os.environ["GIT_CONFIG_GLOBAL"] = "/dev/null"
+            os.environ["GIT_CONFIG_SYSTEM"] = "/dev/null"
+            os.setgroups([])
+            os.setgid(service.pw_gid)
+            os.setuid(service.pw_uid)
+            dubious = subprocess.run(
+                ["git", "-C", str(runner), "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if dubious.returncode == 0 or runtime.validate_runner(value) != runner:
+                os._exit(1)
+            os._exit(0)
+        except BaseException:
+            os._exit(2)
+    _, status = os.waitpid(pid, 0)
+    assert os.waitstatus_to_exitcode(status) == 0
+    after = {
+        str(path.relative_to(runner)): (
+            path.lstat().st_uid,
+            path.lstat().st_gid,
+            path.lstat().st_mode,
+        )
+        for path in (runner, *runner.rglob("*"))
+    }
+    assert after == before
+
+
 def test_runner_validation_still_rejects_dirty_tracked_content_without_optional_locks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
