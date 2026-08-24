@@ -463,6 +463,149 @@ def test_runner_validation_accepts_complete_independent_git_repository(
     assert runtime.validate_runner(value) == runner
 
 
+def test_every_runner_git_command_trusts_only_exact_validated_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, runner = runtime_runner(tmp_path)
+    real_run = subprocess.run
+    git_calls: list[tuple[list[str], dict[str, str]]] = []
+    hostile_git_environment = {
+        "GIT_COMMON_DIR": str(tmp_path / "common"),
+        "GIT_INDEX_FILE": str(tmp_path / "index"),
+        "GIT_OBJECT_DIRECTORY": str(tmp_path / "objects"),
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES": str(tmp_path / "alternate-objects"),
+        "GIT_SHALLOW_FILE": str(tmp_path / "shallow"),
+        "GIT_NAMESPACE": "redirected",
+        "GIT_DIR": str(tmp_path / "redirected"),
+        "GIT_WORK_TREE": str(tmp_path / "redirected-worktree"),
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "safe.directory",
+        "GIT_CONFIG_VALUE_0": "*",
+        "GIT_CONFIG_PARAMETERS": "'safe.directory'='*'",
+    }
+    for key, hostile_value in hostile_git_environment.items():
+        monkeypatch.setenv(key, hostile_value)
+    monkeypatch.setenv("SUGARKUBE_TEST_INHERITED", "preserved")
+
+    def inspect(argv, *args, **kwargs):
+        if argv[0] == "/usr/bin/node":
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout=str(runner / "playwright-browser/browser-executable").encode(),
+            )
+        git_calls.append((argv, kwargs["env"]))
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(runtime.subprocess, "run", inspect)
+    assert runtime.validate_runner(value) == runner.resolve()
+    assert len(git_calls) == 4
+    for argv, environment in git_calls:
+        assert argv[:5] == [
+            "git",
+            "-c",
+            f"safe.directory={runner.resolve()}",
+            "-C",
+            str(runner.resolve()),
+        ]
+        assert "safe.directory=*" not in argv
+        assert environment["GIT_OPTIONAL_LOCKS"] == "0"
+        assert environment["GIT_CONFIG_COUNT"] == "0"
+        assert environment["GIT_CONFIG_NOSYSTEM"] == "1"
+        assert environment["GIT_CONFIG_GLOBAL"] == os.devnull
+        assert environment["SUGARKUBE_TEST_INHERITED"] == "preserved"
+        assert set(environment) & set(hostile_git_environment) == {"GIT_CONFIG_COUNT"}
+
+
+@pytest.mark.parametrize("fault", ["missing", "relative", "parent", "symlink", "mismatch"])
+def test_runner_path_is_rejected_before_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    value, runner = runtime_runner(tmp_path)
+    if fault == "missing":
+        value["runnerRoot"] = str(tmp_path / "missing")
+    elif fault == "relative":
+        value["runnerRoot"] = "relative/runners"
+    elif fault == "parent":
+        value["runnerRoot"] = str(tmp_path / "runners" / ".." / "runners")
+    elif fault == "symlink":
+        link = tmp_path / "linked-runner"
+        runner.rename(tmp_path / "real-runner")
+        link.symlink_to(tmp_path / "real-runner", target_is_directory=True)
+        value["runnerRoot"] = str(tmp_path)
+        value["runnerRevision"] = link.name
+    else:
+        value["runnerRevision"] = "0" * 40
+
+    def reject_git(argv, *args, **kwargs):
+        if argv[0] == "git":
+            pytest.fail("Git must not execute before runner path validation")
+        return subprocess.CompletedProcess(argv, 0, stdout=b"")
+
+    monkeypatch.setattr(runtime.subprocess, "run", reject_git)
+    with pytest.raises((runtime.Invalid, OSError)):
+        runtime.validate_runner(value)
+
+
+@pytest.mark.skipif(os.geteuid() != 0, reason="requires root to drop to an unprivileged uid")
+def test_root_owned_runner_validates_as_unprivileged_user_without_mutation(tmp_path: Path) -> None:
+    value, runner = runtime_runner(tmp_path)
+    nobody = next(entry for entry in __import__("pwd").getpwall() if entry.pw_uid not in {0, 65534})
+    group = __import__("grp").getgrgid(nobody.pw_gid)
+    tmp_path.chmod(0o755)
+    for parent in tmp_path.parents:
+        if parent == Path("/tmp"):
+            break
+        parent.chmod(0o755)
+    for path in [tmp_path / "runners", *runner.rglob("*")]:
+        if not path.is_symlink():
+            path.chmod(0o755 if path.is_dir() or os.access(path, os.X_OK) else 0o644)
+    before = {
+        str(path.relative_to(tmp_path)): (
+            path.lstat().st_uid,
+            path.lstat().st_gid,
+            path.lstat().st_mode,
+        )
+        for path in [tmp_path, *tmp_path.rglob("*")]
+    }
+    config_path = tmp_path / "runtime-config.json"
+    config_path.write_text(json.dumps(value))
+    config_path.chmod(0o644)
+    browser_path = str(runner / "playwright-browser/browser-executable")
+    code = (
+        "import json, subprocess; from pathlib import Path; "
+        "from scripts import dspace_chat_synthetic_runtime as r; "
+        f"c=json.loads(Path({str(config_path)!r}).read_text()); "
+        "real_run=subprocess.run; "
+        "r.subprocess.run=lambda argv,*a,**kw: subprocess.CompletedProcess("
+        f"argv,0,stdout={browser_path!r}.encode()) if argv[0]=='/usr/bin/node' "
+        "else real_run(argv,*a,**kw); "
+        "print(r.validate_runner(c))"
+    )
+    completed = subprocess.run(
+        ["/usr/bin/python3", "-c", code],
+        cwd=ROOT,
+        env={**os.environ, "HOME": str(tmp_path / "unwritable-home")},
+        capture_output=True,
+        text=True,
+        preexec_fn=lambda: (os.setgid(group.gr_gid), os.setuid(nobody.pw_uid)),
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout
+    assert completed.stderr == ""
+    assert completed.stdout.strip() == str(runner.resolve())
+    after = {
+        str(path.relative_to(tmp_path)): (
+            path.lstat().st_uid,
+            path.lstat().st_gid,
+            path.lstat().st_mode,
+        )
+        for path in [tmp_path, *tmp_path.rglob("*")]
+        if path != config_path
+    }
+    assert {key: value for key, value in before.items() if key != "runtime-config.json"} == after
+
+
 def refresh_tracked_stat(runner: Path) -> None:
     """Make Git reconsider a tracked file without changing its bytes."""
     tracked = runner / "package.json"
@@ -522,6 +665,28 @@ def test_runner_validation_still_rejects_dirty_tracked_content_without_optional_
         return real_run(argv, *args, **kwargs)
 
     monkeypatch.setattr(runtime.subprocess, "run", fake_node)
+    with pytest.raises(runtime.Invalid, match="runner tracked state"):
+        runtime.validate_runner(value)
+
+
+def test_alternate_index_cannot_hide_dirty_real_runner_index(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, runner = runtime_runner(tmp_path)
+    alternate_index = tmp_path / "clean-index"
+    subprocess.run(
+        ["git", "read-tree", "HEAD"],
+        cwd=runner,
+        env={**os.environ, "GIT_INDEX_FILE": str(alternate_index)},
+        check=True,
+    )
+    tracked = runner / "package.json"
+    original = tracked.read_bytes()
+    tracked.write_bytes(b'{"dirty":true}\n')
+    git("add", "package.json", cwd=runner)
+    tracked.write_bytes(original)
+    monkeypatch.setenv("GIT_INDEX_FILE", str(alternate_index))
+
     with pytest.raises(runtime.Invalid, match="runner tracked state"):
         runtime.validate_runner(value)
 
