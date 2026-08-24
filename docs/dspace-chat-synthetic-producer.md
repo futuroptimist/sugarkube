@@ -54,7 +54,10 @@ missing object, wrong HEAD, dirty tracked/index state, alternates, missing root 
 frontend link, unusable Playwright shim/module resolution, or missing critical file. Its manifest
 records hashes for the runner, spec, workspace manifests, lockfile, selected browser contract, and
 safe browser provenance. Runner validation disables optional Git locks, including index refreshes,
-so read-only inspection cannot undo normalized access metadata during a metadata-only repair.
+so read-only inspection cannot undo normalized access metadata during a metadata-only repair. Each
+Git inspection trusts only the resolved, validated runner through a command-scoped
+`safe.directory` setting. It does not write repository, global, or system Git configuration, and
+never permits wildcard or parent-directory trust.
 
 ## 2. Validate and dry-run installation
 

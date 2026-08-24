@@ -463,6 +463,115 @@ def test_runner_validation_accepts_complete_independent_git_repository(
     assert runtime.validate_runner(value) == runner
 
 
+def test_all_runner_git_calls_use_exact_command_scoped_trust(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, runner = runtime_runner(tmp_path)
+    real_run = subprocess.run
+    git_calls = []
+
+    def inspect_run(argv, *args, **kwargs):
+        if argv[0] == "/usr/bin/node":
+            return subprocess.CompletedProcess(
+                argv, 0, stdout=str(runner / "playwright-browser/browser-executable").encode()
+            )
+        git_calls.append((argv, kwargs))
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(runtime.subprocess, "run", inspect_run)
+
+    assert runtime.validate_runner(value) == runner
+    assert len(git_calls) == 4
+    for argv, kwargs in git_calls:
+        assert argv[:5] == [
+            "git",
+            "-c",
+            f"safe.directory={runner}",
+            "-C",
+            str(runner),
+        ]
+        assert "safe.directory=*" not in argv
+        assert kwargs["env"]["GIT_OPTIONAL_LOCKS"] == "0"
+        assert kwargs["capture_output"] is True
+    assert "safe.directory" not in (runner / ".git/config").read_text()
+
+
+def test_command_scoped_trust_resolves_dubious_ownership_without_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, runner = runtime_runner(tmp_path)
+    index = runner / ".git/index"
+    config_path = runner / ".git/config"
+    before = (index.stat(), index.read_bytes(), config_path.read_bytes())
+    real_run = subprocess.run
+
+    def dubious_owner_git(argv, *args, **kwargs):
+        if argv[0] == "/usr/bin/node":
+            return subprocess.CompletedProcess(
+                argv, 0, stdout=str(runner / "playwright-browser/browser-executable").encode()
+            )
+        if ["-c", f"safe.directory={runner}"] != argv[1:3]:
+            raise subprocess.CalledProcessError(128, argv, stderr="dubious ownership")
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(runtime.subprocess, "run", dubious_owner_git)
+
+    assert runtime.validate_runner(value) == runner
+    after = index.stat()
+    assert (after.st_uid, after.st_gid, stat.S_IMODE(after.st_mode)) == (
+        before[0].st_uid,
+        before[0].st_gid,
+        stat.S_IMODE(before[0].st_mode),
+    )
+    assert index.read_bytes() == before[1]
+    assert config_path.read_bytes() == before[2]
+
+
+@pytest.mark.parametrize("fault", ["relative-root", "symlink-root", "symlink-runner", "escaping"])
+def test_runner_path_indirection_is_rejected_before_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    value, runner = runtime_runner(tmp_path)
+    if fault == "relative-root":
+        value["runnerRoot"] = "relative"
+    elif fault == "symlink-root":
+        root = Path(value["runnerRoot"])
+        target = tmp_path / "real-runners"
+        root.rename(target)
+        root.symlink_to(target, target_is_directory=True)
+    elif fault == "symlink-runner":
+        target = tmp_path / "real-runner"
+        runner.rename(target)
+        runner.symlink_to(target, target_is_directory=True)
+    else:
+        value["runnerRoot"] = str(Path(value["runnerRoot"]) / ".." / "runners")
+
+    monkeypatch.setattr(
+        runtime.subprocess,
+        "run",
+        lambda *args, **kwargs: pytest.fail("path validation must precede Git execution"),
+    )
+    with pytest.raises(runtime.Invalid, match="root|runner path"):
+        runtime.validate_runner(value)
+
+
+def test_runner_git_rejects_unvalidated_paths_before_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = tmp_path / "real"
+    real.mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(real, target_is_directory=True)
+    monkeypatch.setattr(
+        runtime.subprocess,
+        "run",
+        lambda *args, **kwargs: pytest.fail("unvalidated path must not reach Git"),
+    )
+    for candidate in (Path("relative"), tmp_path / "missing", alias):
+        with pytest.raises(runtime.Invalid, match="runner path"):
+            runtime._run_runner_git(candidate, "status")
+
+
 def refresh_tracked_stat(runner: Path) -> None:
     """Make Git reconsider a tracked file without changing its bytes."""
     tracked = runner / "package.json"
