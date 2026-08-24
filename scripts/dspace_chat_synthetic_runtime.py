@@ -335,15 +335,17 @@ def validate_runner(config: dict) -> Path:
     git_metadata = runner / ".git"
     if git_metadata.is_symlink() or not git_metadata.is_dir():
         raise Invalid("complete Git metadata")
-    git_environment = {**os.environ, "GIT_OPTIONAL_LOCKS": "0"}
-    for key in tuple(git_environment):
-        if key in {"GIT_DIR", "GIT_WORK_TREE", "GIT_CONFIG_PARAMETERS"} or re.fullmatch(
-            r"GIT_CONFIG_(?:KEY|VALUE)_\d+", key
-        ):
-            del git_environment[key]
-    git_environment["GIT_CONFIG_COUNT"] = "0"
-    git_environment["GIT_CONFIG_NOSYSTEM"] = "1"
-    git_environment["GIT_CONFIG_GLOBAL"] = os.devnull
+    git_environment = {
+        key: value for key, value in os.environ.items() if not key.startswith("GIT_")
+    }
+    git_environment.update(
+        {
+            "GIT_OPTIONAL_LOCKS": "0",
+            "GIT_CONFIG_COUNT": "0",
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": os.devnull,
+        }
+    )
 
     def runner_git(*arguments: str) -> subprocess.CompletedProcess[str]:
         """Run read-only Git with trust scoped to this exact validated runner."""

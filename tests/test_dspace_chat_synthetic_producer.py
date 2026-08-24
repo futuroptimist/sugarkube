@@ -469,12 +469,23 @@ def test_every_runner_git_command_trusts_only_exact_validated_directory(
     value, runner = runtime_runner(tmp_path)
     real_run = subprocess.run
     git_calls: list[tuple[list[str], dict[str, str]]] = []
-    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
-    monkeypatch.setenv("GIT_CONFIG_KEY_0", "safe.directory")
-    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "*")
-    monkeypatch.setenv("GIT_CONFIG_PARAMETERS", "'safe.directory'='*'")
-    monkeypatch.setenv("GIT_DIR", str(tmp_path / "redirected"))
-    monkeypatch.setenv("GIT_WORK_TREE", str(tmp_path / "redirected-worktree"))
+    hostile_git_environment = {
+        "GIT_COMMON_DIR": str(tmp_path / "common"),
+        "GIT_INDEX_FILE": str(tmp_path / "index"),
+        "GIT_OBJECT_DIRECTORY": str(tmp_path / "objects"),
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES": str(tmp_path / "alternate-objects"),
+        "GIT_SHALLOW_FILE": str(tmp_path / "shallow"),
+        "GIT_NAMESPACE": "redirected",
+        "GIT_DIR": str(tmp_path / "redirected"),
+        "GIT_WORK_TREE": str(tmp_path / "redirected-worktree"),
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "safe.directory",
+        "GIT_CONFIG_VALUE_0": "*",
+        "GIT_CONFIG_PARAMETERS": "'safe.directory'='*'",
+    }
+    for key, hostile_value in hostile_git_environment.items():
+        monkeypatch.setenv(key, hostile_value)
+    monkeypatch.setenv("SUGARKUBE_TEST_INHERITED", "preserved")
 
     def inspect(argv, *args, **kwargs):
         if argv[0] == "/usr/bin/node":
@@ -502,11 +513,8 @@ def test_every_runner_git_command_trusts_only_exact_validated_directory(
         assert environment["GIT_CONFIG_COUNT"] == "0"
         assert environment["GIT_CONFIG_NOSYSTEM"] == "1"
         assert environment["GIT_CONFIG_GLOBAL"] == os.devnull
-        assert "GIT_CONFIG_KEY_0" not in environment
-        assert "GIT_CONFIG_VALUE_0" not in environment
-        assert "GIT_CONFIG_PARAMETERS" not in environment
-        assert "GIT_DIR" not in environment
-        assert "GIT_WORK_TREE" not in environment
+        assert environment["SUGARKUBE_TEST_INHERITED"] == "preserved"
+        assert set(environment) & set(hostile_git_environment) == {"GIT_CONFIG_COUNT"}
 
 
 @pytest.mark.parametrize("fault", ["missing", "relative", "parent", "symlink", "mismatch"])
@@ -657,6 +665,28 @@ def test_runner_validation_still_rejects_dirty_tracked_content_without_optional_
         return real_run(argv, *args, **kwargs)
 
     monkeypatch.setattr(runtime.subprocess, "run", fake_node)
+    with pytest.raises(runtime.Invalid, match="runner tracked state"):
+        runtime.validate_runner(value)
+
+
+def test_alternate_index_cannot_hide_dirty_real_runner_index(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, runner = runtime_runner(tmp_path)
+    alternate_index = tmp_path / "clean-index"
+    subprocess.run(
+        ["git", "read-tree", "HEAD"],
+        cwd=runner,
+        env={**os.environ, "GIT_INDEX_FILE": str(alternate_index)},
+        check=True,
+    )
+    tracked = runner / "package.json"
+    original = tracked.read_bytes()
+    tracked.write_bytes(b'{"dirty":true}\n')
+    git("add", "package.json", cwd=runner)
+    tracked.write_bytes(original)
+    monkeypatch.setenv("GIT_INDEX_FILE", str(alternate_index))
+
     with pytest.raises(runtime.Invalid, match="runner tracked state"):
         runtime.validate_runner(value)
 
