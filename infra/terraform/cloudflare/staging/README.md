@@ -42,6 +42,17 @@ Never adapt the commands below to touch them.
 
 ## Repository preparation (safe now)
 
+The dependency lock supports GitHub Actions on Linux AMD64 and the `sugarkube3` operator host on
+Linux ARM64. Regenerate it from the origin registry with the pinned Terraform version and both
+platforms, then commit the result:
+
+```bash
+terraform -chdir=infra/terraform/cloudflare/staging providers lock \
+  -platform=linux_amd64 \
+  -platform=linux_arm64 \
+  registry.terraform.io/cloudflare/cloudflare
+```
+
 These credential-free checks mock the provider and disable backend initialization:
 
 ```bash
