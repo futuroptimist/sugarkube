@@ -53,7 +53,11 @@ already contain the exact lockfile's packages. Construction fails for a
 missing object, wrong HEAD, dirty tracked/index state, alternates, missing root store, broken
 frontend link, unusable Playwright shim/module resolution, or missing critical file. Its manifest
 records hashes for the runner, spec, workspace manifests, lockfile, selected browser contract, and
-safe browser provenance. Runner validation first resolves the exact revision directory, rejects
+safe browser provenance. For `system-chromium-v1`, the exact clean tracked runner configuration
+consumes `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` as Chromium's native
+`launchOptions.executablePath`; its browser-availability helper recognizes the same override and
+therefore does not attempt browser installation. Runner validation first resolves the exact revision
+directory, rejects
 symlinks and paths outside the configured runner root, and then gives every Git inspection
 command-scoped trust only for that resolved directory. It ignores persistent and environment-injected
 Git configuration and never writes Git configuration. Optional Git locks, including index refreshes,
@@ -142,8 +146,14 @@ replacement proves publication.
 
 Read status, hashes, metric timestamps, unit exit status, and bounded `outcome=` summaries first.
 Do not print credentials, Secret values, raw results, browser output, or unrestricted journals.
-Classify `preflight`, `overlap`, `timeout/launch`, `missing`, `provenance`, `malformed`, executed
-failure, or successful publication before considering any retry. Do not retry while an invocation
+When a child returns without a current result, the runtime reads at most 16 KiB of its private
+stderr only to select an allowlisted classification: browser-executable launch, Playwright
+configuration, test-before-completion, completion-publisher, or missing-result after child success
+or failure. It archives only that classification, child status, byte count, truncation flag, and
+SHA-256 under the result root; raw output is drained through a pipe, discarded beyond the bounded
+in-memory prefix, and never printed or persisted. Classify `preflight`, `overlap`,
+`timeout/launch`, `missing`, `provenance`, `malformed`, executed failure, or successful publication
+before considering any retry. Do not retry while an invocation
 may remain active and never infer success from browser exit alone.
 
 When no valid current bounded result is consumable, the previous metric is preserved byte-for-byte.

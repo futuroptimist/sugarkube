@@ -909,6 +909,67 @@ def test_runtime_plumbs_exact_system_executable_and_not_bundle(
     assert "PLAYWRIGHT_BROWSERS_PATH" not in child["env"]
 
 
+@pytest.mark.parametrize(
+    ("diagnostic", "status", "expected"),
+    [
+        (b"browserType.launch: Failed to launch browser\n", 1, "browser-executable-launch-failure"),
+        (b"Error loading config at playwright.config.ts\n", 1, "playwright-configuration-failure"),
+        (
+            b"journey completion was not confirmed; result preserved\n",
+            1,
+            "test-failure-before-completion-publication",
+        ),
+        (b"result publication failed\n", 1, "completion-publisher-failure"),
+        (b"opaque secret child failure\n", 1, "current-result-missing-after-child-failure"),
+        (b"", 0, "current-result-missing-after-child-success"),
+    ],
+)
+def test_missing_result_classification_is_allowlisted_bounded_and_sanitized(
+    tmp_path: Path, diagnostic: bytes, status: int, expected: str
+) -> None:
+    metadata_input = {
+        "stderrBytes": len(diagnostic),
+        "stderrSha256": __import__("hashlib").sha256(diagnostic).hexdigest(),
+        "stderrTruncated": False,
+    }
+    classification, metadata = runtime.classify_missing_result(diagnostic, status, metadata_input)
+
+    assert classification == expected
+    assert metadata == {
+        "stderrBytes": len(diagnostic),
+        "stderrSha256": __import__("hashlib").sha256(diagnostic).hexdigest(),
+        "stderrTruncated": False,
+    }
+    if diagnostic:
+        assert diagnostic.decode(errors="ignore") not in json.dumps(metadata)
+
+
+def test_classification_archive_survives_invocation_cleanup_without_raw_output(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "results"
+    invocation = "a" * 32
+    invocation_dir = root / f"uid-1000-{invocation}"
+    invocation_dir.mkdir(parents=True)
+    (invocation_dir / "child.stderr").write_text("credential=private raw payload")
+
+    runtime.archive_classification(
+        root,
+        invocation,
+        "browser-executable-launch-failure",
+        {"childStatus": 1, "stderrBytes": 30, "stderrSha256": "f" * 64, "stderrTruncated": False},
+    )
+    runtime.cleanup_invocation(invocation_dir)
+
+    archived = root / "classifications" / f"{invocation}.json"
+    assert archived.is_file()
+    assert stat.S_IMODE(archived.stat().st_mode) == 0o600
+    contents = archived.read_text()
+    assert "browser-executable-launch-failure" in contents
+    assert "credential" not in contents
+    assert "payload" not in contents
+
+
 def test_runtime_browser_drift_blocks_playwright_and_preserves_metric(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
