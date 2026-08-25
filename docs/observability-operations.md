@@ -95,7 +95,7 @@ APIs/CRDs were absent. No production application-metrics or blackbox lifecycle
 was verified, and current application releases predate the staging metrics integrations.
 
 The shared staging and production desired state is one Prometheus replica with
-`90d` retention and a `110GB` retention-size limit, backed by one `128Gi`
+`90d` retention and a `100GB` retention-size limit, backed by one `128Gi`
 ReadWriteOnce PVC using `local-path`. The baseline also runs one Alertmanager
 replica; production retains its null-only default receiver. The common values
 file is authoritative for retention and storage, while environment overlays
@@ -111,10 +111,11 @@ The sizing review dated **2026-08-25** measured the following:
 | Production | 937.3 GiB | 872.1 GiB | 0.55 GiB/day | 49.6 GiB | 77.5 GiB | 43.5–87.0 GiB |
 
 Time-retention deletions occurred in both environments; size-retention deletions
-were zero. Prometheus interprets its `110GB` cap as decimal bytes (about
-`102.4GiB`), so it exceeds the `96.1GiB` modeled upper bound while leaving
-approximately 20% of the `128Gi` request for the WAL, head chunks, and
-compaction.
+were zero. Prometheus [defines retention-size suffixes as powers of
+two](https://prometheus.io/docs/prometheus/latest/storage/) (`1KB = 1024B`), so
+its `100GB` cap means `100GiB`. It exceeds the `96.1GiB` modeled upper bound and
+leaves `28GiB`, or 21.875% of the `128Gi` request, outside the cap for the WAL,
+head chunks, and compaction.
 
 Each cluster has one Prometheus replica and one local-path PV. That PV is a
 directory on **one node**; capacity is neither pooled across nodes nor
@@ -143,7 +144,7 @@ A later, explicitly authorized operator migration must proceed staging first:
    `128Gi` and preserves the single-replica, RWO, local-path placement contract.
 5. Verify staging, observe it through an agreed soak period, and obtain separate
    production authorization before repeating the controlled procedure there.
-6. After each migration, verify Prometheus health; effective `90d` and `110GB`
+6. After each migration, verify Prometheus health; effective `90d` and `100GB`
    flags; the `128Gi` PVC request; unchanged PV placement contract; backing
    filesystem headroom; and retained-history age growing beyond seven days.
 
@@ -262,8 +263,10 @@ chat-synthetic fallbacks require `dspace_release_approved_info`. With the capabi
 query returns no series. The blackbox missing-data summary retains its seven-day discovery logic,
 but no blackbox history still yields `NO DATA`.
 
-Paging and alerts, persistent Grafana UI state, HA, and retention/storage changes also remain
-deferred. This dashboard provisions none of those integrations. Merging this dashboard change does
+Paging and alerts, persistent Grafana UI state, and HA remain deferred. Repository desired state
+now records the retention and storage contract, while live deployment and the existing
+`20Gi`-to-`128Gi` PVC migration remain separately authorized. This dashboard provisions none of
+those integrations. Merging this dashboard change does
 not deploy either generated artifact: staging and production each require a separate guarded Helm
 upgrade, visual acceptance, API verification, and retained evidence.
 
@@ -409,7 +412,7 @@ availability, schedulable-node capacity, availability-reason, and shared-state
 health panels remain Phase 2 work and are not presented as implemented here.
 
 - Helm release: `kube-prometheus-stack` in namespace `monitoring`.
-- Prometheus: one replica, `90d` retention, `110GB` retention size, `local-path` `ReadWriteOnce` PVC requesting `128Gi`, CPU request `200m`, memory request `512Mi`, memory limit `2Gi`, admin API disabled, and external label `cluster=sugarkube-int`.
+- Prometheus: one replica, `90d` retention, `100GB` retention size, `local-path` `ReadWriteOnce` PVC requesting `128Gi`, CPU request `200m`, memory request `512Mi`, memory limit `2Gi`, admin API disabled, and external label `cluster=sugarkube-int`.
 - Alertmanager: one replica with root/default no-op receiver named exactly
   `"null"`. The existing watchdog route, its order, and its 30-second group wait,
   one-minute group interval, and five-minute repeat interval remain preserved.

@@ -120,7 +120,7 @@ def test_chart_version_and_values_define_shared_staging_and_production_baseline(
     spec = common["prometheus"]["prometheusSpec"]
     assert spec["replicas"] == 1
     assert spec["retention"] == "90d"
-    assert spec["retentionSize"] == "110GB"
+    assert spec["retentionSize"] == "100GB"
     assert spec["enableAdminAPI"] is False
     assert spec["resources"] == {
         "requests": {"cpu": "200m", "memory": "512Mi"},
@@ -141,7 +141,7 @@ def test_chart_version_and_values_define_shared_staging_and_production_baseline(
             merged_spec["storageSpec"]["volumeClaimTemplate"]["spec"]["resources"][
                 "requests"
             ]["storage"],
-        ) == ("90d", "110GB", "128Gi")
+        ) == ("90d", "100GB", "128Gi")
     assert staging["prometheus"]["prometheusSpec"]["externalLabels"] == {"cluster": "sugarkube-int"}
     alertmanager = staging["alertmanager"]
     assert alertmanager["alertmanagerSpec"]["secrets"] == [
@@ -1190,18 +1190,25 @@ case "$*" in
       absent) printf '%s\n' '{"items":[]}' ;;
       discovery-fail) exit 52 ;;
       ambiguous) printf '%s\n' '{"items":[{"metadata":{"namespace":"monitoring","name":"prometheus-a","labels":{"app.kubernetes.io/name":"prometheus"}}},{"metadata":{"namespace":"monitoring","name":"prometheus-b","labels":{"app.kubernetes.io/name":"prometheus"}}}]}' ;;
+      incomplete) printf '%s\n' '{"items":[{"metadata":{"namespace":"monitoring","name":"prometheus-db","labels":{"app.kubernetes.io/name":"prometheus"}},"spec":{"storageClassName":"local-path"},"status":{"phase":"Bound"}}]}' ;;
       *)
         size=128Gi
         [ "$PVC_MODE" != nonexpandable-20gi ] || size=20Gi
         [ "$PVC_MODE" != expandable-mismatch ] || size=64Gi
+        [ "$PVC_MODE" != storageclass-fail ] || size=20Gi
+        [ "$PVC_MODE" != storageclass-ambiguous ] || size=20Gi
         printf '%s\n' '{"items":[{"metadata":{"namespace":"monitoring","name":"prometheus-db","labels":{"app.kubernetes.io/name":"prometheus"}},"spec":{"storageClassName":"local-path","accessModes":["ReadWriteOnce"],"resources":{"requests":{"storage":"'"$size"'"}}},"status":{"phase":"Bound"}}]}'
         ;;
     esac ;;
   *"get pvc -o json"*) printf '%s\n' '{"items":[{"metadata":{"name":"generated-pvc","labels":{"app.kubernetes.io/name":"prometheus"}},"spec":{"storageClassName":"local-path","accessModes":["ReadWriteOnce"],"resources":{"requests":{"storage":"128Gi"}}},"status":{"phase":"Bound"}}]}' ;;
   *"get storageclass local-path -o json"*)
-    [ "$PVC_MODE" != storageclass-fail ] || exit 53
+    case "$PVC_MODE" in storageclass-fail|converged-storageclass-fail) exit 53 ;; esac
+    [ "$PVC_MODE" != storageclass-ambiguous ] || { printf '%s\n' '{"allowVolumeExpansion":"maybe"}'; exit 0; }
     [ "$PVC_MODE" = expandable-mismatch ] && expansion=true || expansion=false
     printf '%s\n' '{"allowVolumeExpansion":'"$expansion"'}' ;;
+  *"get statefulset prometheus-kube-prometheus-stack-prometheus -o json"*)
+    if [ "$KUBECTL_MODE" = stale-retention ]; then retention=7d; retention_size=15GB; else retention=90d; retention_size=100GB; fi
+    printf '%s\n' '{"spec":{"template":{"spec":{"containers":[{"name":"config-reloader","args":[]},{"name":"prometheus","args":["--storage.tsdb.retention.time='"$retention"'","--storage.tsdb.retention.size='"$retention_size"'"]}]}}}}' ;;
   *"get prometheus kube-prometheus-stack-prometheus"*) echo 1 ;;
   *"get alertmanager kube-prometheus-stack-alertmanager -o yaml"*)
     if [ "$ENV_NAME" = prod ]; then printf '%s\n' 'apiVersion: monitoring.coreos.com/v1' 'kind: Alertmanager' 'metadata:' '  name: kube-prometheus-stack-alertmanager' 'spec:' '  secrets: []'; else printf '%s\n' 'apiVersion: monitoring.coreos.com/v1' 'kind: Alertmanager' 'metadata:' '  name: kube-prometheus-stack-alertmanager' 'spec:' '  secrets:' '    - alertmanager-pagerduty' '    - alertmanager-healthchecks-watchdog'; fi ;;
@@ -1667,7 +1674,17 @@ def test_mutation_accepts_absent_or_converged_pvc(tmp_path):
     assert "already matches ReadWriteOnce/local-path/128Gi" in converged.stdout
 
 
-@pytest.mark.parametrize("pvc_mode", ["absent", "discovery-fail", "ambiguous", "storageclass-fail"])
+@pytest.mark.parametrize(
+    "pvc_mode",
+    [
+        "absent",
+        "discovery-fail",
+        "ambiguous",
+        "incomplete",
+        "storageclass-fail",
+        "storageclass-ambiguous",
+    ],
+)
 def test_mutation_fails_closed_on_missing_or_ambiguous_pvc_discovery(tmp_path, pvc_mode):
     result, audit = run_helper(
         tmp_path, "upgrade", helm_mode="present", pvc_mode=pvc_mode
@@ -1676,6 +1693,32 @@ def test_mutation_fails_closed_on_missing_or_ambiguous_pvc_discovery(tmp_path, p
     assert "PVC migration required" in result.stderr
     assert "expansion_capability=unknown" in result.stderr
     assert "helm upgrade" not in audit
+    assert not re.search(r"kubectl .*\b(?:patch|delete|apply|create)\b", audit)
+
+
+def test_converged_pvc_does_not_require_storageclass_expansion_discovery(tmp_path):
+    result, audit = run_helper(
+        tmp_path, "upgrade", helm_mode="present", pvc_mode="converged-storageclass-fail"
+    )
+    assert result.returncode == 0, result.stderr
+    assert "helm upgrade" in audit
+    assert "get storageclass" not in audit
+
+
+@pytest.mark.parametrize(
+    ("kubectl_mode", "success"),
+    [("healthy", True), ("stale-retention", False)],
+)
+def test_verify_checks_effective_statefulset_retention_arguments(tmp_path, kubectl_mode, success):
+    result, audit = run_helper(tmp_path, "verify", kubectl_mode=kubectl_mode)
+    assert (result.returncode == 0) is success
+    assert "rollout status statefulset/prometheus-kube-prometheus-stack-prometheus" in audit
+    assert "get statefulset prometheus-kube-prometheus-stack-prometheus -o json" in audit
+    if success:
+        assert "retention.time=90d" not in result.stderr
+    else:
+        assert "--storage.tsdb.retention.time=90d" in result.stderr
+        assert "--storage.tsdb.retention.size=100GB" in result.stderr
 
 
 @pytest.mark.parametrize(

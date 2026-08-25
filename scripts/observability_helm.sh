@@ -264,21 +264,36 @@ release_state() {
     return 1
   fi
 }
+prometheus_expected_contract() {
+  ruby -ryaml -e '
+    def merge(left, right)
+      return right unless left.is_a?(Hash) && right.is_a?(Hash)
+      left.merge(right) { |_key, old, new| merge(old, new) }
+    end
+    values = merge(
+      YAML.safe_load_file(ARGV.fetch(0), aliases: false),
+      YAML.safe_load_file(ARGV.fetch(1), aliases: false)
+    )
+    prometheus = values.dig("prometheus", "prometheusSpec")
+    spec = prometheus&.dig("storageSpec", "volumeClaimTemplate", "spec")
+    retention = prometheus&.fetch("retention", nil)
+    retention_size = prometheus&.fetch("retentionSize", nil)
+    size = spec&.dig("resources", "requests", "storage")
+    modes = spec&.fetch("accessModes", nil)
+    storage_class = spec&.fetch("storageClassName", nil)
+    fields = [retention, retention_size, size, storage_class]
+    abort "ERROR: merged Prometheus retention/PVC contract is missing or ambiguous." unless
+      fields.all? { |value| value.is_a?(String) && !value.empty? && !value.match?(/[\t\r\n]/) } &&
+      modes.is_a?(Array) && modes == ["ReadWriteOnce"]
+    puts [retention, retention_size, size, storage_class, modes.join(",")].join("\t")
+  ' "${COMMON_VALUES}" "${ENV_VALUES}"
+}
 prometheus_pvc_preflight() (
   local operation="${1:?Prometheus PVC preflight requires an install or upgrade operation}"
-  local desired_size desired_class desired_modes pvc_json claim_data claim_name current_size current_class current_modes phase
+  local contract desired_retention desired_retention_size desired_size desired_class desired_modes pvc_json claim_data claim_name current_size current_class current_modes phase
   local storage_class_json expansion
-  read -r desired_size desired_class desired_modes < <(ruby -ryaml -e '
-    values = YAML.safe_load_file(ARGV.fetch(0), aliases: false)
-    spec = values.dig("prometheus", "prometheusSpec", "storageSpec", "volumeClaimTemplate", "spec")
-    abort "ERROR: canonical Prometheus PVC contract is missing or ambiguous." unless spec.is_a?(Hash)
-    size = spec.dig("resources", "requests", "storage")
-    modes = spec["accessModes"]
-    storage_class = spec["storageClassName"]
-    abort "ERROR: canonical Prometheus PVC contract is missing or ambiguous." unless
-      size.is_a?(String) && storage_class.is_a?(String) && modes == ["ReadWriteOnce"]
-    puts [size, storage_class, modes.join(",")].join(" ")
-  ' "${COMMON_VALUES}")
+  contract="$(prometheus_expected_contract)" || return
+  IFS=$'\t' read -r desired_retention desired_retention_size desired_size desired_class desired_modes <<<"${contract}"
 
   if ! pvc_json="$(kubectl get pvc --all-namespaces -o json)"; then
     echo "ERROR: PVC migration required: environment=${ENVIRONMENT} claim=<unknown> current_request=<unknown> desired_request=${desired_size} storage_class=<unknown> expansion_capability=unknown; PVC discovery failed, so Helm mutation is blocked." >&2
@@ -315,6 +330,11 @@ except (AttributeError, KeyError, TypeError, ValueError, json.JSONDecodeError):
   fi
   IFS=$'\t' read -r claim_name current_size current_class current_modes phase <<<"${claim_data}"
 
+  if [[ "${phase}" == Bound && "${current_size}" == "${desired_size}" && "${current_class}" == "${desired_class}" && "${current_modes}" == "${desired_modes}" ]]; then
+    echo "Prometheus PVC preflight: claim=${claim_name} already matches ${desired_modes}/${desired_class}/${desired_size}; normal Helm path permitted."
+    return 0
+  fi
+
   if ! storage_class_json="$(kubectl get storageclass "${current_class}" -o json)"; then
     expansion=unknown
   else
@@ -323,10 +343,6 @@ try:
     value=json.load(sys.stdin).get("allowVolumeExpansion")
     print("true" if value is True else "false" if value is False or value is None else "unknown")
 except (AttributeError, json.JSONDecodeError): print("unknown")' <<<"${storage_class_json}")"
-  fi
-  if [[ "${phase}" == Bound && "${current_size}" == "${desired_size}" && "${current_class}" == "${desired_class}" && "${current_modes}" == "${desired_modes}" && "${expansion}" != unknown ]]; then
-    echo "Prometheus PVC preflight: claim=${claim_name} already matches ${desired_modes}/${desired_class}/${desired_size}; normal Helm path permitted."
-    return 0
   fi
   echo "ERROR: PVC migration required: environment=${ENVIRONMENT} claim=${claim_name} current_request=${current_size} desired_request=${desired_size} storage_class=${current_class} expansion_capability=${expansion}; expected Bound ${desired_modes}/${desired_class}. Helm mutation is blocked; perform only a separately authorized controlled PVC migration." >&2
   return 20
@@ -729,6 +745,24 @@ verify() (
     kubectl -n "${NAMESPACE}" rollout status "${workload}" --timeout="${TIMEOUT}"
   done
 
+  local contract desired_retention desired_retention_size desired_size desired_class desired_modes
+  contract="$(prometheus_expected_contract)" || return
+  IFS=$'\t' read -r desired_retention desired_retention_size desired_size desired_class desired_modes <<<"${contract}"
+  kubectl -n "${NAMESPACE}" get statefulset prometheus-kube-prometheus-stack-prometheus -o json | \
+    python3 -c 'import json, sys
+try:
+    document = json.load(sys.stdin)
+    containers = document["spec"]["template"]["spec"]["containers"]
+    prometheus = [item for item in containers if item.get("name") == "prometheus"]
+    if len(prometheus) != 1 or not isinstance(prometheus[0].get("args"), list): raise TypeError
+    args = prometheus[0]["args"]
+    expected = [f"--storage.tsdb.retention.time={sys.argv[1]}", f"--storage.tsdb.retention.size={sys.argv[2]}"]
+    effective = [arg for arg in args if isinstance(arg, str) and (arg.startswith("--storage.tsdb.retention.time=") or arg.startswith("--storage.tsdb.retention.size="))]
+    if len(effective) != 2 or sorted(effective) != sorted(expected): raise ValueError
+except (AttributeError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+    raise SystemExit(f"ERROR: Prometheus StatefulSet must contain exactly --storage.tsdb.retention.time={sys.argv[1]} and --storage.tsdb.retention.size={sys.argv[2]}.")' \
+      "${desired_retention}" "${desired_retention_size}"
+
   read -r desired_ne ready_ne < <(kubectl -n "${NAMESPACE}" get daemonset kube-prometheus-stack-prometheus-node-exporter -o jsonpath='{.status.desiredNumberScheduled}{" "}{.status.numberReady}{"\n"}')
   [[ "${ready_ne}" == "${desired_ne}" && ( ( "$ENVIRONMENT" == staging && "$desired_ne" == 3 ) || ( "$ENVIRONMENT" == prod && "$desired_ne" =~ ^[1-9][0-9]*$ ) ) ]] || {
     echo "ERROR: node-exporter daemonset has ${ready_ne:-0}/${desired_ne:-0} ready pods." >&2
@@ -737,8 +771,8 @@ verify() (
   kubectl -n "${NAMESPACE}" get pvc -o json | python3 -c 'import json, sys
 items = json.load(sys.stdin).get("items", [])
 claims = [item for item in items if item.get("metadata", {}).get("labels", {}).get("app.kubernetes.io/name") == "prometheus"]
-if len(claims) != 1 or claims[0].get("status", {}).get("phase") != "Bound" or claims[0].get("spec", {}).get("storageClassName") != "local-path" or claims[0].get("spec", {}).get("accessModes") != ["ReadWriteOnce"] or claims[0].get("spec", {}).get("resources", {}).get("requests", {}).get("storage") != "128Gi":
-    raise SystemExit("ERROR: expected one Bound RWO 128Gi local-path Prometheus PVC.")'
+if len(claims) != 1 or claims[0].get("status", {}).get("phase") != "Bound" or claims[0].get("spec", {}).get("storageClassName") != sys.argv[2] or claims[0].get("spec", {}).get("accessModes") != sys.argv[3].split(",") or claims[0].get("spec", {}).get("resources", {}).get("requests", {}).get("storage") != sys.argv[1]:
+    raise SystemExit(f"ERROR: expected one Bound {sys.argv[3]} {sys.argv[1]} {sys.argv[2]} Prometheus PVC.")' "${desired_size}" "${desired_class}" "${desired_modes}"
   [[ "$(kubectl -n "${NAMESPACE}" get prometheus kube-prometheus-stack-prometheus -o jsonpath='{.spec.replicas}')" == 1 ]]
   [[ "$(kubectl -n "${NAMESPACE}" get alertmanager kube-prometheus-stack-alertmanager -o jsonpath='{.spec.replicas}')" == 1 ]]
   assert_grafana_secret
