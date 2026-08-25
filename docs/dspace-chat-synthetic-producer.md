@@ -123,7 +123,11 @@ Immediately before every child launch the runtime revalidates the selected contr
 contract it passes the already validated exact executable through the pinned runner's supported
 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`; it does not hash one binary while launching another. Drift
 blocks Playwright before result creation, preserves the previous metric, and therefore retains the
-existing stale-signal behavior.
+existing stale-signal behavior. The runner manifest hashes `frontend/playwright.config.ts` as a
+critical file, binding that environment variable to Playwright's native
+`use.launchOptions.executablePath` setting without changing the pinned DSPACE worktree or index.
+Every invocation also sets `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`; neither browser contract may
+acquire a browser while the synthetic is running.
 
 After inspecting status, a controlled one-shot and timer activation are distinct, explicit operator
 actions; neither is performed by installation:

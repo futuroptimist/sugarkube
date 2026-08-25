@@ -37,6 +37,7 @@ ASSET_REVISION = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 CRITICAL = (
     "scripts/run-remote-chat-smoke.mjs",
     "scripts/remote-chat-smoke-completion.mjs",
+    "frontend/playwright.config.ts",
     "frontend/e2e/remote-chat-smoke.spec.ts",
     "package.json",
     "frontend/package.json",

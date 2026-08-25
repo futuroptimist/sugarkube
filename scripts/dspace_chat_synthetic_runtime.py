@@ -373,6 +373,7 @@ def validate_runner(config: dict) -> Path:
     required = {
         "scripts/run-remote-chat-smoke.mjs",
         "scripts/remote-chat-smoke-completion.mjs",
+        "frontend/playwright.config.ts",
         "frontend/e2e/remote-chat-smoke.spec.ts",
         "package.json",
         "frontend/package.json",
@@ -526,6 +527,11 @@ def run(config: dict) -> int:
                     "LC_ALL": "C.UTF-8",
                     "LOGNAME": account.pw_name,
                     "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                    # Invocation-time browser acquisition is forbidden for both
+                    # explicit contracts.  The system contract's pinned config
+                    # consumes the validated executable override; the bundled
+                    # contract uses only its validated runner-local bundle.
+                    "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD": "1",
                     "USER": account.pw_name,
                 }
                 if browser["name"] == RUNNER_LOCAL:

@@ -398,6 +398,7 @@ def runtime_runner(tmp_path: Path) -> tuple[dict, Path]:
     required = {
         "scripts/run-remote-chat-smoke.mjs": "// runner\n",
         "scripts/remote-chat-smoke-completion.mjs": "// completion\n",
+        "frontend/playwright.config.ts": "// native launch configuration\n",
         "frontend/e2e/remote-chat-smoke.spec.ts": "// smoke\n",
         "package.json": "{}\n",
         "frontend/package.json": "{}\n",
@@ -876,6 +877,7 @@ def test_runtime_run_uses_minimal_environment_and_cleans_direct_entries(
     assert runtime.run(value) == 0
     child = next(call for call in calls if call["argv"][0] == "runuser")
     assert "SECRET_PARENT_TOKEN" not in child["env"]
+    assert child["env"]["PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD"] == "1"
     assert child["env"]["PLAYWRIGHT_BROWSERS_PATH"].endswith("playwright-browser")
     separator = child["argv"].index("--")
     node_argv = child["argv"][separator + 1 :]
@@ -906,6 +908,7 @@ def test_runtime_plumbs_exact_system_executable_and_not_bundle(
     assert runtime.run(value) == 0
     child = next(call for call in calls if call["argv"][0] == "runuser")
     assert child["env"]["PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH"] == provenance["executablePath"]
+    assert child["env"]["PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD"] == "1"
     assert "PLAYWRIGHT_BROWSERS_PATH" not in child["env"]
 
 
