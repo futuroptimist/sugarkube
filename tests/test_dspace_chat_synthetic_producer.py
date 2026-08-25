@@ -9,6 +9,7 @@ import platform
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -1012,10 +1013,54 @@ def test_bounded_stderr_run_waits_for_complete_diagnostic_metadata() -> None:
         "stderrBytes": len(diagnostic),
         "stderrSha256": __import__("hashlib").sha256(diagnostic).hexdigest(),
         "stderrTruncated": True,
+        "stderrCaptureComplete": True,
     }
     serialized = json.dumps(metadata)
     assert diagnostic[:32].decode() not in serialized
     assert diagnostic[-32:].decode() not in serialized
+
+
+def test_bounded_stderr_run_returns_when_descendant_retains_stderr(tmp_path: Path) -> None:
+    pid_path = tmp_path / "descendant.pid"
+    started = time.monotonic()
+    try:
+        completed, captured, metadata = runtime.bounded_stderr_run(
+            [
+                "/usr/bin/python3",
+                "-c",
+                (
+                    "import subprocess, sys; "
+                    f"child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)']); "
+                    f"open({str(pid_path)!r}, 'w').write(str(child.pid))"
+                ),
+            ]
+        )
+
+        assert completed.returncode == 0
+        assert time.monotonic() - started < runtime.STDERR_DRAIN_GRACE_SECONDS + 1
+        assert captured == b""
+        assert metadata == {
+            "stderrBytes": 0,
+            "stderrSha256": __import__("hashlib").sha256(b"").hexdigest(),
+            "stderrTruncated": False,
+            "stderrCaptureComplete": False,
+        }
+        assert set(metadata) == {
+            "stderrBytes",
+            "stderrSha256",
+            "stderrTruncated",
+            "stderrCaptureComplete",
+        }
+    finally:
+        if pid_path.exists():
+            descendant_pid = int(pid_path.read_text())
+            os.kill(descendant_pid, 9)
+            for _ in range(100):
+                try:
+                    os.kill(descendant_pid, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.01)
 
 
 def test_missing_result_keeps_metric_cleans_invocation_and_bounds_latest_evidence(

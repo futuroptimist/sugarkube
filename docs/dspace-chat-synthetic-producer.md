@@ -155,10 +155,14 @@ When a child returns without a current result, the runtime reads at most 16 KiB 
 stderr only to select an allowlisted classification: browser-executable launch, Playwright
 configuration, test-before-completion, completion-publisher, or missing-result after child success
 or failure. It archives only that classification, invocation ID, child status, byte count,
-truncation flag, and SHA-256 in an atomically replaced, root-only `latest-classification.json` under
+truncation and capture-complete flags, and SHA-256 in an atomically replaced, root-only
+`latest-classification.json` under
 the result root. Only the latest failure is retained, and invocation cleanup cannot remove it. Raw
 output is drained through a pipe, discarded beyond the bounded
-in-memory prefix, and never printed or persisted. Classify `preflight`, `overlap`,
+in-memory prefix, and never printed or persisted. The drain receives a bounded grace period; when
+a descendant retains the pipe, `stderrCaptureComplete` is false and the byte count, truncation
+flag, and SHA-256 describe only the immutable bytes captured when that grace period ended. Classify
+`preflight`, `overlap`,
 `timeout/launch`, `missing`, `provenance`, `malformed`, executed failure, or successful publication
 before considering any retry. Do not retry while an invocation
 may remain active and never infer success from browser exit alone.

@@ -30,6 +30,7 @@ SERVICE_IDENTIFIER = re.compile(r"[a-z_][a-z0-9_-]{0,31}")
 MAX_RESULT_BYTES = 16 * 1024
 MAX_BROWSER_PATH_BYTES = 4096
 MAX_CHILD_DIAGNOSTIC_BYTES = 16 * 1024
+STDERR_DRAIN_GRACE_SECONDS = 0.25
 REQUIRED = {
     "runnerRevision",
     "dspaceOrigin",
@@ -502,31 +503,39 @@ def bounded_stderr_run(
     captured = bytearray()
     digest = hashlib.sha256()
     count = 0
+    capture_lock = threading.Lock()
 
     def drain() -> None:
         nonlocal count
         with os.fdopen(read_fd, "rb", closefd=True) as stream:
             for block in iter(lambda: stream.read(8192), b""):
-                count += len(block)
-                digest.update(block)
-                remaining = MAX_CHILD_DIAGNOSTIC_BYTES - len(captured)
-                if remaining > 0:
-                    captured.extend(block[:remaining])
+                with capture_lock:
+                    count += len(block)
+                    digest.update(block)
+                    remaining = MAX_CHILD_DIAGNOSTIC_BYTES - len(captured)
+                    if remaining > 0:
+                        captured.extend(block[:remaining])
 
-    reader = threading.Thread(target=drain)
+    reader = threading.Thread(target=drain, daemon=True)
     reader.start()
     try:
         with os.fdopen(write_fd, "wb", closefd=True) as stream:
             completed = subprocess.run(argv, stderr=stream, **kwargs)
     finally:
-        reader.join()
+        reader.join(STDERR_DRAIN_GRACE_SECONDS)
+    with capture_lock:
+        capture_complete = not reader.is_alive()
+        captured_snapshot = bytes(captured)
+        count_snapshot = count
+        digest_snapshot = digest.hexdigest()
     return (
         completed,
-        bytes(captured),
+        captured_snapshot,
         {
-            "stderrBytes": count,
-            "stderrSha256": digest.hexdigest(),
-            "stderrTruncated": count > MAX_CHILD_DIAGNOSTIC_BYTES,
+            "stderrBytes": count_snapshot,
+            "stderrSha256": digest_snapshot,
+            "stderrTruncated": count_snapshot > MAX_CHILD_DIAGNOSTIC_BYTES,
+            "stderrCaptureComplete": capture_complete,
         },
     )
 
