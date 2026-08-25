@@ -121,7 +121,10 @@ binds the path to systemd's exact 32-hex
 `INVOCATION_ID` and UTC epoch start/end window. It cleans only that invocation's path.
 Immediately before every child launch the runtime revalidates the selected contract. For the system
 contract it passes the already validated exact executable through the pinned runner's supported
-`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`; it does not hash one binary while launching another. Drift
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`. The pinned runner's tracked
+`frontend/playwright.config.ts` consumes that value as Chromium's native
+`launchOptions.executablePath`; the runner manifest hashes that configuration alongside the smoke
+entrypoint and completion publisher. It therefore does not hash one binary while launching another. Drift
 blocks Playwright before result creation, preserves the previous metric, and therefore retains the
 existing stale-signal behavior.
 
@@ -142,6 +145,10 @@ replacement proves publication.
 
 Read status, hashes, metric timestamps, unit exit status, and bounded `outcome=` summaries first.
 Do not print credentials, Secret values, raw results, browser output, or unrestricted journals.
+Missing-result summaries use only allowlisted, bounded classifications: browser executable launch,
+Playwright configuration, test failure before completion publication, completion publisher failure,
+or missing current result after child success/failure. Raw child output is discarded and is never
+printed; only the classification and numeric child status remain in the bounded invocation summary.
 Classify `preflight`, `overlap`, `timeout/launch`, `missing`, `provenance`, `malformed`, executed
 failure, or successful publication before considering any retry. Do not retry while an invocation
 may remain active and never infer success from browser exit alone.

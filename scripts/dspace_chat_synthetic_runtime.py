@@ -28,6 +28,8 @@ APPROVED_TOKEN_PLACE_MODEL = "qwen3-8b-instruct"
 SERVICE_IDENTIFIER = re.compile(r"[a-z_][a-z0-9_-]{0,31}")
 MAX_RESULT_BYTES = 16 * 1024
 MAX_BROWSER_PATH_BYTES = 4096
+MAX_CHILD_DIAGNOSTIC_BYTES = 16 * 1024
+MAX_PLAYWRIGHT_CONFIG_BYTES = 256 * 1024
 REQUIRED = {
     "runnerRevision",
     "dspaceOrigin",
@@ -374,6 +376,7 @@ def validate_runner(config: dict) -> Path:
         "scripts/run-remote-chat-smoke.mjs",
         "scripts/remote-chat-smoke-completion.mjs",
         "frontend/e2e/remote-chat-smoke.spec.ts",
+        "frontend/playwright.config.ts",
         "package.json",
         "frontend/package.json",
         "pnpm-workspace.yaml",
@@ -381,6 +384,25 @@ def validate_runner(config: dict) -> Path:
     }
     if not required <= files.keys():
         raise Invalid("critical file manifest")
+    if config["browserContract"]["name"] == SYSTEM_CHROMIUM:
+        playwright_config = runner / "frontend/playwright.config.ts"
+        if playwright_config.stat().st_size > MAX_PLAYWRIGHT_CONFIG_BYTES:
+            raise Invalid("Playwright system browser configuration")
+        configuration = playwright_config.read_text(encoding="utf-8")
+        executable_assignment = re.compile(
+            r"const\s+chromiumExecutable\s*=\s*"
+            r"process\.env\.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH\s*&&\s*"
+            r"process\.env\.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH\.trim\(\)\s*;"
+        )
+        native_launch = re.compile(
+            r"launchOptions\s*:\s*\{\s*"
+            r"executablePath\s*:\s*chromiumExecutable\s*\|\|\s*undefined\s*,"
+        )
+        if (
+            len(executable_assignment.findall(configuration)) != 1
+            or len(native_launch.findall(configuration)) != 1
+        ):
+            raise Invalid("Playwright system browser configuration")
     if not (runner / "node_modules/.pnpm").is_dir():
         raise Invalid("root pnpm store")
     cli = runner / "frontend/node_modules/.bin/playwright"
@@ -455,6 +477,40 @@ def cleanup_invocation(invocation_dir: Path) -> None:
         invocation_dir.rmdir()
     except OSError:
         pass
+
+
+def classify_missing_result(returncode: int, stderr: bytes) -> str:
+    """Classify a missing result from bounded child diagnostics without exposing them."""
+    bounded = stderr[-MAX_CHILD_DIAGNOSTIC_BYTES:]
+    if any(
+        marker in bounded
+        for marker in (
+            b"browserType.launch",
+            b"Executable doesn't exist",
+            b"Failed to launch",
+            b"Browser closed",
+        )
+    ):
+        return "browser-executable-launch-failure"
+    if any(
+        marker in bounded
+        for marker in (
+            b"playwright.config",
+            b"Configuration file",
+            b"Cannot find module",
+            b"No tests found",
+        )
+    ):
+        return "playwright-configuration-failure"
+    if b"result publication failed" in bounded:
+        return "completion-publisher-failure"
+    if b"journey completion was not confirmed" in bounded:
+        return "test-failure-before-completion-publication"
+    return (
+        "missing-current-result-after-child-success"
+        if returncode == 0
+        else "missing-current-result-after-child-failure"
+    )
 
 
 def run(config: dict) -> int:
@@ -536,7 +592,7 @@ def run(config: dict) -> int:
                     ["runuser", "--user", config["serviceAccount"], "--", *argv],
                     cwd=runner,
                     stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
                     env=child_env,
                     timeout=config["timeoutSeconds"],
                     check=False,
@@ -545,7 +601,16 @@ def run(config: dict) -> int:
                 try:
                     payload = read_result(result, account.pw_uid, account.pw_gid)
                 except FileNotFoundError:
-                    raise Invalid("current result missing")
+                    classification = classify_missing_result(
+                        completed.returncode,
+                        completed.stderr if isinstance(completed.stderr, bytes) else b"",
+                    )
+                    print(
+                        f"invocation={invocation} outcome=preserved "
+                        f"reason=current-result-missing classification={classification} "
+                        f"child_status={completed.returncode} start={started} end={ended}"
+                    )
+                    return 1
                 expected_keys = {
                     "schemaVersion",
                     "journey",

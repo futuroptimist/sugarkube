@@ -399,6 +399,13 @@ def runtime_runner(tmp_path: Path) -> tuple[dict, Path]:
         "scripts/run-remote-chat-smoke.mjs": "// runner\n",
         "scripts/remote-chat-smoke-completion.mjs": "// completion\n",
         "frontend/e2e/remote-chat-smoke.spec.ts": "// smoke\n",
+        "frontend/playwright.config.ts": (
+            "const chromiumExecutable = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH &&\n"
+            "  process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH.trim();\n"
+            "export default {projects: [{name: 'chromium', use: {launchOptions: {\n"
+            "  executablePath: chromiumExecutable || undefined,\n"
+            "}}}]};\n"
+        ),
         "package.json": "{}\n",
         "frontend/package.json": "{}\n",
         "pnpm-workspace.yaml": "packages: []\n",
@@ -927,6 +934,52 @@ def test_runtime_browser_drift_blocks_playwright_and_preserves_metric(
     assert runtime.run(value) == 1
     assert metric.read_bytes() == b"previous metric\n"
     assert not any(call["argv"][0] == "runuser" for call in calls)
+
+
+@pytest.mark.parametrize(
+    ("diagnostic", "status", "expected"),
+    [
+        (b"browserType.launch: Failed to launch chromium", 1, "browser-executable-launch-failure"),
+        (b"playwright.config.ts: Cannot find module", 1, "playwright-configuration-failure"),
+        (
+            b"journey completion was not confirmed; result preserved",
+            1,
+            "test-failure-before-completion-publication",
+        ),
+        (b"result publication failed", 1, "completion-publisher-failure"),
+        (b"unrecognized and private", 0, "missing-current-result-after-child-success"),
+        (b"unrecognized and private", 1, "missing-current-result-after-child-failure"),
+    ],
+)
+def test_missing_result_classification_is_allowlisted_and_bounded(
+    diagnostic: bytes, status: int, expected: str
+) -> None:
+    secret_prefix = b"credential=must-not-escape\n" * (runtime.MAX_CHILD_DIAGNOSTIC_BYTES + 1)
+    assert runtime.classify_missing_result(status, secret_prefix + diagnostic) == expected
+
+
+def test_browser_launch_failure_preserves_metric_and_prints_only_classification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    value, metric, _sibling, _calls = prepare_runtime_run(tmp_path, monkeypatch, "missing")
+    real_fake = runtime.subprocess.run
+
+    def classified_run(argv, **kwargs):
+        completed = real_fake(argv, **kwargs)
+        if argv[0] == "runuser":
+            completed.stderr = b"credential=must-not-escape\nbrowserType.launch: Failed to launch"
+            completed.returncode = 1
+        return completed
+
+    monkeypatch.setattr(runtime.subprocess, "run", classified_run)
+    assert runtime.run(value) == 1
+    output = capsys.readouterr().out
+    assert "reason=current-result-missing" in output
+    assert "classification=browser-executable-launch-failure" in output
+    assert "child_status=1" in output
+    assert "credential" not in output
+    assert metric.read_bytes() == b"previous metric\n"
+    assert not (Path(value["resultRoot"]) / f"uid-{os.getuid()}-{'a' * 32}").exists()
 
 
 @pytest.mark.parametrize(
