@@ -38,6 +38,8 @@ CRITICAL = (
     "scripts/run-remote-chat-smoke.mjs",
     "scripts/remote-chat-smoke-completion.mjs",
     "frontend/e2e/remote-chat-smoke.spec.ts",
+    "frontend/playwright.config.ts",
+    "frontend/scripts/utils/ensure-playwright-browsers.js",
     "package.json",
     "frontend/package.json",
     "pnpm-workspace.yaml",

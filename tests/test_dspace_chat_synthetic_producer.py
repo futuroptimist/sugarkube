@@ -9,6 +9,7 @@ import platform
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -399,6 +400,8 @@ def runtime_runner(tmp_path: Path) -> tuple[dict, Path]:
         "scripts/run-remote-chat-smoke.mjs": "// runner\n",
         "scripts/remote-chat-smoke-completion.mjs": "// completion\n",
         "frontend/e2e/remote-chat-smoke.spec.ts": "// smoke\n",
+        "frontend/playwright.config.ts": "// Playwright config\n",
+        "frontend/scripts/utils/ensure-playwright-browsers.js": "// browser helper\n",
         "package.json": "{}\n",
         "frontend/package.json": "{}\n",
         "pnpm-workspace.yaml": "packages: []\n",
@@ -877,6 +880,8 @@ def test_runtime_run_uses_minimal_environment_and_cleans_direct_entries(
     child = next(call for call in calls if call["argv"][0] == "runuser")
     assert "SECRET_PARENT_TOKEN" not in child["env"]
     assert child["env"]["PLAYWRIGHT_BROWSERS_PATH"].endswith("playwright-browser")
+    assert child["env"]["PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD"] == "1"
+    assert "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH" not in child["env"]
     separator = child["argv"].index("--")
     node_argv = child["argv"][separator + 1 :]
     assert node_argv[0] == "/usr/bin/node"
@@ -906,7 +911,192 @@ def test_runtime_plumbs_exact_system_executable_and_not_bundle(
     assert runtime.run(value) == 0
     child = next(call for call in calls if call["argv"][0] == "runuser")
     assert child["env"]["PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH"] == provenance["executablePath"]
+    assert child["env"]["PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD"] == "1"
     assert "PLAYWRIGHT_BROWSERS_PATH" not in child["env"]
+
+
+@pytest.mark.parametrize(
+    ("diagnostic", "status", "expected"),
+    [
+        (b"browserType.launch: Failed to launch browser\n", 1, "browser-executable-launch-failure"),
+        (
+            b"browser has been closed during the journey\n",
+            1,
+            "current-result-missing-after-child-failure",
+        ),
+        (b"Error loading config at playwright.config.ts\n", 1, "playwright-configuration-failure"),
+        (
+            b"journey completion was not confirmed; result preserved\n",
+            1,
+            "test-failure-before-completion-publication",
+        ),
+        (b"result publication failed\n", 1, "completion-publisher-failure"),
+        (b"opaque secret child failure\n", 1, "current-result-missing-after-child-failure"),
+        (b"", 0, "current-result-missing-after-child-success"),
+    ],
+)
+def test_missing_result_classification_is_allowlisted_bounded_and_sanitized(
+    tmp_path: Path, diagnostic: bytes, status: int, expected: str
+) -> None:
+    metadata_input = {
+        "stderrBytes": len(diagnostic),
+        "stderrSha256": __import__("hashlib").sha256(diagnostic).hexdigest(),
+        "stderrTruncated": False,
+    }
+    classification, metadata = runtime.classify_missing_result(diagnostic, status, metadata_input)
+
+    assert classification == expected
+    assert metadata == {
+        "stderrBytes": len(diagnostic),
+        "stderrSha256": __import__("hashlib").sha256(diagnostic).hexdigest(),
+        "stderrTruncated": False,
+    }
+    if diagnostic:
+        assert diagnostic.decode(errors="ignore") not in json.dumps(metadata)
+
+
+def test_classification_archive_survives_invocation_cleanup_without_raw_output(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "results"
+    invocation = "a" * 32
+    invocation_dir = root / f"uid-1000-{invocation}"
+    invocation_dir.mkdir(parents=True)
+    (invocation_dir / "child.stderr").write_text("credential=private raw payload")
+
+    runtime.archive_classification(
+        root,
+        invocation,
+        "browser-executable-launch-failure",
+        {"childStatus": 1, "stderrBytes": 30, "stderrSha256": "f" * 64, "stderrTruncated": False},
+    )
+    runtime.cleanup_invocation(invocation_dir)
+
+    archived = root / "latest-classification.json"
+    assert archived.is_file()
+    assert stat.S_IMODE(archived.stat().st_mode) == 0o600
+    contents = archived.read_text()
+    assert "browser-executable-launch-failure" in contents
+    assert "credential" not in contents
+    assert "payload" not in contents
+
+
+def test_classification_archive_replaces_prior_record_without_growth(tmp_path: Path) -> None:
+    root = tmp_path / "results"
+    root.mkdir()
+    for digit in ("a", "b"):
+        runtime.archive_classification(
+            root,
+            digit * 32,
+            "current-result-missing-after-child-failure",
+            {"childStatus": 1},
+        )
+    records = list(root.glob("*classification*.json"))
+    assert records == [root / "latest-classification.json"]
+    assert json.loads(records[0].read_text())["invocation"] == "b" * 32
+
+
+def test_bounded_stderr_run_waits_for_complete_diagnostic_metadata() -> None:
+    diagnostic = b"diagnostic" * (runtime.MAX_CHILD_DIAGNOSTIC_BYTES // 2)
+
+    completed, captured, metadata = runtime.bounded_stderr_run(
+        [
+            sys.executable,
+            "-S",
+            "-c",
+            f"import sys; sys.stderr.buffer.write({diagnostic!r})",
+        ]
+    )
+
+    assert completed.returncode == 0
+    assert captured == diagnostic[: runtime.MAX_CHILD_DIAGNOSTIC_BYTES]
+    assert metadata == {
+        "stderrBytes": len(diagnostic),
+        "stderrSha256": __import__("hashlib").sha256(diagnostic).hexdigest(),
+        "stderrTruncated": True,
+        "stderrCaptureComplete": True,
+    }
+    serialized = json.dumps(metadata)
+    assert diagnostic[:32].decode() not in serialized
+    assert diagnostic[-32:].decode() not in serialized
+
+
+def test_bounded_stderr_run_returns_when_descendant_retains_stderr(tmp_path: Path) -> None:
+    pid_path = tmp_path / "descendant.pid"
+    started = time.monotonic()
+    try:
+        completed, captured, metadata = runtime.bounded_stderr_run(
+            [
+                sys.executable,
+                "-S",
+                "-c",
+                (
+                    "import subprocess, sys; "
+                    f"child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)']); "
+                    f"open({str(pid_path)!r}, 'w').write(str(child.pid))"
+                ),
+            ]
+        )
+
+        assert completed.returncode == 0
+        assert time.monotonic() - started < runtime.STDERR_DRAIN_GRACE_SECONDS + 1
+        assert captured == b""
+        assert metadata == {
+            "stderrBytes": 0,
+            "stderrSha256": __import__("hashlib").sha256(b"").hexdigest(),
+            "stderrTruncated": False,
+            "stderrCaptureComplete": False,
+        }
+        assert set(metadata) == {
+            "stderrBytes",
+            "stderrSha256",
+            "stderrTruncated",
+            "stderrCaptureComplete",
+        }
+    finally:
+        if pid_path.exists():
+            descendant_pid = int(pid_path.read_text())
+            os.kill(descendant_pid, 9)
+            for _ in range(100):
+                try:
+                    os.kill(descendant_pid, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.01)
+
+
+def test_missing_result_keeps_metric_cleans_invocation_and_bounds_latest_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, metric, _sibling, _calls = prepare_runtime_run(tmp_path, monkeypatch, "missing")
+    diagnostic = b"credential=private payload=" + b"x" * (runtime.MAX_CHILD_DIAGNOSTIC_BYTES + 1024)
+    metadata = {
+        "stderrBytes": len(diagnostic),
+        "stderrSha256": __import__("hashlib").sha256(diagnostic).hexdigest(),
+        "stderrTruncated": True,
+    }
+
+    def failed_child(argv, **_kwargs):
+        return (
+            subprocess.CompletedProcess(argv, 1),
+            diagnostic[: runtime.MAX_CHILD_DIAGNOSTIC_BYTES],
+            metadata,
+        )
+
+    monkeypatch.setattr(runtime, "bounded_stderr_run", failed_child)
+    for invocation in ("a" * 32, "c" * 32):
+        monkeypatch.setenv("INVOCATION_ID", invocation)
+        assert runtime.run(value) == 1
+        assert not (Path(value["resultRoot"]) / f"uid-{os.getuid()}-{invocation}").exists()
+
+    assert metric.read_bytes() == b"previous metric\n"
+    records = list(Path(value["resultRoot"]).glob("*classification*.json"))
+    assert records == [Path(value["resultRoot"]) / "latest-classification.json"]
+    contents = records[0].read_text()
+    assert json.loads(contents)["invocation"] == "c" * 32
+    assert "credential" not in contents
+    assert "payload" not in contents
+    assert "private" not in contents
 
 
 def test_runtime_browser_drift_blocks_playwright_and_preserves_metric(
@@ -1045,6 +1235,13 @@ def materialization_fixture(tmp_path: Path) -> tuple[Path, str, Path, Path]:
         target.parent.mkdir(parents=True, exist_ok=True)
         if not target.exists():
             target.write_text("{}\n" if target.suffix == ".json" else "fixture\n")
+    (source / "frontend/playwright.config.ts").write_text(
+        "import { defineConfig } from '@playwright/test';\n"
+        "const chromiumExecutable = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH && "
+        "process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH.trim();\n"
+        "export default defineConfig({ projects: [{ name: 'chromium', use: { "
+        "launchOptions: { executablePath: chromiumExecutable || undefined } } }] });\n"
+    )
     git("add", ".", cwd=source)
     git("commit", "-m", "runner files", cwd=source)
     revision = git("rev-parse", "HEAD", cwd=source)
@@ -1069,6 +1266,40 @@ def materialization_fixture(tmp_path: Path) -> tuple[Path, str, Path, Path]:
     )
     pnpm.chmod(0o755)
     return source, revision, browser_bundle, pnpm
+
+
+def test_immutable_runner_config_resolves_validated_chromium_executable(
+    tmp_path: Path,
+) -> None:
+    source, _revision, _browser_bundle, _pnpm = materialization_fixture(tmp_path)
+    assert "frontend/playwright.config.ts" in materializer.CRITICAL
+    assert "frontend/scripts/utils/ensure-playwright-browsers.js" in materializer.CRITICAL
+    frontend = source / "frontend"
+    mock = frontend / "node_modules/@playwright/test"
+    mock.mkdir(parents=True)
+    (mock / "package.json").write_text('{"type":"module","exports":"./index.js"}\n')
+    (mock / "index.js").write_text("export const defineConfig = value => value;\n")
+    executable = tmp_path / "validated-chromium-marker"
+    executable.write_text("marker\n")
+    executable.chmod(0o755)
+    evaluable = frontend / "playwright-contract.mjs"
+    evaluable.write_text((frontend / "playwright.config.ts").read_text())
+    script = (
+        "import('./playwright-contract.mjs').then(({default: value}) => "
+        "process.stdout.write(JSON.stringify(value.projects[0].use.launchOptions)))"
+    )
+    completed = subprocess.run(
+        [__import__("shutil").which("node"), "--input-type=module", "-e", script],
+        cwd=frontend,
+        env={
+            "PATH": "/usr/bin:/bin",
+            "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH": str(executable),
+        },
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert json.loads(completed.stdout) == {"executablePath": str(executable)}
 
 
 def test_materialize_discovers_browser_and_is_source_independent(

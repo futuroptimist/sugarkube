@@ -15,6 +15,7 @@ import re
 import shutil
 import stat
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -28,6 +29,8 @@ APPROVED_TOKEN_PLACE_MODEL = "qwen3-8b-instruct"
 SERVICE_IDENTIFIER = re.compile(r"[a-z_][a-z0-9_-]{0,31}")
 MAX_RESULT_BYTES = 16 * 1024
 MAX_BROWSER_PATH_BYTES = 4096
+MAX_CHILD_DIAGNOSTIC_BYTES = 16 * 1024
+STDERR_DRAIN_GRACE_SECONDS = 0.25
 REQUIRED = {
     "runnerRevision",
     "dspaceOrigin",
@@ -374,6 +377,8 @@ def validate_runner(config: dict) -> Path:
         "scripts/run-remote-chat-smoke.mjs",
         "scripts/remote-chat-smoke-completion.mjs",
         "frontend/e2e/remote-chat-smoke.spec.ts",
+        "frontend/playwright.config.ts",
+        "frontend/scripts/utils/ensure-playwright-browsers.js",
         "package.json",
         "frontend/package.json",
         "pnpm-workspace.yaml",
@@ -457,6 +462,105 @@ def cleanup_invocation(invocation_dir: Path) -> None:
         pass
 
 
+def classify_missing_result(stderr: bytes, child_status: int, metadata: dict) -> tuple[str, dict]:
+    """Classify bounded child diagnostics without retaining or returning their contents."""
+    text = stderr.decode("utf-8", errors="replace").lower()
+    if any(
+        marker in text
+        for marker in (
+            "executable doesn't exist",
+            "browsertype.launch: failed to launch",
+            "browser.launch: failed to launch",
+        )
+    ):
+        classification = "browser-executable-launch-failure"
+    elif any(
+        marker in text
+        for marker in (
+            "error loading config",
+            "configuration file",
+            "playwright.config",
+            "unknown project",
+        )
+    ):
+        classification = "playwright-configuration-failure"
+    elif "result publication failed" in text:
+        classification = "completion-publisher-failure"
+    elif child_status == 0:
+        classification = "current-result-missing-after-child-success"
+    elif "journey completion was not confirmed" in text:
+        classification = "test-failure-before-completion-publication"
+    else:
+        classification = "current-result-missing-after-child-failure"
+    return classification, metadata
+
+
+def bounded_stderr_run(
+    argv: list[str], **kwargs
+) -> tuple[subprocess.CompletedProcess, bytes, dict]:
+    """Run a child while hashing and discarding stderr beyond a fixed in-memory prefix."""
+    read_fd, write_fd = os.pipe()
+    captured = bytearray()
+    digest = hashlib.sha256()
+    count = 0
+    capture_lock = threading.Lock()
+
+    def drain() -> None:
+        nonlocal count
+        with os.fdopen(read_fd, "rb", closefd=True) as stream:
+            for block in iter(lambda: stream.read(8192), b""):
+                with capture_lock:
+                    count += len(block)
+                    digest.update(block)
+                    remaining = MAX_CHILD_DIAGNOSTIC_BYTES - len(captured)
+                    if remaining > 0:
+                        captured.extend(block[:remaining])
+
+    reader = threading.Thread(target=drain, daemon=True)
+    reader.start()
+    try:
+        with os.fdopen(write_fd, "wb", closefd=True) as stream:
+            completed = subprocess.run(argv, stderr=stream, **kwargs)
+    finally:
+        reader.join(STDERR_DRAIN_GRACE_SECONDS)
+    with capture_lock:
+        capture_complete = not reader.is_alive()
+        captured_snapshot = bytes(captured)
+        count_snapshot = count
+        digest_snapshot = digest.hexdigest()
+    return (
+        completed,
+        captured_snapshot,
+        {
+            "stderrBytes": count_snapshot,
+            "stderrSha256": digest_snapshot,
+            "stderrTruncated": count_snapshot > MAX_CHILD_DIAGNOSTIC_BYTES,
+            "stderrCaptureComplete": capture_complete,
+        },
+    )
+
+
+def archive_classification(
+    root: Path, invocation: str, classification: str, metadata: dict
+) -> None:
+    """Atomically replace the single bounded classification record."""
+    path = root / "latest-classification.json"
+    payload = {
+        "schemaVersion": 1,
+        "invocation": invocation,
+        "classification": classification,
+        **metadata,
+    }
+    temporary = root / f".latest-classification-{invocation}.tmp"
+    with temporary.open("x", encoding="utf-8") as stream:
+        os.chmod(temporary, 0o600)
+        json.dump(payload, stream, sort_keys=True, separators=(",", ":"))
+        stream.write("\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(temporary, path)
+
+
 def run(config: dict) -> int:
     invocation = os.environ.get("INVOCATION_ID", "")
     if not INVOCATION.fullmatch(invocation):
@@ -527,16 +631,16 @@ def run(config: dict) -> int:
                     "LOGNAME": account.pw_name,
                     "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
                     "USER": account.pw_name,
+                    "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD": "1",
                 }
                 if browser["name"] == RUNNER_LOCAL:
                     child_env["PLAYWRIGHT_BROWSERS_PATH"] = str(runner / "playwright-browser")
                 else:
                     child_env["PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH"] = browser["executablePath"]
-                completed = subprocess.run(
+                completed, child_diagnostic, diagnostic_metadata = bounded_stderr_run(
                     ["runuser", "--user", config["serviceAccount"], "--", *argv],
                     cwd=runner,
                     stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
                     env=child_env,
                     timeout=config["timeoutSeconds"],
                     check=False,
@@ -545,7 +649,16 @@ def run(config: dict) -> int:
                 try:
                     payload = read_result(result, account.pw_uid, account.pw_gid)
                 except FileNotFoundError:
-                    raise Invalid("current result missing")
+                    classification, metadata = classify_missing_result(
+                        child_diagnostic, completed.returncode, diagnostic_metadata
+                    )
+                    archive_classification(
+                        root,
+                        invocation,
+                        classification,
+                        {"childStatus": completed.returncode, **metadata},
+                    )
+                    raise Invalid(classification.replace("-", " "))
                 expected_keys = {
                     "schemaVersion",
                     "journey",
