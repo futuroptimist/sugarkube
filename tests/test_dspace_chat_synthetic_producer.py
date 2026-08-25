@@ -1001,7 +1001,8 @@ def test_bounded_stderr_run_waits_for_complete_diagnostic_metadata() -> None:
 
     completed, captured, metadata = runtime.bounded_stderr_run(
         [
-            "/usr/bin/python3",
+            sys.executable,
+            "-S",
             "-c",
             f"import sys; sys.stderr.buffer.write({diagnostic!r})",
         ]
@@ -1026,7 +1027,8 @@ def test_bounded_stderr_run_returns_when_descendant_retains_stderr(tmp_path: Pat
     try:
         completed, captured, metadata = runtime.bounded_stderr_run(
             [
-                "/usr/bin/python3",
+                sys.executable,
+                "-S",
                 "-c",
                 (
                     "import subprocess, sys; "
