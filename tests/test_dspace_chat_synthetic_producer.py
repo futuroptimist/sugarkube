@@ -913,6 +913,11 @@ def test_runtime_plumbs_exact_system_executable_and_not_bundle(
     ("diagnostic", "status", "expected"),
     [
         (b"browserType.launch: Failed to launch browser\n", 1, "browser-executable-launch-failure"),
+        (
+            b"browser has been closed during the journey\n",
+            1,
+            "current-result-missing-after-child-failure",
+        ),
         (b"Error loading config at playwright.config.ts\n", 1, "playwright-configuration-failure"),
         (
             b"journey completion was not confirmed; result preserved\n",
@@ -968,6 +973,40 @@ def test_classification_archive_survives_invocation_cleanup_without_raw_output(
     assert "browser-executable-launch-failure" in contents
     assert "credential" not in contents
     assert "payload" not in contents
+
+
+def test_classification_archive_rejects_insecure_existing_directory(tmp_path: Path) -> None:
+    root = tmp_path / "results"
+    archive = root / "classifications"
+    archive.mkdir(parents=True, mode=0o755)
+
+    with pytest.raises(runtime.Invalid, match="classification archive"):
+        runtime.archive_classification(
+            root,
+            "a" * 32,
+            "current-result-missing-after-child-failure",
+            {"childStatus": 1},
+        )
+
+
+def test_bounded_stderr_run_waits_for_complete_diagnostic_metadata() -> None:
+    diagnostic = b"diagnostic" * (runtime.MAX_CHILD_DIAGNOSTIC_BYTES // 2)
+
+    completed, captured, metadata = runtime.bounded_stderr_run(
+        [
+            "/usr/bin/python3",
+            "-c",
+            f"import sys; sys.stderr.buffer.write({diagnostic!r})",
+        ]
+    )
+
+    assert completed.returncode == 0
+    assert captured == diagnostic[: runtime.MAX_CHILD_DIAGNOSTIC_BYTES]
+    assert metadata == {
+        "stderrBytes": len(diagnostic),
+        "stderrSha256": __import__("hashlib").sha256(diagnostic).hexdigest(),
+        "stderrTruncated": True,
+    }
 
 
 def test_runtime_browser_drift_blocks_playwright_and_preserves_metric(

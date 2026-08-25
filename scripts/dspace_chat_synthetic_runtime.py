@@ -466,10 +466,8 @@ def classify_missing_result(stderr: bytes, child_status: int, metadata: dict) ->
         marker in text
         for marker in (
             "executable doesn't exist",
-            "failed to launch",
-            "browser has been closed",
-            "browser closed",
-            "browser.launch",
+            "browsertype.launch: failed to launch",
+            "browser.launch: failed to launch",
         )
     ):
         classification = "browser-executable-launch-failure"
@@ -513,13 +511,13 @@ def bounded_stderr_run(
                 if remaining > 0:
                     captured.extend(block[:remaining])
 
-    reader = threading.Thread(target=drain, daemon=True)
+    reader = threading.Thread(target=drain)
     reader.start()
     try:
         with os.fdopen(write_fd, "wb", closefd=True) as stream:
             completed = subprocess.run(argv, stderr=stream, **kwargs)
     finally:
-        reader.join(timeout=1)
+        reader.join()
     return (
         completed,
         bytes(captured),
@@ -536,9 +534,19 @@ def archive_classification(
 ) -> None:
     """Archive only allowlisted, bounded classification evidence outside invocation cleanup."""
     archive = root / "classifications"
-    archive.mkdir(mode=0o700, exist_ok=True)
+    root_info = root.stat()
+    try:
+        archive.mkdir(mode=0o700)
+        os.chown(archive, root_info.st_uid, root_info.st_gid)
+        os.chmod(archive, 0o700)
+    except FileExistsError:
+        pass
     if archive.is_symlink() or not archive.is_dir():
         raise Invalid("classification archive")
+    try:
+        validate_dir(archive, root_info.st_uid, root_info.st_gid, 0o700)
+    except (OSError, Invalid):
+        raise Invalid("classification archive") from None
     path = archive / f"{invocation}.json"
     payload = {
         "schemaVersion": 1,
