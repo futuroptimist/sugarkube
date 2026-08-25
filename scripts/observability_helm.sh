@@ -264,9 +264,89 @@ release_state() {
     return 1
   fi
 }
+
+desired_prometheus_storage() {
+  ruby -ryaml -e '
+    merge = ->(left, right) {
+      left.merge(right) { |_key, old, new| old.is_a?(Hash) && new.is_a?(Hash) ? merge.call(old, new) : new }
+    }
+    values = merge.call(YAML.safe_load_file(ARGV.fetch(0), aliases: false),
+                        YAML.safe_load_file(ARGV.fetch(1), aliases: false))
+    spec = values.dig("prometheus", "prometheusSpec") or abort "ERROR: missing canonical Prometheus values."
+    pvc = spec.dig("storageSpec", "volumeClaimTemplate", "spec") or abort "ERROR: missing canonical Prometheus storage values."
+    fields = [spec["retention"], spec["retentionSize"],
+              pvc.dig("resources", "requests", "storage"), pvc["storageClassName"]]
+    abort "ERROR: incomplete canonical Prometheus retention/storage values." unless fields.all? { |value| value.is_a?(String) && !value.empty? }
+    modes = pvc["accessModes"]
+    abort "ERROR: canonical Prometheus access modes must contain exactly ReadWriteOnce." unless modes == ["ReadWriteOnce"]
+    puts fields
+  ' "${COMMON_VALUES}" "${ENV_VALUES}"
+}
+
+prometheus_pvc_preflight() {
+  local pvc_json storage_class_json claim current desired storage_class expansion
+  local -a contract=() discovered=()
+  mapfile -t contract < <(desired_prometheus_storage)
+  ((${#contract[@]} == 4)) || { echo "ERROR: could not resolve canonical Prometheus storage contract." >&2; return 20; }
+  desired="${contract[2]}"
+
+  if ! pvc_json="$(kubectl -n "${NAMESPACE}" get pvc -l app.kubernetes.io/name=prometheus -o json)"; then
+    echo "ERROR: PVC migration required: environment=${ENVIRONMENT} claim=<discovery-failed> current=<unknown> desired=${desired} StorageClass=<unknown> expansion=<unknown>; PVC discovery failed, so Helm mutation is blocked." >&2
+    return 20
+  fi
+  if ! mapfile -t discovered < <(python3 -c 'import json, sys
+try:
+    payload = json.load(sys.stdin)
+    items = payload["items"]
+except (KeyError, TypeError, ValueError):
+    raise SystemExit(2)
+if not isinstance(items, list):
+    raise SystemExit(2)
+if not items:
+    print("absent")
+    raise SystemExit(0)
+if len(items) != 1:
+    raise SystemExit(2)
+claim = items[0]
+fields = [claim.get("metadata", {}).get("name"),
+          claim.get("spec", {}).get("resources", {}).get("requests", {}).get("storage"),
+          claim.get("spec", {}).get("storageClassName"),
+          claim.get("status", {}).get("phase")]
+modes = claim.get("spec", {}).get("accessModes")
+if not all(isinstance(value, str) and value for value in fields) or modes != ["ReadWriteOnce"]:
+    raise SystemExit(2)
+print("present", *fields, sep="\n")' <<<"${pvc_json}"); then
+    echo "ERROR: PVC migration required: environment=${ENVIRONMENT} claim=<ambiguous> current=<unknown> desired=${desired} StorageClass=<unknown> expansion=<unknown>; PVC discovery was missing or ambiguous, so Helm mutation is blocked." >&2
+    return 20
+  fi
+  [[ "${discovered[0]:-}" != absent ]] || { echo "Prometheus PVC preflight: no existing claim; fresh-install storage provisioning is permitted."; return 0; }
+  ((${#discovered[@]} == 5)) || { echo "ERROR: PVC migration required: environment=${ENVIRONMENT} claim=<ambiguous> current=<unknown> desired=${desired} StorageClass=<unknown> expansion=<unknown>; PVC discovery was missing or ambiguous, so Helm mutation is blocked." >&2; return 20; }
+  claim="${discovered[1]}"; current="${discovered[2]}"; storage_class="${discovered[3]}"
+
+  if ! storage_class_json="$(kubectl get storageclass "${storage_class}" -o json)"; then
+    expansion="<unknown>"
+  else
+    expansion="$(python3 -c 'import json, sys
+try:
+    payload = json.load(sys.stdin)
+    value = payload.get("allowVolumeExpansion", False)
+except (AttributeError, TypeError, ValueError):
+    raise SystemExit(2)
+if not isinstance(value, bool):
+    raise SystemExit(2)
+print(str(value).lower())' <<<"${storage_class_json}" 2>/dev/null)" || expansion="<unknown>"
+  fi
+  if [[ "${discovered[4]}" == Bound && "${current}" == "${desired}" && "${storage_class}" == "${contract[3]}" && "${expansion}" != "<unknown>" ]]; then
+    echo "Prometheus PVC preflight: ${claim} is Bound and matches ${desired} ReadWriteOnce ${storage_class} storage (expansion=${expansion})."
+    return 0
+  fi
+  echo "ERROR: PVC migration required: environment=${ENVIRONMENT} claim=${claim} current=${current} desired=${desired} StorageClass=${storage_class} expansion=${expansion}; no PVC/PV changes were attempted. Perform a separately authorized staging-first migration before retrying Helm." >&2
+  return 20
+}
+
 render() { validate_dashboard; require_tools helm python3 ruby; print_resolved '<not queried: offline render>'; local tmp; tmp="$(mktemp -t sugarkube-observability-render.XXXXXX.yaml)"; trap 'rm -f "${tmp:-}" "${RULES_OVERLAY:-}"' EXIT; prepare_render_args; render_to "$tmp" "${RENDER_ARGS[@]}"; cat "$tmp"; }
-install_release() { validate_dashboard; require_tools helm kubectl python3 ruby; print_resolved; assert_context; assert_grafana_secret; [[ "$ENVIRONMENT" != staging ]] || assert_integration_secrets; local tmp state dashboard_args=(); tmp="$(mktemp -t sugarkube-observability-install.XXXXXX.yaml)"; trap 'rm -f "${tmp:-}" "${RULES_OVERLAY:-}"' EXIT; prepare_render_args; render_to "$tmp" "${RENDER_ARGS[@]}"; state="$(release_state)"; if [[ "$state" == present ]]; then echo "ERROR: cannot install: ${RELEASE} already exists in ${NAMESPACE}. Use observability-upgrade." >&2; exit 4; fi; dashboard_args=(--set-file "${DASHBOARD_VALUE}=${DASHBOARD}"); helm install "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --create-namespace --version "$(version)" -f "${COMMON_VALUES}" -f "${ENV_VALUES}" "${RENDER_ARGS[@]}" "${dashboard_args[@]}" --atomic --wait --timeout "${TIMEOUT}"; }
-upgrade_release() { validate_dashboard; require_tools helm kubectl python3 ruby; print_resolved; assert_context; assert_grafana_secret; [[ "$ENVIRONMENT" != staging ]] || assert_integration_secrets; local tmp state dashboard_args=(); tmp="$(mktemp -t sugarkube-observability-upgrade.XXXXXX.yaml)"; trap 'rm -f "${tmp:-}" "${RULES_OVERLAY:-}"' EXIT; prepare_render_args; render_to "$tmp" "${RENDER_ARGS[@]}"; state="$(release_state)"; if [[ "$state" == absent ]]; then echo "ERROR: upgrade requires an existing Helm release ${RELEASE} in ${NAMESPACE}. Use observability-install for a fresh cluster." >&2; exit 5; fi; dashboard_args=(--set-file "${DASHBOARD_VALUE}=${DASHBOARD}"); helm upgrade "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${COMMON_VALUES}" -f "${ENV_VALUES}" "${RENDER_ARGS[@]}" "${dashboard_args[@]}" --atomic --wait --timeout "${TIMEOUT}"; }
+install_release() { validate_dashboard; require_tools helm kubectl python3 ruby; print_resolved; assert_context; assert_grafana_secret; [[ "$ENVIRONMENT" != staging ]] || assert_integration_secrets; local tmp state dashboard_args=(); tmp="$(mktemp -t sugarkube-observability-install.XXXXXX.yaml)"; trap 'rm -f "${tmp:-}" "${RULES_OVERLAY:-}"' EXIT; prepare_render_args; render_to "$tmp" "${RENDER_ARGS[@]}"; state="$(release_state)"; if [[ "$state" == present ]]; then echo "ERROR: cannot install: ${RELEASE} already exists in ${NAMESPACE}. Use observability-upgrade." >&2; exit 4; fi; prometheus_pvc_preflight; dashboard_args=(--set-file "${DASHBOARD_VALUE}=${DASHBOARD}"); helm install "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --create-namespace --version "$(version)" -f "${COMMON_VALUES}" -f "${ENV_VALUES}" "${RENDER_ARGS[@]}" "${dashboard_args[@]}" --atomic --wait --timeout "${TIMEOUT}"; }
+upgrade_release() { validate_dashboard; require_tools helm kubectl python3 ruby; print_resolved; assert_context; assert_grafana_secret; [[ "$ENVIRONMENT" != staging ]] || assert_integration_secrets; local tmp state dashboard_args=(); tmp="$(mktemp -t sugarkube-observability-upgrade.XXXXXX.yaml)"; trap 'rm -f "${tmp:-}" "${RULES_OVERLAY:-}"' EXIT; prepare_render_args; render_to "$tmp" "${RENDER_ARGS[@]}"; state="$(release_state)"; if [[ "$state" == absent ]]; then echo "ERROR: upgrade requires an existing Helm release ${RELEASE} in ${NAMESPACE}. Use observability-install for a fresh cluster." >&2; exit 5; fi; prometheus_pvc_preflight; dashboard_args=(--set-file "${DASHBOARD_VALUE}=${DASHBOARD}"); helm upgrade "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${COMMON_VALUES}" -f "${ENV_VALUES}" "${RENDER_ARGS[@]}" "${dashboard_args[@]}" --atomic --wait --timeout "${TIMEOUT}"; }
 WATCHDOG_TTY="${SUGARKUBE_WATCHDOG_TTY:-/dev/tty}"
 WATCHDOG_API="/api/v1/namespaces/${NAMESPACE}/services/http:${RELEASE}-alertmanager:9093/proxy/api/v2"
 
@@ -667,11 +747,12 @@ verify() (
     echo "ERROR: node-exporter daemonset has ${ready_ne:-0}/${desired_ne:-0} ready pods." >&2
     exit 6
   }
-  kubectl -n "${NAMESPACE}" get pvc -o json | python3 -c 'import json, sys
+  readarray -t storage_contract < <(desired_prometheus_storage)
+  kubectl -n "${NAMESPACE}" get pvc -o json | DESIRED_STORAGE="${storage_contract[2]}" DESIRED_CLASS="${storage_contract[3]}" python3 -c 'import json, sys, os
 items = json.load(sys.stdin).get("items", [])
 claims = [item for item in items if item.get("metadata", {}).get("labels", {}).get("app.kubernetes.io/name") == "prometheus"]
-if len(claims) != 1 or claims[0].get("status", {}).get("phase") != "Bound" or claims[0].get("spec", {}).get("storageClassName") != "local-path" or claims[0].get("spec", {}).get("accessModes") != ["ReadWriteOnce"] or claims[0].get("spec", {}).get("resources", {}).get("requests", {}).get("storage") != "20Gi":
-    raise SystemExit("ERROR: expected one Bound RWO 20Gi local-path Prometheus PVC.")'
+if len(claims) != 1 or claims[0].get("status", {}).get("phase") != "Bound" or claims[0].get("spec", {}).get("storageClassName") != os.environ["DESIRED_CLASS"] or claims[0].get("spec", {}).get("accessModes") != ["ReadWriteOnce"] or claims[0].get("spec", {}).get("resources", {}).get("requests", {}).get("storage") != os.environ["DESIRED_STORAGE"]:
+    raise SystemExit(f"ERROR: expected one Bound RWO {os.environ['DESIRED_STORAGE']} {os.environ['DESIRED_CLASS']} Prometheus PVC.")'
   [[ "$(kubectl -n "${NAMESPACE}" get prometheus kube-prometheus-stack-prometheus -o jsonpath='{.spec.replicas}')" == 1 ]]
   [[ "$(kubectl -n "${NAMESPACE}" get alertmanager kube-prometheus-stack-alertmanager -o jsonpath='{.spec.replicas}')" == 1 ]]
   assert_grafana_secret
