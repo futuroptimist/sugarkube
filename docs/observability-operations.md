@@ -94,13 +94,10 @@ The `monitoring` namespace, observability releases, and `monitoring.coreos.com`
 APIs/CRDs were absent. No production application-metrics or blackbox lifecycle
 was verified, and current application releases predate the staging metrics integrations.
 
-The committed production baseline is one Prometheus replica with `7d` retention
-and a `15GB` retention-size limit, backed by one `20Gi` ReadWriteOnce Prometheus
-PVC using `local-path`. This storage is node-local and does not support
-expansion, so capacity pressure or node loss requires explicit operator action.
-The baseline also runs one Alertmanager replica using the null-only default
-receiver. After one production week, operators should review observed retention,
-WAL/PVC consumption, and memory before proposing capacity or retention changes.
+The committed desired state for both environments is one Prometheus replica with `90d` retention
+and a `100GB` retention-size limit, backed by one `128Gi` ReadWriteOnce Prometheus PVC using
+`local-path`. The baseline also runs one Alertmanager replica using the null-only default receiver
+in production. Repository desired state is not evidence that an existing live PVC has migrated.
 
 Production live actions require an explicit kubeconfig and the `sugar-prod`
 context; do not run the node-local staging kubeconfig recipe on `sugarkube3`:
@@ -222,6 +219,53 @@ deferred. This dashboard provisions none of those integrations. Merging this das
 not deploy either generated artifact: staging and production each require a separate guarded Helm
 upgrade, visual acceptance, API verification, and retained evidence.
 
+## Prometheus retention and local-path migration
+
+The canonical common values set the identical staging and production target: `90d` time retention,
+a `100GB` size cap, and a `128Gi` PVC request. The environment overlays intentionally contain no
+retention or storage overrides. Chart `87.19.0`, one replica, ReadWriteOnce access, `local-path`, and
+the existing CPU and memory resources remain unchanged.
+
+Sizing was measured on **2026-08-25**. Staging's PV host had 467.9 GiB capacity and 395.9 GiB
+available; observed blocks grew 0.61 GiB/day, projecting a 55.1 GiB 90-day steady state and an
+86.1 GiB backing requirement after 25% workload growth and 20% compaction reserve. Its sample
+formula ranged from 48.1–96.1 GiB. Production's PV host had 937.3 GiB capacity and 872.1 GiB
+available; observed blocks grew 0.55 GiB/day, projecting 49.6 GiB steady state, a 77.5 GiB backing
+requirement with the same reserves, and a 43.5–87.0 GiB sample-formula range. In both environments
+time-retention deletions occurred and size-retention deletions were zero. The 128Gi request and
+100GB cap cover both measured upper bounds and leave approximately 21.9% for the WAL, head chunks,
+and compaction.
+
+Each cluster has one Prometheus replica and one local-path PV. That PV is a directory on one node's
+filesystem: capacity is neither pooled across nodes nor replicated. The PVC's `128Gi` request is a
+declarative Kubernetes value, but `rancher.io/local-path` does not enforce that directory capacity;
+the selected node filesystem is the physical limit. The StorageClass uses `WaitForFirstConsumer`
+and has expansion unset/false.
+
+Existing Bound `20Gi` claims therefore cannot become `128Gi` through a values-only Helm upgrade.
+**Do not use an observability values-only upgrade to force an in-place resize.** Before `helm
+install` or `helm upgrade`, the helper performs read-only PVC and StorageClass discovery. It permits
+no claim (fresh install) or one Bound `128Gi` RWO/local-path claim. A mismatched claim—including an
+expandable one—or missing/ambiguous discovery stops with `PVC migration required` before Helm
+mutation. The helper never patches, deletes, recreates, copies, resizes, snapshots, or migrates a
+storage object.
+
+A later, explicitly authorized operator migration must proceed staging first:
+
+1. Confirm backups/recovery requirements, maintenance window, current PV node placement, node
+   filesystem headroom, and the exact staging claim/PV bindings.
+2. Stop ingestion using an approved procedure and preserve or deliberately retire data according to
+   the authorized migration plan; do not improvise a values-only resize.
+3. Recreate or migrate the staging claim through the separately reviewed operator plan so its
+   declared request is `128Gi`, while retaining the RWO/local-path single-node placement contract.
+4. Deploy and verify staging, then observe it for the authorized soak period.
+5. Only after staging acceptance, repeat the separately authorized procedure for production.
+
+After each migration, verify Prometheus health, effective `--storage.tsdb.retention.time=90d` and
+`--storage.tsdb.retention.size=100GB` flags, a Bound `128Gi` PVC request, unchanged RWO/local-path
+single-node PV placement, adequate backing-filesystem headroom, and retained-history age growing
+beyond seven days. The repository task performs none of these live steps.
+
 ## Read-only preflight and status
 
 ```bash
@@ -269,7 +313,7 @@ is not rollout evidence.
    ```bash
    just kubeconfig-env env=staging
    ```
-2. Confirm the rendered manifests contain one Prometheus replica, one Alertmanager replica, `local-path` 20 Gi Prometheus storage, Grafana NodePort `30300`, no Grafana Ingress, no Prometheus/Alertmanager NodePort, no Longhorn references, and no embedded credentials:
+2. Confirm the rendered manifests contain one Prometheus replica, one Alertmanager replica, `local-path` 128 Gi Prometheus storage, Grafana NodePort `30300`, no Grafana Ingress, no Prometheus/Alertmanager NodePort, no Longhorn references, and no embedded credentials:
    ```bash
    just observability-render env=staging
    ```
@@ -364,7 +408,7 @@ availability, schedulable-node capacity, availability-reason, and shared-state
 health panels remain Phase 2 work and are not presented as implemented here.
 
 - Helm release: `kube-prometheus-stack` in namespace `monitoring`.
-- Prometheus: one replica, `7d` retention, `15GB` retention size, `local-path` `ReadWriteOnce` PVC requesting `20Gi`, CPU request `200m`, memory request `512Mi`, memory limit `2Gi`, admin API disabled, and external label `cluster=sugarkube-int`.
+- Prometheus: one replica, `90d` retention, `100GB` retention size, `local-path` `ReadWriteOnce` PVC requesting `128Gi`, CPU request `200m`, memory request `512Mi`, memory limit `2Gi`, admin API disabled, and external label `cluster=sugarkube-int`.
 - Alertmanager: one replica with root/default no-op receiver named exactly
   `"null"`. The existing watchdog route, its order, and its 30-second group wait,
   one-minute group interval, and five-minute repeat interval remain preserved.
