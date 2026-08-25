@@ -7,8 +7,8 @@ prometheus:
     type: ClusterIP
   prometheusSpec:
     replicas: 1
-    retention: 7d
-    retentionSize: 15GB
+    retention: 90d
+    retentionSize: 100GB
     enableAdminAPI: false
     serviceMonitorSelector:
       matchLabels:
@@ -33,7 +33,7 @@ prometheus:
             - ReadWriteOnce
           resources:
             requests:
-              storage: 20Gi
+              storage: 128Gi
 grafana:
   admin:
     existingSecret: grafana-admin-credentials

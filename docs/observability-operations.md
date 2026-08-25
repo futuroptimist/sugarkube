@@ -94,13 +94,56 @@ The `monitoring` namespace, observability releases, and `monitoring.coreos.com`
 APIs/CRDs were absent. No production application-metrics or blackbox lifecycle
 was verified, and current application releases predate the staging metrics integrations.
 
-The committed production baseline is one Prometheus replica with `7d` retention
-and a `15GB` retention-size limit, backed by one `20Gi` ReadWriteOnce Prometheus
-PVC using `local-path`. This storage is node-local and does not support
-expansion, so capacity pressure or node loss requires explicit operator action.
-The baseline also runs one Alertmanager replica using the null-only default
-receiver. After one production week, operators should review observed retention,
-WAL/PVC consumption, and memory before proposing capacity or retention changes.
+The shared staging and production desired state is one Prometheus replica with
+`90d` retention and a `100GB` retention-size limit, backed by one `128Gi`
+ReadWriteOnce PVC using `local-path`. The baseline also runs one Alertmanager
+replica; production retains its null-only default receiver. The common values
+file is authoritative for retention and storage, while environment overlays
+continue to contain only environment-specific differences.
+
+### Retention sizing and local-path migration boundary
+
+The sizing review dated **2026-08-25** measured the following:
+
+| Environment | PV-host capacity | Available | Block growth | Projected 90-day steady state | Backing requirement (25% growth + 20% compaction reserve) | Sample-formula range |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Staging | 467.9 GiB | 395.9 GiB | 0.61 GiB/day | 55.1 GiB | 86.1 GiB | 48.1–96.1 GiB |
+| Production | 937.3 GiB | 872.1 GiB | 0.55 GiB/day | 49.6 GiB | 77.5 GiB | 43.5–87.0 GiB |
+
+Time-retention deletions occurred in both environments; size-retention deletions
+were zero. A `128Gi` request with a `100GB` cap covers both measured upper
+bounds and leaves approximately 21.9% for the WAL, head chunks, and compaction.
+
+Each cluster has one Prometheus replica and one local-path PV. That PV is a
+directory on **one node**; capacity is neither pooled across nodes nor
+replicated. The PVC's `128Gi` request records desired capacity in Kubernetes,
+but `rancher.io/local-path` does not enforce that directory limit: the selected
+node's backing filesystem remains the physical limit. The StorageClass uses
+`WaitForFirstConsumer` and has expansion unset/false.
+
+Existing Bound claims still request `20Gi`. They cannot be expanded to `128Gi`
+by a normal values-only Helm upgrade. The lifecycle preflight therefore permits
+a fresh install or an already-converged Bound `128Gi` RWO/local-path claim, but
+fails closed with `PVC migration required` for the existing claim, any mismatch,
+or incomplete discovery. It never changes a PVC or PV. **Do not use a
+values-only upgrade to force an in-place resize.** Repository desired state is
+not evidence that either live claim has migrated.
+
+A later, explicitly authorized operator migration must proceed staging first:
+
+1. Confirm backups/recovery requirements, current PV node placement, Prometheus
+   health, filesystem headroom, and an approved outage or data-migration plan.
+2. Stop at the preflight diagnostic and record the claim, PV, StorageClass, and
+   node; do not bypass it or ask Helm to resize the Bound claim.
+3. Under a separate change authorization, perform the chosen controlled PVC
+   recreation or migration using the approved data-preservation procedure.
+4. Reconcile the chart only after the replacement staging claim requests
+   `128Gi` and preserves the single-replica, RWO, local-path placement contract.
+5. Verify staging, observe it through an agreed soak period, and obtain separate
+   production authorization before repeating the controlled procedure there.
+6. After each migration, verify Prometheus health; effective `90d` and `100GB`
+   flags; the `128Gi` PVC request; unchanged PV placement contract; backing
+   filesystem headroom; and retained-history age growing beyond seven days.
 
 Production live actions require an explicit kubeconfig and the `sugar-prod`
 context; do not run the node-local staging kubeconfig recipe on `sugarkube3`:
@@ -269,7 +312,7 @@ is not rollout evidence.
    ```bash
    just kubeconfig-env env=staging
    ```
-2. Confirm the rendered manifests contain one Prometheus replica, one Alertmanager replica, `local-path` 20 Gi Prometheus storage, Grafana NodePort `30300`, no Grafana Ingress, no Prometheus/Alertmanager NodePort, no Longhorn references, and no embedded credentials:
+2. Confirm the rendered manifests contain one Prometheus replica, one Alertmanager replica, `local-path` 128 Gi Prometheus storage, Grafana NodePort `30300`, no Grafana Ingress, no Prometheus/Alertmanager NodePort, no Longhorn references, and no embedded credentials:
    ```bash
    just observability-render env=staging
    ```
@@ -364,7 +407,7 @@ availability, schedulable-node capacity, availability-reason, and shared-state
 health panels remain Phase 2 work and are not presented as implemented here.
 
 - Helm release: `kube-prometheus-stack` in namespace `monitoring`.
-- Prometheus: one replica, `7d` retention, `15GB` retention size, `local-path` `ReadWriteOnce` PVC requesting `20Gi`, CPU request `200m`, memory request `512Mi`, memory limit `2Gi`, admin API disabled, and external label `cluster=sugarkube-int`.
+- Prometheus: one replica, `90d` retention, `100GB` retention size, `local-path` `ReadWriteOnce` PVC requesting `128Gi`, CPU request `200m`, memory request `512Mi`, memory limit `2Gi`, admin API disabled, and external label `cluster=sugarkube-int`.
 - Alertmanager: one replica with root/default no-op receiver named exactly
   `"null"`. The existing watchdog route, its order, and its 30-second group wait,
   one-minute group interval, and five-minute repeat interval remain preserved.
@@ -387,7 +430,7 @@ health panels remain Phase 2 work and are not presented as implemented here.
   endpoints**, and a yellow **Missing probe data** count for the selected probe
   filters. Healthy and failed are current `probe_success` results; missing compares
   current samples with lifecycle-owned targets discovered through `up` during the
-  seven-day Prometheus retention horizon, so disappeared discovery targets remain
+  seven-day dashboard query lookback, so disappeared discovery targets remain
   visible throughout retained history. Exact long-term target inventory remains
   verified by `just observability-blackbox-verify env=staging`.
   The repository-defined matrix contains 21 probes across five supported apps.
