@@ -120,7 +120,7 @@ def test_chart_version_and_values_define_shared_staging_and_production_baseline(
     spec = common["prometheus"]["prometheusSpec"]
     assert spec["replicas"] == 1
     assert spec["retention"] == "90d"
-    assert spec["retentionSize"] == "100GB"
+    assert spec["retentionSize"] == "110GB"
     assert spec["enableAdminAPI"] is False
     assert spec["resources"] == {
         "requests": {"cpu": "200m", "memory": "512Mi"},
@@ -141,7 +141,7 @@ def test_chart_version_and_values_define_shared_staging_and_production_baseline(
             merged_spec["storageSpec"]["volumeClaimTemplate"]["spec"]["resources"][
                 "requests"
             ]["storage"],
-        ) == ("90d", "100GB", "128Gi")
+        ) == ("90d", "110GB", "128Gi")
     assert staging["prometheus"]["prometheusSpec"]["externalLabels"] == {"cluster": "sugarkube-int"}
     alertmanager = staging["alertmanager"]
     assert alertmanager["alertmanagerSpec"]["secrets"] == [
@@ -1124,7 +1124,7 @@ def run_helper(
     helm_mode="absent",
     context="sugar-staging",
     kubectl_mode="healthy",
-    pvc_mode="absent",
+    pvc_mode="converged",
     target_responses=None,
     target_response_delay="0",
     retry_attempts="3",
@@ -1667,7 +1667,7 @@ def test_mutation_accepts_absent_or_converged_pvc(tmp_path):
     assert "already matches ReadWriteOnce/local-path/128Gi" in converged.stdout
 
 
-@pytest.mark.parametrize("pvc_mode", ["discovery-fail", "ambiguous", "storageclass-fail"])
+@pytest.mark.parametrize("pvc_mode", ["absent", "discovery-fail", "ambiguous", "storageclass-fail"])
 def test_mutation_fails_closed_on_missing_or_ambiguous_pvc_discovery(tmp_path, pvc_mode):
     result, audit = run_helper(
         tmp_path, "upgrade", helm_mode="present", pvc_mode=pvc_mode

@@ -8,7 +8,7 @@ prometheus:
   prometheusSpec:
     replicas: 1
     retention: 90d
-    retentionSize: 100GB
+    retentionSize: 110GB
     enableAdminAPI: false
     serviceMonitorSelector:
       matchLabels:
