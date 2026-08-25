@@ -53,10 +53,15 @@ already contain the exact lockfile's packages. Construction fails for a
 missing object, wrong HEAD, dirty tracked/index state, alternates, missing root store, broken
 frontend link, unusable Playwright shim/module resolution, or missing critical file. Its manifest
 records hashes for the runner, spec, workspace manifests, lockfile, selected browser contract, and
-safe browser provenance. For `system-chromium-v1`, the exact clean tracked runner configuration
-consumes `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` as Chromium's native
-`launchOptions.executablePath`; its browser-availability helper recognizes the same override and
-therefore does not attempt browser installation. Runner validation first resolves the exact revision
+safe browser provenance. At pinned revision `97ab09f13fb098de928a878bf1fe9b8d13032cb5`, the clean
+tracked runner configuration already maps `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to Chromium's native
+`launchOptions.executablePath`, and its browser-availability helper recognizes an existing override.
+Both files are hashed into the immutable manifest and required at runtime. The child also receives
+`PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`, so neither browser contract can acquire or fall back to a
+browser between validation and launch. These facts disprove the earlier executable-mapping
+hypothesis; the private host failure's exact root cause remains unknown. This change instead adds
+the bounded evidence needed to classify a future separately authorized execution. Runner validation
+first resolves the exact revision
 directory, rejects
 symlinks and paths outside the configured runner root, and then gives every Git inspection
 command-scoped trust only for that resolved directory. It ignores persistent and environment-injected
@@ -149,8 +154,10 @@ Do not print credentials, Secret values, raw results, browser output, or unrestr
 When a child returns without a current result, the runtime reads at most 16 KiB of its private
 stderr only to select an allowlisted classification: browser-executable launch, Playwright
 configuration, test-before-completion, completion-publisher, or missing-result after child success
-or failure. It archives only that classification, child status, byte count, truncation flag, and
-SHA-256 under the result root; raw output is drained through a pipe, discarded beyond the bounded
+or failure. It archives only that classification, invocation ID, child status, byte count,
+truncation flag, and SHA-256 in an atomically replaced, root-only `latest-classification.json` under
+the result root. Only the latest failure is retained, and invocation cleanup cannot remove it. Raw
+output is drained through a pipe, discarded beyond the bounded
 in-memory prefix, and never printed or persisted. Classify `preflight`, `overlap`,
 `timeout/launch`, `missing`, `provenance`, `malformed`, executed failure, or successful publication
 before considering any retry. Do not retry while an invocation

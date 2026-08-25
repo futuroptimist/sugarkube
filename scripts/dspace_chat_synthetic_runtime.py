@@ -376,6 +376,8 @@ def validate_runner(config: dict) -> Path:
         "scripts/run-remote-chat-smoke.mjs",
         "scripts/remote-chat-smoke-completion.mjs",
         "frontend/e2e/remote-chat-smoke.spec.ts",
+        "frontend/playwright.config.ts",
+        "frontend/scripts/utils/ensure-playwright-browsers.js",
         "package.json",
         "frontend/package.json",
         "pnpm-workspace.yaml",
@@ -532,29 +534,15 @@ def bounded_stderr_run(
 def archive_classification(
     root: Path, invocation: str, classification: str, metadata: dict
 ) -> None:
-    """Archive only allowlisted, bounded classification evidence outside invocation cleanup."""
-    archive = root / "classifications"
-    root_info = root.stat()
-    try:
-        archive.mkdir(mode=0o700)
-        os.chown(archive, root_info.st_uid, root_info.st_gid)
-        os.chmod(archive, 0o700)
-    except FileExistsError:
-        pass
-    if archive.is_symlink() or not archive.is_dir():
-        raise Invalid("classification archive")
-    try:
-        validate_dir(archive, root_info.st_uid, root_info.st_gid, 0o700)
-    except (OSError, Invalid):
-        raise Invalid("classification archive") from None
-    path = archive / f"{invocation}.json"
+    """Atomically replace the single bounded classification record."""
+    path = root / "latest-classification.json"
     payload = {
         "schemaVersion": 1,
         "invocation": invocation,
         "classification": classification,
         **metadata,
     }
-    temporary = archive / f".{invocation}.tmp"
+    temporary = root / f".latest-classification-{invocation}.tmp"
     with temporary.open("x", encoding="utf-8") as stream:
         os.chmod(temporary, 0o600)
         json.dump(payload, stream, sort_keys=True, separators=(",", ":"))
@@ -634,6 +622,7 @@ def run(config: dict) -> int:
                     "LOGNAME": account.pw_name,
                     "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
                     "USER": account.pw_name,
+                    "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD": "1",
                 }
                 if browser["name"] == RUNNER_LOCAL:
                     child_env["PLAYWRIGHT_BROWSERS_PATH"] = str(runner / "playwright-browser")
