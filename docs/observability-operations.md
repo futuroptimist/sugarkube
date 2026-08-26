@@ -117,6 +117,12 @@ its `100GB` cap means `100GiB`. It exceeds the `96.1GiB` modeled upper bound and
 leaves `28GiB`, or 21.875% of the `128Gi` request, outside the cap for the WAL,
 head chunks, and compaction.
 
+Prometheus 3.13 receives this policy through its loaded configuration rather
+than deprecated StatefulSet command-line flags. `observability-verify` therefore
+reads the loaded configuration, reload status, and runtime retention-limit
+metric through the read-only Kubernetes API service proxy. It compares the
+`100GB` desired value semantically with Prometheus's `100GiB` representation.
+
 Each cluster has one Prometheus replica and one local-path PV. That PV is a
 directory on **one node**; capacity is neither pooled across nodes nor
 replicated. The PVC's `128Gi` request records desired capacity in Kubernetes,

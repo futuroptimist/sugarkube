@@ -294,7 +294,6 @@ prometheus_pvc_preflight() (
   local storage_class_json expansion
   contract="$(prometheus_expected_contract)" || return
   IFS=$'\t' read -r desired_retention desired_retention_size desired_size desired_class desired_modes <<<"${contract}"
-
   if ! pvc_json="$(kubectl get pvc --all-namespaces -o json)"; then
     echo "ERROR: PVC migration required: environment=${ENVIRONMENT} claim=<unknown> current_request=<unknown> desired_request=${desired_size} storage_class=<unknown> expansion_capability=unknown; PVC discovery failed, so Helm mutation is blocked." >&2
     return 20
@@ -748,20 +747,31 @@ verify() (
   local contract desired_retention desired_retention_size desired_size desired_class desired_modes
   contract="$(prometheus_expected_contract)" || return
   IFS=$'\t' read -r desired_retention desired_retention_size desired_size desired_class desired_modes <<<"${contract}"
-  kubectl -n "${NAMESPACE}" get statefulset prometheus-kube-prometheus-stack-prometheus -o json | \
-    python3 -c 'import json, sys
-try:
-    document = json.load(sys.stdin)
-    containers = document["spec"]["template"]["spec"]["containers"]
-    prometheus = [item for item in containers if item.get("name") == "prometheus"]
-    if len(prometheus) != 1 or not isinstance(prometheus[0].get("args"), list): raise TypeError
-    args = prometheus[0]["args"]
-    expected = [f"--storage.tsdb.retention.time={sys.argv[1]}", f"--storage.tsdb.retention.size={sys.argv[2]}"]
-    effective = [arg for arg in args if isinstance(arg, str) and (arg.startswith("--storage.tsdb.retention.time=") or arg.startswith("--storage.tsdb.retention.size="))]
-    if len(effective) != 2 or sorted(effective) != sorted(expected): raise ValueError
-except (AttributeError, KeyError, TypeError, ValueError, json.JSONDecodeError):
-    raise SystemExit(f"ERROR: Prometheus StatefulSet must contain exactly --storage.tsdb.retention.time={sys.argv[1]} and --storage.tsdb.retention.size={sys.argv[2]}.")' \
-      "${desired_retention}" "${desired_retention_size}"
+  local cr_retention cr_retention_size cr_replicas
+  IFS=$'\t' read -r cr_retention cr_retention_size cr_replicas < <(
+    kubectl -n "${NAMESPACE}" get prometheus kube-prometheus-stack-prometheus \
+      -o jsonpath='{.spec.retention}{"\t"}{.spec.retentionSize}{"\t"}{.spec.replicas}{"\n"}'
+  )
+  [[ "${cr_retention}" == "${desired_retention}" && \
+      "${cr_retention_size}" == "${desired_retention_size}" && "${cr_replicas}" == 1 ]] || {
+    echo "ERROR: Prometheus CR retention, retentionSize, or replica contract differs from the desired values." >&2
+    exit 6
+  }
+  local retention_tmp service_proxy
+  retention_tmp="$(mktemp -d -t sugarkube-prometheus-retention.XXXXXX)"
+  trap 'rm -rf "${retention_tmp:-}"' EXIT
+  service_proxy="/api/v1/namespaces/${NAMESPACE}/services/http:kube-prometheus-stack-prometheus:9090/proxy"
+  for endpoint in status/config status/runtimeinfo metrics; do
+    local endpoint_path="/api/v1/${endpoint}"
+    [[ "${endpoint}" != metrics ]] || endpoint_path="/metrics"
+    if ! kubectl get --raw "${service_proxy}${endpoint_path}" >"${retention_tmp}/${endpoint//\//-}"; then
+      echo "ERROR: Prometheus ${endpoint} endpoint is unreachable through the Kubernetes API service proxy." >&2
+      exit 6
+    fi
+  done
+  python3 "${ROOT}/scripts/verify_prometheus_retention.py" \
+    "${retention_tmp}/status-config" "${retention_tmp}/status-runtimeinfo" \
+    "${retention_tmp}/metrics" "${desired_retention}" "${desired_retention_size}"
 
   read -r desired_ne ready_ne < <(kubectl -n "${NAMESPACE}" get daemonset kube-prometheus-stack-prometheus-node-exporter -o jsonpath='{.status.desiredNumberScheduled}{" "}{.status.numberReady}{"\n"}')
   [[ "${ready_ne}" == "${desired_ne}" && ( ( "$ENVIRONMENT" == staging && "$desired_ne" == 3 ) || ( "$ENVIRONMENT" == prod && "$desired_ne" =~ ^[1-9][0-9]*$ ) ) ]] || {
@@ -773,7 +783,6 @@ items = json.load(sys.stdin).get("items", [])
 claims = [item for item in items if item.get("metadata", {}).get("labels", {}).get("app.kubernetes.io/name") == "prometheus"]
 if len(claims) != 1 or claims[0].get("status", {}).get("phase") != "Bound" or claims[0].get("spec", {}).get("storageClassName") != sys.argv[2] or claims[0].get("spec", {}).get("accessModes") != sys.argv[3].split(",") or claims[0].get("spec", {}).get("resources", {}).get("requests", {}).get("storage") != sys.argv[1]:
     raise SystemExit(f"ERROR: expected one Bound {sys.argv[3]} {sys.argv[1]} {sys.argv[2]} Prometheus PVC.")' "${desired_size}" "${desired_class}" "${desired_modes}"
-  [[ "$(kubectl -n "${NAMESPACE}" get prometheus kube-prometheus-stack-prometheus -o jsonpath='{.spec.replicas}')" == 1 ]]
   [[ "$(kubectl -n "${NAMESPACE}" get alertmanager kube-prometheus-stack-alertmanager -o jsonpath='{.spec.replicas}')" == 1 ]]
   assert_grafana_secret
   local alertmanager_yaml="" config_yaml=""
