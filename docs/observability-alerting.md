@@ -7,9 +7,10 @@ described in [`docs/observability-design.md`](./observability-design.md) and
 a human. The secret-file-backed synthetic Alertmanager → PagerDuty path has now been manually proven
 through fire, phone receipt, acknowledgement, and resolution. The host-heartbeat timers are installed
 on `sugarkube3`, `sugarkube4`, and `sugarkube5`. The watchdog configuration and operator workflows
-are repository-ready, while their Secret installation, deployment, and live delivery proof remain
-post-merge work. The explicitly allowlisted five-alert DSPACE route is deployed and live-proven in
-staging; this does not claim a production rollout.
+are repository-ready for staging and production, while their Secret installation, deployment, and
+live delivery proof remain post-merge work. The explicitly allowlisted five-alert DSPACE route is
+deployed and live-proven in staging. The production routing policy accepts exact production-labelled
+DSPACE and Cloudflare alerts but does not claim their separately managed rule sources are deployed.
 
 ## 1. Goals and non-goals
 
@@ -27,8 +28,9 @@ staging; this does not claim a production rollout.
 
 ### Non-goals (later stages)
 
-- Production alert rollout. This document designs the staging path first; production follows only
-  after staging drills succeed (see [`docs/observability-design.md`](./observability-design.md) §13).
+- Production DSPACE and Cloudflare rule-source rollout. Their production routing eligibility does
+  not deploy the rules or application telemetry (see
+  [`docs/observability-design.md`](./observability-design.md) §13).
 - Advanced SLOs, burn-rate alerting, or multi-window error budgets.
 - Exhaustive application-level synthetic checks beyond the deployed, bounded DSPACE `/chat`
   producer/consumer contract.
@@ -246,9 +248,9 @@ are explicitly verified, including the staging DSPACE route.
   installation, Helm deployment, live Last Ping confirmation, and PagerDuty failure/recovery drill
   remain post-merge. `KubeNodeNotReady` routing and other application alerts remain later work.
 
-## Staging observability watchdog delivery
+## Staging and production observability watchdog delivery
 
-The repository-ready staging dead-man path is distinct from the per-node heartbeat: Prometheus
+The repository-ready staging and production dead-man paths are distinct from the per-node heartbeat: Prometheus
 continuously fires `SugarkubeObservabilityWatchdog`, Alertmanager sends it to a Healthchecks
 `url_file` receiver, and the external Healthchecks-to-PagerDuty integration detects missing
 deliveries. Ordinary Prometheus alerts still reach the null receiver unless explicitly allowlisted; the existing exact

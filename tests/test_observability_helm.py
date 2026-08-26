@@ -216,9 +216,9 @@ def test_production_values_have_exact_safe_overrides_without_public_exposure_or_
         "alertmanager-pagerduty", "alertmanager-healthchecks-watchdog"
     ]
     assert prod["alertmanager"]["config"]["route"]["receiver"] == "null"
-    assert len(prod["alertmanager"]["config"]["route"]["routes"]) == 2
+    assert len(prod["alertmanager"]["config"]["route"]["routes"]) == 4
     assert {receiver["name"] for receiver in prod["alertmanager"]["config"]["receivers"]} == {
-        "null", "pagerduty-synthetic-test", "healthchecks-watchdog"
+        "null", "pagerduty-synthetic-test", "pagerduty-dspace", "healthchecks-watchdog"
     }
     text = COMMON.read_text(encoding="utf-8") + PROD.read_text(encoding="utf-8")
     forbidden = [
@@ -3133,6 +3133,74 @@ stringData:
 """
 
 
+def alertmanager_receivers_for_labels(config, labels):
+    """Resolve the direct-child routes used by this repository's exact contract."""
+    selected = []
+    for route in config["route"]["routes"]:
+        matches = True
+        for matcher in route["matchers"]:
+            name, operator, expected = re.fullmatch(r'(\w+)(=~|=)"(.*)"', matcher).groups()
+            actual = labels.get(name, "")
+            matches &= bool(re.fullmatch(expected, actual)) if operator == "=~" else actual == expected
+        if matches:
+            selected.append(route["receiver"])
+            if not route.get("continue", False):
+                break
+    return selected or [config["route"]["receiver"]]
+
+
+def test_production_alertmanager_routes_exact_eligible_label_sets():
+    config = yaml_load(PROD)["alertmanager"]["config"]
+    base = {"environment": "prod", "cluster": "sugarkube-prod", "severity": "critical"}
+    for alertname in DSPACE_ALERT_NAMES:
+        assert alertmanager_receivers_for_labels(config, {**base, "alertname": alertname}) == [
+            "pagerduty-dspace"
+        ]
+    assert alertmanager_receivers_for_labels(
+        config, {**base, "alertname": "CloudflareTunnelNoHealthyConnections"}
+    ) == ["pagerduty-dspace"]
+    assert alertmanager_receivers_for_labels(
+        config, {**base, "alertname": "SugarkubePagerDutyTest"}
+    ) == ["pagerduty-synthetic-test"]
+    watchdog = {
+        "alertname": "SugarkubeObservabilityWatchdog",
+        "environment": "prod",
+        "cluster": "sugarkube-prod",
+        "purpose": "observability-watchdog",
+    }
+    assert alertmanager_receivers_for_labels(config, watchdog) == ["healthchecks-watchdog"]
+    for labels in (
+        {**base, "alertname": "UnrelatedCriticalAlert"},
+        {**base, "alertname": DSPACE_ALERT_NAMES[0], "environment": "staging"},
+        {**base, "alertname": DSPACE_ALERT_NAMES[0], "cluster": "sugarkube-int"},
+        {**base, "alertname": DSPACE_ALERT_NAMES[0], "severity": "warning"},
+    ):
+        assert alertmanager_receivers_for_labels(config, labels) == ["null"]
+
+
+def test_production_alertmanager_has_exact_routes_and_file_backed_receivers():
+    config = yaml_load(PROD)["alertmanager"]["config"]
+    assert [route["receiver"] for route in config["route"]["routes"]] == [
+        "pagerduty-dspace", "pagerduty-dspace", "pagerduty-synthetic-test",
+        "healthchecks-watchdog",
+    ]
+    assert config["receivers"] == [
+        {"name": "null"},
+        {"name": "pagerduty-synthetic-test", "pagerduty_configs": [{
+            "routing_key_file": "/etc/alertmanager/secrets/alertmanager-pagerduty/routing-key",
+            "send_resolved": True,
+        }]},
+        {"name": "pagerduty-dspace", "pagerduty_configs": [{
+            "routing_key_file": "/etc/alertmanager/secrets/alertmanager-pagerduty/routing-key",
+            "send_resolved": True,
+        }]},
+        {"name": "healthchecks-watchdog", "webhook_configs": [{
+            "url_file": "/etc/alertmanager/secrets/alertmanager-healthchecks-watchdog/ping-url",
+            "send_resolved": False, "max_alerts": 1, "timeout": "10s",
+        }]},
+    ]
+
+
 def test_production_offline_render_uses_only_ordered_core_values(tmp_path):
     result, audit = run_helper(tmp_path, "render", env_name="prod", context="unavailable")
     assert result.returncode == 0, result.stderr
@@ -3252,3 +3320,21 @@ def test_production_alertmanager_validator_rejects_inline_credentials(tmp_path):
     )
     assert result.returncode == 16
     assert "forbidden-stub" not in result.stderr
+
+
+@pytest.mark.parametrize("mutation", ["missing", "broadened"])
+def test_production_alertmanager_validator_rejects_missing_or_broadened_routes(tmp_path, mutation):
+    config = yaml_load(PROD)["alertmanager"]["config"]
+    if mutation == "missing":
+        config["route"]["routes"].pop(0)
+    else:
+        config["route"]["routes"][0]["matchers"] = ['severity=~".*"']
+    config["privateFixtureDetail"] = "PRIVATE_ROUTE_FIXTURE_SENTINEL"
+    manifest = tmp_path / "invalid-route.yaml"
+    manifest.write_text(production_alertmanager_fixture(config=config), encoding="utf-8")
+    result = subprocess.run(
+        ["ruby", str(ALERTMANAGER_VALIDATOR), "prod", "rendered", str(manifest)],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 16
+    assert "PRIVATE_ROUTE_FIXTURE_SENTINEL" not in result.stderr

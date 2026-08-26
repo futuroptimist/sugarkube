@@ -2,8 +2,10 @@
 
 This runbook covers the staging and production observability lifecycles. It is intentionally
 non-Flux: operators use guarded Helm commands from this repository, with the chart version and
-full values chain committed in Git. The production core stack has live acceptance evidence; the
-application integrations listed below remain separately deferred. Authenticated DSPACE metrics are
+full values chain committed in Git. The production core stack has live acceptance evidence, and its
+Alertmanager policy makes exact production-labelled DSPACE and Cloudflare alerts eligible for
+PagerDuty delivery. The rule sources and application integrations that could produce those alerts
+remain separately deployed and are not claimed by that routing policy. Authenticated DSPACE metrics are
 supported separately on the existing application 3.0.1/chart 3.0.2 coordinates; this repository
 change alone does not deploy them or promote a release. Follow the
 [DSPACE production procedure](apps/dspace.md#production-authenticated-metrics-at-the-existing-release).
@@ -97,10 +99,10 @@ was verified, and current application releases predate the staging metrics integ
 The shared staging and production desired state is one Prometheus replica with
 `90d` retention and a `100GB` retention-size limit, backed by one `128Gi`
 ReadWriteOnce PVC using `local-path`. The baseline also runs one Alertmanager
-replica; production keeps a null default while explicit reviewed routes deliver the PagerDuty
-synthetic test and observability watchdog to PagerDuty and Healthchecks.io, respectively. Production
-DSPACE and Cloudflare routes remain intentionally absent until production-labelled alert rules are
-deployed, so the configuration cannot imply coverage that does not exist. The common values
+replica; production keeps a null default while exact reviewed DSPACE, Cloudflare, and synthetic-test
+label sets are eligible for PagerDuty and the observability watchdog routes to Healthchecks.io.
+These routes define policy, not rule deployment: production DSPACE and Cloudflare rule sources and
+their application telemetry must be deployed and verified separately. The common values
 file is authoritative for retention and storage, while environment overlays
 continue to contain only environment-specific differences.
 
@@ -273,8 +275,9 @@ chat-synthetic fallbacks require `dspace_release_approved_info`. With the capabi
 query returns no series. The blackbox missing-data summary retains its seven-day discovery logic,
 but no blackbox history still yields `NO DATA`.
 
-Paging and alerts, persistent Grafana UI state, and HA remain deferred. Repository desired state
-now records the retention and storage contract, while live deployment and the existing
+Production application rule sources and telemetry, persistent Grafana UI state, and HA remain
+deferred. Repository desired state records an Alertmanager paging policy independently of those rule
+sources, as well as the retention and storage contract, while live deployment and the existing
 `20Gi`-to-`128Gi` PVC migration remain separately authorized. This dashboard provisions none of
 those integrations. Merging this dashboard change does
 not deploy either generated artifact: staging and production each require a separate guarded Helm
@@ -777,9 +780,10 @@ alerts in Prometheus/Alertmanager and resolve unexpected actionable alerts. Then
    `just observability-watchdog-verify env=prod`. The latter checks the production rule, active alert,
    loaded configuration, both CR Secret references, both pod mounts, and at least one bounded
    five-minute repeat. It does not ping Healthchecks manually or send a PagerDuty test event.
-4. Explicitly confirm in Healthchecks that **Last Ping** advances and explicitly confirm in PagerDuty
-   that expected actionable production alerts deliver and resolve. Automated verification cannot
-   substitute for these external confirmations.
+4. Explicitly confirm in Healthchecks that **Last Ping** advances. For any separately deployed rule
+   source that emits an eligible production label set, explicitly confirm in PagerDuty that its
+   actionable alerts deliver and resolve. The checked-in routes do not claim those rule sources are
+   deployed, and automated verification cannot substitute for these external confirmations.
 
 If delivery configuration fails, first pause the external watchdog check or integration so rollback
 does not itself page. Use `helm -n monitoring history kube-prometheus-stack` to identify the last
