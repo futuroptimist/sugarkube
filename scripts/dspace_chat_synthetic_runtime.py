@@ -76,6 +76,11 @@ def load_config(path: Path) -> dict:
         raise Invalid("configuration value type")
     if not SHA.fullmatch(value["runnerRevision"]):
         raise Invalid("runner coordinate")
+    manifest_sha = value.get("runnerManifestSha256")
+    if manifest_sha is not None and (
+        not isinstance(manifest_sha, str) or not SHA256.fullmatch(manifest_sha)
+    ):
+        raise Invalid("runner manifest coordinate")
     if value["repositoryIdentity"] != APPROVED_REPOSITORY_IDENTITY:
         raise Invalid("repository identity")
     if value["tokenPlaceOrigin"] != APPROVED_TOKEN_PLACE_ORIGIN:
@@ -279,12 +284,19 @@ def validate_browser_contract(config: dict, runner: Path, root: Path = Path("/")
     }
 
 
+def runner_storage_identity(config: dict) -> str:
+    """Return the immutable storage identity, separate from the Git revision."""
+    revision = config["runnerRevision"]
+    manifest_sha = config.get("runnerManifestSha256")
+    return revision if manifest_sha is None else f"{revision}-{manifest_sha}"
+
+
 def validate_runner(config: dict) -> Path:
     configured_root = Path(config["runnerRoot"])
     if not configured_root.is_absolute() or ".." in configured_root.parts:
         raise Invalid("runner path")
     runner_root = normalize_root(configured_root)
-    runner = runner_root / config["runnerRevision"]
+    runner = runner_root / config.get("_runnerStorageIdentity", runner_storage_identity(config))
     try:
         runner_info = runner.lstat()
         resolved_runner = runner.resolve(strict=True)
@@ -299,7 +311,11 @@ def validate_runner(config: dict) -> Path:
     ):
         raise Invalid("runner path")
     runner = resolved_runner
-    manifest = json.loads((runner / "sugarkube-runner-manifest.json").read_text(encoding="utf-8"))
+    manifest_path = runner / "sugarkube-runner-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    expected_manifest_sha = config.get("runnerManifestSha256")
+    if expected_manifest_sha is not None and sha256(manifest_path) != expected_manifest_sha:
+        raise Invalid("runner manifest digest")
     files = manifest.get("files")
     browser_relative = manifest.get("playwrightBrowserExecutable")
     if (
