@@ -3522,10 +3522,17 @@ def test_same_revision_manifest_migration_preserves_runner_and_rolls_back_exactl
     installer.apply_installation(old_staged, legacy_snapshot, root, old_asset)
     old_runner = root / "var/lib/sugarkube/dspace-chat-runners" / revision
 
-    def retained_state(path: Path) -> dict[str, tuple[bytes, int, int, int]]:
+    def retained_state(
+        path: Path,
+    ) -> dict[str, tuple[str, bytes | str | None, int, int, int]]:
         return {
             str(item.relative_to(path)): (
-                item.read_bytes() if item.is_file() and not item.is_symlink() else b"",
+                "symlink" if item.is_symlink() else "file" if item.is_file() else "directory",
+                (
+                    os.readlink(item)
+                    if item.is_symlink()
+                    else item.read_bytes() if item.is_file() else None
+                ),
                 item.lstat().st_uid,
                 item.lstat().st_gid,
                 stat.S_IMODE(item.lstat().st_mode),
@@ -3544,6 +3551,11 @@ def test_same_revision_manifest_migration_preserves_runner_and_rolls_back_exactl
     assert set(json.loads((old_runner / legacy_manifest_path.name).read_text())["files"]) == (
         runtime.LEGACY_CRITICAL_FILES
     )
+    legacy_manifest_sha = runtime.sha256(old_runner / legacy_manifest_path.name)
+    complete_legacy_before = retained_state(root)
+    assert installer.repair_runner_access(root, revision, old_asset, legacy_manifest_sha, True) == 0
+    assert "runnerAccess=already-correct mutation=none" in capsys.readouterr().out
+    assert retained_state(root) == complete_legacy_before
 
     installer.apply_installation(new_staged, qualified_snapshot, root, new_asset)
     new_runner = old_runner.parent / qualified_identity
