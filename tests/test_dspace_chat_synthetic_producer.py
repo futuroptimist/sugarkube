@@ -456,6 +456,74 @@ def runtime_runner(tmp_path: Path) -> tuple[dict, Path]:
     return value, qualified
 
 
+def legacy_runtime_runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[dict, Path]:
+    """Convert the realistic Git runner fixture to the approved seven-file contract."""
+    value, qualified = runtime_runner(tmp_path)
+    revision = value["runnerRevision"]
+    runner = qualified.with_name(revision)
+    qualified.rename(runner)
+    value.pop("runnerManifestSha256")
+    value["browserContract"] = json.loads(CONFIG.read_text())["browserContract"]
+    manifest_path = runner / "sugarkube-runner-manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["browserContract"] = value["browserContract"]
+    manifest["browserProvenance"] = value["browserContract"]
+    manifest["playwrightBrowserExecutable"] = None
+    manifest["files"] = {
+        relative: digest
+        for relative, digest in manifest["files"].items()
+        if relative in runtime.LEGACY_CRITICAL_FILES
+    }
+    manifest_path.write_text(json.dumps(manifest))
+    monkeypatch.setattr(runtime, "LEGACY_RUNNER_REVISION", revision)
+    monkeypatch.setattr(runtime, "LEGACY_RUNNER_MANIFEST_SHA256", runtime.sha256(manifest_path))
+    return value, runner
+
+
+def test_approved_legacy_runner_coordinates_are_exact() -> None:
+    assert runtime.LEGACY_RUNNER_REVISION == "97ab09f13fb098de928a878bf1fe9b8d13032cb5"
+    assert runtime.LEGACY_RUNNER_MANIFEST_SHA256 == (
+        "36fdab33edc0f1ad518a6d3d247a1bd32d233402387ba57493a9386d78ec9301"
+    )
+
+
+def test_real_runtime_accepts_only_exact_legacy_seven_file_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, runner = legacy_runtime_runner(tmp_path, monkeypatch)
+
+    assert set(json.loads((runner / "sugarkube-runner-manifest.json").read_text())["files"]) == (
+        runtime.LEGACY_CRITICAL_FILES
+    )
+    assert runtime.validate_runner(value) == runner
+
+    monkeypatch.setattr(runtime, "LEGACY_RUNNER_MANIFEST_SHA256", "0" * 64)
+    with pytest.raises(runtime.Invalid, match="legacy runner manifest coordinate"):
+        runtime.validate_runner(value)
+
+
+@pytest.mark.parametrize("relative", sorted(runtime.LEGACY_UNMANIFESTED_CRITICAL_FILES))
+@pytest.mark.parametrize("fault", ["missing", "symlink", "content"])
+def test_legacy_compatibility_files_are_validated_against_pinned_git_blobs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative: str, fault: str
+) -> None:
+    value, runner = legacy_runtime_runner(tmp_path, monkeypatch)
+    target = runner / relative
+    if fault == "missing":
+        target.unlink()
+    elif fault == "symlink":
+        original = target.read_bytes()
+        target.unlink()
+        external = tmp_path / "external"
+        external.write_bytes(original)
+        target.symlink_to(external)
+    else:
+        target.write_text("drift\n")
+
+    with pytest.raises(runtime.Invalid, match="tracked state|legacy compatibility file"):
+        runtime.validate_runner(value)
+
+
 def test_runner_validation_accepts_complete_independent_git_repository(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

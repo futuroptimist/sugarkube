@@ -22,6 +22,17 @@ migration at the same Git revision without reusing or overwriting the older revi
 Retained assets created before this migration remain valid and continue to select their legacy
 revision-only runner coordinate.
 
+That compatibility is deliberately limited to the approved revision-only coordinate
+`97ab09f13fb098de928a878bf1fe9b8d13032cb5` and legacy manifest SHA-256
+`36fdab33edc0f1ad518a6d3d247a1bd32d233402387ba57493a9386d78ec9301`. The legacy manifest must
+contain exactly its original seven critical-file keys; an unknown digest, another revision-only
+runner, or any missing, renamed, or additional key fails closed. Its two historically unmanifested
+critical files, `frontend/playwright.config.ts` and
+`frontend/scripts/utils/ensure-playwright-browsers.js`, are not implicitly trusted: validation
+requires each to be a regular tracked file whose bytes match its blob at the pinned Git HEAD. New
+manifest-qualified runners instead require the configured manifest digest, their exact qualified
+storage identity, and all nine current critical-file entries and hashes.
+
 Complete Git metadata is retained so the snapshot can prove its exact HEAD and object integrity
 without the source checkout, alternates, hard-linked objects, or a shared object store. The root
 `node_modules/.pnpm` store and frontend dependency links are retained because pnpm workspace links
@@ -101,6 +112,13 @@ installation mutation. Review all hashes and coordinates. `status` is read-only 
 roots, reports activation as not queried; only `/` queries unit activation without printing
 configuration secrets (the committed configuration contains none). A failed staging or preflight
 leaves installed fixtures unchanged.
+
+Status, migration preflight, retained-asset checks, access repair, and rollback all use the same
+runner validator. A same-revision migration therefore retains the approved legacy runner unchanged
+while installing and selecting the manifest-qualified runner. Rollback can reselect the exact
+retained legacy asset, and a later rollback can reselect the qualified retained asset; neither
+operation renames, rewrites, or deletes an immutable runner. Under a private root these checks do
+not query or mutate systemd.
 
 ## 3. Separately authorized installation and controlled execution
 
