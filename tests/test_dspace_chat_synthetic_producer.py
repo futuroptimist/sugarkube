@@ -83,6 +83,22 @@ def test_configuration_selects_contracts_and_exact_legacy_coordinate(tmp_path: P
         runtime.load_config(path)
 
 
+def test_production_legacy_contract_constants_are_exact() -> None:
+    assert runtime.LEGACY_RUNNER_REVISION == "97ab09f13fb098de928a878bf1fe9b8d13032cb5"
+    assert runtime.LEGACY_RUNNER_MANIFEST_SHA256 == (
+        "36fdab33edc0f1ad518a6d3d247a1bd32d233402387ba57493a9386d78ec9301"
+    )
+    assert runtime.LEGACY_CRITICAL_FILES == {
+        "scripts/run-remote-chat-smoke.mjs",
+        "scripts/remote-chat-smoke-completion.mjs",
+        "frontend/e2e/remote-chat-smoke.spec.ts",
+        "package.json",
+        "frontend/package.json",
+        "pnpm-workspace.yaml",
+        "pnpm-lock.yaml",
+    }
+
+
 @pytest.mark.parametrize(
     ("key", "replacement", "message"),
     [
@@ -538,7 +554,7 @@ def test_legacy_compatibility_blob_failure_is_bounded_invalid(
     real_run = subprocess.run
 
     def missing_blob(argv, *args, **kwargs):
-        if "show" in argv:
+        if "cat-file" in argv:
             raise subprocess.CalledProcessError(128, argv, stderr=b"untrusted details")
         return real_run(argv, *args, **kwargs)
 
@@ -575,8 +591,41 @@ def test_unknown_legacy_manifest_digest_fails_before_parsing(
         runtime.validate_runner(value)
 
 
+@pytest.mark.parametrize("fault", ["missing", "extra", "renamed", "symlink", "hash-drift"])
+def test_legacy_declared_manifest_entries_fail_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    value, runner = legacy_runtime_runner(tmp_path, monkeypatch)
+    manifest_path = runner / "sugarkube-runner-manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    relative = sorted(runtime.LEGACY_CRITICAL_FILES)[0]
+    if fault == "missing":
+        manifest["files"].pop(relative)
+    elif fault == "extra":
+        manifest["files"]["unexpected"] = "0" * 64
+    elif fault == "renamed":
+        manifest["files"][f"{relative}.renamed"] = manifest["files"].pop(relative)
+    elif fault == "hash-drift":
+        manifest["files"][relative] = "0" * 64
+    else:
+        target = runner / relative
+        contents = target.read_bytes()
+        target.unlink()
+        external = tmp_path / "declared-external"
+        external.write_bytes(contents)
+        target.symlink_to(external)
+    if fault != "symlink":
+        manifest_path.write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n")
+        monkeypatch.setattr(runtime, "LEGACY_RUNNER_MANIFEST_SHA256", runtime.sha256(manifest_path))
+
+    with pytest.raises(
+        runtime.Invalid, match="critical file manifest|tracked state|critical file hash"
+    ):
+        runtime.validate_runner(value)
+
+
 @pytest.mark.parametrize("relative", sorted(runtime.LEGACY_COMPATIBILITY_FILES))
-@pytest.mark.parametrize("fault", ["missing", "symlink", "drift"])
+@pytest.mark.parametrize("fault", ["missing", "symlink", "untracked", "drift"])
 def test_legacy_unmanifested_critical_files_are_validated_against_head(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative: str, fault: str
 ) -> None:
@@ -590,10 +639,56 @@ def test_legacy_unmanifested_critical_files_are_validated_against_head(
         external = tmp_path / "external"
         external.write_bytes(contents)
         target.symlink_to(external)
-    else:
+    elif fault == "drift":
         target.write_text("drift\n")
+    else:
+        git("rm", "--cached", relative, cwd=runner)
+        git("commit", "-m", "make compatibility file untracked", cwd=runner)
+        revision = git("rev-parse", "HEAD", cwd=runner)
+        manifest_path = runner / "sugarkube-runner-manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["runnerRevision"] = revision
+        manifest_path.write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n")
+        replacement = runner.with_name(revision)
+        runner.rename(replacement)
+        value["runnerRevision"] = revision
+        monkeypatch.setattr(runtime, "LEGACY_RUNNER_REVISION", revision)
+        monkeypatch.setattr(
+            runtime,
+            "LEGACY_RUNNER_MANIFEST_SHA256",
+            runtime.sha256(replacement / manifest_path.name),
+        )
 
     with pytest.raises(runtime.Invalid, match="runner tracked state|legacy compatibility file"):
+        runtime.validate_runner(value)
+
+
+@pytest.mark.parametrize(
+    "relative", sorted(runtime.CURRENT_CRITICAL_FILES - runtime.LEGACY_CRITICAL_FILES)
+)
+def test_qualified_runner_requires_each_qualified_only_manifest_entry(
+    tmp_path: Path, relative: str
+) -> None:
+    value, runner = runtime_runner(tmp_path)
+    manifest_path = runner / "sugarkube-runner-manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["files"].pop(relative)
+    manifest_path.write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n")
+    value["runnerManifestSha256"] = runtime.sha256(manifest_path)
+    replacement = runner.with_name(runtime.runner_storage_identity(value))
+    runner.rename(replacement)
+
+    with pytest.raises(runtime.Invalid, match="critical file manifest"):
+        runtime.validate_runner(value)
+
+
+def test_qualified_configuration_rejects_bare_revision_storage_identity(tmp_path: Path) -> None:
+    value, runner = runtime_runner(tmp_path)
+    bare = runner.with_name(value["runnerRevision"])
+    runner.rename(bare)
+    value["_runnerStorageIdentity"] = value["runnerRevision"]
+
+    with pytest.raises(runtime.Invalid, match="runner storage identity"):
         runtime.validate_runner(value)
 
 
@@ -3345,104 +3440,161 @@ def test_lifecycle_is_single_shot_owner_scoped_bounded_and_redacted() -> None:
 def test_same_revision_manifest_migration_preserves_runner_and_rolls_back_exactly(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
-    """A new manifest contract at one Git revision gets a distinct immutable identity."""
-    candidate_snapshot, revision = runner_snapshot_fixture(tmp_path)
-    candidate_manifest = candidate_snapshot / "sugarkube-runner-manifest.json"
-    candidate_manifest.write_text(
-        json.dumps(
-            {
-                "browserProvenance": json.loads(CONFIG.read_text())["browserContract"],
-                "pnpmVersion": "9.0.0",
-                "playwrightBrowserExecutable": None,
-                "contract": "new-critical-files",
-            }
-        )
+    """Exercise the private-root lifecycle with the authoritative runtime module."""
+    value, legacy_snapshot = legacy_runtime_runner(tmp_path / "fixture", monkeypatch)
+    revision = value["runnerRevision"]
+    monkeypatch.setattr(installer, "APPROVED_RUNNER_REVISION", revision)
+    legacy_manifest_path = legacy_snapshot / "sugarkube-runner-manifest.json"
+    legacy_manifest = json.loads(legacy_manifest_path.read_text())
+    provenance = {
+        "name": runtime.SYSTEM_CHROMIUM,
+        "architecture": "aarch64",
+        "launcherPath": "/usr/bin/chromium",
+        "launcherRealpath": "/usr/bin/chromium",
+        "launcherSha256": "1" * 64,
+        "executablePath": "/usr/lib/chromium/chromium",
+        "executableRealpath": "/usr/lib/chromium/chromium",
+        "executableSha256": "2" * 64,
+        "owner": "root",
+        "group": "root",
+        "mode": "0755",
+        "launcherExecutableRelationship": "distinct-files",
+    }
+    legacy_manifest.update(pnpmVersion="9.0.0", browserProvenance=provenance)
+    legacy_manifest_path.write_text(json.dumps(legacy_manifest, sort_keys=True, indent=2) + "\n")
+    monkeypatch.setattr(
+        runtime, "LEGACY_RUNNER_MANIFEST_SHA256", runtime.sha256(legacy_manifest_path)
     )
-    old_snapshot = tmp_path / "old" / revision
-    __import__("shutil").copytree(candidate_snapshot, old_snapshot)
-    (old_snapshot / "sugarkube-runner-manifest.json").write_text(
-        json.dumps(
-            {
-                "browserProvenance": json.loads(CONFIG.read_text())["browserContract"],
-                "pnpmVersion": "9.0.0",
-                "playwrightBrowserExecutable": None,
-                "contract": "old-critical-files",
-            }
-        )
-    )
+    monkeypatch.setattr(runtime, "validate_browser_contract", lambda *_args: provenance)
+    monkeypatch.setattr(installer, "runtime_module", lambda: runtime)
 
-    def staged(path: Path, manifest_sha: str | None) -> None:
+    qualified_parent = tmp_path / "qualified"
+    qualified_parent.mkdir()
+    qualified_snapshot = qualified_parent / "pending"
+    shutil.copytree(legacy_snapshot, qualified_snapshot, symlinks=True)
+    qualified_manifest_path = qualified_snapshot / legacy_manifest_path.name
+    qualified_manifest = json.loads(qualified_manifest_path.read_text())
+    for relative in runtime.LEGACY_COMPATIBILITY_FILES:
+        qualified_manifest["files"][relative] = runtime.sha256(qualified_snapshot / relative)
+    qualified_manifest_path.write_text(
+        json.dumps(qualified_manifest, sort_keys=True, indent=2) + "\n"
+    )
+    qualified_sha = runtime.sha256(qualified_manifest_path)
+    qualified_identity = f"{revision}-{qualified_sha}"
+    qualified_snapshot.rename(qualified_parent / qualified_identity)
+    qualified_snapshot = qualified_parent / qualified_identity
+
+    def staged(path: Path, manifest_sha: str | None, marker: str = "") -> str:
         installer.render(path)
         config_path = path / "etc/sugarkube/dspace-chat-synthetic.json"
-        value = json.loads(config_path.read_text())
+        rendered = json.loads(config_path.read_text())
+        rendered["runnerRevision"] = revision
         if manifest_sha is None:
-            value.pop("runnerManifestSha256")
+            rendered.pop("runnerManifestSha256")
         else:
-            value["runnerManifestSha256"] = manifest_sha
-        config_path.write_text(json.dumps(value, sort_keys=True, indent=2) + "\n")
+            rendered["runnerManifestSha256"] = manifest_sha
+        config_path.write_text(json.dumps(rendered, sort_keys=True, indent=2) + "\n")
+        if marker:
+            service = path / "etc/systemd/system/dspace-chat-synthetic.service"
+            service.write_text(service.read_text() + f"# {marker}\n")
         asset_manifest = json.loads((path / "manifest.json").read_text())
-        asset_manifest["etc/sugarkube/dspace-chat-synthetic.json"] = installer.sha(config_path)
+        for relative in asset_manifest:
+            asset_manifest[relative] = installer.sha(path / relative)
         (path / "manifest.json").write_text(
             json.dumps(asset_manifest, sort_keys=True, indent=2) + "\n"
         )
+        return installer.sha(path / "manifest.json")
 
     old_staged, new_staged = tmp_path / "old-assets", tmp_path / "new-assets"
-    staged(old_staged, None)
-    candidate_sha = installer.sha(candidate_manifest)
-    staged(new_staged, candidate_sha)
-    root = tmp_path / "root"
+    old_asset = staged(old_staged, None)
+    new_asset = staged(new_staged, qualified_sha)
+    root = tmp_path / "private-root"
     root.mkdir()
-    fake = FakeSnapshotRuntime()
-    fake.validate_browser_contract = lambda _config, selected, _root: json.loads(
-        (selected / "sugarkube-runner-manifest.json").read_text()
-    )["browserProvenance"]
-    monkeypatch.setattr(installer, "runtime_module", lambda: fake)
+    real_run = subprocess.run
+    observed_commands: list[list[str]] = []
 
-    old_asset = installer.sha(old_staged / "manifest.json")
-    new_asset = installer.sha(new_staged / "manifest.json")
-    installer.apply_installation(old_staged, old_snapshot, root, old_asset)
+    def private_root_commands(argv, *args, **kwargs):
+        observed_commands.append([str(part) for part in argv])
+        assert argv[0] == "git", f"private-root lifecycle invoked host command: {argv}"
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(installer.subprocess, "run", private_root_commands)
+    installer.apply_installation(old_staged, legacy_snapshot, root, old_asset)
     old_runner = root / "var/lib/sugarkube/dspace-chat-runners" / revision
-    old_before = tree_bytes(old_runner)
-    installer.apply_installation(new_staged, candidate_snapshot, root, new_asset)
-    new_identity = f"{revision}-{candidate_sha}"
-    new_runner = old_runner.parent / new_identity
 
-    assert old_runner.is_dir() and tree_bytes(old_runner) == old_before
-    assert new_runner.is_dir() and new_runner != old_runner
-    assert os.readlink(root / "var/lib/sugarkube/dspace-chat-installations/current") == new_asset
+    def retained_state(path: Path) -> dict[str, tuple[bytes, int, int, int]]:
+        return {
+            str(item.relative_to(path)): (
+                item.read_bytes() if item.is_file() and not item.is_symlink() else b"",
+                item.lstat().st_uid,
+                item.lstat().st_gid,
+                stat.S_IMODE(item.lstat().st_mode),
+            )
+            for item in [path, *path.rglob("*")]
+        }
+
+    old_before = retained_state(old_runner)
     assert installer.status(root) == 0
-    new_status = capsys.readouterr().out
-    assert f"runnerStorageIdentity={new_identity}" in new_status
-    assert "activation=not-queried" in new_status
-
-    # Reapplication validates the completed transaction and performs no mutation.
-    before = tree_bytes(root)
-    installer.apply_installation(new_staged, candidate_snapshot, root, new_asset)
-    assert tree_bytes(root) == before
-
-    monkeypatch.setattr(
-        installer.subprocess,
-        "run",
-        lambda *args, **kwargs: pytest.fail(
-            f"rollback invoked a host, systemd, cluster, or production command: {args}"
-        ),
-    )
+    legacy_status = capsys.readouterr().out
+    assert f"runnerStorageIdentity={revision}" in legacy_status
     assert (
-        run_installer_main(
-            monkeypatch,
-            "rollback",
-            "--apply",
-            "--root",
-            str(root),
-            "--revision",
-            old_asset,
-        )
-        == 0
+        f"runnerManifestSha256={runtime.sha256(old_runner / legacy_manifest_path.name)}"
+        in legacy_status
     )
+    assert set(json.loads((old_runner / legacy_manifest_path.name).read_text())["files"]) == (
+        runtime.LEGACY_CRITICAL_FILES
+    )
+
+    installer.apply_installation(new_staged, qualified_snapshot, root, new_asset)
+    new_runner = old_runner.parent / qualified_identity
+    assert retained_state(old_runner) == old_before
     assert installer.status(root) == 0
-    old_status = capsys.readouterr().out
-    assert f"runnerStorageIdentity={revision}" in old_status
-    assert tree_bytes(old_runner) == old_before
+    qualified_status = capsys.readouterr().out
+    assert f"runnerStorageIdentity={qualified_identity}" in qualified_status
+    assert "activation=not-queried" in qualified_status
+
+    complete_before = retained_state(root)
+    installer.apply_installation(new_staged, qualified_snapshot, root, new_asset)
+    assert retained_state(root) == complete_before
+
+    for asset, identity in ((old_asset, revision), (new_asset, qualified_identity)):
+        assert (
+            run_installer_main(
+                monkeypatch, "rollback", "--apply", "--root", str(root), "--revision", asset
+            )
+            == 0
+        )
+        assert os.readlink(root / "var/lib/sugarkube/dspace-chat-installations/current") == asset
+        assert installer.status(root) == 0
+        assert f"runnerStorageIdentity={identity}" in capsys.readouterr().out
+        assert (
+            runtime.validate_runner(
+                dict(
+                    runtime.load_config(root / "etc/sugarkube/dspace-chat-synthetic.json"),
+                    runnerRoot=str(old_runner.parent),
+                )
+            )
+            == old_runner.parent / identity
+        )
+
+    bad_parent = tmp_path / "bad"
+    bad_parent.mkdir()
+    bad_snapshot = bad_parent / qualified_identity
+    shutil.copytree(qualified_snapshot, bad_snapshot, symlinks=True)
+    (bad_snapshot / "package.json").write_text("drift\n")
+    bad_staged = tmp_path / "bad-assets"
+    bad_asset = staged(bad_staged, qualified_sha, "distinct retained candidate")
+    before_failure = retained_state(root)
+    with pytest.raises(runtime.Invalid, match="runner tracked state|critical file hash"):
+        installer.apply_installation(bad_staged, bad_snapshot, root, bad_asset)
+    assert retained_state(root) == before_failure
+    assert retained_state(old_runner) == old_before
+
+    before_repair = retained_state(root)
+    assert installer.repair_runner_access(root, revision, new_asset, qualified_sha, True) == 0
+    assert retained_state(root) == before_repair
+    assert "runnerAccess=already-correct mutation=none" in capsys.readouterr().out
+    assert observed_commands and all(command[0] == "git" for command in observed_commands)
 
 
 def test_completed_install_rejects_conflicting_retained_candidate_without_mutation(

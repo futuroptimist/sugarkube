@@ -448,8 +448,20 @@ def validate_runner(config: dict) -> Path:
         for relative in LEGACY_COMPATIBILITY_FILES:
             target = runner / relative
             try:
-                tracked_contents = runner_git_bytes("show", f"HEAD:{relative}")
-            except subprocess.CalledProcessError:
+                entry = runner_git_bytes("ls-tree", "-z", "HEAD", "--", relative)
+                metadata, separator, tracked_path = entry.partition(b"\t")
+                fields = metadata.split()
+                if (
+                    separator != b"\t"
+                    or tracked_path != os.fsencode(relative) + b"\0"
+                    or len(fields) != 3
+                    or fields[0] not in {b"100644", b"100755"}
+                    or fields[1] != b"blob"
+                    or not SHA.fullmatch(fields[2].decode("ascii"))
+                ):
+                    raise Invalid("legacy compatibility file")
+                tracked_contents = runner_git_bytes("cat-file", "blob", fields[2].decode("ascii"))
+            except (OSError, UnicodeError, subprocess.CalledProcessError):
                 raise Invalid("legacy compatibility file") from None
             if (
                 target.is_symlink()
