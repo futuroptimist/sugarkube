@@ -781,11 +781,16 @@ alerts in Prometheus/Alertmanager and resolve unexpected actionable alerts. Then
    that expected actionable production alerts deliver and resolve. Automated verification cannot
    substitute for these external confirmations.
 
-If delivery configuration fails, immediately roll forward to a reviewed values revision whose root
-route and sole receiver are `null`, with no child routes, after first pausing the external watchdog
-check/integration so rollback does not itself page. Run the normal atomic Helm upgrade and
-`just observability-verify env=prod`, diagnose offline without reading Secret values, and re-enable
-delivery only after a corrected render passes all contract checks.
+If delivery configuration fails, first pause the external watchdog check or integration so rollback
+does not itself page. Use `helm -n monitoring history kube-prometheus-stack` to identify the last
+known-good null-only Helm revision, then roll back to that exact revision with
+`helm -n monitoring rollback kube-prometheus-stack <null-only-revision> --wait --timeout 20m`.
+Verify the rolled-back release from a checkout of the Git commit that produced that revision, using
+that checkout's matching verifier. This PR's current verifier intentionally rejects null-only
+production configuration, so running `just observability-verify env=prod` from this checkout against
+the rolled-back release is expected to fail and must not be treated as rollback evidence. Diagnose
+offline without reading Secret values, and re-enable delivery only after a corrected render passes
+all current contract checks.
 
 ### Controlled failure drill and recovery
 
