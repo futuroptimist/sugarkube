@@ -7,6 +7,7 @@ require "yaml"
 PD_SECRET = "alertmanager-pagerduty"
 HC_SECRET = "alertmanager-healthchecks-watchdog"
 PD_RECEIVER = "pagerduty-synthetic-test"
+PROD_PD_RECEIVER = "pagerduty-production"
 DSPACE_RECEIVER = "pagerduty-dspace"
 HC_RECEIVER = "healthchecks-watchdog"
 PD_PATH = "/etc/alertmanager/secrets/alertmanager-pagerduty/routing-key"
@@ -42,12 +43,9 @@ rescue StandardError
 end
 ams = documents.select { |d| d.is_a?(Hash) && d["kind"] == "Alertmanager" && d.dig("metadata", "name") == "kube-prometheus-stack-alertmanager" }
 fail_closed("expected exactly one kube-prometheus-stack Alertmanager custom resource") unless ams.length == 1
-expected_secrets = environment == "staging" ? [PD_SECRET, HC_SECRET] : []
+expected_secrets = [PD_SECRET, HC_SECRET]
 unless (ams.first.dig("spec", "secrets") || []) == expected_secrets
-  if environment == "staging"
-    fail_closed("staging Alertmanager must reference exactly the two expected integration Secrets in order")
-  end
-  fail_closed("production Alertmanager must mount no integration Secrets")
+  fail_closed("#{environment} Alertmanager must reference exactly the two expected integration Secrets in order")
 end
 secret = documents.find { |d| d.is_a?(Hash) && d["kind"] == "Secret" && d.dig("metadata", "name") == "alertmanager-kube-prometheus-stack-alertmanager" }
 fail_closed("generated Alertmanager configuration Secret is missing") unless secret
@@ -72,26 +70,18 @@ fail_closed("inline credentials or webhook URLs are forbidden") if forbidden.cal
 
 route = config["route"]
 fail_closed('root receiver must remain "null"') unless route.is_a?(Hash) && route["receiver"] == "null"
-if environment == "prod"
-  allowed_route = {"receiver" => "null"}
-  nullable_route = {"group_by" => nil, "group_wait" => nil, "group_interval" => nil,
-                    "repeat_interval" => nil, "receiver" => "null"}
-  fail_closed("production root route must be the exact null-only route") unless [allowed_route, nullable_route].include?(route)
-  fail_closed("production receiver list must contain only null") unless config["receivers"] == [{"name" => "null"}]
-  fail_closed("production configuration must contain only route and receivers") unless config.keys.sort == %w[receivers route]
-  warn "Alertmanager production null-only structure verified (credential values not accessed)."
-  exit 0
-end
 fail_closed("root route must contain only its receiver and exact child routes") unless route.keys.sort == %w[receiver routes]
 children = route["routes"]
-fail_closed("root must have exactly the four allowlisted direct-child routes") unless children.is_a?(Array) && children.length == 4
+expected_children = environment == "staging" ? 4 : 3
+fail_closed("root must have exactly the allowlisted direct-child routes") unless children.is_a?(Array) && children.length == expected_children
 receivers = config["receivers"]
-fail_closed("receiver list must contain exactly null, two PagerDuty receivers, and Healthchecks") unless receivers.is_a?(Array) && receivers.length == 4 && receivers.all? { |x| x.is_a?(Hash) }
+expected_receivers = environment == "staging" ? 4 : 3
+fail_closed("receiver list must contain exactly null, the environment PagerDuty receivers, and Healthchecks") unless receivers.is_a?(Array) && receivers.length == expected_receivers && receivers.all? { |x| x.is_a?(Hash) }
 fail_closed('root "null" receiver is missing or broadened') unless receivers.count { |x| x == { "name" => "null" } } == 1
 
 pd_receivers = receivers.select { |x| x.key?("pagerduty_configs") }
-fail_closed("there must be exactly two PagerDuty receivers") unless pd_receivers.length == 2
-fail_closed("PagerDuty receiver names changed") unless pd_receivers.map { |x| x["name"] }.sort == [PD_RECEIVER, DSPACE_RECEIVER].sort
+expected_pd_names = environment == "staging" ? [PD_RECEIVER, DSPACE_RECEIVER] : [PROD_PD_RECEIVER]
+fail_closed("PagerDuty receiver names changed") unless pd_receivers.map { |x| x["name"] }.sort == expected_pd_names.sort
 pd_receivers.each do |pd|
   fail_closed("PagerDuty receiver is malformed") unless pd.keys.sort == %w[name pagerduty_configs]
   configs = pd["pagerduty_configs"]
@@ -107,18 +97,28 @@ webhooks = hc["webhook_configs"]
 expected_webhook = { "url_file" => HC_PATH, "send_resolved" => false, "max_alerts" => 1, "timeout" => "10s" }
 fail_closed("Healthchecks webhook must use the exact file, resolution, timeout, and alert limit") unless webhooks == [expected_webhook]
 
-ds_route, cloudflare_route, pd_route, hc_route = children
-fail_closed("DSPACE route ordering or receiver changed") unless ds_route["receiver"] == DSPACE_RECEIVER
-fail_closed("DSPACE route matchers are not the exact alert allowlist") unless ds_route["matchers"].is_a?(Array) && ds_route["matchers"].sort == DSPACE_MATCHERS.sort
+ds_route, cloudflare_route, *remaining = children
+pagerduty_receiver = environment == "staging" ? DSPACE_RECEIVER : PROD_PD_RECEIVER
+env_label = environment == "staging" ? "staging" : "prod"
+cluster_label = environment == "staging" ? "sugarkube-int" : "sugarkube-prod"
+dspace_matchers = DSPACE_MATCHERS.map { |matcher| matcher.sub('environment="staging"', "environment=\"#{env_label}\"").sub('cluster="sugarkube-int"', "cluster=\"#{cluster_label}\"") }
+cloudflare_matchers = CLOUDFLARE_MATCHERS.map { |matcher| matcher.sub('environment="staging"', "environment=\"#{env_label}\"").sub('cluster="sugarkube-int"', "cluster=\"#{cluster_label}\"") }
+fail_closed("DSPACE route ordering or receiver changed") unless ds_route["receiver"] == pagerduty_receiver
+fail_closed("DSPACE route matchers are not the exact alert allowlist") unless ds_route["matchers"].is_a?(Array) && ds_route["matchers"].sort == dspace_matchers.sort
 fail_closed("DSPACE route must contain only receiver and exact matchers") unless ds_route.keys.sort == %w[matchers receiver]
-fail_closed("Cloudflare route ordering or receiver changed") unless cloudflare_route["receiver"] == DSPACE_RECEIVER
-fail_closed("Cloudflare route matchers are not the exact critical allowlist") unless cloudflare_route["matchers"].is_a?(Array) && cloudflare_route["matchers"].sort == CLOUDFLARE_MATCHERS.sort
+fail_closed("Cloudflare route ordering or receiver changed") unless cloudflare_route["receiver"] == pagerduty_receiver
+fail_closed("Cloudflare route matchers are not the exact critical allowlist") unless cloudflare_route["matchers"].is_a?(Array) && cloudflare_route["matchers"].sort == cloudflare_matchers.sort
 fail_closed("Cloudflare route must contain only receiver and exact matchers") unless cloudflare_route.keys.sort == %w[matchers receiver]
-fail_closed("PagerDuty route ordering or receiver changed") unless pd_route["receiver"] == PD_RECEIVER
-fail_closed("PagerDuty route matchers are not the exact synthetic allowlist") unless pd_route["matchers"].is_a?(Array) && pd_route["matchers"].sort == PD_MATCHERS.sort
-fail_closed("PagerDuty route must contain only receiver and exact matchers") unless pd_route.keys.sort == %w[matchers receiver]
+if environment == "staging"
+  pd_route = remaining.shift
+  fail_closed("PagerDuty route ordering or receiver changed") unless pd_route["receiver"] == PD_RECEIVER
+  fail_closed("PagerDuty route matchers are not the exact synthetic allowlist") unless pd_route["matchers"].is_a?(Array) && pd_route["matchers"].sort == PD_MATCHERS.sort
+  fail_closed("PagerDuty route must contain only receiver and exact matchers") unless pd_route.keys.sort == %w[matchers receiver]
+end
+hc_route = remaining.shift
+hc_matchers = HC_MATCHERS.map { |matcher| matcher.sub('environment="staging"', "environment=\"#{env_label}\"").sub('cluster="sugarkube-int"', "cluster=\"#{cluster_label}\"") }
 expected_hc = {
-  "receiver" => HC_RECEIVER, "matchers" => HC_MATCHERS,
+  "receiver" => HC_RECEIVER, "matchers" => hc_matchers,
   "group_by" => %w[alertname cluster environment], "group_wait" => "30s",
   "group_interval" => "1m", "repeat_interval" => "5m", "continue" => false
 }

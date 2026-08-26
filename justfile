@@ -3695,7 +3695,7 @@ observability-blackbox-status env='':
 observability-blackbox-verify env='':
     @scripts/observability_blackbox.sh verify '{{ env }}'
 
-# Silently configure and enable this staging node's Healthchecks.io heartbeat.
+# Silently configure and enable this staging or production node's Healthchecks.io heartbeat.
 observability-node-heartbeat-install env='':
     @scripts/observability_node_heartbeat.sh install '{{ env }}'
 

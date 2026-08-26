@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-
 ROOT = Path(__file__).resolve().parents[1]
 LIFECYCLE = ROOT / "scripts" / "observability_node_heartbeat.sh"
 DELIVERY = ROOT / "scripts" / "sugarkube-node-heartbeat"
@@ -24,8 +23,7 @@ def harness(tmp_path):
     bin_dir.mkdir()
     calls = tmp_path / "calls"
     systemctl = bin_dir / "systemctl"
-    systemctl.write_text(
-        """#!/bin/sh
+    systemctl.write_text("""#!/bin/sh
 printf '%s\\n' "$*" >>"$CALLS"
 case "$1 $2" in
   'is-enabled --quiet'|'is-active --quiet') exit 0 ;;
@@ -33,8 +31,7 @@ case "$1 $2" in
   'is-active '*) echo active ;;
   'show '*) echo success ;;
 esac
-"""
-    )
+""")
     systemctl.chmod(0o755)
     hostname = bin_dir / "hostname"
     hostname.write_text("#!/bin/sh\nprintf '%s\\n' \"${TEST_HOST:-sugarkube3}\"\n")
@@ -65,12 +62,26 @@ def run_lifecycle(harness, action, environment="staging", tty_text=None, **extra
     )
 
 
-@pytest.mark.parametrize("environment", ["", "dev", "prod", "production", "bogus"])
+@pytest.mark.parametrize("environment", ["", "dev", "production", "bogus"])
 def test_environment_guard_precedes_mutation(harness, environment):
     result = run_lifecycle(harness, "install", environment)
     assert result.returncode
-    assert "env=staging is required" in result.stderr
+    assert "env=staging or env=prod is required" in result.stderr
     assert not harness[2].exists()
+
+
+@pytest.mark.parametrize(
+    ("environment", "host"),
+    [
+        ("staging", "sugarkube3"),
+        ("prod", "sugarkube0"),
+        ("prod", "sugarkube1"),
+        ("prod", "sugarkube2"),
+    ],
+)
+def test_supported_inventory_hosts(harness, environment, host):
+    result = run_lifecycle(harness, "status", environment, TEST_HOST=host)
+    assert result.returncode == 0, result.stderr
 
 
 def test_hostname_guard_uses_canonical_inventory(harness):
@@ -178,7 +189,7 @@ def test_delivery_keeps_secret_out_of_argv_output_and_bounds_failure(tmp_path):
     (credential_dir / "ping-url").write_text(url + "\n")
     argv_log = tmp_path / "argv"
     curl = tmp_path / "curl"
-    curl.write_text("#!/bin/sh\nprintf '%s\\n' \"$*\" >\"$ARGV_LOG\"\ncat >/dev/null\nexit 7\n")
+    curl.write_text('#!/bin/sh\nprintf \'%s\\n\' "$*" >"$ARGV_LOG"\ncat >/dev/null\nexit 7\n')
     curl.chmod(0o755)
     result = subprocess.run(
         [str(DELIVERY)],
@@ -330,6 +341,7 @@ def test_justfile_exposes_node_heartbeat_recipes():
 
 def test_operations_runbook_uses_privilege_for_all_lifecycle_commands():
     operations = (ROOT / "docs/observability-operations.md").read_text()
-    for action in ("install", "status", "verify", "uninstall"):
-        command = f"sudo just observability-node-heartbeat-{action} env=staging"
-        assert command in operations
+    for environment in ("staging", "prod"):
+        for action in ("install", "status", "verify", "uninstall"):
+            command = f"sudo just observability-node-heartbeat-{action} env={environment}"
+            assert command in operations

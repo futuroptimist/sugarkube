@@ -27,8 +27,7 @@ staging; this does not claim a production rollout.
 
 ### Non-goals (later stages)
 
-- Production alert rollout. This document designs the staging path first; production follows only
-  after staging drills succeed (see [`docs/observability-design.md`](./observability-design.md) §13).
+- Broad production alert expansion beyond the exact reviewed allowlist.
 - Advanced SLOs, burn-rate alerting, or multi-window error budgets.
 - Exhaustive application-level synthetic checks beyond the deployed, bounded DSPACE `/chat`
   producer/consumer contract.
@@ -127,7 +126,7 @@ What each check detects, and does not:
 - Route only explicitly named, reviewed, and tested Sugarkube alerts to PagerDuty — an allowlist, not
   the chart's entire default rule set. Do not forward `kube-prometheus-stack`'s bundled rules
   wholesale before auditing each one individually.
-- Staging repository support now mounts `monitoring/alertmanager-pagerduty` and reads its
+- Staging and production repository support mount `monitoring/alertmanager-pagerduty` and reads its
   `routing-key` key from
   `/etc/alertmanager/secrets/alertmanager-pagerduty/routing-key`; the credential is never inline.
   The synthetic `SugarkubePagerDutyTest` route and the exact five-alert DSPACE workload allowlist are

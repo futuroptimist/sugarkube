@@ -632,6 +632,21 @@ a label, not text to paste.
 4. In the **Sugarkube Staging** Healthchecks.io project, confirm only the corresponding node check
    changes from **New** to **Up**. Repeat on the next physical node with its distinct URL.
 
+Production uses the same secret-safe tooling with the separate inventory `clusters/prod/nodes.txt`.
+On each of `sugarkube0`, `sugarkube1`, and `sugarkube2`, supply only that node's production check URL
+at the hidden prompt and run:
+
+```bash
+sudo just observability-node-heartbeat-install env=prod
+sudo just observability-node-heartbeat-status env=prod
+sudo just observability-node-heartbeat-verify env=prod
+# Destructive local rollback, only when required:
+sudo just observability-node-heartbeat-uninstall env=prod
+```
+
+Never reuse a staging URL. Configure each production node check for a **one-minute period plus
+two-minute grace**, and manually confirm the corresponding production Healthchecks check advances.
+
 The timer runs 30 seconds after boot and every minute thereafter, with no more than five seconds of
 randomized delay. Each check has two minutes of grace, so a sustained outage should page PagerDuty
 after approximately one minute plus two minutes of grace.
@@ -717,11 +732,49 @@ repository-ready, as tracked in [`docs/observability-alerting.md`](observability
 Secret installation, deployment, live confirmation, and failure-drill evidence remain post-merge
 operator work.
 
+## Production alert-delivery rollout
+
+Production requires two manually provisioned Secrets in `monitoring`: `alertmanager-pagerduty` with
+key `routing-key`, and `alertmanager-healthchecks-watchdog` with key `ping-url`. PagerDuty must have a
+production Events API integration and escalation policy; Healthchecks.io must have the separate
+`sugarkube-observability-watchdog` check connected to the intended production PagerDuty service and
+configured for a **five-minute period plus two-minute grace**. Never copy staging credentials or
+supply either value through Git, logs, command arguments, or test fixtures.
+
+Use a staged, fail-closed rollout:
+
+1. Confirm the two production Secrets and exact key names using
+   `just observability-watchdog-secret-check env=prod`; the verifier checks metadata only and never
+   returns, decodes, hashes, or compares values. Confirm all per-node checks exist separately.
+2. Before enabling delivery, inspect currently firing production alerts in Prometheus and
+   Alertmanager. Resolve unexpected alerts or confirm that they fall through to `null`; do not expose
+   credentials and do not send synthetic PagerDuty or Healthchecks events.
+3. Render with `just observability-render env=prod >/tmp/sugarkube-prod-render.yaml`. Confirm the
+   root remains `null`, the exact critical DSPACE/Cloudflare allowlist routes to
+   `pagerduty-production`, and `SugarkubeObservabilityWatchdog` routes only to
+   `healthchecks-watchdog` with `continue: false` and a five-minute repeat. Then run
+   `just observability-upgrade env=prod` and `just observability-verify env=prod`.
+4. Run `just observability-watchdog-verify env=prod`. It validates the firing rule and alert, loaded
+   Alertmanager configuration, both Secret references and read-only pod mounts, and a bounded repeat
+   observation without reading credentials or manually contacting Healthchecks.io.
+5. Explicitly confirm in the external systems that Healthchecks **Last Ping** advances and that
+   normal Watchdog delivery creates no permanent PagerDuty incident. Confirm a reviewed actionable
+   production alert reaches the production PagerDuty service and resolves; perform this only under
+   the separate approved incident-drill procedure, never with repository automation from this PR.
+
+If delivery configuration fails, first pause the production Healthchecks notification integration,
+then roll Helm back to the known-good null-only revision. Verify the live route is safely null-only
+using the validator from the Git revision that created that rollback release. Keep both Kubernetes
+Secrets in place during diagnosis; deleting them is not rollback. Fix and re-render before attempting
+another staged upgrade. The current repository verifier intentionally rejects null-only production
+configuration because it represents the new desired state, not the rollback revision.
+
 ## Observability watchdog
 
-The staging-only `SugarkubeObservabilityWatchdog` rule is configured to evaluate `vector(1)` every
-minute after deployment. Its exact
-`staging`/`sugarkube-int`/`observability-watchdog` labels route only to the secret-file-backed
+The staging and production `SugarkubeObservabilityWatchdog` rules are configured to evaluate `vector(1)` every
+minute after deployment. Each environment uses its exact environment and cluster labels; the staging
+`staging`/`sugarkube-int`/`observability-watchdog` labels and production
+`prod`/`sugarkube-prod`/`observability-watchdog` labels route only to the secret-file-backed
 Healthchecks receiver. Alertmanager waits 30 seconds, groups by alert name, cluster, and environment,
 and repeats every five minutes; configure the Healthchecks check for a **five-minute period and
 two-minute grace**. Keep “last ping” confirmation manual: no Healthchecks account credential belongs
