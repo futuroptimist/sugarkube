@@ -208,20 +208,17 @@ def test_grafana_alertmanager_k3s_monitor_values_are_guarded():
 def test_production_values_have_exact_safe_overrides_without_public_exposure_or_credentials():
     assert STAGING.exists() and PROD.exists()
     prod = yaml_load(PROD)
-    assert prod == {
-        "defaultRules": {"disabled": {"Watchdog": True}},
-        "prometheus": {
-            "prometheusSpec": {"externalLabels": {"cluster": "sugarkube-prod"}}
-        },
-        "alertmanager": {
-            "alertmanagerSpec": {"secrets": []},
-            "config": {
-                "global": None, "inhibit_rules": None, "templates": None,
-                "route": {"group_by": None, "group_wait": None, "group_interval": None,
-                          "repeat_interval": None, "receiver": "null", "routes": None},
-                "receivers": [{"name": "null"}],
-            },
-        },
+    assert prod["defaultRules"] == {"disabled": {"Watchdog": True}}
+    assert prod["prometheus"] == {
+        "prometheusSpec": {"externalLabels": {"cluster": "sugarkube-prod"}}
+    }
+    assert prod["alertmanager"]["alertmanagerSpec"]["secrets"] == [
+        "alertmanager-pagerduty", "alertmanager-healthchecks-watchdog"
+    ]
+    assert prod["alertmanager"]["config"]["route"]["receiver"] == "null"
+    assert len(prod["alertmanager"]["config"]["route"]["routes"]) == 4
+    assert {receiver["name"] for receiver in prod["alertmanager"]["config"]["receivers"]} == {
+        "null", "pagerduty-synthetic-test", "pagerduty-dspace", "healthchecks-watchdog"
     }
     text = COMMON.read_text(encoding="utf-8") + PROD.read_text(encoding="utf-8")
     forbidden = [
@@ -231,7 +228,6 @@ def test_production_values_have_exact_safe_overrides_without_public_exposure_or_
         "pass" + "word:",
         "admin" + "Pass" + "word",
         "cloudflare-tunnel",
-        "CloudflareTunnel",
     ]
     for needle in forbidden:
         assert needle not in text
@@ -419,7 +415,7 @@ def test_alertmanager_validator_redacts_invalid_base64(tmp_path):
                 "    receivers:\n",
                 "    receivers:\n      - name: alternate\n        pagerduty_configs: []\n",
             ),
-            "receiver list must contain exactly",
+            "receiver list does not match the environment's exact integration allowlist",
         ),
         (
             lambda text: text.replace(
@@ -1160,7 +1156,8 @@ case "$*" in
     sed 's/^/      /' "$DASHBOARD"
     printf '%s\n' '---' 'kind: ConfigMap' 'data:' '  dashboardproviders.yaml: |' '    providers:' '      - name: sugarkube' '        options:' '          path: /var/lib/grafana/dashboards/sugarkube' '---' 'kind: Deployment' 'spec:' '  template:' '    spec:' '      containers:' '        - volumeMounts:' '            - name: dashboards-sugarkube' "              mountPath: /var/lib/grafana/dashboards/sugarkube/$DASHBOARD_FILE" "              subPath: $DASHBOARD_FILE"
     if [ "$ENV_NAME" = prod ]; then
-      printf '%s\n' '---' 'apiVersion: monitoring.coreos.com/v1' 'kind: Alertmanager' 'metadata:' '  name: kube-prometheus-stack-alertmanager' 'spec:' '  secrets: []' '---' 'apiVersion: v1' 'kind: Secret' 'metadata:' '  name: alertmanager-kube-prometheus-stack-alertmanager' 'stringData:' '  alertmanager.yaml: |' '    route:' '      receiver: "null"' '    receivers:' '      - name: "null"'
+      printf '%s\n' '---' 'apiVersion: monitoring.coreos.com/v1' 'kind: Alertmanager' 'metadata:' '  name: kube-prometheus-stack-alertmanager' 'spec:' '  secrets:' '    - alertmanager-pagerduty' '    - alertmanager-healthchecks-watchdog' '---' 'apiVersion: v1' 'kind: Secret' 'metadata:' '  name: alertmanager-kube-prometheus-stack-alertmanager' 'stringData:' '  alertmanager.yaml: |'
+      sed -e 's/environment="staging"/environment="prod"/' -e 's/cluster="sugarkube-int"/cluster="sugarkube-prod"/' -e 's/^/    /' "$ALERTMANAGER_CONFIG"
       exit 0
     fi
     printf '%s\n' '---' 'apiVersion: monitoring.coreos.com/v1' 'kind: Alertmanager' 'metadata:' '  name: kube-prometheus-stack-alertmanager' 'spec:' '  secrets:' '    - alertmanager-pagerduty' '    - alertmanager-healthchecks-watchdog'
@@ -1240,14 +1237,14 @@ case "$*" in
     printf '%s\n' '{"spec":{"replicas":1,"retention":"90d","retentionSize":"100GB"}}' ;;
   *"get prometheus kube-prometheus-stack-prometheus"*) echo 1 ;;
   *"get alertmanager kube-prometheus-stack-alertmanager -o yaml"*)
-    if [ "$ENV_NAME" = prod ]; then printf '%s\n' 'apiVersion: monitoring.coreos.com/v1' 'kind: Alertmanager' 'metadata:' '  name: kube-prometheus-stack-alertmanager' 'spec:' '  secrets: []'; else printf '%s\n' 'apiVersion: monitoring.coreos.com/v1' 'kind: Alertmanager' 'metadata:' '  name: kube-prometheus-stack-alertmanager' 'spec:' '  secrets:' '    - alertmanager-pagerduty' '    - alertmanager-healthchecks-watchdog'; fi ;;
+    printf '%s\n' 'apiVersion: monitoring.coreos.com/v1' 'kind: Alertmanager' 'metadata:' '  name: kube-prometheus-stack-alertmanager' 'spec:' '  secrets:' '    - alertmanager-pagerduty' '    - alertmanager-healthchecks-watchdog' ;;
   *"get alertmanager kube-prometheus-stack-alertmanager"*) echo 1 ;;
   *"get secret alertmanager-kube-prometheus-stack-alertmanager -o yaml"*)
     printf '%s\n' 'apiVersion: v1' 'kind: Secret' 'metadata:' '  name: alertmanager-kube-prometheus-stack-alertmanager' 'stringData:' '  alertmanager.yaml: |'
     if [ "$KUBECTL_MODE" = malformed-alertmanager ]; then
       printf '%s\n' '    route: [unterminated'
     elif [ "$ENV_NAME" = prod ]; then
-      printf '%s\n' '    route:' '      receiver: "null"' '    receivers:' '      - name: "null"'
+      sed -e 's/environment="staging"/environment="prod"/' -e 's/cluster="sugarkube-int"/cluster="sugarkube-prod"/' -e 's/^/    /' "$ALERTMANAGER_CONFIG"
     else
       sed 's/^/    /' "$ALERTMANAGER_CONFIG"
     fi
@@ -1266,10 +1263,12 @@ case "$*" in
     ;;
   *"proxy/api/v1/rules"*)
     extra=''
+    environment=staging; cluster=sugarkube-int
+    [ "$ENV_NAME" != prod ] || { environment=prod; cluster=sugarkube-prod; }
     [ "$KUBECTL_MODE" != watchdog-extra-rule-label ] || extra=',"sentinel":"REJECTED_RULE_PAYLOAD_SENTINEL"'
-    printf '%s\n' '{"data":{"groups":[{"rules":[{"name":"SugarkubeObservabilityWatchdog","state":"firing","query":"vector(1)","labels":{"environment":"staging","cluster":"sugarkube-int","purpose":"observability-watchdog"'"$extra"'}}]}]}}'
+    printf '%s\n' '{"data":{"groups":[{"rules":[{"name":"SugarkubeObservabilityWatchdog","state":"firing","query":"vector(1)","labels":{"environment":"'"$environment"'","cluster":"'"$cluster"'","purpose":"observability-watchdog"'"$extra"'}}]}]}}'
     ;;
-  *"/api/v2/alerts"*) printf '%s\n' '[{"status":{"state":"active"},"labels":{"alertname":"SugarkubeObservabilityWatchdog","environment":"staging","cluster":"sugarkube-int","purpose":"observability-watchdog","prometheus":"platform-added"}}]' ;;
+  *"/api/v2/alerts"*) environment=staging; cluster=sugarkube-int; [ "$ENV_NAME" != prod ] || { environment=prod; cluster=sugarkube-prod; }; printf '%s\n' '[{"status":{"state":"active"},"labels":{"alertname":"SugarkubeObservabilityWatchdog","environment":"'"$environment"'","cluster":"'"$cluster"'","purpose":"observability-watchdog","prometheus":"platform-added"}}]' ;;
   *"get pods -l app.kubernetes.io/name=alertmanager -o json"*)
     phase=Running
     secret=alertmanager-healthchecks-watchdog
@@ -1286,7 +1285,7 @@ case "$*" in
       watchdog-wrong-mount-path) mount=/etc/alertmanager/secrets/wrong ;;
       watchdog-mount-not-readonly) readonly=false ;;
     esac
-    pod='{"metadata":{"name":"alertmanager-kube-prometheus-stack-alertmanager-0","labels":{"alertmanager":"kube-prometheus-stack-alertmanager"}},"status":{"phase":"'"$phase"'"},"spec":{"volumes":[{"name":"'"$volume"'","secret":{"secretName":"'"$secret"'"}}],"containers":[{"volumeMounts":[{"name":"watchdog","mountPath":"'"$mount"'","readOnly":'"$readonly"'}]}]},"private":"POD_FIXTURE_SENTINEL"}'
+    pod='{"metadata":{"name":"alertmanager-kube-prometheus-stack-alertmanager-0","labels":{"alertmanager":"kube-prometheus-stack-alertmanager"}},"status":{"phase":"'"$phase"'"},"spec":{"volumes":[{"name":"pagerduty","secret":{"secretName":"alertmanager-pagerduty"}},{"name":"'"$volume"'","secret":{"secretName":"'"$secret"'"}}],"containers":[{"volumeMounts":[{"name":"pagerduty","mountPath":"/etc/alertmanager/secrets/alertmanager-pagerduty","readOnly":true},{"name":"watchdog","mountPath":"'"$mount"'","readOnly":'"$readonly"'}]}]},"private":"POD_FIXTURE_SENTINEL"}'
     case "$KUBECTL_MODE" in
       watchdog-unrelated-pod) pod='{"metadata":{"name":"unrelated-alertmanager-0","labels":{"alertmanager":"another-resource"}},"status":{"phase":"Running"},"spec":{}}' ;;
       watchdog-malformed-status) pod="$(printf '%s' "$pod" | sed 's/"status":{"phase":"Running"}/"status":"PRIVATE_MALFORMED_POD_FIXTURE"/')" ;;
@@ -1508,6 +1507,15 @@ receivers:
 """,
         encoding="utf-8",
     )
+    if env_name == "prod":
+        prod_config = yaml_load(PROD)["alertmanager"]["config"]
+        prod_config = json.loads(json.dumps(prod_config))
+        prod_config["route"] = {
+            key: value for key, value in prod_config["route"].items() if value is not None
+        }
+        (tmp_path / "alertmanager-config.yaml").write_text(
+            json.dumps(prod_config), encoding="utf-8"
+        )
     if target_responses is not None:
         responses = tmp_path / "target-responses"
         if any(isinstance(response, bytes) for response in target_responses):
@@ -2637,6 +2645,8 @@ def test_watchdog_secret_check_reads_only_the_key_contract(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert "get secret alertmanager-healthchecks-watchdog -o go-template=" in audit
+    assert "get secret alertmanager-pagerduty -o go-template=" in audit
+    assert "routing-key" in audit
     assert "ping-url" in audit
     assert "value intentionally not read or printed" in result.stdout
     assert not (tmp_path / "watchdog-create-stdin").exists()
@@ -2739,7 +2749,7 @@ def test_watchdog_mount_contract_fails_closed_and_redacts_pod_data(tmp_path, mod
     result, _ = run_helper(tmp_path, "watchdog-verify", kubectl_mode=mode)
 
     assert result.returncode != 0
-    assert "running Alertmanager pods do not have the exact watchdog Secret mount" in result.stderr
+    assert "running Alertmanager pods do not have both exact integration Secret mounts" in result.stderr
     assert "POD_FIXTURE_SENTINEL" not in result.stdout + result.stderr
 
 
@@ -3094,14 +3104,24 @@ def test_watchdog_silence_api_failures_do_not_expose_fixture_contents(tmp_path, 
         assert not (tmp_path / "watchdog-silence-deletions").exists()
 
 
-def production_alertmanager_fixture(*, secrets="[]", route_extra="", receiver_extra="", inline=""):
-    return f'''---
+def production_alertmanager_fixture(*, config=None, secrets=None):
+    prod = yaml_load(PROD)
+    selected_config = config if config is not None else prod["alertmanager"]["config"]
+    selected_config = json.loads(json.dumps(selected_config))
+    selected_config["route"] = {
+        key: value for key, value in selected_config["route"].items() if value is not None
+    }
+    selected_secrets = secrets if secrets is not None else prod["alertmanager"]["alertmanagerSpec"]["secrets"]
+    secret_lines = "\n".join(f"    - {name}" for name in selected_secrets) or "    []"
+    embedded = "\n".join(f"    {line}" for line in json.dumps(selected_config).splitlines())
+    return f"""---
 apiVersion: monitoring.coreos.com/v1
 kind: Alertmanager
 metadata:
   name: kube-prometheus-stack-alertmanager
 spec:
-  secrets: {secrets}
+  secrets:
+{secret_lines}
 ---
 apiVersion: v1
 kind: Secret
@@ -3109,11 +3129,76 @@ metadata:
   name: alertmanager-kube-prometheus-stack-alertmanager
 stringData:
   alertmanager.yaml: |
-    route:
-      receiver: "null"{route_extra}
-    receivers:
-      - name: "null"{receiver_extra}{inline}
-'''
+{embedded}
+"""
+
+
+def alertmanager_receivers_for_labels(config, labels):
+    """Resolve the direct-child routes used by this repository's exact contract."""
+    selected = []
+    for route in config["route"]["routes"]:
+        matches = True
+        for matcher in route["matchers"]:
+            name, operator, expected = re.fullmatch(r'(\w+)(=~|=)"(.*)"', matcher).groups()
+            actual = labels.get(name, "")
+            matches &= bool(re.fullmatch(expected, actual)) if operator == "=~" else actual == expected
+        if matches:
+            selected.append(route["receiver"])
+            if not route.get("continue", False):
+                break
+    return selected or [config["route"]["receiver"]]
+
+
+def test_production_alertmanager_routes_exact_eligible_label_sets():
+    config = yaml_load(PROD)["alertmanager"]["config"]
+    base = {"environment": "prod", "cluster": "sugarkube-prod", "severity": "critical"}
+    for alertname in DSPACE_ALERT_NAMES:
+        assert alertmanager_receivers_for_labels(config, {**base, "alertname": alertname}) == [
+            "pagerduty-dspace"
+        ]
+    assert alertmanager_receivers_for_labels(
+        config, {**base, "alertname": "CloudflareTunnelNoHealthyConnections"}
+    ) == ["pagerduty-dspace"]
+    assert alertmanager_receivers_for_labels(
+        config, {**base, "alertname": "SugarkubePagerDutyTest"}
+    ) == ["pagerduty-synthetic-test"]
+    watchdog = {
+        "alertname": "SugarkubeObservabilityWatchdog",
+        "environment": "prod",
+        "cluster": "sugarkube-prod",
+        "purpose": "observability-watchdog",
+    }
+    assert alertmanager_receivers_for_labels(config, watchdog) == ["healthchecks-watchdog"]
+    for labels in (
+        {**base, "alertname": "UnrelatedCriticalAlert"},
+        {**base, "alertname": DSPACE_ALERT_NAMES[0], "environment": "staging"},
+        {**base, "alertname": DSPACE_ALERT_NAMES[0], "cluster": "sugarkube-int"},
+        {**base, "alertname": DSPACE_ALERT_NAMES[0], "severity": "warning"},
+    ):
+        assert alertmanager_receivers_for_labels(config, labels) == ["null"]
+
+
+def test_production_alertmanager_has_exact_routes_and_file_backed_receivers():
+    config = yaml_load(PROD)["alertmanager"]["config"]
+    assert [route["receiver"] for route in config["route"]["routes"]] == [
+        "pagerduty-dspace", "pagerduty-dspace", "pagerduty-synthetic-test",
+        "healthchecks-watchdog",
+    ]
+    assert config["receivers"] == [
+        {"name": "null"},
+        {"name": "pagerduty-synthetic-test", "pagerduty_configs": [{
+            "routing_key_file": "/etc/alertmanager/secrets/alertmanager-pagerduty/routing-key",
+            "send_resolved": True,
+        }]},
+        {"name": "pagerduty-dspace", "pagerduty_configs": [{
+            "routing_key_file": "/etc/alertmanager/secrets/alertmanager-pagerduty/routing-key",
+            "send_resolved": True,
+        }]},
+        {"name": "healthchecks-watchdog", "webhook_configs": [{
+            "url_file": "/etc/alertmanager/secrets/alertmanager-healthchecks-watchdog/ping-url",
+            "send_resolved": False, "max_alerts": 1, "timeout": "10s",
+        }]},
+    ]
 
 
 def test_production_offline_render_uses_only_ordered_core_values(tmp_path):
@@ -3125,8 +3210,8 @@ def test_production_offline_render_uses_only_ordered_core_values(tmp_path):
     for excluded in (str(STAGING), str(DASHBOARD), "sugarkube-observability-rules"):
         assert excluded not in template
     assert "kubectl" not in audit
-    assert "pagerduty" not in result.stdout.lower()
-    assert "watchdog" not in result.stdout.lower()
+    assert "routing_key:" not in result.stdout
+    assert "url:" not in result.stdout
 
 
 @pytest.mark.parametrize(
@@ -3155,7 +3240,8 @@ def test_production_install_release_and_secret_guards(tmp_path):
     )
     assert installed.returncode == 0, installed.stderr
     assert "helm install" in audit and "--atomic" in audit
-    assert "alertmanager-pagerduty" not in audit and "alertmanager-healthchecks-watchdog" not in audit
+    assert "get secret alertmanager-pagerduty" in audit
+    assert "get secret alertmanager-healthchecks-watchdog" in audit
     existing, audit = run_helper(
         tmp_path / "existing", "install", env_name="prod", context="sugar-prod", helm_mode="present"
     )
@@ -3167,34 +3253,43 @@ def test_production_install_release_and_secret_guards(tmp_path):
     assert missing.returncode != 0 and "helm " not in audit
 
 
-def test_production_core_verify_skips_staging_integrations(tmp_path):
+def test_production_core_verify_checks_integrations_but_skips_staging_workloads(tmp_path):
     result, audit = run_helper(tmp_path, "verify", env_name="prod", context="sugar-prod")
     assert result.returncode == 0, result.stderr
     for required in ("rollout status", "get daemonset", "get pvc -o json", "get svc kube-prometheus-stack-grafana", "get secret grafana-admin-credentials"):
         assert required in audit
-    for excluded in ("servicemonitor dspace", "alertmanager-pagerduty", "alertmanager-healthchecks-watchdog", " --raw "):
+    for required_secret in ("alertmanager-pagerduty", "alertmanager-healthchecks-watchdog"):
+        assert required_secret in audit
+    for excluded in ("servicemonitor dspace", " --raw "):
         assert excluded not in audit
 
 
-@pytest.mark.parametrize("command", ["pagerduty-test", "watchdog-verify"])
+def test_production_watchdog_verify_checks_rule_config_secrets_mounts_and_repeat(tmp_path):
+    result, audit = run_helper(
+        tmp_path, "watchdog-verify", env_name="prod", context="sugar-prod"
+    )
+    assert result.returncode == 0, result.stderr
+    for required in (
+        "get secret alertmanager-pagerduty",
+        "get secret alertmanager-healthchecks-watchdog",
+        "proxy/api/v1/rules",
+        "/api/v2/alerts",
+        "get alertmanager kube-prometheus-stack-alertmanager -o yaml",
+        "get pods -l app.kubernetes.io/name=alertmanager -o json",
+        "logs pod/alertmanager-kube-prometheus-stack-alertmanager-0",
+    ):
+        assert required in audit
+    assert "bounded repeat observation verified" in result.stdout
+
+
+@pytest.mark.parametrize("command", ["pagerduty-test"])
 def test_staging_only_subcommands_reject_production(tmp_path, command):
     result, audit = run_helper(tmp_path, command, env_name="prod", context="sugar-prod")
     assert result.returncode != 0
     assert "staging-only" in result.stderr and not audit
 
 
-@pytest.mark.parametrize(
-    "mutation",
-    [
-        {"route_extra": "\n      routes: []"},
-        {"receiver_extra": "\n      - name: extra"},
-        {"secrets": "[integration-secret]"},
-        {"inline": "\n    routing_key: forbidden-stub"},
-    ],
-)
-def test_production_alertmanager_validator_accepts_null_only_and_rejects_integrations(
-    tmp_path, mutation
-):
+def test_production_alertmanager_validator_requires_integrations_and_rejects_old_null_only(tmp_path):
     valid = tmp_path / "valid.yaml"
     valid.write_text(production_alertmanager_fixture(), encoding="utf-8")
     accepted = subprocess.run(
@@ -3202,29 +3297,44 @@ def test_production_alertmanager_validator_accepts_null_only_and_rejects_integra
         capture_output=True, text=True, check=False,
     )
     assert accepted.returncode == 0, accepted.stderr
-    invalid = tmp_path / "invalid.yaml"
-    invalid.write_text(production_alertmanager_fixture(**mutation), encoding="utf-8")
+
+    old_config = {"route": {"receiver": "null"}, "receivers": [{"name": "null"}]}
+    invalid = tmp_path / "old-null-only.yaml"
+    invalid.write_text(production_alertmanager_fixture(config=old_config, secrets=[]), encoding="utf-8")
     rejected = subprocess.run(
         ["ruby", str(ALERTMANAGER_VALIDATOR), "prod", "rendered", str(invalid)],
         capture_output=True, text=True, check=False,
     )
     assert rejected.returncode == 16
-    assert "forbidden-stub" not in rejected.stderr
+    assert "two expected integration Secrets" in rejected.stderr
 
 
-def test_production_alertmanager_secret_mount_has_production_specific_diagnostic(
-    tmp_path,
-):
-    manifest = tmp_path / "integration-secret.yaml"
-    manifest.write_text(
-        production_alertmanager_fixture(secrets="[integration-secret]"), encoding="utf-8"
-    )
+def test_production_alertmanager_validator_rejects_inline_credentials(tmp_path):
+    config = yaml_load(PROD)["alertmanager"]["config"]
+    config["routing_key"] = "forbidden-stub"
+    manifest = tmp_path / "inline.yaml"
+    manifest.write_text(production_alertmanager_fixture(config=config), encoding="utf-8")
     result = subprocess.run(
         ["ruby", str(ALERTMANAGER_VALIDATOR), "prod", "rendered", str(manifest)],
         capture_output=True, text=True, check=False,
     )
     assert result.returncode == 16
-    assert "production Alertmanager must mount no integration Secrets" in result.stderr
-    assert "two expected" not in result.stderr
-    assert "alertmanager-pagerduty" not in result.stderr
-    assert "alertmanager-healthchecks-watchdog" not in result.stderr
+    assert "forbidden-stub" not in result.stderr
+
+
+@pytest.mark.parametrize("mutation", ["missing", "broadened"])
+def test_production_alertmanager_validator_rejects_missing_or_broadened_routes(tmp_path, mutation):
+    config = yaml_load(PROD)["alertmanager"]["config"]
+    if mutation == "missing":
+        config["route"]["routes"].pop(0)
+    else:
+        config["route"]["routes"][0]["matchers"] = ['severity=~".*"']
+    config["privateFixtureDetail"] = "PRIVATE_ROUTE_FIXTURE_SENTINEL"
+    manifest = tmp_path / "invalid-route.yaml"
+    manifest.write_text(production_alertmanager_fixture(config=config), encoding="utf-8")
+    result = subprocess.run(
+        ["ruby", str(ALERTMANAGER_VALIDATOR), "prod", "rendered", str(manifest)],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 16
+    assert "PRIVATE_ROUTE_FIXTURE_SENTINEL" not in result.stderr

@@ -65,11 +65,11 @@ def run_lifecycle(harness, action, environment="staging", tty_text=None, **extra
     )
 
 
-@pytest.mark.parametrize("environment", ["", "dev", "prod", "production", "bogus"])
+@pytest.mark.parametrize("environment", ["", "dev", "production", "bogus"])
 def test_environment_guard_precedes_mutation(harness, environment):
     result = run_lifecycle(harness, "install", environment)
     assert result.returncode
-    assert "env=staging is required" in result.stderr
+    assert "env=staging or env=prod is required" in result.stderr
     assert not harness[2].exists()
 
 
@@ -77,6 +77,20 @@ def test_hostname_guard_uses_canonical_inventory(harness):
     result = run_lifecycle(harness, "install", TEST_HOST="not-a-node")
     assert result.returncode
     assert "canonical staging node" in result.stderr
+
+
+@pytest.mark.parametrize("host", ["sugarkube0", "sugarkube1", "sugarkube2"])
+def test_production_inventory_accepts_each_node(harness, host):
+    url, _ = canary()
+    result = run_lifecycle(harness, "install", "prod", tty_text=url + "\n", TEST_HOST=host)
+    assert result.returncode == 0, result.stderr
+    assert f"Installed node heartbeat for {host}" in result.stdout
+
+
+def test_production_inventory_rejects_staging_node(harness):
+    result = run_lifecycle(harness, "install", "prod", TEST_HOST="sugarkube3")
+    assert result.returncode
+    assert "canonical prod node" in result.stderr
 
 
 def test_install_rotation_permissions_order_and_no_canary_leaks(harness):
