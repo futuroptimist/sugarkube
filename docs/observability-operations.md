@@ -97,8 +97,10 @@ was verified, and current application releases predate the staging metrics integ
 The shared staging and production desired state is one Prometheus replica with
 `90d` retention and a `100GB` retention-size limit, backed by one `128Gi`
 ReadWriteOnce PVC using `local-path`. The baseline also runs one Alertmanager
-replica; production keeps a null default while explicit reviewed routes deliver to PagerDuty and
-Healthchecks.io. The common values
+replica; production keeps a null default while explicit reviewed routes deliver the PagerDuty
+synthetic test and observability watchdog to PagerDuty and Healthchecks.io, respectively. Production
+DSPACE and Cloudflare routes remain intentionally absent until production-labelled alert rules are
+deployed, so the configuration cannot imply coverage that does not exist. The common values
 file is authoritative for retention and storage, while environment overlays
 continue to contain only environment-specific differences.
 

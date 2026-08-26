@@ -355,7 +355,7 @@ upgrade_release() { validate_dashboard; require_tools helm kubectl python3 ruby;
 WATCHDOG_TTY="${SUGARKUBE_WATCHDOG_TTY:-/dev/tty}"
 WATCHDOG_API="/api/v1/namespaces/${NAMESPACE}/services/http:${RELEASE}-alertmanager:9093/proxy/api/v2"
 
-watchdog_secret_check() { assert_context; assert_watchdog_secret; }
+watchdog_secret_check() { assert_context; assert_integration_secrets; }
 watchdog_secret_install() {
   assert_context
   [[ -z "${HEALTHCHECKS_PING_URL:-}${HEALTHCHECK_PING_URL:-}${PING_URL:-}${WATCHDOG_PING_URL:-}" ]] || { echo "ERROR: credential environment variables are refused." >&2; return 2; }

@@ -216,9 +216,9 @@ def test_production_values_have_exact_safe_overrides_without_public_exposure_or_
         "alertmanager-pagerduty", "alertmanager-healthchecks-watchdog"
     ]
     assert prod["alertmanager"]["config"]["route"]["receiver"] == "null"
-    assert len(prod["alertmanager"]["config"]["route"]["routes"]) == 4
+    assert len(prod["alertmanager"]["config"]["route"]["routes"]) == 2
     assert {receiver["name"] for receiver in prod["alertmanager"]["config"]["receivers"]} == {
-        "null", "pagerduty-synthetic-test", "pagerduty-dspace", "healthchecks-watchdog"
+        "null", "pagerduty-synthetic-test", "healthchecks-watchdog"
     }
     text = COMMON.read_text(encoding="utf-8") + PROD.read_text(encoding="utf-8")
     forbidden = [
@@ -415,7 +415,7 @@ def test_alertmanager_validator_redacts_invalid_base64(tmp_path):
                 "    receivers:\n",
                 "    receivers:\n      - name: alternate\n        pagerduty_configs: []\n",
             ),
-            "receiver list must contain exactly",
+            "receiver list does not match the environment's exact integration allowlist",
         ),
         (
             lambda text: text.replace(
@@ -1507,6 +1507,15 @@ receivers:
 """,
         encoding="utf-8",
     )
+    if env_name == "prod":
+        prod_config = yaml_load(PROD)["alertmanager"]["config"]
+        prod_config = json.loads(json.dumps(prod_config))
+        prod_config["route"] = {
+            key: value for key, value in prod_config["route"].items() if value is not None
+        }
+        (tmp_path / "alertmanager-config.yaml").write_text(
+            json.dumps(prod_config), encoding="utf-8"
+        )
     if target_responses is not None:
         responses = tmp_path / "target-responses"
         if any(isinstance(response, bytes) for response in target_responses):
@@ -2636,6 +2645,8 @@ def test_watchdog_secret_check_reads_only_the_key_contract(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert "get secret alertmanager-healthchecks-watchdog -o go-template=" in audit
+    assert "get secret alertmanager-pagerduty -o go-template=" in audit
+    assert "routing-key" in audit
     assert "ping-url" in audit
     assert "value intentionally not read or printed" in result.stdout
     assert not (tmp_path / "watchdog-create-stdin").exists()
