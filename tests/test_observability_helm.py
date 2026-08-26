@@ -1210,6 +1210,7 @@ case "$*" in
     [ "$KUBECTL_MODE" != retention-unreachable-config ] || exit 54
     [ "$KUBECTL_MODE" != retention-malformed-config ] || { printf '%s\n' '{malformed'; exit 0; }
     case "$KUBECTL_MODE" in
+      retention-malformed-yaml) yaml='storage: {' ;;
       retention-missing) yaml='global: {}\\n' ;;
       retention-wrong-time) yaml='storage:\\n  tsdb:\\n    retention:\\n      time: 7d\\n      size: 100GiB\\n' ;;
       retention-wrong-size) yaml='storage:\\n  tsdb:\\n    retention:\\n      time: 90d\\n      size: 99GiB\\n' ;;
@@ -1219,7 +1220,8 @@ case "$*" in
   *"status/runtimeinfo"*)
     [ "$KUBECTL_MODE" != retention-malformed-runtime ] || { printf '%s\n' '{"status":"error"}'; exit 0; }
     [ "$KUBECTL_MODE" = retention-reload-failed ] && reload=false || reload=true
-    printf '%s\n' '{"status":"success","data":{"storageRetention":"90d or 100GiB","reloadConfigSuccess":'"$reload"'}}' ;;
+    [ "$KUBECTL_MODE" = retention-stale-runtime ] && retention='7d or 100GiB' || retention='90d or 100GiB'
+    printf '%s\n' '{"status":"success","data":{"storageRetention":"'"$retention"'","reloadConfigSuccess":'"$reload"'}}' ;;
   *"proxy/metrics"*)
     case "$KUBECTL_MODE" in retention-zero-limit) limit=0 ;; retention-wrong-limit) limit=106300440576 ;; *) limit=107374182400 ;; esac
     printf '%s\n' '# HELP prometheus_tsdb_retention_limit_bytes The configured TSDB retention limit.' 'prometheus_tsdb_retention_limit_bytes '"$limit" ;;
@@ -1731,7 +1733,9 @@ def test_converged_pvc_does_not_require_storageclass_expansion_discovery(tmp_pat
         ("retention-zero-limit", False),
         ("retention-wrong-limit", False),
         ("retention-reload-failed", False),
+        ("retention-stale-runtime", False),
         ("retention-malformed-config", False),
+        ("retention-malformed-yaml", False),
         ("retention-malformed-runtime", False),
         ("retention-unreachable-config", False),
     ],
@@ -1741,11 +1745,15 @@ def test_verify_checks_loaded_and_runtime_retention(tmp_path, kubectl_mode, succ
     assert (result.returncode == 0) is success
     assert "rollout status statefulset/prometheus-kube-prometheus-stack-prometheus" in audit
     assert "status/config" in audit
+    expected_proxy_calls = 1 if kubectl_mode == "retention-unreachable-config" else 3
+    assert audit.count("get --request-timeout=14s --raw=") == expected_proxy_calls
     if success:
         assert "107374182400 bytes" in result.stdout
         assert "get prometheus kube-prometheus-stack-prometheus -o json" in audit
     else:
         assert "ERROR: Prometheus" in result.stderr
+    if kubectl_mode == "retention-malformed-yaml":
+        assert "status/config loaded YAML configuration is malformed" in result.stderr
 
 
 @pytest.mark.parametrize(
@@ -2173,7 +2181,7 @@ def test_verify_treats_leading_zero_retry_configuration_as_decimal(tmp_path):
         retry_interval="01",
     )
     assert result.returncode != 0
-    assert audit.count("get --request-timeout=") == 8
+    assert audit.count("get --request-timeout=") == 11
     assert audit.count("sleep ") == 7
 
 

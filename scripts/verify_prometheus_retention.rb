@@ -4,8 +4,6 @@
 require "json"
 require "yaml"
 
-EXPECTED_RUNTIME_BYTES = 100 * 1024**3
-
 def fail_closed(message)
   abort "ERROR: Prometheus retention verification failed: #{message}."
 end
@@ -44,12 +42,16 @@ fail_closed("loaded size retention is not equivalent to #{desired_size}") unless
 
 runtime = read_json(runtime_path, "status/runtimeinfo")
 fail_closed("runtime configuration reload was unsuccessful") unless runtime.is_a?(Hash) && runtime["reloadConfigSuccess"] == true
+runtime_retention = /\A(.+?) or (.+)\z/.match(runtime["storageRetention"].to_s)
+fail_closed("runtime storage retention is missing or malformed") unless runtime_retention
+fail_closed("runtime time retention is missing or differs from #{desired_time}") unless runtime_retention[1] == desired_time
+fail_closed("runtime size retention is not equivalent to #{desired_size}") unless size_bytes(runtime_retention[2]) == desired_bytes
 
 metrics = File.read(metrics_path)
 limits = metrics.scan(/^prometheus_tsdb_retention_limit_bytes(?:\{[^\n]*\})?\s+([^\s]+)(?:\s+\d+)?$/).flatten
 fail_closed("runtime size-retention limit is missing or ambiguous") unless limits.length == 1
 limit = Float(limits.first)
-fail_closed("runtime size-retention limit is zero or differs from #{desired_bytes} bytes") unless limit.positive? && limit == desired_bytes && limit == EXPECTED_RUNTIME_BYTES
+fail_closed("runtime size-retention limit is zero or differs from #{desired_bytes} bytes") unless limit.positive? && limit == desired_bytes
 
 cr = JSON.parse(File.read(cr_path))
 spec = cr.fetch("spec")
@@ -58,6 +60,8 @@ fail_closed("Prometheus CR time retention differs from #{desired_time}") unless 
 fail_closed("Prometheus CR size retention is not equivalent to #{desired_size}") unless size_bytes(spec["retentionSize"]) == desired_bytes
 
 puts "Prometheus loaded/runtime retention confirmed: #{desired_time}, #{desired_bytes} bytes, reload successful."
-rescue Errno::ENOENT, JSON::ParserError, Psych::Exception, KeyError, TypeError, ArgumentError
+rescue Psych::Exception
+  fail_closed("status/config loaded YAML configuration is malformed")
+rescue Errno::ENOENT, JSON::ParserError, KeyError, TypeError, ArgumentError
   fail_closed("runtime metrics or Prometheus CR response is malformed")
 end

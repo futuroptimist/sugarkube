@@ -25,6 +25,7 @@ DASHBOARD_UID=""
 DASHBOARD_TITLE=""
 DASHBOARD_VALIDATOR="${ROOT}/scripts/validate_observability_dashboard.py"
 TIMEOUT="${SUGARKUBE_OBSERVABILITY_HELM_TIMEOUT:-20m}"
+REQUEST_TIMEOUT="${SUGARKUBE_OBSERVABILITY_REQUEST_TIMEOUT:-14s}"
 GRAFANA_URL="http://sugarkube3.local:30300"
 PAGERDUTY_SECRET="alertmanager-pagerduty"
 WATCHDOG_SECRET="alertmanager-healthchecks-watchdog"
@@ -756,9 +757,9 @@ verify() (
   prometheus_cr="$(mktemp -t sugarkube-prometheus-cr.XXXXXX.json)"
   trap 'rm -f "${prometheus_config:-}" "${prometheus_runtime:-}" "${prometheus_metrics:-}" "${prometheus_cr:-}" "${alertmanager_yaml:-}" "${config_yaml:-}"' EXIT
   proxy_base="/api/v1/namespaces/${NAMESPACE}/services/http:kube-prometheus-stack-prometheus:9090/proxy"
-  kubectl get --raw="${proxy_base}/api/v1/status/config" >"${prometheus_config}" || { echo "ERROR: Prometheus status/config endpoint is unreachable." >&2; return 7; }
-  kubectl get --raw="${proxy_base}/api/v1/status/runtimeinfo" >"${prometheus_runtime}" || { echo "ERROR: Prometheus status/runtimeinfo endpoint is unreachable." >&2; return 7; }
-  kubectl get --raw="${proxy_base}/metrics" >"${prometheus_metrics}" || { echo "ERROR: Prometheus metrics endpoint is unreachable." >&2; return 7; }
+  kubectl get --request-timeout="${REQUEST_TIMEOUT}" --raw="${proxy_base}/api/v1/status/config" >"${prometheus_config}" || { echo "ERROR: Prometheus status/config endpoint is unreachable." >&2; return 7; }
+  kubectl get --request-timeout="${REQUEST_TIMEOUT}" --raw="${proxy_base}/api/v1/status/runtimeinfo" >"${prometheus_runtime}" || { echo "ERROR: Prometheus status/runtimeinfo endpoint is unreachable." >&2; return 7; }
+  kubectl get --request-timeout="${REQUEST_TIMEOUT}" --raw="${proxy_base}/metrics" >"${prometheus_metrics}" || { echo "ERROR: Prometheus metrics endpoint is unreachable." >&2; return 7; }
   kubectl -n "${NAMESPACE}" get prometheus kube-prometheus-stack-prometheus -o json >"${prometheus_cr}" || { echo "ERROR: Prometheus CR is unreachable." >&2; return 7; }
   ruby "${PROMETHEUS_RETENTION_VALIDATOR}" "${desired_retention}" "${desired_retention_size}" \
     "${prometheus_config}" "${prometheus_runtime}" "${prometheus_metrics}" "${prometheus_cr}"
