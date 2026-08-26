@@ -296,7 +296,16 @@ def validate_runner(config: dict) -> Path:
     if not configured_root.is_absolute() or ".." in configured_root.parts:
         raise Invalid("runner path")
     runner_root = normalize_root(configured_root)
-    runner = runner_root / config.get("_runnerStorageIdentity", runner_storage_identity(config))
+    derived_identity = runner_storage_identity(config)
+    storage_identity = config.get("_runnerStorageIdentity", derived_identity)
+    allowed_identities = {config["runnerRevision"], derived_identity}
+    if (
+        not isinstance(storage_identity, str)
+        or Path(storage_identity).parts != (storage_identity,)
+        or storage_identity not in allowed_identities
+    ):
+        raise Invalid("runner storage identity")
+    runner = runner_root / storage_identity
     try:
         runner_info = runner.lstat()
         resolved_runner = runner.resolve(strict=True)
@@ -312,6 +321,12 @@ def validate_runner(config: dict) -> Path:
         raise Invalid("runner path")
     runner = resolved_runner
     manifest_path = runner / "sugarkube-runner-manifest.json"
+    try:
+        manifest_info = manifest_path.lstat()
+    except OSError:
+        raise Invalid("runner manifest file") from None
+    if manifest_path.is_symlink() or not stat.S_ISREG(manifest_info.st_mode):
+        raise Invalid("runner manifest file")
     expected_manifest_sha = config.get("runnerManifestSha256")
     if expected_manifest_sha is not None and sha256(manifest_path) != expected_manifest_sha:
         raise Invalid("runner manifest digest")

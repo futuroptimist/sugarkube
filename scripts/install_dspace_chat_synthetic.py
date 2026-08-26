@@ -190,6 +190,17 @@ def sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def regular_file(path: Path, description: str) -> Path:
+    """Return path only when it is an existing, non-symlink regular file."""
+    try:
+        info = path.lstat()
+    except OSError as error:
+        raise ValueError(f"{description} is missing or invalid") from error
+    if path.is_symlink() or not stat.S_ISREG(info.st_mode):
+        raise ValueError(f"{description} must be a real regular file")
+    return path
+
+
 def render(destination: Path) -> dict[str, str]:
     hashes = {}
     for target, source in ASSETS.items():
@@ -436,7 +447,9 @@ def install_runner(staged: Path, snapshot: Path, root: Path) -> tuple[Path, bool
         if destination.is_symlink() or not destination.is_dir():
             raise ValueError("runner storage identity destination is invalid")
         manifest = "sugarkube-runner-manifest.json"
-        if (snapshot / manifest).read_bytes() != (destination / manifest).read_bytes():
+        staged_manifest = regular_file(snapshot / manifest, "runner snapshot manifest")
+        installed_manifest = regular_file(destination / manifest, "installed runner manifest")
+        if staged_manifest.read_bytes() != installed_manifest.read_bytes():
             raise ValueError("existing runner manifest does not match snapshot")
         validate_snapshot(staged, destination, root)
         normalize_runner_access(config, destination, root)
@@ -534,6 +547,13 @@ def apply_installation(staged: Path, snapshot: Path, root: Path, asset_revision:
         current = installations / "current"
         if not current.is_symlink() or os.readlink(current) != asset_revision:
             raise ValueError("exact retained revision conflicts with current installation")
+        staged_manifest = regular_file(staged / "manifest.json", "staged asset manifest")
+        retained_manifest_path = regular_file(retained / "manifest.json", "retained asset manifest")
+        if (
+            sha(retained_manifest_path) != asset_revision
+            or retained_manifest_path.read_bytes() != staged_manifest.read_bytes()
+        ):
+            raise ValueError("retained asset does not match staged candidate")
         retained_manifest = validate(retained)
         validate_live_assets(root, retained, retained_manifest)
         config = runtime_module().load_config(retained / "etc/sugarkube/dspace-chat-synthetic.json")

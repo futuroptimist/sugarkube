@@ -66,8 +66,10 @@ tracked runner configuration already maps `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` 
 Both files are hashed into the immutable manifest and required at runtime. The child also receives
 `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`, so neither browser contract can acquire or fall back to a
 browser between validation and launch. These facts disprove the earlier executable-mapping
-hypothesis; the private host failure's exact root cause remains unknown. This change instead adds
-the bounded evidence needed to classify a future separately authorized execution. Runner
+hypothesis. The empty-root rehearsal passed because it had no revision-only runner coordinate;
+the populated private root rejected the newer valid manifest because that logical revision's
+revision-only storage coordinate was already occupied by a different manifest. The logical Git
+revision and immutable runner storage identity are therefore distinct coordinates. Runner
 validation first derives the exact manifest-qualified storage identity (or the legacy
 revision-only identity selected by an older retained asset), verifies the manifest digest, then
 separately verifies the manifest’s logical revision and Git HEAD. It rejects

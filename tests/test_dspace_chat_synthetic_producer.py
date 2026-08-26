@@ -6,6 +6,7 @@ import copy
 import json
 import os
 import platform
+import shutil
 import stat
 import subprocess
 import sys
@@ -480,6 +481,44 @@ def test_runner_manifest_digest_is_checked_before_json_parsing(tmp_path: Path) -
     (runner / "sugarkube-runner-manifest.json").write_text("not valid JSON")
 
     with pytest.raises(runtime.Invalid, match="runner manifest digest"):
+        runtime.validate_runner(value)
+
+
+@pytest.mark.parametrize("qualified", [False, True], ids=["legacy", "qualified"])
+@pytest.mark.parametrize("manifest_kind", ["symlink", "fifo"])
+def test_runner_validation_rejects_non_regular_manifests(
+    tmp_path: Path, qualified: bool, manifest_kind: str
+) -> None:
+    value, runner = runtime_runner(tmp_path)
+    if not qualified:
+        value.pop("runnerManifestSha256")
+        legacy = runner.with_name(value["runnerRevision"])
+        runner.rename(legacy)
+        runner = legacy
+    manifest = runner / "sugarkube-runner-manifest.json"
+    manifest.unlink()
+    if manifest_kind == "symlink":
+        external = tmp_path / "external-manifest.json"
+        external.write_text("{}")
+        manifest.symlink_to(external)
+    else:
+        os.mkfifo(manifest)
+
+    with pytest.raises(runtime.Invalid, match="runner manifest file"):
+        runtime.validate_runner(value)
+
+
+@pytest.mark.parametrize(
+    "identity",
+    ["../escape", "revision/extra", "97ab09f1-deadbeef", ""],
+)
+def test_runner_validation_rejects_ambiguous_qualified_identity(
+    tmp_path: Path, identity: str
+) -> None:
+    value, _runner = runtime_runner(tmp_path)
+    value["_runnerStorageIdentity"] = identity
+
+    with pytest.raises(runtime.Invalid, match="runner storage identity"):
         runtime.validate_runner(value)
 
 
@@ -3203,7 +3242,8 @@ def test_same_revision_manifest_migration_preserves_runner_and_rolls_back_exactl
     )["browserProvenance"]
     monkeypatch.setattr(installer, "runtime_module", lambda: fake)
 
-    old_asset, new_asset = "1" * 64, "2" * 64
+    old_asset = installer.sha(old_staged / "manifest.json")
+    new_asset = installer.sha(new_staged / "manifest.json")
     installer.apply_installation(old_staged, old_snapshot, root, old_asset)
     old_runner = root / "var/lib/sugarkube/dspace-chat-runners" / revision
     old_before = tree_bytes(old_runner)
@@ -3224,9 +3264,59 @@ def test_same_revision_manifest_migration_preserves_runner_and_rolls_back_exactl
     installer.apply_installation(new_staged, candidate_snapshot, root, new_asset)
     assert tree_bytes(root) == before
 
-    old_retained = root / "var/lib/sugarkube/dspace-chat-installations" / old_asset
-    installer.activate(old_retained, root, old_asset)
+    monkeypatch.setattr(
+        installer.subprocess,
+        "run",
+        lambda *args, **kwargs: pytest.fail(
+            f"rollback invoked a host, systemd, cluster, or production command: {args}"
+        ),
+    )
+    assert (
+        run_installer_main(
+            monkeypatch,
+            "rollback",
+            "--apply",
+            "--root",
+            str(root),
+            "--revision",
+            old_asset,
+        )
+        == 0
+    )
     assert installer.status(root) == 0
     old_status = capsys.readouterr().out
     assert f"runnerStorageIdentity={revision}" in old_status
     assert tree_bytes(old_runner) == old_before
+
+
+def test_completed_install_rejects_conflicting_retained_candidate_without_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    snapshot, _revision = runner_snapshot_fixture(tmp_path)
+    staged = tmp_path / "staged"
+    installer.render(staged)
+    asset_revision = installer.sha(staged / "manifest.json")
+    root = tmp_path / "root"
+    retained = root / "var/lib/sugarkube/dspace-chat-installations" / asset_revision
+    shutil.copytree(staged, retained)
+    (retained / "manifest.json").write_bytes(b'{"conflict":"retained"}\n')
+    current = retained.parent / "current"
+    current.symlink_to(asset_revision)
+    live = root / "etc/sugarkube/dspace-chat-synthetic.json"
+    live.parent.mkdir(parents=True)
+    live.write_bytes(b"prior live asset\n")
+    runner = root / "var/lib/sugarkube/dspace-chat-runners/prior"
+    runner.mkdir(parents=True)
+    (runner / "marker").write_bytes(b"prior runner\n")
+    before = tree_bytes(root)
+    monkeypatch.setattr(installer, "runtime_module", FakeSnapshotRuntime)
+    monkeypatch.setattr(
+        installer,
+        "install_runner",
+        lambda *_args: pytest.fail("conflict attempted runner installation"),
+    )
+
+    with pytest.raises(ValueError, match="retained asset does not match staged candidate"):
+        installer.apply_installation(staged, snapshot, root, asset_revision)
+
+    assert tree_bytes(root) == before
