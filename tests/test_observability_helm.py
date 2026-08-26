@@ -1206,9 +1206,25 @@ case "$*" in
     [ "$PVC_MODE" != storageclass-ambiguous ] || { printf '%s\n' '{"allowVolumeExpansion":"maybe"}'; exit 0; }
     [ "$PVC_MODE" = expandable-mismatch ] && expansion=true || expansion=false
     printf '%s\n' '{"allowVolumeExpansion":'"$expansion"'}' ;;
-  *"get statefulset prometheus-kube-prometheus-stack-prometheus -o json"*)
-    if [ "$KUBECTL_MODE" = stale-retention ]; then retention=7d; retention_size=15GB; else retention=90d; retention_size=100GB; fi
-    printf '%s\n' '{"spec":{"template":{"spec":{"containers":[{"name":"config-reloader","args":[]},{"name":"prometheus","args":["--storage.tsdb.retention.time='"$retention"'","--storage.tsdb.retention.size='"$retention_size"'"]}]}}}}' ;;
+  *"status/config"*)
+    [ "$KUBECTL_MODE" != retention-unreachable-config ] || exit 54
+    [ "$KUBECTL_MODE" != retention-malformed-config ] || { printf '%s\n' '{malformed'; exit 0; }
+    case "$KUBECTL_MODE" in
+      retention-missing) yaml='global: {}\\n' ;;
+      retention-wrong-time) yaml='storage:\\n  tsdb:\\n    retention:\\n      time: 7d\\n      size: 100GiB\\n' ;;
+      retention-wrong-size) yaml='storage:\\n  tsdb:\\n    retention:\\n      time: 90d\\n      size: 99GiB\\n' ;;
+      *) yaml='storage:\\n  tsdb:\\n    retention:\\n      time: 90d\\n      size: 100GiB\\n' ;;
+    esac
+    printf '%s\n' '{"status":"success","data":{"yaml":"'"$yaml"'"}}' ;;
+  *"status/runtimeinfo"*)
+    [ "$KUBECTL_MODE" != retention-malformed-runtime ] || { printf '%s\n' '{"status":"error"}'; exit 0; }
+    [ "$KUBECTL_MODE" = retention-reload-failed ] && reload=false || reload=true
+    printf '%s\n' '{"status":"success","data":{"storageRetention":"90d or 100GiB","reloadConfigSuccess":'"$reload"'}}' ;;
+  *"proxy/metrics"*)
+    case "$KUBECTL_MODE" in retention-zero-limit) limit=0 ;; retention-wrong-limit) limit=106300440576 ;; *) limit=107374182400 ;; esac
+    printf '%s\n' '# HELP prometheus_tsdb_retention_limit_bytes The configured TSDB retention limit.' 'prometheus_tsdb_retention_limit_bytes '"$limit" ;;
+  *"get prometheus kube-prometheus-stack-prometheus -o json"*)
+    printf '%s\n' '{"spec":{"replicas":1,"retention":"90d","retentionSize":"100GB"}}' ;;
   *"get prometheus kube-prometheus-stack-prometheus"*) echo 1 ;;
   *"get alertmanager kube-prometheus-stack-alertmanager -o yaml"*)
     if [ "$ENV_NAME" = prod ]; then printf '%s\n' 'apiVersion: monitoring.coreos.com/v1' 'kind: Alertmanager' 'metadata:' '  name: kube-prometheus-stack-alertmanager' 'spec:' '  secrets: []'; else printf '%s\n' 'apiVersion: monitoring.coreos.com/v1' 'kind: Alertmanager' 'metadata:' '  name: kube-prometheus-stack-alertmanager' 'spec:' '  secrets:' '    - alertmanager-pagerduty' '    - alertmanager-healthchecks-watchdog'; fi ;;
@@ -1707,18 +1723,29 @@ def test_converged_pvc_does_not_require_storageclass_expansion_discovery(tmp_pat
 
 @pytest.mark.parametrize(
     ("kubectl_mode", "success"),
-    [("healthy", True), ("stale-retention", False)],
+    [
+        ("healthy", True),
+        ("retention-missing", False),
+        ("retention-wrong-time", False),
+        ("retention-wrong-size", False),
+        ("retention-zero-limit", False),
+        ("retention-wrong-limit", False),
+        ("retention-reload-failed", False),
+        ("retention-malformed-config", False),
+        ("retention-malformed-runtime", False),
+        ("retention-unreachable-config", False),
+    ],
 )
-def test_verify_checks_effective_statefulset_retention_arguments(tmp_path, kubectl_mode, success):
+def test_verify_checks_loaded_and_runtime_retention(tmp_path, kubectl_mode, success):
     result, audit = run_helper(tmp_path, "verify", kubectl_mode=kubectl_mode)
     assert (result.returncode == 0) is success
     assert "rollout status statefulset/prometheus-kube-prometheus-stack-prometheus" in audit
-    assert "get statefulset prometheus-kube-prometheus-stack-prometheus -o json" in audit
+    assert "status/config" in audit
     if success:
-        assert "retention.time=90d" not in result.stderr
+        assert "107374182400 bytes" in result.stdout
+        assert "get prometheus kube-prometheus-stack-prometheus -o json" in audit
     else:
-        assert "--storage.tsdb.retention.time=90d" in result.stderr
-        assert "--storage.tsdb.retention.size=100GB" in result.stderr
+        assert "ERROR: Prometheus" in result.stderr
 
 
 @pytest.mark.parametrize(

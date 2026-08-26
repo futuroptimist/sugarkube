@@ -29,6 +29,7 @@ GRAFANA_URL="http://sugarkube3.local:30300"
 PAGERDUTY_SECRET="alertmanager-pagerduty"
 WATCHDOG_SECRET="alertmanager-healthchecks-watchdog"
 ALERTMANAGER_VALIDATOR="${ROOT}/scripts/verify_observability_alertmanager.rb"
+PROMETHEUS_RETENTION_VALIDATOR="${ROOT}/scripts/verify_prometheus_retention.rb"
 GRAFANA_SECRET="grafana-admin-credentials"
 RULES_OVERLAY=""
 ENVIRONMENT=""
@@ -746,22 +747,21 @@ verify() (
   done
 
   local contract desired_retention desired_retention_size desired_size desired_class desired_modes
+  local prometheus_config prometheus_runtime prometheus_metrics prometheus_cr proxy_base
   contract="$(prometheus_expected_contract)" || return
   IFS=$'\t' read -r desired_retention desired_retention_size desired_size desired_class desired_modes <<<"${contract}"
-  kubectl -n "${NAMESPACE}" get statefulset prometheus-kube-prometheus-stack-prometheus -o json | \
-    python3 -c 'import json, sys
-try:
-    document = json.load(sys.stdin)
-    containers = document["spec"]["template"]["spec"]["containers"]
-    prometheus = [item for item in containers if item.get("name") == "prometheus"]
-    if len(prometheus) != 1 or not isinstance(prometheus[0].get("args"), list): raise TypeError
-    args = prometheus[0]["args"]
-    expected = [f"--storage.tsdb.retention.time={sys.argv[1]}", f"--storage.tsdb.retention.size={sys.argv[2]}"]
-    effective = [arg for arg in args if isinstance(arg, str) and (arg.startswith("--storage.tsdb.retention.time=") or arg.startswith("--storage.tsdb.retention.size="))]
-    if len(effective) != 2 or sorted(effective) != sorted(expected): raise ValueError
-except (AttributeError, KeyError, TypeError, ValueError, json.JSONDecodeError):
-    raise SystemExit(f"ERROR: Prometheus StatefulSet must contain exactly --storage.tsdb.retention.time={sys.argv[1]} and --storage.tsdb.retention.size={sys.argv[2]}.")' \
-      "${desired_retention}" "${desired_retention_size}"
+  prometheus_config="$(mktemp -t sugarkube-prometheus-config.XXXXXX.json)"
+  prometheus_runtime="$(mktemp -t sugarkube-prometheus-runtime.XXXXXX.json)"
+  prometheus_metrics="$(mktemp -t sugarkube-prometheus-metrics.XXXXXX.txt)"
+  prometheus_cr="$(mktemp -t sugarkube-prometheus-cr.XXXXXX.json)"
+  trap 'rm -f "${prometheus_config:-}" "${prometheus_runtime:-}" "${prometheus_metrics:-}" "${prometheus_cr:-}" "${alertmanager_yaml:-}" "${config_yaml:-}"' EXIT
+  proxy_base="/api/v1/namespaces/${NAMESPACE}/services/http:kube-prometheus-stack-prometheus:9090/proxy"
+  kubectl get --raw="${proxy_base}/api/v1/status/config" >"${prometheus_config}" || { echo "ERROR: Prometheus status/config endpoint is unreachable." >&2; return 7; }
+  kubectl get --raw="${proxy_base}/api/v1/status/runtimeinfo" >"${prometheus_runtime}" || { echo "ERROR: Prometheus status/runtimeinfo endpoint is unreachable." >&2; return 7; }
+  kubectl get --raw="${proxy_base}/metrics" >"${prometheus_metrics}" || { echo "ERROR: Prometheus metrics endpoint is unreachable." >&2; return 7; }
+  kubectl -n "${NAMESPACE}" get prometheus kube-prometheus-stack-prometheus -o json >"${prometheus_cr}" || { echo "ERROR: Prometheus CR is unreachable." >&2; return 7; }
+  ruby "${PROMETHEUS_RETENTION_VALIDATOR}" "${desired_retention}" "${desired_retention_size}" \
+    "${prometheus_config}" "${prometheus_runtime}" "${prometheus_metrics}" "${prometheus_cr}"
 
   read -r desired_ne ready_ne < <(kubectl -n "${NAMESPACE}" get daemonset kube-prometheus-stack-prometheus-node-exporter -o jsonpath='{.status.desiredNumberScheduled}{" "}{.status.numberReady}{"\n"}')
   [[ "${ready_ne}" == "${desired_ne}" && ( ( "$ENVIRONMENT" == staging && "$desired_ne" == 3 ) || ( "$ENVIRONMENT" == prod && "$desired_ne" =~ ^[1-9][0-9]*$ ) ) ]] || {
@@ -773,11 +773,9 @@ items = json.load(sys.stdin).get("items", [])
 claims = [item for item in items if item.get("metadata", {}).get("labels", {}).get("app.kubernetes.io/name") == "prometheus"]
 if len(claims) != 1 or claims[0].get("status", {}).get("phase") != "Bound" or claims[0].get("spec", {}).get("storageClassName") != sys.argv[2] or claims[0].get("spec", {}).get("accessModes") != sys.argv[3].split(",") or claims[0].get("spec", {}).get("resources", {}).get("requests", {}).get("storage") != sys.argv[1]:
     raise SystemExit(f"ERROR: expected one Bound {sys.argv[3]} {sys.argv[1]} {sys.argv[2]} Prometheus PVC.")' "${desired_size}" "${desired_class}" "${desired_modes}"
-  [[ "$(kubectl -n "${NAMESPACE}" get prometheus kube-prometheus-stack-prometheus -o jsonpath='{.spec.replicas}')" == 1 ]]
   [[ "$(kubectl -n "${NAMESPACE}" get alertmanager kube-prometheus-stack-alertmanager -o jsonpath='{.spec.replicas}')" == 1 ]]
   assert_grafana_secret
   local alertmanager_yaml="" config_yaml=""
-  trap 'rm -f "${alertmanager_yaml:-}" "${config_yaml:-}"' EXIT
   alertmanager_yaml="$(mktemp -t sugarkube-alertmanager-cr.XXXXXX.yaml)"
   config_yaml="$(mktemp -t sugarkube-alertmanager-config.XXXXXX.yaml)"
   kubectl -n "${NAMESPACE}" get alertmanager kube-prometheus-stack-alertmanager -o yaml >"${alertmanager_yaml}"
