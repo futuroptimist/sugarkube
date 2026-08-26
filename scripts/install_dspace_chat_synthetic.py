@@ -203,6 +203,25 @@ def render(destination: Path) -> dict[str, str]:
     return hashes
 
 
+def bind_runner_identity(staged: Path, snapshot: Path) -> str:
+    """Bind rendered assets to the snapshot manifest's immutable storage identity."""
+    config_path = staged / "etc/sugarkube/dspace-chat-synthetic.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    manifest_path = snapshot / "sugarkube-runner-manifest.json"
+    if manifest_path.is_symlink() or not manifest_path.is_file():
+        raise ValueError("runner manifest is missing or invalid")
+    digest = sha(manifest_path)
+    identity = f"{config['runnerRevision']}-{digest}"
+    config["runnerIdentity"] = identity
+    config["runnerManifestSha256"] = digest
+    config_path.write_text(json.dumps(config, sort_keys=True, indent=2) + "\n")
+    manifest_path = staged / "manifest.json"
+    assets = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assets["etc/sugarkube/dspace-chat-synthetic.json"] = sha(config_path)
+    manifest_path.write_text(json.dumps(assets, sort_keys=True, indent=2) + "\n")
+    return identity
+
+
 def validate(tree: Path) -> dict[str, str]:
     try:
         tree_stat = tree.lstat()
@@ -275,9 +294,18 @@ def load_snapshot_config(staged: Path, snapshot: Path) -> dict:
     runtime = runtime_module()
     config = runtime.load_config(staged / "etc/sugarkube/dspace-chat-synthetic.json")
     revision = config["runnerRevision"]
-    if snapshot.is_symlink() or not snapshot.is_dir() or snapshot.name != revision:
-        raise ValueError("runner snapshot must be a real exact-revision directory")
+    configured_identity = config.get("runnerIdentity", revision)
+    if (
+        snapshot.is_symlink()
+        or not snapshot.is_dir()
+        or snapshot.name not in {revision, configured_identity}
+    ):
+        raise ValueError("runner snapshot must be a real configured-identity directory")
     config["runnerRoot"] = str(snapshot.parent)
+    # A newly materialized input retains the logical revision basename. Select
+    # it only for validation; installed and retained configurations continue to
+    # select the manifest-qualified identity.
+    config["_runnerPathIdentity"] = snapshot.name
     return config
 
 
@@ -424,7 +452,8 @@ def install_runner(staged: Path, snapshot: Path, root: Path) -> tuple[Path, bool
     config = runtime.load_config(staged / "etc/sugarkube/dspace-chat-synthetic.json")
     revision = config["runnerRevision"]
     parent = rooted(root, config["runnerRoot"])
-    destination = parent / revision
+    identity = config.get("runnerIdentity", revision)
+    destination = parent / identity
     if destination.exists() or destination.is_symlink():
         if destination.is_symlink() or not destination.is_dir():
             raise ValueError("runner revision destination is invalid")
@@ -436,14 +465,14 @@ def install_runner(staged: Path, snapshot: Path, root: Path) -> tuple[Path, bool
         validate_runner_access(config, destination, root)
         return destination, False
     parent.mkdir(parents=True, exist_ok=True)
-    temporary = Path(tempfile.mkdtemp(prefix=f".{revision}.", dir=parent))
+    temporary = Path(tempfile.mkdtemp(prefix=f".{identity}.", dir=parent))
     temporary.rmdir()
     try:
         shutil.copytree(snapshot, temporary, symlinks=True)
         # Validation expects the immutable revision basename, so validate through
         # a private exact-name parent before the atomic destination rename.
         validation_parent = Path(tempfile.mkdtemp(prefix=".validate.", dir=parent))
-        validation_runner = validation_parent / revision
+        validation_runner = validation_parent / identity
         os.replace(temporary, validation_runner)
         try:
             normalize_runner_access(config, validation_runner, root)
@@ -483,7 +512,7 @@ def repair_runner_access(
     config = runtime_module().load_config(retained / "etc/sugarkube/dspace-chat-synthetic.json")
     if config["runnerRevision"] != revision:
         raise ValueError("installed runner revision does not match authorization")
-    runner = rooted(root, config["runnerRoot"]) / revision
+    runner = rooted(root, config["runnerRoot"]) / config.get("runnerIdentity", revision)
     if runner.is_symlink() or not runner.is_dir():
         raise ValueError("installed runner revision is missing or invalid")
     manifest = runner / "sugarkube-runner-manifest.json"
@@ -521,7 +550,22 @@ def apply_installation(staged: Path, snapshot: Path, root: Path, asset_revision:
     validate_snapshot(staged, snapshot, root)
     retained = root / "var/lib/sugarkube/dspace-chat-installations" / asset_revision
     if retained.exists():
-        raise ValueError("exact retained revision already exists")
+        retained_manifest = validate(retained)
+        if any(
+            (staged / relative).read_bytes() != (retained / relative).read_bytes()
+            for relative in (*ASSETS, "manifest.json")
+        ):
+            raise ValueError("retained asset identity is ambiguous")
+        config = runtime_module().load_config(retained / "etc/sugarkube/dspace-chat-synthetic.json")
+        runner = rooted(root, config["runnerRoot"]) / config.get(
+            "runnerIdentity", config["runnerRevision"]
+        )
+        validate_snapshot(retained, runner, root)
+        current = retained.parent / "current"
+        if not current.is_symlink() or os.readlink(current) != asset_revision:
+            raise ValueError("retained asset exists but is not the active installation")
+        validate_live_assets(root, retained, retained_manifest)
+        return
     runner, created = install_runner(staged, snapshot, root)
     try:
         install(staged, root, asset_revision)
@@ -563,7 +607,7 @@ def status(root: Path) -> int:
     runtime = runtime_module()
     config = runtime.load_config(live_paths["etc/sugarkube/dspace-chat-synthetic.json"])
     runner_parent = rooted(root, config["runnerRoot"])
-    expected_runner = runner_parent / config["runnerRevision"]
+    expected_runner = runner_parent / config.get("runnerIdentity", config["runnerRevision"])
     if expected_runner.is_symlink() or not expected_runner.is_dir():
         raise ValueError("installed runner revision is missing or invalid")
     runner_manifest_path = expected_runner / "sugarkube-runner-manifest.json"
@@ -594,6 +638,7 @@ def status(root: Path) -> int:
         print(f"{target_name} sha256={sha(path)}")
     print("runnerValidation=passed")
     print(f"runnerRevision={config['runnerRevision']}")
+    print(f"runnerIdentity={expected_runner.name}")
     print(f"runnerManifestSha256={sha(runner_manifest_path)}")
     for key in (
         "dspaceVersion",
@@ -783,10 +828,11 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as temporary:
         staged = Path(temporary)
         render(staged)
-        validate(staged)
         if args.runner_snapshot is None:
             parser.error(f"{args.operation} requires --runner-snapshot")
         snapshot = args.runner_snapshot.absolute()
+        bind_runner_identity(staged, snapshot)
+        validate(staged)
         validate_snapshot(staged, snapshot, args.root)
         if args.operation == "apply":
             asset_revision = hashlib.sha256((staged / "manifest.json").read_bytes()).hexdigest()

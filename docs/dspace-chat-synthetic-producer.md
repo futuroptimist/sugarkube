@@ -20,6 +20,13 @@ without the source checkout, alternates, hard-linked objects, or a shared object
 `node_modules/.pnpm` store and frontend dependency links are retained because pnpm workspace links
 alone are not dependencies: their package targets live in that root content-addressed layout.
 
+The 40-hex `runnerRevision` is the logical DSPACE source revision; it is not, by itself, the
+immutable storage identity. Installation hashes the validated generated runner manifest and binds
+the retained configuration to `<runnerRevision>-<runnerManifestSha256>`. Thus, two valid generated
+manifest contracts for the same tracked DSPACE commit occupy distinct runner directories. The
+manifest digest supplements rather than replaces Git, tracked-file, repository-identity, and
+browser validation.
+
 ## 1. Construct an independent runner
 
 Use only an explicitly identified, clean local DSPACE checkout. Construction uses the exact
@@ -61,8 +68,8 @@ Both files are hashed into the immutable manifest and required at runtime. The c
 browser between validation and launch. These facts disprove the earlier executable-mapping
 hypothesis; the private host failure's exact root cause remains unknown. This change instead adds
 the bounded evidence needed to classify a future separately authorized execution. Runner validation
-first resolves the exact revision
-directory, rejects
+first resolves the exact manifest-qualified directory (or the revision directory selected by a
+retained legacy asset), rejects
 symlinks and paths outside the configured runner root, and then gives every Git inspection
 command-scoped trust only for that resolved directory. It ignores persistent and environment-injected
 Git configuration and never writes Git configuration. Optional Git locks, including index refreshes,
@@ -111,7 +118,9 @@ The application-owned ancestors `/var/lib/sugarkube` and the configured runner r
 revision and its directories are mode `0750`, executable files are `0750`, and data files are
 `0640`. The separate installations and retained-assets subtree remains private. Neither group nor
 world receives write access. An
-identical pre-existing revision is validated and reused; older runner revisions are retained. Only
+identical pre-existing manifest-qualified identity is validated and reused; older revisions and
+older manifest-contract runners are retained unchanged. Reapplying the exact active asset and
+runner identity is a validated no-op. Only
 then does apply transactionally replace the validated asset set and switch `current`.
 After apply, the operator must run `sudo systemctl daemon-reload` as a separate mandatory
 step so the in-memory definitions match disk. The installer never enables, starts, stops, restarts, disables, retries, or executes smoke. A failure during the
@@ -236,5 +245,9 @@ sudo systemctl daemon-reload
 ```
 
 The command rejects an absent, incomplete, or hash-mismatched retained revision and does not change
-timer/service activation. Observe the same status and metric-age evidence afterward. Any live
+timer/service activation. Each retained asset selects its exact runner revision, storage identity,
+and manifest digest, so rollback does not delete or rewrite another runner. After apply or rollback,
+`status` reports `runnerRevision`, `runnerIdentity`, and `runnerManifestSha256`; verify all three
+without renaming runners, editing Git metadata, adding persistent Git safe-directory configuration,
+or bypassing manifest validation. Observe the same status and metric-age evidence afterward. Any live
 cutover or recovery after merge remains a separate reviewed and explicitly authorized operation.
