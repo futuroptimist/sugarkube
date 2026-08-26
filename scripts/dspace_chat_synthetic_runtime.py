@@ -312,10 +312,10 @@ def validate_runner(config: dict) -> Path:
         raise Invalid("runner path")
     runner = resolved_runner
     manifest_path = runner / "sugarkube-runner-manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     expected_manifest_sha = config.get("runnerManifestSha256")
     if expected_manifest_sha is not None and sha256(manifest_path) != expected_manifest_sha:
         raise Invalid("runner manifest digest")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     files = manifest.get("files")
     browser_relative = manifest.get("playwrightBrowserExecutable")
     if (

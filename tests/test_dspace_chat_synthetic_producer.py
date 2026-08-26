@@ -475,6 +475,14 @@ def test_runner_validation_accepts_complete_independent_git_repository(
     assert runtime.validate_runner(value) == runner
 
 
+def test_runner_manifest_digest_is_checked_before_json_parsing(tmp_path: Path) -> None:
+    value, runner = runtime_runner(tmp_path)
+    (runner / "sugarkube-runner-manifest.json").write_text("not valid JSON")
+
+    with pytest.raises(runtime.Invalid, match="runner manifest digest"):
+        runtime.validate_runner(value)
+
+
 def test_every_runner_git_command_trusts_only_exact_validated_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

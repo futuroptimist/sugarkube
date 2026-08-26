@@ -434,7 +434,7 @@ def install_runner(staged: Path, snapshot: Path, root: Path) -> tuple[Path, bool
     destination = parent / identity
     if destination.exists() or destination.is_symlink():
         if destination.is_symlink() or not destination.is_dir():
-            raise ValueError("runner revision destination is invalid")
+            raise ValueError("runner storage identity destination is invalid")
         manifest = "sugarkube-runner-manifest.json"
         if (snapshot / manifest).read_bytes() != (destination / manifest).read_bytes():
             raise ValueError("existing runner manifest does not match snapshot")
@@ -447,7 +447,7 @@ def install_runner(staged: Path, snapshot: Path, root: Path) -> tuple[Path, bool
     temporary.rmdir()
     try:
         shutil.copytree(snapshot, temporary, symlinks=True)
-        # Validation expects the immutable revision basename, so validate through
+        # Validation expects the immutable storage identity basename, so use
         # a private exact-name parent before the atomic destination rename.
         validation_parent = Path(tempfile.mkdtemp(prefix=".validate.", dir=parent))
         validation_runner = validation_parent / identity
