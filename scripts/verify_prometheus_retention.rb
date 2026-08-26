@@ -34,8 +34,10 @@ config_data = read_json(config_path, "status/config")
 yaml = config_data.is_a?(Hash) ? config_data["yaml"] : nil
 fail_closed("status/config response has no loaded YAML configuration") unless yaml.is_a?(String) && !yaml.empty?
 loaded = YAML.safe_load(yaml, aliases: false)
-retention = loaded&.dig("storage", "tsdb", "retention")
-fail_closed("loaded configuration has no storage.tsdb.retention block") unless retention.is_a?(Hash)
+storage = loaded["storage"] if loaded.is_a?(Hash)
+tsdb = storage["tsdb"] if storage.is_a?(Hash)
+retention = tsdb["retention"] if tsdb.is_a?(Hash)
+fail_closed("loaded configuration is invalid or has no storage.tsdb.retention block") unless retention.is_a?(Hash)
 fail_closed("loaded time retention is missing or differs from #{desired_time}") unless retention["time"] == desired_time
 loaded_bytes = size_bytes(retention["size"])
 fail_closed("loaded size retention is not equivalent to #{desired_size}") unless loaded_bytes == desired_bytes

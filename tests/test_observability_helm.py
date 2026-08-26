@@ -1211,6 +1211,8 @@ case "$*" in
     [ "$KUBECTL_MODE" != retention-malformed-config ] || { printf '%s\n' '{malformed'; exit 0; }
     case "$KUBECTL_MODE" in
       retention-malformed-yaml) yaml='storage: {' ;;
+      retention-scalar-yaml) yaml='retention' ;;
+      retention-wrong-shaped-storage) yaml='storage: []' ;;
       retention-missing) yaml='global: {}\\n' ;;
       retention-wrong-time) yaml='storage:\\n  tsdb:\\n    retention:\\n      time: 7d\\n      size: 100GiB\\n' ;;
       retention-wrong-size) yaml='storage:\\n  tsdb:\\n    retention:\\n      time: 90d\\n      size: 99GiB\\n' ;;
@@ -1750,6 +1752,8 @@ def test_converged_pvc_does_not_require_storageclass_expansion_discovery(tmp_pat
         ("retention-missing-limit", False),
         ("retention-malformed-config", False),
         ("retention-malformed-yaml", False),
+        ("retention-scalar-yaml", False),
+        ("retention-wrong-shaped-storage", False),
         ("retention-malformed-runtime", False),
         ("retention-unreachable-config", False),
         ("retention-unreachable-runtime", False),
@@ -1773,6 +1777,10 @@ def test_verify_checks_loaded_and_runtime_retention(tmp_path, kubectl_mode, succ
         assert "ERROR: Prometheus" in result.stderr
     if kubectl_mode == "retention-malformed-yaml":
         assert "status/config loaded YAML configuration is malformed" in result.stderr
+    if kubectl_mode in {"retention-scalar-yaml", "retention-wrong-shaped-storage"}:
+        assert "loaded configuration is invalid" in result.stderr
+        assert "NoMethodError" not in result.stderr
+        assert "Traceback" not in result.stderr
 
 
 @pytest.mark.parametrize(
