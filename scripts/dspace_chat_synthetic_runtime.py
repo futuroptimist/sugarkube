@@ -53,6 +53,24 @@ REQUIRED = {
 }
 RUNNER_LOCAL = "runner-local-playwright-v1"
 SYSTEM_CHROMIUM = "system-chromium-v1"
+LEGACY_RUNNER_REVISION = "97ab09f13fb098de928a878bf1fe9b8d13032cb5"
+LEGACY_RUNNER_MANIFEST_SHA256 = "36fdab33edc0f1ad518a6d3d247a1bd32d233402387ba57493a9386d78ec9301"
+CURRENT_CRITICAL_FILES = {
+    "scripts/run-remote-chat-smoke.mjs",
+    "scripts/remote-chat-smoke-completion.mjs",
+    "frontend/e2e/remote-chat-smoke.spec.ts",
+    "frontend/playwright.config.ts",
+    "frontend/scripts/utils/ensure-playwright-browsers.js",
+    "package.json",
+    "frontend/package.json",
+    "pnpm-workspace.yaml",
+    "pnpm-lock.yaml",
+}
+LEGACY_UNMANIFESTED_CRITICAL_FILES = {
+    "frontend/playwright.config.ts",
+    "frontend/scripts/utils/ensure-playwright-browsers.js",
+}
+LEGACY_CRITICAL_FILES = CURRENT_CRITICAL_FILES - LEGACY_UNMANIFESTED_CRITICAL_FILES
 
 
 class Invalid(RuntimeError):
@@ -298,11 +316,10 @@ def validate_runner(config: dict) -> Path:
     runner_root = normalize_root(configured_root)
     derived_identity = runner_storage_identity(config)
     storage_identity = config.get("_runnerStorageIdentity", derived_identity)
-    allowed_identities = {config["runnerRevision"], derived_identity}
     if (
         not isinstance(storage_identity, str)
         or Path(storage_identity).parts != (storage_identity,)
-        or storage_identity not in allowed_identities
+        or storage_identity != derived_identity
     ):
         raise Invalid("runner storage identity")
     runner = runner_root / storage_identity
@@ -328,9 +345,21 @@ def validate_runner(config: dict) -> Path:
     if manifest_path.is_symlink() or not stat.S_ISREG(manifest_info.st_mode):
         raise Invalid("runner manifest file")
     expected_manifest_sha = config.get("runnerManifestSha256")
-    if expected_manifest_sha is not None and sha256(manifest_path) != expected_manifest_sha:
+    legacy_contract = (
+        expected_manifest_sha is None
+        and config["runnerRevision"] == LEGACY_RUNNER_REVISION
+        and storage_identity == LEGACY_RUNNER_REVISION
+    )
+    if expected_manifest_sha is None:
+        if not legacy_contract:
+            raise Invalid("runner manifest coordinate")
+        expected_manifest_sha = LEGACY_RUNNER_MANIFEST_SHA256
+    if sha256(manifest_path) != expected_manifest_sha:
         raise Invalid("runner manifest digest")
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        raise Invalid("runner manifest") from None
     files = manifest.get("files")
     browser_relative = manifest.get("playwrightBrowserExecutable")
     if (
@@ -404,19 +433,28 @@ def validate_runner(config: dict) -> Path:
         target = runner / relative
         if target.is_symlink() or not target.is_file() or sha256(target) != expected:
             raise Invalid("critical file hash")
-    required = {
-        "scripts/run-remote-chat-smoke.mjs",
-        "scripts/remote-chat-smoke-completion.mjs",
-        "frontend/e2e/remote-chat-smoke.spec.ts",
-        "frontend/playwright.config.ts",
-        "frontend/scripts/utils/ensure-playwright-browsers.js",
-        "package.json",
-        "frontend/package.json",
-        "pnpm-workspace.yaml",
-        "pnpm-lock.yaml",
-    }
-    if not required <= files.keys():
+    required = LEGACY_CRITICAL_FILES if legacy_contract else CURRENT_CRITICAL_FILES
+    if (legacy_contract and files.keys() != required) or (
+        not legacy_contract and not CURRENT_CRITICAL_FILES <= files.keys()
+    ):
         raise Invalid("critical file manifest")
+    if legacy_contract:
+        for relative in LEGACY_UNMANIFESTED_CRITICAL_FILES:
+            target = runner / relative
+            if target.is_symlink() or not target.is_file():
+                raise Invalid("legacy critical file")
+            tracked = runner_git("rev-parse", f"HEAD:{relative}").stdout.strip()
+            mode_and_type = runner_git("ls-tree", "HEAD", "--", relative).stdout.split()
+            if (
+                not SHA.fullmatch(tracked)
+                or len(mode_and_type) < 3
+                or mode_and_type[0] not in {"100644", "100755"}
+                or mode_and_type[1] != "blob"
+                or mode_and_type[2] != tracked
+                or runner_git("hash-object", "--no-filters", "--", relative).stdout.strip()
+                != tracked
+            ):
+                raise Invalid("legacy critical file")
     if not (runner / "node_modules/.pnpm").is_dir():
         raise Invalid("root pnpm store")
     cli = runner / "frontend/node_modules/.bin/playwright"

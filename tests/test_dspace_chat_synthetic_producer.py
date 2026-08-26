@@ -456,6 +456,77 @@ def runtime_runner(tmp_path: Path) -> tuple[dict, Path]:
     return value, qualified
 
 
+def legacy_runtime_runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[dict, Path]:
+    """Build the approved seven-file shape while pinning its fixture coordinates."""
+    value, qualified = runtime_runner(tmp_path)
+    value["browserContract"] = json.loads(CONFIG.read_text())["browserContract"]
+    manifest_path = qualified / "sugarkube-runner-manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["browserContract"] = value["browserContract"]
+    manifest["playwrightBrowserExecutable"] = None
+    for relative in {
+        "playwright-browser/browser-executable",
+        *runtime.LEGACY_UNMANIFESTED_CRITICAL_FILES,
+    }:
+        manifest["files"].pop(relative)
+    manifest_path.write_text(json.dumps(manifest))
+    value.pop("runnerManifestSha256")
+    legacy = qualified.with_name(value["runnerRevision"])
+    qualified.rename(legacy)
+    monkeypatch.setattr(runtime, "LEGACY_RUNNER_REVISION", value["runnerRevision"])
+    monkeypatch.setattr(
+        runtime, "LEGACY_RUNNER_MANIFEST_SHA256", runtime.sha256(legacy / manifest_path.name)
+    )
+    return value, legacy
+
+
+def test_exact_legacy_seven_file_contract_validates_real_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, runner = legacy_runtime_runner(tmp_path, monkeypatch)
+
+    assert set(json.loads((runner / "sugarkube-runner-manifest.json").read_text())["files"]) == (
+        runtime.LEGACY_CRITICAL_FILES
+    )
+    assert runtime.validate_runner(value) == runner
+
+
+def test_legacy_manifest_digest_and_file_set_fail_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, runner = legacy_runtime_runner(tmp_path, monkeypatch)
+    manifest_path = runner / "sugarkube-runner-manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["files"].pop("package.json")
+    manifest_path.write_text(json.dumps(manifest))
+
+    with pytest.raises(runtime.Invalid, match="runner manifest digest"):
+        runtime.validate_runner(value)
+
+    monkeypatch.setattr(runtime, "LEGACY_RUNNER_MANIFEST_SHA256", runtime.sha256(manifest_path))
+    with pytest.raises(runtime.Invalid, match="critical file manifest"):
+        runtime.validate_runner(value)
+
+
+@pytest.mark.parametrize("relative", sorted(runtime.LEGACY_UNMANIFESTED_CRITICAL_FILES))
+@pytest.mark.parametrize("fault", ["missing", "symlink", "drift"])
+def test_legacy_unmanifested_critical_files_match_tracked_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative: str, fault: str
+) -> None:
+    value, runner = legacy_runtime_runner(tmp_path, monkeypatch)
+    target = runner / relative
+    if fault == "missing":
+        target.unlink()
+    elif fault == "symlink":
+        target.unlink()
+        target.symlink_to(runner / "package.json")
+    else:
+        target.write_text("drift\n")
+
+    with pytest.raises(runtime.Invalid, match="runner tracked state|legacy critical file"):
+        runtime.validate_runner(value)
+
+
 def test_runner_validation_accepts_complete_independent_git_repository(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1712,7 +1783,7 @@ def test_runner_validation_rejects_coordinate_and_hash_mismatch(tmp_path: Path) 
     runner = Path(value["runnerRoot"]) / value["runnerRevision"]
     runner.mkdir(parents=True)
     (runner / "sugarkube-runner-manifest.json").write_text(json.dumps({"runnerRevision": "0" * 40}))
-    with pytest.raises(runtime.Invalid, match="coordinate"):
+    with pytest.raises(runtime.Invalid, match="digest"):
         runtime.validate_runner(value)
 
 

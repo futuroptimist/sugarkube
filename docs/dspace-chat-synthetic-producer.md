@@ -22,6 +22,18 @@ migration at the same Git revision without reusing or overwriting the older revi
 Retained assets created before this migration remain valid and continue to select their legacy
 revision-only runner coordinate.
 
+That exception is deliberately limited to revision
+`97ab09f13fb098de928a878bf1fe9b8d13032cb5`, its identical revision-only storage identity, and
+manifest SHA-256 `36fdab33edc0f1ad518a6d3d247a1bd32d233402387ba57493a9386d78ec9301`.
+The approved legacy manifest must contain exactly its original seven critical-file keys and valid
+hashes. Arbitrary revision-only runners, other manifest digests, and other seven-file subsets are
+rejected. The two tracked files that predate manifest coverage,
+`frontend/playwright.config.ts` and
+`frontend/scripts/utils/ensure-playwright-browsers.js`, are still validated fail-closed: each must
+be a regular, non-symlinked file whose Git blob and working bytes match the pinned HEAD. Current
+manifest-qualified runners instead require their configured digest, exact qualified storage
+identity, and all nine critical-file entries, including those two files.
+
 Complete Git metadata is retained so the snapshot can prove its exact HEAD and object integrity
 without the source checkout, alternates, hard-linked objects, or a shared object store. The root
 `node_modules/.pnpm` store and frontend dependency links are retained because pnpm workspace links
@@ -248,8 +260,12 @@ sudo systemctl daemon-reload
 ```
 
 The command loads the retained asset’s own configuration, validates its exact legacy or
-manifest-qualified runner identity and browser contract, and only then switches assets. Thus rollback
-selects the original runner as well as the exact asset. `status` reports `runnerRevision`,
+manifest-qualified runner identity and browser contract, and only then switches assets. Status,
+migration preconditions, retained-asset checks, access repair, idempotent reapplication, and rollback
+all use that same real-runtime validation boundary. Migration retains the approved revision-only
+runner unchanged while installing the qualified runner at its distinct identity; either retained
+asset can subsequently select its exact runner. Thus rollback selects the original runner as well as
+the exact asset. `status` reports `runnerRevision`,
 `runnerStorageIdentity`, and `runnerManifestSha256`; operators must verify all three without renaming
 runners, weakening manifest checks, or adding persistent Git safe-directory configuration. The command
 rejects an absent, incomplete, or hash-mismatched retained revision and does not change
