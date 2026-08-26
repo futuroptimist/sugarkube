@@ -2098,13 +2098,14 @@ class FakeSnapshotRuntime:
         self.validated = []
 
     normalize_root = staticmethod(runtime.normalize_root)
+    runner_identity = staticmethod(runtime.runner_identity)
 
     @staticmethod
     def load_config(path: Path) -> dict:
         return json.loads(path.read_text())
 
     def validate_runner(self, config: dict) -> Path:
-        runner = Path(config["runnerRoot"]) / config["runnerRevision"]
+        runner = Path(config["runnerRoot"]) / runtime.runner_identity(config)
         self.validated.append(runner)
         if not (runner / ".git").is_dir():
             raise ValueError("complete Git metadata")
@@ -2207,7 +2208,8 @@ def test_apply_installs_runner_only_after_copy_revalidation(
         == 0
     )
 
-    installed = root / "var/lib/sugarkube/dspace-chat-runners" / revision
+    manifest_sha = installer.sha(snapshot / "sugarkube-runner-manifest.json")
+    installed = root / "var/lib/sugarkube/dspace-chat-runners" / f"{revision}-{manifest_sha}"
     assert (installed / "dependency.ok").read_bytes() == (snapshot / "dependency.ok").read_bytes()
     assert any(".validate." in str(path) for path in fake.validated)
     assert os.readlink(root / "var/lib/sugarkube/dspace-chat-installations/current")
@@ -2635,6 +2637,7 @@ def test_access_repair_report_only_and_explicit_apply_are_bounded(
     report = capsys.readouterr().out
     assert report.splitlines() == [
         f"runnerRevision={revision}",
+        f"runnerStorageIdentity={revision}",
         f"runnerManifestSha256={manifest_sha}",
         "runnerAccess=repair-required mutation=none authorization=required",
     ]
@@ -2839,6 +2842,75 @@ def test_install_runner_reuses_existing_runner_with_identical_manifest(
 
     assert (installed, created) == (destination, False)
     assert marker.read_bytes() == b"preserved"
+
+
+def test_same_revision_manifest_migration_is_qualified_idempotent_and_rollback_safe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    snapshot, revision = runner_snapshot_fixture(tmp_path)
+    root = tmp_path / "root"
+    root.mkdir()
+    runners = root / "var/lib/sugarkube/dspace-chat-runners"
+    old_runner = runners / revision
+    __import__("shutil").copytree(snapshot, old_runner)
+    old_manifest = old_runner / "sugarkube-runner-manifest.json"
+    old_manifest.write_text('{"browserProvenance":{"name":"older-contract"}}\n')
+    old_bytes = tree_bytes(old_runner)
+
+    old_staged = tmp_path / "old-staged"
+    installer.render(old_staged)
+    old_asset = "9" * 64
+    installer.install(old_staged, root, old_asset)
+    fake = FakeSnapshotRuntime()
+    monkeypatch.setattr(installer, "runtime_module", lambda: fake)
+
+    assert (
+        run_installer_main(
+            monkeypatch, "apply", "--root", str(root), "--runner-snapshot", str(snapshot)
+        )
+        == 0
+    )
+    manifest_sha = installer.sha(snapshot / "sugarkube-runner-manifest.json")
+    identity = f"{revision}-{manifest_sha}"
+    new_runner = runners / identity
+    assert new_runner.is_dir()
+    assert tree_bytes(old_runner) == old_bytes
+    current = root / "var/lib/sugarkube/dspace-chat-installations/current"
+    new_asset = os.readlink(current)
+    live_config = runtime.load_config(root / "etc/sugarkube/dspace-chat-synthetic.json")
+    assert live_config["runnerRevision"] == revision
+    assert runtime.runner_identity(live_config) == identity
+
+    completed = tree_bytes(root)
+    assert (
+        run_installer_main(
+            monkeypatch, "apply", "--root", str(root), "--runner-snapshot", str(snapshot)
+        )
+        == 0
+    )
+    assert tree_bytes(root) == completed
+
+    installer.activate(current.parent / old_asset, root, old_asset)
+    rolled_back = runtime.load_config(root / "etc/sugarkube/dspace-chat-synthetic.json")
+    assert os.readlink(current) == old_asset
+    assert runtime.runner_identity(rolled_back) == revision
+    assert tree_bytes(old_runner) == old_bytes
+    assert new_runner.is_dir()
+    assert (current.parent / new_asset).is_dir()
+
+
+def test_manifest_qualified_runner_rejects_digest_mismatch(tmp_path: Path) -> None:
+    value, runner = runtime_runner(tmp_path)
+    manifest = runner / "sugarkube-runner-manifest.json"
+    identity = f"{value['runnerRevision']}-{runtime.sha256(manifest)}"
+    qualified = runner.with_name(identity)
+    runner.rename(qualified)
+    value["runnerStorageIdentity"] = identity
+    manifest.write_text("unreachable") if manifest.exists() else None
+    (qualified / "sugarkube-runner-manifest.json").write_text("{}\n")
+
+    with pytest.raises(runtime.Invalid, match="manifest digest"):
+        runtime.validate_runner(value)
 
 
 def test_apply_rejects_different_valid_existing_runner_without_mutation(

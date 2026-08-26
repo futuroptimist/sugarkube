@@ -84,8 +84,8 @@ python3 scripts/install_dspace_chat_synthetic.py status --root /tmp/rehearsal-ro
 
 For an alternate installation root, both runner and absolute browser coordinates are resolved under
 that root; the installer never substitutes the live host's `/usr`. Populate private fixtures before
-the command. The preflight first loads the rendered configuration and validates its exact runner
-revision against the snapshot basename, manifest hashes, independent Git metadata, dependencies,
+the command. The preflight first loads the rendered configuration and validates its logical DSPACE
+source revision against the snapshot basename, manifest hashes, independent Git metadata, dependencies,
 and Node/Playwright resolution. It also validates architecture and browser provenance before any
 installation mutation. Review all hashes and coordinates. `status` is read-only and, for alternate
 roots, reports activation as not queried; only `/` queries unit activation without printing
@@ -101,17 +101,23 @@ sudo python3 scripts/install_dspace_chat_synthetic.py apply \
   --runner-snapshot /absolute/staging/97ab09f13fb098de928a878bf1fe9b8d13032cb5
 ```
 
-Apply validates the source snapshot before any destination mutation, copies it beneath the configured
-runner root, normalizes the copy to `root:<serviceGroup>` with group traversal/read access (and
+Apply validates the source snapshot before any destination mutation, binds the rendered asset to an
+immutable runner storage identity of `<source-revision>-<runner-manifest-sha256>`, copies it beneath
+the configured runner root, and normalizes the copy to `root:<serviceGroup>` with group traversal/read access (and
 execute access only where the source executable bit requires it), validates both content and the
-configured child's access, and atomically exposes the exact immutable revision. Source checkout
+configured child's access, and atomically exposes the exact immutable identity. `runnerRevision`
+remains the independently verified Git revision; `runnerStorageIdentity` selects the bytes and
+manifest contract. This permits a newer critical-file manifest contract for the same Git revision
+without overwriting or silently reusing the older runner directory. Source checkout
 ownership and a restrictive source `umask` therefore cannot make the installed runner unusable.
 The application-owned ancestors `/var/lib/sugarkube` and the configured runner root are
 `root:<serviceGroup>` mode `0710` (group traversal without directory listing); the exact runner
 revision and its directories are mode `0750`, executable files are `0750`, and data files are
 `0640`. The separate installations and retained-assets subtree remains private. Neither group nor
 world receives write access. An
-identical pre-existing revision is validated and reused; older runner revisions are retained. Only
+identical pre-existing storage identity is validated and reused; older identities, including the
+legacy revision-only coordinate, are retained. Reapplying the already-current exact asset and
+runner is a validated no-op. Only
 then does apply transactionally replace the validated asset set and switch `current`.
 After apply, the operator must run `sudo systemctl daemon-reload` as a separate mandatory
 step so the in-memory definitions match disk. The installer never enables, starts, stops, restarts, disables, retries, or executes smoke. A failure during the
@@ -177,6 +183,13 @@ coordinates, ownership/modes, activation state, bounded invocation summary, and 
 Invocation cleanup is expected lifecycle behavior, not evidence loss.
 
 ## 4. Explicit rollback/recovery
+
+Every retained asset contains the exact runner storage identity it selected. Rollback activates
+that asset unchanged, so a legacy asset selects its revision-only runner while a manifest-qualified
+asset selects its exact qualified runner; neither runner is deleted. After activation, use
+`status` to verify `runnerRevision`, `runnerStorageIdentity`, and `runnerManifestSha256`. These
+checks preserve Git/repository, tracked-content, browser, and manifest validation rather than
+adding a fallback between identities.
 
 ### Repair an exact runner's access metadata
 
