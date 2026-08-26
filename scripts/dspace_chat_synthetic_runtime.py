@@ -21,6 +21,7 @@ from pathlib import Path
 
 SHA = re.compile(r"[0-9a-f]{40}")
 SHA256 = re.compile(r"[0-9a-f]{64}")
+SHA256 = re.compile(r"[0-9a-f]{64}")
 INVOCATION = re.compile(r"[0-9a-f]{32}")
 APPROVED = ("3.1.1", "22f506e07e0b5abfd0cf756e9c5827c0458fb4b2")
 APPROVED_REPOSITORY_IDENTITY = "https://github.com/democratizedspace/dspace.git"
@@ -76,6 +77,11 @@ def load_config(path: Path) -> dict:
         raise Invalid("configuration value type")
     if not SHA.fullmatch(value["runnerRevision"]):
         raise Invalid("runner coordinate")
+    manifest_sha256 = value.get("runnerManifestSha256")
+    if manifest_sha256 is not None and (
+        not isinstance(manifest_sha256, str) or not SHA256.fullmatch(manifest_sha256)
+    ):
+        raise Invalid("runner manifest coordinate")
     if value["repositoryIdentity"] != APPROVED_REPOSITORY_IDENTITY:
         raise Invalid("repository identity")
     if value["tokenPlaceOrigin"] != APPROVED_TOKEN_PLACE_ORIGIN:
@@ -140,6 +146,12 @@ def load_config(path: Path) -> dict:
         ):
             raise Invalid("system browser contract")
     return value
+
+
+def runner_storage_identity(config: dict) -> str:
+    """Return the immutable storage identity, preserving legacy coordinates."""
+    digest = config.get("runnerManifestSha256")
+    return f"{config['runnerRevision']}-{digest}" if digest else config["runnerRevision"]
 
 
 def sha256(path: Path) -> str:
@@ -284,7 +296,7 @@ def validate_runner(config: dict) -> Path:
     if not configured_root.is_absolute() or ".." in configured_root.parts:
         raise Invalid("runner path")
     runner_root = normalize_root(configured_root)
-    runner = runner_root / config["runnerRevision"]
+    runner = runner_root / runner_storage_identity(config)
     try:
         runner_info = runner.lstat()
         resolved_runner = runner.resolve(strict=True)
@@ -300,6 +312,10 @@ def validate_runner(config: dict) -> Path:
         raise Invalid("runner path")
     runner = resolved_runner
     manifest = json.loads((runner / "sugarkube-runner-manifest.json").read_text(encoding="utf-8"))
+    manifest_path = runner / "sugarkube-runner-manifest.json"
+    expected_manifest_sha256 = config.get("runnerManifestSha256")
+    if expected_manifest_sha256 and sha256(manifest_path) != expected_manifest_sha256:
+        raise Invalid("runner manifest digest")
     files = manifest.get("files")
     browser_relative = manifest.get("playwrightBrowserExecutable")
     if (

@@ -15,6 +15,13 @@ version `3.1.1`, source `22f506e07e0b5abfd0cf756e9c5827c0458fb4b2`, identity con
 `build-info-v1`, and explicitly selected provider-config contract
 `legacy-no-default-provider-v1`.
 
+The Git commit is the logical source revision, not the complete immutable storage identity. Runner
+storage is selected by `<runnerRevision>-<runnerManifestSha256>`, where the digest covers the
+generated manifest and therefore its critical-file, dependency-tool, repository, and browser
+contracts. Retained assets created before manifest-qualified storage remain valid at their legacy
+`<runnerRevision>` coordinate. This compatibility is only for assets that omit the manifest digest;
+new assets must never silently select or overwrite that legacy directory.
+
 Complete Git metadata is retained so the snapshot can prove its exact HEAD and object integrity
 without the source checkout, alternates, hard-linked objects, or a shared object store. The root
 `node_modules/.pnpm` store and frontend dependency links are retained because pnpm workspace links
@@ -92,6 +99,12 @@ roots, reports activation as not queried; only `/` queries unit activation witho
 configuration secrets (the committed configuration contains none). A failed staging or preflight
 leaves installed fixtures unchanged.
 
+An empty alternate root proves candidate self-consistency but cannot exercise a collision with a
+populated legacy revision directory. A same-revision contract migration validates the candidate
+manifest digest, installs or reuses its manifest-qualified directory, and leaves the legacy runner
+byte-for-byte intact. A digest mismatch fails before activation, so `current` and live assets stay
+unchanged and transaction-temporary entries are removed.
+
 ## 3. Separately authorized installation and controlled execution
 
 Only after separate approval, invoke apply with the already materialized snapshot:
@@ -104,14 +117,16 @@ sudo python3 scripts/install_dspace_chat_synthetic.py apply \
 Apply validates the source snapshot before any destination mutation, copies it beneath the configured
 runner root, normalizes the copy to `root:<serviceGroup>` with group traversal/read access (and
 execute access only where the source executable bit requires it), validates both content and the
-configured child's access, and atomically exposes the exact immutable revision. Source checkout
+configured child's access, and atomically exposes the exact immutable storage identity. Source checkout
 ownership and a restrictive source `umask` therefore cannot make the installed runner unusable.
 The application-owned ancestors `/var/lib/sugarkube` and the configured runner root are
 `root:<serviceGroup>` mode `0710` (group traversal without directory listing); the exact runner
-revision and its directories are mode `0750`, executable files are `0750`, and data files are
+identity and its directories are mode `0750`, executable files are `0750`, and data files are
 `0640`. The separate installations and retained-assets subtree remains private. Neither group nor
 world receives write access. An
-identical pre-existing revision is validated and reused; older runner revisions are retained. Only
+identical pre-existing identity is validated and reused; older revisions and same-revision manifest
+identities are retained. Reapplying the exact active asset validates and reuses both retained asset
+and runner identities without replacing either. Only
 then does apply transactionally replace the validated asset set and switch `current`.
 After apply, the operator must run `sudo systemctl daemon-reload` as a separate mandatory
 step so the in-memory definitions match disk. The installer never enables, starts, stops, restarts, disables, retries, or executes smoke. A failure during the
@@ -238,3 +253,7 @@ sudo systemctl daemon-reload
 The command rejects an absent, incomplete, or hash-mismatched retained revision and does not change
 timer/service activation. Observe the same status and metric-age evidence afterward. Any live
 cutover or recovery after merge remains a separate reviewed and explicitly authorized operation.
+Each retained asset contains the configuration that selects its exact runner storage identity, so
+rollback never chooses a runner merely by Git revision. `status` reports `runnerRevision`,
+`runnerStorageIdentity`, and `runnerManifestSha256`; operators must verify all three and must not
+weaken manifest, Git, repository-identity, tracked-state, browser, or child-access validation.

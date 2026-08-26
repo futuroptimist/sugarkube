@@ -190,6 +190,12 @@ def sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def runner_storage_identity(config: dict) -> str:
+    """Return the manifest-qualified identity or a retained legacy revision."""
+    digest = config.get("runnerManifestSha256")
+    return f"{config['runnerRevision']}-{digest}" if digest else config["runnerRevision"]
+
+
 def render(destination: Path) -> dict[str, str]:
     hashes = {}
     for target, source in ASSETS.items():
@@ -275,9 +281,18 @@ def load_snapshot_config(staged: Path, snapshot: Path) -> dict:
     runtime = runtime_module()
     config = runtime.load_config(staged / "etc/sugarkube/dspace-chat-synthetic.json")
     revision = config["runnerRevision"]
-    if snapshot.is_symlink() or not snapshot.is_dir() or snapshot.name != revision:
+    storage_identity = runner_storage_identity(config)
+    if (
+        snapshot.is_symlink()
+        or not snapshot.is_dir()
+        or snapshot.name not in {revision, storage_identity}
+    ):
         raise ValueError("runner snapshot must be a real exact-revision directory")
     config["runnerRoot"] = str(snapshot.parent)
+    # Materialized inputs retain the logical-revision basename. Installation
+    # storage is selected separately by the validated manifest identity.
+    if snapshot.name == revision:
+        config.pop("runnerManifestSha256", None)
     return config
 
 
@@ -288,6 +303,11 @@ def validate_snapshot(staged: Path, snapshot: Path, root: Path = Path("/")) -> s
     runner = runtime.validate_runner(config)
     provenance = runtime.validate_browser_contract(config, runner, root)
     manifest = json.loads((runner / "sugarkube-runner-manifest.json").read_text())
+    expected = runtime.load_config(staged / "etc/sugarkube/dspace-chat-synthetic.json").get(
+        "runnerManifestSha256"
+    )
+    if expected and sha(runner / "sugarkube-runner-manifest.json") != expected:
+        raise ValueError("runner manifest digest mismatch")
     if provenance != manifest.get("browserProvenance"):
         raise ValueError("runner browser provenance mismatch")
     return config["runnerRevision"]
@@ -422,9 +442,9 @@ def install_runner(staged: Path, snapshot: Path, root: Path) -> tuple[Path, bool
     """Copy, revalidate, and atomically expose an immutable runner snapshot."""
     runtime = runtime_module()
     config = runtime.load_config(staged / "etc/sugarkube/dspace-chat-synthetic.json")
-    revision = config["runnerRevision"]
     parent = rooted(root, config["runnerRoot"])
-    destination = parent / revision
+    identity = runner_storage_identity(config)
+    destination = parent / identity
     if destination.exists() or destination.is_symlink():
         if destination.is_symlink() or not destination.is_dir():
             raise ValueError("runner revision destination is invalid")
@@ -436,18 +456,27 @@ def install_runner(staged: Path, snapshot: Path, root: Path) -> tuple[Path, bool
         validate_runner_access(config, destination, root)
         return destination, False
     parent.mkdir(parents=True, exist_ok=True)
-    temporary = Path(tempfile.mkdtemp(prefix=f".{revision}.", dir=parent))
+    temporary = Path(tempfile.mkdtemp(prefix=f".{identity}.", dir=parent))
     temporary.rmdir()
     try:
         shutil.copytree(snapshot, temporary, symlinks=True)
-        # Validation expects the immutable revision basename, so validate through
-        # a private exact-name parent before the atomic destination rename.
+        # Validate through a private coordinate-shaped parent before the atomic
+        # destination rename. The staged validator separately preserves the
+        # logical source revision check.
         validation_parent = Path(tempfile.mkdtemp(prefix=".validate.", dir=parent))
-        validation_runner = validation_parent / revision
+        validation_runner = validation_parent / identity
         os.replace(temporary, validation_runner)
         try:
             normalize_runner_access(config, validation_runner, root)
-            validate_snapshot(staged, validation_runner, root)
+            rooted_config = dict(config, runnerRoot=str(validation_parent))
+            if runtime.validate_runner(rooted_config) != validation_runner.resolve():
+                raise ValueError("installed runner validation returned an unexpected identity")
+            provenance = runtime.validate_browser_contract(rooted_config, validation_runner, root)
+            installed_manifest = json.loads(
+                (validation_runner / "sugarkube-runner-manifest.json").read_text()
+            )
+            if provenance != installed_manifest.get("browserProvenance"):
+                raise ValueError("runner browser provenance mismatch")
             validate_runner_access(config, validation_runner, root)
             os.replace(validation_runner, destination)
             normalize_runner_access(config, destination, root)
@@ -483,7 +512,7 @@ def repair_runner_access(
     config = runtime_module().load_config(retained / "etc/sugarkube/dspace-chat-synthetic.json")
     if config["runnerRevision"] != revision:
         raise ValueError("installed runner revision does not match authorization")
-    runner = rooted(root, config["runnerRoot"]) / revision
+    runner = rooted(root, config["runnerRoot"]) / runner_storage_identity(config)
     if runner.is_symlink() or not runner.is_dir():
         raise ValueError("installed runner revision is missing or invalid")
     manifest = runner / "sugarkube-runner-manifest.json"
@@ -521,7 +550,15 @@ def apply_installation(staged: Path, snapshot: Path, root: Path, asset_revision:
     validate_snapshot(staged, snapshot, root)
     retained = root / "var/lib/sugarkube/dspace-chat-installations" / asset_revision
     if retained.exists():
-        raise ValueError("exact retained revision already exists")
+        retained_manifest = validate(retained)
+        if (retained / "manifest.json").read_bytes() != (staged / "manifest.json").read_bytes():
+            raise ValueError("existing retained revision conflicts with candidate")
+        current = retained.parent / "current"
+        if not current.is_symlink() or os.readlink(current) != asset_revision:
+            raise ValueError("existing retained revision is not the active exact candidate")
+        validate_live_assets(root, retained, retained_manifest)
+        install_runner(staged, snapshot, root)
+        return
     runner, created = install_runner(staged, snapshot, root)
     try:
         install(staged, root, asset_revision)
@@ -563,7 +600,7 @@ def status(root: Path) -> int:
     runtime = runtime_module()
     config = runtime.load_config(live_paths["etc/sugarkube/dspace-chat-synthetic.json"])
     runner_parent = rooted(root, config["runnerRoot"])
-    expected_runner = runner_parent / config["runnerRevision"]
+    expected_runner = runner_parent / runner_storage_identity(config)
     if expected_runner.is_symlink() or not expected_runner.is_dir():
         raise ValueError("installed runner revision is missing or invalid")
     runner_manifest_path = expected_runner / "sugarkube-runner-manifest.json"
@@ -594,6 +631,7 @@ def status(root: Path) -> int:
         print(f"{target_name} sha256={sha(path)}")
     print("runnerValidation=passed")
     print(f"runnerRevision={config['runnerRevision']}")
+    print(f"runnerStorageIdentity={runner_storage_identity(config)}")
     print(f"runnerManifestSha256={sha(runner_manifest_path)}")
     for key in (
         "dspaceVersion",
