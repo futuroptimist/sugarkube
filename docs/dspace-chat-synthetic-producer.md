@@ -9,11 +9,18 @@ and production mutation require a separate reviewed and explicitly authorized op
 The repository owns the wrapper, runtime, bounded metrics consumer, non-secret coordinates, unit
 files, installer, and construction tool. The previous private wrapper SHA
 `5a160f1e4c077c09cda5fec062733cd9b31ed8cbfbc5b7f0779403f4a829e70e` is provenance only; it is
-not a source input and the new wrapper legitimately differs. The approved runner is the complete
-DSPACE commit `97ab09f13fb098de928a878bf1fe9b8d13032cb5`; the deployed application identity remains
+not a source input and the new wrapper legitimately differs. The runner’s logical source revision is
+the complete DSPACE commit `97ab09f13fb098de928a878bf1fe9b8d13032cb5`; the deployed application identity remains
 version `3.1.1`, source `22f506e07e0b5abfd0cf756e9c5827c0458fb4b2`, identity contract
 `build-info-v1`, and explicitly selected provider-config contract
 `legacy-no-default-provider-v1`.
+
+The logical Git revision is not, by itself, the immutable storage identity. New assets bind the
+SHA-256 of the complete generated runner manifest in configuration and store the runner at
+`<runnerRevision>-<runnerManifestSha256>`. This permits a reviewed critical-file or manifest-contract
+migration at the same Git revision without reusing or overwriting the older revision-only coordinate.
+Retained assets created before this migration remain valid and continue to select their legacy
+revision-only runner coordinate.
 
 Complete Git metadata is retained so the snapshot can prove its exact HEAD and object integrity
 without the source checkout, alternates, hard-linked objects, or a shared object store. The root
@@ -59,10 +66,13 @@ tracked runner configuration already maps `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` 
 Both files are hashed into the immutable manifest and required at runtime. The child also receives
 `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`, so neither browser contract can acquire or fall back to a
 browser between validation and launch. These facts disprove the earlier executable-mapping
-hypothesis; the private host failure's exact root cause remains unknown. This change instead adds
-the bounded evidence needed to classify a future separately authorized execution. Runner validation
-first resolves the exact revision
-directory, rejects
+hypothesis. The empty-root private rehearsal passed because it had no revision-only runner coordinate;
+the populated live staging-host root rejected the newer valid manifest because that logical revision's
+revision-only storage coordinate was already occupied by a different manifest. The logical Git
+revision and immutable runner storage identity are therefore distinct coordinates. Runner
+validation first derives the exact manifest-qualified storage identity (or the legacy
+revision-only identity selected by an older retained asset), verifies the manifest digest, then
+separately verifies the manifest’s logical revision and Git HEAD. It rejects
 symlinks and paths outside the configured runner root, and then gives every Git inspection
 command-scoped trust only for that resolved directory. It ignores persistent and environment-injected
 Git configuration and never writes Git configuration. Optional Git locks, including index refreshes,
@@ -104,15 +114,17 @@ sudo python3 scripts/install_dspace_chat_synthetic.py apply \
 Apply validates the source snapshot before any destination mutation, copies it beneath the configured
 runner root, normalizes the copy to `root:<serviceGroup>` with group traversal/read access (and
 execute access only where the source executable bit requires it), validates both content and the
-configured child's access, and atomically exposes the exact immutable revision. Source checkout
+configured child's access, and atomically exposes the exact immutable manifest-qualified identity.
+Source checkout
 ownership and a restrictive source `umask` therefore cannot make the installed runner unusable.
 The application-owned ancestors `/var/lib/sugarkube` and the configured runner root are
 `root:<serviceGroup>` mode `0710` (group traversal without directory listing); the exact runner
 revision and its directories are mode `0750`, executable files are `0750`, and data files are
 `0640`. The separate installations and retained-assets subtree remains private. Neither group nor
 world receives write access. An
-identical pre-existing revision is validated and reused; older runner revisions are retained. Only
-then does apply transactionally replace the validated asset set and switch `current`.
+identical pre-existing storage identity is validated and reused; older runner identities and retained
+assets are never deleted. Reapplying an already current, fully validated asset is an idempotent
+no-op. Only then does apply transactionally replace the validated asset set and switch `current`.
 After apply, the operator must run `sudo systemctl daemon-reload` as a separate mandatory
 step so the in-memory definitions match disk. The installer never enables, starts, stops, restarts, disables, retries, or executes smoke. A failure during the
 installer's transactional asset replacement restores the prior asset set and leaves `current`
@@ -235,6 +247,11 @@ python3 scripts/install_dspace_chat_synthetic.py rollback --apply \
 sudo systemctl daemon-reload
 ```
 
-The command rejects an absent, incomplete, or hash-mismatched retained revision and does not change
+The command loads the retained asset’s own configuration, validates its exact legacy or
+manifest-qualified runner identity and browser contract, and only then switches assets. Thus rollback
+selects the original runner as well as the exact asset. `status` reports `runnerRevision`,
+`runnerStorageIdentity`, and `runnerManifestSha256`; operators must verify all three without renaming
+runners, weakening manifest checks, or adding persistent Git safe-directory configuration. The command
+rejects an absent, incomplete, or hash-mismatched retained revision and does not change
 timer/service activation. Observe the same status and metric-age evidence afterward. Any live
 cutover or recovery after merge remains a separate reviewed and explicitly authorized operation.
