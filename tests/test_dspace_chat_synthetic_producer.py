@@ -476,6 +476,115 @@ def test_runner_validation_accepts_complete_independent_git_repository(
     assert runtime.validate_runner(value) == runner
 
 
+def legacy_runtime_runner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[dict, Path, str]:
+    """Build the approved seven-file shape while retaining real Git validation."""
+    value, qualified = runtime_runner(tmp_path)
+    manifest_path = qualified / "sugarkube-runner-manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    for relative in runtime.LEGACY_COMPATIBILITY_FILES:
+        manifest["files"].pop(relative)
+    manifest["files"].pop("playwright-browser/browser-executable")
+    manifest["playwrightBrowserExecutable"] = None
+    manifest["pnpmVersion"] = "9.0.0"
+    value["browserContract"] = json.loads(CONFIG.read_text())["browserContract"]
+    manifest["browserContract"] = value["browserContract"]
+    manifest["browserProvenance"] = value["browserContract"]
+    manifest_path.write_text(json.dumps(manifest))
+    value.pop("runnerManifestSha256")
+    revision = value["runnerRevision"]
+    legacy = qualified.with_name(revision)
+    qualified.rename(legacy)
+    digest = runtime.sha256(legacy / "sugarkube-runner-manifest.json")
+    monkeypatch.setattr(runtime, "LEGACY_RUNNER_REVISION", revision)
+    monkeypatch.setattr(runtime, "LEGACY_RUNNER_MANIFEST_SHA256", digest)
+    return value, legacy, digest
+
+
+def test_exact_legacy_runner_contract_validates_with_real_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, runner, _digest = legacy_runtime_runner(tmp_path, monkeypatch)
+
+    assert (
+        set(json.loads((runner / "sugarkube-runner-manifest.json").read_text())["files"])
+        == runtime.LEGACY_CRITICAL_FILES
+    )
+    assert runtime.validate_runner(value) == runner
+
+
+def test_legacy_runner_rejects_unknown_manifest_digest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, _runner, _digest = legacy_runtime_runner(tmp_path, monkeypatch)
+    monkeypatch.setattr(runtime, "LEGACY_RUNNER_MANIFEST_SHA256", "0" * 64)
+
+    with pytest.raises(runtime.Invalid, match="legacy runner manifest coordinate"):
+        runtime.validate_runner(value)
+
+
+def test_private_root_status_uses_real_legacy_runner_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    value, runner, _digest = legacy_runtime_runner(tmp_path, monkeypatch)
+    root = tmp_path / "private-root"
+    root.mkdir()
+    logical_runner_root = Path("/var/lib/sugarkube/dspace-chat-runners")
+    installed_runner_root = root / logical_runner_root.relative_to("/")
+    installed_runner_root.mkdir(parents=True)
+    installed_runner = installed_runner_root / value["runnerRevision"]
+    runner.rename(installed_runner)
+
+    staged = tmp_path / "legacy-assets"
+    installer.render(staged)
+    config_path = staged / "etc/sugarkube/dspace-chat-synthetic.json"
+    installed_config = json.loads(config_path.read_text())
+    installed_config.pop("runnerManifestSha256")
+    installed_config["runnerRevision"] = value["runnerRevision"]
+    installed_config["runnerRoot"] = str(logical_runner_root)
+    config_path.write_text(json.dumps(installed_config, sort_keys=True, indent=2) + "\n")
+    asset_manifest = json.loads((staged / "manifest.json").read_text())
+    asset_manifest["etc/sugarkube/dspace-chat-synthetic.json"] = installer.sha(config_path)
+    (staged / "manifest.json").write_text(
+        json.dumps(asset_manifest, sort_keys=True, indent=2) + "\n"
+    )
+    asset_revision = installer.sha(staged / "manifest.json")
+    monkeypatch.setattr(installer, "validate", lambda _tree: asset_manifest)
+    installer.install(staged, root, asset_revision)
+
+    provenance = json.loads((installed_runner / "sugarkube-runner-manifest.json").read_text())[
+        "browserProvenance"
+    ]
+    monkeypatch.setattr(installer, "runtime_module", lambda: runtime)
+    monkeypatch.setattr(runtime, "validate_browser_contract", lambda *_args: provenance)
+
+    assert installer.status(root) == 0
+    output = capsys.readouterr().out
+    assert "runnerValidation=passed" in output
+    assert f"runnerStorageIdentity={value['runnerRevision']}" in output
+    assert "activation=not-queried" in output
+
+
+@pytest.mark.parametrize("relative", sorted(runtime.LEGACY_COMPATIBILITY_FILES))
+@pytest.mark.parametrize("fault", ["missing", "symlink", "drift"])
+def test_legacy_runner_validates_previously_unmanifested_tracked_blobs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative: str, fault: str
+) -> None:
+    value, runner, _digest = legacy_runtime_runner(tmp_path, monkeypatch)
+    target = runner / relative
+    if fault == "missing":
+        target.unlink()
+    elif fault == "symlink":
+        target.unlink()
+        target.symlink_to(runner / "package.json")
+    else:
+        target.write_text("// drift\n")
+
+    with pytest.raises(runtime.Invalid, match="legacy compatibility file"):
+        runtime.validate_runner(value)
+
+
 def test_runner_manifest_digest_is_checked_before_json_parsing(tmp_path: Path) -> None:
     value, runner = runtime_runner(tmp_path)
     (runner / "sugarkube-runner-manifest.json").write_text("not valid JSON")

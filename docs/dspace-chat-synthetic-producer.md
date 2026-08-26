@@ -22,6 +22,19 @@ migration at the same Git revision without reusing or overwriting the older revi
 Retained assets created before this migration remain valid and continue to select their legacy
 revision-only runner coordinate.
 
+Legacy compatibility is deliberately limited to revision
+`97ab09f13fb098de928a878bf1fe9b8d13032cb5`, its revision-only storage identity, and manifest
+SHA-256 `36fdab33edc0f1ad518a6d3d247a1bd32d233402387ba57493a9386d78ec9301`. That approved manifest
+must contain exactly the original seven critical-file keys and their exact hashes. It predates the
+manifest entries for `frontend/playwright.config.ts` and
+`frontend/scripts/utils/ensure-playwright-browsers.js`; runtime validation therefore requires each
+to be a regular tracked file whose content is the exact blob at the pinned Git `HEAD`. Missing,
+renamed, symlinked, untracked, or drifted compatibility files fail closed. An arbitrary seven-file
+manifest, any other digest or revision-only runner, and any missing or extra legacy key are not a
+legacy contract. Manifest-qualified runners remain a separate contract: configuration must carry
+the exact manifest digest, storage must use the qualified identity, and the manifest must include
+all nine current critical files with exact hashes.
+
 Complete Git metadata is retained so the snapshot can prove its exact HEAD and object integrity
 without the source checkout, alternates, hard-linked objects, or a shared object store. The root
 `node_modules/.pnpm` store and frontend dependency links are retained because pnpm workspace links
@@ -71,7 +84,8 @@ the populated live staging-host root rejected the newer valid manifest because t
 revision-only storage coordinate was already occupied by a different manifest. The logical Git
 revision and immutable runner storage identity are therefore distinct coordinates. Runner
 validation first derives the exact manifest-qualified storage identity (or the legacy
-revision-only identity selected by an older retained asset), verifies the manifest digest, then
+revision-only identity selected by the approved older retained asset), verifies the applicable
+exact manifest contract and digest, then
 separately verifies the manifest’s logical revision and Git HEAD. It rejects
 symlinks and paths outside the configured runner root, and then gives every Git inspection
 command-scoped trust only for that resolved directory. It ignores persistent and environment-injected
@@ -255,3 +269,7 @@ runners, weakening manifest checks, or adding persistent Git safe-directory conf
 rejects an absent, incomplete, or hash-mismatched retained revision and does not change
 timer/service activation. Observe the same status and metric-age evidence afterward. Any live
 cutover or recovery after merge remains a separate reviewed and explicitly authorized operation.
+Migration installs the qualified runner alongside, rather than rewriting or renaming, the approved
+legacy runner. Both retained assets remain exactly selectable; status and rollback apply the same
+contract-specific validation, and idempotent reapplication only revalidates an already complete
+qualified installation.
