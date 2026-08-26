@@ -408,6 +408,7 @@ def validate_runner(config: dict) -> Path:
             "GIT_CONFIG_COUNT": "0",
             "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_NO_REPLACE_OBJECTS": "1",
         }
     )
 
@@ -446,10 +447,14 @@ def validate_runner(config: dict) -> Path:
     if legacy_contract:
         for relative in LEGACY_COMPATIBILITY_FILES:
             target = runner / relative
+            try:
+                tracked_contents = runner_git_bytes("show", f"HEAD:{relative}")
+            except subprocess.CalledProcessError:
+                raise Invalid("legacy compatibility file") from None
             if (
                 target.is_symlink()
                 or not target.is_file()
-                or target.read_bytes() != runner_git_bytes("show", f"HEAD:{relative}")
+                or target.read_bytes() != tracked_contents
             ):
                 raise Invalid("legacy compatibility file")
     if not (runner / "node_modules/.pnpm").is_dir():

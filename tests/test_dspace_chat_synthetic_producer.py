@@ -531,6 +531,40 @@ def test_exact_legacy_manifest_validates_declared_and_tracked_compatibility_file
     assert runtime.validate_runner(value) == runner
 
 
+def test_legacy_compatibility_blob_failure_is_bounded_invalid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, _ = legacy_runtime_runner(tmp_path, monkeypatch)
+    real_run = subprocess.run
+
+    def missing_blob(argv, *args, **kwargs):
+        if "show" in argv:
+            raise subprocess.CalledProcessError(128, argv, stderr=b"untrusted details")
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(runtime.subprocess, "run", missing_blob)
+    with pytest.raises(runtime.Invalid, match="^legacy compatibility file$"):
+        runtime.validate_runner(value)
+
+
+def test_legacy_validation_disables_git_replacement_objects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, runner = legacy_runtime_runner(tmp_path, monkeypatch)
+    real_run = subprocess.run
+    git_environments = []
+
+    def record_git_environment(argv, *args, **kwargs):
+        if argv[0] == "git":
+            git_environments.append(kwargs["env"])
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(runtime.subprocess, "run", record_git_environment)
+    assert runtime.validate_runner(value) == runner
+    assert git_environments
+    assert all(environment["GIT_NO_REPLACE_OBJECTS"] == "1" for environment in git_environments)
+
+
 def test_unknown_legacy_manifest_digest_fails_before_parsing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
