@@ -484,6 +484,23 @@ def test_runner_manifest_digest_is_checked_before_json_parsing(tmp_path: Path) -
         runtime.validate_runner(value)
 
 
+def test_runner_validation_rejects_non_directory_runner(tmp_path: Path) -> None:
+    value, runner = runtime_runner(tmp_path)
+    shutil.rmtree(runner)
+    runner.write_text("not a runner directory\n")
+
+    with pytest.raises(runtime.Invalid, match="runner path"):
+        runtime.validate_runner(value)
+
+
+def test_runner_validation_rejects_missing_manifest(tmp_path: Path) -> None:
+    value, runner = runtime_runner(tmp_path)
+    (runner / "sugarkube-runner-manifest.json").unlink()
+
+    with pytest.raises(runtime.Invalid, match="runner manifest file"):
+        runtime.validate_runner(value)
+
+
 @pytest.mark.parametrize("qualified", [False, True], ids=["legacy", "qualified"])
 @pytest.mark.parametrize("manifest_kind", ["symlink", "fifo"])
 def test_runner_validation_rejects_non_regular_manifests(
@@ -2908,6 +2925,32 @@ def test_install_runner_reuses_existing_runner_with_identical_manifest(
     assert marker.read_bytes() == b"preserved"
 
 
+def test_install_runner_rejects_symlink_destination(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    snapshot, _revision = runner_snapshot_fixture(tmp_path)
+    staged = tmp_path / "staged"
+    installer.render(staged)
+    root = tmp_path / "root"
+    destination = root / "var/lib/sugarkube/dspace-chat-runners" / candidate_runner_identity()
+    destination.parent.mkdir(parents=True)
+    destination.symlink_to(tmp_path, target_is_directory=True)
+    monkeypatch.setattr(installer, "runtime_module", lambda: FakeSnapshotRuntime())
+
+    with pytest.raises(ValueError, match="runner storage identity destination is invalid"):
+        installer.install_runner(staged, snapshot, root)
+
+
+@pytest.mark.parametrize("kind", ["missing", "fifo"])
+def test_regular_file_rejects_missing_and_non_regular_paths(tmp_path: Path, kind: str) -> None:
+    candidate = tmp_path / "manifest.json"
+    if kind == "fifo":
+        os.mkfifo(candidate)
+
+    with pytest.raises(ValueError, match="manifest (?:is missing or invalid|must be a real)"):
+        installer.regular_file(candidate, "manifest")
+
+
 def test_apply_rejects_different_valid_existing_runner_without_mutation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -3317,6 +3360,32 @@ def test_completed_install_rejects_conflicting_retained_candidate_without_mutati
     )
 
     with pytest.raises(ValueError, match="retained asset does not match staged candidate"):
+        installer.apply_installation(staged, snapshot, root, asset_revision)
+
+    assert tree_bytes(root) == before
+
+
+@pytest.mark.parametrize("conflict", ["invalid-retained", "different-current"])
+def test_completed_install_rejects_invalid_retained_coordinate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, conflict: str
+) -> None:
+    snapshot, _revision = runner_snapshot_fixture(tmp_path)
+    staged = tmp_path / "staged"
+    installer.render(staged)
+    asset_revision = installer.sha(staged / "manifest.json")
+    root = tmp_path / "root"
+    retained = root / "var/lib/sugarkube/dspace-chat-installations" / asset_revision
+    retained.parent.mkdir(parents=True)
+    if conflict == "invalid-retained":
+        retained.write_text("not a retained directory\n")
+    else:
+        shutil.copytree(staged, retained)
+        (retained.parent / "current").symlink_to("0" * 64)
+
+    monkeypatch.setattr(installer, "validate_snapshot", lambda *_args: None)
+    before = tree_bytes(root)
+    expected = "invalid" if conflict == "invalid-retained" else "conflicts with current"
+    with pytest.raises(ValueError, match=expected):
         installer.apply_installation(staged, snapshot, root, asset_revision)
 
     assert tree_bytes(root) == before
