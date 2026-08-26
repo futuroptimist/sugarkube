@@ -6,7 +6,7 @@ ROOT="${SUGARKUBE_HEARTBEAT_ROOT:-}"
 SYSTEMD_DIR="${ROOT}/etc/systemd/system"
 CREDENTIAL_DIR="${ROOT}/etc/sugarkube/node-heartbeat"
 LIBEXEC_DIR="${ROOT}/usr/local/libexec"
-INVENTORY="${REPO_ROOT}/clusters/staging/nodes.txt"
+INVENTORY=""
 SYSTEMCTL="${SYSTEMCTL_BIN:-systemctl}"
 HOSTNAME_CMD="${HOSTNAME_BIN:-hostname}"
 TTY="${SUGARKUBE_HEARTBEAT_TTY:-/dev/tty}"
@@ -16,13 +16,17 @@ TIMER=sugarkube-node-heartbeat.timer
 die() { printf 'ERROR: %s\n' "$1" >&2; exit "${2:-1}"; }
 require_tool() { command -v "$1" >/dev/null 2>&1 || die "required tool is missing: $1"; }
 guard_env() {
-  [[ "${1:-}" == staging ]] || die "env=staging is required; production and unknown environments are unsupported."
+  case "${1:-}" in
+    staging) INVENTORY="${REPO_ROOT}/clusters/staging/nodes.txt" ;;
+    prod) INVENTORY="${REPO_ROOT}/clusters/prod/nodes.txt" ;;
+    *) die "env=staging or env=prod is required; unknown environments are unsupported." ;;
+  esac
 }
 hostname_checked() {
   local host
-  [[ -r "${INVENTORY}" ]] || die "staging node inventory is unavailable."
+  [[ -r "${INVENTORY}" ]] || die "node inventory is unavailable."
   host="$(${HOSTNAME_CMD} -s)" || die "could not resolve the local hostname."
-  grep -Fxq -- "${host}" "${INVENTORY}" || die "hostname is not a canonical staging node."
+  grep -Fxq -- "${host}" "${INVENTORY}" || die "hostname is not a canonical environment node."
   printf '%s' "${host}"
 }
 require_root() {
@@ -128,7 +132,7 @@ uninstall_heartbeat() {
 }
 
 action="${1:-}"; env_name="${2:-}"
-[[ $# -eq 2 ]] || die "usage: $0 install|status|verify|uninstall staging"
+[[ $# -eq 2 ]] || die "usage: $0 install|status|verify|uninstall staging|prod"
 guard_env "${env_name}"
 case "${action}" in
   install) install_heartbeat ;;

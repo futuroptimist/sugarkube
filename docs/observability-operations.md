@@ -97,7 +97,7 @@ was verified, and current application releases predate the staging metrics integ
 The shared staging and production desired state is one Prometheus replica with
 `90d` retention and a `100GB` retention-size limit, backed by one `128Gi`
 ReadWriteOnce PVC using `local-path`. The baseline also runs one Alertmanager
-replica; production retains its null-only default receiver. The common values
+replica; production uses the same fail-closed, allowlisted PagerDuty and Healthchecks receiver structure as staging, with production-only labels and credentials. The common values
 file is authoritative for retention and storage, while environment overlays
 continue to contain only environment-specific differences.
 
@@ -601,56 +601,35 @@ five minutes. Retain the procedure below for regression drills.
 
 ## Per-node Healthchecks.io heartbeat rollout
 
-The heartbeat is platform/node observability and does not inspect Kubernetes, Helm, DSPACE, or any
-other application. Debian Bookworm's systemd baseline supports `LoadCredential=`; the root-owned
-mode-`0600` source credential is exposed only to the service's private runtime credential directory.
-Installation refuses every environment except explicit `env=staging`, checks the local short
-hostname against `clusters/staging/nodes.txt`, and reads only from the controlling terminal with echo
-disabled. Do not pass a URL as an argument, environment variable, pipe, transcript, or command.
+The heartbeat is platform/node observability and does not inspect Kubernetes or applications. The
+root-owned mode-`0600` ping URL is exposed only through systemd `LoadCredential=`. Staging permits
+only `sugarkube3`–`sugarkube5`; production permits only `sugarkube0`, `sugarkube1`, and `sugarkube2`
+from their checked-in inventories. Each node needs its own existing Healthchecks.io check configured
+for a **one-minute period plus two-minute grace** and its distinct ping URL. URLs remain manually
+supplied secrets: never put one in Git, argv, an environment variable, a pipe, or a transcript.
 
-The heartbeat timers are installed on `sugarkube3`, `sugarkube4`, and `sugarkube5`. Use the following
-procedure only for initial provisioning of another staging node, reprovisioning, or URL rotation.
-Perform it on the affected physical node with its own rotated URL; `<ROTATED-NODE-PING-URL>` below is
-a label, not text to paste.
+For each node, log in interactively, update `main`, verify `hostname -s`, and substitute `staging` or
+`prod` consistently below. At the hidden prompt paste only that node's URL:
 
-1. Log in to the node, update `main`, and confirm that you are operating on the intended host:
+```bash
+sudo just observability-node-heartbeat-install env=staging
+sudo just observability-node-heartbeat-status env=staging
+sudo just observability-node-heartbeat-verify env=staging
+sudo just observability-node-heartbeat-uninstall env=staging
 
-   ```bash
-   cd ~/sugarkube
-   git switch main
-   git pull --ff-only
-   hostname -s
-   ```
+sudo just observability-node-heartbeat-install env=prod
+sudo just observability-node-heartbeat-status env=prod
+sudo just observability-node-heartbeat-verify env=prod
+sudo just observability-node-heartbeat-uninstall env=prod
+```
 
-   Confirm that the output is the node currently being installed before continuing.
-2. From an interactive terminal run `sudo just observability-node-heartbeat-install env=staging`.
-   At the hidden prompt, paste that node's `<ROTATED-NODE-PING-URL>` and press Enter.
-3. Run `sudo just observability-node-heartbeat-status env=staging`, then
-   `sudo just observability-node-heartbeat-verify env=staging`. Verification explicitly starts one
-   oneshot, waits for a successful result within its configured finite timeout, and leaves the
-   recurring timer enabled.
-4. In the **Sugarkube Staging** Healthchecks.io project, confirm only the corresponding node check
-   changes from **New** to **Up**. Repeat on the next physical node with its distinct URL.
-
-The timer runs 30 seconds after boot and every minute thereafter, with no more than five seconds of
-randomized delay. Each check has two minutes of grace, so a sustained outage should page PagerDuty
-after approximately one minute plus two minutes of grace.
-
-For the safe first drill, identify a node that does **not** host Prometheus or Alertmanager, power it
-down, confirm its Healthchecks.io check transitions late/down and the existing integration pages
-PagerDuty, acknowledge the incident, restore power, then confirm the next heartbeat returns the check
-to **Up** and the PagerDuty incident recovers/resolves. Do not start with the observability-hosting
-node.
-
-Rollback is destructive locally: run
-`sudo just observability-node-heartbeat-uninstall env=staging`, then type `uninstall` at the terminal
-confirmation. This disables the timer and removes only this feature's unit, executable, and local
-credential. It does **not** delete or change Healthchecks.io checks, integrations, or PagerDuty
-configuration. Deleting the credential means reinstall requires the node's rotated URL again.
-
-The Alertmanager-driven observability watchdog configuration and operator workflows are
-repository-ready, but await post-merge installation, deployment, and proof. In-cluster
-`KubeNodeNotReady` routing and all application alert rules explicitly remain later tasks.
+Install and verify one node at a time. After each installation, manually confirm the corresponding
+check becomes **Up** in the correct environment's Healthchecks project before continuing. The timer
+runs 30 seconds after boot and every minute thereafter (up to five seconds randomized delay).
+For a staged outage drill, begin with a node that does not host Prometheus or Alertmanager; manually
+confirm Healthchecks becomes late/down and PagerDuty opens an incident, then restore the node and
+confirm both systems recover. Uninstall removes only local owned assets and the local credential; it
+does not alter Healthchecks.io or PagerDuty.
 
 ## Reprovisioning proof and post-merge checklist
 
@@ -719,9 +698,8 @@ operator work.
 
 ## Observability watchdog
 
-The staging-only `SugarkubeObservabilityWatchdog` rule is configured to evaluate `vector(1)` every
-minute after deployment. Its exact
-`staging`/`sugarkube-int`/`observability-watchdog` labels route only to the secret-file-backed
+The environment-specific `SugarkubeObservabilityWatchdog` rule is configured to evaluate `vector(1)` every
+minute after deployment. Its exact staging or production environment/cluster and `observability-watchdog` labels route only to the secret-file-backed
 Healthchecks receiver. Alertmanager waits 30 seconds, groups by alert name, cluster, and environment,
 and repeats every five minutes; configure the Healthchecks check for a **five-minute period and
 two-minute grace**. Keep “last ping” confirmation manual: no Healthchecks account credential belongs
@@ -729,15 +707,21 @@ in this repository.
 
 ### Install, deploy, and verify
 
-1. Select the `sugar-staging` context and run
-   `just observability-watchdog-secret-install env=staging`. Input is hidden and must not be supplied
-   in argv or environment variables. Check only its contract with
-   `just observability-watchdog-secret-check env=staging`.
-2. Run `just observability-render env=staging >/dev/null`, then
-   `just observability-upgrade env=staging`. Install and upgrade refuse mutation unless both the
+1. For staging, select `sugar-staging` and use the hidden-input watchdog Secret installer/checker.
+   The staging lifecycle commands remain:
+   `just observability-watchdog-secret-install env=staging`,
+   `just observability-watchdog-secret-check env=staging`,
+   `just observability-watchdog-verify env=staging`,
+   `just observability-watchdog-drill-start env=staging`,
+   `just observability-watchdog-drill-status env=staging`, and
+   `just observability-watchdog-drill-clear env=staging`.
+   Production Secrets are manually provisioned prerequisites in `monitoring`: `alertmanager-pagerduty`
+   with key `routing-key`, and `alertmanager-healthchecks-watchdog` with key `ping-url`. PagerDuty and
+   the production Healthchecks check `sugarkube-observability-watchdog` must already exist and use
+   production-only integrations. Never copy values from staging.
+2. Before production rollout, inspect currently firing alerts in Prometheus/Alertmanager and resolve or explicitly accept each actionable critical alert before enabling PagerDuty. Render first, then upgrade one environment at a time: `just observability-render env=prod >/dev/null` and `just observability-upgrade env=prod`. Install and upgrade refuse mutation unless both the
    PagerDuty `routing-key` and watchdog `ping-url` Secret contracts are nonempty.
-3. Run `just observability-watchdog-verify env=staging`, then manually confirm Healthchecks **Last
-   Ping** advances. The command checks the firing rule and exact labels, active Alertmanager alert,
+3. Run `just observability-verify env=prod` and `just observability-watchdog-verify env=prod`, then manually confirm Healthchecks **Last Ping** advances and that PagerDuty receives only an explicitly expected actionable alert (do not send a synthetic production test). The command checks the firing rule and exact labels, active Alertmanager alert,
    live CR/generated configuration, mount contract, and a bounded six-minute delivery-log window;
    it accesses neither credential.
 
@@ -745,8 +729,17 @@ Expected first delivery after deployment is within roughly 90 seconds (one-minut
 30-second group wait), and repeats are five minutes apart. After a delivery stops, Healthchecks
 should become late and page after its five-minute period plus two-minute grace. After the silence
 expires or is cleared, recovery is expected on the next five-minute repeat; manually confirm both
-the new Healthchecks ping and the PagerDuty incident's resolution. These are post-merge staging
-checks, not deployment evidence from this change.
+the new Healthchecks ping and the PagerDuty incident's resolution. These are post-merge manual environment checks, not deployment evidence from this change.
+
+### Production delivery rollback
+
+If delivery configuration fails, pause the production Healthchecks-to-PagerDuty integration to avoid
+a watchdog outage page, then Helm-roll back to the last known-safe null-only production revision.
+Verify that revision with its matching checkout and keep both Kubernetes Secrets intact for a forward
+fix. Do not weaken the current verifier or edit live configuration by hand: the repository verifier
+intentionally rejects the old null-only contract when run from this revision. After correction,
+repeat render, firing-alert review, upgrade, both verifiers, and explicit manual Healthchecks and
+PagerDuty confirmation.
 
 ### Controlled failure drill and recovery
 

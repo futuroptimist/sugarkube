@@ -6,19 +6,76 @@ prometheus:
   prometheusSpec:
     externalLabels:
       cluster: sugarkube-prod
+additionalPrometheusRulesMap:
+  sugarkube-observability-watchdog:
+    groups:
+      - name: sugarkube-observability-watchdog
+        interval: 1m
+        rules:
+          - alert: SugarkubeObservabilityWatchdog
+            expr: vector(1)
+            labels:
+              environment: prod
+              cluster: sugarkube-prod
+              purpose: observability-watchdog
+            annotations:
+              summary: Sugarkube production observability watchdog
+              runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-operations.md#observability-watchdog
 alertmanager:
   alertmanagerSpec:
-    secrets: []
+    secrets:
+      - alertmanager-pagerduty
+      - alertmanager-healthchecks-watchdog
   config:
-    global: null
-    inhibit_rules: null
-    templates: null
     route:
       group_by: null
       group_wait: null
       group_interval: null
       repeat_interval: null
       receiver: "null"
-      routes: null
+      routes:
+        - receiver: pagerduty-dspace
+          matchers:
+            - alertname=~"^(DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown)$"
+            - environment="prod"
+            - cluster="sugarkube-prod"
+            - severity="critical"
+        - receiver: pagerduty-dspace
+          matchers:
+            - alertname="CloudflareTunnelNoHealthyConnections"
+            - environment="prod"
+            - cluster="sugarkube-prod"
+            - severity="critical"
+        - receiver: pagerduty-synthetic-test
+          matchers:
+            - alertname="SugarkubePagerDutyTest"
+            - environment="prod"
+            - cluster="sugarkube-prod"
+            - severity="critical"
+        - receiver: healthchecks-watchdog
+          matchers:
+            - alertname="SugarkubeObservabilityWatchdog"
+            - environment="prod"
+            - cluster="sugarkube-prod"
+            - purpose="observability-watchdog"
+          group_by: [alertname, cluster, environment]
+          group_wait: 30s
+          group_interval: 1m
+          repeat_interval: 5m
+          continue: false
     receivers:
       - name: "null"
+      - name: pagerduty-synthetic-test
+        pagerduty_configs:
+          - routing_key_file: /etc/alertmanager/secrets/alertmanager-pagerduty/routing-key
+            send_resolved: true
+      - name: pagerduty-dspace
+        pagerduty_configs:
+          - routing_key_file: /etc/alertmanager/secrets/alertmanager-pagerduty/routing-key
+            send_resolved: true
+      - name: healthchecks-watchdog
+        webhook_configs:
+          - url_file: /etc/alertmanager/secrets/alertmanager-healthchecks-watchdog/ping-url
+            send_resolved: false
+            max_alerts: 1
+            timeout: 10s

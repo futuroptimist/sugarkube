@@ -9,7 +9,8 @@ through fire, phone receipt, acknowledgement, and resolution. The host-heartbeat
 on `sugarkube3`, `sugarkube4`, and `sugarkube5`. The watchdog configuration and operator workflows
 are repository-ready, while their Secret installation, deployment, and live delivery proof remain
 post-merge work. The explicitly allowlisted five-alert DSPACE route is deployed and live-proven in
-staging; this does not claim a production rollout.
+staging. The equivalent production routing, watchdog, and node-heartbeat contracts are now
+repository-defined; live production rollout and external confirmation remain manual operator work.
 
 ## 1. Goals and non-goals
 
@@ -27,8 +28,8 @@ staging; this does not claim a production rollout.
 
 ### Non-goals (later stages)
 
-- Production alert rollout. This document designs the staging path first; production follows only
-  after staging drills succeed (see [`docs/observability-design.md`](./observability-design.md) §13).
+- Expanding the production alert allowlist beyond the proven staging policy or automating external
+  PagerDuty/Healthchecks confirmation.
 - Advanced SLOs, burn-rate alerting, or multi-window error budgets.
 - Exhaustive application-level synthetic checks beyond the deployed, bounded DSPACE `/chat`
   producer/consumer contract.
@@ -77,8 +78,8 @@ flowchart LR
 
 Planned checks:
 
-- One host-level heartbeat per staging node — `sugarkube3`, `sugarkube4`, `sugarkube5` — each a
-  `systemd` timer running directly on that node, pinging its own dedicated Healthchecks.io check.
+- One host-level heartbeat per node: staging `sugarkube3`–`sugarkube5` and production
+  `sugarkube0`–`sugarkube2`, each a `systemd` timer pinging its own dedicated Healthchecks.io check.
 - One observability watchdog heartbeat whose successful path traverses Prometheus and Alertmanager
   before reaching Healthchecks.io (for example, a Prometheus rule that is always true, routed through
   Alertmanager to a webhook receiver that pings Healthchecks.io for each Alertmanager notification).
@@ -108,7 +109,7 @@ file. The delivery process reads the runtime credential and supplies it to curl 
 stdin, so the URL is absent from the unit command, process arguments, status, and normal journal
 output. Never commit or transcribe the value.
 
-The three existing **Sugarkube Staging** checks expect a ping every minute and allow two minutes of
+The staging and production node checks expect a ping every minute and allow two minutes of
 grace. A continuously missing node heartbeat should therefore page through the existing
 Healthchecks.io → PagerDuty integration after approximately the one-minute period plus two-minute
 grace (allowing modest scheduling and delivery jitter).
@@ -246,9 +247,9 @@ are explicitly verified, including the staging DSPACE route.
   installation, Helm deployment, live Last Ping confirmation, and PagerDuty failure/recovery drill
   remain post-merge. `KubeNodeNotReady` routing and other application alerts remain later work.
 
-## Staging observability watchdog delivery
+## Environment-specific observability watchdog delivery
 
-The repository-ready staging dead-man path is distinct from the per-node heartbeat: Prometheus
+The repository-defined staging and production dead-man paths is distinct from the per-node heartbeat: Prometheus
 continuously fires `SugarkubeObservabilityWatchdog`, Alertmanager sends it to a Healthchecks
 `url_file` receiver, and the external Healthchecks-to-PagerDuty integration detects missing
 deliveries. Ordinary Prometheus alerts still reach the null receiver unless explicitly allowlisted; the existing exact
