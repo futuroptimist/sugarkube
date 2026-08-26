@@ -748,20 +748,73 @@ verify() (
   local contract desired_retention desired_retention_size desired_size desired_class desired_modes
   contract="$(prometheus_expected_contract)" || return
   IFS=$'\t' read -r desired_retention desired_retention_size desired_size desired_class desired_modes <<<"${contract}"
-  kubectl -n "${NAMESPACE}" get statefulset prometheus-kube-prometheus-stack-prometheus -o json | \
-    python3 -c 'import json, sys
-try:
-    document = json.load(sys.stdin)
-    containers = document["spec"]["template"]["spec"]["containers"]
-    prometheus = [item for item in containers if item.get("name") == "prometheus"]
-    if len(prometheus) != 1 or not isinstance(prometheus[0].get("args"), list): raise TypeError
-    args = prometheus[0]["args"]
-    expected = [f"--storage.tsdb.retention.time={sys.argv[1]}", f"--storage.tsdb.retention.size={sys.argv[2]}"]
-    effective = [arg for arg in args if isinstance(arg, str) and (arg.startswith("--storage.tsdb.retention.time=") or arg.startswith("--storage.tsdb.retention.size="))]
-    if len(effective) != 2 or sorted(effective) != sorted(expected): raise ValueError
-except (AttributeError, KeyError, TypeError, ValueError, json.JSONDecodeError):
-    raise SystemExit(f"ERROR: Prometheus StatefulSet must contain exactly --storage.tsdb.retention.time={sys.argv[1]} and --storage.tsdb.retention.size={sys.argv[2]}.")' \
-      "${desired_retention}" "${desired_retention_size}"
+  local prometheus_cr runtime_config runtime_info retention_metric
+  if ! prometheus_cr="$(kubectl -n "${NAMESPACE}" get prometheus kube-prometheus-stack-prometheus -o json)"; then
+    echo "ERROR: could not read the Prometheus retention CR contract." >&2
+    return 8
+  fi
+  local prometheus_proxy="/api/v1/namespaces/${NAMESPACE}/services/http:${RELEASE}-prometheus:9090/proxy/api/v1"
+  if ! runtime_config="$(kubectl get --raw "${prometheus_proxy}/status/config")"; then
+    echo "ERROR: Prometheus loaded configuration endpoint could not be reached through the Kubernetes API service proxy." >&2
+    return 8
+  fi
+  if ! runtime_info="$(kubectl get --raw "${prometheus_proxy}/status/runtimeinfo")"; then
+    echo "ERROR: Prometheus runtime information endpoint could not be reached through the Kubernetes API service proxy." >&2
+    return 8
+  fi
+  if ! retention_metric="$(kubectl get --raw "${prometheus_proxy}/query?query=prometheus_tsdb_retention_limit_bytes")"; then
+    echo "ERROR: Prometheus runtime retention metric could not be reached through the Kubernetes API service proxy." >&2
+    return 8
+  fi
+  PROMETHEUS_CR="${prometheus_cr}" RUNTIME_CONFIG="${runtime_config}" RUNTIME_INFO="${runtime_info}" RETENTION_METRIC="${retention_metric}" \
+    ruby -rjson -ryaml -e '
+      def response(name, raw)
+        value = JSON.parse(raw)
+        abort "ERROR: Prometheus #{name} response must be a successful JSON object." unless value.is_a?(Hash) && value["status"] == "success" && value["data"].is_a?(Hash)
+        value["data"]
+      rescue JSON::ParserError
+        abort "ERROR: Prometheus #{name} response is malformed JSON."
+      end
+      def size_bytes(value)
+        match = /\A([1-9][0-9]*)(KiB|MiB|GiB|TiB|KB|MB|GB|TB)\z/.match(value.to_s)
+        return nil unless match
+        match[1].to_i * (1024 ** {"KB" => 1, "KiB" => 1, "MB" => 2, "MiB" => 2, "GB" => 3, "GiB" => 3, "TB" => 4, "TiB" => 4}.fetch(match[2]))
+      end
+      desired_time, desired_size = ARGV
+      begin
+        cr = JSON.parse(ENV.fetch("PROMETHEUS_CR"))
+      rescue JSON::ParserError
+        abort "ERROR: Prometheus CR response is malformed JSON."
+      end
+      abort "ERROR: Prometheus CR response must be a JSON object." unless cr.is_a?(Hash)
+      abort "ERROR: Prometheus CR retention is missing or differs from #{desired_time}." unless cr.dig("spec", "retention") == desired_time
+      abort "ERROR: Prometheus CR retentionSize is missing or differs from #{desired_size}." unless size_bytes(cr.dig("spec", "retentionSize")) == size_bytes(desired_size)
+      config_data = response("loaded configuration", ENV.fetch("RUNTIME_CONFIG"))
+      yaml = config_data["yaml"]
+      abort "ERROR: Prometheus loaded configuration response is missing YAML." unless yaml.is_a?(String)
+      begin
+        loaded = YAML.safe_load(yaml, aliases: false)
+      rescue Psych::Exception
+        abort "ERROR: Prometheus loaded configuration response contains malformed YAML."
+      end
+      retention = loaded.is_a?(Hash) ? loaded.dig("storage", "tsdb", "retention") : nil
+      abort "ERROR: Prometheus loaded configuration is missing storage.tsdb.retention." unless retention.is_a?(Hash)
+      abort "ERROR: Prometheus loaded time retention is missing or differs from #{desired_time}." unless retention["time"] == desired_time
+      expected_bytes = size_bytes(desired_size)
+      abort "ERROR: Prometheus loaded size retention is missing or differs from 100 GiB." unless expected_bytes && size_bytes(retention["size"]) == expected_bytes
+      runtime = response("runtime information", ENV.fetch("RUNTIME_INFO"))
+      abort "ERROR: Prometheus runtime configuration reload failed." unless runtime["reloadConfigSuccess"] == true
+      metric = response("runtime retention metric", ENV.fetch("RETENTION_METRIC"))
+      result = metric["result"]
+      value = result.is_a?(Array) && result.length == 1 && result[0].is_a?(Hash) ? result[0]["value"] : nil
+      begin
+        runtime_bytes = Integer(value.is_a?(Array) && value.length == 2 ? value[1] : nil)
+      rescue ArgumentError, TypeError
+        runtime_bytes = nil
+      end
+      abort "ERROR: prometheus_tsdb_retention_limit_bytes is missing, zero, or differs from #{expected_bytes}." unless runtime_bytes == expected_bytes && runtime_bytes.positive?
+      puts "Prometheus effective retention confirmed: #{retention["time"]} or #{retention["size"]} (#{runtime_bytes} bytes); last configuration reload succeeded."
+    ' "${desired_retention}" "${desired_retention_size}"
 
   read -r desired_ne ready_ne < <(kubectl -n "${NAMESPACE}" get daemonset kube-prometheus-stack-prometheus-node-exporter -o jsonpath='{.status.desiredNumberScheduled}{" "}{.status.numberReady}{"\n"}')
   [[ "${ready_ne}" == "${desired_ne}" && ( ( "$ENVIRONMENT" == staging && "$desired_ne" == 3 ) || ( "$ENVIRONMENT" == prod && "$desired_ne" =~ ^[1-9][0-9]*$ ) ) ]] || {

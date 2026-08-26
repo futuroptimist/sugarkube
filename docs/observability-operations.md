@@ -101,6 +101,14 @@ replica; production retains its null-only default receiver. The common values
 file is authoritative for retention and storage, while environment overlays
 continue to contain only environment-specific differences.
 
+`just observability-verify` validates that contract against the Prometheus CR and
+the effective configuration exposed through the Kubernetes API service proxy.
+Prometheus 3.13 loads retention under `storage.tsdb.retention`, so the verifier
+checks the loaded time and size, successful reload status, and
+`prometheus_tsdb_retention_limit_bytes` instead of requiring deprecated pod CLI
+flags. Size suffixes are compared semantically: the desired `100GB` and the
+runtime `100GiB`/`107374182400` bytes represent the same Prometheus limit.
+
 ### Retention sizing and local-path migration boundary
 
 The sizing review dated **2026-08-25** measured the following:
