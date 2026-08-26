@@ -246,9 +246,9 @@ are explicitly verified, including the staging DSPACE route.
   installation, Helm deployment, live Last Ping confirmation, and PagerDuty failure/recovery drill
   remain post-merge. `KubeNodeNotReady` routing and other application alerts remain later work.
 
-## Staging observability watchdog delivery
+## Staging and production observability watchdog delivery
 
-The repository-ready staging dead-man path is distinct from the per-node heartbeat: Prometheus
+The repository-ready dead-man path is distinct from the per-node heartbeat: Prometheus
 continuously fires `SugarkubeObservabilityWatchdog`, Alertmanager sends it to a Healthchecks
 `url_file` receiver, and the external Healthchecks-to-PagerDuty integration detects missing
 deliveries. Ordinary Prometheus alerts still reach the null receiver unless explicitly allowlisted; the existing exact

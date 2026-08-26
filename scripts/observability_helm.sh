@@ -350,8 +350,8 @@ except (AttributeError, json.JSONDecodeError): print("unknown")' <<<"${storage_c
   return 20
 )
 render() { validate_dashboard; require_tools helm python3 ruby; print_resolved '<not queried: offline render>'; local tmp; tmp="$(mktemp -t sugarkube-observability-render.XXXXXX.yaml)"; trap 'rm -f "${tmp:-}" "${RULES_OVERLAY:-}"' EXIT; prepare_render_args; render_to "$tmp" "${RENDER_ARGS[@]}"; cat "$tmp"; }
-install_release() { validate_dashboard; require_tools helm kubectl python3 ruby; print_resolved; assert_context; assert_grafana_secret; [[ "$ENVIRONMENT" != staging ]] || assert_integration_secrets; local tmp state dashboard_args=(); tmp="$(mktemp -t sugarkube-observability-install.XXXXXX.yaml)"; trap 'rm -f "${tmp:-}" "${RULES_OVERLAY:-}"' EXIT; prepare_render_args; render_to "$tmp" "${RENDER_ARGS[@]}"; state="$(release_state)"; if [[ "$state" == present ]]; then echo "ERROR: cannot install: ${RELEASE} already exists in ${NAMESPACE}. Use observability-upgrade." >&2; exit 4; fi; prometheus_pvc_preflight install; dashboard_args=(--set-file "${DASHBOARD_VALUE}=${DASHBOARD}"); helm install "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --create-namespace --version "$(version)" -f "${COMMON_VALUES}" -f "${ENV_VALUES}" "${RENDER_ARGS[@]}" "${dashboard_args[@]}" --atomic --wait --timeout "${TIMEOUT}"; }
-upgrade_release() { validate_dashboard; require_tools helm kubectl python3 ruby; print_resolved; assert_context; assert_grafana_secret; [[ "$ENVIRONMENT" != staging ]] || assert_integration_secrets; local tmp state dashboard_args=(); tmp="$(mktemp -t sugarkube-observability-upgrade.XXXXXX.yaml)"; trap 'rm -f "${tmp:-}" "${RULES_OVERLAY:-}"' EXIT; prepare_render_args; render_to "$tmp" "${RENDER_ARGS[@]}"; state="$(release_state)"; if [[ "$state" == absent ]]; then echo "ERROR: upgrade requires an existing Helm release ${RELEASE} in ${NAMESPACE}. Use observability-install for a fresh cluster." >&2; exit 5; fi; prometheus_pvc_preflight upgrade; dashboard_args=(--set-file "${DASHBOARD_VALUE}=${DASHBOARD}"); helm upgrade "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${COMMON_VALUES}" -f "${ENV_VALUES}" "${RENDER_ARGS[@]}" "${dashboard_args[@]}" --atomic --wait --timeout "${TIMEOUT}"; }
+install_release() { validate_dashboard; require_tools helm kubectl python3 ruby; print_resolved; assert_context; assert_grafana_secret; assert_integration_secrets; local tmp state dashboard_args=(); tmp="$(mktemp -t sugarkube-observability-install.XXXXXX.yaml)"; trap 'rm -f "${tmp:-}" "${RULES_OVERLAY:-}"' EXIT; prepare_render_args; render_to "$tmp" "${RENDER_ARGS[@]}"; state="$(release_state)"; if [[ "$state" == present ]]; then echo "ERROR: cannot install: ${RELEASE} already exists in ${NAMESPACE}. Use observability-upgrade." >&2; exit 4; fi; prometheus_pvc_preflight install; dashboard_args=(--set-file "${DASHBOARD_VALUE}=${DASHBOARD}"); helm install "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --create-namespace --version "$(version)" -f "${COMMON_VALUES}" -f "${ENV_VALUES}" "${RENDER_ARGS[@]}" "${dashboard_args[@]}" --atomic --wait --timeout "${TIMEOUT}"; }
+upgrade_release() { validate_dashboard; require_tools helm kubectl python3 ruby; print_resolved; assert_context; assert_grafana_secret; assert_integration_secrets; local tmp state dashboard_args=(); tmp="$(mktemp -t sugarkube-observability-upgrade.XXXXXX.yaml)"; trap 'rm -f "${tmp:-}" "${RULES_OVERLAY:-}"' EXIT; prepare_render_args; render_to "$tmp" "${RENDER_ARGS[@]}"; state="$(release_state)"; if [[ "$state" == absent ]]; then echo "ERROR: upgrade requires an existing Helm release ${RELEASE} in ${NAMESPACE}. Use observability-install for a fresh cluster." >&2; exit 5; fi; prometheus_pvc_preflight upgrade; dashboard_args=(--set-file "${DASHBOARD_VALUE}=${DASHBOARD}"); helm upgrade "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${COMMON_VALUES}" -f "${ENV_VALUES}" "${RENDER_ARGS[@]}" "${dashboard_args[@]}" --atomic --wait --timeout "${TIMEOUT}"; }
 WATCHDOG_TTY="${SUGARKUBE_WATCHDOG_TTY:-/dev/tty}"
 WATCHDOG_API="/api/v1/namespaces/${NAMESPACE}/services/http:${RELEASE}-alertmanager:9093/proxy/api/v2"
 
@@ -377,17 +377,19 @@ watchdog_secret_install() {
 watchdog_live_check() (
   require_tools kubectl python3 ruby sleep
   assert_context
-  assert_watchdog_secret
+  assert_integration_secrets
   local tmp observation
   tmp="$(mktemp -d -t sugarkube-watchdog-verify.XXXXXX)"; chmod 700 "${tmp}"; trap 'rm -rf "${tmp}"' EXIT
   kubectl get --raw "/api/v1/namespaces/${NAMESPACE}/services/http:${RELEASE}-prometheus:9090/proxy/api/v1/rules" >"${tmp}/rules"
   kubectl get --raw "${WATCHDOG_API}/alerts" >"${tmp}/alerts"
-  python3 - "${tmp}/rules" "${tmp}/alerts" <<'PY'
+  local watchdog_cluster="sugarkube-int"
+  [[ "${ENVIRONMENT}" == staging ]] || watchdog_cluster="sugarkube-prod"
+  python3 - "${tmp}/rules" "${tmp}/alerts" "${ENVIRONMENT}" "${watchdog_cluster}" <<'PY'
 import json, sys
-wanted={"alertname":"SugarkubeObservabilityWatchdog","environment":"staging","cluster":"sugarkube-int","purpose":"observability-watchdog"}
+wanted={"alertname":"SugarkubeObservabilityWatchdog","environment":sys.argv[3],"cluster":sys.argv[4],"purpose":"observability-watchdog"}
 expected_rule_labels={k:v for k,v in wanted.items() if k!="alertname"}
 try:
-    rules_doc, alerts = (json.load(open(path, encoding="utf-8")) for path in sys.argv[1:])
+    rules_doc, alerts = (json.load(open(path, encoding="utf-8")) for path in sys.argv[1:3])
 except (OSError, UnicodeError, json.JSONDecodeError):
     raise SystemExit("ERROR: watchdog APIs returned malformed data (responses redacted).")
 rules=[r for g in rules_doc.get("data",{}).get("groups",[]) for r in g.get("rules",[]) if r.get("name")==wanted["alertname"]]
@@ -399,7 +401,7 @@ if len(matching)!=1:
 PY
   kubectl -n "${NAMESPACE}" get alertmanager "${RELEASE}-alertmanager" -o yaml >"${tmp}/cr"
   kubectl -n "${NAMESPACE}" get secret "alertmanager-${RELEASE}-alertmanager" -o yaml >"${tmp}/config"
-  ruby "${ALERTMANAGER_VALIDATOR}" staging live "${tmp}/cr" "${tmp}/config"
+  ruby "${ALERTMANAGER_VALIDATOR}" "${ENVIRONMENT}" live "${tmp}/cr" "${tmp}/config"
   kubectl -n "${NAMESPACE}" get pods -l 'app.kubernetes.io/name=alertmanager' -o json >"${tmp}/pods"
   python3 - "${tmp}/pods" "${RELEASE}-alertmanager" >"${tmp}/pod-names" <<'PY'
 import json, re, sys
@@ -423,22 +425,23 @@ try:
   mapping(pod["status"])
   spec=mapping(pod["spec"])
   vols=sequence(spec.get("volumes",[]))
-  names=set()
+  names={}
   for volume in vols:
    volume=mapping(volume)
    secret=volume.get("secret")
-   if secret is not None and mapping(secret).get("secretName")=="alertmanager-healthchecks-watchdog": names.add(volume.get("name"))
+   if secret is not None and mapping(secret).get("secretName") in ("alertmanager-pagerduty","alertmanager-healthchecks-watchdog"): names[mapping(secret)["secretName"]]=volume.get("name")
   containers=sequence(spec.get("containers",[]))
   mounts=[]
   for container in containers:
    container=mapping(container)
    mounts.extend(mapping(mount) for mount in sequence(container.get("volumeMounts",[])))
-  if labels.get("alertmanager")==sys.argv[2]: selected.append((name,pod["status"].get("phase"),bool(names) and any(m.get("name") in names and m.get("mountPath")=="/etc/alertmanager/secrets/alertmanager-healthchecks-watchdog" and m.get("readOnly") is True for m in mounts)))
+  mounted=all(any(m.get("name")==names.get(secret) and m.get("mountPath")==f"/etc/alertmanager/secrets/{secret}" and m.get("readOnly") is True for m in mounts) for secret in ("alertmanager-pagerduty","alertmanager-healthchecks-watchdog"))
+  if labels.get("alertmanager")==sys.argv[2]: selected.append((name,pod["status"].get("phase"),mounted))
 except (OSError, UnicodeError, json.JSONDecodeError, AttributeError, KeyError, TypeError): raise SystemExit("ERROR: Alertmanager pod data is malformed (response redacted).")
 if not selected:
  raise SystemExit("ERROR: no operator-managed Alertmanager pods matched the expected resource (response redacted).")
 if not all(phase=="Running" and mounted for _,phase,mounted in selected):
- raise SystemExit("ERROR: running Alertmanager pods do not have the exact watchdog Secret mount (response redacted).")
+ raise SystemExit("ERROR: running Alertmanager pods do not have both exact integration Secret mounts (response redacted).")
 print(*(name for name,_,_ in selected), sep="\n")
 PY
   observation="${SUGARKUBE_WATCHDOG_OBSERVATION_SECONDS:-310}"
@@ -782,13 +785,13 @@ if len(claims) != 1 or claims[0].get("status", {}).get("phase") != "Bound" or cl
   kubectl -n "${NAMESPACE}" get alertmanager kube-prometheus-stack-alertmanager -o yaml >"${alertmanager_yaml}"
   kubectl -n "${NAMESPACE}" get secret alertmanager-kube-prometheus-stack-alertmanager -o yaml >"${config_yaml}"
   ruby "${ALERTMANAGER_VALIDATOR}" "${ENVIRONMENT}" live "${alertmanager_yaml}" "${config_yaml}"
+  assert_integration_secrets
   [[ -z "$(kubectl -n "${NAMESPACE}" get ingress -l app.kubernetes.io/name=grafana -o name 2>/dev/null)" ]]
   [[ "$(kubectl -n "${NAMESPACE}" get svc kube-prometheus-stack-grafana -o jsonpath='{.spec.ports[?(@.port==80)].nodePort}')" == 30300 ]]
   if [[ "$ENVIRONMENT" == prod ]]; then
     echo "Grafana LAN URL: ${GRAFANA_URL} (same NodePort is available through the other production nodes)"
     exit 0
   fi
-  assert_integration_secrets
   monitor_release="$(kubectl -n dspace get servicemonitor dspace -o jsonpath='{.metadata.labels.release}')"
   [[ "${monitor_release}" == "${RELEASE}" ]] || { echo "ERROR: dspace ServiceMonitor must have release: ${RELEASE}." >&2; exit 7; }
   secret_name="$(kubectl -n dspace get servicemonitor dspace -o jsonpath='{.spec.endpoints[0].bearerTokenSecret.name}')"
@@ -998,4 +1001,4 @@ if [[ "${cmd}" == watchdog-drill-create ]]; then
   trap 'exit 130' INT
   trap 'exit 143' TERM
 fi
-case "${cmd}" in render) render ;; install) install_release ;; upgrade) upgrade_release ;; status) status ;; verify) verify ;; dashboard-verify) dashboard_verify ;; pagerduty-test) require_staging "pagerduty-test"; pagerduty_test "${2:-${1:-}}" ;; grafana-secret-install) grafana_secret_install "${@:2}" ;; grafana-secret-check) grafana_secret_check "${@:2}" ;; watchdog-secret-install) require_staging "watchdog-secret-install"; watchdog_secret_install "${@:2}" ;; watchdog-secret-check) require_staging "watchdog-secret-check"; watchdog_secret_check ;; watchdog-verify) require_staging "watchdog-verify"; watchdog_live_check ;; watchdog-drill-create) require_staging "watchdog-drill-create"; watchdog_silence_create ;; watchdog-drill-status) require_staging "watchdog-drill-status"; watchdog_silence_list ;; watchdog-drill-clear) require_staging "watchdog-drill-clear"; watchdog_silence_clear ;; *) usage; exit 2 ;; esac
+case "${cmd}" in render) render ;; install) install_release ;; upgrade) upgrade_release ;; status) status ;; verify) verify ;; dashboard-verify) dashboard_verify ;; pagerduty-test) require_staging "pagerduty-test"; pagerduty_test "${2:-${1:-}}" ;; grafana-secret-install) grafana_secret_install "${@:2}" ;; grafana-secret-check) grafana_secret_check "${@:2}" ;; watchdog-secret-install) require_staging "watchdog-secret-install"; watchdog_secret_install "${@:2}" ;; watchdog-secret-check) watchdog_secret_check ;; watchdog-verify) watchdog_live_check ;; watchdog-drill-create) require_staging "watchdog-drill-create"; watchdog_silence_create ;; watchdog-drill-status) require_staging "watchdog-drill-status"; watchdog_silence_list ;; watchdog-drill-clear) require_staging "watchdog-drill-clear"; watchdog_silence_clear ;; *) usage; exit 2 ;; esac
