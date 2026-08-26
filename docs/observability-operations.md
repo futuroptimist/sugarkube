@@ -144,9 +144,17 @@ A later, explicitly authorized operator migration must proceed staging first:
    `128Gi` and preserves the single-replica, RWO, local-path placement contract.
 5. Verify staging, observe it through an agreed soak period, and obtain separate
    production authorization before repeating the controlled procedure there.
-6. After each migration, verify Prometheus health; effective `90d` and `100GB`
-   flags; the `128Gi` PVC request; unchanged PV placement contract; backing
-   filesystem headroom; and retained-history age growing beyond seven days.
+6. After each migration, verify Prometheus health; effective `90d` and `100GiB`
+   loaded retention configuration; the `128Gi` PVC request; unchanged PV
+   placement contract; backing filesystem headroom; and retained-history age
+   growing beyond seven days.
+
+Prometheus 3.13 receives retention through its loaded configuration rather than
+deprecated container CLI flags. `observability-verify` therefore reads the
+Prometheus `status/config` and `status/runtimeinfo` APIs through the Kubernetes
+service proxy and checks the runtime `prometheus_tsdb_retention_limit_bytes`
+metric. The check treats the desired `100GB` and Prometheus's effective
+`100GiB` representation as the same binary-sized 107,374,182,400-byte limit.
 
 Production live actions require an explicit kubeconfig and the `sugar-prod`
 context; do not run the node-local staging kubeconfig recipe on `sugarkube3`:

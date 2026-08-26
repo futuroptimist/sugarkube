@@ -1206,10 +1206,9 @@ case "$*" in
     [ "$PVC_MODE" != storageclass-ambiguous ] || { printf '%s\n' '{"allowVolumeExpansion":"maybe"}'; exit 0; }
     [ "$PVC_MODE" = expandable-mismatch ] && expansion=true || expansion=false
     printf '%s\n' '{"allowVolumeExpansion":'"$expansion"'}' ;;
-  *"get statefulset prometheus-kube-prometheus-stack-prometheus -o json"*)
-    if [ "$KUBECTL_MODE" = stale-retention ]; then retention=7d; retention_size=15GB; else retention=90d; retention_size=100GB; fi
-    printf '%s\n' '{"spec":{"template":{"spec":{"containers":[{"name":"config-reloader","args":[]},{"name":"prometheus","args":["--storage.tsdb.retention.time='"$retention"'","--storage.tsdb.retention.size='"$retention_size"'"]}]}}}}' ;;
-  *"get prometheus kube-prometheus-stack-prometheus"*) echo 1 ;;
+  *"get prometheus kube-prometheus-stack-prometheus"*".spec.replicas"*) echo 1 ;;
+  *"get prometheus kube-prometheus-stack-prometheus"*".spec.retentionSize"*) echo 100GB ;;
+  *"get prometheus kube-prometheus-stack-prometheus"*".spec.retention"*) echo 90d ;;
   *"get alertmanager kube-prometheus-stack-alertmanager -o yaml"*)
     if [ "$ENV_NAME" = prod ]; then printf '%s\n' 'apiVersion: monitoring.coreos.com/v1' 'kind: Alertmanager' 'metadata:' '  name: kube-prometheus-stack-alertmanager' 'spec:' '  secrets: []'; else printf '%s\n' 'apiVersion: monitoring.coreos.com/v1' 'kind: Alertmanager' 'metadata:' '  name: kube-prometheus-stack-alertmanager' 'spec:' '  secrets:' '    - alertmanager-pagerduty' '    - alertmanager-healthchecks-watchdog'; fi ;;
   *"get alertmanager kube-prometheus-stack-alertmanager"*) echo 1 ;;
@@ -1313,6 +1312,23 @@ case "$*" in
   *"get servicemonitor dspace"*"metadata.labels.release"*) [ "$KUBECTL_MODE" = wrong-release ] && echo wrong || echo kube-prometheus-stack ;;
   *"get servicemonitor dspace"*"bearerTokenSecret.name"*) [ "$KUBECTL_MODE" != missing-secret-ref ] && echo dspace-token ;;
   *"get secret dspace-token -o name"*) [ "$KUBECTL_MODE" != missing-secret ] || exit 44; echo secret/dspace-token ;;
+  *"proxy/api/v1/status/config"*)
+    [ "$KUBECTL_MODE" != retention-api-unreachable ] || exit 45
+    [ "$KUBECTL_MODE" != retention-config-malformed ] || { printf '%s\\n' '{malformed'; exit 0; }
+    case "$KUBECTL_MODE" in
+      retention-missing) yaml='global:\\n  scrape_interval: 30s\\n' ;;
+      retention-wrong-time) yaml='storage:\\n  tsdb:\\n    retention:\\n      time: 7d\\n      size: 100GiB\\n' ;;
+      retention-wrong-size) yaml='storage:\\n  tsdb:\\n    retention:\\n      time: 90d\\n      size: 15GiB\\n' ;;
+      *) yaml='storage:\\n  tsdb:\\n    retention:\\n      time: 90d\\n      size: 100GiB\\n' ;;
+    esac
+    printf '{"status":"success","data":{"yaml":"%s"}}\\n' "$yaml" ;;
+  *"proxy/api/v1/status/runtimeinfo"*)
+    [ "$KUBECTL_MODE" != retention-runtime-unsuccessful ] || { printf '%s\n' '{"status":"error"}'; exit 0; }
+    [ "$KUBECTL_MODE" = retention-reload-failed ] && reload=false || reload=true
+    printf '%s\n' '{"status":"success","data":{"reloadConfigSuccess":'"$reload"',"storageRetention":"90d or 100GiB"}}' ;;
+  *"proxy/api/v1/query?query=prometheus_tsdb_retention_limit_bytes"*)
+    case "$KUBECTL_MODE" in retention-limit-zero) limit=0 ;; retention-limit-wrong) limit=16106127360 ;; *) limit=107374182400 ;; esac
+    printf '%s\n' '{"status":"success","data":{"resultType":"vector","result":[{"metric":{"__name__":"prometheus_tsdb_retention_limit_bytes"},"value":[1,"'"$limit"'"]}]}}' ;;
   *"get --request-timeout="*" --raw "*)
     [ "$KUBECTL_MODE" != query-fail ] || exit 45
     [ "$TARGET_RESPONSE_DELAY" = 0 ] || /bin/sleep "$TARGET_RESPONSE_DELAY"
@@ -1707,18 +1723,30 @@ def test_converged_pvc_does_not_require_storageclass_expansion_discovery(tmp_pat
 
 @pytest.mark.parametrize(
     ("kubectl_mode", "success"),
-    [("healthy", True), ("stale-retention", False)],
+    [
+        ("healthy", True),
+        ("retention-missing", False),
+        ("retention-wrong-time", False),
+        ("retention-wrong-size", False),
+        ("retention-limit-zero", False),
+        ("retention-limit-wrong", False),
+        ("retention-reload-failed", False),
+        ("retention-config-malformed", False),
+        ("retention-runtime-unsuccessful", False),
+        ("retention-api-unreachable", False),
+    ],
 )
-def test_verify_checks_effective_statefulset_retention_arguments(tmp_path, kubectl_mode, success):
+def test_verify_checks_loaded_and_runtime_retention(tmp_path, kubectl_mode, success):
     result, audit = run_helper(tmp_path, "verify", kubectl_mode=kubectl_mode)
     assert (result.returncode == 0) is success
     assert "rollout status statefulset/prometheus-kube-prometheus-stack-prometheus" in audit
-    assert "get statefulset prometheus-kube-prometheus-stack-prometheus -o json" in audit
+    assert "proxy/api/v1/status/config" in audit
     if success:
-        assert "retention.time=90d" not in result.stderr
+        assert "proxy/api/v1/status/runtimeinfo" in audit
+        assert "prometheus_tsdb_retention_limit_bytes" in audit
+        assert "--storage.tsdb.retention" not in audit
     else:
-        assert "--storage.tsdb.retention.time=90d" in result.stderr
-        assert "--storage.tsdb.retention.size=100GB" in result.stderr
+        assert "ERROR:" in result.stderr
 
 
 @pytest.mark.parametrize(
@@ -1991,7 +2019,7 @@ def test_verify_exact_three_nodes_secret_reference_and_first_observation_health(
         and "get --request-timeout=" in audit
         and "ms --raw /api/v1/namespaces/monitoring/services/http:" in audit
     )
-    assert audit.count(" --raw ") == 1
+    assert audit.count("targets?state=active") == 1
     assert "sleep " not in audit
     for mode in ("two-nodes", "wrong-release", "missing-secret-ref", "missing-secret"):
         result, _ = run_helper(tmp_path / mode, "verify", kubectl_mode=mode)
@@ -2009,7 +2037,7 @@ def test_verify_retries_empty_unknown_and_mixed_then_accepts_one_target(tmp_path
         tmp_path, "verify", target_responses=responses, retry_attempts="4", retry_interval="7"
     )
     assert result.returncode == 0
-    assert audit.count(" --raw ") == 4
+    assert audit.count("targets?state=active") == 4
     assert audit.count("sleep ") == 3
     assert result.stderr.count("targets are converging") == 3
 
@@ -2018,13 +2046,13 @@ def test_verify_accepts_multiple_healthy_targets(tmp_path):
     response = target_response(dspace_target("up"), dspace_target("up", pod="dspace-1"))
     result, audit = run_helper(tmp_path, "verify", target_responses=[response])
     assert result.returncode == 0
-    assert audit.count(" --raw ") == 1
+    assert audit.count("targets?state=active") == 1
 
 
 def test_verify_empty_targets_time_out_without_vacuous_success(tmp_path):
     result, audit = run_helper(tmp_path, "verify", target_responses=[target_response()] * 3)
     assert result.returncode != 0
-    assert audit.count(" --raw ") == 3
+    assert audit.count("targets?state=active") == 3
     assert audit.count("sleep ") == 2
     assert "no matching targets discovered" in result.stderr
 
@@ -2036,7 +2064,7 @@ def test_verify_mixed_targets_time_out_with_safe_diagnostics(tmp_path):
     )
     result, audit = run_helper(tmp_path, "verify", target_responses=[response] * 3)
     assert result.returncode != 0
-    assert audit.count(" --raw ") == 3 and audit.count("sleep ") == 2
+    assert audit.count("targets?state=active") == 3 and audit.count("sleep ") == 2
     safe_values = (
         "dspace-1",
         "down",
@@ -2105,7 +2133,7 @@ def test_verify_api_and_parsing_failures_are_immediate(tmp_path):
             tmp_path / name, "verify", kubectl_mode=mode, target_responses=responses
         )
         assert result.returncode != 0
-        assert audit.count(" --raw ") == 1
+        assert audit.count("targets?state=active") == 1
         assert "sleep " not in audit
         assert message in result.stderr
 
@@ -2120,7 +2148,7 @@ def test_verify_missing_and_non_string_health_fail_immediately(tmp_path):
             tmp_path / name, "verify", target_responses=[target_response(target)]
         )
         assert result.returncode != 0
-        assert audit.count(" --raw ") == 1 and "sleep " not in audit
+        assert audit.count("targets?state=active") == 1 and "sleep " not in audit
         assert "health must be a string" in result.stderr and "Traceback" not in result.stderr
 
 
@@ -2134,7 +2162,7 @@ def test_verify_invalid_retry_configuration_fails_before_polling(tmp_path):
         )
         assert result.returncode != 0
         assert "positive integer" in result.stderr
-        assert " --raw " not in audit
+        assert "targets?state=active" not in audit
 
 
 def test_verify_treats_leading_zero_retry_configuration_as_decimal(tmp_path):
@@ -2146,7 +2174,7 @@ def test_verify_treats_leading_zero_retry_configuration_as_decimal(tmp_path):
         retry_interval="01",
     )
     assert result.returncode != 0
-    assert audit.count("get --request-timeout=") == 8
+    assert audit.count("targets?state=active") == 8
     assert audit.count("sleep ") == 7
 
 
@@ -2159,7 +2187,7 @@ def test_verify_request_budget_and_default_deadline_are_derived_from_retry_contr
         retry_interval="15",
     )
     assert result.returncode != 0
-    assert audit.count("get --request-timeout=14000ms --raw ") == 20
+    assert audit.count("targets?state=active") == 20
     assert audit.count("sleep ") == 19
     assert (20 - 1) * 15 + (15 - 1) == 299
 
@@ -2188,7 +2216,7 @@ def test_verify_deadline_uses_latest_safe_diagnostics_without_extra_request(tmp_
         retry_interval="1",
         target_response_delay="1.05",
     )
-    assert result.returncode != 0 and audit.count(" --raw ") == 1
+    assert result.returncode != 0 and audit.count("targets?state=active") == 1
     assert '"pod": "dspace-safe"' in result.stderr and '"health": "down"' in result.stderr
     assert "activeTargets" not in result.stderr and "Traceback" not in result.stderr
 
@@ -3110,7 +3138,12 @@ def test_production_core_verify_skips_staging_integrations(tmp_path):
     assert result.returncode == 0, result.stderr
     for required in ("rollout status", "get daemonset", "get pvc -o json", "get svc kube-prometheus-stack-grafana", "get secret grafana-admin-credentials"):
         assert required in audit
-    for excluded in ("servicemonitor dspace", "alertmanager-pagerduty", "alertmanager-healthchecks-watchdog", " --raw "):
+    for excluded in (
+        "servicemonitor dspace",
+        "alertmanager-pagerduty",
+        "alertmanager-healthchecks-watchdog",
+        "targets?state=active",
+    ):
         assert excluded not in audit
 
 

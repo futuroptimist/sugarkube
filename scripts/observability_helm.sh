@@ -731,6 +731,137 @@ raise SystemExit(10)' <<<"${targets_json}" || parser_status=$?
   done
   return 10
 }
+verify_prometheus_retention() (
+  local api="/api/v1/namespaces/${NAMESPACE}/services/http:${RELEASE}-prometheus:9090/proxy/api/v1"
+  local tmp
+  tmp="$(mktemp -d -t sugarkube-prometheus-retention.XXXXXX)"
+  trap 'rm -rf "${tmp}"' EXIT
+
+  for endpoint in status/config status/runtimeinfo 'query?query=prometheus_tsdb_retention_limit_bytes'; do
+    if ! kubectl get --request-timeout=14s --raw "${api}/${endpoint}" >"${tmp}/${endpoint%%[/?]*}"; then
+      echo "ERROR: kubectl could not query Prometheus ${endpoint%%\?*}." >&2
+      return 9
+    fi
+    # Give each response a distinct, filesystem-safe name.
+    case "${endpoint}" in
+      status/config) mv "${tmp}/status" "${tmp}/config" ;;
+      status/runtimeinfo) mv "${tmp}/status" "${tmp}/runtime" ;;
+      query*) mv "${tmp}/query" "${tmp}/limit" ;;
+    esac
+  done
+
+  python3 - "${desired_retention}" "${desired_retention_size}" \
+    "${tmp}/config" "${tmp}/runtime" "${tmp}/limit" <<'PY'
+import json
+import re
+import sys
+
+
+def fail(message):
+    raise SystemExit(f"ERROR: {message}")
+
+
+def response(path, label):
+    try:
+        with open(path, encoding="utf-8") as stream:
+            document = json.load(stream)
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        fail(f"Prometheus {label} response is malformed.")
+    if not isinstance(document, dict) or document.get("status") != "success":
+        fail(f"Prometheus {label} query was unsuccessful or malformed.")
+    return document.get("data")
+
+
+def storage_bytes(value):
+    if not isinstance(value, str):
+        fail("loaded size retention is missing or malformed.")
+    match = re.fullmatch(r"([1-9][0-9]*)([KMGTPE]i?B)", value)
+    if not match:
+        fail(f"unsupported retention size {value!r}.")
+    # Prometheus storage suffixes are binary even when written without the i.
+    powers = {
+        unit: power
+        for power, letter in enumerate("KMGTPE", 1)
+        for unit in (letter + "B", letter + "iB")
+    }
+    return int(match.group(1)) * 1024 ** powers[match.group(2)]
+
+
+def duration_seconds(value):
+    if not isinstance(value, str):
+        fail("loaded time retention is missing or malformed.")
+    units = {"d": 86400, "h": 3600, "m": 60, "s": 1}
+    parts = re.findall(r"([1-9][0-9]*)([dhms])", value)
+    if not parts or "".join(number + unit for number, unit in parts) != value:
+        fail(f"unsupported retention duration {value!r}.")
+    return sum(int(number) * units[unit] for number, unit in parts)
+
+
+desired_time, desired_size = sys.argv[1:3]
+config = response(sys.argv[3], "status/config")
+if not isinstance(config, dict) or not isinstance(config.get("yaml"), str):
+    fail("Prometheus status/config response has no loaded YAML configuration.")
+yaml = config["yaml"]
+lines = yaml.splitlines()
+
+
+def mapping_block(key, start, limit, parent_indent):
+    for index in range(start, limit):
+        match = re.fullmatch(r"( *)" + re.escape(key) + r":\s*", lines[index])
+        if match and len(match.group(1)) > parent_indent:
+            indent = len(match.group(1))
+            end = index + 1
+            while end < len(lines):
+                next_line = lines[end]
+                if next_line.strip() and len(next_line) - len(next_line.lstrip(" ")) <= indent:
+                    break
+                end += 1
+            return index, end, indent
+    return None
+
+
+storage = mapping_block("storage", 0, len(lines), -1)
+tsdb = storage and mapping_block("tsdb", storage[0] + 1, storage[1], storage[2])
+retention = tsdb and mapping_block("retention", tsdb[0] + 1, tsdb[1], tsdb[2])
+if not retention:
+    fail("loaded Prometheus configuration is missing storage.tsdb.retention time and size.")
+
+
+def scalar(key):
+    values = []
+    for line in lines[retention[0] + 1 : retention[1]]:
+        match = re.fullmatch(r"( *)" + re.escape(key) + r":\s*([^\s#]+)\s*", line)
+        if match and len(match.group(1)) > retention[2]:
+            values.append(match.group(2))
+    return values[0] if len(values) == 1 else None
+
+
+loaded_time = scalar("time")
+loaded_size = scalar("size")
+if loaded_time is None or loaded_size is None:
+    fail("loaded Prometheus configuration is missing storage.tsdb.retention time and size.")
+if duration_seconds(loaded_time) != duration_seconds(desired_time):
+    fail(f"loaded Prometheus time retention must be {desired_time}, found {loaded_time}.")
+expected_bytes = storage_bytes(desired_size)
+if storage_bytes(loaded_size) != expected_bytes:
+    fail(f"loaded Prometheus size retention must equal {expected_bytes} bytes, found {loaded_size}.")
+
+runtime = response(sys.argv[4], "status/runtimeinfo")
+if not isinstance(runtime, dict) or runtime.get("reloadConfigSuccess") is not True:
+    fail("Prometheus runtime configuration reload status is not successful.")
+
+query = response(sys.argv[5], "retention-limit metric")
+try:
+    results = query["result"]
+    if len(results) != 1 or results[0].get("metric", {}).get("__name__") != "prometheus_tsdb_retention_limit_bytes":
+        raise ValueError
+    runtime_bytes = int(results[0]["value"][1])
+except (AttributeError, KeyError, TypeError, ValueError, IndexError):
+    fail("Prometheus runtime size-retention limit is missing or malformed.")
+if runtime_bytes <= 0 or runtime_bytes != expected_bytes:
+    fail(f"Prometheus runtime size-retention limit must be {expected_bytes} bytes, found {runtime_bytes}.")
+PY
+)
 verify() (
   require_tools kubectl python3 ruby
   print_resolved
@@ -748,20 +879,7 @@ verify() (
   local contract desired_retention desired_retention_size desired_size desired_class desired_modes
   contract="$(prometheus_expected_contract)" || return
   IFS=$'\t' read -r desired_retention desired_retention_size desired_size desired_class desired_modes <<<"${contract}"
-  kubectl -n "${NAMESPACE}" get statefulset prometheus-kube-prometheus-stack-prometheus -o json | \
-    python3 -c 'import json, sys
-try:
-    document = json.load(sys.stdin)
-    containers = document["spec"]["template"]["spec"]["containers"]
-    prometheus = [item for item in containers if item.get("name") == "prometheus"]
-    if len(prometheus) != 1 or not isinstance(prometheus[0].get("args"), list): raise TypeError
-    args = prometheus[0]["args"]
-    expected = [f"--storage.tsdb.retention.time={sys.argv[1]}", f"--storage.tsdb.retention.size={sys.argv[2]}"]
-    effective = [arg for arg in args if isinstance(arg, str) and (arg.startswith("--storage.tsdb.retention.time=") or arg.startswith("--storage.tsdb.retention.size="))]
-    if len(effective) != 2 or sorted(effective) != sorted(expected): raise ValueError
-except (AttributeError, KeyError, TypeError, ValueError, json.JSONDecodeError):
-    raise SystemExit(f"ERROR: Prometheus StatefulSet must contain exactly --storage.tsdb.retention.time={sys.argv[1]} and --storage.tsdb.retention.size={sys.argv[2]}.")' \
-      "${desired_retention}" "${desired_retention_size}"
+  verify_prometheus_retention
 
   read -r desired_ne ready_ne < <(kubectl -n "${NAMESPACE}" get daemonset kube-prometheus-stack-prometheus-node-exporter -o jsonpath='{.status.desiredNumberScheduled}{" "}{.status.numberReady}{"\n"}')
   [[ "${ready_ne}" == "${desired_ne}" && ( ( "$ENVIRONMENT" == staging && "$desired_ne" == 3 ) || ( "$ENVIRONMENT" == prod && "$desired_ne" =~ ^[1-9][0-9]*$ ) ) ]] || {
@@ -774,6 +892,8 @@ claims = [item for item in items if item.get("metadata", {}).get("labels", {}).g
 if len(claims) != 1 or claims[0].get("status", {}).get("phase") != "Bound" or claims[0].get("spec", {}).get("storageClassName") != sys.argv[2] or claims[0].get("spec", {}).get("accessModes") != sys.argv[3].split(",") or claims[0].get("spec", {}).get("resources", {}).get("requests", {}).get("storage") != sys.argv[1]:
     raise SystemExit(f"ERROR: expected one Bound {sys.argv[3]} {sys.argv[1]} {sys.argv[2]} Prometheus PVC.")' "${desired_size}" "${desired_class}" "${desired_modes}"
   [[ "$(kubectl -n "${NAMESPACE}" get prometheus kube-prometheus-stack-prometheus -o jsonpath='{.spec.replicas}')" == 1 ]]
+  [[ "$(kubectl -n "${NAMESPACE}" get prometheus kube-prometheus-stack-prometheus -o jsonpath='{.spec.retention}')" == "${desired_retention}" ]]
+  [[ "$(kubectl -n "${NAMESPACE}" get prometheus kube-prometheus-stack-prometheus -o jsonpath='{.spec.retentionSize}')" == "${desired_retention_size}" ]]
   [[ "$(kubectl -n "${NAMESPACE}" get alertmanager kube-prometheus-stack-alertmanager -o jsonpath='{.spec.replicas}')" == 1 ]]
   assert_grafana_secret
   local alertmanager_yaml="" config_yaml=""
