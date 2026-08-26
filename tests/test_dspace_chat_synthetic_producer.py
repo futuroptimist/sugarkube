@@ -484,6 +484,85 @@ def test_runner_manifest_digest_is_checked_before_json_parsing(tmp_path: Path) -
         runtime.validate_runner(value)
 
 
+def legacy_runtime_runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[dict, Path]:
+    """Convert the realistic Git/dependency fixture to the approved legacy shape."""
+    value, qualified = runtime_runner(tmp_path)
+    manifest_path = qualified / "sugarkube-runner-manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    for relative in runtime.LEGACY_COMPATIBILITY_FILES:
+        manifest["files"].pop(relative)
+    manifest["files"].pop("playwright-browser/browser-executable")
+    manifest["playwrightBrowserExecutable"] = None
+    value["browserContract"] = json.loads(CONFIG.read_text())["browserContract"]
+    manifest["browserContract"] = value["browserContract"]
+    manifest_path.write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n")
+    revision = value["runnerRevision"]
+    legacy = qualified.with_name(revision)
+    qualified.rename(legacy)
+    value.pop("runnerManifestSha256")
+    monkeypatch.setattr(runtime, "LEGACY_RUNNER_REVISION", revision)
+    monkeypatch.setattr(
+        runtime,
+        "LEGACY_RUNNER_MANIFEST_SHA256",
+        runtime.sha256(legacy / "sugarkube-runner-manifest.json"),
+    )
+    return value, legacy
+
+
+def test_exact_legacy_manifest_validates_declared_and_tracked_compatibility_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, runner = legacy_runtime_runner(tmp_path, monkeypatch)
+    real_run = subprocess.run
+
+    def fake_node(argv, *args, **kwargs):
+        if argv[0] == "/usr/bin/node":
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout=str(runner / "playwright-browser/browser-executable").encode(),
+            )
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(runtime.subprocess, "run", fake_node)
+    assert set(json.loads((runner / "sugarkube-runner-manifest.json").read_text())["files"]) == (
+        runtime.LEGACY_CRITICAL_FILES
+    )
+    assert runtime.validate_runner(value) == runner
+
+
+def test_unknown_legacy_manifest_digest_fails_before_parsing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, runner = legacy_runtime_runner(tmp_path, monkeypatch)
+    (runner / "sugarkube-runner-manifest.json").write_text("not JSON")
+
+    with pytest.raises(runtime.Invalid, match="legacy runner manifest coordinate"):
+        runtime.validate_runner(value)
+
+
+@pytest.mark.parametrize("relative", sorted(runtime.LEGACY_COMPATIBILITY_FILES))
+@pytest.mark.parametrize("fault", ["missing", "symlink", "drift"])
+def test_legacy_unmanifested_critical_files_are_validated_against_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative: str, fault: str
+) -> None:
+    value, runner = legacy_runtime_runner(tmp_path, monkeypatch)
+    target = runner / relative
+    if fault == "missing":
+        target.unlink()
+    elif fault == "symlink":
+        contents = target.read_bytes()
+        target.unlink()
+        external = tmp_path / "external"
+        external.write_bytes(contents)
+        target.symlink_to(external)
+    else:
+        target.write_text("drift\n")
+
+    with pytest.raises(runtime.Invalid, match="runner tracked state|legacy compatibility file"):
+        runtime.validate_runner(value)
+
+
 def test_runner_validation_rejects_non_directory_runner(tmp_path: Path) -> None:
     value, runner = runtime_runner(tmp_path)
     shutil.rmtree(runner)

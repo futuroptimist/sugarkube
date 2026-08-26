@@ -22,6 +22,16 @@ migration at the same Git revision without reusing or overwriting the older revi
 Retained assets created before this migration remain valid and continue to select their legacy
 revision-only runner coordinate.
 
+That compatibility is limited to revision `97ab09f13fb098de928a878bf1fe9b8d13032cb5`, its exact
+revision-only storage name, and the exact seven-file manifest with SHA-256
+`36fdab33edc0f1ad518a6d3d247a1bd32d233402387ba57493a9386d78ec9301`. Every declared hash is
+validated. The two files absent from that manifest—`frontend/playwright.config.ts` and
+`frontend/scripts/utils/ensure-playwright-browsers.js`—must be regular, non-symlinked files whose
+bytes equal their tracked blobs at the pinned Git `HEAD`. Unknown digests, arbitrary seven-file
+subsets, and missing, untracked, symlinked, or drifted compatibility files fail closed. New
+manifest-qualified runners still require the configured digest, exact qualified storage identity,
+and all nine critical entries, so the legacy exception does not relax candidate validation.
+
 Complete Git metadata is retained so the snapshot can prove its exact HEAD and object integrity
 without the source checkout, alternates, hard-linked objects, or a shared object store. The root
 `node_modules/.pnpm` store and frontend dependency links are retained because pnpm workspace links
@@ -197,7 +207,7 @@ live `status` and retained-asset validation are root-only operations. Do not wea
 to let the child inspect it: the child needs only `/var/lib/sugarkube`, the runner root, and the exact
 installed runner. For the staging cutover incident, the approved runner revision is
 `97ab09f13fb098de928a878bf1fe9b8d13032cb5`, the approved retained asset revision is
-`68e002775771c087285cd5ba8e402e5d9ac7c2c426a802d44a179e74b925fd54`, and the validated runner
+`9dbccee2be1f57fc7d80a714e3de45a66e860080e07b357c7ddade6e7f343319`, and the validated runner
 manifest SHA-256 is `36fdab33edc0f1ad518a6d3d247a1bd32d233402387ba57493a9386d78ec9301`.
 
 First, as root, validate `current`, the exact retained assets, runner Git/content/dependencies,
@@ -207,7 +217,7 @@ bounded coordinates and access state:
 ```bash
 sudo python3 scripts/install_dspace_chat_synthetic.py repair-runner-access \
   --revision 97ab09f13fb098de928a878bf1fe9b8d13032cb5 \
-  --asset-revision 68e002775771c087285cd5ba8e402e5d9ac7c2c426a802d44a179e74b925fd54 \
+  --asset-revision 9dbccee2be1f57fc7d80a714e3de45a66e860080e07b357c7ddade6e7f343319 \
   --runner-manifest-sha256 36fdab33edc0f1ad518a6d3d247a1bd32d233402387ba57493a9386d78ec9301
 ```
 
@@ -222,7 +232,7 @@ smoke, retry, or roll back:
 ```bash
 sudo python3 scripts/install_dspace_chat_synthetic.py repair-runner-access --apply \
   --revision 97ab09f13fb098de928a878bf1fe9b8d13032cb5 \
-  --asset-revision 68e002775771c087285cd5ba8e402e5d9ac7c2c426a802d44a179e74b925fd54 \
+  --asset-revision 9dbccee2be1f57fc7d80a714e3de45a66e860080e07b357c7ddade6e7f343319 \
   --runner-manifest-sha256 36fdab33edc0f1ad518a6d3d247a1bd32d233402387ba57493a9386d78ec9301
 sudo python3 scripts/install_dspace_chat_synthetic.py status
 ```
