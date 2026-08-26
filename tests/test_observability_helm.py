@@ -1218,12 +1218,21 @@ case "$*" in
     esac
     printf '%s\n' '{"status":"success","data":{"yaml":"'"$yaml"'"}}' ;;
   *"status/runtimeinfo"*)
+    [ "$KUBECTL_MODE" != retention-unreachable-runtime ] || exit 55
     [ "$KUBECTL_MODE" != retention-malformed-runtime ] || { printf '%s\n' '{"status":"error"}'; exit 0; }
     [ "$KUBECTL_MODE" = retention-reload-failed ] && reload=false || reload=true
-    [ "$KUBECTL_MODE" = retention-stale-runtime ] && retention='7d or 100GiB' || retention='90d or 100GiB'
+    [ "$KUBECTL_MODE" = retention-missing-runtime-policy ] && { printf '%s\n' '{"status":"success","data":{"reloadConfigSuccess":true}}'; exit 0; }
+    case "$KUBECTL_MODE" in
+      retention-malformed-runtime-policy) retention='not a retention policy' ;;
+      retention-stale-runtime) retention='7d or 100GiB' ;;
+      retention-wrong-runtime-size) retention='90d or 50GiB' ;;
+      *) retention='90d or 100GiB' ;;
+    esac
     printf '%s\n' '{"status":"success","data":{"storageRetention":"'"$retention"'","reloadConfigSuccess":'"$reload"'}}' ;;
   *"proxy/metrics"*)
-    case "$KUBECTL_MODE" in retention-zero-limit) limit=0 ;; retention-wrong-limit) limit=106300440576 ;; *) limit=107374182400 ;; esac
+    [ "$KUBECTL_MODE" != retention-unreachable-metrics ] || exit 56
+    [ "$KUBECTL_MODE" != retention-missing-limit ] || { printf '%s\n' '# no retention limit metric'; exit 0; }
+    case "$KUBECTL_MODE" in retention-zero-limit) limit=0 ;; retention-wrong-limit) limit=106300440576 ;; retention-scientific-limit) limit=1.073741824e+11 ;; *) limit=107374182400 ;; esac
     printf '%s\n' '# HELP prometheus_tsdb_retention_limit_bytes The configured TSDB retention limit.' 'prometheus_tsdb_retention_limit_bytes '"$limit" ;;
   *"get prometheus kube-prometheus-stack-prometheus -o json"*)
     printf '%s\n' '{"spec":{"replicas":1,"retention":"90d","retentionSize":"100GB"}}' ;;
@@ -1727,6 +1736,7 @@ def test_converged_pvc_does_not_require_storageclass_expansion_discovery(tmp_pat
     ("kubectl_mode", "success"),
     [
         ("healthy", True),
+        ("retention-scientific-limit", True),
         ("retention-missing", False),
         ("retention-wrong-time", False),
         ("retention-wrong-size", False),
@@ -1734,10 +1744,16 @@ def test_converged_pvc_does_not_require_storageclass_expansion_discovery(tmp_pat
         ("retention-wrong-limit", False),
         ("retention-reload-failed", False),
         ("retention-stale-runtime", False),
+        ("retention-wrong-runtime-size", False),
+        ("retention-missing-runtime-policy", False),
+        ("retention-malformed-runtime-policy", False),
+        ("retention-missing-limit", False),
         ("retention-malformed-config", False),
         ("retention-malformed-yaml", False),
         ("retention-malformed-runtime", False),
         ("retention-unreachable-config", False),
+        ("retention-unreachable-runtime", False),
+        ("retention-unreachable-metrics", False),
     ],
 )
 def test_verify_checks_loaded_and_runtime_retention(tmp_path, kubectl_mode, success):
@@ -1745,7 +1761,10 @@ def test_verify_checks_loaded_and_runtime_retention(tmp_path, kubectl_mode, succ
     assert (result.returncode == 0) is success
     assert "rollout status statefulset/prometheus-kube-prometheus-stack-prometheus" in audit
     assert "status/config" in audit
-    expected_proxy_calls = 1 if kubectl_mode == "retention-unreachable-config" else 3
+    expected_proxy_calls = {
+        "retention-unreachable-config": 1,
+        "retention-unreachable-runtime": 2,
+    }.get(kubectl_mode, 3)
     assert audit.count("get --request-timeout=14s --raw=") == expected_proxy_calls
     if success:
         assert "107374182400 bytes" in result.stdout

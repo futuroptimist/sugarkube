@@ -42,7 +42,7 @@ fail_closed("loaded size retention is not equivalent to #{desired_size}") unless
 
 runtime = read_json(runtime_path, "status/runtimeinfo")
 fail_closed("runtime configuration reload was unsuccessful") unless runtime.is_a?(Hash) && runtime["reloadConfigSuccess"] == true
-runtime_retention = /\A(.+?) or (.+)\z/.match(runtime["storageRetention"].to_s)
+runtime_retention = /\A(\S+) or (\S+)\z/.match(runtime["storageRetention"].to_s)
 fail_closed("runtime storage retention is missing or malformed") unless runtime_retention
 fail_closed("runtime time retention is missing or differs from #{desired_time}") unless runtime_retention[1] == desired_time
 fail_closed("runtime size retention is not equivalent to #{desired_size}") unless size_bytes(runtime_retention[2]) == desired_bytes
