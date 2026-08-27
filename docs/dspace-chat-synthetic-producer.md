@@ -179,7 +179,11 @@ configuration, test-before-completion, completion-publisher, or missing-result a
 or failure. It archives only that classification, invocation ID, child status, byte count,
 truncation and capture-complete flags, and SHA-256 in an atomically replaced, root-only
 `latest-classification.json` under
-the result root. Only the latest failure is retained, and invocation cleanup cannot remove it. Raw
+the result root. The systemd runtime directory is preserved across oneshot service exits (but remains
+ephemeral across reboot), while invocation-unique result files stay below their own temporary
+directories. Only the latest failure is retained: publication atomically replaces the prior record,
+failed publication removes its temporary file, and invocation cleanup cannot remove the persistent
+record. Raw
 output is drained through a pipe, discarded beyond the bounded
 in-memory prefix, and never printed or persisted. The drain receives a bounded grace period; when
 a descendant retains the pipe, `stderrCaptureComplete` is false and the byte count, truncation
@@ -188,6 +192,13 @@ flag, and SHA-256 describe only the immutable bytes captured when that grace per
 `timeout/launch`, `missing`, `provenance`, `malformed`, executed failure, or successful publication
 before considering any retry. Do not retry while an invocation
 may remain active and never infer success from browser exit alone.
+
+Bind a retained classification to the exact service execution by comparing its `invocation` field
+with systemd's invocation ID for that execution; do not infer the binding from timestamps or the
+fact that the record is the latest one. The record intentionally excludes raw stdout, raw stderr,
+credentials, browser state, and page content. This persistence correction does not identify or
+repair the live child failure: absent a deterministic specialized marker, it remains
+`current-result-missing-after-child-failure`.
 
 When no valid current bounded result is consumable, the previous metric is preserved byte-for-byte.
 It ages into the existing stale alert, making ambiguity fail closed. A valid current failure

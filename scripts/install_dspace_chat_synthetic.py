@@ -258,6 +258,11 @@ def validate(tree: Path) -> dict[str, str]:
         not in (tree / "etc/systemd/system/dspace-chat-synthetic.timer").read_text()
     ):
         raise ValueError("timer is not persistent")
+    if (
+        "RuntimeDirectoryPreserve=yes"
+        not in (tree / "etc/systemd/system/dspace-chat-synthetic.service").read_text()
+    ):
+        raise ValueError("classification runtime directory is not preserved")
     return manifest
 
 
