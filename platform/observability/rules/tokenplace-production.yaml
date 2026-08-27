@@ -4,7 +4,7 @@ groups:
     interval: 1m
     rules:
       - alert: TokenplaceNoHealthyComputeNodes
-        expr: tokenplace_compute_nodes_healthy{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"} == 0 and on (app, environment, cluster, namespace, release) (up{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"} == 1) and on (app, environment, cluster, namespace, release) (tokenplace_instrumentation_up{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"} == 1)
+        expr: (max by (app, environment, cluster, namespace, release) (tokenplace_compute_nodes_healthy{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"}) == 0) and on (app, environment, cluster, namespace, release) (max by (app, environment, cluster, namespace, release) (up{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"}) == 1) and on (app, environment, cluster, namespace, release) (max by (app, environment, cluster, namespace, release) (tokenplace_instrumentation_up{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"}) == 1)
         for: 5m
         labels:
           application: tokenplace

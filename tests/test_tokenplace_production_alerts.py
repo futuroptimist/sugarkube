@@ -36,6 +36,11 @@ def test_tokenplace_alerts_are_production_only_and_fail_open_for_missing_capacit
     assert "up{" in capacity["expr"]
     assert 'environment="prod"' in capacity["expr"]
     assert 'cluster="sugarkube-prod"' in capacity["expr"]
+    aggregation = "max by (app, environment, cluster, namespace, release)"
+    assert capacity["expr"].count(aggregation) == 3
+    assert capacity["expr"].count(
+        "and on (app, environment, cluster, namespace, release)"
+    ) == 2
     for fallback in ("absent(", "vector(0)", "queue_depth"):
         assert fallback not in capacity["expr"]
     assert alerts["TokenplaceMetricsTargetDown"]["for"] == "10m"

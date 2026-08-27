@@ -45,6 +45,70 @@ tests:
       - eval_time: 6m
         alertname: TokenplaceNoHealthyComputeNodes
         exp_alerts: []
+  - name: relay rollout preserves one zero capacity alert identity
+    interval: 1m
+    input_series:
+      - series: tokenplace_compute_nodes_healthy{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace",pod="relay-old",instance="10.0.0.1:8080",job="relay-old"}
+        values: '0x2 _x6'
+      - series: tokenplace_compute_nodes_healthy{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace",pod="relay-new",instance="10.0.0.2:8080",job="relay-new"}
+        values: '_x2 0x6'
+      - series: up{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace",pod="relay-old",instance="10.0.0.1:8080",job="relay-old"}
+        values: '1x2 _x6'
+      - series: up{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace",pod="relay-new",instance="10.0.0.2:8080",job="relay-new"}
+        values: '_x2 1x6'
+      - series: tokenplace_instrumentation_up{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace",pod="relay-old",instance="10.0.0.1:8080",job="relay-old"}
+        values: '1x2 _x6'
+      - series: tokenplace_instrumentation_up{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace",pod="relay-new",instance="10.0.0.2:8080",job="relay-new"}
+        values: '_x2 1x6'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: TokenplaceNoHealthyComputeNodes
+        exp_alerts:
+          - exp_labels:
+              app: tokenplace
+              application: tokenplace
+              environment: prod
+              cluster: sugarkube-prod
+              namespace: tokenplace
+              release: tokenplace
+              severity: critical
+            exp_annotations:
+              summary: token.place production has no healthy compute nodes
+              description: The relay has explicitly reported zero lease-healthy compute nodes while its scrape and instrumentation telemetry remain healthy.
+              remediation: Restore and register the production Mac Mini compute node, then confirm its lease and healthy-node count recover.
+              runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/k3s-tokenplace-prod.md#production-compute-capacity-alerts
+  - name: duplicate healthy scrape targets emit one stable alert
+    interval: 1m
+    input_series:
+      - series: tokenplace_compute_nodes_healthy{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace",pod="relay-a",instance="10.0.0.1:8080",job="relay-a",service="tokenplace",endpoint="metrics"}
+        values: '0x8'
+      - series: tokenplace_compute_nodes_healthy{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace",pod="relay-b",instance="10.0.0.2:8080",job="relay-b",service="tokenplace-canary",endpoint="metrics-canary"}
+        values: '0x8'
+      - series: up{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace",pod="relay-a",instance="10.0.0.1:8080",job="relay-a"}
+        values: '1x8'
+      - series: up{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace",pod="relay-b",instance="10.0.0.2:8080",job="relay-b"}
+        values: '1x8'
+      - series: tokenplace_instrumentation_up{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace",pod="relay-a",instance="10.0.0.1:8080",job="relay-a"}
+        values: '1x8'
+      - series: tokenplace_instrumentation_up{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace",pod="relay-b",instance="10.0.0.2:8080",job="relay-b"}
+        values: '1x8'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: TokenplaceNoHealthyComputeNodes
+        exp_alerts:
+          - exp_labels:
+              app: tokenplace
+              application: tokenplace
+              environment: prod
+              cluster: sugarkube-prod
+              namespace: tokenplace
+              release: tokenplace
+              severity: critical
+            exp_annotations:
+              summary: token.place production has no healthy compute nodes
+              description: The relay has explicitly reported zero lease-healthy compute nodes while its scrape and instrumentation telemetry remain healthy.
+              remediation: Restore and register the production Mac Mini compute node, then confirm its lease and healthy-node count recover.
+              runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/k3s-tokenplace-prod.md#production-compute-capacity-alerts
   - name: missing healthy telemetry does not fire
     interval: 1m
     input_series:
