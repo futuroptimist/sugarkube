@@ -3548,15 +3548,11 @@ def test_installer_rejects_inactive_runtime_preservation_directives(
     staged = tmp_path / "staged"
     installer.render(staged)
     service = staged / "etc/systemd/system/dspace-chat-synthetic.service"
-    service.write_text(
-        service.read_text().replace("RuntimeDirectoryPreserve=yes\n", replacement)
-    )
+    service.write_text(service.read_text().replace("RuntimeDirectoryPreserve=yes\n", replacement))
     manifest = json.loads((staged / "manifest.json").read_text())
     relative = "etc/systemd/system/dspace-chat-synthetic.service"
     manifest[relative] = installer.sha(service)
-    (staged / "manifest.json").write_text(
-        json.dumps(manifest, sort_keys=True, indent=2) + "\n"
-    )
+    (staged / "manifest.json").write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n")
 
     with pytest.raises(ValueError, match="classification runtime directory is not preserved"):
         installer.validate(staged)
