@@ -1303,6 +1303,31 @@ def test_classification_archive_failure_preserves_prior_record_and_removes_tempo
     assert not list(root.glob(".latest-classification-*.tmp"))
 
 
+def test_classification_archive_cleanup_does_not_mask_primary_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "results"
+    root.mkdir()
+    monkeypatch.setattr(
+        runtime.os,
+        "replace",
+        lambda *_args: (_ for _ in ()).throw(OSError("primary replace failure")),
+    )
+    monkeypatch.setattr(
+        Path,
+        "unlink",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("cleanup failure")),
+    )
+
+    with pytest.raises(OSError, match="primary replace failure"):
+        runtime.archive_classification(
+            root,
+            "e" * 32,
+            "current-result-missing-after-child-failure",
+            {"childStatus": 1},
+        )
+
+
 def test_bounded_stderr_run_waits_for_complete_diagnostic_metadata() -> None:
     diagnostic = b"diagnostic" * (runtime.MAX_CHILD_DIAGNOSTIC_BYTES // 2)
 
@@ -3502,6 +3527,36 @@ def test_installer_rejects_assets_that_lose_classification_runtime_preservation(
     relative = "etc/systemd/system/dspace-chat-synthetic.service"
     manifest[relative] = installer.sha(service)
     (staged / "manifest.json").write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n")
+
+    with pytest.raises(ValueError, match="classification runtime directory is not preserved"):
+        installer.validate(staged)
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    (
+        "# RuntimeDirectoryPreserve=yes\n",
+        "; RuntimeDirectoryPreserve=yes\n",
+        "RuntimeDirectoryPreserve=no\n# RuntimeDirectoryPreserve=yes\n",
+        "RuntimeDirectoryPreserve=yes\nRuntimeDirectoryPreserve=no\n",
+        "[Unit]\nRuntimeDirectoryPreserve=yes\n",
+    ),
+)
+def test_installer_rejects_inactive_runtime_preservation_directives(
+    tmp_path: Path, replacement: str
+) -> None:
+    staged = tmp_path / "staged"
+    installer.render(staged)
+    service = staged / "etc/systemd/system/dspace-chat-synthetic.service"
+    service.write_text(
+        service.read_text().replace("RuntimeDirectoryPreserve=yes\n", replacement)
+    )
+    manifest = json.loads((staged / "manifest.json").read_text())
+    relative = "etc/systemd/system/dspace-chat-synthetic.service"
+    manifest[relative] = installer.sha(service)
+    (staged / "manifest.json").write_text(
+        json.dumps(manifest, sort_keys=True, indent=2) + "\n"
+    )
 
     with pytest.raises(ValueError, match="classification runtime directory is not preserved"):
         installer.validate(staged)

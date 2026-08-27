@@ -646,7 +646,7 @@ def archive_classification(
     finally:
         try:
             temporary.unlink()
-        except FileNotFoundError:
+        except OSError:
             pass
 
 
