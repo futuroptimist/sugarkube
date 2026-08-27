@@ -1277,6 +1277,26 @@ def test_classification_archive_replaces_prior_record_without_growth(tmp_path: P
     assert json.loads(records[0].read_text())["invocation"] == "b" * 32
 
 
+def test_classification_archive_removes_temporary_file_when_replace_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "results"
+    root.mkdir()
+    invocation = "a" * 32
+    monkeypatch.setattr(
+        runtime.os,
+        "replace",
+        lambda *_args: (_ for _ in ()).throw(OSError("injected replacement failure")),
+    )
+
+    with pytest.raises(OSError, match="injected replacement failure"):
+        runtime.archive_classification(
+            root, invocation, "current-result-missing-after-child-failure", {}
+        )
+
+    assert list(root.iterdir()) == []
+
+
 def test_bounded_stderr_run_waits_for_complete_diagnostic_metadata() -> None:
     diagnostic = b"diagnostic" * (runtime.MAX_CHILD_DIAGNOSTIC_BYTES // 2)
 
@@ -1378,6 +1398,61 @@ def test_missing_result_keeps_metric_cleans_invocation_and_bounds_latest_evidenc
     assert "credential" not in contents
     assert "payload" not in contents
     assert "private" not in contents
+
+
+def test_missing_result_cleanup_precedes_persistent_classification_archive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, metric, _sibling, _calls = prepare_runtime_run(tmp_path, monkeypatch, "missing")
+    persistent_root = Path(value["resultRoot"])
+    invocation = "d" * 32
+    invocation_dir = persistent_root / f"uid-{os.getuid()}-{invocation}"
+    real_archive = runtime.archive_classification
+
+    def archive_after_cleanup(root, exact_invocation, classification, metadata):
+        assert root == persistent_root
+        assert not invocation_dir.exists()
+        real_archive(root, exact_invocation, classification, metadata)
+
+    monkeypatch.setenv("INVOCATION_ID", invocation)
+    monkeypatch.setattr(runtime, "archive_classification", archive_after_cleanup)
+    monkeypatch.setattr(
+        runtime,
+        "bounded_stderr_run",
+        lambda argv, **_kwargs: (
+            subprocess.CompletedProcess(argv, 1),
+            b"opaque child failure",
+            {
+                "stderrBytes": 20,
+                "stderrSha256": "e" * 64,
+                "stderrTruncated": False,
+                "stderrCaptureComplete": True,
+            },
+        ),
+    )
+
+    assert runtime.run(value) == 1
+    record = json.loads((persistent_root / "latest-classification.json").read_text())
+    assert record["invocation"] == invocation
+    assert record["classification"] == "current-result-missing-after-child-failure"
+    assert record["stderrCaptureComplete"] is True
+    assert metric.read_bytes() == b"previous metric\n"
+
+
+def test_missing_result_archive_failure_remains_fail_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    value, metric, _sibling, _calls = prepare_runtime_run(tmp_path, monkeypatch, "missing")
+    monkeypatch.setattr(
+        runtime,
+        "archive_classification",
+        lambda *_args: (_ for _ in ()).throw(OSError("injected archive failure")),
+    )
+
+    assert runtime.run(value) == 1
+    assert "outcome=preserved reason=execution-error" in capsys.readouterr().out
+    assert metric.read_bytes() == b"previous metric\n"
+    assert not (Path(value["resultRoot"]) / "latest-classification.json").exists()
 
 
 def test_runtime_browser_drift_blocks_playwright_and_preserves_metric(

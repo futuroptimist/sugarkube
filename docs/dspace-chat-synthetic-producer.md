@@ -179,7 +179,11 @@ configuration, test-before-completion, completion-publisher, or missing-result a
 or failure. It archives only that classification, invocation ID, child status, byte count,
 truncation and capture-complete flags, and SHA-256 in an atomically replaced, root-only
 `latest-classification.json` under
-the result root. Only the latest failure is retained, and invocation cleanup cannot remove it. Raw
+the persistent result root. Invocation-unique results and working files remain below the
+`uid-<uid>-<invocation>` directory and are removed before the bounded classification is published,
+so their cleanup cannot remove the record. Each failure atomically replaces the prior record; bind
+the retained record to a service execution by comparing its exact `invocation` value with systemd's
+invocation ID. Raw
 output is drained through a pipe, discarded beyond the bounded
 in-memory prefix, and never printed or persisted. The drain receives a bounded grace period; when
 a descendant retains the pipe, `stderrCaptureComplete` is false and the byte count, truncation
@@ -197,6 +201,9 @@ timestamp. Publication uses same-directory atomic replacement.
 Evidence collection is limited to repository revision, installed asset/unit SHA-256 values,
 coordinates, ownership/modes, activation state, bounded invocation summary, and metric series/age.
 Invocation cleanup is expected lifecycle behavior, not evidence loss.
+The retained classification deliberately excludes raw child output. Its persistence repairs
+diagnostic retention only; a generic `current-result-missing-after-child-failure` does not identify
+or repair the underlying child failure.
 
 ## 4. Explicit rollback/recovery
 

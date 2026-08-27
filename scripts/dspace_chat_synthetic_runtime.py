@@ -624,24 +624,30 @@ def bounded_stderr_run(
 
 
 def archive_classification(
-    root: Path, invocation: str, classification: str, metadata: dict
+    persistent_root: Path, invocation: str, classification: str, metadata: dict
 ) -> None:
-    """Atomically replace the single bounded classification record."""
-    path = root / "latest-classification.json"
+    """Atomically replace the single bounded record outside invocation cleanup."""
+    path = persistent_root / "latest-classification.json"
     payload = {
         "schemaVersion": 1,
         "invocation": invocation,
         "classification": classification,
         **metadata,
     }
-    temporary = root / f".latest-classification-{invocation}.tmp"
-    with temporary.open("x", encoding="utf-8") as stream:
-        os.chmod(temporary, 0o600)
-        json.dump(payload, stream, sort_keys=True, separators=(",", ":"))
-        stream.write("\n")
-        stream.flush()
-        os.fsync(stream.fileno())
-    os.replace(temporary, path)
+    temporary = persistent_root / f".latest-classification-{invocation}.tmp"
+    try:
+        with temporary.open("x", encoding="utf-8") as stream:
+            os.chmod(temporary, 0o600)
+            json.dump(payload, stream, sort_keys=True, separators=(",", ":"))
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def run(config: dict) -> int:
@@ -735,6 +741,9 @@ def run(config: dict) -> int:
                     classification, metadata = classify_missing_result(
                         child_diagnostic, completed.returncode, diagnostic_metadata
                     )
+                    # Remove invocation-private state before publishing persistent evidence.
+                    # The outer finally repeats this cleanup for every other exit path.
+                    cleanup_invocation(invocation_dir)
                     archive_classification(
                         root,
                         invocation,
