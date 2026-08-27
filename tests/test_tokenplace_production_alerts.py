@@ -1,6 +1,6 @@
+import json
+import subprocess
 from pathlib import Path
-
-import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 RULES = ROOT / "platform/observability/rules/tokenplace-production.yaml"
@@ -8,8 +8,25 @@ PROD_VALUES = ROOT / "clusters/prod/observability/kube-prometheus-stack.values.y
 APP_METRICS = ROOT / "platform/observability/app-metrics.json"
 
 
+def yaml_load(path: Path):
+    result = subprocess.run(
+        [
+            "ruby",
+            "-ryaml",
+            "-rjson",
+            "-e",
+            "puts JSON.generate(YAML.safe_load_file(ARGV[0], aliases: false))",
+            str(path),
+        ],
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    return json.loads(result.stdout)
+
+
 def test_tokenplace_alerts_are_production_only_and_fail_open_for_missing_capacity_telemetry():
-    rules = yaml.safe_load(RULES.read_text(encoding="utf-8"))["groups"][0]["rules"]
+    rules = yaml_load(RULES)["groups"][0]["rules"]
     alerts = {rule["alert"]: rule for rule in rules}
     assert set(alerts) == {"TokenplaceNoHealthyComputeNodes", "TokenplaceMetricsTargetDown"}
     capacity = alerts["TokenplaceNoHealthyComputeNodes"]
@@ -25,7 +42,7 @@ def test_tokenplace_alerts_are_production_only_and_fail_open_for_missing_capacit
 
 
 def test_production_route_is_an_exact_tokenplace_allowlist():
-    prod = yaml.safe_load(PROD_VALUES.read_text(encoding="utf-8"))
+    prod = yaml_load(PROD_VALUES)
     routes = prod["alertmanager"]["config"]["route"]["routes"]
     route = next(route for route in routes if route["receiver"] == "pagerduty-tokenplace")
     assert route["matchers"] == [
@@ -37,17 +54,13 @@ def test_production_route_is_an_exact_tokenplace_allowlist():
     ]
     assert all(
         "tokenplace" not in str(route).lower()
-        for route in yaml.safe_load(
-            (ROOT / "clusters/staging/observability/kube-prometheus-stack.values.yaml").read_text(
-                encoding="utf-8"
-            )
+        for route in yaml_load(
+            ROOT / "clusters/staging/observability/kube-prometheus-stack.values.yaml"
         )["alertmanager"]["config"]["route"]["routes"]
     )
 
 
 def test_production_authenticated_metrics_contract_matches_values_overlay():
-    import json
-
     inventory = json.loads(APP_METRICS.read_text(encoding="utf-8"))
     cfg = inventory["applications"]["tokenplace"]["environments"]["prod"]
     assert cfg["namespace"] == "tokenplace"
@@ -65,9 +78,7 @@ def test_production_authenticated_metrics_contract_matches_values_overlay():
         "cluster": "sugarkube-prod",
         "namespace": "tokenplace",
     }
-    values = yaml.safe_load(
-        (ROOT / "docs/examples/tokenplace.values.prod.yaml").read_text(encoding="utf-8")
-    )
+    values = yaml_load(ROOT / "docs/examples/tokenplace.values.prod.yaml")
     assert values["metrics"] == {
         "enabled": True,
         "auth": {"existingSecret": "tokenplace-prod-metrics-token", "secretKey": "token"},

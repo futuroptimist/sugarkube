@@ -578,6 +578,29 @@ def test_dspace_rules_have_one_canonical_source_and_exact_overlay(tmp_path):
     assert all(not Path(path).exists() for path in overlay_paths)
 
 
+def test_prod_rules_overlay_ignores_invalid_staging_only_rules(tmp_path):
+    originals = {
+        path: path.read_text(encoding="utf-8")
+        for path in (CANONICAL_DSPACE_RULES, CANONICAL_CLOUDFLARE_RULES)
+    }
+    try:
+        for path in originals:
+            path.write_text("invalid: [yaml\n", encoding="utf-8")
+        result, _ = run_helper(
+            tmp_path, "render", env_name="prod", context="sugar-prod"
+        )
+    finally:
+        for path, content in originals.items():
+            path.write_text(content, encoding="utf-8")
+
+    assert result.returncode == 0
+    assert yaml_load(tmp_path / "rules-overlay.yaml") == {
+        "additionalPrometheusRulesMap": {
+            "tokenplace-production": yaml_load(CANONICAL_TOKENPLACE_RULES)
+        }
+    }
+
+
 @pytest.mark.parametrize(
     ("command", "helm_mode", "helm_action"),
     [

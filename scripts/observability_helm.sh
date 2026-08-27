@@ -104,22 +104,25 @@ create_rules_overlay() {
   RULES_OVERLAY="$(mktemp -t sugarkube-observability-rules.XXXXXX.yaml)"
   chmod 600 "${RULES_OVERLAY}"
   ruby -ryaml -e '
-    dspace = YAML.safe_load_file(ARGV.fetch(0), aliases: false)
-    cloudflare = YAML.safe_load_file(ARGV.fetch(1), aliases: false)
-    tokenplace = YAML.safe_load_file(ARGV.fetch(2), aliases: false)
-    {"DSPACE" => dspace, "Cloudflare Tunnel" => cloudflare, "token.place" => tokenplace}.each do |name, rules|
+    environment, output, *rule_args = ARGV
+    selected_rules = if environment == "prod"
+      {"tokenplace-production" => ["token.place", rule_args.fetch(2)]}
+    else
+      {
+        "dspace-release-integrity" => ["DSPACE", rule_args.fetch(0)],
+        "cloudflare-tunnel" => ["Cloudflare Tunnel", rule_args.fetch(1)]
+      }
+    end
+    rules_map = selected_rules.to_h do |key, (name, path)|
+      rules = YAML.safe_load_file(path, aliases: false)
       unless rules.is_a?(Hash) && rules.keys == ["groups"] &&
              rules["groups"].is_a?(Array) && !rules["groups"].empty?
         abort "ERROR: canonical #{name} rules must contain only a nonempty groups list."
       end
+      [key, rules]
     end
-    rules_map = if ARGV.fetch(3) == "prod"
-      {"tokenplace-production" => tokenplace}
-    else
-      {"dspace-release-integrity" => dspace, "cloudflare-tunnel" => cloudflare}
-    end
-    File.write(ARGV.fetch(4), YAML.dump("additionalPrometheusRulesMap" => rules_map))
-  ' "${DSPACE_RULES}" "${CLOUDFLARE_RULES}" "${TOKENPLACE_RULES}" "${ENVIRONMENT}" "${RULES_OVERLAY}"
+    File.write(output, YAML.dump("additionalPrometheusRulesMap" => rules_map))
+  ' "${ENVIRONMENT}" "${RULES_OVERLAY}" "${DSPACE_RULES}" "${CLOUDFLARE_RULES}" "${TOKENPLACE_RULES}"
 }
 validate_dashboard() { python3 "${DASHBOARD_VALIDATOR}" "${DASHBOARD}"; }
 validate_rendered_dashboard() { python3 "${DASHBOARD_VALIDATOR}" "${DASHBOARD}" --rendered "$1"; }
