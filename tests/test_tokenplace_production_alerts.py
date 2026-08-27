@@ -1,4 +1,5 @@
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -36,11 +37,13 @@ def test_tokenplace_alerts_are_production_only_and_fail_open_for_missing_capacit
     assert "up{" in capacity["expr"]
     assert 'environment="prod"' in capacity["expr"]
     assert 'cluster="sugarkube-prod"' in capacity["expr"]
-    aggregation = "max by (app, environment, cluster, namespace, release)"
-    assert capacity["expr"].count(aggregation) == 3
-    assert capacity["expr"].count(
-        "and on (app, environment, cluster, namespace, release)"
-    ) == 2
+    expression = " ".join(capacity["expr"].split())
+    stable_labels = r"app\s*,\s*environment\s*,\s*cluster\s*,\s*namespace\s*,\s*release"
+    target_labels = stable_labels + r"\s*,\s*instance\s*,\s*job"
+    assert len(re.findall(rf"max\s+by\s*\(\s*{stable_labels}\s*\)", expression)) == 1
+    assert len(re.findall(rf"and\s+on\s*\(\s*{target_labels}\s*\)", expression)) == 2
+    assert re.search(r"tokenplace_compute_nodes_healthy\{.*?\}\s+and\s+on", expression)
+    assert re.search(r"max\s+by\s*\(.*?\)\s*\(.*\)\s*==\s*0$", expression)
     for fallback in ("absent(", "vector(0)", "queue_depth"):
         assert fallback not in capacity["expr"]
     assert alerts["TokenplaceMetricsTargetDown"]["for"] == "10m"
