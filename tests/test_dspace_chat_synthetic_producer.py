@@ -1277,6 +1277,29 @@ def test_classification_archive_replaces_prior_record_without_growth(tmp_path: P
     assert json.loads(records[0].read_text())["invocation"] == "b" * 32
 
 
+def test_classification_archive_cleans_temporary_file_when_replacement_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "results"
+    root.mkdir()
+    invocation = "a" * 32
+
+    def fail_replace(_source: Path, _destination: Path) -> None:
+        raise OSError("controlled replacement failure")
+
+    monkeypatch.setattr(runtime.os, "replace", fail_replace)
+    with pytest.raises(OSError, match="controlled replacement failure"):
+        runtime.archive_classification(
+            root,
+            invocation,
+            "current-result-missing-after-child-failure",
+            {"childStatus": 1},
+        )
+
+    assert not (root / "latest-classification.json").exists()
+    assert not (root / f".latest-classification-{invocation}.tmp").exists()
+
+
 def test_bounded_stderr_run_waits_for_complete_diagnostic_metadata() -> None:
     diagnostic = b"diagnostic" * (runtime.MAX_CHILD_DIAGNOSTIC_BYTES // 2)
 
@@ -1378,6 +1401,37 @@ def test_missing_result_keeps_metric_cleans_invocation_and_bounds_latest_evidenc
     assert "credential" not in contents
     assert "payload" not in contents
     assert "private" not in contents
+
+
+def test_classification_archive_failure_preserves_metric_and_cleans_invocation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, metric, _sibling, _calls = prepare_runtime_run(tmp_path, monkeypatch, "missing")
+    invocation = "a" * 32
+
+    def failed_child(argv, **_kwargs):
+        return (
+            subprocess.CompletedProcess(argv, 1),
+            b"opaque child failure",
+            {
+                "stderrBytes": 20,
+                "stderrSha256": "f" * 64,
+                "stderrTruncated": False,
+                "stderrCaptureComplete": True,
+            },
+        )
+
+    monkeypatch.setattr(runtime, "bounded_stderr_run", failed_child)
+    monkeypatch.setattr(
+        runtime,
+        "archive_classification",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("controlled archive failure")),
+    )
+
+    assert runtime.run(value) == 1
+    assert metric.read_bytes() == b"previous metric\n"
+    assert not (Path(value["resultRoot"]) / f"uid-{os.getuid()}-{invocation}").exists()
+    assert not (Path(value["resultRoot"]) / "latest-classification.json").exists()
 
 
 def test_runtime_browser_drift_blocks_playwright_and_preserves_metric(
@@ -3414,6 +3468,8 @@ def test_units_are_bounded_persistent_hardened_and_never_implicitly_activated() 
     assert "Type=oneshot" in service and "TimeoutStartSec=300" in service
     assert "RuntimeDirectory=sugarkube/dspace-chat-synthetic" in service
     assert "RuntimeDirectoryMode=0710" in service and "Group=pi" in service
+    # A oneshot service otherwise loses RuntimeDirectory contents when the unit becomes inactive.
+    assert "RuntimeDirectoryPreserve=yes" in service
     assert "ProtectSystem=strict" in service and "Persistent=true" in timer
     for mutation in (
         "systemctl enable",
