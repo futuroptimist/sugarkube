@@ -826,11 +826,14 @@ verifier is generic: application names, metric families, bounded labels, Secret
 names, ServiceMonitor names, retry bounds, and public `/metrics` status checks
 come from that inventory.
 
-For token.place staging, install or rotate the metrics bearer token before the
-application deployment:
+For token.place staging or production, install or rotate the metrics bearer token before the
+application deployment. Production uses Secret `tokenplace/tokenplace-prod-metrics-token`, key
+`token`; the command accepts the value only through hidden terminal input and never prints it:
 
 ```bash
 just observability-app-metrics-secret-install app=tokenplace env=staging
+# Production, in a separately authorized production maintenance session:
+just observability-app-metrics-secret-install app=tokenplace env=prod
 ```
 
 Validate that the configured Secret and key exist without decoding or printing
@@ -838,6 +841,7 @@ the value:
 
 ```bash
 just observability-app-metrics-secret-check app=tokenplace env=staging
+just observability-app-metrics-secret-check app=tokenplace env=prod
 ```
 
 After staging deploys, verify the configured ServiceMonitor, Secret reference,
@@ -846,11 +850,14 @@ expected unauthenticated public `401` response:
 
 ```bash
 just observability-app-metrics-verify app=tokenplace env=staging
+just observability-app-metrics-verify app=tokenplace env=prod
 ```
 
 `just observability-verify env=staging` also runs every configured application
-metrics verifier after the existing DSPACE checks. Production application metrics
-verification is intentionally rejected until production observability is codified.
+metrics verifier after the existing DSPACE checks. For production, provision the Secret, deploy
+the token.place values, verify the app metrics contract, and only then deploy and verify the
+production observability revision; this prevents the new capacity rule from preceding its scrape
+prerequisite.
 Merging this repository support does not deploy any application, create any
 Secret, dashboard, alert rule, schedulability check, shared-state check, or live
 drill.

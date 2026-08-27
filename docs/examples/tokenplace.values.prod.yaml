@@ -14,3 +14,21 @@ ingress:
 env:
   TOKEN_PLACE_ENV: production
   TOKENPLACE_RELAY_PUBLIC_URL: https://token.place
+
+metrics:
+  enabled: true
+  auth:
+    existingSecret: tokenplace-prod-metrics-token
+    secretKey: token
+
+serviceMonitor:
+  enabled: true
+  interval: 30s
+  scrapeTimeout: 10s
+  additionalLabels:
+    release: kube-prometheus-stack
+  relabelings:
+    app: tokenplace
+    environment: prod
+    release: tokenplace
+    cluster: sugarkube-prod

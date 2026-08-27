@@ -80,6 +80,81 @@ APP_TAG=main-REPLACE_PREVIOUS_SHORTSHA
 just app-redeploy app=tokenplace env=prod tag="$APP_TAG"
 ```
 
+## Production compute-capacity alerts
+
+The chat UI's **Live compute nodes** value comes from
+`total_api_v1_registered_compute_nodes` in `/relay/diagnostics`; the relay evicts expired
+registrations before returning it. Prometheus' `tokenplace_compute_nodes_healthy` uses the same
+lease-expiry availability semantics and is the paging signal. `TokenplaceNoHealthyComputeNodes`
+therefore pages after an explicit zero remains for five minutes, regardless of queue depth or
+current demand. It additionally requires a successful production scrape and
+`tokenplace_instrumentation_up == 1`. Missing, stale, undiscovered, or failed telemetry cannot
+become a zero; `TokenplaceMetricsTargetDown` reports that distinct monitoring failure after ten
+minutes while the relay workload is expected to run.
+
+### Deployment and verification order
+
+Do not place a token in Git, a manifest, shell history, or command arguments. In an authorized
+production session, use the existing hidden-input recipe to create
+`tokenplace/tokenplace-prod-metrics-token` with key `token`, and check only key presence:
+
+```bash
+just observability-app-metrics-secret-install app=tokenplace env=prod
+just observability-app-metrics-secret-check app=tokenplace env=prod
+```
+
+Then deploy the pinned token.place production revision (whose production values enable authenticated
+metrics and its ServiceMonitor), verify the scrape contract, and finally deploy and verify the
+observability revision containing the rules and exact PagerDuty route:
+
+```bash
+just app-redeploy app=tokenplace env=prod tag="$APP_TAG"
+just observability-app-metrics-verify app=tokenplace env=prod
+just observability-render env=prod
+# Separately authorized change window only:
+just observability-upgrade env=prod
+just observability-verify env=prod
+```
+
+### Triage and Mac Mini recovery
+
+Acknowledge the PagerDuty incident first and confirm whether its alert name is the capacity alert or
+the telemetry alert. Query Prometheus with these exact production selectors (through the protected
+Prometheus UI/API); do not expose `/metrics` credentials:
+
+```promql
+tokenplace_compute_nodes_healthy{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"}
+tokenplace_compute_nodes_registered{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"}
+max(tokenplace_compute_node_lease_age_seconds{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"})
+tokenplace_instrumentation_up{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"}
+up{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"}
+tokenplace_relay_queue_depth{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"}
+sum by (reason) (rate(tokenplace_compute_node_evictions_total{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"}[15m]))
+```
+
+For the Mac Mini M4 Pro compute host, use the host's approved access procedure; this repository does
+not store its hostname, login, keys, or connector credentials. Confirm power and network, inspect the
+operator-managed compute process or launch service, restart only that process if necessary, and
+confirm it registers to `https://token.place` (not staging). Verify diagnostics and the healthy and
+registered queries return above zero, lease age resumes updating, the capacity alert resolves, and
+PagerDuty records the resolved notification before resolving the acknowledged incident. If telemetry
+is down, restore the ServiceMonitor/authentication path first rather than treating it as capacity loss.
+
+### Rollback and controlled drill
+
+To back out only this paging behavior, remove the exact `pagerduty-tokenplace` route/receiver and the
+`tokenplace-production` rule overlay in a reviewed observability revision; leave the
+`healthchecks-watchdog` route and Secret untouched. Alternatively, roll back only
+`kube-prometheus-stack` to the immediately preceding known-good Helm revision. Disabling the alert
+does not require changing retention, storage, the relay, or compute heartbeat behavior.
+
+After merge and deployment, schedule (do not improvise) a controlled drill: acknowledge the change,
+stop or unregister the production compute process, wait at least five continuous minutes for
+`TokenplaceNoHealthyComputeNodes` and its PagerDuty incident, acknowledge the incident, restore and
+re-register the Mac Mini node, and confirm both the Prometheus alert and PagerDuty incident resolve.
+Abort if scrape or instrumentation health fails; that is a telemetry drill, not proof of zero-capacity
+paging. This repository change documents the drill but does not perform it or send test events.
+
 ## Cloudflare route
 
 Cloudflare Tunnel routing is external to Helm.

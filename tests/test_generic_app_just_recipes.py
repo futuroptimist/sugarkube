@@ -7976,7 +7976,7 @@ def test_observability_app_metrics_install_secret_subprocess_failures_are_redact
             lambda d: d["applications"]["tokenplace"]["environments"].update(
                 {"prod": {}}
             ),
-            "only staging",
+            "missing required keys",
         ),
         (
             lambda d: d["applications"]["tokenplace"]["environments"][

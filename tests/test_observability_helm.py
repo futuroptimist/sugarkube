@@ -24,6 +24,9 @@ CANONICAL_DSPACE_RULES = (
 CANONICAL_CLOUDFLARE_RULES = (
     ROOT / "platform" / "observability" / "rules" / "cloudflare-tunnel.yaml"
 )
+CANONICAL_TOKENPLACE_PROD_RULES = (
+    ROOT / "platform" / "observability" / "rules" / "tokenplace-production.yaml"
+)
 SCRIPT = ROOT / "scripts" / "observability_helm.sh"
 ALERTMANAGER_VALIDATOR = ROOT / "scripts" / "verify_observability_alertmanager.rb"
 DASHBOARD = ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
@@ -216,9 +219,10 @@ def test_production_values_have_exact_safe_overrides_without_public_exposure_or_
         "alertmanager-pagerduty", "alertmanager-healthchecks-watchdog"
     ]
     assert prod["alertmanager"]["config"]["route"]["receiver"] == "null"
-    assert len(prod["alertmanager"]["config"]["route"]["routes"]) == 4
+    assert len(prod["alertmanager"]["config"]["route"]["routes"]) == 5
     assert {receiver["name"] for receiver in prod["alertmanager"]["config"]["receivers"]} == {
-        "null", "pagerduty-synthetic-test", "pagerduty-dspace", "healthchecks-watchdog"
+        "null", "pagerduty-synthetic-test", "pagerduty-dspace", "pagerduty-tokenplace",
+        "healthchecks-watchdog"
     }
     text = COMMON.read_text(encoding="utf-8") + PROD.read_text(encoding="utf-8")
     forbidden = [
@@ -572,6 +576,18 @@ def test_dspace_rules_have_one_canonical_source_and_exact_overlay(tmp_path):
     overlay_paths = re.findall(r"/[^ ]*sugarkube-observability-rules\.[^ ]*\.yaml", audit)
     assert overlay_paths
     assert all(not Path(path).exists() for path in overlay_paths)
+
+
+def test_production_tokenplace_rules_have_one_canonical_source_and_exact_overlay(tmp_path):
+    prod = yaml_load(PROD)
+    assert "tokenplace-production" not in prod["additionalPrometheusRulesMap"]
+    result, _ = run_helper(tmp_path, "render", env_name="prod", context="unavailable")
+    assert result.returncode == 0, result.stderr
+    assert yaml_load(tmp_path / "rules-overlay.yaml") == {
+        "additionalPrometheusRulesMap": {
+            "tokenplace-production": yaml_load(CANONICAL_TOKENPLACE_PROD_RULES)
+        }
+    }
 
 
 @pytest.mark.parametrize(
@@ -1829,12 +1845,11 @@ def test_install_and_upgrade_dashboard_arguments(tmp_path, command, helm_mode, e
     assert f"grafana.dashboards.sugarkube.{other_dashboard_uid}.json" not in mutation
 
     overlay = str(tmp_path / "sugarkube-observability-rules.")
-    if env_name == "staging":
-        assert overlay in mutation
-    else:
-        assert overlay not in mutation
-        assert str(CANONICAL_DSPACE_RULES) not in mutation
-        assert str(CANONICAL_CLOUDFLARE_RULES) not in mutation
+    assert overlay in mutation
+    assert mutation.index(f"-f {env_values}") < mutation.index(overlay)
+    assert str(CANONICAL_TOKENPLACE_PROD_RULES) not in mutation
+    assert str(CANONICAL_DSPACE_RULES) not in mutation
+    assert str(CANONICAL_CLOUDFLARE_RULES) not in mutation
 
 
 @pytest.mark.parametrize("mode", ["missing-pagerduty", "empty-pagerduty"])
@@ -3162,6 +3177,10 @@ def test_production_alertmanager_routes_exact_eligible_label_sets():
     assert alertmanager_receivers_for_labels(
         config, {**base, "alertname": "SugarkubePagerDutyTest"}
     ) == ["pagerduty-synthetic-test"]
+    for alertname in ("TokenplaceNoHealthyComputeNodes", "TokenplaceMetricsTargetDown"):
+        assert alertmanager_receivers_for_labels(config, {**base, "alertname": alertname}) == [
+            "pagerduty-tokenplace"
+        ]
     watchdog = {
         "alertname": "SugarkubeObservabilityWatchdog",
         "environment": "prod",
@@ -3181,7 +3200,7 @@ def test_production_alertmanager_routes_exact_eligible_label_sets():
 def test_production_alertmanager_has_exact_routes_and_file_backed_receivers():
     config = yaml_load(PROD)["alertmanager"]["config"]
     assert [route["receiver"] for route in config["route"]["routes"]] == [
-        "pagerduty-dspace", "pagerduty-dspace", "pagerduty-synthetic-test",
+        "pagerduty-dspace", "pagerduty-dspace", "pagerduty-tokenplace", "pagerduty-synthetic-test",
         "healthchecks-watchdog",
     ]
     assert config["receivers"] == [
@@ -3191,6 +3210,10 @@ def test_production_alertmanager_has_exact_routes_and_file_backed_receivers():
             "send_resolved": True,
         }]},
         {"name": "pagerduty-dspace", "pagerduty_configs": [{
+            "routing_key_file": "/etc/alertmanager/secrets/alertmanager-pagerduty/routing-key",
+            "send_resolved": True,
+        }]},
+        {"name": "pagerduty-tokenplace", "pagerduty_configs": [{
             "routing_key_file": "/etc/alertmanager/secrets/alertmanager-pagerduty/routing-key",
             "send_resolved": True,
         }]},
@@ -3207,7 +3230,8 @@ def test_production_offline_render_uses_only_ordered_core_values(tmp_path):
     template = next(line for line in audit.splitlines() if "helm template " in line)
     assert template.index(str(COMMON)) < template.index(str(PROD))
     assert str(PROD_DASHBOARD) in template
-    for excluded in (str(STAGING), str(DASHBOARD), "sugarkube-observability-rules"):
+    assert template.index(str(PROD)) < template.index("sugarkube-observability-rules")
+    for excluded in (str(STAGING), str(DASHBOARD)):
         assert excluded not in template
     assert "kubectl" not in audit
     assert "routing_key:" not in result.stdout
@@ -3325,10 +3349,15 @@ def test_production_alertmanager_validator_rejects_inline_credentials(tmp_path):
 @pytest.mark.parametrize("mutation", ["missing", "broadened"])
 def test_production_alertmanager_validator_rejects_missing_or_broadened_routes(tmp_path, mutation):
     config = yaml_load(PROD)["alertmanager"]["config"]
+    tokenplace_index = next(
+        index
+        for index, route in enumerate(config["route"]["routes"])
+        if route["receiver"] == "pagerduty-tokenplace"
+    )
     if mutation == "missing":
-        config["route"]["routes"].pop(0)
+        config["route"]["routes"].pop(tokenplace_index)
     else:
-        config["route"]["routes"][0]["matchers"] = ['severity=~".*"']
+        config["route"]["routes"][tokenplace_index]["matchers"] = ['alertname=~".*"']
     config["privateFixtureDetail"] = "PRIVATE_ROUTE_FIXTURE_SENTINEL"
     manifest = tmp_path / "invalid-route.yaml"
     manifest.write_text(production_alertmanager_fixture(config=config), encoding="utf-8")
