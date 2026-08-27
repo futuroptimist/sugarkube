@@ -1262,6 +1262,27 @@ def test_classification_archive_survives_invocation_cleanup_without_raw_output(
     assert "payload" not in contents
 
 
+def test_regression_invocation_scoped_classification_is_removed_by_cleanup(tmp_path: Path) -> None:
+    """Document the live defect without running a host or systemd service."""
+    root = tmp_path / "results"
+    invocation = "a" * 32
+    invocation_dir = root / f"uid-1000-{invocation}"
+    invocation_dir.mkdir(parents=True)
+
+    # The defective coordinate looked valid until the unconditional finally cleanup.
+    runtime.archive_classification(
+        invocation_dir,
+        invocation,
+        "current-result-missing-after-child-failure",
+        {"childStatus": 1},
+    )
+    assert (invocation_dir / "latest-classification.json").is_file()
+    runtime.cleanup_invocation(invocation_dir)
+
+    assert not (root / "latest-classification.json").exists()
+    assert not invocation_dir.exists()
+
+
 def test_classification_archive_replaces_prior_record_without_growth(tmp_path: Path) -> None:
     root = tmp_path / "results"
     root.mkdir()
@@ -1275,6 +1296,27 @@ def test_classification_archive_replaces_prior_record_without_growth(tmp_path: P
     records = list(root.glob("*classification*.json"))
     assert records == [root / "latest-classification.json"]
     assert json.loads(records[0].read_text())["invocation"] == "b" * 32
+    assert stat.S_IMODE(records[0].stat().st_mode) == 0o600
+    assert not list(root.glob(".latest-classification-*.tmp"))
+
+
+def test_classification_archive_failure_cleans_temporary_and_preserves_prior_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "results"
+    root.mkdir()
+    runtime.archive_classification(root, "a" * 32, "older", {"childStatus": 1})
+    prior = (root / "latest-classification.json").read_bytes()
+
+    def fail_replace(_source: Path, _destination: Path) -> None:
+        raise OSError("injected atomic replacement failure")
+
+    monkeypatch.setattr(runtime.os, "replace", fail_replace)
+    with pytest.raises(OSError, match="injected atomic replacement failure"):
+        runtime.archive_classification(root, "b" * 32, "newer", {"childStatus": 1})
+
+    assert (root / "latest-classification.json").read_bytes() == prior
+    assert not list(root.glob(".latest-classification-*.tmp"))
 
 
 def test_bounded_stderr_run_waits_for_complete_diagnostic_metadata() -> None:

@@ -624,24 +624,32 @@ def bounded_stderr_run(
 
 
 def archive_classification(
-    root: Path, invocation: str, classification: str, metadata: dict
+    persistent_root: Path, invocation: str, classification: str, metadata: dict
 ) -> None:
-    """Atomically replace the single bounded classification record."""
-    path = root / "latest-classification.json"
+    """Atomically replace the bounded record outside invocation cleanup."""
+    path = persistent_root / "latest-classification.json"
     payload = {
         "schemaVersion": 1,
         "invocation": invocation,
         "classification": classification,
         **metadata,
     }
-    temporary = root / f".latest-classification-{invocation}.tmp"
-    with temporary.open("x", encoding="utf-8") as stream:
-        os.chmod(temporary, 0o600)
-        json.dump(payload, stream, sort_keys=True, separators=(",", ":"))
-        stream.write("\n")
-        stream.flush()
-        os.fsync(stream.fileno())
-    os.replace(temporary, path)
+    temporary = persistent_root / f".latest-classification-{invocation}.tmp"
+    try:
+        with temporary.open("x", encoding="utf-8") as stream:
+            os.chmod(temporary, 0o600)
+            json.dump(payload, stream, sort_keys=True, separators=(",", ":"))
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        # A failed write or replacement remains fail closed, but must not leave
+        # invocation-specific diagnostic state in the persistent coordinate.
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def run(config: dict) -> int:
@@ -663,10 +671,10 @@ def run(config: dict) -> int:
         != json.loads((runner / "sugarkube-runner-manifest.json").read_text())["browserProvenance"]
     ):
         raise Invalid("runner browser provenance")
-    root = Path(config["resultRoot"])
-    validate_dir(root, 0, account.pw_gid, 0o710)
-    invocation_dir = root / f"uid-{account.pw_uid}-{invocation}"
-    with (root / ".lock").open("a+b") as lock:
+    persistent_root = Path(config["resultRoot"])
+    validate_dir(persistent_root, 0, account.pw_gid, 0o710)
+    invocation_dir = persistent_root / f"uid-{account.pw_uid}-{invocation}"
+    with (persistent_root / ".lock").open("a+b") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
@@ -736,7 +744,7 @@ def run(config: dict) -> int:
                         child_diagnostic, completed.returncode, diagnostic_metadata
                     )
                     archive_classification(
-                        root,
+                        persistent_root,
                         invocation,
                         classification,
                         {"childStatus": completed.returncode, **metadata},

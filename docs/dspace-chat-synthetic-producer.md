@@ -179,7 +179,12 @@ configuration, test-before-completion, completion-publisher, or missing-result a
 or failure. It archives only that classification, invocation ID, child status, byte count,
 truncation and capture-complete flags, and SHA-256 in an atomically replaced, root-only
 `latest-classification.json` under
-the result root. Only the latest failure is retained, and invocation cleanup cannot remove it. Raw
+the persistent result root. This coordinate is a sibling of, never a child of, the temporary
+`uid-<service-uid>-<invocation-id>/` working directory. The unconditional invocation cleanup removes
+that working directory, while each later failure atomically replaces the single persistent record.
+Bind the record to the corresponding systemd execution by comparing its exact `invocation` value
+with the service's 32-hex `INVOCATION_ID`; do not infer the binding from timestamps. Only the latest
+failure is retained. Raw
 output is drained through a pipe, discarded beyond the bounded
 in-memory prefix, and never printed or persisted. The drain receives a bounded grace period; when
 a descendant retains the pipe, `stderrCaptureComplete` is false and the byte count, truncation
@@ -188,6 +193,13 @@ flag, and SHA-256 describe only the immutable bytes captured when that grace per
 `timeout/launch`, `missing`, `provenance`, `malformed`, executed failure, or successful publication
 before considering any retry. Do not retry while an invocation
 may remain active and never infer success from browser exit alone.
+
+The generic `current-result-missing-after-child-failure` classification means only that a nonzero
+child produced no consumable current result and matched no narrower repository-owned marker. The
+persistence correction does not identify or repair the underlying live child failure; that remains
+unclassified unless a deterministic, non-production reproduction justifies a narrower bounded
+classification. Classification records intentionally exclude raw stdout, raw stderr, credentials,
+cookies, authorization headers, browser state, and page content.
 
 When no valid current bounded result is consumable, the previous metric is preserved byte-for-byte.
 It ages into the existing stale alert, making ambiguity fail closed. A valid current failure
