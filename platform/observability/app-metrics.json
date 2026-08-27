@@ -189,6 +189,193 @@
           },
           "transferredTargetLabels": {},
           "metadataOnlyMetricFamilies": {}
+        },
+        "prod": {
+          "namespace": "tokenplace",
+          "serviceMonitorName": "tokenplace",
+          "expectedTargetCount": 1,
+          "secret": {
+            "name": "tokenplace-prod-metrics-token",
+            "key": "token"
+          },
+          "serviceMonitor": {
+            "selectorMatchLabels": {
+              "app.kubernetes.io/instance": "tokenplace",
+              "app.kubernetes.io/name": "tokenplace"
+            },
+            "path": "/metrics",
+            "interval": "30s",
+            "scrapeTimeout": "10s",
+            "authorization": {
+              "type": "Bearer",
+              "credentials": {
+                "name": "tokenplace-prod-metrics-token",
+                "key": "token"
+              }
+            },
+            "relabelings": [
+              {
+                "action": "replace",
+                "targetLabel": "app",
+                "replacement": "tokenplace"
+              },
+              {
+                "action": "replace",
+                "targetLabel": "environment",
+                "replacement": "prod"
+              },
+              {
+                "action": "replace",
+                "targetLabel": "release",
+                "replacement": "tokenplace"
+              },
+              {
+                "action": "replace",
+                "targetLabel": "cluster",
+                "replacement": "sugarkube-prod"
+              }
+            ],
+            "targetLabels": []
+          },
+          "targetLabels": {
+            "app": "tokenplace",
+            "environment": "prod",
+            "release": "tokenplace",
+            "cluster": "sugarkube-prod",
+            "namespace": "tokenplace"
+          },
+          "publicMetrics": {
+            "url": "https://token.place/metrics",
+            "expectedUnauthenticatedStatus": 401
+          },
+          "retries": {
+            "attempts": 6,
+            "delaySeconds": 10
+          },
+          "requiredMetricFamilies": [
+            "tokenplace_compute_nodes_registered",
+            "tokenplace_compute_nodes_healthy",
+            "tokenplace_compute_node_lease_age_seconds",
+            "tokenplace_compute_node_evictions_total",
+            "tokenplace_relay_queue_depth",
+            "tokenplace_relay_oldest_queued_request_age_seconds",
+            "tokenplace_relay_in_flight_requests",
+            "tokenplace_relay_oldest_in_flight_age_seconds",
+            "tokenplace_relay_request_outcomes_total",
+            "tokenplace_http_requests_total",
+            "tokenplace_http_request_duration_seconds",
+            "tokenplace_instrumentation_up",
+            "tokenplace_build_info"
+          ],
+          "allowedApplicationLabels": {
+            "app": [
+              "tokenplace"
+            ],
+            "environment": [
+              "prod"
+            ],
+            "release": [
+              "tokenplace"
+            ],
+            "cluster": [
+              "sugarkube-prod"
+            ],
+            "method": [
+              "GET",
+              "POST",
+              "PUT",
+              "PATCH",
+              "DELETE",
+              "OPTIONS",
+              "HEAD",
+              "other"
+            ],
+            "route": [
+              "/metrics",
+              "/api/v1/relay/requests",
+              "/api/v1/relay/requests/cancel",
+              "/api/v1/relay/responses",
+              "/api/v1/relay/responses/retrieve",
+              "/api/v1/relay/progress",
+              "/api/v1/relay/servers/register",
+              "/api/v1/relay/servers/unregister",
+              "/api/v1/relay/servers/poll",
+              "/api/v1/relay/servers/control",
+              "/api/v1/relay/servers/next",
+              "/healthz",
+              "/livez",
+              "/relay/diagnostics",
+              "/api/v1/*",
+              "/api/v2/*",
+              "other"
+            ],
+            "status_class": [
+              "1xx",
+              "2xx",
+              "3xx",
+              "4xx",
+              "5xx",
+              "unknown"
+            ],
+            "provider_mode": [
+              "relay",
+              "direct",
+              "unknown"
+            ],
+            "outcome": [
+              "completed",
+              "cancelled",
+              "expired",
+              "timed_out",
+              "rate_limited",
+              "dependency_failure",
+              "failed"
+            ],
+            "reason": [
+              "stale_lease",
+              "unregistered",
+              "capacity_loss"
+            ]
+          },
+          "forbiddenApplicationLabels": [
+            "authorization",
+            "bearer",
+            "cookie",
+            "email",
+            "hostname",
+            "jwt",
+            "node",
+            "passwd",
+            "passcode",
+            "remote_addr",
+            "secret",
+            "session",
+            "token",
+            "url",
+            "user"
+          ],
+          "derivedApplicationLabels": {
+            "version": {
+              "workload": {
+                "kind": "Deployment",
+                "name": "tokenplace"
+              },
+              "container": "relay",
+              "env": "TOKENPLACE_IMAGE_TAG",
+              "normalizer": "identity"
+            },
+            "revision": {
+              "workload": {
+                "kind": "Deployment",
+                "name": "tokenplace"
+              },
+              "container": "relay",
+              "env": "TOKENPLACE_IMAGE_TAG",
+              "normalizer": "identity"
+            }
+          },
+          "transferredTargetLabels": {},
+          "metadataOnlyMetricFamilies": {}
         }
       }
     },

@@ -364,7 +364,15 @@ spec:
     - host: ${{host}}
 YAML
     if [[ "$*" == *charts/tokenplace* ]]; then
-      cat <<'YAML'
+      metrics_environment=staging
+      metrics_cluster=sugarkube-int
+      metrics_secret=tokenplace-staging-metrics-token
+      if [[ "$*" == *tokenplace.values.prod.yaml* ]]; then
+        metrics_environment=prod
+        metrics_cluster=sugarkube-prod
+        metrics_secret=tokenplace-prod-metrics-token
+      fi
+      cat <<YAML
 ---
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
@@ -387,7 +395,7 @@ spec:
       authorization:
         type: Bearer
         credentials:
-          name: tokenplace-staging-metrics-token
+          name: $metrics_secret
           key: token
       relabelings:
         - action: replace
@@ -395,13 +403,13 @@ spec:
           replacement: tokenplace
         - action: replace
           targetLabel: environment
-          replacement: staging
+          replacement: $metrics_environment
         - action: replace
           targetLabel: release
           replacement: tokenplace
         - action: replace
           targetLabel: cluster
-          replacement: sugarkube-int
+          replacement: $metrics_cluster
 YAML
     fi
     if [ "${{app}}" = dspace ] && [[ "$*" == *dspace.values.staging.yaml* ]]; then

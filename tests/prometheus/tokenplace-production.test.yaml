@@ -1,0 +1,158 @@
+rule_files:
+  - ../../platform/observability/rules/tokenplace-production.yaml
+evaluation_interval: 1m
+tests:
+  - name: explicit_zero_fires_and_recovers
+    interval: 1m
+    input_series:
+      - series: tokenplace_compute_nodes_healthy{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"}
+        values: 0x6 1x5
+      - series: up{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace",service="tokenplace-metrics",pod="relay-0",instance="relay-0"}
+        values: 1x11
+      - series: tokenplace_instrumentation_up{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"}
+        values: 1x11
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: TokenplaceNoHealthyComputeNodes
+        exp_alerts:
+          - exp_labels: &zero_labels
+              app: tokenplace
+              application: tokenplace
+              environment: prod
+              cluster: sugarkube-prod
+              namespace: tokenplace
+              release: tokenplace
+              severity: critical
+            exp_annotations: &zero_annotations
+              summary: token.place production has no healthy compute nodes
+              description: The relay has explicitly reported zero lease-healthy compute nodes while its scrape and instrumentation telemetry remain healthy.
+              remediation: Restore and register the production Mac Mini compute node, then confirm its lease and healthy-node count recover.
+              runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/apps/tokenplace.md#production-compute-capacity-paging
+      - eval_time: 7m
+        alertname: TokenplaceNoHealthyComputeNodes
+        exp_alerts: []
+  - name: positive_healthy_count_never_fires
+    interval: 1m
+    input_series:
+      - series: tokenplace_compute_nodes_healthy{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"}
+        values: 1x10
+      - series: up{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"}
+        values: 1x10
+      - series: tokenplace_instrumentation_up{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"}
+        values: 1x10
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: TokenplaceNoHealthyComputeNodes
+        exp_alerts: []
+  - name: missing_or_unhealthy_telemetry_never_becomes_zero
+    interval: 1m
+    input_series:
+      - series: up{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"}
+        values: 1x10
+      - series: tokenplace_instrumentation_up{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"}
+        values: 1x10
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: TokenplaceNoHealthyComputeNodes
+        exp_alerts: []
+  - name: scrape_down_blocks_zero_capacity
+    interval: 1m
+    input_series: &zero_with_bad_scrape
+      - series: tokenplace_compute_nodes_healthy{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"}
+        values: 0x12
+      - series: up{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace",service="tokenplace-metrics",pod="relay-0",instance="relay-0"}
+        values: 0x12
+      - series: tokenplace_instrumentation_up{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"}
+        values: 1x12
+      - series: kube_pod_container_status_ready{namespace="tokenplace",pod="relay-0",container="relay"}
+        values: 1x12
+      - series: kube_pod_status_phase{namespace="tokenplace",pod="relay-0",phase="Running"}
+        values: 1x12
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: TokenplaceNoHealthyComputeNodes
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: TokenplaceMetricsTargetDown
+        exp_alerts:
+          - exp_labels:
+              app: tokenplace
+              application: tokenplace
+              environment: prod
+              cluster: sugarkube-prod
+              namespace: tokenplace
+              release: tokenplace
+              service: tokenplace-metrics
+              pod: relay-0
+              instance: relay-0
+              severity: critical
+            exp_annotations: &down_annotations
+              summary: Prometheus has no healthy token.place production metrics target
+              description: The production workload is running but its authenticated metrics target is down or undiscovered; this does not prove compute capacity is zero.
+              remediation: Check ServiceMonitor discovery, the metrics Secret reference, target health, and network policy without reading the credential.
+              runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/apps/tokenplace.md#tokenplacemetricstargetdown
+  - name: instrumentation_down_blocks_zero_capacity
+    interval: 1m
+    input_series:
+      - series: tokenplace_compute_nodes_healthy{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"}
+        values: 0x10
+      - series: up{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"}
+        values: 1x10
+      - series: tokenplace_instrumentation_up{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"}
+        values: 0x10
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: TokenplaceNoHealthyComputeNodes
+        exp_alerts: []
+  - name: nonproduction_or_wrong_identity_cannot_trigger
+    interval: 1m
+    input_series:
+      - series: tokenplace_compute_nodes_healthy{app="tokenplace",environment="staging",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"}
+        values: 0x10
+      - series: tokenplace_compute_nodes_healthy{app="wrong",application="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"}
+        values: 0x10
+      - series: tokenplace_compute_nodes_healthy{app="tokenplace",environment="prod",cluster="wrong",namespace="tokenplace",release="tokenplace"}
+        values: 0x10
+      - series: tokenplace_compute_nodes_healthy{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="wrong",release="tokenplace"}
+        values: 0x10
+      - series: tokenplace_compute_nodes_healthy{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="wrong"}
+        values: 0x10
+      - series: up{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"}
+        values: 1x10
+      - series: tokenplace_instrumentation_up{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"}
+        values: 1x10
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: TokenplaceNoHealthyComputeNodes
+        exp_alerts: []
+  - name: target_healthy_and_recovery
+    interval: 1m
+    input_series:
+      - series: up{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace",service="tokenplace-metrics",pod="relay-0",instance="relay-0"}
+        values: 1x3 0x11 1x3
+      - series: kube_pod_container_status_ready{namespace="tokenplace",pod="relay-0",container="relay"}
+        values: 1x17
+      - series: kube_pod_status_phase{namespace="tokenplace",pod="relay-0",phase="Running"}
+        values: 1x17
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: TokenplaceMetricsTargetDown
+        exp_alerts: []
+      - eval_time: 14m
+        alertname: TokenplaceMetricsTargetDown
+        exp_alerts:
+          - exp_labels:
+              app: tokenplace
+              application: tokenplace
+              environment: prod
+              cluster: sugarkube-prod
+              namespace: tokenplace
+              release: tokenplace
+              service: tokenplace-metrics
+              pod: relay-0
+              instance: relay-0
+              severity: critical
+            exp_annotations: *down_annotations
+      - eval_time: 16m
+        alertname: TokenplaceMetricsTargetDown
+        exp_alerts: []

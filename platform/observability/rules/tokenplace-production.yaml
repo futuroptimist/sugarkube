@@ -1,0 +1,31 @@
+---
+groups:
+  - name: tokenplace-production-capacity
+    interval: 1m
+    rules:
+      - alert: TokenplaceNoHealthyComputeNodes
+        expr: tokenplace_compute_nodes_healthy{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"} == 0 and on (app, environment, cluster, namespace, release) up{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"} == 1 and on (app, environment, cluster, namespace, release) tokenplace_instrumentation_up{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"} == 1
+        for: 5m
+        labels:
+          application: tokenplace
+          environment: prod
+          cluster: sugarkube-prod
+          severity: critical
+        annotations:
+          summary: token.place production has no healthy compute nodes
+          description: The relay has explicitly reported zero lease-healthy compute nodes while its scrape and instrumentation telemetry remain healthy.
+          remediation: Restore and register the production Mac Mini compute node, then confirm its lease and healthy-node count recover.
+          runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/apps/tokenplace.md#production-compute-capacity-paging
+      - alert: TokenplaceMetricsTargetDown
+        expr: (up{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"} == 0) or label_replace(((kube_pod_container_status_ready{namespace="tokenplace",container="relay"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace="tokenplace",phase="Running"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace="tokenplace"}) unless on (namespace, pod) up{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"}), "instance", "unknown", "", "")
+        for: 10m
+        labels:
+          application: tokenplace
+          environment: prod
+          cluster: sugarkube-prod
+          severity: critical
+        annotations:
+          summary: Prometheus has no healthy token.place production metrics target
+          description: The production workload is running but its authenticated metrics target is down or undiscovered; this does not prove compute capacity is zero.
+          remediation: Check ServiceMonitor discovery, the metrics Secret reference, target health, and network policy without reading the credential.
+          runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/apps/tokenplace.md#tokenplacemetricstargetdown

@@ -386,3 +386,81 @@ recipe.
 Dashboards, alert rules, functional schedulability, shared state, and live drills
 remain follow-ups that require live metrics evidence. This Phase 1 support does
 not implement `/api/v1/relay/availability` or any Phase 2 relay behavior.
+
+## Production compute-capacity paging
+
+Production metrics use the authenticated contract in
+`platform/observability/app-metrics.json`. Before deploying token.place, create
+`tokenplace/tokenplace-prod-metrics-token` with the `token` key through the
+existing hidden-input recipe; it never prints or decodes the value:
+
+```bash
+just observability-app-metrics-secret-install app=tokenplace env=prod
+just observability-app-metrics-secret-check app=tokenplace env=prod
+```
+
+Deploy the pinned token.place chart with `docs/examples/tokenplace.values.prod.yaml`
+only after that check succeeds. Then verify the ServiceMonitor, target, required
+families, bounded labels, and unauthenticated public `401` response:
+
+```bash
+just app-deploy app=tokenplace env=prod
+just observability-app-metrics-verify app=tokenplace env=prod
+curl -o /dev/null -sS -w '%{http_code}\n' https://token.place/metrics
+```
+
+The chat UI's **Live compute nodes** reads
+`total_api_v1_registered_compute_nodes` from `/relay/diagnostics` after stale
+registrations have been evicted. `tokenplace_compute_nodes_healthy` is the
+Prometheus paging signal for the same lease-based usable capacity. A continuous,
+explicit zero with a healthy scrape and `tokenplace_instrumentation_up == 1`
+fires `TokenplaceNoHealthyComputeNodes` after five minutes, regardless of queue
+or current demand. Missing, stale, undiscovered, or failed telemetry does not
+become a zero; `TokenplaceMetricsTargetDown` separately fires after ten minutes
+when a running relay has a down or missing scrape target.
+
+### Production queries
+
+Use these queries without inspecting the metrics credential:
+
+```promql
+tokenplace_compute_nodes_healthy{environment="prod",cluster="sugarkube-prod"}
+tokenplace_compute_nodes_registered{environment="prod",cluster="sugarkube-prod"}
+tokenplace_compute_node_lease_age_seconds{environment="prod",cluster="sugarkube-prod"}
+tokenplace_instrumentation_up{environment="prod",cluster="sugarkube-prod"}
+up{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"}
+tokenplace_relay_queue_depth{environment="prod",cluster="sugarkube-prod"}
+rate(tokenplace_compute_node_evictions_total{environment="prod",cluster="sugarkube-prod"}[15m])
+```
+
+If capacity is zero, confirm the Mac Mini is powered and network-connected,
+start its existing production compute-node service using the host's documented
+local service manager, confirm it points to `https://token.place`, and verify a
+fresh registration and lease in diagnostics and the queries above. Do not copy
+host login, relay, or model-provider credentials into tickets, commands, or this
+repository. If the relay changed immediately before the loss, use the normal
+immutable application rollback only after ruling out the compute host.
+
+### TokenplaceMetricsTargetDown
+
+For a target-down page, check Prometheus target discovery, the ServiceMonitor
+selector and bearer Secret name/key contract, relay pod readiness, and network
+policy. Do not diagnose zero compute capacity from missing metrics. Acknowledge
+the distinct PagerDuty incident, restore scrape health, and confirm both the
+Prometheus alert and PagerDuty incident resolve via `send_resolved: true`.
+
+### PagerDuty drill and rollback
+
+After merge and deployment, conduct one controlled drill during an approved
+window: stop or unregister the production compute node, wait at least five
+continuous minutes for `TokenplaceNoHealthyComputeNodes` and its PagerDuty
+incident, acknowledge it, restore and register the node, and confirm the alert
+and incident resolve. Document the evidence; this repository change does not
+perform the drill or send a test event.
+
+To roll back only paging, remove the exact token.place Alertmanager child route
+and `pagerduty-tokenplace` receiver while leaving the watchdog route untouched;
+or disable only the `tokenplace-production` rules overlay. For a full rollback,
+revert the observability revision and render/deploy that revision through the
+normal guarded production lifecycle. Never delete or alter the Healthchecks
+watchdog Secret, route, or check as part of this rollback.

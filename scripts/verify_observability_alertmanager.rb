@@ -8,6 +8,7 @@ PD_SECRET = "alertmanager-pagerduty"
 HC_SECRET = "alertmanager-healthchecks-watchdog"
 PD_RECEIVER = "pagerduty-synthetic-test"
 DSPACE_RECEIVER = "pagerduty-dspace"
+TOKENPLACE_RECEIVER = "pagerduty-tokenplace"
 HC_RECEIVER = "healthchecks-watchdog"
 PD_PATH = "/etc/alertmanager/secrets/alertmanager-pagerduty/routing-key"
 HC_PATH = "/etc/alertmanager/secrets/alertmanager-healthchecks-watchdog/ping-url"
@@ -62,15 +63,16 @@ route = config["route"]
 fail_closed('root receiver must remain "null"') unless route.is_a?(Hash) && route["receiver"] == "null"
 fail_closed("root route must contain only its receiver and exact child routes") unless route.keys.sort == %w[receiver routes]
 children = route["routes"]
-expected_route_count = 4
+expected_route_count = environment == "prod" ? 5 : 4
 fail_closed("root must have exactly the environment's allowlisted direct-child routes") unless children.is_a?(Array) && children.length == expected_route_count
 receivers = config["receivers"]
-expected_receiver_count = 4
+expected_receiver_count = environment == "prod" ? 5 : 4
 fail_closed("receiver list does not match the environment's exact integration allowlist") unless receivers.is_a?(Array) && receivers.length == expected_receiver_count && receivers.all? { |x| x.is_a?(Hash) }
 fail_closed('root "null" receiver is missing or broadened') unless receivers.count { |x| x == { "name" => "null" } } == 1
 
 pd_receivers = receivers.select { |x| x.key?("pagerduty_configs") }
 expected_pd_names = [PD_RECEIVER, DSPACE_RECEIVER]
+expected_pd_names << TOKENPLACE_RECEIVER if environment == "prod"
 fail_closed("PagerDuty receiver names changed") unless pd_receivers.map { |x| x["name"] }.sort == expected_pd_names.sort
 pd_receivers.each do |pd|
   fail_closed("PagerDuty receiver is malformed") unless pd.keys.sort == %w[name pagerduty_configs]
@@ -87,7 +89,11 @@ webhooks = hc["webhook_configs"]
 expected_webhook = { "url_file" => HC_PATH, "send_resolved" => false, "max_alerts" => 1, "timeout" => "10s" }
 fail_closed("Healthchecks webhook must use the exact file, resolution, timeout, and alert limit") unless webhooks == [expected_webhook]
 
-ds_route, cloudflare_route, pd_route, hc_route = children
+if environment == "prod"
+  ds_route, cloudflare_route, tokenplace_route, pd_route, hc_route = children
+else
+  ds_route, cloudflare_route, pd_route, hc_route = children
+end
 label_environment = environment
 cluster = environment == "staging" ? "sugarkube-int" : "sugarkube-prod"
 pd_matchers = ['alertname="SugarkubePagerDutyTest"', "environment=\"#{label_environment}\"",
@@ -96,6 +102,9 @@ hc_matchers = ['alertname="SugarkubeObservabilityWatchdog"', "environment=\"#{la
                "cluster=\"#{cluster}\"", 'purpose="observability-watchdog"']
 dspace_matchers = ['alertname=~"^(DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown)$"',
                    "environment=\"#{label_environment}\"", "cluster=\"#{cluster}\"", 'severity="critical"']
+tokenplace_matchers = ['alertname=~"^(TokenplaceNoHealthyComputeNodes|TokenplaceMetricsTargetDown)$"',
+                       'application="tokenplace"', 'environment="prod"',
+                       'cluster="sugarkube-prod"', 'severity="critical"']
 cloudflare_matchers = ['alertname="CloudflareTunnelNoHealthyConnections"',
                        "environment=\"#{label_environment}\"", "cluster=\"#{cluster}\"", 'severity="critical"']
 fail_closed("DSPACE route ordering or receiver changed") unless ds_route["receiver"] == DSPACE_RECEIVER
@@ -104,6 +113,11 @@ fail_closed("DSPACE route must contain only receiver and exact matchers") unless
 fail_closed("Cloudflare route ordering or receiver changed") unless cloudflare_route["receiver"] == DSPACE_RECEIVER
 fail_closed("Cloudflare route matchers are not the exact critical allowlist") unless cloudflare_route["matchers"].is_a?(Array) && cloudflare_route["matchers"].sort == cloudflare_matchers.sort
 fail_closed("Cloudflare route must contain only receiver and exact matchers") unless cloudflare_route.keys.sort == %w[matchers receiver]
+if environment == "prod"
+  fail_closed("token.place route ordering or receiver changed") unless tokenplace_route["receiver"] == TOKENPLACE_RECEIVER
+  fail_closed("token.place route matchers are not the exact production alert allowlist") unless tokenplace_route["matchers"].is_a?(Array) && tokenplace_route["matchers"].sort == tokenplace_matchers.sort
+  fail_closed("token.place route must contain only receiver and exact matchers") unless tokenplace_route.keys.sort == %w[matchers receiver]
+end
 fail_closed("PagerDuty route ordering or receiver changed") unless pd_route["receiver"] == PD_RECEIVER
 fail_closed("PagerDuty route matchers are not the exact synthetic allowlist") unless pd_route["matchers"].is_a?(Array) && pd_route["matchers"].sort == pd_matchers.sort
 fail_closed("PagerDuty route must contain only receiver and exact matchers") unless pd_route.keys.sort == %w[matchers receiver]

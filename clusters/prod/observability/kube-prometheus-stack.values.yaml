@@ -47,6 +47,13 @@ alertmanager:
             - environment="prod"
             - cluster="sugarkube-prod"
             - severity="critical"
+        - receiver: pagerduty-tokenplace
+          matchers:
+            - alertname=~"^(TokenplaceNoHealthyComputeNodes|TokenplaceMetricsTargetDown)$"
+            - application="tokenplace"
+            - environment="prod"
+            - cluster="sugarkube-prod"
+            - severity="critical"
         - receiver: pagerduty-synthetic-test
           matchers:
             - alertname="SugarkubePagerDutyTest"
@@ -71,6 +78,10 @@ alertmanager:
           - routing_key_file: /etc/alertmanager/secrets/alertmanager-pagerduty/routing-key
             send_resolved: true
       - name: pagerduty-dspace
+        pagerduty_configs:
+          - routing_key_file: /etc/alertmanager/secrets/alertmanager-pagerduty/routing-key
+            send_resolved: true
+      - name: pagerduty-tokenplace
         pagerduty_configs:
           - routing_key_file: /etc/alertmanager/secrets/alertmanager-pagerduty/routing-key
             send_resolved: true
