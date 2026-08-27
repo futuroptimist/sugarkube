@@ -63,6 +63,25 @@ def command(*argv: str, cwd: Path | None = None) -> str:
     return subprocess.run(argv, cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
 
 
+def systemd_service_value(unit: str, directive: str) -> str | None:
+    """Return the last active value assigned to a service directive."""
+    section = ""
+    value = None
+    for raw_line in unit.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith(("#", ";")):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            section = line[1:-1].strip()
+            continue
+        if section != "Service" or "=" not in line:
+            continue
+        key, candidate = line.split("=", 1)
+        if key.strip() == directive:
+            value = candidate.strip()
+    return value
+
+
 def verify_source(source: Path, revision: str, identity: str) -> None:
     if not REVISION.fullmatch(revision) or not (source / ".git").is_dir():
         raise ValueError("complete Git metadata and an exact commit are required")
@@ -258,6 +277,9 @@ def validate(tree: Path) -> dict[str, str]:
         not in (tree / "etc/systemd/system/dspace-chat-synthetic.timer").read_text()
     ):
         raise ValueError("timer is not persistent")
+    service = (tree / "etc/systemd/system/dspace-chat-synthetic.service").read_text()
+    if systemd_service_value(service, "RuntimeDirectoryPreserve") != "yes":
+        raise ValueError("classification runtime directory is not preserved")
     return manifest
 
 

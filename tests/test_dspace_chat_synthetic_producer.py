@@ -1277,6 +1277,57 @@ def test_classification_archive_replaces_prior_record_without_growth(tmp_path: P
     assert json.loads(records[0].read_text())["invocation"] == "b" * 32
 
 
+def test_classification_archive_failure_preserves_prior_record_and_removes_temporary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "results"
+    root.mkdir()
+    prior = root / "latest-classification.json"
+    prior.write_text('{"invocation":"prior"}\n')
+    prior.chmod(0o600)
+
+    monkeypatch.setattr(
+        runtime.os,
+        "replace",
+        lambda *_args: (_ for _ in ()).throw(OSError("bounded fixture failure")),
+    )
+    with pytest.raises(OSError, match="bounded fixture failure"):
+        runtime.archive_classification(
+            root,
+            "d" * 32,
+            "current-result-missing-after-child-failure",
+            {"childStatus": 1},
+        )
+
+    assert prior.read_text() == '{"invocation":"prior"}\n'
+    assert not list(root.glob(".latest-classification-*.tmp"))
+
+
+def test_classification_archive_cleanup_does_not_mask_primary_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "results"
+    root.mkdir()
+    monkeypatch.setattr(
+        runtime.os,
+        "replace",
+        lambda *_args: (_ for _ in ()).throw(OSError("primary replace failure")),
+    )
+    monkeypatch.setattr(
+        Path,
+        "unlink",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("cleanup failure")),
+    )
+
+    with pytest.raises(OSError, match="primary replace failure"):
+        runtime.archive_classification(
+            root,
+            "e" * 32,
+            "current-result-missing-after-child-failure",
+            {"childStatus": 1},
+        )
+
+
 def test_bounded_stderr_run_waits_for_complete_diagnostic_metadata() -> None:
     diagnostic = b"diagnostic" * (runtime.MAX_CHILD_DIAGNOSTIC_BYTES // 2)
 
@@ -1378,6 +1429,45 @@ def test_missing_result_keeps_metric_cleans_invocation_and_bounds_latest_evidenc
     assert "credential" not in contents
     assert "payload" not in contents
     assert "private" not in contents
+    assert stat.S_IMODE(records[0].stat().st_mode) == 0o600
+    assert json.loads(contents) == {
+        "schemaVersion": 1,
+        "invocation": "c" * 32,
+        "classification": "current-result-missing-after-child-failure",
+        "childStatus": 1,
+        **metadata,
+    }
+
+
+def test_missing_result_archive_failure_remains_fail_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    value, metric, _sibling, calls = prepare_runtime_run(tmp_path, monkeypatch, "missing")
+    monkeypatch.setattr(
+        runtime,
+        "bounded_stderr_run",
+        lambda argv, **_kwargs: (
+            subprocess.CompletedProcess(argv, 1),
+            b"opaque failure",
+            {
+                "stderrBytes": 14,
+                "stderrSha256": "f" * 64,
+                "stderrTruncated": False,
+                "stderrCaptureComplete": True,
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "archive_classification",
+        lambda *_args: (_ for _ in ()).throw(OSError("bounded fixture failure")),
+    )
+
+    assert runtime.run(value) == 1
+    assert "reason=execution-error" in capsys.readouterr().out
+    assert metric.read_bytes() == b"previous metric\n"
+    assert not any(call["argv"][0] == "/usr/bin/python3" for call in calls)
+    assert not (Path(value["resultRoot"]) / f"uid-{os.getuid()}-{'a' * 32}").exists()
 
 
 def test_runtime_browser_drift_blocks_playwright_and_preserves_metric(
@@ -3414,6 +3504,7 @@ def test_units_are_bounded_persistent_hardened_and_never_implicitly_activated() 
     assert "Type=oneshot" in service and "TimeoutStartSec=300" in service
     assert "RuntimeDirectory=sugarkube/dspace-chat-synthetic" in service
     assert "RuntimeDirectoryMode=0710" in service and "Group=pi" in service
+    assert "RuntimeDirectoryPreserve=yes" in service
     assert "ProtectSystem=strict" in service and "Persistent=true" in timer
     for mutation in (
         "systemctl enable",
@@ -3423,6 +3514,48 @@ def test_units_are_bounded_persistent_hardened_and_never_implicitly_activated() 
         "systemctl disable",
     ):
         assert mutation not in install
+
+
+def test_installer_rejects_assets_that_lose_classification_runtime_preservation(
+    tmp_path: Path,
+) -> None:
+    staged = tmp_path / "staged"
+    installer.render(staged)
+    service = staged / "etc/systemd/system/dspace-chat-synthetic.service"
+    service.write_text(service.read_text().replace("RuntimeDirectoryPreserve=yes\n", ""))
+    manifest = json.loads((staged / "manifest.json").read_text())
+    relative = "etc/systemd/system/dspace-chat-synthetic.service"
+    manifest[relative] = installer.sha(service)
+    (staged / "manifest.json").write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n")
+
+    with pytest.raises(ValueError, match="classification runtime directory is not preserved"):
+        installer.validate(staged)
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    (
+        "# RuntimeDirectoryPreserve=yes\n",
+        "; RuntimeDirectoryPreserve=yes\n",
+        "RuntimeDirectoryPreserve=no\n# RuntimeDirectoryPreserve=yes\n",
+        "RuntimeDirectoryPreserve=yes\nRuntimeDirectoryPreserve=no\n",
+        "[Unit]\nRuntimeDirectoryPreserve=yes\n",
+    ),
+)
+def test_installer_rejects_inactive_runtime_preservation_directives(
+    tmp_path: Path, replacement: str
+) -> None:
+    staged = tmp_path / "staged"
+    installer.render(staged)
+    service = staged / "etc/systemd/system/dspace-chat-synthetic.service"
+    service.write_text(service.read_text().replace("RuntimeDirectoryPreserve=yes\n", replacement))
+    manifest = json.loads((staged / "manifest.json").read_text())
+    relative = "etc/systemd/system/dspace-chat-synthetic.service"
+    manifest[relative] = installer.sha(service)
+    (staged / "manifest.json").write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n")
+
+    with pytest.raises(ValueError, match="classification runtime directory is not preserved"):
+        installer.validate(staged)
 
 
 def test_lifecycle_is_single_shot_owner_scoped_bounded_and_redacted() -> None:

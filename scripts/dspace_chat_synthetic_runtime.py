@@ -635,13 +635,19 @@ def archive_classification(
         **metadata,
     }
     temporary = root / f".latest-classification-{invocation}.tmp"
-    with temporary.open("x", encoding="utf-8") as stream:
-        os.chmod(temporary, 0o600)
-        json.dump(payload, stream, sort_keys=True, separators=(",", ":"))
-        stream.write("\n")
-        stream.flush()
-        os.fsync(stream.fileno())
-    os.replace(temporary, path)
+    try:
+        with temporary.open("x", encoding="utf-8") as stream:
+            os.chmod(temporary, 0o600)
+            json.dump(payload, stream, sort_keys=True, separators=(",", ":"))
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        try:
+            temporary.unlink()
+        except OSError:
+            pass
 
 
 def run(config: dict) -> int:
