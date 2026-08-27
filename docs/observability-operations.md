@@ -849,8 +849,17 @@ just observability-app-metrics-verify app=tokenplace env=staging
 ```
 
 `just observability-verify env=staging` also runs every configured application
-metrics verifier after the existing DSPACE checks. Production application metrics
-verification is intentionally rejected until production observability is codified.
+metrics verifier after the existing DSPACE checks. Production token.place uses the
+same credential-safe lifecycle with `env=prod`, as detailed below.
 Merging this repository support does not deploy any application, create any
 Secret, dashboard, alert rule, schedulability check, shared-state check, or live
 drill.
+
+## Production token.place capacity paging
+
+Production token.place authenticated metrics, the distinct zero-capacity and missing-target alerts,
+secure deployment order, Prometheus queries, Mac Mini recovery, PagerDuty checks, rollback, and the
+documentation-only controlled drill are maintained in the
+[token.place production capacity runbook](observability-tokenplace-production.md). These critical
+alerts use an exact production-only PagerDuty route; the observability watchdog remains exclusively
+routed to Healthchecks.io.

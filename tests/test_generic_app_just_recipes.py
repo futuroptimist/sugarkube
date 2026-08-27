@@ -5897,6 +5897,17 @@ def test_observability_app_metrics_inventory_tokenplace_contract_is_strict_and_c
         },
     }
     assert "token" in cfg["forbiddenApplicationLabels"]
+    prod = doc["applications"]["tokenplace"]["environments"]["prod"]
+    assert prod["secret"] == {"name": "tokenplace-prod-metrics-token", "key": "token"}
+    assert prod["serviceMonitor"]["authorization"]["credentials"] == prod["secret"]
+    assert prod["publicMetrics"]["url"] == "https://token.place/metrics"
+    assert prod["targetLabels"] == {
+        "app": "tokenplace",
+        "environment": "prod",
+        "release": "tokenplace",
+        "cluster": "sugarkube-prod",
+        "namespace": "tokenplace",
+    }
 
 
 def test_observability_app_metrics_inventory_accepts_both_canonical_relabeling_forms():
@@ -7974,9 +7985,9 @@ def test_observability_app_metrics_install_secret_subprocess_failures_are_redact
         (lambda d: d.update({"applications": []}), "applications"),
         (
             lambda d: d["applications"]["tokenplace"]["environments"].update(
-                {"prod": {}}
+                {"production": {}}
             ),
-            "only staging",
+            "environment is unsupported",
         ),
         (
             lambda d: d["applications"]["tokenplace"]["environments"][

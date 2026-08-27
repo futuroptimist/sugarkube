@@ -216,9 +216,21 @@ def test_production_values_have_exact_safe_overrides_without_public_exposure_or_
         "alertmanager-pagerduty", "alertmanager-healthchecks-watchdog"
     ]
     assert prod["alertmanager"]["config"]["route"]["receiver"] == "null"
-    assert len(prod["alertmanager"]["config"]["route"]["routes"]) == 4
+    routes = prod["alertmanager"]["config"]["route"]["routes"]
+    assert len(routes) == 5
+    assert routes[0] == {
+        "receiver": "pagerduty-tokenplace",
+        "matchers": [
+            'alertname=~"^(TokenplaceNoHealthyComputeNodes|TokenplaceMetricsTargetDown)$"',
+            'application="tokenplace"',
+            'environment="prod"',
+            'cluster="sugarkube-prod"',
+            'severity="critical"',
+        ],
+    }
     assert {receiver["name"] for receiver in prod["alertmanager"]["config"]["receivers"]} == {
-        "null", "pagerduty-synthetic-test", "pagerduty-dspace", "healthchecks-watchdog"
+        "null", "pagerduty-synthetic-test", "pagerduty-dspace", "pagerduty-tokenplace",
+        "healthchecks-watchdog"
     }
     text = COMMON.read_text(encoding="utf-8") + PROD.read_text(encoding="utf-8")
     forbidden = [
@@ -3152,6 +3164,10 @@ def alertmanager_receivers_for_labels(config, labels):
 def test_production_alertmanager_routes_exact_eligible_label_sets():
     config = yaml_load(PROD)["alertmanager"]["config"]
     base = {"environment": "prod", "cluster": "sugarkube-prod", "severity": "critical"}
+    for alertname in ("TokenplaceNoHealthyComputeNodes", "TokenplaceMetricsTargetDown"):
+        assert alertmanager_receivers_for_labels(
+            config, {**base, "application": "tokenplace", "alertname": alertname}
+        ) == ["pagerduty-tokenplace"]
     for alertname in DSPACE_ALERT_NAMES:
         assert alertmanager_receivers_for_labels(config, {**base, "alertname": alertname}) == [
             "pagerduty-dspace"
@@ -3174,6 +3190,8 @@ def test_production_alertmanager_routes_exact_eligible_label_sets():
         {**base, "alertname": DSPACE_ALERT_NAMES[0], "environment": "staging"},
         {**base, "alertname": DSPACE_ALERT_NAMES[0], "cluster": "sugarkube-int"},
         {**base, "alertname": DSPACE_ALERT_NAMES[0], "severity": "warning"},
+        {**base, "application": "tokenplace", "alertname": "TokenplaceUnexpectedAlert"},
+        {**base, "application": "wrong", "alertname": "TokenplaceNoHealthyComputeNodes"},
     ):
         assert alertmanager_receivers_for_labels(config, labels) == ["null"]
 
@@ -3181,8 +3199,8 @@ def test_production_alertmanager_routes_exact_eligible_label_sets():
 def test_production_alertmanager_has_exact_routes_and_file_backed_receivers():
     config = yaml_load(PROD)["alertmanager"]["config"]
     assert [route["receiver"] for route in config["route"]["routes"]] == [
-        "pagerduty-dspace", "pagerduty-dspace", "pagerduty-synthetic-test",
-        "healthchecks-watchdog",
+        "pagerduty-tokenplace", "pagerduty-dspace", "pagerduty-dspace",
+        "pagerduty-synthetic-test", "healthchecks-watchdog",
     ]
     assert config["receivers"] == [
         {"name": "null"},
@@ -3191,6 +3209,10 @@ def test_production_alertmanager_has_exact_routes_and_file_backed_receivers():
             "send_resolved": True,
         }]},
         {"name": "pagerduty-dspace", "pagerduty_configs": [{
+            "routing_key_file": "/etc/alertmanager/secrets/alertmanager-pagerduty/routing-key",
+            "send_resolved": True,
+        }]},
+        {"name": "pagerduty-tokenplace", "pagerduty_configs": [{
             "routing_key_file": "/etc/alertmanager/secrets/alertmanager-pagerduty/routing-key",
             "send_resolved": True,
         }]},

@@ -1,5 +1,5 @@
 # Staging-only non-Flux kube-prometheus-stack overrides.
-# Production observability values are intentionally not codified yet.
+# Production uses a separate overlay; keep this file staging-only.
 prometheus:
   prometheusSpec:
     externalLabels:
