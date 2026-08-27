@@ -298,7 +298,7 @@ def validate_inventory(doc):
         for env, cfg in environments.items():
             if env not in {"staging", "prod"}:
                 fail("application metrics environment is unsupported")
-            if env == "prod" and app != "dspace":
+            if env == "prod" and app not in {"dspace", "tokenplace"}:
                 fail("only staging app metrics verification is supported for this application")
             expect_keys(
                 cfg,

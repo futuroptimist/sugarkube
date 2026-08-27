@@ -281,7 +281,7 @@ Minimum gate for token.place v0.1.2:
 - Release identity: `tokenplace_build_info{version,revision,release,environment}` or equivalent.
 - ServiceMonitor/scrape hook in the chart, enabled by Sugarkube values.
 - Dashboard: relay/API availability, queue and lease health, compute-node pool health, upstream inference latency/outcomes, pod restarts, resource saturation, and release identity.
-- Alert set: public/API down, no healthy compute nodes while demand exists, queue age/depth high, stale leases not evicted, upstream dependency unavailable, crash loop, and scrape down.
+- Alert set: public/API down, no healthy production compute nodes regardless of demand, queue age/depth high, stale leases not evicted, upstream dependency unavailable, crash loop, and scrape down.
 - Relay-blind E2EE invariants: metrics, logs, dashboards, and alerts may include safe routing metadata and bounded outcomes only. They must never contain plaintext prompts/responses, ciphertext, cryptographic keys, auth headers, user identity, or raw payload sizes that can identify a user.
 
 ## 9. danielsmith.io-specific story
@@ -336,7 +336,7 @@ the canonical [`docs/observability-alerting.md`](./observability-alerting.md).
 | `PrometheusScrapeDown` | warning | `up == 0` | scrape down | 10m | ServiceMonitor mismatch, app metrics disabled | this design + app runbook | fix scrape hook; do not page if app is healthy |
 | `AlertmanagerDeliveryFailed` | warning | notification failures | >0 sustained | 15m | receiver secret/config/network | future `docs/runbooks/alertmanager.md` | fix receiver; verify test alert |
 | `DspaceDchatDependencyFailures` | warning | dChat outcome | dependency failures above baseline | 15m | token.place/downstream failures | `docs/apps/dspace.md`, `docs/apps/tokenplace.md` | fallback path or rollback related release |
-| `TokenplaceNoHealthyComputeNodes` | critical when demand exists | healthy nodes and queued work | healthy nodes 0 and queue >0 | 5m | compute nodes offline, relay registration broken | `docs/apps/tokenplace.md` | restart/register compute node; rollback relay if release-related |
+| `TokenplaceNoHealthyComputeNodes` | critical in production | lease-healthy nodes, scrape health, and instrumentation health | explicit healthy nodes 0 with healthy telemetry, regardless of demand | 5m | compute nodes offline, relay registration broken | `docs/apps/tokenplace.md` | restart/register compute node; rollback relay if release-related |
 | `TokenplaceQueueBacklog` | warning | queue age/depth | p95 age >60s or depth above staging baseline | 15m | insufficient compute, upstream slow | `docs/apps/tokenplace.md` | add/restart compute; rate-limit; rollback if regression |
 | `DanielsmithStaticProbeFailed` | warning/critical | blackbox path probes | `/` fails now; `/resume.pdf` only after the v0.1.0 root resume contract is implemented and verified | 5m | nginx/static asset/ingress issue | `docs/apps/danielsmith.md` | rollback image/tag; fix ingress if shared |
 

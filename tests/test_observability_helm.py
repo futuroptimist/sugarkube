@@ -24,6 +24,9 @@ CANONICAL_DSPACE_RULES = (
 CANONICAL_CLOUDFLARE_RULES = (
     ROOT / "platform" / "observability" / "rules" / "cloudflare-tunnel.yaml"
 )
+CANONICAL_TOKENPLACE_RULES = (
+    ROOT / "platform" / "observability" / "rules" / "tokenplace-production.yaml"
+)
 SCRIPT = ROOT / "scripts" / "observability_helm.sh"
 ALERTMANAGER_VALIDATOR = ROOT / "scripts" / "verify_observability_alertmanager.rb"
 DASHBOARD = ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
@@ -216,9 +219,10 @@ def test_production_values_have_exact_safe_overrides_without_public_exposure_or_
         "alertmanager-pagerduty", "alertmanager-healthchecks-watchdog"
     ]
     assert prod["alertmanager"]["config"]["route"]["receiver"] == "null"
-    assert len(prod["alertmanager"]["config"]["route"]["routes"]) == 4
+    assert len(prod["alertmanager"]["config"]["route"]["routes"]) == 5
     assert {receiver["name"] for receiver in prod["alertmanager"]["config"]["receivers"]} == {
-        "null", "pagerduty-synthetic-test", "pagerduty-dspace", "healthchecks-watchdog"
+        "null", "pagerduty-synthetic-test", "pagerduty-dspace", "pagerduty-tokenplace",
+        "healthchecks-watchdog"
     }
     text = COMMON.read_text(encoding="utf-8") + PROD.read_text(encoding="utf-8")
     forbidden = [
@@ -572,6 +576,29 @@ def test_dspace_rules_have_one_canonical_source_and_exact_overlay(tmp_path):
     overlay_paths = re.findall(r"/[^ ]*sugarkube-observability-rules\.[^ ]*\.yaml", audit)
     assert overlay_paths
     assert all(not Path(path).exists() for path in overlay_paths)
+
+
+def test_prod_rules_overlay_ignores_invalid_staging_only_rules(tmp_path):
+    originals = {
+        path: path.read_text(encoding="utf-8")
+        for path in (CANONICAL_DSPACE_RULES, CANONICAL_CLOUDFLARE_RULES)
+    }
+    try:
+        for path in originals:
+            path.write_text("invalid: [yaml\n", encoding="utf-8")
+        result, _ = run_helper(
+            tmp_path, "render", env_name="prod", context="sugar-prod"
+        )
+    finally:
+        for path, content in originals.items():
+            path.write_text(content, encoding="utf-8")
+
+    assert result.returncode == 0
+    assert yaml_load(tmp_path / "rules-overlay.yaml") == {
+        "additionalPrometheusRulesMap": {
+            "tokenplace-production": yaml_load(CANONICAL_TOKENPLACE_RULES)
+        }
+    }
 
 
 @pytest.mark.parametrize(
@@ -1829,12 +1856,9 @@ def test_install_and_upgrade_dashboard_arguments(tmp_path, command, helm_mode, e
     assert f"grafana.dashboards.sugarkube.{other_dashboard_uid}.json" not in mutation
 
     overlay = str(tmp_path / "sugarkube-observability-rules.")
-    if env_name == "staging":
-        assert overlay in mutation
-    else:
-        assert overlay not in mutation
-        assert str(CANONICAL_DSPACE_RULES) not in mutation
-        assert str(CANONICAL_CLOUDFLARE_RULES) not in mutation
+    assert overlay in mutation
+    assert str(CANONICAL_DSPACE_RULES) not in mutation
+    assert str(CANONICAL_CLOUDFLARE_RULES) not in mutation
 
 
 @pytest.mark.parametrize("mode", ["missing-pagerduty", "empty-pagerduty"])
@@ -3159,6 +3183,10 @@ def test_production_alertmanager_routes_exact_eligible_label_sets():
     assert alertmanager_receivers_for_labels(
         config, {**base, "alertname": "CloudflareTunnelNoHealthyConnections"}
     ) == ["pagerduty-dspace"]
+    for alertname in ("TokenplaceNoHealthyComputeNodes", "TokenplaceMetricsTargetDown"):
+        assert alertmanager_receivers_for_labels(
+            config, {**base, "application": "tokenplace", "alertname": alertname}
+        ) == ["pagerduty-tokenplace"]
     assert alertmanager_receivers_for_labels(
         config, {**base, "alertname": "SugarkubePagerDutyTest"}
     ) == ["pagerduty-synthetic-test"]
@@ -3181,8 +3209,8 @@ def test_production_alertmanager_routes_exact_eligible_label_sets():
 def test_production_alertmanager_has_exact_routes_and_file_backed_receivers():
     config = yaml_load(PROD)["alertmanager"]["config"]
     assert [route["receiver"] for route in config["route"]["routes"]] == [
-        "pagerduty-dspace", "pagerduty-dspace", "pagerduty-synthetic-test",
-        "healthchecks-watchdog",
+        "pagerduty-dspace", "pagerduty-dspace", "pagerduty-tokenplace",
+        "pagerduty-synthetic-test", "healthchecks-watchdog",
     ]
     assert config["receivers"] == [
         {"name": "null"},
@@ -3191,6 +3219,10 @@ def test_production_alertmanager_has_exact_routes_and_file_backed_receivers():
             "send_resolved": True,
         }]},
         {"name": "pagerduty-dspace", "pagerduty_configs": [{
+            "routing_key_file": "/etc/alertmanager/secrets/alertmanager-pagerduty/routing-key",
+            "send_resolved": True,
+        }]},
+        {"name": "pagerduty-tokenplace", "pagerduty_configs": [{
             "routing_key_file": "/etc/alertmanager/secrets/alertmanager-pagerduty/routing-key",
             "send_resolved": True,
         }]},
@@ -3207,8 +3239,9 @@ def test_production_offline_render_uses_only_ordered_core_values(tmp_path):
     template = next(line for line in audit.splitlines() if "helm template " in line)
     assert template.index(str(COMMON)) < template.index(str(PROD))
     assert str(PROD_DASHBOARD) in template
-    for excluded in (str(STAGING), str(DASHBOARD), "sugarkube-observability-rules"):
+    for excluded in (str(STAGING), str(DASHBOARD)):
         assert excluded not in template
+    assert "sugarkube-observability-rules" in template
     assert "kubectl" not in audit
     assert "routing_key:" not in result.stdout
     assert "url:" not in result.stdout

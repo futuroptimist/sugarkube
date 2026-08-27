@@ -318,6 +318,17 @@ spec:
     [[ "$*" != *jobbot3000.values.prod.yaml* ]] || host=jobbot3000.example.test
     [[ "$*" != *gitshelves.values.staging.yaml* ]] || host=staging.gitshelves.com
     [[ "$*" != *gitshelves.values.prod.yaml* ]] || host=gitshelves.com
+    metrics_secret=dspace-prod-metrics-token
+    deploy_environment=staging
+    metrics_cluster=sugarkube-int
+    if [[ "$*" == *charts/tokenplace* ]]; then
+      metrics_secret=tokenplace-staging-metrics-token
+      if [[ "$*" == *tokenplace.values.prod.yaml* ]]; then
+        metrics_secret=tokenplace-prod-metrics-token
+        deploy_environment=prod
+        metrics_cluster=sugarkube-prod
+      fi
+    fi
     cat <<YAML
 apiVersion: apps/v1
 kind: Deployment
@@ -335,7 +346,7 @@ spec:
             - name: METRICS_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: dspace-prod-metrics-token
+                  name: ${{metrics_secret}}
                   key: token
             - name: TOKENPLACE_IMAGE_TAG
               value: ${{tag}}
@@ -344,7 +355,7 @@ spec:
             - name: TOKENPLACE_CHART_VERSION
               value: "0.1.4"
             - name: TOKENPLACE_DEPLOY_ENV
-              value: staging
+              value: ${{deploy_environment}}
 ---
 apiVersion: v1
 kind: Service
@@ -364,7 +375,7 @@ spec:
     - host: ${{host}}
 YAML
     if [[ "$*" == *charts/tokenplace* ]]; then
-      cat <<'YAML'
+      cat <<YAML
 ---
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
@@ -387,7 +398,7 @@ spec:
       authorization:
         type: Bearer
         credentials:
-          name: tokenplace-staging-metrics-token
+          name: ${{metrics_secret}}
           key: token
       relabelings:
         - action: replace
@@ -395,13 +406,13 @@ spec:
           replacement: tokenplace
         - action: replace
           targetLabel: environment
-          replacement: staging
+          replacement: ${{deploy_environment}}
         - action: replace
           targetLabel: release
           replacement: tokenplace
         - action: replace
           targetLabel: cluster
-          replacement: sugarkube-int
+          replacement: ${{metrics_cluster}}
 YAML
     fi
     if [ "${{app}}" = dspace ] && [[ "$*" == *dspace.values.staging.yaml* ]]; then
@@ -4196,6 +4207,24 @@ def test_tokenplace_oci_paths_render_once_before_single_mutation(
 
 
 @pytest.mark.usefixtures("ensure_just_available")
+def test_tokenplace_production_offline_render_enforces_production_metrics_contract(
+    generic_app_stub_env: dict[str, str],
+) -> None:
+    generic_app_stub_env["SUGARKUBE_STUB_NODE_ENV"] = "prod"
+
+    result = _run_just(
+        ["tokenplace-oci-promote-prod", "tag=main-deadbee"], generic_app_stub_env
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
+    assert "-f docs/examples/tokenplace.values.prod.yaml" in helm_log
+    assert "--namespace tokenplace" in helm_log
+    assert "credential" not in result.stdout.lower()
+    assert "credential" not in result.stderr.lower()
+
+
+@pytest.mark.usefixtures("ensure_just_available")
 @pytest.mark.parametrize(
     ("recipe", "image_heading", "check_heading"),
     [
@@ -7974,9 +8003,9 @@ def test_observability_app_metrics_install_secret_subprocess_failures_are_redact
         (lambda d: d.update({"applications": []}), "applications"),
         (
             lambda d: d["applications"]["tokenplace"]["environments"].update(
-                {"prod": {}}
+                {"development": {}}
             ),
-            "only staging",
+            "environment is unsupported",
         ),
         (
             lambda d: d["applications"]["tokenplace"]["environments"][

@@ -17,6 +17,7 @@ STAGING_VALUES="${ROOT}/clusters/staging/observability/kube-prometheus-stack.val
 PROD_VALUES="${ROOT}/clusters/prod/observability/kube-prometheus-stack.values.yaml"
 DSPACE_RULES="${ROOT}/platform/observability/rules/dspace-release-integrity.yaml"
 CLOUDFLARE_RULES="${ROOT}/platform/observability/rules/cloudflare-tunnel.yaml"
+TOKENPLACE_RULES="${ROOT}/platform/observability/rules/tokenplace-production.yaml"
 STAGING_DASHBOARD="${ROOT}/clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
 PROD_DASHBOARD="${ROOT}/clusters/prod/observability/dashboards/sugarkube-prod-observability.json"
 DASHBOARD=""
@@ -77,7 +78,11 @@ ordered values files:
   - ${COMMON_VALUES}
   - ${ENV_VALUES}
 EOT
-  [[ "$ENVIRONMENT" != staging ]] || printf '  - generated mode-0600 rules overlay sourced from %s\n' "$DSPACE_RULES"
+  if [[ "$ENVIRONMENT" == staging ]]; then
+    printf '  - generated mode-0600 rules overlay sourced from %s\n' "$DSPACE_RULES"
+  else
+    printf '  - generated mode-0600 rules overlay sourced from %s\n' "$TOKENPLACE_RULES"
+  fi
   printf 'dashboard source (--set-file): %s\n' "$DASHBOARD"
   printf 'Grafana LAN URL: %s (same NodePort is available through the other %s nodes)\n' "$GRAFANA_URL" "$ENVIRONMENT"
 }
@@ -99,20 +104,25 @@ create_rules_overlay() {
   RULES_OVERLAY="$(mktemp -t sugarkube-observability-rules.XXXXXX.yaml)"
   chmod 600 "${RULES_OVERLAY}"
   ruby -ryaml -e '
-    dspace = YAML.safe_load_file(ARGV.fetch(0), aliases: false)
-    cloudflare = YAML.safe_load_file(ARGV.fetch(1), aliases: false)
-    {"DSPACE" => dspace, "Cloudflare Tunnel" => cloudflare}.each do |name, rules|
+    environment, output, *rule_args = ARGV
+    selected_rules = if environment == "prod"
+      {"tokenplace-production" => ["token.place", rule_args.fetch(2)]}
+    else
+      {
+        "dspace-release-integrity" => ["DSPACE", rule_args.fetch(0)],
+        "cloudflare-tunnel" => ["Cloudflare Tunnel", rule_args.fetch(1)]
+      }
+    end
+    rules_map = selected_rules.to_h do |key, (name, path)|
+      rules = YAML.safe_load_file(path, aliases: false)
       unless rules.is_a?(Hash) && rules.keys == ["groups"] &&
              rules["groups"].is_a?(Array) && !rules["groups"].empty?
         abort "ERROR: canonical #{name} rules must contain only a nonempty groups list."
       end
+      [key, rules]
     end
-    overlay = {"additionalPrometheusRulesMap" => {
-      "dspace-release-integrity" => dspace,
-      "cloudflare-tunnel" => cloudflare,
-    }}
-    File.write(ARGV.fetch(2), YAML.dump(overlay))
-  ' "${DSPACE_RULES}" "${CLOUDFLARE_RULES}" "${RULES_OVERLAY}"
+    File.write(output, YAML.dump("additionalPrometheusRulesMap" => rules_map))
+  ' "${ENVIRONMENT}" "${RULES_OVERLAY}" "${DSPACE_RULES}" "${CLOUDFLARE_RULES}" "${TOKENPLACE_RULES}"
 }
 validate_dashboard() { python3 "${DASHBOARD_VALIDATOR}" "${DASHBOARD}"; }
 validate_rendered_dashboard() { python3 "${DASHBOARD_VALIDATOR}" "${DASHBOARD}" --rendered "$1"; }
@@ -129,10 +139,8 @@ render_to() {
 }
 prepare_render_args() {
   RENDER_ARGS=()
-  if [[ "$ENVIRONMENT" == staging ]]; then
-    create_rules_overlay
-    RENDER_ARGS=(-f "$RULES_OVERLAY")
-  fi
+  create_rules_overlay
+  RENDER_ARGS=(-f "$RULES_OVERLAY")
 }
 assert_pagerduty_secret() {
   local present

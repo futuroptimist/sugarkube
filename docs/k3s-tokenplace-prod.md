@@ -97,3 +97,107 @@ just app-config app=tokenplace env=prod
 ```bash
 just tokenplace-debug-logs-env env=prod
 ```
+
+## Production compute capacity alerts
+
+Production pages on two deliberately separate failures:
+
+- `TokenplaceNoHealthyComputeNodes` means the relay explicitly reported zero
+  lease-healthy compute nodes for five continuous minutes while the Prometheus
+  scrape and `tokenplace_instrumentation_up` were both healthy. It is actionable
+  even when the queue is empty.
+- `TokenplaceMetricsTargetDown` means the authenticated production metrics target
+  was down or undiscovered while the relay workload was expected to run for ten
+  minutes. Missing, stale, or failed telemetry never becomes a zero-node value.
+
+The chat UI's **Live compute nodes** value comes from
+`total_api_v1_registered_compute_nodes` in `/relay/diagnostics`; the relay evicts
+stale registrations before returning it. The alert uses
+`tokenplace_compute_nodes_healthy`, which applies the same lease-expiry
+availability semantics and is therefore the paging signal rather than raw demand
+or queue depth.
+
+### Provision and deploy authenticated metrics
+
+Create `tokenplace/tokenplace-prod-metrics-token` with key `token` before deploying
+production values. No Secret manifest belongs in Git. From a private interactive
+terminal, use the existing hidden-input recipe; do not pass the value as an
+argument, environment variable, or redirected file:
+
+```bash
+just observability-app-metrics-secret-install app=tokenplace env=prod
+```
+
+Then follow this order:
+
+```bash
+just observability-app-metrics-secret-check app=tokenplace env=prod
+just app-redeploy app=tokenplace env=prod tag="$APP_TAG"
+just observability-app-metrics-verify app=tokenplace env=prod
+just observability-render env=prod
+```
+
+The verifier checks the Secret's existence and nonempty key without reading or
+printing its value, expects unauthenticated `https://token.place/metrics` to
+return 401, and validates target identity, required families, and bounded labels.
+Only after those checks pass should an operator upgrade the production
+observability release through its normal reviewed lifecycle.
+
+### Diagnosis and Mac Mini recovery
+
+Use Prometheus (or Grafana Explore) for these credential-free queries:
+
+```promql
+tokenplace_compute_nodes_healthy{environment="prod",cluster="sugarkube-prod"}
+tokenplace_compute_nodes_registered{environment="prod",cluster="sugarkube-prod"}
+tokenplace_compute_node_lease_age_seconds{environment="prod",cluster="sugarkube-prod"}
+tokenplace_instrumentation_up{environment="prod",cluster="sugarkube-prod"}
+up{app="tokenplace",environment="prod",cluster="sugarkube-prod",namespace="tokenplace",release="tokenplace"}
+tokenplace_relay_queue_depth{environment="prod",cluster="sugarkube-prod"}
+tokenplace_compute_node_evictions_total{environment="prod",cluster="sugarkube-prod"}
+```
+
+For the production Mac Mini M4 Pro, use the host's existing secure access method;
+no host credential is stored here. Confirm power and networking, start or restart
+the installed compute-node service, verify it is configured for the production
+`token.place` relay (not staging), and use its local service manager/logs to
+confirm registration and lease renewal. Then confirm diagnostics and the healthy,
+registered, lease-age, and eviction queries recover. Do not restart the relay
+merely to manufacture a registration.
+
+Acknowledge the PagerDuty incident while investigating. After restoration,
+confirm the Prometheus alert becomes inactive and the same incident resolves via
+`send_resolved: true`; do not create a second test event. For a metrics-target
+page, repair discovery/authentication first and do not interpret the incident as
+proof that compute is absent.
+
+### Controlled post-merge drill
+
+Do this only in an approved maintenance window after the Secret, metrics deploy,
+rules, and route have been verified. Do **not** perform it as part of a repository
+change:
+
+1. Stop or explicitly unregister the production compute service on the Mac Mini.
+2. Confirm diagnostics and the healthy-node metric explicitly reach zero.
+3. Wait at least five continuous minutes, then confirm
+   `TokenplaceNoHealthyComputeNodes` fires and its PagerDuty incident arrives.
+4. Acknowledge the incident, restore/re-register the compute service, and confirm
+   lease renewal and a successful real request.
+5. Confirm the Prometheus alert clears and PagerDuty resolves the incident.
+
+### Focused rollback
+
+To disable only this paging path, remove the exact `pagerduty-tokenplace` route
+and receiver and the `tokenplace-production` rules overlay in a reviewed
+observability revision; leave `healthchecks-watchdog`, its Secret, and the
+watchdog rule untouched. Alternatively, redeploy the previous known-good
+Sugarkube observability revision using the standard Helm lifecycle. Disabling the
+alert must not disable authenticated application metrics, existing DSPACE or
+Cloudflare routes, the synthetic test route, or the watchdog.
+
+### TokenplaceMetricsTargetDown
+
+Check the production ServiceMonitor selector, `tokenplace-prod-metrics-token`
+name/key wiring, ready relay pod, network reachability, and Prometheus Targets
+page. Restore the target and wait for the ten-minute alert to resolve; investigate
+compute capacity separately.
