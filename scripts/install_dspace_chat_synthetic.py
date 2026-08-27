@@ -34,6 +34,7 @@ ASSETS = {
 }
 REVISION = re.compile(r"[0-9a-f]{40}")
 ASSET_REVISION = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+APPROVED_RUNNER_REVISION = "97ab09f13fb098de928a878bf1fe9b8d13032cb5"
 CRITICAL = (
     "scripts/run-remote-chat-smoke.mjs",
     "scripts/remote-chat-smoke-completion.mjs",
@@ -250,7 +251,7 @@ def validate(tree: Path) -> dict[str, str]:
         if sha(path) != expected:
             raise ValueError("staged asset hash mismatch")
     config = json.loads((tree / "etc/sugarkube/dspace-chat-synthetic.json").read_text())
-    if config.get("runnerRevision") != "97ab09f13fb098de928a878bf1fe9b8d13032cb5":
+    if config.get("runnerRevision") != APPROVED_RUNNER_REVISION:
         raise ValueError("unapproved runner revision")
     if (
         "Persistent=true"
