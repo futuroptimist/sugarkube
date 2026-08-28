@@ -5890,6 +5890,29 @@ from scripts import observability_app_metrics as app_metrics
 APP_METRICS_CONFIG = REPO_ROOT / "platform/observability/app-metrics.json"
 APP_METRICS_SCRIPT = REPO_ROOT / "scripts/observability_app_metrics.py"
 
+TOKENPLACE_MAINTENANCE_METRIC_FAMILIES = [
+    "tokenplace_compute_nodes_registered",
+    "tokenplace_compute_nodes_healthy",
+    "tokenplace_instrumentation_up",
+    "tokenplace_build_info",
+]
+
+TOKENPLACE_MODERN_METRIC_FAMILIES = [
+    "tokenplace_compute_nodes_registered",
+    "tokenplace_compute_nodes_healthy",
+    "tokenplace_compute_node_lease_age_seconds",
+    "tokenplace_compute_node_evictions_total",
+    "tokenplace_relay_queue_depth",
+    "tokenplace_relay_oldest_queued_request_age_seconds",
+    "tokenplace_relay_in_flight_requests",
+    "tokenplace_relay_oldest_in_flight_age_seconds",
+    "tokenplace_relay_request_outcomes_total",
+    "tokenplace_http_requests_total",
+    "tokenplace_http_request_duration_seconds",
+    "tokenplace_instrumentation_up",
+    "tokenplace_build_info",
+]
+
 
 def test_observability_app_metrics_inventory_tokenplace_contract_is_strict_and_complete():
     doc = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))
@@ -5926,6 +5949,19 @@ def test_observability_app_metrics_inventory_tokenplace_contract_is_strict_and_c
         },
     }
     assert "token" in cfg["forbiddenApplicationLabels"]
+
+
+def test_observability_app_metrics_inventory_tokenplace_contract_is_environment_specific():
+    environments = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))[
+        "applications"
+    ]["tokenplace"]["environments"]
+
+    assert environments["prod"]["requiredMetricFamilies"] == (
+        TOKENPLACE_MAINTENANCE_METRIC_FAMILIES
+    )
+    assert environments["staging"]["requiredMetricFamilies"] == (
+        TOKENPLACE_MODERN_METRIC_FAMILIES
+    )
 
 
 def test_observability_app_metrics_inventory_accepts_both_canonical_relabeling_forms():
@@ -6755,17 +6791,118 @@ def test_observability_app_metrics_public_uses_actual_success_status_without_bod
 
 
 def _verify_base(monkeypatch, cfg, prom_func):
-    sm = {"spec": {"selector": {"matchLabels": cfg["serviceMonitor"]["selectorMatchLabels"]}, "endpoints": [{"path": "/metrics", "interval": cfg["serviceMonitor"]["interval"], "scrapeTimeout": cfg["serviceMonitor"]["scrapeTimeout"], "authorization": {"type": "Bearer", "credentials": cfg["secret"]}, "relabelings": cfg["serviceMonitor"]["relabelings"]}]}}
+    sm = {"metadata": {"name": cfg["serviceMonitorName"], "namespace": cfg["namespace"], "labels": {"release": "kube-prometheus-stack"}}, "spec": {"selector": {"matchLabels": cfg["serviceMonitor"]["selectorMatchLabels"]}, "endpoints": [{"path": "/metrics", "interval": cfg["serviceMonitor"]["interval"], "scrapeTimeout": cfg["serviceMonitor"]["scrapeTimeout"], "authorization": {"type": "Bearer", "credentials": cfg["secret"]}, "relabelings": cfg["serviceMonitor"]["relabelings"]}]}}
     class Opener:
         def open(self, url, timeout):
             raise app_metrics.urllib.error.HTTPError(url, 401, "unauthorized", {}, None)
     monkeypatch.setattr(app_metrics, "appcfg", lambda app, env: cfg)
     monkeypatch.setattr(app_metrics, "assert_context", lambda: None)
+    monkeypatch.setattr(app_metrics, "assert_production_context", lambda: None)
     monkeypatch.setattr(app_metrics, "check_secret", lambda cfg: None)
     monkeypatch.setattr(app_metrics, "derive_build_labels_live", lambda cfg: {"version": "main-deadbee", "revision": "main-deadbee"})
     monkeypatch.setattr(app_metrics, "kjson", lambda args: sm)
     monkeypatch.setattr(app_metrics, "prom", prom_func)
     monkeypatch.setattr(app_metrics.urllib.request, "build_opener", lambda *args: Opener())
+
+
+def _tokenplace_metric_fixture(cfg, missing_family=None, extra_labels=None):
+    def prom_func(path):
+        if path == "/api/v1/targets":
+            return {
+                "activeTargets": [
+                    {
+                        "health": "up",
+                        "scrapePool": "serviceMonitor/tokenplace/tokenplace/0",
+                        "labels": cfg["targetLabels"],
+                        "discoveredLabels": {},
+                    }
+                ]
+            }
+        metric = app_metrics.urllib.parse.unquote(path.rsplit("query=", 1)[-1]).split(
+            "{", 1
+        )[0]
+        if app_metrics.metric_family_from_series(metric) == missing_family:
+            return {"resultType": "vector", "result": []}
+        labels = {
+            "__name__": metric,
+            "app": "tokenplace",
+            "environment": cfg["targetLabels"]["environment"],
+            "version": "main-deadbee",
+            "revision": "main-deadbee",
+            **(extra_labels or {}),
+        }
+        return {"resultType": "vector", "result": [{"metric": labels}]}
+
+    return prom_func
+
+
+def test_observability_app_metrics_production_maintenance_fixture_passes(monkeypatch, capsys):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
+        "tokenplace"
+    ]["environments"]["prod"]
+    cfg["retries"] = {"attempts": 1, "delaySeconds": 0}
+    _verify_base(monkeypatch, cfg, _tokenplace_metric_fixture(cfg))
+
+    app_metrics.verify("tokenplace", "prod")
+
+    captured = capsys.readouterr()
+    assert "credential" not in (captured.out + captured.err).lower()
+
+
+@pytest.mark.parametrize("missing_family", TOKENPLACE_MAINTENANCE_METRIC_FAMILIES)
+def test_observability_app_metrics_production_requires_each_maintenance_family(
+    monkeypatch, missing_family
+):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
+        "tokenplace"
+    ]["environments"]["prod"]
+    cfg["retries"] = {"attempts": 1, "delaySeconds": 0}
+    _verify_base(
+        monkeypatch,
+        cfg,
+        _tokenplace_metric_fixture(cfg, missing_family=missing_family),
+    )
+
+    with pytest.raises(app_metrics.Error, match=f"required metric family missing: {missing_family}"):
+        app_metrics.verify("tokenplace", "prod")
+
+
+def test_observability_app_metrics_production_rejects_unbounded_application_label(monkeypatch):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
+        "tokenplace"
+    ]["environments"]["prod"]
+    _verify_base(
+        monkeypatch,
+        cfg,
+        _tokenplace_metric_fixture(cfg, extra_labels={"request_id": "not-allowed"}),
+    )
+
+    with pytest.raises(app_metrics.Error, match="unbounded application metric label"):
+        app_metrics.verify("tokenplace", "prod")
+
+
+def test_observability_app_metrics_staging_rejects_maintenance_only_fixture(monkeypatch):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
+        "tokenplace"
+    ]["environments"]["staging"]
+    cfg["retries"] = {"attempts": 1, "delaySeconds": 0}
+    missing_modern = set(TOKENPLACE_MODERN_METRIC_FAMILIES).difference(
+        TOKENPLACE_MAINTENANCE_METRIC_FAMILIES
+    )
+
+    def maintenance_only(path):
+        metric = app_metrics.urllib.parse.unquote(path.rsplit("query=", 1)[-1]).split(
+            "{", 1
+        )[0]
+        family = app_metrics.metric_family_from_series(metric)
+        return _tokenplace_metric_fixture(
+            cfg, missing_family=family if family in missing_modern else None
+        )(path)
+
+    _verify_base(monkeypatch, cfg, maintenance_only)
+
+    with pytest.raises(app_metrics.Error, match="required metric family missing"):
+        app_metrics.verify("tokenplace", "staging")
 
 
 def test_observability_app_metrics_verify_target_failures_and_retries(monkeypatch):
