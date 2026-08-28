@@ -25,6 +25,24 @@ ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "config/dspace-chat-synthetic.json"
 
 
+def asset_hashes(path: Path) -> dict[str, str]:
+    manifest = json.loads((path / "manifest.json").read_text())
+    return manifest.get("assets", manifest)
+
+
+def write_asset_manifest(path: Path, hashes: dict[str, str], *, legacy: bool = False) -> None:
+    manifest = (
+        hashes
+        if legacy
+        else {
+            "schemaVersion": installer.ASSET_MANIFEST_SCHEMA_VERSION,
+            "capabilities": {installer.CLASSIFICATION_PERSISTENCE_CAPABILITY: True},
+            "assets": hashes,
+        }
+    )
+    (path / "manifest.json").write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n")
+
+
 def config(tmp_path: Path) -> dict:
     value = json.loads(CONFIG.read_text(encoding="utf-8"))
     value.pop("runnerManifestSha256", None)  # model a retained pre-migration asset by default
@@ -3532,15 +3550,56 @@ def test_installer_rejects_assets_that_lose_classification_runtime_preservation(
     installer.render(staged)
     service = staged / "etc/systemd/system/dspace-chat-synthetic.service"
     service.write_text(service.read_text().replace("RuntimeDirectoryPreserve=yes\n", ""))
-    manifest = json.loads((staged / "manifest.json").read_text())
+    manifest = asset_hashes(staged)
     relative = "etc/systemd/system/dspace-chat-synthetic.service"
     manifest[relative] = installer.sha(service)
-    (staged / "manifest.json").write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n")
+    write_asset_manifest(staged, manifest)
 
     with pytest.raises(ValueError, match="classification runtime directory is not preserved"):
         installer.validate_current_candidate(staged)
 
     with pytest.raises(ValueError, match="classification runtime directory is not preserved"):
+        installer.validate_retained_asset(staged)
+
+
+@pytest.mark.parametrize("marker", ["first historical asset", "second historical asset"])
+def test_distinct_legacy_manifest_assets_remain_retained_only(tmp_path: Path, marker: str) -> None:
+    retained = tmp_path / marker.replace(" ", "-")
+    installer.render(retained)
+    service = retained / "etc/systemd/system/dspace-chat-synthetic.service"
+    service.write_text(
+        service.read_text().replace("RuntimeDirectoryPreserve=yes\n", "") + f"# {marker}\n"
+    )
+    hashes = asset_hashes(retained)
+    relative = "etc/systemd/system/dspace-chat-synthetic.service"
+    hashes[relative] = installer.sha(service)
+    write_asset_manifest(retained, hashes, legacy=True)
+
+    assert installer.validate_retained_asset(retained) == hashes
+    with pytest.raises(ValueError, match="current asset manifest contract is required"):
+        installer.validate_current_candidate(retained)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda manifest: manifest.update(schemaVersion=2),
+        lambda manifest: manifest["capabilities"].clear(),
+        lambda manifest: manifest["capabilities"].update(unexpected=True),
+        lambda manifest: manifest.update(unexpected=True),
+        lambda manifest: manifest["assets"].update(unexpected="0" * 64),
+        lambda manifest: manifest["assets"].update({next(iter(installer.ASSETS)): "not-a-hash"}),
+    ],
+)
+def test_current_asset_manifest_contract_fails_closed(tmp_path: Path, mutation) -> None:
+    staged = tmp_path / "staged"
+    installer.render(staged)
+    path = staged / "manifest.json"
+    manifest = json.loads(path.read_text())
+    mutation(manifest)
+    path.write_text(json.dumps(manifest))
+
+    with pytest.raises(ValueError, match="asset manifest"):
         installer.validate_retained_asset(staged)
 
 
@@ -3561,10 +3620,10 @@ def test_installer_rejects_inactive_runtime_preservation_directives(
     installer.render(staged)
     service = staged / "etc/systemd/system/dspace-chat-synthetic.service"
     service.write_text(service.read_text().replace("RuntimeDirectoryPreserve=yes\n", replacement))
-    manifest = json.loads((staged / "manifest.json").read_text())
+    manifest = asset_hashes(staged)
     relative = "etc/systemd/system/dspace-chat-synthetic.service"
     manifest[relative] = installer.sha(service)
-    (staged / "manifest.json").write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n")
+    write_asset_manifest(staged, manifest)
 
     with pytest.raises(ValueError, match="classification runtime directory is not preserved"):
         installer.validate_current_candidate(staged)
@@ -3650,18 +3709,15 @@ def test_same_revision_manifest_migration_preserves_runner_and_rolls_back_exactl
         if not preserve_classification:
             service = path / "etc/systemd/system/dspace-chat-synthetic.service"
             service.write_text(service.read_text().replace("RuntimeDirectoryPreserve=yes\n", ""))
-        asset_manifest = json.loads((path / "manifest.json").read_text())
+        asset_manifest = asset_hashes(path)
         for relative in asset_manifest:
             asset_manifest[relative] = installer.sha(path / relative)
-        (path / "manifest.json").write_text(
-            json.dumps(asset_manifest, sort_keys=True, indent=2) + "\n"
-        )
+        write_asset_manifest(path, asset_manifest, legacy=not preserve_classification)
         return installer.sha(path / "manifest.json")
 
     old_staged, new_staged = tmp_path / "old-assets", tmp_path / "new-assets"
     old_asset = staged(old_staged, None, preserve_classification=False)
     new_asset = staged(new_staged, qualified_sha)
-    monkeypatch.setattr(installer, "APPROVED_LEGACY_ASSET_REVISION", old_asset)
     root = tmp_path / "private-root"
     root.mkdir()
     real_run = subprocess.run
@@ -3674,7 +3730,7 @@ def test_same_revision_manifest_migration_preserves_runner_and_rolls_back_exactl
 
     monkeypatch.setattr(installer.subprocess, "run", private_root_commands)
     installer.validate_retained_asset(old_staged)
-    with pytest.raises(ValueError, match="classification runtime directory is not preserved"):
+    with pytest.raises(ValueError, match="current asset manifest contract is required"):
         installer.validate_current_candidate(old_staged)
     installer.install_runner(old_staged, legacy_snapshot, root)
     old_retained = root / "var/lib/sugarkube/dspace-chat-installations" / old_asset

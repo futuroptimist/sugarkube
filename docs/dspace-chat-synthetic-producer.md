@@ -22,16 +22,20 @@ migration at the same Git revision without reusing or overwriting the older revi
 Retained assets created before this migration remain valid and continue to select their legacy
 revision-only runner coordinate.
 
-Asset validation likewise separates two contracts. Every retained asset must still have the exact
-supported manifest shape and listed hashes, valid configuration, timer persistence, runner identity
-and manifest, clean tracked runner content, and browser provenance. Current candidates additionally
-require an effective `RuntimeDirectoryPreserve=yes` in the service's `[Service]` section. That
-current policy is checked for every render, dry-run, new installation, and idempotent reapplication,
-but is not retroactively imposed on the byte-for-byte retained asset with approved manifest digest
-`3c67cd1bc8253cecddfe1649e96aa5d9cc1b16c8da93c93695c02afa0444b741`, which was created under
-the earlier valid contract. Every other retained asset must satisfy the current preservation policy;
-retention or a self-consistent re-hashed manifest does not grant legacy status. Retained assets are
-never rewritten, upgraded, or re-hashed to gain that compatibility.
+Asset validation likewise separates two manifest contracts. The historical contract is exactly the
+bare mapping of every supported asset path to its SHA-256 hash. The current contract is a versioned
+object containing that exact mapping and an explicit classification-persistence capability. Unknown,
+incomplete, or malformed structures fail closed. Every retained asset must still satisfy its declared
+manifest shape and listed hashes, valid configuration, timer persistence, runner identity and
+manifest, clean tracked runner content, and browser provenance.
+
+The current capability requires an effective `RuntimeDirectoryPreserve=yes` in the service's
+`[Service]` section. It is checked for every current-format retained asset and every render, dry-run,
+new installation, and idempotent reapplication. Historical bare-manifest retained assets remain
+eligible for inspection and explicit rollback because rewriting immutable assets to impose a later
+policy would invalidate their identity. This exception is based only on the supported historical
+format, not an asset digest or retention alone: a newly reconstructed versioned asset cannot gain
+compatibility from a self-consistent re-hash. Retained assets are never rewritten or upgraded.
 
 That compatibility is limited to revision `97ab09f13fb098de928a878bf1fe9b8d13032cb5`, its exact
 revision-only storage name, and the exact seven-file manifest with SHA-256
@@ -121,9 +125,9 @@ and Node/Playwright resolution. It also validates architecture and browser prove
 installation mutation. Review all hashes and coordinates. `status` is read-only and, for alternate
 roots, reports activation as not queried; only `/` queries unit activation without printing
 configuration secrets (the committed configuration contains none). Its
-`classificationRuntimeDirectoryPreserve=yes|no` field makes the selected asset's effective contract
-visible; `no` identifies a valid historical asset whose service predates classification-directory
-persistence rather than suppressing that weaker contract. A failed staging or preflight
+`classificationRuntimeDirectoryPreserve=yes|no` field makes the selected asset's effective service
+directive visible; `no` identifies a valid historical-format asset whose service predates
+classification-directory persistence rather than suppressing that weaker contract. A failed staging or preflight
 leaves installed fixtures unchanged.
 
 ## 3. Separately authorized installation and controlled execution
@@ -230,10 +234,8 @@ Invocation cleanup is expected lifecycle behavior, not evidence loss.
 The installations and retained-assets store remains intentionally private (`root:root:0700`), so
 live `status` and retained-asset validation are root-only operations. Do not weaken that store merely
 to let the child inspect it: the child needs only `/var/lib/sugarkube`, the runner root, and the exact
-installed runner. For the staging cutover incident, the approved runner revision is
-`97ab09f13fb098de928a878bf1fe9b8d13032cb5`, the approved retained asset revision is
-`9dbccee2be1f57fc7d80a714e3de45a66e860080e07b357c7ddade6e7f343319`, and the validated runner
-manifest SHA-256 is `36fdab33edc0f1ad518a6d3d247a1bd32d233402387ba57493a9386d78ec9301`.
+installed runner. Supply the exact retained asset revision reported by the validated private-root
+status, together with the approved runner revision and runner manifest SHA-256.
 
 First, as root, validate `current`, the exact retained assets, runner Git/content/dependencies,
 browser provenance, and the authorized manifest hash without mutation. The report contains only
@@ -242,7 +244,7 @@ bounded coordinates and access state:
 ```bash
 sudo python3 scripts/install_dspace_chat_synthetic.py repair-runner-access \
   --revision 97ab09f13fb098de928a878bf1fe9b8d13032cb5 \
-  --asset-revision 9dbccee2be1f57fc7d80a714e3de45a66e860080e07b357c7ddade6e7f343319 \
+  --asset-revision ASSET_REVISION \
   --runner-manifest-sha256 36fdab33edc0f1ad518a6d3d247a1bd32d233402387ba57493a9386d78ec9301
 ```
 
@@ -257,7 +259,7 @@ smoke, retry, or roll back:
 ```bash
 sudo python3 scripts/install_dspace_chat_synthetic.py repair-runner-access --apply \
   --revision 97ab09f13fb098de928a878bf1fe9b8d13032cb5 \
-  --asset-revision 9dbccee2be1f57fc7d80a714e3de45a66e860080e07b357c7ddade6e7f343319 \
+  --asset-revision ASSET_REVISION \
   --runner-manifest-sha256 36fdab33edc0f1ad518a6d3d247a1bd32d233402387ba57493a9386d78ec9301
 sudo python3 scripts/install_dspace_chat_synthetic.py status
 ```

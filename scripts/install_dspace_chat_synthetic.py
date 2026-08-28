@@ -35,7 +35,8 @@ ASSETS = {
 REVISION = re.compile(r"[0-9a-f]{40}")
 ASSET_REVISION = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 APPROVED_RUNNER_REVISION = "97ab09f13fb098de928a878bf1fe9b8d13032cb5"
-APPROVED_LEGACY_ASSET_REVISION = "3c67cd1bc8253cecddfe1649e96aa5d9cc1b16c8da93c93695c02afa0444b741"
+ASSET_MANIFEST_SCHEMA_VERSION = 1
+CLASSIFICATION_PERSISTENCE_CAPABILITY = "classificationRuntimeDirectoryPreserve"
 CRITICAL = (
     "scripts/run-remote-chat-smoke.mjs",
     "scripts/remote-chat-smoke-completion.mjs",
@@ -231,11 +232,47 @@ def render(destination: Path) -> dict[str, str]:
         shutil.copyfile(src, out)
         out.chmod(0o755 if "/libexec/" in target else 0o644)
         hashes[target] = sha(out)
-    (destination / "manifest.json").write_text(json.dumps(hashes, sort_keys=True, indent=2) + "\n")
+    manifest = {
+        "schemaVersion": ASSET_MANIFEST_SCHEMA_VERSION,
+        "capabilities": {CLASSIFICATION_PERSISTENCE_CAPABILITY: True},
+        "assets": hashes,
+    }
+    (destination / "manifest.json").write_text(
+        json.dumps(manifest, sort_keys=True, indent=2) + "\n"
+    )
     return hashes
 
 
-def validate_retained_asset(tree: Path) -> dict[str, str]:
+def parse_asset_manifest(path: Path) -> tuple[dict[str, str], bool]:
+    """Return exact asset hashes and whether the current contract was declared."""
+    manifest = json.loads(path.read_text())
+    if not isinstance(manifest, dict):
+        raise ValueError("asset manifest is malformed")
+    # The supported bare mapping, rather than retention or any particular digest,
+    # is the compatibility boundary for assets created under the legacy contract.
+    if set(manifest) == set(ASSETS):
+        assets = manifest
+        current_contract = False
+    elif set(manifest) == {"schemaVersion", "capabilities", "assets"}:
+        if manifest["schemaVersion"] != ASSET_MANIFEST_SCHEMA_VERSION or manifest[
+            "capabilities"
+        ] != {CLASSIFICATION_PERSISTENCE_CAPABILITY: True}:
+            raise ValueError("asset manifest contract is unsupported")
+        assets = manifest["assets"]
+        current_contract = True
+    else:
+        raise ValueError("asset manifest contract is unsupported")
+    if not isinstance(assets, dict) or set(assets) != set(ASSETS):
+        raise ValueError("asset manifest is incomplete")
+    if any(
+        not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value)
+        for value in assets.values()
+    ):
+        raise ValueError("asset manifest hash is malformed")
+    return assets, current_contract
+
+
+def _validate_retained_asset_contract(tree: Path) -> tuple[dict[str, str], bool]:
     """Validate immutable integrity and the baseline retained-asset contract."""
     try:
         tree_stat = tree.lstat()
@@ -264,9 +301,7 @@ def validate_retained_asset(tree: Path) -> dict[str, str]:
             raise ValueError("asset file must be a real regular file")
         return path
 
-    manifest = json.loads(regular_file("manifest.json").read_text())
-    if set(manifest) != set(ASSETS):
-        raise ValueError("asset manifest is incomplete")
+    manifest, current_contract = parse_asset_manifest(regular_file("manifest.json"))
     for target, expected in manifest.items():
         path = regular_file(target)
         if sha(path) != expected:
@@ -280,17 +315,22 @@ def validate_retained_asset(tree: Path) -> dict[str, str]:
     ):
         raise ValueError("timer is not persistent")
     service = (tree / "etc/systemd/system/dspace-chat-synthetic.service").read_text()
-    if (
-        systemd_service_value(service, "RuntimeDirectoryPreserve") != "yes"
-        and sha(tree / "manifest.json") != APPROVED_LEGACY_ASSET_REVISION
-    ):
+    if current_contract and systemd_service_value(service, "RuntimeDirectoryPreserve") != "yes":
         raise ValueError("classification runtime directory is not preserved")
+    return manifest, current_contract
+
+
+def validate_retained_asset(tree: Path) -> dict[str, str]:
+    """Validate an immutable retained asset and return its exact hashes."""
+    manifest, _ = _validate_retained_asset_contract(tree)
     return manifest
 
 
 def validate_current_candidate(tree: Path) -> dict[str, str]:
     """Validate a newly rendered or installed asset against current policy."""
-    manifest = validate_retained_asset(tree)
+    manifest, current_contract = _validate_retained_asset_contract(tree)
+    if not current_contract:
+        raise ValueError("current asset manifest contract is required")
     service = (tree / "etc/systemd/system/dspace-chat-synthetic.service").read_text()
     if systemd_service_value(service, "RuntimeDirectoryPreserve") != "yes":
         raise ValueError("classification runtime directory is not preserved")
