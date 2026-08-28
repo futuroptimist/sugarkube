@@ -1338,13 +1338,20 @@ def test_bounded_stderr_reproduces_runuser_node_exec_diagnostic_without_exposure
 
     assert completed.returncode == 1
     assert classification == "node-executable-launch-failure"
+    assert len(diagnostic) == 68
+    assert (
+        __import__("hashlib").sha256(diagnostic).hexdigest()
+        == "0497adf508288a12076a26a2c8d11bf3fde989528d5929d158bf8e19a6a0ad6c"
+    )
     assert returned == {
         "stderrBytes": 68,
         "stderrSha256": __import__("hashlib").sha256(diagnostic).hexdigest(),
         "stderrTruncated": False,
         "stderrCaptureComplete": True,
     }
-    assert diagnostic.decode().strip() not in capsys.readouterr().out
+    output = capsys.readouterr()
+    assert diagnostic.decode().strip() not in output.out
+    assert diagnostic.decode().strip() not in output.err
 
 
 def test_classification_archive_survives_invocation_cleanup_without_raw_output(
@@ -1574,7 +1581,7 @@ def test_runuser_node_exec_failure_archives_only_semantic_metadata(
 
     assert runtime.run(value) == 1
 
-    output = capsys.readouterr().out
+    output = capsys.readouterr()
     record = Path(value["resultRoot"]) / "latest-classification.json"
     payload = json.loads(record.read_text())
     assert payload == {
@@ -1584,8 +1591,9 @@ def test_runuser_node_exec_failure_archives_only_semantic_metadata(
         "childStatus": 1,
         **metadata,
     }
-    assert "reason=node-executable-launch-failure" in output
-    assert diagnostic.decode().strip() not in output
+    assert "reason=node-executable-launch-failure" in output.out
+    assert diagnostic.decode().strip() not in output.out
+    assert diagnostic.decode().strip() not in output.err
     assert diagnostic.decode().strip() not in record.read_text()
     assert metric.read_bytes() == b"previous metric\n"
     assert not (Path(value["resultRoot"]) / f"uid-{os.getuid()}-{'a' * 32}").exists()
