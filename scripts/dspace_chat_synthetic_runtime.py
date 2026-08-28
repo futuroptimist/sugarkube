@@ -573,6 +573,13 @@ def classify_missing_result(stderr: bytes, child_status: int, metadata: dict) ->
         classification = "current-result-missing-after-child-success"
     elif "journey completion was not confirmed" in text:
         classification = "test-failure-before-completion-publication"
+    elif (
+        child_status != 0
+        and metadata.get("stderrCaptureComplete") is True
+        and metadata.get("stderrTruncated") is False
+        and metadata.get("stderrBytes", 0) > 0
+    ):
+        classification = "unrecognized-complete-child-diagnostic"
     else:
         classification = "current-result-missing-after-child-failure"
     return classification, metadata

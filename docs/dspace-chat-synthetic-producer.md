@@ -194,7 +194,13 @@ Do not print credentials, Secret values, raw results, browser output, or unrestr
 When a child returns without a current result, the runtime reads at most 16 KiB of its private
 stderr only to select an allowlisted classification: browser-executable launch, Playwright
 configuration, test-before-completion, completion-publisher, or missing-result after child success
-or failure. It archives only that classification, invocation ID, child status, byte count,
+or failure. A nonempty diagnostic from a failed child whose capture is both complete and
+untruncated is classified as `unrecognized-complete-child-diagnostic` when none of those narrow
+markers match. This proves only that the complete bounded diagnostic did not match a repository-owned
+specific classifier; it does not identify the diagnostic or the staging failure's root cause.
+Empty, incomplete, truncated, and over-limit unknown diagnostics continue to fail closed as
+`current-result-missing-after-child-failure`. It archives only that classification, invocation ID,
+child status, byte count,
 truncation and capture-complete flags, and SHA-256 in an atomically replaced, root-only
 `latest-classification.json` under
 the result root. The systemd runtime directory is preserved across oneshot service exits (but remains

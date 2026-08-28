@@ -1221,7 +1221,7 @@ def test_runtime_plumbs_exact_system_executable_and_not_bundle(
         (
             b"browser has been closed during the journey\n",
             1,
-            "current-result-missing-after-child-failure",
+            "unrecognized-complete-child-diagnostic",
         ),
         (b"Error loading config at playwright.config.ts\n", 1, "playwright-configuration-failure"),
         (
@@ -1230,7 +1230,7 @@ def test_runtime_plumbs_exact_system_executable_and_not_bundle(
             "test-failure-before-completion-publication",
         ),
         (b"result publication failed\n", 1, "completion-publisher-failure"),
-        (b"opaque secret child failure\n", 1, "current-result-missing-after-child-failure"),
+        (b"opaque secret child failure\n", 1, "unrecognized-complete-child-diagnostic"),
         (b"", 0, "current-result-missing-after-child-success"),
     ],
 )
@@ -1241,6 +1241,7 @@ def test_missing_result_classification_is_allowlisted_bounded_and_sanitized(
         "stderrBytes": len(diagnostic),
         "stderrSha256": __import__("hashlib").sha256(diagnostic).hexdigest(),
         "stderrTruncated": False,
+        "stderrCaptureComplete": True,
     }
     classification, metadata = runtime.classify_missing_result(diagnostic, status, metadata_input)
 
@@ -1249,9 +1250,93 @@ def test_missing_result_classification_is_allowlisted_bounded_and_sanitized(
         "stderrBytes": len(diagnostic),
         "stderrSha256": __import__("hashlib").sha256(diagnostic).hexdigest(),
         "stderrTruncated": False,
+        "stderrCaptureComplete": True,
     }
     if diagnostic:
         assert diagnostic.decode(errors="ignore") not in json.dumps(metadata)
+
+
+@pytest.mark.parametrize(
+    ("diagnostic", "metadata_override"),
+    [
+        (b"", {}),
+        (b"opaque diagnostic\n", {"stderrCaptureComplete": False}),
+        (b"opaque diagnostic\n", {"stderrTruncated": True}),
+        (b"x" * (runtime.MAX_CHILD_DIAGNOSTIC_BYTES + 1), {"stderrTruncated": True}),
+    ],
+)
+def test_incomplete_empty_or_truncated_unknown_diagnostics_remain_generic(
+    diagnostic: bytes, metadata_override: dict
+) -> None:
+    metadata = {
+        "stderrBytes": len(diagnostic),
+        "stderrSha256": __import__("hashlib").sha256(diagnostic).hexdigest(),
+        "stderrTruncated": False,
+        "stderrCaptureComplete": True,
+        **metadata_override,
+    }
+
+    classification, returned_metadata = runtime.classify_missing_result(diagnostic, 1, metadata)
+
+    assert classification == "current-result-missing-after-child-failure"
+    assert returned_metadata == metadata
+    if diagnostic:
+        assert diagnostic.decode(errors="ignore") not in json.dumps(returned_metadata)
+
+
+@pytest.mark.parametrize(
+    "diagnostic",
+    [
+        b"error: command failed with exit code 1\n",
+        b"Error: command failed with exit code 1.\n",
+        b"Error: Process completed with exit code 1.\n",
+    ],
+)
+def test_complete_package_manager_style_diagnostic_is_safely_narrowed(
+    diagnostic: bytes,
+) -> None:
+    metadata = {
+        "stderrBytes": len(diagnostic),
+        "stderrSha256": __import__("hashlib").sha256(diagnostic).hexdigest(),
+        "stderrTruncated": False,
+        "stderrCaptureComplete": True,
+    }
+
+    classification, returned_metadata = runtime.classify_missing_result(diagnostic, 1, metadata)
+
+    assert classification == "unrecognized-complete-child-diagnostic"
+    assert returned_metadata == metadata
+
+
+def test_complete_68_byte_unknown_diagnostic_is_safely_narrowed() -> None:
+    diagnostic = b"error: command failed before publishing the current journey result.\n"
+    assert len(diagnostic) == 68
+    metadata = {
+        "stderrBytes": len(diagnostic),
+        "stderrSha256": __import__("hashlib").sha256(diagnostic).hexdigest(),
+        "stderrTruncated": False,
+        "stderrCaptureComplete": True,
+    }
+
+    classification, returned_metadata = runtime.classify_missing_result(diagnostic, 1, metadata)
+
+    assert classification == "unrecognized-complete-child-diagnostic"
+    assert returned_metadata == metadata
+    assert diagnostic.decode() not in json.dumps(returned_metadata)
+
+
+def test_near_miss_specific_marker_uses_only_safe_complete_diagnostic_category() -> None:
+    diagnostic = b"browser launch looked slow but eventually returned failure\n"
+    metadata = {
+        "stderrBytes": len(diagnostic),
+        "stderrSha256": __import__("hashlib").sha256(diagnostic).hexdigest(),
+        "stderrTruncated": False,
+        "stderrCaptureComplete": True,
+    }
+
+    classification, _ = runtime.classify_missing_result(diagnostic, 1, metadata)
+
+    assert classification == "unrecognized-complete-child-diagnostic"
 
 
 def test_classification_archive_survives_invocation_cleanup_without_raw_output(
