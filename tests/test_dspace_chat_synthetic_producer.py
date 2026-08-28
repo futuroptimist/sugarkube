@@ -25,6 +25,24 @@ ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "config/dspace-chat-synthetic.json"
 
 
+def asset_hashes(path: Path) -> dict[str, str]:
+    manifest = json.loads((path / "manifest.json").read_text())
+    return manifest.get("assets", manifest)
+
+
+def write_asset_manifest(path: Path, hashes: dict[str, str], *, legacy: bool = False) -> None:
+    manifest = (
+        hashes
+        if legacy
+        else {
+            "schemaVersion": installer.ASSET_MANIFEST_SCHEMA_VERSION,
+            "capabilities": {installer.CLASSIFICATION_PERSISTENCE_CAPABILITY: True},
+            "assets": hashes,
+        }
+    )
+    (path / "manifest.json").write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n")
+
+
 def config(tmp_path: Path) -> dict:
     value = json.loads(CONFIG.read_text(encoding="utf-8"))
     value.pop("runnerManifestSha256", None)  # model a retained pre-migration asset by default
@@ -2098,7 +2116,7 @@ def test_installer_dry_run_status_apply_and_exact_rollback(tmp_path: Path, capsy
     with __import__("tempfile").TemporaryDirectory() as temporary:
         staged = Path(temporary)
         installer.render(staged)
-        installer.validate(staged)
+        installer.validate_current_candidate(staged)
     assert set(tmp_path.rglob("*")) == before
     assert installer.status(tmp_path) == 0
     assert "sha256=missing" in capsys.readouterr().out
@@ -2405,7 +2423,16 @@ def test_installer_rejects_symlink_root_before_probe_or_mutation(
     alias.symlink_to(real, target_is_directory=True)
     monkeypatch.setattr(installer, "status", lambda _root: pytest.fail("status probed"))
     monkeypatch.setattr(installer, "render", lambda _root: pytest.fail("render mutated"))
-    monkeypatch.setattr(installer, "validate", lambda _root: pytest.fail("rollback probed"))
+    monkeypatch.setattr(
+        installer,
+        "validate_retained_asset",
+        lambda _root: pytest.fail("rollback probed"),
+    )
+    monkeypatch.setattr(
+        installer,
+        "validate_current_candidate",
+        lambda _root: pytest.fail("candidate probed"),
+    )
 
     arguments = [operation, "--root", str(alias)]
     if operation in {"dry-run", "apply"}:
@@ -3343,7 +3370,7 @@ def test_validate_rejects_retained_asset_symlinks(tmp_path: Path, fault: str) ->
         intermediate.symlink_to(external, target_is_directory=True)
 
     with pytest.raises(ValueError):
-        installer.validate(tree)
+        installer.validate_retained_asset(tree)
 
 
 def test_rollback_rejects_symlinked_retained_asset_before_mutation(
@@ -3523,13 +3550,57 @@ def test_installer_rejects_assets_that_lose_classification_runtime_preservation(
     installer.render(staged)
     service = staged / "etc/systemd/system/dspace-chat-synthetic.service"
     service.write_text(service.read_text().replace("RuntimeDirectoryPreserve=yes\n", ""))
-    manifest = json.loads((staged / "manifest.json").read_text())
+    manifest = asset_hashes(staged)
     relative = "etc/systemd/system/dspace-chat-synthetic.service"
     manifest[relative] = installer.sha(service)
-    (staged / "manifest.json").write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n")
+    write_asset_manifest(staged, manifest)
 
     with pytest.raises(ValueError, match="classification runtime directory is not preserved"):
-        installer.validate(staged)
+        installer.validate_current_candidate(staged)
+
+    with pytest.raises(ValueError, match="classification runtime directory is not preserved"):
+        installer.validate_retained_asset(staged)
+
+
+@pytest.mark.parametrize("marker", ["first historical asset", "second historical asset"])
+def test_distinct_legacy_manifest_assets_remain_retained_only(tmp_path: Path, marker: str) -> None:
+    retained = tmp_path / marker.replace(" ", "-")
+    installer.render(retained)
+    service = retained / "etc/systemd/system/dspace-chat-synthetic.service"
+    service.write_text(
+        service.read_text().replace("RuntimeDirectoryPreserve=yes\n", "") + f"# {marker}\n"
+    )
+    hashes = asset_hashes(retained)
+    relative = "etc/systemd/system/dspace-chat-synthetic.service"
+    hashes[relative] = installer.sha(service)
+    write_asset_manifest(retained, hashes, legacy=True)
+
+    assert installer.validate_retained_asset(retained) == hashes
+    with pytest.raises(ValueError, match="current asset manifest contract is required"):
+        installer.validate_current_candidate(retained)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda manifest: manifest.update(schemaVersion=2),
+        lambda manifest: manifest["capabilities"].clear(),
+        lambda manifest: manifest["capabilities"].update(unexpected=True),
+        lambda manifest: manifest.update(unexpected=True),
+        lambda manifest: manifest["assets"].update(unexpected="0" * 64),
+        lambda manifest: manifest["assets"].update({next(iter(installer.ASSETS)): "not-a-hash"}),
+    ],
+)
+def test_current_asset_manifest_contract_fails_closed(tmp_path: Path, mutation) -> None:
+    staged = tmp_path / "staged"
+    installer.render(staged)
+    path = staged / "manifest.json"
+    manifest = json.loads(path.read_text())
+    mutation(manifest)
+    path.write_text(json.dumps(manifest))
+
+    with pytest.raises(ValueError, match="asset manifest"):
+        installer.validate_retained_asset(staged)
 
 
 @pytest.mark.parametrize(
@@ -3549,13 +3620,13 @@ def test_installer_rejects_inactive_runtime_preservation_directives(
     installer.render(staged)
     service = staged / "etc/systemd/system/dspace-chat-synthetic.service"
     service.write_text(service.read_text().replace("RuntimeDirectoryPreserve=yes\n", replacement))
-    manifest = json.loads((staged / "manifest.json").read_text())
+    manifest = asset_hashes(staged)
     relative = "etc/systemd/system/dspace-chat-synthetic.service"
     manifest[relative] = installer.sha(service)
-    (staged / "manifest.json").write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n")
+    write_asset_manifest(staged, manifest)
 
     with pytest.raises(ValueError, match="classification runtime directory is not preserved"):
-        installer.validate(staged)
+        installer.validate_current_candidate(staged)
 
 
 def test_lifecycle_is_single_shot_owner_scoped_bounded_and_redacted() -> None:
@@ -3617,7 +3688,12 @@ def test_same_revision_manifest_migration_preserves_runner_and_rolls_back_exactl
     qualified_snapshot.rename(qualified_parent / qualified_identity)
     qualified_snapshot = qualified_parent / qualified_identity
 
-    def staged(path: Path, manifest_sha: str | None, marker: str = "") -> str:
+    def staged(
+        path: Path,
+        manifest_sha: str | None,
+        marker: str = "",
+        preserve_classification: bool = True,
+    ) -> str:
         installer.render(path)
         config_path = path / "etc/sugarkube/dspace-chat-synthetic.json"
         rendered = json.loads(config_path.read_text())
@@ -3630,16 +3706,17 @@ def test_same_revision_manifest_migration_preserves_runner_and_rolls_back_exactl
         if marker:
             service = path / "etc/systemd/system/dspace-chat-synthetic.service"
             service.write_text(service.read_text() + f"# {marker}\n")
-        asset_manifest = json.loads((path / "manifest.json").read_text())
+        if not preserve_classification:
+            service = path / "etc/systemd/system/dspace-chat-synthetic.service"
+            service.write_text(service.read_text().replace("RuntimeDirectoryPreserve=yes\n", ""))
+        asset_manifest = asset_hashes(path)
         for relative in asset_manifest:
             asset_manifest[relative] = installer.sha(path / relative)
-        (path / "manifest.json").write_text(
-            json.dumps(asset_manifest, sort_keys=True, indent=2) + "\n"
-        )
+        write_asset_manifest(path, asset_manifest, legacy=not preserve_classification)
         return installer.sha(path / "manifest.json")
 
     old_staged, new_staged = tmp_path / "old-assets", tmp_path / "new-assets"
-    old_asset = staged(old_staged, None)
+    old_asset = staged(old_staged, None, preserve_classification=False)
     new_asset = staged(new_staged, qualified_sha)
     root = tmp_path / "private-root"
     root.mkdir()
@@ -3652,7 +3729,14 @@ def test_same_revision_manifest_migration_preserves_runner_and_rolls_back_exactl
         return real_run(argv, *args, **kwargs)
 
     monkeypatch.setattr(installer.subprocess, "run", private_root_commands)
-    installer.apply_installation(old_staged, legacy_snapshot, root, old_asset)
+    installer.validate_retained_asset(old_staged)
+    with pytest.raises(ValueError, match="current asset manifest contract is required"):
+        installer.validate_current_candidate(old_staged)
+    installer.install_runner(old_staged, legacy_snapshot, root)
+    old_retained = root / "var/lib/sugarkube/dspace-chat-installations" / old_asset
+    old_retained.parent.mkdir(parents=True)
+    shutil.copytree(old_staged, old_retained)
+    installer.activate(old_retained, root, old_asset)
     old_runner = root / "var/lib/sugarkube/dspace-chat-runners" / revision
 
     def retained_state(
@@ -3674,8 +3758,10 @@ def test_same_revision_manifest_migration_preserves_runner_and_rolls_back_exactl
         }
 
     old_before = retained_state(old_runner)
+    old_asset_before = retained_state(old_retained)
     assert installer.status(root) == 0
     legacy_status = capsys.readouterr().out
+    assert "classificationRuntimeDirectoryPreserve=no" in legacy_status
     assert f"runnerStorageIdentity={revision}" in legacy_status
     assert (
         f"runnerManifestSha256={runtime.sha256(old_runner / legacy_manifest_path.name)}"
@@ -3686,15 +3772,22 @@ def test_same_revision_manifest_migration_preserves_runner_and_rolls_back_exactl
     )
     legacy_manifest_sha = runtime.sha256(old_runner / legacy_manifest_path.name)
     complete_legacy_before = retained_state(root)
+    assert (
+        run_installer_main(monkeypatch, "rollback", "--root", str(root), "--revision", old_asset)
+        == 0
+    )
+    assert "validation=passed mutation=none" in capsys.readouterr().out
+    assert retained_state(root) == complete_legacy_before
     assert installer.repair_runner_access(root, revision, old_asset, legacy_manifest_sha, True) == 0
     assert "runnerAccess=already-correct mutation=none" in capsys.readouterr().out
     assert retained_state(root) == complete_legacy_before
 
     installer.apply_installation(new_staged, qualified_snapshot, root, new_asset)
-    new_runner = old_runner.parent / qualified_identity
     assert retained_state(old_runner) == old_before
+    assert retained_state(old_retained) == old_asset_before
     assert installer.status(root) == 0
     qualified_status = capsys.readouterr().out
+    assert "classificationRuntimeDirectoryPreserve=yes" in qualified_status
     assert f"runnerStorageIdentity={qualified_identity}" in qualified_status
     assert "activation=not-queried" in qualified_status
 
@@ -3721,6 +3814,8 @@ def test_same_revision_manifest_migration_preserves_runner_and_rolls_back_exactl
             )
             == old_runner.parent / identity
         )
+    assert retained_state(old_retained) == old_asset_before
+    assert retained_state(old_runner) == old_before
 
     bad_parent = tmp_path / "bad"
     bad_parent.mkdir()

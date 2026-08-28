@@ -35,6 +35,8 @@ ASSETS = {
 REVISION = re.compile(r"[0-9a-f]{40}")
 ASSET_REVISION = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 APPROVED_RUNNER_REVISION = "97ab09f13fb098de928a878bf1fe9b8d13032cb5"
+ASSET_MANIFEST_SCHEMA_VERSION = 1
+CLASSIFICATION_PERSISTENCE_CAPABILITY = "classificationRuntimeDirectoryPreserve"
 CRITICAL = (
     "scripts/run-remote-chat-smoke.mjs",
     "scripts/remote-chat-smoke-completion.mjs",
@@ -230,11 +232,48 @@ def render(destination: Path) -> dict[str, str]:
         shutil.copyfile(src, out)
         out.chmod(0o755 if "/libexec/" in target else 0o644)
         hashes[target] = sha(out)
-    (destination / "manifest.json").write_text(json.dumps(hashes, sort_keys=True, indent=2) + "\n")
+    manifest = {
+        "schemaVersion": ASSET_MANIFEST_SCHEMA_VERSION,
+        "capabilities": {CLASSIFICATION_PERSISTENCE_CAPABILITY: True},
+        "assets": hashes,
+    }
+    (destination / "manifest.json").write_text(
+        json.dumps(manifest, sort_keys=True, indent=2) + "\n"
+    )
     return hashes
 
 
-def validate(tree: Path) -> dict[str, str]:
+def parse_asset_manifest(path: Path) -> tuple[dict[str, str], bool]:
+    """Return exact asset hashes and whether the current contract was declared."""
+    manifest = json.loads(path.read_text())
+    if not isinstance(manifest, dict):
+        raise ValueError("asset manifest is malformed")
+    # The supported bare mapping, rather than retention or any particular digest,
+    # is the compatibility boundary for assets created under the legacy contract.
+    if set(manifest) == set(ASSETS):
+        assets = manifest
+        current_contract = False
+    elif set(manifest) == {"schemaVersion", "capabilities", "assets"}:
+        if manifest["schemaVersion"] != ASSET_MANIFEST_SCHEMA_VERSION or manifest[
+            "capabilities"
+        ] != {CLASSIFICATION_PERSISTENCE_CAPABILITY: True}:
+            raise ValueError("asset manifest contract is unsupported")
+        assets = manifest["assets"]
+        current_contract = True
+    else:
+        raise ValueError("asset manifest contract is unsupported")
+    if not isinstance(assets, dict) or set(assets) != set(ASSETS):
+        raise ValueError("asset manifest is incomplete")
+    if any(
+        not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value)
+        for value in assets.values()
+    ):
+        raise ValueError("asset manifest hash is malformed")
+    return assets, current_contract
+
+
+def _validate_retained_asset_contract(tree: Path) -> tuple[dict[str, str], bool]:
+    """Validate immutable integrity and the baseline retained-asset contract."""
     try:
         tree_stat = tree.lstat()
     except OSError as error:
@@ -262,9 +301,7 @@ def validate(tree: Path) -> dict[str, str]:
             raise ValueError("asset file must be a real regular file")
         return path
 
-    manifest = json.loads(regular_file("manifest.json").read_text())
-    if set(manifest) != set(ASSETS):
-        raise ValueError("asset manifest is incomplete")
+    manifest, current_contract = parse_asset_manifest(regular_file("manifest.json"))
     for target, expected in manifest.items():
         path = regular_file(target)
         if sha(path) != expected:
@@ -277,6 +314,23 @@ def validate(tree: Path) -> dict[str, str]:
         not in (tree / "etc/systemd/system/dspace-chat-synthetic.timer").read_text()
     ):
         raise ValueError("timer is not persistent")
+    service = (tree / "etc/systemd/system/dspace-chat-synthetic.service").read_text()
+    if current_contract and systemd_service_value(service, "RuntimeDirectoryPreserve") != "yes":
+        raise ValueError("classification runtime directory is not preserved")
+    return manifest, current_contract
+
+
+def validate_retained_asset(tree: Path) -> dict[str, str]:
+    """Validate an immutable retained asset and return its exact hashes."""
+    manifest, _ = _validate_retained_asset_contract(tree)
+    return manifest
+
+
+def validate_current_candidate(tree: Path) -> dict[str, str]:
+    """Validate a newly rendered or installed asset against current policy."""
+    manifest, current_contract = _validate_retained_asset_contract(tree)
+    if not current_contract:
+        raise ValueError("current asset manifest contract is required")
     service = (tree / "etc/systemd/system/dspace-chat-synthetic.service").read_text()
     if systemd_service_value(service, "RuntimeDirectoryPreserve") != "yes":
         raise ValueError("classification runtime directory is not preserved")
@@ -521,7 +575,7 @@ def repair_runner_access(
     ):
         raise ValueError("current asset revision pointer is invalid")
     retained = installations / asset_revision
-    retained_manifest = validate(retained)
+    retained_manifest = validate_retained_asset(retained)
     validate_live_assets(root, retained, retained_manifest)
     config = runtime_module().load_config(retained / "etc/sugarkube/dspace-chat-synthetic.json")
     if config["runnerRevision"] != revision:
@@ -560,7 +614,7 @@ def repair_runner_access(
 
 def apply_installation(staged: Path, snapshot: Path, root: Path, asset_revision: str) -> None:
     """Install a fully validated runner and roll it back on later asset failure."""
-    validate(staged)
+    validate_current_candidate(staged)
     validate_snapshot(staged, snapshot, root)
     installations = root / "var/lib/sugarkube/dspace-chat-installations"
     retained = installations / asset_revision
@@ -577,7 +631,7 @@ def apply_installation(staged: Path, snapshot: Path, root: Path, asset_revision:
             or retained_manifest_path.read_bytes() != staged_manifest.read_bytes()
         ):
             raise ValueError("retained asset does not match staged candidate")
-        retained_manifest = validate(retained)
+        retained_manifest = validate_current_candidate(retained)
         validate_live_assets(root, retained, retained_manifest)
         config = runtime_module().load_config(retained / "etc/sugarkube/dspace-chat-synthetic.json")
         runner = rooted(root, config["runnerRoot"]) / runtime_module().runner_storage_identity(
@@ -621,7 +675,7 @@ def status(root: Path) -> int:
     retained = installations / revision
     if retained.is_symlink() or not retained.is_dir():
         raise ValueError("current retained asset revision is missing or invalid")
-    manifest = validate(retained)
+    manifest = validate_retained_asset(retained)
     validate_live_assets(root, retained, manifest)
 
     runtime = runtime_module()
@@ -654,6 +708,9 @@ def status(root: Path) -> int:
         raise ValueError("installed runner browser provenance is invalid")
 
     print(f"assetRevision={revision}")
+    service = retained / "etc/systemd/system/dspace-chat-synthetic.service"
+    preservation = systemd_service_value(service.read_text(), "RuntimeDirectoryPreserve")
+    print(f"classificationRuntimeDirectoryPreserve={'yes' if preservation == 'yes' else 'no'}")
     for target_name, path in live_paths.items():
         print(f"{target_name} sha256={sha(path)}")
     print("runnerValidation=passed")
@@ -713,7 +770,7 @@ def activation_status() -> int:
 def activate(retained: Path, root: Path, revision: str) -> None:
     if not ASSET_REVISION.fullmatch(revision):
         raise ValueError("revision must be a lowercase hexadecimal asset revision")
-    validate(retained)
+    validate_retained_asset(retained)
     current = retained.parent / "current"
     temporary = retained.parent / ".current.new"
     prepared = []
@@ -754,7 +811,7 @@ def activate(retained: Path, root: Path, revision: str) -> None:
 def install(staged: Path, root: Path, revision: str) -> None:
     if not ASSET_REVISION.fullmatch(revision):
         raise ValueError("revision must be a lowercase hexadecimal asset revision")
-    validate(staged)
+    validate_current_candidate(staged)
     retained = root / "var/lib/sugarkube/dspace-chat-installations" / revision
     if retained.exists():
         raise ValueError("exact retained revision already exists")
@@ -834,7 +891,7 @@ def main() -> int:
         if not ASSET_REVISION.fullmatch(args.revision):
             raise ValueError("revision must be a lowercase hexadecimal asset revision")
         retained = args.root / "var/lib/sugarkube/dspace-chat-installations" / args.revision
-        validate(retained)
+        validate_retained_asset(retained)
         rollback_config = runtime.load_config(retained / "etc/sugarkube/dspace-chat-synthetic.json")
         rollback_runner = rooted(args.root, rollback_config["runnerRoot"]) / (
             runtime.runner_storage_identity(rollback_config)
@@ -854,7 +911,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as temporary:
         staged = Path(temporary)
         render(staged)
-        validate(staged)
+        validate_current_candidate(staged)
         if args.runner_snapshot is None:
             parser.error(f"{args.operation} requires --runner-snapshot")
         snapshot = args.runner_snapshot.absolute()
