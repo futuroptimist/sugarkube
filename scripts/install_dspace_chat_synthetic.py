@@ -234,7 +234,8 @@ def render(destination: Path) -> dict[str, str]:
     return hashes
 
 
-def validate(tree: Path) -> dict[str, str]:
+def validate_retained_asset(tree: Path) -> dict[str, str]:
+    """Validate immutable integrity and the historical baseline asset contract."""
     try:
         tree_stat = tree.lstat()
     except OSError as error:
@@ -277,8 +278,19 @@ def validate(tree: Path) -> dict[str, str]:
         not in (tree / "etc/systemd/system/dspace-chat-synthetic.timer").read_text()
     ):
         raise ValueError("timer is not persistent")
+    return manifest
+
+
+def classification_runtime_directory_preserved(tree: Path) -> bool:
+    """Report whether an asset has the current classification persistence capability."""
     service = (tree / "etc/systemd/system/dspace-chat-synthetic.service").read_text()
-    if systemd_service_value(service, "RuntimeDirectoryPreserve") != "yes":
+    return systemd_service_value(service, "RuntimeDirectoryPreserve") == "yes"
+
+
+def validate_current_candidate(tree: Path) -> dict[str, str]:
+    """Validate a newly rendered/installed asset against the current policy."""
+    manifest = validate_retained_asset(tree)
+    if not classification_runtime_directory_preserved(tree):
         raise ValueError("classification runtime directory is not preserved")
     return manifest
 
@@ -521,7 +533,7 @@ def repair_runner_access(
     ):
         raise ValueError("current asset revision pointer is invalid")
     retained = installations / asset_revision
-    retained_manifest = validate(retained)
+    retained_manifest = validate_retained_asset(retained)
     validate_live_assets(root, retained, retained_manifest)
     config = runtime_module().load_config(retained / "etc/sugarkube/dspace-chat-synthetic.json")
     if config["runnerRevision"] != revision:
@@ -560,7 +572,7 @@ def repair_runner_access(
 
 def apply_installation(staged: Path, snapshot: Path, root: Path, asset_revision: str) -> None:
     """Install a fully validated runner and roll it back on later asset failure."""
-    validate(staged)
+    validate_current_candidate(staged)
     validate_snapshot(staged, snapshot, root)
     installations = root / "var/lib/sugarkube/dspace-chat-installations"
     retained = installations / asset_revision
@@ -577,7 +589,7 @@ def apply_installation(staged: Path, snapshot: Path, root: Path, asset_revision:
             or retained_manifest_path.read_bytes() != staged_manifest.read_bytes()
         ):
             raise ValueError("retained asset does not match staged candidate")
-        retained_manifest = validate(retained)
+        retained_manifest = validate_retained_asset(retained)
         validate_live_assets(root, retained, retained_manifest)
         config = runtime_module().load_config(retained / "etc/sugarkube/dspace-chat-synthetic.json")
         runner = rooted(root, config["runnerRoot"]) / runtime_module().runner_storage_identity(
@@ -621,7 +633,7 @@ def status(root: Path) -> int:
     retained = installations / revision
     if retained.is_symlink() or not retained.is_dir():
         raise ValueError("current retained asset revision is missing or invalid")
-    manifest = validate(retained)
+    manifest = validate_retained_asset(retained)
     validate_live_assets(root, retained, manifest)
 
     runtime = runtime_module()
@@ -654,6 +666,8 @@ def status(root: Path) -> int:
         raise ValueError("installed runner browser provenance is invalid")
 
     print(f"assetRevision={revision}")
+    preservation = "yes" if classification_runtime_directory_preserved(retained) else "no"
+    print(f"classificationRuntimeDirectoryPreserved={preservation}")
     for target_name, path in live_paths.items():
         print(f"{target_name} sha256={sha(path)}")
     print("runnerValidation=passed")
@@ -713,7 +727,7 @@ def activation_status() -> int:
 def activate(retained: Path, root: Path, revision: str) -> None:
     if not ASSET_REVISION.fullmatch(revision):
         raise ValueError("revision must be a lowercase hexadecimal asset revision")
-    validate(retained)
+    validate_retained_asset(retained)
     current = retained.parent / "current"
     temporary = retained.parent / ".current.new"
     prepared = []
@@ -754,7 +768,7 @@ def activate(retained: Path, root: Path, revision: str) -> None:
 def install(staged: Path, root: Path, revision: str) -> None:
     if not ASSET_REVISION.fullmatch(revision):
         raise ValueError("revision must be a lowercase hexadecimal asset revision")
-    validate(staged)
+    validate_current_candidate(staged)
     retained = root / "var/lib/sugarkube/dspace-chat-installations" / revision
     if retained.exists():
         raise ValueError("exact retained revision already exists")
@@ -834,7 +848,7 @@ def main() -> int:
         if not ASSET_REVISION.fullmatch(args.revision):
             raise ValueError("revision must be a lowercase hexadecimal asset revision")
         retained = args.root / "var/lib/sugarkube/dspace-chat-installations" / args.revision
-        validate(retained)
+        validate_retained_asset(retained)
         rollback_config = runtime.load_config(retained / "etc/sugarkube/dspace-chat-synthetic.json")
         rollback_runner = rooted(args.root, rollback_config["runnerRoot"]) / (
             runtime.runner_storage_identity(rollback_config)
@@ -854,7 +868,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as temporary:
         staged = Path(temporary)
         render(staged)
-        validate(staged)
+        validate_current_candidate(staged)
         if args.runner_snapshot is None:
             parser.error(f"{args.operation} requires --runner-snapshot")
         snapshot = args.runner_snapshot.absolute()
