@@ -300,18 +300,24 @@ def validate_inventory(doc):
                 fail("application metrics environment is unsupported")
             if env == "prod" and app not in {"dspace", "tokenplace"}:
                 fail("only staging app metrics verification is supported for this application")
-            cfg_keys = {
-                "namespace", "serviceMonitorName", "expectedTargetCount", "secret",
-                "serviceMonitor", "targetLabels", "publicMetrics", "retries",
-                "requiredMetricFamilies", "allowedApplicationLabels",
-                "derivedApplicationLabels", "forbiddenApplicationLabels",
-                "transferredTargetLabels", "metadataOnlyMetricFamilies",
-            }
-            if "metricFamilyCompatibility" in cfg:
-                cfg_keys.add("metricFamilyCompatibility")
             expect_keys(
                 cfg,
-                cfg_keys,
+                {
+                    "namespace",
+                    "serviceMonitorName",
+                    "expectedTargetCount",
+                    "secret",
+                    "serviceMonitor",
+                    "targetLabels",
+                    "publicMetrics",
+                    "retries",
+                    "requiredMetricFamilies",
+                    "allowedApplicationLabels",
+                    "derivedApplicationLabels",
+                    "forbiddenApplicationLabels",
+                    "transferredTargetLabels",
+                    "metadataOnlyMetricFamilies",
+                },
                 f"{app}/{env}",
             )
             name(cfg["namespace"], "namespace")
@@ -426,15 +432,6 @@ def validate_inventory(doc):
                     fail("retry settings must be bounded integers")
             metrics = cfg["requiredMetricFamilies"]
             unique_string_list(metrics, "requiredMetricFamilies", prometheus_metric)
-            compatibility = cfg.get("metricFamilyCompatibility")
-            if compatibility is not None:
-                expect_keys(compatibility, {"derivedLabel", "allowedValues", "requiredMetricFamilies"}, "metricFamilyCompatibility")
-                if app != "tokenplace" or env != "prod":
-                    fail("metricFamilyCompatibility is only supported for tokenplace/prod")
-                if compatibility["derivedLabel"] not in cfg["derivedApplicationLabels"]:
-                    fail("metricFamilyCompatibility derivedLabel is not derived")
-                unique_string_list(compatibility["allowedValues"], "metricFamilyCompatibility.allowedValues", nonempty)
-                unique_string_list(compatibility["requiredMetricFamilies"], "metricFamilyCompatibility.requiredMetricFamilies", prometheus_metric)
             transferred = cfg["transferredTargetLabels"]
             if not isinstance(transferred, dict):
                 fail("transferredTargetLabels must be an object")
@@ -948,7 +945,7 @@ def target_state_converged(cfg: dict[str, Any], targets: list[dict[str, Any]]) -
 def query_required_families(cfg: dict[str, Any], derived_values: dict[str, str]) -> set[str]:
     selector = promql_selector(cfg["targetLabels"])
     found: set[str] = set()
-    for metric in required_metric_families(cfg, derived_values):
+    for metric in cfg["requiredMetricFamilies"]:
         candidates = [metric, f"{metric}_bucket", f"{metric}_sum", f"{metric}_count"]
         for candidate in candidates:
             data = prom("/api/v1/query?query=" + urllib.parse.quote(candidate + selector))
@@ -973,13 +970,6 @@ def query_required_families(cfg: dict[str, Any], derived_values: dict[str, str])
                 if series_name == metric or metric_family_from_series(series_name) == metric:
                     found.add(metric)
     return found
-
-
-def required_metric_families(cfg: dict[str, Any], derived_values: dict[str, str]) -> list[str]:
-    compatibility = cfg.get("metricFamilyCompatibility")
-    if compatibility and derived_values.get(compatibility["derivedLabel"]) in compatibility["allowedValues"]:
-        return compatibility["requiredMetricFamilies"]
-    return cfg["requiredMetricFamilies"]
 
 
 def metadata_declares_family(
@@ -1103,7 +1093,7 @@ def verify(app, env):
             1,
         )
 
-    required = set(required_metric_families(cfg, derived_values))
+    required = set(cfg["requiredMetricFamilies"])
     found: set[str] = set()
     for i in range(attempts):
         found = query_required_families(cfg, derived_values)
