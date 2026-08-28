@@ -125,10 +125,11 @@ contract intentionally requires only `tokenplace_compute_nodes_registered`,
 `tokenplace_build_info`. The approved immutable candidate is
 `ghcr.io/futuroptimist/tokenplace-relay:sha-f5c6d6b`, built from source commit
 `f5c6d6b0306112718d74a8340f39f35551b657e6`. Those four families are sufficient
-for zero-healthy-compute-node and telemetry-loss paging. Staging remains on the
-modern Qwen relay and retains its full 13-family contract. A future production
-promotion to the modern relay must restore the full production metric-family
-contract in the same reviewed rollout.
+for zero-healthy-compute-node and telemetry-loss paging. The verifier selects
+this compatibility contract only when the live relay reports the approved
+`sha-f5c6d6b` image tag; every other production image must satisfy the full
+13-family contract. Staging remains on the modern Qwen relay and retains that
+full contract.
 
 Create `tokenplace/tokenplace-prod-metrics-token` with key `token` before deploying
 production values. No Secret manifest belongs in Git. From a private interactive

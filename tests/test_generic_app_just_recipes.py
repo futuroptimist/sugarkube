@@ -5939,10 +5939,7 @@ def test_observability_app_metrics_inventory_tokenplace_contracts_are_environmen
         "applications"
     ]["tokenplace"]["environments"]
 
-    assert environments["prod"]["requiredMetricFamilies"] == (
-        TOKENPLACE_MAINTENANCE_METRIC_FAMILIES
-    )
-    assert environments["staging"]["requiredMetricFamilies"] == [
+    modern_families = {
         "tokenplace_compute_nodes_registered",
         "tokenplace_compute_nodes_healthy",
         "tokenplace_compute_node_lease_age_seconds",
@@ -5956,7 +5953,14 @@ def test_observability_app_metrics_inventory_tokenplace_contracts_are_environmen
         "tokenplace_http_request_duration_seconds",
         "tokenplace_instrumentation_up",
         "tokenplace_build_info",
-    ]
+    }
+    assert set(environments["prod"]["requiredMetricFamilies"]) == modern_families
+    assert set(environments["staging"]["requiredMetricFamilies"]) == modern_families
+    assert environments["prod"]["metricFamilyCompatibility"] == {
+        "derivedLabel": "revision",
+        "allowedValues": ["sha-f5c6d6b"],
+        "requiredMetricFamilies": TOKENPLACE_MAINTENANCE_METRIC_FAMILIES,
+    }
 
 
 def test_observability_app_metrics_inventory_accepts_both_canonical_relabeling_forms():
@@ -6786,7 +6790,19 @@ def test_observability_app_metrics_public_uses_actual_success_status_without_bod
 
 
 def _verify_base(monkeypatch, cfg, prom_func):
-    sm = {"metadata": {"name": cfg["serviceMonitorName"], "namespace": cfg["namespace"], "labels": {"release": "kube-prometheus-stack"}}, "spec": {"selector": {"matchLabels": cfg["serviceMonitor"]["selectorMatchLabels"]}, "endpoints": [{"path": "/metrics", "interval": cfg["serviceMonitor"]["interval"], "scrapeTimeout": cfg["serviceMonitor"]["scrapeTimeout"], "authorization": {"type": "Bearer", "credentials": cfg["secret"]}, "relabelings": cfg["serviceMonitor"]["relabelings"]}]}}
+    sm = {
+        "metadata": {"name": cfg["serviceMonitorName"], "namespace": cfg["namespace"], "labels": {"release": "kube-prometheus-stack"}},
+        "spec": {
+            "selector": {"matchLabels": cfg["serviceMonitor"]["selectorMatchLabels"]},
+            "endpoints": [{
+                "path": "/metrics",
+                "interval": cfg["serviceMonitor"]["interval"],
+                "scrapeTimeout": cfg["serviceMonitor"]["scrapeTimeout"],
+                "authorization": {"type": "Bearer", "credentials": cfg["secret"]},
+                "relabelings": cfg["serviceMonitor"]["relabelings"],
+            }],
+        },
+    }
     class Opener:
         def open(self, url, timeout):
             raise app_metrics.urllib.error.HTTPError(url, 401, "unauthorized", {}, None)
@@ -6794,13 +6810,15 @@ def _verify_base(monkeypatch, cfg, prom_func):
     monkeypatch.setattr(app_metrics, "assert_context", lambda: None)
     monkeypatch.setattr(app_metrics, "assert_production_context", lambda: None)
     monkeypatch.setattr(app_metrics, "check_secret", lambda cfg: None)
-    monkeypatch.setattr(app_metrics, "derive_build_labels_live", lambda cfg: {"version": "main-deadbee", "revision": "main-deadbee"})
+    identity = "sha-f5c6d6b" if cfg.get("metricFamilyCompatibility") else "main-deadbee"
+    monkeypatch.setattr(app_metrics, "derive_build_labels_live", lambda cfg: {"version": identity, "revision": identity})
     monkeypatch.setattr(app_metrics, "kjson", lambda args: sm)
     monkeypatch.setattr(app_metrics, "prom", prom_func)
     monkeypatch.setattr(app_metrics.urllib.request, "build_opener", lambda *args: Opener())
 
 
-def _tokenplace_metric_fixture(cfg, present, extra_labels=None):
+def _tokenplace_metric_fixture(cfg, present, extra_labels=None, identity=None):
+    identity = identity or ("sha-f5c6d6b" if cfg.get("metricFamilyCompatibility") else "main-deadbee")
     def prom_func(path):
         if path == "/api/v1/targets":
             return {"activeTargets": [{
@@ -6817,8 +6835,8 @@ def _tokenplace_metric_fixture(cfg, present, extra_labels=None):
         labels = {
             "__name__": metric,
             **cfg["targetLabels"],
-            "version": "main-deadbee",
-            "revision": "main-deadbee",
+            "version": identity,
+            "revision": identity,
         }
         labels.update(extra_labels or {})
         return {"resultType": "vector", "result": [{"metric": labels}]}
@@ -6877,6 +6895,16 @@ def test_observability_app_metrics_verify_tokenplace_prod_rejects_unbounded_labe
     )
 
     with pytest.raises(app_metrics.Error, match="unbounded application metric label"):
+        app_metrics.verify("tokenplace", "prod")
+
+
+def test_observability_app_metrics_verify_tokenplace_prod_nonapproved_image_requires_modern_contract(monkeypatch):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"]["tokenplace"]["environments"]["prod"]
+    cfg = {**cfg, "retries": {"attempts": 1, "delaySeconds": 0}}
+    _verify_base(monkeypatch, cfg, _tokenplace_metric_fixture(cfg, set(TOKENPLACE_MAINTENANCE_METRIC_FAMILIES), identity="main-deadbee"))
+    monkeypatch.setattr(app_metrics, "derive_build_labels_live", lambda cfg: {"version": "main-deadbee", "revision": "main-deadbee"})
+
+    with pytest.raises(app_metrics.Error, match="required metric family missing"):
         app_metrics.verify("tokenplace", "prod")
 
 
