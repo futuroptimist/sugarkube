@@ -548,7 +548,19 @@ def cleanup_invocation(invocation_dir: Path) -> None:
 def classify_missing_result(stderr: bytes, child_status: int, metadata: dict) -> tuple[str, dict]:
     """Classify bounded child diagnostics without retaining or returning their contents."""
     text = stderr.decode("utf-8", errors="replace").lower()
-    if any(
+    capture_complete = metadata.get("stderrCaptureComplete") is True
+    capture_untruncated = metadata.get("stderrTruncated") is False
+    if (
+        child_status != 0
+        and capture_complete
+        and capture_untruncated
+        and re.search(
+            r"(?m)^\[qa:remote-chat-smoke\] launch: spawn\s+\S+\s+(?:eacces|enoent|eperm)\s*$",
+            text,
+        )
+    ):
+        classification = "playwright-process-launch-failure"
+    elif any(
         marker in text
         for marker in (
             "executable doesn't exist",

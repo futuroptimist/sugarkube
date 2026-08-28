@@ -1254,6 +1254,77 @@ def test_missing_result_classification_is_allowlisted_bounded_and_sanitized(
         assert diagnostic.decode(errors="ignore") not in json.dumps(metadata)
 
 
+@pytest.mark.parametrize(
+    "diagnostic",
+    [
+        b"[qa:remote-chat-smoke] launch: spawn node ENOENT\n",
+        b"[qa:remote-chat-smoke] launch: spawn node EACCES\n",
+        b"[qa:remote-chat-smoke] launch: spawn node EPERM\r\n",
+    ],
+)
+def test_missing_result_classifies_bounded_playwright_process_launch(
+    diagnostic: bytes,
+) -> None:
+    metadata = {
+        "stderrBytes": len(diagnostic),
+        "stderrSha256": __import__("hashlib").sha256(diagnostic).hexdigest(),
+        "stderrTruncated": False,
+        "stderrCaptureComplete": True,
+    }
+
+    classification, returned_metadata = runtime.classify_missing_result(diagnostic, 1, metadata)
+
+    assert classification == "playwright-process-launch-failure"
+    assert returned_metadata == metadata
+    assert diagnostic.decode().strip() not in json.dumps(returned_metadata)
+
+
+@pytest.mark.parametrize(
+    ("diagnostic", "metadata_override"),
+    [
+        (b"[qa:remote-chat-smoke] launch: spawn node UNKNOWN\n", {}),
+        (b"prefix [qa:remote-chat-smoke] launch: spawn node ENOENT\n", {}),
+        (b"[qa:remote-chat-smoke] launch: browserType.launch ENOENT\n", {}),
+        (b"[qa:remote-chat-smoke] launch: spawn node ENOENT\n", {"stderrTruncated": True}),
+        (
+            b"[qa:remote-chat-smoke] launch: spawn node ENOENT\n",
+            {"stderrCaptureComplete": False},
+        ),
+        (b"", {}),
+    ],
+)
+def test_playwright_process_launch_near_misses_remain_generic(
+    diagnostic: bytes, metadata_override: dict
+) -> None:
+    metadata = {
+        "stderrBytes": len(diagnostic),
+        "stderrSha256": __import__("hashlib").sha256(diagnostic).hexdigest(),
+        "stderrTruncated": False,
+        "stderrCaptureComplete": True,
+        **metadata_override,
+    }
+
+    classification, returned_metadata = runtime.classify_missing_result(diagnostic, 1, metadata)
+
+    assert classification == "current-result-missing-after-child-failure"
+    assert returned_metadata == metadata
+
+
+def test_playwright_process_launch_marker_beyond_bounded_prefix_remains_generic() -> None:
+    diagnostic = b"x" * runtime.MAX_CHILD_DIAGNOSTIC_BYTES
+    metadata = {
+        "stderrBytes": runtime.MAX_CHILD_DIAGNOSTIC_BYTES + 64,
+        "stderrSha256": "f" * 64,
+        "stderrTruncated": True,
+        "stderrCaptureComplete": True,
+    }
+
+    classification, returned_metadata = runtime.classify_missing_result(diagnostic, 1, metadata)
+
+    assert classification == "current-result-missing-after-child-failure"
+    assert returned_metadata == metadata
+
+
 def test_classification_archive_survives_invocation_cleanup_without_raw_output(
     tmp_path: Path,
 ) -> None:

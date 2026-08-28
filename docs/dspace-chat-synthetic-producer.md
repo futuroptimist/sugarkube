@@ -193,8 +193,14 @@ Read status, hashes, metric timestamps, unit exit status, and bounded `outcome=`
 Do not print credentials, Secret values, raw results, browser output, or unrestricted journals.
 When a child returns without a current result, the runtime reads at most 16 KiB of its private
 stderr only to select an allowlisted classification: browser-executable launch, Playwright
-configuration, test-before-completion, completion-publisher, or missing-result after child success
-or failure. It archives only that classification, invocation ID, child status, byte count,
+process launch, Playwright configuration, test-before-completion, completion-publisher, or
+missing-result after child success or failure. `playwright-process-launch-failure` requires the
+runner-owned, line-anchored launch marker, a recognized process-launch errno, child failure, and a
+complete, untruncated capture. It proves that the runner could not start its Playwright child; it
+does not identify a staging application failure or expose the command or diagnostic. Unknown,
+partial, truncated, and near-miss diagnostics remain fail-closed as
+`current-result-missing-after-child-failure`. The runtime archives only the selected
+classification, invocation ID, child status, byte count,
 truncation and capture-complete flags, and SHA-256 in an atomically replaced, root-only
 `latest-classification.json` under
 the result root. The systemd runtime directory is preserved across oneshot service exits (but remains
@@ -214,9 +220,10 @@ may remain active and never infer success from browser exit alone.
 Bind a retained classification to the exact service execution by comparing its `invocation` field
 with systemd's invocation ID for that execution; do not infer the binding from timestamps or the
 fact that the record is the latest one. The record intentionally excludes raw stdout, raw stderr,
-credentials, browser state, and page content. This persistence correction does not identify or
-repair the live child failure: absent a deterministic specialized marker, it remains
-`current-result-missing-after-child-failure`.
+credentials, browser state, and page content. Classification does not repair the live child
+failure. A diagnostic that does not satisfy a deterministic specialized marker remains
+`current-result-missing-after-child-failure`; the retained metadata alone must not be treated as
+proof that the staging application or its journey failed.
 
 When no valid current bounded result is consumable, the previous metric is preserved byte-for-byte.
 It ages into the existing stale alert, making ambiguity fail closed. A valid current failure
