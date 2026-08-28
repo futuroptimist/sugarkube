@@ -27,8 +27,11 @@ supported manifest shape and listed hashes, valid configuration, timer persisten
 and manifest, clean tracked runner content, and browser provenance. Current candidates additionally
 require an effective `RuntimeDirectoryPreserve=yes` in the service's `[Service]` section. That
 current policy is checked for every render, dry-run, new installation, and idempotent reapplication,
-but is not retroactively imposed on byte-for-byte retained assets created under the earlier valid
-contract. Retained assets are never rewritten, upgraded, or re-hashed to gain that compatibility.
+but is not retroactively imposed on the byte-for-byte retained asset with approved manifest digest
+`3c67cd1bc8253cecddfe1649e96aa5d9cc1b16c8da93c93695c02afa0444b741`, which was created under
+the earlier valid contract. Every other retained asset must satisfy the current preservation policy;
+retention or a self-consistent re-hashed manifest does not grant legacy status. Retained assets are
+never rewritten, upgraded, or re-hashed to gain that compatibility.
 
 That compatibility is limited to revision `97ab09f13fb098de928a878bf1fe9b8d13032cb5`, its exact
 revision-only storage name, and the exact seven-file manifest with SHA-256

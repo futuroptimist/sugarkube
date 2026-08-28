@@ -35,6 +35,7 @@ ASSETS = {
 REVISION = re.compile(r"[0-9a-f]{40}")
 ASSET_REVISION = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 APPROVED_RUNNER_REVISION = "97ab09f13fb098de928a878bf1fe9b8d13032cb5"
+APPROVED_LEGACY_ASSET_REVISION = "3c67cd1bc8253cecddfe1649e96aa5d9cc1b16c8da93c93695c02afa0444b741"
 CRITICAL = (
     "scripts/run-remote-chat-smoke.mjs",
     "scripts/remote-chat-smoke-completion.mjs",
@@ -278,6 +279,12 @@ def validate_retained_asset(tree: Path) -> dict[str, str]:
         not in (tree / "etc/systemd/system/dspace-chat-synthetic.timer").read_text()
     ):
         raise ValueError("timer is not persistent")
+    service = (tree / "etc/systemd/system/dspace-chat-synthetic.service").read_text()
+    if (
+        systemd_service_value(service, "RuntimeDirectoryPreserve") != "yes"
+        and sha(tree / "manifest.json") != APPROVED_LEGACY_ASSET_REVISION
+    ):
+        raise ValueError("classification runtime directory is not preserved")
     return manifest
 
 

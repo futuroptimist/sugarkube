@@ -3540,6 +3540,9 @@ def test_installer_rejects_assets_that_lose_classification_runtime_preservation(
     with pytest.raises(ValueError, match="classification runtime directory is not preserved"):
         installer.validate_current_candidate(staged)
 
+    with pytest.raises(ValueError, match="classification runtime directory is not preserved"):
+        installer.validate_retained_asset(staged)
+
 
 @pytest.mark.parametrize(
     "replacement",
@@ -3658,6 +3661,7 @@ def test_same_revision_manifest_migration_preserves_runner_and_rolls_back_exactl
     old_staged, new_staged = tmp_path / "old-assets", tmp_path / "new-assets"
     old_asset = staged(old_staged, None, preserve_classification=False)
     new_asset = staged(new_staged, qualified_sha)
+    monkeypatch.setattr(installer, "APPROVED_LEGACY_ASSET_REVISION", old_asset)
     root = tmp_path / "private-root"
     root.mkdir()
     real_run = subprocess.run
@@ -3713,9 +3717,7 @@ def test_same_revision_manifest_migration_preserves_runner_and_rolls_back_exactl
     legacy_manifest_sha = runtime.sha256(old_runner / legacy_manifest_path.name)
     complete_legacy_before = retained_state(root)
     assert (
-        run_installer_main(
-            monkeypatch, "rollback", "--root", str(root), "--revision", old_asset
-        )
+        run_installer_main(monkeypatch, "rollback", "--root", str(root), "--revision", old_asset)
         == 0
     )
     assert "validation=passed mutation=none" in capsys.readouterr().out
