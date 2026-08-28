@@ -192,9 +192,10 @@ replacement proves publication.
 Read status, hashes, metric timestamps, unit exit status, and bounded `outcome=` summaries first.
 Do not print credentials, Secret values, raw results, browser output, or unrestricted journals.
 When a child returns without a current result, the runtime reads at most 16 KiB of its private
-stderr only to select an allowlisted classification: browser-executable launch, Playwright
-configuration, test-before-completion, completion-publisher, or missing-result after child success
-or failure. It archives only that classification, invocation ID, child status, byte count,
+stderr only to select an allowlisted classification: the exact Node executable launch through
+`runuser`, browser-executable launch, Playwright configuration, test-before-completion,
+completion-publisher, or missing-result after child success or failure. It archives only that
+classification, invocation ID, child status, byte count,
 truncation and capture-complete flags, and SHA-256 in an atomically replaced, root-only
 `latest-classification.json` under
 the result root. The systemd runtime directory is preserved across oneshot service exits (but remains
@@ -213,9 +214,15 @@ may remain active and never infer success from browser exit alone.
 
 Bind a retained classification to the exact service execution by comparing its `invocation` field
 with systemd's invocation ID for that execution; do not infer the binding from timestamps or the
-fact that the record is the latest one. The record intentionally excludes raw stdout, raw stderr,
-credentials, browser state, and page content. This persistence correction does not identify or
-repair the live child failure: absent a deterministic specialized marker, it remains
+fact that the record is the latest one. The narrowly matched
+`node-executable-launch-failure` classification means that `runuser` reported that the fixed
+`/usr/bin/node` coordinate could not be executed because it was unavailable to the kernel or
+permission was denied. It is selected only for a complete, untruncated diagnostic with that exact
+bounded structure and child status 1. It does not prove that the path itself is absent: an
+unavailable interpreter or dynamic loader can produce the same operating-system result. The record
+intentionally excludes raw stdout, raw stderr, credentials, browser state, and page content. This
+classification does not repair the child execution environment. Diagnostics that are incomplete,
+truncated, structurally different, or otherwise unknown remain
 `current-result-missing-after-child-failure`.
 
 When no valid current bounded result is consumable, the previous metric is preserved byte-for-byte.
