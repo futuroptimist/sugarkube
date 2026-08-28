@@ -112,6 +112,16 @@ roots, reports activation as not queried; only `/` queries unit activation witho
 configuration secrets (the committed configuration contains none). A failed staging or preflight
 leaves installed fixtures unchanged.
 
+Asset validation deliberately separates two contracts. Newly rendered candidates must have an
+effective `RuntimeDirectoryPreserve=yes` in the service's `[Service]` section; a missing, commented,
+misplaced, overridden, or different value fails candidate dry-run and installation. Retained assets
+instead keep the baseline contract under which their immutable bytes were created. Their complete
+manifest, every listed hash, configuration, timer persistence, exact runner and Git identity, browser
+provenance, and live-asset equality are still validated, but a later service-policy addition is not
+retroactively imposed on an exact historical asset. `status` reports
+`classificationRuntimeDirectoryPreserve=yes` or `not-configured` so operators can identify which
+contract is selected without rewriting or re-hashing it.
+
 ## 3. Separately authorized installation and controlled execution
 
 Only after separate approval, invoke apply with the already materialized snapshot:
@@ -276,3 +286,5 @@ runners, weakening manifest checks, or adding persistent Git safe-directory conf
 rejects an absent, incomplete, or hash-mismatched retained revision and does not change
 timer/service activation. Observe the same status and metric-age evidence afterward. Any live
 cutover or recovery after merge remains a separate reviewed and explicitly authorized operation.
+An explicit rollback may intentionally restore a historical service without classification
+runtime-directory preservation; it never relaxes the requirement for a newly rendered candidate.
