@@ -119,6 +119,17 @@ or queue depth.
 
 ### Provision and deploy authenticated metrics
 
+Production temporarily uses the Llama 3.1 maintenance relay line. The approved
+immutable candidate is `ghcr.io/futuroptimist/tokenplace-relay:sha-f5c6d6b`,
+built from source commit `f5c6d6b0306112718d74a8340f39f35551b657e6`. Its
+intentionally narrow verifier contract requires exactly
+`tokenplace_compute_nodes_registered`, `tokenplace_compute_nodes_healthy`,
+`tokenplace_instrumentation_up`, and `tokenplace_build_info`. These families are
+sufficient for zero-healthy-compute-node and telemetry-loss paging. Staging
+continues to use the modern Qwen relay and its full 13-family metrics contract.
+A future production promotion to the modern relay must restore the full
+production family contract as part of the same reviewed rollout.
+
 Create `tokenplace/tokenplace-prod-metrics-token` with key `token` before deploying
 production values. No Secret manifest belongs in Git. From a private interactive
 terminal, use the existing hidden-input recipe; do not pass the value as an
