@@ -135,6 +135,13 @@ world receives write access. An
 identical pre-existing storage identity is validated and reused; older runner identities and retained
 assets are never deleted. Reapplying an already current, fully validated asset is an idempotent
 no-op. Only then does apply transactionally replace the validated asset set and switch `current`.
+Candidate and retained-asset validation are deliberately distinct. Every newly rendered or newly
+installed candidate must have an effective `RuntimeDirectoryPreserve=yes` assignment in the
+service's `[Service]` section. Immutable retained assets continue to be checked against their
+complete historical contract (manifest shape and hashes, configuration, runner identity and clean
+tracked state, browser provenance, timer persistence, and the other baseline safety checks) without
+retroactively imposing later candidate policy. Retained bytes and manifests are never rewritten or
+re-hashed to gain compatibility.
 After apply, the operator must run `sudo systemctl daemon-reload` as a separate mandatory
 step so the in-memory definitions match disk. The installer never enables, starts, stops, restarts, disables, retries, or executes smoke. A failure during the
 installer's transactional asset replacement restores the prior asset set and leaves `current`
@@ -271,8 +278,12 @@ sudo systemctl daemon-reload
 The command loads the retained asset’s own configuration, validates its exact legacy or
 manifest-qualified runner identity and browser contract, and only then switches assets. Thus rollback
 selects the original runner as well as the exact asset. `status` reports `runnerRevision`,
-`runnerStorageIdentity`, and `runnerManifestSha256`; operators must verify all three without renaming
-runners, weakening manifest checks, or adding persistent Git safe-directory configuration. The command
+`runnerStorageIdentity`, `runnerManifestSha256`, and
+`classificationRuntimeDirectoryPreserved`. A `no` value identifies an otherwise valid historical
+asset whose service predates classification persistence. Rollback remains explicit and may
+intentionally restore that historical contract; it does not relax the persistence requirement for
+new candidates. Operators must verify all reported coordinates without renaming runners, weakening
+manifest checks, or adding persistent Git safe-directory configuration. The command
 rejects an absent, incomplete, or hash-mismatched retained revision and does not change
 timer/service activation. Observe the same status and metric-age evidence afterward. Any live
 cutover or recovery after merge remains a separate reviewed and explicitly authorized operation.
