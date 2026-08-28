@@ -235,7 +235,11 @@ The installations and retained-assets store remains intentionally private (`root
 live `status` and retained-asset validation are root-only operations. Do not weaken that store merely
 to let the child inspect it: the child needs only `/var/lib/sugarkube`, the runner root, and the exact
 installed runner. Supply the exact retained asset revision reported by the validated private-root
-status, together with the approved runner revision and runner manifest SHA-256.
+status. For the staging incident, the validated retained asset coordinate is
+`9dbccee2be1f57fc7d80a714e3de45a66e860080e07b357c7ddade6e7f343319`, alongside the
+approved runner revision and runner manifest SHA-256 shown below. These exact coordinates are
+operational authorization and evidence only; retained compatibility is determined by the validated
+legacy/current manifest contract, never by an asset-digest allowlist.
 
 First, as root, validate `current`, the exact retained assets, runner Git/content/dependencies,
 browser provenance, and the authorized manifest hash without mutation. The report contains only
@@ -244,7 +248,7 @@ bounded coordinates and access state:
 ```bash
 sudo python3 scripts/install_dspace_chat_synthetic.py repair-runner-access \
   --revision 97ab09f13fb098de928a878bf1fe9b8d13032cb5 \
-  --asset-revision ASSET_REVISION \
+  --asset-revision 9dbccee2be1f57fc7d80a714e3de45a66e860080e07b357c7ddade6e7f343319 \
   --runner-manifest-sha256 36fdab33edc0f1ad518a6d3d247a1bd32d233402387ba57493a9386d78ec9301
 ```
 
@@ -259,7 +263,7 @@ smoke, retry, or roll back:
 ```bash
 sudo python3 scripts/install_dspace_chat_synthetic.py repair-runner-access --apply \
   --revision 97ab09f13fb098de928a878bf1fe9b8d13032cb5 \
-  --asset-revision ASSET_REVISION \
+  --asset-revision 9dbccee2be1f57fc7d80a714e3de45a66e860080e07b357c7ddade6e7f343319 \
   --runner-manifest-sha256 36fdab33edc0f1ad518a6d3d247a1bd32d233402387ba57493a9386d78ec9301
 sudo python3 scripts/install_dspace_chat_synthetic.py status
 ```
