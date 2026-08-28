@@ -22,6 +22,14 @@ migration at the same Git revision without reusing or overwriting the older revi
 Retained assets created before this migration remain valid and continue to select their legacy
 revision-only runner coordinate.
 
+Asset validation likewise separates two contracts. Every retained asset must still have the exact
+supported manifest shape and listed hashes, valid configuration, timer persistence, runner identity
+and manifest, clean tracked runner content, and browser provenance. Current candidates additionally
+require an effective `RuntimeDirectoryPreserve=yes` in the service's `[Service]` section. That
+current policy is checked for every render, dry-run, new installation, and idempotent reapplication,
+but is not retroactively imposed on byte-for-byte retained assets created under the earlier valid
+contract. Retained assets are never rewritten, upgraded, or re-hashed to gain that compatibility.
+
 That compatibility is limited to revision `97ab09f13fb098de928a878bf1fe9b8d13032cb5`, its exact
 revision-only storage name, and the exact seven-file manifest with SHA-256
 `36fdab33edc0f1ad518a6d3d247a1bd32d233402387ba57493a9386d78ec9301`. Every declared hash is
@@ -109,7 +117,10 @@ revision against the snapshot basename, manifest hashes, independent Git metadat
 and Node/Playwright resolution. It also validates architecture and browser provenance before any
 installation mutation. Review all hashes and coordinates. `status` is read-only and, for alternate
 roots, reports activation as not queried; only `/` queries unit activation without printing
-configuration secrets (the committed configuration contains none). A failed staging or preflight
+configuration secrets (the committed configuration contains none). Its
+`classificationRuntimeDirectoryPreserve=yes|no` field makes the selected asset's effective contract
+visible; `no` identifies a valid historical asset whose service predates classification-directory
+persistence rather than suppressing that weaker contract. A failed staging or preflight
 leaves installed fixtures unchanged.
 
 ## 3. Separately authorized installation and controlled execution
@@ -270,7 +281,10 @@ sudo systemctl daemon-reload
 
 The command loads the retained asset’s own configuration, validates its exact legacy or
 manifest-qualified runner identity and browser contract, and only then switches assets. Thus rollback
-selects the original runner as well as the exact asset. `status` reports `runnerRevision`,
+selects the original runner as well as the exact asset. Rollback remains explicit and may
+intentionally restore a historical service contract without classification runtime-directory
+persistence; every newly rendered candidate must still satisfy the current persistence requirement.
+`status` reports `runnerRevision`,
 `runnerStorageIdentity`, and `runnerManifestSha256`; operators must verify all three without renaming
 runners, weakening manifest checks, or adding persistent Git safe-directory configuration. The command
 rejects an absent, incomplete, or hash-mismatched retained revision and does not change
