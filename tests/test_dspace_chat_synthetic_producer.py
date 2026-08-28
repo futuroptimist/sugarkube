@@ -1254,6 +1254,99 @@ def test_missing_result_classification_is_allowlisted_bounded_and_sanitized(
         assert diagnostic.decode(errors="ignore") not in json.dumps(metadata)
 
 
+@pytest.mark.parametrize(
+    "diagnostic",
+    [
+        b"runuser: failed to execute /usr/bin/node: No such file or directory\n",
+        b"runuser: failed to execute /usr/bin/node: No such file or directory",
+        b"runuser: failed to execute /usr/bin/node: Permission denied\n",
+        b"runuser: failed to execute /usr/bin/node: Permission denied\r\n",
+    ],
+)
+def test_missing_result_classifies_complete_runuser_node_exec_failures(
+    diagnostic: bytes,
+) -> None:
+    metadata = {
+        "stderrBytes": len(diagnostic),
+        "stderrSha256": __import__("hashlib").sha256(diagnostic).hexdigest(),
+        "stderrTruncated": False,
+        "stderrCaptureComplete": True,
+    }
+
+    classification, returned = runtime.classify_missing_result(diagnostic, 1, metadata)
+
+    assert classification == "node-executable-launch-failure"
+    assert returned == metadata
+    assert diagnostic.decode() not in json.dumps(returned)
+
+
+@pytest.mark.parametrize(
+    ("diagnostic", "metadata_override"),
+    [
+        (b"runuser: failed to execute /usr/bin/nodejs: No such file or directory\n", {}),
+        (b"runuser: failed to execute /usr/bin/node: Input/output error\n", {}),
+        (b"prefix runuser: failed to execute /usr/bin/node: Permission denied\n", {}),
+        (
+            b"runuser: failed to execute /usr/bin/node: No such file or directory\n",
+            {"stderrCaptureComplete": False},
+        ),
+        (
+            b"runuser: failed to execute /usr/bin/node: No such file or directory\n",
+            {"stderrTruncated": True},
+        ),
+        (
+            b"runuser: failed to execute /usr/bin/node: No such file or directory\n"
+            + b"x" * runtime.MAX_CHILD_DIAGNOSTIC_BYTES,
+            {"stderrTruncated": True},
+        ),
+        (b"", {}),
+    ],
+)
+def test_runuser_node_exec_near_misses_remain_generic(
+    diagnostic: bytes, metadata_override: dict
+) -> None:
+    metadata = {
+        "stderrBytes": len(diagnostic),
+        "stderrSha256": __import__("hashlib").sha256(diagnostic).hexdigest(),
+        "stderrTruncated": False,
+        "stderrCaptureComplete": True,
+        **metadata_override,
+    }
+
+    classification, returned = runtime.classify_missing_result(diagnostic, 1, metadata)
+
+    assert classification == "current-result-missing-after-child-failure"
+    assert returned == metadata
+
+
+def test_bounded_stderr_reproduces_runuser_node_exec_diagnostic_without_exposure(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    diagnostic = b"runuser: failed to execute /usr/bin/node: No such file or directory\n"
+
+    completed, captured, metadata = runtime.bounded_stderr_run(
+        [
+            sys.executable,
+            "-S",
+            "-c",
+            f"import sys; sys.stderr.buffer.write({diagnostic!r}); raise SystemExit(1)",
+        ]
+    )
+    classification, returned = runtime.classify_missing_result(
+        captured, completed.returncode, metadata
+    )
+
+    assert completed.returncode == 1
+    assert classification == "node-executable-launch-failure"
+    assert returned == {
+        "stderrBytes": 68,
+        "stderrSha256": __import__("hashlib").sha256(diagnostic).hexdigest(),
+        "stderrTruncated": False,
+        "stderrCaptureComplete": True,
+    }
+    assert diagnostic.decode().strip() not in capsys.readouterr().out
+
+
 def test_classification_archive_survives_invocation_cleanup_without_raw_output(
     tmp_path: Path,
 ) -> None:
@@ -1455,6 +1548,47 @@ def test_missing_result_keeps_metric_cleans_invocation_and_bounds_latest_evidenc
         "childStatus": 1,
         **metadata,
     }
+
+
+def test_runuser_node_exec_failure_archives_only_semantic_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    value, metric, _sibling, _calls = prepare_runtime_run(tmp_path, monkeypatch, "missing")
+    diagnostic = b"runuser: failed to execute /usr/bin/node: No such file or directory\n"
+    metadata = {
+        "stderrBytes": len(diagnostic),
+        "stderrSha256": __import__("hashlib").sha256(diagnostic).hexdigest(),
+        "stderrTruncated": False,
+        "stderrCaptureComplete": True,
+    }
+
+    monkeypatch.setattr(
+        runtime,
+        "bounded_stderr_run",
+        lambda argv, **_kwargs: (
+            subprocess.CompletedProcess(argv, 1),
+            diagnostic,
+            metadata,
+        ),
+    )
+
+    assert runtime.run(value) == 1
+
+    output = capsys.readouterr().out
+    record = Path(value["resultRoot"]) / "latest-classification.json"
+    payload = json.loads(record.read_text())
+    assert payload == {
+        "schemaVersion": 1,
+        "invocation": "a" * 32,
+        "classification": "node-executable-launch-failure",
+        "childStatus": 1,
+        **metadata,
+    }
+    assert "reason=node-executable-launch-failure" in output
+    assert diagnostic.decode().strip() not in output
+    assert diagnostic.decode().strip() not in record.read_text()
+    assert metric.read_bytes() == b"previous metric\n"
+    assert not (Path(value["resultRoot"]) / f"uid-{os.getuid()}-{'a' * 32}").exists()
 
 
 def test_missing_result_archive_failure_remains_fail_closed(

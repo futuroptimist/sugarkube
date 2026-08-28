@@ -548,7 +548,20 @@ def cleanup_invocation(invocation_dir: Path) -> None:
 def classify_missing_result(stderr: bytes, child_status: int, metadata: dict) -> tuple[str, dict]:
     """Classify bounded child diagnostics without retaining or returning their contents."""
     text = stderr.decode("utf-8", errors="replace").lower()
-    if any(
+    node_launch_failure = (
+        child_status == 1
+        and metadata.get("stderrCaptureComplete") is True
+        and metadata.get("stderrTruncated") is False
+        and re.fullmatch(
+            rb"runuser: failed to execute /usr/bin/node: "
+            rb"(?:No such file or directory|Permission denied)\r?\n?",
+            stderr,
+        )
+        is not None
+    )
+    if node_launch_failure:
+        classification = "node-executable-launch-failure"
+    elif any(
         marker in text
         for marker in (
             "executable doesn't exist",
