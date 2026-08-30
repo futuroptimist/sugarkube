@@ -56,8 +56,8 @@ same `All = .*` shape in both profiles. The validator compares each artifact to 
 template and rejects one-sided title, query, visualization, transformation, target-mode, ID, order,
 or grid drift.
 
-The staging blackbox exporter and Probe lifecycle is documented separately in
-[Staging blackbox monitoring](observability-blackbox.md). That guarded lifecycle
+The environment-specific blackbox exporter and Probe lifecycle is documented separately in
+[Blackbox monitoring](observability-blackbox.md). That guarded lifecycle
 exclusively owns its narrowly scoped staging Prometheus-to-exporter
 NetworkPolicy; it is not part of an active Flux or cluster Kustomize graph.
 The observed live baseline had no monitoring default-deny or
@@ -93,7 +93,7 @@ Read-only discovery on 2026-08-08 at merge SHA
 local storage. The default `local-path` StorageClass used
 `WaitForFirstConsumer`, did not allow expansion, and there were no PVs or PVCs.
 The `monitoring` namespace, observability releases, and `monitoring.coreos.com`
-APIs/CRDs were absent. No production application-metrics or blackbox lifecycle
+APIs/CRDs were absent. No production application-metrics lifecycle
 was verified, and current application releases predate the staging metrics integrations.
 
 The shared staging and production desired state is one Prometheus replica with

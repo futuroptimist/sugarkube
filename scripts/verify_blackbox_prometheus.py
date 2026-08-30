@@ -5,28 +5,36 @@ import json
 import os
 import sys
 
+ROUTES = {
+    "dspace": ("root", "config", "healthz", "livez"),
+    "tokenplace": ("root", "healthz", "livez", "metadata"),
+    "danielsmith": ("root", "healthz", "livez"),
+    "gitshelves": ("root", "healthz", "livez", "baseplate", "module"),
+    "jobbot3000": ("root", "healthz", "livez", "tracker", "manifest"),
+}
+
+
+def fail(message, code=9):
+    print(f"ERROR: {message}", file=sys.stderr)
+    raise SystemExit(code)
+
+
+def parse_args():
+    args = sys.argv[1:]
+    probes = False
+    if "--probes" in args:
+        args.remove("--probes")
+        probes = True
+    if len(args) != 2 or args[0] != "--env" or args[1] not in {"staging", "prod"}:
+        fail("explicit --env staging or --env prod is required.")
+    return args[1], probes
+
+
+ENVIRONMENT, PROBES_MODE = parse_args()
 EXPECTED = {
-    "blackbox-dspace-staging-root": ("dspace", "root"),
-    "blackbox-dspace-staging-config": ("dspace", "config"),
-    "blackbox-dspace-staging-healthz": ("dspace", "healthz"),
-    "blackbox-dspace-staging-livez": ("dspace", "livez"),
-    "blackbox-tokenplace-staging-root": ("tokenplace", "root"),
-    "blackbox-tokenplace-staging-healthz": ("tokenplace", "healthz"),
-    "blackbox-tokenplace-staging-livez": ("tokenplace", "livez"),
-    "blackbox-tokenplace-staging-metadata": ("tokenplace", "metadata"),
-    "blackbox-danielsmith-staging-root": ("danielsmith", "root"),
-    "blackbox-danielsmith-staging-healthz": ("danielsmith", "healthz"),
-    "blackbox-danielsmith-staging-livez": ("danielsmith", "livez"),
-    "blackbox-gitshelves-staging-root": ("gitshelves", "root"),
-    "blackbox-gitshelves-staging-healthz": ("gitshelves", "healthz"),
-    "blackbox-gitshelves-staging-livez": ("gitshelves", "livez"),
-    "blackbox-gitshelves-staging-baseplate": ("gitshelves", "baseplate"),
-    "blackbox-gitshelves-staging-module": ("gitshelves", "module"),
-    "blackbox-jobbot3000-staging-root": ("jobbot3000", "root"),
-    "blackbox-jobbot3000-staging-healthz": ("jobbot3000", "healthz"),
-    "blackbox-jobbot3000-staging-livez": ("jobbot3000", "livez"),
-    "blackbox-jobbot3000-staging-tracker": ("jobbot3000", "tracker"),
-    "blackbox-jobbot3000-staging-manifest": ("jobbot3000", "manifest"),
+    f"blackbox-{app}-{ENVIRONMENT}-{route}": (app, route)
+    for app, routes in ROUTES.items()
+    for route in routes
 }
 EXPECTED_JOBS = {f"probe/monitoring/{name}": labels for name, labels in EXPECTED.items()}
 
@@ -37,11 +45,6 @@ FAMILIES = {
     "probe_dns_lookup_time_seconds",
     "probe_ssl_earliest_cert_expiry",
 }
-
-
-def fail(message, code=9):
-    print(f"ERROR: {message}", file=sys.stderr)
-    raise SystemExit(code)
 
 
 def response(value, description):
@@ -66,20 +69,25 @@ def validate_probes(document):
         if not isinstance(labels, dict) or not isinstance(metadata.get("name"), str):
             fail("Probe response contains an invalid object.", 7)
         name = metadata["name"]
+        if name in found:
+            fail("Probe response contains a duplicate name.", 7)
+        if (
+            labels.get("environment") != ENVIRONMENT
+            or labels.get("release") != "kube-prometheus-stack"
+        ):
+            fail("Probe response contains invalid lifecycle-owned labels.", 7)
         found[name] = (labels.get("app"), labels.get("route"))
     if found != EXPECTED:
-        fail("staging Probe names or app/route mappings are incorrect.", 7)
+        fail(f"{ENVIRONMENT} Probe names or app/route mappings are incorrect.", 7)
 
 
 try:
     document = json.load(sys.stdin)
 except (UnicodeDecodeError, json.JSONDecodeError):
     fail("response is malformed JSON.")
-if sys.argv[1:] == ["--probes"]:
+if PROBES_MODE:
     validate_probes(document)
     raise SystemExit(0)
-if sys.argv[1:]:
-    fail("invalid verifier arguments.")
 if not isinstance(document, dict) or set(document) != {"targets", "metrics"}:
     fail("Prometheus response bundle has an invalid structure.")
 
@@ -96,6 +104,8 @@ for item in active:
     if job not in EXPECTED_JOBS:
         continue
     key = (labels.get("app"), labels.get("route"))
+    if labels.get("environment") != ENVIRONMENT:
+        fail("Prometheus target contains invalid lifecycle-owned labels.")
     health = item.get("health")
     if key != EXPECTED_JOBS[job] or not isinstance(health, str):
         fail("Prometheus target contains invalid lifecycle-owned labels.")
@@ -119,6 +129,8 @@ for family, raw in metrics.items():
         if job not in EXPECTED_JOBS:
             continue
         key = (labels.get("app"), labels.get("route"))
+        if labels.get("environment") != ENVIRONMENT:
+            fail(f"{family} contains invalid lifecycle-owned labels.")
         if key != EXPECTED_JOBS[job]:
             fail(f"{family} contains invalid lifecycle-owned labels.")
         value = sample.get("value")
@@ -138,7 +150,10 @@ complete = all(values == set(EXPECTED.values()) for values in metric_sets.values
 if healthy and complete and not zero:
     raise SystemExit(0)
 if os.environ.get("FINAL_ATTEMPT") == "1":
-    print("ERROR: staging blackbox verification did not converge before timeout.", file=sys.stderr)
+    print(
+        f"ERROR: {ENVIRONMENT} blackbox verification did not converge before timeout.",
+        file=sys.stderr,
+    )
     for app, route in sorted(EXPECTED.values()):
         health = discovered.get((app, route), "missing")
         series = (
@@ -149,7 +164,7 @@ if os.environ.get("FINAL_ATTEMPT") == "1":
             json.dumps(
                 {
                     "app": app,
-                    "environment": "staging",
+                    "environment": ENVIRONMENT,
                     "route": route,
                     "health": health,
                     "series": series,

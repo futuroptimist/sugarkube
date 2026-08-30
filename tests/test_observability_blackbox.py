@@ -38,8 +38,8 @@ COVERAGE_BOOTSTRAP_ENV = (
 )
 
 
-def expected_names():
-    text = (ROOT / "clusters/staging/observability/probes/public-apps.yaml").read_text()
+def expected_names(environment="staging"):
+    text = (ROOT / f"clusters/{environment}/observability/probes/public-apps.yaml").read_text()
     return [
         line.strip().split(": ", 1)[1]
         for line in text.splitlines()
@@ -47,15 +47,18 @@ def expected_names():
     ]
 
 
-def verifier_bundle(health="up", success="1"):
-    pairs = [(name, name.removeprefix("blackbox-").split("-staging-")) for name in expected_names()]
+def verifier_bundle(health="up", success="1", environment="staging"):
+    pairs = [
+        (name, name.removeprefix("blackbox-").split(f"-{environment}-"))
+        for name in expected_names(environment)
+    ]
     targets = [
         {
             "labels": {
                 "job": f"probe/monitoring/{name}",
                 "app": pair[0],
                 "route": pair[1],
-                "environment": "staging",
+                "environment": environment,
             },
             "health": health,
         }
@@ -79,6 +82,7 @@ def verifier_bundle(health="up", success="1"):
                             "job": f"probe/monitoring/{name}",
                             "app": pair[0],
                             "route": pair[1],
+                            "environment": environment,
                         },
                         "value": [1, success if family == "probe_success" else "2"],
                     }
@@ -141,7 +145,7 @@ with open(os.environ["LOG"], "a") as log:
 scenario = os.environ.get("SCENARIO", "success")
 joined = " ".join(args)
 if args[:2] == ["config", "current-context"]:
-    print("wrong-context" if scenario == "bad_context" else "sugar-staging")
+    print("wrong-context" if scenario == "bad_context" else "sugar-" + os.environ.get("STUB_ENV", "staging"))
 elif args[:1] == ["kustomize"]:
     if "network-policies" in joined:
         print(open(os.environ["POLICY"]).read())
@@ -235,7 +239,20 @@ class Scenario:
         return path.read_text().splitlines() if path.exists() else []
 
     def run(self, command, environment="staging", **extra):
-        env = {**self.env, **{key: str(value) for key, value in extra.items()}}
+        env = dict(self.env)
+        normalized = "prod" if environment in ("prod", "production") else "staging"
+        env["STUB_ENV"] = normalized
+        env["PROBES_YAML"] = str(
+            ROOT / f"clusters/{normalized}/observability/probes/public-apps.yaml"
+        )
+        env["PROBES_JSON"] = env[f"{normalized.upper()}_PROBES_JSON"]
+        env["POLICY"] = str(
+            ROOT
+            / f"clusters/{normalized}/observability/network-policies/prometheus-to-blackbox-exporter.yaml"
+        )
+        env["POLICY_JSON"] = env[f"{normalized.upper()}_POLICY_JSON"]
+        env["PROM_JSON"] = env[f"{normalized.upper()}_PROM_JSON"]
+        env.update({key: str(value) for key, value in extra.items()})
         for key in COVERAGE_BOOTSTRAP_ENV:
             env.pop(key, None)
         args = [str(SCRIPT), command]
@@ -289,15 +306,40 @@ def scenario(tmp_path):
     policy_json.write_text(policy_docs.stdout)
     prom = tmp_path / "prom.json"
     prom.write_text(json.dumps(verifier_bundle()))
+    prod_probes = tmp_path / "prod-probes.json"
+    prod_docs = subprocess.run(
+        [
+            "ruby",
+            "-ryaml",
+            "-rjson",
+            "-e",
+            "puts JSON.generate(YAML.load_stream(File.read(ARGV[0])))",
+            str(ROOT / "clusters/prod/observability/probes/public-apps.yaml"),
+        ],
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    prod_probes.write_text(json.dumps({"items": json.loads(prod_docs.stdout)}))
+    prod_policy_json = tmp_path / "prod-policy.json"
+    prod_policy_json.write_text(policy_json.read_text())
+    prod_prom = tmp_path / "prod-prom.json"
+    prod_prom.write_text(json.dumps(verifier_bundle(environment="prod")))
     env = {
         **os.environ,
         "PATH": f"{bindir}:{os.environ['PATH']}",
         "LOG": str(tmp_path / "operations.log"),
         "PROBES_JSON": str(probes),
+        "STAGING_PROBES_JSON": str(probes),
+        "PROD_PROBES_JSON": str(prod_probes),
         "PROBES_YAML": str(ROOT / "clusters/staging/observability/probes/public-apps.yaml"),
         "POLICY": str(POLICY),
         "POLICY_JSON": str(policy_json),
+        "STAGING_POLICY_JSON": str(policy_json),
+        "PROD_POLICY_JSON": str(prod_policy_json),
         "PROM_JSON": str(prom),
+        "STAGING_PROM_JSON": str(prom),
+        "PROD_PROM_JSON": str(prod_prom),
         "RAW_COUNT": str(tmp_path / "raw-count"),
         "REAL_PYTHON": sys.executable,
         "TMPDIR": str(tmp_path),
@@ -317,14 +359,14 @@ def mutations(log):
     ]
 
 
-def test_missing_and_production_envs_fail_before_cluster_access(scenario):
-    for environment in (None, "prod", "production", "dev"):
+def test_missing_and_unsupported_envs_fail_before_cluster_access(scenario):
+    for environment in (None, "dev"):
         result = scenario.run("render", environment)
         assert result.returncode == 2
     assert scenario.log == []
 
 
-@pytest.mark.parametrize("environment", ["staging", "int"])
+@pytest.mark.parametrize("environment", ["staging", "int", "prod", "production"])
 def test_environment_normalization_renders_offline(scenario, environment):
     result = scenario.run("render", environment)
     assert result.returncode == 0
@@ -600,13 +642,13 @@ def test_prometheus_transport_failures_are_redacted_and_cleanup(scenario, transp
     assert not list(scenario.root.glob("sugarkube-blackbox-prometheus.*"))
 
 
-def verify(payload, final=False, *args):
+def verify(payload, final=False, *args, environment="staging"):
     stdin = io.StringIO(json.dumps(payload) if not isinstance(payload, str) else payload)
     stdout = io.StringIO()
     stderr = io.StringIO()
     old_argv, old_stdin = sys.argv, sys.stdin
     old_final_attempt = os.environ.get("FINAL_ATTEMPT")
-    sys.argv = [str(ROOT / "scripts/verify_blackbox_prometheus.py"), *args]
+    sys.argv = [str(ROOT / "scripts/verify_blackbox_prometheus.py"), "--env", environment, *args]
     sys.stdin = stdin
     os.environ["FINAL_ATTEMPT"] = "1" if final else "0"
     try:
@@ -707,3 +749,150 @@ def test_probe_validator_requires_exact_names_and_mappings():
     assert verify({}, False, "--probes").returncode == 7
     assert verify({"items": [None]}, False, "--probes").returncode == 7
     assert verify(items, False, "--unknown").returncode == 9
+
+
+PROD_MATRIX = {
+    "dspace": {
+        "root": "https://democratized.space/",
+        "config": "https://democratized.space/config.json",
+        "healthz": "https://democratized.space/healthz",
+        "livez": "https://democratized.space/livez",
+    },
+    "tokenplace": {
+        "root": "https://token.place/",
+        "healthz": "https://token.place/healthz",
+        "livez": "https://token.place/livez",
+        "metadata": "https://token.place/api/v1/meta",
+    },
+    "danielsmith": {
+        "root": "https://danielsmith.io/",
+        "healthz": "https://danielsmith.io/healthz",
+        "livez": "https://danielsmith.io/livez",
+    },
+    "jobbot3000": {
+        "root": "https://jobbot3000.tech/",
+        "healthz": "https://jobbot3000.tech/healthz",
+        "livez": "https://jobbot3000.tech/livez",
+        "tracker": "https://jobbot3000.tech/tracker",
+        "manifest": "https://jobbot3000.tech/manifest.webmanifest",
+    },
+    "gitshelves": {
+        "root": "https://gitshelves.com/",
+        "healthz": "https://gitshelves.com/healthz",
+        "livez": "https://gitshelves.com/livez",
+        "baseplate": "https://gitshelves.com/models/baseplate_2x6.stl",
+        "module": "https://gitshelves.com/models/contrib_cube.stl",
+    },
+}
+
+
+def load_probe_documents(environment):
+    result = subprocess.run(
+        [
+            "ruby",
+            "-ryaml",
+            "-rjson",
+            "-e",
+            "puts JSON.generate(YAML.load_stream(File.read(ARGV[0])))",
+            str(ROOT / f"clusters/{environment}/observability/probes/public-apps.yaml"),
+        ],
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    return json.loads(result.stdout)
+
+
+def test_production_probe_contract_and_environment_separation():
+    prod = load_probe_documents("prod")
+    staging = load_probe_documents("staging")
+    assert len(prod) == len(staging) == 21
+    staging_contract = {
+        (p["metadata"]["labels"]["app"], p["metadata"]["labels"]["route"]): (
+            p["spec"]["module"],
+            p["spec"]["interval"],
+            p["metadata"]["labels"]["criticality"],
+        )
+        for p in staging
+    }
+    for probe in prod:
+        labels = probe["metadata"]["labels"]
+        target_labels = probe["spec"]["targets"]["staticConfig"]["labels"]
+        app, route = labels["app"], labels["route"]
+        assert probe["metadata"]["name"] == f"blackbox-{app}-prod-{route}"
+        assert labels["release"] == "kube-prometheus-stack"
+        assert labels["environment"] == target_labels["environment"] == "prod"
+        assert {k: target_labels[k] for k in ("app", "route", "criticality")} == {
+            k: labels[k] for k in ("app", "route", "criticality")
+        }
+        assert probe["spec"]["targets"]["staticConfig"]["static"] == [PROD_MATRIX[app][route]]
+        assert (
+            probe["spec"]["module"],
+            probe["spec"]["interval"],
+            labels["criticality"],
+        ) == staging_contract[(app, route)]
+    assert "staging." not in json.dumps(prod)
+    assert (
+        "environment: prod"
+        not in (ROOT / "clusters/staging/observability/probes/public-apps.yaml").read_text()
+    )
+
+
+def test_production_render_is_offline_and_uses_production_inputs(scenario):
+    result = scenario.run("render", "prod", KUBECONFIG="/definitely/unusable")
+    assert result.returncode == 0
+    assert not any("config current-context" in line for line in scenario.log)
+    assert any(
+        "clusters/prod/observability/kube-prometheus-stack.values.yaml" in line
+        for line in scenario.log
+    )
+    assert any(
+        "clusters/prod/observability/prometheus-blackbox-exporter.values.yaml" in line
+        for line in scenario.log
+    )
+    assert all(
+        "clusters/prod/observability" in line
+        for line in scenario.log
+        if line.startswith("kubectl kustomize")
+    )
+
+
+def test_production_live_requires_explicit_kubeconfig_before_cluster_access(scenario):
+    result = scenario.run("install", "prod")
+    assert result.returncode == 3
+    assert not any("config current-context" in line or "helm list" in line for line in scenario.log)
+    assert not mutations(scenario.log)
+
+
+@pytest.mark.parametrize("failure", ["bad_context", "bad_identity"])
+def test_production_identity_guards_precede_release_queries(scenario, failure):
+    result = scenario.run(
+        "install", "prod", KUBECONFIG=scenario.root / "prod.yaml", SCENARIO=failure
+    )
+    assert result.returncode != 0
+    assert not any("helm list" in line for line in scenario.log)
+    assert not mutations(scenario.log)
+
+
+def test_production_mutation_has_no_probe_cleanup(scenario):
+    result = scenario.run(
+        "install", "prod", KUBECONFIG=scenario.root / "prod.yaml", SCENARIO="release_absent"
+    )
+    assert result.returncode == 0
+    assert not any(" delete probe " in line for line in scenario.log)
+
+
+def test_prod_verifier_rejects_mixed_environment_and_requires_explicit_env():
+    assert verify(verifier_bundle(environment="prod"), environment="prod").returncode == 0
+    mixed = verifier_bundle(environment="prod")
+    mixed["targets"]["data"]["activeTargets"][0]["labels"]["environment"] = "staging"
+    assert verify(mixed, environment="prod").returncode == 9
+    stdin, stderr, argv = sys.stdin, io.StringIO(), sys.argv
+    try:
+        sys.stdin = io.StringIO("{}")
+        sys.argv = [str(ROOT / "scripts/verify_blackbox_prometheus.py")]
+        with contextlib.redirect_stderr(stderr), pytest.raises(SystemExit) as error:
+            runpy.run_path(sys.argv[0], run_name="__main__")
+        assert error.value.code == 9
+    finally:
+        sys.stdin, sys.argv = stdin, argv
