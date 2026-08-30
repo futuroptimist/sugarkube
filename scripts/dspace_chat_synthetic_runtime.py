@@ -164,7 +164,7 @@ def load_config(path: Path) -> dict:
         ):
             raise Invalid("system browser contract")
     # Retained assets created before the pinned Node contract remain readable for
-    # inspection and historical activation. Execution and every new asset call
+    # status inspection only. Execution and every activation-capable path call
     # validate_node_contract(), which fails closed when this key is absent.
     node = value.get("nodeContract")
     if node is None:
@@ -282,6 +282,64 @@ def _rooted(root: Path, absolute: str) -> Path:
     return root / coordinate.relative_to("/")
 
 
+def node_service_identity(config: dict, root: Path) -> tuple[int, int]:
+    """Resolve the service identity, using the root group for private rehearsals."""
+    if root != Path("/"):
+        return -1, root.stat().st_gid
+    try:
+        account = pwd.getpwnam(config["serviceAccount"])
+        group = grp.getgrnam(config["serviceGroup"])
+    except KeyError:
+        raise Invalid("Node runtime provenance") from None
+    return account.pw_uid, group.gr_gid
+
+
+def validate_node_ancestors(
+    config: dict, root: Path, path: Path, *, allow_missing: bool = False
+) -> None:
+    """Require confined, root-controlled ancestors traversable by the service."""
+    expected_uid, expected_gid = (0, 0) if root == Path("/") else (
+        root.stat().st_uid,
+        root.stat().st_gid,
+    )
+    service_uid, service_gid = node_service_identity(config, root)
+    try:
+        path.relative_to(root)
+        parents = []
+        parent = path.parent
+        while True:
+            parents.append(parent)
+            if parent == root:
+                break
+            parent = parent.parent
+    except ValueError:
+        raise Invalid("Node runtime provenance") from None
+    try:
+        for parent in parents:
+            try:
+                info = parent.lstat()
+            except FileNotFoundError:
+                if allow_missing:
+                    continue
+                raise
+            execute_bit = (
+                stat.S_IXUSR
+                if info.st_uid == service_uid
+                else stat.S_IXGRP if info.st_gid == service_gid else stat.S_IXOTH
+            )
+            if (
+                parent.is_symlink()
+                or not stat.S_ISDIR(info.st_mode)
+                or info.st_uid != expected_uid
+                or info.st_gid != expected_gid
+                or info.st_mode & 0o022
+                or not info.st_mode & execute_bit
+            ):
+                raise Invalid("Node runtime provenance")
+    except OSError:
+        raise Invalid("Node runtime provenance") from None
+
+
 def validate_node_contract(config: dict, root: Path = Path("/")) -> dict:
     """Validate the pinned root-controlled native Node executable without running it."""
     contract = config.get("nodeContract")
@@ -328,34 +386,7 @@ def validate_node_contract(config: dict, root: Path = Path("/")) -> dict:
         or sha256(path) != contract["executableSha256"]
     ):
         raise Invalid("Node runtime provenance")
-    service_uid, service_gid = (-1, expected_gid)
-    if root == Path("/"):
-        try:
-            account = pwd.getpwnam(config["serviceAccount"])
-            group = grp.getgrnam(config["serviceGroup"])
-        except KeyError:
-            raise Invalid("Node runtime provenance") from None
-        service_uid, service_gid = account.pw_uid, group.gr_gid
-    for parent in path.parents:
-        if parent == root:
-            break
-        parent_info = parent.lstat()
-        # The service account is neither root nor guaranteed to be in root's
-        # group, so every root-controlled ancestor must be traversable by it.
-        execute_bit = (
-            stat.S_IXUSR
-            if parent_info.st_uid == service_uid
-            else stat.S_IXGRP if parent_info.st_gid == service_gid else stat.S_IXOTH
-        )
-        if (
-            parent.is_symlink()
-            or not stat.S_ISDIR(parent_info.st_mode)
-            or parent_info.st_uid != expected_uid
-            or parent_info.st_gid != expected_gid
-            or parent_info.st_mode & 0o022
-            or not parent_info.st_mode & execute_bit
-        ):
-            raise Invalid("Node runtime provenance")
+    validate_node_ancestors(config, root, path)
     return dict(contract)
 
 

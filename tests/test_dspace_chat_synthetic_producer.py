@@ -61,8 +61,9 @@ def synthetic_node_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> t
     root.mkdir(mode=0o755)
     node = root / "opt/sugarkube/nodejs/v20.20.2-linux-arm64/bin/node"
     node.parent.mkdir(parents=True, mode=0o755)
-    for parent in reversed(node.parents):
-        if parent == root.parent:
+    for parent in node.parents:
+        if parent == root:
+            root.chmod(0o755)
             break
         parent.chmod(0o755)
     contents = bytearray(20)
@@ -103,6 +104,17 @@ def test_node_contract_rejects_untraversable_ancestor(
 ) -> None:
     value, root = synthetic_node_fixture(tmp_path, monkeypatch)
     (root / "opt/sugarkube").chmod(0o700)
+    with pytest.raises(runtime.Invalid, match="Node runtime provenance"):
+        runtime.validate_node_contract(value, root)
+
+
+def test_node_contract_uses_matching_group_execute_bit_for_private_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, root = synthetic_node_fixture(tmp_path, monkeypatch)
+    root.chmod(0o750)
+    assert runtime.validate_node_contract(value, root)["version"] == "20.20.2"
+    root.chmod(0o700)
     with pytest.raises(runtime.Invalid, match="Node runtime provenance"):
         runtime.validate_node_contract(value, root)
 
@@ -165,6 +177,28 @@ def test_provision_node_private_root_is_atomic_idempotent_and_umask_independent(
     assert tree_bytes(root) == installed
     assert not list(node.parent.glob(".node.*.new"))
 
+    escaped_root = tmp_path / "escaped-root"
+    escaped_root.mkdir(mode=0o755)
+    (escaped_root / "opt").symlink_to(tmp_path)
+    with pytest.raises(ValueError, match="ancestor is insecure"):
+        installer.provision_node(archive, escaped_root, True)
+    assert not (tmp_path / "sugarkube/nodejs/v20.20.2-linux-arm64/bin/node").exists()
+
+    failed_root = tmp_path / "failed-root"
+    failed_root.mkdir(mode=0o755)
+    real_validate = runtime.validate_node_contract
+    monkeypatch.setattr(
+        runtime,
+        "validate_node_contract",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(runtime.Invalid("final coordinate")),
+    )
+    with pytest.raises(runtime.Invalid, match="final coordinate"):
+        installer.provision_node(archive, failed_root, True)
+    failed_node = failed_root / value["nodeContract"]["executablePath"].removeprefix("/")
+    assert not failed_node.exists()
+    assert not list(failed_node.parent.glob(".node.*.new"))
+    monkeypatch.setattr(runtime, "validate_node_contract", real_validate)
+
 
 @pytest.mark.parametrize(
     "fault", ["missing", "dangling", "owner", "writable", "arm32", "digest", "hardlink"]
@@ -182,7 +216,17 @@ def test_node_contract_fails_closed_for_invalid_identity(
     elif fault == "writable":
         node.chmod(0o775)
     elif fault == "owner":
-        os.chown(node, 1, 1)
+        real_lstat = Path.lstat
+
+        def wrong_owner(path: Path):
+            info = real_lstat(path)
+            if path == node:
+                fields = list(info)
+                fields[4:6] = [info.st_uid + 1, info.st_gid + 1]
+                return os.stat_result(fields)
+            return info
+
+        monkeypatch.setattr(Path, "lstat", wrong_owner)
     elif fault == "arm32":
         contents = bytearray(node.read_bytes())
         contents[4] = 1

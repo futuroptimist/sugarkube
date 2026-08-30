@@ -391,19 +391,14 @@ def validate_snapshot(
     staged: Path,
     snapshot: Path,
     root: Path = Path("/"),
-    allow_legacy_node_contract: bool = False,
 ) -> str:
     """Apply the runtime's complete runner contract to an installation input."""
     runtime = runtime_module()
     config = load_snapshot_config(staged, snapshot)
-    node = None
-    if "nodeContract" in config:
-        node = runtime.validate_node_contract(config, root)
-    elif not allow_legacy_node_contract:
-        raise runtime.Invalid("Node runtime contract")
-    runner = runtime.validate_runner(config, node["executablePath"] if node else None)
+    node = runtime.validate_node_contract(config, root)
+    runner = runtime.validate_runner(config, node["executablePath"])
     provenance = runtime.validate_browser_contract(
-        config, runner, root, node["executablePath"] if node else None
+        config, runner, root, node["executablePath"]
     )
     manifest = json.loads((runner / "sugarkube-runner-manifest.json").read_text())
     if provenance != manifest.get("browserProvenance"):
@@ -867,6 +862,11 @@ def provision_node(archive: Path, root: Path, apply: bool) -> int:
     runtime = runtime_module()
     config = runtime.load_config(ROOT / "config/dspace-chat-synthetic.json")
     contract = config["nodeContract"]
+    root = runtime.normalize_root(root)
+    if runtime.platform.machine() != contract["architecture"]:
+        raise ValueError("Node host architecture mismatch")
+    # Resolve the service identity before any apply-side filesystem mutation.
+    runtime.node_service_identity(config, root)
     regular_file(archive, "Node distribution archive")
     if sha(archive) != contract["archiveSha256"]:
         raise ValueError("Node distribution archive digest mismatch")
@@ -881,12 +881,18 @@ def provision_node(archive: Path, root: Path, apply: bool) -> int:
         with tempfile.NamedTemporaryFile() as candidate:
             shutil.copyfileobj(stream, candidate)
             candidate.flush()
-            if sha(Path(candidate.name)) != contract["executableSha256"]:
+            candidate.seek(0)
+            header = candidate.read(20)
+            native_aarch64 = (
+                len(header) == 20
+                and header[:6] == b"\x7fELF\x02\x01"
+                and int.from_bytes(header[18:20], "little") == 183
+            )
+            if not native_aarch64 or sha(Path(candidate.name)) != contract["executableSha256"]:
                 raise ValueError("Node executable digest mismatch")
     if not apply:
         print("nodeValidation=passed mutation=none authorization=required")
         return 0
-    root = runtime.normalize_root(root)
     destination = rooted(root, contract["executablePath"])
     expected_uid, expected_gid = (
         (0, 0)
@@ -896,38 +902,31 @@ def provision_node(archive: Path, root: Path, apply: bool) -> int:
             root.stat().st_gid,
         )
     )
-    # Inspect, rather than resolve, each existing component.  This rejects a
-    # dangling link and an escape before mkdir/open can mutate its target.
-    cursor = root
-    missing_parents = []
-    for component in destination.relative_to(root).parts[:-1]:
-        cursor /= component
-        try:
-            info = cursor.lstat()
-        except FileNotFoundError:
-            missing_parents.append(cursor)
-            continue
-        if (
-            cursor.is_symlink()
-            or not stat.S_ISDIR(info.st_mode)
-            or info.st_uid != expected_uid
-            or info.st_gid != expected_gid
-            or info.st_mode & 0o022
-            or not info.st_mode & stat.S_IXOTH
-        ):
-            raise ValueError("Node destination ancestor is insecure")
+    # Use the runtime's exact ownership and effective execute-bit rule, while
+    # permitting parents that this invocation will create below.
+    try:
+        runtime.validate_node_ancestors(config, root, destination, allow_missing=True)
+    except runtime.Invalid as error:
+        raise ValueError("Node destination ancestor is insecure") from error
     if os.path.lexists(destination):
         runtime.validate_node_contract(config, root)
         print("nodeProvisioning=already-current mutation=none")
         return 0
     if root == Path("/") and os.geteuid() != 0:
         raise PermissionError("real-root Node provisioning requires root authorization")
+    cursor = root
+    missing_parents = []
+    for component in destination.relative_to(root).parts[:-1]:
+        cursor /= component
+        if not os.path.lexists(cursor):
+            missing_parents.append(cursor)
     destination.parent.mkdir(parents=True, mode=0o755, exist_ok=True)
     # mkdir's requested mode is filtered by umask. Correct only directories this
     # operation created; pre-existing unsafe ancestors are rejected below.
     for created in missing_parents:
         created.chmod(0o755)
         os.chown(created, expected_uid, expected_gid)
+    runtime.validate_node_ancestors(config, root, destination)
     with tarfile.open(archive, "r:xz") as bundle:
         stream = bundle.extractfile(member_name)
         assert stream is not None
@@ -942,10 +941,29 @@ def provision_node(archive: Path, root: Path, apply: bool) -> int:
                 os.fsync(output.fileno())
             temporary.chmod(0o755)
             os.chown(temporary, expected_uid, expected_gid)
+            with temporary.open("rb") as candidate:
+                header = candidate.read(20)
+            if (
+                len(header) != 20
+                or header[:6] != b"\x7fELF\x02\x01"
+                or int.from_bytes(header[18:20], "little") != 183
+                or sha(temporary) != contract["executableSha256"]
+            ):
+                raise ValueError("extracted Node executable validation failed")
             os.replace(temporary, destination)
+            published_identity = destination.lstat().st_dev, destination.lstat().st_ino
+            try:
+                runtime.validate_node_contract(config, root)
+            except Exception:
+                try:
+                    current = destination.lstat()
+                    if (current.st_dev, current.st_ino) == published_identity:
+                        destination.unlink()
+                except FileNotFoundError:
+                    pass
+                raise
         finally:
             temporary.unlink(missing_ok=True)
-    runtime.validate_node_contract(config, root)
     print("nodeProvisioning=installed")
     return 0
 

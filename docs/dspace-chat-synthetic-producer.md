@@ -54,6 +54,9 @@ ownership change is required. Real-root validation still requires numeric `0:0`,
 service identity can traverse. New directories are normalized to `0755` regardless of umask.
 Provisioning streams both archive verification and extraction into an invocation-unique temporary
 file, atomically renames only after validation, and cleans only that invocation's temporary path.
+If final coordinate validation fails, provisioning also removes the coordinate only when it still
+has the inode published by that invocation; it never removes a pre-existing or concurrently
+replaced coordinate.
 Provisioning authorization remains distinct from activation:
 provisioning never reloads, starts, enables, or executes the service. Reapplication validates an
 already-current coordinate without rewriting it. Rollback validates the retained asset against the
