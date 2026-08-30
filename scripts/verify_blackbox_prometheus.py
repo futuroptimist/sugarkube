@@ -54,7 +54,9 @@ def validate_probes(document):
     found = {}
     for item in items:
         metadata = item.get("metadata") if isinstance(item, dict) else None
-        labels = metadata.get("labels") if isinstance(metadata, dict) else None
+        if not isinstance(metadata, dict):
+            fail("Probe response contains an invalid object.", 7)
+        labels = metadata.get("labels")
         if not isinstance(labels, dict) or not isinstance(metadata.get("name"), str):
             fail("Probe response contains an invalid object.", 7)
         name = metadata["name"]

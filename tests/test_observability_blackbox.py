@@ -714,6 +714,8 @@ def test_probe_validator_requires_exact_names_and_mappings():
     assert verify(items, False, "--probes").returncode == 7
     assert verify({}, False, "--probes").returncode == 7
     assert verify({"items": [None]}, False, "--probes").returncode == 7
+    assert verify({"items": [{}]}, False, "--probes").returncode == 7
+    assert verify({"items": [{"metadata": []}]}, False, "--probes").returncode == 7
     assert verify(items, False, "--unknown").returncode == 9
 
 
@@ -742,7 +744,7 @@ def test_production_probe_matrix_exact_and_separate():
         "dspace": "https://democratized.space",
         "tokenplace": "https://token.place",
         "danielsmith": "https://danielsmith.io",
-        "jobbot3000": "https://jobbot3000.tech",
+        "jobbot3000": "https://jobbot3000.example.test",
         "gitshelves": "https://gitshelves.com",
     }
     paths = {

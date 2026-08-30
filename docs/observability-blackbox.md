@@ -37,11 +37,11 @@ Live evidence comes only from the separate post-merge rollout and validation.
 
 The canonical `kube-prometheus-stack` Helm release, its `Probe` and
 `ServiceMonitor` CRDs, and its Prometheus service must already exist in
-`monitoring`. Select a kubeconfig whose current context is exactly
-`sugar-staging`; the helper also runs the repository cluster-identity assertion.
-Production live commands require an explicitly set `KUBECONFIG`, the exact
-`sugar-prod` context, and a successful production identity assertion before any
-release query or mutation. Offline rendering never reads kubeconfig or contacts Kubernetes.
+`monitoring`. For staging live commands, select a kubeconfig whose current context
+is exactly `sugar-staging`; the helper also runs the repository cluster-identity
+assertion. Production live commands require an explicitly set `KUBECONFIG`, the
+exact `sugar-prod` context, and a successful production identity assertion before
+any release query or mutation. Offline rendering never reads kubeconfig or contacts Kubernetes.
 Install `helm`, `kubectl`, `python3`, `ruby` (with Psych), and `just`, and ensure chart-repository
 access is available.
 
