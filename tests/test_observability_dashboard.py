@@ -199,6 +199,57 @@ def test_missing_application_capabilities_produce_no_series_not_healthy_zero(das
     )
 
 
+def test_5xx_ratios_use_request_family_gated_zero_contract(dashboards):
+    template = json.loads(TEMPLATE.read_text(encoding="utf-8"))
+    for document in (template, *dashboards):
+        for title, expected in validator.FIVE_XX_RATIO_EXPRESSIONS.items():
+            expression = validator.panel_expression(document, title)
+            assert expression == expected
+            assert " or on() (0 * sum(rate(" in expression
+            assert "or vector(0)" not in expression
+
+    dspace = validator.FIVE_XX_RATIO_EXPRESSIONS["5xx error ratio"]
+    assert dspace.count("dspace_http_requests_total") == 3
+    assert dspace.count('environment=~"$environment"') == 3
+    assert dspace.count('status_class="5xx"') == 1
+
+    tokenplace = validator.FIVE_XX_RATIO_EXPRESSIONS["token.place HTTP 5xx ratio"]
+    assert tokenplace.count("tokenplace_http_requests_total") == 3
+    for selector in (
+        'app="tokenplace"',
+        'environment=~"$environment"',
+        'release="tokenplace"',
+        'cluster=~"$cluster"',
+        'namespace="tokenplace"',
+    ):
+        assert tokenplace.count(selector) == 3
+    assert tokenplace.count('status_class="5xx"') == 1
+
+
+@pytest.mark.parametrize(
+    ("title", "old", "new"),
+    [
+        ("5xx error ratio", " or on() (0 * sum(rate(", " or on() (0 * sum(rate(wrong_"),
+        (
+            "token.place HTTP 5xx ratio",
+            'namespace="tokenplace"}[$__rate_interval]))))',
+            'namespace="wrong"}[$__rate_interval]))))',
+        ),
+        ("5xx error ratio", " or on() (0 * sum(rate(", " or vector(0) or on() (0 * sum(rate("),
+    ],
+)
+def test_5xx_ratio_contract_rejects_wrong_gate_filter_or_unconditional_zero(
+    tmp_path, dashboards, title, old, new
+):
+    staging, _ = dashboards
+    changed = copy.deepcopy(staging)
+    target = panel(changed, title)["targets"][0]
+    assert old in target["expr"]
+    target["expr"] = target["expr"].replace(old, new, 1)
+    with pytest.raises(SystemExit, match="5xx zero contract|missing data"):
+        validator._validate_semantics(changed)
+
+
 def test_query_scoping_and_safe_labels(dashboards):
     staging, _ = dashboards
     serialized = json.dumps(staging)
