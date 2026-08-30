@@ -4481,3 +4481,46 @@ def test_completed_install_rejects_invalid_retained_coordinate(
         installer.apply_installation(staged, snapshot, root, asset_revision)
 
     assert tree_bytes(root) == before
+
+
+def test_real_root_node_identity_fails_closed_for_missing_service_account(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing production identity must fail before Node provenance is trusted."""
+    config = runtime.load_config(ROOT / "config/dspace-chat-synthetic.json")
+    monkeypatch.setattr(
+        runtime.pwd,
+        "getpwnam",
+        lambda _name: (_ for _ in ()).throw(KeyError("missing account")),
+    )
+
+    with pytest.raises(runtime.Invalid, match="Node runtime provenance"):
+        runtime.node_service_identity(config, Path("/"))
+
+
+def test_real_root_node_identity_uses_configured_account_and_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = runtime.load_config(ROOT / "config/dspace-chat-synthetic.json")
+    monkeypatch.setattr(runtime.pwd, "getpwnam", lambda _name: SimpleNamespace(pw_uid=123))
+    monkeypatch.setattr(runtime.grp, "getgrnam", lambda _name: SimpleNamespace(gr_gid=456))
+
+    assert runtime.node_service_identity(config, Path("/")) == (123, 456)
+
+
+def test_node_contract_rejects_home_coordinate_before_filesystem_access() -> None:
+    config = runtime.load_config(ROOT / "config/dspace-chat-synthetic.json")
+    config["nodeContract"]["executablePath"] = "/home/pi/.nvm/bin/node"
+
+    with pytest.raises(runtime.Invalid, match="Node runtime provenance"):
+        runtime.validate_node_contract(config)
+
+
+def test_runner_local_browser_requires_explicitly_validated_node_coordinate(
+    tmp_path: Path,
+) -> None:
+    config = runtime.load_config(ROOT / "config/dspace-chat-synthetic.json")
+    config["browserContract"]["name"] = runtime.RUNNER_LOCAL
+
+    with pytest.raises(runtime.Invalid, match="validated Node coordinate"):
+        runtime.validate_browser_contract(config, tmp_path, node_executable=None)
