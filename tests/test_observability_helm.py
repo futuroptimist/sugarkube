@@ -2320,7 +2320,7 @@ case "$*" in
       echo terminated > "$PID_FILE"
       exit 0
     fi
-    if [ "$MODE" != success ]; then
+    if [ "$MODE" != success ] && [ "$MODE" != wrong-content ]; then
       /bin/sleep 0.2
       echo terminated > "$PID_FILE"
       exit 0
@@ -2336,7 +2336,7 @@ esac
 echo "curl $*" >> "$AUDIT"
 case "$*" in *"http://127.0.0.1:43127/"*) ;; *) exit 51 ;; esac
 [ -f "$TMPDIR"/sugarkube-grafana-verify.*/netrc ] || exit 52
-[ "$MODE" = success ] || /bin/sleep 0.3
+case "$MODE" in success|wrong-content) ;; *) /bin/sleep 0.3 ;; esac
 case "$MODE" in
   auth401) printf '%s\n%s\n' '{"message":"redacted"}' 401 ;;
   auth403) printf '%s\n%s\n' '{"message":"redacted"}' 403 ;;
@@ -2352,16 +2352,20 @@ esac
         stub.chmod(0o755)
     (bin_dir / "sleep").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     (bin_dir / "sleep").chmod(0o755)
+    dashboard_path = PROD_DASHBOARD if env_name == "prod" else DASHBOARD
+    dashboard_response = json.loads(dashboard_path.read_text(encoding="utf-8"))
+    if mode == "wrong-content":
+        ratio_panel = next(
+            item for item in dashboard_response["panels"] if item["title"] == "5xx error ratio"
+        )
+        ratio_panel["targets"][0]["expr"] = "up"
     env = os.environ | {
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
         "AUDIT": str(audit),
         "MODE": mode,
         "CONTEXT": context,
         "ENV_NAME": env_name,
-        "DASHBOARD_RESPONSE": json.dumps({"dashboard": {
-            "uid": "sugarkube-prod-observability" if env_name == "prod" else "sugarkube-staging-observability",
-            "title": "Sugarkube Production Observability" if env_name == "prod" else "Sugarkube Staging Observability",
-        }}),
+        "DASHBOARD_RESPONSE": json.dumps({"dashboard": dashboard_response}),
         "PID_FILE": str(pid_file),
         "FORWARD_PID": str(tmp_path / "port-forward.pid"),
         "FORWARD_LINE": forward_line,
@@ -2480,6 +2484,12 @@ def test_dashboard_verifier_rejects_incorrect_and_malformed_api_json(tmp_path):
         assert result.returncode != 0
         assert "response redacted" in result.stderr
         assert not list((tmp_path / mode).glob("sugarkube-grafana-verify.*"))
+
+
+def test_dashboard_verifier_rejects_material_5xx_panel_drift(tmp_path):
+    result, _, _ = run_dashboard_verifier(tmp_path, "wrong-content")
+    assert result.returncode != 0
+    assert "5xx panel content differs" in result.stderr
 
 
 def test_dashboard_verifier_cleans_up_when_interrupted(tmp_path):

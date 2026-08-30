@@ -51,6 +51,19 @@ TOKENPLACE_DATA_TITLES = {
 EVENT_METRICS = {"dspace_dchat_requests_total", "dspace_dependency_requests_total"}
 CAPABILITY = 'dspace_release_approved_info{environment=~"$environment"}'
 CAPABILITY_PRESENCE_GATE = f"and on() (count({CAPABILITY}) > 0)"
+FIVE_XX_RATIO_CONTRACTS = {
+    "5xx error ratio": {
+        "metric": "dspace_http_requests_total",
+        "filters": 'environment=~"$environment"',
+    },
+    "token.place HTTP 5xx ratio": {
+        "metric": "tokenplace_http_requests_total",
+        "filters": (
+            'app="tokenplace",environment=~"$environment",release="tokenplace",'
+            'cluster=~"$cluster",namespace="tokenplace"'
+        ),
+    },
+}
 
 
 def load_dashboard(path: Path) -> dict:
@@ -259,6 +272,23 @@ def _validate_semantics(dashboard: dict) -> None:
         raise SystemExit("ERROR: token.place queries require environment and cluster variables.")
     if any("vector(0)" in expr for expr in token_expressions):
         raise SystemExit("ERROR: token.place queries must preserve missing data.")
+    for title, contract in FIVE_XX_RATIO_CONTRACTS.items():
+        expression = panel_expression(dashboard, title)
+        metric = contract["metric"]
+        filters = contract["filters"]
+        all_requests = f'sum(rate({metric}{{{filters}}}[$__rate_interval]))'
+        errors = f'sum(rate({metric}{{{filters},status_class="5xx"}}[$__rate_interval]))'
+        expected = (
+            f"({errors} or on() (0 * {all_requests})) / "
+            f"clamp_min({all_requests}, 1e-9)"
+        )
+        if expression != expected:
+            raise SystemExit(
+                f"ERROR: {title} must use its filtered all-request family "
+                "for gated zero and denominator."
+            )
+        if "vector(0)" in expression:
+            raise SystemExit(f"ERROR: {title} must preserve an absent request family as NO DATA.")
     for metric in EVENT_METRICS:
         matches = [expr for expr in expressions if metric in expr]
         if not matches or any(

@@ -199,6 +199,50 @@ def test_missing_application_capabilities_produce_no_series_not_healthy_zero(das
     )
 
 
+def test_5xx_ratios_use_request_family_gated_zero_with_aligned_filters(dashboards):
+    documents = [json.loads(TEMPLATE.read_text(encoding="utf-8")), *dashboards]
+    for document in documents:
+        for title, contract in validator.FIVE_XX_RATIO_CONTRACTS.items():
+            expression = panel(document, title)["targets"][0]["expr"]
+            metric = contract["metric"]
+            filters = contract["filters"]
+            all_requests = f'sum(rate({metric}{{{filters}}}[$__rate_interval]))'
+            errors = f'sum(rate({metric}{{{filters},status_class="5xx"}}[$__rate_interval]))'
+            assert expression == (
+                f"({errors} or on() (0 * {all_requests})) / "
+                f"clamp_min({all_requests}, 1e-9)"
+            )
+            assert "or vector(0)" not in expression
+            # sum(rate(...)) has no output when its metric family is absent, so
+            # the multiplication gate cannot manufacture a healthy zero.
+            assert f"or on() (0 * {all_requests})" in expression
+
+
+@pytest.mark.parametrize("title", validator.FIVE_XX_RATIO_CONTRACTS)
+@pytest.mark.parametrize("mutation", ["gate-family", "gate-filter", "denominator-filter", "vector"])
+def test_5xx_ratio_contract_rejects_ungated_or_misaligned_queries(
+    tmp_path, dashboards, title, mutation
+):
+    staging, _ = dashboards
+    changed = copy.deepcopy(staging)
+    target = panel(changed, title)["targets"][0]
+    metric = validator.FIVE_XX_RATIO_CONTRACTS[title]["metric"]
+    if mutation == "gate-family":
+        target["expr"] = target["expr"].replace(f"0 * sum(rate({metric}", "0 * sum(rate(up", 1)
+    elif mutation == "gate-filter":
+        target["expr"] = target["expr"].replace(
+            'environment=~"$environment"', 'environment="wrong"', 2
+        )
+    elif mutation == "denominator-filter":
+        before, separator, after = target["expr"].rpartition('environment=~"$environment"')
+        assert separator
+        target["expr"] = before + 'environment="wrong"' + after
+    else:
+        target["expr"] += " or vector(0)"
+    with pytest.raises(SystemExit):
+        validator._validate_semantics(changed)
+
+
 def test_query_scoping_and_safe_labels(dashboards):
     staging, _ = dashboards
     serialized = json.dumps(staging)
