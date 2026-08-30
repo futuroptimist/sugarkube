@@ -128,6 +128,7 @@ def materialize(
     browser_bundle: Path | None,
     browser_contract: dict,
     browser_source_root: Path,
+    node_executable: str,
 ) -> None:
     runtime = runtime_module()
     browser_source_root = runtime.normalize_root(browser_source_root)
@@ -144,7 +145,10 @@ def materialize(
         # running dependency installation. Runner-local discovery intentionally
         # remains below, after its bundle has been copied into the snapshot.
         browser_provenance = runtime.validate_browser_contract(
-            {"browserContract": browser_contract}, output, browser_source_root
+            {"browserContract": browser_contract},
+            output,
+            browser_source_root,
+            node_executable,
         )
     else:
         raise ValueError("unsupported browser contract")
@@ -182,7 +186,10 @@ def materialize(
         validate_runner(staging, revision)
         if browser_contract["name"] == runtime.RUNNER_LOCAL:
             browser_provenance = runtime.validate_browser_contract(
-                {"browserContract": browser_contract}, staging, browser_source_root
+                {"browserContract": browser_contract},
+                staging,
+                browser_source_root,
+                node_executable,
             )
         files = {relative: sha(staging / relative) for relative in CRITICAL}
         browser_relative = None
@@ -210,7 +217,11 @@ def materialize(
 
 
 def sha(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def regular_file(path: Path, description: str) -> Path:
@@ -385,12 +396,15 @@ def validate_snapshot(
     """Apply the runtime's complete runner contract to an installation input."""
     runtime = runtime_module()
     config = load_snapshot_config(staged, snapshot)
+    node = None
     if "nodeContract" in config:
-        runtime.validate_node_contract(config, root)
+        node = runtime.validate_node_contract(config, root)
     elif not allow_legacy_node_contract:
         raise runtime.Invalid("Node runtime contract")
-    runner = runtime.validate_runner(config)
-    provenance = runtime.validate_browser_contract(config, runner, root)
+    runner = runtime.validate_runner(config, node["executablePath"] if node else None)
+    provenance = runtime.validate_browser_contract(
+        config, runner, root, node["executablePath"] if node else None
+    )
     manifest = json.loads((runner / "sugarkube-runner-manifest.json").read_text())
     if provenance != manifest.get("browserProvenance"):
         raise ValueError("runner browser provenance mismatch")
@@ -713,10 +727,17 @@ def status(root: Path) -> int:
     node_provenance = None
     if "nodeContract" in rooted_config:
         node_provenance = runtime.validate_node_contract(rooted_config, root)
-    runner = runtime.validate_runner(rooted_config)
+    runner = runtime.validate_runner(
+        rooted_config, node_provenance["executablePath"] if node_provenance else None
+    )
     if runner != expected_runner:
         raise ValueError("installed runner validation returned an unexpected revision")
-    provenance = runtime.validate_browser_contract(rooted_config, runner, root)
+    provenance = runtime.validate_browser_contract(
+        rooted_config,
+        runner,
+        root,
+        node_provenance["executablePath"] if node_provenance else None,
+    )
     if provenance != runner_manifest.get("browserProvenance"):
         raise ValueError("installed runner browser provenance is invalid")
 
@@ -865,33 +886,62 @@ def provision_node(archive: Path, root: Path, apply: bool) -> int:
     if not apply:
         print("nodeValidation=passed mutation=none authorization=required")
         return 0
+    root = runtime.normalize_root(root)
     destination = rooted(root, contract["executablePath"])
-    if destination.exists() or destination.is_symlink():
+    expected_uid, expected_gid = (
+        (0, 0)
+        if root == Path("/")
+        else (
+            root.stat().st_uid,
+            root.stat().st_gid,
+        )
+    )
+    # Inspect, rather than resolve, each existing component.  This rejects a
+    # dangling link and an escape before mkdir/open can mutate its target.
+    cursor = root
+    missing_parents = []
+    for component in destination.relative_to(root).parts[:-1]:
+        cursor /= component
+        try:
+            info = cursor.lstat()
+        except FileNotFoundError:
+            missing_parents.append(cursor)
+            continue
+        if (
+            cursor.is_symlink()
+            or not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != expected_uid
+            or info.st_gid != expected_gid
+            or info.st_mode & 0o022
+            or not info.st_mode & stat.S_IXOTH
+        ):
+            raise ValueError("Node destination ancestor is insecure")
+    if os.path.lexists(destination):
         runtime.validate_node_contract(config, root)
         print("nodeProvisioning=already-current mutation=none")
         return 0
-    missing_parents = []
-    parent = destination.parent
-    while parent != root and not parent.exists():
-        missing_parents.append(parent)
-        parent = parent.parent
+    if root == Path("/") and os.geteuid() != 0:
+        raise PermissionError("real-root Node provisioning requires root authorization")
     destination.parent.mkdir(parents=True, mode=0o755, exist_ok=True)
     # mkdir's requested mode is filtered by umask. Correct only directories this
     # operation created; pre-existing unsafe ancestors are rejected below.
     for created in missing_parents:
         created.chmod(0o755)
-        os.chown(created, 0, 0)
+        os.chown(created, expected_uid, expected_gid)
     with tarfile.open(archive, "r:xz") as bundle:
         stream = bundle.extractfile(member_name)
         assert stream is not None
-        temporary = destination.with_name(".node.new")
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=".node.", suffix=".new", dir=destination.parent
+        )
+        temporary = Path(temporary_name)
         try:
-            with temporary.open("xb") as output:
+            with os.fdopen(descriptor, "wb") as output:
                 shutil.copyfileobj(stream, output)
                 output.flush()
                 os.fsync(output.fileno())
             temporary.chmod(0o755)
-            os.chown(temporary, 0, 0)
+            os.chown(temporary, expected_uid, expected_gid)
             os.replace(temporary, destination)
         finally:
             temporary.unlink(missing_ok=True)
@@ -956,9 +1006,9 @@ def main() -> int:
     if args.operation == "materialize":
         if not all((args.source, args.output, args.pnpm, args.pnpm_version)):
             parser.error("materialize requires source, output, pnpm, and pnpm-version")
-        browser_contract = runtime.load_config(ROOT / "config/dspace-chat-synthetic.json")[
-            "browserContract"
-        ]
+        materialize_config = runtime.load_config(ROOT / "config/dspace-chat-synthetic.json")
+        browser_contract = materialize_config["browserContract"]
+        node = runtime.validate_node_contract(materialize_config, args.root)
         if browser_contract["name"] == runtime.SYSTEM_CHROMIUM and args.browser_source_root is None:
             parser.error("system browser materialize requires --browser-source-root")
         materialize(
@@ -971,6 +1021,7 @@ def main() -> int:
             args.browser_bundle.resolve() if args.browser_bundle else None,
             browser_contract,
             args.browser_source_root if args.browser_source_root else Path("/"),
+            node["executablePath"],
         )
         return 0
     if args.operation == "rollback":
@@ -982,7 +1033,7 @@ def main() -> int:
         rollback_runner = rooted(args.root, rollback_config["runnerRoot"]) / (
             runtime.runner_storage_identity(rollback_config)
         )
-        validate_snapshot(retained, rollback_runner, args.root, True)
+        validate_snapshot(retained, rollback_runner, args.root)
         validate_runner_access(rollback_config, rollback_runner, args.root)
         if not args.apply:
             print("validation=passed mutation=none rollback=authorization-required")

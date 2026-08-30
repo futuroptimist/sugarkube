@@ -226,7 +226,7 @@ def normalize_root(root: Path) -> Path:
     return resolved
 
 
-def discover_playwright_browser(runner: Path) -> Path:
+def discover_playwright_browser(runner: Path, node_executable: str) -> Path:
     """Return Playwright's executable only when it is runner-local and usable."""
     browser_root = runner / "playwright-browser"
     try:
@@ -237,7 +237,7 @@ def discover_playwright_browser(runner: Path) -> Path:
         raise Invalid("Playwright browser discovery")
     completed = subprocess.run(
         [
-            NODE_EXECUTABLE,
+            node_executable,
             "-e",
             "const {chromium}=require('@playwright/test');"
             "const p=chromium.executablePath();"
@@ -291,12 +291,18 @@ def validate_node_contract(config: dict, root: Path = Path("/")) -> dict:
     path = _rooted(root, contract["executablePath"])
     if contract["executablePath"].startswith("/home/"):
         raise Invalid("Node runtime provenance")
+    expected_uid, expected_gid = (
+        (0, 0)
+        if root == Path("/")
+        else (
+            root.stat().st_uid,
+            root.stat().st_gid,
+        )
+    )
     try:
         info = path.lstat()
         resolved = path.resolve(strict=True)
         resolved.relative_to(root)
-        owner = pwd.getpwuid(info.st_uid).pw_name
-        group = grp.getgrgid(info.st_gid).gr_name
         with path.open("rb") as stream:
             header = stream.read(20)
     except (OSError, KeyError, ValueError, RuntimeError):
@@ -316,33 +322,55 @@ def validate_node_contract(config: dict, root: Path = Path("/")) -> dict:
         or info.st_nlink != 1
         or not os.access(path, os.X_OK)
         or resolved != expected
-        or owner != contract["owner"]
-        or group != contract["group"]
+        or info.st_uid != expected_uid
+        or info.st_gid != expected_gid
         or f"{stat.S_IMODE(info.st_mode):04o}" != contract["mode"]
         or sha256(path) != contract["executableSha256"]
     ):
         raise Invalid("Node runtime provenance")
+    service_uid, service_gid = (-1, expected_gid)
+    if root == Path("/"):
+        try:
+            account = pwd.getpwnam(config["serviceAccount"])
+            group = grp.getgrnam(config["serviceGroup"])
+        except KeyError:
+            raise Invalid("Node runtime provenance") from None
+        service_uid, service_gid = account.pw_uid, group.gr_gid
     for parent in path.parents:
         if parent == root:
             break
         parent_info = parent.lstat()
         # The service account is neither root nor guaranteed to be in root's
         # group, so every root-controlled ancestor must be traversable by it.
+        execute_bit = (
+            stat.S_IXUSR
+            if parent_info.st_uid == service_uid
+            else stat.S_IXGRP if parent_info.st_gid == service_gid else stat.S_IXOTH
+        )
         if (
             parent.is_symlink()
-            or parent_info.st_uid != 0
+            or not stat.S_ISDIR(parent_info.st_mode)
+            or parent_info.st_uid != expected_uid
+            or parent_info.st_gid != expected_gid
             or parent_info.st_mode & 0o022
-            or not parent_info.st_mode & stat.S_IXOTH
+            or not parent_info.st_mode & execute_bit
         ):
             raise Invalid("Node runtime provenance")
     return dict(contract)
 
 
-def validate_browser_contract(config: dict, runner: Path, root: Path = Path("/")) -> dict:
+def validate_browser_contract(
+    config: dict,
+    runner: Path,
+    root: Path = Path("/"),
+    node_executable: str | None = NODE_EXECUTABLE,
+) -> dict:
     """Validate and describe the explicitly selected browser without fallback."""
     contract = config["browserContract"]
     if contract["name"] == RUNNER_LOCAL:
-        executable = discover_playwright_browser(runner)
+        if node_executable is None:
+            raise Invalid("validated Node coordinate")
+        executable = discover_playwright_browser(runner, node_executable)
         return {
             "name": RUNNER_LOCAL,
             "architecture": platform.machine(),
@@ -403,7 +431,7 @@ def runner_storage_identity(config: dict) -> str:
     return revision if manifest_sha is None else f"{revision}-{manifest_sha}"
 
 
-def validate_runner(config: dict) -> Path:
+def validate_runner(config: dict, node_executable: str | None = NODE_EXECUTABLE) -> Path:
     configured_root = Path(config["runnerRoot"])
     if not configured_root.is_absolute() or ".." in configured_root.parts:
         raise Invalid("runner path")
@@ -572,7 +600,9 @@ def validate_runner(config: dict) -> Path:
     if not entrypoint.is_file():
         raise Invalid("runner entrypoint")
     if config["browserContract"]["name"] == RUNNER_LOCAL:
-        discovered = discover_playwright_browser(runner)
+        if node_executable is None:
+            raise Invalid("validated Node coordinate")
+        discovered = discover_playwright_browser(runner, node_executable)
         if discovered != (runner / browser_relative).resolve(strict=True):
             raise Invalid("Playwright browser manifest")
     return runner
@@ -771,8 +801,8 @@ def run(config: dict) -> int:
         if not resolved or not Path(resolved).is_file() or not os.access(resolved, os.X_OK):
             raise Invalid("required executable")
     node = validate_node_contract(config)
-    runner = validate_runner(config)
-    browser = validate_browser_contract(config, runner)
+    runner = validate_runner(config, node["executablePath"])
+    browser = validate_browser_contract(config, runner, node_executable=node["executablePath"])
     if (
         browser
         != json.loads((runner / "sugarkube-runner-manifest.json").read_text())["browserProvenance"]
@@ -821,7 +851,11 @@ def run(config: dict) -> int:
             ]
             try:
                 # Revalidate immediately before launch so drift cannot produce a current result.
-                browser = validate_browser_contract(config, runner)
+                node = validate_node_contract(config)
+                argv[0] = node["executablePath"]
+                browser = validate_browser_contract(
+                    config, runner, node_executable=node["executablePath"]
+                )
                 child_env = {
                     "HOME": account.pw_dir,
                     "LANG": "C.UTF-8",

@@ -46,10 +46,25 @@ sudo python3 scripts/install_dspace_chat_synthetic.py provision-node --apply \
 
 `--root /tmp/rehearsal-root` maps the exact coordinate into a private root. Dry-run, status,
 installation, repair, and rollback validate the same fixture without executing it; alternate-root
-status never queries systemd. Provisioning authorization remains distinct from activation:
+status never queries systemd. In this host-free model, the private root directory's numeric owner
+and group deterministically represent logical `root:root`; no host account lookup or privileged
+ownership change is required. Real-root validation still requires numeric `0:0`, and real-root
+`--apply` requires effective root authorization. Every existing coordinate ancestor is checked with
+`lstat` before mutation: it must be a confined, real, non-writable directory that the configured
+service identity can traverse. New directories are normalized to `0755` regardless of umask.
+Provisioning streams both archive verification and extraction into an invocation-unique temporary
+file, atomically renames only after validation, and cleans only that invocation's temporary path.
+Provisioning authorization remains distinct from activation:
 provisioning never reloads, starts, enables, or executes the service. Reapplication validates an
 already-current coordinate without rewriting it. Rollback validates the retained asset against the
 same Node contract and never changes Node independently.
+
+Status has one deliberately narrow compatibility exception: a retained configuration created
+before `nodeContract` existed remains readable and is reported as `legacy-not-declared`. That
+exception never invents a coordinate and never authorizes execution, repair, installation, or
+rollback. An explicit rollback must carry the exact pinned contract and pass Node preflight before
+`activate()`; otherwise the live assets and `current` pointer remain unchanged. A retained asset
+carrying the same validated contract remains eligible for an explicitly authorized rollback.
 
 Read-only operator verification is:
 
