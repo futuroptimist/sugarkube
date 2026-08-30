@@ -38,8 +38,8 @@ COVERAGE_BOOTSTRAP_ENV = (
 )
 
 
-def expected_names():
-    text = (ROOT / "clusters/staging/observability/probes/public-apps.yaml").read_text()
+def expected_names(environment="staging"):
+    text = (ROOT / f"clusters/{environment}/observability/probes/public-apps.yaml").read_text()
     return [
         line.strip().split(": ", 1)[1]
         for line in text.splitlines()
@@ -47,15 +47,18 @@ def expected_names():
     ]
 
 
-def verifier_bundle(health="up", success="1"):
-    pairs = [(name, name.removeprefix("blackbox-").split("-staging-")) for name in expected_names()]
+def verifier_bundle(health="up", success="1", environment="staging"):
+    pairs = [
+        (name, name.removeprefix("blackbox-").split(f"-{environment}-"))
+        for name in expected_names(environment)
+    ]
     targets = [
         {
             "labels": {
                 "job": f"probe/monitoring/{name}",
                 "app": pair[0],
                 "route": pair[1],
-                "environment": "staging",
+                "environment": environment,
             },
             "health": health,
         }
@@ -79,6 +82,7 @@ def verifier_bundle(health="up", success="1"):
                             "job": f"probe/monitoring/{name}",
                             "app": pair[0],
                             "route": pair[1],
+                            "environment": environment,
                         },
                         "value": [1, success if family == "probe_success" else "2"],
                     }
@@ -141,11 +145,11 @@ with open(os.environ["LOG"], "a") as log:
 scenario = os.environ.get("SCENARIO", "success")
 joined = " ".join(args)
 if args[:2] == ["config", "current-context"]:
-    print("wrong-context" if scenario == "bad_context" else "sugar-staging")
+    print("wrong-context" if scenario == "bad_context" else "sugar-" + os.environ.get("TEST_ENV", "staging"))
 elif args[:1] == ["kustomize"]:
     if "network-policies" in joined:
         print(open(os.environ["POLICY"]).read())
-    else: print(open(os.environ["PROBES_YAML"]).read())
+    else: print(open(os.environ["PROD_PROBES_YAML"] if "/prod/" in joined else os.environ["PROBES_YAML"]).read())
 elif args[:2] == ["apply", "-f"] and scenario == "policy_apply_failure" and "policy" in args[2]:
     sys.exit(41)
 elif "get crd" in joined and scenario == "missing_crds": sys.exit(1)
@@ -184,7 +188,7 @@ elif "get networkpolicy allow-kube-prometheus-stack-to-blackbox-exporter -o json
     elif scenario == "additional_policy_type": spec["policyTypes"].append("Egress")
     print(json.dumps(policy))
 elif "get probe -l" in joined and "-o json" in joined:
-    print(open(os.environ["PROBES_JSON"]).read())
+    print(open(os.environ["PROD_PROBES_JSON"] if os.environ.get("TEST_ENV") == "prod" else os.environ["PROBES_JSON"]).read())
 elif "--raw" in joined:
     count_file = os.environ["RAW_COUNT"]
     try: count = int(open(count_file).read())
@@ -236,6 +240,8 @@ class Scenario:
 
     def run(self, command, environment="staging", **extra):
         env = {**self.env, **{key: str(value) for key, value in extra.items()}}
+        normalized = "prod" if environment in ("prod", "production") else "staging"
+        env["TEST_ENV"] = normalized
         for key in COVERAGE_BOOTSTRAP_ENV:
             env.pop(key, None)
         args = [str(SCRIPT), command]
@@ -272,6 +278,21 @@ def scenario(tmp_path):
         capture_output=True,
     )
     probes.write_text(json.dumps({"items": json.loads(docs.stdout)}))
+    prod_probes = tmp_path / "prod-probes.json"
+    prod_docs = subprocess.run(
+        [
+            "ruby",
+            "-ryaml",
+            "-rjson",
+            "-e",
+            "puts JSON.generate(YAML.load_stream(File.read(ARGV[0])))",
+            str(ROOT / "clusters/prod/observability/probes/public-apps.yaml"),
+        ],
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    prod_probes.write_text(json.dumps({"items": json.loads(prod_docs.stdout)}))
     policy_json = tmp_path / "policy.json"
     policy_docs = subprocess.run(
         [
@@ -294,7 +315,9 @@ def scenario(tmp_path):
         "PATH": f"{bindir}:{os.environ['PATH']}",
         "LOG": str(tmp_path / "operations.log"),
         "PROBES_JSON": str(probes),
+        "PROD_PROBES_JSON": str(prod_probes),
         "PROBES_YAML": str(ROOT / "clusters/staging/observability/probes/public-apps.yaml"),
+        "PROD_PROBES_YAML": str(ROOT / "clusters/prod/observability/probes/public-apps.yaml"),
         "POLICY": str(POLICY),
         "POLICY_JSON": str(policy_json),
         "PROM_JSON": str(prom),
@@ -318,13 +341,13 @@ def mutations(log):
 
 
 def test_missing_and_production_envs_fail_before_cluster_access(scenario):
-    for environment in (None, "prod", "production", "dev"):
+    for environment in (None, "dev"):
         result = scenario.run("render", environment)
         assert result.returncode == 2
     assert scenario.log == []
 
 
-@pytest.mark.parametrize("environment", ["staging", "int"])
+@pytest.mark.parametrize("environment", ["staging", "int", "prod", "production"])
 def test_environment_normalization_renders_offline(scenario, environment):
     result = scenario.run("render", environment)
     assert result.returncode == 0
@@ -600,13 +623,13 @@ def test_prometheus_transport_failures_are_redacted_and_cleanup(scenario, transp
     assert not list(scenario.root.glob("sugarkube-blackbox-prometheus.*"))
 
 
-def verify(payload, final=False, *args):
+def verify(payload, final=False, *args, environment="staging"):
     stdin = io.StringIO(json.dumps(payload) if not isinstance(payload, str) else payload)
     stdout = io.StringIO()
     stderr = io.StringIO()
     old_argv, old_stdin = sys.argv, sys.stdin
     old_final_attempt = os.environ.get("FINAL_ATTEMPT")
-    sys.argv = [str(ROOT / "scripts/verify_blackbox_prometheus.py"), *args]
+    sys.argv = [str(ROOT / "scripts/verify_blackbox_prometheus.py"), "--env", environment, *args]
     sys.stdin = stdin
     os.environ["FINAL_ATTEMPT"] = "1" if final else "0"
     try:
@@ -707,3 +730,160 @@ def test_probe_validator_requires_exact_names_and_mappings():
     assert verify({}, False, "--probes").returncode == 7
     assert verify({"items": [None]}, False, "--probes").returncode == 7
     assert verify(items, False, "--unknown").returncode == 9
+
+
+def test_prometheus_verifier_rejects_duplicate_targets_and_series():
+    payload = verifier_bundle()
+    payload["targets"]["data"]["activeTargets"].append(
+        json.loads(json.dumps(payload["targets"]["data"]["activeTargets"][0]))
+    )
+    assert verify(payload).returncode == 9
+    payload = verifier_bundle()
+    payload["metrics"]["probe_success"]["data"]["result"].append(
+        json.loads(json.dumps(payload["metrics"]["probe_success"]["data"]["result"][0]))
+    )
+    assert verify(payload).returncode == 9
+
+
+PRODUCTION_MATRIX = {
+    "dspace": {
+        "root": "https://democratized.space/",
+        "config": "https://democratized.space/config.json",
+        "healthz": "https://democratized.space/healthz",
+        "livez": "https://democratized.space/livez",
+    },
+    "tokenplace": {
+        "root": "https://token.place/",
+        "healthz": "https://token.place/healthz",
+        "livez": "https://token.place/livez",
+        "metadata": "https://token.place/api/v1/meta",
+    },
+    "danielsmith": {
+        "root": "https://danielsmith.io/",
+        "healthz": "https://danielsmith.io/healthz",
+        "livez": "https://danielsmith.io/livez",
+    },
+    "jobbot3000": {
+        "root": "https://jobbot3000.tech/",
+        "healthz": "https://jobbot3000.tech/healthz",
+        "livez": "https://jobbot3000.tech/livez",
+        "tracker": "https://jobbot3000.tech/tracker",
+        "manifest": "https://jobbot3000.tech/manifest.webmanifest",
+    },
+    "gitshelves": {
+        "root": "https://gitshelves.com/",
+        "healthz": "https://gitshelves.com/healthz",
+        "livez": "https://gitshelves.com/livez",
+        "baseplate": "https://gitshelves.com/models/baseplate_2x6.stl",
+        "module": "https://gitshelves.com/models/contrib_cube.stl",
+    },
+}
+
+
+def load_probe_documents(environment):
+    result = subprocess.run(
+        [
+            "ruby",
+            "-ryaml",
+            "-rjson",
+            "-e",
+            "puts JSON.generate(YAML.load_stream(File.read(ARGV[0])))",
+            str(ROOT / f"clusters/{environment}/observability/probes/public-apps.yaml"),
+        ],
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    return json.loads(result.stdout)
+
+
+def test_production_probe_matrix_exact_and_matches_staging_contract():
+    production = load_probe_documents("prod")
+    staging = load_probe_documents("staging")
+    assert len(production) == len(staging) == 21
+    expected = {
+        (app, route): url
+        for app, routes in PRODUCTION_MATRIX.items()
+        for route, url in routes.items()
+    }
+    found = {}
+    for prod, stage in zip(production, staging, strict=True):
+        labels = prod["metadata"]["labels"]
+        target_labels = prod["spec"]["targets"]["staticConfig"]["labels"]
+        key = (labels["app"], labels["route"])
+        found[key] = prod["spec"]["targets"]["staticConfig"]["static"][0]
+        assert prod["metadata"]["name"] == f"blackbox-{key[0]}-prod-{key[1]}"
+        assert labels["release"] == "kube-prometheus-stack"
+        assert labels["environment"] == target_labels["environment"] == "prod"
+        assert {k: target_labels[k] for k in ("app", "route", "criticality")} == {
+            k: labels[k] for k in ("app", "route", "criticality")
+        }
+        assert prod["spec"]["module"] == stage["spec"]["module"]
+        assert prod["spec"]["interval"] == stage["spec"]["interval"]
+        assert labels["criticality"] == stage["metadata"]["labels"]["criticality"]
+    assert found == expected
+
+
+def test_environment_renders_are_separated(scenario):
+    for environment, forbidden in (("staging", "-prod-"), ("prod", "-staging-")):
+        result = scenario.run("render", environment, KUBECONFIG="/definitely/unusable")
+        assert result.returncode == 0
+        assert f"environment: {environment}" in result.stdout
+        assert forbidden not in result.stdout
+        assert result.stdout.count("kind: Probe") == 21
+
+
+def test_production_live_operation_requires_explicit_kubeconfig_before_access(scenario):
+    env = dict(scenario.env)
+    env.pop("KUBECONFIG", None)
+    scenario.env = env
+    result = scenario.run("status", "prod")
+    assert result.returncode == 3
+    assert not any(
+        "config current-context" in line or line.startswith("helm list") for line in scenario.log
+    )
+    assert not mutations(scenario.log)
+
+
+@pytest.mark.parametrize("failure", ["bad_context", "bad_identity"])
+def test_production_identity_guards_precede_queries_and_mutation(scenario, failure):
+    result = scenario.run(
+        "install", "prod", SCENARIO=failure, KUBECONFIG=scenario.root / "prod-config"
+    )
+    assert result.returncode != 0
+    assert not any("helm list" in line for line in scenario.log)
+    assert not mutations(scenario.log)
+
+
+def test_production_mutation_has_no_probe_cleanup(scenario):
+    result = scenario.run(
+        "install", "prod", SCENARIO="release_absent", KUBECONFIG=scenario.root / "prod-config"
+    )
+    assert result.returncode == 0
+    assert not any(" delete probe " in line for line in scenario.log)
+    assert sum(line.startswith("kubectl apply") for line in scenario.log) == 2
+
+
+def test_verifier_rejects_mixed_environment_and_requires_explicit_env():
+    payload = verifier_bundle(environment="prod")
+    payload["targets"]["data"]["activeTargets"][0]["labels"]["environment"] = "staging"
+    assert verify(payload, environment="prod").returncode == 9
+    stdin = json.dumps(verifier_bundle())
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/verify_blackbox_prometheus.py")],
+        input=stdin,
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 9
+
+
+def test_environment_exporter_values_and_network_policy_do_not_drift():
+    for relative in (
+        "prometheus-blackbox-exporter.values.yaml",
+        "network-policies/prometheus-to-blackbox-exporter.yaml",
+        "network-policies/kustomization.yaml",
+    ):
+        assert (ROOT / "clusters/prod/observability" / relative).read_text() == (
+            ROOT / "clusters/staging/observability" / relative
+        ).read_text()

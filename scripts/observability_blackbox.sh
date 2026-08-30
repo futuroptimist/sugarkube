@@ -10,11 +10,13 @@ REPOSITORY="https://prometheus-community.github.io/helm-charts"
 VERSION_FILE="${ROOT}/platform/observability/helm/prometheus-blackbox-exporter.version"
 BASE_VERSION_FILE="${ROOT}/platform/observability/helm/kube-prometheus-stack.version"
 BASE_COMMON_VALUES="${ROOT}/platform/observability/helm/kube-prometheus-stack.values.common.yaml"
-BASE_STAGING_VALUES="${ROOT}/clusters/staging/observability/kube-prometheus-stack.values.yaml"
-VALUES="${ROOT}/clusters/staging/observability/prometheus-blackbox-exporter.values.yaml"
-PROBES="${ROOT}/clusters/staging/observability/probes"
-POLICIES="${ROOT}/clusters/staging/observability/network-policies"
-POLICY_SOURCE="${POLICIES}/prometheus-to-blackbox-exporter.yaml"
+BASE_ENV_VALUES=""
+VALUES=""
+PROBES=""
+POLICIES=""
+POLICY_SOURCE=""
+ENVIRONMENT=""
+EXPECTED_CONTEXT=""
 POLICY_NAME="allow-kube-prometheus-stack-to-blackbox-exporter"
 TIMEOUT="${SUGARKUBE_OBSERVABILITY_HELM_TIMEOUT:-20m}"
 PROMETHEUS_SERVICE="kube-prometheus-stack-prometheus"
@@ -27,21 +29,28 @@ LEGACY_PROBES=(
   blackbox-danielsmith-prod-livez
 )
 
-usage() { echo "Usage: $0 <render|install|upgrade|status|verify> env=staging" >&2; }
+usage() { echo "Usage: $0 <render|install|upgrade|status|verify> env=<staging|prod>" >&2; }
 normalize_env() {
   local raw="${1:-}"; while [[ "${raw}" == env=* ]]; do raw="${raw#env=}"; done
   case "${raw}" in
-    staging) printf staging ;;
-    int) echo "WARNING: env name 'int' is deprecated; using env=staging." >&2; printf staging ;;
-    ""|prod|production) echo "ERROR: production blackbox observability is unsupported; pass env=staging explicitly." >&2; exit 2 ;;
-    *) echo "ERROR: unsupported blackbox observability env '${raw}'; supported env: staging." >&2; exit 2 ;;
+    staging) ENVIRONMENT=staging ;;
+    int) echo "WARNING: env name 'int' is deprecated; using env=staging." >&2; ENVIRONMENT=staging ;;
+    prod|production) ENVIRONMENT=prod ;;
+    "") echo "ERROR: pass env=staging or env=prod explicitly." >&2; exit 2 ;;
+    *) echo "ERROR: unsupported blackbox observability env '${raw}'; supported envs: staging, prod." >&2; exit 2 ;;
   esac
+  EXPECTED_CONTEXT="sugar-${ENVIRONMENT}"
+  BASE_ENV_VALUES="${ROOT}/clusters/${ENVIRONMENT}/observability/kube-prometheus-stack.values.yaml"
+  VALUES="${ROOT}/clusters/${ENVIRONMENT}/observability/prometheus-blackbox-exporter.values.yaml"
+  PROBES="${ROOT}/clusters/${ENVIRONMENT}/observability/probes"
+  POLICIES="${ROOT}/clusters/${ENVIRONMENT}/observability/network-policies"
+  POLICY_SOURCE="${POLICIES}/prometheus-to-blackbox-exporter.yaml"
 }
 require_tools() { local t; for t in "$@"; do command -v "$t" >/dev/null || { echo "ERROR: required tool missing: $t" >&2; exit 127; }; done; }
 version() { tr -d '[:space:]' <"${VERSION_FILE}"; }
 current_context() { kubectl config current-context 2>/dev/null || true; }
 print_resolved() { local ctx; if (($#)); then ctx="$1"; else ctx="$(current_context)"; fi; cat <<EOT
-blackbox environment: staging
+blackbox environment: ${ENVIRONMENT}
 current Kubernetes context: ${ctx:-<unknown>}
 namespace: ${NAMESPACE}
 release: ${RELEASE}
@@ -55,16 +64,20 @@ NetworkPolicy manifest path: ${POLICY_SOURCE}
 EOT
 }
 assert_context() {
-  local ctx; ctx="$(current_context)"
-  [[ "${ctx}" == sugar-staging ]] || { echo "ERROR: expected context 'sugar-staging', got '${ctx:-<none>}' before mutation or cluster access." >&2; exit 3; }
-  python3 "${ROOT}/scripts/cluster_identity.py" assert --kubeconfig "${KUBECONFIG:-${HOME}/.kube/config}" --env staging >/dev/null
+  local ctx
+  if [[ "${ENVIRONMENT}" == prod && -z "${KUBECONFIG:-}" ]]; then
+    echo "ERROR: production live operations require an explicitly supplied KUBECONFIG." >&2; exit 3
+  fi
+  ctx="$(current_context)"
+  [[ "${ctx}" == "${EXPECTED_CONTEXT}" ]] || { echo "ERROR: expected context '${EXPECTED_CONTEXT}', got '${ctx:-<none>}' before mutation or cluster access." >&2; exit 3; }
+  python3 "${ROOT}/scripts/cluster_identity.py" assert --kubeconfig "${KUBECONFIG:-${HOME}/.kube/config}" --env "${ENVIRONMENT}" >/dev/null
 }
 render_to() {
   local base_out="$1" chart_out="$2" policy_out="$3" probe_out="$4" selectors_out="$5" base_json="$6" chart_json="$7" policy_json="$8" probes_json="$9"
   helm repo add prometheus-community "${REPOSITORY}" --force-update >/dev/null
   helm repo update prometheus-community >/dev/null
   helm template "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${VALUES}" >"${chart_out}"
-  helm template "${BASE_RELEASE}" "prometheus-community/${BASE_RELEASE}" --namespace "${NAMESPACE}" --version "$(tr -d '[:space:]' <"${BASE_VERSION_FILE}")" -f "${BASE_COMMON_VALUES}" -f "${BASE_STAGING_VALUES}" >"${base_out}"
+  helm template "${BASE_RELEASE}" "prometheus-community/${BASE_RELEASE}" --namespace "${NAMESPACE}" --version "$(tr -d '[:space:]' <"${BASE_VERSION_FILE}")" -f "${BASE_COMMON_VALUES}" -f "${BASE_ENV_VALUES}" >"${base_out}"
   kubectl kustomize "${POLICIES}" >"${policy_out}"
   kubectl kustomize "${PROBES}" >"${probe_out}"
   [[ -s "${base_out}" && -s "${chart_out}" && -s "${policy_out}" && -s "${probe_out}" ]] || { echo "ERROR: prerequisite chart, exporter chart, NetworkPolicy, and Probe renders must all be non-empty." >&2; exit 4; }
@@ -106,7 +119,7 @@ for key in ("app.kubernetes.io/instance","app.kubernetes.io/name"):
 json.dump({"prometheus":{"operator.prometheus.io/name":base[0]["metadata"]["name"]},"exporter":labels},open(sys.argv[3],"w",encoding="utf-8"),sort_keys=True)
 PY
   validate_policy_file "${policy_json}" "${selectors_out}"
-  python3 "${ROOT}/scripts/verify_blackbox_prometheus.py" --probes <"${probes_json}"
+  python3 "${ROOT}/scripts/verify_blackbox_prometheus.py" --env "${ENVIRONMENT}" --probes <"${probes_json}"
 }
 validate_policy_file() {
   python3 - "$2" "${POLICY_NAME}" "${NAMESPACE}" "$1" "${EXPECTED_POLICY_JSON}" <<'PY'
@@ -157,21 +170,23 @@ with_render() {
 render() { require_tools helm kubectl python3 ruby; with_render; print_resolved "" >&2; cat "${CHART_RENDER}"; printf '\n---\n'; cat "${POLICY_RENDER}"; printf '\n---\n'; cat "${PROBE_RENDER}"; }
 mutate() {
   local action="$1" state
-  require_tools helm kubectl python3 ruby; with_render; print_resolved; assert_context; preflight; state="$(release_state)"
+  require_tools helm kubectl python3 ruby; with_render; assert_context; print_resolved "${EXPECTED_CONTEXT}"; preflight; state="$(release_state)"
   if [[ "${action}" == install && "${state}" == present ]]; then echo "ERROR: install requires an absent ${RELEASE} release; use upgrade." >&2; exit 6; fi
   if [[ "${action}" == upgrade && "${state}" == absent ]]; then echo "ERROR: upgrade requires an existing ${RELEASE} release; use install." >&2; exit 6; fi
   helm "${action}" "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${VALUES}" --wait --timeout "${TIMEOUT}"
   kubectl apply -f "${POLICY_RENDER}"
   # Remove only the production Probes left by the former mixed staging matrix.
-  kubectl -n "${NAMESPACE}" delete probe "${LEGACY_PROBES[@]}" --ignore-not-found
+  if [[ "${ENVIRONMENT}" == staging ]]; then
+    kubectl -n "${NAMESPACE}" delete probe "${LEGACY_PROBES[@]}" --ignore-not-found
+  fi
   kubectl apply -f "${PROBE_RENDER}"
 }
 status() {
-  require_tools helm kubectl python3 ruby; with_render; print_resolved; assert_context
+  require_tools helm kubectl python3 ruby; with_render; assert_context; print_resolved "${EXPECTED_CONTEXT}"
   helm -n "${NAMESPACE}" status "${RELEASE}"
   kubectl -n "${NAMESPACE}" get deployment,pods,service,servicemonitor -l "app.kubernetes.io/instance=${RELEASE}"
   kubectl -n "${NAMESPACE}" get networkpolicy "${POLICY_NAME}" -o yaml
-  kubectl -n "${NAMESPACE}" get probe -l 'release=kube-prometheus-stack,environment=staging' -L app,route,criticality
+  kubectl -n "${NAMESPACE}" get probe -l "release=kube-prometheus-stack,environment=${ENVIRONMENT}" -L app,route,criticality
 }
 validate_policy_live() {
   local policy
@@ -191,7 +206,7 @@ validate_resources() {
   [[ -z "$(kubectl -n "${NAMESPACE}" get ingress -l "app.kubernetes.io/instance=${RELEASE}" -o name)" ]] || { echo "ERROR: exporter Ingress is forbidden." >&2; exit 7; }
   [[ -z "$(kubectl -n "${NAMESPACE}" get service -l "app.kubernetes.io/instance=${RELEASE}" -o jsonpath='{range .items[*].spec.ports[*]}{.nodePort}{"\n"}{end}' | sed '/^$/d')" ]] || { echo "ERROR: exporter NodePort is forbidden." >&2; exit 7; }
   [[ "$(kubectl -n "${NAMESPACE}" get servicemonitor "${RELEASE}" -o jsonpath='{.metadata.labels.release}')" == "${BASE_RELEASE}" ]] || { echo "ERROR: exporter ServiceMonitor is absent or lacks release: ${BASE_RELEASE}." >&2; exit 7; }
-  kubectl -n "${NAMESPACE}" get probe -l 'release=kube-prometheus-stack' -o json | python3 "${ROOT}/scripts/verify_blackbox_prometheus.py" --probes
+  kubectl -n "${NAMESPACE}" get probe -l "release=kube-prometheus-stack,environment=${ENVIRONMENT}" -o json | python3 "${ROOT}/scripts/verify_blackbox_prometheus.py" --env "${ENVIRONMENT}" --probes
 }
 prom_get() {
   local operation="$1" path="$2" error_file output rc category
@@ -227,17 +242,17 @@ verify_series() {
     targets="$(prom_get targets '/api/v1/targets?state=active')" || exit 9
     metrics='{}'
     for family in probe_success probe_duration_seconds probe_http_status_code probe_dns_lookup_time_seconds probe_ssl_earliest_cert_expiry; do
-      printf -v encoded '%%7Benvironment%%3D%%22staging%%22%%7D'
+      printf -v encoded '%%7Benvironment%%3D%%22%s%%22%%7D' "${ENVIRONMENT}"
       output="$(prom_get "${family}" "/api/v1/query?query=${family}${encoded}")" || exit 9
       metrics="$(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); d[sys.argv[2]]=json.loads(sys.stdin.read()); print(json.dumps(d,separators=(",",":")))' "${metrics}" "${family}" <<<"${output}")" || { echo "ERROR: Prometheus metric response is malformed JSON." >&2; exit 9; }
     done
     rc=0
-    FINAL_ATTEMPT="$((attempt==attempts))" python3 "${ROOT}/scripts/verify_blackbox_prometheus.py" <<<"$(printf '{"targets":%s,"metrics":%s}' "${targets}" "${metrics}")" || rc=$?
-    case "${rc}" in 0) echo "All 21 staging blackbox targets and required metric families are healthy."; return;; 10) ((attempt<attempts)) && { echo "Blackbox targets are converging (attempt ${attempt}/${attempts}); retrying." >&2; sleep "${interval}"; };; *) exit "${rc}";; esac
+    FINAL_ATTEMPT="$((attempt==attempts))" python3 "${ROOT}/scripts/verify_blackbox_prometheus.py" --env "${ENVIRONMENT}" <<<"$(printf '{"targets":%s,"metrics":%s}' "${targets}" "${metrics}")" || rc=$?
+    case "${rc}" in 0) echo "All 21 ${ENVIRONMENT} blackbox targets and required metric families are healthy."; return;; 10) ((attempt<attempts)) && { echo "Blackbox targets are converging (attempt ${attempt}/${attempts}); retrying." >&2; sleep "${interval}"; };; *) exit "${rc}";; esac
   done
   exit 10
 }
-verify() { require_tools helm kubectl python3 ruby sleep; with_render; print_resolved; assert_context; preflight; [[ "$(release_state)" == present ]] || { echo "ERROR: exporter release is absent." >&2; exit 7; }; validate_policy_live; validate_resources; verify_series; }
+verify() { require_tools helm kubectl python3 ruby sleep; with_render; assert_context; print_resolved "${EXPECTED_CONTEXT}"; preflight; [[ "$(release_state)" == present ]] || { echo "ERROR: exporter release is absent." >&2; exit 7; }; validate_policy_live; validate_resources; verify_series; }
 
-cmd="${1:-}"; shift || true; [[ -n "${cmd}" ]] || { usage; exit 2; }; normalize_env "${1:-}" >/dev/null
+cmd="${1:-}"; shift || true; [[ -n "${cmd}" ]] || { usage; exit 2; }; normalize_env "${1:-}"
 case "${cmd}" in render) render;; install|upgrade) mutate "${cmd}";; status) status;; verify) verify;; *) usage; exit 2;; esac
