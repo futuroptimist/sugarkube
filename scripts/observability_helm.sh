@@ -982,14 +982,24 @@ dashboard_verify() (
         000|404|429|500|502|503|504) sleep 1; continue ;;
         *) echo "ERROR: Grafana dashboard API rejected the request (response redacted)." >&2; return 13 ;;
       esac
-      DASHBOARD_UID="${DASHBOARD_UID}" DASHBOARD_TITLE="${DASHBOARD_TITLE}" python3 -c 'import json, os, sys
+      DASHBOARD_UID="${DASHBOARD_UID}" DASHBOARD_TITLE="${DASHBOARD_TITLE}" DASHBOARD_SOURCE="${DASHBOARD}" python3 -c 'import json, os, sys
 try:
     result = json.load(sys.stdin)
-except (json.JSONDecodeError, UnicodeError):
-    raise SystemExit("ERROR: Grafana dashboard API returned malformed JSON (response redacted).")
+    with open(os.environ["DASHBOARD_SOURCE"], encoding="utf-8") as source:
+        expected = json.load(source)
+except (OSError, json.JSONDecodeError, UnicodeError):
+    raise SystemExit("ERROR: Grafana dashboard verification input was malformed (response redacted).")
 dashboard = result.get("dashboard") if isinstance(result, dict) else None
 if not isinstance(dashboard, dict) or dashboard.get("uid") != os.environ["DASHBOARD_UID"] or dashboard.get("title") != os.environ["DASHBOARD_TITLE"]:
-    raise SystemExit("ERROR: Grafana did not return the expected provisioned dashboard (response redacted).")' <<<"${body}"
+    raise SystemExit("ERROR: Grafana did not return the expected provisioned dashboard (response redacted).")
+def contract(document, title):
+    matches = [panel for panel in document.get("panels", []) if panel.get("title") == title]
+    if len(matches) != 1 or len(matches[0].get("targets", [])) != 1:
+        return None
+    return matches[0].get("id"), matches[0]["targets"][0].get("expr")
+for title in ("5xx error ratio", "token.place HTTP 5xx ratio"):
+    if contract(dashboard, title) != contract(expected, title):
+        raise SystemExit("ERROR: Grafana dashboard content does not match the provisioned 5xx query contract (response redacted).")' <<<"${body}"
       echo "Grafana API confirmed dashboard UID ${DASHBOARD_UID} (credentials and response redacted)."
       return 0
     fi

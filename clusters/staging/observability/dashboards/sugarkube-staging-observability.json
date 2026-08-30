@@ -1200,7 +1200,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(dspace_http_requests_total{environment=~\"$environment\",status_class=\"5xx\"}[$__rate_interval])) / clamp_min(sum(rate(dspace_http_requests_total{environment=~\"$environment\"}[$__rate_interval])), 1e-9)",
+          "expr": "(sum(rate(dspace_http_requests_total{environment=~\"$environment\",status_class=\"5xx\"}[$__rate_interval])) or on() (0 * sum(rate(dspace_http_requests_total{environment=~\"$environment\"}[$__rate_interval])))) / clamp_min(sum(rate(dspace_http_requests_total{environment=~\"$environment\"}[$__rate_interval])), 1e-9)",
           "legendFormat": "5xx ratio"
         }
       ],
@@ -2605,7 +2605,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(tokenplace_http_requests_total{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=~\"$cluster\",namespace=\"tokenplace\",status_class=\"5xx\"}[$__rate_interval])) / clamp_min(sum(rate(tokenplace_http_requests_total{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=~\"$cluster\",namespace=\"tokenplace\"}[$__rate_interval])), 1e-9)",
+          "expr": "(sum(rate(tokenplace_http_requests_total{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=~\"$cluster\",namespace=\"tokenplace\",status_class=\"5xx\"}[$__rate_interval])) or on() (0 * sum(rate(tokenplace_http_requests_total{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=~\"$cluster\",namespace=\"tokenplace\"}[$__rate_interval])))) / clamp_min(sum(rate(tokenplace_http_requests_total{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=~\"$cluster\",namespace=\"tokenplace\"}[$__rate_interval])), 1e-9)",
           "legendFormat": "5xx ratio"
         }
       ],

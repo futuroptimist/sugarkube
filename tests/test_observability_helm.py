@@ -2320,7 +2320,7 @@ case "$*" in
       echo terminated > "$PID_FILE"
       exit 0
     fi
-    if [ "$MODE" != success ]; then
+    if [ "$MODE" != success ] && [ "$MODE" != content-drift ]; then
       /bin/sleep 0.2
       echo terminated > "$PID_FILE"
       exit 0
@@ -2352,16 +2352,20 @@ esac
         stub.chmod(0o755)
     (bin_dir / "sleep").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     (bin_dir / "sleep").chmod(0o755)
+    dashboard_response = json.loads(
+        (PROD_DASHBOARD if env_name == "prod" else DASHBOARD).read_text(encoding="utf-8")
+    )
+    if mode == "content-drift":
+        next(
+            panel for panel in dashboard_response["panels"] if panel["title"] == "5xx error ratio"
+        )["targets"][0]["expr"] = "vector(0)"
     env = os.environ | {
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
         "AUDIT": str(audit),
         "MODE": mode,
         "CONTEXT": context,
         "ENV_NAME": env_name,
-        "DASHBOARD_RESPONSE": json.dumps({"dashboard": {
-            "uid": "sugarkube-prod-observability" if env_name == "prod" else "sugarkube-staging-observability",
-            "title": "Sugarkube Production Observability" if env_name == "prod" else "Sugarkube Staging Observability",
-        }}),
+        "DASHBOARD_RESPONSE": json.dumps({"dashboard": dashboard_response}),
         "PID_FILE": str(pid_file),
         "FORWARD_PID": str(tmp_path / "port-forward.pid"),
         "FORWARD_LINE": forward_line,
@@ -2472,6 +2476,13 @@ def test_dashboard_verifier_auth_failures_are_immediate_and_redacted(tmp_path):
         assert result.returncode != 0 and audit.count("curl ") == 1
         assert "redacted" in result.stderr and "placeholder" not in result.stdout + result.stderr
         assert not list((tmp_path / mode).glob("sugarkube-grafana-verify.*"))
+
+
+def test_dashboard_verifier_rejects_5xx_query_content_drift(tmp_path):
+    result, _, _ = run_dashboard_verifier(tmp_path, "content-drift")
+    assert result.returncode != 0
+    assert "content does not match" in result.stderr
+    assert "response redacted" in result.stderr
 
 
 def test_dashboard_verifier_rejects_incorrect_and_malformed_api_json(tmp_path):
