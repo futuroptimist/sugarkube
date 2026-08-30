@@ -239,7 +239,7 @@ def test_5xx_ratios_use_request_family_gated_zero_contract(dashboards):
     ],
 )
 def test_5xx_ratio_contract_rejects_wrong_gate_filter_or_unconditional_zero(
-    tmp_path, dashboards, title, old, new
+    dashboards, title, old, new
 ):
     staging, _ = dashboards
     changed = copy.deepcopy(staging)
