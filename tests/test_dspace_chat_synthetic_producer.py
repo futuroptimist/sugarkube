@@ -2527,6 +2527,43 @@ class StatusRuntime:
         return value["nodeContract"]
 
 
+class RealNodeValidationRuntime(StatusRuntime):
+    """Keep runner checks deterministic while exercising real Node provenance."""
+
+    def __init__(self, node_contract: dict):
+        self.node_contract = copy.deepcopy(node_contract)
+
+    def load_config(self, path: Path) -> dict:
+        value = super().load_config(path)
+        if "nodeContract" in value:
+            value["nodeContract"] = copy.deepcopy(self.node_contract)
+        return value
+
+    @staticmethod
+    def validate_runner(value: dict, _node: str | None = None) -> Path:
+        identity = value.get("_runnerStorageIdentity", runtime.runner_storage_identity(value))
+        runner = Path(value["runnerRoot"]) / identity
+        if (
+            not (runner / ".git").is_dir()
+            or not (runner / "sugarkube-runner-manifest.json").is_file()
+        ):
+            raise ValueError("runner fixture is incomplete")
+        return runner
+
+    @staticmethod
+    def validate_node_contract(value: dict, root: Path) -> dict:
+        return runtime.validate_node_contract(value, root)
+
+    @staticmethod
+    def validate_browser_contract(
+        _value: dict, runner: Path, _root: Path, _node: str | None = None
+    ) -> dict:
+        manifest = runner / "sugarkube-runner-manifest.json"
+        if manifest.is_file():
+            return json.loads(manifest.read_text())["browserProvenance"]
+        return {"name": runtime.SYSTEM_CHROMIUM}
+
+
 def status_installation(tmp_path: Path) -> tuple[Path, Path, str]:
     root = tmp_path / "root"
     revision = "a" * 64
@@ -2645,6 +2682,172 @@ def test_status_reports_validated_provenance_without_mutation_or_systemctl(
     assert "rawResult" not in output
     assert "activation=not-queried" in output
     assert tree_bytes(root) == before
+
+
+def test_real_node_validation_covers_private_root_dry_run_status_repair_and_rollback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    value, root = synthetic_node_fixture(tmp_path, monkeypatch)
+    snapshot, _ = runner_snapshot_fixture(tmp_path)
+    snapshot_manifest = snapshot / "sugarkube-runner-manifest.json"
+    snapshot_provenance = json.loads(snapshot_manifest.read_text())
+    snapshot_provenance["pnpmVersion"] = "9.0.0"
+    snapshot_provenance["browserProvenance"].update(
+        architecture="aarch64",
+        executablePath="/usr/lib/chromium/chromium",
+        executableSha256="1" * 64,
+        launcherPath="/usr/bin/chromium",
+        launcherSha256="2" * 64,
+    )
+    snapshot_manifest.write_text(json.dumps(snapshot_provenance))
+    selected_runtime = RealNodeValidationRuntime(value["nodeContract"])
+    monkeypatch.setattr(installer, "runtime_module", lambda: selected_runtime)
+
+    commands: list[list[str]] = []
+    real_run = subprocess.run
+
+    def command_guard(argv, *args, **kwargs):
+        command = [str(part) for part in argv]
+        commands.append(command)
+        if command[0] != "git":
+            pytest.fail(f"private-root lifecycle invoked host command: {command}")
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(installer.subprocess, "run", command_guard)
+    monkeypatch.setattr(runtime.subprocess, "run", command_guard)
+
+    before_dry_run = tree_bytes(root)
+    assert (
+        run_installer_main(
+            monkeypatch, "dry-run", "--root", str(root), "--runner-snapshot", str(snapshot)
+        )
+        == 0
+    )
+    assert tree_bytes(root) == before_dry_run
+
+    staged = tmp_path / "staged"
+    installer.render(staged)
+    asset_revision = installer.sha(staged / "manifest.json")
+    installer.install(staged, root, asset_revision)
+    config_value = selected_runtime.load_config(root / "etc/sugarkube/dspace-chat-synthetic.json")
+    runner = (
+        root
+        / config_value["runnerRoot"].removeprefix("/")
+        / runtime.runner_storage_identity(config_value)
+    )
+    runner.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(snapshot, runner)
+
+    before_status = tree_bytes(root)
+    assert installer.status(root) == 0
+    status_output = capsys.readouterr().out
+    node = value["nodeContract"]
+    for expected in (
+        f"nodeVersion={node['version']}",
+        f"nodeArchitecture={node['architecture']}",
+        f"nodeExecutablePath={node['executablePath']}",
+        f"nodeExecutableSha256={node['executableSha256']}",
+        f"nodeArchiveSha256={node['archiveSha256']}",
+        "activation=not-queried",
+    ):
+        assert expected in status_output
+    assert tree_bytes(root) == before_status
+
+    monkeypatch.setattr(installer, "validate_runner_access", lambda *_args: None)
+    monkeypatch.setattr(installer, "runner_access_plan", lambda *_args: [])
+    manifest_sha = installer.sha(runner / "sugarkube-runner-manifest.json")
+    assert (
+        installer.repair_runner_access(
+            root,
+            config_value["runnerRevision"],
+            asset_revision,
+            manifest_sha,
+            True,
+        )
+        == 0
+    )
+    assert (
+        run_installer_main(
+            monkeypatch,
+            "rollback",
+            "--apply",
+            "--root",
+            str(root),
+            "--revision",
+            asset_revision,
+        )
+        == 0
+    )
+    current = root / "var/lib/sugarkube/dspace-chat-installations/current"
+    assert os.readlink(current) == asset_revision
+    assert all(command[0] == "git" for command in commands)
+
+
+def test_missing_retained_node_contract_fails_before_rollback_activation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, root = synthetic_node_fixture(tmp_path, monkeypatch)
+    snapshot, _ = runner_snapshot_fixture(tmp_path)
+    selected_runtime = RealNodeValidationRuntime(value["nodeContract"])
+    monkeypatch.setattr(installer, "runtime_module", lambda: selected_runtime)
+    monkeypatch.setattr(installer, "validate_runner_access", lambda *_args: None)
+    monkeypatch.setattr(
+        installer.subprocess,
+        "run",
+        lambda argv, *_args, **_kwargs: pytest.fail(f"rollback invoked command: {argv}"),
+    )
+    monkeypatch.setattr(
+        runtime.subprocess,
+        "run",
+        lambda argv, *_args, **_kwargs: pytest.fail(f"rollback executed Node: {argv}"),
+    )
+
+    staged = tmp_path / "current-staged"
+    installer.render(staged)
+    current_revision = installer.sha(staged / "manifest.json")
+    installer.install(staged, root, current_revision)
+    monkeypatch.setattr(
+        installer,
+        "activate",
+        lambda *_args: pytest.fail("missing-contract rollback reached activation"),
+    )
+    config_value = selected_runtime.load_config(staged / "etc/sugarkube/dspace-chat-synthetic.json")
+    runner = (
+        root
+        / config_value["runnerRoot"].removeprefix("/")
+        / runtime.runner_storage_identity(config_value)
+    )
+    runner.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(snapshot, runner)
+
+    retained = root / "var/lib/sugarkube/dspace-chat-installations" / current_revision
+    legacy = tmp_path / "legacy-retained"
+    shutil.copytree(retained, legacy)
+    legacy_config = legacy / "etc/sugarkube/dspace-chat-synthetic.json"
+    legacy_value = json.loads(legacy_config.read_text())
+    legacy_value.pop("nodeContract")
+    legacy_config.write_text(json.dumps(legacy_value, sort_keys=True, indent=2) + "\n")
+    hashes = asset_hashes(legacy)
+    hashes["etc/sugarkube/dspace-chat-synthetic.json"] = installer.sha(legacy_config)
+    write_asset_manifest(legacy, hashes)
+    legacy_revision = installer.sha(legacy / "manifest.json")
+    legacy.rename(retained.parent / legacy_revision)
+
+    current = retained.parent / "current"
+    before = tree_bytes(root)
+    current_before = os.readlink(current)
+    with pytest.raises(runtime.Invalid, match="Node runtime contract"):
+        run_installer_main(
+            monkeypatch,
+            "rollback",
+            "--apply",
+            "--root",
+            str(root),
+            "--revision",
+            legacy_revision,
+        )
+    assert tree_bytes(root) == before
+    assert os.readlink(current) == current_before
 
 
 @pytest.mark.parametrize(
