@@ -391,7 +391,9 @@ They do not define alert thresholds:
   them by the bounded `outcome` label.
 - **token.place HTTP request rate** groups summed counter rates by normalized
   `route` and bounded `status_class`. **token.place HTTP 5xx ratio** divides the
-  summed 5xx rate by the summed request rate, and **token.place HTTP latency
+  summed 5xx rate by the summed request rate. Its zero numerator is gated by
+  that same filtered request family, so healthy traffic without a 5xx series is
+  `0` while absent instrumentation remains `NO DATA`. **token.place HTTP latency
   percentiles** derives p50, p95, and p99 from summed histogram-bucket rates by
   normalized route.
 - **token.place build identity** is an instant table containing only `pod`,
@@ -402,8 +404,9 @@ Every token.place query selects the canonical `app=tokenplace`,
 selected `$environment`. Logical gauges use `max` to deduplicate
 values that future relay replicas may repeat instead of incorrectly adding
 them. Process-local event counters use summed rates. No token.place state or
-event query substitutes zero for an absent series: an emitted zero remains
-zero, while absent instrumentation remains `NO DATA`. Queries and legends do
+event query substitutes zero independently of its instrumentation family: an
+emitted or request-family-gated zero remains zero, while absent instrumentation
+remains `NO DATA`. Queries and legends do
 not expose raw targets, instances, node identities, request identifiers,
 URLs, payloads, credentials, or other sensitive or unbounded labels.
 

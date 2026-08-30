@@ -220,6 +220,42 @@ def test_query_scoping_and_safe_labels(dashboards):
     assert not any(f"{{{{{label}}}}}" in serialized for label in validator.FORBIDDEN_LABELS)
 
 
+def test_five_xx_ratios_gate_zero_on_the_filtered_request_family(dashboards):
+    for document in dashboards:
+        for title, expected in validator.FIVE_XX_RATIO_EXPRESSIONS.items():
+            expression = panel(document, title)["targets"][0]["expr"]
+            assert expression == expected
+            assert "or on() (0 * sum(rate(" in expression
+            assert expression.count("[$__rate_interval]") == 3
+            assert "or vector(0)" not in expression
+
+    dspace = validator.FIVE_XX_RATIO_EXPRESSIONS["5xx error ratio"]
+    assert dspace.count("dspace_http_requests_total") == 3
+    assert dspace.count('environment=~"$environment"') == 3
+    assert dspace.count('status_class="5xx"') == 1
+
+    tokenplace = validator.FIVE_XX_RATIO_EXPRESSIONS["token.place HTTP 5xx ratio"]
+    assert tokenplace.count("tokenplace_http_requests_total") == 3
+    for selector in (
+        'app="tokenplace"',
+        'environment=~"$environment"',
+        'release="tokenplace"',
+        'cluster=~"$cluster"',
+        'namespace="tokenplace"',
+    ):
+        assert tokenplace.count(selector) == 3
+    assert tokenplace.count('status_class="5xx"') == 1
+
+
+@pytest.mark.parametrize("title", validator.FIVE_XX_RATIO_EXPRESSIONS)
+def test_dashboard_validator_rejects_ungated_five_xx_ratio(tmp_path, dashboards, title):
+    staging, _ = dashboards
+    changed = copy.deepcopy(staging)
+    panel(changed, title)["targets"][0]["expr"] += " + 0"
+    with pytest.raises(SystemExit, match="filtered request family"):
+        validator._validate_semantics(changed)
+
+
 @pytest.mark.parametrize(
     ("title", "target_index"),
     [
