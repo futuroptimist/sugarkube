@@ -38,8 +38,8 @@ COVERAGE_BOOTSTRAP_ENV = (
 )
 
 
-def expected_names():
-    text = (ROOT / "clusters/staging/observability/probes/public-apps.yaml").read_text()
+def expected_names(environment="staging"):
+    text = (ROOT / f"clusters/{environment}/observability/probes/public-apps.yaml").read_text()
     return [
         line.strip().split(": ", 1)[1]
         for line in text.splitlines()
@@ -47,15 +47,18 @@ def expected_names():
     ]
 
 
-def verifier_bundle(health="up", success="1"):
-    pairs = [(name, name.removeprefix("blackbox-").split("-staging-")) for name in expected_names()]
+def verifier_bundle(health="up", success="1", environment="staging"):
+    pairs = [
+        (name, name.removeprefix("blackbox-").split(f"-{environment}-"))
+        for name in expected_names(environment)
+    ]
     targets = [
         {
             "labels": {
                 "job": f"probe/monitoring/{name}",
                 "app": pair[0],
                 "route": pair[1],
-                "environment": "staging",
+                "environment": environment,
             },
             "health": health,
         }
@@ -79,6 +82,7 @@ def verifier_bundle(health="up", success="1"):
                             "job": f"probe/monitoring/{name}",
                             "app": pair[0],
                             "route": pair[1],
+                            "environment": environment,
                         },
                         "value": [1, success if family == "probe_success" else "2"],
                     }
@@ -141,11 +145,11 @@ with open(os.environ["LOG"], "a") as log:
 scenario = os.environ.get("SCENARIO", "success")
 joined = " ".join(args)
 if args[:2] == ["config", "current-context"]:
-    print("wrong-context" if scenario == "bad_context" else "sugar-staging")
+    print("wrong-context" if scenario == "bad_context" else os.environ.get("EXPECTED_CONTEXT", "sugar-staging"))
 elif args[:1] == ["kustomize"]:
     if "network-policies" in joined:
         print(open(os.environ["POLICY"]).read())
-    else: print(open(os.environ["PROBES_YAML"]).read())
+    else: print(open(os.environ["PROD_PROBES_YAML"] if "/prod/" in joined else os.environ["PROBES_YAML"]).read())
 elif args[:2] == ["apply", "-f"] and scenario == "policy_apply_failure" and "policy" in args[2]:
     sys.exit(41)
 elif "get crd" in joined and scenario == "missing_crds": sys.exit(1)
@@ -184,7 +188,7 @@ elif "get networkpolicy allow-kube-prometheus-stack-to-blackbox-exporter -o json
     elif scenario == "additional_policy_type": spec["policyTypes"].append("Egress")
     print(json.dumps(policy))
 elif "get probe -l" in joined and "-o json" in joined:
-    print(open(os.environ["PROBES_JSON"]).read())
+    print(open(os.environ["PROD_PROBES_JSON"] if os.environ.get("EXPECTED_CONTEXT") == "sugar-prod" else os.environ["PROBES_JSON"]).read())
 elif "--raw" in joined:
     count_file = os.environ["RAW_COUNT"]
     try: count = int(open(count_file).read())
@@ -195,7 +199,7 @@ elif "--raw" in joined:
     if transport == operation:
         sys.stderr.write("Unauthorized Authorization: Bearer secret https://raw.invalid/path\n")
         sys.exit(23)
-    bundle = json.load(open(os.environ["PROM_JSON"]))
+    bundle = json.load(open(os.environ["PROD_PROM_JSON"] if os.environ.get("EXPECTED_CONTEXT") == "sugar-prod" else os.environ["PROM_JSON"]))
     if "targets?" in joined:
         payload = bundle["targets"]
         if scenario == "delayed" and count < 6:
@@ -236,6 +240,8 @@ class Scenario:
 
     def run(self, command, environment="staging", **extra):
         env = {**self.env, **{key: str(value) for key, value in extra.items()}}
+        if environment in ("prod", "production"):
+            env["EXPECTED_CONTEXT"] = "sugar-prod"
         for key in COVERAGE_BOOTSTRAP_ENV:
             env.pop(key, None)
         args = [str(SCRIPT), command]
@@ -272,6 +278,23 @@ def scenario(tmp_path):
         capture_output=True,
     )
     probes.write_text(json.dumps({"items": json.loads(docs.stdout)}))
+    prod_probes = tmp_path / "prod-probes.json"
+    prod_docs = subprocess.run(
+        [
+            "ruby",
+            "-ryaml",
+            "-rjson",
+            "-e",
+            "puts JSON.generate(YAML.load_stream(File.read(ARGV[0])))",
+            str(ROOT / "clusters/prod/observability/probes/public-apps.yaml"),
+        ],
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    prod_probes.write_text(json.dumps({"items": json.loads(prod_docs.stdout)}))
+    prod_prom = tmp_path / "prod-prom.json"
+    prod_prom.write_text(json.dumps(verifier_bundle(environment="prod")))
     policy_json = tmp_path / "policy.json"
     policy_docs = subprocess.run(
         [
@@ -295,6 +318,9 @@ def scenario(tmp_path):
         "LOG": str(tmp_path / "operations.log"),
         "PROBES_JSON": str(probes),
         "PROBES_YAML": str(ROOT / "clusters/staging/observability/probes/public-apps.yaml"),
+        "PROD_PROBES_YAML": str(ROOT / "clusters/prod/observability/probes/public-apps.yaml"),
+        "PROD_PROBES_JSON": str(prod_probes),
+        "PROD_PROM_JSON": str(prod_prom),
         "POLICY": str(POLICY),
         "POLICY_JSON": str(policy_json),
         "PROM_JSON": str(prom),
@@ -318,13 +344,13 @@ def mutations(log):
 
 
 def test_missing_and_production_envs_fail_before_cluster_access(scenario):
-    for environment in (None, "prod", "production", "dev"):
+    for environment in (None, "dev"):
         result = scenario.run("render", environment)
         assert result.returncode == 2
     assert scenario.log == []
 
 
-@pytest.mark.parametrize("environment", ["staging", "int"])
+@pytest.mark.parametrize("environment", ["staging", "int", "prod", "production"])
 def test_environment_normalization_renders_offline(scenario, environment):
     result = scenario.run("render", environment)
     assert result.returncode == 0
@@ -606,7 +632,7 @@ def verify(payload, final=False, *args):
     stderr = io.StringIO()
     old_argv, old_stdin = sys.argv, sys.stdin
     old_final_attempt = os.environ.get("FINAL_ATTEMPT")
-    sys.argv = [str(ROOT / "scripts/verify_blackbox_prometheus.py"), *args]
+    sys.argv = [str(ROOT / "scripts/verify_blackbox_prometheus.py"), "--env", "staging", *args]
     sys.stdin = stdin
     os.environ["FINAL_ATTEMPT"] = "1" if final else "0"
     try:
@@ -707,3 +733,41 @@ def test_probe_validator_requires_exact_names_and_mappings():
     assert verify({}, False, "--probes").returncode == 7
     assert verify({"items": [None]}, False, "--probes").returncode == 7
     assert verify(items, False, "--unknown").returncode == 9
+
+
+@pytest.mark.parametrize("environment", ["staging", "prod"])
+def test_environment_manifests_have_exact_separated_contract(environment):
+    import yaml
+
+    path = ROOT / f"clusters/{environment}/observability/probes/public-apps.yaml"
+    items = [item for item in yaml.safe_load_all(path.read_text()) if item]
+    assert len(items) == 21
+    assert all(item["kind"] == "Probe" for item in items)
+    assert {item["metadata"]["labels"]["environment"] for item in items} == {environment}
+    assert all(f"-{environment}-" in item["metadata"]["name"] for item in items)
+    assert all(
+        item["metadata"]["labels"]
+        == {"release": "kube-prometheus-stack", **item["spec"]["targets"]["staticConfig"]["labels"]}
+        for item in items
+    )
+    forbidden = "-prod-" if environment == "staging" else "-staging-"
+    assert forbidden not in path.read_text()
+
+
+def test_production_live_requires_explicit_kubeconfig_before_cluster_access(scenario):
+    result = scenario.run("status", "prod", KUBECONFIG="")
+    assert result.returncode == 3
+    assert not any("config current-context" in line or "helm list" in line for line in scenario.log)
+
+
+def test_production_mutation_has_no_probe_deletion(scenario):
+    result = scenario.run(
+        "install", "prod", KUBECONFIG=scenario.root / "prod.yaml", SCENARIO="release_absent"
+    )
+    assert result.returncode == 0
+    assert not any(" delete probe " in line for line in scenario.log)
+    assert any(
+        "clusters/prod/observability/prometheus-blackbox-exporter.values.yaml" in line
+        for line in scenario.log
+        if line.startswith("helm install")
+    )

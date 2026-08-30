@@ -56,8 +56,8 @@ same `All = .*` shape in both profiles. The validator compares each artifact to 
 template and rejects one-sided title, query, visualization, transformation, target-mode, ID, order,
 or grid drift.
 
-The staging blackbox exporter and Probe lifecycle is documented separately in
-[Staging blackbox monitoring](observability-blackbox.md). That guarded lifecycle
+The staging and repository-ready production blackbox exporter and Probe lifecycles are documented separately in
+[blackbox monitoring](observability-blackbox.md). Production requires an explicit kubeconfig and `sugar-prod` identity guard, and is not live evidence until separately deployed and verified. That guarded lifecycle
 exclusively owns its narrowly scoped staging Prometheus-to-exporter
 NetworkPolicy; it is not part of an active Flux or cluster Kustomize graph.
 The observed live baseline had no monitoring default-deny or

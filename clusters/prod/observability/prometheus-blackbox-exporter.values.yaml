@@ -1,0 +1,95 @@
+fullnameOverride: prometheus-blackbox-exporter
+replicas: 1
+
+service:
+  type: ClusterIP
+  port: 9115
+
+ingress:
+  enabled: false
+
+serviceMonitor:
+  enabled: false
+  selfMonitor:
+    enabled: true
+    labels:
+      release: kube-prometheus-stack
+
+secretConfig: false
+extraConfigmapMounts: []
+extraSecretMounts: []
+extraVolumes: []
+extraVolumeMounts: []
+
+networkPolicy:
+  enabled: false
+
+config:
+  modules:
+    https_2xx:
+      prober: http
+      timeout: 10s
+      http:
+        method: GET
+        follow_redirects: true
+        fail_if_not_ssl: true
+        fail_if_ssl: false
+        preferred_ip_protocol: ip4
+        tls_config:
+          insecure_skip_verify: false
+    json_health_2xx:
+      prober: http
+      timeout: 10s
+      http:
+        method: GET
+        follow_redirects: true
+        fail_if_not_ssl: true
+        valid_status_codes: [200]
+        body_size_limit: 1MiB
+        fail_if_body_not_matches_regexp:
+          - '"status"[[:space:]]*:[[:space:]]*"(ok|ready|alive)"'
+        preferred_ip_protocol: ip4
+        tls_config:
+          insecure_skip_verify: false
+    gitshelves_text_health_2xx:
+      prober: http
+      timeout: 10s
+      http:
+        method: GET
+        follow_redirects: true
+        fail_if_not_ssl: true
+        valid_status_codes: [200]
+        body_size_limit: 16B
+        fail_if_body_not_matches_regexp:
+          - '^ok\n$'
+        preferred_ip_protocol: ip4
+        tls_config:
+          insecure_skip_verify: false
+    static_content_2xx:
+      prober: http
+      timeout: 10s
+      http:
+        method: GET
+        follow_redirects: true
+        fail_if_not_ssl: true
+        valid_status_codes: [200]
+        body_size_limit: 1MiB
+        fail_if_body_not_matches_regexp:
+          - '(offlineWorker|"environment"|"version"|jobbot3000)'
+        preferred_ip_protocol: ip4
+        tls_config:
+          insecure_skip_verify: false
+    stl_content_2xx:
+      prober: http
+      timeout: 10s
+      http:
+        method: GET
+        follow_redirects: true
+        fail_if_not_ssl: true
+        valid_status_codes: [200]
+        body_size_limit: 10MiB
+        fail_if_body_not_matches_regexp:
+          - '^OpenSCAD Model'
+        preferred_ip_protocol: ip4
+        tls_config:
+          insecure_skip_verify: false

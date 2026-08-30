@@ -1,6 +1,6 @@
-# Staging blackbox monitoring
+# Staging and production blackbox monitoring
 
-Public-route monitoring has a guarded, **staging-only, non-Flux** lifecycle. The
+Public-route monitoring has a guarded, **environment-specific, non-Flux** lifecycle. The
 exporter, Prometheus, and their administrative interfaces remain LAN/internal
 only. The exporter is a `ClusterIP` service; this work adds no Ingress,
 NodePort, public DNS, router rule, credential, or persistence. The lifecycle
@@ -18,12 +18,9 @@ exists.
   `https://prometheus-community.github.io/helm-charts` repository.
 - Exact chart version: `platform/observability/helm/prometheus-blackbox-exporter.version`
   (`11.15.1`).
-- Complete staging values:
-  `clusters/staging/observability/prometheus-blackbox-exporter.values.yaml`.
-- Lifecycle-owned Probes and deterministic Kustomize entrypoint:
-  `clusters/staging/observability/probes/`.
-- Lifecycle-owned NetworkPolicy and deterministic Kustomize entrypoint:
-  `clusters/staging/observability/network-policies/`; the canonical manifest is
+- Complete environment values: `clusters/{staging,prod}/observability/prometheus-blackbox-exporter.values.yaml`.
+- Lifecycle-owned Probes and deterministic Kustomize entrypoints: `clusters/{staging,prod}/observability/probes/`.
+- Lifecycle-owned NetworkPolicies and deterministic Kustomize entrypoints: `clusters/{staging,prod}/observability/network-policies/`; the canonical manifest is
   `prometheus-to-blackbox-exporter.yaml`.
 - Helper: `scripts/observability_blackbox.sh`, exposed by
   `just observability-blackbox-*`.
@@ -37,8 +34,7 @@ Live evidence comes only from the separate post-merge rollout and validation.
 
 The canonical `kube-prometheus-stack` Helm release, its `Probe` and
 `ServiceMonitor` CRDs, and its Prometheus service must already exist in
-`monitoring`. Select a kubeconfig whose current context is exactly
-`sugar-staging`; the helper also runs the repository cluster-identity assertion.
+`monitoring`. For staging, select a kubeconfig whose current context is exactly `sugar-staging`. Production live commands additionally require an explicitly supplied `KUBECONFIG`, require current context `sugar-prod`, and run the production cluster-identity assertion before any release query or mutation. Offline render never reads kubeconfig or contacts Kubernetes.
 Install `helm`, `kubectl`, `python3`, `ruby` (with Psych), and `just`, and ensure chart-repository
 access is available.
 
@@ -50,6 +46,18 @@ just observability-blackbox-status env=staging
 just observability-blackbox-verify env=staging
 ```
 
+Production (use a dedicated, explicitly supplied path for every live command):
+
+```bash
+just observability-blackbox-render env=prod
+KUBECONFIG=/approved/path/sugar-prod.yaml just observability-blackbox-install env=prod
+KUBECONFIG=/approved/path/sugar-prod.yaml just observability-blackbox-upgrade env=prod
+KUBECONFIG=/approved/path/sugar-prod.yaml just observability-blackbox-status env=prod
+KUBECONFIG=/approved/path/sugar-prod.yaml just observability-blackbox-verify env=prod
+```
+
+Production support is repository-ready, not live. A separate operator deployment and successful verification must produce evidence before exporter, Probe series, dashboard population, or alerts may be claimed live.
+
 Render, status, and verify are read-only. Status displays the exact owned
 NetworkPolicy. Install is only for an absent exporter release; upgrade requires
 it to exist. Both render the pinned chart, policy, and Probes first, pass the
@@ -57,10 +65,20 @@ complete committed values on every Helm operation, and wait up to the
 Pi-appropriate timeout. Only after Helm succeeds, they apply the policy, delete
 the eleven explicit legacy production Probe names using `--ignore-not-found`,
 then apply the rendered staging Probes. A Helm failure makes no policy or Probe
-mutation; a policy apply failure prevents both Probe operations. No selector
-pruning or staging Probe deletion is used. Neither uses
-`--reuse-values`. Missing environments and production are rejected;
+mutation; a policy apply failure prevents both Probe operations. No selector pruning or staging Probe deletion is used. Production performs no Probe cleanup; staging retains only its explicit eleven-name legacy cleanup. Neither uses `--reuse-values`. Missing and unsupported environments are rejected; `prod` and `production` select production;
 `env=int` remains a deprecated alias for staging.
+
+## Exact production matrix (repository contract only)
+
+| App | Base URL | Routes |
+| --- | --- | --- |
+| DSPACE (`dspace`) | `https://democratized.space` | `/` (`root`), `/config.json` (`config`), `/healthz` (`healthz`), `/livez` (`livez`) |
+| token.place (`tokenplace`) | `https://token.place` | `/` (`root`), `/healthz` (`healthz`), `/livez` (`livez`), `/api/v1/meta` (`metadata`) |
+| danielsmith.io (`danielsmith`) | `https://danielsmith.io` | `/` (`root`), `/healthz` (`healthz`), `/livez` (`livez`) |
+| Jobbot 3000 (`jobbot3000`) | `https://jobbot3000.tech` | `/` (`root`), `/healthz` (`healthz`), `/livez` (`livez`), `/tracker` (`tracker`), `/manifest.webmanifest` (`manifest`) |
+| GitShelves (`gitshelves`) | `https://gitshelves.com` | `/` (`root`), `/healthz` (`healthz`), `/livez` (`livez`), `/models/baseplate_2x6.stl` (`baseplate`), `/models/contrib_cube.stl` (`module`) |
+
+These are exactly 21 `environment: prod` Probes. They mirror staging modules, intervals, body/TLS checks, and criticalities. Their presence in Git is not deployment evidence.
 
 ## Exact staging matrix
 
@@ -151,8 +169,6 @@ Do not use `--reuse-values`.
 `platform/observability/prometheus-blackbox-exporter.yaml` and
 `monitoring/probes/public-apps.yaml` are retained as `LEGACY/FUTURE ONLY`
 references and are absent from every active Kustomize graph. They must not be
-applied. Production Probe ownership is outside this staging-only lifecycle. The staging
-helper neither manages production nor supplies a replacement production
-lifecycle. Any future Flux adoption
+applied. Production Probe ownership belongs exclusively to the guarded `env=prod` lifecycle described above; it must not be inferred as live from repository state. Any future Flux adoption
 of the exporter, policy, or staging Probes must first retire the manual lifecycle and
 must never manage the same Helm release or Probe object names simultaneously.
