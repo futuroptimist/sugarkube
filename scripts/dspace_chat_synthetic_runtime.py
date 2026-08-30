@@ -53,6 +53,7 @@ REQUIRED = {
 }
 RUNNER_LOCAL = "runner-local-playwright-v1"
 SYSTEM_CHROMIUM = "system-chromium-v1"
+NODE_EXECUTABLE = "/opt/sugarkube/nodejs/v20.20.2-linux-arm64/bin/node"
 LEGACY_RUNNER_REVISION = "97ab09f13fb098de928a878bf1fe9b8d13032cb5"
 LEGACY_RUNNER_MANIFEST_SHA256 = "36fdab33edc0f1ad518a6d3d247a1bd32d233402387ba57493a9386d78ec9301"
 CURRENT_CRITICAL_FILES = {
@@ -162,6 +163,43 @@ def load_config(path: Path) -> dict:
             )
         ):
             raise Invalid("system browser contract")
+    # Retained assets created before the pinned Node contract remain readable for
+    # status inspection only. Execution and every activation-capable path call
+    # validate_node_contract(), which fails closed when this key is absent.
+    node = value.get("nodeContract")
+    if node is None:
+        return value
+    required_node = {
+        "version",
+        "architecture",
+        "executablePath",
+        "executableRealpath",
+        "executableSha256",
+        "distributionUrl",
+        "archiveSha256",
+        "owner",
+        "group",
+        "mode",
+    }
+    if (
+        not isinstance(node, dict)
+        or set(node) != required_node
+        or any(not isinstance(node[key], str) for key in required_node)
+        or node["version"] != "20.20.2"
+        or node["architecture"] != "aarch64"
+        or node["executablePath"] != NODE_EXECUTABLE
+        or node["executableRealpath"] != node["executablePath"]
+        or node["distributionUrl"]
+        != "https://nodejs.org/dist/v20.20.2/node-v20.20.2-linux-arm64.tar.xz"
+        or node["archiveSha256"]
+        != "73093db209e4e9e09dd7d15a47aeaab1b74833830df03efa5f942a1122c5fa71"
+        or node["executableSha256"]
+        != "05a69ccdcb795f2a8b86c145e71a6a37cce84fccef5aaf25a8fe38bc9423e732"
+        or node["owner"] != "root"
+        or node["group"] != "root"
+        or node["mode"] != "0755"
+    ):
+        raise Invalid("Node runtime contract")
     return value
 
 
@@ -188,7 +226,7 @@ def normalize_root(root: Path) -> Path:
     return resolved
 
 
-def discover_playwright_browser(runner: Path) -> Path:
+def discover_playwright_browser(runner: Path, node_executable: str) -> Path:
     """Return Playwright's executable only when it is runner-local and usable."""
     browser_root = runner / "playwright-browser"
     try:
@@ -199,7 +237,7 @@ def discover_playwright_browser(runner: Path) -> Path:
         raise Invalid("Playwright browser discovery")
     completed = subprocess.run(
         [
-            "/usr/bin/node",
+            node_executable,
             "-e",
             "const {chromium}=require('@playwright/test');"
             "const p=chromium.executablePath();"
@@ -244,11 +282,126 @@ def _rooted(root: Path, absolute: str) -> Path:
     return root / coordinate.relative_to("/")
 
 
-def validate_browser_contract(config: dict, runner: Path, root: Path = Path("/")) -> dict:
+def node_service_identity(config: dict, root: Path) -> tuple[int, int]:
+    """Resolve the service identity, using the root group for private rehearsals."""
+    if root != Path("/"):
+        return -1, root.stat().st_gid
+    try:
+        account = pwd.getpwnam(config["serviceAccount"])
+        group = grp.getgrnam(config["serviceGroup"])
+    except KeyError:
+        raise Invalid("Node runtime provenance") from None
+    return account.pw_uid, group.gr_gid
+
+
+def validate_node_ancestors(
+    config: dict, root: Path, path: Path, *, allow_missing: bool = False
+) -> None:
+    """Require confined, root-controlled ancestors traversable by the service."""
+    expected_uid, expected_gid = (0, 0) if root == Path("/") else (
+        root.stat().st_uid,
+        root.stat().st_gid,
+    )
+    service_uid, service_gid = node_service_identity(config, root)
+    try:
+        path.relative_to(root)
+        parents = []
+        parent = path.parent
+        while True:
+            parents.append(parent)
+            if parent == root:
+                break
+            parent = parent.parent
+    except ValueError:
+        raise Invalid("Node runtime provenance") from None
+    try:
+        for parent in parents:
+            try:
+                info = parent.lstat()
+            except FileNotFoundError:
+                if allow_missing:
+                    continue
+                raise
+            execute_bit = (
+                stat.S_IXUSR
+                if info.st_uid == service_uid
+                else stat.S_IXGRP if info.st_gid == service_gid else stat.S_IXOTH
+            )
+            if (
+                parent.is_symlink()
+                or not stat.S_ISDIR(info.st_mode)
+                or info.st_uid != expected_uid
+                or info.st_gid != expected_gid
+                or info.st_mode & 0o022
+                or not info.st_mode & execute_bit
+            ):
+                raise Invalid("Node runtime provenance")
+    except OSError:
+        raise Invalid("Node runtime provenance") from None
+
+
+def validate_node_contract(config: dict, root: Path = Path("/")) -> dict:
+    """Validate the pinned root-controlled native Node executable without running it."""
+    contract = config.get("nodeContract")
+    if not isinstance(contract, dict):
+        raise Invalid("Node runtime contract")
+    root = normalize_root(root)
+    path = _rooted(root, contract["executablePath"])
+    if contract["executablePath"].startswith("/home/"):
+        raise Invalid("Node runtime provenance")
+    expected_uid, expected_gid = (
+        (0, 0)
+        if root == Path("/")
+        else (
+            root.stat().st_uid,
+            root.stat().st_gid,
+        )
+    )
+    try:
+        info = path.lstat()
+        resolved = path.resolve(strict=True)
+        resolved.relative_to(root)
+        with path.open("rb") as stream:
+            header = stream.read(20)
+    except (OSError, KeyError, ValueError, RuntimeError):
+        raise Invalid("Node runtime provenance") from None
+    expected = _rooted(root, contract["executableRealpath"])
+    native_aarch64 = (
+        len(header) == 20
+        and header[:4] == b"\x7fELF"
+        and header[4:6] == b"\x02\x01"
+        and int.from_bytes(header[18:20], "little") == 183
+    )
+    if not native_aarch64 or platform.machine() != contract["architecture"]:
+        raise Invalid("Node runtime provenance")
+    if (
+        path.is_symlink()
+        or not stat.S_ISREG(info.st_mode)
+        or info.st_nlink != 1
+        or not os.access(path, os.X_OK)
+        or resolved != expected
+        or info.st_uid != expected_uid
+        or info.st_gid != expected_gid
+        or f"{stat.S_IMODE(info.st_mode):04o}" != contract["mode"]
+        or sha256(path) != contract["executableSha256"]
+    ):
+        raise Invalid("Node runtime provenance")
+    validate_node_ancestors(config, root, path)
+    return dict(contract)
+
+
+def validate_browser_contract(
+    config: dict,
+    runner: Path,
+    root: Path = Path("/"),
+    node_executable: str | None = NODE_EXECUTABLE,
+) -> dict:
     """Validate and describe the explicitly selected browser without fallback."""
     contract = config["browserContract"]
     if contract["name"] == RUNNER_LOCAL:
-        executable = discover_playwright_browser(runner)
+        if node_executable is None:
+            raise Invalid("validated Node coordinate")
+        executable = discover_playwright_browser(runner, node_executable)
         return {
             "name": RUNNER_LOCAL,
             "architecture": platform.machine(),
@@ -309,7 +462,7 @@ def runner_storage_identity(config: dict) -> str:
     return revision if manifest_sha is None else f"{revision}-{manifest_sha}"
 
 
-def validate_runner(config: dict) -> Path:
+def validate_runner(config: dict, node_executable: str | None = NODE_EXECUTABLE) -> Path:
     configured_root = Path(config["runnerRoot"])
     if not configured_root.is_absolute() or ".." in configured_root.parts:
         raise Invalid("runner path")
@@ -478,7 +631,9 @@ def validate_runner(config: dict) -> Path:
     if not entrypoint.is_file():
         raise Invalid("runner entrypoint")
     if config["browserContract"]["name"] == RUNNER_LOCAL:
-        discovered = discover_playwright_browser(runner)
+        if node_executable is None:
+            raise Invalid("validated Node coordinate")
+        discovered = discover_playwright_browser(runner, node_executable)
         if discovered != (runner / browser_relative).resolve(strict=True):
             raise Invalid("Playwright browser manifest")
     return runner
@@ -553,7 +708,8 @@ def classify_missing_result(stderr: bytes, child_status: int, metadata: dict) ->
         and metadata.get("stderrCaptureComplete") is True
         and metadata.get("stderrTruncated") is False
         and re.fullmatch(
-            rb"runuser: failed to execute /usr/bin/node: "
+            rb"runuser: failed to execute (?:/usr/bin/node|"
+            rb"/opt/sugarkube/nodejs/v20\.20\.2-linux-arm64/bin/node): "
             rb"(?:No such file or directory|Permission denied)\r?\n?",
             stderr,
         )
@@ -675,8 +831,9 @@ def run(config: dict) -> int:
         resolved = executable if Path(executable).is_absolute() else shutil.which(executable)
         if not resolved or not Path(resolved).is_file() or not os.access(resolved, os.X_OK):
             raise Invalid("required executable")
-    runner = validate_runner(config)
-    browser = validate_browser_contract(config, runner)
+    node = validate_node_contract(config)
+    runner = validate_runner(config, node["executablePath"])
+    browser = validate_browser_contract(config, runner, node_executable=node["executablePath"])
     if (
         browser
         != json.loads((runner / "sugarkube-runner-manifest.json").read_text())["browserProvenance"]
@@ -700,7 +857,7 @@ def run(config: dict) -> int:
             result = invocation_dir / "result.json"
             started = int(time.time())
             argv = [
-                "/usr/bin/node",
+                node["executablePath"],
                 str(runner / "scripts/run-remote-chat-smoke.mjs"),
                 "--base-url",
                 config["dspaceOrigin"],
@@ -725,7 +882,11 @@ def run(config: dict) -> int:
             ]
             try:
                 # Revalidate immediately before launch so drift cannot produce a current result.
-                browser = validate_browser_contract(config, runner)
+                node = validate_node_contract(config)
+                argv[0] = node["executablePath"]
+                browser = validate_browser_contract(
+                    config, runner, node_executable=node["executablePath"]
+                )
                 child_env = {
                     "HOME": account.pw_dir,
                     "LANG": "C.UTF-8",

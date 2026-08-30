@@ -55,6 +55,209 @@ def config(tmp_path: Path) -> dict:
     return value
 
 
+def synthetic_node_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[dict, Path]:
+    """Create non-runnable ELF metadata for provenance-only validation."""
+    root = tmp_path / "node-root"
+    root.mkdir(mode=0o755)
+    node = root / "opt/sugarkube/nodejs/v20.20.2-linux-arm64/bin/node"
+    node.parent.mkdir(parents=True, mode=0o755)
+    for parent in node.parents:
+        if parent == root:
+            root.chmod(0o755)
+            break
+        parent.chmod(0o755)
+    contents = bytearray(20)
+    contents[:6] = b"\x7fELF\x02\x01"
+    contents[18:20] = (183).to_bytes(2, "little")
+    node.write_bytes(contents + b"synthetic-not-executable-code")
+    node.chmod(0o755)
+    value = json.loads(CONFIG.read_text())
+    contract = value["nodeContract"]
+    contract["executableSha256"] = runtime.sha256(node)
+    monkeypatch.setattr(runtime.platform, "machine", lambda: "aarch64")
+    return value, root
+
+
+def test_node_contract_accepts_root_controlled_native_provenance_without_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, root = synthetic_node_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        runtime.subprocess, "run", lambda *_a, **_k: pytest.fail("Node fixture was executed")
+    )
+    assert runtime.validate_node_contract(value, root)["version"] == "20.20.2"
+
+
+def test_legacy_configuration_without_node_contract_remains_readable(tmp_path: Path) -> None:
+    value = json.loads(CONFIG.read_text())
+    del value["nodeContract"]
+    path = tmp_path / "legacy.json"
+    path.write_text(json.dumps(value))
+    loaded = runtime.load_config(path)
+    assert "nodeContract" not in loaded
+    with pytest.raises(runtime.Invalid, match="Node runtime contract"):
+        runtime.validate_node_contract(loaded)
+
+
+def test_node_contract_rejects_untraversable_ancestor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, root = synthetic_node_fixture(tmp_path, monkeypatch)
+    (root / "opt/sugarkube").chmod(0o700)
+    with pytest.raises(runtime.Invalid, match="Node runtime provenance"):
+        runtime.validate_node_contract(value, root)
+
+
+def test_node_contract_uses_matching_group_execute_bit_for_private_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, root = synthetic_node_fixture(tmp_path, monkeypatch)
+    root.chmod(0o750)
+    assert runtime.validate_node_contract(value, root)["version"] == "20.20.2"
+    root.chmod(0o700)
+    with pytest.raises(runtime.Invalid, match="Node runtime provenance"):
+        runtime.validate_node_contract(value, root)
+
+
+def test_node_contract_checks_architecture_before_hashing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, root = synthetic_node_fixture(tmp_path, monkeypatch)
+    node = root / value["nodeContract"]["executablePath"].removeprefix("/")
+    contents = bytearray(node.read_bytes())
+    contents[18:20] = (62).to_bytes(2, "little")
+    node.write_bytes(contents)
+    monkeypatch.setattr(runtime, "sha256", lambda _path: pytest.fail("hashed wrong ELF"))
+    with pytest.raises(runtime.Invalid, match="Node runtime provenance"):
+        runtime.validate_node_contract(value, root)
+
+
+def test_provision_node_private_root_is_atomic_idempotent_and_umask_independent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value = json.loads(CONFIG.read_text())
+    contents = bytearray(20)
+    contents[:6] = b"\x7fELF\x02\x01"
+    contents[18:20] = (183).to_bytes(2, "little")
+    contents += b"provenance-only-node"
+    source = tmp_path / "source"
+    member = source / "node-v20.20.2-linux-arm64/bin/node"
+    member.parent.mkdir(parents=True)
+    member.write_bytes(contents)
+    archive = tmp_path / "node.tar.xz"
+    import tarfile
+
+    with tarfile.open(archive, "w:xz") as bundle:
+        bundle.add(member, arcname="node-v20.20.2-linux-arm64/bin/node")
+    value["nodeContract"]["archiveSha256"] = installer.sha(archive)
+    value["nodeContract"]["executableSha256"] = runtime.sha256(member)
+    root = tmp_path / "root"
+    root.mkdir(mode=0o755)
+    monkeypatch.setattr(installer, "runtime_module", lambda: runtime)
+    monkeypatch.setattr(runtime, "load_config", lambda _path: copy.deepcopy(value))
+    monkeypatch.setattr(runtime.platform, "machine", lambda: "aarch64")
+    monkeypatch.setattr(
+        installer.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail("provisioning invoked a command"),
+    )
+
+    before = tree_bytes(root)
+    assert installer.provision_node(archive, root, False) == 0
+    assert tree_bytes(root) == before
+    previous_umask = os.umask(0o077)
+    try:
+        assert installer.provision_node(archive, root, True) == 0
+    finally:
+        os.umask(previous_umask)
+    node = root / value["nodeContract"]["executablePath"].removeprefix("/")
+    assert stat.S_IMODE(node.parent.stat().st_mode) == 0o755
+    installed = tree_bytes(root)
+    assert installer.provision_node(archive, root, True) == 0
+    assert tree_bytes(root) == installed
+    assert not list(node.parent.glob(".node.*.new"))
+
+    escaped_root = tmp_path / "escaped-root"
+    escaped_root.mkdir(mode=0o755)
+    (escaped_root / "opt").symlink_to(tmp_path)
+    with pytest.raises(ValueError, match="ancestor is insecure"):
+        installer.provision_node(archive, escaped_root, True)
+    assert not (tmp_path / "sugarkube/nodejs/v20.20.2-linux-arm64/bin/node").exists()
+
+    failed_root = tmp_path / "failed-root"
+    failed_root.mkdir(mode=0o755)
+    real_validate = runtime.validate_node_contract
+    monkeypatch.setattr(
+        runtime,
+        "validate_node_contract",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(runtime.Invalid("final coordinate")),
+    )
+    with pytest.raises(runtime.Invalid, match="final coordinate"):
+        installer.provision_node(archive, failed_root, True)
+    failed_node = failed_root / value["nodeContract"]["executablePath"].removeprefix("/")
+    assert not failed_node.exists()
+    assert not list(failed_node.parent.glob(".node.*.new"))
+    monkeypatch.setattr(runtime, "validate_node_contract", real_validate)
+
+
+@pytest.mark.parametrize(
+    "fault", ["missing", "dangling", "owner", "writable", "arm32", "digest", "hardlink"]
+)
+def test_node_contract_fails_closed_for_invalid_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    value, root = synthetic_node_fixture(tmp_path, monkeypatch)
+    node = root / value["nodeContract"]["executablePath"].removeprefix("/")
+    if fault == "missing":
+        node.unlink()
+    elif fault == "dangling":
+        node.unlink()
+        node.symlink_to(node.with_name("absent"))
+    elif fault == "writable":
+        node.chmod(0o775)
+    elif fault == "owner":
+        real_lstat = Path.lstat
+
+        def wrong_owner(path: Path):
+            info = real_lstat(path)
+            if path == node:
+                fields = list(info)
+                fields[4:6] = [info.st_uid + 1, info.st_gid + 1]
+                return os.stat_result(fields)
+            return info
+
+        monkeypatch.setattr(Path, "lstat", wrong_owner)
+    elif fault == "arm32":
+        contents = bytearray(node.read_bytes())
+        contents[4] = 1
+        contents[18:20] = (40).to_bytes(2, "little")
+        node.write_bytes(contents)
+        value["nodeContract"]["executableSha256"] = runtime.sha256(node)
+    elif fault == "digest":
+        value["nodeContract"]["executableSha256"] = "0" * 64
+    else:
+        os.link(node, node.with_name("second-identity"))
+    with pytest.raises(runtime.Invalid, match="Node runtime provenance"):
+        runtime.validate_node_contract(value, root)
+
+
+def test_node_configuration_rejects_home_path_wrong_version_and_path_fallback(
+    tmp_path: Path,
+) -> None:
+    for key, replacement in (
+        ("version", "20.20.1"),
+        ("executablePath", "/home/pi/.nvm/versions/node/v20.20.2/bin/node"),
+        ("executablePath", "/usr/bin/nodejs"),
+        ("executablePath", "node"),
+    ):
+        value = json.loads(CONFIG.read_text())
+        value["nodeContract"][key] = replacement
+        path = tmp_path / f"{key}-{len(replacement)}.json"
+        path.write_text(json.dumps(value))
+        with pytest.raises(runtime.Invalid, match="Node runtime contract"):
+            runtime.load_config(path)
+
+
 def candidate_runner_identity() -> str:
     return runtime.runner_storage_identity(json.loads(CONFIG.read_text(encoding="utf-8")))
 
@@ -285,7 +488,7 @@ def test_runner_local_browser_contract_reports_discovered_provenance(
     executable = runner / "playwright-browser/chromium/chrome"
     executable.parent.mkdir(parents=True)
     executable.write_bytes(b"browser")
-    monkeypatch.setattr(runtime, "discover_playwright_browser", lambda _runner: executable)
+    monkeypatch.setattr(runtime, "discover_playwright_browser", lambda _runner, _node: executable)
 
     assert runtime.validate_browser_contract(
         {"browserContract": {"name": runtime.RUNNER_LOCAL}}, runner
@@ -346,7 +549,7 @@ def test_browser_contracts_never_fallback_to_the_other_direction(
     monkeypatch.setattr(
         runtime,
         "discover_playwright_browser",
-        lambda _runner: pytest.fail("system contract fell back to runner-local discovery"),
+        lambda _runner, _node: pytest.fail("system contract fell back to runner-local discovery"),
     )
     runtime.validate_browser_contract(
         {"browserContract": contract}, tmp_path / "missing-runner", root
@@ -355,7 +558,7 @@ def test_browser_contracts_never_fallback_to_the_other_direction(
     monkeypatch.setattr(
         runtime,
         "discover_playwright_browser",
-        lambda _runner: (_ for _ in ()).throw(runtime.Invalid("runner bundle missing")),
+        lambda _runner, _node: (_ for _ in ()).throw(runtime.Invalid("runner bundle missing")),
     )
     with pytest.raises(runtime.Invalid, match="runner bundle missing"):
         runtime.validate_browser_contract(
@@ -497,7 +700,7 @@ def test_runner_validation_accepts_complete_independent_git_repository(
     real_run = subprocess.run
 
     def fake_node(argv, *args, **kwargs):
-        if argv[0] == "/usr/bin/node":
+        if argv[0] == runtime.NODE_EXECUTABLE:
             return subprocess.CompletedProcess(
                 argv,
                 0,
@@ -550,7 +753,7 @@ def test_exact_legacy_manifest_validates_declared_and_tracked_compatibility_file
     real_run = subprocess.run
 
     def fake_node(argv, *args, **kwargs):
-        if argv[0] == "/usr/bin/node":
+        if argv[0] == runtime.NODE_EXECUTABLE:
             return subprocess.CompletedProcess(
                 argv,
                 0,
@@ -790,7 +993,7 @@ def test_every_runner_git_command_trusts_only_exact_validated_directory(
     monkeypatch.setenv("SUGARKUBE_TEST_INHERITED", "preserved")
 
     def inspect(argv, *args, **kwargs):
-        if argv[0] == "/usr/bin/node":
+        if argv[0] == runtime.NODE_EXECUTABLE:
             return subprocess.CompletedProcess(
                 argv,
                 0,
@@ -880,7 +1083,7 @@ def test_root_owned_runner_validates_as_unprivileged_user_without_mutation(tmp_p
         f"c=json.loads(Path({str(config_path)!r}).read_text()); "
         "real_run=subprocess.run; "
         "r.subprocess.run=lambda argv,*a,**kw: subprocess.CompletedProcess("
-        f"argv,0,stdout={browser_path!r}.encode()) if argv[0]=='/usr/bin/node' "
+        f"argv,0,stdout={browser_path!r}.encode()) if argv[0]=={runtime.NODE_EXECUTABLE!r} "
         "else real_run(argv,*a,**kw); "
         "print(r.validate_runner(c))"
     )
@@ -935,7 +1138,7 @@ def test_git_optional_locks_keep_validation_index_metadata_read_only(
     monkeypatch.setenv("SUGARKUBE_TEST_INHERITED", "preserved")
 
     def fake_node(argv, *args, **kwargs):
-        if argv[0] == "/usr/bin/node":
+        if argv[0] == runtime.NODE_EXECUTABLE:
             return subprocess.CompletedProcess(
                 argv,
                 0,
@@ -962,7 +1165,7 @@ def test_runner_validation_still_rejects_dirty_tracked_content_without_optional_
     real_run = subprocess.run
 
     def fake_node(argv, *args, **kwargs):
-        if argv[0] == "/usr/bin/node":
+        if argv[0] == runtime.NODE_EXECUTABLE:
             pytest.fail("dirty tracked state must fail before browser discovery")
         return real_run(argv, *args, **kwargs)
 
@@ -1013,7 +1216,7 @@ def test_runner_validation_rejects_shallow_or_failed_fsck(
             return subprocess.CompletedProcess(argv, 0, stdout="true\n", stderr="")
         if "fsck" in argv and fault == "fsck":
             raise subprocess.CalledProcessError(1, argv)
-        if argv[0] == "/usr/bin/node":
+        if argv[0] == runtime.NODE_EXECUTABLE:
             runner = Path(value["runnerRoot"]) / value["runnerRevision"]
             return subprocess.CompletedProcess(
                 argv,
@@ -1069,7 +1272,7 @@ def test_runner_validation_rejects_incomplete_snapshot_contracts(
     real_run = subprocess.run
 
     def controlled_run(argv, *args, **kwargs):
-        if argv[0] == "/usr/bin/node":
+        if argv[0] == runtime.NODE_EXECUTABLE:
             return subprocess.CompletedProcess(argv, 0, stdout=str(discovered).encode())
         if "status" in argv:
             return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
@@ -1101,7 +1304,7 @@ def prepare_runtime_run(
     monkeypatch.setenv("SECRET_PARENT_TOKEN", "must-not-leak")
     monkeypatch.setattr(runtime.pwd, "getpwnam", lambda _name: account)
     monkeypatch.setattr(runtime.grp, "getgrnam", lambda _name: SimpleNamespace(gr_gid=os.getgid()))
-    monkeypatch.setattr(runtime, "validate_runner", lambda _config: runner)
+    monkeypatch.setattr(runtime, "validate_runner", lambda _config, _node=None: runner)
     monkeypatch.setattr(
         runtime,
         "validate_browser_contract",
@@ -1120,6 +1323,9 @@ def prepare_runtime_run(
         )
     )
     monkeypatch.setattr(runtime, "validate_dir", lambda *_args: None)
+    monkeypatch.setattr(
+        runtime, "validate_node_contract", lambda value: dict(value["nodeContract"])
+    )
     monkeypatch.setattr(runtime.os, "chown", lambda *_args: None)
     calls: list[dict] = []
 
@@ -1183,7 +1389,7 @@ def test_runtime_run_uses_minimal_environment_and_cleans_direct_entries(
     assert "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH" not in child["env"]
     separator = child["argv"].index("--")
     node_argv = child["argv"][separator + 1 :]
-    assert node_argv[0] == "/usr/bin/node"
+    assert node_argv[0] == value["nodeContract"]["executablePath"]
     assert node_argv.count("--expected-provider") == 1
     provider_index = node_argv.index("--expected-provider")
     assert node_argv[provider_index + 1] == value["provider"] == "token-place"
@@ -1482,7 +1688,8 @@ def test_bounded_stderr_run_returns_when_descendant_retains_stderr(tmp_path: Pat
                 "-c",
                 (
                     "import subprocess, sys; "
-                    f"child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)']); "
+                    "child = subprocess.Popen([sys.executable, '-c', "
+                    "'import time; time.sleep(30)']); "
                     f"open({str(pid_path)!r}, 'w').write(str(child.pid))"
                 ),
             ]
@@ -1836,15 +2043,14 @@ def test_immutable_runner_config_resolves_validated_chromium_executable(
 def test_materialize_discovers_browser_and_is_source_independent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    if not Path("/usr/bin/node").is_file():
-        # TODO: Environments running this test should provide /usr/bin/node.
-        # Root cause: The test intentionally uses the absolute production Node path,
-        # while some development and test images omit it.
-        # Estimated fix: Provision Node at /usr/bin/node in the affected environment.
-        pytest.skip("runtime contract requires /usr/bin/node")
     source, revision, browser_bundle, pnpm = materialization_fixture(tmp_path)
     output = tmp_path / "output" / revision
     monkeypatch.setattr(installer, "runtime_module", lambda: runtime)
+    monkeypatch.setattr(
+        runtime,
+        "discover_playwright_browser",
+        lambda runner, _node: runner / "playwright-browser/chromium/chrome",
+    )
 
     materializer.materialize(
         source,
@@ -1856,6 +2062,7 @@ def test_materialize_discovers_browser_and_is_source_independent(
         browser_bundle,
         {"name": runtime.RUNNER_LOCAL},
         Path("/"),
+        runtime.NODE_EXECUTABLE,
     )
     manifest = json.loads((output / "sugarkube-runner-manifest.json").read_text())
     relative = manifest["playwrightBrowserExecutable"]
@@ -1866,8 +2073,11 @@ def test_materialize_discovers_browser_and_is_source_independent(
     __import__("shutil").rmtree(browser_bundle)
     value = config(tmp_path)
     value.update(runnerRoot=str(output.parent), runnerRevision=revision)
+    value["runnerManifestSha256"] = runtime.sha256(output / "sugarkube-runner-manifest.json")
+    qualified = output.with_name(runtime.runner_storage_identity(value))
+    output.rename(qualified)
     value["browserContract"] = {"name": runtime.RUNNER_LOCAL}
-    assert runtime.validate_runner(value) == output
+    assert runtime.validate_runner(value) == qualified
 
 
 def test_materialize_orchestrates_complete_snapshot_without_host_node(
@@ -1890,7 +2100,7 @@ def test_materialize_orchestrates_complete_snapshot_without_host_node(
             return runner / discovered
 
         @staticmethod
-        def validate_browser_contract(_config: dict, runner: Path, _root: Path) -> dict:
+        def validate_browser_contract(_config: dict, runner: Path, _root: Path, _node: str) -> dict:
             browser = runner / discovered
             return {
                 "name": runtime.RUNNER_LOCAL,
@@ -1916,6 +2126,7 @@ def test_materialize_orchestrates_complete_snapshot_without_host_node(
         browser_bundle,
         {"name": runtime.RUNNER_LOCAL},
         Path("/"),
+        runtime.NODE_EXECUTABLE,
     )
 
     manifest = json.loads((output / "sugarkube-runner-manifest.json").read_text())
@@ -1949,6 +2160,7 @@ def test_system_materialize_skips_browser_bundle_and_download(
         None,
         contract,
         browser_root,
+        runtime.NODE_EXECUTABLE,
     )
     manifest = json.loads((output / "sugarkube-runner-manifest.json").read_text())
     assert manifest["playwrightBrowserExecutable"] is None
@@ -1968,6 +2180,7 @@ def test_system_materialize_skips_browser_bundle_and_download(
             tmp_path,
             contract,
             browser_root,
+            runtime.NODE_EXECUTABLE,
         )
 
 
@@ -1979,6 +2192,12 @@ def test_materialize_cli_dispatches_complete_coordinates(
     browser = tmp_path / "browser"
     captured = []
     monkeypatch.setattr(installer, "materialize", lambda *args: captured.append(args))
+    monkeypatch.setattr(installer, "runtime_module", lambda: runtime)
+    monkeypatch.setattr(
+        runtime,
+        "validate_node_contract",
+        lambda value, _root: value["nodeContract"],
+    )
     monkeypatch.setattr(
         sys,
         "argv",
@@ -2012,6 +2231,7 @@ def test_materialize_cli_dispatches_complete_coordinates(
             browser.resolve(),
             json.loads(CONFIG.read_text())["browserContract"],
             Path("/").resolve(),
+            runtime.NODE_EXECUTABLE,
         )
     ]
 
@@ -2040,7 +2260,7 @@ def test_playwright_browser_discovery_rejects_invalid_path(
     )
 
     with pytest.raises(runtime.Invalid, match="discovery"):
-        runtime.discover_playwright_browser(runner)
+        runtime.discover_playwright_browser(runner, runtime.NODE_EXECUTABLE)
 
 
 def test_playwright_browser_discovery_rejects_missing_root_and_invalid_output(
@@ -2049,7 +2269,7 @@ def test_playwright_browser_discovery_rejects_missing_root_and_invalid_output(
     runner = tmp_path / "runner"
     (runner / "frontend").mkdir(parents=True)
     with pytest.raises(runtime.Invalid, match="discovery"):
-        runtime.discover_playwright_browser(runner)
+        runtime.discover_playwright_browser(runner, runtime.NODE_EXECUTABLE)
 
     (runner / "playwright-browser").mkdir()
     monkeypatch.setattr(
@@ -2058,7 +2278,7 @@ def test_playwright_browser_discovery_rejects_missing_root_and_invalid_output(
         lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout=b""),
     )
     with pytest.raises(runtime.Invalid, match="discovery"):
-        runtime.discover_playwright_browser(runner)
+        runtime.discover_playwright_browser(runner, runtime.NODE_EXECUTABLE)
 
 
 def test_playwright_browser_discovery_rejects_symlinked_root(
@@ -2073,7 +2293,7 @@ def test_playwright_browser_discovery_rejects_symlinked_root(
     real_run = subprocess.run
 
     def controlled_run(argv, *args, **kwargs):
-        if argv[0] == "/usr/bin/node":
+        if argv[0] == runtime.NODE_EXECUTABLE:
             return subprocess.CompletedProcess(argv, 0, stdout=str(external_browser).encode())
         if "status" in argv:
             return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
@@ -2082,7 +2302,7 @@ def test_playwright_browser_discovery_rejects_symlinked_root(
     monkeypatch.setattr(runtime.subprocess, "run", controlled_run)
 
     with pytest.raises(runtime.Invalid, match="discovery"):
-        runtime.discover_playwright_browser(runner)
+        runtime.discover_playwright_browser(runner, runtime.NODE_EXECUTABLE)
     with pytest.raises(runtime.Invalid, match="discovery"):
         runtime.validate_runner(value)
 
@@ -2105,7 +2325,7 @@ def test_playwright_browser_discovery_rejects_relative_path(
     )
 
     with pytest.raises(runtime.Invalid, match="discovery"):
-        runtime.discover_playwright_browser(runner)
+        runtime.discover_playwright_browser(runner, runtime.NODE_EXECUTABLE)
 
 
 def test_runner_validation_rejects_discovered_browser_hash_tampering(
@@ -2119,7 +2339,7 @@ def test_runner_validation_rejects_discovered_browser_hash_tampering(
     def controlled_run(argv, *args, **kwargs):
         if "status" in argv:
             return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
-        if argv[0] == "/usr/bin/node":
+        if argv[0] == runtime.NODE_EXECUTABLE:
             return subprocess.CompletedProcess(argv, 0, stdout=str(browser).encode())
         return real_run(argv, *args, **kwargs)
 
@@ -2288,17 +2508,60 @@ class StatusRuntime:
         return json.loads(path.read_text())
 
     @staticmethod
-    def validate_runner(value: dict) -> Path:
+    def validate_runner(value: dict, _node: str | None = None) -> Path:
         runner = Path(value["runnerRoot"]) / runtime.runner_storage_identity(value)
         if (runner / "invalid").exists():
             raise ValueError("runner validation failed")
         return runner
 
     @staticmethod
-    def validate_browser_contract(_value: dict, runner: Path, _root: Path) -> dict:
+    def validate_browser_contract(
+        _value: dict, runner: Path, _root: Path, _node: str | None = None
+    ) -> dict:
         return json.loads((runner / "sugarkube-runner-manifest.json").read_text())[
             "browserProvenance"
         ]
+
+    @staticmethod
+    def validate_node_contract(value: dict, _root: Path) -> dict:
+        return value["nodeContract"]
+
+
+class RealNodeValidationRuntime(StatusRuntime):
+    """Keep runner checks deterministic while exercising real Node provenance."""
+
+    def __init__(self, node_contract: dict):
+        self.node_contract = copy.deepcopy(node_contract)
+
+    def load_config(self, path: Path) -> dict:
+        value = super().load_config(path)
+        if "nodeContract" in value:
+            value["nodeContract"] = copy.deepcopy(self.node_contract)
+        return value
+
+    @staticmethod
+    def validate_runner(value: dict, _node: str | None = None) -> Path:
+        identity = value.get("_runnerStorageIdentity", runtime.runner_storage_identity(value))
+        runner = Path(value["runnerRoot"]) / identity
+        if (
+            not (runner / ".git").is_dir()
+            or not (runner / "sugarkube-runner-manifest.json").is_file()
+        ):
+            raise ValueError("runner fixture is incomplete")
+        return runner
+
+    @staticmethod
+    def validate_node_contract(value: dict, root: Path) -> dict:
+        return runtime.validate_node_contract(value, root)
+
+    @staticmethod
+    def validate_browser_contract(
+        _value: dict, runner: Path, _root: Path, _node: str | None = None
+    ) -> dict:
+        manifest = runner / "sugarkube-runner-manifest.json"
+        if manifest.is_file():
+            return json.loads(manifest.read_text())["browserProvenance"]
+        return {"name": runtime.SYSTEM_CHROMIUM}
 
 
 def status_installation(tmp_path: Path) -> tuple[Path, Path, str]:
@@ -2419,6 +2682,172 @@ def test_status_reports_validated_provenance_without_mutation_or_systemctl(
     assert "rawResult" not in output
     assert "activation=not-queried" in output
     assert tree_bytes(root) == before
+
+
+def test_real_node_validation_covers_private_root_dry_run_status_repair_and_rollback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    value, root = synthetic_node_fixture(tmp_path, monkeypatch)
+    snapshot, _ = runner_snapshot_fixture(tmp_path)
+    snapshot_manifest = snapshot / "sugarkube-runner-manifest.json"
+    snapshot_provenance = json.loads(snapshot_manifest.read_text())
+    snapshot_provenance["pnpmVersion"] = "9.0.0"
+    snapshot_provenance["browserProvenance"].update(
+        architecture="aarch64",
+        executablePath="/usr/lib/chromium/chromium",
+        executableSha256="1" * 64,
+        launcherPath="/usr/bin/chromium",
+        launcherSha256="2" * 64,
+    )
+    snapshot_manifest.write_text(json.dumps(snapshot_provenance))
+    selected_runtime = RealNodeValidationRuntime(value["nodeContract"])
+    monkeypatch.setattr(installer, "runtime_module", lambda: selected_runtime)
+
+    commands: list[list[str]] = []
+    real_run = subprocess.run
+
+    def command_guard(argv, *args, **kwargs):
+        command = [str(part) for part in argv]
+        commands.append(command)
+        if command[0] != "git":
+            pytest.fail(f"private-root lifecycle invoked host command: {command}")
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(installer.subprocess, "run", command_guard)
+    monkeypatch.setattr(runtime.subprocess, "run", command_guard)
+
+    before_dry_run = tree_bytes(root)
+    assert (
+        run_installer_main(
+            monkeypatch, "dry-run", "--root", str(root), "--runner-snapshot", str(snapshot)
+        )
+        == 0
+    )
+    assert tree_bytes(root) == before_dry_run
+
+    staged = tmp_path / "staged"
+    installer.render(staged)
+    asset_revision = installer.sha(staged / "manifest.json")
+    installer.install(staged, root, asset_revision)
+    config_value = selected_runtime.load_config(root / "etc/sugarkube/dspace-chat-synthetic.json")
+    runner = (
+        root
+        / config_value["runnerRoot"].removeprefix("/")
+        / runtime.runner_storage_identity(config_value)
+    )
+    runner.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(snapshot, runner)
+
+    before_status = tree_bytes(root)
+    assert installer.status(root) == 0
+    status_output = capsys.readouterr().out
+    node = value["nodeContract"]
+    for expected in (
+        f"nodeVersion={node['version']}",
+        f"nodeArchitecture={node['architecture']}",
+        f"nodeExecutablePath={node['executablePath']}",
+        f"nodeExecutableSha256={node['executableSha256']}",
+        f"nodeArchiveSha256={node['archiveSha256']}",
+        "activation=not-queried",
+    ):
+        assert expected in status_output
+    assert tree_bytes(root) == before_status
+
+    monkeypatch.setattr(installer, "validate_runner_access", lambda *_args: None)
+    monkeypatch.setattr(installer, "runner_access_plan", lambda *_args: [])
+    manifest_sha = installer.sha(runner / "sugarkube-runner-manifest.json")
+    assert (
+        installer.repair_runner_access(
+            root,
+            config_value["runnerRevision"],
+            asset_revision,
+            manifest_sha,
+            True,
+        )
+        == 0
+    )
+    assert (
+        run_installer_main(
+            monkeypatch,
+            "rollback",
+            "--apply",
+            "--root",
+            str(root),
+            "--revision",
+            asset_revision,
+        )
+        == 0
+    )
+    current = root / "var/lib/sugarkube/dspace-chat-installations/current"
+    assert os.readlink(current) == asset_revision
+    assert all(command[0] == "git" for command in commands)
+
+
+def test_missing_retained_node_contract_fails_before_rollback_activation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, root = synthetic_node_fixture(tmp_path, monkeypatch)
+    snapshot, _ = runner_snapshot_fixture(tmp_path)
+    selected_runtime = RealNodeValidationRuntime(value["nodeContract"])
+    monkeypatch.setattr(installer, "runtime_module", lambda: selected_runtime)
+    monkeypatch.setattr(installer, "validate_runner_access", lambda *_args: None)
+    monkeypatch.setattr(
+        installer.subprocess,
+        "run",
+        lambda argv, *_args, **_kwargs: pytest.fail(f"rollback invoked command: {argv}"),
+    )
+    monkeypatch.setattr(
+        runtime.subprocess,
+        "run",
+        lambda argv, *_args, **_kwargs: pytest.fail(f"rollback executed Node: {argv}"),
+    )
+
+    staged = tmp_path / "current-staged"
+    installer.render(staged)
+    current_revision = installer.sha(staged / "manifest.json")
+    installer.install(staged, root, current_revision)
+    monkeypatch.setattr(
+        installer,
+        "activate",
+        lambda *_args: pytest.fail("missing-contract rollback reached activation"),
+    )
+    config_value = selected_runtime.load_config(staged / "etc/sugarkube/dspace-chat-synthetic.json")
+    runner = (
+        root
+        / config_value["runnerRoot"].removeprefix("/")
+        / runtime.runner_storage_identity(config_value)
+    )
+    runner.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(snapshot, runner)
+
+    retained = root / "var/lib/sugarkube/dspace-chat-installations" / current_revision
+    legacy = tmp_path / "legacy-retained"
+    shutil.copytree(retained, legacy)
+    legacy_config = legacy / "etc/sugarkube/dspace-chat-synthetic.json"
+    legacy_value = json.loads(legacy_config.read_text())
+    legacy_value.pop("nodeContract")
+    legacy_config.write_text(json.dumps(legacy_value, sort_keys=True, indent=2) + "\n")
+    hashes = asset_hashes(legacy)
+    hashes["etc/sugarkube/dspace-chat-synthetic.json"] = installer.sha(legacy_config)
+    write_asset_manifest(legacy, hashes)
+    legacy_revision = installer.sha(legacy / "manifest.json")
+    legacy.rename(retained.parent / legacy_revision)
+
+    current = retained.parent / "current"
+    before = tree_bytes(root)
+    current_before = os.readlink(current)
+    with pytest.raises(runtime.Invalid, match="Node runtime contract"):
+        run_installer_main(
+            monkeypatch,
+            "rollback",
+            "--apply",
+            "--root",
+            str(root),
+            "--revision",
+            legacy_revision,
+        )
+    assert tree_bytes(root) == before
+    assert os.readlink(current) == current_before
 
 
 @pytest.mark.parametrize(
@@ -2607,6 +3036,7 @@ def test_materialize_rejects_symlink_browser_root_before_output(
             None,
             {"name": runtime.SYSTEM_CHROMIUM},
             alias,
+            runtime.NODE_EXECUTABLE,
         )
     assert not output.exists()
 
@@ -2650,7 +3080,7 @@ class FakeSnapshotRuntime:
     def load_config(path: Path) -> dict:
         return json.loads(path.read_text())
 
-    def validate_runner(self, config: dict) -> Path:
+    def validate_runner(self, config: dict, _node: str | None = None) -> Path:
         runner = Path(config["runnerRoot"]) / config.get(
             "_runnerStorageIdentity", self.runner_storage_identity(config)
         )
@@ -2668,8 +3098,14 @@ class FakeSnapshotRuntime:
         return runner
 
     @staticmethod
-    def validate_browser_contract(_config: dict, _runner: Path, _root: Path) -> dict:
+    def validate_browser_contract(
+        _config: dict, _runner: Path, _root: Path, _node: str | None = None
+    ) -> dict:
         return {"name": runtime.SYSTEM_CHROMIUM}
+
+    @staticmethod
+    def validate_node_contract(config: dict, _root: Path) -> dict:
+        return config["nodeContract"]
 
 
 @pytest.mark.parametrize(
@@ -3238,15 +3674,21 @@ def test_access_repair_preserves_normalized_git_index_through_post_validation(
         validate_runner = staticmethod(runtime.validate_runner)
 
         @staticmethod
-        def validate_browser_contract(_config: dict, selected: Path, _root: Path) -> dict:
+        def validate_browser_contract(
+            _config: dict, selected: Path, _root: Path, _node: str | None = None
+        ) -> dict:
             return json.loads((selected / "sugarkube-runner-manifest.json").read_text())[
                 "browserProvenance"
             ]
 
+        @staticmethod
+        def validate_node_contract(config: dict, _root: Path) -> dict:
+            return config["nodeContract"]
+
     real_run = subprocess.run
 
     def fake_node(argv, *args, **kwargs):
-        if argv[0] == "/usr/bin/node":
+        if argv[0] == runtime.NODE_EXECUTABLE:
             return subprocess.CompletedProcess(
                 argv,
                 0,
@@ -3812,6 +4254,9 @@ def test_same_revision_manifest_migration_preserves_runner_and_rolls_back_exactl
         runtime, "LEGACY_RUNNER_MANIFEST_SHA256", runtime.sha256(legacy_manifest_path)
     )
     monkeypatch.setattr(runtime, "validate_browser_contract", lambda *_args: provenance)
+    monkeypatch.setattr(
+        runtime, "validate_node_contract", lambda value, _root: value["nodeContract"]
+    )
     monkeypatch.setattr(installer, "runtime_module", lambda: runtime)
 
     qualified_parent = tmp_path / "qualified"
@@ -4036,3 +4481,46 @@ def test_completed_install_rejects_invalid_retained_coordinate(
         installer.apply_installation(staged, snapshot, root, asset_revision)
 
     assert tree_bytes(root) == before
+
+
+def test_real_root_node_identity_fails_closed_for_missing_service_account(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing production identity must fail before Node provenance is trusted."""
+    config = runtime.load_config(ROOT / "config/dspace-chat-synthetic.json")
+    monkeypatch.setattr(
+        runtime.pwd,
+        "getpwnam",
+        lambda _name: (_ for _ in ()).throw(KeyError("missing account")),
+    )
+
+    with pytest.raises(runtime.Invalid, match="Node runtime provenance"):
+        runtime.node_service_identity(config, Path("/"))
+
+
+def test_real_root_node_identity_uses_configured_account_and_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = runtime.load_config(ROOT / "config/dspace-chat-synthetic.json")
+    monkeypatch.setattr(runtime.pwd, "getpwnam", lambda _name: SimpleNamespace(pw_uid=123))
+    monkeypatch.setattr(runtime.grp, "getgrnam", lambda _name: SimpleNamespace(gr_gid=456))
+
+    assert runtime.node_service_identity(config, Path("/")) == (123, 456)
+
+
+def test_node_contract_rejects_home_coordinate_before_filesystem_access() -> None:
+    config = runtime.load_config(ROOT / "config/dspace-chat-synthetic.json")
+    config["nodeContract"]["executablePath"] = "/home/pi/.nvm/bin/node"
+
+    with pytest.raises(runtime.Invalid, match="Node runtime provenance"):
+        runtime.validate_node_contract(config)
+
+
+def test_runner_local_browser_requires_explicitly_validated_node_coordinate(
+    tmp_path: Path,
+) -> None:
+    config = runtime.load_config(ROOT / "config/dspace-chat-synthetic.json")
+    config["browserContract"]["name"] = runtime.RUNNER_LOCAL
+
+    with pytest.raises(runtime.Invalid, match="validated Node coordinate"):
+        runtime.validate_browser_contract(config, tmp_path, node_executable=None)
