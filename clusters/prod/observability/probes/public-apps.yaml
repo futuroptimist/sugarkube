@@ -328,7 +328,7 @@ spec:
   targets:
     staticConfig:
       static:
-      - https://jobbot3000.example.test/
+      - https://jobbot3000.tech/
       labels:
         app: jobbot3000
         environment: prod
@@ -356,7 +356,7 @@ spec:
   targets:
     staticConfig:
       static:
-      - https://jobbot3000.example.test/healthz
+      - https://jobbot3000.tech/healthz
       labels:
         app: jobbot3000
         environment: prod
@@ -384,7 +384,7 @@ spec:
   targets:
     staticConfig:
       static:
-      - https://jobbot3000.example.test/livez
+      - https://jobbot3000.tech/livez
       labels:
         app: jobbot3000
         environment: prod
@@ -412,7 +412,7 @@ spec:
   targets:
     staticConfig:
       static:
-      - https://jobbot3000.example.test/tracker
+      - https://jobbot3000.tech/tracker
       labels:
         app: jobbot3000
         environment: prod
@@ -440,7 +440,7 @@ spec:
   targets:
     staticConfig:
       static:
-      - https://jobbot3000.example.test/manifest.webmanifest
+      - https://jobbot3000.tech/manifest.webmanifest
       labels:
         app: jobbot3000
         environment: prod

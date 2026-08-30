@@ -744,7 +744,7 @@ def test_production_probe_matrix_exact_and_separate():
         "dspace": "https://democratized.space",
         "tokenplace": "https://token.place",
         "danielsmith": "https://danielsmith.io",
-        "jobbot3000": "https://jobbot3000.example.test",
+        "jobbot3000": "https://jobbot3000.tech",
         "gitshelves": "https://gitshelves.com",
     }
     paths = {
