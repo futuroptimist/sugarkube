@@ -79,6 +79,7 @@ def verifier_bundle(health="up", success="1"):
                             "job": f"probe/monitoring/{name}",
                             "app": pair[0],
                             "route": pair[1],
+                            "environment": "staging",
                         },
                         "value": [1, success if family == "probe_success" else "2"],
                     }
@@ -141,11 +142,14 @@ with open(os.environ["LOG"], "a") as log:
 scenario = os.environ.get("SCENARIO", "success")
 joined = " ".join(args)
 if args[:2] == ["config", "current-context"]:
-    print("wrong-context" if scenario == "bad_context" else "sugar-staging")
+    print("wrong-context" if scenario == "bad_context" else ("sugar-prod" if os.environ.get("TEST_ENV") == "prod" else "sugar-staging"))
 elif args[:1] == ["kustomize"]:
     if "network-policies" in joined:
-        print(open(os.environ["POLICY"]).read())
-    else: print(open(os.environ["PROBES_YAML"]).read())
+        source = os.path.join(args[-1], "prometheus-to-blackbox-exporter.yaml") if "/prod/" in joined else os.environ["POLICY"]
+        print(open(source).read())
+    else:
+        source = os.path.join(args[-1], "public-apps.yaml") if "/prod/" in joined else os.environ["PROBES_YAML"]
+        print(open(source).read())
 elif args[:2] == ["apply", "-f"] and scenario == "policy_apply_failure" and "policy" in args[2]:
     sys.exit(41)
 elif "get crd" in joined and scenario == "missing_crds": sys.exit(1)
@@ -235,7 +239,11 @@ class Scenario:
         return path.read_text().splitlines() if path.exists() else []
 
     def run(self, command, environment="staging", **extra):
-        env = {**self.env, **{key: str(value) for key, value in extra.items()}}
+        env = {
+            **self.env,
+            "TEST_ENV": environment or "",
+            **{key: str(value) for key, value in extra.items()},
+        }
         for key in COVERAGE_BOOTSTRAP_ENV:
             env.pop(key, None)
         args = [str(SCRIPT), command]
@@ -317,14 +325,14 @@ def mutations(log):
     ]
 
 
-def test_missing_and_production_envs_fail_before_cluster_access(scenario):
-    for environment in (None, "prod", "production", "dev"):
+def test_missing_and_unsupported_envs_fail_before_cluster_access(scenario):
+    for environment in (None, "dev"):
         result = scenario.run("render", environment)
         assert result.returncode == 2
     assert scenario.log == []
 
 
-@pytest.mark.parametrize("environment", ["staging", "int"])
+@pytest.mark.parametrize("environment", ["staging", "int", "prod", "production"])
 def test_environment_normalization_renders_offline(scenario, environment):
     result = scenario.run("render", environment)
     assert result.returncode == 0
@@ -606,7 +614,7 @@ def verify(payload, final=False, *args):
     stderr = io.StringIO()
     old_argv, old_stdin = sys.argv, sys.stdin
     old_final_attempt = os.environ.get("FINAL_ATTEMPT")
-    sys.argv = [str(ROOT / "scripts/verify_blackbox_prometheus.py"), *args]
+    sys.argv = [str(ROOT / "scripts/verify_blackbox_prometheus.py"), "--env", "staging", *args]
     sys.stdin = stdin
     os.environ["FINAL_ATTEMPT"] = "1" if final else "0"
     try:
@@ -707,3 +715,105 @@ def test_probe_validator_requires_exact_names_and_mappings():
     assert verify({}, False, "--probes").returncode == 7
     assert verify({"items": [None]}, False, "--probes").returncode == 7
     assert verify(items, False, "--unknown").returncode == 9
+
+
+def load_probe_documents(environment):
+    result = subprocess.run(
+        [
+            "ruby",
+            "-ryaml",
+            "-rjson",
+            "-e",
+            "puts JSON.generate(YAML.load_stream(File.read(ARGV[0])))",
+            str(ROOT / f"clusters/{environment}/observability/probes/public-apps.yaml"),
+        ],
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    return [item for item in json.loads(result.stdout) if item]
+
+
+def test_production_probe_matrix_exact_and_separate():
+    prod = load_probe_documents("prod")
+    staging = load_probe_documents("staging")
+    assert len(prod) == len(staging) == 21
+    bases = {
+        "dspace": "https://democratized.space",
+        "tokenplace": "https://token.place",
+        "danielsmith": "https://danielsmith.io",
+        "jobbot3000": "https://jobbot3000.tech",
+        "gitshelves": "https://gitshelves.com",
+    }
+    paths = {
+        "root": "/",
+        "config": "/config.json",
+        "healthz": "/healthz",
+        "livez": "/livez",
+        "metadata": "/api/v1/meta",
+        "tracker": "/tracker",
+        "manifest": "/manifest.webmanifest",
+        "baseplate": "/models/baseplate_2x6.stl",
+        "module": "/models/contrib_cube.stl",
+    }
+    staging_by_key = {
+        (item["metadata"]["labels"]["app"], item["metadata"]["labels"]["route"]): item
+        for item in staging
+    }
+    for item in prod:
+        labels = item["metadata"]["labels"]
+        key = (labels["app"], labels["route"])
+        target_labels = item["spec"]["targets"]["staticConfig"]["labels"]
+        target = item["spec"]["targets"]["staticConfig"]["static"][0]
+        assert item["metadata"]["name"] == f"blackbox-{key[0]}-prod-{key[1]}"
+        assert labels["release"] == "kube-prometheus-stack"
+        assert labels["environment"] == target_labels["environment"] == "prod"
+        assert target == bases[key[0]] + paths[key[1]]
+        assert "staging" not in target
+        assert item["spec"]["module"] == staging_by_key[key]["spec"]["module"]
+        assert item["spec"]["interval"] == staging_by_key[key]["spec"]["interval"]
+        assert labels["criticality"] == staging_by_key[key]["metadata"]["labels"]["criticality"]
+    assert all("-prod-" not in item["metadata"]["name"] for item in staging)
+
+
+def test_production_live_requires_explicit_kubeconfig_before_cluster_access(scenario):
+    result = scenario.run("install", "prod", KUBECONFIG="")
+    assert result.returncode == 3
+    assert not any(line.startswith("helm list") for line in scenario.log)
+    # Rendering is deliberately first; the production guard then rejects before live access.
+    assert not any(line.startswith("identity ") for line in scenario.log)
+    assert not mutations(scenario.log)
+
+
+@pytest.mark.parametrize("failure", ["bad_context", "bad_identity"])
+def test_production_identity_guards_precede_release_queries(scenario, failure):
+    result = scenario.run(
+        "install", "prod", KUBECONFIG=scenario.root / "prod.config", SCENARIO=failure
+    )
+    assert result.returncode != 0
+    assert not any(line.startswith("helm list") for line in scenario.log)
+    assert not mutations(scenario.log)
+
+
+def test_production_mutation_has_no_probe_deletion(scenario):
+    result = scenario.run(
+        "install", "prod", KUBECONFIG=scenario.root / "prod.config", SCENARIO="release_absent"
+    )
+    assert result.returncode == 0
+    assert not any(" delete probe " in line for line in scenario.log)
+    assert any("identity assert" in line and "--env prod" in line for line in scenario.log)
+
+
+def test_verifier_requires_explicit_supported_environment():
+    payload = verifier_bundle()
+    for args in ((), ("--env", "dev")):
+        stdin = io.StringIO(json.dumps(payload))
+        old_argv, old_stdin = sys.argv, sys.stdin
+        sys.argv = [str(ROOT / "scripts/verify_blackbox_prometheus.py"), *args]
+        sys.stdin = stdin
+        try:
+            with pytest.raises(SystemExit) as error:
+                runpy.run_path(sys.argv[0], run_name="__main__")
+            assert error.value.code == 9
+        finally:
+            sys.argv, sys.stdin = old_argv, old_stdin
