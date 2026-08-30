@@ -50,7 +50,6 @@ REQUIRED = {
     "metricPath",
     "metricsConsumer",
     "browserContract",
-    "nodeContract",
 }
 RUNNER_LOCAL = "runner-local-playwright-v1"
 SYSTEM_CHROMIUM = "system-chromium-v1"
@@ -87,7 +86,7 @@ def load_config(path: Path) -> dict:
         or not REQUIRED <= value.keys()
     ):
         raise Invalid("configuration schema")
-    string_keys = REQUIRED - {"timeoutSeconds", "browserContract", "nodeContract"}
+    string_keys = REQUIRED - {"timeoutSeconds", "browserContract"}
     if (
         any(not isinstance(value[key], str) for key in string_keys)
         or not isinstance(value["timeoutSeconds"], int)
@@ -164,7 +163,12 @@ def load_config(path: Path) -> dict:
             )
         ):
             raise Invalid("system browser contract")
-    node = value["nodeContract"]
+    # Retained assets created before the pinned Node contract remain readable for
+    # inspection and historical activation. Execution and every new asset call
+    # validate_node_contract(), which fails closed when this key is absent.
+    node = value.get("nodeContract")
+    if node is None:
+        return value
     required_node = {
         "version",
         "architecture",
@@ -280,7 +284,9 @@ def _rooted(root: Path, absolute: str) -> Path:
 
 def validate_node_contract(config: dict, root: Path = Path("/")) -> dict:
     """Validate the pinned root-controlled native Node executable without running it."""
-    contract = config["nodeContract"]
+    contract = config.get("nodeContract")
+    if not isinstance(contract, dict):
+        raise Invalid("Node runtime contract")
     root = normalize_root(root)
     path = _rooted(root, contract["executablePath"])
     if contract["executablePath"].startswith("/home/"):
@@ -302,6 +308,8 @@ def validate_node_contract(config: dict, root: Path = Path("/")) -> dict:
         and header[4:6] == b"\x02\x01"
         and int.from_bytes(header[18:20], "little") == 183
     )
+    if not native_aarch64 or platform.machine() != contract["architecture"]:
+        raise Invalid("Node runtime provenance")
     if (
         path.is_symlink()
         or not stat.S_ISREG(info.st_mode)
@@ -312,15 +320,20 @@ def validate_node_contract(config: dict, root: Path = Path("/")) -> dict:
         or group != contract["group"]
         or f"{stat.S_IMODE(info.st_mode):04o}" != contract["mode"]
         or sha256(path) != contract["executableSha256"]
-        or not native_aarch64
-        or platform.machine() != contract["architecture"]
     ):
         raise Invalid("Node runtime provenance")
     for parent in path.parents:
         if parent == root:
             break
         parent_info = parent.lstat()
-        if parent.is_symlink() or parent_info.st_uid != 0 or parent_info.st_mode & 0o022:
+        # The service account is neither root nor guaranteed to be in root's
+        # group, so every root-controlled ancestor must be traversable by it.
+        if (
+            parent.is_symlink()
+            or parent_info.st_uid != 0
+            or parent_info.st_mode & 0o022
+            or not parent_info.st_mode & stat.S_IXOTH
+        ):
             raise Invalid("Node runtime provenance")
     return dict(contract)
 

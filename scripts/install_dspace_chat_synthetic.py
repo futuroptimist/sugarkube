@@ -376,11 +376,19 @@ def load_snapshot_config(staged: Path, snapshot: Path) -> dict:
     return config
 
 
-def validate_snapshot(staged: Path, snapshot: Path, root: Path = Path("/")) -> str:
+def validate_snapshot(
+    staged: Path,
+    snapshot: Path,
+    root: Path = Path("/"),
+    allow_legacy_node_contract: bool = False,
+) -> str:
     """Apply the runtime's complete runner contract to an installation input."""
     runtime = runtime_module()
     config = load_snapshot_config(staged, snapshot)
-    runtime.validate_node_contract(config, root)
+    if "nodeContract" in config:
+        runtime.validate_node_contract(config, root)
+    elif not allow_legacy_node_contract:
+        raise runtime.Invalid("Node runtime contract")
     runner = runtime.validate_runner(config)
     provenance = runtime.validate_browser_contract(config, runner, root)
     manifest = json.loads((runner / "sugarkube-runner-manifest.json").read_text())
@@ -702,7 +710,9 @@ def status(root: Path) -> int:
         raise ValueError("installed runner browser provenance is invalid")
 
     rooted_config = dict(config, runnerRoot=str(runner_parent))
-    node_provenance = runtime.validate_node_contract(rooted_config, root)
+    node_provenance = None
+    if "nodeContract" in rooted_config:
+        node_provenance = runtime.validate_node_contract(rooted_config, root)
     runner = runtime.validate_runner(rooted_config)
     if runner != expected_runner:
         raise ValueError("installed runner validation returned an unexpected revision")
@@ -720,11 +730,14 @@ def status(root: Path) -> int:
     print(f"runnerRevision={config['runnerRevision']}")
     print(f"runnerStorageIdentity={runtime.runner_storage_identity(config)}")
     print(f"runnerManifestSha256={sha(runner_manifest_path)}")
-    print(f"nodeVersion={node_provenance['version']}")
-    print(f"nodeArchitecture={node_provenance['architecture']}")
-    print(f"nodeExecutablePath={node_provenance['executablePath']}")
-    print(f"nodeExecutableSha256={node_provenance['executableSha256']}")
-    print(f"nodeArchiveSha256={node_provenance['archiveSha256']}")
+    if node_provenance is None:
+        print("nodeValidation=legacy-not-declared")
+    else:
+        print(f"nodeVersion={node_provenance['version']}")
+        print(f"nodeArchitecture={node_provenance['architecture']}")
+        print(f"nodeExecutablePath={node_provenance['executablePath']}")
+        print(f"nodeExecutableSha256={node_provenance['executableSha256']}")
+        print(f"nodeArchiveSha256={node_provenance['archiveSha256']}")
     for key in (
         "dspaceVersion",
         "dspaceSourceRevision",
@@ -857,7 +870,17 @@ def provision_node(archive: Path, root: Path, apply: bool) -> int:
         runtime.validate_node_contract(config, root)
         print("nodeProvisioning=already-current mutation=none")
         return 0
-    destination.parent.mkdir(parents=True, mode=0o755)
+    missing_parents = []
+    parent = destination.parent
+    while parent != root and not parent.exists():
+        missing_parents.append(parent)
+        parent = parent.parent
+    destination.parent.mkdir(parents=True, mode=0o755, exist_ok=True)
+    # mkdir's requested mode is filtered by umask. Correct only directories this
+    # operation created; pre-existing unsafe ancestors are rejected below.
+    for created in missing_parents:
+        created.chmod(0o755)
+        os.chown(created, 0, 0)
     with tarfile.open(archive, "r:xz") as bundle:
         stream = bundle.extractfile(member_name)
         assert stream is not None
@@ -959,7 +982,7 @@ def main() -> int:
         rollback_runner = rooted(args.root, rollback_config["runnerRoot"]) / (
             runtime.runner_storage_identity(rollback_config)
         )
-        validate_snapshot(retained, rollback_runner, args.root)
+        validate_snapshot(retained, rollback_runner, args.root, True)
         validate_runner_access(rollback_config, rollback_runner, args.root)
         if not args.apply:
             print("validation=passed mutation=none rollback=authorization-required")

@@ -87,6 +87,39 @@ def test_node_contract_accepts_root_controlled_native_provenance_without_executi
     assert runtime.validate_node_contract(value, root)["version"] == "20.20.2"
 
 
+def test_legacy_configuration_without_node_contract_remains_readable(tmp_path: Path) -> None:
+    value = json.loads(CONFIG.read_text())
+    del value["nodeContract"]
+    path = tmp_path / "legacy.json"
+    path.write_text(json.dumps(value))
+    loaded = runtime.load_config(path)
+    assert "nodeContract" not in loaded
+    with pytest.raises(runtime.Invalid, match="Node runtime contract"):
+        runtime.validate_node_contract(loaded)
+
+
+def test_node_contract_rejects_untraversable_ancestor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, root = synthetic_node_fixture(tmp_path, monkeypatch)
+    (root / "opt/sugarkube").chmod(0o750)
+    with pytest.raises(runtime.Invalid, match="Node runtime provenance"):
+        runtime.validate_node_contract(value, root)
+
+
+def test_node_contract_checks_architecture_before_hashing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, root = synthetic_node_fixture(tmp_path, monkeypatch)
+    node = root / value["nodeContract"]["executablePath"].removeprefix("/")
+    contents = bytearray(node.read_bytes())
+    contents[18:20] = (62).to_bytes(2, "little")
+    node.write_bytes(contents)
+    monkeypatch.setattr(runtime, "sha256", lambda _path: pytest.fail("hashed wrong ELF"))
+    with pytest.raises(runtime.Invalid, match="Node runtime provenance"):
+        runtime.validate_node_contract(value, root)
+
+
 @pytest.mark.parametrize(
     "fault", ["missing", "dangling", "owner", "writable", "arm32", "digest", "hardlink"]
 )
@@ -103,9 +136,7 @@ def test_node_contract_fails_closed_for_invalid_identity(
     elif fault == "writable":
         node.chmod(0o775)
     elif fault == "owner":
-        monkeypatch.setattr(
-            runtime.pwd, "getpwuid", lambda _uid: SimpleNamespace(pw_name="pi")
-        )
+        monkeypatch.setattr(runtime.pwd, "getpwuid", lambda _uid: SimpleNamespace(pw_name="pi"))
     elif fault == "arm32":
         contents = bytearray(node.read_bytes())
         contents[4] = 1
