@@ -199,6 +199,43 @@ def test_missing_application_capabilities_produce_no_series_not_healthy_zero(das
     )
 
 
+def test_http_5xx_ratios_use_request_family_gated_zero(dashboards):
+    template = json.loads(TEMPLATE.read_text(encoding="utf-8"))
+    for document in (template, *dashboards):
+        for title, expected in validator.HTTP_5XX_EXPRESSIONS.items():
+            expression = panel(document, title)["targets"][0]["expr"]
+            assert expression == expected
+            assert "or on() (0 * sum(rate(" in expression
+            assert "or vector(0)" not in expression
+
+    dspace = validator.HTTP_5XX_EXPRESSIONS["5xx error ratio"]
+    assert dspace.count("dspace_http_requests_total") == 3
+    assert dspace.count('environment=~"$environment"') == 3
+    assert dspace.count('status_class="5xx"') == 1
+
+    tokenplace = validator.HTTP_5XX_EXPRESSIONS["token.place HTTP 5xx ratio"]
+    assert tokenplace.count("tokenplace_http_requests_total") == 3
+    for label_filter in (
+        'app="tokenplace"',
+        'environment=~"$environment"',
+        'release="tokenplace"',
+        'cluster=~"$cluster"',
+        'namespace="tokenplace"',
+    ):
+        assert tokenplace.count(label_filter) == 3
+    assert tokenplace.count('status_class="5xx"') == 1
+
+
+@pytest.mark.parametrize("title", validator.HTTP_5XX_EXPRESSIONS)
+def test_validator_rejects_ungated_5xx_ratio(tmp_path, dashboards, title):
+    staging, _ = dashboards
+    changed = copy.deepcopy(staging)
+    target = panel(changed, title)["targets"][0]
+    target["expr"] = target["expr"].replace("0 * sum(rate(", "sum(rate(", 1)
+    with pytest.raises(SystemExit, match="request-family-gated zero"):
+        validator._validate_semantics(changed)
+
+
 def test_query_scoping_and_safe_labels(dashboards):
     staging, _ = dashboards
     serialized = json.dumps(staging)

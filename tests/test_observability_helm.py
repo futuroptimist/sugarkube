@@ -2352,16 +2352,17 @@ esac
         stub.chmod(0o755)
     (bin_dir / "sleep").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     (bin_dir / "sleep").chmod(0o755)
+    dashboard_path = PROD_DASHBOARD if env_name == "prod" else DASHBOARD
+    dashboard_response = json.loads(dashboard_path.read_text(encoding="utf-8"))
+    if mode == "dashboard-content-drift":
+        dashboard_response["panels"][0]["title"] += " drift"
     env = os.environ | {
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
         "AUDIT": str(audit),
         "MODE": mode,
         "CONTEXT": context,
         "ENV_NAME": env_name,
-        "DASHBOARD_RESPONSE": json.dumps({"dashboard": {
-            "uid": "sugarkube-prod-observability" if env_name == "prod" else "sugarkube-staging-observability",
-            "title": "Sugarkube Production Observability" if env_name == "prod" else "Sugarkube Staging Observability",
-        }}),
+        "DASHBOARD_RESPONSE": json.dumps({"dashboard": dashboard_response}),
         "PID_FILE": str(pid_file),
         "FORWARD_PID": str(tmp_path / "port-forward.pid"),
         "FORWARD_LINE": forward_line,
@@ -2480,6 +2481,13 @@ def test_dashboard_verifier_rejects_incorrect_and_malformed_api_json(tmp_path):
         assert result.returncode != 0
         assert "response redacted" in result.stderr
         assert not list((tmp_path / mode).glob("sugarkube-grafana-verify.*"))
+
+
+def test_dashboard_verifier_rejects_material_dashboard_content_drift(tmp_path):
+    result, _, _ = run_dashboard_verifier(tmp_path, "dashboard-content-drift")
+    assert result.returncode != 0
+    assert "content differs" in result.stderr
+    assert "response redacted" in result.stderr
 
 
 def test_dashboard_verifier_cleans_up_when_interrupted(tmp_path):

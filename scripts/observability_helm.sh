@@ -982,15 +982,23 @@ dashboard_verify() (
         000|404|429|500|502|503|504) sleep 1; continue ;;
         *) echo "ERROR: Grafana dashboard API rejected the request (response redacted)." >&2; return 13 ;;
       esac
-      DASHBOARD_UID="${DASHBOARD_UID}" DASHBOARD_TITLE="${DASHBOARD_TITLE}" python3 -c 'import json, os, sys
+      DASHBOARD_UID="${DASHBOARD_UID}" DASHBOARD_TITLE="${DASHBOARD_TITLE}" DASHBOARD_SOURCE="${DASHBOARD}" python3 -c 'import json, os, sys
 try:
     result = json.load(sys.stdin)
 except (json.JSONDecodeError, UnicodeError):
     raise SystemExit("ERROR: Grafana dashboard API returned malformed JSON (response redacted).")
 dashboard = result.get("dashboard") if isinstance(result, dict) else None
 if not isinstance(dashboard, dict) or dashboard.get("uid") != os.environ["DASHBOARD_UID"] or dashboard.get("title") != os.environ["DASHBOARD_TITLE"]:
-    raise SystemExit("ERROR: Grafana did not return the expected provisioned dashboard (response redacted).")' <<<"${body}"
-      echo "Grafana API confirmed dashboard UID ${DASHBOARD_UID} (credentials and response redacted)."
+    raise SystemExit("ERROR: Grafana did not return the expected provisioned dashboard (response redacted).")
+try:
+    with open(os.environ["DASHBOARD_SOURCE"], encoding="utf-8") as source:
+        expected = json.load(source)
+except (OSError, UnicodeError, json.JSONDecodeError):
+    raise SystemExit("ERROR: version-controlled dashboard source is unavailable or malformed.")
+for key in ("panels", "templating"):
+    if dashboard.get(key) != expected.get(key):
+        raise SystemExit("ERROR: Grafana dashboard content differs from the version-controlled source (response redacted).")' <<<"${body}"
+      echo "Grafana API confirmed dashboard UID and content for ${DASHBOARD_UID} (credentials and response redacted)."
       return 0
     fi
     sleep 1

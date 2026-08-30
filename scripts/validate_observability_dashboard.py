@@ -51,6 +51,26 @@ TOKENPLACE_DATA_TITLES = {
 EVENT_METRICS = {"dspace_dchat_requests_total", "dspace_dependency_requests_total"}
 CAPABILITY = 'dspace_release_approved_info{environment=~"$environment"}'
 CAPABILITY_PRESENCE_GATE = f"and on() (count({CAPABILITY}) > 0)"
+HTTP_5XX_EXPRESSIONS = {
+    "5xx error ratio": (
+        '(sum(rate(dspace_http_requests_total{environment=~"$environment",'
+        'status_class="5xx"}[$__rate_interval])) or on() (0 * '
+        'sum(rate(dspace_http_requests_total{environment=~"$environment"}'
+        '[$__rate_interval])))) / clamp_min(sum(rate(dspace_http_requests_total'
+        '{environment=~"$environment"}[$__rate_interval])), 1e-9)'
+    ),
+    "token.place HTTP 5xx ratio": (
+        '(sum(rate(tokenplace_http_requests_total{app="tokenplace",'
+        'environment=~"$environment",release="tokenplace",cluster=~"$cluster",'
+        'namespace="tokenplace",status_class="5xx"}[$__rate_interval])) or on() '
+        '(0 * sum(rate(tokenplace_http_requests_total{app="tokenplace",'
+        'environment=~"$environment",release="tokenplace",cluster=~"$cluster",'
+        'namespace="tokenplace"}[$__rate_interval])))) / clamp_min(sum(rate('
+        'tokenplace_http_requests_total{app="tokenplace",environment=~"$environment",'
+        'release="tokenplace",cluster=~"$cluster",namespace="tokenplace"}'
+        '[$__rate_interval])), 1e-9)'
+    ),
+}
 
 
 def load_dashboard(path: Path) -> dict:
@@ -259,6 +279,11 @@ def _validate_semantics(dashboard: dict) -> None:
         raise SystemExit("ERROR: token.place queries require environment and cluster variables.")
     if any("vector(0)" in expr for expr in token_expressions):
         raise SystemExit("ERROR: token.place queries must preserve missing data.")
+    for title, expected in HTTP_5XX_EXPRESSIONS.items():
+        if panel_expression(dashboard, title) != expected:
+            raise SystemExit(
+                f"ERROR: {title} must use its request-family-gated zero expression."
+            )
     for metric in EVENT_METRICS:
         matches = [expr for expr in expressions if metric in expr]
         if not matches or any(
