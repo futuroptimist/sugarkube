@@ -17,6 +17,18 @@
   "resultRoot": "/run/sugarkube/dspace-chat-synthetic",
   "metricPath": "/var/lib/node_exporter/textfile_collector/dspace-chat.prom",
   "metricsConsumer": "/usr/local/libexec/sugarkube-dspace-chat-synthetic-metrics",
+  "nodeContract": {
+    "version": "20.20.2",
+    "architecture": "aarch64",
+    "executablePath": "/opt/sugarkube/node-v20.20.2-linux-arm64/bin/node",
+    "executableSha256": "05a69ccdcb795f2a8b86c145e71a6a37cce84fccef5aaf25a8fe38bc9423e732",
+    "archiveName": "node-v20.20.2-linux-arm64.tar.xz",
+    "archiveSha256": "73093db209e4e9e09dd7d15a47aeaab1b74833830df03efa5f942a1122c5fa71",
+    "sourceUrl": "https://nodejs.org/dist/v20.20.2/node-v20.20.2-linux-arm64.tar.xz",
+    "owner": "root",
+    "group": "root",
+    "mode": "0755"
+  },
   "browserContract": {
     "name": "system-chromium-v1",
     "architecture": "aarch64",

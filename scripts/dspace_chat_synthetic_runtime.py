@@ -26,6 +26,7 @@ APPROVED = ("3.1.1", "22f506e07e0b5abfd0cf756e9c5827c0458fb4b2")
 APPROVED_REPOSITORY_IDENTITY = "https://github.com/democratizedspace/dspace.git"
 APPROVED_TOKEN_PLACE_ORIGIN = "https://staging.token.place"
 APPROVED_TOKEN_PLACE_MODEL = "qwen3-8b-instruct"
+NODE_EXECUTABLE = "/opt/sugarkube/node-v20.20.2-linux-arm64/bin/node"
 SERVICE_IDENTIFIER = re.compile(r"[a-z_][a-z0-9_-]{0,31}")
 MAX_RESULT_BYTES = 16 * 1024
 MAX_BROWSER_PATH_BYTES = 4096
@@ -50,6 +51,7 @@ REQUIRED = {
     "metricPath",
     "metricsConsumer",
     "browserContract",
+    "nodeContract",
 }
 RUNNER_LOCAL = "runner-local-playwright-v1"
 SYSTEM_CHROMIUM = "system-chromium-v1"
@@ -85,7 +87,7 @@ def load_config(path: Path) -> dict:
         or not REQUIRED <= value.keys()
     ):
         raise Invalid("configuration schema")
-    string_keys = REQUIRED - {"timeoutSeconds", "browserContract"}
+    string_keys = REQUIRED - {"timeoutSeconds", "browserContract", "nodeContract"}
     if (
         any(not isinstance(value[key], str) for key in string_keys)
         or not isinstance(value["timeoutSeconds"], int)
@@ -123,6 +125,34 @@ def load_config(path: Path) -> dict:
         if not Path(value[key]).is_absolute():
             raise Invalid("configured path")
     browser = value["browserContract"]
+    node = value["nodeContract"]
+    node_required = {
+        "version",
+        "architecture",
+        "executablePath",
+        "executableSha256",
+        "archiveName",
+        "archiveSha256",
+        "sourceUrl",
+        "owner",
+        "group",
+        "mode",
+    }
+    if (
+        not isinstance(node, dict)
+        or set(node) != node_required
+        or any(not isinstance(node[key], str) for key in node_required)
+        or node["architecture"] not in {"aarch64", "x86_64"}
+        or node["owner"] != "root"
+        or node["group"] != "root"
+        or node["mode"] != "0755"
+        or not Path(node["executablePath"]).is_absolute()
+        or str(Path(node["executablePath"])).startswith("/home/")
+        or not SHA256.fullmatch(node["executableSha256"])
+        or not SHA256.fullmatch(node["archiveSha256"])
+        or node["sourceUrl"] != f"https://nodejs.org/dist/v{node['version']}/{node['archiveName']}"
+    ):
+        raise Invalid("Node runtime contract")
     if not isinstance(browser, dict) or browser.get("name") not in (RUNNER_LOCAL, SYSTEM_CHROMIUM):
         raise Invalid("browser contract must be selected explicitly")
     if browser["name"] == RUNNER_LOCAL:
@@ -188,7 +218,7 @@ def normalize_root(root: Path) -> Path:
     return resolved
 
 
-def discover_playwright_browser(runner: Path) -> Path:
+def discover_playwright_browser(runner: Path, node: str = NODE_EXECUTABLE) -> Path:
     """Return Playwright's executable only when it is runner-local and usable."""
     browser_root = runner / "playwright-browser"
     try:
@@ -199,7 +229,7 @@ def discover_playwright_browser(runner: Path) -> Path:
         raise Invalid("Playwright browser discovery")
     completed = subprocess.run(
         [
-            "/usr/bin/node",
+            node,
             "-e",
             "const {chromium}=require('@playwright/test');"
             "const p=chromium.executablePath();"
@@ -244,11 +274,79 @@ def _rooted(root: Path, absolute: str) -> Path:
     return root / coordinate.relative_to("/")
 
 
+def validate_node_contract(config: dict, root: Path = Path("/")) -> dict:
+    """Validate one immutable Node coordinate without executing it or searching PATH."""
+    contract = config["nodeContract"]
+    root = normalize_root(root)
+    path = _rooted(root, contract["executablePath"])
+    try:
+        info = path.lstat()
+        resolved = path.resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise Invalid("Node executable coordinate") from None
+    if (
+        path.is_symlink()
+        or resolved != path
+        or not stat.S_ISREG(info.st_mode)
+        or info.st_nlink != 1
+    ):
+        raise Invalid("Node executable identity")
+    relative = Path(contract["executablePath"]).relative_to("/")
+    parent = root
+    for component in relative.parts[:-1]:
+        parent /= component
+        parent_info = parent.stat()
+        if (
+            not stat.S_ISDIR(parent_info.st_mode)
+            or parent_info.st_uid != 0
+            or parent_info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+        ):
+            raise Invalid("Node executable parent ownership or mode")
+    try:
+        owner = pwd.getpwuid(info.st_uid).pw_name
+        group = grp.getgrgid(info.st_gid).gr_name
+    except KeyError:
+        raise Invalid("Node executable ownership") from None
+    if (
+        owner != contract["owner"]
+        or group != contract["group"]
+        or stat.S_IMODE(info.st_mode) != int(contract["mode"], 8)
+        or info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+    ):
+        raise Invalid("Node executable ownership or mode")
+    header = path.read_bytes()[:20]
+    machines = {"aarch64": 183, "x86_64": 62}
+    if (
+        platform.machine() != contract["architecture"]
+        or len(header) < 20
+        or header[:4] != b"\x7fELF"
+        or header[4:6] != b"\x02\x01"
+        or int.from_bytes(header[18:20], "little") != machines[contract["architecture"]]
+    ):
+        raise Invalid("Node executable architecture")
+    if sha256(path) != contract["executableSha256"]:
+        raise Invalid("Node executable digest")
+    return {
+        "version": contract["version"],
+        "architecture": contract["architecture"],
+        "executablePath": contract["executablePath"],
+        "executableSha256": contract["executableSha256"],
+        "archiveName": contract["archiveName"],
+        "archiveSha256": contract["archiveSha256"],
+        "sourceUrl": contract["sourceUrl"],
+    }
+
+
 def validate_browser_contract(config: dict, runner: Path, root: Path = Path("/")) -> dict:
     """Validate and describe the explicitly selected browser without fallback."""
     contract = config["browserContract"]
     if contract["name"] == RUNNER_LOCAL:
-        executable = discover_playwright_browser(runner)
+        if "nodeContract" in config:
+            executable = discover_playwright_browser(
+                runner, config["nodeContract"]["executablePath"]
+            )
+        else:  # Narrow compatibility for validator unit fixtures.
+            executable = discover_playwright_browser(runner)
         return {
             "name": RUNNER_LOCAL,
             "architecture": platform.machine(),
@@ -478,7 +576,7 @@ def validate_runner(config: dict) -> Path:
     if not entrypoint.is_file():
         raise Invalid("runner entrypoint")
     if config["browserContract"]["name"] == RUNNER_LOCAL:
-        discovered = discover_playwright_browser(runner)
+        discovered = discover_playwright_browser(runner, config["nodeContract"]["executablePath"])
         if discovered != (runner / browser_relative).resolve(strict=True):
             raise Invalid("Playwright browser manifest")
     return runner
@@ -553,9 +651,9 @@ def classify_missing_result(stderr: bytes, child_status: int, metadata: dict) ->
         and metadata.get("stderrCaptureComplete") is True
         and metadata.get("stderrTruncated") is False
         and re.fullmatch(
-            rb"runuser: failed to execute /usr/bin/node: "
-            rb"(?:No such file or directory|Permission denied)\r?\n?",
-            stderr,
+            f"runuser: failed to execute {re.escape(NODE_EXECUTABLE)}: "
+            r"(?:No such file or directory|Permission denied)\r?\n?",
+            stderr.decode("utf-8", errors="replace"),
         )
         is not None
     )
@@ -675,6 +773,7 @@ def run(config: dict) -> int:
         resolved = executable if Path(executable).is_absolute() else shutil.which(executable)
         if not resolved or not Path(resolved).is_file() or not os.access(resolved, os.X_OK):
             raise Invalid("required executable")
+    validate_node_contract(config)
     runner = validate_runner(config)
     browser = validate_browser_contract(config, runner)
     if (
@@ -700,7 +799,7 @@ def run(config: dict) -> int:
             result = invocation_dir / "result.json"
             started = int(time.time())
             argv = [
-                "/usr/bin/node",
+                config["nodeContract"]["executablePath"],
                 str(runner / "scripts/run-remote-chat-smoke.mjs"),
                 "--base-url",
                 config["dspaceOrigin"],

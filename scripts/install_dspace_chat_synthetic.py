@@ -13,6 +13,7 @@ import shutil
 import stat
 import subprocess
 import tempfile
+import tarfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -379,6 +380,7 @@ def validate_snapshot(staged: Path, snapshot: Path, root: Path = Path("/")) -> s
     """Apply the runtime's complete runner contract to an installation input."""
     runtime = runtime_module()
     config = load_snapshot_config(staged, snapshot)
+    runtime.validate_node_contract(config, root)
     runner = runtime.validate_runner(config)
     provenance = runtime.validate_browser_contract(config, runner, root)
     manifest = json.loads((runner / "sugarkube-runner-manifest.json").read_text())
@@ -703,6 +705,7 @@ def status(root: Path) -> int:
     runner = runtime.validate_runner(rooted_config)
     if runner != expected_runner:
         raise ValueError("installed runner validation returned an unexpected revision")
+    node_provenance = runtime.validate_node_contract(rooted_config, root)
     provenance = runtime.validate_browser_contract(rooted_config, runner, root)
     if provenance != runner_manifest.get("browserProvenance"):
         raise ValueError("installed runner browser provenance is invalid")
@@ -730,6 +733,11 @@ def status(root: Path) -> int:
     ):
         print(f"{key}={config[key]}")
     print(f"pnpmVersion={runner_manifest['pnpmVersion']}")
+    print(f"nodeVersion={node_provenance['version']}")
+    print(f"nodeArchitecture={node_provenance['architecture']}")
+    print(f"nodeExecutablePath={node_provenance['executablePath']}")
+    print(f"nodeExecutableSha256={node_provenance['executableSha256']}")
+    print(f"nodeArchiveSha256={node_provenance['archiveSha256']}")
     playwright_executable = runner_manifest.get("playwrightBrowserExecutable") or "none"
     print(f"playwrightBrowserExecutable={playwright_executable}")
     print(f"browserContract={config['browserContract']['name']}")
@@ -820,6 +828,53 @@ def install(staged: Path, root: Path, revision: str) -> None:
     activate(retained, root, revision)
 
 
+def provision_node(root: Path, archive: Path, apply: bool) -> int:
+    """Validate an operator-supplied upstream archive and explicitly install Node."""
+    runtime = runtime_module()
+    config = runtime.load_config(ROOT / "config/dspace-chat-synthetic.json")
+    contract = config["nodeContract"]
+    archive = regular_file(archive, "Node distribution archive")
+    if archive.name != contract["archiveName"] or sha(archive) != contract["archiveSha256"]:
+        raise ValueError("Node distribution archive provenance mismatch")
+    member_name = f"node-v{contract['version']}-linux-{contract['architecture']}/bin/node"
+    with tarfile.open(archive, "r:xz") as bundle:
+        members = [member for member in bundle.getmembers() if member.name == member_name]
+        if len(members) != 1 or not members[0].isfile() or members[0].issym() or members[0].islnk():
+            raise ValueError("Node distribution executable identity is ambiguous")
+        stream = bundle.extractfile(members[0])
+        if stream is None:
+            raise ValueError("Node distribution executable is missing")
+        payload = stream.read()
+    if hashlib.sha256(payload).hexdigest() != contract["executableSha256"]:
+        raise ValueError("Node distribution executable digest mismatch")
+    if not apply:
+        print("nodeProvisioning=validated mutation=none authorization=required")
+        return 0
+    destination = rooted(root, contract["executablePath"])
+    if destination.exists():
+        runtime.validate_node_contract(config, root)
+        print("nodeProvisioning=already-correct mutation=none")
+        return 0
+    destination.parent.mkdir(parents=True, mode=0o755, exist_ok=True)
+    temporary = destination.with_name(f".{destination.name}.new")
+    try:
+        with temporary.open("xb") as output:
+            output.write(payload)
+            output.flush()
+            os.fsync(output.fileno())
+        os.chmod(temporary, 0o755)
+        if root.resolve() == Path("/"):
+            os.chown(temporary, 0, 0)
+        os.replace(temporary, destination)
+        runtime.validate_node_contract(config, root)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        destination.unlink(missing_ok=True)
+        raise
+    print("nodeProvisioning=installed coordinate=" + contract["executablePath"])
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -832,6 +887,7 @@ def main() -> int:
             "rollback",
             "repair-runner-access",
             "materialize",
+            "provision-node",
         ),
         default="dry-run",
     )
@@ -850,11 +906,16 @@ def main() -> int:
     parser.add_argument("--browser-bundle", type=Path)
     parser.add_argument("--browser-source-root", type=Path)
     parser.add_argument("--runner-snapshot", type=Path)
+    parser.add_argument("--node-archive", type=Path)
     args = parser.parse_args()
     runtime = runtime_module()
     args.root = runtime.normalize_root(args.root)
     if args.operation == "status":
         return status(args.root)
+    if args.operation == "provision-node":
+        if args.node_archive is None:
+            parser.error("provision-node requires --node-archive")
+        return provision_node(args.root, args.node_archive, args.apply)
     if args.operation == "repair-runner-access":
         if args.runner_manifest_sha256 is None or args.asset_revision is None:
             parser.error(
@@ -908,6 +969,7 @@ def main() -> int:
     configured = runtime.load_config(ROOT / "config/dspace-chat-synthetic.json")
     if configured["browserContract"]["name"] == runtime.SYSTEM_CHROMIUM:
         runtime.validate_browser_contract(configured, Path("."), args.root)
+    runtime.validate_node_contract(configured, args.root)
     with tempfile.TemporaryDirectory() as temporary:
         staged = Path(temporary)
         render(staged)

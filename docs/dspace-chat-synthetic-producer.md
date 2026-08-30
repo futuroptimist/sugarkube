@@ -306,3 +306,55 @@ runners, weakening manifest checks, or adding persistent Git safe-directory conf
 rejects an absent, incomplete, or hash-mismatched retained revision and does not change
 timer/service activation. Observe the same status and metric-age evidence afterward. Any live
 cutover or recovery after merge remains a separate reviewed and explicitly authorized operation.
+
+## Repository-owned Node runtime
+
+The producer does not discover Node through `PATH`. Its independent `nodeContract` pins Node
+20.20.2 for native `aarch64` at the single coordinate
+`/opt/sugarkube/node-v20.20.2-linux-arm64/bin/node`. The contract records the official
+`node-v20.20.2-linux-arm64.tar.xz` URL and SHA-256 as provisioning provenance and separately pins
+the extracted executable SHA-256. This identity is deliberately separate from the DSPACE source
+revision, runner revision, and runner-manifest digest.
+
+Every dry-run, apply, status, access repair, and rollback validates the same coordinate before
+runner activation. Validation does not execute Node: it rejects missing or dangling paths,
+symlinks (including ambiguous aliases), non-regular files, non-root ownership, any mode other than
+`0755`, group/world writability, a host/contract architecture mismatch, a non-64-bit little-endian
+ELF or wrong ELF machine, and an executable digest mismatch. The digest binds the selected binary
+to the declared version; no version command is trusted. User NVM installations, `/usr/bin/nodejs`,
+PATH lookup, and mutable symlinks are never fallbacks. The systemd unit retains `ProtectHome=true`,
+`ProtectSystem=strict`, `SystemCallArchitectures=native`, and `NoNewPrivileges=true`, and grants
+only read access to the pinned `/opt/sugarkube` version directory.
+
+Provisioning and activation are separate authorizations. Download the named archive outside this
+script, compare it with the URL and digest in the configuration, then rehearse without mutation:
+
+```bash
+python3 scripts/install_dspace_chat_synthetic.py provision-node \
+  --node-archive ./node-v20.20.2-linux-arm64.tar.xz
+```
+
+Only a separately authorized operator may install it:
+
+```bash
+sudo python3 scripts/install_dspace_chat_synthetic.py provision-node --apply \
+  --node-archive ./node-v20.20.2-linux-arm64.tar.xz
+```
+
+The installer reads no package repository, installs no OS package, invokes neither Node nor
+systemd, and is idempotent when the exact coordinate is already valid. `--root /tmp/rehearsal-root`
+confines extraction and validation to a private fixture; status under that root never queries
+systemd. Read-only host verification is:
+
+```bash
+sudo python3 scripts/install_dspace_chat_synthetic.py status
+sudo stat -c '%U:%G %a %n' /opt/sugarkube/node-v20.20.2-linux-arm64/bin/node
+sudo sha256sum /opt/sugarkube/node-v20.20.2-linux-arm64/bin/node
+sudo readelf -h /opt/sugarkube/node-v20.20.2-linux-arm64/bin/node
+```
+
+Retained assets preserve their own exact Node contract, so rollback fails closed unless that same
+contract remains valid; rollback never selects another Node. Provisioning does not reload or start
+the unit, enable or modify the timer, or publish a synthetic result. The alert therefore remains
+stale until a separately authorized installation and activation produce a genuinely successful,
+fresh synthetic result; stale metrics are not rewritten by this procedure.
