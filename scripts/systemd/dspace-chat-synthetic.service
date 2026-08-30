@@ -3,6 +3,7 @@ Description=Sugarkube bounded DSPACE chat synthetic producer
 Documentation=https://github.com/futuroptimist/sugarkube/blob/main/docs/dspace-chat-synthetic-producer.md
 After=network-online.target
 Wants=network-online.target
+ConditionPathIsExecutable=/opt/sugarkube/node/v20.20.2-linux-arm64/bin/node
 
 [Service]
 Type=oneshot

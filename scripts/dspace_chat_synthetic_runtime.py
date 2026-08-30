@@ -50,9 +50,11 @@ REQUIRED = {
     "metricPath",
     "metricsConsumer",
     "browserContract",
+    "nodeContract",
 }
 RUNNER_LOCAL = "runner-local-playwright-v1"
 SYSTEM_CHROMIUM = "system-chromium-v1"
+NODE_COORDINATE = "/opt/sugarkube/node/v20.20.2-linux-arm64/bin/node"
 LEGACY_RUNNER_REVISION = "97ab09f13fb098de928a878bf1fe9b8d13032cb5"
 LEGACY_RUNNER_MANIFEST_SHA256 = "36fdab33edc0f1ad518a6d3d247a1bd32d233402387ba57493a9386d78ec9301"
 CURRENT_CRITICAL_FILES = {
@@ -85,7 +87,7 @@ def load_config(path: Path) -> dict:
         or not REQUIRED <= value.keys()
     ):
         raise Invalid("configuration schema")
-    string_keys = REQUIRED - {"timeoutSeconds", "browserContract"}
+    string_keys = REQUIRED - {"timeoutSeconds", "browserContract", "nodeContract"}
     if (
         any(not isinstance(value[key], str) for key in string_keys)
         or not isinstance(value["timeoutSeconds"], int)
@@ -123,6 +125,25 @@ def load_config(path: Path) -> dict:
         if not Path(value[key]).is_absolute():
             raise Invalid("configured path")
     browser = value["browserContract"]
+    node = value["nodeContract"]
+    node_required = {
+        "version", "architecture", "path", "realpath", "sha256", "archiveSha256",
+        "archiveMember", "owner", "group", "mode",
+    }
+    if (
+        not isinstance(node, dict)
+        or set(node) != node_required
+        or any(not isinstance(node[key], str) for key in node_required)
+        or node["version"] != "20.20.2"
+        or node["architecture"] != "aarch64"
+        or node["path"] != NODE_COORDINATE or node["path"] != node["realpath"]
+        or not Path(node["path"]).is_absolute()
+        or "/home/" in node["path"]
+        or not SHA256.fullmatch(node["sha256"])
+        or not SHA256.fullmatch(node["archiveSha256"])
+        or node["owner"] != "root" or node["group"] != "root" or node["mode"] != "0755"
+    ):
+        raise Invalid("Node contract")
     if not isinstance(browser, dict) or browser.get("name") not in (RUNNER_LOCAL, SYSTEM_CHROMIUM):
         raise Invalid("browser contract must be selected explicitly")
     if browser["name"] == RUNNER_LOCAL:
@@ -188,7 +209,9 @@ def normalize_root(root: Path) -> Path:
     return resolved
 
 
-def discover_playwright_browser(runner: Path) -> Path:
+def discover_playwright_browser(
+    runner: Path, node: str = NODE_COORDINATE
+) -> Path:
     """Return Playwright's executable only when it is runner-local and usable."""
     browser_root = runner / "playwright-browser"
     try:
@@ -199,7 +222,7 @@ def discover_playwright_browser(runner: Path) -> Path:
         raise Invalid("Playwright browser discovery")
     completed = subprocess.run(
         [
-            "/usr/bin/node",
+            node,
             "-e",
             "const {chromium}=require('@playwright/test');"
             "const p=chromium.executablePath();"
@@ -242,6 +265,40 @@ def _rooted(root: Path, absolute: str) -> Path:
     if not coordinate.is_absolute() or ".." in coordinate.parts:
         raise Invalid("rooted coordinate")
     return root / coordinate.relative_to("/")
+
+
+def validate_node_contract(config: dict, root: Path = Path("/")) -> dict:
+    """Validate the single pinned Node ELF coordinate without executing it."""
+    contract = config["nodeContract"]
+    root = normalize_root(root)
+    if root == Path("/") and platform.machine() != contract["architecture"]:
+        raise Invalid("Node architecture")
+    path = _rooted(root, contract["path"])
+    expected = _rooted(root, contract["realpath"])
+    try:
+        info = path.lstat()
+        resolved = path.resolve(strict=True)
+        resolved.relative_to(root)
+    except (OSError, RuntimeError, ValueError):
+        raise Invalid("Node provenance") from None
+    expected_uid = 0 if root == Path("/") else os.getuid()
+    expected_gid = 0 if root == Path("/") else os.getgid()
+    try:
+        header = path.read_bytes()[:20]
+    except OSError:
+        raise Invalid("Node provenance") from None
+    # ELF64, little endian, EM_AARCH64. Version provenance is bound by the
+    # exact upstream archive/member and executable digests, never by execution.
+    if (
+        path.is_symlink() or resolved != expected or not stat.S_ISREG(info.st_mode)
+        or info.st_nlink != 1 or info.st_uid != expected_uid or info.st_gid != expected_gid
+        or stat.S_IMODE(info.st_mode) != 0o755 or not os.access(path, os.X_OK)
+        or sha256(path) != contract["sha256"]
+        or len(header) < 20 or header[:7] != b"\x7fELF\x02\x01\x01"
+        or int.from_bytes(header[18:20], "little") != 183
+    ):
+        raise Invalid("Node provenance")
+    return dict(contract)
 
 
 def validate_browser_contract(config: dict, runner: Path, root: Path = Path("/")) -> dict:
@@ -553,7 +610,9 @@ def classify_missing_result(stderr: bytes, child_status: int, metadata: dict) ->
         and metadata.get("stderrCaptureComplete") is True
         and metadata.get("stderrTruncated") is False
         and re.fullmatch(
-            rb"runuser: failed to execute /usr/bin/node: "
+            rb"runuser: failed to execute (?:/usr/bin/node|"
+            + re.escape(NODE_COORDINATE.encode("ascii"))
+            + rb"): "
             rb"(?:No such file or directory|Permission denied)\r?\n?",
             stderr,
         )
@@ -676,6 +735,7 @@ def run(config: dict) -> int:
         if not resolved or not Path(resolved).is_file() or not os.access(resolved, os.X_OK):
             raise Invalid("required executable")
     runner = validate_runner(config)
+    node = validate_node_contract(config)
     browser = validate_browser_contract(config, runner)
     if (
         browser
@@ -700,7 +760,7 @@ def run(config: dict) -> int:
             result = invocation_dir / "result.json"
             started = int(time.time())
             argv = [
-                "/usr/bin/node",
+                node["path"],
                 str(runner / "scripts/run-remote-chat-smoke.mjs"),
                 "--base-url",
                 config["dspaceOrigin"],

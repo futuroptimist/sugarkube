@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 import platform
@@ -53,6 +54,69 @@ def config(tmp_path: Path) -> dict:
         metricsConsumer=str(tmp_path / "consumer.py"),
     )
     return value
+
+
+def node_fixture(tmp_path: Path, value: dict | None = None) -> tuple[dict, Path]:
+    """Create a non-executed ELF64/AArch64 fixture at the configured coordinate."""
+    value = copy.deepcopy(value or config(tmp_path))
+    path = tmp_path / value["nodeContract"]["path"].removeprefix("/")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = b"\x7fELF\x02\x01\x01" + b"\0" * 11 + (183).to_bytes(2, "little") + b"fixture"
+    path.write_bytes(payload)
+    path.chmod(0o755)
+    value["nodeContract"]["sha256"] = hashlib.sha256(payload).hexdigest()
+    return value, path
+
+
+def test_node_contract_accepts_only_exact_root_controlled_native_fixture(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    value, node = node_fixture(root)
+    assert runtime.validate_node_contract(value, root)["path"] == value["nodeContract"]["path"]
+
+    node.chmod(0o775)
+    with pytest.raises(runtime.Invalid, match="provenance"):
+        runtime.validate_node_contract(value, root)
+    node.chmod(0o755)
+    value["nodeContract"]["version"] = "20.20.1"
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps(value))
+    with pytest.raises(runtime.Invalid, match="Node contract"):
+        runtime.load_config(path)
+
+
+@pytest.mark.parametrize("failure", ["missing", "dangling", "digest", "arm32", "hardlink"])
+def test_node_contract_fails_closed_without_fallback(tmp_path: Path, failure: str) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    value, node = node_fixture(root)
+    if failure == "missing":
+        node.unlink()
+    elif failure == "dangling":
+        node.unlink(); node.symlink_to("absent")
+    elif failure == "digest":
+        value["nodeContract"]["sha256"] = "0" * 64
+    elif failure == "arm32":
+        payload = bytearray(node.read_bytes()); payload[4] = 1
+        node.write_bytes(payload); node.chmod(0o755)
+        value["nodeContract"]["sha256"] = hashlib.sha256(payload).hexdigest()
+    else:
+        os.link(node, node.with_name("node-alias"))
+    with pytest.raises(runtime.Invalid):
+        runtime.validate_node_contract(value, root)
+    assert value["nodeContract"]["path"] != "/opt/sugarkube/node/v20.20.2-linux-arm64/bin/nodejs"
+    assert "PATH" not in value["nodeContract"]
+
+
+def test_node_contract_rejects_home_coordinate_and_wrong_architecture(tmp_path: Path) -> None:
+    value = config(tmp_path)
+    value["nodeContract"]["path"] = value["nodeContract"]["realpath"] = (
+        "/home/pi/.nvm/versions/node/v20.20.2/bin/node"
+    )
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps(value))
+    with pytest.raises(runtime.Invalid, match="Node contract"):
+        runtime.load_config(path)
 
 
 def candidate_runner_identity() -> str:
@@ -497,7 +561,7 @@ def test_runner_validation_accepts_complete_independent_git_repository(
     real_run = subprocess.run
 
     def fake_node(argv, *args, **kwargs):
-        if argv[0] == "/usr/bin/node":
+        if argv[0] == "/opt/sugarkube/node/v20.20.2-linux-arm64/bin/node":
             return subprocess.CompletedProcess(
                 argv,
                 0,
@@ -550,7 +614,7 @@ def test_exact_legacy_manifest_validates_declared_and_tracked_compatibility_file
     real_run = subprocess.run
 
     def fake_node(argv, *args, **kwargs):
-        if argv[0] == "/usr/bin/node":
+        if argv[0] == "/opt/sugarkube/node/v20.20.2-linux-arm64/bin/node":
             return subprocess.CompletedProcess(
                 argv,
                 0,
@@ -790,7 +854,7 @@ def test_every_runner_git_command_trusts_only_exact_validated_directory(
     monkeypatch.setenv("SUGARKUBE_TEST_INHERITED", "preserved")
 
     def inspect(argv, *args, **kwargs):
-        if argv[0] == "/usr/bin/node":
+        if argv[0] == "/opt/sugarkube/node/v20.20.2-linux-arm64/bin/node":
             return subprocess.CompletedProcess(
                 argv,
                 0,
@@ -880,7 +944,7 @@ def test_root_owned_runner_validates_as_unprivileged_user_without_mutation(tmp_p
         f"c=json.loads(Path({str(config_path)!r}).read_text()); "
         "real_run=subprocess.run; "
         "r.subprocess.run=lambda argv,*a,**kw: subprocess.CompletedProcess("
-        f"argv,0,stdout={browser_path!r}.encode()) if argv[0]=='/usr/bin/node' "
+        f"argv,0,stdout={browser_path!r}.encode()) if argv[0]=='/opt/sugarkube/node/v20.20.2-linux-arm64/bin/node' "
         "else real_run(argv,*a,**kw); "
         "print(r.validate_runner(c))"
     )
@@ -935,7 +999,7 @@ def test_git_optional_locks_keep_validation_index_metadata_read_only(
     monkeypatch.setenv("SUGARKUBE_TEST_INHERITED", "preserved")
 
     def fake_node(argv, *args, **kwargs):
-        if argv[0] == "/usr/bin/node":
+        if argv[0] == "/opt/sugarkube/node/v20.20.2-linux-arm64/bin/node":
             return subprocess.CompletedProcess(
                 argv,
                 0,
@@ -962,7 +1026,7 @@ def test_runner_validation_still_rejects_dirty_tracked_content_without_optional_
     real_run = subprocess.run
 
     def fake_node(argv, *args, **kwargs):
-        if argv[0] == "/usr/bin/node":
+        if argv[0] == "/opt/sugarkube/node/v20.20.2-linux-arm64/bin/node":
             pytest.fail("dirty tracked state must fail before browser discovery")
         return real_run(argv, *args, **kwargs)
 
@@ -1013,7 +1077,7 @@ def test_runner_validation_rejects_shallow_or_failed_fsck(
             return subprocess.CompletedProcess(argv, 0, stdout="true\n", stderr="")
         if "fsck" in argv and fault == "fsck":
             raise subprocess.CalledProcessError(1, argv)
-        if argv[0] == "/usr/bin/node":
+        if argv[0] == "/opt/sugarkube/node/v20.20.2-linux-arm64/bin/node":
             runner = Path(value["runnerRoot"]) / value["runnerRevision"]
             return subprocess.CompletedProcess(
                 argv,
@@ -1069,7 +1133,7 @@ def test_runner_validation_rejects_incomplete_snapshot_contracts(
     real_run = subprocess.run
 
     def controlled_run(argv, *args, **kwargs):
-        if argv[0] == "/usr/bin/node":
+        if argv[0] == "/opt/sugarkube/node/v20.20.2-linux-arm64/bin/node":
             return subprocess.CompletedProcess(argv, 0, stdout=str(discovered).encode())
         if "status" in argv:
             return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
@@ -1102,6 +1166,7 @@ def prepare_runtime_run(
     monkeypatch.setattr(runtime.pwd, "getpwnam", lambda _name: account)
     monkeypatch.setattr(runtime.grp, "getgrnam", lambda _name: SimpleNamespace(gr_gid=os.getgid()))
     monkeypatch.setattr(runtime, "validate_runner", lambda _config: runner)
+    monkeypatch.setattr(runtime, "validate_node_contract", lambda _config: _config["nodeContract"])
     monkeypatch.setattr(
         runtime,
         "validate_browser_contract",
@@ -1183,7 +1248,7 @@ def test_runtime_run_uses_minimal_environment_and_cleans_direct_entries(
     assert "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH" not in child["env"]
     separator = child["argv"].index("--")
     node_argv = child["argv"][separator + 1 :]
-    assert node_argv[0] == "/usr/bin/node"
+    assert node_argv[0] == "/opt/sugarkube/node/v20.20.2-linux-arm64/bin/node"
     assert node_argv.count("--expected-provider") == 1
     provider_index = node_argv.index("--expected-provider")
     assert node_argv[provider_index + 1] == value["provider"] == "token-place"
@@ -1257,10 +1322,10 @@ def test_missing_result_classification_is_allowlisted_bounded_and_sanitized(
 @pytest.mark.parametrize(
     "diagnostic",
     [
-        b"runuser: failed to execute /usr/bin/node: No such file or directory\n",
-        b"runuser: failed to execute /usr/bin/node: No such file or directory",
-        b"runuser: failed to execute /usr/bin/node: Permission denied\n",
-        b"runuser: failed to execute /usr/bin/node: Permission denied\r\n",
+        b"runuser: failed to execute /opt/sugarkube/node/v20.20.2-linux-arm64/bin/node: No such file or directory\n",
+        b"runuser: failed to execute /opt/sugarkube/node/v20.20.2-linux-arm64/bin/node: No such file or directory",
+        b"runuser: failed to execute /opt/sugarkube/node/v20.20.2-linux-arm64/bin/node: Permission denied\n",
+        b"runuser: failed to execute /opt/sugarkube/node/v20.20.2-linux-arm64/bin/node: Permission denied\r\n",
     ],
 )
 def test_missing_result_classifies_complete_runuser_node_exec_failures(
@@ -1283,19 +1348,19 @@ def test_missing_result_classifies_complete_runuser_node_exec_failures(
 @pytest.mark.parametrize(
     ("diagnostic", "metadata_override"),
     [
-        (b"runuser: failed to execute /usr/bin/nodejs: No such file or directory\n", {}),
-        (b"runuser: failed to execute /usr/bin/node: Input/output error\n", {}),
-        (b"prefix runuser: failed to execute /usr/bin/node: Permission denied\n", {}),
+        (b"runuser: failed to execute /opt/sugarkube/node/v20.20.2-linux-arm64/bin/nodejs: No such file or directory\n", {}),
+        (b"runuser: failed to execute /opt/sugarkube/node/v20.20.2-linux-arm64/bin/node: Input/output error\n", {}),
+        (b"prefix runuser: failed to execute /opt/sugarkube/node/v20.20.2-linux-arm64/bin/node: Permission denied\n", {}),
         (
-            b"runuser: failed to execute /usr/bin/node: No such file or directory\n",
+            b"runuser: failed to execute /opt/sugarkube/node/v20.20.2-linux-arm64/bin/node: No such file or directory\n",
             {"stderrCaptureComplete": False},
         ),
         (
-            b"runuser: failed to execute /usr/bin/node: No such file or directory\n",
+            b"runuser: failed to execute /opt/sugarkube/node/v20.20.2-linux-arm64/bin/node: No such file or directory\n",
             {"stderrTruncated": True},
         ),
         (
-            b"runuser: failed to execute /usr/bin/node: No such file or directory\n"
+            b"runuser: failed to execute /opt/sugarkube/node/v20.20.2-linux-arm64/bin/node: No such file or directory\n"
             + b"x" * runtime.MAX_CHILD_DIAGNOSTIC_BYTES,
             {"stderrTruncated": True},
         ),
@@ -1322,6 +1387,7 @@ def test_runuser_node_exec_near_misses_remain_generic(
 def test_bounded_stderr_reproduces_runuser_node_exec_diagnostic_without_exposure(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    # Preserve the exact bounded evidence contract emitted before provisioning existed.
     diagnostic = b"runuser: failed to execute /usr/bin/node: No such file or directory\n"
 
     completed, captured, metadata = runtime.bounded_stderr_run(
@@ -1561,7 +1627,7 @@ def test_runuser_node_exec_failure_archives_only_semantic_metadata(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     value, metric, _sibling, _calls = prepare_runtime_run(tmp_path, monkeypatch, "missing")
-    diagnostic = b"runuser: failed to execute /usr/bin/node: No such file or directory\n"
+    diagnostic = b"runuser: failed to execute /opt/sugarkube/node/v20.20.2-linux-arm64/bin/node: No such file or directory\n"
     metadata = {
         "stderrBytes": len(diagnostic),
         "stderrSha256": __import__("hashlib").sha256(diagnostic).hexdigest(),
@@ -1836,12 +1902,12 @@ def test_immutable_runner_config_resolves_validated_chromium_executable(
 def test_materialize_discovers_browser_and_is_source_independent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    if not Path("/usr/bin/node").is_file():
-        # TODO: Environments running this test should provide /usr/bin/node.
+    if not Path("/opt/sugarkube/node/v20.20.2-linux-arm64/bin/node").is_file():
+        # TODO: Environments running this test should provide /opt/sugarkube/node/v20.20.2-linux-arm64/bin/node.
         # Root cause: The test intentionally uses the absolute production Node path,
         # while some development and test images omit it.
-        # Estimated fix: Provision Node at /usr/bin/node in the affected environment.
-        pytest.skip("runtime contract requires /usr/bin/node")
+        # Estimated fix: Provision Node at /opt/sugarkube/node/v20.20.2-linux-arm64/bin/node in the affected environment.
+        pytest.skip("runtime contract requires /opt/sugarkube/node/v20.20.2-linux-arm64/bin/node")
     source, revision, browser_bundle, pnpm = materialization_fixture(tmp_path)
     output = tmp_path / "output" / revision
     monkeypatch.setattr(installer, "runtime_module", lambda: runtime)
@@ -2073,7 +2139,7 @@ def test_playwright_browser_discovery_rejects_symlinked_root(
     real_run = subprocess.run
 
     def controlled_run(argv, *args, **kwargs):
-        if argv[0] == "/usr/bin/node":
+        if argv[0] == "/opt/sugarkube/node/v20.20.2-linux-arm64/bin/node":
             return subprocess.CompletedProcess(argv, 0, stdout=str(external_browser).encode())
         if "status" in argv:
             return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
@@ -2119,7 +2185,7 @@ def test_runner_validation_rejects_discovered_browser_hash_tampering(
     def controlled_run(argv, *args, **kwargs):
         if "status" in argv:
             return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
-        if argv[0] == "/usr/bin/node":
+        if argv[0] == "/opt/sugarkube/node/v20.20.2-linux-arm64/bin/node":
             return subprocess.CompletedProcess(argv, 0, stdout=str(browser).encode())
         return real_run(argv, *args, **kwargs)
 
@@ -2299,6 +2365,10 @@ class StatusRuntime:
         return json.loads((runner / "sugarkube-runner-manifest.json").read_text())[
             "browserProvenance"
         ]
+
+    @staticmethod
+    def validate_node_contract(value: dict, _root: Path) -> dict:
+        return value["nodeContract"]
 
 
 def status_installation(tmp_path: Path) -> tuple[Path, Path, str]:
@@ -2670,6 +2740,10 @@ class FakeSnapshotRuntime:
     @staticmethod
     def validate_browser_contract(_config: dict, _runner: Path, _root: Path) -> dict:
         return {"name": runtime.SYSTEM_CHROMIUM}
+
+    @staticmethod
+    def validate_node_contract(config: dict, _root: Path) -> dict:
+        return config["nodeContract"]
 
 
 @pytest.mark.parametrize(
@@ -3236,6 +3310,7 @@ def test_access_repair_preserves_normalized_git_index_through_post_validation(
 
         runner_storage_identity = staticmethod(runtime.runner_storage_identity)
         validate_runner = staticmethod(runtime.validate_runner)
+        validate_node_contract = staticmethod(lambda config, _root: config["nodeContract"])
 
         @staticmethod
         def validate_browser_contract(_config: dict, selected: Path, _root: Path) -> dict:
@@ -3246,7 +3321,7 @@ def test_access_repair_preserves_normalized_git_index_through_post_validation(
     real_run = subprocess.run
 
     def fake_node(argv, *args, **kwargs):
-        if argv[0] == "/usr/bin/node":
+        if argv[0] == "/opt/sugarkube/node/v20.20.2-linux-arm64/bin/node":
             return subprocess.CompletedProcess(
                 argv,
                 0,
@@ -3839,6 +3914,7 @@ def test_same_revision_manifest_migration_preserves_runner_and_rolls_back_exactl
         installer.render(path)
         config_path = path / "etc/sugarkube/dspace-chat-synthetic.json"
         rendered = json.loads(config_path.read_text())
+        rendered["nodeContract"]["sha256"] = fixture_node_digest
         rendered["runnerRevision"] = revision
         if manifest_sha is None:
             rendered.pop("runnerManifestSha256")
@@ -3857,11 +3933,13 @@ def test_same_revision_manifest_migration_preserves_runner_and_rolls_back_exactl
         write_asset_manifest(path, asset_manifest, legacy=not preserve_classification)
         return installer.sha(path / "manifest.json")
 
+    root = tmp_path / "private-root"
+    root.mkdir()
+    fixture_config, _fixture_node = node_fixture(root)
+    fixture_node_digest = fixture_config["nodeContract"]["sha256"]
     old_staged, new_staged = tmp_path / "old-assets", tmp_path / "new-assets"
     old_asset = staged(old_staged, None, preserve_classification=False)
     new_asset = staged(new_staged, qualified_sha)
-    root = tmp_path / "private-root"
-    root.mkdir()
     real_run = subprocess.run
     observed_commands: list[list[str]] = []
 

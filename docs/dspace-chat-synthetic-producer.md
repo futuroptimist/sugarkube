@@ -4,6 +4,43 @@ This runbook describes construction and review of the staging producer. It does 
 host cutover. Live installation, unit mutation, execution, timer activation, cluster access, Helm,
 and production mutation require a separate reviewed and explicitly authorized operation.
 
+## Pinned Node runtime
+
+The producer never discovers Node through `PATH`, `/usr/bin/nodejs`, an OS package candidate, a
+symlink, or NVM. Configuration selects Node **20.20.2** only at
+`/opt/sugarkube/node/v20.20.2-linux-arm64/bin/node`, binding it to the official
+`node-v20.20.2-linux-arm64.tar.xz` archive SHA-256, its exact member name, and the member SHA-256.
+This provisioning identity remains separate from the DSPACE revision, runner manifest, and retained
+producer-asset identities.
+
+Dry-run, status, repair, activation, and rollback validate that same coordinate without executing
+it. It must be a non-symlink, singly linked executable regular file with exact digest, `root:root`
+ownership and mode `0755`, and an ELF64 little-endian AArch64 header. The real path must equal the
+selected path. Thus missing, dangling, aliased, writable, user-home/NVM, 32-bit ARM, wrong-version,
+and wrong-digest candidates fail closed before Playwright. Existing systemd protections, including
+`ProtectHome=true`, `ProtectSystem=strict`, and `SystemCallArchitectures=native`, are unchanged.
+
+Acquire the named upstream archive separately. These commands first validate it read-only, then
+perform the distinct, explicitly authorized provisioning action, and finally inspect the result:
+
+```bash
+python3 scripts/install_dspace_chat_synthetic.py provision-node \
+  --node-archive /absolute/path/node-v20.20.2-linux-arm64.tar.xz
+sudo python3 scripts/install_dspace_chat_synthetic.py provision-node --apply \
+  --node-archive /absolute/path/node-v20.20.2-linux-arm64.tar.xz
+sudo python3 scripts/install_dspace_chat_synthetic.py status
+stat -Lc '%U:%G %a %n' /opt/sugarkube/node/v20.20.2-linux-arm64/bin/node
+sha256sum /opt/sugarkube/node/v20.20.2-linux-arm64/bin/node
+file /opt/sugarkube/node/v20.20.2-linux-arm64/bin/node
+```
+
+Provisioning never contacts a package repository and never invokes Node or systemd. Without
+`--apply` it only validates the archive. An alternate `--root` supports host-isolated rehearsal;
+reapplication accepts only an already-valid coordinate and is idempotent. Every rollback uses its
+retained configuration's exact Node contract. Provisioning does not activate assets or change the
+timer, and the alert remains stale until separately authorized installation and a genuinely
+successful fresh synthetic result.
+
 ## Artifact and trust model
 
 The repository owns the wrapper, runtime, bounded metrics consumer, non-secret coordinates, unit

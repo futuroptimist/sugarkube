@@ -13,6 +13,7 @@ import shutil
 import stat
 import subprocess
 import tempfile
+import tarfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -379,6 +380,7 @@ def validate_snapshot(staged: Path, snapshot: Path, root: Path = Path("/")) -> s
     """Apply the runtime's complete runner contract to an installation input."""
     runtime = runtime_module()
     config = load_snapshot_config(staged, snapshot)
+    runtime.validate_node_contract(config, root)
     runner = runtime.validate_runner(config)
     provenance = runtime.validate_browser_contract(config, runner, root)
     manifest = json.loads((runner / "sugarkube-runner-manifest.json").read_text())
@@ -680,6 +682,7 @@ def status(root: Path) -> int:
 
     runtime = runtime_module()
     config = runtime.load_config(live_paths["etc/sugarkube/dspace-chat-synthetic.json"])
+    node_provenance = runtime.validate_node_contract(config, root)
     runner_parent = rooted(root, config["runnerRoot"])
     expected_runner = runner_parent / runtime.runner_storage_identity(config)
     if expected_runner.is_symlink() or not expected_runner.is_dir():
@@ -717,6 +720,11 @@ def status(root: Path) -> int:
     print(f"runnerRevision={config['runnerRevision']}")
     print(f"runnerStorageIdentity={runtime.runner_storage_identity(config)}")
     print(f"runnerManifestSha256={sha(runner_manifest_path)}")
+    print(f"nodeVersion={node_provenance['version']}")
+    print(f"nodeArchitecture={node_provenance['architecture']}")
+    print(f"nodePath={node_provenance['path']}")
+    print(f"nodeSha256={node_provenance['sha256']}")
+    print(f"nodeArchiveSha256={node_provenance['archiveSha256']}")
     for key in (
         "dspaceVersion",
         "dspaceSourceRevision",
@@ -820,6 +828,46 @@ def install(staged: Path, root: Path, revision: str) -> None:
     activate(retained, root, revision)
 
 
+def provision_node(archive: Path, root: Path, apply: bool) -> None:
+    """Validate a pinned local archive and optionally install its exact Node member."""
+    runtime = runtime_module()
+    config = runtime.load_config(ROOT / "config/dspace-chat-synthetic.json")
+    contract = config["nodeContract"]
+    regular_file(archive, "Node distribution archive")
+    if sha(archive) != contract["archiveSha256"]:
+        raise ValueError("Node distribution archive digest mismatch")
+    try:
+        with tarfile.open(archive, "r:xz") as bundle:
+            member = bundle.getmember(contract["archiveMember"])
+            stream = bundle.extractfile(member)
+            payload = stream.read() if stream is not None else b""
+    except (KeyError, OSError, tarfile.TarError):
+        raise ValueError("Node distribution archive member is invalid") from None
+    if not member.isfile() or hashlib.sha256(payload).hexdigest() != contract["sha256"]:
+        raise ValueError("Node distribution executable digest mismatch")
+    if not apply:
+        print("validation=passed mutation=none provisioning=authorization-required")
+        return
+    destination = rooted(root, contract["path"])
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.exists():
+        runtime.validate_node_contract(config, root)
+        return
+    temporary = destination.with_name(".node.tmp")
+    try:
+        with temporary.open("xb") as output:
+            output.write(payload)
+            output.flush()
+            os.fsync(output.fileno())
+        temporary.chmod(0o755)
+        if root == Path("/"):
+            os.chown(temporary, 0, 0)
+        os.replace(temporary, destination)
+        runtime.validate_node_contract(config, root)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -832,6 +880,7 @@ def main() -> int:
             "rollback",
             "repair-runner-access",
             "materialize",
+            "provision-node",
         ),
         default="dry-run",
     )
@@ -850,11 +899,17 @@ def main() -> int:
     parser.add_argument("--browser-bundle", type=Path)
     parser.add_argument("--browser-source-root", type=Path)
     parser.add_argument("--runner-snapshot", type=Path)
+    parser.add_argument("--node-archive", type=Path)
     args = parser.parse_args()
     runtime = runtime_module()
     args.root = runtime.normalize_root(args.root)
     if args.operation == "status":
         return status(args.root)
+    if args.operation == "provision-node":
+        if args.node_archive is None:
+            parser.error("provision-node requires --node-archive")
+        provision_node(args.node_archive.absolute(), args.root, args.apply)
+        return 0
     if args.operation == "repair-runner-access":
         if args.runner_manifest_sha256 is None or args.asset_revision is None:
             parser.error(
