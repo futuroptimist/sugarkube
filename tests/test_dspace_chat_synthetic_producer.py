@@ -55,6 +55,88 @@ def config(tmp_path: Path) -> dict:
     return value
 
 
+def synthetic_node_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[dict, Path]:
+    """Create non-runnable ELF metadata for provenance-only validation."""
+    root = tmp_path / "node-root"
+    root.mkdir(mode=0o755)
+    node = root / "opt/sugarkube/nodejs/v20.20.2-linux-arm64/bin/node"
+    node.parent.mkdir(parents=True, mode=0o755)
+    for parent in reversed(node.parents):
+        if parent == root.parent:
+            break
+        parent.chmod(0o755)
+    contents = bytearray(20)
+    contents[:6] = b"\x7fELF\x02\x01"
+    contents[18:20] = (183).to_bytes(2, "little")
+    node.write_bytes(contents + b"synthetic-not-executable-code")
+    node.chmod(0o755)
+    value = json.loads(CONFIG.read_text())
+    contract = value["nodeContract"]
+    contract["executableSha256"] = runtime.sha256(node)
+    monkeypatch.setattr(runtime.platform, "machine", lambda: "aarch64")
+    return value, root
+
+
+def test_node_contract_accepts_root_controlled_native_provenance_without_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, root = synthetic_node_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        runtime.subprocess, "run", lambda *_a, **_k: pytest.fail("Node fixture was executed")
+    )
+    assert runtime.validate_node_contract(value, root)["version"] == "20.20.2"
+
+
+@pytest.mark.parametrize(
+    "fault", ["missing", "dangling", "owner", "writable", "arm32", "digest", "hardlink"]
+)
+def test_node_contract_fails_closed_for_invalid_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    value, root = synthetic_node_fixture(tmp_path, monkeypatch)
+    node = root / value["nodeContract"]["executablePath"].removeprefix("/")
+    if fault == "missing":
+        node.unlink()
+    elif fault == "dangling":
+        node.unlink()
+        node.symlink_to(node.with_name("absent"))
+    elif fault == "writable":
+        node.chmod(0o775)
+    elif fault == "owner":
+        monkeypatch.setattr(
+            runtime.pwd, "getpwuid", lambda _uid: SimpleNamespace(pw_name="pi")
+        )
+    elif fault == "arm32":
+        contents = bytearray(node.read_bytes())
+        contents[4] = 1
+        contents[18:20] = (40).to_bytes(2, "little")
+        node.write_bytes(contents)
+        value["nodeContract"]["executableSha256"] = runtime.sha256(node)
+    elif fault == "digest":
+        value["nodeContract"]["executableSha256"] = "0" * 64
+    else:
+        os.link(node, node.with_name("second-identity"))
+    with pytest.raises(runtime.Invalid, match="Node runtime provenance"):
+        runtime.validate_node_contract(value, root)
+
+
+def test_node_configuration_rejects_home_path_wrong_version_and_path_fallback(
+    tmp_path: Path,
+) -> None:
+    for key, replacement in (
+        ("version", "20.20.1"),
+        ("executablePath", "/home/pi/.nvm/versions/node/v20.20.2/bin/node"),
+        ("executablePath", "/usr/bin/nodejs"),
+        ("executablePath", "node"),
+    ):
+        value = json.loads(CONFIG.read_text())
+        value["nodeContract"][key] = replacement
+        path = tmp_path / f"{key}-{len(replacement)}.json"
+        path.write_text(json.dumps(value))
+        with pytest.raises(runtime.Invalid, match="Node runtime contract"):
+            runtime.load_config(path)
+
+
 def candidate_runner_identity() -> str:
     return runtime.runner_storage_identity(json.loads(CONFIG.read_text(encoding="utf-8")))
 
@@ -497,7 +579,7 @@ def test_runner_validation_accepts_complete_independent_git_repository(
     real_run = subprocess.run
 
     def fake_node(argv, *args, **kwargs):
-        if argv[0] == "/usr/bin/node":
+        if argv[0] == runtime.NODE_EXECUTABLE:
             return subprocess.CompletedProcess(
                 argv,
                 0,
@@ -550,7 +632,7 @@ def test_exact_legacy_manifest_validates_declared_and_tracked_compatibility_file
     real_run = subprocess.run
 
     def fake_node(argv, *args, **kwargs):
-        if argv[0] == "/usr/bin/node":
+        if argv[0] == runtime.NODE_EXECUTABLE:
             return subprocess.CompletedProcess(
                 argv,
                 0,
@@ -790,7 +872,7 @@ def test_every_runner_git_command_trusts_only_exact_validated_directory(
     monkeypatch.setenv("SUGARKUBE_TEST_INHERITED", "preserved")
 
     def inspect(argv, *args, **kwargs):
-        if argv[0] == "/usr/bin/node":
+        if argv[0] == runtime.NODE_EXECUTABLE:
             return subprocess.CompletedProcess(
                 argv,
                 0,
@@ -880,7 +962,7 @@ def test_root_owned_runner_validates_as_unprivileged_user_without_mutation(tmp_p
         f"c=json.loads(Path({str(config_path)!r}).read_text()); "
         "real_run=subprocess.run; "
         "r.subprocess.run=lambda argv,*a,**kw: subprocess.CompletedProcess("
-        f"argv,0,stdout={browser_path!r}.encode()) if argv[0]=='/usr/bin/node' "
+        f"argv,0,stdout={browser_path!r}.encode()) if argv[0]=={runtime.NODE_EXECUTABLE!r} "
         "else real_run(argv,*a,**kw); "
         "print(r.validate_runner(c))"
     )
@@ -935,7 +1017,7 @@ def test_git_optional_locks_keep_validation_index_metadata_read_only(
     monkeypatch.setenv("SUGARKUBE_TEST_INHERITED", "preserved")
 
     def fake_node(argv, *args, **kwargs):
-        if argv[0] == "/usr/bin/node":
+        if argv[0] == runtime.NODE_EXECUTABLE:
             return subprocess.CompletedProcess(
                 argv,
                 0,
@@ -962,7 +1044,7 @@ def test_runner_validation_still_rejects_dirty_tracked_content_without_optional_
     real_run = subprocess.run
 
     def fake_node(argv, *args, **kwargs):
-        if argv[0] == "/usr/bin/node":
+        if argv[0] == runtime.NODE_EXECUTABLE:
             pytest.fail("dirty tracked state must fail before browser discovery")
         return real_run(argv, *args, **kwargs)
 
@@ -1013,7 +1095,7 @@ def test_runner_validation_rejects_shallow_or_failed_fsck(
             return subprocess.CompletedProcess(argv, 0, stdout="true\n", stderr="")
         if "fsck" in argv and fault == "fsck":
             raise subprocess.CalledProcessError(1, argv)
-        if argv[0] == "/usr/bin/node":
+        if argv[0] == runtime.NODE_EXECUTABLE:
             runner = Path(value["runnerRoot"]) / value["runnerRevision"]
             return subprocess.CompletedProcess(
                 argv,
@@ -1069,7 +1151,7 @@ def test_runner_validation_rejects_incomplete_snapshot_contracts(
     real_run = subprocess.run
 
     def controlled_run(argv, *args, **kwargs):
-        if argv[0] == "/usr/bin/node":
+        if argv[0] == runtime.NODE_EXECUTABLE:
             return subprocess.CompletedProcess(argv, 0, stdout=str(discovered).encode())
         if "status" in argv:
             return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
@@ -1120,6 +1202,9 @@ def prepare_runtime_run(
         )
     )
     monkeypatch.setattr(runtime, "validate_dir", lambda *_args: None)
+    monkeypatch.setattr(
+        runtime, "validate_node_contract", lambda value: dict(value["nodeContract"])
+    )
     monkeypatch.setattr(runtime.os, "chown", lambda *_args: None)
     calls: list[dict] = []
 
@@ -1183,7 +1268,7 @@ def test_runtime_run_uses_minimal_environment_and_cleans_direct_entries(
     assert "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH" not in child["env"]
     separator = child["argv"].index("--")
     node_argv = child["argv"][separator + 1 :]
-    assert node_argv[0] == "/usr/bin/node"
+    assert node_argv[0] == value["nodeContract"]["executablePath"]
     assert node_argv.count("--expected-provider") == 1
     provider_index = node_argv.index("--expected-provider")
     assert node_argv[provider_index + 1] == value["provider"] == "token-place"
@@ -1482,7 +1567,8 @@ def test_bounded_stderr_run_returns_when_descendant_retains_stderr(tmp_path: Pat
                 "-c",
                 (
                     "import subprocess, sys; "
-                    f"child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)']); "
+                    "child = subprocess.Popen([sys.executable, '-c', "
+                    "'import time; time.sleep(30)']); "
                     f"open({str(pid_path)!r}, 'w').write(str(child.pid))"
                 ),
             ]
@@ -2073,7 +2159,7 @@ def test_playwright_browser_discovery_rejects_symlinked_root(
     real_run = subprocess.run
 
     def controlled_run(argv, *args, **kwargs):
-        if argv[0] == "/usr/bin/node":
+        if argv[0] == runtime.NODE_EXECUTABLE:
             return subprocess.CompletedProcess(argv, 0, stdout=str(external_browser).encode())
         if "status" in argv:
             return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
@@ -2119,7 +2205,7 @@ def test_runner_validation_rejects_discovered_browser_hash_tampering(
     def controlled_run(argv, *args, **kwargs):
         if "status" in argv:
             return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
-        if argv[0] == "/usr/bin/node":
+        if argv[0] == runtime.NODE_EXECUTABLE:
             return subprocess.CompletedProcess(argv, 0, stdout=str(browser).encode())
         return real_run(argv, *args, **kwargs)
 
@@ -2299,6 +2385,10 @@ class StatusRuntime:
         return json.loads((runner / "sugarkube-runner-manifest.json").read_text())[
             "browserProvenance"
         ]
+
+    @staticmethod
+    def validate_node_contract(value: dict, _root: Path) -> dict:
+        return value["nodeContract"]
 
 
 def status_installation(tmp_path: Path) -> tuple[Path, Path, str]:
@@ -2670,6 +2760,10 @@ class FakeSnapshotRuntime:
     @staticmethod
     def validate_browser_contract(_config: dict, _runner: Path, _root: Path) -> dict:
         return {"name": runtime.SYSTEM_CHROMIUM}
+
+    @staticmethod
+    def validate_node_contract(config: dict, _root: Path) -> dict:
+        return config["nodeContract"]
 
 
 @pytest.mark.parametrize(
@@ -3243,10 +3337,14 @@ def test_access_repair_preserves_normalized_git_index_through_post_validation(
                 "browserProvenance"
             ]
 
+        @staticmethod
+        def validate_node_contract(config: dict, _root: Path) -> dict:
+            return config["nodeContract"]
+
     real_run = subprocess.run
 
     def fake_node(argv, *args, **kwargs):
-        if argv[0] == "/usr/bin/node":
+        if argv[0] == runtime.NODE_EXECUTABLE:
             return subprocess.CompletedProcess(
                 argv,
                 0,
@@ -3812,6 +3910,9 @@ def test_same_revision_manifest_migration_preserves_runner_and_rolls_back_exactl
         runtime, "LEGACY_RUNNER_MANIFEST_SHA256", runtime.sha256(legacy_manifest_path)
     )
     monkeypatch.setattr(runtime, "validate_browser_contract", lambda *_args: provenance)
+    monkeypatch.setattr(
+        runtime, "validate_node_contract", lambda value, _root: value["nodeContract"]
+    )
     monkeypatch.setattr(installer, "runtime_module", lambda: runtime)
 
     qualified_parent = tmp_path / "qualified"

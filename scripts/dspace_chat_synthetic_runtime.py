@@ -50,9 +50,11 @@ REQUIRED = {
     "metricPath",
     "metricsConsumer",
     "browserContract",
+    "nodeContract",
 }
 RUNNER_LOCAL = "runner-local-playwright-v1"
 SYSTEM_CHROMIUM = "system-chromium-v1"
+NODE_EXECUTABLE = "/opt/sugarkube/nodejs/v20.20.2-linux-arm64/bin/node"
 LEGACY_RUNNER_REVISION = "97ab09f13fb098de928a878bf1fe9b8d13032cb5"
 LEGACY_RUNNER_MANIFEST_SHA256 = "36fdab33edc0f1ad518a6d3d247a1bd32d233402387ba57493a9386d78ec9301"
 CURRENT_CRITICAL_FILES = {
@@ -85,7 +87,7 @@ def load_config(path: Path) -> dict:
         or not REQUIRED <= value.keys()
     ):
         raise Invalid("configuration schema")
-    string_keys = REQUIRED - {"timeoutSeconds", "browserContract"}
+    string_keys = REQUIRED - {"timeoutSeconds", "browserContract", "nodeContract"}
     if (
         any(not isinstance(value[key], str) for key in string_keys)
         or not isinstance(value["timeoutSeconds"], int)
@@ -162,6 +164,38 @@ def load_config(path: Path) -> dict:
             )
         ):
             raise Invalid("system browser contract")
+    node = value["nodeContract"]
+    required_node = {
+        "version",
+        "architecture",
+        "executablePath",
+        "executableRealpath",
+        "executableSha256",
+        "distributionUrl",
+        "archiveSha256",
+        "owner",
+        "group",
+        "mode",
+    }
+    if (
+        not isinstance(node, dict)
+        or set(node) != required_node
+        or any(not isinstance(node[key], str) for key in required_node)
+        or node["version"] != "20.20.2"
+        or node["architecture"] != "aarch64"
+        or node["executablePath"] != NODE_EXECUTABLE
+        or node["executableRealpath"] != node["executablePath"]
+        or node["distributionUrl"]
+        != "https://nodejs.org/dist/v20.20.2/node-v20.20.2-linux-arm64.tar.xz"
+        or node["archiveSha256"]
+        != "73093db209e4e9e09dd7d15a47aeaab1b74833830df03efa5f942a1122c5fa71"
+        or node["executableSha256"]
+        != "05a69ccdcb795f2a8b86c145e71a6a37cce84fccef5aaf25a8fe38bc9423e732"
+        or node["owner"] != "root"
+        or node["group"] != "root"
+        or node["mode"] != "0755"
+    ):
+        raise Invalid("Node runtime contract")
     return value
 
 
@@ -199,7 +233,7 @@ def discover_playwright_browser(runner: Path) -> Path:
         raise Invalid("Playwright browser discovery")
     completed = subprocess.run(
         [
-            "/usr/bin/node",
+            NODE_EXECUTABLE,
             "-e",
             "const {chromium}=require('@playwright/test');"
             "const p=chromium.executablePath();"
@@ -242,6 +276,53 @@ def _rooted(root: Path, absolute: str) -> Path:
     if not coordinate.is_absolute() or ".." in coordinate.parts:
         raise Invalid("rooted coordinate")
     return root / coordinate.relative_to("/")
+
+
+def validate_node_contract(config: dict, root: Path = Path("/")) -> dict:
+    """Validate the pinned root-controlled native Node executable without running it."""
+    contract = config["nodeContract"]
+    root = normalize_root(root)
+    path = _rooted(root, contract["executablePath"])
+    if contract["executablePath"].startswith("/home/"):
+        raise Invalid("Node runtime provenance")
+    try:
+        info = path.lstat()
+        resolved = path.resolve(strict=True)
+        resolved.relative_to(root)
+        owner = pwd.getpwuid(info.st_uid).pw_name
+        group = grp.getgrgid(info.st_gid).gr_name
+        with path.open("rb") as stream:
+            header = stream.read(20)
+    except (OSError, KeyError, ValueError, RuntimeError):
+        raise Invalid("Node runtime provenance") from None
+    expected = _rooted(root, contract["executableRealpath"])
+    native_aarch64 = (
+        len(header) == 20
+        and header[:4] == b"\x7fELF"
+        and header[4:6] == b"\x02\x01"
+        and int.from_bytes(header[18:20], "little") == 183
+    )
+    if (
+        path.is_symlink()
+        or not stat.S_ISREG(info.st_mode)
+        or info.st_nlink != 1
+        or not os.access(path, os.X_OK)
+        or resolved != expected
+        or owner != contract["owner"]
+        or group != contract["group"]
+        or f"{stat.S_IMODE(info.st_mode):04o}" != contract["mode"]
+        or sha256(path) != contract["executableSha256"]
+        or not native_aarch64
+        or platform.machine() != contract["architecture"]
+    ):
+        raise Invalid("Node runtime provenance")
+    for parent in path.parents:
+        if parent == root:
+            break
+        parent_info = parent.lstat()
+        if parent.is_symlink() or parent_info.st_uid != 0 or parent_info.st_mode & 0o022:
+            raise Invalid("Node runtime provenance")
+    return dict(contract)
 
 
 def validate_browser_contract(config: dict, runner: Path, root: Path = Path("/")) -> dict:
@@ -553,7 +634,8 @@ def classify_missing_result(stderr: bytes, child_status: int, metadata: dict) ->
         and metadata.get("stderrCaptureComplete") is True
         and metadata.get("stderrTruncated") is False
         and re.fullmatch(
-            rb"runuser: failed to execute /usr/bin/node: "
+            rb"runuser: failed to execute (?:/usr/bin/node|"
+            rb"/opt/sugarkube/nodejs/v20\.20\.2-linux-arm64/bin/node): "
             rb"(?:No such file or directory|Permission denied)\r?\n?",
             stderr,
         )
@@ -675,6 +757,7 @@ def run(config: dict) -> int:
         resolved = executable if Path(executable).is_absolute() else shutil.which(executable)
         if not resolved or not Path(resolved).is_file() or not os.access(resolved, os.X_OK):
             raise Invalid("required executable")
+    node = validate_node_contract(config)
     runner = validate_runner(config)
     browser = validate_browser_contract(config, runner)
     if (
@@ -700,7 +783,7 @@ def run(config: dict) -> int:
             result = invocation_dir / "result.json"
             started = int(time.time())
             argv = [
-                "/usr/bin/node",
+                node["executablePath"],
                 str(runner / "scripts/run-remote-chat-smoke.mjs"),
                 "--base-url",
                 config["dspaceOrigin"],

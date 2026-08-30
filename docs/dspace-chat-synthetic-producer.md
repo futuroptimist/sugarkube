@@ -15,6 +15,55 @@ version `3.1.1`, source `22f506e07e0b5abfd0cf756e9c5827c0458fb4b2`, identity con
 `build-info-v1`, and explicitly selected provider-config contract
 `legacy-no-default-provider-v1`.
 
+### Node runtime ownership
+
+Node has a separate provisioning identity; it is neither the DSPACE runner revision nor its
+manifest identity. The sole coordinate is
+`/opt/sugarkube/nodejs/v20.20.2-linux-arm64/bin/node`, from the official
+`node-v20.20.2-linux-arm64.tar.xz` distribution. Configuration pins its upstream URL, archive and
+executable SHA-256 values, version `20.20.2`, `aarch64` architecture, realpath, and
+`root:root:0755` metadata. Validation reads, but never executes, the candidate: it requires ELF64
+little-endian AArch64, one non-symlink regular-file identity, the exact digest, and root-owned,
+non-group/world-writable coordinate ancestors. Missing, dangling, hard-linked, writable,
+wrong-version, wrong-digest, and 32-bit ARM candidates fail before Playwright.
+
+There is no PATH, `/usr/bin/nodejs`, distro-package, NVM, home-directory, or mutable-symlink
+fallback. A user NVM binary cannot meet the durable root ownership, `ProtectHome=true`, and native
+architecture contracts. The unit retains `ProtectHome=true`, `ProtectSystem=strict`,
+`SystemCallArchitectures=native`, and `NoNewPrivileges=true`, and exposes the pinned `/opt` tree
+read-only.
+
+Provisioning consumes an operator-supplied archive; it does not download, contact a package
+repository, execute Node, or call systemd. Validate first, then obtain separate authorization for
+the explicit mutation:
+
+```bash
+python3 scripts/install_dspace_chat_synthetic.py provision-node \
+  --node-archive /absolute/path/node-v20.20.2-linux-arm64.tar.xz
+sudo python3 scripts/install_dspace_chat_synthetic.py provision-node --apply \
+  --node-archive /absolute/path/node-v20.20.2-linux-arm64.tar.xz
+```
+
+`--root /tmp/rehearsal-root` maps the exact coordinate into a private root. Dry-run, status,
+installation, repair, and rollback validate the same fixture without executing it; alternate-root
+status never queries systemd. Provisioning authorization remains distinct from activation:
+provisioning never reloads, starts, enables, or executes the service. Reapplication validates an
+already-current coordinate without rewriting it. Rollback validates the retained asset against the
+same Node contract and never changes Node independently.
+
+Read-only operator verification is:
+
+```bash
+sudo python3 scripts/install_dspace_chat_synthetic.py status
+sudo sha256sum /opt/sugarkube/nodejs/v20.20.2-linux-arm64/bin/node
+sudo stat -Lc '%U:%G %a %h %F %n' \
+  /opt/sugarkube/nodejs/v20.20.2-linux-arm64/bin/node
+sudo readelf -h /opt/sugarkube/nodejs/v20.20.2-linux-arm64/bin/node
+```
+
+The alert remains stale until a separately authorized installation and a genuinely successful,
+fresh synthetic result. Provisioning alone neither proves success nor resolves the alert.
+
 The logical Git revision is not, by itself, the immutable storage identity. New assets bind the
 SHA-256 of the complete generated runner manifest in configuration and store the runner at
 `<runnerRevision>-<runnerManifestSha256>`. This permits a reviewed critical-file or manifest-contract
@@ -215,10 +264,12 @@ may remain active and never infer success from browser exit alone.
 Bind a retained classification to the exact service execution by comparing its `invocation` field
 with systemd's invocation ID for that execution; do not infer the binding from timestamps or the
 fact that the record is the latest one. The narrowly matched
-`node-executable-launch-failure` classification means that `runuser` reported that the fixed
-`/usr/bin/node` coordinate could not be executed because it was unavailable to the kernel or
-permission was denied. It is selected only for a complete, untruncated diagnostic with that exact
-bounded structure and child status 1. It does not prove that the path itself is absent: an
+`node-executable-launch-failure` classification means that `runuser` reported that the pinned Node
+coordinate could not be executed because it was unavailable to the kernel or permission was
+denied. The bounded matcher retains the historical `/usr/bin/node` form only so already-persisted
+diagnostics remain classifiable; new launches use the pinned `/opt` coordinate. It is selected only
+for a complete, untruncated diagnostic with that exact bounded structure and child status 1. It does
+not prove that the path itself is absent: an
 unavailable interpreter or dynamic loader can produce the same operating-system result. The record
 intentionally excludes raw stdout, raw stderr, credentials, browser state, and page content. This
 classification does not repair the child execution environment. Diagnostics that are incomplete,
