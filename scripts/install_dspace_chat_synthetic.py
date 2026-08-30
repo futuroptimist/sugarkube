@@ -12,6 +12,7 @@ import re
 import shutil
 import stat
 import subprocess
+import tarfile
 import tempfile
 from pathlib import Path
 
@@ -387,6 +388,63 @@ def validate_snapshot(staged: Path, snapshot: Path, root: Path = Path("/")) -> s
     return config["runnerRevision"]
 
 
+def provision_node(archive: Path, root: Path, apply: bool) -> int:
+    """Validate an operator-supplied official archive and optionally install its pinned Node."""
+    runtime = runtime_module()
+    config = runtime.load_config(ROOT / "config/dspace-chat-synthetic.json")
+    contract = config["nodeContract"]
+    archive = regular_file(archive, "Node archive")
+    if archive.name != contract["archiveName"] or sha(archive) != contract["archiveSha256"]:
+        raise ValueError("Node archive provenance mismatch")
+    member_name = f"node-v{contract['version']}-linux-arm64/bin/node"
+    with tarfile.open(archive, "r:xz") as bundle:
+        members = [member for member in bundle.getmembers() if member.name == member_name]
+        if len(members) != 1 or not members[0].isfile() or members[0].issym() or members[0].islnk():
+            raise ValueError("Node archive executable identity is ambiguous")
+        source = bundle.extractfile(members[0])
+        if source is None:
+            raise ValueError("Node archive executable is missing")
+        contents = source.read()
+    if hashlib.sha256(contents).hexdigest() != contract["executableSha256"]:
+        raise ValueError("Node archive executable digest mismatch")
+    with tempfile.TemporaryDirectory() as temporary:
+        rehearsal_root = Path(temporary)
+        candidate = rooted(rehearsal_root, contract["executablePath"])
+        candidate.parent.mkdir(parents=True)
+        candidate.write_bytes(contents)
+        candidate.chmod(0o755)
+        runtime.validate_node_contract(config, rehearsal_root)
+    if not apply:
+        print("nodeValidation=passed mutation=none provisioning=authorization-required")
+        return 0
+    destination = rooted(root, contract["executablePath"])
+    if destination.exists() or destination.is_symlink():
+        runtime.validate_node_contract(config, root)
+        print("nodeProvisioning=already-correct mutation=none")
+        return 0
+    version_root = destination.parent.parent
+    if version_root.exists() or version_root.is_symlink():
+        raise ValueError("Node version coordinate is incomplete or ambiguous")
+    version_root.parent.mkdir(parents=True, exist_ok=True)
+    temporary = Path(tempfile.mkdtemp(prefix=f".{version_root.name}.", dir=version_root.parent))
+    try:
+        binary = temporary / "bin/node"
+        binary.parent.mkdir()
+        binary.write_bytes(contents)
+        binary.chmod(0o755)
+        for path in (temporary, binary.parent, binary):
+            os.chown(path, 0, 0)
+            if path != binary:
+                path.chmod(0o755)
+        os.replace(temporary, version_root)
+        runtime.validate_node_contract(config, root)
+    except Exception:
+        shutil.rmtree(temporary, ignore_errors=True)
+        raise
+    print("nodeProvisioning=installed authorization=explicit")
+    return 0
+
+
 def rooted(root: Path, absolute: str) -> Path:
     coordinate = Path(absolute)
     if not coordinate.is_absolute() or ".." in coordinate.parts:
@@ -578,6 +636,7 @@ def repair_runner_access(
     retained_manifest = validate_retained_asset(retained)
     validate_live_assets(root, retained, retained_manifest)
     config = runtime_module().load_config(retained / "etc/sugarkube/dspace-chat-synthetic.json")
+    runtime_module().validate_node_contract(config, root)
     if config["runnerRevision"] != revision:
         raise ValueError("installed runner revision does not match authorization")
     runner = rooted(root, config["runnerRoot"]) / runtime_module().runner_storage_identity(config)
@@ -680,6 +739,7 @@ def status(root: Path) -> int:
 
     runtime = runtime_module()
     config = runtime.load_config(live_paths["etc/sugarkube/dspace-chat-synthetic.json"])
+    node_provenance = runtime.validate_node_contract(config, root)
     runner_parent = rooted(root, config["runnerRoot"])
     expected_runner = runner_parent / runtime.runner_storage_identity(config)
     if expected_runner.is_symlink() or not expected_runner.is_dir():
@@ -717,6 +777,11 @@ def status(root: Path) -> int:
     print(f"runnerRevision={config['runnerRevision']}")
     print(f"runnerStorageIdentity={runtime.runner_storage_identity(config)}")
     print(f"runnerManifestSha256={sha(runner_manifest_path)}")
+    print(f"nodeVersion={node_provenance['version']}")
+    print(f"nodeArchitecture={node_provenance['architecture']}")
+    print(f"nodeExecutablePath={node_provenance['executablePath']}")
+    print(f"nodeExecutableSha256={node_provenance['executableSha256']}")
+    print(f"nodeArchiveSha256={node_provenance['archiveSha256']}")
     for key in (
         "dspaceVersion",
         "dspaceSourceRevision",
@@ -831,6 +896,7 @@ def main() -> int:
             "status",
             "rollback",
             "repair-runner-access",
+            "provision-node",
             "materialize",
         ),
         default="dry-run",
@@ -850,11 +916,16 @@ def main() -> int:
     parser.add_argument("--browser-bundle", type=Path)
     parser.add_argument("--browser-source-root", type=Path)
     parser.add_argument("--runner-snapshot", type=Path)
+    parser.add_argument("--node-archive", type=Path)
     args = parser.parse_args()
     runtime = runtime_module()
     args.root = runtime.normalize_root(args.root)
     if args.operation == "status":
         return status(args.root)
+    if args.operation == "provision-node":
+        if args.node_archive is None:
+            parser.error("provision-node requires --node-archive")
+        return provision_node(args.node_archive, args.root, args.apply)
     if args.operation == "repair-runner-access":
         if args.runner_manifest_sha256 is None or args.asset_revision is None:
             parser.error(
@@ -893,6 +964,7 @@ def main() -> int:
         retained = args.root / "var/lib/sugarkube/dspace-chat-installations" / args.revision
         validate_retained_asset(retained)
         rollback_config = runtime.load_config(retained / "etc/sugarkube/dspace-chat-synthetic.json")
+        runtime.validate_node_contract(rollback_config, args.root)
         rollback_runner = rooted(args.root, rollback_config["runnerRoot"]) / (
             runtime.runner_storage_identity(rollback_config)
         )
@@ -906,6 +978,7 @@ def main() -> int:
     # The system contract is independent of the copied runner. Check it before
     # rendering assets (and therefore before any installation-side output).
     configured = runtime.load_config(ROOT / "config/dspace-chat-synthetic.json")
+    runtime.validate_node_contract(configured, args.root)
     if configured["browserContract"]["name"] == runtime.SYSTEM_CHROMIUM:
         runtime.validate_browser_contract(configured, Path("."), args.root)
     with tempfile.TemporaryDirectory() as temporary:

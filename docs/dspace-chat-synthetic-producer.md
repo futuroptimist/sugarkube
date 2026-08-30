@@ -15,6 +15,60 @@ version `3.1.1`, source `22f506e07e0b5abfd0cf756e9c5827c0458fb4b2`, identity con
 `build-info-v1`, and explicitly selected provider-config contract
 `legacy-no-default-provider-v1`.
 
+### Repository-owned Node runtime
+
+Node is a separate provisioning identity, not the DSPACE source revision or generated runner
+manifest identity. The selected contract is the official Node.js `20.20.2` Linux arm64 archive
+`node-v20.20.2-linux-arm64.tar.xz` at its versioned upstream URL, archive SHA-256
+`73093db209e4e9e09dd7d15a47aeaab1b74833830df03efa5f942a1122c5fa71`, and executable SHA-256
+`05a69ccdcb795f2a8b86c145e71a6a37cce84fccef5aaf25a8fe38bc9423e732`. The only executable
+coordinate is `/opt/sugarkube/node-v20.20.2-linux-arm64/bin/node`; it is a non-symlink,
+single-linked, `root:root:0755` ELF64 little-endian AArch64 regular file. Validation reads its ELF
+header and digest but never executes it. The digest binds the executable to the declared version,
+while the separately checked archive digest and exact archive member bind its upstream provenance.
+
+There is no PATH, `/usr/bin/nodejs`, distro-candidate, mutable symlink, or NVM fallback. In
+particular, a user-owned executable below `/home` is both outside this trust model and inaccessible
+with `ProtectHome=true`; accepting it would also make a service dependency mutable by that user.
+Missing, dangling, multiply linked, non-root-owned, group/world-writable, wrong-mode,
+wrong-architecture, wrong-version, or digest-mismatched candidates fail before Playwright.
+`ProtectSystem=strict`, `SystemCallArchitectures=native`, and `NoNewPrivileges=true` remain intact,
+and the exact coordinate is explicitly read-only in the unit sandbox.
+
+Provisioning consumes an archive already obtained and reviewed by the operator; it never contacts
+the network or a package manager. Rehearse archive and executable validation without mutation:
+
+```bash
+sudo python3 scripts/install_dspace_chat_synthetic.py provision-node \
+  --node-archive /absolute/staging/node-v20.20.2-linux-arm64.tar.xz
+```
+
+After separate authorization, add `--apply` to install the exact versioned directory atomically.
+An already valid coordinate is an idempotent no-op; an incomplete or conflicting coordinate fails
+closed. This authorization provisions Node only: it does not install an OS package, render or
+activate producer assets, call systemd, execute Node, run the synthetic, or alter the timer.
+Producer `dry-run`, `apply`, `status`, repair, and rollback independently revalidate the same Node
+contract. Alternate `--root` rehearsals inspect only fixtures beneath that root and never invoke a
+package manager, Node, or systemd.
+
+Read-only host verification (the installer prints only bounded provenance) is:
+
+```bash
+sudo python3 scripts/install_dspace_chat_synthetic.py status
+sudo stat -Lc '%U:%G %a %h %F %n' \
+  /opt/sugarkube/node-v20.20.2-linux-arm64/bin/node
+sudo sha256sum /opt/sugarkube/node-v20.20.2-linux-arm64/bin/node
+sudo readelf -h /opt/sugarkube/node-v20.20.2-linux-arm64/bin/node | \
+  sed -n '/Class:/p;/Data:/p;/Machine:/p'
+```
+
+Every retained asset carries its own Node contract. Rollback validates that exact contract before
+switching the current asset, so an older retained asset is not silently run with another Node.
+Installing Node and activating assets remain separately authorized, and neither proves synthetic
+success. The alert remains stale until those actions are separately approved and a genuinely fresh,
+successful bounded synthetic result is published; this repository change does not claim that staging
+succeeded or that the alert resolved.
+
 The logical Git revision is not, by itself, the immutable storage identity. New assets bind the
 SHA-256 of the complete generated runner manifest in configuration and store the runner at
 `<runnerRevision>-<runnerManifestSha256>`. This permits a reviewed critical-file or manifest-contract

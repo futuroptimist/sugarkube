@@ -218,6 +218,81 @@ def system_browser_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> t
     return contract, root
 
 
+def node_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[dict, Path, Path]:
+    root = tmp_path / "node-root"
+    value = config(tmp_path)
+    node = root / value["nodeContract"]["executablePath"].removeprefix("/")
+    node.parent.mkdir(parents=True)
+    # Minimal ELF64 little-endian AArch64 header; validation never executes it.
+    contents = bytearray(64)
+    contents[:6] = b"\x7fELF\x02\x01"
+    contents[18:20] = (183).to_bytes(2, "little")
+    node.write_bytes(contents)
+    node.chmod(0o755)
+    value["nodeContract"]["executableSha256"] = runtime.sha256(node)
+    monkeypatch.setattr(runtime.platform, "machine", lambda: "aarch64")
+    return value, root, node
+
+
+def test_node_contract_accepts_root_controlled_native_provenance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, root, node = node_fixture(tmp_path, monkeypatch)
+    provenance = runtime.validate_node_contract(value, root)
+    assert provenance["version"] == "20.20.2"
+    assert provenance["executablePath"] == value["nodeContract"]["executablePath"]
+    assert provenance["executableSha256"] == runtime.sha256(node)
+
+
+@pytest.mark.parametrize(
+    "fault", ["missing", "dangling", "hardlink", "writable", "wrong-arch", "digest"]
+)
+def test_node_contract_fails_closed_for_candidate_faults(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    value, root, node = node_fixture(tmp_path, monkeypatch)
+    if fault == "missing":
+        node.unlink()
+    elif fault == "dangling":
+        node.unlink()
+        node.symlink_to(root / "absent")
+    elif fault == "hardlink":
+        os.link(node, node.with_name("node-alias"))
+    elif fault == "writable":
+        node.chmod(0o775)
+    elif fault == "wrong-arch":
+        contents = bytearray(node.read_bytes())
+        contents[18:20] = (40).to_bytes(2, "little")  # 32-bit ARM
+        node.write_bytes(contents)
+        value["nodeContract"]["executableSha256"] = runtime.sha256(node)
+    else:
+        node.write_bytes(node.read_bytes() + b"drift")
+    with pytest.raises(runtime.Invalid, match="Node runtime"):
+        runtime.validate_node_contract(value, root)
+
+
+def test_node_contract_rejects_user_home_wrong_version_and_unpinned_fallbacks(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "config.json"
+    for replacement in (
+        {
+            "executablePath": "/home/pi/.nvm/versions/node/v20.20.2/bin/node",
+            "executableRealpath": "/home/pi/.nvm/versions/node/v20.20.2/bin/node",
+        },
+        {"version": "20.20.1"},
+        {"executablePath": "/usr/bin/nodejs", "executableRealpath": "/usr/bin/nodejs"},
+    ):
+        value = config(tmp_path)
+        value["nodeContract"].update(replacement)
+        path.write_text(json.dumps(value))
+        with pytest.raises(runtime.Invalid, match="Node runtime contract"):
+            runtime.load_config(path)
+    source = Path(runtime.__file__).read_text()
+    assert "shutil.which(node" not in source
+    assert '"/usr/bin/nodejs"' not in source
+
+
 def test_explicit_system_browser_contract_validates_target_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1104,6 +1179,13 @@ def prepare_runtime_run(
     monkeypatch.setattr(runtime, "validate_runner", lambda _config: runner)
     monkeypatch.setattr(
         runtime,
+        "validate_node_contract",
+        lambda _config: {
+            "executablePath": _config["nodeContract"]["executablePath"],
+        },
+    )
+    monkeypatch.setattr(
+        runtime,
         "validate_browser_contract",
         lambda *_args, **_kwargs: {
             "name": runtime.RUNNER_LOCAL,
@@ -1183,7 +1265,7 @@ def test_runtime_run_uses_minimal_environment_and_cleans_direct_entries(
     assert "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH" not in child["env"]
     separator = child["argv"].index("--")
     node_argv = child["argv"][separator + 1 :]
-    assert node_argv[0] == "/usr/bin/node"
+    assert node_argv[0] == value["nodeContract"]["executablePath"]
     assert node_argv.count("--expected-provider") == 1
     provider_index = node_argv.index("--expected-provider")
     assert node_argv[provider_index + 1] == value["provider"] == "token-place"
@@ -1561,7 +1643,10 @@ def test_runuser_node_exec_failure_archives_only_semantic_metadata(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     value, metric, _sibling, _calls = prepare_runtime_run(tmp_path, monkeypatch, "missing")
-    diagnostic = b"runuser: failed to execute /usr/bin/node: No such file or directory\n"
+    diagnostic = (
+        f"runuser: failed to execute {value['nodeContract']['executablePath']}: "
+        "No such file or directory\n"
+    ).encode()
     metadata = {
         "stderrBytes": len(diagnostic),
         "stderrSha256": __import__("hashlib").sha256(diagnostic).hexdigest(),
@@ -2295,6 +2380,19 @@ class StatusRuntime:
         return runner
 
     @staticmethod
+    def validate_node_contract(value: dict, _root: Path) -> dict:
+        return {
+            key: value["nodeContract"][key]
+            for key in (
+                "version",
+                "architecture",
+                "executablePath",
+                "executableSha256",
+                "archiveSha256",
+            )
+        }
+
+    @staticmethod
     def validate_browser_contract(_value: dict, runner: Path, _root: Path) -> dict:
         return json.loads((runner / "sugarkube-runner-manifest.json").read_text())[
             "browserProvenance"
@@ -2537,6 +2635,10 @@ def test_system_browser_preflight_precedes_all_installer_mutation(
         def validate_browser_contract(*_args) -> dict:
             raise runtime.Invalid("browser preflight")
 
+        @staticmethod
+        def validate_node_contract(*_args) -> dict:
+            return {}
+
     monkeypatch.chdir(tmp_path)
     (tmp_path / "rehearsal-root").mkdir()
     monkeypatch.setattr(installer, "runtime_module", lambda: RejectingRuntime())
@@ -2670,6 +2772,10 @@ class FakeSnapshotRuntime:
     @staticmethod
     def validate_browser_contract(_config: dict, _runner: Path, _root: Path) -> dict:
         return {"name": runtime.SYSTEM_CHROMIUM}
+
+    @staticmethod
+    def validate_node_contract(_config: dict, _root: Path) -> dict:
+        return {}
 
 
 @pytest.mark.parametrize(
@@ -3243,6 +3349,10 @@ def test_access_repair_preserves_normalized_git_index_through_post_validation(
                 "browserProvenance"
             ]
 
+        @staticmethod
+        def validate_node_contract(_config: dict, _root: Path) -> dict:
+            return {}
+
     real_run = subprocess.run
 
     def fake_node(argv, *args, **kwargs):
@@ -3615,6 +3725,8 @@ def test_rollback_cli_validates_dry_run_without_activation(
     )
     monkeypatch.setattr(installer, "validate_snapshot", lambda *_args: None)
     monkeypatch.setattr(installer, "validate_runner_access", lambda *_args: None)
+    monkeypatch.setattr(runtime, "validate_node_contract", lambda *_args: {})
+    monkeypatch.setattr(installer, "runtime_module", lambda: runtime)
 
     assert (
         run_installer_main(monkeypatch, "rollback", "--root", str(tmp_path), "--revision", revision)
@@ -3640,6 +3752,8 @@ def test_rollback_cli_apply_activates_only_after_validation(
     monkeypatch.setattr(installer, "activate", activate)
     monkeypatch.setattr(installer, "validate_snapshot", lambda *_args: None)
     monkeypatch.setattr(installer, "validate_runner_access", lambda *_args: None)
+    monkeypatch.setattr(runtime, "validate_node_contract", lambda *_args: {})
+    monkeypatch.setattr(installer, "runtime_module", lambda: runtime)
     assert (
         run_installer_main(
             monkeypatch,
@@ -3812,6 +3926,20 @@ def test_same_revision_manifest_migration_preserves_runner_and_rolls_back_exactl
         runtime, "LEGACY_RUNNER_MANIFEST_SHA256", runtime.sha256(legacy_manifest_path)
     )
     monkeypatch.setattr(runtime, "validate_browser_contract", lambda *_args: provenance)
+    monkeypatch.setattr(
+        runtime,
+        "validate_node_contract",
+        lambda config, _root: {
+            key: config["nodeContract"][key]
+            for key in (
+                "version",
+                "architecture",
+                "executablePath",
+                "executableSha256",
+                "archiveSha256",
+            )
+        },
+    )
     monkeypatch.setattr(installer, "runtime_module", lambda: runtime)
 
     qualified_parent = tmp_path / "qualified"
