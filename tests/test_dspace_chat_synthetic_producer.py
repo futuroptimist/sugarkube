@@ -115,6 +115,7 @@ def test_present_null_node_contract_is_not_legacy_compatible(tmp_path: Path) -> 
     "arguments",
     [
         ("dry-run",),
+        ("apply",),
         (
             "materialize",
             "--source",
