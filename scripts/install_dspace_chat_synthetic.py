@@ -1058,7 +1058,10 @@ def main() -> int:
             runtime.runner_storage_identity(rollback_config)
         )
         validate_snapshot(
-            retained, rollback_runner, args.root, allow_legacy_missing=True
+            retained,
+            rollback_runner,
+            args.root,
+            allow_legacy_missing=not args.apply,
         )
         validate_runner_access(rollback_config, rollback_runner, args.root)
         if not args.apply:

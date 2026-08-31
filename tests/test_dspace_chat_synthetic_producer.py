@@ -2925,6 +2925,19 @@ def test_missing_retained_node_contract_allows_read_only_rollback_without_mutati
     assert tree_bytes(root) == before
     assert os.readlink(current) == current_before
 
+    with pytest.raises(runtime.Invalid, match="Node runtime contract"):
+        run_installer_main(
+            monkeypatch,
+            "rollback",
+            "--apply",
+            "--root",
+            str(root),
+            "--revision",
+            legacy_revision,
+        )
+    assert tree_bytes(root) == before
+    assert os.readlink(current) == current_before
+
 
 @pytest.mark.parametrize(
     "fault",

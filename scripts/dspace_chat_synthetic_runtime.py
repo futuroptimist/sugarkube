@@ -164,7 +164,7 @@ def load_config(path: Path) -> dict:
         ):
             raise Invalid("system browser contract")
     # Retained assets created before the pinned Node contract remain readable for
-    # status and rollback validation. Execution and new installation paths call
+    # historical inspection. Execution and new installation paths call
     # validate_node_contract() strictly, which fails closed when this key is absent.
     if "nodeContract" not in value:
         return value
