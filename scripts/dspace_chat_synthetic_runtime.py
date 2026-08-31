@@ -164,11 +164,11 @@ def load_config(path: Path) -> dict:
         ):
             raise Invalid("system browser contract")
     # Retained assets created before the pinned Node contract remain readable for
-    # status inspection only. Execution and every activation-capable path call
-    # validate_node_contract(), which fails closed when this key is absent.
-    node = value.get("nodeContract")
-    if node is None:
+    # historical inspection. Execution and new installation paths call
+    # validate_node_contract() strictly, which fails closed when this key is absent.
+    if "nodeContract" not in value:
         return value
+    node = value["nodeContract"]
     required_node = {
         "version",
         "architecture",
@@ -340,8 +340,12 @@ def validate_node_ancestors(
         raise Invalid("Node runtime provenance") from None
 
 
-def validate_node_contract(config: dict, root: Path = Path("/")) -> dict:
+def validate_node_contract(
+    config: dict, root: Path = Path("/"), *, allow_legacy_missing: bool = False
+) -> dict | None:
     """Validate the pinned root-controlled native Node executable without running it."""
+    if allow_legacy_missing and "nodeContract" not in config:
+        return None
     contract = config.get("nodeContract")
     if not isinstance(contract, dict):
         raise Invalid("Node runtime contract")
