@@ -97,6 +97,15 @@ def test_legacy_configuration_without_node_contract_remains_readable(tmp_path: P
     assert "nodeContract" not in loaded
     with pytest.raises(runtime.Invalid, match="Node runtime contract"):
         runtime.validate_node_contract(loaded)
+    assert runtime.validate_node_contract(loaded, allow_legacy_missing=True) is None
+
+
+@pytest.mark.parametrize("contract", [None, [], {"version": "20.20.2"}])
+def test_legacy_node_compatibility_rejects_present_invalid_contract(contract: object) -> None:
+    value = json.loads(CONFIG.read_text())
+    value["nodeContract"] = contract
+    with pytest.raises(runtime.Invalid):
+        runtime.validate_node_contract(value, allow_legacy_missing=True)
 
 
 def test_node_contract_rejects_untraversable_ancestor(
@@ -2569,6 +2578,13 @@ def status_installation(tmp_path: Path) -> tuple[Path, Path, str]:
     revision = "a" * 64
     staged = tmp_path / "staged"
     installer.render(staged)
+    staged_config = staged / "etc/sugarkube/dspace-chat-synthetic.json"
+    staged_value = json.loads(staged_config.read_text())
+    staged_value.pop("nodeContract")
+    staged_config.write_text(json.dumps(staged_value, sort_keys=True, indent=2) + "\n")
+    hashes = asset_hashes(staged)
+    hashes["etc/sugarkube/dspace-chat-synthetic.json"] = installer.sha(staged_config)
+    write_asset_manifest(staged, hashes)
     installer.install(staged, root, revision)
     config_value = json.loads(CONFIG.read_text())
     runner = (
@@ -2666,6 +2682,7 @@ def test_status_reports_validated_provenance_without_mutation_or_systemctl(
     assert "pnpmVersion=9.0.0" in output
     assert "playwrightBrowserExecutable=none" in output
     assert "runnerValidation=passed" in output
+    assert "nodeValidation=legacy-not-declared" in output
     provenance = json.loads((runner / "sugarkube-runner-manifest.json").read_text())[
         "browserProvenance"
     ]
@@ -2783,11 +2800,15 @@ def test_real_node_validation_covers_private_root_dry_run_status_repair_and_roll
     assert all(command[0] == "git" for command in commands)
 
 
-def test_missing_retained_node_contract_fails_before_rollback_activation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_missing_retained_node_contract_allows_read_only_rollback_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     value, root = synthetic_node_fixture(tmp_path, monkeypatch)
     snapshot, _ = runner_snapshot_fixture(tmp_path)
+    snapshot_manifest = snapshot / "sugarkube-runner-manifest.json"
+    snapshot_value = json.loads(snapshot_manifest.read_text())
+    snapshot_value["pnpmVersion"] = "9.0.0"
+    snapshot_manifest.write_text(json.dumps(snapshot_value))
     selected_runtime = RealNodeValidationRuntime(value["nodeContract"])
     monkeypatch.setattr(installer, "runtime_module", lambda: selected_runtime)
     monkeypatch.setattr(installer, "validate_runner_access", lambda *_args: None)
@@ -2806,11 +2827,7 @@ def test_missing_retained_node_contract_fails_before_rollback_activation(
     installer.render(staged)
     current_revision = installer.sha(staged / "manifest.json")
     installer.install(staged, root, current_revision)
-    monkeypatch.setattr(
-        installer,
-        "activate",
-        lambda *_args: pytest.fail("missing-contract rollback reached activation"),
-    )
+    monkeypatch.setattr(installer, "activate", lambda *_args: pytest.fail("rollback activated"))
     config_value = selected_runtime.load_config(staged / "etc/sugarkube/dspace-chat-synthetic.json")
     runner = (
         root
@@ -2836,16 +2853,17 @@ def test_missing_retained_node_contract_fails_before_rollback_activation(
     current = retained.parent / "current"
     before = tree_bytes(root)
     current_before = os.readlink(current)
-    with pytest.raises(runtime.Invalid, match="Node runtime contract"):
-        run_installer_main(
-            monkeypatch,
-            "rollback",
-            "--apply",
-            "--root",
-            str(root),
-            "--revision",
-            legacy_revision,
-        )
+    assert run_installer_main(
+        monkeypatch,
+        "rollback",
+        "--root",
+        str(root),
+        "--revision",
+        legacy_revision,
+    ) == 0
+    assert capsys.readouterr().out == (
+        "validation=passed mutation=none rollback=authorization-required\n"
+    )
     assert tree_bytes(root) == before
     assert os.readlink(current) == current_before
 
@@ -4055,7 +4073,7 @@ def test_rollback_cli_validates_dry_run_without_activation(
     monkeypatch.setattr(
         installer, "activate", lambda *args: pytest.fail("dry-run activated rollback")
     )
-    monkeypatch.setattr(installer, "validate_snapshot", lambda *_args: None)
+    monkeypatch.setattr(installer, "validate_snapshot", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(installer, "validate_runner_access", lambda *_args: None)
 
     assert (
@@ -4080,7 +4098,7 @@ def test_rollback_cli_apply_activates_only_after_validation(
         calls.append((validated, root, selected))
 
     monkeypatch.setattr(installer, "activate", activate)
-    monkeypatch.setattr(installer, "validate_snapshot", lambda *_args: None)
+    monkeypatch.setattr(installer, "validate_snapshot", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(installer, "validate_runner_access", lambda *_args: None)
     assert (
         run_installer_main(

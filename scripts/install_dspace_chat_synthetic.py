@@ -391,14 +391,20 @@ def validate_snapshot(
     staged: Path,
     snapshot: Path,
     root: Path = Path("/"),
+    *,
+    allow_legacy_node: bool = False,
 ) -> str:
     """Apply the runtime's complete runner contract to an installation input."""
     runtime = runtime_module()
     config = load_snapshot_config(staged, snapshot)
-    node = runtime.validate_node_contract(config, root)
-    runner = runtime.validate_runner(config, node["executablePath"])
+    if allow_legacy_node and "nodeContract" not in config:
+        node = None
+    else:
+        node = runtime.validate_node_contract(config, root)
+    node_executable = node["executablePath"] if node else None
+    runner = runtime.validate_runner(config, node_executable)
     provenance = runtime.validate_browser_contract(
-        config, runner, root, node["executablePath"]
+        config, runner, root, node_executable
     )
     manifest = json.loads((runner / "sugarkube-runner-manifest.json").read_text())
     if provenance != manifest.get("browserProvenance"):
@@ -1051,7 +1057,7 @@ def main() -> int:
         rollback_runner = rooted(args.root, rollback_config["runnerRoot"]) / (
             runtime.runner_storage_identity(rollback_config)
         )
-        validate_snapshot(retained, rollback_runner, args.root)
+        validate_snapshot(retained, rollback_runner, args.root, allow_legacy_node=True)
         validate_runner_access(rollback_config, rollback_runner, args.root)
         if not args.apply:
             print("validation=passed mutation=none rollback=authorization-required")
