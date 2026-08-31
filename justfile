@@ -3675,19 +3675,19 @@ observability-watchdog-drill-status env='':
 observability-watchdog-drill-clear env='':
     @scripts/observability_helm.sh watchdog-drill-clear '{{ env }}'
 
-# Render the pinned staging blackbox exporter and Probe manifests (read-only).
+# Render the pinned environment blackbox exporter and Probe manifests (read-only).
 observability-blackbox-render env='':
     @scripts/observability_blackbox.sh render '{{ env }}'
 
-# Fresh-install the staging-only blackbox exporter and apply its Probes.
+# Fresh-install the selected environment blackbox exporter and apply its Probes.
 observability-blackbox-install env='':
     @scripts/observability_blackbox.sh install '{{ env }}'
 
-# Upgrade the staging-only blackbox exporter and apply its Probes.
+# Upgrade the selected environment blackbox exporter and apply its Probes.
 observability-blackbox-upgrade env='':
     @scripts/observability_blackbox.sh upgrade '{{ env }}'
 
-# Summarize the staging-only blackbox resources (read-only).
+# Summarize the selected environment blackbox resources (read-only).
 observability-blackbox-status env='':
     @scripts/observability_blackbox.sh status '{{ env }}'
 
