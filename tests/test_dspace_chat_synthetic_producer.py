@@ -97,6 +97,18 @@ def test_legacy_configuration_without_node_contract_remains_readable(tmp_path: P
     assert "nodeContract" not in loaded
     with pytest.raises(runtime.Invalid, match="Node runtime contract"):
         runtime.validate_node_contract(loaded)
+    assert runtime.validate_node_contract(loaded, allow_legacy_missing=True) is None
+
+
+def test_present_null_node_contract_is_never_legacy_compatible(tmp_path: Path) -> None:
+    value = json.loads(CONFIG.read_text())
+    value["nodeContract"] = None
+    path = tmp_path / "null-node.json"
+    path.write_text(json.dumps(value))
+    with pytest.raises(runtime.Invalid, match="Node runtime contract"):
+        runtime.load_config(path)
+    with pytest.raises(runtime.Invalid, match="Node runtime contract"):
+        runtime.validate_node_contract(value, allow_legacy_missing=True)
 
 
 def test_node_contract_rejects_untraversable_ancestor(
@@ -2523,7 +2535,11 @@ class StatusRuntime:
         ]
 
     @staticmethod
-    def validate_node_contract(value: dict, _root: Path) -> dict:
+    def validate_node_contract(
+        value: dict, _root: Path, *, allow_legacy_missing: bool = False
+    ) -> dict | None:
+        if allow_legacy_missing and "nodeContract" not in value:
+            return None
         return value["nodeContract"]
 
 
@@ -2551,8 +2567,12 @@ class RealNodeValidationRuntime(StatusRuntime):
         return runner
 
     @staticmethod
-    def validate_node_contract(value: dict, root: Path) -> dict:
-        return runtime.validate_node_contract(value, root)
+    def validate_node_contract(
+        value: dict, root: Path, *, allow_legacy_missing: bool = False
+    ) -> dict | None:
+        return runtime.validate_node_contract(
+            value, root, allow_legacy_missing=allow_legacy_missing
+        )
 
     @staticmethod
     def validate_browser_contract(
@@ -2783,11 +2803,22 @@ def test_real_node_validation_covers_private_root_dry_run_status_repair_and_roll
     assert all(command[0] == "git" for command in commands)
 
 
-def test_missing_retained_node_contract_fails_before_rollback_activation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_missing_retained_node_contract_supports_read_only_status_and_rollback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
     value, root = synthetic_node_fixture(tmp_path, monkeypatch)
     snapshot, _ = runner_snapshot_fixture(tmp_path)
+    snapshot_manifest = snapshot / "sugarkube-runner-manifest.json"
+    snapshot_provenance = json.loads(snapshot_manifest.read_text())
+    snapshot_provenance["pnpmVersion"] = "9.0.0"
+    snapshot_provenance["browserProvenance"].update(
+        architecture="aarch64",
+        executablePath="/usr/lib/chromium/chromium",
+        executableSha256="1" * 64,
+        launcherPath="/usr/bin/chromium",
+        launcherSha256="2" * 64,
+    )
+    snapshot_manifest.write_text(json.dumps(snapshot_provenance))
     selected_runtime = RealNodeValidationRuntime(value["nodeContract"])
     monkeypatch.setattr(installer, "runtime_module", lambda: selected_runtime)
     monkeypatch.setattr(installer, "validate_runner_access", lambda *_args: None)
@@ -2806,11 +2837,6 @@ def test_missing_retained_node_contract_fails_before_rollback_activation(
     installer.render(staged)
     current_revision = installer.sha(staged / "manifest.json")
     installer.install(staged, root, current_revision)
-    monkeypatch.setattr(
-        installer,
-        "activate",
-        lambda *_args: pytest.fail("missing-contract rollback reached activation"),
-    )
     config_value = selected_runtime.load_config(staged / "etc/sugarkube/dspace-chat-synthetic.json")
     runner = (
         root
@@ -2831,21 +2857,27 @@ def test_missing_retained_node_contract_fails_before_rollback_activation(
     hashes["etc/sugarkube/dspace-chat-synthetic.json"] = installer.sha(legacy_config)
     write_asset_manifest(legacy, hashes)
     legacy_revision = installer.sha(legacy / "manifest.json")
-    legacy.rename(retained.parent / legacy_revision)
+    legacy_retained = retained.parent / legacy_revision
+    legacy.rename(legacy_retained)
+    installer.activate(legacy_retained, root, legacy_revision)
+    monkeypatch.setattr(installer, "activate", lambda *_args: pytest.fail("rollback activated"))
 
     current = retained.parent / "current"
     before = tree_bytes(root)
     current_before = os.readlink(current)
-    with pytest.raises(runtime.Invalid, match="Node runtime contract"):
-        run_installer_main(
-            monkeypatch,
-            "rollback",
-            "--apply",
-            "--root",
-            str(root),
-            "--revision",
-            legacy_revision,
-        )
+    assert installer.status(root) == 0
+    assert "nodeValidation=legacy-not-declared" in capsys.readouterr().out
+    assert run_installer_main(
+        monkeypatch,
+        "rollback",
+        "--root",
+        str(root),
+        "--revision",
+        legacy_revision,
+    ) == 0
+    assert capsys.readouterr().out == (
+        "validation=passed mutation=none rollback=authorization-required\n"
+    )
     assert tree_bytes(root) == before
     assert os.readlink(current) == current_before
 
@@ -4055,7 +4087,7 @@ def test_rollback_cli_validates_dry_run_without_activation(
     monkeypatch.setattr(
         installer, "activate", lambda *args: pytest.fail("dry-run activated rollback")
     )
-    monkeypatch.setattr(installer, "validate_snapshot", lambda *_args: None)
+    monkeypatch.setattr(installer, "validate_snapshot", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(installer, "validate_runner_access", lambda *_args: None)
 
     assert (
@@ -4080,7 +4112,7 @@ def test_rollback_cli_apply_activates_only_after_validation(
         calls.append((validated, root, selected))
 
     monkeypatch.setattr(installer, "activate", activate)
-    monkeypatch.setattr(installer, "validate_snapshot", lambda *_args: None)
+    monkeypatch.setattr(installer, "validate_snapshot", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(installer, "validate_runner_access", lambda *_args: None)
     assert (
         run_installer_main(
@@ -4255,7 +4287,9 @@ def test_same_revision_manifest_migration_preserves_runner_and_rolls_back_exactl
     )
     monkeypatch.setattr(runtime, "validate_browser_contract", lambda *_args: provenance)
     monkeypatch.setattr(
-        runtime, "validate_node_contract", lambda value, _root: value["nodeContract"]
+        runtime,
+        "validate_node_contract",
+        lambda value, _root, **_kwargs: value.get("nodeContract"),
     )
     monkeypatch.setattr(installer, "runtime_module", lambda: runtime)
 
