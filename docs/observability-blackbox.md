@@ -64,12 +64,15 @@ Render, status, and verify are read-only. Status displays the exact owned
 NetworkPolicy. Install is only for an absent exporter release; upgrade requires
 it to exist. Both render the pinned chart, policy, and Probes first, pass the
 complete committed values on every Helm operation, and wait up to the
-Pi-appropriate timeout. Only after Helm succeeds, they apply the policy, delete
-the eleven explicit legacy production Probe names using `--ignore-not-found`,
-then apply the rendered staging Probes. A Helm failure makes no policy or Probe
-mutation; a policy apply failure prevents both Probe operations. No selector
-pruning or staging Probe deletion is used. Production performs no legacy or
-cross-environment Probe cleanup. Neither environment uses `--reuse-values`.
+Pi-appropriate timeout. Only after Helm succeeds, they apply the policy and then
+the rendered Probes. After the desired Probes are applied, the
+helper lists objects using the exact `release: kube-prometheus-stack` and selected
+`environment` labels and deletes only names absent from the rendered desired set.
+An empty stale set is a no-op, and unrelated or differently labelled Probes are
+outside the selector. Rendering, YAML parsing, listing, and comparison all fail
+closed before deletion. A Helm failure makes no policy or Probe mutation; a
+policy apply failure prevents Probe mutation. Neither environment uses
+`--reuse-values`.
 Missing and unsupported environments fail before cluster access; `env=int` is
 a deprecated staging alias and `production` normalizes to `prod`.
 
@@ -112,12 +115,25 @@ egress remain unaffected, while the exporter remains ClusterIP-only.
 
 ## Exact production matrix and rollout status
 
-Production mirrors the staging modules, intervals, criticalities, TLS checks,
-body limits, and content contracts. Its public bases are
-`https://democratized.space`, `https://token.place`, `https://danielsmith.io`,
-`https://jobbot3000.tech`, and `https://gitshelves.com`; the routes are the same
-21 app/routes in the staging table. Names use
+Production coverage follows applications that have both a production deployment
+and DNS-routable, verified production endpoints. It mirrors the corresponding
+staging modules, intervals, criticalities, TLS checks, body limits, and content
+contracts for these 11 routes:
+
+| App | Base URL | Routes |
+| --- | --- | --- |
+| DSPACE (`dspace`) | `https://democratized.space` | `/` (`root`), `/config.json` (`config`), `/healthz` (`healthz`), `/livez` (`livez`) |
+| token.place (`tokenplace`) | `https://token.place` | `/` (`root`), `/healthz` (`healthz`), `/livez` (`livez`), `/api/v1/meta` (`metadata`) |
+| danielsmith.io (`danielsmith`) | `https://danielsmith.io` | `/` (`root`), `/healthz` (`healthz`), `/livez` (`livez`) |
+
+Names use
 `blackbox-<app>-prod-<route>` and labels use `environment: prod`.
+
+GitShelves and jobbot3000 remain fully covered in staging but have no active
+production Probes. Add their production Probes only in a reviewed change after
+each application's production promotion, public DNS, Cloudflare Tunnel route,
+and all intended endpoint checks succeed. Dormant Helm examples and promotion
+documentation do not satisfy this activation gate.
 
 This production lifecycle is **repository-ready, not live deployment
 evidence**. The exporter, Probes, metric series, dashboard population, and
@@ -164,11 +180,10 @@ just observability-blackbox-verify env=prod
 ```
 
 Restore the corresponding version and complete values file before a subsequent
-forward upgrade. The one-time legacy cleanup is not undone by Helm rollback;
-restoring those former production Probe objects, if actually intended on the
-staging cluster, requires an explicit application of an approved historical
-manifest. Never restore them by applying the retained legacy mixed matrix.
-Do not use `--reuse-values`.
+forward upgrade. Probe reconciliation follows the checked-out desired manifest;
+do not restore removed production Probe objects unless their production
+activation gate has been satisfied in a reviewed change. Never restore them by
+applying the retained legacy mixed matrix. Do not use `--reuse-values`.
 
 ## Troubleshooting
 
