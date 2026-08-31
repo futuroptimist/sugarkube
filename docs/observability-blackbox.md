@@ -151,12 +151,16 @@ kubectl apply -k clusters/staging/observability/network-policies
 kubectl apply -k clusters/staging/observability/probes
 just observability-blackbox-verify env=staging
 
-# Production uses the same sequence with its explicit kubeconfig guard:
-KUBECONFIG=/path/to/explicit-prod-kubeconfig helm -n monitoring history prometheus-blackbox-exporter
-KUBECONFIG=/path/to/explicit-prod-kubeconfig helm -n monitoring rollback prometheus-blackbox-exporter <prior-revision> --wait --timeout 20m
-KUBECONFIG=/path/to/explicit-prod-kubeconfig kubectl apply -k clusters/prod/observability/network-policies
-KUBECONFIG=/path/to/explicit-prod-kubeconfig kubectl apply -k clusters/prod/observability/probes
-KUBECONFIG=/path/to/explicit-prod-kubeconfig just observability-blackbox-verify env=prod
+# Production uses the same sequence after enforcing its explicit guards:
+export KUBECONFIG=/path/to/explicit-prod-kubeconfig
+test -n "$KUBECONFIG"
+test "$(kubectl config current-context)" = sugar-prod
+python3 scripts/cluster_identity.py assert --kubeconfig "$KUBECONFIG" --env prod
+helm -n monitoring history prometheus-blackbox-exporter
+helm -n monitoring rollback prometheus-blackbox-exporter <prior-revision> --wait --timeout 20m
+kubectl apply -k clusters/prod/observability/network-policies
+kubectl apply -k clusters/prod/observability/probes
+just observability-blackbox-verify env=prod
 ```
 
 Restore the corresponding version and complete values file before a subsequent

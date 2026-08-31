@@ -38,8 +38,8 @@ COVERAGE_BOOTSTRAP_ENV = (
 )
 
 
-def expected_names():
-    text = (ROOT / "clusters/staging/observability/probes/public-apps.yaml").read_text()
+def expected_names(environment="staging"):
+    text = (ROOT / f"clusters/{environment}/observability/probes/public-apps.yaml").read_text()
     return [
         line.strip().split(": ", 1)[1]
         for line in text.splitlines()
@@ -47,15 +47,18 @@ def expected_names():
     ]
 
 
-def verifier_bundle(health="up", success="1"):
-    pairs = [(name, name.removeprefix("blackbox-").split("-staging-")) for name in expected_names()]
+def verifier_bundle(health="up", success="1", environment="staging"):
+    pairs = [
+        (name, name.removeprefix("blackbox-").split(f"-{environment}-"))
+        for name in expected_names(environment)
+    ]
     targets = [
         {
             "labels": {
                 "job": f"probe/monitoring/{name}",
                 "app": pair[0],
                 "route": pair[1],
-                "environment": "staging",
+                "environment": environment,
             },
             "health": health,
         }
@@ -79,7 +82,7 @@ def verifier_bundle(health="up", success="1"):
                             "job": f"probe/monitoring/{name}",
                             "app": pair[0],
                             "route": pair[1],
-                            "environment": "staging",
+                            "environment": environment,
                         },
                         "value": [1, success if family == "probe_success" else "2"],
                     }
@@ -239,9 +242,20 @@ class Scenario:
         return path.read_text().splitlines() if path.exists() else []
 
     def run(self, command, environment="staging", **extra):
+        normalized = (
+            "staging"
+            if environment == "int"
+            else "prod" if environment == "production" else environment
+        )
         env = {
             **self.env,
             "TEST_ENV": environment or "",
+            "PROBES_JSON": self.env.get(
+                f"PROBES_JSON_{str(normalized).upper()}", self.env["PROBES_JSON"]
+            ),
+            "PROM_JSON": self.env.get(
+                f"PROM_JSON_{str(normalized).upper()}", self.env["PROM_JSON"]
+            ),
             **{key: str(value) for key, value in extra.items()},
         }
         for key in COVERAGE_BOOTSTRAP_ENV:
@@ -265,21 +279,28 @@ def scenario(tmp_path):
         path = bindir / name
         path.write_text(content)
         path.chmod(0o755)
-    probes = tmp_path / "probes.json"
-    docs = subprocess.run(
-        [
-            "ruby",
-            "-ryaml",
-            "-rjson",
-            "-e",
-            "puts JSON.generate(YAML.load_stream(File.read(ARGV[0])))",
-            str(ROOT / "clusters/staging/observability/probes/public-apps.yaml"),
-        ],
-        check=True,
-        text=True,
-        capture_output=True,
-    )
-    probes.write_text(json.dumps({"items": json.loads(docs.stdout)}))
+    probe_paths = {}
+    prom_paths = {}
+    for environment in ("staging", "prod"):
+        probes = tmp_path / f"probes-{environment}.json"
+        docs = subprocess.run(
+            [
+                "ruby",
+                "-ryaml",
+                "-rjson",
+                "-e",
+                "puts JSON.generate(YAML.load_stream(File.read(ARGV[0])))",
+                str(ROOT / f"clusters/{environment}/observability/probes/public-apps.yaml"),
+            ],
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        probes.write_text(json.dumps({"items": json.loads(docs.stdout)}))
+        probe_paths[environment] = probes
+        prom = tmp_path / f"prom-{environment}.json"
+        prom.write_text(json.dumps(verifier_bundle(environment=environment)))
+        prom_paths[environment] = prom
     policy_json = tmp_path / "policy.json"
     policy_docs = subprocess.run(
         [
@@ -295,17 +316,19 @@ def scenario(tmp_path):
         capture_output=True,
     )
     policy_json.write_text(policy_docs.stdout)
-    prom = tmp_path / "prom.json"
-    prom.write_text(json.dumps(verifier_bundle()))
     env = {
         **os.environ,
         "PATH": f"{bindir}:{os.environ['PATH']}",
         "LOG": str(tmp_path / "operations.log"),
-        "PROBES_JSON": str(probes),
+        "PROBES_JSON": str(probe_paths["staging"]),
+        "PROBES_JSON_STAGING": str(probe_paths["staging"]),
+        "PROBES_JSON_PROD": str(probe_paths["prod"]),
         "PROBES_YAML": str(ROOT / "clusters/staging/observability/probes/public-apps.yaml"),
         "POLICY": str(POLICY),
         "POLICY_JSON": str(policy_json),
-        "PROM_JSON": str(prom),
+        "PROM_JSON": str(prom_paths["staging"]),
+        "PROM_JSON_STAGING": str(prom_paths["staging"]),
+        "PROM_JSON_PROD": str(prom_paths["prod"]),
         "RAW_COUNT": str(tmp_path / "raw-count"),
         "REAL_PYTHON": sys.executable,
         "TMPDIR": str(tmp_path),
@@ -569,17 +592,27 @@ def test_resource_guards_fail_before_prometheus_queries(scenario, failure):
     assert not any("--raw" in line for line in scenario.log)
 
 
-def test_delayed_target_discovery_retries_then_succeeds(scenario):
-    result = scenario.run("verify", SCENARIO="delayed", SUGARKUBE_BLACKBOX_VERIFY_ATTEMPTS=3)
+@pytest.mark.parametrize("environment", ["staging", "prod"])
+def test_delayed_target_discovery_retries_then_succeeds(scenario, environment):
+    result = scenario.run(
+        "verify",
+        environment,
+        KUBECONFIG=scenario.root / "prod.config" if environment == "prod" else "",
+        SCENARIO="delayed",
+        SUGARKUBE_BLACKBOX_VERIFY_ATTEMPTS=3,
+    )
     assert result.returncode == 0
     assert scenario.log.count("sleep 1") == 1
     assert sum("targets?state=active" in line for line in scenario.log) == 2
 
 
 @pytest.mark.parametrize("failure", ["persistent_missing", "persistent_down"])
-def test_persistent_target_failure_is_bounded_and_redacted(scenario, failure):
+@pytest.mark.parametrize("environment", ["staging", "prod"])
+def test_persistent_target_failure_is_bounded_and_redacted(scenario, failure, environment):
     result = scenario.run(
         "verify",
+        environment,
+        KUBECONFIG=scenario.root / "prod.config" if environment == "prod" else "",
         SCENARIO=failure,
         COV_CORE_SOURCE="invalid-source",
         COV_CORE_CONFIG=scenario.root / "missing-coveragerc",
@@ -597,8 +630,16 @@ def test_persistent_target_failure_is_bounded_and_redacted(scenario, failure):
 @pytest.mark.parametrize(
     "transport,operation", [("targets", "targets"), ("metric", "probe_success")]
 )
-def test_prometheus_transport_failures_are_redacted_and_cleanup(scenario, transport, operation):
-    result = scenario.run("verify", TRANSPORT=transport)
+@pytest.mark.parametrize("environment", ["staging", "prod"])
+def test_prometheus_transport_failures_are_redacted_and_cleanup(
+    scenario, transport, operation, environment
+):
+    result = scenario.run(
+        "verify",
+        environment,
+        KUBECONFIG=scenario.root / "prod.config" if environment == "prod" else "",
+        TRANSPORT=transport,
+    )
     assert result.returncode == 9
     assert (
         f"operation={operation} category=authentication status=23 error=<redacted>" in result.stderr
@@ -608,13 +649,13 @@ def test_prometheus_transport_failures_are_redacted_and_cleanup(scenario, transp
     assert not list(scenario.root.glob("sugarkube-blackbox-prometheus.*"))
 
 
-def verify(payload, final=False, *args):
+def verify(payload, final=False, *args, environment="staging"):
     stdin = io.StringIO(json.dumps(payload) if not isinstance(payload, str) else payload)
     stdout = io.StringIO()
     stderr = io.StringIO()
     old_argv, old_stdin = sys.argv, sys.stdin
     old_final_attempt = os.environ.get("FINAL_ATTEMPT")
-    sys.argv = [str(ROOT / "scripts/verify_blackbox_prometheus.py"), "--env", "staging", *args]
+    sys.argv = [str(ROOT / "scripts/verify_blackbox_prometheus.py"), "--env", environment, *args]
     sys.stdin = stdin
     os.environ["FINAL_ATTEMPT"] = "1" if final else "0"
     try:
@@ -640,6 +681,56 @@ def test_prometheus_verifier_accepts_exact_lifecycle_jobs_and_ignores_unrelated(
         {"labels": {"job": "probe/monitoring/unrelated"}, "health": "down"}
     )
     assert verify(payload).returncode == 0
+
+
+def test_prometheus_verifier_accepts_exact_production_bundle():
+    assert verify(verifier_bundle(environment="prod"), environment="prod").returncode == 0
+
+
+@pytest.mark.parametrize("environment", ["staging", "prod"])
+def test_prometheus_verifier_rejects_duplicate_lifecycle_targets_and_series(environment):
+    payload = verifier_bundle(environment=environment)
+    payload["targets"]["data"]["activeTargets"].append(
+        json.loads(json.dumps(payload["targets"]["data"]["activeTargets"][0]))
+    )
+    assert verify(payload, environment=environment).returncode == 9
+
+    payload = verifier_bundle(environment=environment)
+    payload["metrics"]["probe_success"]["data"]["result"].append(
+        json.loads(json.dumps(payload["metrics"]["probe_success"]["data"]["result"][0]))
+    )
+    assert verify(payload, environment=environment).returncode == 9
+
+
+def test_production_verifier_rejects_staging_mixed_missing_and_mislabeled_lifecycle_data():
+    cases = []
+    cases.append(verifier_bundle())
+
+    mixed = verifier_bundle(environment="prod")
+    mixed["targets"]["data"]["activeTargets"][0] = verifier_bundle()["targets"]["data"][
+        "activeTargets"
+    ][0]
+    cases.append(mixed)
+
+    missing = verifier_bundle(environment="prod")
+    missing["targets"]["data"]["activeTargets"].pop()
+    cases.append(missing)
+
+    mislabeled = verifier_bundle(environment="prod")
+    mislabeled["metrics"]["probe_success"]["data"]["result"][0]["metric"]["environment"] = "staging"
+    cases.append(mislabeled)
+
+    for payload in cases:
+        assert verify(payload, True, environment="prod").returncode in {9, 10}
+
+    unrelated = verifier_bundle(environment="prod")
+    unrelated["targets"]["data"]["activeTargets"].append(
+        {
+            "labels": {"job": "probe/monitoring/unrelated", "environment": "staging"},
+            "health": "down",
+        }
+    )
+    assert verify(unrelated, environment="prod").returncode == 0
 
 
 def test_prometheus_verifier_converges_then_reports_bounded_diagnostics():
@@ -717,6 +808,66 @@ def test_probe_validator_requires_exact_names_and_mappings():
     assert verify({"items": [{}]}, False, "--probes").returncode == 7
     assert verify({"items": [{"metadata": []}]}, False, "--probes").returncode == 7
     assert verify(items, False, "--unknown").returncode == 9
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("spec", "missing"),
+        ("spec", None),
+        ("spec", []),
+        ("targets", "missing"),
+        ("targets", None),
+        ("targets", []),
+        ("staticConfig", "missing"),
+        ("staticConfig", None),
+        ("staticConfig", []),
+        ("labels", "missing"),
+        ("labels", None),
+        ("labels", []),
+    ],
+)
+def test_probe_validator_rejects_missing_and_non_mapping_nested_fields(field, value):
+    item = load_probe_documents("staging")[0]
+    if field == "spec":
+        item.pop("spec") if value == "missing" else item.__setitem__("spec", value)
+    elif field == "targets":
+        (
+            item["spec"].pop("targets")
+            if value == "missing"
+            else item["spec"].__setitem__("targets", value)
+        )
+    elif field == "staticConfig":
+        targets = item["spec"]["targets"]
+        (
+            targets.pop("staticConfig")
+            if value == "missing"
+            else targets.__setitem__("staticConfig", value)
+        )
+    else:
+        static_config = item["spec"]["targets"]["staticConfig"]
+        (
+            static_config.pop("labels")
+            if value == "missing"
+            else static_config.__setitem__("labels", value)
+        )
+    result = verify({"items": [item]}, False, "--probes")
+    assert result.returncode == 7
+    assert "Traceback" not in result.stderr
+
+
+def test_probe_validator_rejects_duplicate_names_and_label_mismatch():
+    items = load_probe_documents("staging")
+    items[1]["metadata"]["name"] = items[0]["metadata"]["name"]
+    result = verify({"items": items}, False, "--probes")
+    assert result.returncode == 7
+    assert "duplicate lifecycle-owned name" in result.stderr
+
+    items = load_probe_documents("staging")
+    items[0]["spec"]["targets"]["staticConfig"]["labels"]["route"] = "wrong"
+    result = verify({"items": items}, False, "--probes")
+    assert result.returncode == 7
+    assert "metadata and target labels" in result.stderr
 
 
 def load_probe_documents(environment):
@@ -804,6 +955,45 @@ def test_production_mutation_has_no_probe_deletion(scenario):
     assert result.returncode == 0
     assert not any(" delete probe " in line for line in scenario.log)
     assert any("identity assert" in line and "--env prod" in line for line in scenario.log)
+
+
+@pytest.mark.parametrize("command,state", [("install", "release_absent"), ("upgrade", "success")])
+def test_production_mutation_order_and_values_without_probe_deletion(scenario, command, state):
+    result = scenario.run(
+        command,
+        "prod",
+        KUBECONFIG=scenario.root / "prod.config",
+        SCENARIO=state,
+    )
+    assert result.returncode == 0
+    mutation = next(line for line in scenario.log if line.startswith(f"helm {command}"))
+    assert (
+        f"-f {ROOT / 'clusters/prod/observability/prometheus-blackbox-exporter.values.yaml'}"
+        in mutation
+    )
+    applies = [line for line in scenario.log if line.startswith("kubectl apply")]
+    assert len(applies) == 2
+    assert (
+        scenario.log.index(mutation)
+        < scenario.log.index(applies[0])
+        < scenario.log.index(applies[1])
+    )
+    assert not any(" delete probe " in line for line in scenario.log)
+
+
+def test_production_verify_queries_only_production_selector(scenario):
+    result = scenario.run(
+        "verify", "prod", KUBECONFIG=scenario.root / "prod.config", SCENARIO="success"
+    )
+    assert result.returncode == 0
+    queries = [line for line in scenario.log if "/api/v1/query?query=" in line]
+    assert len(queries) == 5
+    assert all("%7Benvironment%3D%22prod%22%7D" in line for line in queries)
+    assert all("%22staging%22" not in line for line in queries)
+    context = scenario.log.index("kubectl config current-context")
+    identity = next(i for i, line in enumerate(scenario.log) if "identity assert" in line)
+    first_query = scenario.log.index(queries[0])
+    assert context < identity < first_query
 
 
 def test_verifier_requires_explicit_supported_environment():

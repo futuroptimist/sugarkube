@@ -62,9 +62,10 @@ def validate_probes(document):
         name = metadata["name"]
         if name in found:
             fail("Probe response contains a duplicate lifecycle-owned name.", 7)
-        target_labels = (
-            item.get("spec", {}).get("targets", {}).get("staticConfig", {}).get("labels")
-        )
+        spec = item.get("spec")
+        targets = spec.get("targets") if isinstance(spec, dict) else None
+        static_config = targets.get("staticConfig") if isinstance(targets, dict) else None
+        target_labels = static_config.get("labels") if isinstance(static_config, dict) else None
         expected_labels = (labels.get("app"), labels.get("route"), labels.get("environment"))
         if (
             not isinstance(target_labels, dict)
