@@ -65,14 +65,18 @@ NetworkPolicy. Install is only for an absent exporter release; upgrade requires
 it to exist. Both render the pinned chart, policy, and Probes first, pass the
 complete committed values on every Helm operation, and wait up to the
 Pi-appropriate timeout. Only after Helm succeeds, they apply the policy and then
-the rendered Probes. After the desired Probes are applied, the
-helper lists objects using the exact `release: kube-prometheus-stack` and selected
-`environment` labels and deletes only names absent from the rendered desired set.
-An empty stale set is a no-op, and unrelated or differently labelled Probes are
-outside the selector. Rendering, YAML parsing, listing, and comparison all fail
-closed before deletion. A Helm failure makes no policy or Probe mutation; a
-policy apply failure prevents Probe mutation. Neither environment uses
-`--reuse-values`.
+the rendered Probes. After the desired Probes are applied, the helper prunes
+same-environment objects selected by the exact `release: kube-prometheus-stack`
+and selected `environment` labels, deleting only names absent from the rendered
+desired set. In staging only, it also deletes the eleven exact cross-environment
+legacy names listed in the helper's `LEGACY_PROBES`; production performs no
+cross-environment legacy cleanup. Both cleanup paths run after the context and
+identity guards and the desired Probe apply, and both use `--ignore-not-found`.
+An empty stale set is a no-op. Probes outside either the exact selector or, in
+staging, the exact legacy-name set remain untouched. Rendering, YAML parsing,
+listing, and comparison all fail closed before deletion. A Helm failure makes
+no policy or Probe mutation; a policy apply failure prevents Probe mutation.
+Neither environment uses `--reuse-values`.
 Missing and unsupported environments fail before cluster access; `env=int` is
 a deprecated staging alias and `production` normalizes to `prod`.
 
@@ -180,10 +184,13 @@ just observability-blackbox-verify env=prod
 ```
 
 Restore the corresponding version and complete values file before a subsequent
-forward upgrade. Probe reconciliation follows the checked-out desired manifest;
-do not restore removed production Probe objects unless their production
-activation gate has been satisfied in a reviewed change. Never restore them by
-applying the retained legacy mixed matrix. Do not use `--reuse-values`.
+forward upgrade. Same-environment Probe reconciliation follows the checked-out
+desired manifest; staging additionally deletes the eleven exact cross-environment
+names in `LEGACY_PROBES`, rather than deriving those deletions from that manifest.
+Production performs no such cross-environment cleanup. Do not restore removed
+production Probe objects unless their production activation gate has been
+satisfied in a reviewed change. Never restore them by applying the retained
+legacy mixed matrix. Do not use `--reuse-values`.
 
 ## Troubleshooting
 
