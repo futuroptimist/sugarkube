@@ -28,7 +28,6 @@ LEGACY_PROBES=(
   blackbox-danielsmith-prod-root blackbox-danielsmith-prod-healthz
   blackbox-danielsmith-prod-livez
 )
-
 usage() { echo "Usage: $0 <render|install|upgrade|status|verify> env=<staging|prod>" >&2; }
 normalize_env() {
   local raw="${1:-}"; while [[ "${raw}" == env=* ]]; do raw="${raw#env=}"; done
@@ -166,8 +165,10 @@ with_render() {
   CHART_RENDER_JSON="$(mktemp -t sugarkube-blackbox-chart.XXXXXX.json)"
   POLICY_RENDER_JSON="$(mktemp -t sugarkube-blackbox-policy.XXXXXX.json)"
   PROBE_RENDER_JSON="$(mktemp -t sugarkube-blackbox-probes.XXXXXX.json)"
+  LIVE_PROBES_JSON="$(mktemp -t sugarkube-blackbox-live-probes.XXXXXX.json)"
+  STALE_PROBE_NAMES="$(mktemp -t sugarkube-blackbox-stale-probes.XXXXXX)"
   EXPECTED_POLICY_JSON="$(mktemp -t sugarkube-blackbox-policy.XXXXXX.json)"
-  trap 'rm -f "${BASE_RENDER:-}" "${CHART_RENDER:-}" "${POLICY_RENDER:-}" "${PROBE_RENDER:-}" "${SELECTORS_RENDER:-}" "${BASE_RENDER_JSON:-}" "${CHART_RENDER_JSON:-}" "${POLICY_RENDER_JSON:-}" "${PROBE_RENDER_JSON:-}" "${EXPECTED_POLICY_JSON:-}"' EXIT
+  trap 'rm -f "${BASE_RENDER:-}" "${CHART_RENDER:-}" "${POLICY_RENDER:-}" "${PROBE_RENDER:-}" "${SELECTORS_RENDER:-}" "${BASE_RENDER_JSON:-}" "${CHART_RENDER_JSON:-}" "${POLICY_RENDER_JSON:-}" "${PROBE_RENDER_JSON:-}" "${LIVE_PROBES_JSON:-}" "${STALE_PROBE_NAMES:-}" "${EXPECTED_POLICY_JSON:-}"' EXIT
   render_to "${BASE_RENDER}" "${CHART_RENDER}" "${POLICY_RENDER}" "${PROBE_RENDER}" "${SELECTORS_RENDER}" "${BASE_RENDER_JSON}" "${CHART_RENDER_JSON}" "${POLICY_RENDER_JSON}" "${PROBE_RENDER_JSON}"
 }
 render() { require_tools helm kubectl python3 ruby; with_render; print_resolved "" >&2; cat "${CHART_RENDER}"; printf '\n---\n'; cat "${POLICY_RENDER}"; printf '\n---\n'; cat "${PROBE_RENDER}"; }
@@ -178,11 +179,54 @@ mutate() {
   if [[ "${action}" == upgrade && "${state}" == absent ]]; then echo "ERROR: upgrade requires an existing ${RELEASE} release; use install." >&2; exit 6; fi
   helm "${action}" "${RELEASE}" "${CHART}" --namespace "${NAMESPACE}" --version "$(version)" -f "${VALUES}" --wait --timeout "${TIMEOUT}"
   kubectl apply -f "${POLICY_RENDER}"
-  # Remove only the production Probes left by the former mixed staging matrix.
+  kubectl apply -f "${PROBE_RENDER}"
+  reconcile_probes
+}
+reconcile_probes() {
+  local stale_names=() name
+  kubectl -n "${NAMESPACE}" get probe \
+    -l "release=${BASE_RELEASE},environment=${ENVIRONMENT}" -o json >"${LIVE_PROBES_JSON}" || {
+    echo "ERROR: could not list lifecycle-owned Probes; refusing to prune." >&2
+    exit 7
+  }
+  if ! python3 - "${PROBE_RENDER_JSON}" "${LIVE_PROBES_JSON}" "${ENVIRONMENT}" >"${STALE_PROBE_NAMES}" <<'PY'
+import json
+import sys
+
+desired_document = json.load(open(sys.argv[1], encoding="utf-8"))
+live = json.load(open(sys.argv[2], encoding="utf-8"))
+environment = sys.argv[3]
+if not isinstance(live, dict) or not isinstance(live.get("items"), list):
+    raise SystemExit("ERROR: lifecycle-owned Probe response has an invalid structure.")
+desired = {
+    item["metadata"]["name"]
+    for item in desired_document["items"]
+    if isinstance(item, dict) and item.get("kind") == "Probe"
+}
+for item in live["items"]:
+    metadata = item.get("metadata") if isinstance(item, dict) else None
+    labels = metadata.get("labels") if isinstance(metadata, dict) else None
+    name = metadata.get("name") if isinstance(metadata, dict) else None
+    if not isinstance(labels, dict) or not isinstance(name, str):
+        raise SystemExit("ERROR: lifecycle-owned Probe response contains an invalid object.")
+    if labels.get("release") != "kube-prometheus-stack" or labels.get("environment") != environment:
+        raise SystemExit("ERROR: Probe selector returned an object outside lifecycle ownership.")
+    if name not in desired:
+        print(name)
+PY
+  then
+    echo "ERROR: could not compare lifecycle-owned Probes; refusing to prune." >&2
+    exit 7
+  fi
+  while IFS= read -r name; do
+    [[ -n "${name}" ]] && stale_names+=("${name}")
+  done <"${STALE_PROBE_NAMES}"
+  ((${#stale_names[@]} == 0)) || kubectl -n "${NAMESPACE}" delete probe "${stale_names[@]}" --ignore-not-found
+  # These exact names are the production Probes formerly shipped in the mixed
+  # staging matrix. Context validation above makes this cleanup staging-only.
   if [[ "${ENVIRONMENT}" == staging ]]; then
     kubectl -n "${NAMESPACE}" delete probe "${LEGACY_PROBES[@]}" --ignore-not-found
   fi
-  kubectl apply -f "${PROBE_RENDER}"
 }
 status() {
   require_tools helm kubectl python3 ruby; with_render; assert_context; print_resolved "${EXPECTED_CONTEXT}"
@@ -251,7 +295,7 @@ verify_series() {
     done
     rc=0
     FINAL_ATTEMPT="$((attempt==attempts))" python3 "${ROOT}/scripts/verify_blackbox_prometheus.py" --env "${ENVIRONMENT}" <<<"$(printf '{"targets":%s,"metrics":%s}' "${targets}" "${metrics}")" || rc=$?
-    case "${rc}" in 0) echo "All 21 ${ENVIRONMENT} blackbox targets and required metric families are healthy."; return;; 10) ((attempt<attempts)) && { echo "Blackbox targets are converging (attempt ${attempt}/${attempts}); retrying." >&2; sleep "${interval}"; };; *) exit "${rc}";; esac
+    case "${rc}" in 0) echo "All $(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["items"]))' "${PROBE_RENDER_JSON}") ${ENVIRONMENT} blackbox targets and required metric families are healthy."; return;; 10) ((attempt<attempts)) && { echo "Blackbox targets are converging (attempt ${attempt}/${attempts}); retrying." >&2; sleep "${interval}"; };; *) exit "${rc}";; esac
   done
   exit 10
 }

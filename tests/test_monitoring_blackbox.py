@@ -5,6 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 VALUES = ROOT / "clusters/staging/observability/prometheus-blackbox-exporter.values.yaml"
 PROBES = ROOT / "clusters/staging/observability/probes/public-apps.yaml"
+PROD_PROBES = ROOT / "clusters/prod/observability/probes/public-apps.yaml"
 POLICY = (
     ROOT / "clusters/staging/observability/network-policies/prometheus-to-blackbox-exporter.yaml"
 )
@@ -131,6 +132,30 @@ def test_staging_probe_matrix_is_exact():
         for doc in docs
     )
     assert "production" not in PROBES.read_text() and "environment: prod" not in PROBES.read_text()
+
+
+def test_production_probe_matrix_contains_only_deployed_public_apps():
+    docs = yaml(PROD_PROBES)
+    assert len(docs) == 11
+    assert {
+        (doc["metadata"]["labels"]["app"], doc["metadata"]["labels"]["route"])
+        for doc in docs
+    } == {
+        (app, route)
+        for app, routes in {
+            "dspace": ("root", "config", "healthz", "livez"),
+            "tokenplace": ("root", "healthz", "livez", "metadata"),
+            "danielsmith": ("root", "healthz", "livez"),
+        }.items()
+        for route in routes
+    }
+    assert all(
+        doc["metadata"]["labels"]["release"] == "kube-prometheus-stack"
+        and doc["metadata"]["labels"]["environment"] == "prod"
+        for doc in docs
+    )
+    assert "gitshelves.com" not in PROD_PROBES.read_text()
+    assert "jobbot3000.tech" not in PROD_PROBES.read_text()
 
 
 def test_legacy_resources_are_outside_active_graphs():

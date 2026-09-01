@@ -14,11 +14,17 @@ ROUTES = {
 }
 
 
+PRODUCTION_APPS = {"dspace", "tokenplace", "danielsmith"}
+
+
 def expected(environment):
+    routes = ROUTES if environment == "staging" else {
+        app: app_routes for app, app_routes in ROUTES.items() if app in PRODUCTION_APPS
+    }
     return {
         f"blackbox-{app}-{environment}-{route}": (app, route, environment)
-        for app, routes in ROUTES.items()
-        for route in routes
+        for app, app_routes in routes.items()
+        for route in app_routes
     }
 
 

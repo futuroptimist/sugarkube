@@ -17,18 +17,22 @@ POLICY = (
     ROOT / "clusters/staging/observability/network-policies/prometheus-to-blackbox-exporter.yaml"
 )
 POLICIES = POLICY.parent
-LEGACY = [
-    "blackbox-dspace-prod-root",
-    "blackbox-dspace-prod-config",
-    "blackbox-dspace-prod-healthz",
-    "blackbox-dspace-prod-livez",
-    "blackbox-tokenplace-prod-root",
-    "blackbox-tokenplace-prod-healthz",
-    "blackbox-tokenplace-prod-livez",
-    "blackbox-tokenplace-prod-metadata",
-    "blackbox-danielsmith-prod-root",
-    "blackbox-danielsmith-prod-healthz",
-    "blackbox-danielsmith-prod-livez",
+STALE_PROD = [
+    f"blackbox-{app}-prod-{route}"
+    for app, routes in {
+        "gitshelves": ("root", "healthz", "livez", "baseplate", "module"),
+        "jobbot3000": ("root", "healthz", "livez", "tracker", "manifest"),
+    }.items()
+    for route in routes
+]
+LEGACY_STAGING_PROD = [
+    f"blackbox-{app}-prod-{route}"
+    for app, routes in {
+        "dspace": ("root", "config", "healthz", "livez"),
+        "tokenplace": ("root", "healthz", "livez", "metadata"),
+        "danielsmith": ("root", "healthz", "livez"),
+    }.items()
+    for route in routes
 ]
 COVERAGE_BOOTSTRAP_ENV = (
     "COV_CORE_SOURCE",
@@ -191,7 +195,22 @@ elif "get networkpolicy allow-kube-prometheus-stack-to-blackbox-exporter -o json
     elif scenario == "additional_policy_type": spec["policyTypes"].append("Egress")
     print(json.dumps(policy))
 elif "get probe -l" in joined and "-o json" in joined:
-    print(open(os.environ["PROBES_JSON"]).read())
+    if scenario == "reconcile_list_failure": sys.exit(31)
+    probes = json.load(open(os.environ["PROBES_JSON"]))
+    if scenario == "stale_prod":
+        stale = [
+            "blackbox-gitshelves-prod-root", "blackbox-gitshelves-prod-healthz",
+            "blackbox-gitshelves-prod-livez", "blackbox-gitshelves-prod-baseplate",
+            "blackbox-gitshelves-prod-module", "blackbox-jobbot3000-prod-root",
+            "blackbox-jobbot3000-prod-healthz", "blackbox-jobbot3000-prod-livez",
+            "blackbox-jobbot3000-prod-tracker", "blackbox-jobbot3000-prod-manifest",
+        ]
+        probes["items"].extend(
+            {"metadata": {"name": name, "labels": {
+                "release": "kube-prometheus-stack", "environment": "prod"
+            }}} for name in stale
+        )
+    print(json.dumps(probes))
 elif "--raw" in joined:
     count_file = os.environ["RAW_COUNT"]
     try: count = int(open(count_file).read())
@@ -512,25 +531,60 @@ def test_wrong_release_state_rejects_mutation(scenario, command, state):
     assert not mutations(scenario.log)
 
 
-@pytest.mark.parametrize("command,state", [("install", "release_absent"), ("upgrade", "success")])
+@pytest.mark.parametrize("command,state", [("install", "release_absent"), ("upgrade", "stale_prod")])
 def test_successful_mutation_uses_pinned_complete_values_and_order(scenario, command, state):
-    result = scenario.run(command, SCENARIO=state, SUGARKUBE_OBSERVABILITY_HELM_TIMEOUT="7m")
+    result = scenario.run(
+        command,
+        "prod",
+        KUBECONFIG=scenario.root / "prod.config",
+        SCENARIO=state if command == "upgrade" else "release_absent",
+        SUGARKUBE_OBSERVABILITY_HELM_TIMEOUT="7m",
+    )
     assert result.returncode == 0
     mutation = next(line for line in scenario.log if line.startswith(f"helm {command}"))
     assert "--version 11.15.1" in mutation
-    assert f"-f {VALUES}" in mutation
+    assert (
+        f"-f {ROOT / 'clusters/prod/observability/prometheus-blackbox-exporter.values.yaml'}"
+        in mutation
+    )
     assert "--wait --timeout 7m" in mutation
     assert "--reuse-values" not in mutation
-    delete = next(line for line in scenario.log if " delete probe " in line)
+    delete = next((line for line in scenario.log if " delete probe " in line), None)
     applies = [line for line in scenario.log if line.startswith("kubectl apply")]
     assert len(applies) == 2
     assert (
         scenario.log.index(mutation)
         < scenario.log.index(applies[0])
-        < scenario.log.index(delete)
         < scenario.log.index(applies[1])
     )
-    assert delete.endswith("delete probe " + " ".join(LEGACY) + " --ignore-not-found")
+    selector = next(line for line in scenario.log if " get probe -l " in f" {line} ")
+    assert "release=kube-prometheus-stack,environment=prod -o json" in selector
+    if command == "upgrade":
+        assert delete == (
+            "kubectl -n monitoring delete probe "
+            + " ".join(STALE_PROD)
+            + " --ignore-not-found"
+        )
+        assert scenario.log.index(applies[1]) < scenario.log.index(delete)
+    else:
+        assert delete is None
+
+
+def test_staging_reconciliation_cleans_up_only_known_cross_environment_probes(scenario):
+    result = scenario.run("upgrade")
+    assert result.returncode == 0
+    assert [line for line in scenario.log if " delete probe " in line] == [
+        "kubectl -n monitoring delete probe "
+        + " ".join(LEGACY_STAGING_PROD)
+        + " --ignore-not-found"
+    ]
+
+
+def test_reconciliation_list_failure_occurs_after_apply_but_before_deletion(scenario):
+    result = scenario.run("upgrade", SCENARIO="reconcile_list_failure")
+    assert result.returncode == 7
+    assert sum(line.startswith("kubectl apply") for line in scenario.log) == 2
+    assert not any(" delete probe " in line for line in scenario.log)
 
 
 def test_failed_helm_mutation_suppresses_cleanup_and_apply(scenario):
@@ -890,13 +944,21 @@ def load_probe_documents(environment):
 def test_production_probe_matrix_exact_and_separate():
     prod = load_probe_documents("prod")
     staging = load_probe_documents("staging")
-    assert len(prod) == len(staging) == 21
+    assert len(prod) == 11
+    assert len(staging) == 21
+    production_keys = {
+        (app, route)
+        for app, routes in {
+            "dspace": ("root", "config", "healthz", "livez"),
+            "tokenplace": ("root", "healthz", "livez", "metadata"),
+            "danielsmith": ("root", "healthz", "livez"),
+        }.items()
+        for route in routes
+    }
     bases = {
         "dspace": "https://democratized.space",
         "tokenplace": "https://token.place",
         "danielsmith": "https://danielsmith.io",
-        "jobbot3000": "https://jobbot3000.tech",
-        "gitshelves": "https://gitshelves.com",
     }
     paths = {
         "root": "/",
@@ -913,6 +975,10 @@ def test_production_probe_matrix_exact_and_separate():
         (item["metadata"]["labels"]["app"], item["metadata"]["labels"]["route"]): item
         for item in staging
     }
+    assert {
+        (item["metadata"]["labels"]["app"], item["metadata"]["labels"]["route"])
+        for item in prod
+    } == production_keys
     for item in prod:
         labels = item["metadata"]["labels"]
         key = (labels["app"], labels["route"])
