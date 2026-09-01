@@ -144,6 +144,49 @@ def test_node_contract_rejects_invalid_interpreter(
         runtime.validate_node_contract(value, root)
 
 
+def test_node_contract_accepts_secure_merged_usr_interpreter_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, root = synthetic_node_fixture(tmp_path, monkeypatch)
+    interpreter = root / "lib/ld-linux-armhf.so.3"
+    usr_interpreter = root / "usr/lib/ld-linux-armhf.so.3"
+    usr_interpreter.parent.mkdir(parents=True)
+    interpreter.replace(usr_interpreter)
+    (root / "lib").rmdir()
+    (root / "lib").symlink_to("usr/lib", target_is_directory=True)
+
+    assert runtime.validate_node_contract(value, root)["version"] == "20.20.2"
+
+
+def test_node_contract_checks_interpreter_execute_bit_for_service_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, root = synthetic_node_fixture(tmp_path, monkeypatch)
+    interpreter = root / "lib/ld-linux-armhf.so.3"
+    interpreter.chmod(0o700)
+
+    with pytest.raises(runtime.Invalid, match="Node runtime provenance"):
+        runtime.validate_node_contract(value, root)
+
+
+def test_node_contract_rejects_symlink_before_parsing_elf(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, root = synthetic_node_fixture(tmp_path, monkeypatch)
+    node = root / value["nodeContract"]["executablePath"].removeprefix("/")
+    target = node.with_name("node-target")
+    node.replace(target)
+    node.symlink_to(target.name)
+    monkeypatch.setattr(
+        runtime,
+        "validate_elf_contract",
+        lambda *_args, **_kwargs: pytest.fail("parsed a symlinked Node coordinate"),
+    )
+
+    with pytest.raises(runtime.Invalid, match="Node runtime provenance"):
+        runtime.validate_node_contract(value, root)
+
+
 @pytest.mark.parametrize("fault", ["duplicate", "malformed"])
 def test_node_contract_rejects_ambiguous_or_malformed_pt_interp(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str

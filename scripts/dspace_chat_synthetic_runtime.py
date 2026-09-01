@@ -311,7 +311,12 @@ def node_service_identity(config: dict, root: Path) -> tuple[int, int]:
 
 
 def validate_node_ancestors(
-    config: dict, root: Path, path: Path, *, allow_missing: bool = False
+    config: dict,
+    root: Path,
+    path: Path,
+    *,
+    allow_missing: bool = False,
+    allow_secure_symlinks: bool = False,
 ) -> None:
     """Require confined, root-controlled ancestors traversable by the service."""
     expected_uid, expected_gid = (0, 0) if root == Path("/") else (
@@ -343,12 +348,22 @@ def validate_node_ancestors(
                 if info.st_uid == service_uid
                 else stat.S_IXGRP if info.st_gid == service_gid else stat.S_IXOTH
             )
+            is_symlink = stat.S_ISLNK(info.st_mode)
+            secure_symlink = False
+            if is_symlink and allow_secure_symlinks:
+                try:
+                    parent.resolve(strict=True).relative_to(root)
+                    secure_symlink = (
+                        info.st_uid == expected_uid and info.st_gid == expected_gid
+                    )
+                except (OSError, ValueError, RuntimeError):
+                    secure_symlink = False
             if (
-                parent.is_symlink()
-                or not stat.S_ISDIR(info.st_mode)
+                (is_symlink and not secure_symlink)
+                or (not is_symlink and not stat.S_ISDIR(info.st_mode))
                 or info.st_uid != expected_uid
                 or info.st_gid != expected_gid
-                or info.st_mode & 0o022
+                or (not is_symlink and info.st_mode & 0o022)
                 or not info.st_mode & execute_bit
             ):
                 raise Invalid("Node runtime provenance")
@@ -439,6 +454,12 @@ def validate_node_interpreter(config: dict, root: Path) -> None:
         target_info = resolved.lstat()
     except (OSError, ValueError, RuntimeError):
         raise Invalid("Node runtime provenance") from None
+    service_uid, service_gid = node_service_identity(config, root)
+    execute_bit = (
+        stat.S_IXUSR
+        if target_info.st_uid == service_uid
+        else stat.S_IXGRP if target_info.st_gid == service_gid else stat.S_IXOTH
+    )
     if (
         coordinate_info.st_uid != expected_uid
         or coordinate_info.st_gid != expected_gid
@@ -447,10 +468,10 @@ def validate_node_interpreter(config: dict, root: Path) -> None:
         or target_info.st_uid != expected_uid
         or target_info.st_gid != expected_gid
         or target_info.st_mode & 0o022
-        or not os.access(resolved, os.X_OK)
+        or not target_info.st_mode & execute_bit
     ):
         raise Invalid("Node runtime provenance")
-    validate_node_ancestors(config, root, interpreter)
+    validate_node_ancestors(config, root, interpreter, allow_secure_symlinks=True)
     validate_node_ancestors(config, root, resolved)
     validate_elf_contract(resolved, contract, require_interpreter=False)
 
@@ -475,7 +496,6 @@ def validate_node_contract(
     except (OSError, KeyError, ValueError, RuntimeError):
         raise Invalid("Node runtime provenance") from None
     expected = _rooted(root, contract["executableRealpath"])
-    interpreter = validate_elf_contract(path, contract, require_interpreter=True)
     expected_uid, expected_gid = (0, 0) if root == Path("/") else (
         root.stat().st_uid,
         root.stat().st_gid,
@@ -489,11 +509,14 @@ def validate_node_contract(
         or info.st_uid != expected_uid
         or info.st_gid != expected_gid
         or f"{stat.S_IMODE(info.st_mode):04o}" != contract["mode"]
-        or sha256(path) != contract["executableSha256"]
     ):
         raise Invalid("Node runtime provenance")
+    interpreter = validate_elf_contract(resolved, contract, require_interpreter=True)
+    if sha256(resolved) != contract["executableSha256"]:
+        raise Invalid("Node runtime provenance")
     validate_node_ancestors(config, root, path)
-    assert interpreter == contract["interpreterPath"]
+    if interpreter != contract["interpreterPath"]:
+        raise Invalid("Node ELF interpreter")
     validate_node_interpreter(config, root)
     return dict(contract)
 
