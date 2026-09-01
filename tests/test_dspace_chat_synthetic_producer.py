@@ -8,6 +8,7 @@ import os
 import platform
 import shutil
 import stat
+import struct
 import subprocess
 import sys
 import time
@@ -55,22 +56,60 @@ def config(tmp_path: Path) -> dict:
     return value
 
 
+def synthetic_elf(
+    *,
+    machine: int = 40,
+    interpreter: bytes = b"/lib/ld-linux-armhf.so.3\0",
+    duplicate: bool = False,
+) -> bytes:
+    """Build compact, non-runnable ELF32 metadata with bounded program headers."""
+    entries = 2 if duplicate else 1
+    header = bytearray(52 + entries * 32)
+    header[:7] = b"\x7fELF\x01\x01\x01"
+    struct.pack_into(
+        "<HHIIIIIHHHHHH", header, 16, 2, machine, 1, 0, 52, 0, 0, 52, 32, entries, 0, 0, 0
+    )
+    for index in range(entries):
+        offset = len(header)
+        struct.pack_into(
+            "<IIIIIIII",
+            header,
+            52 + index * 32,
+            3,
+            offset,
+            0,
+            0,
+            len(interpreter),
+            len(interpreter),
+            4,
+            1,
+        )
+        header.extend(interpreter)
+    return bytes(header)
+
+
+def install_synthetic_interpreter(root: Path) -> Path:
+    interpreter = root / "lib/ld-linux-armhf.so.3"
+    interpreter.parent.mkdir(parents=True, exist_ok=True)
+    interpreter.write_bytes(b"synthetic-loader")
+    interpreter.chmod(0o755)
+    return interpreter
+
+
 def synthetic_node_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[dict, Path]:
     """Create non-runnable ELF metadata for provenance-only validation."""
     root = tmp_path / "node-root"
     root.mkdir(mode=0o755)
-    node = root / "opt/sugarkube/nodejs/v20.20.2-linux-arm64/bin/node"
+    node = root / "opt/sugarkube/nodejs/v20.20.2-linux-armv7l/bin/node"
     node.parent.mkdir(parents=True, mode=0o755)
     for parent in node.parents:
         if parent == root:
             root.chmod(0o755)
             break
         parent.chmod(0o755)
-    contents = bytearray(20)
-    contents[:6] = b"\x7fELF\x02\x01"
-    contents[18:20] = (183).to_bytes(2, "little")
-    node.write_bytes(contents + b"synthetic-not-executable-code")
+    node.write_bytes(synthetic_elf())
     node.chmod(0o755)
+    install_synthetic_interpreter(root)
     value = json.loads(CONFIG.read_text())
     contract = value["nodeContract"]
     contract["executableSha256"] = runtime.sha256(node)
@@ -149,7 +188,7 @@ def test_node_contract_rejects_untraversable_ancestor(
 ) -> None:
     value, root = synthetic_node_fixture(tmp_path, monkeypatch)
     (root / "opt/sugarkube").chmod(0o700)
-    with pytest.raises(runtime.Invalid, match="Node runtime provenance"):
+    with pytest.raises(runtime.Invalid, match="Node (runtime provenance|ELF contract)"):
         runtime.validate_node_contract(value, root)
 
 
@@ -173,7 +212,46 @@ def test_node_contract_checks_architecture_before_hashing(
     contents[18:20] = (62).to_bytes(2, "little")
     node.write_bytes(contents)
     monkeypatch.setattr(runtime, "sha256", lambda _path: pytest.fail("hashed wrong ELF"))
-    with pytest.raises(runtime.Invalid, match="Node runtime provenance"):
+    with pytest.raises(runtime.Invalid, match="Node ELF contract"):
+        runtime.validate_node_contract(value, root)
+
+
+@pytest.mark.parametrize(
+    "fault", ["missing", "dangling", "duplicate", "malformed", "wrong-architecture", "insecure"]
+)
+def test_node_contract_fails_closed_for_interpreter_faults(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    value, root = synthetic_node_fixture(tmp_path, monkeypatch)
+    node = root / value["nodeContract"]["executablePath"].removeprefix("/")
+    interpreter = root / "lib/ld-linux-armhf.so.3"
+    if fault == "missing":
+        interpreter.unlink()
+    elif fault == "dangling":
+        interpreter.unlink()
+        interpreter.symlink_to("absent-loader")
+    elif fault == "duplicate":
+        node.write_bytes(synthetic_elf(duplicate=True))
+    elif fault == "malformed":
+        node.write_bytes(synthetic_elf(interpreter=b"/lib/ld-linux-armhf.so.3"))
+    elif fault == "wrong-architecture":
+        node.write_bytes(synthetic_elf(machine=183))
+    else:
+        interpreter.chmod(0o775)
+    value["nodeContract"]["executableSha256"] = runtime.sha256(node)
+    with pytest.raises(runtime.Invalid, match="Node ELF"):
+        runtime.validate_node_contract(value, root)
+
+
+def test_aarch64_kernel_does_not_authorize_aarch64_node_in_armhf_userspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, root = synthetic_node_fixture(tmp_path, monkeypatch)
+    node = root / value["nodeContract"]["executablePath"].removeprefix("/")
+    node.write_bytes(synthetic_elf(machine=183, interpreter=b"/lib/ld-linux-aarch64.so.1\0"))
+    value["nodeContract"]["executableSha256"] = runtime.sha256(node)
+    monkeypatch.setattr(runtime.platform, "machine", lambda: "aarch64")
+    with pytest.raises(runtime.Invalid, match="Node ELF"):
         runtime.validate_node_contract(value, root)
 
 
@@ -181,23 +259,21 @@ def test_provision_node_private_root_is_atomic_idempotent_and_umask_independent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     value = json.loads(CONFIG.read_text())
-    contents = bytearray(20)
-    contents[:6] = b"\x7fELF\x02\x01"
-    contents[18:20] = (183).to_bytes(2, "little")
-    contents += b"provenance-only-node"
+    contents = synthetic_elf()
     source = tmp_path / "source"
-    member = source / "node-v20.20.2-linux-arm64/bin/node"
+    member = source / "node-v20.20.2-linux-armv7l/bin/node"
     member.parent.mkdir(parents=True)
     member.write_bytes(contents)
     archive = tmp_path / "node.tar.xz"
     import tarfile
 
     with tarfile.open(archive, "w:xz") as bundle:
-        bundle.add(member, arcname="node-v20.20.2-linux-arm64/bin/node")
+        bundle.add(member, arcname="node-v20.20.2-linux-armv7l/bin/node")
     value["nodeContract"]["archiveSha256"] = installer.sha(archive)
     value["nodeContract"]["executableSha256"] = runtime.sha256(member)
     root = tmp_path / "root"
     root.mkdir(mode=0o755)
+    install_synthetic_interpreter(root)
     monkeypatch.setattr(installer, "runtime_module", lambda: runtime)
     monkeypatch.setattr(runtime, "load_config", lambda _path: copy.deepcopy(value))
     monkeypatch.setattr(runtime.platform, "machine", lambda: "aarch64")
@@ -224,13 +300,15 @@ def test_provision_node_private_root_is_atomic_idempotent_and_umask_independent(
 
     escaped_root = tmp_path / "escaped-root"
     escaped_root.mkdir(mode=0o755)
+    install_synthetic_interpreter(escaped_root)
     (escaped_root / "opt").symlink_to(tmp_path)
     with pytest.raises(ValueError, match="ancestor is insecure"):
         installer.provision_node(archive, escaped_root, True)
-    assert not (tmp_path / "sugarkube/nodejs/v20.20.2-linux-arm64/bin/node").exists()
+    assert not (tmp_path / "sugarkube/nodejs/v20.20.2-linux-armv7l/bin/node").exists()
 
     failed_root = tmp_path / "failed-root"
     failed_root.mkdir(mode=0o755)
+    install_synthetic_interpreter(failed_root)
     real_validate = runtime.validate_node_contract
     monkeypatch.setattr(
         runtime,
@@ -246,7 +324,7 @@ def test_provision_node_private_root_is_atomic_idempotent_and_umask_independent(
 
 
 @pytest.mark.parametrize(
-    "fault", ["missing", "dangling", "owner", "writable", "arm32", "digest", "hardlink"]
+    "fault", ["missing", "dangling", "owner", "writable", "aarch64", "digest", "hardlink"]
 )
 def test_node_contract_fails_closed_for_invalid_identity(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
@@ -272,17 +350,17 @@ def test_node_contract_fails_closed_for_invalid_identity(
             return info
 
         monkeypatch.setattr(Path, "lstat", wrong_owner)
-    elif fault == "arm32":
+    elif fault == "aarch64":
         contents = bytearray(node.read_bytes())
-        contents[4] = 1
-        contents[18:20] = (40).to_bytes(2, "little")
+        contents[4] = 2
+        contents[18:20] = (183).to_bytes(2, "little")
         node.write_bytes(contents)
         value["nodeContract"]["executableSha256"] = runtime.sha256(node)
     elif fault == "digest":
         value["nodeContract"]["executableSha256"] = "0" * 64
     else:
         os.link(node, node.with_name("second-identity"))
-    with pytest.raises(runtime.Invalid, match="Node runtime provenance"):
+    with pytest.raises(runtime.Invalid, match="Node (runtime provenance|ELF contract)"):
         runtime.validate_node_contract(value, root)
 
 
@@ -4207,6 +4285,10 @@ def test_units_are_bounded_persistent_hardened_and_never_implicitly_activated() 
     assert "RuntimeDirectoryMode=0710" in service and "Group=pi" in service
     assert "RuntimeDirectoryPreserve=yes" in service
     assert "ProtectSystem=strict" in service and "Persistent=true" in timer
+    node = json.loads(CONFIG.read_text())["nodeContract"]
+    assert f"ConditionPathIsExecutable={node['executablePath']}" in service
+    assert f"ReadOnlyPaths={Path(node['executablePath']).parents[1]}" in service
+    assert "SystemCallArchitectures=native arm" in service
     for mutation in (
         "systemctl enable",
         "systemctl start",
