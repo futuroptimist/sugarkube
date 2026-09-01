@@ -158,6 +158,46 @@ def test_node_contract_accepts_secure_merged_usr_interpreter_path(
     assert runtime.validate_node_contract(value, root)["version"] == "20.20.2"
 
 
+@pytest.mark.parametrize("fault", ["escape", "dangling", "cycle", "writable", "owner"])
+def test_node_contract_rejects_insecure_merged_usr_interpreter_chain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    value, root = synthetic_node_fixture(tmp_path, monkeypatch)
+    interpreter = root / "lib/ld-linux-armhf.so.3"
+    usr_lib = root / "usr/lib"
+    usr_lib.mkdir(parents=True)
+    interpreter.replace(usr_lib / interpreter.name)
+    (root / "lib").rmdir()
+    target = "usr/lib"
+    if fault == "escape":
+        target = "../../outside"
+    elif fault == "dangling":
+        target = "missing"
+    elif fault == "cycle":
+        (usr_lib / interpreter.name).unlink()
+        usr_lib.rmdir()
+        usr_lib.symlink_to("../../lib", target_is_directory=True)
+    elif fault == "writable":
+        usr_lib.chmod(0o775)
+    link = root / "lib"
+    link.symlink_to(target, target_is_directory=True)
+    if fault == "owner":
+        real_lstat = Path.lstat
+
+        def wrong_owner(path: Path):
+            info = real_lstat(path)
+            if path == link:
+                fields = list(info)
+                fields[4:6] = [info.st_uid + 1, info.st_gid + 1]
+                return os.stat_result(fields)
+            return info
+
+        monkeypatch.setattr(Path, "lstat", wrong_owner)
+
+    with pytest.raises(runtime.Invalid, match="Node runtime provenance"):
+        runtime.validate_node_contract(value, root)
+
+
 def test_node_contract_checks_interpreter_execute_bit_for_service_identity(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -182,6 +222,7 @@ def test_node_contract_rejects_symlink_before_parsing_elf(
         "validate_elf_contract",
         lambda *_args, **_kwargs: pytest.fail("parsed a symlinked Node coordinate"),
     )
+    monkeypatch.setattr(runtime, "sha256", lambda *_args: pytest.fail("hashed a symlink"))
 
     with pytest.raises(runtime.Invalid, match="Node runtime provenance"):
         runtime.validate_node_contract(value, root)
@@ -4334,6 +4375,10 @@ def test_units_are_bounded_persistent_hardened_and_never_implicitly_activated() 
     assert "RuntimeDirectoryMode=0710" in service and "Group=pi" in service
     assert "RuntimeDirectoryPreserve=yes" in service
     assert "ProtectSystem=strict" in service and "Persistent=true" in timer
+    node = json.loads(CONFIG.read_text())["nodeContract"]
+    assert f"ConditionPathIsExecutable={node['executablePath']}" in service
+    assert f"ReadOnlyPaths={Path(node['executablePath']).parent.parent}" in service
+    assert "SystemCallArchitectures=native" in service
     for mutation in (
         "systemctl enable",
         "systemctl start",
