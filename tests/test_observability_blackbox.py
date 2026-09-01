@@ -944,13 +944,21 @@ def load_probe_documents(environment):
 def test_production_probe_matrix_exact_and_separate():
     prod = load_probe_documents("prod")
     staging = load_probe_documents("staging")
-    assert len(prod) == len(staging) == 21
+    assert len(prod) == 11
+    assert len(staging) == 21
+    production_keys = {
+        (app, route)
+        for app, routes in {
+            "dspace": ("root", "config", "healthz", "livez"),
+            "tokenplace": ("root", "healthz", "livez", "metadata"),
+            "danielsmith": ("root", "healthz", "livez"),
+        }.items()
+        for route in routes
+    }
     bases = {
         "dspace": "https://democratized.space",
         "tokenplace": "https://token.place",
         "danielsmith": "https://danielsmith.io",
-        "jobbot3000": "https://jobbot3000.tech",
-        "gitshelves": "https://gitshelves.com",
     }
     paths = {
         "root": "/",
@@ -967,6 +975,10 @@ def test_production_probe_matrix_exact_and_separate():
         (item["metadata"]["labels"]["app"], item["metadata"]["labels"]["route"]): item
         for item in staging
     }
+    assert {
+        (item["metadata"]["labels"]["app"], item["metadata"]["labels"]["route"])
+        for item in prod
+    } == production_keys
     for item in prod:
         labels = item["metadata"]["labels"]
         key = (labels["app"], labels["route"])
