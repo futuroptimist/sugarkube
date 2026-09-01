@@ -432,12 +432,31 @@ def validate_node_interpreter(config: dict, root: Path) -> None:
     """Validate the contracted userspace loader inside the selected root."""
     contract = config["nodeContract"]
     interpreter = _rooted(root, contract["interpreterPath"])
+    try:
+        root_info = root.lstat()
+    except OSError:
+        raise Invalid("Node runtime provenance") from None
     expected_uid, expected_gid = (0, 0) if root == Path("/") else (
-        root.stat().st_uid,
-        root.stat().st_gid,
+        root_info.st_uid,
+        root_info.st_gid,
     )
+    if (
+        stat.S_ISLNK(root_info.st_mode)
+        or not stat.S_ISDIR(root_info.st_mode)
+        or root_info.st_uid != expected_uid
+        or root_info.st_gid != expected_gid
+        or root_info.st_mode & 0o022
+    ):
+        raise Invalid("Node runtime provenance")
     service_uid, service_gid = node_service_identity(config, root)
-    pending = list(Path(contract["interpreterPath"]).parts[1:])
+    root_execute_bit = (
+        stat.S_IXUSR
+        if root_info.st_uid == service_uid
+        else stat.S_IXGRP if root_info.st_gid == service_gid else stat.S_IXOTH
+    )
+    if not root_info.st_mode & root_execute_bit:
+        raise Invalid("Node runtime provenance")
+    pending = list(interpreter.relative_to(root).parts)
     current = root
     symlink_hops = 0
     seen_links: set[Path] = set()

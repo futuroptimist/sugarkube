@@ -41,8 +41,17 @@ def synthetic_arm_elf(
     payload_offset = 52 + len(program_headers)
     for index in range(count):
         struct.pack_into(
-            "<IIIIIIII", program_headers, index * 32, 3 if interpreter is not None else 1,
-            payload_offset, 0, 0, len(payload), len(payload), 4, 1,
+            "<IIIIIIII",
+            program_headers,
+            index * 32,
+            3 if interpreter is not None else 1,
+            payload_offset,
+            0,
+            0,
+            len(payload),
+            len(payload),
+            4,
+            1,
         )
     return bytes(header + program_headers + payload)
 
@@ -333,6 +342,28 @@ def test_node_contract_uses_matching_group_execute_bit_for_private_root(
         runtime.validate_node_contract(value, root)
 
 
+@pytest.mark.parametrize("mode", [0o700, 0o770, 0o757])
+def test_private_root_rejected_before_interpreter_or_archive_processing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: int
+) -> None:
+    value, root = synthetic_node_fixture(tmp_path, monkeypatch)
+    root.chmod(mode)
+    before = tree_bytes(root)
+    monkeypatch.setattr(installer, "runtime_module", lambda: runtime)
+    monkeypatch.setattr(runtime, "load_config", lambda _path: copy.deepcopy(value))
+    monkeypatch.setattr(
+        installer.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail("provisioning invoked a command"),
+    )
+
+    with pytest.raises(runtime.Invalid, match="Node runtime provenance"):
+        runtime.validate_node_interpreter(value, root)
+    with pytest.raises(runtime.Invalid, match="Node runtime provenance"):
+        installer.provision_node(tmp_path / "unreadable-archive", root, False)
+    assert tree_bytes(root) == before
+
+
 def test_node_contract_checks_architecture_before_hashing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -363,7 +394,7 @@ def test_provision_node_private_root_is_atomic_idempotent_and_umask_independent(
     value["nodeContract"]["archiveSha256"] = installer.sha(archive)
     value["nodeContract"]["executableSha256"] = runtime.sha256(member)
     root = tmp_path / "root"
-    root.mkdir(mode=0o755)
+    root.mkdir(mode=0o750)
     install_synthetic_interpreter(root, value)
     monkeypatch.setattr(installer, "runtime_module", lambda: runtime)
     monkeypatch.setattr(runtime, "load_config", lambda _path: copy.deepcopy(value))
@@ -375,6 +406,7 @@ def test_provision_node_private_root_is_atomic_idempotent_and_umask_independent(
     )
 
     before = tree_bytes(root)
+    runtime.validate_node_interpreter(value, root)
     assert installer.provision_node(archive, root, False) == 0
     assert tree_bytes(root) == before
     previous_umask = os.umask(0o077)
