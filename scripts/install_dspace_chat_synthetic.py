@@ -403,9 +403,7 @@ def validate_snapshot(
         node = runtime.validate_node_contract(config, root)
     node_executable = node["executablePath"] if node else None
     runner = runtime.validate_runner(config, node_executable)
-    provenance = runtime.validate_browser_contract(
-        config, runner, root, node_executable
-    )
+    provenance = runtime.validate_browser_contract(config, runner, root, node_executable)
     manifest = json.loads((runner / "sugarkube-runner-manifest.json").read_text())
     if provenance != manifest.get("browserProvenance"):
         raise ValueError("runner browser provenance mismatch")
@@ -725,9 +723,7 @@ def status(root: Path) -> int:
         raise ValueError("installed runner browser provenance is invalid")
 
     rooted_config = dict(config, runnerRoot=str(runner_parent))
-    node_provenance = runtime.validate_node_contract(
-        rooted_config, root, allow_legacy_missing=True
-    )
+    node_provenance = runtime.validate_node_contract(rooted_config, root, allow_legacy_missing=True)
     runner = runtime.validate_runner(
         rooted_config, node_provenance["executablePath"] if node_provenance else None
     )
@@ -869,14 +865,13 @@ def provision_node(archive: Path, root: Path, apply: bool) -> int:
     config = runtime.load_config(ROOT / "config/dspace-chat-synthetic.json")
     contract = config["nodeContract"]
     root = runtime.normalize_root(root)
-    if runtime.platform.machine() != contract["architecture"]:
-        raise ValueError("Node host architecture mismatch")
     # Resolve the service identity before any apply-side filesystem mutation.
     runtime.node_service_identity(config, root)
+    runtime.validate_node_interpreter(config, root, contract)
     regular_file(archive, "Node distribution archive")
     if sha(archive) != contract["archiveSha256"]:
         raise ValueError("Node distribution archive digest mismatch")
-    member_name = f"node-v{contract['version']}-linux-arm64/bin/node"
+    member_name = f"node-v{contract['version']}-linux-armv7l/bin/node"
     with tarfile.open(archive, "r:xz") as bundle:
         members = [member for member in bundle.getmembers() if member.name == member_name]
         if len(members) != 1 or not members[0].isfile() or members[0].islnk() or members[0].issym():
@@ -887,14 +882,11 @@ def provision_node(archive: Path, root: Path, apply: bool) -> int:
         with tempfile.NamedTemporaryFile() as candidate:
             shutil.copyfileobj(stream, candidate)
             candidate.flush()
-            candidate.seek(0)
-            header = candidate.read(20)
-            native_aarch64 = (
-                len(header) == 20
-                and header[:6] == b"\x7fELF\x02\x01"
-                and int.from_bytes(header[18:20], "little") == 183
-            )
-            if not native_aarch64 or sha(Path(candidate.name)) != contract["executableSha256"]:
+            try:
+                runtime.validate_node_elf_contract(Path(candidate.name), contract)
+            except runtime.Invalid as error:
+                raise ValueError("Node executable ELF contract mismatch") from error
+            if sha(Path(candidate.name)) != contract["executableSha256"]:
                 raise ValueError("Node executable digest mismatch")
     if not apply:
         print("nodeValidation=passed mutation=none authorization=required")
@@ -947,14 +939,11 @@ def provision_node(archive: Path, root: Path, apply: bool) -> int:
                 os.fsync(output.fileno())
             temporary.chmod(0o755)
             os.chown(temporary, expected_uid, expected_gid)
-            with temporary.open("rb") as candidate:
-                header = candidate.read(20)
-            if (
-                len(header) != 20
-                or header[:6] != b"\x7fELF\x02\x01"
-                or int.from_bytes(header[18:20], "little") != 183
-                or sha(temporary) != contract["executableSha256"]
-            ):
+            try:
+                runtime.validate_node_elf_contract(temporary, contract)
+            except runtime.Invalid as error:
+                raise ValueError("extracted Node executable validation failed") from error
+            if sha(temporary) != contract["executableSha256"]:
                 raise ValueError("extracted Node executable validation failed")
             os.replace(temporary, destination)
             published_identity = destination.lstat().st_dev, destination.lstat().st_ino
