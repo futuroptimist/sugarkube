@@ -25,6 +25,15 @@ STALE_PROD = [
     }.items()
     for route in routes
 ]
+LEGACY_STAGING_PROD = [
+    f"blackbox-{app}-prod-{route}"
+    for app, routes in {
+        "dspace": ("root", "config", "healthz", "livez"),
+        "tokenplace": ("root", "healthz", "livez", "metadata"),
+        "danielsmith": ("root", "healthz", "livez"),
+    }.items()
+    for route in routes
+]
 COVERAGE_BOOTSTRAP_ENV = (
     "COV_CORE_SOURCE",
     "COV_CORE_CONFIG",
@@ -534,7 +543,10 @@ def test_successful_mutation_uses_pinned_complete_values_and_order(scenario, com
     assert result.returncode == 0
     mutation = next(line for line in scenario.log if line.startswith(f"helm {command}"))
     assert "--version 11.15.1" in mutation
-    assert f"-f {VALUES}" in mutation
+    assert (
+        f"-f {ROOT / 'clusters/prod/observability/prometheus-blackbox-exporter.values.yaml'}"
+        in mutation
+    )
     assert "--wait --timeout 7m" in mutation
     assert "--reuse-values" not in mutation
     delete = next((line for line in scenario.log if " delete probe " in line), None)
@@ -548,16 +560,24 @@ def test_successful_mutation_uses_pinned_complete_values_and_order(scenario, com
     selector = next(line for line in scenario.log if " get probe -l " in f" {line} ")
     assert "release=kube-prometheus-stack,environment=prod -o json" in selector
     if command == "upgrade":
-        assert delete == "kubectl -n monitoring delete probe " + " ".join(STALE_PROD)
+        assert delete == (
+            "kubectl -n monitoring delete probe "
+            + " ".join(STALE_PROD)
+            + " --ignore-not-found"
+        )
         assert scenario.log.index(applies[1]) < scenario.log.index(delete)
     else:
         assert delete is None
 
 
-def test_noop_reconciliation_does_not_delete_probes(scenario):
+def test_staging_reconciliation_cleans_up_only_known_cross_environment_probes(scenario):
     result = scenario.run("upgrade")
     assert result.returncode == 0
-    assert not any(" delete probe " in line for line in scenario.log)
+    assert [line for line in scenario.log if " delete probe " in line] == [
+        "kubectl -n monitoring delete probe "
+        + " ".join(LEGACY_STAGING_PROD)
+        + " --ignore-not-found"
+    ]
 
 
 def test_reconciliation_list_failure_occurs_after_apply_but_before_deletion(scenario):

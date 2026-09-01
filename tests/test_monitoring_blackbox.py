@@ -149,7 +149,11 @@ def test_production_probe_matrix_contains_only_deployed_public_apps():
         }.items()
         for route in routes
     }
-    assert all(doc["metadata"]["labels"]["environment"] == "prod" for doc in docs)
+    assert all(
+        doc["metadata"]["labels"]["release"] == "kube-prometheus-stack"
+        and doc["metadata"]["labels"]["environment"] == "prod"
+        for doc in docs
+    )
     assert "gitshelves.com" not in PROD_PROBES.read_text()
     assert "jobbot3000.tech" not in PROD_PROBES.read_text()
 

@@ -20,6 +20,14 @@ EXPECTED_CONTEXT=""
 POLICY_NAME="allow-kube-prometheus-stack-to-blackbox-exporter"
 TIMEOUT="${SUGARKUBE_OBSERVABILITY_HELM_TIMEOUT:-20m}"
 PROMETHEUS_SERVICE="kube-prometheus-stack-prometheus"
+LEGACY_PROBES=(
+  blackbox-dspace-prod-root blackbox-dspace-prod-config
+  blackbox-dspace-prod-healthz blackbox-dspace-prod-livez
+  blackbox-tokenplace-prod-root blackbox-tokenplace-prod-healthz
+  blackbox-tokenplace-prod-livez blackbox-tokenplace-prod-metadata
+  blackbox-danielsmith-prod-root blackbox-danielsmith-prod-healthz
+  blackbox-danielsmith-prod-livez
+)
 usage() { echo "Usage: $0 <render|install|upgrade|status|verify> env=<staging|prod>" >&2; }
 normalize_env() {
   local raw="${1:-}"; while [[ "${raw}" == env=* ]]; do raw="${raw#env=}"; done
@@ -213,7 +221,12 @@ PY
   while IFS= read -r name; do
     [[ -n "${name}" ]] && stale_names+=("${name}")
   done <"${STALE_PROBE_NAMES}"
-  ((${#stale_names[@]} == 0)) || kubectl -n "${NAMESPACE}" delete probe "${stale_names[@]}"
+  ((${#stale_names[@]} == 0)) || kubectl -n "${NAMESPACE}" delete probe "${stale_names[@]}" --ignore-not-found
+  # These exact names are the production Probes formerly shipped in the mixed
+  # staging matrix. Context validation above makes this cleanup staging-only.
+  if [[ "${ENVIRONMENT}" == staging ]]; then
+    kubectl -n "${NAMESPACE}" delete probe "${LEGACY_PROBES[@]}" --ignore-not-found
+  fi
 }
 status() {
   require_tools helm kubectl python3 ruby; with_render; assert_context; print_resolved "${EXPECTED_CONTEXT}"
