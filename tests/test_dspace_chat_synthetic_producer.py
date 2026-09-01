@@ -153,8 +153,9 @@ def test_node_contract_rejects_invalid_interpreter(
         runtime.validate_node_contract(value, root)
 
 
+@pytest.mark.parametrize("link_target", ["usr/lib", "/usr/lib"])
 def test_node_contract_accepts_secure_merged_usr_interpreter_path(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, link_target: str
 ) -> None:
     value, root = synthetic_node_fixture(tmp_path, monkeypatch)
     interpreter = root / "lib/ld-linux-armhf.so.3"
@@ -162,9 +163,67 @@ def test_node_contract_accepts_secure_merged_usr_interpreter_path(
     usr_interpreter.parent.mkdir(parents=True)
     interpreter.replace(usr_interpreter)
     (root / "lib").rmdir()
-    (root / "lib").symlink_to("usr/lib", target_is_directory=True)
+    (root / "lib").symlink_to(link_target, target_is_directory=True)
 
     assert runtime.validate_node_contract(value, root)["version"] == "20.20.2"
+
+
+def test_elf_parser_rejects_malformed_metadata_and_accepts_elf64(tmp_path: Path) -> None:
+    contract = json.loads(CONFIG.read_text())["nodeContract"]
+    image = tmp_path / "node"
+
+    for contents, message in [
+        (b"not an ELF", "Node ELF contract"),
+        (synthetic_arm_elf("relative/loader"), "Node ELF interpreter"),
+    ]:
+        image.write_bytes(contents)
+        with pytest.raises(runtime.Invalid, match=message):
+            runtime.validate_elf_contract(image, contract, require_interpreter=True)
+
+    malformed = bytearray(synthetic_arm_elf(contract["interpreterPath"]))
+    malformed[44:46] = (0).to_bytes(2, "little")
+    image.write_bytes(malformed)
+    with pytest.raises(runtime.Invalid, match="Node ELF program headers"):
+        runtime.validate_elf_contract(image, contract, require_interpreter=True)
+
+    malformed = bytearray(synthetic_arm_elf(contract["interpreterPath"]))
+    malformed[44:46] = (2).to_bytes(2, "little")
+    image.write_bytes(malformed)
+    with pytest.raises(runtime.Invalid, match="Node ELF program headers"):
+        runtime.validate_elf_contract(image, contract, require_interpreter=True)
+
+    malformed = bytearray(synthetic_arm_elf(contract["interpreterPath"]))
+    malformed[68:72] = (1).to_bytes(4, "little")
+    image.write_bytes(malformed)
+    with pytest.raises(runtime.Invalid, match="Node ELF interpreter"):
+        runtime.validate_elf_contract(image, contract, require_interpreter=True)
+
+    malformed = bytearray(synthetic_arm_elf(contract["interpreterPath"]))
+    malformed[-2] = 0xFF
+    image.write_bytes(malformed)
+    with pytest.raises(runtime.Invalid, match="Node ELF interpreter"):
+        runtime.validate_elf_contract(image, contract, require_interpreter=True)
+
+    loader_with_interpreter = synthetic_arm_elf(contract["interpreterPath"])
+    image.write_bytes(loader_with_interpreter)
+    with pytest.raises(runtime.Invalid, match="Node ELF interpreter"):
+        runtime.validate_elf_contract(image, contract, require_interpreter=False)
+
+    elf64 = bytearray(64 + 56)
+    elf64[:7] = b"\x7fELF\x02\x01\x01"
+    struct.pack_into("<HHIQQQIHHHHHH", elf64, 16, 2, 40, 1, 0, 64, 0, 0, 64, 56, 1, 0, 0, 0)
+    image.write_bytes(elf64)
+    elf64_contract = {**contract, "elfClass": 64}
+    assert runtime.validate_elf_contract(image, elf64_contract, require_interpreter=False) is None
+
+    with pytest.raises(runtime.Invalid, match="Node ELF contract"):
+        runtime.validate_elf_contract(tmp_path / "missing", contract, require_interpreter=True)
+
+
+def test_interpreter_validation_rejects_missing_root(tmp_path: Path) -> None:
+    value = json.loads(CONFIG.read_text())
+    with pytest.raises(runtime.Invalid, match="Node runtime provenance"):
+        runtime.validate_node_interpreter(value, tmp_path / "missing")
 
 
 @pytest.mark.parametrize("fault", ["escape", "dangling", "cycle", "writable", "owner"])
