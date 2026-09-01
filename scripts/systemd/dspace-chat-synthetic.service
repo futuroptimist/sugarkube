@@ -3,7 +3,7 @@ Description=Sugarkube bounded DSPACE chat synthetic producer
 Documentation=https://github.com/futuroptimist/sugarkube/blob/main/docs/dspace-chat-synthetic-producer.md
 After=network-online.target
 Wants=network-online.target
-ConditionPathIsExecutable=/opt/sugarkube/nodejs/v20.20.2-linux-arm64/bin/node
+ConditionPathIsExecutable=/opt/sugarkube/nodejs/v20.20.2-linux-armv7l/bin/node
 
 [Service]
 Type=oneshot
@@ -25,7 +25,7 @@ ProtectKernelModules=true
 ProtectKernelTunables=true
 ProtectSystem=strict
 ReadOnlyPaths=/var/lib/sugarkube/dspace-chat-runners
-ReadOnlyPaths=/opt/sugarkube/nodejs/v20.20.2-linux-arm64
+ReadOnlyPaths=/opt/sugarkube/nodejs/v20.20.2-linux-armv7l
 ReadWritePaths=/run/sugarkube/dspace-chat-synthetic /var/lib/node_exporter/textfile_collector
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 RestrictNamespaces=true
