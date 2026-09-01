@@ -19,19 +19,22 @@ version `3.1.1`, source `22f506e07e0b5abfd0cf756e9c5827c0458fb4b2`, identity con
 
 Node has a separate provisioning identity; it is neither the DSPACE runner revision nor its
 manifest identity. The sole coordinate is
-`/opt/sugarkube/nodejs/v20.20.2-linux-arm64/bin/node`, from the official
-`node-v20.20.2-linux-arm64.tar.xz` distribution. Configuration pins its upstream URL, archive and
-executable SHA-256 values, version `20.20.2`, `aarch64` architecture, realpath, and
-`root:root:0755` metadata. Validation reads, but never executes, the candidate: it requires ELF64
-little-endian AArch64, one non-symlink regular-file identity, the exact digest, and root-owned,
-non-group/world-writable coordinate ancestors. Missing, dangling, hard-linked, writable,
-wrong-version, wrong-digest, and 32-bit ARM candidates fail before Playwright.
+`/opt/sugarkube/nodejs/v20.20.2-linux-armv7l/bin/node`, from the official
+`node-v20.20.2-linux-armv7l.tar.xz` distribution. Configuration pins its upstream URL, archive and
+executable SHA-256 values, version `20.20.2`, `armv7l` userspace architecture, realpath, and
+`root:root:0755` metadata. Kernel architecture alone is insufficient: a 64-bit AArch64 kernel can
+run a 32-bit armhf userspace, so the runtime must match the userspace ABI and its available dynamic
+loader. Validation reads, but never executes, the candidate: it requires little-endian ELF32 ARM,
+exactly one `PT_INTERP` naming `/lib/ld-linux-armhf.so.3`, one non-symlink regular-file identity,
+the exact digest, and root-controlled executable loader and coordinate paths. Missing, dangling,
+malformed, duplicate, incompatible, or insecure loaders and wrong-architecture Node candidates fail
+before Playwright.
 
 There is no PATH, `/usr/bin/nodejs`, distro-package, NVM, home-directory, or mutable-symlink
 fallback. A user NVM binary cannot meet the durable root ownership, `ProtectHome=true`, and native
 architecture contracts. The unit retains `ProtectHome=true`, `ProtectSystem=strict`,
-`SystemCallArchitectures=native`, and `NoNewPrivileges=true`, and exposes the pinned `/opt` tree
-read-only.
+`SystemCallArchitectures=native arm` (the native AArch64 browser plus the armhf Node runtime), and
+`NoNewPrivileges=true`, and exposes the pinned `/opt` tree read-only.
 
 Provisioning consumes an operator-supplied archive; it does not download, contact a package
 repository, execute Node, or call systemd. Validate first, then obtain separate authorization for
@@ -39,9 +42,9 @@ the explicit mutation:
 
 ```bash
 python3 scripts/install_dspace_chat_synthetic.py provision-node \
-  --node-archive /absolute/path/node-v20.20.2-linux-arm64.tar.xz
+  --node-archive /absolute/path/node-v20.20.2-linux-armv7l.tar.xz
 sudo python3 scripts/install_dspace_chat_synthetic.py provision-node --apply \
-  --node-archive /absolute/path/node-v20.20.2-linux-arm64.tar.xz
+  --node-archive /absolute/path/node-v20.20.2-linux-armv7l.tar.xz
 ```
 
 `--root /tmp/rehearsal-root` maps the exact coordinate into a private root. Dry-run, status,
@@ -73,10 +76,10 @@ Read-only operator verification is:
 
 ```bash
 sudo python3 scripts/install_dspace_chat_synthetic.py status
-sudo sha256sum /opt/sugarkube/nodejs/v20.20.2-linux-arm64/bin/node
+sudo sha256sum /opt/sugarkube/nodejs/v20.20.2-linux-armv7l/bin/node
 sudo stat -Lc '%U:%G %a %h %F %n' \
-  /opt/sugarkube/nodejs/v20.20.2-linux-arm64/bin/node
-sudo readelf -h /opt/sugarkube/nodejs/v20.20.2-linux-arm64/bin/node
+  /opt/sugarkube/nodejs/v20.20.2-linux-armv7l/bin/node
+sudo readelf -h /opt/sugarkube/nodejs/v20.20.2-linux-armv7l/bin/node
 ```
 
 The alert remains stale until a separately authorized installation and a genuinely successful,

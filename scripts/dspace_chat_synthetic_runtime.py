@@ -14,6 +14,7 @@ import pwd
 import re
 import shutil
 import stat
+import struct
 import subprocess
 import threading
 import time
@@ -53,7 +54,7 @@ REQUIRED = {
 }
 RUNNER_LOCAL = "runner-local-playwright-v1"
 SYSTEM_CHROMIUM = "system-chromium-v1"
-NODE_EXECUTABLE = "/opt/sugarkube/nodejs/v20.20.2-linux-arm64/bin/node"
+NODE_EXECUTABLE = "/opt/sugarkube/nodejs/v20.20.2-linux-armv7l/bin/node"
 LEGACY_RUNNER_REVISION = "97ab09f13fb098de928a878bf1fe9b8d13032cb5"
 LEGACY_RUNNER_MANIFEST_SHA256 = "36fdab33edc0f1ad518a6d3d247a1bd32d233402387ba57493a9386d78ec9301"
 CURRENT_CRITICAL_FILES = {
@@ -172,6 +173,10 @@ def load_config(path: Path) -> dict:
     required_node = {
         "version",
         "architecture",
+        "elfClass",
+        "endianness",
+        "elfMachine",
+        "interpreterPath",
         "executablePath",
         "executableRealpath",
         "executableSha256",
@@ -186,15 +191,19 @@ def load_config(path: Path) -> dict:
         or set(node) != required_node
         or any(not isinstance(node[key], str) for key in required_node)
         or node["version"] != "20.20.2"
-        or node["architecture"] != "aarch64"
+        or node["architecture"] != "armv7l"
+        or node["elfClass"] != "ELF32"
+        or node["endianness"] != "little"
+        or node["elfMachine"] != "ARM"
+        or node["interpreterPath"] != "/lib/ld-linux-armhf.so.3"
         or node["executablePath"] != NODE_EXECUTABLE
         or node["executableRealpath"] != node["executablePath"]
         or node["distributionUrl"]
-        != "https://nodejs.org/dist/v20.20.2/node-v20.20.2-linux-arm64.tar.xz"
+        != "https://nodejs.org/dist/v20.20.2/node-v20.20.2-linux-armv7l.tar.xz"
         or node["archiveSha256"]
-        != "73093db209e4e9e09dd7d15a47aeaab1b74833830df03efa5f942a1122c5fa71"
+        != "f704ce75d9a194c30c378049b516000e49612c2f046ac83c7435eb33ec2926f0"
         or node["executableSha256"]
-        != "05a69ccdcb795f2a8b86c145e71a6a37cce84fccef5aaf25a8fe38bc9423e732"
+        != "9dcda398973e57977269150896e7ffbc00553169bece0ea06ace0515d967cb54"
         or node["owner"] != "root"
         or node["group"] != "root"
         or node["mode"] != "0755"
@@ -298,9 +307,13 @@ def validate_node_ancestors(
     config: dict, root: Path, path: Path, *, allow_missing: bool = False
 ) -> None:
     """Require confined, root-controlled ancestors traversable by the service."""
-    expected_uid, expected_gid = (0, 0) if root == Path("/") else (
-        root.stat().st_uid,
-        root.stat().st_gid,
+    expected_uid, expected_gid = (
+        (0, 0)
+        if root == Path("/")
+        else (
+            root.stat().st_uid,
+            root.stat().st_gid,
+        )
     )
     service_uid, service_gid = node_service_identity(config, root)
     try:
@@ -340,6 +353,122 @@ def validate_node_ancestors(
         raise Invalid("Node runtime provenance") from None
 
 
+def _elf_interpreter(path: Path, contract: dict) -> str:
+    """Return the sole bounded PT_INTERP value after validating the declared ELF ABI."""
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as stream:
+            header = stream.read(64)
+            if len(header) < 52 or header[:4] != b"\x7fELF":
+                raise Invalid("Node ELF contract")
+            elf_class, data = header[4], header[5]
+            if elf_class not in (1, 2) or data not in (1, 2):
+                raise Invalid("Node ELF contract")
+            endian = "<" if data == 1 else ">"
+            declared_class = "ELF32" if elf_class == 1 else "ELF64"
+            declared_endian = "little" if data == 1 else "big"
+            machine = struct.unpack_from(endian + "H", header, 18)[0]
+            machine_name = {40: "ARM", 62: "x86-64", 183: "AArch64"}.get(machine)
+            if elf_class == 1:
+                phoff = struct.unpack_from(endian + "I", header, 28)[0]
+                phentsize, phnum = struct.unpack_from(endian + "HH", header, 42)
+                required_phentsize = 32
+            else:
+                phoff = struct.unpack_from(endian + "Q", header, 32)[0]
+                phentsize, phnum = struct.unpack_from(endian + "HH", header, 54)
+                required_phentsize = 56
+            if (
+                declared_class != contract["elfClass"]
+                or declared_endian != contract["endianness"]
+                or machine_name != contract["elfMachine"]
+                or phnum < 1
+                or phentsize != required_phentsize
+                or phoff > size
+                or phnum > (size - phoff) // phentsize
+            ):
+                raise Invalid("Node ELF contract")
+            stream.seek(phoff)
+            programs = stream.read(phnum * phentsize)
+            interpreters = []
+            for index in range(phnum):
+                offset = index * phentsize
+                if struct.unpack_from(endian + "I", programs, offset)[0] != 3:  # PT_INTERP
+                    continue
+                if elf_class == 1:
+                    member_offset = struct.unpack_from(endian + "I", programs, offset + 4)[0]
+                    member_size = struct.unpack_from(endian + "I", programs, offset + 16)[0]
+                else:
+                    member_offset = struct.unpack_from(endian + "Q", programs, offset + 8)[0]
+                    member_size = struct.unpack_from(endian + "Q", programs, offset + 32)[0]
+                if (
+                    member_size < 2
+                    or member_size > 4096
+                    or member_offset > size
+                    or member_size > size - member_offset
+                ):
+                    raise Invalid("Node ELF interpreter")
+                position = stream.tell()
+                stream.seek(member_offset)
+                raw = stream.read(member_size)
+                stream.seek(position)
+                if raw[-1:] != b"\0" or b"\0" in raw[:-1]:
+                    raise Invalid("Node ELF interpreter")
+                try:
+                    value = raw[:-1].decode("ascii")
+                except UnicodeDecodeError:
+                    raise Invalid("Node ELF interpreter") from None
+                interpreters.append(value)
+    except (OSError, KeyError, struct.error):
+        raise Invalid("Node ELF contract") from None
+    if len(interpreters) != 1 or interpreters[0] != contract["interpreterPath"]:
+        raise Invalid("Node ELF interpreter")
+    return interpreters[0]
+
+
+def _validate_elf_interpreter(root: Path, interpreter: str) -> None:
+    """Validate interpreter confinement and root-controlled provenance without running it."""
+    if not Path(interpreter).is_absolute() or ".." in Path(interpreter).parts:
+        raise Invalid("Node ELF interpreter")
+    logical = _rooted(root, interpreter)
+    expected_uid, expected_gid = (
+        (0, 0) if root == Path("/") else (root.stat().st_uid, root.stat().st_gid)
+    )
+    try:
+        logical_info = logical.lstat()
+        resolved = logical.resolve(strict=True)
+        resolved.relative_to(root)
+        resolved_info = resolved.stat()
+        checked = {root, logical, resolved}
+        for endpoint in (logical, resolved):
+            cursor = endpoint.parent
+            while cursor != root:
+                checked.add(cursor)
+                cursor = cursor.parent
+        for item in checked:
+            info = item.lstat()
+            execute_bit = stat.S_IXUSR if root != Path("/") else stat.S_IXOTH
+            if (
+                info.st_uid != expected_uid
+                or info.st_gid != expected_gid
+                or (not stat.S_ISLNK(info.st_mode) and info.st_mode & 0o022)
+                or (stat.S_ISDIR(info.st_mode) and not info.st_mode & execute_bit)
+            ):
+                raise Invalid("Node ELF interpreter provenance")
+        if (
+            not (stat.S_ISREG(logical_info.st_mode) or stat.S_ISLNK(logical_info.st_mode))
+            or not stat.S_ISREG(resolved_info.st_mode)
+            or not resolved_info.st_mode & execute_bit
+        ):
+            raise Invalid("Node ELF interpreter provenance")
+    except (OSError, RuntimeError, ValueError):
+        raise Invalid("Node ELF interpreter provenance") from None
+
+
+def validate_node_elf(path: Path, contract: dict, root: Path) -> None:
+    """Validate Node's static ELF coordinate and its root-selected loader."""
+    _validate_elf_interpreter(root, _elf_interpreter(path, contract))
+
+
 def validate_node_contract(
     config: dict, root: Path = Path("/"), *, allow_legacy_missing: bool = False
 ) -> dict | None:
@@ -365,19 +494,10 @@ def validate_node_contract(
         info = path.lstat()
         resolved = path.resolve(strict=True)
         resolved.relative_to(root)
-        with path.open("rb") as stream:
-            header = stream.read(20)
     except (OSError, KeyError, ValueError, RuntimeError):
         raise Invalid("Node runtime provenance") from None
     expected = _rooted(root, contract["executableRealpath"])
-    native_aarch64 = (
-        len(header) == 20
-        and header[:4] == b"\x7fELF"
-        and header[4:6] == b"\x02\x01"
-        and int.from_bytes(header[18:20], "little") == 183
-    )
-    if not native_aarch64 or platform.machine() != contract["architecture"]:
-        raise Invalid("Node runtime provenance")
+    validate_node_elf(path, contract, root)
     if (
         path.is_symlink()
         or not stat.S_ISREG(info.st_mode)
@@ -713,7 +833,7 @@ def classify_missing_result(stderr: bytes, child_status: int, metadata: dict) ->
         and metadata.get("stderrTruncated") is False
         and re.fullmatch(
             rb"runuser: failed to execute (?:/usr/bin/node|"
-            rb"/opt/sugarkube/nodejs/v20\.20\.2-linux-arm64/bin/node): "
+            rb"/opt/sugarkube/nodejs/v20\.20\.2-linux-armv7l/bin/node): "
             rb"(?:No such file or directory|Permission denied)\r?\n?",
             stderr,
         )
