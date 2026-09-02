@@ -327,8 +327,20 @@ def _validate_retained_asset_contract(tree: Path) -> tuple[dict[str, str], bool]
     ):
         raise ValueError("timer is not persistent")
     service = (tree / "etc/systemd/system/dspace-chat-synthetic.service").read_text()
-    if current_contract and systemd_service_value(service, "RuntimeDirectoryPreserve") != "yes":
-        raise ValueError("classification runtime directory is not preserved")
+    if current_contract:
+        if systemd_service_value(service, "RuntimeDirectoryPreserve") != "yes":
+            raise ValueError("classification runtime directory is not preserved")
+        if (
+            systemd_service_value(service, "RuntimeDirectory")
+            != "sugarkube/dspace-chat-synthetic"
+            or systemd_service_value(service, "RuntimeDirectoryMode") != "0730"
+            or systemd_service_value(service, "Group") != config.get("serviceGroup")
+            or systemd_service_value(service, "User") not in (None, "root")
+        ):
+            raise ValueError("runtime directory DAC contract is incompatible with child")
+        writable = (systemd_service_value(service, "ReadWritePaths") or "").split()
+        if "/run/sugarkube/dspace-chat-synthetic" not in writable:
+            raise ValueError("runtime directory write namespace contract is missing")
     return manifest, current_contract
 
 

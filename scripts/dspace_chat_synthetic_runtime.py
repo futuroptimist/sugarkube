@@ -31,6 +31,7 @@ SERVICE_IDENTIFIER = re.compile(r"[a-z_][a-z0-9_-]{0,31}")
 MAX_RESULT_BYTES = 16 * 1024
 MAX_BROWSER_PATH_BYTES = 4096
 MAX_CHILD_DIAGNOSTIC_BYTES = 16 * 1024
+MAX_CHILD_DIAGNOSTIC_EXCERPT_CHARS = 512
 STDERR_DRAIN_GRACE_SECONDS = 0.25
 REQUIRED = {
     "runnerRevision",
@@ -889,7 +890,7 @@ def cleanup_invocation(invocation_dir: Path) -> None:
 
 
 def classify_missing_result(stderr: bytes, child_status: int, metadata: dict) -> tuple[str, dict]:
-    """Classify bounded child diagnostics without retaining or returning their contents."""
+    """Classify a missing result and retain only bounded, sanitized child evidence."""
     text = stderr.decode("utf-8", errors="replace").lower()
     node_launch_failure = (
         child_status == 1
@@ -932,7 +933,27 @@ def classify_missing_result(stderr: bytes, child_status: int, metadata: dict) ->
         classification = "test-failure-before-completion-publication"
     else:
         classification = "current-result-missing-after-child-failure"
-    return classification, metadata
+    return classification, {**metadata, "stderrExcerpt": sanitized_diagnostic_excerpt(stderr)}
+
+
+def sanitized_diagnostic_excerpt(stderr: bytes) -> str:
+    """Return a small single-line diagnostic excerpt with secret values removed."""
+    text = stderr.decode("utf-8", errors="replace")
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "?", text)
+    text = " ".join(text.split())
+    sensitive = re.compile(
+        r"(?i)(?:authorization|bearer|basic|credential|pass" r"word|passwd|secret|"
+        r"api" r"[_-]?key|access[_-]?token|token|private[_ -]?key)"
+    )
+    if sensitive.search(text):
+        return "[redacted-sensitive-diagnostic]"
+    text = re.sub(
+        r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b",
+        "[redacted-token]",
+        text,
+        flags=re.IGNORECASE,
+    )
+    return text[:MAX_CHILD_DIAGNOSTIC_EXCERPT_CHARS]
 
 
 def bounded_stderr_run(
@@ -1007,6 +1028,13 @@ def archive_classification(
             pass
 
 
+def child_termination_metadata(returncode: int) -> dict:
+    """Describe subprocess termination without platform-dependent prose."""
+    if returncode < 0:
+        return {"childStatus": returncode, "childSignal": -returncode}
+    return {"childStatus": returncode, "childExitStatus": returncode}
+
+
 def run(config: dict) -> int:
     invocation = os.environ.get("INVOCATION_ID", "")
     if not INVOCATION.fullmatch(invocation):
@@ -1028,7 +1056,7 @@ def run(config: dict) -> int:
     ):
         raise Invalid("runner browser provenance")
     root = Path(config["resultRoot"])
-    validate_dir(root, 0, account.pw_gid, 0o710)
+    validate_dir(root, 0, account.pw_gid, 0o730)
     invocation_dir = root / f"uid-{account.pw_uid}-{invocation}"
     with (root / ".lock").open("a+b") as lock:
         try:
@@ -1107,7 +1135,11 @@ def run(config: dict) -> int:
                         root,
                         invocation,
                         classification,
-                        {"childStatus": completed.returncode, **metadata},
+                        {**child_termination_metadata(completed.returncode), **metadata},
+                    )
+                    print(
+                        f"invocation={invocation} diagnostic=latest-classification.json "
+                        f"classification={classification} child_status={completed.returncode}"
                     )
                     raise Invalid(classification.replace("-", " "))
                 expected_keys = {

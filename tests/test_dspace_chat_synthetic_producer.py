@@ -1759,6 +1759,7 @@ def test_missing_result_classification_is_allowlisted_bounded_and_sanitized(
         "stderrBytes": len(diagnostic),
         "stderrSha256": __import__("hashlib").sha256(diagnostic).hexdigest(),
         "stderrTruncated": False,
+        "stderrExcerpt": runtime.sanitized_diagnostic_excerpt(diagnostic),
     }
     if diagnostic:
         assert diagnostic.decode(errors="ignore") not in json.dumps(metadata)
@@ -1786,8 +1787,7 @@ def test_missing_result_classifies_complete_runuser_node_exec_failures(
     classification, returned = runtime.classify_missing_result(diagnostic, 1, metadata)
 
     assert classification == "node-executable-launch-failure"
-    assert returned == metadata
-    assert diagnostic.decode() not in json.dumps(returned)
+    assert returned == {**metadata, "stderrExcerpt": diagnostic.decode().strip()}
 
 
 @pytest.mark.parametrize(
@@ -1826,7 +1826,10 @@ def test_runuser_node_exec_near_misses_remain_generic(
     classification, returned = runtime.classify_missing_result(diagnostic, 1, metadata)
 
     assert classification == "current-result-missing-after-child-failure"
-    assert returned == metadata
+    assert returned == {
+        **metadata,
+        "stderrExcerpt": runtime.sanitized_diagnostic_excerpt(diagnostic),
+    }
 
 
 def test_bounded_stderr_reproduces_runuser_node_exec_diagnostic_without_exposure(
@@ -1858,10 +1861,35 @@ def test_bounded_stderr_reproduces_runuser_node_exec_diagnostic_without_exposure
         "stderrSha256": __import__("hashlib").sha256(diagnostic).hexdigest(),
         "stderrTruncated": False,
         "stderrCaptureComplete": True,
+        "stderrExcerpt": diagnostic.decode().strip(),
     }
     output = capsys.readouterr()
     assert diagnostic.decode().strip() not in output.out
     assert diagnostic.decode().strip() not in output.err
+
+
+@pytest.mark.parametrize(
+    "diagnostic",
+    [
+        b"Authorization: Bearer visible-value",
+        b"authorization: Basic dXNlcjpwYXNz",
+        b"token" + b"=ghp_abcdefghijklmnopqrstuvwxyz123456",
+        b"github_pat_abcdefghijklmnopqrstuvwxyz_123456",
+        b"-----BEGIN PRIVATE KEY----- material",
+        b"PASS" + b"WORD=hunter2",
+    ],
+)
+def test_diagnostic_excerpt_redacts_sensitive_marker_classes(diagnostic: bytes) -> None:
+    excerpt = runtime.sanitized_diagnostic_excerpt(diagnostic)
+
+    assert excerpt in {"[redacted-sensitive-diagnostic]", "[redacted-token]"}
+    assert not any(value in excerpt for value in ("visible-value", "dXNlcj", "hunter2"))
+
+
+def test_child_termination_metadata_distinguishes_exit_signal_and_empty_stderr() -> None:
+    assert runtime.child_termination_metadata(7) == {"childStatus": 7, "childExitStatus": 7}
+    assert runtime.child_termination_metadata(-15) == {"childStatus": -15, "childSignal": 15}
+    assert runtime.sanitized_diagnostic_excerpt(b"") == ""
 
 
 def test_classification_archive_survives_invocation_cleanup_without_raw_output(
@@ -2064,7 +2092,9 @@ def test_missing_result_keeps_metric_cleans_invocation_and_bounds_latest_evidenc
         "invocation": "c" * 32,
         "classification": "current-result-missing-after-child-failure",
         "childStatus": 1,
+        "childExitStatus": 1,
         **metadata,
+        "stderrExcerpt": "[redacted-sensitive-diagnostic]",
     }
 
 
@@ -2100,12 +2130,14 @@ def test_runuser_node_exec_failure_archives_only_semantic_metadata(
         "invocation": "a" * 32,
         "classification": "node-executable-launch-failure",
         "childStatus": 1,
+        "childExitStatus": 1,
         **metadata,
+        "stderrExcerpt": diagnostic.decode().strip(),
     }
     assert "reason=node-executable-launch-failure" in output.out
     assert diagnostic.decode().strip() not in output.out
     assert diagnostic.decode().strip() not in output.err
-    assert diagnostic.decode().strip() not in record.read_text()
+    assert payload["stderrExcerpt"] == diagnostic.decode().strip()
     assert metric.read_bytes() == b"previous metric\n"
     assert not (Path(value["resultRoot"]) / f"uid-{os.getuid()}-{'a' * 32}").exists()
 
@@ -4463,7 +4495,7 @@ def test_units_are_bounded_persistent_hardened_and_never_implicitly_activated() 
     install = (ROOT / "scripts/install_dspace_chat_synthetic.py").read_text()
     assert "Type=oneshot" in service and "TimeoutStartSec=300" in service
     assert "RuntimeDirectory=sugarkube/dspace-chat-synthetic" in service
-    assert "RuntimeDirectoryMode=0710" in service and "Group=pi" in service
+    assert "RuntimeDirectoryMode=0730" in service and "Group=pi" in service
     assert "RuntimeDirectoryPreserve=yes" in service
     assert "ProtectSystem=strict" in service and "Persistent=true" in timer
     node = json.loads(CONFIG.read_text())["nodeContract"]
@@ -4497,6 +4529,34 @@ def test_installer_rejects_assets_that_lose_classification_runtime_preservation(
 
     with pytest.raises(ValueError, match="classification runtime directory is not preserved"):
         installer.validate_retained_asset(staged)
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("RuntimeDirectoryMode=0730", "RuntimeDirectoryMode=0710"),
+        ("Group=pi", "Group=unrelated"),
+        ("Group=pi", "User=pi\nGroup=pi"),
+        (
+            "ReadWritePaths=/run/sugarkube/dspace-chat-synthetic ",
+            "ReadWritePaths=/run/not-the-result-root ",
+        ),
+    ],
+)
+def test_installer_rejects_incompatible_runtime_directory_dac_contract(
+    tmp_path: Path, old: str, new: str
+) -> None:
+    staged = tmp_path / "staged"
+    installer.render(staged)
+    service = staged / "etc/systemd/system/dspace-chat-synthetic.service"
+    service.write_text(service.read_text().replace(old, new))
+    hashes = asset_hashes(staged)
+    relative = "etc/systemd/system/dspace-chat-synthetic.service"
+    hashes[relative] = installer.sha(service)
+    write_asset_manifest(staged, hashes)
+
+    with pytest.raises(ValueError, match="runtime directory"):
+        installer.validate_current_candidate(staged)
 
 
 @pytest.mark.parametrize("marker", ["first historical asset", "second historical asset"])
