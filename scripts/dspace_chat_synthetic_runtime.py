@@ -31,6 +31,7 @@ SERVICE_IDENTIFIER = re.compile(r"[a-z_][a-z0-9_-]{0,31}")
 MAX_RESULT_BYTES = 16 * 1024
 MAX_BROWSER_PATH_BYTES = 4096
 MAX_CHILD_DIAGNOSTIC_BYTES = 16 * 1024
+MAX_CHILD_DIAGNOSTIC_EXCERPT_CHARS = 512
 STDERR_DRAIN_GRACE_SECONDS = 0.25
 REQUIRED = {
     "runnerRevision",
@@ -889,7 +890,7 @@ def cleanup_invocation(invocation_dir: Path) -> None:
 
 
 def classify_missing_result(stderr: bytes, child_status: int, metadata: dict) -> tuple[str, dict]:
-    """Classify bounded child diagnostics without retaining or returning their contents."""
+    """Classify a missing result and retain only bounded, sanitized child evidence."""
     text = stderr.decode("utf-8", errors="replace").lower()
     node_launch_failure = (
         child_status == 1
@@ -932,7 +933,45 @@ def classify_missing_result(stderr: bytes, child_status: int, metadata: dict) ->
         classification = "test-failure-before-completion-publication"
     else:
         classification = "current-result-missing-after-child-failure"
-    return classification, metadata
+    return classification, {**metadata, "stderrExcerpt": sanitized_diagnostic_excerpt(stderr)}
+
+
+def sanitized_diagnostic_excerpt(stderr: bytes) -> str:
+    """Map child stderr to a fixed allowlist of credential-free diagnostics."""
+    text = stderr.decode("utf-8", errors="replace")
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "?", text)
+    text = " ".join(text.split())
+    if not text:
+        return ""
+    lowered = text.lower()
+    if re.fullmatch(
+        r"runuser: failed to execute (?:/usr/bin/node|"
+        r"/opt/sugarkube/nodejs/v20\.20\.2-linux-armv7l/bin/node): "
+        r"(?:no such file or directory|permission denied)",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return "[node-executable-launch-diagnostic]"
+    allowlisted = (
+        (
+            (
+                "executable doesn't exist",
+                "browsertype.launch: failed to launch",
+                "browser.launch: failed to launch",
+            ),
+            "[browser-executable-launch-diagnostic]",
+        ),
+        (
+            ("error loading config", "configuration file", "playwright.config", "unknown project"),
+            "[playwright-configuration-diagnostic]",
+        ),
+        (("result publication failed",), "[completion-publisher-diagnostic]"),
+        (("journey completion was not confirmed",), "[journey-incomplete-diagnostic]"),
+    )
+    for markers, diagnostic in allowlisted:
+        if any(marker in lowered for marker in markers):
+            return diagnostic
+    return "[redacted-unrecognized-diagnostic]"
 
 
 def bounded_stderr_run(
@@ -958,9 +997,13 @@ def bounded_stderr_run(
 
     reader = threading.Thread(target=drain, daemon=True)
     reader.start()
+    timeout_error = None
     try:
         with os.fdopen(write_fd, "wb", closefd=True) as stream:
-            completed = subprocess.run(argv, stderr=stream, **kwargs)
+            try:
+                completed = subprocess.run(argv, stderr=stream, **kwargs)
+            except subprocess.TimeoutExpired as error:
+                timeout_error = error
     finally:
         reader.join(STDERR_DRAIN_GRACE_SECONDS)
     with capture_lock:
@@ -968,15 +1011,20 @@ def bounded_stderr_run(
         captured_snapshot = bytes(captured)
         count_snapshot = count
         digest_snapshot = digest.hexdigest()
+    metadata = {
+        "stderrBytes": count_snapshot,
+        "stderrSha256": digest_snapshot,
+        "stderrTruncated": count_snapshot > MAX_CHILD_DIAGNOSTIC_BYTES,
+        "stderrCaptureComplete": capture_complete,
+    }
+    if timeout_error is not None:
+        timeout_error.bounded_stderr = captured_snapshot
+        timeout_error.diagnostic_metadata = metadata
+        raise timeout_error
     return (
         completed,
         captured_snapshot,
-        {
-            "stderrBytes": count_snapshot,
-            "stderrSha256": digest_snapshot,
-            "stderrTruncated": count_snapshot > MAX_CHILD_DIAGNOSTIC_BYTES,
-            "stderrCaptureComplete": capture_complete,
-        },
+        metadata,
     )
 
 
@@ -1005,6 +1053,11 @@ def archive_classification(
             temporary.unlink()
         except OSError:
             pass
+
+
+def launcher_termination_metadata(returncode: int) -> dict:
+    """Retain runuser's opaque status without attributing it to its child."""
+    return {"launcherSource": "runuser", "launcherStatus": returncode}
 
 
 def run(config: dict) -> int:
@@ -1088,14 +1141,37 @@ def run(config: dict) -> int:
                     child_env["PLAYWRIGHT_BROWSERS_PATH"] = str(runner / "playwright-browser")
                 else:
                     child_env["PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH"] = browser["executablePath"]
-                completed, child_diagnostic, diagnostic_metadata = bounded_stderr_run(
-                    ["runuser", "--user", config["serviceAccount"], "--", *argv],
-                    cwd=runner,
-                    stdout=subprocess.DEVNULL,
-                    env=child_env,
-                    timeout=config["timeoutSeconds"],
-                    check=False,
-                )
+                try:
+                    completed, child_diagnostic, diagnostic_metadata = bounded_stderr_run(
+                        ["runuser", "--user", config["serviceAccount"], "--", *argv],
+                        cwd=runner,
+                        stdout=subprocess.DEVNULL,
+                        env=child_env,
+                        timeout=config["timeoutSeconds"],
+                        check=False,
+                    )
+                except subprocess.TimeoutExpired as error:
+                    child_diagnostic = getattr(error, "bounded_stderr", b"")
+                    diagnostic_metadata = getattr(error, "diagnostic_metadata", None)
+                    if diagnostic_metadata is None:
+                        diagnostic_metadata = {
+                            "stderrBytes": len(child_diagnostic),
+                            "stderrSha256": hashlib.sha256(child_diagnostic).hexdigest(),
+                            "stderrTruncated": False,
+                            "stderrCaptureComplete": False,
+                        }
+                    archive_classification(
+                        root,
+                        invocation,
+                        "launcher-timeout",
+                        {"launcherSource": "runuser", **diagnostic_metadata},
+                    )
+                    print(
+                        f"invocation={invocation} diagnosticMetadata="
+                        f"{root / 'latest-classification.json'} "
+                        "classification=launcher-timeout launcherSource=runuser"
+                    )
+                    raise Invalid("launcher timeout") from error
                 ended = int(time.time())
                 try:
                     payload = read_result(result, account.pw_uid, account.pw_gid)
@@ -1107,7 +1183,13 @@ def run(config: dict) -> int:
                         root,
                         invocation,
                         classification,
-                        {"childStatus": completed.returncode, **metadata},
+                        {**launcher_termination_metadata(completed.returncode), **metadata},
+                    )
+                    print(
+                        f"invocation={invocation} diagnosticMetadata="
+                        f"{root / 'latest-classification.json'} "
+                        f"classification={classification} launcherSource=runuser "
+                        f"launcherStatus={completed.returncode}"
                     )
                     raise Invalid(classification.replace("-", " "))
                 expected_keys = {

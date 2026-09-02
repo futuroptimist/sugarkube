@@ -9,6 +9,7 @@ import importlib.util
 import json
 import os
 import re
+import shlex
 import shutil
 import stat
 import subprocess
@@ -83,6 +84,30 @@ def systemd_service_value(unit: str, directive: str) -> str | None:
         if key.strip() == directive:
             value = candidate.strip()
     return value
+
+
+def systemd_service_list_values(unit: str, directive: str) -> list[str]:
+    """Return the effective words from a repeatable service directive."""
+    section = ""
+    values: list[str] = []
+    for raw_line in unit.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith(("#", ";")):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            section = line[1:-1].strip()
+            continue
+        if section != "Service" or "=" not in line:
+            continue
+        key, candidate = line.split("=", 1)
+        if key.strip() != directive:
+            continue
+        candidate = candidate.strip()
+        if not candidate:
+            values.clear()
+        else:
+            values.extend(shlex.split(candidate))
+    return values
 
 
 def verify_source(source: Path, revision: str, identity: str) -> None:
@@ -327,8 +352,20 @@ def _validate_retained_asset_contract(tree: Path) -> tuple[dict[str, str], bool]
     ):
         raise ValueError("timer is not persistent")
     service = (tree / "etc/systemd/system/dspace-chat-synthetic.service").read_text()
-    if current_contract and systemd_service_value(service, "RuntimeDirectoryPreserve") != "yes":
-        raise ValueError("classification runtime directory is not preserved")
+    if current_contract:
+        if systemd_service_value(service, "RuntimeDirectoryPreserve") != "yes":
+            raise ValueError("classification runtime directory is not preserved")
+        if (
+            systemd_service_value(service, "RuntimeDirectory")
+            != "sugarkube/dspace-chat-synthetic"
+            or systemd_service_value(service, "RuntimeDirectoryMode") != "0710"
+            or systemd_service_value(service, "Group") != config.get("serviceGroup")
+            or systemd_service_value(service, "User") not in (None, "root")
+        ):
+            raise ValueError("runtime directory DAC contract is incompatible with child")
+        writable = systemd_service_list_values(service, "ReadWritePaths")
+        if "/run/sugarkube/dspace-chat-synthetic" not in writable:
+            raise ValueError("runtime directory write namespace contract is missing")
     return manifest, current_contract
 
 
