@@ -38,6 +38,8 @@ ASSET_REVISION = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 APPROVED_RUNNER_REVISION = "97ab09f13fb098de928a878bf1fe9b8d13032cb5"
 ASSET_MANIFEST_SCHEMA_VERSION = 1
 CLASSIFICATION_PERSISTENCE_CAPABILITY = "classificationRuntimeDirectoryPreserve"
+RUNTIME_DIRECTORY = "sugarkube/dspace-chat-synthetic"
+RUNTIME_DIRECTORY_MODE = "0730"
 CRITICAL = (
     "scripts/run-remote-chat-smoke.mjs",
     "scripts/remote-chat-smoke-completion.mjs",
@@ -83,6 +85,29 @@ def systemd_service_value(unit: str, directive: str) -> str | None:
         if key.strip() == directive:
             value = candidate.strip()
     return value
+
+
+def validate_service_contract(
+    service: str, config: dict, *, require_preservation: bool = True
+) -> None:
+    """Enforce the root-wrapper and minimum child-group DAC contract."""
+    expected = {
+        "Group": config["serviceGroup"],
+        "RuntimeDirectory": RUNTIME_DIRECTORY,
+        "RuntimeDirectoryMode": RUNTIME_DIRECTORY_MODE,
+    }
+    if require_preservation:
+        expected["RuntimeDirectoryPreserve"] = "yes"
+    for directive, value in expected.items():
+        if systemd_service_value(service, directive) != value:
+            if directive == "RuntimeDirectoryPreserve":
+                raise ValueError("classification runtime directory is not preserved")
+            raise ValueError(f"service {directive} contract is invalid")
+    if systemd_service_value(service, "User") not in (None, "root"):
+        raise ValueError("service root wrapper contract is invalid")
+    writable = (systemd_service_value(service, "ReadWritePaths") or "").split()
+    if "/run/sugarkube/dspace-chat-synthetic" not in writable:
+        raise ValueError("service result root mount contract is invalid")
 
 
 def verify_source(source: Path, revision: str, identity: str) -> None:
@@ -327,8 +352,7 @@ def _validate_retained_asset_contract(tree: Path) -> tuple[dict[str, str], bool]
     ):
         raise ValueError("timer is not persistent")
     service = (tree / "etc/systemd/system/dspace-chat-synthetic.service").read_text()
-    if current_contract and systemd_service_value(service, "RuntimeDirectoryPreserve") != "yes":
-        raise ValueError("classification runtime directory is not preserved")
+    validate_service_contract(service, config, require_preservation=current_contract)
     return manifest, current_contract
 
 
@@ -344,8 +368,8 @@ def validate_current_candidate(tree: Path) -> dict[str, str]:
     if not current_contract:
         raise ValueError("current asset manifest contract is required")
     service = (tree / "etc/systemd/system/dspace-chat-synthetic.service").read_text()
-    if systemd_service_value(service, "RuntimeDirectoryPreserve") != "yes":
-        raise ValueError("classification runtime directory is not preserved")
+    config = json.loads((tree / "etc/sugarkube/dspace-chat-synthetic.json").read_text())
+    validate_service_contract(service, config)
     return manifest
 
 
@@ -403,9 +427,7 @@ def validate_snapshot(
         node = runtime.validate_node_contract(config, root)
     node_executable = node["executablePath"] if node else None
     runner = runtime.validate_runner(config, node_executable)
-    provenance = runtime.validate_browser_contract(
-        config, runner, root, node_executable
-    )
+    provenance = runtime.validate_browser_contract(config, runner, root, node_executable)
     manifest = json.loads((runner / "sugarkube-runner-manifest.json").read_text())
     if provenance != manifest.get("browserProvenance"):
         raise ValueError("runner browser provenance mismatch")
@@ -725,9 +747,7 @@ def status(root: Path) -> int:
         raise ValueError("installed runner browser provenance is invalid")
 
     rooted_config = dict(config, runnerRoot=str(runner_parent))
-    node_provenance = runtime.validate_node_contract(
-        rooted_config, root, allow_legacy_missing=True
-    )
+    node_provenance = runtime.validate_node_contract(rooted_config, root, allow_legacy_missing=True)
     runner = runtime.validate_runner(
         rooted_config, node_provenance["executablePath"] if node_provenance else None
     )
