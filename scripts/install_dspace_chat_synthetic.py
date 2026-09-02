@@ -38,6 +38,8 @@ ASSET_REVISION = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 APPROVED_RUNNER_REVISION = "97ab09f13fb098de928a878bf1fe9b8d13032cb5"
 ASSET_MANIFEST_SCHEMA_VERSION = 1
 CLASSIFICATION_PERSISTENCE_CAPABILITY = "classificationRuntimeDirectoryPreserve"
+RESULT_RUNTIME_DIRECTORY = "sugarkube/dspace-chat-synthetic"
+RESULT_RUNTIME_DIRECTORY_MODE = "0730"
 CRITICAL = (
     "scripts/run-remote-chat-smoke.mjs",
     "scripts/remote-chat-smoke-completion.mjs",
@@ -327,8 +329,21 @@ def _validate_retained_asset_contract(tree: Path) -> tuple[dict[str, str], bool]
     ):
         raise ValueError("timer is not persistent")
     service = (tree / "etc/systemd/system/dspace-chat-synthetic.service").read_text()
-    if current_contract and systemd_service_value(service, "RuntimeDirectoryPreserve") != "yes":
-        raise ValueError("classification runtime directory is not preserved")
+    if current_contract:
+        if systemd_service_value(service, "RuntimeDirectoryPreserve") != "yes":
+            raise ValueError("classification runtime directory is not preserved")
+        expected_group = config.get("serviceGroup")
+        if (
+            systemd_service_value(service, "User") not in (None, "root")
+            or systemd_service_value(service, "Group") != expected_group
+            or systemd_service_value(service, "RuntimeDirectory") != RESULT_RUNTIME_DIRECTORY
+            or systemd_service_value(service, "RuntimeDirectoryMode")
+            != RESULT_RUNTIME_DIRECTORY_MODE
+        ):
+            raise ValueError("result runtime directory DAC contract is incompatible")
+        writable = (systemd_service_value(service, "ReadWritePaths") or "").split()
+        if f"/run/{RESULT_RUNTIME_DIRECTORY}" not in writable:
+            raise ValueError("result runtime directory write namespace is unavailable")
     return manifest, current_contract
 
 
@@ -403,9 +418,7 @@ def validate_snapshot(
         node = runtime.validate_node_contract(config, root)
     node_executable = node["executablePath"] if node else None
     runner = runtime.validate_runner(config, node_executable)
-    provenance = runtime.validate_browser_contract(
-        config, runner, root, node_executable
-    )
+    provenance = runtime.validate_browser_contract(config, runner, root, node_executable)
     manifest = json.loads((runner / "sugarkube-runner-manifest.json").read_text())
     if provenance != manifest.get("browserProvenance"):
         raise ValueError("runner browser provenance mismatch")
@@ -725,9 +738,7 @@ def status(root: Path) -> int:
         raise ValueError("installed runner browser provenance is invalid")
 
     rooted_config = dict(config, runnerRoot=str(runner_parent))
-    node_provenance = runtime.validate_node_contract(
-        rooted_config, root, allow_legacy_missing=True
-    )
+    node_provenance = runtime.validate_node_contract(rooted_config, root, allow_legacy_missing=True)
     runner = runtime.validate_runner(
         rooted_config, node_provenance["executablePath"] if node_provenance else None
     )

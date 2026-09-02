@@ -2055,17 +2055,16 @@ def test_missing_result_keeps_metric_cleans_invocation_and_bounds_latest_evidenc
     assert records == [Path(value["resultRoot"]) / "latest-classification.json"]
     contents = records[0].read_text()
     assert json.loads(contents)["invocation"] == "c" * 32
-    assert "credential" not in contents
-    assert "payload" not in contents
     assert "private" not in contents
+    assert "credential=<redacted>" in contents
     assert stat.S_IMODE(records[0].stat().st_mode) == 0o600
-    assert json.loads(contents) == {
-        "schemaVersion": 1,
-        "invocation": "c" * 32,
-        "classification": "current-result-missing-after-child-failure",
-        "childStatus": 1,
-        **metadata,
-    }
+    payload = json.loads(contents)
+    assert payload["classification"] == "current-result-missing-after-child-failure"
+    assert payload["childTermination"] == "exit"
+    assert payload["childExitStatus"] == payload["childStatus"] == 1
+    assert payload["stderrBytes"] == metadata["stderrBytes"]
+    assert len(payload["stderrExcerpt"].encode()) <= runtime.MAX_CHILD_DIAGNOSTIC_EXCERPT_BYTES
+    assert payload["stderrExcerptTruncated"] is True
 
 
 def test_runuser_node_exec_failure_archives_only_semantic_metadata(
@@ -2095,19 +2094,73 @@ def test_runuser_node_exec_failure_archives_only_semantic_metadata(
     output = capsys.readouterr()
     record = Path(value["resultRoot"]) / "latest-classification.json"
     payload = json.loads(record.read_text())
-    assert payload == {
-        "schemaVersion": 1,
-        "invocation": "a" * 32,
-        "classification": "node-executable-launch-failure",
-        "childStatus": 1,
-        **metadata,
-    }
+    assert payload["classification"] == "node-executable-launch-failure"
+    assert payload["childStatus"] == payload["childExitStatus"] == 1
+    assert payload["childTermination"] == "exit"
+    assert payload["stderrExcerpt"] == diagnostic.decode().strip()
     assert "reason=node-executable-launch-failure" in output.out
-    assert diagnostic.decode().strip() not in output.out
+    assert '"stderrExcerpt":"runuser: failed to execute' in output.out
     assert diagnostic.decode().strip() not in output.err
-    assert diagnostic.decode().strip() not in record.read_text()
     assert metric.read_bytes() == b"previous metric\n"
     assert not (Path(value["resultRoot"]) / f"uid-{os.getuid()}-{'a' * 32}").exists()
+
+
+@pytest.mark.parametrize("status", [-15, -9])
+def test_missing_result_signal_and_empty_stderr_are_persistently_diagnosable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    value, metric, _sibling, _calls = prepare_runtime_run(tmp_path, monkeypatch, "missing")
+    monkeypatch.setattr(
+        runtime,
+        "bounded_stderr_run",
+        lambda argv, **_kwargs: (
+            subprocess.CompletedProcess(argv, status),
+            b"",
+            {
+                "stderrBytes": 0,
+                "stderrSha256": __import__("hashlib").sha256(b"").hexdigest(),
+                "stderrTruncated": False,
+                "stderrCaptureComplete": True,
+            },
+        ),
+    )
+
+    assert runtime.run(value) == 1
+    record = json.loads((Path(value["resultRoot"]) / "latest-classification.json").read_text())
+    assert record["childTermination"] == "signal"
+    assert record["childSignal"] == -status
+    assert record["stderrBytes"] == record["stderrCapturedLines"] == 0
+    assert record["stderrExcerpt"] == ""
+    assert metric.read_bytes() == b"previous metric\n"
+
+
+def test_diagnostic_excerpt_redacts_sensitive_markers_and_is_deterministically_bounded() -> None:
+    diagnostic = (
+        b"Authorization: Bearer bearer-value\n"
+        b"authorization=Basic basic-value\n"
+        b"to"
+        b"ken=plain-value github_pat_abcdefghijklmnopqrstuvwxyz\n"
+        b"ghp_abcdefghijklmnopqrstuvwxyz\n"
+        b"-----BEGIN OPENSSH PRIVATE KEY-----\n"
+        b"useful failure context\n" + b"x" * (runtime.MAX_CHILD_DIAGNOSTIC_EXCERPT_BYTES * 2)
+    )
+
+    first = runtime.diagnostic_excerpt(diagnostic)
+    second = runtime.diagnostic_excerpt(diagnostic)
+
+    assert first == second
+    assert len(first["stderrExcerpt"].encode()) <= runtime.MAX_CHILD_DIAGNOSTIC_EXCERPT_BYTES
+    assert first["stderrExcerptTruncated"] is True
+    assert "useful failure context" in first["stderrExcerpt"]
+    for secret in (
+        "bearer-value",
+        "basic-value",
+        "plain-value",
+        "github_pat_abcdefghijklmnopqrstuvwxyz",
+        "ghp_abcdefghijklmnopqrstuvwxyz",
+        "BEGIN OPENSSH PRIVATE KEY",
+    ):
+        assert secret not in first["stderrExcerpt"]
 
 
 def test_missing_result_archive_failure_remains_fail_closed(
@@ -2195,7 +2248,10 @@ def test_runtime_timeout_is_bounded_single_launch_and_owner_scoped_cleanup(
 
     assert runtime.run(value) == 1
     output = capsys.readouterr().out
-    assert "reason=execution-error" in output
+    assert "reason=child-abnormal-termination" in output
+    record = json.loads((Path(value["resultRoot"]) / "latest-classification.json").read_text())
+    assert record["childTimedOut"] is True
+    assert record["childTermination"] == "signal"
     assert "secret" not in output
     assert sum(call["argv"][0] == "runuser" for call in calls) == 1
     assert not any(call["argv"][0] == "/usr/bin/python3" for call in calls)
@@ -4463,7 +4519,7 @@ def test_units_are_bounded_persistent_hardened_and_never_implicitly_activated() 
     install = (ROOT / "scripts/install_dspace_chat_synthetic.py").read_text()
     assert "Type=oneshot" in service and "TimeoutStartSec=300" in service
     assert "RuntimeDirectory=sugarkube/dspace-chat-synthetic" in service
-    assert "RuntimeDirectoryMode=0710" in service and "Group=pi" in service
+    assert "RuntimeDirectoryMode=0730" in service and "Group=pi" in service
     assert "RuntimeDirectoryPreserve=yes" in service
     assert "ProtectSystem=strict" in service and "Persistent=true" in timer
     node = json.loads(CONFIG.read_text())["nodeContract"]
@@ -4478,6 +4534,43 @@ def test_units_are_bounded_persistent_hardened_and_never_implicitly_activated() 
         "systemctl disable",
     ):
         assert mutation not in install
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "message"),
+    [
+        ("RuntimeDirectoryMode=0730", "RuntimeDirectoryMode=0710", "DAC contract"),
+        ("Group=pi", "Group=root", "DAC contract"),
+        (
+            "ReadWritePaths=/run/sugarkube/dspace-chat-synthetic ",
+            "ReadWritePaths=",
+            "write namespace",
+        ),
+    ],
+)
+def test_installer_rejects_incompatible_result_directory_contract(
+    tmp_path: Path, old: str, new: str, message: str
+) -> None:
+    staged = tmp_path / "staged"
+    installer.render(staged)
+    service = staged / "etc/systemd/system/dspace-chat-synthetic.service"
+    service.write_text(service.read_text().replace(old, new))
+    hashes = asset_hashes(staged)
+    relative = "etc/systemd/system/dspace-chat-synthetic.service"
+    hashes[relative] = installer.sha(service)
+    write_asset_manifest(staged, hashes)
+
+    with pytest.raises(ValueError, match=message):
+        installer.validate_current_candidate(staged)
+
+
+def test_result_directory_mode_is_root_owned_group_write_search_only() -> None:
+    mode = int(installer.RESULT_RUNTIME_DIRECTORY_MODE, 8)
+    assert mode & stat.S_IRWXU == stat.S_IRWXU
+    assert mode & stat.S_IRWXG == stat.S_IWGRP | stat.S_IXGRP
+    assert mode & stat.S_IRGRP == 0
+    assert mode & stat.S_IWOTH == 0
+    assert mode & stat.S_IXOTH == 0
 
 
 def test_installer_rejects_assets_that_lose_classification_runtime_preservation(
