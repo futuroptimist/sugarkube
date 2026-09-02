@@ -1891,6 +1891,17 @@ def test_bounded_stderr_reproduces_runuser_node_exec_diagnostic_without_exposure
             b"https://alice:" + b"userinfo-value@example.test/path",
             "userinfo-value",
         ),
+        (b"session_id=session-visible-value", "session-visible-value"),
+        (b"sk-proj-providerstylevisiblevalue123456789", "providerstylevisiblevalue"),
+        (
+            b"-----BEGIN OPENSSH PRIVATE KEY-----\nprivate-body\n"
+            b"-----END OPENSSH PRIVATE KEY-----",
+            "private-body",
+        ),
+        (
+            b"-----BEGIN PRIVATE KEY-----\npem-body\n-----END PRIVATE KEY-----",
+            "pem-body",
+        ),
     ],
 )
 def test_diagnostic_excerpt_never_persists_unallowlisted_text(
@@ -1903,9 +1914,15 @@ def test_diagnostic_excerpt_never_persists_unallowlisted_text(
 
 
 def test_launcher_termination_metadata_keeps_runuser_status_opaque() -> None:
-    assert runtime.launcher_termination_metadata(7) == {"launcherStatus": 7}
-    assert runtime.launcher_termination_metadata(143) == {"launcherStatus": 143}
-    assert runtime.launcher_termination_metadata(-15) == {"launcherStatus": -15}
+    assert runtime.launcher_termination_metadata(7) == {
+        "launcherSource": "runuser", "launcherStatus": 7
+    }
+    assert runtime.launcher_termination_metadata(143) == {
+        "launcherSource": "runuser", "launcherStatus": 143
+    }
+    assert runtime.launcher_termination_metadata(-15) == {
+        "launcherSource": "runuser", "launcherStatus": -15
+    }
     assert runtime.sanitized_diagnostic_excerpt(b"") == ""
 
 
@@ -2113,10 +2130,55 @@ def test_missing_result_keeps_metric_cleans_invocation_and_bounds_latest_evidenc
         "schemaVersion": 1,
         "invocation": "c" * 32,
         "classification": "current-result-missing-after-child-failure",
+        "launcherSource": "runuser",
         "launcherStatus": 1,
         **metadata,
         "stderrExcerpt": "[redacted-unrecognized-diagnostic]",
     }
+
+
+@pytest.mark.parametrize(
+    ("launcher_status", "diagnostic"),
+    [(7, b"ordinary failure"), (143, b"signal-like failure"), (-15, b""), (-9, b"")],
+)
+def test_missing_result_preserves_opaque_runuser_status_without_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    launcher_status: int,
+    diagnostic: bytes,
+) -> None:
+    value, metric, sibling, calls = prepare_runtime_run(tmp_path, monkeypatch, "missing")
+    launches = 0
+
+    def failed_child(argv, **_kwargs):
+        nonlocal launches
+        launches += 1
+        return (
+            subprocess.CompletedProcess(argv, launcher_status),
+            diagnostic,
+            {
+                "stderrBytes": len(diagnostic),
+                "stderrSha256": __import__("hashlib").sha256(diagnostic).hexdigest(),
+                "stderrTruncated": False,
+                "stderrCaptureComplete": True,
+            },
+        )
+
+    monkeypatch.setattr(runtime, "bounded_stderr_run", failed_child)
+
+    assert runtime.run(value) == 1
+    assert launches == 1
+    assert metric.read_bytes() == b"previous metric\n"
+    assert (sibling / "keep").read_text() == "untouched"
+    assert not any(call["argv"][0] == "/usr/bin/python3" for call in calls)
+    assert not (Path(value["resultRoot"]) / f"uid-{os.getuid()}-{'a' * 32}").exists()
+    payload = json.loads(
+        (Path(value["resultRoot"]) / "latest-classification.json").read_text()
+    )
+    assert payload["launcherSource"] == "runuser"
+    assert payload["launcherStatus"] == launcher_status
+    assert "childExitStatus" not in payload
+    assert "childSignal" not in payload
 
 
 def test_runuser_node_exec_failure_archives_only_semantic_metadata(
@@ -2150,6 +2212,7 @@ def test_runuser_node_exec_failure_archives_only_semantic_metadata(
         "schemaVersion": 1,
         "invocation": "a" * 32,
         "classification": "node-executable-launch-failure",
+        "launcherSource": "runuser",
         "launcherStatus": 1,
         **metadata,
         "stderrExcerpt": "[node-executable-launch-diagnostic]",
@@ -2247,13 +2310,19 @@ def test_runtime_timeout_is_bounded_single_launch_and_owner_scoped_cleanup(
 
     assert runtime.run(value) == 1
     output = capsys.readouterr().out
-    assert "reason=execution-error" in output
+    assert "classification=launcher-timeout" in output
     assert "secret" not in output
     assert sum(call["argv"][0] == "runuser" for call in calls) == 1
     assert not any(call["argv"][0] == "/usr/bin/python3" for call in calls)
     assert metric.read_bytes() == b"previous metric\n"
     assert (sibling / "keep").read_text() == "untouched"
     assert not (Path(value["resultRoot"]) / f"uid-{os.getuid()}-{'a' * 32}").exists()
+    payload = json.loads(
+        (Path(value["resultRoot"]) / "latest-classification.json").read_text()
+    )
+    assert payload["classification"] == "launcher-timeout"
+    assert payload["launcherSource"] == "runuser"
+    assert "stderrExcerpt" not in payload
 
 
 def test_runtime_rejects_pre_existing_invocation_without_cleanup_or_publication(
@@ -2774,6 +2843,74 @@ def test_directory_mode_ownership_checks(tmp_path: Path) -> None:
     path.chmod(0o770)
     with pytest.raises(runtime.Invalid, match="ownership or mode"):
         runtime.validate_dir(path, info.st_uid, info.st_gid, 0o710)
+
+
+@pytest.mark.skipif(os.geteuid() != 0, reason="requires disposable uid/gid DAC check")
+def test_runtime_parent_and_invocation_directory_dac_handoff() -> None:
+    base = Path(__import__("tempfile").mkdtemp(prefix="sugarkube-dac-", dir="/tmp"))
+    service_uid, service_gid, unrelated_uid = 45670, 45671, 45672
+    root = base / "dspace-chat-synthetic"
+    invocation = root / f"uid-45670-{'a' * 32}"
+    try:
+        base.chmod(0o711)
+        root.mkdir(mode=0o710)
+        os.chown(root, 0, service_gid)
+        for name in (".lock", "latest-classification.json", "prior-invocation"):
+            path = root / name
+            path.mkdir() if name == "prior-invocation" else path.write_text("root-owned")
+        invocation.mkdir(mode=0o770)
+        os.chown(invocation, 0, service_gid)
+        invocation.chmod(0o770)
+
+        def identity(uid: int):
+            def become_identity() -> None:
+                os.setgroups([])
+                os.setgid(service_gid if uid == service_uid else unrelated_uid)
+                os.setuid(uid)
+
+            return become_identity
+
+        child_script = """
+import os, pathlib, sys
+root, invocation = map(pathlib.Path, sys.argv[1:])
+result = invocation / "result.json"
+result.write_text("{}")
+assert result.read_text() == "{}"
+for name in (".lock", "latest-classification.json", "prior-invocation"):
+    path = root / name
+    try:
+        os.unlink(path) if path.is_file() else os.rmdir(path)
+    except PermissionError:
+        continue
+    raise AssertionError(f"replaced protected parent entry: {name}")
+"""
+        child = subprocess.run(
+            ["/usr/bin/python3", "-c", child_script, str(root), str(invocation)],
+            preexec_fn=identity(service_uid),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert child.returncode == 0, child.stderr
+        assert (invocation / "result.json").read_text() == "{}"
+        protected = (".lock", "latest-classification.json", "prior-invocation")
+        assert all((root / name).exists() for name in protected)
+
+        unrelated = subprocess.run(
+            [
+                "/usr/bin/python3",
+                "-c",
+                "open(__import__('sys').argv[1], 'w').close()",
+                str(invocation / "unrelated"),
+            ],
+            preexec_fn=identity(unrelated_uid),
+            capture_output=True,
+            check=False,
+        )
+        assert unrelated.returncode != 0
+        assert not (invocation / "unrelated").exists()
+    finally:
+        __import__("shutil").rmtree(base)
 
 
 def test_metrics_consumer_success_failure_malformed_and_atomic_preservation(tmp_path: Path) -> None:
