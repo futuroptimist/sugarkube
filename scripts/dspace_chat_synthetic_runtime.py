@@ -31,6 +31,7 @@ SERVICE_IDENTIFIER = re.compile(r"[a-z_][a-z0-9_-]{0,31}")
 MAX_RESULT_BYTES = 16 * 1024
 MAX_BROWSER_PATH_BYTES = 4096
 MAX_CHILD_DIAGNOSTIC_BYTES = 16 * 1024
+MAX_SANITIZED_EXCERPT_BYTES = 2048
 STDERR_DRAIN_GRACE_SECONDS = 0.25
 REQUIRED = {
     "runnerRevision",
@@ -189,10 +190,7 @@ def load_config(path: Path) -> dict:
     if (
         not isinstance(node, dict)
         or set(node) != required_node
-        or any(
-            not isinstance(node[key], str)
-            for key in required_node - {"elfClass", "elfMachine"}
-        )
+        or any(not isinstance(node[key], str) for key in required_node - {"elfClass", "elfMachine"})
         or not isinstance(node["elfClass"], int)
         or isinstance(node["elfClass"], bool)
         or not isinstance(node["elfMachine"], int)
@@ -318,9 +316,13 @@ def validate_node_ancestors(
     allow_missing: bool = False,
 ) -> None:
     """Require confined, root-controlled ancestors traversable by the service."""
-    expected_uid, expected_gid = (0, 0) if root == Path("/") else (
-        root.stat().st_uid,
-        root.stat().st_gid,
+    expected_uid, expected_gid = (
+        (0, 0)
+        if root == Path("/")
+        else (
+            root.stat().st_uid,
+            root.stat().st_gid,
+        )
     )
     service_uid, service_gid = node_service_identity(config, root)
     try:
@@ -436,9 +438,13 @@ def validate_node_interpreter(config: dict, root: Path) -> None:
         root_info = root.lstat()
     except OSError:
         raise Invalid("Node runtime provenance") from None
-    expected_uid, expected_gid = (0, 0) if root == Path("/") else (
-        root_info.st_uid,
-        root_info.st_gid,
+    expected_uid, expected_gid = (
+        (0, 0)
+        if root == Path("/")
+        else (
+            root_info.st_uid,
+            root_info.st_gid,
+        )
     )
     if (
         stat.S_ISLNK(root_info.st_mode)
@@ -547,9 +553,13 @@ def validate_node_contract(
     except (OSError, KeyError, ValueError, RuntimeError):
         raise Invalid("Node runtime provenance") from None
     expected = _rooted(root, contract["executableRealpath"])
-    expected_uid, expected_gid = (0, 0) if root == Path("/") else (
-        root.stat().st_uid,
-        root.stat().st_gid,
+    expected_uid, expected_gid = (
+        (0, 0)
+        if root == Path("/")
+        else (
+            root.stat().st_uid,
+            root.stat().st_gid,
+        )
     )
     service_uid, service_gid = node_service_identity(config, root)
     execute_bit = (
@@ -888,8 +898,34 @@ def cleanup_invocation(invocation_dir: Path) -> None:
         pass
 
 
+def sanitized_diagnostic_excerpt(stderr: bytes) -> str:
+    """Return a useful, strictly bounded excerpt with sensitive lines removed."""
+    text = stderr.decode("utf-8", errors="replace").replace("\x00", "�")
+    sensitive = re.compile(
+        r"authoriz(?:ation|e)|bearer|basic\s+[a-z0-9+/=]+|"
+        r"github_"
+        r"pat_|gh"
+        r"[pousr]_[a-z0-9]+|-----(?:begin|end) [^-]*private key-----|"
+        r"(?:secret|token|pass"
+        r"word|passwd|credential|a"
+        r"pi[_-]?key)"
+        r"[a-z0-9_-]{0,40}\s*[:=]",
+        re.IGNORECASE,
+    )
+    sanitized = "\n".join(
+        "[REDACTED]" if sensitive.search(line) else line for line in text.splitlines()
+    ).strip()
+    encoded = sanitized.encode("utf-8")[:MAX_SANITIZED_EXCERPT_BYTES]
+    while encoded:
+        try:
+            return encoded.decode("utf-8")
+        except UnicodeDecodeError:
+            encoded = encoded[:-1]
+    return ""
+
+
 def classify_missing_result(stderr: bytes, child_status: int, metadata: dict) -> tuple[str, dict]:
-    """Classify bounded child diagnostics without retaining or returning their contents."""
+    """Classify bounded child diagnostics and add only sanitized bounded contents."""
     text = stderr.decode("utf-8", errors="replace").lower()
     node_launch_failure = (
         child_status == 1
@@ -932,6 +968,10 @@ def classify_missing_result(stderr: bytes, child_status: int, metadata: dict) ->
         classification = "test-failure-before-completion-publication"
     else:
         classification = "current-result-missing-after-child-failure"
+    metadata = dict(metadata)
+    excerpt = sanitized_diagnostic_excerpt(stderr)
+    if excerpt:
+        metadata["sanitizedStderrExcerpt"] = excerpt
     return classification, metadata
 
 
@@ -943,14 +983,16 @@ def bounded_stderr_run(
     captured = bytearray()
     digest = hashlib.sha256()
     count = 0
+    lines = 0
     capture_lock = threading.Lock()
 
     def drain() -> None:
-        nonlocal count
+        nonlocal count, lines
         with os.fdopen(read_fd, "rb", closefd=True) as stream:
             for block in iter(lambda: stream.read(8192), b""):
                 with capture_lock:
                     count += len(block)
+                    lines += block.count(b"\n")
                     digest.update(block)
                     remaining = MAX_CHILD_DIAGNOSTIC_BYTES - len(captured)
                     if remaining > 0:
@@ -967,12 +1009,14 @@ def bounded_stderr_run(
         capture_complete = not reader.is_alive()
         captured_snapshot = bytes(captured)
         count_snapshot = count
+        lines_snapshot = lines
         digest_snapshot = digest.hexdigest()
     return (
         completed,
         captured_snapshot,
         {
             "stderrBytes": count_snapshot,
+            "stderrLines": lines_snapshot,
             "stderrSha256": digest_snapshot,
             "stderrTruncated": count_snapshot > MAX_CHILD_DIAGNOSTIC_BYTES,
             "stderrCaptureComplete": capture_complete,
@@ -1028,7 +1072,10 @@ def run(config: dict) -> int:
     ):
         raise Invalid("runner browser provenance")
     root = Path(config["resultRoot"])
-    validate_dir(root, 0, account.pw_gid, 0o710)
+    # The root wrapper lists nothing through the child identity.  Group write and
+    # search are sufficient for that child to create its 0600 result in the
+    # wrapper-created invocation directory; group/world read and world write are not.
+    validate_dir(root, 0, account.pw_gid, 0o730)
     invocation_dir = root / f"uid-{account.pw_uid}-{invocation}"
     with (root / ".lock").open("a+b") as lock:
         try:
@@ -1103,11 +1150,20 @@ def run(config: dict) -> int:
                     classification, metadata = classify_missing_result(
                         child_diagnostic, completed.returncode, diagnostic_metadata
                     )
+                    termination = (
+                        {"childTermination": "signal", "childSignal": -completed.returncode}
+                        if completed.returncode < 0
+                        else {"childTermination": "exit"}
+                    )
                     archive_classification(
                         root,
                         invocation,
                         classification,
-                        {"childStatus": completed.returncode, **metadata},
+                        {"childStatus": completed.returncode, **termination, **metadata},
+                    )
+                    print(
+                        f"invocation={invocation} diagnostic=latest-classification.json "
+                        f"classification={classification} child_status={completed.returncode}"
                     )
                     raise Invalid(classification.replace("-", " "))
                 expected_keys = {

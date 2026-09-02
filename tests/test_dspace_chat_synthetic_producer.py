@@ -1759,9 +1759,13 @@ def test_missing_result_classification_is_allowlisted_bounded_and_sanitized(
         "stderrBytes": len(diagnostic),
         "stderrSha256": __import__("hashlib").sha256(diagnostic).hexdigest(),
         "stderrTruncated": False,
+        **(
+            {"sanitizedStderrExcerpt": runtime.sanitized_diagnostic_excerpt(diagnostic)}
+            if diagnostic
+            else {}
+        ),
     }
-    if diagnostic:
-        assert diagnostic.decode(errors="ignore") not in json.dumps(metadata)
+    assert len(json.dumps(metadata)) < runtime.MAX_CHILD_DIAGNOSTIC_BYTES
 
 
 @pytest.mark.parametrize(
@@ -1786,8 +1790,10 @@ def test_missing_result_classifies_complete_runuser_node_exec_failures(
     classification, returned = runtime.classify_missing_result(diagnostic, 1, metadata)
 
     assert classification == "node-executable-launch-failure"
-    assert returned == metadata
-    assert diagnostic.decode() not in json.dumps(returned)
+    assert returned == {
+        **metadata,
+        "sanitizedStderrExcerpt": diagnostic.decode().strip(),
+    }
 
 
 @pytest.mark.parametrize(
@@ -1826,7 +1832,14 @@ def test_runuser_node_exec_near_misses_remain_generic(
     classification, returned = runtime.classify_missing_result(diagnostic, 1, metadata)
 
     assert classification == "current-result-missing-after-child-failure"
-    assert returned == metadata
+    assert returned == {
+        **metadata,
+        **(
+            {"sanitizedStderrExcerpt": runtime.sanitized_diagnostic_excerpt(diagnostic)}
+            if diagnostic
+            else {}
+        ),
+    }
 
 
 def test_bounded_stderr_reproduces_runuser_node_exec_diagnostic_without_exposure(
@@ -1855,9 +1868,11 @@ def test_bounded_stderr_reproduces_runuser_node_exec_diagnostic_without_exposure
     )
     assert returned == {
         "stderrBytes": 68,
+        "stderrLines": 1,
         "stderrSha256": __import__("hashlib").sha256(diagnostic).hexdigest(),
         "stderrTruncated": False,
         "stderrCaptureComplete": True,
+        "sanitizedStderrExcerpt": diagnostic.decode().strip(),
     }
     output = capsys.readouterr()
     assert diagnostic.decode().strip() not in output.out
@@ -1972,6 +1987,7 @@ def test_bounded_stderr_run_waits_for_complete_diagnostic_metadata() -> None:
     assert captured == diagnostic[: runtime.MAX_CHILD_DIAGNOSTIC_BYTES]
     assert metadata == {
         "stderrBytes": len(diagnostic),
+        "stderrLines": 0,
         "stderrSha256": __import__("hashlib").sha256(diagnostic).hexdigest(),
         "stderrTruncated": True,
         "stderrCaptureComplete": True,
@@ -2004,12 +2020,14 @@ def test_bounded_stderr_run_returns_when_descendant_retains_stderr(tmp_path: Pat
         assert captured == b""
         assert metadata == {
             "stderrBytes": 0,
+            "stderrLines": 0,
             "stderrSha256": __import__("hashlib").sha256(b"").hexdigest(),
             "stderrTruncated": False,
             "stderrCaptureComplete": False,
         }
         assert set(metadata) == {
             "stderrBytes",
+            "stderrLines",
             "stderrSha256",
             "stderrTruncated",
             "stderrCaptureComplete",
@@ -2024,6 +2042,44 @@ def test_bounded_stderr_run_returns_when_descendant_retains_stderr(tmp_path: Pat
                 except ProcessLookupError:
                     break
                 time.sleep(0.01)
+
+
+def test_sanitized_diagnostic_excerpt_redacts_sensitive_marker_classes() -> None:
+    diagnostic = b"\n".join(
+        (
+            b"useful launch failure",
+            b"Authorization: Bearer bearer-value",
+            b"Authorization: Basic dXNlcjpwYXNz",
+            b"github_" + b"pat_abcdefghijklmnopqrstuvwxyz",
+            b"gh" + b"p_abcdefghijklmnopqrstuvwxyz",
+            b"pass" + b"word=hunter2",
+            b"-----BEGIN OPENSSH PRIVATE KEY-----",
+        )
+    )
+
+    excerpt = runtime.sanitized_diagnostic_excerpt(diagnostic)
+
+    assert "useful launch failure" in excerpt
+    assert excerpt.count("[REDACTED]") == 6
+    for secret in (
+        "bearer-value",
+        "dXNlcjpwYXNz",
+        "github_" + "pat_",
+        "gh" + "p_",
+        "hunter2",
+        "PRIVATE KEY",
+    ):
+        assert secret not in excerpt
+
+
+def test_sanitized_diagnostic_excerpt_has_deterministic_byte_bound() -> None:
+    excerpt = runtime.sanitized_diagnostic_excerpt(
+        ("diagnosable Ω" * runtime.MAX_CHILD_DIAGNOSTIC_BYTES).encode()
+    )
+    assert len(excerpt.encode()) <= runtime.MAX_SANITIZED_EXCERPT_BYTES
+    assert excerpt == runtime.sanitized_diagnostic_excerpt(
+        ("diagnosable Ω" * runtime.MAX_CHILD_DIAGNOSTIC_BYTES).encode()
+    )
 
 
 def test_missing_result_keeps_metric_cleans_invocation_and_bounds_latest_evidence(
@@ -2064,6 +2120,8 @@ def test_missing_result_keeps_metric_cleans_invocation_and_bounds_latest_evidenc
         "invocation": "c" * 32,
         "classification": "current-result-missing-after-child-failure",
         "childStatus": 1,
+        "childTermination": "exit",
+        "sanitizedStderrExcerpt": "[REDACTED]",
         **metadata,
     }
 
@@ -2100,12 +2158,14 @@ def test_runuser_node_exec_failure_archives_only_semantic_metadata(
         "invocation": "a" * 32,
         "classification": "node-executable-launch-failure",
         "childStatus": 1,
+        "childTermination": "exit",
+        "sanitizedStderrExcerpt": diagnostic.decode().strip(),
         **metadata,
     }
     assert "reason=node-executable-launch-failure" in output.out
     assert diagnostic.decode().strip() not in output.out
     assert diagnostic.decode().strip() not in output.err
-    assert diagnostic.decode().strip() not in record.read_text()
+    assert payload["sanitizedStderrExcerpt"] == diagnostic.decode().strip()
     assert metric.read_bytes() == b"previous metric\n"
     assert not (Path(value["resultRoot"]) / f"uid-{os.getuid()}-{'a' * 32}").exists()
 
@@ -2139,6 +2199,42 @@ def test_missing_result_archive_failure_remains_fail_closed(
     assert metric.read_bytes() == b"previous metric\n"
     assert not any(call["argv"][0] == "/usr/bin/python3" for call in calls)
     assert not (Path(value["resultRoot"]) / f"uid-{os.getuid()}-{'a' * 32}").exists()
+
+
+@pytest.mark.parametrize(("returncode", "diagnostic"), [(-15, b""), (-9, b"killed\n")])
+def test_signal_termination_without_result_is_persistently_diagnosable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    returncode: int,
+    diagnostic: bytes,
+) -> None:
+    value, metric, _sibling, calls = prepare_runtime_run(tmp_path, monkeypatch, "missing")
+    monkeypatch.setattr(
+        runtime,
+        "bounded_stderr_run",
+        lambda argv, **_kwargs: (
+            subprocess.CompletedProcess(argv, returncode),
+            diagnostic,
+            {
+                "stderrBytes": len(diagnostic),
+                "stderrLines": diagnostic.count(b"\n"),
+                "stderrSha256": __import__("hashlib").sha256(diagnostic).hexdigest(),
+                "stderrTruncated": False,
+                "stderrCaptureComplete": True,
+            },
+        ),
+    )
+
+    assert runtime.run(value) == 1
+
+    payload = json.loads((Path(value["resultRoot"]) / "latest-classification.json").read_text())
+    assert payload["childStatus"] == returncode
+    assert payload["childTermination"] == "signal"
+    assert payload["childSignal"] == -returncode
+    assert payload["stderrBytes"] == len(diagnostic)
+    assert payload.get("sanitizedStderrExcerpt") == (diagnostic.decode().strip() or None)
+    assert metric.read_bytes() == b"previous metric\n"
+    assert not any(call["argv"][0] == "/usr/bin/python3" for call in calls)
 
 
 def test_runtime_browser_drift_blocks_playwright_and_preserves_metric(
@@ -4463,7 +4559,12 @@ def test_units_are_bounded_persistent_hardened_and_never_implicitly_activated() 
     install = (ROOT / "scripts/install_dspace_chat_synthetic.py").read_text()
     assert "Type=oneshot" in service and "TimeoutStartSec=300" in service
     assert "RuntimeDirectory=sugarkube/dspace-chat-synthetic" in service
-    assert "RuntimeDirectoryMode=0710" in service and "Group=pi" in service
+    assert "RuntimeDirectoryMode=0730" in service and "Group=pi" in service
+    mode = int(installer.systemd_service_value(service, "RuntimeDirectoryMode"), 8)
+    assert mode & 0o030 == 0o030  # configured group can write and search
+    assert mode & 0o040 == 0  # listing result-root contents is unnecessary
+    assert mode & 0o007 == 0  # unrelated users cannot read, write, or search
+    assert installer.systemd_service_value(service, "User") is None  # root-owned wrapper
     assert "RuntimeDirectoryPreserve=yes" in service
     assert "ProtectSystem=strict" in service and "Persistent=true" in timer
     node = json.loads(CONFIG.read_text())["nodeContract"]
@@ -4478,6 +4579,44 @@ def test_units_are_bounded_persistent_hardened_and_never_implicitly_activated() 
         "systemctl disable",
     ):
         assert mutation not in install
+
+
+@pytest.mark.parametrize(
+    ("directive", "replacement"),
+    [
+        ("RuntimeDirectoryMode=0730", "RuntimeDirectoryMode=0710"),
+        ("Group=pi", "Group=root"),
+        ("ReadWritePaths=/run/sugarkube/dspace-chat-synthetic", "ReadWritePaths=/tmp"),
+    ],
+)
+def test_current_candidate_rejects_incompatible_result_directory_contract(
+    tmp_path: Path, directive: str, replacement: str
+) -> None:
+    staged = tmp_path / "staged"
+    installer.render(staged)
+    service = staged / "etc/systemd/system/dspace-chat-synthetic.service"
+    service.write_text(service.read_text().replace(directive, replacement))
+    hashes = asset_hashes(staged)
+    relative = "etc/systemd/system/dspace-chat-synthetic.service"
+    hashes[relative] = installer.sha(service)
+    write_asset_manifest(staged, hashes)
+
+    with pytest.raises(ValueError, match="service .* contract is invalid"):
+        installer.validate_current_candidate(staged)
+
+
+def test_readwritepaths_does_not_substitute_for_group_dac(tmp_path: Path) -> None:
+    staged = tmp_path / "staged"
+    installer.render(staged)
+    service = staged / "etc/systemd/system/dspace-chat-synthetic.service"
+    service.write_text(
+        service.read_text().replace("RuntimeDirectoryMode=0730", "RuntimeDirectoryMode=0710")
+    )
+    assert "/run/sugarkube/dspace-chat-synthetic" in installer.systemd_service_value(
+        service.read_text(), "ReadWritePaths"
+    )
+    with pytest.raises(ValueError, match="RuntimeDirectoryMode"):
+        installer.validate_service_contract(service.read_text(), json.loads(CONFIG.read_text()))
 
 
 def test_installer_rejects_assets_that_lose_classification_runtime_preservation(
