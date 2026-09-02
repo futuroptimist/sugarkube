@@ -4738,6 +4738,32 @@ def test_installer_accepts_result_root_on_an_earlier_read_write_paths_line(
     assert installer.validate_current_candidate(staged) == hashes
 
 
+def test_installer_rejects_result_root_before_empty_read_write_paths_reset(
+    tmp_path: Path,
+) -> None:
+    staged = tmp_path / "staged"
+    installer.render(staged)
+    service = staged / "etc/systemd/system/dspace-chat-synthetic.service"
+    service.write_text(
+        service.read_text().replace(
+            "ReadWritePaths=/run/sugarkube/dspace-chat-synthetic "
+            "/var/lib/node_exporter/textfile_collector",
+            "ReadWritePaths=/run/sugarkube/dspace-chat-synthetic\n"
+            "ReadWritePaths=\n"
+            "ReadWritePaths=/var/lib/node_exporter/textfile_collector",
+        )
+    )
+    hashes = asset_hashes(staged)
+    relative = "etc/systemd/system/dspace-chat-synthetic.service"
+    hashes[relative] = installer.sha(service)
+    write_asset_manifest(staged, hashes)
+
+    with pytest.raises(
+        ValueError, match="runtime directory write namespace contract is missing"
+    ):
+        installer.validate_current_candidate(staged)
+
+
 @pytest.mark.parametrize("marker", ["first historical asset", "second historical asset"])
 def test_distinct_legacy_manifest_assets_remain_retained_only(tmp_path: Path, marker: str) -> None:
     retained = tmp_path / marker.replace(" ", "-")
