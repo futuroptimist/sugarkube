@@ -937,23 +937,41 @@ def classify_missing_result(stderr: bytes, child_status: int, metadata: dict) ->
 
 
 def sanitized_diagnostic_excerpt(stderr: bytes) -> str:
-    """Return a small single-line diagnostic excerpt with secret values removed."""
+    """Map child stderr to a fixed allowlist of credential-free diagnostics."""
     text = stderr.decode("utf-8", errors="replace")
     text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "?", text)
     text = " ".join(text.split())
-    sensitive = re.compile(
-        r"(?i)(?:authorization|bearer|basic|credential|pass" r"word|passwd|secret|"
-        r"api" r"[_-]?key|access[_-]?token|token|private[_ -]?key)"
-    )
-    if sensitive.search(text):
-        return "[redacted-sensitive-diagnostic]"
-    text = re.sub(
-        r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b",
-        "[redacted-token]",
+    if not text:
+        return ""
+    lowered = text.lower()
+    if re.fullmatch(
+        r"runuser: failed to execute (?:/usr/bin/node|"
+        r"/opt/sugarkube/nodejs/v20\.20\.2-linux-armv7l/bin/node): "
+        r"(?:no such file or directory|permission denied)",
         text,
         flags=re.IGNORECASE,
+    ):
+        return "[node-executable-launch-diagnostic]"
+    allowlisted = (
+        (
+            (
+                "executable doesn't exist",
+                "browsertype.launch: failed to launch",
+                "browser.launch: failed to launch",
+            ),
+            "[browser-executable-launch-diagnostic]",
+        ),
+        (
+            ("error loading config", "configuration file", "playwright.config", "unknown project"),
+            "[playwright-configuration-diagnostic]",
+        ),
+        (("result publication failed",), "[completion-publisher-diagnostic]"),
+        (("journey completion was not confirmed",), "[journey-incomplete-diagnostic]"),
     )
-    return text[:MAX_CHILD_DIAGNOSTIC_EXCERPT_CHARS]
+    for markers, diagnostic in allowlisted:
+        if any(marker in lowered for marker in markers):
+            return diagnostic
+    return "[redacted-unrecognized-diagnostic]"
 
 
 def bounded_stderr_run(
@@ -1028,11 +1046,9 @@ def archive_classification(
             pass
 
 
-def child_termination_metadata(returncode: int) -> dict:
-    """Describe subprocess termination without platform-dependent prose."""
-    if returncode < 0:
-        return {"childStatus": returncode, "childSignal": -returncode}
-    return {"childStatus": returncode, "childExitStatus": returncode}
+def launcher_termination_metadata(returncode: int) -> dict:
+    """Retain runuser's opaque status without attributing it to its child."""
+    return {"launcherStatus": returncode}
 
 
 def run(config: dict) -> int:
@@ -1056,7 +1072,7 @@ def run(config: dict) -> int:
     ):
         raise Invalid("runner browser provenance")
     root = Path(config["resultRoot"])
-    validate_dir(root, 0, account.pw_gid, 0o730)
+    validate_dir(root, 0, account.pw_gid, 0o710)
     invocation_dir = root / f"uid-{account.pw_uid}-{invocation}"
     with (root / ".lock").open("a+b") as lock:
         try:
@@ -1135,7 +1151,7 @@ def run(config: dict) -> int:
                         root,
                         invocation,
                         classification,
-                        {**child_termination_metadata(completed.returncode), **metadata},
+                        {**launcher_termination_metadata(completed.returncode), **metadata},
                     )
                     print(
                         f"invocation={invocation} diagnostic=latest-classification.json "
