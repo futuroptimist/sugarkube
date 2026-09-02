@@ -31,6 +31,8 @@ SERVICE_IDENTIFIER = re.compile(r"[a-z_][a-z0-9_-]{0,31}")
 MAX_RESULT_BYTES = 16 * 1024
 MAX_BROWSER_PATH_BYTES = 4096
 MAX_CHILD_DIAGNOSTIC_BYTES = 16 * 1024
+MAX_CHILD_DIAGNOSTIC_EXCERPT_BYTES = 2048
+MAX_CHILD_DIAGNOSTIC_EXCERPT_LINES = 16
 STDERR_DRAIN_GRACE_SECONDS = 0.25
 REQUIRED = {
     "runnerRevision",
@@ -77,6 +79,16 @@ LEGACY_CRITICAL_FILES = CURRENT_CRITICAL_FILES - LEGACY_COMPATIBILITY_FILES
 
 class Invalid(RuntimeError):
     """Bounded validation failure (message contains no input data)."""
+
+
+class ChildTerminated(RuntimeError):
+    """Child termination carrying only bounded diagnostic evidence."""
+
+    def __init__(self, status: int, diagnostic: bytes, metadata: dict):
+        super().__init__("child terminated abnormally")
+        self.status = status
+        self.diagnostic = diagnostic
+        self.metadata = metadata
 
 
 def load_config(path: Path) -> dict:
@@ -189,10 +201,7 @@ def load_config(path: Path) -> dict:
     if (
         not isinstance(node, dict)
         or set(node) != required_node
-        or any(
-            not isinstance(node[key], str)
-            for key in required_node - {"elfClass", "elfMachine"}
-        )
+        or any(not isinstance(node[key], str) for key in required_node - {"elfClass", "elfMachine"})
         or not isinstance(node["elfClass"], int)
         or isinstance(node["elfClass"], bool)
         or not isinstance(node["elfMachine"], int)
@@ -318,9 +327,13 @@ def validate_node_ancestors(
     allow_missing: bool = False,
 ) -> None:
     """Require confined, root-controlled ancestors traversable by the service."""
-    expected_uid, expected_gid = (0, 0) if root == Path("/") else (
-        root.stat().st_uid,
-        root.stat().st_gid,
+    expected_uid, expected_gid = (
+        (0, 0)
+        if root == Path("/")
+        else (
+            root.stat().st_uid,
+            root.stat().st_gid,
+        )
     )
     service_uid, service_gid = node_service_identity(config, root)
     try:
@@ -436,9 +449,13 @@ def validate_node_interpreter(config: dict, root: Path) -> None:
         root_info = root.lstat()
     except OSError:
         raise Invalid("Node runtime provenance") from None
-    expected_uid, expected_gid = (0, 0) if root == Path("/") else (
-        root_info.st_uid,
-        root_info.st_gid,
+    expected_uid, expected_gid = (
+        (0, 0)
+        if root == Path("/")
+        else (
+            root_info.st_uid,
+            root_info.st_gid,
+        )
     )
     if (
         stat.S_ISLNK(root_info.st_mode)
@@ -547,9 +564,13 @@ def validate_node_contract(
     except (OSError, KeyError, ValueError, RuntimeError):
         raise Invalid("Node runtime provenance") from None
     expected = _rooted(root, contract["executableRealpath"])
-    expected_uid, expected_gid = (0, 0) if root == Path("/") else (
-        root.stat().st_uid,
-        root.stat().st_gid,
+    expected_uid, expected_gid = (
+        (0, 0)
+        if root == Path("/")
+        else (
+            root.stat().st_uid,
+            root.stat().st_gid,
+        )
     )
     service_uid, service_gid = node_service_identity(config, root)
     execute_bit = (
@@ -935,6 +956,52 @@ def classify_missing_result(stderr: bytes, child_status: int, metadata: dict) ->
     return classification, metadata
 
 
+def diagnostic_excerpt(stderr: bytes) -> dict:
+    """Return a deterministic, tightly bounded excerpt with credential values removed."""
+    text = stderr.decode("utf-8", errors="replace")
+    lines = text.splitlines()[:MAX_CHILD_DIAGNOSTIC_EXCERPT_LINES]
+    sanitized = "\n".join(lines)
+    # Redact common authorization forms and token formats before generic assignments.
+    sanitized = re.sub(
+        r"(?i)\b(authorization\s*[:=]\s*(?:bearer|basic)|bearer|basic)\s+\S+",
+        r"\1 <redacted>",
+        sanitized,
+    )
+    sanitized = re.sub(
+        r"\b(?:gh[pousr]_[A-Za-z0-9_]{8,}|github_pat_[A-Za-z0-9_]{8,})\b", "<redacted>", sanitized
+    )
+    sanitized = re.sub(
+        r"(?i)\b([A-Za-z0-9_-]*(?:to"
+        r"ken|secret|pass"
+        r"word|passwd|credential|"
+        r"api[-_]?key)[A-Za-z0-9_-]*)\s*[:=]\s*\S+",
+        r"\1=<redacted>",
+        sanitized,
+    )
+    sanitized = re.sub(
+        r"-----BEGIN [^-\r\n]*(?:PRIVATE KEY|CREDENTIAL)[^-\r\n]*-----",
+        "<redacted-private-marker>",
+        sanitized,
+        flags=re.IGNORECASE,
+    )
+    encoded = sanitized.encode("utf-8")[:MAX_CHILD_DIAGNOSTIC_EXCERPT_BYTES]
+    # Never retain a partial UTF-8 code point.
+    excerpt = encoded.decode("utf-8", errors="ignore")
+    return {
+        "stderrCapturedLines": min(len(text.splitlines()), MAX_CHILD_DIAGNOSTIC_EXCERPT_LINES),
+        "stderrExcerpt": excerpt,
+        "stderrExcerptTruncated": len(lines) < len(text.splitlines())
+        or len(sanitized.encode("utf-8")) > MAX_CHILD_DIAGNOSTIC_EXCERPT_BYTES,
+    }
+
+
+def child_status_metadata(status: int) -> dict:
+    """Describe subprocess exit or signal status without ambiguous signed values."""
+    if status < 0:
+        return {"childStatus": status, "childTermination": "signal", "childSignal": -status}
+    return {"childStatus": status, "childTermination": "exit", "childExitStatus": status}
+
+
 def bounded_stderr_run(
     argv: list[str], **kwargs
 ) -> tuple[subprocess.CompletedProcess, bytes, dict]:
@@ -958,9 +1025,13 @@ def bounded_stderr_run(
 
     reader = threading.Thread(target=drain, daemon=True)
     reader.start()
+    timeout_error = None
     try:
         with os.fdopen(write_fd, "wb", closefd=True) as stream:
-            completed = subprocess.run(argv, stderr=stream, **kwargs)
+            try:
+                completed = subprocess.run(argv, stderr=stream, **kwargs)
+            except subprocess.TimeoutExpired as error:
+                timeout_error = error
     finally:
         reader.join(STDERR_DRAIN_GRACE_SECONDS)
     with capture_lock:
@@ -968,15 +1039,18 @@ def bounded_stderr_run(
         captured_snapshot = bytes(captured)
         count_snapshot = count
         digest_snapshot = digest.hexdigest()
+    metadata = {
+        "stderrBytes": count_snapshot,
+        "stderrSha256": digest_snapshot,
+        "stderrTruncated": count_snapshot > MAX_CHILD_DIAGNOSTIC_BYTES,
+        "stderrCaptureComplete": capture_complete,
+    }
+    if timeout_error is not None:
+        raise ChildTerminated(-9, captured_snapshot, {**metadata, "childTimedOut": True})
     return (
         completed,
         captured_snapshot,
-        {
-            "stderrBytes": count_snapshot,
-            "stderrSha256": digest_snapshot,
-            "stderrTruncated": count_snapshot > MAX_CHILD_DIAGNOSTIC_BYTES,
-            "stderrCaptureComplete": capture_complete,
-        },
+        metadata,
     )
 
 
@@ -1028,7 +1102,9 @@ def run(config: dict) -> int:
     ):
         raise Invalid("runner browser provenance")
     root = Path(config["resultRoot"])
-    validate_dir(root, 0, account.pw_gid, 0o710)
+    # The root wrapper owns/listens on this directory; the configured child group
+    # needs only write+search to reach its private, wrapper-created invocation dir.
+    validate_dir(root, 0, account.pw_gid, 0o730)
     invocation_dir = root / f"uid-{account.pw_uid}-{invocation}"
     with (root / ".lock").open("a+b") as lock:
         try:
@@ -1088,14 +1164,30 @@ def run(config: dict) -> int:
                     child_env["PLAYWRIGHT_BROWSERS_PATH"] = str(runner / "playwright-browser")
                 else:
                     child_env["PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH"] = browser["executablePath"]
-                completed, child_diagnostic, diagnostic_metadata = bounded_stderr_run(
-                    ["runuser", "--user", config["serviceAccount"], "--", *argv],
-                    cwd=runner,
-                    stdout=subprocess.DEVNULL,
-                    env=child_env,
-                    timeout=config["timeoutSeconds"],
-                    check=False,
-                )
+                try:
+                    completed, child_diagnostic, diagnostic_metadata = bounded_stderr_run(
+                        ["runuser", "--user", config["serviceAccount"], "--", *argv],
+                        cwd=runner,
+                        stdout=subprocess.DEVNULL,
+                        env=child_env,
+                        timeout=config["timeoutSeconds"],
+                        check=False,
+                    )
+                except ChildTerminated as error:
+                    evidence = {
+                        **child_status_metadata(error.status),
+                        **error.metadata,
+                        **diagnostic_excerpt(error.diagnostic),
+                    }
+                    archive_classification(root, invocation, "child-abnormal-termination", evidence)
+                    print(
+                        f"invocation={invocation} outcome=preserved "
+                        "reason=child-abnormal-termination "
+                        "diagnosticMetadata="
+                        f"{json.dumps(evidence, sort_keys=True, separators=(',', ':'))} "
+                        f"start={started}"
+                    )
+                    return 1
                 ended = int(time.time())
                 try:
                     payload = read_result(result, account.pw_uid, account.pw_gid)
@@ -1103,13 +1195,24 @@ def run(config: dict) -> int:
                     classification, metadata = classify_missing_result(
                         child_diagnostic, completed.returncode, diagnostic_metadata
                     )
+                    evidence = {
+                        **child_status_metadata(completed.returncode),
+                        **metadata,
+                        **diagnostic_excerpt(child_diagnostic),
+                    }
                     archive_classification(
                         root,
                         invocation,
                         classification,
-                        {"childStatus": completed.returncode, **metadata},
+                        evidence,
                     )
-                    raise Invalid(classification.replace("-", " "))
+                    print(
+                        f"invocation={invocation} outcome=preserved reason={classification} "
+                        "diagnosticMetadata="
+                        f"{json.dumps(evidence, sort_keys=True, separators=(',', ':'))} "
+                        f"start={started}"
+                    )
+                    return 1
                 expected_keys = {
                     "schemaVersion",
                     "journey",
