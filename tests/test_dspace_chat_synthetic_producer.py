@@ -1684,16 +1684,45 @@ def test_runtime_run_uses_minimal_environment_and_cleans_direct_entries(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     value, _metric, sibling, calls = prepare_runtime_run(tmp_path, monkeypatch)
+    caller_node_dir = tmp_path / "caller-bin"
+    caller_node_dir.mkdir()
+    (caller_node_dir / "node").write_text("caller-controlled")
+    (caller_node_dir / "node").chmod(0o755)
+    contracted_node_dir = tmp_path / "contracted-node-bin"
+    contracted_node_dir.mkdir()
+    contracted_node = contracted_node_dir / "node"
+    contracted_node.write_text("validated fixture; never executed")
+    contracted_node.chmod(0o755)
+    fixed_directories = [tmp_path / name for name in ("usr-bin", "bin")]
+    for directory in fixed_directories:
+        directory.mkdir()
+    fixed_path = os.pathsep.join(map(str, fixed_directories))
+    value["nodeContract"]["executablePath"] = str(contracted_node)
+    monkeypatch.setenv("PATH", f"{caller_node_dir}:/caller/arbitrary/path")
+    monkeypatch.setattr(runtime, "FIXED_SYSTEM_PATH", fixed_path)
+    real_which = shutil.which
+    monkeypatch.setattr(
+        runtime.shutil,
+        "which",
+        lambda executable, path=None: real_which(executable, path=path)
+        if path is not None
+        else {"git": "/usr/bin/git", "runuser": "/usr/sbin/runuser"}.get(executable),
+    )
 
     assert runtime.run(value) == 0
     child = next(call for call in calls if call["argv"][0] == "runuser")
     assert "SECRET_PARENT_TOKEN" not in child["env"]
+    assert child["env"]["PATH"] == f"{contracted_node_dir}:{fixed_path}"
+    assert str(caller_node_dir) not in child["env"]["PATH"]
+    assert "/caller/arbitrary/path" not in child["env"]["PATH"]
+    assert real_which("node", path=fixed_path) is None
+    assert real_which("node", path=child["env"]["PATH"]) == str(contracted_node)
     assert child["env"]["PLAYWRIGHT_BROWSERS_PATH"].endswith("playwright-browser")
     assert child["env"]["PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD"] == "1"
     assert "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH" not in child["env"]
     separator = child["argv"].index("--")
     node_argv = child["argv"][separator + 1 :]
-    assert node_argv[0] == value["nodeContract"]["executablePath"]
+    assert node_argv[0] == str(contracted_node)
     assert node_argv.count("--expected-provider") == 1
     provider_index = node_argv.index("--expected-provider")
     assert node_argv[provider_index + 1] == value["provider"] == "token-place"
