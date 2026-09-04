@@ -1712,20 +1712,32 @@ def test_runtime_child_path_resolves_nested_node_without_inheriting_caller_path(
     contracted_node.parent.mkdir(parents=True)
     contracted_node.write_text("not executed\n")
     contracted_node.chmod(0o755)
+    system_path_dirs = [tmp_path / "system-bin", tmp_path / "system-sbin"]
+    for directory in system_path_dirs:
+        directory.mkdir()
+    monkeypatch.setattr(runtime, "SYSTEM_PATH", ":".join(map(str, system_path_dirs)))
     caller_node = tmp_path / "caller-bin/node"
     caller_node.parent.mkdir()
     caller_node.write_text("not executed\n")
     caller_node.chmod(0o755)
-    monkeypatch.setenv("PATH", f"{caller_node.parent}:{os.environ['PATH']}")
+    caller_extra = tmp_path / "caller-sbin"
+    caller_extra.mkdir()
+    caller_path_entries = [
+        str(caller_node.parent),
+        str(caller_extra),
+        *os.environ["PATH"].split(":"),
+    ]
+    monkeypatch.setenv("PATH", ":".join(caller_path_entries))
     validated = dict(value["nodeContract"], executablePath=str(contracted_node))
     monkeypatch.setattr(runtime, "validate_node_contract", lambda _value: validated)
 
+    assert shutil.which("node", path=runtime.SYSTEM_PATH) is None
     assert runtime.run(value) == 0
 
     child = next(call for call in calls if call["argv"][0] == "runuser")
     child_path = child["env"]["PATH"]
-    assert child_path.split(":", 1) == [str(contracted_node.parent), runtime.SYSTEM_PATH]
-    assert str(caller_node.parent) not in child_path.split(":")
+    assert child_path == f"{contracted_node.parent}:{runtime.SYSTEM_PATH}"
+    assert not set(caller_path_entries) & set(child_path.split(":"))
     assert shutil.which("node", path=child_path) == str(contracted_node)
     separator = child["argv"].index("--")
     assert child["argv"][separator + 1] == str(contracted_node)
