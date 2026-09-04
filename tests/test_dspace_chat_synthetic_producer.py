@@ -1606,6 +1606,7 @@ def prepare_runtime_run(
     account = SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid(), pw_dir="/tmp", pw_name="pi")
     monkeypatch.setenv("INVOCATION_ID", "a" * 32)
     monkeypatch.setenv("SECRET_PARENT_TOKEN", "must-not-leak")
+    monkeypatch.setenv("PATH", f"/caller-controlled/node/bin:{runtime.SYSTEM_PATH}")
     monkeypatch.setattr(runtime.pwd, "getpwnam", lambda _name: account)
     monkeypatch.setattr(runtime.grp, "getgrnam", lambda _name: SimpleNamespace(gr_gid=os.getgid()))
     monkeypatch.setattr(runtime, "validate_runner", lambda _config, _node=None: runner)
@@ -1688,6 +1689,12 @@ def test_runtime_run_uses_minimal_environment_and_cleans_direct_entries(
     assert runtime.run(value) == 0
     child = next(call for call in calls if call["argv"][0] == "runuser")
     assert "SECRET_PARENT_TOKEN" not in child["env"]
+    contracted_node = Path(value["nodeContract"]["executablePath"])
+    assert child["env"]["PATH"].split(":") == [
+        str(contracted_node.parent),
+        *runtime.SYSTEM_PATH.split(":"),
+    ]
+    assert "caller-controlled" not in child["env"]["PATH"]
     assert child["env"]["PLAYWRIGHT_BROWSERS_PATH"].endswith("playwright-browser")
     assert child["env"]["PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD"] == "1"
     assert "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH" not in child["env"]
@@ -1699,6 +1706,27 @@ def test_runtime_run_uses_minimal_environment_and_cleans_direct_entries(
     assert node_argv[provider_index + 1] == value["provider"] == "token-place"
     assert not (Path(value["resultRoot"]) / f"uid-{os.getuid()}-{'a' * 32}").exists()
     assert (sibling / "keep").read_text() == "untouched"
+
+
+def test_runtime_node_provenance_drift_blocks_launch_and_preserves_metric(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, metric, sibling, calls = prepare_runtime_run(tmp_path, monkeypatch)
+    validations = 0
+
+    def drift(_config: dict) -> dict:
+        nonlocal validations
+        validations += 1
+        if validations == 1:
+            return dict(value["nodeContract"])
+        raise runtime.Invalid("Node runtime provenance")
+
+    monkeypatch.setattr(runtime, "validate_node_contract", drift)
+
+    assert runtime.run(value) == 1
+    assert metric.read_bytes() == b"previous metric\n"
+    assert (sibling / "keep").read_text() == "untouched"
+    assert not any(call["argv"][0] == "runuser" for call in calls)
 
 
 def test_runtime_plumbs_exact_system_executable_and_not_bundle(
