@@ -31,8 +31,12 @@ inside the selected root to a secure, executable ELF32 ARM regular file. Missing
 malformed, duplicate, incompatible, or insecure interpreters and wrong-ABI Node candidates fail
 before publication or Playwright.
 
-There is no PATH, `/usr/bin/nodejs`, distro-package, NVM, home-directory, or mutable-symlink
-fallback. A user NVM binary cannot meet the durable root ownership, `ProtectHome=true`, and native
+There is no unverified PATH, `/usr/bin/nodejs`, distro-package, NVM, home-directory, or
+mutable-symlink fallback. The sanitized child PATH starts with the freshly validated contracted
+Node executable's directory, followed by the fixed system PATH, so the pinned runner's nested bare
+`node` launch resolves to the same contract without inheriting the caller's PATH. The outer
+`runuser` command continues to launch the runner through the contracted absolute executable. A
+user NVM binary cannot meet the durable root ownership, `ProtectHome=true`, and native
 architecture contracts. The unit retains `ProtectHome=true`, `ProtectSystem=strict`,
 `SystemCallArchitectures=native`, and `NoNewPrivileges=true`, and exposes the pinned `/opt` tree
 read-only.

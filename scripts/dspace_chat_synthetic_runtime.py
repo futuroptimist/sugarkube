@@ -56,6 +56,7 @@ REQUIRED = {
 RUNNER_LOCAL = "runner-local-playwright-v1"
 SYSTEM_CHROMIUM = "system-chromium-v1"
 NODE_EXECUTABLE = "/opt/sugarkube/nodejs/v20.20.2-linux-armv7l/bin/node"
+SYSTEM_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 LEGACY_RUNNER_REVISION = "97ab09f13fb098de928a878bf1fe9b8d13032cb5"
 LEGACY_RUNNER_MANIFEST_SHA256 = "36fdab33edc0f1ad518a6d3d247a1bd32d233402387ba57493a9386d78ec9301"
 CURRENT_CRITICAL_FILES = {
@@ -1133,7 +1134,7 @@ def run(config: dict) -> int:
                     "LANG": "C.UTF-8",
                     "LC_ALL": "C.UTF-8",
                     "LOGNAME": account.pw_name,
-                    "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                    "PATH": f"{Path(node['executablePath']).parent}:{SYSTEM_PATH}",
                     "USER": account.pw_name,
                     "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD": "1",
                 }
