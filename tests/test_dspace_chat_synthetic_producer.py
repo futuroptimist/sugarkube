@@ -1688,6 +1688,9 @@ def test_runtime_run_uses_minimal_environment_and_cleans_direct_entries(
     assert runtime.run(value) == 0
     child = next(call for call in calls if call["argv"][0] == "runuser")
     assert "SECRET_PARENT_TOKEN" not in child["env"]
+    assert child["env"]["PATH"] == (
+        f"{Path(value['nodeContract']['executablePath']).parent}:{runtime.SYSTEM_PATH}"
+    )
     assert child["env"]["PLAYWRIGHT_BROWSERS_PATH"].endswith("playwright-browser")
     assert child["env"]["PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD"] == "1"
     assert "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH" not in child["env"]
@@ -1699,6 +1702,35 @@ def test_runtime_run_uses_minimal_environment_and_cleans_direct_entries(
     assert node_argv[provider_index + 1] == value["provider"] == "token-place"
     assert not (Path(value["resultRoot"]) / f"uid-{os.getuid()}-{'a' * 32}").exists()
     assert (sibling / "keep").read_text() == "untouched"
+
+
+def test_runtime_child_path_resolves_nested_node_from_fresh_validated_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value, _metric, _sibling, calls = prepare_runtime_run(tmp_path, monkeypatch)
+    caller_entry = "/caller-controlled/bin"
+    monkeypatch.setenv("PATH", f"{caller_entry}:{os.environ['PATH']}")
+    fixed_system_path = f"{tmp_path}/usr/bin:{tmp_path}/bin"
+    monkeypatch.setattr(runtime, "SYSTEM_PATH", fixed_system_path)
+    contracted_node = tmp_path / "contracted-node/bin/node"
+    contracted_node.parent.mkdir(parents=True)
+    contracted_node.touch(mode=0o755)
+    monkeypatch.setattr(
+        runtime,
+        "validate_node_contract",
+        lambda _value: {**value["nodeContract"], "executablePath": str(contracted_node)},
+    )
+
+    assert runtime.run(value) == 0
+
+    child = next(call for call in calls if call["argv"][0] == "runuser")
+    child_path = child["env"]["PATH"]
+    assert child_path.split(":", 1) == [str(contracted_node.parent), runtime.SYSTEM_PATH]
+    assert caller_entry not in child_path
+    assert shutil.which("node", path=fixed_system_path) is None
+    assert shutil.which("node", path=child_path) == str(contracted_node)
+    separator = child["argv"].index("--")
+    assert child["argv"][separator + 1] == str(contracted_node)
 
 
 def test_runtime_plumbs_exact_system_executable_and_not_bundle(
