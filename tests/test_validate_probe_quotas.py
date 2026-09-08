@@ -52,6 +52,47 @@ def run(probes, declarations, *, replicas=1, methods=METHODS):
     )
 
 
+def test_render_active_returns_output_and_reports_render_failures(tmp_path, monkeypatch):
+    monkeypatch.setattr(quotas, "ROOT", tmp_path)
+    calls = []
+
+    def runner(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="rendered probe")
+
+    assert quotas.render_active("staging", runner) == "rendered probe"
+    assert calls == [
+        (
+            ["kubectl", "kustomize", str(tmp_path / "clusters/staging/observability/probes")],
+            {"capture_output": True, "text": True, "check": False},
+        )
+    ]
+
+    def failing_runner(command, **kwargs):
+        return subprocess.CompletedProcess(command, 1)
+
+    with pytest.raises(quotas.ContractError, match="unable to render active staging"):
+        quotas.render_active("staging", failing_runner)
+
+
+def test_load_modules_rejects_an_unknown_http_method(tmp_path, monkeypatch):
+    values = tmp_path / "clusters/staging/observability"
+    values.mkdir(parents=True)
+    (values / "prometheus-blackbox-exporter.values.yaml").write_text(
+        yaml.safe_dump({"config": {"modules": {"trace": {"http": {"method": "TRACE"}}}}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(quotas, "ROOT", tmp_path)
+
+    with pytest.raises(quotas.ContractError, match="invalid or missing method"):
+        quotas.load_modules("staging")
+
+
+def test_validate_rejects_an_unknown_environment():
+    with pytest.raises(quotas.ContractError, match="environment must be staging or prod"):
+        quotas.validate("development", "", {"version": 1, "probes": []}, {}, 1)
+
+
 def test_sixty_second_probe_exhausts_daily_quota_but_exact_get_exemption_passes():
     item = declaration()
     with pytest.raises(quotas.ContractError, match="window=daily volume=1440"):
