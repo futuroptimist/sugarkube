@@ -3679,6 +3679,18 @@ observability-watchdog-drill-clear env='':
 observability-blackbox-render env='':
     @scripts/observability_blackbox.sh render '{{ env }}'
 
+# Render active Probe graphs and reject schedules that can exhaust reviewed quotas.
+observability-blackbox-quotas env='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    requested='{{ env }}'
+    if [ -n "${requested}" ]; then
+      python3 scripts/validate_probe_quotas.py --env "${requested#env=}"
+    else
+      python3 scripts/validate_probe_quotas.py --env staging
+      python3 scripts/validate_probe_quotas.py --env prod
+    fi
+
 # Fresh-install the selected environment blackbox exporter and apply its Probes.
 observability-blackbox-install env='':
     @scripts/observability_blackbox.sh install '{{ env }}'

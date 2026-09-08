@@ -1,5 +1,66 @@
 # Staging and production blackbox monitoring
 
+## Probe quota safety contract
+
+`config/observability/probe-quotas.yaml` is the reviewable inventory for every Probe in
+the active staging and production Kustomize graphs. Application owners own the route,
+quota bucket, limits, exemptions, and operational-endpoint classification; observability
+owners own the Probe interval, module, enabled state, fanout, and request multiplier.
+The validator compares both sides rather than treating the inventory as a disconnected
+fixture. The legacy `monitoring/probes/public-apps.yaml` file is deliberately never read.
+
+Run both environments with:
+
+```bash
+just observability-blackbox-quotas
+```
+
+or one environment with `just observability-blackbox-quotas env=staging`. The entrypoint
+uses `kubectl kustomize clusters/ENV/observability/probes` only as a local renderer; it
+does not connect to Kubernetes. `--probes` accepts an already-rendered file for offline
+tests. As with generic app configuration, `SUGARKUBE_APP_CONFIG_DIR` may point at an
+operator-owned directory containing `probe-quotas.yaml`, or `--contracts` may select a
+file explicitly. This permits a custom application to be checked without an application
+branch in shared Python.
+
+For interval `I` seconds, scrape fanout `F`, and per-execution application-request
+multiplier `M`, a probe contributes conservatively rounded volume:
+
+```text
+hourly = ceil(3,600 / I) * F * M
+daily  = ceil(86,400 / I) * F * M
+```
+
+Enabled, non-exempt probes with the same application, environment, bucket, limits, and
+safety margin are summed before either window is checked. The usable budget is
+`reviewed_limit * (1 - safety_margin)`. A total **equal to or greater than** that budget
+fails; only a total strictly below it passes. Thus the margin reserves capacity for real
+users and rounding protects against partial intervals. Hourly and daily windows are
+independent.
+
+Exemptions match the exact application-owned path and HTTP method. They do not match a
+prefix, suffix, trailing-slash variant, near-match path, or another method; `GET` never
+implies `HEAD`. A disabled declaration contributes zero and must not have an active
+rendered Probe. An endpoint bypasses numeric limits only when
+`unlimited_operational: true` is explicitly reviewed, with `limits: null` and no
+exemptions. All other declarations require positive hourly/daily limits, a bucket,
+fanout, multiplier, margin, interval, method, route class, application, and environment.
+
+The validator fails closed on malformed or contradictory metadata, duplicate contracts,
+unknown modules/methods, an active Probe without a contract, or an enabled contract
+without an active Probe. Diagnostics contain only repository-owned identities, route and
+bucket classes, calculated volume, and reviewed limits; target hosts, headers, secrets,
+and source identities are not emitted. Fix failures by reconciling the application quota
+policy with the rendered Probe. Do not raise a declared limit or mark an endpoint
+unlimited merely to silence validation.
+
+The September 2026 token.place incident is the boundary example: one 60-second Probe
+produces 1,440 daily requests, so a non-exempt 1,000/day bucket fails deterministically.
+The current root `/` and metadata `/api/v1/meta` contracts pass only because their exact
+`GET` (and separately reviewed `HEAD`) exemptions are declared. Removing either Probe's
+`GET` exemption makes the production-equivalent schedule fail. When adding a Probe, add
+its contract in the same change and run the recipe for both environments.
+
 Public-route monitoring has a guarded, environment-aware, **non-Flux** lifecycle. The
 exporter, Prometheus, and their administrative interfaces remain LAN/internal
 only. The exporter is a `ClusterIP` service; this work adds no Ingress,
