@@ -179,6 +179,9 @@ def test_disabled_probe_is_valid_and_zero_volume_and_unlimited_is_explicit():
 
 def test_repository_staging_and_production_rendered_graphs_validate():
     if shutil.which("kubectl") is None:
+        # TODO: Environments missing kubectl should install it to exercise active graph rendering.
+        # Root cause: kubectl is unavailable in some local test environments.
+        # Estimated fix: Install the CI-pinned kubectl v1.28.7 and rerun this integration test.
         pytest.skip("kubectl is required to exercise active Kustomize graph rendering")
     contract = yaml.safe_load((ROOT / "config/observability/probe-quotas.yaml").read_text())
     for env in ("staging", "prod"):
