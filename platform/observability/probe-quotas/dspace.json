@@ -1,0 +1,166 @@
+{
+  "schemaVersion": 1,
+  "application": "dspace",
+  "probes": [
+    {
+      "application": "dspace",
+      "environment": "staging",
+      "probe": "blackbox-dspace-staging-root",
+      "route": "root",
+      "path": "/",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "bucket": "unmetered-public",
+      "limits": {
+        "hourly": null,
+        "daily": null
+      },
+      "exemptions": [],
+      "fanout": 1,
+      "requestMultiplier": 1,
+      "safetyMargin": 0.2,
+      "unlimited": true
+    },
+    {
+      "application": "dspace",
+      "environment": "staging",
+      "probe": "blackbox-dspace-staging-config",
+      "route": "config",
+      "path": "/config.json",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "bucket": "unmetered-public",
+      "limits": {
+        "hourly": null,
+        "daily": null
+      },
+      "exemptions": [],
+      "fanout": 1,
+      "requestMultiplier": 1,
+      "safetyMargin": 0.2,
+      "unlimited": true
+    },
+    {
+      "application": "dspace",
+      "environment": "staging",
+      "probe": "blackbox-dspace-staging-healthz",
+      "route": "healthz",
+      "path": "/healthz",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "bucket": "unmetered-public",
+      "limits": {
+        "hourly": null,
+        "daily": null
+      },
+      "exemptions": [],
+      "fanout": 1,
+      "requestMultiplier": 1,
+      "safetyMargin": 0.2,
+      "unlimited": true
+    },
+    {
+      "application": "dspace",
+      "environment": "staging",
+      "probe": "blackbox-dspace-staging-livez",
+      "route": "livez",
+      "path": "/livez",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "bucket": "unmetered-public",
+      "limits": {
+        "hourly": null,
+        "daily": null
+      },
+      "exemptions": [],
+      "fanout": 1,
+      "requestMultiplier": 1,
+      "safetyMargin": 0.2,
+      "unlimited": true
+    },
+    {
+      "application": "dspace",
+      "environment": "prod",
+      "probe": "blackbox-dspace-prod-root",
+      "route": "root",
+      "path": "/",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "bucket": "unmetered-public",
+      "limits": {
+        "hourly": null,
+        "daily": null
+      },
+      "exemptions": [],
+      "fanout": 1,
+      "requestMultiplier": 1,
+      "safetyMargin": 0.2,
+      "unlimited": true
+    },
+    {
+      "application": "dspace",
+      "environment": "prod",
+      "probe": "blackbox-dspace-prod-config",
+      "route": "config",
+      "path": "/config.json",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "bucket": "unmetered-public",
+      "limits": {
+        "hourly": null,
+        "daily": null
+      },
+      "exemptions": [],
+      "fanout": 1,
+      "requestMultiplier": 1,
+      "safetyMargin": 0.2,
+      "unlimited": true
+    },
+    {
+      "application": "dspace",
+      "environment": "prod",
+      "probe": "blackbox-dspace-prod-healthz",
+      "route": "healthz",
+      "path": "/healthz",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "bucket": "unmetered-public",
+      "limits": {
+        "hourly": null,
+        "daily": null
+      },
+      "exemptions": [],
+      "fanout": 1,
+      "requestMultiplier": 1,
+      "safetyMargin": 0.2,
+      "unlimited": true
+    },
+    {
+      "application": "dspace",
+      "environment": "prod",
+      "probe": "blackbox-dspace-prod-livez",
+      "route": "livez",
+      "path": "/livez",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "bucket": "unmetered-public",
+      "limits": {
+        "hourly": null,
+        "daily": null
+      },
+      "exemptions": [],
+      "fanout": 1,
+      "requestMultiplier": 1,
+      "safetyMargin": 0.2,
+      "unlimited": true
+    }
+  ]
+}

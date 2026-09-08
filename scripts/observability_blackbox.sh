@@ -122,6 +122,7 @@ json.dump({"prometheus":{"operator.prometheus.io/name":base[0]["metadata"]["name
 PY
   validate_policy_file "${policy_json}" "${selectors_out}"
   python3 "${ROOT}/scripts/verify_blackbox_prometheus.py" --env "${ENVIRONMENT}" --probes <"${probes_json}"
+  python3 "${ROOT}/scripts/validate_probe_quotas.py" --env "${ENVIRONMENT}" >&2
 }
 validate_policy_file() {
   python3 - "$2" "${POLICY_NAME}" "${NAMESPACE}" "$1" "${EXPECTED_POLICY_JSON}" <<'PY'

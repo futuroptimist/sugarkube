@@ -33,6 +33,87 @@ exists.
 Repository configuration is not evidence that these resources are deployed.
 Live evidence comes only from the separate post-merge rollout and validation.
 
+## Probe quota safety contract
+
+The application owners and observability reviewers jointly own the declarative
+contracts in `platform/observability/probe-quotas/*.json`. Each application has
+one reviewable file. The files describe the staging and production Probe name,
+route class, exact application-owned path, method, interval, enabled state,
+shared bucket, hourly and daily limits, exact exemptions, Prometheus scrape
+fanout, per-execution request multiplier, safety margin, and whether the route
+has been explicitly reviewed as unlimited. Application-specific quota facts
+belong in those files; `scripts/validate_probe_quotas.py` contains no
+application-name branches. The unlimited declarations currently record that no
+application quota applies to those public or operational reads. They are not an
+inference from successful HTTP responses and must be changed if an application
+adds a quota.
+
+For a window of `W` seconds and interval `I` seconds, each enabled,
+non-exempt Probe contributes:
+
+```text
+scheduled requests = ceil(W / I) * fanout * requestMultiplier
+usable budget      = floor(reviewed limit * (1 - safetyMargin))
+```
+
+The validator uses `W=3,600` for hourly limits and `W=86,400` for daily
+limits. It sums scheduled requests from every enabled, non-exempt Probe with
+the same application and bucket before comparing either window. A volume that
+**reaches or exceeds** the usable budget fails; equality is deliberately
+unsafe. Disabled declarations contribute zero. An unlimited route passes only
+when `unlimited` is explicitly `true`, both limits are explicitly `null`, and
+the declaration has no contradictory exemptions. Fanout must equal the
+rendered Prometheus replica count, and `requestMultiplier` accounts for any
+probe execution that generates more than one application request.
+
+Exemptions are exact `(path, method)` pairs. Therefore a `GET /api/v1/meta`
+exemption says nothing about `HEAD`, `POST`, `/api/v1/meta/`, a prefix, a
+suffix, or a near-match path. Both `GET` and `HEAD` must be listed when both are
+exempt. Missing fields, unknown methods, malformed durations, invalid limits
+or margins, duplicate declarations, contradictory shared-bucket policy, and
+unknown exporter modules all fail closed. Diagnostics contain only
+repository-owned application, environment, Probe, route/bucket classes, and
+calculated budgets; target hosts, headers, credentials, and source identities
+are never printed.
+
+The entrypoint reads only the active lifecycle Kustomize graphs at
+`clusters/{staging,prod}/observability/probes/kustomization.yaml`, follows their
+local `resources`, and rejects unsupported transformations. It derives the
+actual path from each rendered static target, the actual method from that
+environment's blackbox module, and the fanout from the base plus environment
+Prometheus values. Every active Probe needs one enabled contract, every enabled
+contract needs one active Probe, and staging and production are checked
+independently. The legacy `monitoring/probes/public-apps.yaml` is never read.
+
+Run the standalone, read-only check for both environments with:
+
+```bash
+just observability-probe-quotas
+# or
+python3 scripts/validate_probe_quotas.py --env staging --env prod
+```
+
+The same check runs explicitly in `.github/workflows/tests.yml` and inside the
+blackbox lifecycle render before any install or upgrade can apply a Probe. A
+failure means the manifest and reviewed quota policy are inconsistent or the
+worst-case schedule is unsafe; do not use current endpoint health or historical
+traffic to waive it.
+
+To add or change a Probe, update its active environment manifest, blackbox
+module when necessary, and application contract together. Choose an existing
+bucket only when requests truly share that quota counter, record the actual
+replica fanout and request multiplier, and obtain application-owner review for
+limits, margins, exemptions, or unlimited status. A new application can be
+tested without changing shared code by placing its schema-version-1 JSON file
+in a temporary directory and passing `--config-dir DIRECTORY`.
+
+The token.place incident demonstrates the boundary: one request every 60
+seconds schedules 1,440 requests per day, which reaches a 1,000/day ordinary
+quota even before reserving the 20% safety margin. The production-equivalent
+root and metadata contracts pass only because their exact paths explicitly
+list corrected `GET` and `HEAD` exemptions. Removing either route's exemption,
+or probing it with an unlisted method, makes validation fail.
+
 ## Prerequisites and commands
 
 The canonical `kube-prometheus-stack` Helm release, its `Probe` and

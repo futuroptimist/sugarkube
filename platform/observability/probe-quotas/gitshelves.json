@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "application": "gitshelves",
+  "probes": [
+    {
+      "application": "gitshelves",
+      "environment": "staging",
+      "probe": "blackbox-gitshelves-staging-root",
+      "route": "root",
+      "path": "/",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "bucket": "unmetered-public",
+      "limits": {
+        "hourly": null,
+        "daily": null
+      },
+      "exemptions": [],
+      "fanout": 1,
+      "requestMultiplier": 1,
+      "safetyMargin": 0.2,
+      "unlimited": true
+    },
+    {
+      "application": "gitshelves",
+      "environment": "staging",
+      "probe": "blackbox-gitshelves-staging-healthz",
+      "route": "healthz",
+      "path": "/healthz",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "bucket": "unmetered-public",
+      "limits": {
+        "hourly": null,
+        "daily": null
+      },
+      "exemptions": [],
+      "fanout": 1,
+      "requestMultiplier": 1,
+      "safetyMargin": 0.2,
+      "unlimited": true
+    },
+    {
+      "application": "gitshelves",
+      "environment": "staging",
+      "probe": "blackbox-gitshelves-staging-livez",
+      "route": "livez",
+      "path": "/livez",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "bucket": "unmetered-public",
+      "limits": {
+        "hourly": null,
+        "daily": null
+      },
+      "exemptions": [],
+      "fanout": 1,
+      "requestMultiplier": 1,
+      "safetyMargin": 0.2,
+      "unlimited": true
+    },
+    {
+      "application": "gitshelves",
+      "environment": "staging",
+      "probe": "blackbox-gitshelves-staging-baseplate",
+      "route": "baseplate",
+      "path": "/models/baseplate_2x6.stl",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "bucket": "unmetered-public",
+      "limits": {
+        "hourly": null,
+        "daily": null
+      },
+      "exemptions": [],
+      "fanout": 1,
+      "requestMultiplier": 1,
+      "safetyMargin": 0.2,
+      "unlimited": true
+    },
+    {
+      "application": "gitshelves",
+      "environment": "staging",
+      "probe": "blackbox-gitshelves-staging-module",
+      "route": "module",
+      "path": "/models/contrib_cube.stl",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "bucket": "unmetered-public",
+      "limits": {
+        "hourly": null,
+        "daily": null
+      },
+      "exemptions": [],
+      "fanout": 1,
+      "requestMultiplier": 1,
+      "safetyMargin": 0.2,
+      "unlimited": true
+    }
+  ]
+}

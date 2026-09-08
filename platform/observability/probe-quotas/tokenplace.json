@@ -1,0 +1,198 @@
+{
+  "schemaVersion": 1,
+  "application": "tokenplace",
+  "probes": [
+    {
+      "application": "tokenplace",
+      "environment": "staging",
+      "probe": "blackbox-tokenplace-staging-root",
+      "route": "root",
+      "path": "/",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "bucket": "public-api",
+      "limits": {
+        "hourly": 60,
+        "daily": 1000
+      },
+      "exemptions": [
+        {
+          "path": "/",
+          "methods": [
+            "GET",
+            "HEAD"
+          ]
+        }
+      ],
+      "fanout": 1,
+      "requestMultiplier": 1,
+      "safetyMargin": 0.2,
+      "unlimited": false
+    },
+    {
+      "application": "tokenplace",
+      "environment": "staging",
+      "probe": "blackbox-tokenplace-staging-healthz",
+      "route": "healthz",
+      "path": "/healthz",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "bucket": "unmetered-public",
+      "limits": {
+        "hourly": null,
+        "daily": null
+      },
+      "exemptions": [],
+      "fanout": 1,
+      "requestMultiplier": 1,
+      "safetyMargin": 0.2,
+      "unlimited": true
+    },
+    {
+      "application": "tokenplace",
+      "environment": "staging",
+      "probe": "blackbox-tokenplace-staging-livez",
+      "route": "livez",
+      "path": "/livez",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "bucket": "unmetered-public",
+      "limits": {
+        "hourly": null,
+        "daily": null
+      },
+      "exemptions": [],
+      "fanout": 1,
+      "requestMultiplier": 1,
+      "safetyMargin": 0.2,
+      "unlimited": true
+    },
+    {
+      "application": "tokenplace",
+      "environment": "staging",
+      "probe": "blackbox-tokenplace-staging-metadata",
+      "route": "metadata",
+      "path": "/api/v1/meta",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "bucket": "public-api",
+      "limits": {
+        "hourly": 60,
+        "daily": 1000
+      },
+      "exemptions": [
+        {
+          "path": "/api/v1/meta",
+          "methods": [
+            "GET",
+            "HEAD"
+          ]
+        }
+      ],
+      "fanout": 1,
+      "requestMultiplier": 1,
+      "safetyMargin": 0.2,
+      "unlimited": false
+    },
+    {
+      "application": "tokenplace",
+      "environment": "prod",
+      "probe": "blackbox-tokenplace-prod-root",
+      "route": "root",
+      "path": "/",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "bucket": "public-api",
+      "limits": {
+        "hourly": 60,
+        "daily": 1000
+      },
+      "exemptions": [
+        {
+          "path": "/",
+          "methods": [
+            "GET",
+            "HEAD"
+          ]
+        }
+      ],
+      "fanout": 1,
+      "requestMultiplier": 1,
+      "safetyMargin": 0.2,
+      "unlimited": false
+    },
+    {
+      "application": "tokenplace",
+      "environment": "prod",
+      "probe": "blackbox-tokenplace-prod-healthz",
+      "route": "healthz",
+      "path": "/healthz",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "bucket": "unmetered-public",
+      "limits": {
+        "hourly": null,
+        "daily": null
+      },
+      "exemptions": [],
+      "fanout": 1,
+      "requestMultiplier": 1,
+      "safetyMargin": 0.2,
+      "unlimited": true
+    },
+    {
+      "application": "tokenplace",
+      "environment": "prod",
+      "probe": "blackbox-tokenplace-prod-livez",
+      "route": "livez",
+      "path": "/livez",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "bucket": "unmetered-public",
+      "limits": {
+        "hourly": null,
+        "daily": null
+      },
+      "exemptions": [],
+      "fanout": 1,
+      "requestMultiplier": 1,
+      "safetyMargin": 0.2,
+      "unlimited": true
+    },
+    {
+      "application": "tokenplace",
+      "environment": "prod",
+      "probe": "blackbox-tokenplace-prod-metadata",
+      "route": "metadata",
+      "path": "/api/v1/meta",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "bucket": "public-api",
+      "limits": {
+        "hourly": 60,
+        "daily": 1000
+      },
+      "exemptions": [
+        {
+          "path": "/api/v1/meta",
+          "methods": [
+            "GET",
+            "HEAD"
+          ]
+        }
+      ],
+      "fanout": 1,
+      "requestMultiplier": 1,
+      "safetyMargin": 0.2,
+      "unlimited": false
+    }
+  ]
+}

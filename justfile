@@ -3679,6 +3679,10 @@ observability-watchdog-drill-clear env='':
 observability-blackbox-render env='':
     @scripts/observability_blackbox.sh render '{{ env }}'
 
+# Validate both rendered active Probe graphs against reviewed application quotas (read-only).
+observability-probe-quotas:
+    @python3 scripts/validate_probe_quotas.py --env staging --env prod
+
 # Fresh-install the selected environment blackbox exporter and apply its Probes.
 observability-blackbox-install env='':
     @scripts/observability_blackbox.sh install '{{ env }}'
