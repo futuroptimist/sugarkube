@@ -1,0 +1,434 @@
+{
+  "schema_version": 1,
+  "environment": "staging",
+  "quota_policies": [
+    {
+      "application": "dspace",
+      "bucket": "public-http",
+      "limits": {
+        "hourly": 2,
+        "daily": 2
+      },
+      "safety_margin": "0.10",
+      "exemptions": [],
+      "unlimited_endpoints": [
+        {
+          "route": "/",
+          "method": "GET"
+        },
+        {
+          "route": "/config.json",
+          "method": "GET"
+        },
+        {
+          "route": "/healthz",
+          "method": "GET"
+        },
+        {
+          "route": "/livez",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "application": "tokenplace",
+      "bucket": "public-http",
+      "limits": {
+        "hourly": 100,
+        "daily": 1000
+      },
+      "safety_margin": "0.10",
+      "exemptions": [
+        {
+          "route": "/",
+          "method": "GET"
+        },
+        {
+          "route": "/api/v1/meta",
+          "method": "GET"
+        },
+        {
+          "route": "/",
+          "method": "HEAD"
+        },
+        {
+          "route": "/api/v1/meta",
+          "method": "HEAD"
+        }
+      ],
+      "unlimited_endpoints": [
+        {
+          "route": "/healthz",
+          "method": "GET"
+        },
+        {
+          "route": "/livez",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "application": "danielsmith",
+      "bucket": "public-http",
+      "limits": {
+        "hourly": 2,
+        "daily": 2
+      },
+      "safety_margin": "0.10",
+      "exemptions": [],
+      "unlimited_endpoints": [
+        {
+          "route": "/",
+          "method": "GET"
+        },
+        {
+          "route": "/healthz",
+          "method": "GET"
+        },
+        {
+          "route": "/livez",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "application": "jobbot3000",
+      "bucket": "public-http",
+      "limits": {
+        "hourly": 2,
+        "daily": 2
+      },
+      "safety_margin": "0.10",
+      "exemptions": [],
+      "unlimited_endpoints": [
+        {
+          "route": "/",
+          "method": "GET"
+        },
+        {
+          "route": "/healthz",
+          "method": "GET"
+        },
+        {
+          "route": "/livez",
+          "method": "GET"
+        },
+        {
+          "route": "/tracker",
+          "method": "GET"
+        },
+        {
+          "route": "/manifest.webmanifest",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "application": "gitshelves",
+      "bucket": "public-http",
+      "limits": {
+        "hourly": 2,
+        "daily": 2
+      },
+      "safety_margin": "0.10",
+      "exemptions": [],
+      "unlimited_endpoints": [
+        {
+          "route": "/",
+          "method": "GET"
+        },
+        {
+          "route": "/healthz",
+          "method": "GET"
+        },
+        {
+          "route": "/livez",
+          "method": "GET"
+        },
+        {
+          "route": "/models/baseplate_2x6.stl",
+          "method": "GET"
+        },
+        {
+          "route": "/models/contrib_cube.stl",
+          "method": "GET"
+        }
+      ]
+    }
+  ],
+  "probes": [
+    {
+      "application": "dspace",
+      "environment": "staging",
+      "probe": "blackbox-dspace-staging-root",
+      "route_class": "root",
+      "route": "/",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "quota_bucket": "public-http",
+      "scrape_fanout": 1,
+      "request_multiplier": 1
+    },
+    {
+      "application": "dspace",
+      "environment": "staging",
+      "probe": "blackbox-dspace-staging-config",
+      "route_class": "config",
+      "route": "/config.json",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "quota_bucket": "public-http",
+      "scrape_fanout": 1,
+      "request_multiplier": 1
+    },
+    {
+      "application": "dspace",
+      "environment": "staging",
+      "probe": "blackbox-dspace-staging-healthz",
+      "route_class": "healthz",
+      "route": "/healthz",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "quota_bucket": "public-http",
+      "scrape_fanout": 1,
+      "request_multiplier": 1
+    },
+    {
+      "application": "dspace",
+      "environment": "staging",
+      "probe": "blackbox-dspace-staging-livez",
+      "route_class": "livez",
+      "route": "/livez",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "quota_bucket": "public-http",
+      "scrape_fanout": 1,
+      "request_multiplier": 1
+    },
+    {
+      "application": "tokenplace",
+      "environment": "staging",
+      "probe": "blackbox-tokenplace-staging-root",
+      "route_class": "root",
+      "route": "/",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "quota_bucket": "public-http",
+      "scrape_fanout": 1,
+      "request_multiplier": 1
+    },
+    {
+      "application": "tokenplace",
+      "environment": "staging",
+      "probe": "blackbox-tokenplace-staging-healthz",
+      "route_class": "healthz",
+      "route": "/healthz",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "quota_bucket": "public-http",
+      "scrape_fanout": 1,
+      "request_multiplier": 1
+    },
+    {
+      "application": "tokenplace",
+      "environment": "staging",
+      "probe": "blackbox-tokenplace-staging-livez",
+      "route_class": "livez",
+      "route": "/livez",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "quota_bucket": "public-http",
+      "scrape_fanout": 1,
+      "request_multiplier": 1
+    },
+    {
+      "application": "tokenplace",
+      "environment": "staging",
+      "probe": "blackbox-tokenplace-staging-metadata",
+      "route_class": "metadata",
+      "route": "/api/v1/meta",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "quota_bucket": "public-http",
+      "scrape_fanout": 1,
+      "request_multiplier": 1
+    },
+    {
+      "application": "danielsmith",
+      "environment": "staging",
+      "probe": "blackbox-danielsmith-staging-root",
+      "route_class": "root",
+      "route": "/",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "quota_bucket": "public-http",
+      "scrape_fanout": 1,
+      "request_multiplier": 1
+    },
+    {
+      "application": "danielsmith",
+      "environment": "staging",
+      "probe": "blackbox-danielsmith-staging-healthz",
+      "route_class": "healthz",
+      "route": "/healthz",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "quota_bucket": "public-http",
+      "scrape_fanout": 1,
+      "request_multiplier": 1
+    },
+    {
+      "application": "danielsmith",
+      "environment": "staging",
+      "probe": "blackbox-danielsmith-staging-livez",
+      "route_class": "livez",
+      "route": "/livez",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "quota_bucket": "public-http",
+      "scrape_fanout": 1,
+      "request_multiplier": 1
+    },
+    {
+      "application": "jobbot3000",
+      "environment": "staging",
+      "probe": "blackbox-jobbot3000-staging-root",
+      "route_class": "root",
+      "route": "/",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "quota_bucket": "public-http",
+      "scrape_fanout": 1,
+      "request_multiplier": 1
+    },
+    {
+      "application": "jobbot3000",
+      "environment": "staging",
+      "probe": "blackbox-jobbot3000-staging-healthz",
+      "route_class": "healthz",
+      "route": "/healthz",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "quota_bucket": "public-http",
+      "scrape_fanout": 1,
+      "request_multiplier": 1
+    },
+    {
+      "application": "jobbot3000",
+      "environment": "staging",
+      "probe": "blackbox-jobbot3000-staging-livez",
+      "route_class": "livez",
+      "route": "/livez",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "quota_bucket": "public-http",
+      "scrape_fanout": 1,
+      "request_multiplier": 1
+    },
+    {
+      "application": "jobbot3000",
+      "environment": "staging",
+      "probe": "blackbox-jobbot3000-staging-tracker",
+      "route_class": "tracker",
+      "route": "/tracker",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "quota_bucket": "public-http",
+      "scrape_fanout": 1,
+      "request_multiplier": 1
+    },
+    {
+      "application": "jobbot3000",
+      "environment": "staging",
+      "probe": "blackbox-jobbot3000-staging-manifest",
+      "route_class": "manifest",
+      "route": "/manifest.webmanifest",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "quota_bucket": "public-http",
+      "scrape_fanout": 1,
+      "request_multiplier": 1
+    },
+    {
+      "application": "gitshelves",
+      "environment": "staging",
+      "probe": "blackbox-gitshelves-staging-root",
+      "route_class": "root",
+      "route": "/",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "quota_bucket": "public-http",
+      "scrape_fanout": 1,
+      "request_multiplier": 1
+    },
+    {
+      "application": "gitshelves",
+      "environment": "staging",
+      "probe": "blackbox-gitshelves-staging-healthz",
+      "route_class": "healthz",
+      "route": "/healthz",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "quota_bucket": "public-http",
+      "scrape_fanout": 1,
+      "request_multiplier": 1
+    },
+    {
+      "application": "gitshelves",
+      "environment": "staging",
+      "probe": "blackbox-gitshelves-staging-livez",
+      "route_class": "livez",
+      "route": "/livez",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "quota_bucket": "public-http",
+      "scrape_fanout": 1,
+      "request_multiplier": 1
+    },
+    {
+      "application": "gitshelves",
+      "environment": "staging",
+      "probe": "blackbox-gitshelves-staging-baseplate",
+      "route_class": "baseplate",
+      "route": "/models/baseplate_2x6.stl",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "quota_bucket": "public-http",
+      "scrape_fanout": 1,
+      "request_multiplier": 1
+    },
+    {
+      "application": "gitshelves",
+      "environment": "staging",
+      "probe": "blackbox-gitshelves-staging-module",
+      "route_class": "module",
+      "route": "/models/contrib_cube.stl",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "quota_bucket": "public-http",
+      "scrape_fanout": 1,
+      "request_multiplier": 1
+    }
+  ]
+}

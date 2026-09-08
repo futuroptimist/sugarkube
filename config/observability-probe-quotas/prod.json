@@ -1,0 +1,240 @@
+{
+  "schema_version": 1,
+  "environment": "prod",
+  "quota_policies": [
+    {
+      "application": "dspace",
+      "bucket": "public-http",
+      "limits": {
+        "hourly": 2,
+        "daily": 2
+      },
+      "safety_margin": "0.10",
+      "exemptions": [],
+      "unlimited_endpoints": [
+        {
+          "route": "/",
+          "method": "GET"
+        },
+        {
+          "route": "/config.json",
+          "method": "GET"
+        },
+        {
+          "route": "/healthz",
+          "method": "GET"
+        },
+        {
+          "route": "/livez",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "application": "tokenplace",
+      "bucket": "public-http",
+      "limits": {
+        "hourly": 100,
+        "daily": 1000
+      },
+      "safety_margin": "0.10",
+      "exemptions": [
+        {
+          "route": "/",
+          "method": "GET"
+        },
+        {
+          "route": "/api/v1/meta",
+          "method": "GET"
+        },
+        {
+          "route": "/",
+          "method": "HEAD"
+        },
+        {
+          "route": "/api/v1/meta",
+          "method": "HEAD"
+        }
+      ],
+      "unlimited_endpoints": [
+        {
+          "route": "/healthz",
+          "method": "GET"
+        },
+        {
+          "route": "/livez",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "application": "danielsmith",
+      "bucket": "public-http",
+      "limits": {
+        "hourly": 2,
+        "daily": 2
+      },
+      "safety_margin": "0.10",
+      "exemptions": [],
+      "unlimited_endpoints": [
+        {
+          "route": "/",
+          "method": "GET"
+        },
+        {
+          "route": "/healthz",
+          "method": "GET"
+        },
+        {
+          "route": "/livez",
+          "method": "GET"
+        }
+      ]
+    }
+  ],
+  "probes": [
+    {
+      "application": "dspace",
+      "environment": "prod",
+      "probe": "blackbox-dspace-prod-root",
+      "route_class": "root",
+      "route": "/",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "quota_bucket": "public-http",
+      "scrape_fanout": 1,
+      "request_multiplier": 1
+    },
+    {
+      "application": "dspace",
+      "environment": "prod",
+      "probe": "blackbox-dspace-prod-config",
+      "route_class": "config",
+      "route": "/config.json",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "quota_bucket": "public-http",
+      "scrape_fanout": 1,
+      "request_multiplier": 1
+    },
+    {
+      "application": "dspace",
+      "environment": "prod",
+      "probe": "blackbox-dspace-prod-healthz",
+      "route_class": "healthz",
+      "route": "/healthz",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "quota_bucket": "public-http",
+      "scrape_fanout": 1,
+      "request_multiplier": 1
+    },
+    {
+      "application": "dspace",
+      "environment": "prod",
+      "probe": "blackbox-dspace-prod-livez",
+      "route_class": "livez",
+      "route": "/livez",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "quota_bucket": "public-http",
+      "scrape_fanout": 1,
+      "request_multiplier": 1
+    },
+    {
+      "application": "tokenplace",
+      "environment": "prod",
+      "probe": "blackbox-tokenplace-prod-root",
+      "route_class": "root",
+      "route": "/",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "quota_bucket": "public-http",
+      "scrape_fanout": 1,
+      "request_multiplier": 1
+    },
+    {
+      "application": "tokenplace",
+      "environment": "prod",
+      "probe": "blackbox-tokenplace-prod-healthz",
+      "route_class": "healthz",
+      "route": "/healthz",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "quota_bucket": "public-http",
+      "scrape_fanout": 1,
+      "request_multiplier": 1
+    },
+    {
+      "application": "tokenplace",
+      "environment": "prod",
+      "probe": "blackbox-tokenplace-prod-livez",
+      "route_class": "livez",
+      "route": "/livez",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "quota_bucket": "public-http",
+      "scrape_fanout": 1,
+      "request_multiplier": 1
+    },
+    {
+      "application": "tokenplace",
+      "environment": "prod",
+      "probe": "blackbox-tokenplace-prod-metadata",
+      "route_class": "metadata",
+      "route": "/api/v1/meta",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "quota_bucket": "public-http",
+      "scrape_fanout": 1,
+      "request_multiplier": 1
+    },
+    {
+      "application": "danielsmith",
+      "environment": "prod",
+      "probe": "blackbox-danielsmith-prod-root",
+      "route_class": "root",
+      "route": "/",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "quota_bucket": "public-http",
+      "scrape_fanout": 1,
+      "request_multiplier": 1
+    },
+    {
+      "application": "danielsmith",
+      "environment": "prod",
+      "probe": "blackbox-danielsmith-prod-healthz",
+      "route_class": "healthz",
+      "route": "/healthz",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "quota_bucket": "public-http",
+      "scrape_fanout": 1,
+      "request_multiplier": 1
+    },
+    {
+      "application": "danielsmith",
+      "environment": "prod",
+      "probe": "blackbox-danielsmith-prod-livez",
+      "route_class": "livez",
+      "route": "/livez",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "quota_bucket": "public-http",
+      "scrape_fanout": 1,
+      "request_multiplier": 1
+    }
+  ]
+}

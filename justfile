@@ -3679,6 +3679,10 @@ observability-watchdog-drill-clear env='':
 observability-blackbox-render env='':
     @scripts/observability_blackbox.sh render '{{ env }}'
 
+# Validate active rendered Probe schedules against reviewed application quotas (offline).
+observability-blackbox-quota-validate env='':
+    @env_name='{{ env }}'; while [ "${env_name#env=}" != "${env_name}" ]; do env_name="${env_name#env=}"; done; python3 scripts/validate_probe_quotas.py --env "${env_name}"
+
 # Fresh-install the selected environment blackbox exporter and apply its Probes.
 observability-blackbox-install env='':
     @scripts/observability_blackbox.sh install '{{ env }}'
