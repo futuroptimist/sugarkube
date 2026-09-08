@@ -121,6 +121,7 @@ for key in ("app.kubernetes.io/instance","app.kubernetes.io/name"):
 json.dump({"prometheus":{"operator.prometheus.io/name":base[0]["metadata"]["name"]},"exporter":labels},open(sys.argv[3],"w",encoding="utf-8"),sort_keys=True)
 PY
   validate_policy_file "${policy_json}" "${selectors_out}"
+  python3 "${ROOT}/scripts/validate_probe_quotas.py" --env "${ENVIRONMENT}" --rendered-probes "${probes_json}"
   python3 "${ROOT}/scripts/verify_blackbox_prometheus.py" --env "${ENVIRONMENT}" --probes <"${probes_json}"
 }
 validate_policy_file() {

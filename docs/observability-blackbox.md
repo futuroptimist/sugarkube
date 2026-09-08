@@ -33,6 +33,70 @@ exists.
 Repository configuration is not evidence that these resources are deployed.
 Live evidence comes only from the separate post-merge rollout and validation.
 
+## Probe quota safety contract
+
+`config/observability-probe-quotas/{staging,prod}.json` is the reviewable,
+application-owned quota inventory for the active Probe Kustomize graph in the
+matching environment. Each Probe contract records its application, environment,
+object identity, bounded route label, exact application path, HTTP method,
+interval, enabled state, shared bucket, scrape fanout, and per-execution request
+multiplier. Each application/bucket policy records hourly and daily limits, a
+safety margin, exact path-and-method exemptions, and any exact operational
+endpoints reviewed as unlimited. Application-specific facts belong in these JSON
+files; `scripts/validate_probe_quotas.py` is deliberately application-agnostic.
+An alternate directory can be reviewed with `--config-dir`, which lets a new
+application prove its contract without adding branching to the validator.
+
+For each enabled, non-exempt, non-unlimited declaration and window `W`, the
+conservative scheduled volume is:
+
+```text
+ceil(W seconds / interval seconds) * scrape_fanout * request_multiplier
+```
+
+Volumes are summed by `(environment, application, quota_bucket)` independently
+for the hourly (`W = 3,600`) and daily (`W = 86,400`) windows. The usable budget
+is `floor(reviewed_limit * (1 - safety_margin))`. A volume **equal to or greater
+than** that budget fails; equality is intentionally unsafe. Disabled probes add
+zero volume but remain fully schema-checked. Exemptions and unlimited endpoints
+match exact path and method pairs only: GET does not imply HEAD, and `/api` does
+not match `/api/`, a prefix, suffix, or near-match.
+
+Run the read-only validator directly or through Just:
+
+```bash
+python3 scripts/validate_probe_quotas.py --env staging
+python3 scripts/validate_probe_quotas.py --env prod
+just observability-blackbox-quota-validate env=staging
+```
+
+The validator discovers only resources named by
+`clusters/<environment>/observability/probes/kustomization.yaml`, parses their
+rendered Probe objects, and compares the interval, method (from the selected
+blackbox module), exact target path, labels, and identity with the contract. It
+does not inspect `monitoring/probes/public-apps.yaml`, contact targets, or read a
+Kubernetes context. The lifecycle render passes its rendered Kustomize output to
+the same validator before any install or upgrade can proceed, and CI validates
+both active environments. Missing, duplicate, orphaned, ambiguous, malformed, or
+contradictory declarations fail closed. Diagnostics expose bounded repository
+identifiers and calculated budgets, never target URLs, headers, credentials, or
+source identities.
+
+When adding or changing a Probe, first add it to the active environment graph,
+then add exactly one matching Probe contract and its application/bucket policy.
+Record actual quota limits and a deliberately reviewed margin; do not increase a
+limit merely to silence validation. Declare an exemption only after confirming
+the application owns that exact method/path behavior. Reserve
+`unlimited_endpoints` for intentionally unlimited operational routes and make
+that assertion explicit in review.
+
+The September 2026 token.place incident demonstrates the gate: a 60-second
+non-exempt probe schedules 1,440 requests/day and therefore fails against the
+1,000/day bucket. The current root `/` and metadata `/api/v1/meta` probes pass
+only because their corrected GET exemptions are explicit; `/healthz` and
+`/livez` are separately reviewed as unlimited operational endpoints. Removing
+either corrected exemption makes the production-equivalent contract fail.
+
 ## Prerequisites and commands
 
 The canonical `kube-prometheus-stack` Helm release, its `Probe` and

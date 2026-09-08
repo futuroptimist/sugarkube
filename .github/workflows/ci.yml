@@ -81,6 +81,11 @@ jobs:
         run: |
           pytest -vv --durations=25 --cov=scripts --cov=tests --cov-report=xml:coverage/python-coverage.xml
 
+      - name: Validate active Probe schedules against application quotas
+        run: |
+          python scripts/validate_probe_quotas.py --env staging
+          python scripts/validate_probe_quotas.py --env prod
+
       - name: Upload to Codecov
         if: always()
         uses: codecov/codecov-action@v4
