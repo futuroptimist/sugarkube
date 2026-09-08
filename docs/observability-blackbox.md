@@ -33,6 +33,68 @@ exists.
 Repository configuration is not evidence that these resources are deployed.
 Live evidence comes only from the separate post-merge rollout and validation.
 
+## Probe quota contracts
+
+Every Probe in either active environment graph has a declarative quota contract owned by
+its application's generic config. `SUGARKUBE_PROBE_QUOTA_CONFIG` in
+`docs/examples/apps/<app>.env` points to the reviewable JSON document beside that config;
+an operator-owned `apps/<app>.env` or `SUGARKUBE_APP_CONFIG_DIR` override can point to the
+same schema without changing shared validation code. Each version-1 document names its
+application and contains independent `staging` and `prod` contract lists. A contract records
+the environment, Probe name, route class, exact application path, method, interval, enabled
+state, shared bucket, hourly and daily limits, exact method/path exemptions, scrape fanout,
+per-execution request multiplier, safety margin, and unlimited status. An unlimited contract
+must have null limits, no exemptions, and a non-empty review reason. A limited contract must
+have both positive limits and a null unlimited reason.
+
+`python scripts/validate_probe_quotas.py --env all` invokes `kubectl kustomize` locally on
+`clusters/{staging,prod}/observability/probes`, derives each Probe's request method from that
+environment's committed blackbox module configuration, and compares the rendered identity,
+route, exact URL path, method, and interval with the contract. It never contacts a Kubernetes
+API or an application. The legacy `monitoring/probes/public-apps.yaml` graph is deliberately
+not discovered. Missing, duplicate, contradictory, malformed, or orphaned declarations fail;
+so do rendered Probes without declarations. The blackbox render/install/upgrade path runs the
+same validator against its already-rendered active graph, and CI runs both environment graphs.
+
+For a window of `W` seconds and interval `I` seconds, one enabled, non-exempt Probe contributes:
+
+```text
+ceil(W / I) * fanout * request_multiplier
+```
+
+The validator uses `W = 3,600` for hourly checks and `W = 86,400` for daily checks, then sums
+all contributions with the same application and bucket before comparing either window. The
+reviewed usable budget is `limit * (1 - safety_margin)`. A volume **equal to or greater than**
+that budget fails; equality intentionally fails as the conservative boundary rule. Disabled
+contracts contribute zero. Exact exemptions compare the complete path and HTTP method tuple:
+GET does not imply HEAD or POST, and a prefix, suffix, near match, or trailing slash is a
+different path. Explicitly unlimited operational endpoints bypass arithmetic only through the
+reviewable unlimited declaration and reason.
+
+The September 2026 token.place incident is the motivating example. At 60 seconds,
+`ceil(86,400 / 60) = 1,440` scheduled requests per Probe per day, which deterministically
+reaches a 1,000/day quota. The current root `/` and metadata `/api/v1/meta` contracts retain
+those reviewed hourly/daily limits and pass only because their corrected exact GET and HEAD
+exemptions are explicit. Removing either route's GET exemption makes the production-equivalent
+60-second Probe fail; a GET exemption also cannot make a POST Probe safe.
+
+To add or change a Probe, first update its application's quota JSON with application-owned
+facts and a deliberate margin. Use a shared bucket name whenever application requests consume
+the same counter, set fanout to the number of independent Prometheus scrapers, and set the
+request multiplier when one scrape execution causes multiple application requests. Then run:
+
+```bash
+python scripts/validate_probe_quotas.py --env staging
+python scripts/validate_probe_quotas.py --env prod
+just observability-blackbox-quota-validate
+```
+
+Failures report only bounded repository-owned application, environment, Probe, route/bucket
+classes, calculated volume, and reviewed limit. They intentionally omit target hosts, headers,
+credentials, source identities, and secret values. Correct the application contract or Probe
+configuration; do not use a live success response, historical traffic, or a quota reset as
+evidence that an unsafe schedule is acceptable.
+
 ## Prerequisites and commands
 
 The canonical `kube-prometheus-stack` Helm release, its `Probe` and

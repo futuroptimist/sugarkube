@@ -16,6 +16,12 @@ jobs:
         with:
           python-version: '3.x'
 
+      - name: Set up kubectl for offline Kustomize validation
+        uses: azure/setup-kubectl@v4
+
+      - name: Validate active Probe schedules against application quotas
+        run: python scripts/validate_probe_quotas.py --env all
+
       - name: Install Python test deps
         run: |
           python -m pip install --upgrade pip

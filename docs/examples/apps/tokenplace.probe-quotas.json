@@ -1,0 +1,202 @@
+{
+  "schema_version": 1,
+  "application": "tokenplace",
+  "environments": {
+    "staging": [
+      {
+        "application": "tokenplace",
+        "environment": "staging",
+        "probe": "blackbox-tokenplace-staging-root",
+        "route_class": "root",
+        "path": "/",
+        "method": "GET",
+        "interval": "60s",
+        "enabled": true,
+        "bucket": "public-information",
+        "limits": {
+          "hourly": 100,
+          "daily": 1000
+        },
+        "exemptions": [
+          {
+            "path": "/",
+            "method": "GET"
+          },
+          {
+            "path": "/",
+            "method": "HEAD"
+          }
+        ],
+        "fanout": 1,
+        "request_multiplier": 1,
+        "safety_margin": 0.1,
+        "unlimited": false,
+        "unlimited_reason": null
+      },
+      {
+        "application": "tokenplace",
+        "environment": "staging",
+        "probe": "blackbox-tokenplace-staging-healthz",
+        "route_class": "healthz",
+        "path": "/healthz",
+        "method": "GET",
+        "interval": "60s",
+        "enabled": true,
+        "bucket": "operational-unlimited",
+        "limits": null,
+        "exemptions": [],
+        "fanout": 1,
+        "request_multiplier": 1,
+        "safety_margin": 0.1,
+        "unlimited": true,
+        "unlimited_reason": "Dedicated public operational/static endpoint is application-owned and has no application quota."
+      },
+      {
+        "application": "tokenplace",
+        "environment": "staging",
+        "probe": "blackbox-tokenplace-staging-livez",
+        "route_class": "livez",
+        "path": "/livez",
+        "method": "GET",
+        "interval": "60s",
+        "enabled": true,
+        "bucket": "operational-unlimited",
+        "limits": null,
+        "exemptions": [],
+        "fanout": 1,
+        "request_multiplier": 1,
+        "safety_margin": 0.1,
+        "unlimited": true,
+        "unlimited_reason": "Dedicated public operational/static endpoint is application-owned and has no application quota."
+      },
+      {
+        "application": "tokenplace",
+        "environment": "staging",
+        "probe": "blackbox-tokenplace-staging-metadata",
+        "route_class": "metadata",
+        "path": "/api/v1/meta",
+        "method": "GET",
+        "interval": "60s",
+        "enabled": true,
+        "bucket": "public-information",
+        "limits": {
+          "hourly": 100,
+          "daily": 1000
+        },
+        "exemptions": [
+          {
+            "path": "/api/v1/meta",
+            "method": "GET"
+          },
+          {
+            "path": "/api/v1/meta",
+            "method": "HEAD"
+          }
+        ],
+        "fanout": 1,
+        "request_multiplier": 1,
+        "safety_margin": 0.1,
+        "unlimited": false,
+        "unlimited_reason": null
+      }
+    ],
+    "prod": [
+      {
+        "application": "tokenplace",
+        "environment": "prod",
+        "probe": "blackbox-tokenplace-prod-root",
+        "route_class": "root",
+        "path": "/",
+        "method": "GET",
+        "interval": "60s",
+        "enabled": true,
+        "bucket": "public-information",
+        "limits": {
+          "hourly": 100,
+          "daily": 1000
+        },
+        "exemptions": [
+          {
+            "path": "/",
+            "method": "GET"
+          },
+          {
+            "path": "/",
+            "method": "HEAD"
+          }
+        ],
+        "fanout": 1,
+        "request_multiplier": 1,
+        "safety_margin": 0.1,
+        "unlimited": false,
+        "unlimited_reason": null
+      },
+      {
+        "application": "tokenplace",
+        "environment": "prod",
+        "probe": "blackbox-tokenplace-prod-healthz",
+        "route_class": "healthz",
+        "path": "/healthz",
+        "method": "GET",
+        "interval": "60s",
+        "enabled": true,
+        "bucket": "operational-unlimited",
+        "limits": null,
+        "exemptions": [],
+        "fanout": 1,
+        "request_multiplier": 1,
+        "safety_margin": 0.1,
+        "unlimited": true,
+        "unlimited_reason": "Dedicated public operational/static endpoint is application-owned and has no application quota."
+      },
+      {
+        "application": "tokenplace",
+        "environment": "prod",
+        "probe": "blackbox-tokenplace-prod-livez",
+        "route_class": "livez",
+        "path": "/livez",
+        "method": "GET",
+        "interval": "60s",
+        "enabled": true,
+        "bucket": "operational-unlimited",
+        "limits": null,
+        "exemptions": [],
+        "fanout": 1,
+        "request_multiplier": 1,
+        "safety_margin": 0.1,
+        "unlimited": true,
+        "unlimited_reason": "Dedicated public operational/static endpoint is application-owned and has no application quota."
+      },
+      {
+        "application": "tokenplace",
+        "environment": "prod",
+        "probe": "blackbox-tokenplace-prod-metadata",
+        "route_class": "metadata",
+        "path": "/api/v1/meta",
+        "method": "GET",
+        "interval": "60s",
+        "enabled": true,
+        "bucket": "public-information",
+        "limits": {
+          "hourly": 100,
+          "daily": 1000
+        },
+        "exemptions": [
+          {
+            "path": "/api/v1/meta",
+            "method": "GET"
+          },
+          {
+            "path": "/api/v1/meta",
+            "method": "HEAD"
+          }
+        ],
+        "fanout": 1,
+        "request_multiplier": 1,
+        "safety_margin": 0.1,
+        "unlimited": false,
+        "unlimited_reason": null
+      }
+    ]
+  }
+}
