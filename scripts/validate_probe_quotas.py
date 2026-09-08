@@ -17,6 +17,24 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 WINDOWS = {"hourly": 3600, "daily": 86400}
 METHODS = {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
+ENVIRONMENTS = {"staging", "prod"}
+DECLARATION_FIELDS = {
+    "application",
+    "environment",
+    "probe",
+    "route_class",
+    "route",
+    "method",
+    "interval",
+    "enabled",
+    "bucket",
+    "limits",
+    "exemptions",
+    "scrape_fanout",
+    "request_multiplier",
+    "safety_margin",
+    "unlimited_operational",
+}
 
 
 class ContractError(ValueError):
@@ -57,7 +75,11 @@ def render_active(environment, runner=subprocess.run):
 
 def load_modules(environment):
     path = (
-        ROOT / "clusters" / environment / "observability/prometheus-blackbox-exporter.values.yaml"
+        ROOT
+        / "clusters"
+        / environment
+        / "observability"
+        / "prometheus-blackbox-exporter.values.yaml"
     )
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     modules = data.get("config", {}).get("modules", {})
@@ -67,18 +89,50 @@ def load_modules(environment):
         if method not in METHODS:
             raise ContractError(f"blackbox module {name} has an invalid or missing method")
         methods[name] = method
-    prometheus_values = yaml.safe_load(
+    common_values = yaml.safe_load(
         (
-            ROOT / "clusters" / environment / "observability/kube-prometheus-stack.values.yaml"
+            ROOT
+            / "platform"
+            / "observability"
+            / "helm"
+            / "kube-prometheus-stack.values.common.yaml"
+        ).read_text(encoding="utf-8")
+    )
+    environment_values = yaml.safe_load(
+        (
+            ROOT / "clusters" / environment / "observability" / "kube-prometheus-stack.values.yaml"
         ).read_text(encoding="utf-8")
     )
     # kube-prometheus-stack defaults to one replica when replicas is omitted.
-    replicas = prometheus_values.get("prometheus", {}).get("prometheusSpec", {}).get("replicas", 1)
+    common_spec = common_values.get("prometheus", {}).get("prometheusSpec", {})
+    environment_spec = environment_values.get("prometheus", {}).get("prometheusSpec", {})
+    replicas = environment_spec.get("replicas", common_spec.get("replicas", 1))
     return methods, _positive_int(replicas, "Prometheus replicas")
 
 
+def select_environment_contract(contract_data, environment):
+    """Validate inventory structure before selecting one environment's declarations."""
+    if not isinstance(contract_data, dict) or contract_data.get("version") != 1:
+        raise ContractError("quota contract version must be 1")
+    declarations = contract_data.get("probes")
+    if not isinstance(declarations, list):
+        raise ContractError("quota contract probes must be a list")
+
+    selected = []
+    for item in declarations:
+        if not isinstance(item, dict):
+            raise ContractError("each quota declaration must be an object")
+        if set(item) != DECLARATION_FIELDS:
+            raise ContractError("quota declaration has missing or unknown metadata")
+        if item["environment"] not in ENVIRONMENTS:
+            raise ContractError("quota declaration has an invalid environment")
+        if item["environment"] == environment:
+            selected.append(item)
+    return {"version": 1, "probes": selected}
+
+
 def validate(environment, rendered, contract_data, module_methods, replicas):
-    if environment not in {"staging", "prod"}:
+    if environment not in ENVIRONMENTS:
         raise ContractError("environment must be staging or prod")
     if not isinstance(contract_data, dict) or contract_data.get("version") != 1:
         raise ContractError("quota contract version must be 1")
@@ -122,24 +176,7 @@ def validate(environment, rendered, contract_data, module_methods, replicas):
     for item in declarations:
         if not isinstance(item, dict):
             raise ContractError("each quota declaration must be an object")
-        required = {
-            "application",
-            "environment",
-            "probe",
-            "route_class",
-            "route",
-            "method",
-            "interval",
-            "enabled",
-            "bucket",
-            "limits",
-            "exemptions",
-            "scrape_fanout",
-            "request_multiplier",
-            "safety_margin",
-            "unlimited_operational",
-        }
-        if set(item) != required:
+        if set(item) != DECLARATION_FIELDS:
             raise ContractError("quota declaration has missing or unknown metadata")
         name = item["probe"]
         if not isinstance(name, str) or name in declared:
@@ -240,7 +277,8 @@ def validate(environment, rendered, contract_data, module_methods, replicas):
 
 
 def main(argv=None):
-    config_dir = Path(os.environ.get("SUGARKUBE_APP_CONFIG_DIR", ROOT / "config/observability"))
+    configured_dir = os.environ.get("SUGARKUBE_APP_CONFIG_DIR")
+    config_dir = Path(configured_dir) if configured_dir else ROOT / "config" / "observability"
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--env", required=True, choices=("staging", "prod"))
     parser.add_argument(
@@ -257,14 +295,9 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         contract = yaml.safe_load(args.contracts.read_text(encoding="utf-8"))
-        # One inventory owns both environments; select before duplicate/orphan checks.
-        if isinstance(contract, dict) and isinstance(contract.get("probes"), list):
-            contract = dict(contract)
-            contract["probes"] = [
-                item
-                for item in contract["probes"]
-                if isinstance(item, dict) and item.get("environment") == args.env
-            ]
+        # One inventory owns both environments. Validate its complete structure so
+        # malformed declarations cannot disappear during environment selection.
+        contract = select_environment_contract(contract, args.env)
         rendered = (
             args.probes.read_text(encoding="utf-8") if args.probes else render_active(args.env)
         )

@@ -214,3 +214,71 @@ def test_custom_application_loads_from_temporary_config_directory(tmp_path, monk
         yaml.safe_dump({"version": 1, "probes": [item]}), encoding="utf-8"
     )
     assert quotas.main(["--env", "staging", "--probes", str(rendered)]) == 0
+
+
+@pytest.mark.parametrize(
+    "malformed",
+    [
+        "not-an-object",
+        {key: value for key, value in declaration().items() if key != "environment"},
+        {**declaration(), "environment": "development"},
+    ],
+)
+def test_main_rejects_malformed_unselected_declarations(tmp_path, monkeypatch, malformed):
+    inventory = {"version": 1, "probes": [{**declaration(), "environment": "prod"}, malformed]}
+    contracts = tmp_path / "contracts.yaml"
+    contracts.write_text(yaml.safe_dump(inventory), encoding="utf-8")
+    rendered = tmp_path / "rendered.yaml"
+    rendered.write_text("", encoding="utf-8")
+    monkeypatch.setattr(quotas, "load_modules", lambda environment: ({}, 1))
+
+    assert (
+        quotas.main(
+            [
+                "--env",
+                "prod",
+                "--contracts",
+                str(contracts),
+                "--probes",
+                str(rendered),
+            ]
+        )
+        == 1
+    )
+
+
+def test_empty_app_config_environment_variable_uses_repository_default(tmp_path, monkeypatch):
+    (tmp_path / "probe-quotas.yaml").write_text("version: 999\n", encoding="utf-8")
+    rendered = tmp_path / "rendered.yaml"
+    rendered.write_text("", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("SUGARKUBE_APP_CONFIG_DIR", "")
+    monkeypatch.setattr(quotas, "load_modules", lambda environment: ({}, 1))
+    monkeypatch.setattr(quotas, "validate", lambda *args: 0)
+
+    assert quotas.main(["--env", "staging", "--probes", str(rendered)]) == 0
+
+
+def test_load_modules_uses_common_values_then_environment_override(tmp_path, monkeypatch):
+    common = tmp_path / "platform" / "observability" / "helm"
+    environment = tmp_path / "clusters" / "staging" / "observability"
+    common.mkdir(parents=True)
+    environment.mkdir(parents=True)
+    (environment / "prometheus-blackbox-exporter.values.yaml").write_text(
+        yaml.safe_dump({"config": {"modules": {"get": {"http": {"method": "GET"}}}}}),
+        encoding="utf-8",
+    )
+    (common / "kube-prometheus-stack.values.common.yaml").write_text(
+        yaml.safe_dump({"prometheus": {"prometheusSpec": {"replicas": 3}}}),
+        encoding="utf-8",
+    )
+    override = environment / "kube-prometheus-stack.values.yaml"
+    override.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(quotas, "ROOT", tmp_path)
+
+    assert quotas.load_modules("staging") == ({"get": "GET"}, 3)
+    override.write_text(
+        yaml.safe_dump({"prometheus": {"prometheusSpec": {"replicas": 2}}}),
+        encoding="utf-8",
+    )
+    assert quotas.load_modules("staging") == ({"get": "GET"}, 2)
