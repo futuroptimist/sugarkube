@@ -39,10 +39,16 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: '3.x'
+      - name: Setup kubectl for read-only Kustomize rendering
+        uses: azure/setup-kubectl@v4
       - name: Install dependencies
         run: |
-          uv pip install --system pytest pytest-cov coverage
+          uv pip install --system pytest pytest-cov coverage pyyaml
           if [ -f requirements.txt ]; then uv pip install --system -r requirements.txt; fi
+      - name: Validate active Probe schedules against application quotas
+        run: |
+          python scripts/validate_probe_quotas.py --env staging
+          python scripts/validate_probe_quotas.py --env prod
       - name: Run tests with coverage
         run: |
           pytest --cov=. --cov-report=xml --cov-report=term --maxfail=1 --disable-warnings -q

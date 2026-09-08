@@ -19,7 +19,7 @@ jobs:
       - name: Install Python test deps
         run: |
           python -m pip install --upgrade pip
-          pip install pytest pytest-cov
+          pip install pytest pytest-cov pyyaml
 
       - name: Install bats and mDNS dependencies
         run: |
