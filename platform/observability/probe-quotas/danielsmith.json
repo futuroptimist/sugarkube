@@ -1,0 +1,126 @@
+{
+  "schemaVersion": 1,
+  "application": "danielsmith",
+  "probes": [
+    {
+      "application": "danielsmith",
+      "environment": "staging",
+      "probe": "blackbox-danielsmith-staging-root",
+      "route": "root",
+      "path": "/",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "bucket": "unmetered-public",
+      "limits": {
+        "hourly": null,
+        "daily": null
+      },
+      "exemptions": [],
+      "fanout": 1,
+      "requestMultiplier": 1,
+      "safetyMargin": 0.2,
+      "unlimited": true
+    },
+    {
+      "application": "danielsmith",
+      "environment": "staging",
+      "probe": "blackbox-danielsmith-staging-healthz",
+      "route": "healthz",
+      "path": "/healthz",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "bucket": "unmetered-public",
+      "limits": {
+        "hourly": null,
+        "daily": null
+      },
+      "exemptions": [],
+      "fanout": 1,
+      "requestMultiplier": 1,
+      "safetyMargin": 0.2,
+      "unlimited": true
+    },
+    {
+      "application": "danielsmith",
+      "environment": "staging",
+      "probe": "blackbox-danielsmith-staging-livez",
+      "route": "livez",
+      "path": "/livez",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "bucket": "unmetered-public",
+      "limits": {
+        "hourly": null,
+        "daily": null
+      },
+      "exemptions": [],
+      "fanout": 1,
+      "requestMultiplier": 1,
+      "safetyMargin": 0.2,
+      "unlimited": true
+    },
+    {
+      "application": "danielsmith",
+      "environment": "prod",
+      "probe": "blackbox-danielsmith-prod-root",
+      "route": "root",
+      "path": "/",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "bucket": "unmetered-public",
+      "limits": {
+        "hourly": null,
+        "daily": null
+      },
+      "exemptions": [],
+      "fanout": 1,
+      "requestMultiplier": 1,
+      "safetyMargin": 0.2,
+      "unlimited": true
+    },
+    {
+      "application": "danielsmith",
+      "environment": "prod",
+      "probe": "blackbox-danielsmith-prod-healthz",
+      "route": "healthz",
+      "path": "/healthz",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "bucket": "unmetered-public",
+      "limits": {
+        "hourly": null,
+        "daily": null
+      },
+      "exemptions": [],
+      "fanout": 1,
+      "requestMultiplier": 1,
+      "safetyMargin": 0.2,
+      "unlimited": true
+    },
+    {
+      "application": "danielsmith",
+      "environment": "prod",
+      "probe": "blackbox-danielsmith-prod-livez",
+      "route": "livez",
+      "path": "/livez",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "bucket": "unmetered-public",
+      "limits": {
+        "hourly": null,
+        "daily": null
+      },
+      "exemptions": [],
+      "fanout": 1,
+      "requestMultiplier": 1,
+      "safetyMargin": 0.2,
+      "unlimited": true
+    }
+  ]
+}

@@ -45,6 +45,7 @@ jobs:
           if [ -f requirements.txt ]; then uv pip install --system -r requirements.txt; fi
       - name: Run tests with coverage
         run: |
+          python scripts/validate_probe_quotas.py --env staging --env prod
           pytest --cov=. --cov-report=xml --cov-report=term --maxfail=1 --disable-warnings -q
       - name: Check Codecov token
         id: codecov_token

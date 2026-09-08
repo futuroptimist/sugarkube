@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "application": "jobbot3000",
+  "probes": [
+    {
+      "application": "jobbot3000",
+      "environment": "staging",
+      "probe": "blackbox-jobbot3000-staging-root",
+      "route": "root",
+      "path": "/",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "bucket": "unmetered-public",
+      "limits": {
+        "hourly": null,
+        "daily": null
+      },
+      "exemptions": [],
+      "fanout": 1,
+      "requestMultiplier": 1,
+      "safetyMargin": 0.2,
+      "unlimited": true
+    },
+    {
+      "application": "jobbot3000",
+      "environment": "staging",
+      "probe": "blackbox-jobbot3000-staging-healthz",
+      "route": "healthz",
+      "path": "/healthz",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "bucket": "unmetered-public",
+      "limits": {
+        "hourly": null,
+        "daily": null
+      },
+      "exemptions": [],
+      "fanout": 1,
+      "requestMultiplier": 1,
+      "safetyMargin": 0.2,
+      "unlimited": true
+    },
+    {
+      "application": "jobbot3000",
+      "environment": "staging",
+      "probe": "blackbox-jobbot3000-staging-livez",
+      "route": "livez",
+      "path": "/livez",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "bucket": "unmetered-public",
+      "limits": {
+        "hourly": null,
+        "daily": null
+      },
+      "exemptions": [],
+      "fanout": 1,
+      "requestMultiplier": 1,
+      "safetyMargin": 0.2,
+      "unlimited": true
+    },
+    {
+      "application": "jobbot3000",
+      "environment": "staging",
+      "probe": "blackbox-jobbot3000-staging-tracker",
+      "route": "tracker",
+      "path": "/tracker",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "bucket": "unmetered-public",
+      "limits": {
+        "hourly": null,
+        "daily": null
+      },
+      "exemptions": [],
+      "fanout": 1,
+      "requestMultiplier": 1,
+      "safetyMargin": 0.2,
+      "unlimited": true
+    },
+    {
+      "application": "jobbot3000",
+      "environment": "staging",
+      "probe": "blackbox-jobbot3000-staging-manifest",
+      "route": "manifest",
+      "path": "/manifest.webmanifest",
+      "method": "GET",
+      "interval": "60s",
+      "enabled": true,
+      "bucket": "unmetered-public",
+      "limits": {
+        "hourly": null,
+        "daily": null
+      },
+      "exemptions": [],
+      "fanout": 1,
+      "requestMultiplier": 1,
+      "safetyMargin": 0.2,
+      "unlimited": true
+    }
+  ]
+}
