@@ -59,6 +59,15 @@ def _duration(value, field="interval"):
     return seconds
 
 
+def _exact_path(value, field):
+    if not isinstance(value, str) or not value.startswith("/"):
+        raise ContractError(f"{field} must be an exact path")
+    parts = urlsplit(value)
+    if parts.scheme or parts.netloc or parts.query or parts.fragment:
+        raise ContractError(f"{field} must be an exact path without a query or fragment")
+    return value
+
+
 def _documents(text):
     return [doc for doc in yaml.safe_load_all(text) if isinstance(doc, dict)]
 
@@ -112,23 +121,77 @@ def load_modules(environment):
 
 def select_environment_contract(contract_data, environment):
     """Validate inventory structure before selecting one environment's declarations."""
-    if not isinstance(contract_data, dict) or contract_data.get("version") != 1:
+    if not isinstance(contract_data, dict) or set(contract_data) != {"version", "probes"}:
+        raise ContractError("quota contract has missing or unknown top-level fields")
+    if contract_data["version"] != 1:
         raise ContractError("quota contract version must be 1")
-    declarations = contract_data.get("probes")
+    declarations = contract_data["probes"]
     if not isinstance(declarations, list):
         raise ContractError("quota contract probes must be a list")
 
     selected = []
+    identities = set()
     for item in declarations:
-        if not isinstance(item, dict):
-            raise ContractError("each quota declaration must be an object")
-        if set(item) != DECLARATION_FIELDS:
-            raise ContractError("quota declaration has missing or unknown metadata")
-        if item["environment"] not in ENVIRONMENTS:
-            raise ContractError("quota declaration has an invalid environment")
+        _validate_declaration(item)
+        identity = (item["environment"], item["probe"])
+        if identity in identities:
+            raise ContractError("quota declaration identity is duplicated")
+        identities.add(identity)
         if item["environment"] == environment:
             selected.append(item)
     return {"version": 1, "probes": selected}
+
+
+def _validate_declaration(item):
+    """Validate environment-independent declaration metadata."""
+    if not isinstance(item, dict):
+        raise ContractError("each quota declaration must be an object")
+    if set(item) != DECLARATION_FIELDS:
+        raise ContractError("quota declaration has missing or unknown metadata")
+    if item["environment"] not in ENVIRONMENTS:
+        raise ContractError("quota declaration has an invalid environment")
+    name = item["probe"]
+    if not isinstance(name, str) or not name.strip():
+        raise ContractError("quota declaration identity is missing")
+    for field in ("application", "route_class", "bucket"):
+        if not isinstance(item[field], str) or not item[field].strip():
+            raise ContractError(f"probe {name} has invalid {field}")
+    _exact_path(item["route"], f"probe {name} route")
+    if item["method"] not in METHODS:
+        raise ContractError(f"probe {name} has unknown method")
+    _duration(item["interval"])
+    if not isinstance(item["enabled"], bool) or not isinstance(item["unlimited_operational"], bool):
+        raise ContractError(f"probe {name} has invalid enabled/unlimited metadata")
+    _positive_int(item["scrape_fanout"], "scrape_fanout")
+    _positive_int(item["request_multiplier"], "request_multiplier")
+    margin = item["safety_margin"]
+    if isinstance(margin, bool) or not isinstance(margin, (int, float)) or not 0 <= margin < 1:
+        raise ContractError(f"probe {name} has invalid safety_margin")
+    exemptions = item["exemptions"]
+    if not isinstance(exemptions, list):
+        raise ContractError(f"probe {name} has malformed exemptions")
+    exemption_keys = []
+    for exemption in exemptions:
+        if not isinstance(exemption, dict) or set(exemption) != {"route", "method"}:
+            raise ContractError(f"probe {name} has malformed exemptions")
+        try:
+            exemption_route = _exact_path(exemption["route"], f"probe {name} exemption route")
+        except ContractError as exc:
+            raise ContractError(f"probe {name} has malformed exemptions") from exc
+        if exemption["method"] not in METHODS:
+            raise ContractError(f"probe {name} has malformed exemptions")
+        exemption_keys.append((exemption_route, exemption["method"]))
+    if len(exemption_keys) != len(set(exemption_keys)):
+        raise ContractError(f"probe {name} has duplicate exemptions")
+    limits = item["limits"]
+    if item["unlimited_operational"]:
+        if limits is not None or exemptions:
+            raise ContractError(f"probe {name} has contradictory unlimited metadata")
+    else:
+        if not isinstance(limits, dict) or set(limits) != set(WINDOWS):
+            raise ContractError(f"probe {name} has missing or ambiguous limits")
+        for window in WINDOWS:
+            _positive_int(limits[window], f"{window} limit")
 
 
 def validate(environment, rendered, contract_data, module_methods, replicas):
@@ -174,57 +237,22 @@ def validate(environment, rendered, contract_data, module_methods, replicas):
     buckets = defaultdict(lambda: {"hourly": 0, "daily": 0, "records": []})
     bucket_policies = {}
     for item in declarations:
-        if not isinstance(item, dict):
-            raise ContractError("each quota declaration must be an object")
-        if set(item) != DECLARATION_FIELDS:
-            raise ContractError("quota declaration has missing or unknown metadata")
+        _validate_declaration(item)
         name = item["probe"]
         if not isinstance(name, str) or name in declared:
             raise ContractError("quota declaration identity is missing or duplicated")
         declared[name] = item
         if item["environment"] != environment:
             raise ContractError(f"probe {name} has contradictory environment metadata")
-        for field in ("application", "route_class", "bucket"):
-            if not isinstance(item[field], str) or not item[field].strip():
-                raise ContractError(f"probe {name} has invalid {field}")
         route = item["route"]
-        if not isinstance(route, str) or not route.startswith("/") or "?" in route or "#" in route:
-            raise ContractError(f"probe {name} has invalid route")
         method = item["method"]
-        if method not in METHODS:
-            raise ContractError(f"probe {name} has unknown method")
         seconds = _duration(item["interval"])
-        if not isinstance(item["enabled"], bool) or not isinstance(
-            item["unlimited_operational"], bool
-        ):
-            raise ContractError(f"probe {name} has invalid enabled/unlimited metadata")
         fanout = _positive_int(item["scrape_fanout"], "scrape_fanout")
         multiplier = _positive_int(item["request_multiplier"], "request_multiplier")
         margin = item["safety_margin"]
-        if isinstance(margin, bool) or not isinstance(margin, (int, float)) or not 0 <= margin < 1:
-            raise ContractError(f"probe {name} has invalid safety_margin")
         exemptions = item["exemptions"]
-        if not isinstance(exemptions, list) or any(
-            not isinstance(x, dict)
-            or set(x) != {"route", "method"}
-            or not isinstance(x["route"], str)
-            or not x["route"].startswith("/")
-            or x["method"] not in METHODS
-            for x in exemptions
-        ):
-            raise ContractError(f"probe {name} has malformed exemptions")
         exemption_keys = [(x["route"], x["method"]) for x in exemptions]
-        if len(exemption_keys) != len(set(exemption_keys)):
-            raise ContractError(f"probe {name} has duplicate exemptions")
         limits = item["limits"]
-        if item["unlimited_operational"]:
-            if limits is not None or exemptions:
-                raise ContractError(f"probe {name} has contradictory unlimited metadata")
-        else:
-            if not isinstance(limits, dict) or set(limits) != set(WINDOWS):
-                raise ContractError(f"probe {name} has missing or ambiguous limits")
-            for window in WINDOWS:
-                _positive_int(limits[window], f"{window} limit")
 
         manifest = active.get(name)
         if item["enabled"] and manifest is None:
@@ -247,13 +275,17 @@ def validate(environment, rendered, contract_data, module_methods, replicas):
             raise ContractError(f"probe {name} method contradicts its blackbox module")
         if fanout != replicas:
             raise ContractError(f"probe {name} scrape_fanout contradicts Prometheus replicas")
-        if item["unlimited_operational"] or (route, method) in exemption_keys:
-            continue
         policy_key = (item["application"], environment, item["bucket"])
-        policy = (margin, limits["hourly"], limits["daily"])
+        policy = (
+            ("unlimited", margin)
+            if item["unlimited_operational"]
+            else ("metered", margin, limits["hourly"], limits["daily"])
+        )
         if policy_key in bucket_policies and bucket_policies[policy_key] != policy:
             raise ContractError(f"probe {name} has contradictory shared-bucket policy")
         bucket_policies[policy_key] = policy
+        if item["unlimited_operational"] or (route, method) in exemption_keys:
+            continue
         key = (*policy_key, *policy)
         volume = fanout * multiplier
         for window, duration in WINDOWS.items():
@@ -264,7 +296,7 @@ def validate(environment, rendered, contract_data, module_methods, replicas):
     if missing:
         raise ContractError(f"active Probe lacks quota declaration: {missing[0]}")
     for key, totals in buckets.items():
-        app, env, bucket, margin, hourly_limit, daily_limit = key
+        app, env, bucket, _, margin, hourly_limit, daily_limit = key
         limits = {"hourly": hourly_limit, "daily": daily_limit}
         for window in WINDOWS:
             usable = limits[window] * (1 - margin)

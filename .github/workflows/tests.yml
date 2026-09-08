@@ -41,6 +41,8 @@ jobs:
           python-version: '3.x'
       - name: Setup kubectl for read-only Kustomize rendering
         uses: azure/setup-kubectl@v4
+        with:
+          version: 'v1.28.7'
       - name: Install dependencies
         run: |
           uv pip install --system pytest pytest-cov coverage pyyaml

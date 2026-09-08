@@ -145,6 +145,29 @@ def test_duplicates_orphans_and_undeclared_active_probes_fail():
         run([probe()], [])
 
 
+def test_fanout_must_match_effective_prometheus_replicas():
+    with pytest.raises(quotas.ContractError, match="scrape_fanout contradicts"):
+        run([probe()], [declaration()], replicas=2)
+
+
+def test_exempt_declarations_must_share_the_same_metered_bucket_policy():
+    items = [declaration("one"), declaration("two")]
+    docs = [probe("one"), probe("two")]
+    for item in items:
+        item["exemptions"] = [{"route": "/", "method": "GET"}]
+    items[1]["limits"]["daily"] = 2000
+    with pytest.raises(quotas.ContractError, match="contradictory shared-bucket policy"):
+        run(docs, items)
+
+
+def test_unlimited_and_metered_declarations_cannot_share_a_bucket():
+    items = [declaration("unlimited"), declaration("metered")]
+    docs = [probe("unlimited"), probe("metered")]
+    items[0].update(unlimited_operational=True, limits=None)
+    with pytest.raises(quotas.ContractError, match="contradictory shared-bucket policy"):
+        run(docs, items)
+
+
 def test_disabled_probe_is_valid_and_zero_volume_and_unlimited_is_explicit():
     item = declaration()
     item["enabled"] = False
@@ -181,6 +204,10 @@ def test_tokenplace_production_requires_both_corrected_exact_exemptions():
         "probes": [x for x in contract["probes"] if x["environment"] == "prod"],
     }
     methods, replicas = quotas.load_modules("prod")
+    tokenplace = [x for x in selected["probes"] if x["application"] == "tokenplace"]
+    metered = [x for x in tokenplace if x["bucket"] == "public-information"]
+    assert metered
+    assert all(x["limits"] == {"hourly": 60, "daily": 1000} for x in metered)
     quotas.validate("prod", rendered, selected, methods, replicas)
     for name in ("blackbox-tokenplace-prod-root", "blackbox-tokenplace-prod-metadata"):
         broken = copy.deepcopy(selected)
@@ -242,6 +269,40 @@ def test_main_rejects_malformed_unselected_declarations(tmp_path, monkeypatch, m
                 "--probes",
                 str(rendered),
             ]
+        )
+        == 1
+    )
+
+
+@pytest.mark.parametrize("environment", ["staging", "prod"])
+@pytest.mark.parametrize(
+    "inventory_change",
+    [
+        lambda inventory: inventory.update(extra=True),
+        lambda inventory: inventory["probes"].append(copy.deepcopy(inventory["probes"][0])),
+        lambda inventory: inventory["probes"][0].update(route="/?debug=true"),
+        lambda inventory: inventory["probes"][0]["exemptions"].append(
+            {"route": "/#status", "method": "GET"}
+        ),
+    ],
+)
+def test_every_environment_rejects_malformed_complete_inventory(
+    tmp_path, monkeypatch, environment, inventory_change
+):
+    item = declaration()
+    item["environment"] = "prod" if environment == "staging" else "staging"
+    item["exemptions"] = [{"route": "/", "method": "GET"}]
+    inventory = {"version": 1, "probes": [item]}
+    inventory_change(inventory)
+    contracts = tmp_path / "contracts.yaml"
+    contracts.write_text(yaml.safe_dump(inventory), encoding="utf-8")
+    rendered = tmp_path / "rendered.yaml"
+    rendered.write_text("", encoding="utf-8")
+    monkeypatch.setattr(quotas, "load_modules", lambda selected_environment: ({}, 1))
+
+    assert (
+        quotas.main(
+            ["--env", environment, "--contracts", str(contracts), "--probes", str(rendered)]
         )
         == 1
     )

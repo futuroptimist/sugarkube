@@ -70,7 +70,7 @@ probes:
   enabled: true
   bucket: public-information
   limits:
-    hourly: 1000
+    hourly: 60
     daily: 1000
   exemptions:
   - route: /
@@ -121,7 +121,7 @@ probes:
   enabled: true
   bucket: public-information
   limits:
-    hourly: 1000
+    hourly: 60
     daily: 1000
   exemptions:
   - route: /api/v1/meta
@@ -397,7 +397,7 @@ probes:
   enabled: true
   bucket: public-information
   limits:
-    hourly: 1000
+    hourly: 60
     daily: 1000
   exemptions:
   - route: /
@@ -448,7 +448,7 @@ probes:
   enabled: true
   bucket: public-information
   limits:
-    hourly: 1000
+    hourly: 60
     daily: 1000
   exemptions:
   - route: /api/v1/meta
