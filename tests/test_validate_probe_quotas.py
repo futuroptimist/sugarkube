@@ -114,6 +114,32 @@ def test_usable_budget_boundary_fails_and_below_threshold_passes():
 
 
 @pytest.mark.parametrize(
+    ("window", "boundary_interval", "lower_interval", "higher_interval"),
+    [
+        ("hourly", "120s", "125s", "119s"),
+        ("daily", "2880s", "3000s", "2879s"),
+    ],
+)
+def test_exact_decimal_margin_boundary_fails_and_strictly_lower_volume_passes(
+    window, boundary_interval, lower_interval, higher_interval
+):
+    item = declaration(interval=boundary_interval)
+    item["limits"] = {"hourly": 100000, "daily": 100000}
+    item["limits"][window] = 100
+    item["safety_margin"] = 0.7
+
+    with pytest.raises(quotas.ContractError, match=f"window={window}.*volume=30"):
+        run([probe(interval=boundary_interval)], [item])
+
+    item["interval"] = lower_interval
+    run([probe(interval=lower_interval)], [item])
+
+    item["interval"] = higher_interval
+    with pytest.raises(quotas.ContractError, match=f"window={window}.*volume=31"):
+        run([probe(interval=higher_interval)], [item])
+
+
+@pytest.mark.parametrize(
     ("field", "value"),
     [
         ("interval", "60seconds"),

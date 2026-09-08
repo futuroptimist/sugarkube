@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 from collections import defaultdict
+from fractions import Fraction
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -299,7 +300,7 @@ def validate(environment, rendered, contract_data, module_methods, replicas):
         app, env, bucket, _, margin, hourly_limit, daily_limit = key
         limits = {"hourly": hourly_limit, "daily": daily_limit}
         for window in WINDOWS:
-            usable = limits[window] * (1 - margin)
+            usable = limits[window] * (1 - Fraction(str(margin)))
             if totals[window] >= usable:
                 raise ContractError(
                     f"unsafe schedule: application={app} environment={env} bucket={bucket} "
