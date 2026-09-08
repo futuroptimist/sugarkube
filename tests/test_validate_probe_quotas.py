@@ -254,6 +254,77 @@ def test_error_never_echoes_target_or_unrelated_secret_sentinels():
     assert "SENTINEL" not in str(error.value)
 
 
+def assert_private_input_is_hidden(capsys, expected_diagnostic, *sentinels):
+    output = capsys.readouterr()
+    combined = output.out + output.err
+    assert expected_diagnostic in output.err
+    assert output.out == ""
+    assert "Traceback" not in combined
+    for sentinel in sentinels:
+        assert sentinel not in combined
+
+
+def test_main_privacy_hides_malformed_inventory_details(tmp_path, monkeypatch, capsys):
+    contracts = tmp_path / "contracts.yaml"
+    contracts.write_text(
+        "probes:\n  - target: https://private.inventory.invalid/\n   secret: INVENTORY_SENTINEL\n",
+        encoding="utf-8",
+    )
+    rendered = tmp_path / "rendered.yaml"
+    rendered.write_text("", encoding="utf-8")
+    monkeypatch.setattr(quotas, "load_modules", lambda environment: ({}, 1))
+
+    assert (
+        quotas.main(["--env", "staging", "--contracts", str(contracts), "--probes", str(rendered)])
+        == 1
+    )
+    assert_private_input_is_hidden(
+        capsys,
+        "probe quota validation failed: YAML input is malformed",
+        "private.inventory.invalid",
+        "INVENTORY_SENTINEL",
+        "target:",
+    )
+
+
+def test_main_privacy_hides_malformed_rendered_probe_details(tmp_path, monkeypatch, capsys):
+    contracts = tmp_path / "contracts.yaml"
+    contracts.write_text(
+        yaml.safe_dump({"version": 1, "probes": [declaration()]}), encoding="utf-8"
+    )
+    rendered = tmp_path / "rendered.yaml"
+    rendered.write_text(
+        "kind: Probe\nspec:\n  target: https://private.probe.invalid/\n   secret: PROBE_SENTINEL\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(quotas, "load_modules", lambda environment: ({"get": "GET"}, 1))
+
+    assert (
+        quotas.main(["--env", "staging", "--contracts", str(contracts), "--probes", str(rendered)])
+        == 1
+    )
+    assert_private_input_is_hidden(
+        capsys,
+        "probe quota validation failed: YAML input is malformed",
+        "private.probe.invalid",
+        "PROBE_SENTINEL",
+        "target:",
+    )
+
+
+def test_main_privacy_hides_missing_input_path(tmp_path, capsys):
+    private_path = tmp_path / "private-host.invalid-MISSING_SENTINEL.yaml"
+
+    assert quotas.main(["--env", "staging", "--contracts", str(private_path)]) == 1
+    assert_private_input_is_hidden(
+        capsys,
+        "probe quota validation failed: unable to read an input file",
+        "private-host.invalid",
+        "MISSING_SENTINEL",
+        str(private_path),
+    )
+
+
 def test_custom_application_loads_from_temporary_config_directory(tmp_path, monkeypatch):
     (tmp_path / "probe-quotas.yaml").write_text(
         yaml.safe_dump({"version": 1, "probes": [declaration(app="new-app")]}),

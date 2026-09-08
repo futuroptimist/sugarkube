@@ -336,8 +336,14 @@ def main(argv=None):
         )
         methods, replicas = load_modules(args.env)
         validate(args.env, rendered, contract, methods, replicas)
-    except (OSError, yaml.YAMLError, ContractError) as exc:
+    except ContractError as exc:
         print(f"probe quota validation failed: {exc}", file=sys.stderr)
+        return 1
+    except yaml.YAMLError:
+        print("probe quota validation failed: YAML input is malformed", file=sys.stderr)
+        return 1
+    except OSError:
+        print("probe quota validation failed: unable to read an input file", file=sys.stderr)
         return 1
     print(f"probe quota validation passed: environment={args.env}")
     return 0
