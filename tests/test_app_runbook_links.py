@@ -19,6 +19,12 @@ BROKEN_DSPACE_CHART_PACKAGE_URL = (
     "https://github.com/orgs/democratizedspace/packages/"
     "container/package/charts%2Fdspace"
 )
+TOKENPLACE_POSTMORTEMS = (
+    f"{TOKENPLACE_REPO}/blob/main/outages/"
+    "2026-09-02-production-relay-metrics-cardinality-oom.md",
+    f"{TOKENPLACE_REPO}/blob/main/outages/"
+    "2026-09-03-production-public-information-rate-limit-exhaustion.md",
+)
 
 APP_LINKS = {
     "dspace": {
@@ -178,6 +184,15 @@ def test_gitshelves_runbook_does_not_link_missing_release_guides() -> None:
     text = _read("docs/apps/gitshelves.md")
     assert "/docs/release-ghcr.md" not in text
     assert "/docs/release-helm.md" not in text
+
+
+def test_tokenplace_incident_runbook_discovery_links() -> None:
+    incident_runbook = _read("docs/tokenplace-incident-runbooks.md")
+    for url in TOKENPLACE_POSTMORTEMS:
+        assert url in incident_runbook
+
+    production_runbook = _read("docs/k3s-tokenplace-prod.md")
+    assert "](tokenplace-incident-runbooks.md)" in production_runbook
 
 
 ONBOARDING_DISCOVERY_FIELDS = [

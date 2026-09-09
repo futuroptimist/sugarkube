@@ -2,8 +2,12 @@
 
 These fail-closed operator runbooks implement the repository portion of
 [Sugarkube #2779](https://github.com/futuroptimist/sugarkube/issues/2779) and are grounded in the
-canonical incident records linked by
-[token.place PR #1763](https://github.com/futuroptimist/token.place/pull/1763). They do not claim
+canonical postmortems for the
+[2026-09-02 production relay metrics-cardinality OOM](https://github.com/futuroptimist/token.place/blob/main/outages/2026-09-02-production-relay-metrics-cardinality-oom.md)
+and the
+[2026-09-03 production public-information rate-limit exhaustion](https://github.com/futuroptimist/token.place/blob/main/outages/2026-09-03-production-public-information-rate-limit-exhaustion.md).
+Implementation history is tracked in
+[token.place PR #1763](https://github.com/futuroptimist/token.place/pull/1763). These runbooks do not claim
 that the Step 14b staging drill has run. Never use this procedure to close an incident or tracker
 before the evidence and human review exist.
 
