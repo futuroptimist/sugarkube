@@ -386,3 +386,9 @@ recipe.
 Dashboards, alert rules, functional schedulability, shared state, and live drills
 remain follow-ups that require live metrics evidence. This Phase 1 support does
 not implement `/api/v1/relay/availability` or any Phase 2 relay behavior.
+
+## Incident response
+
+Use the tested [metrics-OOM and quota-exhaustion runbook](../tokenplace-incident-response.md) for
+fail-closed classification, exact-resource containment, recovery, rollback, and the future staging
+drill. Repository implementation does not establish that the live drill passed.

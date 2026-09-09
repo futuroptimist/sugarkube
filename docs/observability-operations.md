@@ -854,3 +854,7 @@ verification is intentionally rejected until production observability is codifie
 Merging this repository support does not deploy any application, create any
 Secret, dashboard, alert rule, schedulability check, shared-state check, or live
 drill.
+
+For token.place application-metrics OOM or public-route quota exhaustion, use the
+[tested incident response and staging-drill procedure](tokenplace-incident-response.md). It keeps
+health probes intact, mutates only exact discovery resources, and restores metrics last.

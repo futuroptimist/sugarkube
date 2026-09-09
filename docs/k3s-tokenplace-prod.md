@@ -213,3 +213,7 @@ Check the production ServiceMonitor selector, `tokenplace-prod-metrics-token`
 name/key wiring, ready relay pod, network reachability, and Prometheus Targets
 page. Restore the target and wait for the ten-minute alert to resolve; investigate
 compute capacity separately.
+
+For metrics-OOM or quota-exhaustion response, follow the
+[tested token.place incident runbook](tokenplace-incident-response.md). Its helper rejects
+production for the pending drill; this production page is an index, not authorization to rehearse.

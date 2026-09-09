@@ -34,6 +34,8 @@ Review the safety notes before working with power components.
 - [observability-design.md](observability-design.md) — canonical Prometheus/Grafana observability
   design across Sugarkube, DSPACE, token.place, danielsmith.io, jobbot3000, and GitShelves
 - [observability-operations.md](observability-operations.md) — staging and production non-Flux kube-prometheus-stack operations runbook
+- [tokenplace-incident-response.md](tokenplace-incident-response.md) — fail-closed metrics-OOM,
+  quota-exhaustion, recovery, rollback, and staging-drill procedure
 - [observability-blackbox.md](observability-blackbox.md) — staging blackbox exporter and public probe lifecycle runbook
 - [observability-alerting.md](observability-alerting.md) — canonical alerting strategy: PagerDuty/Healthchecks.io target architecture, routing policy, and rollout/drill plan
 - [pi_image_team_notifications.md](pi_image_team_notifications.md) — optional Slack/Matrix progress
