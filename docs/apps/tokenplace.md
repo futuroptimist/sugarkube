@@ -1,5 +1,9 @@
 # token.place on Sugarkube
 
+Incident response for metrics OOM and quota exhaustion is in the tested
+[token.place incident runbooks](../tokenplace-incident-runbooks.md). The repository-only staging
+drill plan there does not claim that the live Step 14b drill has passed.
+
 This is the canonical runbook for deploying token.place from GHCR artifacts to Sugarkube. The generic `just app-*` recipes are the preferred future path. The `tokenplace-oci-*` recipes remain compatibility shims and are scheduled for later removal only after the generic flow has been exercised across routine releases.
 
 ## Artifact model
