@@ -1,5 +1,7 @@
 # Observability operations runbook
 
+For token.place application-metrics OOM or quota exhaustion, use the dedicated [token.place incident response and staging drill](./tokenplace-incident-response.md).
+
 This runbook covers the staging and production observability lifecycles. It is intentionally
 non-Flux: operators use guarded Helm commands from this repository, with the chart version and
 full values chain committed in Git. The production core stack has live acceptance evidence, and its

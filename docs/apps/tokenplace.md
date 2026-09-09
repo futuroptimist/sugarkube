@@ -1,5 +1,7 @@
 # token.place on Sugarkube
 
+Incident operators must also follow the tested, fail-closed [metrics-OOM and quota-exhaustion response](../tokenplace-incident-response.md).
+
 This is the canonical runbook for deploying token.place from GHCR artifacts to Sugarkube. The generic `just app-*` recipes are the preferred future path. The `tokenplace-oci-*` recipes remain compatibility shims and are scheduled for later removal only after the generic flow has been exercised across routine releases.
 
 ## Artifact model

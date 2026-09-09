@@ -1,5 +1,7 @@
 # Sugarkube
 
+- [token.place incident response](./tokenplace-incident-response.md) — fail-closed metrics-OOM and quota-exhaustion recovery, rollback, and future non-production drill.
+
 Welcome to **sugarkube**, a solar-powered off-grid platform for Raspberry Pis and aquarium aeration.
 This repo tracks CAD models, electronics schematics, and documentation
 so anyone can replicate the setup.
