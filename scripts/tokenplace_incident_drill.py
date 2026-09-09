@@ -67,7 +67,8 @@ class Preflight:
     mode: str
     source: str
     classification: tuple[tuple[str, object], ...]
-    degraded_metrics_supported: bool
+    metrics_mode_state: str
+    discovery_labels: tuple[tuple[str, str], ...]
 
 
 @dataclass(frozen=True)
@@ -120,8 +121,8 @@ def validate(args: argparse.Namespace) -> Coordinates:
     for field in ("current_image", "replacement_image", "rollback_image"):
         if not IMAGE.fullmatch(getattr(args, field)):
             raise DrillError(f"{field.replace('_', ' ')} must use an immutable sha256 digest")
-    if len({args.current_image, args.replacement_image, args.rollback_image}) != 3:
-        raise DrillError("current, replacement, and rollback images must be distinct")
+    if args.current_image == args.replacement_image:
+        raise DrillError("current and replacement images must be distinct")
     if not re.fullmatch(r"[1-9][0-9]*(Mi|Gi)", args.memory_limit):
         raise DrillError("memory limit must be an explicit positive Mi or Gi quantity")
     for field in ("namespace", "deployment", "container", "service_monitor", "run_id"):
@@ -190,11 +191,20 @@ def _validate_snapshot(
         monitor.get("namespace") != inv.namespace
         or monitor.get("name") != inv.service_monitor
         or monitor.get("selector_labels") != dict(inv.selector_labels)
+        or monitor.get("discovery_label") != "kube-prometheus-stack"
+        or monitor.get("incident_pause_label") is not None
     ):
         raise DrillError("live ServiceMonitor coordinates do not match inventory")
     live_probes = snapshot.get("probes")
     expected_probes = [
-        {"namespace": "monitoring", "name": name, "route": route, "method": method}
+        {
+            "namespace": "monitoring",
+            "name": name,
+            "route": route,
+            "method": method,
+            "discovery_label": "kube-prometheus-stack",
+            "incident_pause_label": None,
+        }
         for _, name, route, method in inv.probes
     ]
     if (
@@ -228,7 +238,15 @@ def _validate_snapshot(
     capability = deployment.get("metrics_mode")
     if capability not in (None, {"normal": "normal", "degraded": "degraded"}):
         raise DrillError("degraded metrics capability is not the supported reviewed contract")
-    return Preflight(c, inv, mode, source, classification, capability is not None)
+    metrics_mode_state = deployment.get("metrics_mode_value", "normal" if capability else "absent")
+    if metrics_mode_state not in ({"normal", "degraded"} if capability else {"absent"}):
+        raise DrillError("current metrics mode cannot be inverted exactly")
+    discovery_labels = [("servicemonitor", monitor["discovery_label"])] + [
+        (probe["name"], probe["discovery_label"]) for probe in live_probes
+    ]
+    return Preflight(
+        c, inv, mode, source, classification, metrics_mode_state, tuple(discovery_labels)
+    )
 
 
 def preflight_snapshot(mode: str, c: Coordinates, snapshot: dict) -> Preflight:
@@ -328,11 +346,16 @@ def _normalise_live(c: Coordinates, objects: list[dict]) -> dict:
             "image": container.get("image"),
             "memory_limit": container.get("resources", {}).get("limits", {}).get("memory"),
             "metrics_mode": metrics_mode,
+            "metrics_mode_value": env.get("TOKENPLACE_METRICS_MODE", "absent"),
         },
         "service_monitor": {
             "namespace": monitor.get("metadata", {}).get("namespace"),
             "name": monitor.get("metadata", {}).get("name"),
             "selector_labels": monitor.get("spec", {}).get("selector", {}).get("matchLabels"),
+            "discovery_label": monitor.get("metadata", {}).get("labels", {}).get("release"),
+            "incident_pause_label": monitor.get("metadata", {})
+            .get("labels", {})
+            .get("sugarkube.dev/incident-paused"),
         },
         "probes": [
             {
@@ -353,6 +376,10 @@ def _normalise_live(c: Coordinates, objects: list[dict]) -> dict:
                 # The Prometheus Operator Probe CRD performs GET requests; it
                 # has no per-Probe HTTP-method field.
                 "method": "GET",
+                "discovery_label": p.get("metadata", {}).get("labels", {}).get("release"),
+                "incident_pause_label": p.get("metadata", {})
+                .get("labels", {})
+                .get("sugarkube.dev/incident-paused"),
             }
             for p in probes
         ],
@@ -373,75 +400,276 @@ def build_plan(preflight: Preflight) -> dict:
         "monitoring",
     ]
     root, metadata = probes["root"]["probe"], probes["metadata"]["probe"]
-    actions = []
+    actions: list[dict] = []
+    previous: str | None = None
 
-    def add(stage, resource, command, rollback=None):
+    def mutation(stage, resource, command, inverse, old_state, recovery_fallback=None):
+        nonlocal previous
+        record = {
+            "id": stage,
+            "stage": stage,
+            "type": "mutation",
+            "depends_on": [previous] if previous else [],
+            "resource": resource,
+            "old_state": old_state,
+            "command": command,
+            "inverse": inverse,
+            "rollback": inverse,
+        }
+        if recovery_fallback:
+            record["recovery_fallback"] = recovery_fallback
+        actions.append(record)
+        previous = stage
+        return record
+
+    def gate(stage, checks, on_failure, duration=0, preserves=()):
+        nonlocal previous
         actions.append(
-            {"stage": stage, "resource": resource, "command": command, "rollback": rollback or []}
+            {
+                "id": stage,
+                "stage": stage,
+                "type": "gate",
+                "depends_on": [previous] if previous else [],
+                "duration": {"value": duration, "unit": "minutes"},
+                "checks": checks,
+                "preserves": list(preserves),
+                "on_failure": on_failure,
+            }
+        )
+        previous = stage
+
+    discovery = dict(preflight.discovery_labels)
+    paused: dict[str, dict] = {}
+
+    def pause_label(stage, kind, target, base):
+        old = discovery["servicemonitor" if kind == "servicemonitor" else target]
+        pause = base + [
+            "label",
+            f"{kind}/{target}",
+            "release-",
+            "sugarkube.dev/incident-paused=true",
+            "--overwrite",
+        ]
+        restore = base + [
+            "label",
+            f"{kind}/{target}",
+            f"release={old}",
+            "sugarkube.dev/incident-paused-",
+            "--overwrite",
+        ]
+        paused[target] = mutation(
+            stage,
+            f"{kind}/{target}",
+            pause,
+            restore,
+            {"release": old, "sugarkube.dev/incident-paused": None},
         )
 
-    if mode == "metrics-oom" and preflight.degraded_metrics_supported:
-        add(
-            "pause",
-            f"deployment/{c.deployment}",
-            prefix
-            + ["set", "env", f"deployment/{c.deployment}", "TOKENPLACE_METRICS_MODE=degraded"],
-            prefix + ["set", "env", f"deployment/{c.deployment}", "TOKENPLACE_METRICS_MODE=normal"],
-        )
+    if mode == "metrics-oom" and preflight.metrics_mode_state in {"normal", "degraded"}:
+        old = preflight.metrics_mode_state
+        if old == "normal":
+            paused["metrics"] = mutation(
+                "pause-metrics",
+                f"deployment/{c.deployment}",
+                prefix
+                + ["set", "env", f"deployment/{c.deployment}", "TOKENPLACE_METRICS_MODE=degraded"],
+                prefix
+                + ["set", "env", f"deployment/{c.deployment}", f"TOKENPLACE_METRICS_MODE={old}"],
+                {"TOKENPLACE_METRICS_MODE": old},
+            )
         containment = "degraded-metrics"
     elif mode == "metrics-oom":
-        target, base, kind = c.service_monitor, prefix, "servicemonitor"
-        add(
-            "pause",
-            f"{kind}/{target}",
-            base
-            + [
-                "label",
-                f"{kind}/{target}",
-                "release-",
-                "sugarkube.dev/incident-paused=true",
-                "--overwrite",
-            ],
-            base
-            + [
-                "label",
-                f"{kind}/{target}",
-                "release=kube-prometheus-stack",
-                "sugarkube.dev/incident-paused-",
-                "--overwrite",
-            ],
-        )
+        pause_label("pause-metrics", "servicemonitor", c.service_monitor, prefix)
         containment = "servicemonitor-fallback"
     else:
         containment = "public-probe-pause"
-        for target in (root, metadata):
-            add(
-                "pause",
-                f"probe/{target}",
-                probe_prefix
-                + [
-                    "label",
-                    f"probe/{target}",
-                    "release-",
-                    "sugarkube.dev/incident-paused=true",
-                    "--overwrite",
-                ],
-                probe_prefix
-                + [
-                    "label",
-                    f"probe/{target}",
-                    "release=kube-prometheus-stack",
-                    "sugarkube.dev/incident-paused-",
-                    "--overwrite",
-                ],
-            )
-    add(
+        pause_label("pause-root", "probe", root, probe_prefix)
+        pause_label("pause-metadata", "probe", metadata, probe_prefix)
+    replace_inverse = prefix + [
+        "set",
+        "image",
+        f"deployment/{c.deployment}",
+        f"{c.container}={c.current_image}",
+    ]
+    mutation(
         "replace",
         f"deployment/{c.deployment}",
         prefix
         + ["set", "image", f"deployment/{c.deployment}", f"{c.container}={c.replacement_image}"],
-        prefix
-        + ["set", "image", f"deployment/{c.deployment}", f"{c.container}={c.rollback_image}"],
+        replace_inverse,
+        {"image": c.current_image},
+        {
+            "kind": "reviewed-recovery-fallback",
+            "not_an_inverse": True,
+            "requires_capability_revalidation": True,
+            "command": prefix
+            + [
+                "set",
+                "image",
+                f"deployment/{c.deployment}",
+                f"{c.container}={c.rollback_image}",
+            ],
+        },
+    )
+    gate(
+        "workload-readiness",
+        [
+            {"metric": "ready_replicas", "operator": "eq", "value": c.replicas, "unit": "replicas"},
+            {
+                "metric": "image_digest",
+                "operator": "eq",
+                "value": c.replacement_image,
+                "unit": "digest",
+            },
+            {
+                "metric": "memory_limit",
+                "operator": "eq",
+                "value": c.memory_limit,
+                "unit": "quantity",
+            },
+            {"metric": "readiness_failures", "operator": "eq", "value": 0, "unit": "events"},
+            {"metric": "restart_increase", "operator": "eq", "value": 0, "unit": "restarts"},
+            {"metric": "new_oomkilled_137", "operator": "eq", "value": 0, "unit": "terminations"},
+        ],
+        replace_inverse,
+        duration=5,
+    )
+    gate(
+        "compute-registration",
+        [{"metric": "registered", "operator": "eq", "value": True, "unit": "boolean"}],
+        replace_inverse,
+    )
+    gate(
+        "compute-polling",
+        [{"metric": "polling_resumed", "operator": "eq", "value": True, "unit": "boolean"}],
+        replace_inverse,
+    )
+    gate(
+        "encrypted-e2ee",
+        [
+            {"metric": step, "operator": "eq", "value": True, "unit": "boolean"}
+            for step in (
+                "encrypted_request",
+                "encrypted_response",
+                "retrieval",
+                "client_decryption",
+            )
+        ],
+        replace_inverse,
+    )
+
+    common = [
+        {"metric": "readiness_failures", "operator": "eq", "value": 0, "unit": "events"},
+        {"metric": "restart_increase", "operator": "eq", "value": 0, "unit": "restarts"},
+        {"metric": "new_oomkilled_137", "operator": "eq", "value": 0, "unit": "terminations"},
+        {
+            "metric": "route_429_rate",
+            "operator": "lte",
+            "value": 1,
+            "unit": "percent",
+            "window": {"value": 5, "unit": "minutes"},
+        },
+        {
+            "metric": "route_5xx_rate",
+            "operator": "lte",
+            "value": 1,
+            "unit": "percent",
+            "window": {"value": 5, "unit": "minutes"},
+        },
+        {"metric": "scrape_health", "operator": "eq", "value": 100, "unit": "percent"},
+        {
+            "metric": "active_series_vs_baseline",
+            "operator": "lte",
+            "value": 10,
+            "unit": "percent_above_baseline",
+        },
+        {
+            "metric": "scrape_samples_vs_baseline",
+            "operator": "lte",
+            "value": 10,
+            "unit": "percent_above_baseline",
+        },
+        {
+            "metric": "memory_working_set",
+            "operator": "lt",
+            "value": 85,
+            "unit": "percent_of_limit",
+            "window": {"value": 5, "unit": "minutes"},
+        },
+    ]
+    if mode == "quota-exhaustion":
+        for label, target in (("root", root), ("metadata", metadata)):
+            paused_action = paused[target]
+            restore = mutation(
+                f"restore-{label}",
+                paused_action["resource"],
+                paused_action["inverse"],
+                paused_action["command"],
+                {"release": None, "sugarkube.dev/incident-paused": "true"},
+            )
+            gate(
+                f"observe-{label}",
+                common,
+                restore["inverse"],
+                duration=15,
+                preserves=("probe/livez", "probe/healthz"),
+            )
+    else:
+        gate(
+            "preserve-root",
+            [{"metric": "discovery_unchanged", "operator": "eq", "value": True, "unit": "boolean"}],
+            replace_inverse,
+            duration=15,
+            preserves=(f"probe/{root}", "probe/livez", "probe/healthz"),
+        )
+        gate(
+            "preserve-metadata",
+            [{"metric": "discovery_unchanged", "operator": "eq", "value": True, "unit": "boolean"}],
+            replace_inverse,
+            duration=15,
+            preserves=(f"probe/{metadata}", "probe/livez", "probe/healthz"),
+        )
+    metrics_rollback = replace_inverse
+    if "metrics" in paused:
+        restore = mutation(
+            "restore-metrics",
+            paused["metrics"]["resource"],
+            paused["metrics"]["inverse"],
+            paused["metrics"]["command"],
+            {"TOKENPLACE_METRICS_MODE": "degraded"},
+        )
+        metrics_rollback = restore["inverse"]
+    elif c.service_monitor in paused:
+        restore = mutation(
+            "restore-metrics",
+            paused[c.service_monitor]["resource"],
+            paused[c.service_monitor]["inverse"],
+            paused[c.service_monitor]["command"],
+            {"release": None, "sugarkube.dev/incident-paused": "true"},
+        )
+        metrics_rollback = restore["inverse"]
+    else:
+        gate(
+            "preserve-metrics-last",
+            [{"metric": "discovery_unchanged", "operator": "eq", "value": True, "unit": "boolean"}],
+            replace_inverse,
+            preserves=(f"servicemonitor/{c.service_monitor}",),
+        )
+    exit_checks = common + [
+        {
+            "metric": "memory_working_set",
+            "operator": "lt",
+            "value": 70,
+            "unit": "percent_of_limit",
+            "window": {"value": 15, "unit": "minutes"},
+        }
+    ]
+    gate(
+        "observe-metrics",
+        exit_checks,
+        metrics_rollback,
+        duration=30,
+        preserves=("probe/livez", "probe/healthz"),
     )
     return {
         "schema_version": 2,

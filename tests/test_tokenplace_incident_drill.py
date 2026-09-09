@@ -37,7 +37,7 @@ def args(tmp_path: Path, **changes):
     return argparse.Namespace(**values)
 
 
-def snapshot(c, *, mode="metrics-oom", degraded=True):
+def snapshot(c, *, mode="metrics-oom", degraded=True, metrics_mode_value="normal"):
     inv = drill.inventory("staging")
     classification = (
         {"termination_reason": "OOMKilled", "exit_code": 137}
@@ -56,23 +56,39 @@ def snapshot(c, *, mode="metrics-oom", degraded=True):
             "image": c.current_image,
             "memory_limit": c.memory_limit,
             "metrics_mode": {"normal": "normal", "degraded": "degraded"} if degraded else None,
+            "metrics_mode_value": metrics_mode_value if degraded else "absent",
         },
         "service_monitor": {
             "namespace": inv.namespace,
             "name": inv.service_monitor,
             "selector_labels": dict(inv.selector_labels),
+            "discovery_label": "kube-prometheus-stack",
+            "incident_pause_label": None,
         },
         "probes": [
-            {"namespace": "monitoring", "name": name, "route": route, "method": method}
+            {
+                "namespace": "monitoring",
+                "name": name,
+                "route": route,
+                "method": method,
+                "discovery_label": "kube-prometheus-stack",
+                "incident_pause_label": None,
+            }
             for _, name, route, method in inv.probes
         ],
         "classification": classification,
     }
 
 
-def preflight(tmp_path, *, mode="metrics-oom", degraded=True, **changes):
+def preflight(
+    tmp_path, *, mode="metrics-oom", degraded=True, metrics_mode_value="normal", **changes
+):
     c = drill.validate(args(tmp_path, mode=mode, **changes))
-    return drill.preflight_snapshot(mode, c, snapshot(c, mode=mode, degraded=degraded))
+    return drill.preflight_snapshot(
+        mode,
+        c,
+        snapshot(c, mode=mode, degraded=degraded, metrics_mode_value=metrics_mode_value),
+    )
 
 
 @pytest.mark.parametrize(
@@ -106,9 +122,14 @@ def test_typed_preflight_required_and_image_coordinates_are_exact(tmp_path):
         drill.build_plan({})
     checked = preflight(tmp_path)
     plan = drill.build_plan(checked)
-    replace = next(a for a in plan["actions"] if a["stage"] == "replace")
+    replace = next(a for a in plan["actions"] if a["id"] == "replace")
     assert replace["command"][-1] == "relay=" + checked.coordinates.replacement_image
-    assert replace["rollback"][-1] == "relay=" + checked.coordinates.rollback_image
+    assert replace["rollback"][-1] == "relay=" + checked.coordinates.current_image
+    assert replace["recovery_fallback"]["not_an_inverse"] is True
+    assert replace["recovery_fallback"]["requires_capability_revalidation"] is True
+    assert replace["recovery_fallback"]["command"][-1] == (
+        "relay=" + checked.coordinates.rollback_image
+    )
     assert plan["expected_deployment"]["current_image"] == checked.coordinates.current_image
 
 
@@ -209,7 +230,11 @@ def test_live_preflight_calls_identity_first_and_binds_every_lookup(tmp_path, mo
         },
     }
     monitor = {
-        "metadata": {"namespace": "tokenplace", "name": "tokenplace"},
+        "metadata": {
+            "namespace": "tokenplace",
+            "name": "tokenplace",
+            "labels": {"release": "kube-prometheus-stack"},
+        },
         "spec": {"selector": {"matchLabels": normal["service_monitor"]["selector_labels"]}},
     }
     probes = [
@@ -217,6 +242,7 @@ def test_live_preflight_calls_identity_first_and_binds_every_lookup(tmp_path, mo
             "metadata": {
                 "namespace": p["namespace"],
                 "name": p["name"],
+                "labels": {"release": "kube-prometheus-stack"},
             },
             "spec": {
                 "targets": {
@@ -292,3 +318,98 @@ def test_duplicate_inventory_route_classes_are_rejected(monkeypatch):
     with pytest.raises(drill.DrillError, match="duplicate"):
         drill.inventory("staging")
     monkeypatch.setattr(drill.yaml, "safe_load", original)
+
+
+def test_metrics_plan_has_typed_ordered_gates_and_metrics_last(tmp_path):
+    plan = drill.build_plan(preflight(tmp_path))
+    ids = [action["id"] for action in plan["actions"]]
+    assert ids == [
+        "pause-metrics",
+        "replace",
+        "workload-readiness",
+        "compute-registration",
+        "compute-polling",
+        "encrypted-e2ee",
+        "preserve-root",
+        "preserve-metadata",
+        "restore-metrics",
+        "observe-metrics",
+    ]
+    assert all(
+        action["depends_on"] == [ids[index - 1]]
+        for index, action in enumerate(plan["actions"][1:], 1)
+    )
+    workload = next(action for action in plan["actions"] if action["id"] == "workload-readiness")
+    assert workload["duration"] == {"value": 5, "unit": "minutes"}
+    assert {check["metric"] for check in workload["checks"]} >= {
+        "ready_replicas",
+        "image_digest",
+        "memory_limit",
+    }
+    assert workload["on_failure"][-1].endswith(preflight(tmp_path).coordinates.current_image)
+    for action in plan["actions"]:
+        if action["type"] == "gate":
+            assert "command" not in action
+
+
+def test_quota_restoration_has_exact_inverse_and_preserves_health(tmp_path):
+    plan = drill.build_plan(preflight(tmp_path, mode="quota-exhaustion"))
+    ids = [action["id"] for action in plan["actions"]]
+    assert ids.index("restore-root") < ids.index("observe-root") < ids.index("restore-metadata")
+    assert (
+        ids.index("restore-metadata")
+        < ids.index("observe-metadata")
+        < ids.index("preserve-metrics-last")
+    )
+    assert ids[-1] == "observe-metrics"
+    for label in ("root", "metadata"):
+        restore = next(action for action in plan["actions"] if action["id"] == f"restore-{label}")
+        observation = next(
+            action for action in plan["actions"] if action["id"] == f"observe-{label}"
+        )
+        assert "release=kube-prometheus-stack" in restore["command"]
+        assert observation["duration"] == {"value": 15, "unit": "minutes"}
+        assert observation["on_failure"] == restore["inverse"]
+        assert observation["preserves"] == ["probe/livez", "probe/healthz"]
+
+
+def test_numeric_observation_thresholds_and_metrics_exit(tmp_path):
+    plan = drill.build_plan(preflight(tmp_path))
+    observation = plan["actions"][-1]
+    checks = {check["metric"]: check for check in observation["checks"]}
+    assert observation["duration"] == {"value": 30, "unit": "minutes"}
+    assert checks["route_429_rate"]["value"] == 1
+    assert checks["route_429_rate"]["window"] == {"value": 5, "unit": "minutes"}
+    assert checks["route_5xx_rate"]["value"] == 1
+    assert checks["scrape_health"]["value"] == 100
+    assert checks["active_series_vs_baseline"]["value"] == 10
+    assert checks["scrape_samples_vs_baseline"]["value"] == 10
+    assert checks["memory_working_set"]["value"] == 70
+    assert checks["memory_working_set"]["window"] == {"value": 15, "unit": "minutes"}
+
+
+def test_exact_old_metrics_states_and_discovery_labels(tmp_path):
+    already_degraded = drill.build_plan(
+        preflight(tmp_path, degraded=True, metrics_mode_value="degraded")
+    )
+    assert already_degraded["preflight"]["containment"] == "degraded-metrics"
+    assert "pause-metrics" not in [action["id"] for action in already_degraded["actions"]]
+    assert "restore-metrics" not in [action["id"] for action in already_degraded["actions"]]
+
+    fallback = drill.build_plan(preflight(tmp_path, degraded=False))
+    pause = fallback["actions"][0]
+    restore = next(action for action in fallback["actions"] if action["id"] == "restore-metrics")
+    assert pause["old_state"] == {
+        "release": "kube-prometheus-stack",
+        "sugarkube.dev/incident-paused": None,
+    }
+    assert restore["command"] == pause["inverse"]
+    assert restore["inverse"] == pause["command"]
+
+
+def test_missing_old_discovery_state_fails_closed(tmp_path):
+    c = drill.validate(args(tmp_path))
+    data = snapshot(c)
+    data["service_monitor"]["discovery_label"] = None
+    with pytest.raises(drill.DrillError, match="ServiceMonitor"):
+        drill.preflight_snapshot("metrics-oom", c, data)
