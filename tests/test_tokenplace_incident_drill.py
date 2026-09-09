@@ -118,6 +118,51 @@ def test_static_preconditions_fail_closed(tmp_path, change):
             drill.validate(parsed)
 
 
+@pytest.mark.parametrize(
+    "change,message",
+    [
+        ({"kubeconfig": Path("/missing/kubeconfig")}, "kubeconfig"),
+        (
+            {"replacement_image": "registry.example/relay@sha256:" + "a" * 64},
+            "distinct",
+        ),
+        ({"run_id": "unsafe_name"}, "safe Kubernetes name"),
+    ],
+)
+def test_additional_static_preconditions_are_covered(tmp_path, change, message):
+    with pytest.raises(drill.DrillError, match=message):
+        drill.validate(args(tmp_path, **change))
+
+
+@pytest.mark.parametrize(
+    "capability,value,message",
+    [
+        ({"normal": "normal", "degraded": "unsupported"}, "normal", "contract"),
+        ({"normal": "normal", "degraded": "degraded"}, "unsupported", "inverted"),
+    ],
+)
+def test_metrics_capability_must_be_supported_and_invertible(tmp_path, capability, value, message):
+    c = drill.validate(args(tmp_path))
+    data = snapshot(c)
+    data["deployment"]["metrics_mode"] = capability
+    data["deployment"]["metrics_mode_value"] = value
+    with pytest.raises(drill.DrillError, match=message):
+        drill.preflight_snapshot("metrics-oom", c, data)
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        subprocess.CompletedProcess([], 1, "", ""),
+        subprocess.CompletedProcess([], 0, "not-json", ""),
+        subprocess.CompletedProcess([], 0, "[]", ""),
+    ],
+)
+def test_runner_json_refuses_failed_or_malformed_results(result):
+    with pytest.raises(drill.DrillError, match="observation failed"):
+        drill._runner_json(lambda _command: result, ["ignored"], "observation failed")
+
+
 def test_typed_preflight_required_and_image_coordinates_are_exact(tmp_path):
     with pytest.raises(drill.DrillError, match="typed"):
         drill.build_plan({})
