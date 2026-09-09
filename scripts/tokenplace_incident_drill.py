@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -122,11 +124,68 @@ def validate(args: argparse.Namespace) -> Coordinates:
         raise DrillError(
             "explicit authorization for process-local and emptyDir state loss is required"
         )
-    if args.evidence.exists():
-        raise DrillError("evidence file must not already exist")
+    _validate_evidence_target(args.evidence)
     return Coordinates(
         **{field: getattr(args, field) for field in Coordinates.__dataclass_fields__}
     )
+
+
+def _validate_evidence_target(target: Path) -> None:
+    """Require a new private evidence file outside the repository."""
+    if not target.is_absolute():
+        raise DrillError("evidence target must be an absolute private path")
+    if target.is_symlink() or target.exists():
+        raise DrillError("evidence target must be a new regular file")
+    try:
+        parent = target.parent.resolve(strict=True)
+        resolved_target = target.resolve(strict=False)
+        root = ROOT.resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise DrillError("evidence target cannot be safely resolved") from None
+    if not parent.is_dir():
+        raise DrillError("evidence parent must be an existing directory")
+    if parent == root or parent.is_relative_to(root):
+        raise DrillError("evidence target must be outside the repository")
+    if resolved_target == root or resolved_target.is_relative_to(root):
+        raise DrillError("evidence target must be outside the repository")
+
+
+def _publish_evidence(target: Path, payload: str) -> None:
+    """Durably publish payload with mode 0600 without replacing another record."""
+    fd = -1
+    temporary: Path | None = None
+    published = False
+    try:
+        fd, name = tempfile.mkstemp(prefix=".tokenplace-evidence-", dir=target.parent)
+        temporary = Path(name)
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb") as stream:
+            fd = -1
+            stream.write(payload.encode("utf-8"))
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.link(temporary, target)
+        published = True
+        directory_fd = os.open(target.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except BaseException:
+        if published:
+            try:
+                target.unlink()
+            except OSError:
+                pass
+        raise
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        if temporary is not None:
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
 
 
 def inventory(environment: str) -> Inventory:
@@ -929,8 +988,8 @@ def main(argv: list[str] | None = None) -> int:
         coordinates = validate(args)
         snapshot = json.loads(args.snapshot.read_text(encoding="utf-8"))
         plan = build_plan(preflight_snapshot(args.mode, coordinates, snapshot))
-        args.evidence.parent.mkdir(parents=True, exist_ok=True)
-        args.evidence.write_text(json.dumps(plan, indent=2) + "\n", encoding="utf-8")
+        rendered = json.dumps(plan, indent=2) + "\n"
+        _publish_evidence(args.evidence, rendered)
         print(json.dumps(plan, indent=2))
         return 0
     except DrillError as exc:

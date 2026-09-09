@@ -12,6 +12,7 @@ def args(tmp_path: Path, **changes):
     kubeconfig = tmp_path / "private" / "kubeconfig"
     kubeconfig.parent.mkdir(exist_ok=True)
     kubeconfig.write_text("fixture")
+    (tmp_path / "private-evidence").mkdir(exist_ok=True)
     values = dict(
         mode="metrics-oom",
         host="staging.token.place",
@@ -609,7 +610,77 @@ def test_cli_accepts_private_evidence_location_outside_repo(tmp_path, monkeypatc
             argv += ["--" + key.replace("_", "-"), str(value)]
     assert drill.main(argv) == 0
     assert parsed.evidence.exists()
-    assert str(parsed.evidence) not in capsys.readouterr().out
+    captured = capsys.readouterr()
+    assert str(parsed.evidence) not in captured.out + captured.err
+    published = json.loads(parsed.evidence.read_text())
+    assert published == json.loads(captured.out)
+    assert published["state_changes"]["repository"] is False
+    assert parsed.evidence.stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize("kind", ["relative", "repository"])
+def test_cli_refuses_non_private_evidence_targets_without_disclosure(
+    tmp_path, monkeypatch, capsys, kind
+):
+    parsed = args(tmp_path)
+    parsed.snapshot.write_text(json.dumps(snapshot(drill.validate(parsed))))
+    target = Path("private-result.json") if kind == "relative" else drill.ROOT / "result.json"
+    parsed.evidence = target
+    argv = []
+    for key, value in vars(parsed).items():
+        if key in {"acknowledge_state_loss", "dry_run"}:
+            argv.append("--" + key.replace("_", "-"))
+        else:
+            argv += ["--" + key.replace("_", "-"), str(value)]
+    monkeypatch.chdir(tmp_path)
+    assert drill.main(argv) == 2
+    captured = capsys.readouterr()
+    assert str(target) not in captured.out + captured.err
+    assert not (tmp_path / "private-result.json").exists()
+    assert not (drill.ROOT / "result.json").exists()
+
+
+def test_existing_evidence_file_and_symlink_are_never_overwritten(tmp_path):
+    (tmp_path / "private-evidence").mkdir()
+    existing = tmp_path / "private-evidence" / "existing.json"
+    existing.write_text("original")
+    with pytest.raises(drill.DrillError, match="new regular file"):
+        drill.validate(args(tmp_path, evidence=existing))
+    assert existing.read_text() == "original"
+
+    destination = tmp_path / "private-evidence" / "destination.json"
+    destination.write_text("destination")
+    link = tmp_path / "private-evidence" / "link.json"
+    link.symlink_to(destination)
+    with pytest.raises(drill.DrillError, match="new regular file"):
+        drill.validate(args(tmp_path, evidence=link))
+    assert link.is_symlink()
+    assert destination.read_text() == "destination"
+
+
+def test_missing_evidence_parent_is_not_created(tmp_path):
+    target = tmp_path / "missing" / "result.json"
+    with pytest.raises(drill.DrillError, match="safely resolved"):
+        drill.validate(args(tmp_path, evidence=target))
+    assert not target.parent.exists()
+
+
+@pytest.mark.parametrize("failure", ["write", "publish"])
+def test_evidence_publication_failure_leaves_no_files(tmp_path, monkeypatch, failure):
+    directory = tmp_path / "private-evidence"
+    target = directory / "failed.json"
+
+    if failure == "write":
+        monkeypatch.setattr(drill.os, "fsync", lambda _fd: (_ for _ in ()).throw(OSError()))
+    else:
+        monkeypatch.setattr(
+            drill.os, "link", lambda _source, _target: (_ for _ in ()).throw(OSError())
+        )
+
+    with pytest.raises(OSError):
+        drill._publish_evidence(target, '{"complete": true}\n')
+    assert not target.exists()
+    assert list(directory.glob(".tokenplace-evidence-*")) == []
 
 
 def test_duplicate_inventory_route_classes_are_rejected(monkeypatch):
