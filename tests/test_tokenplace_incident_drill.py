@@ -249,12 +249,34 @@ def test_live_preflight_calls_identity_first_and_binds_every_lookup(tmp_path, mo
         "metadata": {
             "uid": "replicaset-1",
             "ownerReferences": [{"uid": "deployment-1", "controller": True}],
-        }
+        },
+        "spec": {
+            "template": {
+                "spec": {
+                    "containers": [
+                        {
+                            "name": c.container,
+                            "image": c.current_image,
+                            "resources": {"limits": {"memory": c.memory_limit}},
+                        }
+                    ]
+                }
+            }
+        },
     }
     pod = {
         "metadata": {
             "uid": "pod-private-1",
             "ownerReferences": [{"uid": "replicaset-1", "controller": True}],
+        },
+        "spec": {
+            "containers": [
+                {
+                    "name": c.container,
+                    "image": c.current_image,
+                    "resources": {"limits": {"memory": c.memory_limit}},
+                }
+            ]
         },
         "status": {
             "containerStatuses": [
@@ -309,7 +331,7 @@ def test_live_preflight_calls_identity_first_and_binds_every_lookup(tmp_path, mo
 
 
 @pytest.mark.parametrize("pod_count", [0, 2])
-def test_live_oom_requires_one_owned_candidate(tmp_path, pod_count):
+def test_live_oom_rejects_unconverged_pod_count(tmp_path, pod_count):
     c = drill.validate(args(tmp_path))
     deployment = {
         "metadata": {"uid": "deployment-1"},
@@ -319,10 +341,32 @@ def test_live_oom_requires_one_owned_candidate(tmp_path, pod_count):
         "metadata": {
             "uid": "rs-1",
             "ownerReferences": [{"uid": "deployment-1", "controller": True}],
-        }
+        },
+        "spec": {
+            "template": {
+                "spec": {
+                    "containers": [
+                        {
+                            "name": c.container,
+                            "image": c.current_image,
+                            "resources": {"limits": {"memory": c.memory_limit}},
+                        }
+                    ]
+                }
+            }
+        },
     }
     pod = {
         "metadata": {"uid": "pod-1", "ownerReferences": [{"uid": "rs-1", "controller": True}]},
+        "spec": {
+            "containers": [
+                {
+                    "name": c.container,
+                    "image": c.current_image,
+                    "resources": {"limits": {"memory": c.memory_limit}},
+                }
+            ]
+        },
         "status": {
             "containerStatuses": [
                 {
@@ -344,7 +388,7 @@ def test_live_oom_requires_one_owned_candidate(tmp_path, pod_count):
     def runner(command):
         return subprocess.CompletedProcess(command, 0, replies.pop(0), "")
 
-    with pytest.raises(drill.DrillError, match="missing or ambiguous"):
+    with pytest.raises(drill.DrillError, match="unconverged"):
         drill._observe_live_oom(c, deployment, ["kubectl"], runner)
 
 
@@ -358,7 +402,20 @@ def test_live_oom_rejects_wrong_owner_and_malformed_termination(tmp_path):
         "metadata": {
             "uid": "rs-1",
             "ownerReferences": [{"uid": "deployment-1", "controller": True}],
-        }
+        },
+        "spec": {
+            "template": {
+                "spec": {
+                    "containers": [
+                        {
+                            "name": c.container,
+                            "image": c.current_image,
+                            "resources": {"limits": {"memory": c.memory_limit}},
+                        }
+                    ]
+                }
+            }
+        },
     }
     for owner, finished, match in (
         ("stale", "2026-09-09T01:02:03Z", "ownership"),
@@ -366,6 +423,15 @@ def test_live_oom_rejects_wrong_owner_and_malformed_termination(tmp_path):
     ):
         pod = {
             "metadata": {"uid": "pod-1", "ownerReferences": [{"uid": owner, "controller": True}]},
+            "spec": {
+                "containers": [
+                    {
+                        "name": c.container,
+                        "image": c.current_image,
+                        "resources": {"limits": {"memory": c.memory_limit}},
+                    }
+                ]
+            },
             "status": {
                 "containerStatuses": [
                     {
@@ -389,6 +455,90 @@ def test_live_oom_rejects_wrong_owner_and_malformed_termination(tmp_path):
 
         with pytest.raises(drill.DrillError, match=match):
             drill._observe_live_oom(c, deployment, ["kubectl"], runner)
+
+
+@pytest.mark.parametrize(
+    ("case", "match"),
+    [
+        ("old-replicaset-pod", "ownership"),
+        ("replicaset-image", "current ReplicaSet"),
+        ("replicaset-memory", "current ReplicaSet"),
+        ("pod-image", "coordinates"),
+        ("pod-memory", "coordinates"),
+        ("terminating", "terminating"),
+        ("replica-count", "unconverged"),
+    ],
+)
+def test_live_oom_requires_a_converged_reviewed_workload(tmp_path, case, match):
+    c = drill.validate(args(tmp_path))
+    deployment = {
+        "metadata": {"uid": "deployment-1"},
+        "spec": {"selector": {"matchLabels": {"app": "tokenplace"}}},
+    }
+
+    def replicaset(uid="rs-current", image=None, memory=None):
+        return {
+            "metadata": {
+                "uid": uid,
+                "ownerReferences": [{"uid": "deployment-1", "controller": True}],
+            },
+            "spec": {
+                "template": {
+                    "spec": {
+                        "containers": [
+                            {
+                                "name": c.container,
+                                "image": image or c.current_image,
+                                "resources": {"limits": {"memory": memory or c.memory_limit}},
+                            }
+                        ]
+                    }
+                }
+            },
+        }
+
+    def pod(owner="rs-current", image=None, memory=None):
+        return {
+            "metadata": {
+                "uid": "pod-private",
+                "ownerReferences": [{"uid": owner, "controller": True}],
+            },
+            "spec": {
+                "containers": [
+                    {
+                        "name": c.container,
+                        "image": image or c.current_image,
+                        "resources": {"limits": {"memory": memory or c.memory_limit}},
+                    }
+                ]
+            },
+            "status": {"containerStatuses": []},
+        }
+
+    replicasets = [replicaset()]
+    pods = [pod()]
+    if case == "old-replicaset-pod":
+        replicasets.append(replicaset("rs-old", c.rollback_image))
+        pods = [pod("rs-old", c.rollback_image)]
+    elif case == "replicaset-image":
+        replicasets = [replicaset(image=c.rollback_image)]
+    elif case == "replicaset-memory":
+        replicasets = [replicaset(memory="1Gi")]
+    elif case == "pod-image":
+        pods = [pod(image=c.rollback_image)]
+    elif case == "pod-memory":
+        pods = [pod(memory="1Gi")]
+    elif case == "terminating":
+        pods[0]["metadata"]["deletionTimestamp"] = "2026-09-09T01:00:00Z"
+    elif case == "replica-count":
+        pods = []
+    replies = [json.dumps({"items": replicasets}), json.dumps({"items": pods})]
+
+    def runner(command):
+        return subprocess.CompletedProcess(command, 0, replies.pop(0), "")
+
+    with pytest.raises(drill.DrillError, match=match):
+        drill._observe_live_oom(c, deployment, ["kubectl"], runner)
 
 
 def test_live_quota_runs_validator_then_status_only_requests():

@@ -334,11 +334,25 @@ def _observe_live_oom(c: Coordinates, deployment: dict, base: list[str], runner:
     ).get("items")
     if not isinstance(replicasets, list):
         raise DrillError("ReplicaSet observation is malformed")
-    replica_uids = {
-        item.get("metadata", {}).get("uid")
-        for item in replicasets
-        if _controller_uid(item) == deployment_uid and item.get("metadata", {}).get("uid")
-    }
+    replica_uids = set()
+    for item in replicasets:
+        if _controller_uid(item) != deployment_uid:
+            continue
+        containers = item.get("spec", {}).get("template", {}).get("spec", {}).get("containers")
+        if not isinstance(containers, list):
+            continue
+        selected = [container for container in containers if container.get("name") == c.container]
+        if len(selected) != 1:
+            continue
+        container = selected[0]
+        if (
+            container.get("image") == c.current_image
+            and container.get("resources", {}).get("limits", {}).get("memory") == c.memory_limit
+            and item.get("metadata", {}).get("uid")
+        ):
+            replica_uids.add(item["metadata"]["uid"])
+    if not replica_uids:
+        raise DrillError("current ReplicaSet observation is missing")
     pods = _runner_json(
         runner,
         base + namespace + ["get", "pods", "-l", selector, "-o", "json"],
@@ -346,10 +360,28 @@ def _observe_live_oom(c: Coordinates, deployment: dict, base: list[str], runner:
     ).get("items")
     if not isinstance(pods, list):
         raise DrillError("Pod observation is malformed")
+    if len(pods) != c.replicas:
+        raise DrillError("current workload replica count is unconverged")
     candidates = []
     for pod in pods:
         if _controller_uid(pod) not in replica_uids:
             raise DrillError("Pod observation contains stale or wrong ownership")
+        if pod.get("metadata", {}).get("deletionTimestamp") is not None:
+            raise DrillError("Pod observation contains a terminating workload member")
+        containers = pod.get("spec", {}).get("containers")
+        if not isinstance(containers, list):
+            raise DrillError("Pod container specification is malformed")
+        selected_specs = [
+            container for container in containers if container.get("name") == c.container
+        ]
+        if len(selected_specs) != 1:
+            raise DrillError("selected Pod container specification is missing or ambiguous")
+        selected_spec = selected_specs[0]
+        if (
+            selected_spec.get("image") != c.current_image
+            or selected_spec.get("resources", {}).get("limits", {}).get("memory") != c.memory_limit
+        ):
+            raise DrillError("Pod container coordinates do not match reviewed coordinates")
         statuses = pod.get("status", {}).get("containerStatuses")
         if not isinstance(statuses, list):
             raise DrillError("Pod container status observation is malformed")
