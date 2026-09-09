@@ -204,9 +204,10 @@ def test_live_preflight_calls_identity_first_and_binds_every_lookup(tmp_path, mo
     c = drill.validate(args(tmp_path))
     normal = snapshot(c)
     deployment = {
-        "metadata": {"namespace": c.namespace, "name": c.deployment},
+        "metadata": {"namespace": c.namespace, "name": c.deployment, "uid": "deployment-1"},
         "spec": {
             "replicas": 1,
+            "selector": {"matchLabels": {"app": "tokenplace"}},
             "template": {
                 "spec": {
                     "containers": [
@@ -219,14 +220,6 @@ def test_live_preflight_calls_identity_first_and_binds_every_lookup(tmp_path, mo
                     ]
                 }
             },
-        },
-        "status": {
-            "containerStatuses": [
-                {
-                    "name": "relay",
-                    "lastState": {"terminated": {"reason": "OOMKilled", "exitCode": 137}},
-                }
-            ]
         },
     }
     monitor = {
@@ -252,7 +245,53 @@ def test_live_preflight_calls_identity_first_and_binds_every_lookup(tmp_path, mo
         }
         for p in normal["probes"]
     ]
-    replies = ["", json.dumps(deployment), json.dumps(monitor), *map(json.dumps, probes)]
+    replicaset = {
+        "metadata": {
+            "uid": "replicaset-1",
+            "ownerReferences": [{"uid": "deployment-1", "controller": True}],
+        }
+    }
+    pod = {
+        "metadata": {
+            "uid": "pod-private-1",
+            "ownerReferences": [{"uid": "replicaset-1", "controller": True}],
+        },
+        "status": {
+            "containerStatuses": [
+                {
+                    "name": "relay",
+                    "restartCount": 2,
+                    "lastState": {
+                        "terminated": {
+                            "reason": "OOMKilled",
+                            "exitCode": 137,
+                            "finishedAt": "2026-09-09T01:02:03Z",
+                        }
+                    },
+                }
+            ]
+        },
+    }
+    events = {
+        "items": [
+            {
+                "reason": "BackOff",
+                "count": 2,
+                "firstTimestamp": "2026-09-09T01:02:04Z",
+                "lastTimestamp": "2026-09-09T01:03:04Z",
+                "message": "private",
+            }
+        ]
+    }
+    replies = [
+        "",
+        json.dumps(deployment),
+        json.dumps(monitor),
+        *map(json.dumps, probes),
+        json.dumps({"items": [replicaset]}),
+        json.dumps({"items": [pod]}),
+        json.dumps(events),
+    ]
     calls = []
 
     def runner(command):
@@ -264,6 +303,126 @@ def test_live_preflight_calls_identity_first_and_binds_every_lookup(tmp_path, mo
     for call in calls[1:]:
         assert call[1:5] == ["--kubeconfig", str(c.kubeconfig), "--context", c.context]
     assert result.source == "live-authoritative"
+    rendered = json.dumps(drill.build_plan(result))
+    assert "pod-private-1" not in rendered and "private" not in rendered
+    assert '"reason": "BackOff"' in rendered
+
+
+@pytest.mark.parametrize("pod_count", [0, 2])
+def test_live_oom_requires_one_owned_candidate(tmp_path, pod_count):
+    c = drill.validate(args(tmp_path))
+    deployment = {
+        "metadata": {"uid": "deployment-1"},
+        "spec": {"selector": {"matchLabels": {"app": "tokenplace"}}},
+    }
+    rs = {
+        "metadata": {
+            "uid": "rs-1",
+            "ownerReferences": [{"uid": "deployment-1", "controller": True}],
+        }
+    }
+    pod = {
+        "metadata": {"uid": "pod-1", "ownerReferences": [{"uid": "rs-1", "controller": True}]},
+        "status": {
+            "containerStatuses": [
+                {
+                    "name": c.container,
+                    "restartCount": 1,
+                    "lastState": {
+                        "terminated": {
+                            "reason": "OOMKilled",
+                            "exitCode": 137,
+                            "finishedAt": "2026-09-09T01:02:03Z",
+                        }
+                    },
+                }
+            ]
+        },
+    }
+    replies = [json.dumps({"items": [rs]}), json.dumps({"items": [pod] * pod_count})]
+
+    def runner(command):
+        return subprocess.CompletedProcess(command, 0, replies.pop(0), "")
+
+    with pytest.raises(drill.DrillError, match="missing or ambiguous"):
+        drill._observe_live_oom(c, deployment, ["kubectl"], runner)
+
+
+def test_live_oom_rejects_wrong_owner_and_malformed_termination(tmp_path):
+    c = drill.validate(args(tmp_path))
+    deployment = {
+        "metadata": {"uid": "deployment-1"},
+        "spec": {"selector": {"matchLabels": {"app": "tokenplace"}}},
+    }
+    rs = {
+        "metadata": {
+            "uid": "rs-1",
+            "ownerReferences": [{"uid": "deployment-1", "controller": True}],
+        }
+    }
+    for owner, finished, match in (
+        ("stale", "2026-09-09T01:02:03Z", "ownership"),
+        ("rs-1", "bad", "timestamp"),
+    ):
+        pod = {
+            "metadata": {"uid": "pod-1", "ownerReferences": [{"uid": owner, "controller": True}]},
+            "status": {
+                "containerStatuses": [
+                    {
+                        "name": c.container,
+                        "restartCount": 1,
+                        "lastState": {
+                            "terminated": {
+                                "reason": "OOMKilled",
+                                "exitCode": 137,
+                                "finishedAt": finished,
+                            }
+                        },
+                    }
+                ]
+            },
+        }
+        replies = [json.dumps({"items": [rs]}), json.dumps({"items": [pod]})]
+
+        def runner(command):
+            return subprocess.CompletedProcess(command, 0, replies.pop(0), "")
+
+        with pytest.raises(drill.DrillError, match=match):
+            drill._observe_live_oom(c, deployment, ["kubectl"], runner)
+
+
+def test_live_quota_runs_validator_then_status_only_requests():
+    calls = []
+    replies = ["", "429", "429", "200", "200"]
+
+    def runner(command):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0, replies.pop(0), "")
+
+    evidence = drill._observe_live_quota(runner)
+    assert "validate_probe_quotas.py" in calls[0][1]
+    assert evidence["route_statuses"] == {
+        "root": 429,
+        "metadata": 429,
+        "livez": 200,
+        "healthz": 200,
+    }
+    assert all("--output" in call and "/dev/null" in call for call in calls[1:])
+
+
+def test_live_quota_fails_closed_on_validator_or_route_status():
+    def failed_validator(command):
+        return subprocess.CompletedProcess(command, 1, "", "")
+
+    with pytest.raises(drill.DrillError, match="quota validation"):
+        drill._observe_live_quota(failed_validator)
+    replies = ["", "200", "429", "200", "200"]
+
+    def wrong_status(command):
+        return subprocess.CompletedProcess(command, 0, replies.pop(0), "")
+
+    evidence = drill._observe_live_quota(wrong_status)
+    assert evidence["route_statuses"]["root"] == 200
 
 
 def test_identity_failure_stops_before_kubectl(tmp_path):

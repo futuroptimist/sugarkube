@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Callable
 from urllib.parse import urlsplit
@@ -69,17 +70,6 @@ class Preflight:
     classification: tuple[tuple[str, object], ...]
     metrics_mode_state: str
     discovery_labels: tuple[tuple[str, str], ...]
-
-
-@dataclass(frozen=True)
-class QuotaEvidence:
-    """Bounded aggregate route evidence produced by an authoritative observer."""
-
-    root_status: int
-    metadata_status: int
-    livez_status: int
-    healthz_status: int
-    quota_validator_success: bool
 
 
 def parser() -> argparse.ArgumentParser:
@@ -218,7 +208,11 @@ def _validate_snapshot(
     if mode == "metrics-oom":
         if evidence.get("termination_reason") != "OOMKilled" or evidence.get("exit_code") != 137:
             raise DrillError("metrics-OOM classification requires OOMKilled with exit code 137")
-        classification = (("termination_reason", "OOMKilled"), ("exit_code", 137))
+        classification_items = [("termination_reason", "OOMKilled"), ("exit_code", 137)]
+        if source == "live-authoritative":
+            for key in ("restart_count", "termination_time", "event_aggregates"):
+                classification_items.append((key, evidence[key]))
+        classification = tuple(classification_items)
     else:
         statuses = evidence.get("route_statuses")
         if (
@@ -262,9 +256,8 @@ def preflight_live(
     mode: str,
     c: Coordinates,
     runner: Runner,
-    quota_evidence: QuotaEvidence | None = None,
 ) -> Preflight:
-    """Run authoritative identity first, then read the five exact live targets."""
+    """Run authoritative identity first, then derive bounded live evidence."""
     identity = [
         sys.executable,
         str(ROOT / "scripts/cluster_identity.py"),
@@ -293,18 +286,11 @@ def preflight_live(
         except json.JSONDecodeError as exc:
             raise DrillError("exact live target returned invalid JSON") from exc
     snapshot = _normalise_live(c, objects)
+    deployment = objects[0]
+    if mode == "metrics-oom":
+        snapshot["classification"] = _observe_live_oom(c, deployment, base, runner)
     if mode == "quota-exhaustion":
-        if not isinstance(quota_evidence, QuotaEvidence):
-            raise DrillError("typed authoritative quota evidence is required")
-        snapshot["classification"] = {
-            "route_statuses": {
-                "root": quota_evidence.root_status,
-                "metadata": quota_evidence.metadata_status,
-                "livez": quota_evidence.livez_status,
-                "healthz": quota_evidence.healthz_status,
-            },
-            "quota_validator_success": quota_evidence.quota_validator_success,
-        }
+        snapshot["classification"] = _observe_live_quota(runner)
     return _validate_snapshot(
         mode,
         c,
@@ -312,6 +298,156 @@ def preflight_live(
         snapshot,
         "live-authoritative",
     )
+
+
+def _runner_json(runner: Runner, command: list[str], error: str) -> dict:
+    result = runner(command)
+    if result.returncode:
+        raise DrillError(error)
+    try:
+        value = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise DrillError(error) from exc
+    if not isinstance(value, dict):
+        raise DrillError(error)
+    return value
+
+
+def _observe_live_oom(c: Coordinates, deployment: dict, base: list[str], runner: Runner) -> dict:
+    metadata = deployment.get("metadata", {})
+    deployment_uid = metadata.get("uid")
+    selector_labels = deployment.get("spec", {}).get("selector", {}).get("matchLabels")
+    if not deployment_uid or not isinstance(selector_labels, dict) or not selector_labels:
+        raise DrillError("Deployment ownership selector is missing or malformed")
+    if any(
+        not re.fullmatch(r"[A-Za-z0-9./_-]+", str(k))
+        or not re.fullmatch(r"[A-Za-z0-9._-]+", str(v))
+        for k, v in selector_labels.items()
+    ):
+        raise DrillError("Deployment ownership selector is unsafe")
+    selector = ",".join(f"{key}={selector_labels[key]}" for key in sorted(selector_labels))
+    namespace = ["--namespace", c.namespace]
+    replicasets = _runner_json(
+        runner,
+        base + namespace + ["get", "replicasets", "-l", selector, "-o", "json"],
+        "Deployment-owned ReplicaSet observation failed",
+    ).get("items")
+    if not isinstance(replicasets, list):
+        raise DrillError("ReplicaSet observation is malformed")
+    replica_uids = {
+        item.get("metadata", {}).get("uid")
+        for item in replicasets
+        if _controller_uid(item) == deployment_uid and item.get("metadata", {}).get("uid")
+    }
+    pods = _runner_json(
+        runner,
+        base + namespace + ["get", "pods", "-l", selector, "-o", "json"],
+        "Deployment-owned Pod observation failed",
+    ).get("items")
+    if not isinstance(pods, list):
+        raise DrillError("Pod observation is malformed")
+    candidates = []
+    for pod in pods:
+        if _controller_uid(pod) not in replica_uids:
+            raise DrillError("Pod observation contains stale or wrong ownership")
+        statuses = pod.get("status", {}).get("containerStatuses")
+        if not isinstance(statuses, list):
+            raise DrillError("Pod container status observation is malformed")
+        selected = [status for status in statuses if status.get("name") == c.container]
+        if len(selected) != 1:
+            raise DrillError("selected Pod container status is missing or ambiguous")
+        status = selected[0]
+        terminated = status.get("lastState", {}).get("terminated")
+        if not isinstance(terminated, dict):
+            continue
+        if terminated.get("reason") != "OOMKilled" or terminated.get("exitCode") != 137:
+            continue
+        if not isinstance(status.get("restartCount"), int) or status["restartCount"] <= 0:
+            raise DrillError("OOM termination restart evidence is malformed")
+        finished = terminated.get("finishedAt")
+        try:
+            parsed = datetime.fromisoformat(finished.replace("Z", "+00:00"))
+        except (AttributeError, ValueError) as exc:
+            raise DrillError("OOM termination timestamp is malformed") from exc
+        if parsed.tzinfo is None:
+            raise DrillError("OOM termination timestamp is malformed")
+        candidates.append((pod, finished, status["restartCount"]))
+    if len(candidates) != 1:
+        raise DrillError("metrics-OOM evidence is missing or ambiguous")
+    pod, finished, restart_count = candidates[0]
+    pod_uid = pod.get("metadata", {}).get("uid")
+    if not pod_uid:
+        raise DrillError("affected Pod identity is malformed")
+    events = _runner_json(
+        runner,
+        base
+        + namespace
+        + ["get", "events", "--field-selector", f"involvedObject.uid={pod_uid}", "-o", "json"],
+        "affected Pod event observation failed",
+    ).get("items")
+    if not isinstance(events, list):
+        raise DrillError("affected Pod event observation is malformed")
+    aggregates = []
+    for event in events:
+        reason = event.get("reason")
+        count = event.get("count", 1)
+        first = event.get("firstTimestamp") or event.get("eventTime")
+        last = event.get("lastTimestamp") or event.get("eventTime")
+        if reason and SAFE_NAME.fullmatch(reason.lower()) and isinstance(count, int):
+            aggregates.append({"reason": reason, "count": count, "first": first, "last": last})
+    return {
+        "termination_reason": "OOMKilled",
+        "exit_code": 137,
+        "restart_count": restart_count,
+        "termination_time": finished,
+        "event_aggregates": aggregates,
+    }
+
+
+def _controller_uid(obj: dict) -> object:
+    owners = obj.get("metadata", {}).get("ownerReferences")
+    if not isinstance(owners, list):
+        return None
+    controllers = [owner.get("uid") for owner in owners if owner.get("controller") is True]
+    return controllers[0] if len(controllers) == 1 else None
+
+
+def _observe_live_quota(runner: Runner) -> dict:
+    validator = [
+        sys.executable,
+        str(ROOT / "scripts/validate_probe_quotas.py"),
+        "--env",
+        "staging",
+        "--probes",
+        str(ROOT / "clusters/staging/observability/probes/public-apps.yaml"),
+    ]
+    if runner(validator).returncode:
+        raise DrillError("staging quota validation failed")
+    statuses = {}
+    for route, path in (
+        ("root", "/"),
+        ("metadata", "/api/v1/meta"),
+        ("livez", "/livez"),
+        ("healthz", "/healthz"),
+    ):
+        command = [
+            "curl",
+            "--silent",
+            "--show-error",
+            "--output",
+            "/dev/null",
+            "--write-out",
+            "%{http_code}",
+            "--max-time",
+            "10",
+            f"https://{STAGING_HOST}{path}",
+        ]
+        result = runner(command)
+        try:
+            statuses[route] = int(result.stdout.strip()) if result.returncode == 0 else 0
+        except ValueError as exc:
+            raise DrillError("status-only route observation failed") from exc
+    return {"route_statuses": statuses, "quota_validator_success": True}
 
 
 def _normalise_live(c: Coordinates, objects: list[dict]) -> dict:
@@ -323,14 +459,6 @@ def _normalise_live(c: Coordinates, objects: list[dict]) -> dict:
     if len(selected) != 1:
         raise DrillError("live Deployment selected container is missing or ambiguous")
     container = selected[0]
-    terminated = next(
-        (
-            s.get("lastState", {}).get("terminated", {})
-            for s in deployment.get("status", {}).get("containerStatuses", [])
-            if s.get("name") == c.container
-        ),
-        {},
-    )
     env = {item.get("name"): item.get("value") for item in container.get("env", [])}
     metrics_mode = (
         {"normal": "normal", "degraded": "degraded"}
@@ -383,10 +511,7 @@ def _normalise_live(c: Coordinates, objects: list[dict]) -> dict:
             }
             for p in probes
         ],
-        "classification": {
-            "termination_reason": terminated.get("reason"),
-            "exit_code": terminated.get("exitCode"),
-        },
+        "classification": {},
     }
 
 
