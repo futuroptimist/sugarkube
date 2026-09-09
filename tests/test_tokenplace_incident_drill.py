@@ -11,7 +11,7 @@ def args(tmp_path: Path, **changes):
     kubeconfig.write_text("safe fixture")
     values = dict(
         mode="metrics-oom",
-        host="staging.example",
+        host="staging.token.place",
         kubeconfig=kubeconfig,
         context="sugar-staging",
         environment="staging",
@@ -19,6 +19,7 @@ def args(tmp_path: Path, **changes):
         deployment="tokenplace",
         container="relay",
         image="registry.example/relay@sha256:" + "a" * 64,
+        previous_image="registry.example/relay@sha256:" + "b" * 64,
         replicas=1,
         memory_limit="512Mi",
         service_monitor="tokenplace",
@@ -36,8 +37,10 @@ def args(tmp_path: Path, **changes):
     [
         {"environment": "prod"},
         {"context": "sugar-prod"},
+        {"host": "token.place"},
         {"replicas": 0},
         {"image": "registry.example/relay:latest"},
+        {"previous_image": "registry.example/relay:latest"},
         {"memory_limit": "unknown"},
         {"acknowledge_state_loss": False},
         {"service_monitor": ""},
@@ -87,7 +90,12 @@ def test_quota_mode_pauses_exact_public_information_probes(tmp_path):
     ]
     rendered = str(plan)
     assert "incident-paused=true" not in " ".join(plan["preserved"])
-    assert "staging.example" not in rendered and str(tmp_path) not in rendered
+    assert "staging.token.place" not in rendered
+    assert all(
+        action["command"][1:3] == ["--kubeconfig", str((tmp_path / "kubeconfig").resolve())]
+        for action in plan["actions"]
+        if action["command"][0] == "kubectl"
+    )
     assert not any(
         a["command"][0] == "kubectl" and a["resource"].startswith("servicemonitor/")
         for a in plan["actions"]
@@ -101,6 +109,49 @@ def test_inventory_has_exact_route_and_method_contract():
         "/api/v1/meta",
         "GET",
     )
+
+
+def test_duplicate_inventory_route_classes_are_rejected(monkeypatch):
+    contract = drill.yaml.safe_load(
+        (drill.ROOT / "config/observability/probe-quotas.yaml").read_text()
+    )
+    duplicate = next(
+        item
+        for item in contract["probes"]
+        if item["application"] == "tokenplace" and item["environment"] == "staging"
+    ).copy()
+    contract["probes"].append(duplicate)
+    monkeypatch.setattr(drill.yaml, "safe_load", lambda _: contract)
+    with pytest.raises(drill.DrillError, match="duplicate route classes"):
+        drill.inventory("staging")
+
+
+def test_plan_records_identity_and_executable_image_rollback(tmp_path):
+    coordinates = drill.validate(args(tmp_path, replicas=2, memory_limit="1Gi"))
+    plan = drill.build_plan("metrics-oom", coordinates, drill.inventory("staging"))
+    assert plan["expected_deployment"] == {
+        "replicas": 2,
+        "container": "relay",
+        "image": "registry.example/relay@sha256:" + "a" * 64,
+        "memory_limit": "1Gi",
+    }
+    replace = next(action for action in plan["actions"] if action["stage"] == "replace")
+    assert replace["rollback"][-1].endswith("=" + coordinates.previous_image)
+    assert any(a["stage"] == "verify-deployment-identity" for a in plan["actions"])
+    assert plan["state_changes"]["repository"] is True
+
+
+def test_absolute_repository_evidence_path_is_accepted(tmp_path):
+    evidence = drill.ROOT / "evidence" / "absolute-test.json"
+    coordinates = drill.validate(args(tmp_path, evidence=evidence))
+    assert coordinates.run_id == "drill-test"
+
+
+def test_relative_evidence_path_is_anchored_to_repository(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    coordinates_args = args(tmp_path)
+    drill.validate(coordinates_args)
+    assert coordinates_args.evidence == drill.ROOT / "evidence" / "drill-test.json"
 
 
 def test_container_restart_and_pod_replacement_semantics_are_machine_visible():

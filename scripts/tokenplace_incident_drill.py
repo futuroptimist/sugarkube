@@ -15,6 +15,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 SAFE_NAME = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
 MODES = ("metrics-oom", "quota-exhaustion")
+STAGING_HOST = "staging.token.place"
 
 
 class DrillError(ValueError):
@@ -31,6 +32,7 @@ class Coordinates:
     deployment: str
     container: str
     image: str
+    previous_image: str
     replicas: int
     memory_limit: str
     service_monitor: str
@@ -48,6 +50,7 @@ def parser() -> argparse.ArgumentParser:
         "deployment",
         "container",
         "image",
+        "previous-image",
         "memory-limit",
         "service-monitor",
         "run-id",
@@ -74,12 +77,15 @@ def validate(args: argparse.Namespace) -> Coordinates:
         raise DrillError("production is forbidden")
     if not args.kubeconfig.is_file():
         raise DrillError("kubeconfig is missing or is not a regular file")
-    if not isinstance(args.host, str) or not args.host.strip():
-        raise DrillError("an explicit host is required")
+    if not isinstance(args.host, str) or args.host.strip().lower().rstrip(".") != STAGING_HOST:
+        raise DrillError("host must be the canonical token.place staging host")
     if args.replicas < 1:
         raise DrillError("replica count must be positive")
-    if not re.fullmatch(r"[^\s:@]+(?:/[^\s:@]+)+@sha256:[0-9a-f]{64}", args.image):
-        raise DrillError("image must use an immutable sha256 digest")
+    for field in ("image", "previous_image"):
+        if not re.fullmatch(r"[^\s:@]+(?:/[^\s:@]+)+@sha256:[0-9a-f]{64}", getattr(args, field)):
+            raise DrillError(f"{field.replace('_', ' ')} must use an immutable sha256 digest")
+    if args.image == args.previous_image:
+        raise DrillError("replacement and previous images must differ")
     if not re.fullmatch(r"[1-9][0-9]*(Mi|Gi)", args.memory_limit):
         raise DrillError("memory limit must be an explicit positive Mi or Gi quantity")
     for field in ("namespace", "deployment", "container", "service_monitor", "run_id"):
@@ -87,10 +93,16 @@ def validate(args: argparse.Namespace) -> Coordinates:
             raise DrillError(f"{field.replace('_', ' ')} is not an exact safe Kubernetes name")
     if not args.acknowledge_state_loss:
         raise DrillError("explicit authorization for process-local relay-state loss is required")
-    if args.evidence.exists() or args.evidence.parent != Path("evidence"):
+    supplied_evidence = args.evidence.expanduser()
+    evidence = (
+        supplied_evidence if supplied_evidence.is_absolute() else ROOT / supplied_evidence
+    ).resolve()
+    evidence_root = (ROOT / "evidence").resolve()
+    if evidence.exists() or evidence.parent != evidence_root:
         raise DrillError(
             "evidence must be a new file directly beneath the repository evidence directory"
         )
+    args.evidence = evidence
     return Coordinates(
         **{field: getattr(args, field) for field in Coordinates.__dataclass_fields__}
     )
@@ -98,11 +110,15 @@ def validate(args: argparse.Namespace) -> Coordinates:
 
 def inventory(environment: str) -> dict[str, dict]:
     contract = yaml.safe_load((ROOT / "config/observability/probe-quotas.yaml").read_text())
-    selected = {
-        item["route_class"]: item
+    matches = [
+        item
         for item in contract["probes"]
         if item["application"] == "tokenplace" and item["environment"] == environment
-    }
+    ]
+    route_classes = [item["route_class"] for item in matches]
+    if len(route_classes) != len(set(route_classes)):
+        raise DrillError("token.place quota inventory contains duplicate route classes")
+    selected = {item["route_class"]: item for item in matches}
     if set(selected) != {"root", "metadata", "livez", "healthz"}:
         raise DrillError("token.place quota inventory is missing or ambiguous")
     expected = {
@@ -120,9 +136,10 @@ def inventory(environment: str) -> dict[str, dict]:
 
 
 def build_plan(mode: str, c: Coordinates, probes: dict[str, dict]) -> dict:
-    """Return ordered exact-resource actions; never include host or private paths."""
-    prefix = ["kubectl", "--context", c.context, "--namespace", c.namespace]
-    probe_prefix = ["kubectl", "--context", c.context, "--namespace", "monitoring"]
+    """Return ordered actions bound to the validated kubeconfig; omit the host."""
+    kubectl = ["kubectl", "--kubeconfig", str(c.kubeconfig.resolve()), "--context", c.context]
+    prefix = kubectl + ["--namespace", c.namespace]
+    probe_prefix = kubectl + ["--namespace", "monitoring"]
     root, metadata = probes["root"]["probe"], probes["metadata"]["probe"]
     pause = [c.service_monitor] if mode == "metrics-oom" else [root, metadata]
     actions = []
@@ -159,7 +176,28 @@ def build_plan(mode: str, c: Coordinates, probes: dict[str, dict]) -> dict:
         "replace",
         f"deployment/{c.deployment}",
         prefix + ["set", "image", f"deployment/{c.deployment}", f"{c.container}={c.image}"],
-        ["operator-supplied exact previous immutable image"],
+        prefix
+        + [
+            "set",
+            "image",
+            f"deployment/{c.deployment}",
+            f"{c.container}={c.previous_image}",
+        ],
+    )
+    add(
+        "verify-deployment-identity",
+        f"deployment/{c.deployment}",
+        prefix
+        + [
+            "get",
+            f"deployment/{c.deployment}",
+            "-o",
+            "jsonpath={.spec.replicas} {.spec.template.spec.containers[?(@.name=='"
+            + c.container
+            + "')].image} {.spec.template.spec.containers[?(@.name=='"
+            + c.container
+            + "')].resources.limits.memory}",
+        ],
     )
     add(
         "readiness-and-identity",
@@ -251,10 +289,16 @@ def build_plan(mode: str, c: Coordinates, probes: dict[str, dict]) -> dict:
         "state_changes": {
             "cluster": False,
             "production": False,
-            "repository": False,
+            "repository": True,
             "external": False,
         },
         "preserved": [f"probe/{probes['livez']['probe']}", f"probe/{probes['healthz']['probe']}"],
+        "expected_deployment": {
+            "replicas": c.replicas,
+            "container": c.container,
+            "image": c.image,
+            "memory_limit": c.memory_limit,
+        },
         "required_preconditions": [
             "exact deployment/container/image/replicas/memory",
             "exact ServiceMonitor and Probe inventory",
@@ -274,7 +318,10 @@ def main(argv: list[str] | None = None) -> int:
         args.evidence.write_text(json.dumps(plan, indent=2) + "\n", encoding="utf-8")
         print(json.dumps(plan, indent=2))
         return 0
-    except (DrillError, OSError, KeyError, TypeError, yaml.YAMLError):
+    except DrillError as exc:
+        print(f"token.place incident drill refused: {exc}", file=sys.stderr)
+        return 2
+    except (OSError, KeyError, TypeError, yaml.YAMLError):
         print("token.place incident drill refused: precondition validation failed", file=sys.stderr)
         return 2
 

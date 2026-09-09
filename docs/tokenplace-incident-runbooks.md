@@ -111,7 +111,8 @@ coordinates):
 python3 scripts/tokenplace_incident_drill.py --dry-run --mode metrics-oom \
   --host "$STAGING_HOST" --kubeconfig "$STAGING_KUBECONFIG" --context sugar-staging \
   --environment staging --namespace "$NAMESPACE" --deployment "$DEPLOYMENT" \
-  --container "$CONTAINER" --image "$IMAGE_DIGEST" --replicas "$REPLICAS" \
+  --container "$CONTAINER" --image "$IMAGE_DIGEST" --previous-image "$PREVIOUS_IMAGE_DIGEST" \
+  --replicas "$REPLICAS" \
   --memory-limit "$MEMORY_LIMIT" --service-monitor "$SERVICE_MONITOR" \
   --run-id "$RUN_ID" --evidence "evidence/${RUN_ID}-metrics-oom.json" \
   --acknowledge-state-loss
