@@ -1,5 +1,9 @@
 # token.place on Sugarkube
 
+Incident operators must use the [tested metrics-OOM and quota-exhaustion recovery
+contract](../tokenplace-incident-recovery.md), which preserves health probes and requires compute
+and encrypted E2EE recovery before ordered monitoring restoration.
+
 This is the canonical runbook for deploying token.place from GHCR artifacts to Sugarkube. The generic `just app-*` recipes are the preferred future path. The `tokenplace-oci-*` recipes remain compatibility shims and are scheduled for later removal only after the generic flow has been exercised across routine releases.
 
 ## Artifact model

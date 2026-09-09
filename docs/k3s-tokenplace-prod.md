@@ -2,6 +2,10 @@
 
 Use this environment runbook for production token.place operations after staging sign-off. The full uniform GHCR-first flow lives in [docs/apps/tokenplace.md](apps/tokenplace.md); this page keeps the production commands copy-pasteable.
 
+For metrics-OOM or quota-exhaustion classification and ordered recovery, use the
+[tested token.place incident recovery contract](tokenplace-incident-recovery.md). Its drill tooling
+rejects production; complete and review the separate staging drill before adapting any recovery.
+
 ## Scope and ownership
 
 - App repo: publishes `ghcr.io/futuroptimist/tokenplace-relay` and `oci://ghcr.io/futuroptimist/charts/tokenplace`.
