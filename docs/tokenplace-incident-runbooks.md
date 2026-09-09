@@ -102,8 +102,12 @@ crosses a rollback threshold, remove only that Probe's discovery label using the
 
 ## Step 14b: prepared staging drill (not yet performed)
 
-The helper is intentionally dry-run-only in Step 14a: it validates repository inventory and emits
-exact selections without invoking `kubectl`. Use a unique DNS-safe run ID and a new evidence file.
+The helper is intentionally dry-run-only in Step 14a: it validates repository inventory and a
+reviewed, privacy-safe JSON snapshot, then emits exact selections without invoking `kubectl`. The
+snapshot must contain the exact Deployment, inventory-derived ServiceMonitor and four Probes. It
+must also contain `OOMKilled`/137 termination evidence or bounded root/metadata 429 and healthy
+livez/healthz statuses plus a successful quota-validator result. Use a unique DNS-safe run ID and
+a new evidence file in an operator-supplied private directory outside the repository.
 From the repository root, generate both plans (replace every placeholder with reviewed staging
 coordinates):
 
@@ -111,12 +115,22 @@ coordinates):
 python3 scripts/tokenplace_incident_drill.py --dry-run --mode metrics-oom \
   --host "$STAGING_HOST" --kubeconfig "$STAGING_KUBECONFIG" --context sugar-staging \
   --environment staging --namespace "$NAMESPACE" --deployment "$DEPLOYMENT" \
-  --container "$CONTAINER" --image "$IMAGE_DIGEST" --previous-image "$PREVIOUS_IMAGE_DIGEST" \
+  --container "$CONTAINER" --current-image "$CURRENT_IMAGE_DIGEST" \
+  --replacement-image "$REPLACEMENT_IMAGE_DIGEST" --rollback-image "$ROLLBACK_IMAGE_DIGEST" \
   --replicas "$REPLICAS" \
   --memory-limit "$MEMORY_LIMIT" --service-monitor "$SERVICE_MONITOR" \
-  --run-id "$RUN_ID" --evidence "evidence/${RUN_ID}-metrics-oom.json" \
+  --run-id "$RUN_ID" --snapshot "$REVIEWED_PRIVATE_SNAPSHOT" \
+  --evidence "$PRIVATE_EVIDENCE_DIRECTORY/${RUN_ID}-metrics-oom.json" \
   --acknowledge-state-loss
 ```
+
+An offline plan is marked as a non-executing preview. The future live preflight calls
+`scripts/cluster_identity.py assert --kubeconfig "$STAGING_KUBECONFIG" --env staging` first, then
+reads only the exact Deployment, `ServiceMonitor/tokenplace`, and inventory-derived Probes through
+that kubeconfig and context. It refuses drift before constructing any mutation. When the reviewed
+current artifact exposes `TOKENPLACE_METRICS_MODE=normal|degraded`, containment uses the reversible
+degraded value; otherwise it uses only the exact ServiceMonitor pause fallback. Replacement and
+rollback remain bound to their separately reviewed immutable digests.
 
 Repeat with `--mode quota-exhaustion`, a new run ID, and a new evidence filename. Step 14b must add
 a separately reviewed execution adapter; the Step 14a helper cannot mutate a cluster. The operator
