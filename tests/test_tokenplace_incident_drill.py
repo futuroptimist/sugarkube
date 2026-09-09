@@ -668,18 +668,43 @@ def test_missing_evidence_parent_is_not_created(tmp_path):
 @pytest.mark.parametrize("failure", ["write", "publish"])
 def test_evidence_publication_failure_leaves_no_files(tmp_path, monkeypatch, failure):
     directory = tmp_path / "private-evidence"
+    directory.mkdir()
     target = directory / "failed.json"
+    reached = {failure: 0}
 
     if failure == "write":
-        monkeypatch.setattr(drill.os, "fsync", lambda _fd: (_ for _ in ()).throw(OSError()))
+
+        def fail_fsync(_fd):
+            reached["write"] += 1
+            raise OSError
+
+        monkeypatch.setattr(drill.os, "fsync", fail_fsync)
     else:
-        monkeypatch.setattr(
-            drill.os, "link", lambda _source, _target: (_ for _ in ()).throw(OSError())
-        )
+
+        def fail_link(_source, _target):
+            reached["publish"] += 1
+            raise OSError
+
+        monkeypatch.setattr(drill.os, "link", fail_link)
 
     with pytest.raises(OSError):
         drill._publish_evidence(target, '{"complete": true}\n')
+    assert reached[failure] == 1
     assert not target.exists()
+    assert list(directory.glob(".tokenplace-evidence-*")) == []
+
+
+def test_evidence_publication_race_does_not_replace_existing_target(tmp_path):
+    directory = tmp_path / "private-evidence"
+    directory.mkdir()
+    target = directory / "result.json"
+    drill._validate_evidence_target(target)
+    target.write_text("competing publication")
+
+    with pytest.raises(FileExistsError):
+        drill._publish_evidence(target, '{"complete": true}\n')
+
+    assert target.read_text() == "competing publication"
     assert list(directory.glob(".tokenplace-evidence-*")) == []
 
 
