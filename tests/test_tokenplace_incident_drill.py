@@ -443,13 +443,29 @@ def test_exact_old_metrics_states_and_discovery_labels(tmp_path):
 
     fallback = drill.build_plan(preflight(tmp_path, degraded=False))
     pause = fallback["actions"][0]
+    exit_gate = next(action for action in fallback["actions"] if action["id"] == "metrics-exit")
     restore = next(action for action in fallback["actions"] if action["id"] == "restore-metrics")
+    observation = next(
+        action for action in fallback["actions"] if action["id"] == "observe-metrics"
+    )
+    exit_checks = {check["metric"]: check for check in exit_gate["checks"]}
+    assert "scrape_health" not in exit_checks
+    assert exit_checks["authenticated_scrape"] == {
+        "metric": "authenticated_scrape",
+        "operator": "eq",
+        "value": True,
+        "unit": "boolean",
+        "source": "direct-authenticated-target",
+    }
+    assert fallback["actions"].index(exit_gate) < fallback["actions"].index(restore)
+    assert {check["metric"] for check in observation["checks"]} >= {"scrape_health"}
     assert pause["old_state"] == {
         "release": "kube-prometheus-stack",
         "sugarkube.dev/incident-paused": None,
     }
     assert restore["command"] == pause["inverse"]
     assert restore["inverse"] == pause["command"]
+    assert observation["on_failure"] == pause["command"]
 
 
 def test_missing_old_discovery_state_fails_closed(tmp_path):

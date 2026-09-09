@@ -657,15 +657,22 @@ def build_plan(preflight: Preflight) -> dict:
     metrics_rollback = replace_inverse
     metrics_was_paused = "metrics" in paused or c.service_monitor in paused
     if mode == "metrics-oom" and metrics_was_paused:
+        metrics_exit_checks = common
+        if c.service_monitor in paused:
+            # Prometheus cannot observe a target while its ServiceMonitor discovery
+            # label is paused.  Direct authenticated evidence is available before
+            # restoration; discovered scrape health is verified afterwards.
+            metrics_exit_checks = [check for check in common if check["metric"] != "scrape_health"]
         gate(
             "metrics-exit",
-            common
+            metrics_exit_checks
             + [
                 {
                     "metric": "authenticated_scrape",
                     "operator": "eq",
                     "value": True,
                     "unit": "boolean",
+                    "source": "direct-authenticated-target",
                 },
                 {
                     "metric": "memory_working_set",
