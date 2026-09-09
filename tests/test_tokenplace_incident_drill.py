@@ -332,6 +332,7 @@ def test_metrics_plan_has_typed_ordered_gates_and_metrics_last(tmp_path):
         "encrypted-e2ee",
         "preserve-root",
         "preserve-metadata",
+        "metrics-exit",
         "restore-metrics",
         "observe-metrics",
     ]
@@ -355,7 +356,24 @@ def test_metrics_plan_has_typed_ordered_gates_and_metrics_last(tmp_path):
 def test_quota_restoration_has_exact_inverse_and_preserves_health(tmp_path):
     plan = drill.build_plan(preflight(tmp_path, mode="quota-exhaustion"))
     ids = [action["id"] for action in plan["actions"]]
+    assert ids.index("encrypted-e2ee") < ids.index("quota-validator") < ids.index("restore-root")
     assert ids.index("restore-root") < ids.index("observe-root") < ids.index("restore-metadata")
+    validator = next(action for action in plan["actions"] if action["id"] == "quota-validator")
+    assert validator["checks"][0]["argv"] == [
+        "python3",
+        "scripts/validate_probe_quotas.py",
+        "--env",
+        "staging",
+        "--probes",
+        "clusters/staging/observability/probes/public-apps.yaml",
+    ]
+    assert validator["on_failure"] == {
+        "outcome": "hold-current-containment",
+        "root": "paused",
+        "metadata": "paused",
+        "mutation": None,
+    }
+    assert "command" not in validator
     assert (
         ids.index("restore-metadata")
         < ids.index("observe-metadata")
@@ -375,6 +393,33 @@ def test_quota_restoration_has_exact_inverse_and_preserves_health(tmp_path):
 
 def test_numeric_observation_thresholds_and_metrics_exit(tmp_path):
     plan = drill.build_plan(preflight(tmp_path))
+    ids = [action["id"] for action in plan["actions"]]
+    assert (
+        ids.index("preserve-metadata")
+        < ids.index("metrics-exit")
+        < ids.index("restore-metrics")
+        < ids.index("observe-metrics")
+    )
+    exit_gate = next(action for action in plan["actions"] if action["id"] == "metrics-exit")
+    exit_checks = {check["metric"]: check for check in exit_gate["checks"]}
+    assert exit_checks["authenticated_scrape"]["value"] is True
+    assert exit_checks["active_series_vs_baseline"]["value"] == 10
+    assert exit_checks["scrape_samples_vs_baseline"]["value"] == 10
+    assert exit_checks["restart_increase"]["value"] == 0
+    assert exit_checks["new_oomkilled_137"]["value"] == 0
+    assert exit_checks["memory_working_set"] == {
+        "metric": "memory_working_set",
+        "operator": "lt",
+        "value": 70,
+        "unit": "percent_of_limit",
+        "window": {"value": 15, "unit": "minutes"},
+    }
+    assert exit_gate["on_failure"] == {
+        "outcome": "hold-current-containment",
+        "metrics": "paused",
+        "mutation": None,
+    }
+    assert "command" not in exit_gate
     observation = plan["actions"][-1]
     checks = {check["metric"]: check for check in observation["checks"]}
     assert observation["duration"] == {"value": 30, "unit": "minutes"}

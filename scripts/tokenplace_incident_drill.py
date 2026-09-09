@@ -598,6 +598,31 @@ def build_plan(preflight: Preflight) -> dict:
         },
     ]
     if mode == "quota-exhaustion":
+        gate(
+            "quota-validator",
+            [
+                {
+                    "metric": "quota_contract_valid",
+                    "operator": "eq",
+                    "value": True,
+                    "unit": "boolean",
+                    "argv": [
+                        "python3",
+                        "scripts/validate_probe_quotas.py",
+                        "--env",
+                        "staging",
+                        "--probes",
+                        "clusters/staging/observability/probes/public-apps.yaml",
+                    ],
+                }
+            ],
+            {
+                "outcome": "hold-current-containment",
+                "root": "paused",
+                "metadata": "paused",
+                "mutation": None,
+            },
+        )
         for label, target in (("root", root), ("metadata", metadata)):
             paused_action = paused[target]
             restore = mutation(
@@ -630,6 +655,33 @@ def build_plan(preflight: Preflight) -> dict:
             preserves=(f"probe/{metadata}", "probe/livez", "probe/healthz"),
         )
     metrics_rollback = replace_inverse
+    metrics_was_paused = "metrics" in paused or c.service_monitor in paused
+    if mode == "metrics-oom" and metrics_was_paused:
+        gate(
+            "metrics-exit",
+            common
+            + [
+                {
+                    "metric": "authenticated_scrape",
+                    "operator": "eq",
+                    "value": True,
+                    "unit": "boolean",
+                },
+                {
+                    "metric": "memory_working_set",
+                    "operator": "lt",
+                    "value": 70,
+                    "unit": "percent_of_limit",
+                    "window": {"value": 15, "unit": "minutes"},
+                },
+            ],
+            {
+                "outcome": "hold-current-containment",
+                "metrics": "paused",
+                "mutation": None,
+            },
+            duration=15,
+        )
     if "metrics" in paused:
         restore = mutation(
             "restore-metrics",
