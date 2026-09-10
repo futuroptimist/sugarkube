@@ -924,3 +924,237 @@ def test_missing_old_discovery_state_fails_closed(tmp_path):
     data["service_monitor"]["discovery_label"] = None
     with pytest.raises(drill.DrillError, match="ServiceMonitor"):
         drill.preflight_snapshot("metrics-oom", c, data)
+
+
+def execution_files(tmp_path, plan):
+    plan_path = tmp_path / "immutable-plan.json"
+    plan_path.write_text(json.dumps(plan))
+    journal = tmp_path / "private-journal"
+    journal.mkdir()
+    kubeconfig = tmp_path / "execution-kubeconfig"
+    kubeconfig.write_text("fixture")
+    return argparse.Namespace(
+        execute_stage=None,
+        rollback_stage=None,
+        cleanup=False,
+        plan=plan_path,
+        journal=journal,
+        kubeconfig=kubeconfig,
+        gate_evidence=None,
+    )
+
+
+def execution_runner(plan, calls, marker=None):
+    expected = plan["expected_deployment"]
+    state = {"image": expected["current_image"], "metrics_mode": "normal", "paused": False}
+    deployment = {
+        "spec": {
+            "replicas": expected["replicas"],
+            "template": {
+                "spec": {
+                    "containers": [
+                        {
+                            "name": expected["container"],
+                            "image": state["image"],
+                            "resources": {"limits": {"memory": expected["memory_limit"]}},
+                            "env": [
+                                {
+                                    "name": "TOKENPLACE_METRICS_MODE",
+                                    "value": state["metrics_mode"],
+                                }
+                            ],
+                        }
+                    ]
+                }
+            },
+        }
+    }
+
+    def run(command):
+        calls.append(command)
+        if "cluster_identity.py" in " ".join(command):
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if "deployment" in command and "get" in command:
+            container = deployment["spec"]["template"]["spec"]["containers"][0]
+            container["image"] = state["image"]
+            container["env"][0]["value"] = state["metrics_mode"]
+            return subprocess.CompletedProcess(command, 0, json.dumps(deployment), "")
+        if "get" in command and ("probe" in command or "servicemonitor" in command):
+            labels = (
+                {"sugarkube.dev/incident-paused": "true"}
+                if state["paused"]
+                else {"release": "kube-prometheus-stack"}
+            )
+            return subprocess.CompletedProcess(
+                command, 0, json.dumps({"metadata": {"labels": labels}}), ""
+            )
+        if "configmap" in command and "get" in command:
+            return subprocess.CompletedProcess(
+                command, 0 if marker else 1, json.dumps(marker or {}), ""
+            )
+        if command[0] == "curl":
+            return subprocess.CompletedProcess(command, 0, "200", "")
+        if "label" in command:
+            state["paused"] = "release-" in command
+        if "set" in command and "env" in command:
+            state["metrics_mode"] = command[-1].split("=", 1)[1]
+        if "set" in command and "image" in command:
+            state["image"] = command[-1].split("=", 1)[1]
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    return run
+
+
+def test_execution_plan_digest_tampering_fails_before_runner(tmp_path):
+    plan = drill.build_plan(preflight(tmp_path))
+    plan["expected_deployment"]["replicas"] = 99
+    parsed = execution_files(tmp_path, plan)
+    calls = []
+    with pytest.raises(drill.DrillError, match="digest"):
+        drill.execute_operation(parsed, execution_runner(plan, calls))
+    assert calls == []
+
+
+def test_marker_is_unique_one_stage_and_resumable(tmp_path):
+    plan = drill.build_plan(preflight(tmp_path))
+    parsed = execution_files(tmp_path, plan)
+    parsed.execute_stage = "marker"
+    calls = []
+    result = drill.execute_operation(parsed, execution_runner(plan, calls))
+    assert result == {"status": "completed", "stage": "marker"}
+    mutations = [command for command in calls if "create" in command or "delete" in command]
+    assert len(mutations) == 1
+    assert mutations[0][mutations[0].index("configmap") + 1].startswith(
+        "tokenplace-drill-drill-test-"
+    )
+    assert f"sugarkube.dev/run-id={plan['run_id']}" in mutations[0][-1]
+    assert f"sugarkube.dev/plan-digest={plan['plan_digest']}" in mutations[0][-1]
+
+    marker = {
+        "metadata": {
+            "labels": {
+                "sugarkube.dev/run-id": plan["run_id"],
+                "sugarkube.dev/plan-digest": plan["plan_digest"],
+            }
+        },
+        "data": {"run-id": plan["run_id"], "plan-digest": plan["plan_digest"]},
+    }
+    calls.clear()
+    result = drill.execute_operation(parsed, execution_runner(plan, calls, marker))
+    assert result["status"] == "already-completed"
+    assert not any("create" in command or "delete" in command for command in calls)
+
+
+def test_out_of_order_and_marker_collision_fail_closed(tmp_path):
+    plan = drill.build_plan(preflight(tmp_path))
+    parsed = execution_files(tmp_path, plan)
+    parsed.execute_stage = plan["actions"][0]["id"]
+    calls = []
+    with pytest.raises(drill.DrillError, match="marker"):
+        drill.execute_operation(parsed, execution_runner(plan, calls))
+
+    parsed.execute_stage = "marker"
+    wrong = {
+        "metadata": {"labels": {"sugarkube.dev/run-id": "another-run"}},
+        "data": {},
+    }
+    with pytest.raises(drill.DrillError, match="ownership"):
+        drill.execute_operation(parsed, execution_runner(plan, [], wrong))
+
+
+def test_gate_evidence_is_typed_and_never_runs_a_mutation(tmp_path):
+    plan = drill.build_plan(preflight(tmp_path))
+    gate = next(action for action in plan["actions"] if action["type"] == "gate")
+    passing = {check["metric"]: check["value"] for check in gate["checks"]}
+    assert drill._evidence_passes(gate, passing) is True
+    failing = dict(passing)
+    failing[gate["checks"][0]["metric"]] = -1
+    assert drill._evidence_passes(gate, failing) is False
+    with pytest.raises(drill.DrillError, match="incomplete"):
+        drill._evidence_passes(gate, {})
+
+
+@pytest.mark.parametrize("mode", drill.MODES)
+def test_exactly_one_mutation_resume_and_rollback_for_each_mode(tmp_path, mode):
+    plan = drill.build_plan(preflight(tmp_path, mode=mode))
+    parsed = execution_files(tmp_path, plan)
+    parsed.execute_stage = "marker"
+    drill.execute_operation(parsed, execution_runner(plan, []))
+    marker = {
+        "metadata": {
+            "labels": {
+                "sugarkube.dev/run-id": plan["run_id"],
+                "sugarkube.dev/plan-digest": plan["plan_digest"],
+            }
+        },
+        "data": {"run-id": plan["run_id"], "plan-digest": plan["plan_digest"]},
+    }
+    stage = plan["actions"][0]
+    parsed.execute_stage = stage["id"]
+    calls = []
+    runner = execution_runner(plan, calls, marker)
+    assert drill.execute_operation(parsed, runner)["status"] == "completed"
+    assert sum("label" in command or "set" in command for command in calls) == 1
+    calls.clear()
+    assert drill.execute_operation(parsed, runner)["status"] == "already-completed"
+    assert not any("label" in command or "set" in command for command in calls)
+
+    parsed.execute_stage = None
+    parsed.rollback_stage = stage["id"]
+    calls.clear()
+    assert drill.execute_operation(parsed, runner)["status"] == "rolled-back"
+    assert stage["inverse"][-2:] == calls[-1][-2:]
+
+
+@pytest.mark.parametrize("mode", drill.MODES)
+def test_cleanup_deletes_only_exact_marker_and_is_idempotent(tmp_path, mode):
+    plan = drill.build_plan(preflight(tmp_path, mode=mode))
+    parsed = execution_files(tmp_path, plan)
+    parsed.cleanup = True
+    for stage in ["marker"] + [action["id"] for action in plan["actions"]]:
+        drill._append_journal(
+            parsed.journal,
+            plan,
+            {
+                "stage": stage,
+                "outcome": "completed",
+                "pre_state": "validated",
+                "post_state": "completed",
+                "rollback_coordinate": None,
+            },
+        )
+    drill._append_journal(
+        parsed.journal,
+        plan,
+        {
+            "stage": "replace",
+            "outcome": "rolled-back",
+            "pre_state": "replacement",
+            "post_state": "original",
+            "rollback_coordinate": plan["expected_deployment"]["current_image"],
+        },
+    )
+    marker = {
+        "metadata": {
+            "labels": {
+                "sugarkube.dev/run-id": plan["run_id"],
+                "sugarkube.dev/plan-digest": plan["plan_digest"],
+            }
+        },
+        "data": {"run-id": plan["run_id"], "plan-digest": plan["plan_digest"]},
+    }
+    calls = []
+    assert drill.execute_operation(parsed, execution_runner(plan, calls, marker))["status"] == (
+        "clean"
+    )
+    deletes = [command for command in calls if "delete" in command]
+    assert len(deletes) == 1
+    assert deletes[0][-1] == drill._marker_name(plan)
+    assert "--selector" not in deletes[0]
+
+    # Model the exact resource as absent after deletion; cleanup performs no mutation.
+    calls.clear()
+    assert drill.execute_operation(parsed, execution_runner(plan, calls))["status"] == (
+        "already-clean"
+    )
+    assert not any("delete" in command for command in calls)

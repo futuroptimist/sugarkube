@@ -106,7 +106,7 @@ crosses a rollback threshold, remove only that Probe's discovery label using the
 
 ## Step 14b: prepared staging drill (not yet performed)
 
-The helper is intentionally dry-run-only in Step 14a: it validates repository inventory and a
+The helper preserves its Step 14a dry-run interface: it validates repository inventory and a
 reviewed, privacy-safe JSON snapshot, then emits exact selections without invoking `kubectl`. The
 snapshot must contain the exact Deployment, inventory-derived ServiceMonitor and four Probes. It
 must also contain `OOMKilled`/137 termination evidence or bounded root/metadata 429 and healthy
@@ -136,17 +136,51 @@ current artifact exposes `TOKENPLACE_METRICS_MODE=normal|degraded`, containment 
 degraded value; otherwise it uses only the exact ServiceMonitor pause fallback. Replacement and
 rollback remain bound to their separately reviewed immutable digests.
 
-Repeat with `--mode quota-exhaustion`, a new run ID, and a new evidence filename. Step 14b must add
-a separately reviewed execution adapter; the Step 14a helper cannot mutate a cluster. The operator
-must capture the schema-versioned JSON plan, precondition summary, authoritative injected symptom,
-every printed mutation/rollback pair, Ready/digest/limit proof, compute registration and polling,
+Repeat with `--mode quota-exhaustion`, a new run ID, and a new evidence filename. The generated
+plan includes a deterministic digest. A future Step 14b operator can create its unique marker and
+then execute or validate exactly one ordered stage per invocation (the live drill has **not** run):
+
+```bash
+python3 scripts/tokenplace_incident_drill.py --execute-stage marker \
+  --plan "$PRIVATE_PLAN" --journal "$PRIVATE_JOURNAL_DIRECTORY" \
+  --kubeconfig "$STAGING_KUBECONFIG"
+python3 scripts/tokenplace_incident_drill.py --execute-stage "$NEXT_STAGE" \
+  --plan "$PRIVATE_PLAN" --journal "$PRIVATE_JOURNAL_DIRECTORY" \
+  --kubeconfig "$STAGING_KUBECONFIG" --gate-evidence "$PRIVATE_GATE_EVIDENCE"
+```
+
+Omit `--gate-evidence` for mutation stages. Gate evidence is a private JSON object keyed by the
+plan's typed check names. Humans or external systems must supply real readiness, compute
+registration and polling, encrypted request/response/retrieval/decryption, authenticated scrape,
+quota-validation, and bounded observation results; the runner never fabricates them. Resume by
+reissuing the same command: a journaled completed stage is a verified no-op, while a skipped stage,
+changed plan, changed coordinates, or marker collision is refused. Apply only the exact inverse of
+a completed mutation with:
+
+```bash
+python3 scripts/tokenplace_incident_drill.py --rollback-stage "$COMPLETED_MUTATION" \
+  --plan "$PRIVATE_PLAN" --journal "$PRIVATE_JOURNAL_DIRECTORY" \
+  --kubeconfig "$STAGING_KUBECONFIG"
+```
+
+After the original image and exact ServiceMonitor/Probe discovery labels are restored, and
+`/livez` and `/healthz` are healthy, delete only the matching run-ID/digest marker. Repeating this
+command reports the already-clean state without mutation:
+
+```bash
+python3 scripts/tokenplace_incident_drill.py --cleanup \
+  --plan "$PRIVATE_PLAN" --journal "$PRIVATE_JOURNAL_DIRECTORY" \
+  --kubeconfig "$STAGING_KUBECONFIG"
+```
+
+The operator must capture the schema-versioned JSON plan, precondition summary, authoritative
+symptom, every printed mutation/rollback pair, Ready/digest/limit proof, compute registration and polling,
 encrypted E2EE request/response/retrieval/decryption result, each bounded observation gate, quota
 validator output, and final four-state change declaration. Evidence stays aggregate and redacted.
 
-Create temporary drill resources with the unique run ID, resume only when their recorded phase and
-coordinates match, and reject an existing evidence file. Cleanup deletes only resources bearing
-that exact run ID after restoring the original digest and discovery labels; rerunning cleanup must
-report an already-clean state. A drill passes only when both incident classes demonstrate pause,
+The runner creates one exact ConfigMap marker named from the unique run ID and plan digest and keeps
+its append-only journal outside the repository. Cleanup never uses a selector, prefix, or broad
+namespace deletion. A drill passes only when both incident classes demonstrate pause,
 replacement, compute recovery, ordered restoration, threshold rollback, and exact cleanup while
 health coverage remains uninterrupted. Update the canonical incident records and GitHub trackers
 manually after review; use no automatic issue-closing action.
