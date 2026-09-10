@@ -944,9 +944,14 @@ def execution_files(tmp_path, plan):
     )
 
 
-def execution_runner(plan, calls, marker=None):
+def execution_runner(plan, calls, marker=None, initial_image=None):
     expected = plan["expected_deployment"]
-    state = {"image": expected["current_image"], "metrics_mode": "normal", "paused": False}
+    state = {
+        "image": initial_image or expected["current_image"],
+        "metrics_mode": "normal",
+        "paused": False,
+        "marker": marker,
+    }
     deployment = {
         "spec": {
             "replicas": expected["replicas"],
@@ -990,7 +995,7 @@ def execution_runner(plan, calls, marker=None):
             )
         if "configmap" in command and "get" in command:
             return subprocess.CompletedProcess(
-                command, 0 if marker else 1, json.dumps(marker or {}), ""
+                command, 0, json.dumps(state["marker"]) if state["marker"] else "", ""
             )
         if command[0] == "curl":
             return subprocess.CompletedProcess(command, 0, "200", "")
@@ -1000,6 +1005,12 @@ def execution_runner(plan, calls, marker=None):
             state["metrics_mode"] = command[-1].split("=", 1)[1]
         if "set" in command and "image" in command:
             state["image"] = command[-1].split("=", 1)[1]
+        if "configmap" in command and "create" in command:
+            state["marker"] = {
+                "data": {"run-id": plan["run_id"], "plan-digest": plan["plan_digest"]}
+            }
+        if "configmap" in command and "delete" in command:
+            state["marker"] = None
         return subprocess.CompletedProcess(command, 0, "", "")
 
     return run
@@ -1027,8 +1038,9 @@ def test_marker_is_unique_one_stage_and_resumable(tmp_path):
     assert mutations[0][mutations[0].index("configmap") + 1].startswith(
         "tokenplace-drill-drill-test-"
     )
-    assert f"sugarkube.dev/run-id={plan['run_id']}" in mutations[0][-1]
-    assert f"sugarkube.dev/plan-digest={plan['plan_digest']}" in mutations[0][-1]
+    assert f"--from-literal=run-id={plan['run_id']}" in mutations[0]
+    assert f"--from-literal=plan-digest={plan['plan_digest']}" in mutations[0]
+    assert "--labels" not in mutations[0]
 
     marker = {
         "metadata": {
@@ -1111,29 +1123,8 @@ def test_cleanup_deletes_only_exact_marker_and_is_idempotent(tmp_path, mode):
     plan = drill.build_plan(preflight(tmp_path, mode=mode))
     parsed = execution_files(tmp_path, plan)
     parsed.cleanup = True
-    for stage in ["marker"] + [action["id"] for action in plan["actions"]]:
-        drill._append_journal(
-            parsed.journal,
-            plan,
-            {
-                "stage": stage,
-                "outcome": "completed",
-                "pre_state": "validated",
-                "post_state": "completed",
-                "rollback_coordinate": None,
-            },
-        )
-    drill._append_journal(
-        parsed.journal,
-        plan,
-        {
-            "stage": "replace",
-            "outcome": "rolled-back",
-            "pre_state": "replacement",
-            "post_state": "original",
-            "rollback_coordinate": plan["expected_deployment"]["current_image"],
-        },
-    )
+    drill._record_phase(parsed.journal, plan, "execute", "marker", "intent")
+    drill._record_phase(parsed.journal, plan, "execute", "marker", "completed")
     marker = {
         "metadata": {
             "labels": {
@@ -1158,3 +1149,130 @@ def test_cleanup_deletes_only_exact_marker_and_is_idempotent(tmp_path, mode):
         "already-clean"
     )
     assert not any("delete" in command for command in calls)
+
+
+def test_marker_mutation_is_reconciled_after_completion_record_failure(tmp_path, monkeypatch):
+    plan = drill.build_plan(preflight(tmp_path))
+    parsed = execution_files(tmp_path, plan)
+    parsed.execute_stage = "marker"
+    runner = execution_runner(plan, [])
+    original = drill._append_journal
+    count = 0
+
+    def fail_completion(directory, immutable_plan, record):
+        nonlocal count
+        count += 1
+        if count == 2:
+            raise OSError("injected publication failure")
+        original(directory, immutable_plan, record)
+
+    monkeypatch.setattr(drill, "_append_journal", fail_completion)
+    with pytest.raises(OSError, match="injected"):
+        drill.execute_operation(parsed, runner)
+    monkeypatch.setattr(drill, "_append_journal", original)
+    assert drill.execute_operation(parsed, runner) == {"status": "completed", "stage": "marker"}
+
+
+@pytest.mark.parametrize("mode", drill.MODES)
+def test_forward_mutation_is_reconciled_without_replay(tmp_path, monkeypatch, mode):
+    plan = drill.build_plan(preflight(tmp_path, mode=mode))
+    parsed = execution_files(tmp_path, plan)
+    runner_calls = []
+    runner = execution_runner(plan, runner_calls)
+    parsed.execute_stage = "marker"
+    drill.execute_operation(parsed, runner)
+    parsed.execute_stage = plan["actions"][0]["id"]
+    original = drill._append_journal
+    count = 0
+
+    def fail_completion(directory, immutable_plan, record):
+        nonlocal count
+        count += 1
+        if count == 2:
+            raise OSError("injected publication failure")
+        original(directory, immutable_plan, record)
+
+    monkeypatch.setattr(drill, "_append_journal", fail_completion)
+    with pytest.raises(OSError, match="injected"):
+        drill.execute_operation(parsed, runner)
+    mutation_count = sum("label" in call or "set" in call for call in runner_calls)
+    monkeypatch.setattr(drill, "_append_journal", original)
+    assert drill.execute_operation(parsed, runner)["status"] == "completed"
+    assert sum("label" in call or "set" in call for call in runner_calls) == mutation_count
+
+
+def test_journal_gap_duplicate_and_concurrent_execution_are_refused(tmp_path):
+    plan = drill.build_plan(preflight(tmp_path))
+    parsed = execution_files(tmp_path, plan)
+    payload = {
+        "schema_version": 1,
+        "run_id": plan["run_id"],
+        "plan_digest": plan["plan_digest"],
+        "sequence": 1,
+        "operation": "execute",
+        "stage": "marker",
+        "phase": "intent",
+    }
+    (parsed.journal / "record-0001.json").write_text(json.dumps(payload))
+    with pytest.raises(drill.DrillError, match="gap"):
+        drill._journal_records(parsed.journal, plan)
+    (parsed.journal / "record-0001.json").unlink()
+    drill._record_phase(parsed.journal, plan, "execute", "marker", "intent")
+    payload["sequence"] = 1
+    (parsed.journal / "record-0001.json").write_text(json.dumps(payload))
+    with pytest.raises(drill.DrillError, match="duplicate"):
+        drill._journal_records(parsed.journal, plan)
+    for path in parsed.journal.glob("record-*.json"):
+        path.unlink()
+    parsed.execute_stage = "marker"
+    with drill._execution_lock(parsed.journal):
+        with pytest.raises(drill.DrillError, match="another invocation"):
+            drill.execute_operation(parsed, execution_runner(plan, []))
+
+
+def test_marker_lookup_error_is_not_treated_as_absence(tmp_path):
+    plan = drill.build_plan(preflight(tmp_path))
+    parsed = execution_files(tmp_path, plan)
+    parsed.execute_stage = "marker"
+    base = execution_runner(plan, [])
+
+    def failing_lookup(command):
+        if "configmap" in command and "get" in command:
+            return subprocess.CompletedProcess(command, 1, "", "forbidden")
+        return base(command)
+
+    with pytest.raises(drill.DrillError, match="lookup failed"):
+        drill.execute_operation(parsed, failing_lookup)
+
+
+def test_stage_preflight_requires_stage_specific_image(tmp_path):
+    plan = drill.build_plan(preflight(tmp_path))
+    parsed = execution_files(tmp_path, plan)
+    replacement = plan["expected_deployment"]["replacement_image"]
+    current = plan["expected_deployment"]["current_image"]
+    runner = execution_runner(plan, [], initial_image=replacement)
+    with pytest.raises(drill.DrillError, match="coordinates drifted"):
+        drill._assert_stage_preflight(plan, parsed.kubeconfig, runner, current)
+    drill._assert_stage_preflight(plan, parsed.kubeconfig, runner, replacement)
+
+
+@pytest.mark.parametrize("mode", drill.MODES)
+def test_partial_run_can_rollback_and_cleanup(tmp_path, mode):
+    plan = drill.build_plan(preflight(tmp_path, mode=mode))
+    parsed = execution_files(tmp_path, plan)
+    runner = execution_runner(plan, [])
+    parsed.execute_stage = "marker"
+    drill.execute_operation(parsed, runner)
+    stage = plan["actions"][0]
+    parsed.execute_stage = stage["id"]
+    drill.execute_operation(parsed, runner)
+    parsed.execute_stage = None
+    parsed.rollback_stage = stage["id"]
+    drill.execute_operation(parsed, runner)
+    parsed.rollback_stage = None
+    parsed.cleanup = True
+    assert drill.execute_operation(parsed, runner)["status"] == "clean"
+    parsed.cleanup = False
+    parsed.execute_stage = plan["actions"][1]["id"]
+    with pytest.raises(drill.DrillError, match="after rollback"):
+        drill.execute_operation(parsed, runner)

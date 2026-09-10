@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import fcntl
 import hashlib
 import json
 import os
@@ -1054,8 +1056,11 @@ def _private_directory(path: Path, label: str) -> Path:
 
 
 def _journal_records(directory: Path, plan: dict) -> list[dict]:
+    paths = sorted(directory.glob("record-*.json"))
     records = []
-    for path in sorted(directory.glob("record-*.json")):
+    for sequence, path in enumerate(paths):
+        if path.name != f"record-{sequence:04d}.json":
+            raise DrillError("durable journal sequence has a gap")
         try:
             record = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
@@ -1064,18 +1069,60 @@ def _journal_records(directory: Path, plan: dict) -> list[dict]:
             not isinstance(record, dict)
             or record.get("plan_digest") != plan["plan_digest"]
             or record.get("run_id") != plan["run_id"]
+            or record.get("sequence") != sequence
         ):
             raise DrillError("journal ownership does not match the immutable plan")
         records.append(record)
+    pending = None
+    completed = set()
+    aborting = False
+    ordered = ["marker"] + [action["id"] for action in plan["actions"]]
+    mutations = {action["id"] for action in plan["actions"] if action["type"] == "mutation"}
+    executed = []
+    active = []
+    for record in records:
+        phase = record.get("phase")
+        operation = record.get("operation")
+        stage = record.get("stage")
+        key = (operation, stage)
+        if phase == "intent":
+            if pending is not None or key in completed:
+                raise DrillError("journal contains duplicate or conflicting records")
+            if operation == "execute":
+                if aborting or stage not in ordered or stage != ordered[len(executed)]:
+                    raise DrillError("journal contains an invalid forward transition")
+            if operation == "rollback":
+                if stage not in mutations or not active or active[-1] != stage:
+                    raise DrillError("journal contains an invalid rollback transition")
+                aborting = True
+            if operation == "cleanup" and (stage != "cleanup" or active):
+                raise DrillError("journal contains an invalid cleanup transition")
+            if operation not in {"execute", "rollback", "cleanup"}:
+                raise DrillError("journal operation is invalid")
+            pending = key
+        elif phase == "completed":
+            if pending != key:
+                raise DrillError("journal transition is invalid")
+            completed.add(key)
+            pending = None
+            if operation == "execute":
+                executed.append(stage)
+                if stage in mutations:
+                    active.append(stage)
+            elif operation == "rollback":
+                active.pop()
+        else:
+            raise DrillError("journal record transition is invalid")
     return records
 
 
 def _append_journal(directory: Path, plan: dict, record: dict) -> None:
-    sequence = len(list(directory.glob("record-*.json")))
+    sequence = len(_journal_records(directory, plan))
     payload = {
         "schema_version": 1,
         "run_id": plan["run_id"],
         "plan_digest": plan["plan_digest"],
+        "sequence": sequence,
         **record,
     }
     target = directory / f"record-{sequence:04d}.json"
@@ -1186,10 +1233,12 @@ def _marker_command(plan: dict, kubeconfig: Path, verb: str) -> list[str]:
             "create",
             "configmap",
             name,
-            "--labels",
-            f"sugarkube.dev/run-id={plan['run_id']},sugarkube.dev/plan-digest={plan['plan_digest']}",
+            f"--from-literal=run-id={plan['run_id']}",
+            f"--from-literal=plan-digest={plan['plan_digest']}",
         ]
-    return base + [verb, "configmap", name, "-o", "json"]
+    if verb == "get":
+        return base + [verb, "configmap", name, "--ignore-not-found", "-o", "json"]
+    return base + [verb, "configmap", name]
 
 
 def _assert_action_prestate(
@@ -1253,6 +1302,8 @@ def _assert_action_prestate(
 def _validate_marker(plan: dict, kubeconfig: Path, runner: Runner, *, absent_ok=False) -> bool:
     result = runner(_marker_command(plan, kubeconfig, "get"))
     if result.returncode:
+        raise DrillError("exact drill marker lookup failed")
+    if not result.stdout.strip():
         if absent_ok:
             return False
         raise DrillError("exact drill marker is missing")
@@ -1260,13 +1311,99 @@ def _validate_marker(plan: dict, kubeconfig: Path, runner: Runner, *, absent_ok=
         marker = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
         raise DrillError("drill marker is malformed") from exc
-    labels = marker.get("metadata", {}).get("labels", {})
-    if (
-        labels.get("sugarkube.dev/run-id") != plan["run_id"]
-        or labels.get("sugarkube.dev/plan-digest") != plan["plan_digest"]
-    ):
+    data = marker.get("data", {})
+    if data.get("run-id") != plan["run_id"] or data.get("plan-digest") != plan["plan_digest"]:
         raise DrillError("drill marker ownership does not match")
     return True
+
+
+@contextlib.contextmanager
+def _execution_lock(directory: Path):
+    """Refuse concurrent writers for one private journal."""
+    lock = directory / ".execution.lock"
+    with lock.open("a+", encoding="utf-8") as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise DrillError("another invocation is active for this run") from exc
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def _completed_operations(records: list[dict]) -> set[tuple[str, str]]:
+    return {
+        (record["operation"], record["stage"])
+        for record in records
+        if record["phase"] == "completed"
+    }
+
+
+def _pending_operation(records: list[dict]) -> tuple[str, str] | None:
+    if records and records[-1]["phase"] == "intent":
+        return records[-1]["operation"], records[-1]["stage"]
+    return None
+
+
+def _action_matches(plan: dict, action: dict, observed: dict, post: bool) -> bool:
+    """Return whether an exact resource is in the action's pre- or post-state."""
+    kind, _ = action["resource"].split("/", 1)
+    old = action.get("old_state", {})
+    if kind in {"probe", "servicemonitor"}:
+        labels = observed.get("metadata", {}).get("labels", {})
+        expected = old
+        if post:
+            expected = {"release": None, "sugarkube.dev/incident-paused": "true"}
+            for token in action["command"]:
+                if token.startswith("release="):
+                    expected = {
+                        "release": token.split("=", 1)[1],
+                        "sugarkube.dev/incident-paused": None,
+                    }
+        return all(labels.get(key) == value for key, value in expected.items())
+    containers = observed.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
+    selected = [
+        item for item in containers if item.get("name") == plan["expected_deployment"]["container"]
+    ]
+    if len(selected) != 1:
+        return False
+    container = selected[0]
+    if "image" in old:
+        expected = old["image"]
+        if post:
+            expected = action["command"][-1].split("=", 1)[1]
+        return container.get("image") == expected
+    if "TOKENPLACE_METRICS_MODE" in old:
+        env = {item.get("name"): item.get("value") for item in container.get("env", [])}
+        expected = (
+            action["command"][-1].split("=", 1)[1] if post else old["TOKENPLACE_METRICS_MODE"]
+        )
+        return env.get("TOKENPLACE_METRICS_MODE") == expected
+    return False
+
+
+def _action_observed(plan: dict, action: dict, kubeconfig: Path, runner: Runner) -> dict:
+    kind, name = action["resource"].split("/", 1)
+    namespace = "monitoring" if kind == "probe" else plan["inventory"]["namespace"]
+    return _runner_json(
+        runner,
+        [
+            "kubectl",
+            "--kubeconfig",
+            str(kubeconfig),
+            "--context",
+            "sugar-staging",
+            "--namespace",
+            namespace,
+            "get",
+            kind,
+            name,
+            "-o",
+            "json",
+        ],
+        "stage state lookup failed",
+    )
 
 
 def _evidence_passes(action: dict, evidence: dict) -> bool:
@@ -1290,142 +1427,159 @@ def execute_operation(args: argparse.Namespace, runner: Runner = subprocess.run)
     journal = _private_directory(args.journal, "journal")
     if not args.kubeconfig.is_file():
         raise DrillError("kubeconfig is missing or is not a regular file")
+    with _execution_lock(journal):
+        return _execute_locked(args, runner, plan, journal)
+
+
+def _record_phase(journal, plan, operation, stage, phase):
+    _append_journal(journal, plan, {"operation": operation, "stage": stage, "phase": phase})
+
+
+def _verify_cleanup_baseline(plan, kubeconfig, runner):
+    _assert_stage_preflight(plan, kubeconfig, runner, plan["expected_deployment"]["current_image"])
+    checked_resources = set()
+    for action in plan["actions"]:
+        resource = action.get("resource")
+        if action.get("type") == "mutation" and resource not in checked_resources:
+            observed = _action_observed(plan, action, kubeconfig, runner)
+            if not _action_matches(plan, action, observed, False):
+                raise DrillError("cleanup requires the exact baseline")
+            checked_resources.add(resource)
+    for path in ("/livez", "/healthz"):
+        result = runner(
+            [
+                "curl",
+                "--silent",
+                "--output",
+                "/dev/null",
+                "--write-out",
+                "%{http_code}",
+                "--max-time",
+                "10",
+                f"https://{STAGING_HOST}{path}",
+            ]
+        )
+        if result.returncode or not result.stdout.strip().startswith("2"):
+            raise DrillError("cleanup health preservation check failed")
+
+
+def _execute_locked(args, runner, plan, journal):
     records = _journal_records(journal, plan)
-    ordered_stages = ["marker"] + [action["id"] for action in plan["actions"]]
-    completed = [
-        r["stage"]
-        for r in records
-        if r.get("outcome") == "completed" and r.get("stage") in ordered_stages
-    ]
-    _assert_stage_preflight(
-        plan,
-        args.kubeconfig,
-        runner,
-        plan["expected_deployment"]["current_image"] if args.cleanup else None,
-    )
-
-    if args.cleanup:
-        if completed != ordered_stages:
-            raise DrillError("cleanup requires every ordered stage to be completed")
-        expected = plan["expected_deployment"]
-        # Cleanup is deliberately permitted only after the exact image inverse was applied.
-        rollback = [
-            r for r in records if r.get("outcome") == "rolled-back" and r.get("stage") == "replace"
-        ]
-        if not rollback or rollback[-1].get("rollback_coordinate") != expected["current_image"]:
-            raise DrillError("cleanup requires the original image to be restored")
-        base = ["kubectl", "--kubeconfig", str(args.kubeconfig), "--context", "sugar-staging"]
-        targets = [
-            (plan["inventory"]["namespace"], "servicemonitor", plan["inventory"]["service_monitor"])
-        ]
-        targets.extend(
-            ("monitoring", "probe", item["probe"]) for item in plan["inventory"]["probes"].values()
-        )
-        for namespace, kind, name in targets:
-            observed = _runner_json(
-                runner,
-                base + ["--namespace", namespace, "get", kind, name, "-o", "json"],
-                "cleanup restoration lookup failed",
-            )
-            labels = observed.get("metadata", {}).get("labels", {})
-            if (
-                labels.get("release") != "kube-prometheus-stack"
-                or labels.get("sugarkube.dev/incident-paused") is not None
-            ):
-                raise DrillError("cleanup requires exact monitoring discovery restoration")
-        for path in ("/livez", "/healthz"):
-            result = runner(
-                [
-                    "curl",
-                    "--silent",
-                    "--output",
-                    "/dev/null",
-                    "--write-out",
-                    "%{http_code}",
-                    "--max-time",
-                    "10",
-                    f"https://{STAGING_HOST}{path}",
-                ]
-            )
-            if result.returncode or not result.stdout.strip().startswith("2"):
-                raise DrillError("cleanup health preservation check failed")
-        if not _validate_marker(plan, args.kubeconfig, runner, absent_ok=True):
-            return {"status": "already-clean", "run_id": plan["run_id"]}
-        command = _marker_command(plan, args.kubeconfig, "delete")[:-2]
-        _run_checked(runner, command, "exact marker cleanup failed")
-        _append_journal(
-            journal,
-            plan,
-            {
-                "stage": "cleanup",
-                "outcome": "completed",
-                "pre_state": "restored",
-                "post_state": "clean",
-                "rollback_coordinate": None,
-            },
-        )
-        return {"status": "clean", "run_id": plan["run_id"]}
-
-    stage = args.execute_stage or args.rollback_stage
-    if stage == "marker" and args.execute_stage:
-        if "marker" in completed:
-            _validate_marker(plan, args.kubeconfig, runner)
-            return {"status": "already-completed", "stage": "marker"}
-        if completed:
-            raise DrillError("marker creation is out of order")
-        collision = runner(_marker_command(plan, args.kubeconfig, "get"))
-        if collision.returncode == 0:
-            _validate_marker(plan, args.kubeconfig, lambda _command: collision)
-            raise DrillError("matching marker exists without a durable journal")
-        _run_checked(
-            runner, _marker_command(plan, args.kubeconfig, "create"), "marker creation failed"
-        )
-        _append_journal(
-            journal,
-            plan,
-            {
-                "stage": "marker",
-                "outcome": "completed",
-                "pre_state": "absent",
-                "post_state": "owned",
-                "rollback_coordinate": _marker_name(plan),
-            },
-        )
-        return {"status": "completed", "stage": "marker"}
+    completed = _completed_operations(records)
+    pending = _pending_operation(records)
+    stage = "cleanup" if args.cleanup else args.execute_stage or args.rollback_stage
+    operation = "cleanup" if args.cleanup else "rollback" if args.rollback_stage else "execute"
+    if pending and pending != (operation, stage):
+        raise DrillError("a different interrupted operation must be reconciled first")
+    aborting = any(record["operation"] == "rollback" for record in records)
+    if operation == "execute" and aborting:
+        raise DrillError("forward execution is refused after rollback begins")
 
     actions = plan["actions"]
     action = next((item for item in actions if item["id"] == stage), None)
+    active = [
+        item
+        for item in actions
+        if ("execute", item["id"]) in completed
+        and item["type"] == "mutation"
+        and ("rollback", item["id"]) not in completed
+    ]
+    replace_active = any(item["id"] == "replace" for item in active)
+    expected_image = (
+        plan["expected_deployment"]["replacement_image"]
+        if replace_active
+        else plan["expected_deployment"]["current_image"]
+    )
+    _assert_stage_preflight(plan, args.kubeconfig, runner, expected_image)
+
+    if operation == "cleanup":
+        if active:
+            raise DrillError("cleanup requires all active mutations to be rolled back")
+        _verify_cleanup_baseline(plan, args.kubeconfig, runner)
+        marker_present = _validate_marker(plan, args.kubeconfig, runner, absent_ok=True)
+        if pending:
+            if marker_present:
+                _run_checked(
+                    runner,
+                    _marker_command(plan, args.kubeconfig, "delete"),
+                    "exact marker cleanup failed",
+                )
+            _record_phase(journal, plan, operation, stage, "completed")
+            return {"status": "clean", "run_id": plan["run_id"]}
+        if (operation, stage) in completed or not marker_present:
+            return {"status": "already-clean", "run_id": plan["run_id"]}
+        _record_phase(journal, plan, operation, stage, "intent")
+        _run_checked(
+            runner, _marker_command(plan, args.kubeconfig, "delete"), "exact marker cleanup failed"
+        )
+        _record_phase(journal, plan, operation, stage, "completed")
+        return {"status": "clean", "run_id": plan["run_id"]}
+
+    if stage == "marker" and operation == "execute":
+        present = _validate_marker(plan, args.kubeconfig, runner, absent_ok=True)
+        if pending:
+            if not present:
+                _run_checked(
+                    runner,
+                    _marker_command(plan, args.kubeconfig, "create"),
+                    "marker creation failed",
+                )
+            _record_phase(journal, plan, operation, stage, "completed")
+            return {"status": "completed", "stage": stage}
+        if (operation, stage) in completed:
+            if not present:
+                raise DrillError("completed marker is missing")
+            return {"status": "already-completed", "stage": stage}
+        if present:
+            raise DrillError("matching marker exists without a durable intent")
+        _record_phase(journal, plan, operation, stage, "intent")
+        _run_checked(
+            runner, _marker_command(plan, args.kubeconfig, "create"), "marker creation failed"
+        )
+        _record_phase(journal, plan, operation, stage, "completed")
+        return {"status": "completed", "stage": stage}
+
     if action is None:
         raise DrillError("requested stage is not in the immutable plan")
     _validate_marker(plan, args.kubeconfig, runner)
-    if args.rollback_stage:
-        if stage not in completed or action.get("type") != "mutation":
+    if operation == "rollback":
+        if action.get("type") != "mutation" or ("execute", stage) not in completed:
             raise DrillError("only a completed mutation can be rolled back")
-        if any(r.get("outcome") == "rolled-back" and r.get("stage") == stage for r in records):
+        if (operation, stage) in completed:
             return {"status": "already-rolled-back", "stage": stage}
-        _assert_action_prestate(plan, action, args.kubeconfig, runner, inverse=True)
-        command = _bind_command(action["inverse"], args.kubeconfig)
-        _run_checked(runner, command, "exact stage rollback failed")
-        coordinate = action.get("old_state", {}).get("image", action.get("resource"))
-        _append_journal(
-            journal,
-            plan,
-            {
-                "stage": stage,
-                "outcome": "rolled-back",
-                "pre_state": "completed",
-                "post_state": "inverse-applied",
-                "rollback_coordinate": coordinate,
-            },
+        if not active or active[-1]["id"] != stage:
+            raise DrillError("rollback must follow reverse mutation order")
+        observed = _action_observed(plan, action, args.kubeconfig, runner)
+        post, pre = _action_matches(plan, action, observed, True), _action_matches(
+            plan, action, observed, False
         )
+        if pending and pre:
+            _record_phase(journal, plan, operation, stage, "completed")
+            return {"status": "rolled-back", "stage": stage}
+        if not post:
+            raise DrillError("rollback state is ambiguous")
+        if not pending:
+            _record_phase(journal, plan, operation, stage, "intent")
+        _run_checked(
+            runner, _bind_command(action["inverse"], args.kubeconfig), "exact stage rollback failed"
+        )
+        _record_phase(journal, plan, operation, stage, "completed")
         return {"status": "rolled-back", "stage": stage}
 
-    expected_order = ordered_stages
-    if stage in completed:
+    executed = [item["id"] for item in actions if ("execute", item["id"]) in completed]
+    expected = ["marker"] + [item["id"] for item in actions]
+    done = ["marker"] + executed if ("execute", "marker") in completed else executed
+    if (operation, stage) in completed:
+        if action["type"] == "mutation":
+            observed = _action_observed(plan, action, args.kubeconfig, runner)
+            if not _action_matches(plan, action, observed, True):
+                raise DrillError("completed stage post-state drifted")
         return {"status": "already-completed", "stage": stage}
-    if completed != expected_order[: len(completed)] or expected_order[len(completed)] != stage:
+    if done != expected[: len(done)] or expected[len(done)] != stage:
         raise DrillError("stage is out of order")
     if action["type"] == "gate":
+        if pending:
+            raise DrillError("gate intent cannot be pending")
         if args.gate_evidence is None:
             raise DrillError("gate stage requires private evidence")
         try:
@@ -1434,24 +1588,22 @@ def execute_operation(args: argparse.Namespace, runner: Runner = subprocess.run)
             raise DrillError("gate evidence cannot be read") from exc
         if not _evidence_passes(action, evidence):
             return {"status": "gate-failed", "stage": stage, "on_failure": action["on_failure"]}
-        post = "thresholds-passed"
-    else:
-        _assert_action_prestate(plan, action, args.kubeconfig, runner)
-        _run_checked(
-            runner, _bind_command(action["command"], args.kubeconfig), "stage mutation failed"
-        )
-        post = "mutation-applied"
-    _append_journal(
-        journal,
-        plan,
-        {
-            "stage": stage,
-            "outcome": "completed",
-            "pre_state": action.get("old_state", "validated"),
-            "post_state": post,
-            "rollback_coordinate": action.get("inverse"),
-        },
+        _record_phase(journal, plan, operation, stage, "intent")
+        _record_phase(journal, plan, operation, stage, "completed")
+        return {"status": "completed", "stage": stage}
+    observed = _action_observed(plan, action, args.kubeconfig, runner)
+    post, pre = _action_matches(plan, action, observed, True), _action_matches(
+        plan, action, observed, False
     )
+    if pending and post:
+        _record_phase(journal, plan, operation, stage, "completed")
+        return {"status": "completed", "stage": stage}
+    if not pre:
+        raise DrillError("stage state is ambiguous")
+    if not pending:
+        _record_phase(journal, plan, operation, stage, "intent")
+    _run_checked(runner, _bind_command(action["command"], args.kubeconfig), "stage mutation failed")
+    _record_phase(journal, plan, operation, stage, "completed")
     return {"status": "completed", "stage": stage}
 
 
