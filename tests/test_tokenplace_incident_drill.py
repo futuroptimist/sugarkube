@@ -1794,3 +1794,181 @@ def test_action_post_state_lookup_error_remains_pending(tmp_path):
         "execute",
         action["id"],
     )
+
+
+@pytest.mark.parametrize(
+    "change,message",
+    [
+        ({"schema_version": 1}, "schema"),
+        ({"environment": "prod"}, "staging"),
+        ({"run_id": "unsafe_name"}, "run ID"),
+        ({"plan_digest": "bad"}, "digest"),
+        ({"actions": []}, "ordered stages"),
+        ({"actions": [{"id": "duplicate"}, {"id": "duplicate"}]}, "ambiguous"),
+        ({"actions": [{"id": "stage", "command": "echo unsafe"}]}, "shell-string"),
+    ],
+)
+def test_execution_plan_loader_rejects_malformed_contracts(tmp_path, change, message):
+    plan = drill.build_plan(preflight(tmp_path))
+    plan.update(change)
+    if "plan_digest" not in change:
+        plan["plan_digest"] = drill._plan_digest(plan)
+    path = tmp_path / "plan.json"
+    path.write_text(json.dumps(plan))
+
+    with pytest.raises(drill.DrillError, match=message):
+        drill._load_execution_plan(path)
+
+
+def test_execution_plan_loader_rejects_unreadable_and_invalid_json(tmp_path):
+    with pytest.raises(drill.DrillError, match="cannot be read"):
+        drill._load_execution_plan(tmp_path / "missing.json")
+    path = tmp_path / "plan.json"
+    path.write_text("not-json")
+    with pytest.raises(drill.DrillError, match="cannot be read"):
+        drill._load_execution_plan(path)
+
+
+def test_private_directory_and_command_guards_fail_closed(tmp_path):
+    with pytest.raises(drill.DrillError, match="absolute"):
+        drill._private_directory(Path("relative"), "journal")
+    with pytest.raises(drill.DrillError, match="outside"):
+        drill._private_directory(drill.ROOT, "journal")
+    with pytest.raises(drill.DrillError, match="kubeconfig"):
+        drill._bind_command(["kubectl", "get", "pods"], tmp_path / "config")
+    with pytest.raises(drill.DrillError, match="shell-string"):
+        drill._run_checked(lambda _: None, "unsafe", "failed")
+    with pytest.raises(drill.DrillError, match="failed"):
+        drill._run_checked(
+            lambda command: subprocess.CompletedProcess(command, 1, "", ""),
+            ["false"],
+            "failed",
+        )
+
+
+def test_main_redacts_snapshot_and_execution_failures(tmp_path, capsys, monkeypatch):
+    parsed = args(tmp_path)
+    parsed.snapshot.write_text("not-json")
+    argv = []
+    for name, value in vars(parsed).items():
+        option = "--" + name.replace("_", "-")
+        if isinstance(value, bool):
+            if value:
+                argv.append(option)
+        else:
+            argv.extend((option, str(value)))
+    assert drill.main(argv) == 2
+    assert str(parsed.snapshot) not in capsys.readouterr().err
+
+    monkeypatch.setattr(
+        drill,
+        "execute_operation",
+        lambda *_: (_ for _ in ()).throw(drill.DrillError("safe refusal")),
+    )
+    assert (
+        drill.main(
+            [
+                "--execute-stage",
+                "replace",
+                "--plan",
+                str(tmp_path / "plan.json"),
+                "--journal",
+                str(tmp_path),
+                "--kubeconfig",
+                str(parsed.kubeconfig),
+            ]
+        )
+        == 2
+    )
+    assert "safe refusal" in capsys.readouterr().err
+
+    monkeypatch.setattr(drill, "execute_operation", lambda *_: {"status": "completed"})
+    assert (
+        drill.main(
+            [
+                "--execute-stage",
+                "replace",
+                "--plan",
+                str(tmp_path / "plan.json"),
+                "--journal",
+                str(tmp_path),
+                "--kubeconfig",
+                str(parsed.kubeconfig),
+            ]
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out) == {"status": "completed"}
+
+
+@pytest.mark.parametrize("stdout", ["", "not-json"])
+def test_marker_validation_rejects_missing_or_malformed_marker(tmp_path, stdout):
+    plan = drill.build_plan(preflight(tmp_path))
+    runner = lambda command: subprocess.CompletedProcess(command, 0, stdout, "")
+    with pytest.raises(drill.DrillError, match="missing|malformed"):
+        drill._validate_marker(plan, tmp_path / "kubeconfig", runner)
+
+
+def test_action_matching_rejects_missing_container_and_unknown_state(tmp_path):
+    plan = drill.build_plan(preflight(tmp_path))
+    action = next(item for item in plan["actions"] if item["id"] == "replace")
+    assert not drill._action_matches(plan, action, {}, post=False)
+    action = {**action, "old_state": {}}
+    assert not drill._action_matches(
+        plan,
+        action,
+        {
+            "spec": {
+                "template": {
+                    "spec": {"containers": [{"name": plan["expected_deployment"]["container"]}]}
+                }
+            }
+        },
+        post=False,
+    )
+
+
+@pytest.mark.parametrize("mode", ["metrics-oom", "quota-exhaustion"])
+def test_action_prestate_accepts_exact_forward_and_inverse_states(tmp_path, mode):
+    plan = drill.build_plan(preflight(tmp_path, mode=mode))
+    kubeconfig = tmp_path / "private" / "kubeconfig"
+
+    for action in (item for item in plan["actions"] if item["type"] == "mutation"):
+        kind = action["resource"].split("/", 1)[0]
+
+        def observed(inverse=False):
+            if kind in {"probe", "servicemonitor"}:
+                labels = (
+                    {"sugarkube.dev/incident-paused": "true"}
+                    if inverse
+                    else {
+                        "release": action["old_state"]["release"],
+                        "sugarkube.dev/incident-paused": action["old_state"].get(
+                            "sugarkube.dev/incident-paused"
+                        ),
+                    }
+                )
+                return {"metadata": {"labels": labels}}
+            state = dict(action["old_state"])
+            if inverse:
+                if "set" in action["command"] and "image" in action["command"]:
+                    state = {"image": plan["expected_deployment"]["replacement_image"]}
+                elif "TOKENPLACE_METRICS_MODE=degraded" in action["command"]:
+                    state = {"TOKENPLACE_METRICS_MODE": "degraded"}
+            container = {
+                "name": plan["expected_deployment"]["container"],
+                "image": state.get("image", plan["expected_deployment"]["current_image"]),
+                "env": (
+                    [{"name": "TOKENPLACE_METRICS_MODE", "value": state["TOKENPLACE_METRICS_MODE"]}]
+                    if "TOKENPLACE_METRICS_MODE" in state
+                    else []
+                ),
+            }
+            return {"spec": {"template": {"spec": {"containers": [container]}}}}
+
+        for inverse in (False, True):
+            payload = observed(inverse)
+            runner = lambda command, payload=payload: subprocess.CompletedProcess(
+                command, 0, json.dumps(payload), ""
+            )
+            drill._assert_action_prestate(plan, action, kubeconfig, runner, inverse=inverse)
