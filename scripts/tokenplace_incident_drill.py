@@ -14,7 +14,7 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 from urllib.parse import urlsplit
@@ -27,6 +27,9 @@ IMAGE = re.compile(r"[^\s:@]+(?:/[^\s:@]+)+@sha256:[0-9a-f]{64}")
 MODES = ("metrics-oom", "quota-exhaustion")
 STAGING_HOST = "staging.token.place"
 EXECUTION_OPERATIONS = ("--execute-stage", "--rollback-stage", "--cleanup")
+GATE_EVIDENCE_MAX_BYTES = 64 * 1024
+GATE_EVIDENCE_FRESHNESS_SECONDS = 5 * 60
+RFC3339_UTC = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$")
 
 
 class DrillError(ValueError):
@@ -1413,33 +1416,168 @@ def _action_observed(plan: dict, action: dict, kubeconfig: Path, runner: Runner)
     )
 
 
-def _evidence_passes(action: dict, evidence: dict) -> bool:
-    if not isinstance(evidence, dict) or set(evidence) - {c["metric"] for c in action["checks"]}:
-        raise DrillError("gate evidence is malformed")
-    for check in action["checks"]:
-        if check["metric"] not in evidence:
-            raise DrillError("gate evidence is incomplete")
-        observed, expected, operator = evidence[check["metric"]], check["value"], check["operator"]
-        if operator == "eq" and observed != expected:
-            return False
-        if operator == "lte" and not (isinstance(observed, (int, float)) and observed <= expected):
-            return False
-        if operator == "lt" and not (isinstance(observed, (int, float)) and observed < expected):
-            return False
-    return True
+def _utc_timestamp(value: object) -> datetime:
+    if not isinstance(value, str) or not RFC3339_UTC.fullmatch(value):
+        raise DrillError("gate evidence timestamp must be RFC3339 UTC")
+    try:
+        return datetime.fromisoformat(value[:-1] + "+00:00")
+    except ValueError as exc:
+        raise DrillError("gate evidence timestamp is malformed") from exc
 
 
-def execute_operation(args: argparse.Namespace, runner: Runner = subprocess.run) -> dict:
+def _minutes(spec: object, label: str) -> float:
+    if not isinstance(spec, dict) or set(spec) != {"value", "unit"}:
+        raise DrillError(f"planned {label} is malformed")
+    value = spec["value"]
+    if spec["unit"] != "minutes" or isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise DrillError(f"planned {label} is unsupported")
+    return float(value)
+
+
+def _typed_comparison(observed: object, expected: object, operator: object) -> bool:
+    if operator not in {"eq", "lte", "lt"}:
+        raise DrillError("planned gate operator is unsupported")
+    if isinstance(expected, bool):
+        if operator != "eq" or not isinstance(observed, bool):
+            raise DrillError("gate evidence value has the wrong type")
+    elif isinstance(expected, str):
+        if operator != "eq" or not isinstance(observed, str):
+            raise DrillError("gate evidence value has the wrong type")
+    elif isinstance(expected, (int, float)) and not isinstance(expected, bool):
+        if isinstance(observed, bool) or not isinstance(observed, (int, float)):
+            raise DrillError("gate evidence value has the wrong type")
+        if not all(
+            map(
+                lambda number: number == number and abs(number) != float("inf"),
+                (observed, expected),
+            )
+        ):
+            raise DrillError("gate evidence number must be finite")
+    else:
+        raise DrillError("planned gate value type is unsupported")
+    if operator == "eq":
+        return observed == expected
+    if operator == "lte":
+        return observed <= expected
+    return observed < expected
+
+
+def _evidence_passes(
+    plan: dict, action: dict, evidence: dict, now: datetime | None = None
+) -> tuple[bool, dict]:
+    top_fields = {
+        "schema_version",
+        "run_id",
+        "plan_digest",
+        "stage",
+        "observed_from",
+        "observed_until",
+        "checks",
+    }
+    if not isinstance(evidence, dict) or set(evidence) != top_fields:
+        raise DrillError("gate evidence object is malformed")
+    if evidence["schema_version"] != 1:
+        raise DrillError("gate evidence schema is unsupported")
+    for field in ("run_id", "stage"):
+        if not isinstance(evidence[field], str) or not SAFE_NAME.fullmatch(evidence[field]):
+            raise DrillError("gate evidence identifier is unsafe")
+    if not isinstance(evidence["plan_digest"], str) or not re.fullmatch(
+        r"[0-9a-f]{64}", evidence["plan_digest"]
+    ):
+        raise DrillError("gate evidence identifier is unsafe")
+    if (evidence["run_id"], evidence["plan_digest"], evidence["stage"]) != (
+        plan["run_id"],
+        plan["plan_digest"],
+        action["id"],
+    ):
+        raise DrillError("gate evidence does not belong to this plan stage")
+    start, end = _utc_timestamp(evidence["observed_from"]), _utc_timestamp(
+        evidence["observed_until"]
+    )
+    clock = now or datetime.now(timezone.utc)
+    if clock.tzinfo is None:
+        raise DrillError("gate evidence clock must be timezone-aware")
+    clock = clock.astimezone(timezone.utc)
+    if start > end or end > clock:
+        raise DrillError("gate evidence interval is invalid")
+    if (clock - end).total_seconds() > GATE_EVIDENCE_FRESHNESS_SECONDS:
+        raise DrillError("gate evidence is stale")
+    duration = _minutes(action["duration"], "duration") if "duration" in action else 0
+    if (end - start).total_seconds() < duration * 60:
+        raise DrillError("gate evidence does not cover the required duration")
+    checks = evidence["checks"]
+    planned = {check["metric"]: check for check in action["checks"]}
+    if not isinstance(checks, dict) or set(checks) != set(planned):
+        raise DrillError("gate evidence metric set is not exact")
+    passed = True
+    sources = {}
+    for metric, check in planned.items():
+        item = checks[metric]
+        fields = {"value", "observed_from", "observed_until"}
+        if "source" in check:
+            fields.add("source")
+        if not isinstance(item, dict) or set(item) != fields:
+            raise DrillError("gate evidence check is malformed")
+        check_start, check_end = _utc_timestamp(item["observed_from"]), _utc_timestamp(
+            item["observed_until"]
+        )
+        if check_start > check_end or check_start < start or check_end > end or check_end > clock:
+            raise DrillError("gate evidence check interval is invalid")
+        window = _minutes(check["window"], "window") if "window" in check else 0
+        if (check_end - check_start).total_seconds() < window * 60:
+            raise DrillError("gate evidence check does not cover its window")
+        if "source" in check:
+            if item["source"] != check["source"]:
+                raise DrillError("gate evidence source does not match")
+            sources[metric] = item["source"]
+        passed = _typed_comparison(item["value"], check["value"], check["operator"]) and passed
+    return passed, {
+        "observed_from": evidence["observed_from"],
+        "observed_until": evidence["observed_until"],
+        "sources": sources,
+    }
+
+
+def _read_gate_evidence(path: Path) -> tuple[dict, str]:
+    if not path.is_absolute():
+        raise DrillError("gate evidence must be an absolute private file")
+    try:
+        resolved = path.resolve(strict=True)
+        root = ROOT.resolve(strict=True)
+        stat = resolved.stat()
+        if (
+            resolved == root
+            or resolved.is_relative_to(root)
+            or not resolved.is_file()
+            or path.is_symlink()
+        ):
+            raise DrillError("gate evidence must be a regular file outside the repository")
+        if stat.st_size > GATE_EVIDENCE_MAX_BYTES:
+            raise DrillError("gate evidence exceeds the size limit")
+        payload = resolved.read_bytes()
+        evidence = json.loads(payload)
+    except DrillError:
+        raise
+    except (OSError, RuntimeError, json.JSONDecodeError) as exc:
+        raise DrillError("gate evidence cannot be read") from exc
+    return evidence, hashlib.sha256(payload).hexdigest()
+
+
+def execute_operation(
+    args: argparse.Namespace, runner: Runner = subprocess.run, now: datetime | None = None
+) -> dict:
     plan = _load_execution_plan(args.plan)
     journal = _private_directory(args.journal, "journal")
     if not args.kubeconfig.is_file():
         raise DrillError("kubeconfig is missing or is not a regular file")
     with _execution_lock(journal):
-        return _execute_locked(args, runner, plan, journal)
+        return _execute_locked(args, runner, plan, journal, now)
 
 
-def _record_phase(journal, plan, operation, stage, phase):
-    _append_journal(journal, plan, {"operation": operation, "stage": stage, "phase": phase})
+def _record_phase(journal, plan, operation, stage, phase, **metadata):
+    _append_journal(
+        journal, plan, {"operation": operation, "stage": stage, "phase": phase, **metadata}
+    )
 
 
 def _verify_cleanup_baseline(plan, kubeconfig, runner):
@@ -1470,7 +1608,7 @@ def _verify_cleanup_baseline(plan, kubeconfig, runner):
             raise DrillError("cleanup health preservation check failed")
 
 
-def _execute_locked(args, runner, plan, journal):
+def _execute_locked(args, runner, plan, journal, now=None):
     records = _journal_records(journal, plan)
     completed = _completed_operations(records)
     pending = _pending_operation(records)
@@ -1601,15 +1739,22 @@ def _execute_locked(args, runner, plan, journal):
     if action["type"] == "gate":
         if args.gate_evidence is None:
             raise DrillError("gate stage requires private evidence")
-        try:
-            evidence = json.loads(args.gate_evidence.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise DrillError("gate evidence cannot be read") from exc
-        if not _evidence_passes(action, evidence):
+        evidence, evidence_digest = _read_gate_evidence(args.gate_evidence)
+        passes, summary = _evidence_passes(plan, action, evidence, now)
+        if pending:
+            intent = next(
+                record
+                for record in reversed(records)
+                if record["operation"] == operation and record["stage"] == stage
+            )
+            if intent.get("evidence_digest") != evidence_digest:
+                raise DrillError("pending gate evidence digest changed")
+        if not passes:
             return {"status": "gate-failed", "stage": stage, "on_failure": action["on_failure"]}
+        metadata = {"evidence_digest": evidence_digest, "evidence_summary": summary}
         if not pending:
-            _record_phase(journal, plan, operation, stage, "intent")
-        _record_phase(journal, plan, operation, stage, "completed")
+            _record_phase(journal, plan, operation, stage, "intent", **metadata)
+        _record_phase(journal, plan, operation, stage, "completed", **metadata)
         return {"status": "completed", "stage": stage}
     observed = _action_observed(plan, action, args.kubeconfig, runner)
     post, pre = _action_matches(plan, action, observed, True), _action_matches(

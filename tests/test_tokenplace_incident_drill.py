@@ -1,6 +1,7 @@
 import argparse
 import json
 import subprocess
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -944,6 +945,36 @@ def execution_files(tmp_path, plan):
     )
 
 
+def gate_evidence(plan, gate, now=None):
+    now = now or datetime.now(timezone.utc)
+    windows = [gate.get("duration", {"value": 0})["value"]]
+    windows += [check.get("window", {"value": 0})["value"] for check in gate["checks"]]
+    start = now - timedelta(minutes=max(windows))
+    stamp = lambda value: value.isoformat(timespec="seconds").replace("+00:00", "Z")
+    checks = {}
+    for check in gate["checks"]:
+        value = check["value"]
+        if check["operator"] == "lt":
+            value -= 1
+        item = {
+            "value": value,
+            "observed_from": stamp(start),
+            "observed_until": stamp(now),
+        }
+        if "source" in check:
+            item["source"] = check["source"]
+        checks[check["metric"]] = item
+    return {
+        "schema_version": 1,
+        "run_id": plan["run_id"],
+        "plan_digest": plan["plan_digest"],
+        "stage": gate["id"],
+        "observed_from": stamp(start),
+        "observed_until": stamp(now),
+        "checks": checks,
+    }
+
+
 def execution_runner(plan, calls, marker=None, initial_image=None):
     expected = plan["expected_deployment"]
     state = {
@@ -1077,13 +1108,173 @@ def test_out_of_order_and_marker_collision_fail_closed(tmp_path):
 def test_gate_evidence_is_typed_and_never_runs_a_mutation(tmp_path):
     plan = drill.build_plan(preflight(tmp_path))
     gate = next(action for action in plan["actions"] if action["type"] == "gate")
-    passing = {check["metric"]: check["value"] for check in gate["checks"]}
-    assert drill._evidence_passes(gate, passing) is True
-    failing = dict(passing)
-    failing[gate["checks"][0]["metric"]] = -1
-    assert drill._evidence_passes(gate, failing) is False
-    with pytest.raises(drill.DrillError, match="incomplete"):
-        drill._evidence_passes(gate, {})
+    now = datetime(2026, 9, 10, 12, tzinfo=timezone.utc)
+    passing = gate_evidence(plan, gate, now)
+    assert drill._evidence_passes(plan, gate, passing, now)[0] is True
+    failing = json.loads(json.dumps(passing))
+    failing["checks"][gate["checks"][0]["metric"]]["value"] = -1
+    assert drill._evidence_passes(plan, gate, failing, now)[0] is False
+    with pytest.raises(drill.DrillError, match="malformed"):
+        drill._evidence_passes(plan, gate, {}, now)
+
+
+@pytest.mark.parametrize("mode", drill.MODES)
+def test_versioned_evidence_covers_all_gate_durations_and_sources(tmp_path, mode):
+    plan = drill.build_plan(preflight(tmp_path, mode=mode))
+    now = datetime(2026, 9, 10, 12, tzinfo=timezone.utc)
+    durations = set()
+    for gate in (action for action in plan["actions"] if action["type"] == "gate"):
+        durations.add(gate.get("duration", {"value": 0})["value"])
+        assert drill._evidence_passes(plan, gate, gate_evidence(plan, gate, now), now)[0]
+    assert durations >= {0, 5, 15, 30}
+
+
+@pytest.mark.parametrize("field", ["run_id", "plan_digest", "stage"])
+def test_gate_evidence_is_bound_to_exact_plan_identity(tmp_path, field):
+    plan = drill.build_plan(preflight(tmp_path))
+    gate = next(action for action in plan["actions"] if action["type"] == "gate")
+    evidence = gate_evidence(plan, gate)
+    evidence[field] = "f" * 64 if field == "plan_digest" else "wrong"
+    with pytest.raises(drill.DrillError, match="belong"):
+        drill._evidence_passes(plan, gate, evidence)
+
+
+@pytest.mark.parametrize(
+    "change, message",
+    [
+        (lambda evidence, gate: evidence.update(extra=True), "malformed"),
+        (lambda evidence, gate: evidence["checks"].pop(gate["checks"][0]["metric"]), "metric"),
+        (lambda evidence, gate: evidence["checks"].update(extra={}), "metric"),
+        (lambda evidence, gate: evidence.update(observed_until="not-a-time"), "timestamp"),
+        (
+            lambda evidence, gate: evidence.update(
+                observed_from=evidence["observed_until"], observed_until=evidence["observed_from"]
+            ),
+            "interval",
+        ),
+    ],
+)
+def test_gate_evidence_rejects_fields_metrics_and_timestamps(tmp_path, change, message):
+    plan = drill.build_plan(preflight(tmp_path))
+    gate = next(action for action in plan["actions"] if action["type"] == "gate")
+    evidence = gate_evidence(plan, gate)
+    change(evidence, gate)
+    with pytest.raises(drill.DrillError, match=message):
+        drill._evidence_passes(plan, gate, evidence)
+
+
+def test_gate_evidence_rejects_stale_future_short_window_and_wrong_source(tmp_path):
+    plan = drill.build_plan(preflight(tmp_path))
+    gate = next(
+        action
+        for action in plan["actions"]
+        if action["type"] == "gate" and any("source" in check for check in action["checks"])
+    )
+    now = datetime(2026, 9, 10, 12, tzinfo=timezone.utc)
+    evidence = gate_evidence(plan, gate, now)
+    with pytest.raises(drill.DrillError, match="stale"):
+        drill._evidence_passes(plan, gate, evidence, now + timedelta(minutes=6))
+    with pytest.raises(drill.DrillError, match="invalid"):
+        drill._evidence_passes(plan, gate, evidence, now - timedelta(seconds=1))
+    metric = next(check["metric"] for check in gate["checks"] if "source" in check)
+    evidence["checks"][metric]["source"] = "prometheus"
+    with pytest.raises(drill.DrillError, match="source"):
+        drill._evidence_passes(plan, gate, evidence, now)
+
+
+def test_gate_evidence_rejects_short_duration_window_and_non_utc(tmp_path):
+    plan = drill.build_plan(preflight(tmp_path))
+    gate = next(
+        action
+        for action in plan["actions"]
+        if action["type"] == "gate" and action.get("duration", {}).get("value") == 15
+    )
+    evidence = gate_evidence(plan, gate)
+    evidence["observed_from"] = evidence["observed_until"]
+    with pytest.raises(drill.DrillError, match="duration"):
+        drill._evidence_passes(plan, gate, evidence)
+    gate = next(
+        action
+        for action in plan["actions"]
+        if action["type"] == "gate" and any("window" in check for check in action["checks"])
+    )
+    evidence = gate_evidence(plan, gate)
+    windowed = next(check for check in gate["checks"] if "window" in check)
+    evidence["checks"][windowed["metric"]]["observed_from"] = evidence["checks"][
+        windowed["metric"]
+    ]["observed_until"]
+    with pytest.raises(drill.DrillError, match="window"):
+        drill._evidence_passes(plan, gate, evidence)
+    evidence = gate_evidence(plan, gate)
+    evidence["observed_until"] = evidence["observed_until"].replace("Z", "+00:00")
+    with pytest.raises(drill.DrillError, match="RFC3339"):
+        drill._evidence_passes(plan, gate, evidence)
+
+
+def test_gate_evidence_rejects_boolean_integer_confusion_and_unknown_operator(tmp_path):
+    plan = drill.build_plan(preflight(tmp_path))
+    gate = next(
+        action
+        for action in plan["actions"]
+        if action["type"] == "gate"
+        and any(isinstance(check["value"], bool) for check in action["checks"])
+    )
+    evidence = gate_evidence(plan, gate)
+    boolean = next(check for check in gate["checks"] if isinstance(check["value"], bool))
+    evidence["checks"][boolean["metric"]]["value"] = int(boolean["value"])
+    with pytest.raises(drill.DrillError, match="type"):
+        drill._evidence_passes(plan, gate, evidence)
+    changed_gate = json.loads(json.dumps(gate))
+    changed = next(
+        check for check in changed_gate["checks"] if check["metric"] == boolean["metric"]
+    )
+    changed["operator"] = "contains"
+    with pytest.raises(drill.DrillError, match="operator"):
+        drill._evidence_passes(plan, changed_gate, gate_evidence(plan, changed_gate))
+
+
+@pytest.mark.parametrize("value", [True, [1], {"value": 1}, float("nan"), float("inf")])
+def test_gate_evidence_rejects_wrong_numeric_types(tmp_path, value):
+    plan = drill.build_plan(preflight(tmp_path))
+    gate = next(
+        action
+        for action in plan["actions"]
+        if action["type"] == "gate"
+        and any(
+            isinstance(check["value"], (int, float)) and not isinstance(check["value"], bool)
+            for check in action["checks"]
+        )
+    )
+    evidence = gate_evidence(plan, gate)
+    metric = next(
+        check["metric"]
+        for check in gate["checks"]
+        if isinstance(check["value"], (int, float)) and not isinstance(check["value"], bool)
+    )
+    evidence["checks"][metric]["value"] = value
+    with pytest.raises(drill.DrillError, match="type|finite"):
+        drill._evidence_passes(plan, gate, evidence)
+
+
+def test_gate_evidence_file_must_be_private_regular_and_bounded(tmp_path):
+    relative = Path("gate.json")
+    with pytest.raises(drill.DrillError, match="absolute"):
+        drill._read_gate_evidence(relative)
+    repository_file = drill.ROOT / ".gate-test.json"
+    repository_file.write_text("{}")
+    try:
+        with pytest.raises(drill.DrillError, match="outside"):
+            drill._read_gate_evidence(repository_file)
+    finally:
+        repository_file.unlink()
+    oversized = tmp_path / "oversized.json"
+    oversized.write_bytes(b" " * (drill.GATE_EVIDENCE_MAX_BYTES + 1))
+    with pytest.raises(drill.DrillError, match="size"):
+        drill._read_gate_evidence(oversized)
+    with pytest.raises(drill.DrillError, match="read"):
+        drill._read_gate_evidence(tmp_path / "missing.json")
+    with pytest.raises(drill.DrillError, match="regular"):
+        drill._read_gate_evidence(tmp_path)
 
 
 @pytest.mark.parametrize("mode", drill.MODES)
@@ -1278,12 +1469,19 @@ def test_partial_run_can_rollback_and_cleanup(tmp_path, mode):
         drill.execute_operation(parsed, runner)
 
 
-def _journal_through(parsed, plan, stage_id, *, pending_operation="execute"):
+def _journal_through(parsed, plan, stage_id, *, pending_operation="execute", pending_metadata=None):
     drill._record_phase(parsed.journal, plan, "execute", "marker", "intent")
     drill._record_phase(parsed.journal, plan, "execute", "marker", "completed")
     for action in plan["actions"]:
         if action["id"] == stage_id:
-            drill._record_phase(parsed.journal, plan, pending_operation, stage_id, "intent")
+            drill._record_phase(
+                parsed.journal,
+                plan,
+                pending_operation,
+                stage_id,
+                "intent",
+                **(pending_metadata or {}),
+            )
             return action
         drill._record_phase(parsed.journal, plan, "execute", action["id"], "intent")
         drill._record_phase(parsed.journal, plan, "execute", action["id"], "completed")
@@ -1366,11 +1564,15 @@ def test_pending_gate_revalidates_evidence_without_mutation(tmp_path):
     plan = drill.build_plan(preflight(tmp_path))
     gate = next(item for item in plan["actions"] if item["type"] == "gate")
     parsed = execution_files(tmp_path, plan)
-    _journal_through(parsed, plan, gate["id"])
     parsed.execute_stage = gate["id"]
     parsed.gate_evidence = tmp_path / "gate.json"
-    parsed.gate_evidence.write_text(
-        json.dumps({check["metric"]: check["value"] for check in gate["checks"]})
+    payload = json.dumps(gate_evidence(plan, gate)).encode()
+    parsed.gate_evidence.write_bytes(payload)
+    _journal_through(
+        parsed,
+        plan,
+        gate["id"],
+        pending_metadata={"evidence_digest": drill.hashlib.sha256(payload).hexdigest()},
     )
     marker = {"data": {"run-id": plan["run_id"], "plan-digest": plan["plan_digest"]}}
     calls = []
@@ -1382,6 +1584,36 @@ def test_pending_gate_revalidates_evidence_without_mutation(tmp_path):
         == "completed"
     )
     assert not any("label" in call or "set" in call for call in calls)
+    records = drill._journal_records(parsed.journal, plan)
+    assert records[-1]["evidence_digest"] == drill.hashlib.sha256(payload).hexdigest()
+    assert set(records[-1]["evidence_summary"]) == {
+        "observed_from",
+        "observed_until",
+        "sources",
+    }
+
+
+def test_pending_gate_refuses_changed_evidence_digest(tmp_path):
+    plan = drill.build_plan(preflight(tmp_path))
+    gate = next(item for item in plan["actions"] if item["type"] == "gate")
+    parsed = execution_files(tmp_path, plan)
+    parsed.execute_stage = gate["id"]
+    parsed.gate_evidence = tmp_path / "gate.json"
+    original = json.dumps(gate_evidence(plan, gate)).encode()
+    parsed.gate_evidence.write_bytes(original)
+    _journal_through(
+        parsed,
+        plan,
+        gate["id"],
+        pending_metadata={"evidence_digest": drill.hashlib.sha256(original).hexdigest()},
+    )
+    parsed.gate_evidence.write_text(json.dumps(gate_evidence(plan, gate), indent=2))
+    marker = {"data": {"run-id": plan["run_id"], "plan-digest": plan["plan_digest"]}}
+    with pytest.raises(drill.DrillError, match="digest changed"):
+        drill.execute_operation(
+            parsed,
+            execution_runner(plan, [], marker, plan["expected_deployment"]["replacement_image"]),
+        )
 
 
 def _matching_marker(plan):

@@ -149,13 +149,54 @@ python3 scripts/tokenplace_incident_drill.py --execute-stage "$NEXT_STAGE" \
   --kubeconfig "$STAGING_KUBECONFIG" --gate-evidence "$PRIVATE_GATE_EVIDENCE"
 ```
 
-Omit `--gate-evidence` for mutation stages. Gate evidence is a private JSON object keyed by the
-plan's typed check names. Humans or external systems must supply real readiness, compute
-registration and polling, encrypted request/response/retrieval/decryption, authenticated scrape,
-quota-validation, and bounded observation results; the runner never fabricates them. Resume by
-reissuing the same command: a journaled completed stage is a verified no-op, while a skipped stage,
-changed plan, changed coordinates, or marker collision is refused. Apply only the exact inverse of
-a completed mutation with:
+Omit `--gate-evidence` for mutation stages. For a gate, supply an absolute path to a regular file
+outside this repository (maximum 64 KiB):
+
+```bash
+python3 scripts/tokenplace_incident_drill.py --execute-stage "$GATE" \
+  --plan "$PRIVATE_PLAN" --journal "$PRIVATE_JOURNAL_DIRECTORY" \
+  --kubeconfig "$STAGING_KUBECONFIG" --gate-evidence "$PRIVATE_GATE_EVIDENCE"
+```
+
+Gate evidence uses this strict, versioned schema (the abbreviated digest below must be replaced by
+the exact 64-character digest from the immutable plan):
+
+```json
+{
+  "schema_version": 1,
+  "run_id": "drill-20260910",
+  "plan_digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "stage": "metrics-exit",
+  "observed_from": "2026-09-10T11:45:00Z",
+  "observed_until": "2026-09-10T12:00:00Z",
+  "checks": {
+    "authenticated_scrape": {
+      "value": true,
+      "observed_from": "2026-09-10T11:45:00Z",
+      "observed_until": "2026-09-10T12:00:00Z",
+      "source": "direct-authenticated-target"
+    }
+  }
+}
+```
+
+The `checks` keys must exactly equal every metric in the selected plan action; the complete real
+object therefore includes the other planned checks omitted from this compact example. Unknown or
+missing fields are refused. All timestamps are RFC3339 UTC, ordered, not in the future, and the
+top-level end time must be no more than five minutes old. The top-level interval must cover the
+action duration; every check interval must be contained within it and cover its declared window.
+Zero-duration gates may use a point-in-time interval. A declared source must match exactly.
+Booleans, strings, and finite JSON numbers are compared without boolean/number coercion.
+
+Humans or external systems must supply real readiness, compute registration and polling,
+encrypted request/response/retrieval/decryption, authenticated scrape, quota-validation, and
+bounded observation results; the runner never infers or fabricates them. Evidence must contain no
+payloads, tokens, encrypted bodies, prompts, responses, user identifiers, URLs, headers, or private
+paths. The journal records only the SHA-256 digest, time bounds, and declared-source summary. Resume
+requires the unchanged evidence file and revalidates it before completion. Reissue the same
+command to resume: a journaled completed stage is a verified no-op, while a skipped stage, changed
+plan, changed evidence digest, changed coordinates, or marker collision is refused. Apply only the
+exact inverse of a completed mutation with:
 
 ```bash
 python3 scripts/tokenplace_incident_drill.py --rollback-stage "$COMPLETED_MUTATION" \
