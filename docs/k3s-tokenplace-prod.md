@@ -1,6 +1,9 @@
 # k3s token.place runbook (prod)
 
-Use this environment runbook for production token.place operations after staging sign-off. The full uniform GHCR-first flow lives in [docs/apps/tokenplace.md](apps/tokenplace.md); this page keeps the production commands copy-pasteable.
+Use this environment runbook for production token.place operations after staging sign-off. For
+incident response, use the [token.place incident runbooks](tokenplace-incident-runbooks.md). The full
+uniform GHCR-first flow lives in [docs/apps/tokenplace.md](apps/tokenplace.md); this page keeps the
+production commands copy-pasteable.
 
 ## Scope and ownership
 

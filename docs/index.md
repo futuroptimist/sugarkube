@@ -78,6 +78,8 @@ Review the safety notes before working with power components.
 - [power_system_design.md](power_system_design.md) — sizing batteries and choosing a
   charge controller
 - [outage_catalog.md](outage_catalog.md) — structured archive of incidents
+- [tokenplace-incident-runbooks.md](tokenplace-incident-runbooks.md) — fail-closed token.place
+  metrics-OOM and quota-exhaustion recovery, plus the unperformed staging drill plan
 
 Start with the basics and progress toward a fully autonomous solar cube.
 
