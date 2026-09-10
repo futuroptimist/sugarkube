@@ -185,18 +185,27 @@ object therefore includes the other planned checks omitted from this compact exa
 missing fields are refused. All timestamps are RFC3339 UTC, ordered, not in the future, and the
 top-level end time must be no more than five minutes old. The top-level interval must cover the
 action duration; every check interval must be contained within it and cover its declared window.
-Zero-duration gates may use a point-in-time interval. A declared source must match exactly.
+Every individual check end time must also be no more than five minutes old; a fresh top-level end
+time never makes an older contained check acceptable. Zero-duration gates may use a point-in-time
+interval. A declared source must match exactly.
 Booleans, strings, and finite JSON numbers are compared without boolean/number coercion.
 
 Humans or external systems must supply real readiness, compute registration and polling,
 encrypted request/response/retrieval/decryption, authenticated scrape, quota-validation, and
 bounded observation results; the runner never infers or fabricates them. Evidence must contain no
 payloads, tokens, encrypted bodies, prompts, responses, user identifiers, URLs, headers, or private
-paths. The journal records only the SHA-256 digest, time bounds, and declared-source summary. Resume
-requires the unchanged evidence file and revalidates it before completion. Reissue the same
-command to resume: a journaled completed stage is a verified no-op, while a skipped stage, changed
-plan, changed evidence digest, changed coordinates, or marker collision is refused. Apply only the
-exact inverse of a completed mutation with:
+paths. The journal records only the SHA-256 digest, time bounds, and declared-source summary. A
+validated non-mutating gate is published as one atomic completion record, so it cannot leave a new
+intent pending. For a legacy or interrupted pending gate, an unchanged, still-fresh evidence file
+is revalidated and completed. A different digest is refused while the original observation is
+fresh. Once the recorded original observation is stale, the runner durably appends an `expired`
+transition retaining its original digest and summary, then accepts only a new fully validated,
+fresh evidence file in a separate atomic completion record. Interruption after `expired` is
+retryable with that fresh file. This renewal performs no Kubernetes mutation and is available only
+to immutable-plan gate actions; marker, mutation, rollback, and cleanup records retain their
+intent and exact post-state rules. Reissue the same command to resume: a journaled completed stage
+is a verified no-op, while a skipped stage, changed plan, changed coordinates, malformed evidence,
+or marker collision is refused. Apply only the exact inverse of a completed mutation with:
 
 ```bash
 python3 scripts/tokenplace_incident_drill.py --rollback-stage "$COMPLETED_MUTATION" \

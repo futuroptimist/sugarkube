@@ -1081,6 +1081,7 @@ def _journal_records(directory: Path, plan: dict) -> list[dict]:
     aborting = False
     ordered = ["marker"] + [action["id"] for action in plan["actions"]]
     mutations = {action["id"] for action in plan["actions"] if action["type"] == "mutation"}
+    gates = {action["id"] for action in plan["actions"] if action["type"] == "gate"}
     executed = []
     active = []
     for record in records:
@@ -1104,7 +1105,15 @@ def _journal_records(directory: Path, plan: dict) -> list[dict]:
                 raise DrillError("journal operation is invalid")
             pending = key
         elif phase == "completed":
-            if pending != key:
+            direct_gate = (
+                pending is None
+                and operation == "execute"
+                and stage in gates
+                and not aborting
+                and len(executed) < len(ordered)
+                and stage == ordered[len(executed)]
+            )
+            if pending != key and not direct_gate:
                 raise DrillError("journal transition is invalid")
             completed.add(key)
             pending = None
@@ -1114,6 +1123,10 @@ def _journal_records(directory: Path, plan: dict) -> list[dict]:
                     active.append(stage)
             elif operation == "rollback":
                 active.pop()
+        elif phase == "expired":
+            if pending != key or operation != "execute" or stage not in gates:
+                raise DrillError("journal transition is invalid")
+            pending = None
         else:
             raise DrillError("journal record transition is invalid")
     return records
@@ -1523,6 +1536,8 @@ def _evidence_passes(
         )
         if check_start > check_end or check_start < start or check_end > end or check_end > clock:
             raise DrillError("gate evidence check interval is invalid")
+        if (clock - check_end).total_seconds() > GATE_EVIDENCE_FRESHNESS_SECONDS:
+            raise DrillError("gate evidence check is stale")
         window = _minutes(check["window"], "window") if "window" in check else 0
         if (check_end - check_start).total_seconds() < window * 60:
             raise DrillError("gate evidence check does not cover its window")
@@ -1748,12 +1763,30 @@ def _execute_locked(args, runner, plan, journal, now=None):
                 if record["operation"] == operation and record["stage"] == stage
             )
             if intent.get("evidence_digest") != evidence_digest:
-                raise DrillError("pending gate evidence digest changed")
+                prior_summary = intent.get("evidence_summary")
+                if not isinstance(prior_summary, dict) or set(prior_summary) != {
+                    "observed_from",
+                    "observed_until",
+                    "sources",
+                }:
+                    raise DrillError("pending gate evidence metadata is malformed")
+                prior_end = _utc_timestamp(prior_summary["observed_until"])
+                clock = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+                if (clock - prior_end).total_seconds() <= GATE_EVIDENCE_FRESHNESS_SECONDS:
+                    raise DrillError("pending gate evidence digest changed while still fresh")
+                _record_phase(
+                    journal,
+                    plan,
+                    operation,
+                    stage,
+                    "expired",
+                    evidence_digest=intent["evidence_digest"],
+                    evidence_summary=prior_summary,
+                )
+                pending = None
         if not passes:
             return {"status": "gate-failed", "stage": stage, "on_failure": action["on_failure"]}
         metadata = {"evidence_digest": evidence_digest, "evidence_summary": summary}
-        if not pending:
-            _record_phase(journal, plan, operation, stage, "intent", **metadata)
         _record_phase(journal, plan, operation, stage, "completed", **metadata)
         return {"status": "completed", "stage": stage}
     observed = _action_observed(plan, action, args.kubeconfig, runner)

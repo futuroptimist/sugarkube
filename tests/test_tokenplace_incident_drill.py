@@ -1182,6 +1182,23 @@ def test_gate_evidence_rejects_stale_future_short_window_and_wrong_source(tmp_pa
         drill._evidence_passes(plan, gate, evidence, now)
 
 
+def test_gate_evidence_rejects_stale_individual_check(tmp_path):
+    plan = drill.build_plan(preflight(tmp_path))
+    gate = next(
+        action
+        for action in plan["actions"]
+        if action["type"] == "gate" and action.get("duration", {}).get("value") == 30
+    )
+    now = datetime(2026, 9, 10, 12, tzinfo=timezone.utc)
+    evidence = gate_evidence(plan, gate, now)
+    metric = gate["checks"][0]["metric"]
+    evidence["checks"][metric]["observed_from"] = stamp = "2026-09-10T11:30:00Z"
+    evidence["checks"][metric]["observed_until"] = "2026-09-10T11:35:00Z"
+    assert evidence["observed_from"] == stamp
+    with pytest.raises(drill.DrillError, match="check is stale"):
+        drill._evidence_passes(plan, gate, evidence, now)
+
+
 def test_gate_evidence_rejects_short_duration_window_and_non_utc(tmp_path):
     plan = drill.build_plan(preflight(tmp_path))
     gate = next(
@@ -1568,11 +1585,15 @@ def test_pending_gate_revalidates_evidence_without_mutation(tmp_path):
     parsed.gate_evidence = tmp_path / "gate.json"
     payload = json.dumps(gate_evidence(plan, gate)).encode()
     parsed.gate_evidence.write_bytes(payload)
+    summary = drill._evidence_passes(plan, gate, json.loads(payload), now=None)[1]
     _journal_through(
         parsed,
         plan,
         gate["id"],
-        pending_metadata={"evidence_digest": drill.hashlib.sha256(payload).hexdigest()},
+        pending_metadata={
+            "evidence_digest": drill.hashlib.sha256(payload).hexdigest(),
+            "evidence_summary": summary,
+        },
     )
     marker = {"data": {"run-id": plan["run_id"], "plan-digest": plan["plan_digest"]}}
     calls = []
@@ -1601,19 +1622,61 @@ def test_pending_gate_refuses_changed_evidence_digest(tmp_path):
     parsed.gate_evidence = tmp_path / "gate.json"
     original = json.dumps(gate_evidence(plan, gate)).encode()
     parsed.gate_evidence.write_bytes(original)
+    summary = drill._evidence_passes(plan, gate, json.loads(original), now=None)[1]
     _journal_through(
         parsed,
         plan,
         gate["id"],
-        pending_metadata={"evidence_digest": drill.hashlib.sha256(original).hexdigest()},
+        pending_metadata={
+            "evidence_digest": drill.hashlib.sha256(original).hexdigest(),
+            "evidence_summary": summary,
+        },
     )
     parsed.gate_evidence.write_text(json.dumps(gate_evidence(plan, gate), indent=2))
     marker = {"data": {"run-id": plan["run_id"], "plan-digest": plan["plan_digest"]}}
-    with pytest.raises(drill.DrillError, match="digest changed"):
+    with pytest.raises(drill.DrillError, match="digest changed while still fresh"):
         drill.execute_operation(
             parsed,
             execution_runner(plan, [], marker, plan["expected_deployment"]["replacement_image"]),
         )
+
+
+def test_fresh_evidence_recovers_expired_pending_gate_without_mutation(tmp_path):
+    plan = drill.build_plan(preflight(tmp_path))
+    gate = next(item for item in plan["actions"] if item["type"] == "gate")
+    now = datetime(2026, 9, 10, 12, tzinfo=timezone.utc)
+    old = gate_evidence(plan, gate, now - timedelta(minutes=6))
+    old_payload = json.dumps(old).encode()
+    old_summary = drill._evidence_passes(plan, gate, old, now - timedelta(minutes=6))[1]
+    parsed = execution_files(tmp_path, plan)
+    parsed.execute_stage = gate["id"]
+    parsed.gate_evidence = tmp_path / "replacement-gate.json"
+    parsed.gate_evidence.write_text(json.dumps(gate_evidence(plan, gate, now)))
+    _journal_through(
+        parsed,
+        plan,
+        gate["id"],
+        pending_metadata={
+            "evidence_digest": drill.hashlib.sha256(old_payload).hexdigest(),
+            "evidence_summary": old_summary,
+        },
+    )
+    calls = []
+    result = drill.execute_operation(
+        parsed,
+        execution_runner(
+            plan,
+            calls,
+            _matching_marker(plan),
+            plan["expected_deployment"]["replacement_image"],
+        ),
+        now,
+    )
+    assert result["status"] == "completed"
+    records = drill._journal_records(parsed.journal, plan)
+    assert [record["phase"] for record in records[-2:]] == ["expired", "completed"]
+    assert records[-2]["evidence_digest"] == drill.hashlib.sha256(old_payload).hexdigest()
+    assert not any("label" in call or "set" in call for call in calls)
 
 
 def _matching_marker(plan):
