@@ -1155,7 +1155,10 @@ def _run_checked(
 
 
 def _assert_stage_preflight(
-    plan: dict, kubeconfig: Path, runner: Runner, expected_image: str | None = None
+    plan: dict,
+    kubeconfig: Path,
+    runner: Runner,
+    expected_image: str | set[str] | None = None,
 ) -> None:
     """Reassert authoritative identity and the immutable deployment coordinates."""
     _run_checked(
@@ -1202,17 +1205,21 @@ def _assert_stage_preflight(
     except (json.JSONDecodeError, KeyError, TypeError) as exc:
         raise DrillError("exact deployment preflight is malformed") from exc
     selected = [item for item in containers if item.get("name") == expected["container"]]
+    allowed_images = (
+        expected_image
+        if isinstance(expected_image, set)
+        else (
+            {expected_image}
+            if expected_image
+            else {expected["current_image"], expected["replacement_image"]}
+        )
+    )
     if (
         spec.get("replicas") != expected["replicas"]
         or len(selected) != 1
         or selected[0].get("resources", {}).get("limits", {}).get("memory")
         != expected["memory_limit"]
-        or selected[0].get("image")
-        not in (
-            {expected_image}
-            if expected_image
-            else {expected["current_image"], expected["replacement_image"]}
-        )
+        or selected[0].get("image") not in allowed_images
     ):
         raise DrillError("exact deployment coordinates drifted")
 
@@ -1490,6 +1497,11 @@ def _execute_locked(args, runner, plan, journal):
         if replace_active
         else plan["expected_deployment"]["current_image"]
     )
+    if pending and stage == "replace" and operation in {"execute", "rollback"}:
+        expected_image = {
+            plan["expected_deployment"]["current_image"],
+            plan["expected_deployment"]["replacement_image"],
+        }
     _assert_stage_preflight(plan, args.kubeconfig, runner, expected_image)
 
     if operation == "cleanup":
@@ -1504,6 +1516,8 @@ def _execute_locked(args, runner, plan, journal):
                     _marker_command(plan, args.kubeconfig, "delete"),
                     "exact marker cleanup failed",
                 )
+                if _validate_marker(plan, args.kubeconfig, runner, absent_ok=True):
+                    raise DrillError("exact marker cleanup post-state failed")
             _record_phase(journal, plan, operation, stage, "completed")
             return {"status": "clean", "run_id": plan["run_id"]}
         if (operation, stage) in completed or not marker_present:
@@ -1512,6 +1526,8 @@ def _execute_locked(args, runner, plan, journal):
         _run_checked(
             runner, _marker_command(plan, args.kubeconfig, "delete"), "exact marker cleanup failed"
         )
+        if _validate_marker(plan, args.kubeconfig, runner, absent_ok=True):
+            raise DrillError("exact marker cleanup post-state failed")
         _record_phase(journal, plan, operation, stage, "completed")
         return {"status": "clean", "run_id": plan["run_id"]}
 
@@ -1524,6 +1540,7 @@ def _execute_locked(args, runner, plan, journal):
                     _marker_command(plan, args.kubeconfig, "create"),
                     "marker creation failed",
                 )
+                _validate_marker(plan, args.kubeconfig, runner)
             _record_phase(journal, plan, operation, stage, "completed")
             return {"status": "completed", "stage": stage}
         if (operation, stage) in completed:
@@ -1536,6 +1553,7 @@ def _execute_locked(args, runner, plan, journal):
         _run_checked(
             runner, _marker_command(plan, args.kubeconfig, "create"), "marker creation failed"
         )
+        _validate_marker(plan, args.kubeconfig, runner)
         _record_phase(journal, plan, operation, stage, "completed")
         return {"status": "completed", "stage": stage}
 
@@ -1563,6 +1581,9 @@ def _execute_locked(args, runner, plan, journal):
         _run_checked(
             runner, _bind_command(action["inverse"], args.kubeconfig), "exact stage rollback failed"
         )
+        observed = _action_observed(plan, action, args.kubeconfig, runner)
+        if not _action_matches(plan, action, observed, False):
+            raise DrillError("exact stage rollback post-state failed")
         _record_phase(journal, plan, operation, stage, "completed")
         return {"status": "rolled-back", "stage": stage}
 
@@ -1578,8 +1599,6 @@ def _execute_locked(args, runner, plan, journal):
     if done != expected[: len(done)] or expected[len(done)] != stage:
         raise DrillError("stage is out of order")
     if action["type"] == "gate":
-        if pending:
-            raise DrillError("gate intent cannot be pending")
         if args.gate_evidence is None:
             raise DrillError("gate stage requires private evidence")
         try:
@@ -1588,7 +1607,8 @@ def _execute_locked(args, runner, plan, journal):
             raise DrillError("gate evidence cannot be read") from exc
         if not _evidence_passes(action, evidence):
             return {"status": "gate-failed", "stage": stage, "on_failure": action["on_failure"]}
-        _record_phase(journal, plan, operation, stage, "intent")
+        if not pending:
+            _record_phase(journal, plan, operation, stage, "intent")
         _record_phase(journal, plan, operation, stage, "completed")
         return {"status": "completed", "stage": stage}
     observed = _action_observed(plan, action, args.kubeconfig, runner)
@@ -1603,6 +1623,9 @@ def _execute_locked(args, runner, plan, journal):
     if not pending:
         _record_phase(journal, plan, operation, stage, "intent")
     _run_checked(runner, _bind_command(action["command"], args.kubeconfig), "stage mutation failed")
+    observed = _action_observed(plan, action, args.kubeconfig, runner)
+    if not _action_matches(plan, action, observed, True):
+        raise DrillError("stage mutation post-state failed")
     _record_phase(journal, plan, operation, stage, "completed")
     return {"status": "completed", "stage": stage}
 

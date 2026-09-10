@@ -1115,7 +1115,7 @@ def test_exactly_one_mutation_resume_and_rollback_for_each_mode(tmp_path, mode):
     parsed.rollback_stage = stage["id"]
     calls.clear()
     assert drill.execute_operation(parsed, runner)["status"] == "rolled-back"
-    assert stage["inverse"][-2:] == calls[-1][-2:]
+    assert any(stage["inverse"][-2:] == call[-2:] for call in calls)
 
 
 @pytest.mark.parametrize("mode", drill.MODES)
@@ -1276,3 +1276,226 @@ def test_partial_run_can_rollback_and_cleanup(tmp_path, mode):
     parsed.execute_stage = plan["actions"][1]["id"]
     with pytest.raises(drill.DrillError, match="after rollback"):
         drill.execute_operation(parsed, runner)
+
+
+def _journal_through(parsed, plan, stage_id, *, pending_operation="execute"):
+    drill._record_phase(parsed.journal, plan, "execute", "marker", "intent")
+    drill._record_phase(parsed.journal, plan, "execute", "marker", "completed")
+    for action in plan["actions"]:
+        if action["id"] == stage_id:
+            drill._record_phase(parsed.journal, plan, pending_operation, stage_id, "intent")
+            return action
+        drill._record_phase(parsed.journal, plan, "execute", action["id"], "intent")
+        drill._record_phase(parsed.journal, plan, "execute", action["id"], "completed")
+    raise AssertionError(f"missing stage {stage_id}")
+
+
+@pytest.mark.parametrize(
+    ("operation", "initial_image", "expected_status"),
+    [
+        ("execute", "replacement_image", "completed"),
+        ("rollback", "current_image", "rolled-back"),
+    ],
+)
+def test_interrupted_replace_post_state_reconciles_without_replay(
+    tmp_path, operation, initial_image, expected_status
+):
+    plan = drill.build_plan(preflight(tmp_path))
+    parsed = execution_files(tmp_path, plan)
+    action = _journal_through(parsed, plan, "replace")
+    if operation == "rollback":
+        # A rollback intent follows the completed forward operation.
+        drill._record_phase(parsed.journal, plan, "execute", "replace", "completed")
+        drill._record_phase(parsed.journal, plan, "rollback", "replace", "intent")
+    parsed.execute_stage = "replace" if operation == "execute" else None
+    parsed.rollback_stage = "replace" if operation == "rollback" else None
+    marker = {"data": {"run-id": plan["run_id"], "plan-digest": plan["plan_digest"]}}
+    calls = []
+    runner = execution_runner(plan, calls, marker, plan["expected_deployment"][initial_image])
+
+    assert drill.execute_operation(parsed, runner)["status"] == expected_status
+    mutation = action["command"] if operation == "execute" else action["inverse"]
+    assert not any(call[-2:] == mutation[-2:] for call in calls)
+
+
+@pytest.mark.parametrize("operation", ["execute", "rollback"])
+def test_pending_replace_pre_state_retries_once_and_verifies(tmp_path, operation):
+    plan = drill.build_plan(preflight(tmp_path))
+    parsed = execution_files(tmp_path, plan)
+    if operation == "execute":
+        action = _journal_through(parsed, plan, "replace")
+        parsed.execute_stage = "replace"
+        initial = plan["expected_deployment"]["current_image"]
+        command = action["command"]
+    else:
+        _journal_through(parsed, plan, "replace")
+        # Complete the pending forward replace before beginning its rollback.
+        drill._record_phase(parsed.journal, plan, "execute", "replace", "completed")
+        drill._record_phase(parsed.journal, plan, "rollback", "replace", "intent")
+        action = next(item for item in plan["actions"] if item["id"] == "replace")
+        parsed.rollback_stage = "replace"
+        initial = plan["expected_deployment"]["replacement_image"]
+        command = action["inverse"]
+    marker = {"data": {"run-id": plan["run_id"], "plan-digest": plan["plan_digest"]}}
+    calls = []
+    drill.execute_operation(parsed, execution_runner(plan, calls, marker, initial))
+    assert sum(call[-2:] == command[-2:] for call in calls) == 1
+    assert sum("deployment" in call and "get" in call for call in calls) >= 2
+
+
+@pytest.mark.parametrize("operation", ["execute", "rollback"])
+def test_pending_replace_rejects_third_image(tmp_path, operation):
+    plan = drill.build_plan(preflight(tmp_path))
+    parsed = execution_files(tmp_path, plan)
+    _journal_through(parsed, plan, "replace")
+    if operation == "execute":
+        parsed.execute_stage = "replace"
+    else:
+        drill._record_phase(parsed.journal, plan, "execute", "replace", "completed")
+        drill._record_phase(parsed.journal, plan, "rollback", "replace", "intent")
+        parsed.rollback_stage = "replace"
+    marker = {"data": {"run-id": plan["run_id"], "plan-digest": plan["plan_digest"]}}
+    with pytest.raises(drill.DrillError, match="coordinates drifted"):
+        drill.execute_operation(
+            parsed,
+            execution_runner(plan, [], marker, "registry.example/relay@sha256:" + "d" * 64),
+        )
+
+
+def test_pending_gate_revalidates_evidence_without_mutation(tmp_path):
+    plan = drill.build_plan(preflight(tmp_path))
+    gate = next(item for item in plan["actions"] if item["type"] == "gate")
+    parsed = execution_files(tmp_path, plan)
+    _journal_through(parsed, plan, gate["id"])
+    parsed.execute_stage = gate["id"]
+    parsed.gate_evidence = tmp_path / "gate.json"
+    parsed.gate_evidence.write_text(
+        json.dumps({check["metric"]: check["value"] for check in gate["checks"]})
+    )
+    marker = {"data": {"run-id": plan["run_id"], "plan-digest": plan["plan_digest"]}}
+    calls = []
+    assert (
+        drill.execute_operation(
+            parsed,
+            execution_runner(plan, calls, marker, plan["expected_deployment"]["replacement_image"]),
+        )["status"]
+        == "completed"
+    )
+    assert not any("label" in call or "set" in call for call in calls)
+
+
+def _matching_marker(plan):
+    return {"data": {"run-id": plan["run_id"], "plan-digest": plan["plan_digest"]}}
+
+
+def test_marker_success_without_post_state_refuses_completion(tmp_path):
+    plan = drill.build_plan(preflight(tmp_path))
+    parsed = execution_files(tmp_path, plan)
+    parsed.execute_stage = "marker"
+    base = execution_runner(plan, [])
+
+    def false_success(command):
+        if "configmap" in command and "create" in command:
+            return subprocess.CompletedProcess(command, 0, "", "")
+        return base(command)
+
+    with pytest.raises(drill.DrillError, match="marker is missing"):
+        drill.execute_operation(parsed, false_success)
+    assert drill._pending_operation(drill._journal_records(parsed.journal, plan)) == (
+        "execute",
+        "marker",
+    )
+
+
+def test_action_success_without_post_state_refuses_completion(tmp_path):
+    plan = drill.build_plan(preflight(tmp_path))
+    parsed = execution_files(tmp_path, plan)
+    drill._record_phase(parsed.journal, plan, "execute", "marker", "intent")
+    drill._record_phase(parsed.journal, plan, "execute", "marker", "completed")
+    action = plan["actions"][0]
+    parsed.execute_stage = action["id"]
+    base = execution_runner(plan, [], _matching_marker(plan))
+
+    def false_success(command):
+        if command[-2:] == action["command"][-2:]:
+            return subprocess.CompletedProcess(command, 0, "", "")
+        return base(command)
+
+    with pytest.raises(drill.DrillError, match="post-state"):
+        drill.execute_operation(parsed, false_success)
+    assert drill._pending_operation(drill._journal_records(parsed.journal, plan)) == (
+        "execute",
+        action["id"],
+    )
+
+
+def test_rollback_success_without_post_state_refuses_completion(tmp_path):
+    plan = drill.build_plan(preflight(tmp_path))
+    parsed = execution_files(tmp_path, plan)
+    action = _journal_through(parsed, plan, "replace")
+    drill._record_phase(parsed.journal, plan, "execute", "replace", "completed")
+    parsed.rollback_stage = "replace"
+    base = execution_runner(
+        plan, [], _matching_marker(plan), plan["expected_deployment"]["replacement_image"]
+    )
+
+    def false_success(command):
+        if command[-2:] == action["inverse"][-2:]:
+            return subprocess.CompletedProcess(command, 0, "", "")
+        return base(command)
+
+    with pytest.raises(drill.DrillError, match="rollback post-state"):
+        drill.execute_operation(parsed, false_success)
+    assert drill._pending_operation(drill._journal_records(parsed.journal, plan)) == (
+        "rollback",
+        "replace",
+    )
+
+
+def test_marker_delete_success_without_absence_refuses_completion(tmp_path):
+    plan = drill.build_plan(preflight(tmp_path))
+    parsed = execution_files(tmp_path, plan)
+    parsed.cleanup = True
+    drill._record_phase(parsed.journal, plan, "execute", "marker", "intent")
+    drill._record_phase(parsed.journal, plan, "execute", "marker", "completed")
+    base = execution_runner(plan, [], _matching_marker(plan))
+
+    def false_success(command):
+        if "configmap" in command and "delete" in command:
+            return subprocess.CompletedProcess(command, 0, "", "")
+        return base(command)
+
+    with pytest.raises(drill.DrillError, match="cleanup post-state"):
+        drill.execute_operation(parsed, false_success)
+    assert drill._pending_operation(drill._journal_records(parsed.journal, plan)) == (
+        "cleanup",
+        "cleanup",
+    )
+
+
+def test_action_post_state_lookup_error_remains_pending(tmp_path):
+    plan = drill.build_plan(preflight(tmp_path))
+    parsed = execution_files(tmp_path, plan)
+    drill._record_phase(parsed.journal, plan, "execute", "marker", "intent")
+    drill._record_phase(parsed.journal, plan, "execute", "marker", "completed")
+    action = plan["actions"][0]
+    parsed.execute_stage = action["id"]
+    base = execution_runner(plan, [], _matching_marker(plan))
+    lookups = 0
+
+    def fail_post_lookup(command):
+        nonlocal lookups
+        if "get" in command and (
+            "deployment" in command or action["resource"].split("/")[0] in command
+        ):
+            lookups += 1
+            if lookups >= 3:
+                return subprocess.CompletedProcess(command, 1, "", "unavailable")
+        return base(command)
+
+    with pytest.raises(drill.DrillError, match="state lookup failed"):
+        drill.execute_operation(parsed, fail_post_lookup)
+    assert drill._pending_operation(drill._journal_records(parsed.journal, plan)) == (
+        "execute",
+        action["id"],
+    )
