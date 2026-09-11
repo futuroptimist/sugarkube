@@ -1,6 +1,7 @@
 import argparse
 import json
 import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -930,20 +931,36 @@ def test_evidence_publication_race_does_not_replace_existing_target(tmp_path):
 
 
 def test_duplicate_inventory_route_classes_are_rejected(monkeypatch):
-    contract = drill.yaml.safe_load(
-        (drill.ROOT / "config/observability/probe-quotas.yaml").read_text()
-    )
-    duplicate = next(
-        p.copy()
-        for p in contract["probes"]
-        if p["application"] == "tokenplace" and p["environment"] == "staging"
-    )
-    contract["probes"].append(duplicate)
-    original = drill.yaml.safe_load
-    monkeypatch.setattr(drill.yaml, "safe_load", lambda _: contract)
+    original = json.loads((drill.ROOT / "platform/observability/app-metrics.json").read_text())
+    contract = json.loads(json.dumps(original))
+    probes = contract["applications"]["tokenplace"]["environments"]["staging"][
+        "incidentDrillProbes"
+    ]
+    probes.append(probes[0].copy())
+    monkeypatch.setattr(drill.json, "loads", lambda _: contract)
     with pytest.raises(drill.DrillError, match="duplicate"):
         drill.inventory("staging")
-    monkeypatch.setattr(drill.yaml, "safe_load", original)
+
+
+def test_malformed_incident_inventory_is_rejected(monkeypatch):
+    contract = json.loads((drill.ROOT / "platform/observability/app-metrics.json").read_text())
+    contract["applications"]["tokenplace"]["environments"]["staging"]["incidentDrillProbes"] = {
+        "route_class": "root"
+    }
+    monkeypatch.setattr(drill.json, "loads", lambda _: contract)
+    with pytest.raises(drill.DrillError, match="malformed"):
+        drill.inventory("staging")
+
+
+def test_operator_help_works_without_site_packages():
+    result = subprocess.run(
+        [sys.executable, "-S", str(drill.ROOT / "scripts/tokenplace_incident_drill.py"), "--help"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert "--live-preflight" in result.stdout
 
 
 def test_metrics_plan_has_typed_ordered_gates_and_metrics_last(tmp_path):

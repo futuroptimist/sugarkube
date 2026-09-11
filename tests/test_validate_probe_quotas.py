@@ -1,4 +1,5 @@
 import copy
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -264,6 +265,22 @@ def test_repository_staging_and_production_rendered_graphs_validate():
         }
         methods, replicas = quotas.load_modules(env)
         quotas.validate(env, rendered, selected, methods, replicas)
+
+
+def test_incident_drill_probe_inventory_matches_quota_contract():
+    contract = yaml.safe_load((ROOT / "config/observability/probe-quotas.yaml").read_text())
+    metrics = json.loads((ROOT / "platform/observability/app-metrics.json").read_text())
+    incident_probes = metrics["applications"]["tokenplace"]["environments"]["staging"][
+        "incidentDrillProbes"
+    ]
+    quota_probes = [
+        {key: probe[key] for key in ("route_class", "probe", "route", "method")}
+        for probe in contract["probes"]
+        if probe["application"] == "tokenplace" and probe["environment"] == "staging"
+    ]
+    assert sorted(incident_probes, key=lambda probe: probe["route_class"]) == sorted(
+        quota_probes, key=lambda probe: probe["route_class"]
+    )
 
 
 def test_tokenplace_production_requires_both_corrected_exact_exemptions():

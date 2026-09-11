@@ -19,8 +19,6 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urlsplit
 
-import yaml
-
 ROOT = Path(__file__).resolve().parents[1]
 SAFE_NAME = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
 IMAGE = re.compile(r"[^\s:@]+(?:/[^\s:@]+)+@sha256:[0-9a-f]{64}")
@@ -239,12 +237,11 @@ def _publish_evidence(target: Path, payload: str) -> None:
 
 
 def inventory(environment: str) -> Inventory:
-    quota = yaml.safe_load((ROOT / "config/observability/probe-quotas.yaml").read_text())
-    matches = [
-        p
-        for p in quota["probes"]
-        if p["application"] == "tokenplace" and p["environment"] == environment
-    ]
+    metrics = json.loads((ROOT / "platform/observability/app-metrics.json").read_text())
+    item = metrics["applications"]["tokenplace"]["environments"][environment]
+    matches = item["incidentDrillProbes"]
+    if not isinstance(matches, list) or not all(isinstance(probe, dict) for probe in matches):
+        raise DrillError("token.place incident inventory is malformed")
     route_classes = [p["route_class"] for p in matches]
     if len(route_classes) != len(set(route_classes)):
         raise DrillError("token.place quota inventory contains duplicate route classes")
@@ -259,8 +256,6 @@ def inventory(environment: str) -> Inventory:
         (selected[k]["route"], selected[k]["method"]) != v for k, v in expected.items()
     ):
         raise DrillError("token.place quota inventory is missing, ambiguous, or mismatched")
-    metrics = json.loads((ROOT / "platform/observability/app-metrics.json").read_text())
-    item = metrics["applications"]["tokenplace"]["environments"][environment]
     return Inventory(
         item["namespace"],
         item["serviceMonitorName"],
@@ -2071,7 +2066,7 @@ def main(argv: list[str] | None = None) -> int:
     except DrillError as exc:
         print(f"token.place incident drill refused: {exc}", file=sys.stderr)
         return 2
-    except (OSError, KeyError, TypeError, json.JSONDecodeError, yaml.YAMLError):
+    except (OSError, KeyError, TypeError, json.JSONDecodeError):
         print("token.place incident drill refused: precondition validation failed", file=sys.stderr)
         return 2
 

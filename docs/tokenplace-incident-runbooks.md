@@ -115,6 +115,10 @@ a new evidence file in an operator-supplied private directory outside the reposi
 From the repository root, generate both plans (replace every placeholder with reviewed staging
 coordinates):
 
+The runner uses only the Python standard library; no ambient Python packages or package installation
+are prerequisites for this direct `python3` invocation. Its incident Probe coordinates are loaded
+strictly from the repository's JSON observability inventory.
+
 ```bash
 python3 scripts/tokenplace_incident_drill.py --dry-run --mode metrics-oom \
   --host "$STAGING_HOST" --kubeconfig "$STAGING_KUBECONFIG" --context sugar-staging \
