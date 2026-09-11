@@ -37,6 +37,8 @@ ASSETS = {
 REVISION = re.compile(r"[0-9a-f]{40}")
 ASSET_REVISION = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 APPROVED_RUNNER_REVISION = "97ab09f13fb098de928a878bf1fe9b8d13032cb5"
+CURRENT_RUNNER_REVISION = "f14b9e978cff52930c3f8adc1fe96beae6936cef"
+CURRENT_RUNNER_MANIFEST_SHA256 = "b0d08bda3cb459ca5576a57b5f1066427b9c1612e6e148ad0a9af1f3caeb57a5"
 ASSET_MANIFEST_SCHEMA_VERSION = 1
 CLASSIFICATION_PERSISTENCE_CAPABILITY = "classificationRuntimeDirectoryPreserve"
 CRITICAL = (
@@ -344,7 +346,11 @@ def _validate_retained_asset_contract(tree: Path) -> tuple[dict[str, str], bool]
         if sha(path) != expected:
             raise ValueError("staged asset hash mismatch")
     config = json.loads((tree / "etc/sugarkube/dspace-chat-synthetic.json").read_text())
-    if config.get("runnerRevision") != APPROVED_RUNNER_REVISION:
+    runner_revision = config.get("runnerRevision")
+    if runner_revision == CURRENT_RUNNER_REVISION:
+        if config.get("runnerManifestSha256") != CURRENT_RUNNER_MANIFEST_SHA256:
+            raise ValueError("unapproved runner revision")
+    elif runner_revision != APPROVED_RUNNER_REVISION:
         raise ValueError("unapproved runner revision")
     if (
         "Persistent=true"
@@ -1023,7 +1029,7 @@ def main() -> int:
         default="dry-run",
     )
     parser.add_argument("--root", type=Path, default=Path("/"))
-    parser.add_argument("--revision", default="97ab09f13fb098de928a878bf1fe9b8d13032cb5")
+    parser.add_argument("--revision", default=CURRENT_RUNNER_REVISION)
     parser.add_argument("--apply", action="store_true", help="authorize an explicit mutation")
     parser.add_argument("--runner-manifest-sha256")
     parser.add_argument("--asset-revision")

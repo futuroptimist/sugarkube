@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "runnerRevision": "97ab09f13fb098de928a878bf1fe9b8d13032cb5",
-  "runnerManifestSha256": "997e8a5572925ba2dc4ccf275764f7d046c975f01145fd5d3db67a05aca7e864",
+  "runnerRevision": "f14b9e978cff52930c3f8adc1fe96beae6936cef",
+  "runnerManifestSha256": "b0d08bda3cb459ca5576a57b5f1066427b9c1612e6e148ad0a9af1f3caeb57a5",
   "dspaceVersion": "3.1.1",
   "dspaceSourceRevision": "22f506e07e0b5abfd0cf756e9c5827c0458fb4b2",
   "repositoryIdentity": "https://github.com/democratizedspace/dspace.git",
