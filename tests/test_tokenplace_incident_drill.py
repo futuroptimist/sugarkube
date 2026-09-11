@@ -1,6 +1,7 @@
 import argparse
 import json
 import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -929,21 +930,37 @@ def test_evidence_publication_race_does_not_replace_existing_target(tmp_path):
     assert list(directory.glob(".tokenplace-evidence-*")) == []
 
 
-def test_duplicate_inventory_route_classes_are_rejected(monkeypatch):
-    contract = drill.yaml.safe_load(
-        (drill.ROOT / "config/observability/probe-quotas.yaml").read_text()
+def test_site_packages_free_entry_point_displays_help():
+    result = subprocess.run(
+        [sys.executable, "-S", str(drill.ROOT / "scripts/tokenplace_incident_drill.py"), "--help"],
+        cwd=drill.ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
     )
-    duplicate = next(
-        p.copy()
-        for p in contract["probes"]
-        if p["application"] == "tokenplace" and p["environment"] == "staging"
+    assert result.returncode == 0, result.stderr
+    assert "--live-preflight" in result.stdout
+
+
+def test_duplicate_inventory_route_classes_are_rejected(tmp_path, monkeypatch):
+    contract = json.loads(drill.INCIDENT_INVENTORY.read_text())
+    contract["environments"]["staging"].append(
+        contract["environments"]["staging"][0].copy()
     )
-    contract["probes"].append(duplicate)
-    original = drill.yaml.safe_load
-    monkeypatch.setattr(drill.yaml, "safe_load", lambda _: contract)
+    path = tmp_path / "inventory.json"
+    path.write_text(json.dumps(contract))
+    monkeypatch.setattr(drill, "INCIDENT_INVENTORY", path)
     with pytest.raises(drill.DrillError, match="duplicate"):
         drill.inventory("staging")
-    monkeypatch.setattr(drill.yaml, "safe_load", original)
+
+
+@pytest.mark.parametrize("contents", ["not json", "{}", '{"version": 1, "environments": []}'])
+def test_malformed_incident_inventory_fails_closed(tmp_path, monkeypatch, contents):
+    path = tmp_path / "inventory.json"
+    path.write_text(contents)
+    monkeypatch.setattr(drill, "INCIDENT_INVENTORY", path)
+    with pytest.raises((drill.DrillError, json.JSONDecodeError)):
+        drill.inventory("staging")
 
 
 def test_metrics_plan_has_typed_ordered_gates_and_metrics_last(tmp_path):
