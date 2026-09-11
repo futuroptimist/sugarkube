@@ -6,6 +6,32 @@
         "staging": {
           "namespace": "tokenplace",
           "serviceMonitorName": "tokenplace",
+          "incidentDrillProbes": [
+            {
+              "route_class": "root",
+              "probe": "blackbox-tokenplace-staging-root",
+              "route": "/",
+              "method": "GET"
+            },
+            {
+              "route_class": "metadata",
+              "probe": "blackbox-tokenplace-staging-metadata",
+              "route": "/api/v1/meta",
+              "method": "GET"
+            },
+            {
+              "route_class": "livez",
+              "probe": "blackbox-tokenplace-staging-livez",
+              "route": "/livez",
+              "method": "GET"
+            },
+            {
+              "route_class": "healthz",
+              "probe": "blackbox-tokenplace-staging-healthz",
+              "route": "/healthz",
+              "method": "GET"
+            }
+          ],
           "expectedTargetCount": 1,
           "secret": {
             "name": "tokenplace-staging-metrics-token",
