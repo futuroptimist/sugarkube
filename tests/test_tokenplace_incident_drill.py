@@ -31,8 +31,12 @@ def args(tmp_path: Path, **changes):
         service_monitor="tokenplace",
         run_id="drill-test",
         snapshot=tmp_path / "snapshot.json",
+        live_preflight=False,
         evidence=tmp_path / "private-evidence" / "result.json",
         acknowledge_state_loss=True,
+        lifecycle="real-incident",
+        incident_image=None,
+        acknowledge_staging_fault_injection=False,
         dry_run=True,
     )
     values.update(changes)
@@ -178,6 +182,73 @@ def test_typed_preflight_required_and_image_coordinates_are_exact(tmp_path):
         "relay=" + checked.coordinates.rollback_image
     )
     assert plan["expected_deployment"]["current_image"] == checked.coordinates.current_image
+
+
+def test_staging_rehearsal_has_separate_identities_and_live_oom_gate(tmp_path):
+    parsed = args(
+        tmp_path,
+        lifecycle="staging-rehearsal",
+        incident_image="registry.example/relay@sha256:" + "d" * 64,
+        acknowledge_staging_fault_injection=True,
+    )
+    c = drill.validate(parsed)
+    healthy = snapshot(c)
+    healthy["classification"] = {}
+    plan = drill.build_plan(drill.preflight_snapshot("metrics-oom", c, healthy))
+
+    assert plan["lifecycle"] == "staging-rehearsal"
+    assert plan["preflight"]["classification"] == {"oom_status": "not-yet-observed"}
+    assert plan["preflight"]["offline_fixture_authoritative"] is False
+    assert [action["id"] for action in plan["actions"][:3]] == [
+        "inject-oom-stimulus",
+        "observe-authentic-oom",
+        "pause-metrics",
+    ]
+    stimulus = plan["actions"][0]
+    assert stimulus["command"][-1] == "relay=" + c.incident_image
+    assert stimulus["inverse"][-1] == "relay=" + c.current_image
+    replace = next(action for action in plan["actions"] if action["id"] == "replace")
+    assert replace["old_state"] == {"image": c.incident_image}
+    assert replace["inverse"][-1] == "relay=" + c.current_image
+    assert (
+        len(
+            {
+                plan["expected_deployment"][key]
+                for key in (
+                    "current_image",
+                    "incident_image",
+                    "replacement_image",
+                    "rollback_image",
+                )
+            }
+        )
+        == 4
+    )
+
+
+@pytest.mark.parametrize(
+    "changes,message",
+    [
+        ({"acknowledge_staging_fault_injection": False}, "fault-injection"),
+        ({"incident_image": None}, "incident image"),
+        ({"incident_image": "registry.example/relay@sha256:" + "a" * 64}, "distinct"),
+        ({"environment": "production"}, "staging"),
+    ],
+)
+def test_staging_rehearsal_authorization_and_coordinates_fail_closed(tmp_path, changes, message):
+    values = {
+        "lifecycle": "staging-rehearsal",
+        "incident_image": "registry.example/relay@sha256:" + "d" * 64,
+        "acknowledge_staging_fault_injection": True,
+    }
+    values.update(changes)
+    with pytest.raises(drill.DrillError, match=message):
+        drill.validate(args(tmp_path, **values))
+
+
+def test_real_incident_rejects_rehearsal_controls(tmp_path):
+    with pytest.raises(drill.DrillError, match="require staging-rehearsal"):
+        drill.validate(args(tmp_path, incident_image="registry.example/relay@sha256:" + "d" * 64))
 
 
 @pytest.mark.parametrize(
@@ -650,7 +721,9 @@ def test_cli_accepts_private_evidence_location_outside_repo(tmp_path, monkeypatc
     monkeypatch.chdir(tmp_path)
     argv = []
     for key, value in vars(parsed).items():
-        if key in {"acknowledge_state_loss", "dry_run"}:
+        if value is None or value is False:
+            continue
+        if key in {"acknowledge_state_loss", "acknowledge_staging_fault_injection", "dry_run"}:
             argv.append("--" + key.replace("_", "-"))
         else:
             argv += ["--" + key.replace("_", "-"), str(value)]
@@ -674,7 +747,9 @@ def test_cli_refuses_non_private_evidence_targets_without_disclosure(
     parsed.evidence = target
     argv = []
     for key, value in vars(parsed).items():
-        if key in {"acknowledge_state_loss", "dry_run"}:
+        if value is None or value is False:
+            continue
+        if key in {"acknowledge_state_loss", "acknowledge_staging_fault_injection", "dry_run"}:
             argv.append("--" + key.replace("_", "-"))
         else:
             argv += ["--" + key.replace("_", "-"), str(value)]
@@ -836,6 +911,23 @@ def test_quota_restoration_has_exact_inverse_and_preserves_health(tmp_path):
         observation = next(
             action for action in plan["actions"] if action["id"] == f"observe-{label}"
         )
+
+
+def test_offline_rehearsal_plan_cannot_be_executed(tmp_path):
+    parsed = args(
+        tmp_path,
+        lifecycle="staging-rehearsal",
+        incident_image="registry.example/relay@sha256:" + "d" * 64,
+        acknowledge_staging_fault_injection=True,
+    )
+    c = drill.validate(parsed)
+    healthy = snapshot(c)
+    healthy["classification"] = {}
+    plan = drill.build_plan(drill.preflight_snapshot("metrics-oom", c, healthy))
+    path = tmp_path / "preview.json"
+    path.write_text(json.dumps(plan))
+    with pytest.raises(drill.DrillError, match="cannot be executed"):
+        drill._load_execution_plan(path)
         assert "release=kube-prometheus-stack" in restore["command"]
         assert observation["duration"] == {"value": 15, "unit": "minutes"}
         assert observation["on_failure"] == restore["inverse"]

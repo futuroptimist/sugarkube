@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SAFE_NAME = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
 IMAGE = re.compile(r"[^\s:@]+(?:/[^\s:@]+)+@sha256:[0-9a-f]{64}")
 MODES = ("metrics-oom", "quota-exhaustion")
+LIFECYCLES = ("real-incident", "staging-rehearsal")
 STAGING_HOST = "staging.token.place"
 EXECUTION_OPERATIONS = ("--execute-stage", "--rollback-stage", "--cleanup")
 GATE_EVIDENCE_MAX_BYTES = 64 * 1024
@@ -52,6 +53,8 @@ class Coordinates:
     memory_limit: str
     service_monitor: str
     run_id: str
+    lifecycle: str = "real-incident"
+    incident_image: str | None = None
 
 
 @dataclass(frozen=True)
@@ -84,6 +87,8 @@ class Preflight:
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     result.add_argument("--mode", choices=MODES, required=True)
+    result.add_argument("--lifecycle", choices=LIFECYCLES, default="real-incident")
+    result.add_argument("--incident-image")
     for name in (
         "host",
         "context",
@@ -101,9 +106,12 @@ def parser() -> argparse.ArgumentParser:
         result.add_argument(f"--{name}", required=True)
     result.add_argument("--kubeconfig", required=True, type=Path)
     result.add_argument("--replicas", required=True, type=int)
-    result.add_argument("--snapshot", required=True, type=Path)
+    preflight = result.add_mutually_exclusive_group(required=True)
+    preflight.add_argument("--snapshot", type=Path)
+    preflight.add_argument("--live-preflight", action="store_true")
     result.add_argument("--evidence", required=True, type=Path)
     result.add_argument("--acknowledge-state-loss", action="store_true")
+    result.add_argument("--acknowledge-staging-fault-injection", action="store_true")
     result.add_argument("--dry-run", action="store_true", required=True)
     return result
 
@@ -134,6 +142,24 @@ def validate(args: argparse.Namespace) -> Coordinates:
     for field in ("current_image", "replacement_image", "rollback_image"):
         if not IMAGE.fullmatch(getattr(args, field)):
             raise DrillError(f"{field.replace('_', ' ')} must use an immutable sha256 digest")
+    lifecycle = getattr(args, "lifecycle", "real-incident")
+    incident_image = getattr(args, "incident_image", None)
+    if lifecycle == "staging-rehearsal":
+        if args.mode != "metrics-oom":
+            raise DrillError("staging rehearsal is supported only for metrics-OOM")
+        if not IMAGE.fullmatch(incident_image or ""):
+            raise DrillError(
+                "incident image must use a separately supplied immutable sha256 digest"
+            )
+        if not getattr(args, "acknowledge_staging_fault_injection", False):
+            raise DrillError("explicit staging fault-injection authorization is required")
+        if (
+            len({args.current_image, incident_image, args.replacement_image, args.rollback_image})
+            != 4
+        ):
+            raise DrillError("baseline, incident, recovery, and fallback images must be distinct")
+    elif incident_image is not None or getattr(args, "acknowledge_staging_fault_injection", False):
+        raise DrillError("rehearsal stimulus controls require staging-rehearsal lifecycle")
     if args.current_image == args.replacement_image:
         raise DrillError("current and replacement images must be distinct")
     if not re.fullmatch(r"[1-9][0-9]*(Mi|Gi)", args.memory_limit):
@@ -146,9 +172,13 @@ def validate(args: argparse.Namespace) -> Coordinates:
             "explicit authorization for process-local and emptyDir state loss is required"
         )
     _validate_evidence_target(args.evidence)
-    return Coordinates(
-        **{field: getattr(args, field) for field in Coordinates.__dataclass_fields__}
-    )
+    values = {
+        field: getattr(args, field)
+        for field in Coordinates.__dataclass_fields__
+        if hasattr(args, field)
+    }
+    values.update(lifecycle=lifecycle, incident_image=incident_image)
+    return Coordinates(**values)
 
 
 def _validate_evidence_target(target: Path) -> None:
@@ -285,7 +315,7 @@ def _validate_snapshot(
     ):
         raise DrillError("live Probe coordinates do not match inventory")
     evidence = snapshot.get("classification", {})
-    if mode == "metrics-oom":
+    if mode == "metrics-oom" and c.lifecycle == "real-incident":
         if evidence.get("termination_reason") != "OOMKilled" or evidence.get("exit_code") != 137:
             raise DrillError("metrics-OOM classification requires OOMKilled with exit code 137")
         classification_items = [("termination_reason", "OOMKilled"), ("exit_code", 137)]
@@ -293,7 +323,7 @@ def _validate_snapshot(
             for key in ("restart_count", "termination_time", "event_aggregates"):
                 classification_items.append((key, evidence[key]))
         classification = tuple(classification_items)
-    else:
+    elif mode == "quota-exhaustion":
         statuses = evidence.get("route_statuses")
         if (
             statuses != {"root": 429, "metadata": 429, "livez": 200, "healthz": 200}
@@ -309,6 +339,10 @@ def _validate_snapshot(
             ("healthz_status", 200),
             ("quota_validator_success", True),
         )
+    else:
+        if evidence:
+            raise DrillError("healthy rehearsal preflight must not assert synthetic OOM evidence")
+        classification = (("oom_status", "not-yet-observed"),)
     capability = deployment.get("metrics_mode")
     if capability not in (None, {"normal": "normal", "degraded": "degraded"}):
         raise DrillError("degraded metrics capability is not the supported reviewed contract")
@@ -367,10 +401,17 @@ def preflight_live(
             raise DrillError("exact live target returned invalid JSON") from exc
     snapshot = _normalise_live(c, objects)
     deployment = objects[0]
-    if mode == "metrics-oom":
+    if mode == "metrics-oom" and c.lifecycle == "real-incident":
         snapshot["classification"] = _observe_live_oom(c, deployment, base, runner)
     if mode == "quota-exhaustion":
         snapshot["classification"] = _observe_live_quota(runner)
+    if c.lifecycle == "staging-rehearsal":
+        status = deployment.get("status", {})
+        if (
+            status.get("readyReplicas", 0) != c.replicas
+            or status.get("availableReplicas", 0) != c.replicas
+        ):
+            raise DrillError("healthy rehearsal baseline is not ready")
     return _validate_snapshot(
         mode,
         c,
@@ -393,7 +434,14 @@ def _runner_json(runner: Runner, command: list[str], error: str) -> dict:
     return value
 
 
-def _observe_live_oom(c: Coordinates, deployment: dict, base: list[str], runner: Runner) -> dict:
+def _observe_live_oom(
+    c: Coordinates,
+    deployment: dict,
+    base: list[str],
+    runner: Runner,
+    *,
+    not_before: datetime | None = None,
+) -> dict:
     metadata = deployment.get("metadata", {})
     deployment_uid = metadata.get("uid")
     selector_labels = deployment.get("spec", {}).get("selector", {}).get("matchLabels")
@@ -483,6 +531,8 @@ def _observe_live_oom(c: Coordinates, deployment: dict, base: list[str], runner:
             raise DrillError("OOM termination timestamp is malformed") from exc
         if parsed.tzinfo is None:
             raise DrillError("OOM termination timestamp is malformed")
+        if not_before is not None and parsed < not_before:
+            raise DrillError("OOM termination predates the controlled stimulus")
         candidates.append((pod, finished, status["restartCount"]))
     if len(candidates) != 1:
         raise DrillError("metrics-OOM evidence is missing or ambiguous")
@@ -675,6 +725,34 @@ def build_plan(preflight: Preflight) -> dict:
         )
         previous = stage
 
+    if c.lifecycle == "staging-rehearsal":
+        baseline_inverse = prefix + [
+            "set",
+            "image",
+            f"deployment/{c.deployment}",
+            f"{c.container}={c.current_image}",
+        ]
+        mutation(
+            "inject-oom-stimulus",
+            f"deployment/{c.deployment}",
+            prefix
+            + ["set", "image", f"deployment/{c.deployment}", f"{c.container}={c.incident_image}"],
+            baseline_inverse,
+            {"image": c.current_image},
+        )["baseline_idempotent_inverse"] = True
+        gate(
+            "observe-authentic-oom",
+            [
+                {
+                    "metric": "authoritative_live_oomkilled_137",
+                    "operator": "eq",
+                    "value": True,
+                    "unit": "boolean",
+                }
+            ],
+            baseline_inverse,
+        )
+
     discovery = dict(preflight.discovery_labels)
     paused: dict[str, dict] = {}
 
@@ -734,7 +812,7 @@ def build_plan(preflight: Preflight) -> dict:
         prefix
         + ["set", "image", f"deployment/{c.deployment}", f"{c.container}={c.replacement_image}"],
         replace_inverse,
-        {"image": c.current_image},
+        {"image": c.incident_image if c.lifecycle == "staging-rehearsal" else c.current_image},
         {
             "kind": "reviewed-recovery-fallback",
             "not_an_inverse": True,
@@ -970,6 +1048,7 @@ def build_plan(preflight: Preflight) -> dict:
     plan = {
         "schema_version": 2,
         "mode": mode,
+        "lifecycle": c.lifecycle,
         "run_id": c.run_id,
         "environment": "staging",
         "dry_run": True,
@@ -978,12 +1057,14 @@ def build_plan(preflight: Preflight) -> dict:
             "authoritative_identity": preflight.source,
             "coordinates_compared": True,
             "classification": dict(preflight.classification),
+            "offline_fixture_authoritative": False,
             "containment": containment,
         },
         "expected_deployment": {
             "replicas": c.replicas,
             "container": c.container,
             "current_image": c.current_image,
+            "incident_image": c.incident_image,
             "replacement_image": c.replacement_image,
             "rollback_image": c.rollback_image,
             "memory_limit": c.memory_limit,
@@ -1020,6 +1101,13 @@ def _load_execution_plan(path: Path) -> dict:
         raise DrillError("unsupported plan schema")
     if plan.get("environment") != "staging" or plan.get("run_id") is None:
         raise DrillError("execution is restricted to a named staging run")
+    if plan.get("lifecycle", "real-incident") not in LIFECYCLES:
+        raise DrillError("plan lifecycle is unsupported")
+    if (
+        plan.get("lifecycle") == "staging-rehearsal"
+        and plan.get("non_executing_preview") is not False
+    ):
+        raise DrillError("offline rehearsal previews cannot be executed")
     if not SAFE_NAME.fullmatch(str(plan["run_id"])):
         raise DrillError("plan run ID is unsafe")
     digest = plan.get("plan_digest")
@@ -1590,6 +1678,9 @@ def execute_operation(
 
 
 def _record_phase(journal, plan, operation, stage, phase, **metadata):
+    metadata.setdefault(
+        "recorded_at", datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    )
     _append_journal(
         journal, plan, {"operation": operation, "stage": stage, "phase": phase, **metadata}
     )
@@ -1644,12 +1735,18 @@ def _execute_locked(args, runner, plan, journal, now=None):
         and item["type"] == "mutation"
         and ("rollback", item["id"]) not in completed
     ]
-    replace_active = any(item["id"] == "replace" for item in active)
-    expected_image = (
-        plan["expected_deployment"]["replacement_image"]
-        if replace_active
-        else plan["expected_deployment"]["current_image"]
-    )
+    active_images = [item for item in active if item["id"] in {"inject-oom-stimulus", "replace"}]
+    expected_image = plan["expected_deployment"]["current_image"]
+    if active_images:
+        expected_image = (
+            plan["expected_deployment"]["incident_image"]
+            if active_images[-1]["id"] == "inject-oom-stimulus"
+            else plan["expected_deployment"]["replacement_image"]
+        )
+    if aborting:
+        # Recovery replacement and all subsequent inverses converge directly to
+        # the original healthy baseline; never require revisiting the stimulus.
+        expected_image = plan["expected_deployment"]["current_image"]
     if pending and stage == "replace" and operation in {"execute", "rollback"}:
         expected_image = {
             plan["expected_deployment"]["current_image"],
@@ -1724,6 +1821,9 @@ def _execute_locked(args, runner, plan, journal, now=None):
         post, pre = _action_matches(plan, action, observed, True), _action_matches(
             plan, action, observed, False
         )
+        if pre and action.get("baseline_idempotent_inverse"):
+            _record_phase(journal, plan, operation, stage, "completed")
+            return {"status": "already-at-safe-baseline", "stage": stage}
         if pending and pre:
             _record_phase(journal, plan, operation, stage, "completed")
             return {"status": "rolled-back", "stage": stage}
@@ -1752,6 +1852,74 @@ def _execute_locked(args, runner, plan, journal, now=None):
     if done != expected[: len(done)] or expected[len(done)] != stage:
         raise DrillError("stage is out of order")
     if action["type"] == "gate":
+        if action["id"] == "observe-authentic-oom":
+            if args.gate_evidence is not None:
+                raise DrillError("authoritative OOM gate refuses operator-authored evidence")
+            expected = plan["expected_deployment"]
+            deployment = _runner_json(
+                runner,
+                [
+                    "kubectl",
+                    "--kubeconfig",
+                    str(args.kubeconfig),
+                    "--context",
+                    "sugar-staging",
+                    "--namespace",
+                    plan["inventory"]["namespace"],
+                    "get",
+                    "deployment",
+                    next(a["resource"].split("/", 1)[1] for a in actions if a["id"] == "replace"),
+                    "-o",
+                    "json",
+                ],
+                "authoritative OOM Deployment lookup failed",
+            )
+            coordinates = Coordinates(
+                STAGING_HOST,
+                args.kubeconfig,
+                "sugar-staging",
+                "staging",
+                plan["inventory"]["namespace"],
+                deployment["metadata"]["name"],
+                expected["container"],
+                expected["incident_image"],
+                expected["replacement_image"],
+                expected["rollback_image"],
+                expected["replicas"],
+                expected["memory_limit"],
+                plan["inventory"]["service_monitor"],
+                plan["run_id"],
+                "staging-rehearsal",
+                expected["incident_image"],
+            )
+            observation = _observe_live_oom(
+                coordinates,
+                deployment,
+                ["kubectl", "--kubeconfig", str(args.kubeconfig), "--context", "sugar-staging"],
+                runner,
+                not_before=_utc_timestamp(
+                    next(
+                        record["recorded_at"]
+                        for record in reversed(records)
+                        if record["operation"] == "execute"
+                        and record["stage"] == "inject-oom-stimulus"
+                        and record["phase"] == "completed"
+                    )
+                ),
+            )
+            _record_phase(
+                journal,
+                plan,
+                operation,
+                stage,
+                "completed",
+                evidence_summary={
+                    "termination_time": observation["termination_time"],
+                    "restart_count": observation["restart_count"],
+                    "event_aggregates": observation["event_aggregates"],
+                },
+            )
+            return {"status": "completed", "stage": stage}
         if args.gate_evidence is None:
             raise DrillError("gate stage requires private evidence")
         evidence, evidence_digest = _read_gate_evidence(args.gate_evidence)
@@ -1823,8 +1991,18 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(result, sort_keys=True))
             return 0
         coordinates = validate(args)
-        snapshot = json.loads(args.snapshot.read_text(encoding="utf-8"))
-        plan = build_plan(preflight_snapshot(args.mode, coordinates, snapshot))
+        if args.live_preflight:
+            checked = preflight_live(
+                args.mode,
+                coordinates,
+                lambda command: subprocess.run(
+                    command, capture_output=True, text=True, check=False
+                ),
+            )
+        else:
+            snapshot = json.loads(args.snapshot.read_text(encoding="utf-8"))
+            checked = preflight_snapshot(args.mode, coordinates, snapshot)
+        plan = build_plan(checked)
         rendered = json.dumps(plan, indent=2) + "\n"
         _publish_evidence(args.evidence, rendered)
         print(json.dumps(plan, indent=2))
