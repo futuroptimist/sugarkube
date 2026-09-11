@@ -247,6 +247,78 @@ def test_staging_rehearsal_authorization_and_coordinates_fail_closed(tmp_path, c
         drill.validate(args(tmp_path, **values))
 
 
+def test_staging_rehearsal_rejects_repository_aliases_of_same_digest(tmp_path):
+    digest = "d" * 64
+    with pytest.raises(drill.DrillError, match="distinct"):
+        drill.validate(
+            args(
+                tmp_path,
+                lifecycle="staging-rehearsal",
+                incident_image=f"alias.example/stimulus@sha256:{digest}",
+                replacement_image=f"alias.example/recovery@sha256:{digest}",
+                acknowledge_staging_fault_injection=True,
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {
+            "status": {
+                "observedGeneration": 6,
+                "updatedReplicas": 1,
+                "readyReplicas": 1,
+                "availableReplicas": 1,
+            }
+        },
+        {
+            "status": {
+                "observedGeneration": 7,
+                "updatedReplicas": 0,
+                "readyReplicas": 1,
+                "availableReplicas": 1,
+            }
+        },
+        {
+            "status": {
+                "observedGeneration": 7,
+                "updatedReplicas": 1,
+                "readyReplicas": 0,
+                "availableReplicas": 1,
+            }
+        },
+        {
+            "status": {
+                "observedGeneration": 7,
+                "updatedReplicas": 1,
+                "readyReplicas": 1,
+                "availableReplicas": 0,
+            }
+        },
+    ],
+)
+def test_healthy_rehearsal_requires_observed_and_converged_deployment(change):
+    deployment = {"metadata": {"generation": 7}, **change}
+    with pytest.raises(drill.DrillError, match="not ready"):
+        drill._assert_healthy_rehearsal(deployment, 1)
+
+
+def test_healthy_rehearsal_accepts_fully_observed_deployment():
+    drill._assert_healthy_rehearsal(
+        {
+            "metadata": {"generation": 7},
+            "status": {
+                "observedGeneration": 7,
+                "updatedReplicas": 1,
+                "readyReplicas": 1,
+                "availableReplicas": 1,
+            },
+        },
+        1,
+    )
+
+
 def test_real_incident_rejects_rehearsal_controls(tmp_path):
     with pytest.raises(drill.DrillError, match="require staging-rehearsal"):
         drill.validate(args(tmp_path, incident_image="registry.example/relay@sha256:" + "d" * 64))
@@ -935,6 +1007,71 @@ def test_offline_rehearsal_plan_cannot_be_executed(tmp_path):
         drill._load_execution_plan(path)
 
 
+def test_live_authoritative_rehearsal_plan_is_executable(tmp_path):
+    parsed = args(
+        tmp_path,
+        lifecycle="staging-rehearsal",
+        incident_image="registry.example/relay@sha256:" + "d" * 64,
+        acknowledge_staging_fault_injection=True,
+    )
+    c = drill.validate(parsed)
+    healthy = snapshot(c)
+    healthy["classification"] = {}
+    checked = drill._validate_snapshot(
+        "metrics-oom", c, drill.inventory("staging"), healthy, "live-authoritative"
+    )
+    plan = drill.build_plan(checked)
+    path = tmp_path / "live-plan.json"
+    path.write_text(json.dumps(plan))
+
+    assert drill._load_execution_plan(path) == plan
+
+
+def test_offline_rehearsal_cli_emits_non_executing_deterministic_plan(
+    tmp_path, monkeypatch, capsys
+):
+    parsed = args(
+        tmp_path,
+        lifecycle="staging-rehearsal",
+        incident_image="test.invalid/relay@sha256:" + "d" * 64,
+        current_image="test.invalid/relay@sha256:" + "a" * 64,
+        replacement_image="test.invalid/relay@sha256:" + "b" * 64,
+        rollback_image="test.invalid/relay@sha256:" + "c" * 64,
+        acknowledge_staging_fault_injection=True,
+    )
+    c = drill.validate(parsed)
+    healthy = snapshot(c)
+    healthy["classification"] = {}
+    parsed.snapshot.write_text(json.dumps(healthy))
+    argv = []
+    for key, value in vars(parsed).items():
+        if value is None or value is False:
+            continue
+        option = "--" + key.replace("_", "-")
+        argv.append(option)
+        if not isinstance(value, bool):
+            argv.append(str(value))
+    monkeypatch.chdir(tmp_path)
+
+    assert drill.main(argv) == 0
+    plan = json.loads(capsys.readouterr().out)
+    ids = [action["id"] for action in plan["actions"]]
+    assert ids[:4] == [
+        "inject-oom-stimulus",
+        "observe-authentic-oom",
+        "pause-metrics",
+        "replace",
+    ]
+    stimulus, replace = plan["actions"][0], plan["actions"][3]
+    assert stimulus["old_state"] == {"image": c.current_image}
+    assert stimulus["inverse"][-1] == f"relay={c.current_image}"
+    assert replace["old_state"] == {"image": c.incident_image}
+    assert replace["inverse_state"] == {"image": c.current_image}
+    assert plan["plan_digest"] == drill._plan_digest(plan)
+    assert plan["non_executing_preview"] is True
+    assert set(plan["state_changes"].values()) == {False}
+
+
 def test_authentic_oom_window_starts_at_stimulus_intent():
     records = [
         {
@@ -952,6 +1089,72 @@ def test_authentic_oom_window_starts_at_stimulus_intent():
     ]
 
     assert drill._stimulus_not_before(records) == datetime(2026, 9, 11, 12, 0, tzinfo=timezone.utc)
+
+
+@pytest.mark.parametrize(
+    ("finished_at", "accepted"),
+    [("2026-09-11T12:00:03Z", True), ("2026-09-11T11:59:59Z", False)],
+)
+def test_authoritative_oom_is_bounded_by_stimulus_intent(tmp_path, finished_at, accepted):
+    c = drill.validate(args(tmp_path))
+    deployment = {
+        "metadata": {"uid": "deployment-1"},
+        "spec": {"selector": {"matchLabels": {"app": "tokenplace"}}},
+    }
+    container = {
+        "name": c.container,
+        "image": c.current_image,
+        "resources": {"limits": {"memory": c.memory_limit}},
+    }
+    rs = {
+        "metadata": {
+            "uid": "rs-1",
+            "ownerReferences": [{"uid": "deployment-1", "controller": True}],
+        },
+        "spec": {"template": {"spec": {"containers": [container]}}},
+    }
+    pod = {
+        "metadata": {
+            "uid": "pod-1",
+            "ownerReferences": [{"uid": "rs-1", "controller": True}],
+        },
+        "spec": {"containers": [container]},
+        "status": {
+            "containerStatuses": [
+                {
+                    "name": c.container,
+                    "restartCount": 1,
+                    "lastState": {
+                        "terminated": {
+                            "reason": "OOMKilled",
+                            "exitCode": 137,
+                            "finishedAt": finished_at,
+                        }
+                    },
+                }
+            ]
+        },
+    }
+    replies = [
+        {"items": [rs]},
+        {"items": [pod]},
+        {"items": []},
+    ]
+
+    def runner(command):
+        return subprocess.CompletedProcess(command, 0, json.dumps(replies.pop(0)), "")
+
+    not_before = datetime(2026, 9, 11, 12, 0, tzinfo=timezone.utc)
+    if accepted:
+        assert (
+            drill._observe_live_oom(c, deployment, ["kubectl"], runner, not_before=not_before)[
+                "termination_time"
+            ]
+            == finished_at
+        )
+    else:
+        with pytest.raises(drill.DrillError, match="predates"):
+            drill._observe_live_oom(c, deployment, ["kubectl"], runner, not_before=not_before)
 
 
 def test_rehearsal_replacement_inverse_matches_healthy_baseline(tmp_path):
@@ -1184,6 +1387,71 @@ def execution_runner(plan, calls, marker=None, initial_image=None):
         return subprocess.CompletedProcess(command, 0, "", "")
 
     return run
+
+
+def executable_rehearsal_plan(tmp_path):
+    parsed = args(
+        tmp_path,
+        lifecycle="staging-rehearsal",
+        incident_image="registry.example/relay@sha256:" + "d" * 64,
+        acknowledge_staging_fault_injection=True,
+    )
+    c = drill.validate(parsed)
+    healthy = snapshot(c)
+    healthy["classification"] = {}
+    checked = drill._validate_snapshot(
+        "metrics-oom", c, drill.inventory("staging"), healthy, "live-authoritative"
+    )
+    return drill.build_plan(checked)
+
+
+def test_rehearsal_reverse_rollback_converges_to_exact_baseline_and_cleans_up(tmp_path):
+    plan = executable_rehearsal_plan(tmp_path)
+    parsed = execution_files(tmp_path, plan)
+    for stage in ["marker"] + [action["id"] for action in plan["actions"]]:
+        drill._record_phase(parsed.journal, plan, "execute", stage, "intent")
+        drill._record_phase(parsed.journal, plan, "execute", stage, "completed")
+    calls = []
+    runner = execution_runner(
+        plan, calls, _matching_marker(plan), plan["expected_deployment"]["replacement_image"]
+    )
+    mutations = [action for action in plan["actions"] if action["type"] == "mutation"]
+
+    for action in reversed(mutations):
+        parsed.rollback_stage = action["id"]
+        assert drill.execute_operation(parsed, runner)["status"] in {
+            "rolled-back",
+            "already-at-safe-baseline",
+        }
+
+    stimulus = mutations[0]
+    # Replace performs the sole healthy-image write; the already-converged
+    # stimulus inverse is reconciled from observed state without replay.
+    assert sum(call[-2:] == stimulus["inverse"][-2:] for call in calls) == 1
+    parsed.rollback_stage = None
+    parsed.cleanup = True
+    assert drill.execute_operation(parsed, runner)["status"] == "clean"
+
+
+def test_cleanup_refuses_metrics_mode_drift_after_rehearsal_rollback(tmp_path):
+    plan = executable_rehearsal_plan(tmp_path)
+    parsed = execution_files(tmp_path, plan)
+    parsed.cleanup = True
+    drill._record_phase(parsed.journal, plan, "execute", "marker", "intent")
+    drill._record_phase(parsed.journal, plan, "execute", "marker", "completed")
+    runner = execution_runner(plan, [], _matching_marker(plan))
+    runner(
+        [
+            "kubectl",
+            "set",
+            "env",
+            "deployment/tokenplace",
+            "TOKENPLACE_METRICS_MODE=degraded",
+        ]
+    )
+
+    with pytest.raises(drill.DrillError, match="exact baseline"):
+        drill.execute_operation(parsed, runner)
 
 
 def test_execution_plan_digest_tampering_fails_before_runner(tmp_path):

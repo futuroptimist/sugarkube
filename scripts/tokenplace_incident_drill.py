@@ -24,6 +24,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 SAFE_NAME = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
 IMAGE = re.compile(r"[^\s:@]+(?:/[^\s:@]+)+@sha256:[0-9a-f]{64}")
+IMAGE_DIGEST = re.compile(r"@sha256:([0-9a-f]{64})$")
 MODES = ("metrics-oom", "quota-exhaustion")
 LIFECYCLES = ("real-incident", "staging-rehearsal")
 STAGING_HOST = "staging.token.place"
@@ -153,10 +154,8 @@ def validate(args: argparse.Namespace) -> Coordinates:
             )
         if not getattr(args, "acknowledge_staging_fault_injection", False):
             raise DrillError("explicit staging fault-injection authorization is required")
-        if (
-            len({args.current_image, incident_image, args.replacement_image, args.rollback_image})
-            != 4
-        ):
+        images = (args.current_image, incident_image, args.replacement_image, args.rollback_image)
+        if len({IMAGE_DIGEST.search(image).group(1) for image in images}) != 4:
             raise DrillError("baseline, incident, recovery, and fallback images must be distinct")
     elif incident_image is not None or getattr(args, "acknowledge_staging_fault_injection", False):
         raise DrillError("rehearsal stimulus controls require staging-rehearsal lifecycle")
@@ -406,12 +405,7 @@ def preflight_live(
     if mode == "quota-exhaustion":
         snapshot["classification"] = _observe_live_quota(runner)
     if c.lifecycle == "staging-rehearsal":
-        status = deployment.get("status", {})
-        if (
-            status.get("readyReplicas", 0) != c.replicas
-            or status.get("availableReplicas", 0) != c.replicas
-        ):
-            raise DrillError("healthy rehearsal baseline is not ready")
+        _assert_healthy_rehearsal(deployment, c.replicas)
     return _validate_snapshot(
         mode,
         c,
@@ -419,6 +413,19 @@ def preflight_live(
         snapshot,
         "live-authoritative",
     )
+
+
+def _assert_healthy_rehearsal(deployment: dict, replicas: int) -> None:
+    """Require the controller to have fully observed and converged the reviewed revision."""
+    status = deployment.get("status", {})
+    metadata = deployment.get("metadata", {})
+    if (
+        status.get("observedGeneration") != metadata.get("generation")
+        or status.get("updatedReplicas", 0) != replicas
+        or status.get("readyReplicas", 0) != replicas
+        or status.get("availableReplicas", 0) != replicas
+    ):
+        raise DrillError("healthy rehearsal baseline is not ready")
 
 
 def _runner_json(runner: Runner, command: list[str], error: str) -> dict:
@@ -1495,18 +1502,19 @@ def _action_matches(plan: dict, action: dict, observed: dict, post: bool) -> boo
     if len(selected) != 1:
         return False
     container = selected[0]
+    matches = True
     if "image" in old:
         expected = old["image"]
         if post:
             expected = action["command"][-1].split("=", 1)[1]
-        return container.get("image") == expected
+        matches = container.get("image") == expected and matches
     if "TOKENPLACE_METRICS_MODE" in old:
         env = {item.get("name"): item.get("value") for item in container.get("env", [])}
         expected = (
             action["command"][-1].split("=", 1)[1] if post else old["TOKENPLACE_METRICS_MODE"]
         )
-        return env.get("TOKENPLACE_METRICS_MODE") == expected
-    return False
+        matches = env.get("TOKENPLACE_METRICS_MODE") == expected and matches
+    return matches and bool(old.keys() & {"image", "TOKENPLACE_METRICS_MODE"})
 
 
 def _action_observed(plan: dict, action: dict, kubeconfig: Path, runner: Runner) -> dict:
@@ -1720,14 +1728,21 @@ def _record_phase(journal, plan, operation, stage, phase, **metadata):
 
 def _verify_cleanup_baseline(plan, kubeconfig, runner):
     _assert_stage_preflight(plan, kubeconfig, runner, plan["expected_deployment"]["current_image"])
-    checked_resources = set()
+    baselines = {}
     for action in plan["actions"]:
         resource = action.get("resource")
-        if action.get("type") == "mutation" and resource not in checked_resources:
-            observed = _action_observed(plan, action, kubeconfig, runner)
-            if not _action_matches(plan, action, observed, False):
-                raise DrillError("cleanup requires the exact baseline")
-            checked_resources.add(resource)
+        if action.get("type") != "mutation":
+            continue
+        resource_baseline = baselines.setdefault(resource, {})
+        for field, value in action.get("old_state", {}).items():
+            resource_baseline.setdefault(field, value)
+    for resource, old_state in baselines.items():
+        action = next(item for item in plan["actions"] if item.get("resource") == resource)
+        observed = _action_observed(plan, action, kubeconfig, runner)
+        baseline_action = {**action, "old_state": old_state}
+        baseline_action.pop("inverse_state", None)
+        if not _action_matches(plan, baseline_action, observed, False):
+            raise DrillError("cleanup requires the exact baseline")
     for path in ("/livez", "/healthz"):
         result = runner(
             [
@@ -1767,18 +1782,20 @@ def _execute_locked(args, runner, plan, journal, now=None):
         and item["type"] == "mutation"
         and ("rollback", item["id"]) not in completed
     ]
-    active_images = [item for item in active if item["id"] in {"inject-oom-stimulus", "replace"}]
+    image_actions = {
+        item["id"]: item
+        for item in actions
+        if item.get("type") == "mutation" and "image" in item.get("old_state", {})
+    }
     expected_image = plan["expected_deployment"]["current_image"]
-    if active_images:
-        expected_image = (
-            plan["expected_deployment"]["incident_image"]
-            if active_images[-1]["id"] == "inject-oom-stimulus"
-            else plan["expected_deployment"]["replacement_image"]
-        )
-    if ("rollback", "replace") in completed:
-        # The replacement inverse converges directly to the healthy baseline,
-        # even while the earlier stimulus mutation remains journal-active.
-        expected_image = plan["expected_deployment"]["current_image"]
+    for record in records:
+        if record["phase"] != "completed" or record["stage"] not in image_actions:
+            continue
+        image_action = image_actions[record["stage"]]
+        if record["operation"] == "execute":
+            expected_image = image_action["command"][-1].split("=", 1)[1]
+        elif record["operation"] == "rollback":
+            expected_image = image_action.get("inverse_state", image_action["old_state"])["image"]
     if pending and stage == "replace" and operation in {"execute", "rollback"}:
         expected_image = {
             plan["expected_deployment"]["current_image"],
@@ -1859,6 +1876,8 @@ def _execute_locked(args, runner, plan, journal, now=None):
             plan, action, observed, False
         )
         if pre and action.get("baseline_idempotent_inverse"):
+            if not pending:
+                _record_phase(journal, plan, operation, stage, "intent")
             _record_phase(journal, plan, operation, stage, "completed")
             return {"status": "already-at-safe-baseline", "stage": stage}
         if pending and pre:
