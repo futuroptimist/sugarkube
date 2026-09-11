@@ -781,7 +781,11 @@ def test_live_quota_runs_validator_then_status_only_requests():
         return subprocess.CompletedProcess(command, 0, replies.pop(0), "")
 
     evidence = drill._observe_live_quota(runner)
-    assert "validate_probe_quotas.py" in calls[0][1]
+    assert calls[0][1:4] == [
+        "-S",
+        str(drill.ROOT / "scripts/validate_tokenplace_incident_probes.py"),
+        "--environment",
+    ]
     assert evidence["route_statuses"] == {
         "root": 429,
         "metadata": 429,
@@ -964,6 +968,28 @@ def test_duplicate_inventory_route_classes_are_rejected(tmp_path, monkeypatch):
         drill.inventory("staging")
 
 
+def test_unsupported_inventory_environment_is_an_operator_error():
+    with pytest.raises(drill.DrillError, match="environment must be staging or prod"):
+        drill.inventory("production")
+
+
+def test_incident_probe_validator_runs_without_site_packages():
+    result = subprocess.run(
+        [
+            "python3",
+            "-S",
+            str(drill.ROOT / "scripts/validate_tokenplace_incident_probes.py"),
+            "--environment",
+            "staging",
+        ],
+        cwd=drill.ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.mark.parametrize(
     "contents",
     [
@@ -1025,11 +1051,10 @@ def test_quota_restoration_has_exact_inverse_and_preserves_health(tmp_path):
     validator = next(action for action in plan["actions"] if action["id"] == "quota-validator")
     assert validator["checks"][0]["argv"] == [
         "python3",
-        "scripts/validate_probe_quotas.py",
-        "--env",
+        "-S",
+        "scripts/validate_tokenplace_incident_probes.py",
+        "--environment",
         "staging",
-        "--probes",
-        "clusters/staging/observability/probes/public-apps.yaml",
     ]
     assert validator["on_failure"] == {
         "outcome": "hold-current-containment",

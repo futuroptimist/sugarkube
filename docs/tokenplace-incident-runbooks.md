@@ -115,8 +115,8 @@ a new evidence file in an operator-supplied private directory outside the reposi
 From the repository root, generate both plans (replace every placeholder with reviewed staging
 coordinates):
 
-The runner uses only Python's standard library. Its small, strict JSON projection of the
-token.place Probe coordinates is committed at
+The runner and its live quota preflight use only Python's standard library. Its small, strict JSON
+projection of the token.place Probe coordinates is committed at
 `config/observability/tokenplace-incident-probes.json` and is checked against the full YAML quota
 contract in tests. No Python package installation or repository bootstrap is required before using
 the commands below on an operator host.

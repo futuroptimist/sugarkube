@@ -247,7 +247,9 @@ def inventory(environment: str) -> Inventory:
         or set(contract["environments"]) != {"staging", "prod"}
     ):
         raise DrillError("token.place probe inventory contract is malformed")
-    matches = contract["environments"].get(environment)
+    if environment not in contract["environments"]:
+        raise DrillError("environment must be staging or prod")
+    matches = contract["environments"][environment]
     required = {"route_class", "probe", "route", "method"}
     if (
         not isinstance(matches, list)
@@ -257,7 +259,7 @@ def inventory(environment: str) -> Inventory:
         raise DrillError("token.place probe inventory contract is malformed")
     route_classes = [p["route_class"] for p in matches]
     if len(route_classes) != len(set(route_classes)):
-        raise DrillError("token.place quota inventory contains duplicate route classes")
+        raise DrillError("token.place incident probe inventory contains duplicate route classes")
     selected = {p["route_class"]: p for p in matches}
     expected = {
         "root": ("/", "GET"),
@@ -268,7 +270,7 @@ def inventory(environment: str) -> Inventory:
     if set(selected) != set(expected) or any(
         (selected[k]["route"], selected[k]["method"]) != v for k, v in expected.items()
     ):
-        raise DrillError("token.place quota inventory is missing, ambiguous, or mismatched")
+        raise DrillError("token.place incident probe inventory is missing, ambiguous, or mismatched")
     metrics = json.loads((ROOT / "platform/observability/app-metrics.json").read_text())
     item = metrics["applications"]["tokenplace"]["environments"][environment]
     return Inventory(
@@ -594,11 +596,10 @@ def _controller_uid(obj: dict) -> object:
 def _observe_live_quota(runner: Runner) -> dict:
     validator = [
         sys.executable,
-        str(ROOT / "scripts/validate_probe_quotas.py"),
-        "--env",
+        "-S",
+        str(ROOT / "scripts/validate_tokenplace_incident_probes.py"),
+        "--environment",
         "staging",
-        "--probes",
-        str(ROOT / "clusters/staging/observability/probes/public-apps.yaml"),
     ]
     if runner(validator).returncode:
         raise DrillError("staging quota validation failed")
@@ -951,11 +952,10 @@ def build_plan(preflight: Preflight) -> dict:
                     "unit": "boolean",
                     "argv": [
                         "python3",
-                        "scripts/validate_probe_quotas.py",
-                        "--env",
+                        "-S",
+                        "scripts/validate_tokenplace_incident_probes.py",
+                        "--environment",
                         "staging",
-                        "--probes",
-                        "clusters/staging/observability/probes/public-apps.yaml",
                     ],
                 }
             ],
