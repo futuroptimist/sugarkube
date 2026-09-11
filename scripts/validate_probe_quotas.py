@@ -92,16 +92,23 @@ def _yaml_scalar(text):
         or " #" in value
         or ": " in value
         or any(char in value for char in "[]{}")
-        or re.fullmatch(r"[+-]?0[0-9]+", value)
     ):
         raise YAMLInputError
-    try:
+    # Convert only the deliberately supported ASCII decimal grammar; Python's
+    # numeric converters also accept ambiguous forms such as underscores.
+    if re.fullmatch(r"[+-]?(?:0|[1-9][0-9]*)", value):
         return int(value)
-    except ValueError:
-        try:
-            return float(value)
-        except ValueError:
-            return value
+    if re.fullmatch(
+        r"[+-]?(?:(?:[0-9]+\.[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?|[0-9]+[eE][+-]?[0-9]+)",
+        value,
+    ):
+        return float(value)
+    if re.fullmatch(
+        r"[+-]?(?:[0-9][0-9_]*(?:\.[0-9_]*)?(?:[eE][+-]?[0-9_]+)?|\.[0-9_]+(?:[eE][+-]?[0-9_]+)?)",
+        value,
+    ):
+        raise YAMLInputError
+    return value
 
 
 def _yaml_documents(text):

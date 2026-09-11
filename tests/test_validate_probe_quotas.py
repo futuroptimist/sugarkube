@@ -425,7 +425,16 @@ def test_complete_validator_rejects_terminated_or_malformed_scalars(tmp_path, ol
     assert result.stderr == "probe quota validation failed: YAML input is malformed\n"
 
 
-@pytest.mark.parametrize(("hourly", "passes"), [("77", True), ("077", False)])
+@pytest.mark.parametrize(
+    ("hourly", "passes"),
+    [
+        ("77", True),
+        ("077", False),
+        ("0_77", False),
+        ("+0_77", False),
+        ("0_0_77", False),
+    ],
+)
 def test_complete_validator_rejects_ambiguous_leading_zero_quota(
     tmp_path, hourly, passes
 ):
