@@ -180,6 +180,61 @@ def test_typed_preflight_required_and_image_coordinates_are_exact(tmp_path):
     assert plan["expected_deployment"]["current_image"] == checked.coordinates.current_image
 
 
+def test_rehearsal_plan_starts_healthy_and_separates_all_images(tmp_path):
+    stimulus = "registry.example/relay@sha256:" + "d" * 64
+    parsed = args(
+        tmp_path,
+        staging_rehearsal=True,
+        stimulus_image=stimulus,
+        acknowledge_fault_injection=True,
+    )
+    coordinates = drill.validate(parsed)
+    data = snapshot(coordinates)
+    data["classification"] = {}  # a healthy baseline has no OOM to claim
+    plan = drill.build_plan(drill.preflight_snapshot("metrics-oom", coordinates, data))
+
+    assert plan["lifecycle"] == "staging-rehearsal"
+    assert plan["preflight"]["classification"] == {"status": "awaiting-live-stimulus"}
+    assert [item["id"] for item in plan["actions"][:3]] == [
+        "inject-oom-stimulus",
+        "observe-stimulus-oom",
+        "pause-metrics",
+    ]
+    inject = plan["actions"][0]
+    assert inject["command"][-1] == "relay=" + stimulus
+    assert inject["inverse"][-1] == "relay=" + coordinates.current_image
+    identities = {
+        plan["expected_deployment"][key]
+        for key in ("current_image", "stimulus_image", "replacement_image", "rollback_image")
+    }
+    assert len(identities) == 4
+    assert plan["actions"][1]["authoritative_live_oom"] is True
+
+
+@pytest.mark.parametrize(
+    "changes,match",
+    [
+        (
+            {"staging_rehearsal": True, "stimulus_image": "registry.example/r@sha256:" + "d" * 64},
+            "fault-injection",
+        ),
+        ({"stimulus_image": "registry.example/r@sha256:" + "d" * 64}, "rehearsal"),
+        (
+            {
+                "mode": "quota-exhaustion",
+                "staging_rehearsal": True,
+                "stimulus_image": "registry.example/r@sha256:" + "d" * 64,
+                "acknowledge_fault_injection": True,
+            },
+            "only for metrics-OOM",
+        ),
+    ],
+)
+def test_rehearsal_controls_are_explicit_and_isolated(tmp_path, changes, match):
+    with pytest.raises(drill.DrillError, match=match):
+        drill.validate(args(tmp_path, **changes))
+
+
 @pytest.mark.parametrize(
     "field,value",
     [("image", "wrong"), ("replicas", 2), ("memory_limit", "1Gi"), ("container", "wrong")],

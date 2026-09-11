@@ -128,6 +128,44 @@ python3 scripts/tokenplace_incident_drill.py --dry-run --mode metrics-oom \
   --acknowledge-state-loss
 ```
 
+For the controlled metrics-OOM rehearsal, start from a healthy reviewed snapshot instead. Select
+the mode explicitly, supply a fourth immutable digest solely for the incident stimulus, and make
+both acknowledgements. These four identities (healthy baseline, stimulus, recovery replacement,
+and reviewed emergency fallback) must be different:
+
+```bash
+python3 scripts/tokenplace_incident_drill.py --dry-run --mode metrics-oom \
+  --staging-rehearsal --stimulus-image "$STIMULUS_IMAGE_DIGEST" \
+  --host "$STAGING_HOST" --kubeconfig "$STAGING_KUBECONFIG" --context sugar-staging \
+  --environment staging --namespace "$NAMESPACE" --deployment "$DEPLOYMENT" \
+  --container "$CONTAINER" --current-image "$HEALTHY_BASELINE_DIGEST" \
+  --replacement-image "$RECOVERY_IMAGE_DIGEST" --rollback-image "$FALLBACK_IMAGE_DIGEST" \
+  --replicas "$REPLICAS" --memory-limit "$MEMORY_LIMIT" \
+  --service-monitor "$SERVICE_MONITOR" --run-id "$RUN_ID" \
+  --snapshot "$REVIEWED_HEALTHY_SNAPSHOT" \
+  --evidence "$PRIVATE_EVIDENCE_DIRECTORY/${RUN_ID}-metrics-oom-rehearsal.json" \
+  --acknowledge-state-loss --acknowledge-fault-injection
+```
+
+The offline classification says `awaiting-live-stimulus`; fixture OOM fields are ignored and are
+never authoritative. Before a live plan, preflight rechecks identity, the healthy immutable image
+and memory limit, desired/ready/available/updated replicas, the exact ServiceMonitor and all four
+Probes, and the absence of pause labels. Execute `marker`, then `inject-oom-stimulus`, then
+`observe-stimulus-oom`, one invocation at a time. The observation stage accepts **no** gate evidence
+file: it reads the Kubernetes API itself and requires exactly one current Deployment-owned
+ReplicaSet/Pod/container at the stimulus digest and reviewed limit, with OOMKilled/137, a positive
+restart count, timestamp, and privacy-safe event aggregates. Only then may containment and the
+existing recovery sequence proceed.
+
+On any interruption, stop forward execution and roll back completed mutations in reverse journal
+order. The replacement inverse may briefly revisit the exact stimulated digest because it records
+true mutation prestate; immediately continue through containment rollback and the stimulus inverse
+to the original healthy digest. Never stop rollback with the stimulus deployed. Cleanup is refused
+until every mutation is reversed, the original image and discovery labels match exactly, both
+`/livez` and `/healthz` return 2xx, and only then is the exact run marker deleted. A failed recovery,
+threshold failure, ambiguous observation, or missing evidence follows this same rollback sequence;
+no selector- or prefix-based cleanup is permitted.
+
 An offline plan is marked as a non-executing preview. The future live preflight calls
 `scripts/cluster_identity.py assert --kubeconfig "$STAGING_KUBECONFIG" --env staging` first, then
 reads only the exact Deployment, `ServiceMonitor/tokenplace`, and inventory-derived Probes through
@@ -149,7 +187,8 @@ python3 scripts/tokenplace_incident_drill.py --execute-stage "$NEXT_STAGE" \
   --kubeconfig "$STAGING_KUBECONFIG" --gate-evidence "$PRIVATE_GATE_EVIDENCE"
 ```
 
-Omit `--gate-evidence` for mutation stages. For a gate, supply an absolute path to a regular file
+Omit `--gate-evidence` for mutation stages and for the authoritative `observe-stimulus-oom` gate.
+For every other gate, supply an absolute path to a regular file
 outside this repository (maximum 64 KiB):
 
 ```bash
