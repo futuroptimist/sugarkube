@@ -77,8 +77,23 @@ def _yaml_scalar(text):
                 return json.loads(value)
             except (ValueError, TypeError) as exc:
                 raise YAMLInputError from exc
-        return value[1:-1].replace("''", "'")
-    if value[0] in "!&*{|>" or " #" in value or any(char in value for char in "[]{}"):
+        inner = value[1:-1]
+        index = 0
+        while index < len(inner):
+            if inner[index] == "'":
+                if index + 1 >= len(inner) or inner[index + 1] != "'":
+                    raise YAMLInputError
+                index += 2
+                continue
+            index += 1
+        return inner.replace("''", "'")
+    if (
+        value[0] in "!&*{|>"
+        or " #" in value
+        or ": " in value
+        or any(char in value for char in "[]{}")
+        or re.fullmatch(r"[+-]?0[0-9]+", value)
+    ):
         raise YAMLInputError
     try:
         return int(value)
@@ -94,15 +109,26 @@ def _yaml_documents(text):
     documents = []
     chunks = [[]]
     leading_marker = True
+    terminated = False
     for raw in text.splitlines():
         if raw.strip() == "---":
-            if leading_marker and not chunks[-1]:
+            if terminated:
+                chunks.append([])
+                terminated = False
+            elif leading_marker and not chunks[-1]:
                 leading_marker = False
             else:
                 chunks.append([])
             continue
-        if raw.strip() in {"", "..."} or raw.lstrip().startswith("#"):
+        if raw.strip() == "...":
+            if terminated or not chunks[-1]:
+                raise YAMLInputError
+            terminated = True
             continue
+        if raw.strip() == "" or raw.lstrip().startswith("#"):
+            continue
+        if terminated:
+            raise YAMLInputError
         indentation = len(raw) - len(raw.lstrip(" "))
         if "\t" in raw or indentation % 2:
             raise YAMLInputError

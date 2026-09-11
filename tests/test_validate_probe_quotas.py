@@ -387,6 +387,86 @@ def test_complete_validator_rejects_malformed_contract_flow_sequence(tmp_path):
     assert result.stderr == "probe quota validation failed: YAML input is malformed\n"
 
 
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("version: 1\n", "version: 1\n...\n"),
+        ("bucket: operational", "bucket: operational: invalid"),
+        ("bucket: operational", "bucket: 'operational'bad'"),
+    ],
+)
+def test_complete_validator_rejects_terminated_or_malformed_scalars(tmp_path, old, new):
+    contract = tmp_path / "contract.yaml"
+    contract.write_text(
+        (ROOT / "config/observability/probe-quotas.yaml")
+        .read_text(encoding="utf-8")
+        .replace(old, new, 1),
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [
+            "python3",
+            "-S",
+            "scripts/validate_probe_quotas.py",
+            "--env",
+            "staging",
+            "--contracts",
+            str(contract),
+            "--probes",
+            "clusters/staging/observability/probes/public-apps.yaml",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert result.stderr == "probe quota validation failed: YAML input is malformed\n"
+
+
+@pytest.mark.parametrize(("hourly", "passes"), [("77", True), ("077", False)])
+def test_complete_validator_rejects_ambiguous_leading_zero_quota(
+    tmp_path, hourly, passes
+):
+    item = declaration()
+    item.update(limits={"hourly": 77, "daily": 10000}, safety_margin=0.1)
+    contract = tmp_path / "contract.yaml"
+    contract.write_text(
+        yaml.safe_dump({"version": 1, "probes": [item]}).replace(
+            "hourly: 77", f"hourly: {hourly}"
+        ),
+        encoding="utf-8",
+    )
+    rendered = tmp_path / "probes.yaml"
+    rendered.write_text(yaml.safe_dump(probe(module="https_2xx")), encoding="utf-8")
+    result = subprocess.run(
+        [
+            "python3",
+            "-S",
+            "scripts/validate_probe_quotas.py",
+            "--env",
+            "staging",
+            "--contracts",
+            str(contract),
+            "--probes",
+            str(rendered),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if passes:
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == "probe quota validation passed: environment=staging\n"
+        assert result.stderr == ""
+    else:
+        assert result.returncode != 0
+        assert result.stdout == ""
+        assert result.stderr == "probe quota validation failed: YAML input is malformed\n"
+
+
 def test_configuration_and_probe_reader_matches_pyyaml():
     single_documents = [ROOT / "config/observability/probe-quotas.yaml"]
     for environment in ("staging", "prod"):
