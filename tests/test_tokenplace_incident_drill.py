@@ -209,6 +209,7 @@ def test_staging_rehearsal_has_separate_identities_and_live_oom_gate(tmp_path):
     assert stimulus["inverse"][-1] == "relay=" + c.current_image
     replace = next(action for action in plan["actions"] if action["id"] == "replace")
     assert replace["old_state"] == {"image": c.incident_image}
+    assert replace["inverse_state"] == {"image": c.current_image}
     assert replace["inverse"][-1] == "relay=" + c.current_image
     assert (
         len(
@@ -911,6 +912,10 @@ def test_quota_restoration_has_exact_inverse_and_preserves_health(tmp_path):
         observation = next(
             action for action in plan["actions"] if action["id"] == f"observe-{label}"
         )
+        assert "release=kube-prometheus-stack" in restore["command"]
+        assert observation["duration"] == {"value": 15, "unit": "minutes"}
+        assert observation["on_failure"] == restore["inverse"]
+        assert observation["preserves"] == ["probe/livez", "probe/healthz"]
 
 
 def test_offline_rehearsal_plan_cannot_be_executed(tmp_path):
@@ -928,10 +933,52 @@ def test_offline_rehearsal_plan_cannot_be_executed(tmp_path):
     path.write_text(json.dumps(plan))
     with pytest.raises(drill.DrillError, match="cannot be executed"):
         drill._load_execution_plan(path)
-        assert "release=kube-prometheus-stack" in restore["command"]
-        assert observation["duration"] == {"value": 15, "unit": "minutes"}
-        assert observation["on_failure"] == restore["inverse"]
-        assert observation["preserves"] == ["probe/livez", "probe/healthz"]
+
+
+def test_authentic_oom_window_starts_at_stimulus_intent():
+    records = [
+        {
+            "operation": "execute",
+            "stage": "inject-oom-stimulus",
+            "phase": "intent",
+            "recorded_at": "2026-09-11T12:00:00Z",
+        },
+        {
+            "operation": "execute",
+            "stage": "inject-oom-stimulus",
+            "phase": "completed",
+            "recorded_at": "2026-09-11T12:00:05Z",
+        },
+    ]
+
+    assert drill._stimulus_not_before(records) == datetime(2026, 9, 11, 12, 0, tzinfo=timezone.utc)
+
+
+def test_rehearsal_replacement_inverse_matches_healthy_baseline(tmp_path):
+    parsed = args(
+        tmp_path,
+        lifecycle="staging-rehearsal",
+        incident_image="registry.example/relay@sha256:" + "d" * 64,
+        acknowledge_staging_fault_injection=True,
+    )
+    coordinates = drill.validate(parsed)
+    healthy = snapshot(coordinates)
+    healthy["classification"] = {}
+    plan = drill.build_plan(drill.preflight_snapshot("metrics-oom", coordinates, healthy))
+    replace = next(action for action in plan["actions"] if action["id"] == "replace")
+    observed = {
+        "spec": {
+            "template": {
+                "spec": {
+                    "containers": [
+                        {"name": coordinates.container, "image": coordinates.current_image}
+                    ]
+                }
+            }
+        }
+    }
+
+    assert drill._action_matches(plan, replace, observed, post=False)
 
 
 def test_numeric_observation_thresholds_and_metrics_exit(tmp_path):

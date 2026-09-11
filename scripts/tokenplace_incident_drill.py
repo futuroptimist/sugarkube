@@ -690,7 +690,15 @@ def build_plan(preflight: Preflight) -> dict:
     actions: list[dict] = []
     previous: str | None = None
 
-    def mutation(stage, resource, command, inverse, old_state, recovery_fallback=None):
+    def mutation(
+        stage,
+        resource,
+        command,
+        inverse,
+        old_state,
+        recovery_fallback=None,
+        inverse_state=None,
+    ):
         nonlocal previous
         record = {
             "id": stage,
@@ -703,6 +711,8 @@ def build_plan(preflight: Preflight) -> dict:
             "inverse": inverse,
             "rollback": inverse,
         }
+        if inverse_state is not None:
+            record["inverse_state"] = inverse_state
         if recovery_fallback:
             record["recovery_fallback"] = recovery_fallback
         actions.append(record)
@@ -825,6 +835,7 @@ def build_plan(preflight: Preflight) -> dict:
                 f"{c.container}={c.rollback_image}",
             ],
         },
+        {"image": c.current_image},
     )
     gate(
         "workload-readiness",
@@ -1460,7 +1471,11 @@ def _pending_operation(records: list[dict]) -> tuple[str, str] | None:
 def _action_matches(plan: dict, action: dict, observed: dict, post: bool) -> bool:
     """Return whether an exact resource is in the action's pre- or post-state."""
     kind, _ = action["resource"].split("/", 1)
-    old = action.get("old_state", {})
+    old = (
+        action.get("old_state", {})
+        if post
+        else action.get("inverse_state", action.get("old_state", {}))
+    )
     if kind in {"probe", "servicemonitor"}:
         labels = observed.get("metadata", {}).get("labels", {})
         expected = old
@@ -1524,6 +1539,23 @@ def _utc_timestamp(value: object) -> datetime:
         return datetime.fromisoformat(value[:-1] + "+00:00")
     except ValueError as exc:
         raise DrillError("gate evidence timestamp is malformed") from exc
+
+
+def _stimulus_not_before(records: list[dict]) -> datetime:
+    """Return the durable boundary recorded immediately before stimulus mutation."""
+    record = next(
+        (
+            item
+            for item in reversed(records)
+            if item["operation"] == "execute"
+            and item["stage"] == "inject-oom-stimulus"
+            and item["phase"] == "intent"
+        ),
+        None,
+    )
+    if record is None:
+        raise DrillError("authoritative OOM gate is missing stimulus intent")
+    return _utc_timestamp(record.get("recorded_at"))
 
 
 def _minutes(spec: object, label: str) -> float:
@@ -1743,14 +1775,19 @@ def _execute_locked(args, runner, plan, journal, now=None):
             if active_images[-1]["id"] == "inject-oom-stimulus"
             else plan["expected_deployment"]["replacement_image"]
         )
-    if aborting:
-        # Recovery replacement and all subsequent inverses converge directly to
-        # the original healthy baseline; never require revisiting the stimulus.
+    if ("rollback", "replace") in completed:
+        # The replacement inverse converges directly to the healthy baseline,
+        # even while the earlier stimulus mutation remains journal-active.
         expected_image = plan["expected_deployment"]["current_image"]
     if pending and stage == "replace" and operation in {"execute", "rollback"}:
         expected_image = {
             plan["expected_deployment"]["current_image"],
             plan["expected_deployment"]["replacement_image"],
+        }
+    if pending and stage == "inject-oom-stimulus" and operation == "rollback":
+        expected_image = {
+            plan["expected_deployment"]["current_image"],
+            plan["expected_deployment"]["incident_image"],
         }
     _assert_stage_preflight(plan, args.kubeconfig, runner, expected_image)
 
@@ -1897,15 +1934,7 @@ def _execute_locked(args, runner, plan, journal, now=None):
                 deployment,
                 ["kubectl", "--kubeconfig", str(args.kubeconfig), "--context", "sugar-staging"],
                 runner,
-                not_before=_utc_timestamp(
-                    next(
-                        record["recorded_at"]
-                        for record in reversed(records)
-                        if record["operation"] == "execute"
-                        and record["stage"] == "inject-oom-stimulus"
-                        and record["phase"] == "completed"
-                    )
-                ),
+                not_before=_stimulus_not_before(records),
             )
             _record_phase(
                 journal,
