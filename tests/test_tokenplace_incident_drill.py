@@ -34,6 +34,9 @@ def args(tmp_path: Path, **changes):
         evidence=tmp_path / "private-evidence" / "result.json",
         acknowledge_state_loss=True,
         dry_run=True,
+        scenario="real-incident",
+        stimulus_image=None,
+        acknowledge_staging_fault_injection=False,
     )
     values.update(changes)
     return argparse.Namespace(**values)
@@ -178,6 +181,64 @@ def test_typed_preflight_required_and_image_coordinates_are_exact(tmp_path):
         "relay=" + checked.coordinates.rollback_image
     )
     assert plan["expected_deployment"]["current_image"] == checked.coordinates.current_image
+
+
+def test_rehearsal_plan_separates_images_and_observes_oom_after_stimulus(tmp_path):
+    stimulus = "registry.example/relay@sha256:" + "d" * 64
+    checked = preflight(
+        tmp_path,
+        scenario="staging-rehearsal",
+        stimulus_image=stimulus,
+        acknowledge_staging_fault_injection=True,
+    )
+    plan = drill.build_plan(checked)
+    ids = [action["id"] for action in plan["actions"]]
+    assert ids[:2] == ["inject-oom-stimulus", "observe-authentic-oom"]
+    inject = plan["actions"][0]
+    assert inject["command"][-1] == "relay=" + stimulus
+    assert inject["inverse"][-1] == "relay=" + checked.coordinates.current_image
+    assert plan["actions"][1]["authoritative_live_oom"] is True
+    assert plan["preflight"]["classification"] == {"fixture_classification_authoritative": False}
+    assert (
+        len(
+            {
+                plan["expected_deployment"][key]
+                for key in (
+                    "current_image",
+                    "stimulus_image",
+                    "replacement_image",
+                    "rollback_image",
+                )
+            }
+        )
+        == 4
+    )
+
+
+def test_rehearsal_requires_stimulus_authorization_and_distinct_digest(tmp_path):
+    stimulus = "registry.example/relay@sha256:" + "d" * 64
+    with pytest.raises(drill.DrillError, match="fault-injection authorization"):
+        drill.validate(args(tmp_path, scenario="staging-rehearsal", stimulus_image=stimulus))
+    with pytest.raises(drill.DrillError, match="must be distinct"):
+        drill.validate(
+            args(
+                tmp_path,
+                scenario="staging-rehearsal",
+                stimulus_image="registry.example/relay@sha256:" + "a" * 64,
+                acknowledge_staging_fault_injection=True,
+            )
+        )
+
+
+def test_real_incident_refuses_rehearsal_controls(tmp_path):
+    with pytest.raises(drill.DrillError, match="restricted"):
+        drill.validate(
+            args(
+                tmp_path,
+                stimulus_image="registry.example/relay@sha256:" + "d" * 64,
+                acknowledge_staging_fault_injection=True,
+            )
+        )
 
 
 @pytest.mark.parametrize(
@@ -650,8 +711,11 @@ def test_cli_accepts_private_evidence_location_outside_repo(tmp_path, monkeypatc
     monkeypatch.chdir(tmp_path)
     argv = []
     for key, value in vars(parsed).items():
-        if key in {"acknowledge_state_loss", "dry_run"}:
-            argv.append("--" + key.replace("_", "-"))
+        if key in {"acknowledge_state_loss", "acknowledge_staging_fault_injection", "dry_run"}:
+            if value:
+                argv.append("--" + key.replace("_", "-"))
+        elif value is None:
+            continue
         else:
             argv += ["--" + key.replace("_", "-"), str(value)]
     assert drill.main(argv) == 0
@@ -674,8 +738,11 @@ def test_cli_refuses_non_private_evidence_targets_without_disclosure(
     parsed.evidence = target
     argv = []
     for key, value in vars(parsed).items():
-        if key in {"acknowledge_state_loss", "dry_run"}:
-            argv.append("--" + key.replace("_", "-"))
+        if key in {"acknowledge_state_loss", "acknowledge_staging_fault_injection", "dry_run"}:
+            if value:
+                argv.append("--" + key.replace("_", "-"))
+        elif value is None:
+            continue
         else:
             argv += ["--" + key.replace("_", "-"), str(value)]
     monkeypatch.chdir(tmp_path)

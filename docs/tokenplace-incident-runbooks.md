@@ -106,17 +106,21 @@ crosses a rollback threshold, remove only that Probe's discovery label using the
 
 ## Step 14b: prepared staging drill (not yet performed)
 
-The helper preserves its Step 14a dry-run interface: it validates repository inventory and a
-reviewed, privacy-safe JSON snapshot, then emits exact selections without invoking `kubectl`. The
+The helper preserves the real-incident and quota paths and adds an explicit metrics-OOM
+`staging-rehearsal` path. Its dry-run interface validates repository inventory and a reviewed,
+privacy-safe JSON snapshot, then emits exact selections without invoking `kubectl`. The
 snapshot must contain the exact Deployment, inventory-derived ServiceMonitor and four Probes. It
 must also contain `OOMKilled`/137 termination evidence or bounded root/metadata 429 and healthy
 livez/healthz statuses plus a successful quota-validator result. Use a unique DNS-safe run ID and
 a new evidence file in an operator-supplied private directory outside the repository.
-From the repository root, generate both plans (replace every placeholder with reviewed staging
-coordinates):
+For a real incident, the snapshot's OOM classification remains required before mitigation. For a
+rehearsal, snapshot OOM fields are explicitly labelled non-authoritative: a healthy baseline can
+produce a preview, but only Kubernetes API observations collected by the runner after injection
+can pass the live OOM gate. Generate the rehearsal plan with four separately reviewed digests:
 
 ```bash
 python3 scripts/tokenplace_incident_drill.py --dry-run --mode metrics-oom \
+  --scenario staging-rehearsal --stimulus-image "$STIMULUS_IMAGE_DIGEST" \
   --host "$STAGING_HOST" --kubeconfig "$STAGING_KUBECONFIG" --context sugar-staging \
   --environment staging --namespace "$NAMESPACE" --deployment "$DEPLOYMENT" \
   --container "$CONTAINER" --current-image "$CURRENT_IMAGE_DIGEST" \
@@ -125,16 +129,23 @@ python3 scripts/tokenplace_incident_drill.py --dry-run --mode metrics-oom \
   --memory-limit "$MEMORY_LIMIT" --service-monitor "$SERVICE_MONITOR" \
   --run-id "$RUN_ID" --snapshot "$REVIEWED_PRIVATE_SNAPSHOT" \
   --evidence "$PRIVATE_EVIDENCE_DIRECTORY/${RUN_ID}-metrics-oom.json" \
-  --acknowledge-state-loss
+  --acknowledge-state-loss --acknowledge-staging-fault-injection
 ```
 
-An offline plan is marked as a non-executing preview. The future live preflight calls
+The acknowledgements authorize staging-only fault injection and loss of process-local and
+`emptyDir` state. They do not weaken production/context/host rejection. Baseline, stimulus,
+recovery replacement, and reviewed emergency fallback must be distinct immutable digests. The
+fallback is not an inverse. Never pre-roll the stimulus image, because doing so would corrupt the
+recorded healthy baseline and cleanup semantics.
+
+An offline plan is marked as a non-executing preview with zero state changes. The live preflight calls
 `scripts/cluster_identity.py assert --kubeconfig "$STAGING_KUBECONFIG" --env staging` first, then
 reads only the exact Deployment, `ServiceMonitor/tokenplace`, and inventory-derived Probes through
 that kubeconfig and context. It refuses drift before constructing any mutation. When the reviewed
 current artifact exposes `TOKENPLACE_METRICS_MODE=normal|degraded`, containment uses the reversible
-degraded value; otherwise it uses only the exact ServiceMonitor pause fallback. Replacement and
-rollback remain bound to their separately reviewed immutable digests.
+degraded value; otherwise it uses only the exact ServiceMonitor pause fallback. Rehearsal also
+requires every desired baseline replica to be ready and available. Replacement and rollback
+remain bound to their separately reviewed immutable digests.
 
 Repeat with `--mode quota-exhaustion`, a new run ID, and a new evidence filename. The generated
 plan includes a deterministic digest. A future Step 14b operator can create its unique marker and
@@ -157,6 +168,16 @@ python3 scripts/tokenplace_incident_drill.py --execute-stage "$GATE" \
   --plan "$PRIVATE_PLAN" --journal "$PRIVATE_JOURNAL_DIRECTORY" \
   --kubeconfig "$STAGING_KUBECONFIG" --gate-evidence "$PRIVATE_GATE_EVIDENCE"
 ```
+
+The rehearsal order begins `marker`, `inject-oom-stimulus`, and
+`observe-authentic-oom`. The stimulus mutation records its exact baseline-image inverse before it
+runs. The observation stage accepts **no** `--gate-evidence`; it queries the exact Deployment,
+Deployment-owned ReplicaSet, Pod, and named container through the bound staging kubeconfig. It
+requires the stimulus digest and reviewed memory limit, exactly one OOMKilled/137 termination, a
+positive restart count, a valid timestamp, and privacy-safe event reason/count/time aggregates.
+Missing or ambiguous OOMs and wrong owner, image, container, or limit refuse progression. The
+remaining containment, recovery, readiness, compute registration/polling, encrypted E2EE, route
+preservation, metrics-last restoration, and observation stages retain their existing order.
 
 Gate evidence uses this strict, versioned schema (the abbreviated digest below must be replaced by
 the exact 64-character digest from the immutable plan):
@@ -212,6 +233,14 @@ python3 scripts/tokenplace_incident_drill.py --rollback-stage "$COMPLETED_MUTATI
   --plan "$PRIVATE_PLAN" --journal "$PRIVATE_JOURNAL_DIRECTORY" \
   --kubeconfig "$STAGING_KUBECONFIG"
 ```
+
+On interruption or any failed threshold, stop forward execution and roll back completed mutations
+in reverse journal order. Recovery replacement inverses directly to the original healthy image;
+the earlier stimulus inverse also names that baseline, so rollback never terminally restores the
+incident image. Continue until every active mutation is reversed and original discovery labels and
+metrics mode are restored exactly. Cleanup refuses while a mutation remains active, while the
+Deployment differs from healthy image/replica/limit coordinates, or while an exact label or
+`/livez`/`/healthz` check is unhealthy. Only then may it delete the exact run marker.
 
 After the original image and exact ServiceMonitor/Probe discovery labels are restored, and
 `/livez` and `/healthz` are healthy, delete only the matching run-ID/digest marker. Repeating this

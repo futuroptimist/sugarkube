@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SAFE_NAME = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
 IMAGE = re.compile(r"[^\s:@]+(?:/[^\s:@]+)+@sha256:[0-9a-f]{64}")
 MODES = ("metrics-oom", "quota-exhaustion")
+SCENARIOS = ("real-incident", "staging-rehearsal")
 STAGING_HOST = "staging.token.place"
 EXECUTION_OPERATIONS = ("--execute-stage", "--rollback-stage", "--cleanup")
 GATE_EVIDENCE_MAX_BYTES = 64 * 1024
@@ -52,6 +53,8 @@ class Coordinates:
     memory_limit: str
     service_monitor: str
     run_id: str
+    scenario: str = "real-incident"
+    stimulus_image: str | None = None
 
 
 @dataclass(frozen=True)
@@ -79,11 +82,14 @@ class Preflight:
     classification: tuple[tuple[str, object], ...]
     metrics_mode_state: str
     discovery_labels: tuple[tuple[str, str], ...]
+    scenario: str = "real-incident"
 
 
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     result.add_argument("--mode", choices=MODES, required=True)
+    result.add_argument("--scenario", choices=SCENARIOS, default="real-incident")
+    result.add_argument("--stimulus-image")
     for name in (
         "host",
         "context",
@@ -104,6 +110,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--snapshot", required=True, type=Path)
     result.add_argument("--evidence", required=True, type=Path)
     result.add_argument("--acknowledge-state-loss", action="store_true")
+    result.add_argument("--acknowledge-staging-fault-injection", action="store_true")
     result.add_argument("--dry-run", action="store_true", required=True)
     return result
 
@@ -136,6 +143,22 @@ def validate(args: argparse.Namespace) -> Coordinates:
             raise DrillError(f"{field.replace('_', ' ')} must use an immutable sha256 digest")
     if args.current_image == args.replacement_image:
         raise DrillError("current and replacement images must be distinct")
+    scenario = getattr(args, "scenario", "real-incident")
+    stimulus_image = getattr(args, "stimulus_image", None)
+    if scenario == "staging-rehearsal":
+        if args.mode != "metrics-oom":
+            raise DrillError("staging rehearsal is supported only for metrics-OOM")
+        if not IMAGE.fullmatch(stimulus_image or ""):
+            raise DrillError("stimulus image must use an immutable sha256 digest")
+        if not getattr(args, "acknowledge_staging_fault_injection", False):
+            raise DrillError("explicit staging fault-injection authorization is required")
+        if (
+            len({args.current_image, stimulus_image, args.replacement_image, args.rollback_image})
+            != 4
+        ):
+            raise DrillError("baseline, stimulus, recovery, and fallback images must be distinct")
+    elif stimulus_image is not None or getattr(args, "acknowledge_staging_fault_injection", False):
+        raise DrillError("stimulus controls are restricted to staging rehearsal")
     if not re.fullmatch(r"[1-9][0-9]*(Mi|Gi)", args.memory_limit):
         raise DrillError("memory limit must be an explicit positive Mi or Gi quantity")
     for field in ("namespace", "deployment", "container", "service_monitor", "run_id"):
@@ -146,9 +169,13 @@ def validate(args: argparse.Namespace) -> Coordinates:
             "explicit authorization for process-local and emptyDir state loss is required"
         )
     _validate_evidence_target(args.evidence)
-    return Coordinates(
-        **{field: getattr(args, field) for field in Coordinates.__dataclass_fields__}
-    )
+    values = {
+        field: getattr(args, field)
+        for field in Coordinates.__dataclass_fields__
+        if hasattr(args, field)
+    }
+    values.update(scenario=scenario, stimulus_image=stimulus_image)
+    return Coordinates(**values)
 
 
 def _validate_evidence_target(target: Path) -> None:
@@ -285,7 +312,16 @@ def _validate_snapshot(
     ):
         raise DrillError("live Probe coordinates do not match inventory")
     evidence = snapshot.get("classification", {})
-    if mode == "metrics-oom":
+    if mode == "metrics-oom" and c.scenario == "staging-rehearsal":
+        if source == "live-authoritative":
+            if evidence != {"authoritative_oom_pending": True}:
+                raise DrillError("healthy rehearsal preflight must not contain OOM evidence")
+            classification = (("authoritative_oom_pending", True),)
+        else:
+            # Snapshot classification is useful only for a non-executing preview.  It
+            # is deliberately not copied into the later authoritative OOM gate.
+            classification = (("fixture_classification_authoritative", False),)
+    elif mode == "metrics-oom":
         if evidence.get("termination_reason") != "OOMKilled" or evidence.get("exit_code") != 137:
             raise DrillError("metrics-OOM classification requires OOMKilled with exit code 137")
         classification_items = [("termination_reason", "OOMKilled"), ("exit_code", 137)]
@@ -319,7 +355,14 @@ def _validate_snapshot(
         (probe["name"], probe["discovery_label"]) for probe in live_probes
     ]
     return Preflight(
-        c, inv, mode, source, classification, metrics_mode_state, tuple(discovery_labels)
+        c,
+        inv,
+        mode,
+        source,
+        classification,
+        metrics_mode_state,
+        tuple(discovery_labels),
+        c.scenario,
     )
 
 
@@ -367,7 +410,15 @@ def preflight_live(
             raise DrillError("exact live target returned invalid JSON") from exc
     snapshot = _normalise_live(c, objects)
     deployment = objects[0]
-    if mode == "metrics-oom":
+    if mode == "metrics-oom" and c.scenario == "staging-rehearsal":
+        status = deployment.get("status", {})
+        if (
+            status.get("readyReplicas", 0) != c.replicas
+            or status.get("availableReplicas", 0) != c.replicas
+        ):
+            raise DrillError("healthy rehearsal baseline is not ready")
+        snapshot["classification"] = {"authoritative_oom_pending": True}
+    elif mode == "metrics-oom":
         snapshot["classification"] = _observe_live_oom(c, deployment, base, runner)
     if mode == "quota-exhaustion":
         snapshot["classification"] = _observe_live_quota(runner)
@@ -524,6 +575,31 @@ def _controller_uid(obj: dict) -> object:
     return controllers[0] if len(controllers) == 1 else None
 
 
+def _current_restart_total(
+    c: Coordinates, deployment: dict, base: list[str], runner: Runner
+) -> int:
+    """Capture a bounded pre-stimulus restart counter from the exact workload."""
+    labels = deployment.get("spec", {}).get("selector", {}).get("matchLabels")
+    if not isinstance(labels, dict) or not labels:
+        raise DrillError("Deployment ownership selector is missing or malformed")
+    selector = ",".join(f"{key}={labels[key]}" for key in sorted(labels))
+    pods = _runner_json(
+        runner,
+        base + ["--namespace", c.namespace, "get", "pods", "-l", selector, "-o", "json"],
+        "baseline restart observation failed",
+    ).get("items")
+    if not isinstance(pods, list) or len(pods) != c.replicas:
+        raise DrillError("baseline restart observation is unconverged")
+    total = 0
+    for pod in pods:
+        statuses = pod.get("status", {}).get("containerStatuses")
+        selected = [item for item in statuses or [] if item.get("name") == c.container]
+        if len(selected) != 1 or not isinstance(selected[0].get("restartCount"), int):
+            raise DrillError("baseline restart observation is malformed")
+        total += selected[0]["restartCount"]
+    return total
+
+
 def _observe_live_quota(runner: Runner) -> dict:
     validator = [
         sys.executable,
@@ -659,20 +735,21 @@ def build_plan(preflight: Preflight) -> dict:
         previous = stage
         return record
 
-    def gate(stage, checks, on_failure, duration=0, preserves=()):
+    def gate(stage, checks, on_failure, duration=0, preserves=(), authoritative_live_oom=False):
         nonlocal previous
-        actions.append(
-            {
-                "id": stage,
-                "stage": stage,
-                "type": "gate",
-                "depends_on": [previous] if previous else [],
-                "duration": {"value": duration, "unit": "minutes"},
-                "checks": checks,
-                "preserves": list(preserves),
-                "on_failure": on_failure,
-            }
-        )
+        record = {
+            "id": stage,
+            "stage": stage,
+            "type": "gate",
+            "depends_on": [previous] if previous else [],
+            "duration": {"value": duration, "unit": "minutes"},
+            "checks": checks,
+            "preserves": list(preserves),
+            "on_failure": on_failure,
+        }
+        if authoritative_live_oom:
+            record["authoritative_live_oom"] = True
+        actions.append(record)
         previous = stage
 
     discovery = dict(preflight.discovery_labels)
@@ -700,6 +777,36 @@ def build_plan(preflight: Preflight) -> dict:
             pause,
             restore,
             {"release": old, "sugarkube.dev/incident-paused": None},
+        )
+
+    if preflight.scenario == "staging-rehearsal":
+        stimulus_inverse = prefix + [
+            "set",
+            "image",
+            f"deployment/{c.deployment}",
+            f"{c.container}={c.current_image}",
+        ]
+        mutation(
+            "inject-oom-stimulus",
+            f"deployment/{c.deployment}",
+            prefix
+            + ["set", "image", f"deployment/{c.deployment}", f"{c.container}={c.stimulus_image}"],
+            stimulus_inverse,
+            {"image": c.current_image},
+        )
+        gate(
+            "observe-authentic-oom",
+            [
+                {
+                    "metric": "authoritative_oomkilled_137",
+                    "operator": "eq",
+                    "value": True,
+                    "unit": "boolean",
+                    "source": "live-kubernetes-api",
+                }
+            ],
+            stimulus_inverse,
+            authoritative_live_oom=True,
         )
 
     if mode == "metrics-oom" and preflight.metrics_mode_state in {"normal", "degraded"}:
@@ -970,6 +1077,7 @@ def build_plan(preflight: Preflight) -> dict:
     plan = {
         "schema_version": 2,
         "mode": mode,
+        "scenario": preflight.scenario,
         "run_id": c.run_id,
         "environment": "staging",
         "dry_run": True,
@@ -984,6 +1092,7 @@ def build_plan(preflight: Preflight) -> dict:
             "replicas": c.replicas,
             "container": c.container,
             "current_image": c.current_image,
+            "stimulus_image": c.stimulus_image,
             "replacement_image": c.replacement_image,
             "rollback_image": c.rollback_image,
             "memory_limit": c.memory_limit,
@@ -1644,16 +1753,25 @@ def _execute_locked(args, runner, plan, journal, now=None):
         and item["type"] == "mutation"
         and ("rollback", item["id"]) not in completed
     ]
-    replace_active = any(item["id"] == "replace" for item in active)
-    expected_image = (
-        plan["expected_deployment"]["replacement_image"]
-        if replace_active
-        else plan["expected_deployment"]["current_image"]
-    )
-    if pending and stage == "replace" and operation in {"execute", "rollback"}:
+    expected_image = plan["expected_deployment"]["current_image"]
+    for item in active:
+        if item.get("resource", "").startswith("deployment/") and "image" in item.get(
+            "old_state", {}
+        ):
+            expected_image = item["command"][-1].split("=", 1)[1]
+    if plan.get("scenario") == "staging-rehearsal" and ("rollback", "replace") in completed:
+        # The recovery replacement's inverse deliberately converges directly to
+        # the healthy baseline rather than revisiting the incident image.
+        expected_image = plan["expected_deployment"]["current_image"]
+    if (
+        pending
+        and action
+        and action.get("resource", "").startswith("deployment/")
+        and "image" in action.get("old_state", {})
+    ):
         expected_image = {
-            plan["expected_deployment"]["current_image"],
-            plan["expected_deployment"]["replacement_image"],
+            action["old_state"]["image"],
+            action["command"][-1].split("=", 1)[1],
         }
     _assert_stage_preflight(plan, args.kubeconfig, runner, expected_image)
 
@@ -1724,6 +1842,13 @@ def _execute_locked(args, runner, plan, journal, now=None):
         post, pre = _action_matches(plan, action, observed, True), _action_matches(
             plan, action, observed, False
         )
+        if (
+            action["id"] == "inject-oom-stimulus"
+            and plan.get("scenario") == "staging-rehearsal"
+            and pre
+        ):
+            _record_phase(journal, plan, operation, stage, "completed", direct_baseline=True)
+            return {"status": "rolled-back", "stage": stage}
         if pending and pre:
             _record_phase(journal, plan, operation, stage, "completed")
             return {"status": "rolled-back", "stage": stage}
@@ -1752,6 +1877,79 @@ def _execute_locked(args, runner, plan, journal, now=None):
     if done != expected[: len(done)] or expected[len(done)] != stage:
         raise DrillError("stage is out of order")
     if action["type"] == "gate":
+        if action.get("authoritative_live_oom"):
+            if args.gate_evidence is not None:
+                raise DrillError("authoritative OOM gate refuses operator-authored evidence")
+            expected = plan["expected_deployment"]
+            deployment = _runner_json(
+                runner,
+                [
+                    "kubectl",
+                    "--kubeconfig",
+                    str(args.kubeconfig),
+                    "--context",
+                    "sugar-staging",
+                    "--namespace",
+                    plan["inventory"]["namespace"],
+                    "get",
+                    "deployment",
+                    next(
+                        a["resource"].split("/", 1)[1]
+                        for a in actions
+                        if a["id"] == "inject-oom-stimulus"
+                    ),
+                    "-o",
+                    "json",
+                ],
+                "stimulated Deployment observation failed",
+            )
+            observed_coordinates = Coordinates(
+                host=STAGING_HOST,
+                kubeconfig=args.kubeconfig,
+                context="sugar-staging",
+                environment="staging",
+                namespace=plan["inventory"]["namespace"],
+                deployment=deployment.get("metadata", {}).get("name", ""),
+                container=expected["container"],
+                current_image=expected["stimulus_image"],
+                replacement_image=expected["replacement_image"],
+                rollback_image=expected["rollback_image"],
+                replicas=expected["replicas"],
+                memory_limit=expected["memory_limit"],
+                service_monitor=plan["inventory"]["service_monitor"],
+                run_id=plan["run_id"],
+                scenario="staging-rehearsal",
+                stimulus_image=expected["stimulus_image"],
+            )
+            base = ["kubectl", "--kubeconfig", str(args.kubeconfig), "--context", "sugar-staging"]
+            proof = _observe_live_oom(observed_coordinates, deployment, base, runner)
+            stimulus_intent = next(
+                record
+                for record in records
+                if record["operation"] == "execute"
+                and record["stage"] == "inject-oom-stimulus"
+                and record["phase"] == "intent"
+            )
+            baseline_restarts = stimulus_intent.get("baseline_restart_count")
+            if (
+                not isinstance(baseline_restarts, int)
+                or proof["restart_count"] <= baseline_restarts
+            ):
+                raise DrillError("authentic OOM restart count did not increase from baseline")
+            _record_phase(
+                journal,
+                plan,
+                operation,
+                stage,
+                "completed",
+                evidence_summary={
+                    "source": "live-kubernetes-api",
+                    "termination_time": proof["termination_time"],
+                    "restart_count": proof["restart_count"],
+                    "event_aggregates": proof["event_aggregates"],
+                },
+            )
+            return {"status": "completed", "stage": stage}
         if args.gate_evidence is None:
             raise DrillError("gate stage requires private evidence")
         evidence, evidence_digest = _read_gate_evidence(args.gate_evidence)
@@ -1799,7 +1997,30 @@ def _execute_locked(args, runner, plan, journal, now=None):
     if not pre:
         raise DrillError("stage state is ambiguous")
     if not pending:
-        _record_phase(journal, plan, operation, stage, "intent")
+        metadata = {}
+        if action["id"] == "inject-oom-stimulus":
+            expected = plan["expected_deployment"]
+            c = Coordinates(
+                host=STAGING_HOST,
+                kubeconfig=args.kubeconfig,
+                context="sugar-staging",
+                environment="staging",
+                namespace=plan["inventory"]["namespace"],
+                deployment=action["resource"].split("/", 1)[1],
+                container=expected["container"],
+                current_image=expected["current_image"],
+                replacement_image=expected["replacement_image"],
+                rollback_image=expected["rollback_image"],
+                replicas=expected["replicas"],
+                memory_limit=expected["memory_limit"],
+                service_monitor=plan["inventory"]["service_monitor"],
+                run_id=plan["run_id"],
+                scenario="staging-rehearsal",
+                stimulus_image=expected["stimulus_image"],
+            )
+            base = ["kubectl", "--kubeconfig", str(args.kubeconfig), "--context", "sugar-staging"]
+            metadata["baseline_restart_count"] = _current_restart_total(c, observed, base, runner)
+        _record_phase(journal, plan, operation, stage, "intent", **metadata)
     _run_checked(runner, _bind_command(action["command"], args.kubeconfig), "stage mutation failed")
     observed = _action_observed(plan, action, args.kubeconfig, runner)
     if not _action_matches(plan, action, observed, True):
