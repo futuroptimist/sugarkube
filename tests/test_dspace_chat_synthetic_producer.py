@@ -2706,7 +2706,7 @@ def test_materialize_cli_dispatches_complete_coordinates(
     assert captured == [
         (
             source.resolve(),
-            "97ab09f13fb098de928a878bf1fe9b8d13032cb5",
+            json.loads(CONFIG.read_text(encoding="utf-8"))["runnerRevision"],
             runtime.APPROVED_REPOSITORY_IDENTITY,
             output.resolve(),
             "/fixture/pnpm",
@@ -3650,7 +3650,7 @@ def test_explicit_live_root_reaches_status_only_after_mocked_normalization(
 
 
 def runner_snapshot_fixture(tmp_path: Path) -> tuple[Path, str]:
-    revision = "97ab09f13fb098de928a878bf1fe9b8d13032cb5"
+    revision = json.loads(CONFIG.read_text(encoding="utf-8"))["runnerRevision"]
     snapshot = tmp_path / "source" / revision
     snapshot.mkdir(parents=True)
     (snapshot / ".git").mkdir()
@@ -3797,7 +3797,7 @@ def test_apply_installs_runner_only_after_copy_revalidation(
 def test_runner_install_normalizes_private_source_without_changing_content(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    revision = "97ab09f13fb098de928a878bf1fe9b8d13032cb5"
+    revision = json.loads(CONFIG.read_text(encoding="utf-8"))["runnerRevision"]
     snapshot = tmp_path / "source" / revision
     previous_umask = os.umask(0o077)
     try:

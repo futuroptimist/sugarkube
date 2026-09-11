@@ -10,7 +10,7 @@ The repository owns the wrapper, runtime, bounded metrics consumer, non-secret c
 files, installer, and construction tool. The previous private wrapper SHA
 `5a160f1e4c077c09cda5fec062733cd9b31ed8cbfbc5b7f0779403f4a829e70e` is provenance only; it is
 not a source input and the new wrapper legitimately differs. The runner’s logical source revision is
-the complete DSPACE commit `97ab09f13fb098de928a878bf1fe9b8d13032cb5`; the deployed application identity remains
+the complete DSPACE commit `f14b9e978cff52930c3f8adc1fe96beae6936cef`; the deployed application identity remains
 version `3.1.1`, source `22f506e07e0b5abfd0cf756e9c5827c0458fb4b2`, identity contract
 `build-info-v1`, and explicitly selected provider-config contract
 `legacy-no-default-provider-v1`.
@@ -137,9 +137,9 @@ lockfile, frozen and offline; it never contacts GitHub or resolves new package v
 ```bash
 python3 scripts/install_dspace_chat_synthetic.py materialize \
   --source /absolute/path/to/local/dspace \
-  --revision 97ab09f13fb098de928a878bf1fe9b8d13032cb5 \
+  --revision f14b9e978cff52930c3f8adc1fe96beae6936cef \
   --repository-identity https://github.com/democratizedspace/dspace.git \
-  --output /absolute/staging/97ab09f13fb098de928a878bf1fe9b8d13032cb5 \
+  --output /absolute/staging/f14b9e978cff52930c3f8adc1fe96beae6936cef \
   --pnpm /absolute/toolchain/pnpm --pnpm-version 9.0.0 \
   --browser-source-root /absolute/private/target-root
 ```
@@ -188,9 +188,9 @@ root for a non-mutating rehearsal:
 
 ```bash
 python3 scripts/install_dspace_chat_synthetic.py dry-run \
-  --runner-snapshot /absolute/staging/97ab09f13fb098de928a878bf1fe9b8d13032cb5
+  --runner-snapshot /absolute/staging/f14b9e978cff52930c3f8adc1fe96beae6936cef
 python3 scripts/install_dspace_chat_synthetic.py dry-run --root /tmp/rehearsal-root \
-  --runner-snapshot /absolute/staging/97ab09f13fb098de928a878bf1fe9b8d13032cb5
+  --runner-snapshot /absolute/staging/f14b9e978cff52930c3f8adc1fe96beae6936cef
 python3 scripts/install_dspace_chat_synthetic.py status --root /tmp/rehearsal-root
 ```
 
@@ -213,7 +213,7 @@ Only after separate approval, invoke apply with the already materialized snapsho
 
 ```bash
 sudo python3 scripts/install_dspace_chat_synthetic.py apply \
-  --runner-snapshot /absolute/staging/97ab09f13fb098de928a878bf1fe9b8d13032cb5
+  --runner-snapshot /absolute/staging/f14b9e978cff52930c3f8adc1fe96beae6936cef
 ```
 
 Apply validates the source snapshot before any destination mutation, copies it beneath the configured
