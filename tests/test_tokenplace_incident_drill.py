@@ -247,6 +247,33 @@ def test_staging_rehearsal_authorization_and_coordinates_fail_closed(tmp_path, c
         drill.validate(args(tmp_path, **values))
 
 
+def test_staging_rehearsal_rejects_non_oom_mode(tmp_path):
+    with pytest.raises(drill.DrillError, match="supported only for metrics-OOM"):
+        drill.validate(
+            args(
+                tmp_path,
+                mode="quota-exhaustion",
+                lifecycle="staging-rehearsal",
+                incident_image="registry.example/relay@sha256:" + "d" * 64,
+                acknowledge_staging_fault_injection=True,
+            )
+        )
+
+
+def test_staging_rehearsal_rejects_preexisting_oom_evidence(tmp_path):
+    c = drill.validate(
+        args(
+            tmp_path,
+            lifecycle="staging-rehearsal",
+            incident_image="registry.example/relay@sha256:" + "d" * 64,
+            acknowledge_staging_fault_injection=True,
+        )
+    )
+    unhealthy = snapshot(c)
+    with pytest.raises(drill.DrillError, match="must not assert synthetic OOM evidence"):
+        drill.preflight_snapshot("metrics-oom", c, unhealthy)
+
+
 def test_staging_rehearsal_rejects_repository_aliases_of_same_digest(tmp_path):
     digest = "d" * 64
     with pytest.raises(drill.DrillError, match="distinct"):
@@ -2351,6 +2378,8 @@ def test_marker_validation_rejects_missing_or_malformed_marker(tmp_path, stdout)
 def test_action_matching_rejects_missing_container_and_unknown_state(tmp_path):
     plan = drill.build_plan(preflight(tmp_path))
     action = next(item for item in plan["actions"] if item["id"] == "replace")
+    with pytest.raises(ValueError, match="unknown action state"):
+        drill._action_matches(plan, action, {}, "unknown")
     assert not drill._action_matches(plan, action, {}, "forward-pre")
     action = {**action, "old_state": {}}
     assert not drill._action_matches(
