@@ -115,6 +115,9 @@ a new evidence file in an operator-supplied private directory outside the reposi
 From the repository root, generate both plans (replace every placeholder with reviewed staging
 coordinates):
 
+The incident-drill runner uses only the Python standard library and its checked-in JSON inventory,
+so the direct `python3` commands below do not require PyYAML or another operator-host bootstrap.
+
 ```bash
 python3 scripts/tokenplace_incident_drill.py --dry-run --mode metrics-oom \
   --host "$STAGING_HOST" --kubeconfig "$STAGING_KUBECONFIG" --context sugar-staging \

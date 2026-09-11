@@ -19,9 +19,8 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urlsplit
 
-import yaml
-
 ROOT = Path(__file__).resolve().parents[1]
+INCIDENT_INVENTORY = ROOT / "config/observability/tokenplace-incident-inventory.json"
 SAFE_NAME = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
 IMAGE = re.compile(r"[^\s:@]+(?:/[^\s:@]+)+@sha256:[0-9a-f]{64}")
 IMAGE_DIGEST = re.compile(r"@sha256:([0-9a-f]{64})$")
@@ -239,16 +238,26 @@ def _publish_evidence(target: Path, payload: str) -> None:
 
 
 def inventory(environment: str) -> Inventory:
-    quota = yaml.safe_load((ROOT / "config/observability/probe-quotas.yaml").read_text())
-    matches = [
-        p
-        for p in quota["probes"]
-        if p["application"] == "tokenplace" and p["environment"] == environment
-    ]
-    route_classes = [p["route_class"] for p in matches]
+    contract = json.loads(INCIDENT_INVENTORY.read_text(encoding="utf-8"))
+    if set(contract) != {"version", "environments"} or contract["version"] != 1:
+        raise DrillError("token.place incident inventory has an unsupported schema")
+    environments = contract["environments"]
+    if not isinstance(environments, dict) or set(environments) != {"staging", "prod"}:
+        raise DrillError("token.place incident inventory has invalid environments")
+    matches = environments.get(environment)
+    if not isinstance(matches, list) or not all(isinstance(item, dict) for item in matches):
+        raise DrillError("token.place incident inventory has malformed entries")
+    required = {"route_class", "probe", "route", "method"}
+    if any(
+        set(item) != required
+        or not all(isinstance(item[key], str) for key in required)
+        for item in matches
+    ):
+        raise DrillError("token.place incident inventory has malformed entries")
+    route_classes = [item["route_class"] for item in matches]
     if len(route_classes) != len(set(route_classes)):
-        raise DrillError("token.place quota inventory contains duplicate route classes")
-    selected = {p["route_class"]: p for p in matches}
+        raise DrillError("token.place incident inventory contains duplicate route classes")
+    selected = {item["route_class"]: item for item in matches}
     expected = {
         "root": ("/", "GET"),
         "metadata": ("/api/v1/meta", "GET"),
@@ -2071,7 +2080,7 @@ def main(argv: list[str] | None = None) -> int:
     except DrillError as exc:
         print(f"token.place incident drill refused: {exc}", file=sys.stderr)
         return 2
-    except (OSError, KeyError, TypeError, json.JSONDecodeError, yaml.YAMLError):
+    except (OSError, KeyError, TypeError, json.JSONDecodeError):
         print("token.place incident drill refused: precondition validation failed", file=sys.stderr)
         return 2
 
