@@ -61,7 +61,12 @@ def _yaml_scalar(text):
     if value == "{}":
         return {}
     if value.startswith("[") and value.endswith("]"):
-        return [_yaml_scalar(part) for part in value[1:-1].split(",") if part.strip()]
+        parts = value[1:-1].split(",")
+        if not value[1:-1].strip() or any(not part.strip() for part in parts):
+            raise YAMLInputError
+        if any(any(delimiter in part for delimiter in "[]{}") for part in parts):
+            raise YAMLInputError
+        return [_yaml_scalar(part) for part in parts]
     if value[:1] in {'"', "'"}:
         if len(value) < 2 or value[-1] != value[0]:
             raise YAMLInputError
@@ -73,7 +78,7 @@ def _yaml_scalar(text):
             except (ValueError, TypeError) as exc:
                 raise YAMLInputError from exc
         return value[1:-1].replace("''", "'")
-    if value[0] in "!&*{|>" or " #" in value:
+    if value[0] in "!&*{|>" or " #" in value or any(char in value for char in "[]{}"):
         raise YAMLInputError
     try:
         return int(value)
@@ -88,9 +93,12 @@ def _yaml_documents(text):
     """Parse a strict indentation-based YAML subset and reject ambiguous input."""
     documents = []
     chunks = [[]]
+    leading_marker = True
     for raw in text.splitlines():
         if raw.strip() == "---":
-            if chunks[-1]:
+            if leading_marker and not chunks[-1]:
+                leading_marker = False
+            else:
                 chunks.append([])
             continue
         if raw.strip() in {"", "..."} or raw.lstrip().startswith("#"):
@@ -98,6 +106,7 @@ def _yaml_documents(text):
         indentation = len(raw) - len(raw.lstrip(" "))
         if "\t" in raw or indentation % 2:
             raise YAMLInputError
+        leading_marker = False
         chunks[-1].append((indentation, raw.lstrip(" ")))
 
     def parse(lines, start, indent):
@@ -133,7 +142,7 @@ def _yaml_documents(text):
         return value, index
 
     def split_mapping(content):
-        if ":" not in content:
+        if not re.match(r"^[A-Za-z0-9_.-]+:(?: |$)", content):
             raise YAMLInputError
         key, scalar = content.split(":", 1)
         if not key or key.strip() != key or any(char in key for char in "{}[],&*!|>'\""):
@@ -171,7 +180,17 @@ def _yaml_documents(text):
             if end != len(chunk):
                 raise YAMLInputError
             documents.append(document)
+        else:
+            documents.append(None)
     return documents
+
+
+def _single_yaml_document(text):
+    """Read one non-empty document for configuration inputs."""
+    documents = _yaml_documents(text)
+    if len(documents) != 1 or not isinstance(documents[0], dict):
+        raise YAMLInputError
+    return documents[0]
 
 
 def _positive_int(value, field):
@@ -223,7 +242,7 @@ def load_modules(environment):
         / "observability"
         / "prometheus-blackbox-exporter.values.yaml"
     )
-    data = _yaml_documents(path.read_text(encoding="utf-8"))[0]
+    data = _single_yaml_document(path.read_text(encoding="utf-8"))
     modules = data.get("config", {}).get("modules", {})
     methods = {}
     for name, module in modules.items():
@@ -231,7 +250,7 @@ def load_modules(environment):
         if method not in METHODS:
             raise ContractError(f"blackbox module {name} has an invalid or missing method")
         methods[name] = method
-    common_values = _yaml_documents(
+    common_values = _single_yaml_document(
         (
             ROOT
             / "platform"
@@ -239,12 +258,12 @@ def load_modules(environment):
             / "helm"
             / "kube-prometheus-stack.values.common.yaml"
         ).read_text(encoding="utf-8")
-    )[0]
-    environment_values = _yaml_documents(
+    )
+    environment_values = _single_yaml_document(
         (
             ROOT / "clusters" / environment / "observability" / "kube-prometheus-stack.values.yaml"
         ).read_text(encoding="utf-8")
-    )[0]
+    )
     # kube-prometheus-stack defaults to one replica when replicas is omitted.
     common_spec = common_values.get("prometheus", {}).get("prometheusSpec", {})
     environment_spec = environment_values.get("prometheus", {}).get("prometheusSpec", {})
@@ -459,7 +478,7 @@ def main(argv=None):
     )
     args = parser.parse_args(argv)
     try:
-        contract = _yaml_documents(args.contracts.read_text(encoding="utf-8"))[0]
+        contract = _single_yaml_document(args.contracts.read_text(encoding="utf-8"))
         # One inventory owns both environments. Validate its complete structure so
         # malformed declarations cannot disappear during environment selection.
         contract = select_environment_contract(contract, args.env)
@@ -471,7 +490,7 @@ def main(argv=None):
     except ContractError as exc:
         print(f"probe quota validation failed: {exc}", file=sys.stderr)
         return 1
-    except (YAMLInputError, IndexError):
+    except YAMLInputError:
         print("probe quota validation failed: YAML input is malformed", file=sys.stderr)
         return 1
     except OSError:
