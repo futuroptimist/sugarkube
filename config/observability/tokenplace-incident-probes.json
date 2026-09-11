@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "probes": [
+    {
+      "application": "tokenplace",
+      "environment": "staging",
+      "probe": "blackbox-tokenplace-staging-root",
+      "route_class": "root",
+      "route": "/",
+      "method": "GET"
+    },
+    {
+      "application": "tokenplace",
+      "environment": "staging",
+      "probe": "blackbox-tokenplace-staging-metadata",
+      "route_class": "metadata",
+      "route": "/api/v1/meta",
+      "method": "GET"
+    },
+    {
+      "application": "tokenplace",
+      "environment": "staging",
+      "probe": "blackbox-tokenplace-staging-livez",
+      "route_class": "livez",
+      "route": "/livez",
+      "method": "GET"
+    },
+    {
+      "application": "tokenplace",
+      "environment": "staging",
+      "probe": "blackbox-tokenplace-staging-healthz",
+      "route_class": "healthz",
+      "route": "/healthz",
+      "method": "GET"
+    }
+  ]
+}

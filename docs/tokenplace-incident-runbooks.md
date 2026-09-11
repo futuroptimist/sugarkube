@@ -113,7 +113,8 @@ must also contain `OOMKilled`/137 termination evidence or bounded root/metadata 
 livez/healthz statuses plus a successful quota-validator result. Use a unique DNS-safe run ID and
 a new evidence file in an operator-supplied private directory outside the repository.
 From the repository root, generate both plans (replace every placeholder with reviewed staging
-coordinates):
+coordinates). The runner and its identity-first live preflight use only the Python standard library;
+the direct `python3` invocation does not depend on ambient site packages such as PyYAML:
 
 ```bash
 python3 scripts/tokenplace_incident_drill.py --dry-run --mode metrics-oom \

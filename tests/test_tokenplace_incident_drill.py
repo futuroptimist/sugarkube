@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+import yaml
 
 from scripts import tokenplace_incident_drill as drill
 
@@ -930,8 +931,8 @@ def test_evidence_publication_race_does_not_replace_existing_target(tmp_path):
 
 
 def test_duplicate_inventory_route_classes_are_rejected(monkeypatch):
-    contract = drill.yaml.safe_load(
-        (drill.ROOT / "config/observability/probe-quotas.yaml").read_text()
+    contract = json.loads(
+        (drill.ROOT / "config/observability/tokenplace-incident-probes.json").read_text()
     )
     duplicate = next(
         p.copy()
@@ -939,11 +940,67 @@ def test_duplicate_inventory_route_classes_are_rejected(monkeypatch):
         if p["application"] == "tokenplace" and p["environment"] == "staging"
     )
     contract["probes"].append(duplicate)
-    original = drill.yaml.safe_load
-    monkeypatch.setattr(drill.yaml, "safe_load", lambda _: contract)
+    original = drill.json.loads
+    monkeypatch.setattr(drill.json, "loads", lambda _: contract)
     with pytest.raises(drill.DrillError, match="duplicate"):
         drill.inventory("staging")
-    monkeypatch.setattr(drill.yaml, "safe_load", original)
+    monkeypatch.setattr(drill.json, "loads", original)
+
+
+def test_incident_inventory_rejects_malformed_json(monkeypatch):
+    monkeypatch.setattr(drill.json, "loads", lambda _: {"version": 1, "probes": "invalid"})
+    with pytest.raises(drill.DrillError, match="malformed"):
+        drill.inventory("staging")
+
+
+def test_incident_inventory_matches_quota_contract():
+    incident = json.loads(
+        (drill.ROOT / "config/observability/tokenplace-incident-probes.json").read_text()
+    )["probes"]
+    quotas = yaml.safe_load(
+        (drill.ROOT / "config/observability/probe-quotas.yaml").read_text()
+    )["probes"]
+    fields = ("application", "environment", "probe", "route_class", "route", "method")
+    expected = [
+        {field: probe[field] for field in fields}
+        for probe in quotas
+        if probe["application"] == "tokenplace" and probe["environment"] == "staging"
+    ]
+    assert sorted(incident, key=lambda probe: probe["route_class"]) == sorted(
+        expected, key=lambda probe: probe["route_class"]
+    )
+
+
+def test_help_runs_without_site_packages():
+    result = subprocess.run(
+        ["python3", "-S", str(drill.ROOT / "scripts/tokenplace_incident_drill.py"), "--help"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "--live-preflight" in result.stdout
+
+
+def test_live_preflight_reaches_identity_check_without_site_packages(tmp_path):
+    parsed = args(tmp_path, snapshot=None, live_preflight=True)
+    argv = []
+    for key, value in vars(parsed).items():
+        if value is None or value is False:
+            continue
+        option = "--" + key.replace("_", "-")
+        argv.append(option)
+        if not isinstance(value, bool):
+            argv.append(str(value))
+    result = subprocess.run(
+        ["python3", "-S", str(drill.ROOT / "scripts/tokenplace_incident_drill.py"), *argv],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 2
+    assert "authoritative staging identity assertion failed" in result.stderr
+    assert "No module named 'yaml'" not in result.stderr
 
 
 def test_metrics_plan_has_typed_ordered_gates_and_metrics_last(tmp_path):
