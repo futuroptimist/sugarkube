@@ -1475,18 +1475,21 @@ def _pending_operation(records: list[dict]) -> tuple[str, str] | None:
     return None
 
 
-def _action_matches(plan: dict, action: dict, observed: dict, post: bool) -> bool:
-    """Return whether an exact resource is in the action's pre- or post-state."""
+def _action_matches(plan: dict, action: dict, observed: dict, state: str) -> bool:
+    """Return whether an exact resource matches one explicit operation state."""
+    if state not in {"forward-pre", "forward-post", "rollback-pre", "rollback-post"}:
+        raise ValueError(f"unknown action state: {state}")
+    forward_post = state in {"forward-post", "rollback-pre"}
     kind, _ = action["resource"].split("/", 1)
-    old = (
+    expected_state = (
         action.get("old_state", {})
-        if post
+        if state == "forward-pre"
         else action.get("inverse_state", action.get("old_state", {}))
     )
     if kind in {"probe", "servicemonitor"}:
         labels = observed.get("metadata", {}).get("labels", {})
-        expected = old
-        if post:
+        expected = expected_state
+        if forward_post:
             expected = {"release": None, "sugarkube.dev/incident-paused": "true"}
             for token in action["command"]:
                 if token.startswith("release="):
@@ -1503,18 +1506,20 @@ def _action_matches(plan: dict, action: dict, observed: dict, post: bool) -> boo
         return False
     container = selected[0]
     matches = True
-    if "image" in old:
-        expected = old["image"]
-        if post:
+    if "image" in expected_state:
+        expected = expected_state["image"]
+        if forward_post:
             expected = action["command"][-1].split("=", 1)[1]
         matches = container.get("image") == expected and matches
-    if "TOKENPLACE_METRICS_MODE" in old:
+    if "TOKENPLACE_METRICS_MODE" in expected_state:
         env = {item.get("name"): item.get("value") for item in container.get("env", [])}
         expected = (
-            action["command"][-1].split("=", 1)[1] if post else old["TOKENPLACE_METRICS_MODE"]
+            action["command"][-1].split("=", 1)[1]
+            if forward_post
+            else expected_state["TOKENPLACE_METRICS_MODE"]
         )
         matches = env.get("TOKENPLACE_METRICS_MODE") == expected and matches
-    return matches and bool(old.keys() & {"image", "TOKENPLACE_METRICS_MODE"})
+    return matches and bool(expected_state.keys() & {"image", "TOKENPLACE_METRICS_MODE"})
 
 
 def _action_observed(plan: dict, action: dict, kubeconfig: Path, runner: Runner) -> dict:
@@ -1741,7 +1746,7 @@ def _verify_cleanup_baseline(plan, kubeconfig, runner):
         observed = _action_observed(plan, action, kubeconfig, runner)
         baseline_action = {**action, "old_state": old_state}
         baseline_action.pop("inverse_state", None)
-        if not _action_matches(plan, baseline_action, observed, False):
+        if not _action_matches(plan, baseline_action, observed, "forward-pre"):
             raise DrillError("cleanup requires the exact baseline")
     for path in ("/livez", "/healthz"):
         result = runner(
@@ -1796,15 +1801,23 @@ def _execute_locked(args, runner, plan, journal, now=None):
             expected_image = image_action["command"][-1].split("=", 1)[1]
         elif record["operation"] == "rollback":
             expected_image = image_action.get("inverse_state", image_action["old_state"])["image"]
-    if pending and stage == "replace" and operation in {"execute", "rollback"}:
+    if pending and action and "image" in action.get("old_state", {}):
+        states = (
+            ("forward-pre", "forward-post")
+            if operation == "execute"
+            else ("rollback-pre", "rollback-post")
+        )
         expected_image = {
-            plan["expected_deployment"]["current_image"],
-            plan["expected_deployment"]["replacement_image"],
-        }
-    if pending and stage == "inject-oom-stimulus" and operation == "rollback":
-        expected_image = {
-            plan["expected_deployment"]["current_image"],
-            plan["expected_deployment"]["incident_image"],
+            (
+                action["command"][-1].split("=", 1)[1]
+                if state in {"forward-post", "rollback-pre"}
+                else (
+                    action["old_state"]["image"]
+                    if state == "forward-pre"
+                    else action.get("inverse_state", action["old_state"])["image"]
+                )
+            )
+            for state in states
         }
     _assert_stage_preflight(plan, args.kubeconfig, runner, expected_image)
 
@@ -1872,8 +1885,8 @@ def _execute_locked(args, runner, plan, journal, now=None):
         if not active or active[-1]["id"] != stage:
             raise DrillError("rollback must follow reverse mutation order")
         observed = _action_observed(plan, action, args.kubeconfig, runner)
-        post, pre = _action_matches(plan, action, observed, True), _action_matches(
-            plan, action, observed, False
+        post, pre = _action_matches(plan, action, observed, "rollback-pre"), _action_matches(
+            plan, action, observed, "rollback-post"
         )
         if pre and action.get("baseline_idempotent_inverse"):
             if not pending:
@@ -1891,7 +1904,7 @@ def _execute_locked(args, runner, plan, journal, now=None):
             runner, _bind_command(action["inverse"], args.kubeconfig), "exact stage rollback failed"
         )
         observed = _action_observed(plan, action, args.kubeconfig, runner)
-        if not _action_matches(plan, action, observed, False):
+        if not _action_matches(plan, action, observed, "rollback-post"):
             raise DrillError("exact stage rollback post-state failed")
         _record_phase(journal, plan, operation, stage, "completed")
         return {"status": "rolled-back", "stage": stage}
@@ -1902,7 +1915,7 @@ def _execute_locked(args, runner, plan, journal, now=None):
     if (operation, stage) in completed:
         if action["type"] == "mutation":
             observed = _action_observed(plan, action, args.kubeconfig, runner)
-            if not _action_matches(plan, action, observed, True):
+            if not _action_matches(plan, action, observed, "forward-post"):
                 raise DrillError("completed stage post-state drifted")
         return {"status": "already-completed", "stage": stage}
     if done != expected[: len(done)] or expected[len(done)] != stage:
@@ -2006,8 +2019,8 @@ def _execute_locked(args, runner, plan, journal, now=None):
         _record_phase(journal, plan, operation, stage, "completed", **metadata)
         return {"status": "completed", "stage": stage}
     observed = _action_observed(plan, action, args.kubeconfig, runner)
-    post, pre = _action_matches(plan, action, observed, True), _action_matches(
-        plan, action, observed, False
+    post, pre = _action_matches(plan, action, observed, "forward-post"), _action_matches(
+        plan, action, observed, "forward-pre"
     )
     if pending and post:
         _record_phase(journal, plan, operation, stage, "completed")
@@ -2018,7 +2031,7 @@ def _execute_locked(args, runner, plan, journal, now=None):
         _record_phase(journal, plan, operation, stage, "intent")
     _run_checked(runner, _bind_command(action["command"], args.kubeconfig), "stage mutation failed")
     observed = _action_observed(plan, action, args.kubeconfig, runner)
-    if not _action_matches(plan, action, observed, True):
+    if not _action_matches(plan, action, observed, "forward-post"):
         raise DrillError("stage mutation post-state failed")
     _record_phase(journal, plan, operation, stage, "completed")
     return {"status": "completed", "stage": stage}

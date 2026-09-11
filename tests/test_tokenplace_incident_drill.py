@@ -1157,31 +1157,63 @@ def test_authoritative_oom_is_bounded_by_stimulus_intent(tmp_path, finished_at, 
             drill._observe_live_oom(c, deployment, ["kubectl"], runner, not_before=not_before)
 
 
-def test_rehearsal_replacement_inverse_matches_healthy_baseline(tmp_path):
-    parsed = args(
-        tmp_path,
-        lifecycle="staging-rehearsal",
-        incident_image="registry.example/relay@sha256:" + "d" * 64,
-        acknowledge_staging_fault_injection=True,
+def test_rehearsal_replace_executes_from_incident_image(tmp_path):
+    plan = executable_rehearsal_plan(tmp_path)
+    parsed = execution_files(tmp_path, plan)
+    replace = _journal_through(parsed, plan, "replace")
+    parsed.execute_stage = "replace"
+    calls = []
+    runner = execution_runner(
+        plan, calls, _matching_marker(plan), plan["expected_deployment"]["incident_image"]
     )
-    coordinates = drill.validate(parsed)
-    healthy = snapshot(coordinates)
-    healthy["classification"] = {}
-    plan = drill.build_plan(drill.preflight_snapshot("metrics-oom", coordinates, healthy))
+
+    assert drill.execute_operation(parsed, runner)["status"] == "completed"
+    assert sum(call[-2:] == replace["command"][-2:] for call in calls) == 1
+
+
+def test_pending_rehearsal_image_mutations_reconcile_pre_and_post_states(tmp_path):
+    for stage, pre_key, post_key in (
+        ("inject-oom-stimulus", "current_image", "incident_image"),
+        ("replace", "incident_image", "replacement_image"),
+    ):
+        for initial_key, mutations in ((pre_key, 1), (post_key, 0)):
+            case = tmp_path / f"{stage}-{initial_key}"
+            case.mkdir()
+            plan = executable_rehearsal_plan(case)
+            parsed = execution_files(case, plan)
+            action = _journal_through(parsed, plan, stage)
+            parsed.execute_stage = stage
+            calls = []
+            runner = execution_runner(
+                plan,
+                calls,
+                _matching_marker(plan),
+                plan["expected_deployment"][initial_key],
+            )
+
+            assert drill.execute_operation(parsed, runner)["status"] == "completed"
+            assert sum(call[-2:] == action["command"][-2:] for call in calls) == mutations
+
+
+def test_rehearsal_replacement_inverse_matches_healthy_baseline(tmp_path):
+    plan = executable_rehearsal_plan(tmp_path)
     replace = next(action for action in plan["actions"] if action["id"] == "replace")
     observed = {
         "spec": {
             "template": {
                 "spec": {
                     "containers": [
-                        {"name": coordinates.container, "image": coordinates.current_image}
+                        {
+                            "name": plan["expected_deployment"]["container"],
+                            "image": plan["expected_deployment"]["current_image"],
+                        }
                     ]
                 }
             }
         }
     }
 
-    assert drill._action_matches(plan, replace, observed, post=False)
+    assert drill._action_matches(plan, replace, observed, "rollback-post")
 
 
 def test_numeric_observation_thresholds_and_metrics_exit(tmp_path):
@@ -2319,7 +2351,7 @@ def test_marker_validation_rejects_missing_or_malformed_marker(tmp_path, stdout)
 def test_action_matching_rejects_missing_container_and_unknown_state(tmp_path):
     plan = drill.build_plan(preflight(tmp_path))
     action = next(item for item in plan["actions"] if item["id"] == "replace")
-    assert not drill._action_matches(plan, action, {}, post=False)
+    assert not drill._action_matches(plan, action, {}, "forward-pre")
     action = {**action, "old_state": {}}
     assert not drill._action_matches(
         plan,
@@ -2331,7 +2363,7 @@ def test_action_matching_rejects_missing_container_and_unknown_state(tmp_path):
                 }
             }
         },
-        post=False,
+        "forward-pre",
     )
 
 
