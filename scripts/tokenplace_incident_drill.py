@@ -238,10 +238,22 @@ def _publish_evidence(target: Path, payload: str) -> None:
 
 
 def inventory(environment: str) -> Inventory:
-    contract = json.loads(INCIDENT_PROBES.read_text(encoding="utf-8"))
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise DrillError("token.place probe inventory contract is malformed")
+            result[key] = value
+        return result
+
+    contract = json.loads(
+        INCIDENT_PROBES.read_text(encoding="utf-8"), object_pairs_hook=unique_object
+    )
     if (
         not isinstance(contract, dict)
         or set(contract) != {"schema_version", "environments"}
+        or isinstance(contract["schema_version"], bool)
+        or not isinstance(contract["schema_version"], int)
         or contract["schema_version"] != 1
         or not isinstance(contract["environments"], dict)
         or set(contract["environments"]) != {"staging", "prod"}
@@ -254,12 +266,16 @@ def inventory(environment: str) -> Inventory:
     if (
         not isinstance(matches, list)
         or not all(isinstance(p, dict) and set(p) == required for p in matches)
-        or not all(all(isinstance(p[key], str) for key in required) for p in matches)
+        or not all(all(isinstance(p[key], str) and p[key] for key in required) for p in matches)
+        or not all(SAFE_NAME.fullmatch(p["probe"]) for p in matches)
     ):
         raise DrillError("token.place probe inventory contract is malformed")
     route_classes = [p["route_class"] for p in matches]
     if len(route_classes) != len(set(route_classes)):
         raise DrillError("token.place incident probe inventory contains duplicate route classes")
+    probe_names = [p["probe"] for p in matches]
+    if len(probe_names) != len(set(probe_names)):
+        raise DrillError("token.place incident probe inventory contains duplicate probe names")
     selected = {p["route_class"]: p for p in matches}
     expected = {
         "root": ("/", "GET"),
@@ -270,7 +286,9 @@ def inventory(environment: str) -> Inventory:
     if set(selected) != set(expected) or any(
         (selected[k]["route"], selected[k]["method"]) != v for k, v in expected.items()
     ):
-        raise DrillError("token.place incident probe inventory is missing, ambiguous, or mismatched")
+        raise DrillError(
+            "token.place incident probe inventory is missing, ambiguous, or mismatched"
+        )
     metrics = json.loads((ROOT / "platform/observability/app-metrics.json").read_text())
     item = metrics["applications"]["tokenplace"]["environments"][environment]
     return Inventory(
@@ -597,8 +615,8 @@ def _observe_live_quota(runner: Runner) -> dict:
     validator = [
         sys.executable,
         "-S",
-        str(ROOT / "scripts/validate_tokenplace_incident_probes.py"),
-        "--environment",
+        str(ROOT / "scripts/validate_probe_quotas.py"),
+        "--env",
         "staging",
     ]
     if runner(validator).returncode:
@@ -953,8 +971,8 @@ def build_plan(preflight: Preflight) -> dict:
                     "argv": [
                         "python3",
                         "-S",
-                        "scripts/validate_tokenplace_incident_probes.py",
-                        "--environment",
+                        "scripts/validate_probe_quotas.py",
+                        "--env",
                         "staging",
                     ],
                 }

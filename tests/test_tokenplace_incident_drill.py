@@ -783,8 +783,8 @@ def test_live_quota_runs_validator_then_status_only_requests():
     evidence = drill._observe_live_quota(runner)
     assert calls[0][1:4] == [
         "-S",
-        str(drill.ROOT / "scripts/validate_tokenplace_incident_probes.py"),
-        "--environment",
+        str(drill.ROOT / "scripts/validate_probe_quotas.py"),
+        "--env",
     ]
     assert evidence["route_statuses"] == {
         "root": 429,
@@ -973,14 +973,16 @@ def test_unsupported_inventory_environment_is_an_operator_error():
         drill.inventory("production")
 
 
-def test_incident_probe_validator_runs_without_site_packages():
+def test_quota_validator_runs_without_site_packages():
     result = subprocess.run(
         [
             "python3",
             "-S",
-            str(drill.ROOT / "scripts/validate_tokenplace_incident_probes.py"),
-            "--environment",
+            str(drill.ROOT / "scripts/validate_probe_quotas.py"),
+            "--env",
             "staging",
+            "--probes",
+            str(drill.ROOT / "clusters/staging/observability/probes/public-apps.yaml"),
         ],
         cwd=drill.ROOT,
         capture_output=True,
@@ -994,6 +996,9 @@ def test_incident_probe_validator_runs_without_site_packages():
     "contents",
     [
         "not JSON",
+        '{"schema_version": 1, "schema_version": 1, "environments": {}}',
+        '{"schema_version": true, "environments": {"staging": [], "prod": []}}',
+        '{"schema_version": 1.0, "environments": {"staging": [], "prod": []}}',
         '{"schema_version": 1, "environments": {}}',
         '{"schema_version": 1, "environments": {"staging": {}, "prod": []}}',
     ],
@@ -1008,6 +1013,30 @@ def test_malformed_incident_probe_inventory_is_rejected(tmp_path, monkeypatch, c
     else:
         with pytest.raises(drill.DrillError, match="contract is malformed"):
             drill.inventory("staging")
+
+
+@pytest.mark.parametrize("probe_name", ["", "Not Safe"])
+def test_incident_probe_inventory_rejects_invalid_probe_names(
+    tmp_path, monkeypatch, probe_name
+):
+    contract = json.loads(drill.INCIDENT_PROBES.read_text())
+    contract["environments"]["staging"][0]["probe"] = probe_name
+    path = tmp_path / "incident-probes.json"
+    path.write_text(json.dumps(contract))
+    monkeypatch.setattr(drill, "INCIDENT_PROBES", path)
+    with pytest.raises(drill.DrillError, match="contract is malformed"):
+        drill.inventory("staging")
+
+
+def test_incident_probe_inventory_rejects_duplicate_probe_names(tmp_path, monkeypatch):
+    contract = json.loads(drill.INCIDENT_PROBES.read_text())
+    probes = contract["environments"]["staging"]
+    probes[1]["probe"] = probes[0]["probe"]
+    path = tmp_path / "incident-probes.json"
+    path.write_text(json.dumps(contract))
+    monkeypatch.setattr(drill, "INCIDENT_PROBES", path)
+    with pytest.raises(drill.DrillError, match="duplicate probe names"):
+        drill.inventory("staging")
 
 
 def test_metrics_plan_has_typed_ordered_gates_and_metrics_last(tmp_path):
@@ -1052,8 +1081,8 @@ def test_quota_restoration_has_exact_inverse_and_preserves_health(tmp_path):
     assert validator["checks"][0]["argv"] == [
         "python3",
         "-S",
-        "scripts/validate_tokenplace_incident_probes.py",
-        "--environment",
+        "scripts/validate_probe_quotas.py",
+        "--env",
         "staging",
     ]
     assert validator["on_failure"] == {

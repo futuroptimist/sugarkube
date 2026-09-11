@@ -6,14 +6,13 @@ from __future__ import annotations
 import argparse
 import math
 import os
+import re
 import subprocess
 import sys
 from collections import defaultdict
 from fractions import Fraction
 from pathlib import Path
 from urllib.parse import urlsplit
-
-import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 WINDOWS = {"hourly": 3600, "daily": 86400}
@@ -40,6 +39,139 @@ DECLARATION_FIELDS = {
 
 class ContractError(ValueError):
     """A safe, repository-only validation error."""
+
+
+class YAMLInputError(ValueError):
+    """A privacy-safe error raised by the deliberately small YAML reader."""
+
+
+def _yaml_scalar(text):
+    """Read the scalar forms used by the repository's reviewed YAML inputs."""
+    value = text.strip()
+    if not value:
+        return None
+    if value in {"null", "Null", "NULL", "~"}:
+        return None
+    if value in {"true", "True", "TRUE"}:
+        return True
+    if value in {"false", "False", "FALSE"}:
+        return False
+    if value == "[]":
+        return []
+    if value == "{}":
+        return {}
+    if value.startswith("[") and value.endswith("]"):
+        return [_yaml_scalar(part) for part in value[1:-1].split(",") if part.strip()]
+    if value[:1] in {'"', "'"}:
+        if len(value) < 2 or value[-1] != value[0]:
+            raise YAMLInputError
+        if value[0] == '"':
+            try:
+                import json
+
+                return json.loads(value)
+            except (ValueError, TypeError) as exc:
+                raise YAMLInputError from exc
+        return value[1:-1].replace("''", "'")
+    if value[0] in "!&*{|>" or " #" in value:
+        raise YAMLInputError
+    try:
+        return int(value)
+    except ValueError:
+        try:
+            return float(value)
+        except ValueError:
+            return value
+
+
+def _yaml_documents(text):
+    """Parse a strict indentation-based YAML subset and reject ambiguous input."""
+    documents = []
+    chunks = [[]]
+    for raw in text.splitlines():
+        if raw.strip() == "---":
+            if chunks[-1]:
+                chunks.append([])
+            continue
+        if raw.strip() in {"", "..."} or raw.lstrip().startswith("#"):
+            continue
+        indentation = len(raw) - len(raw.lstrip(" "))
+        if "\t" in raw or indentation % 2:
+            raise YAMLInputError
+        chunks[-1].append((indentation, raw.lstrip(" ")))
+
+    def parse(lines, start, indent):
+        if start >= len(lines) or lines[start][0] != indent:
+            raise YAMLInputError
+        sequence = lines[start][1].startswith("- ") or lines[start][1] == "-"
+        value = [] if sequence else {}
+        index = start
+        while index < len(lines) and lines[index][0] == indent:
+            content = lines[index][1]
+            if sequence:
+                if not content.startswith("-") or content[:2] not in {"- ", "-"}:
+                    break
+                remainder = content[1:].strip()
+                if not remainder:
+                    item, index = parse(lines, index + 1, indent + 2)
+                    value.append(item)
+                    continue
+                if not re.match(r"^[A-Za-z0-9_.-]+:(?: |$)", remainder):
+                    value.append(_yaml_scalar(remainder))
+                    index += 1
+                    continue
+                key, scalar = remainder.split(":", 1)
+                item = {}
+                index = parse_mapping_entry(lines, index, indent, item, key, scalar, 2)
+                while index < len(lines) and lines[index][0] == indent + 2:
+                    key, scalar = split_mapping(lines[index][1])
+                    index = parse_mapping_entry(lines, index, indent + 2, item, key, scalar, 2)
+                value.append(item)
+                continue
+            key, scalar = split_mapping(content)
+            index = parse_mapping_entry(lines, index, indent, value, key, scalar, 2)
+        return value, index
+
+    def split_mapping(content):
+        if ":" not in content:
+            raise YAMLInputError
+        key, scalar = content.split(":", 1)
+        if not key or key.strip() != key or any(char in key for char in "{}[],&*!|>'\""):
+            raise YAMLInputError
+        return key, scalar
+
+    def parse_mapping_entry(lines, index, indent, mapping, key, scalar, child_offset):
+        if key in mapping:
+            raise YAMLInputError
+        if scalar.strip():
+            mapping[key] = _yaml_scalar(scalar)
+            return index + 1
+        next_index = index + 1
+        if (
+            next_index < len(lines)
+            and lines[next_index][0] == indent
+            and lines[next_index][1].startswith("-")
+        ):
+            mapping[key], next_index = parse(lines, next_index, indent)
+            return next_index
+        if next_index < len(lines) and lines[next_index][0] > indent:
+            if lines[next_index][0] != indent + child_offset:
+                raise YAMLInputError
+            mapping[key], next_index = parse(lines, next_index, indent + child_offset)
+        else:
+            mapping[key] = None
+        return next_index
+
+    for chunk in chunks:
+        if chunk:
+            if len(chunk) == 1 and chunk[0][1] in {"{}", "[]"}:
+                document, end = _yaml_scalar(chunk[0][1]), 1
+            else:
+                document, end = parse(chunk, 0, chunk[0][0])
+            if end != len(chunk):
+                raise YAMLInputError
+            documents.append(document)
+    return documents
 
 
 def _positive_int(value, field):
@@ -70,7 +202,7 @@ def _exact_path(value, field):
 
 
 def _documents(text):
-    return [doc for doc in yaml.safe_load_all(text) if isinstance(doc, dict)]
+    return [doc for doc in _yaml_documents(text) if isinstance(doc, dict)]
 
 
 def render_active(environment, runner=subprocess.run):
@@ -91,7 +223,7 @@ def load_modules(environment):
         / "observability"
         / "prometheus-blackbox-exporter.values.yaml"
     )
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    data = _yaml_documents(path.read_text(encoding="utf-8"))[0]
     modules = data.get("config", {}).get("modules", {})
     methods = {}
     for name, module in modules.items():
@@ -99,7 +231,7 @@ def load_modules(environment):
         if method not in METHODS:
             raise ContractError(f"blackbox module {name} has an invalid or missing method")
         methods[name] = method
-    common_values = yaml.safe_load(
+    common_values = _yaml_documents(
         (
             ROOT
             / "platform"
@@ -107,12 +239,12 @@ def load_modules(environment):
             / "helm"
             / "kube-prometheus-stack.values.common.yaml"
         ).read_text(encoding="utf-8")
-    )
-    environment_values = yaml.safe_load(
+    )[0]
+    environment_values = _yaml_documents(
         (
             ROOT / "clusters" / environment / "observability" / "kube-prometheus-stack.values.yaml"
         ).read_text(encoding="utf-8")
-    )
+    )[0]
     # kube-prometheus-stack defaults to one replica when replicas is omitted.
     common_spec = common_values.get("prometheus", {}).get("prometheusSpec", {})
     environment_spec = environment_values.get("prometheus", {}).get("prometheusSpec", {})
@@ -327,7 +459,7 @@ def main(argv=None):
     )
     args = parser.parse_args(argv)
     try:
-        contract = yaml.safe_load(args.contracts.read_text(encoding="utf-8"))
+        contract = _yaml_documents(args.contracts.read_text(encoding="utf-8"))[0]
         # One inventory owns both environments. Validate its complete structure so
         # malformed declarations cannot disappear during environment selection.
         contract = select_environment_contract(contract, args.env)
@@ -339,7 +471,7 @@ def main(argv=None):
     except ContractError as exc:
         print(f"probe quota validation failed: {exc}", file=sys.stderr)
         return 1
-    except yaml.YAMLError:
+    except (YAMLInputError, IndexError):
         print("probe quota validation failed: YAML input is malformed", file=sys.stderr)
         return 1
     except OSError:

@@ -266,6 +266,32 @@ def test_repository_staging_and_production_rendered_graphs_validate():
         quotas.validate(env, rendered, selected, methods, replicas)
 
 
+@pytest.mark.parametrize("environment", ["staging", "prod"])
+def test_validator_runs_without_site_packages_against_fixture(environment):
+    result = subprocess.run(
+        [
+            "python3",
+            "-S",
+            "scripts/validate_probe_quotas.py",
+            "--env",
+            environment,
+            "--probes",
+            f"clusters/{environment}/observability/probes/public-apps.yaml",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == f"probe quota validation passed: environment={environment}\n"
+
+
+def test_strict_yaml_reader_rejects_duplicate_members():
+    with pytest.raises(quotas.YAMLInputError):
+        quotas._yaml_documents("version: 1\nversion: 1\n")
+
+
 def test_tokenplace_production_requires_both_corrected_exact_exemptions():
     contract = yaml.safe_load((ROOT / "config/observability/probe-quotas.yaml").read_text())
     rendered = (ROOT / "clusters/prod/observability/probes/public-apps.yaml").read_text()
