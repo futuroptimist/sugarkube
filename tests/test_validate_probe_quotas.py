@@ -266,6 +266,273 @@ def test_repository_staging_and_production_rendered_graphs_validate():
         quotas.validate(env, rendered, selected, methods, replicas)
 
 
+@pytest.mark.parametrize("environment", ["staging", "prod"])
+def test_validator_runs_without_site_packages_against_fixture(environment):
+    result = subprocess.run(
+        [
+            "python3",
+            "-S",
+            "scripts/validate_probe_quotas.py",
+            "--env",
+            environment,
+            "--probes",
+            f"clusters/{environment}/observability/probes/public-apps.yaml",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == f"probe quota validation passed: environment={environment}\n"
+
+
+def test_strict_yaml_reader_rejects_duplicate_members():
+    with pytest.raises(quotas.YAMLInputError):
+        quotas._yaml_documents("version: 1\nversion: 1\n")
+
+
+@pytest.mark.parametrize("malformed", ["[GET,,HEAD]", "[GET", "GET]", "{GET", "GET}"])
+def test_strict_yaml_reader_rejects_malformed_or_unsupported_scalars(malformed):
+    with pytest.raises(quotas.YAMLInputError):
+        quotas._yaml_documents(f"methods: {malformed}\n")
+
+
+@pytest.mark.parametrize("suffix", ["\n---\nversion: 999\nprobes: []\n", "\n---\n"])
+def test_complete_validator_rejects_additional_contract_documents(tmp_path, suffix):
+    contract = tmp_path / "contract.yaml"
+    contract.write_text(
+        (ROOT / "config/observability/probe-quotas.yaml").read_text(encoding="utf-8") + suffix,
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [
+            "python3",
+            "-S",
+            "scripts/validate_probe_quotas.py",
+            "--env",
+            "staging",
+            "--contracts",
+            str(contract),
+            "--probes",
+            "clusters/staging/observability/probes/public-apps.yaml",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert result.stderr == "probe quota validation failed: YAML input is malformed\n"
+
+
+def test_complete_validator_rejects_missing_mapping_separator_space(tmp_path):
+    contract = tmp_path / "contract.yaml"
+    contract.write_text(
+        (ROOT / "config/observability/probe-quotas.yaml")
+        .read_text(encoding="utf-8")
+        .replace("enabled: true", "enabled:true", 1),
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [
+            "python3",
+            "-S",
+            "scripts/validate_probe_quotas.py",
+            "--env",
+            "staging",
+            "--contracts",
+            str(contract),
+            "--probes",
+            "clusters/staging/observability/probes/public-apps.yaml",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert result.stderr == "probe quota validation failed: YAML input is malformed\n"
+
+
+def test_complete_validator_rejects_malformed_contract_flow_sequence(tmp_path):
+    contract = tmp_path / "contract.yaml"
+    contract.write_text(
+        (ROOT / "config/observability/probe-quotas.yaml")
+        .read_text(encoding="utf-8")
+        .replace("method: GET", "method: [GET,,HEAD]", 1),
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [
+            "python3",
+            "-S",
+            "scripts/validate_probe_quotas.py",
+            "--env",
+            "staging",
+            "--contracts",
+            str(contract),
+            "--probes",
+            "clusters/staging/observability/probes/public-apps.yaml",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert result.stderr == "probe quota validation failed: YAML input is malformed\n"
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("version: 1\n", "version: 1\n...\n"),
+        ("bucket: operational", "bucket: operational: invalid"),
+        ("bucket: operational", "bucket: 'operational'bad'"),
+    ],
+)
+def test_complete_validator_rejects_terminated_or_malformed_scalars(tmp_path, old, new):
+    contract = tmp_path / "contract.yaml"
+    contract.write_text(
+        (ROOT / "config/observability/probe-quotas.yaml")
+        .read_text(encoding="utf-8")
+        .replace(old, new, 1),
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [
+            "python3",
+            "-S",
+            "scripts/validate_probe_quotas.py",
+            "--env",
+            "staging",
+            "--contracts",
+            str(contract),
+            "--probes",
+            "clusters/staging/observability/probes/public-apps.yaml",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert result.stderr == "probe quota validation failed: YAML input is malformed\n"
+
+
+@pytest.mark.parametrize(
+    ("hourly", "passes"),
+    [
+        ("77", True),
+        ("077", False),
+        ("0_77", False),
+        ("+0_77", False),
+        ("0_0_77", False),
+    ],
+)
+def test_complete_validator_rejects_ambiguous_leading_zero_quota(
+    tmp_path, hourly, passes
+):
+    item = declaration()
+    item.update(limits={"hourly": 77, "daily": 10000}, safety_margin=0.1)
+    contract = tmp_path / "contract.yaml"
+    contract.write_text(
+        yaml.safe_dump({"version": 1, "probes": [item]}).replace(
+            "hourly: 77", f"hourly: {hourly}"
+        ),
+        encoding="utf-8",
+    )
+    rendered = tmp_path / "probes.yaml"
+    rendered.write_text(yaml.safe_dump(probe(module="https_2xx")), encoding="utf-8")
+    result = subprocess.run(
+        [
+            "python3",
+            "-S",
+            "scripts/validate_probe_quotas.py",
+            "--env",
+            "staging",
+            "--contracts",
+            str(contract),
+            "--probes",
+            str(rendered),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if passes:
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == "probe quota validation passed: environment=staging\n"
+        assert result.stderr == ""
+    else:
+        assert result.returncode != 0
+        assert result.stdout == ""
+        assert result.stderr == "probe quota validation failed: YAML input is malformed\n"
+
+
+def test_configuration_and_probe_reader_matches_pyyaml():
+    single_documents = [ROOT / "config/observability/probe-quotas.yaml"]
+    for environment in ("staging", "prod"):
+        base = ROOT / "clusters" / environment / "observability"
+        single_documents.extend(
+            [
+                base / "prometheus-blackbox-exporter.values.yaml",
+                base / "kube-prometheus-stack.values.yaml",
+            ]
+        )
+        probes = (base / "probes/public-apps.yaml").read_text(encoding="utf-8")
+        assert quotas._yaml_documents(probes) == list(yaml.safe_load_all(probes))
+    single_documents.append(
+        ROOT / "platform/observability/helm/kube-prometheus-stack.values.common.yaml"
+    )
+    for path in single_documents:
+        contents = path.read_text(encoding="utf-8")
+        assert quotas._single_yaml_document(contents) == yaml.safe_load(contents)
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    [
+        "prometheus-blackbox-exporter.values.yaml",
+        "kube-prometheus-stack.values.yaml",
+    ],
+)
+def test_load_modules_rejects_additional_values_documents(tmp_path, monkeypatch, relative_path):
+    shutil.copytree(ROOT / "clusters/staging", tmp_path / "clusters/staging")
+    shutil.copytree(ROOT / "platform", tmp_path / "platform")
+    path = tmp_path / "clusters/staging/observability" / relative_path
+    path.write_text(path.read_text(encoding="utf-8") + "\n---\n", encoding="utf-8")
+    monkeypatch.setattr(quotas, "ROOT", tmp_path)
+
+    with pytest.raises(quotas.YAMLInputError):
+        quotas.load_modules("staging")
+
+
+def test_load_modules_rejects_malformed_values_flow_sequence(tmp_path, monkeypatch):
+    shutil.copytree(ROOT / "clusters/staging", tmp_path / "clusters/staging")
+    shutil.copytree(ROOT / "platform", tmp_path / "platform")
+    path = (
+        tmp_path
+        / "clusters/staging/observability/prometheus-blackbox-exporter.values.yaml"
+    )
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(
+            "valid_status_codes: [200]", "valid_status_codes: [200,,204]", 1
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(quotas, "ROOT", tmp_path)
+
+    with pytest.raises(quotas.YAMLInputError):
+        quotas.load_modules("staging")
+
+
 def test_tokenplace_production_requires_both_corrected_exact_exemptions():
     contract = yaml.safe_load((ROOT / "config/observability/probe-quotas.yaml").read_text())
     rendered = (ROOT / "clusters/prod/observability/probes/public-apps.yaml").read_text()

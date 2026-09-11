@@ -1,12 +1,47 @@
 import argparse
 import json
+import os
 import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+import yaml
 
 from scripts import tokenplace_incident_drill as drill
+
+
+def test_help_runs_without_site_packages():
+    result = subprocess.run(
+        ["python3", "-S", "scripts/tokenplace_incident_drill.py", "--help"],
+        cwd=drill.ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Build a fail-closed" in result.stdout
+
+
+@pytest.fixture(scope="module")
+def package_free_python(tmp_path_factory):
+    venv = tmp_path_factory.mktemp("package-free") / "venv"
+    subprocess.run(
+        [sys.executable, "-m", "venv", "--without-pip", venv],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    python = venv / "bin" / "python"
+    config = (venv / "pyvenv.cfg").read_text(encoding="utf-8")
+    assert "include-system-site-packages = false" in config
+    for flags in ([], ["-S"]):
+        result = subprocess.run(
+            [python, *flags, "-c", "import yaml"], capture_output=True, text=True, check=False
+        )
+        assert result.returncode != 0
+    return python
 
 
 def args(tmp_path: Path, **changes):
@@ -84,6 +119,280 @@ def snapshot(c, *, mode="metrics-oom", degraded=True, metrics_mode_value="normal
         ],
         "classification": classification,
     }
+
+
+def _portable_cli_args(parsed, evidence, *, live):
+    command = [
+        "--mode",
+        parsed.mode,
+        "--lifecycle",
+        parsed.lifecycle,
+        "--host",
+        parsed.host,
+        "--kubeconfig",
+        str(parsed.kubeconfig),
+        "--context",
+        parsed.context,
+        "--environment",
+        parsed.environment,
+        "--namespace",
+        parsed.namespace,
+        "--deployment",
+        parsed.deployment,
+        "--container",
+        parsed.container,
+        "--current-image",
+        parsed.current_image,
+        "--replacement-image",
+        parsed.replacement_image,
+        "--rollback-image",
+        parsed.rollback_image,
+        "--replicas",
+        str(parsed.replicas),
+        "--memory-limit",
+        parsed.memory_limit,
+        "--service-monitor",
+        parsed.service_monitor,
+        "--run-id",
+        parsed.run_id,
+        "--evidence",
+        str(evidence),
+        "--acknowledge-state-loss",
+        "--dry-run",
+    ]
+    if live:
+        command.append("--live-preflight")
+    else:
+        command.extend(["--snapshot", str(parsed.snapshot)])
+    if parsed.lifecycle == "staging-rehearsal":
+        command.extend(
+            [
+                "--incident-image",
+                parsed.incident_image,
+                "--acknowledge-staging-fault-injection",
+            ]
+        )
+    return command
+
+
+def _portable_environment(tmp_path, parsed, *, degraded=True, identity="staging"):
+    fixture = snapshot(drill.validate(parsed), mode=parsed.mode, degraded=degraded)
+    deployment = {
+        "metadata": {
+            "namespace": parsed.namespace,
+            "name": parsed.deployment,
+            "uid": "d-1",
+            "generation": 4,
+        },
+        "spec": {
+            "replicas": parsed.replicas,
+            "selector": {"matchLabels": {"app": "tokenplace"}},
+            "template": {
+                "spec": {
+                    "containers": [
+                        {
+                            "name": parsed.container,
+                            "image": parsed.current_image,
+                            "resources": {"limits": {"memory": parsed.memory_limit}},
+                            "env": (
+                                [{"name": "TOKENPLACE_METRICS_MODE", "value": "normal"}]
+                                if degraded
+                                else []
+                            ),
+                        }
+                    ]
+                }
+            },
+        },
+        "status": {
+            "observedGeneration": 4,
+            "updatedReplicas": 1,
+            "readyReplicas": 1,
+            "availableReplicas": 1,
+        },
+    }
+    monitor = {
+        "metadata": {
+            "namespace": "tokenplace",
+            "name": "tokenplace",
+            "labels": {"release": "kube-prometheus-stack"},
+        },
+        "spec": {"selector": {"matchLabels": fixture["service_monitor"]["selector_labels"]}},
+    }
+    probes = {
+        item["name"]: {
+            "metadata": {
+                "namespace": item["namespace"],
+                "name": item["name"],
+                "labels": {"release": "kube-prometheus-stack"},
+            },
+            "spec": {
+                "targets": {
+                    "staticConfig": {"static": ["https://staging.token.place" + item["route"]]}
+                },
+                "module": next(
+                    module
+                    for route, name, _path, module in drill.inventory("staging").probes
+                    if name == item["name"]
+                ),
+            },
+        }
+        for item in fixture["probes"]
+    }
+    payload = tmp_path / "stub-data.json"
+    payload.write_text(
+        json.dumps(
+            {"identity": identity, "deployment": deployment, "monitor": monitor, "probes": probes}
+        ),
+        encoding="utf-8",
+    )
+    log = tmp_path / "commands.jsonl"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    kubectl = bin_dir / "kubectl"
+    kubectl.write_text(
+        """#!/usr/bin/env python3
+import json, os, pathlib, sys
+args = sys.argv[1:]
+with open(os.environ['COMMAND_LOG'], 'a') as stream: stream.write(json.dumps(['kubectl', *args]) + '\\n')
+data = json.loads(pathlib.Path(os.environ['STUB_DATA']).read_text())
+if any(word in args for word in ('apply','create','delete','label','patch','replace','rollout','scale','set')): sys.exit(90)
+if args[:1] == ['kustomize']:
+    print(pathlib.Path(os.environ['PROBE_YAML']).read_text()); sys.exit(0)
+if 'get' in args:
+    kind = args[args.index('get') + 1]
+    name = args[args.index('get') + 2] if len(args) > args.index('get') + 2 else ''
+    if kind == 'nodes':
+        print(json.dumps({'items':[{'metadata':{'name':'fixture-node','labels':{'sugarkube.env':data['identity'],'sugarkube.cluster':'fixture'}}}]})); sys.exit(0)
+    if kind == 'deployment': print(json.dumps(data['deployment'])); sys.exit(0)
+    if kind == 'servicemonitor': print(json.dumps(data['monitor'])); sys.exit(0)
+    if kind == 'probe' and name in data['probes']: print(json.dumps(data['probes'][name])); sys.exit(0)
+if args[:2] == ['config', 'current-context']: print('sugar-staging'); sys.exit(0)
+if args[:2] == ['config', 'view']: print('https://fixture.invalid'); sys.exit(0)
+sys.stderr.write('unexpected kubectl: ' + repr(args)); sys.exit(91)
+""",
+        encoding="utf-8",
+    )
+    curl = bin_dir / "curl"
+    curl.write_text(
+        """#!/usr/bin/env python3
+import json, os, sys
+with open(os.environ['COMMAND_LOG'], 'a') as stream: stream.write(json.dumps(['curl', *sys.argv[1:]]) + '\\n')
+url = sys.argv[-1]
+print('429' if url.endswith('/') or url.endswith('/api/v1/meta') else '200', end='')
+""",
+        encoding="utf-8",
+    )
+    kubectl.chmod(0o755)
+    curl.chmod(0o755)
+    env = os.environ.copy()
+    env.pop("PYTHONHOME", None)
+    env.pop("PYTHONPATH", None)
+    env.update(
+        PATH=str(bin_dir) + os.pathsep + env.get("PATH", ""),
+        COMMAND_LOG=str(log),
+        STUB_DATA=str(payload),
+        PROBE_YAML=str(drill.ROOT / "clusters/staging/observability/probes/public-apps.yaml"),
+    )
+    return env, log
+
+
+@pytest.mark.parametrize(
+    "mode,degraded,lifecycle",
+    [
+        ("metrics-oom", True, "staging-rehearsal"),
+        ("metrics-oom", False, "staging-rehearsal"),
+        ("quota-exhaustion", True, "real-incident"),
+    ],
+)
+@pytest.mark.parametrize("live", [False, True])
+def test_package_free_complete_workflows(
+    tmp_path, package_free_python, mode, degraded, lifecycle, live
+):
+    parsed = args(
+        tmp_path,
+        mode=mode,
+        lifecycle=lifecycle,
+        incident_image=(
+            "registry.example/relay@sha256:" + "d" * 64
+            if lifecycle == "staging-rehearsal"
+            else None
+        ),
+        acknowledge_staging_fault_injection=lifecycle == "staging-rehearsal",
+    )
+    snapshot_fixture = snapshot(drill.validate(parsed), mode=mode, degraded=degraded)
+    if lifecycle == "staging-rehearsal":
+        snapshot_fixture["classification"] = {}
+    parsed.snapshot.write_text(json.dumps(snapshot_fixture), encoding="utf-8")
+    evidence = tmp_path / "private-evidence" / ("live.json" if live else "snapshot-plan.json")
+    env, log = _portable_environment(tmp_path, parsed, degraded=degraded)
+    result = subprocess.run(
+        [
+            package_free_python,
+            "-S",
+            drill.ROOT / "scripts/tokenplace_incident_drill.py",
+            *_portable_cli_args(parsed, evidence, live=live),
+        ],
+        cwd=drill.ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    plan = json.loads(result.stdout)
+    assert plan["preflight"]["authoritative_identity"] == (
+        "live-authoritative" if live else "offline-reviewed-snapshot"
+    )
+    assert plan["preflight"]["containment"] == (
+        "servicemonitor-fallback"
+        if mode == "metrics-oom" and not degraded
+        else "degraded-metrics" if mode == "metrics-oom" else "public-probe-pause"
+    )
+    assert plan["expected_deployment"]["current_image"] == parsed.current_image
+    assert plan["expected_deployment"]["replacement_image"] == parsed.replacement_image
+    assert plan["expected_deployment"]["rollback_image"] == parsed.rollback_image
+    assert plan["non_executing_preview"] is not live
+    if live:
+        assert drill._load_execution_plan(evidence) == plan
+    commands = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+    assert not any(
+        any(word in command for word in ("apply", "create", "delete", "label", "patch", "set"))
+        for command in commands
+    )
+    if live:
+        assert commands[0][0] == "kubectl" and ["get", "nodes", "-o", "json"] == commands[0][-4:]
+        if mode == "quota-exhaustion":
+            assert any(command[1] == "kustomize" for command in commands)
+            assert sum(command[0] == "curl" for command in commands) == 4
+
+
+def test_package_free_identity_rejection_stops_live_workflow(tmp_path, package_free_python):
+    parsed = args(tmp_path, mode="quota-exhaustion")
+    evidence = tmp_path / "private-evidence" / "refused.json"
+    env, log = _portable_environment(tmp_path, parsed, identity="prod")
+    result = subprocess.run(
+        [
+            package_free_python,
+            "-S",
+            drill.ROOT / "scripts/tokenplace_incident_drill.py",
+            *_portable_cli_args(parsed, evidence, live=True),
+        ],
+        cwd=drill.ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 2
+    assert "identity assertion failed" in result.stderr
+    assert result.stdout == ""
+    assert not evidence.exists()
+    commands = [json.loads(line) for line in log.read_text().splitlines()]
+    assert [command[command.index("get") + 1] for command in commands if "get" in command] == [
+        "nodes"
+    ]
+    assert not any(command[0] == "curl" or command[1:2] == ["kustomize"] for command in commands)
 
 
 def preflight(
@@ -768,7 +1077,11 @@ def test_live_quota_runs_validator_then_status_only_requests():
         return subprocess.CompletedProcess(command, 0, replies.pop(0), "")
 
     evidence = drill._observe_live_quota(runner)
-    assert "validate_probe_quotas.py" in calls[0][1]
+    assert calls[0][1:4] == [
+        "-S",
+        str(drill.ROOT / "scripts/validate_probe_quotas.py"),
+        "--env",
+    ]
     assert evidence["route_statuses"] == {
         "root": 429,
         "metadata": 429,
@@ -929,21 +1242,95 @@ def test_evidence_publication_race_does_not_replace_existing_target(tmp_path):
     assert list(directory.glob(".tokenplace-evidence-*")) == []
 
 
-def test_duplicate_inventory_route_classes_are_rejected(monkeypatch):
-    contract = drill.yaml.safe_load(
-        (drill.ROOT / "config/observability/probe-quotas.yaml").read_text()
-    )
-    duplicate = next(
-        p.copy()
-        for p in contract["probes"]
-        if p["application"] == "tokenplace" and p["environment"] == "staging"
-    )
-    contract["probes"].append(duplicate)
-    original = drill.yaml.safe_load
-    monkeypatch.setattr(drill.yaml, "safe_load", lambda _: contract)
+def test_incident_probe_inventory_matches_quota_contract():
+    incident = json.loads(drill.INCIDENT_PROBES.read_text())
+    quota = yaml.safe_load((drill.ROOT / "config/observability/probe-quotas.yaml").read_text())
+    for environment, probes in incident["environments"].items():
+        expected = [
+            {key: probe[key] for key in ("route_class", "probe", "route", "method")}
+            for probe in quota["probes"]
+            if probe["application"] == "tokenplace" and probe["environment"] == environment
+        ]
+        assert probes == expected
+
+
+def test_duplicate_inventory_route_classes_are_rejected(tmp_path, monkeypatch):
+    contract = json.loads(drill.INCIDENT_PROBES.read_text())
+    contract["environments"]["staging"].append(contract["environments"]["staging"][0].copy())
+    path = tmp_path / "incident-probes.json"
+    path.write_text(json.dumps(contract))
+    monkeypatch.setattr(drill, "INCIDENT_PROBES", path)
     with pytest.raises(drill.DrillError, match="duplicate"):
         drill.inventory("staging")
-    monkeypatch.setattr(drill.yaml, "safe_load", original)
+
+
+def test_unsupported_inventory_environment_is_an_operator_error():
+    with pytest.raises(drill.DrillError, match="environment must be staging or prod"):
+        drill.inventory("production")
+
+
+def test_quota_validator_runs_without_site_packages():
+    result = subprocess.run(
+        [
+            "python3",
+            "-S",
+            str(drill.ROOT / "scripts/validate_probe_quotas.py"),
+            "--env",
+            "staging",
+            "--probes",
+            str(drill.ROOT / "clusters/staging/observability/probes/public-apps.yaml"),
+        ],
+        cwd=drill.ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    "contents",
+    [
+        "not JSON",
+        '{"schema_version": 1, "schema_version": 1, "environments": {}}',
+        '{"schema_version": true, "environments": {"staging": [], "prod": []}}',
+        '{"schema_version": 1.0, "environments": {"staging": [], "prod": []}}',
+        '{"schema_version": 1, "environments": {}}',
+        '{"schema_version": 1, "environments": {"staging": {}, "prod": []}}',
+    ],
+)
+def test_malformed_incident_probe_inventory_is_rejected(tmp_path, monkeypatch, contents):
+    path = tmp_path / "incident-probes.json"
+    path.write_text(contents)
+    monkeypatch.setattr(drill, "INCIDENT_PROBES", path)
+    if contents == "not JSON":
+        with pytest.raises(json.JSONDecodeError):
+            drill.inventory("staging")
+    else:
+        with pytest.raises(drill.DrillError, match="contract is malformed"):
+            drill.inventory("staging")
+
+
+@pytest.mark.parametrize("probe_name", ["", "Not Safe"])
+def test_incident_probe_inventory_rejects_invalid_probe_names(tmp_path, monkeypatch, probe_name):
+    contract = json.loads(drill.INCIDENT_PROBES.read_text())
+    contract["environments"]["staging"][0]["probe"] = probe_name
+    path = tmp_path / "incident-probes.json"
+    path.write_text(json.dumps(contract))
+    monkeypatch.setattr(drill, "INCIDENT_PROBES", path)
+    with pytest.raises(drill.DrillError, match="contract is malformed"):
+        drill.inventory("staging")
+
+
+def test_incident_probe_inventory_rejects_duplicate_probe_names(tmp_path, monkeypatch):
+    contract = json.loads(drill.INCIDENT_PROBES.read_text())
+    probes = contract["environments"]["staging"]
+    probes[1]["probe"] = probes[0]["probe"]
+    path = tmp_path / "incident-probes.json"
+    path.write_text(json.dumps(contract))
+    monkeypatch.setattr(drill, "INCIDENT_PROBES", path)
+    with pytest.raises(drill.DrillError, match="duplicate probe names"):
+        drill.inventory("staging")
 
 
 def test_metrics_plan_has_typed_ordered_gates_and_metrics_last(tmp_path):
@@ -987,11 +1374,10 @@ def test_quota_restoration_has_exact_inverse_and_preserves_health(tmp_path):
     validator = next(action for action in plan["actions"] if action["id"] == "quota-validator")
     assert validator["checks"][0]["argv"] == [
         "python3",
+        "-S",
         "scripts/validate_probe_quotas.py",
         "--env",
         "staging",
-        "--probes",
-        "clusters/staging/observability/probes/public-apps.yaml",
     ]
     assert validator["on_failure"] == {
         "outcome": "hold-current-containment",

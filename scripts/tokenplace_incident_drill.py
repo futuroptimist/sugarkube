@@ -19,8 +19,6 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urlsplit
 
-import yaml
-
 ROOT = Path(__file__).resolve().parents[1]
 SAFE_NAME = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
 IMAGE = re.compile(r"[^\s:@]+(?:/[^\s:@]+)+@sha256:[0-9a-f]{64}")
@@ -31,6 +29,7 @@ STAGING_HOST = "staging.token.place"
 EXECUTION_OPERATIONS = ("--execute-stage", "--rollback-stage", "--cleanup")
 GATE_EVIDENCE_MAX_BYTES = 64 * 1024
 GATE_EVIDENCE_FRESHNESS_SECONDS = 5 * 60
+INCIDENT_PROBES = ROOT / "config/observability/tokenplace-incident-probes.json"
 RFC3339_UTC = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$")
 
 
@@ -239,15 +238,44 @@ def _publish_evidence(target: Path, payload: str) -> None:
 
 
 def inventory(environment: str) -> Inventory:
-    quota = yaml.safe_load((ROOT / "config/observability/probe-quotas.yaml").read_text())
-    matches = [
-        p
-        for p in quota["probes"]
-        if p["application"] == "tokenplace" and p["environment"] == environment
-    ]
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise DrillError("token.place probe inventory contract is malformed")
+            result[key] = value
+        return result
+
+    contract = json.loads(
+        INCIDENT_PROBES.read_text(encoding="utf-8"), object_pairs_hook=unique_object
+    )
+    if (
+        not isinstance(contract, dict)
+        or set(contract) != {"schema_version", "environments"}
+        or isinstance(contract["schema_version"], bool)
+        or not isinstance(contract["schema_version"], int)
+        or contract["schema_version"] != 1
+        or not isinstance(contract["environments"], dict)
+        or set(contract["environments"]) != {"staging", "prod"}
+    ):
+        raise DrillError("token.place probe inventory contract is malformed")
+    if environment not in contract["environments"]:
+        raise DrillError("environment must be staging or prod")
+    matches = contract["environments"][environment]
+    required = {"route_class", "probe", "route", "method"}
+    if (
+        not isinstance(matches, list)
+        or not all(isinstance(p, dict) and set(p) == required for p in matches)
+        or not all(all(isinstance(p[key], str) and p[key] for key in required) for p in matches)
+        or not all(SAFE_NAME.fullmatch(p["probe"]) for p in matches)
+    ):
+        raise DrillError("token.place probe inventory contract is malformed")
     route_classes = [p["route_class"] for p in matches]
     if len(route_classes) != len(set(route_classes)):
-        raise DrillError("token.place quota inventory contains duplicate route classes")
+        raise DrillError("token.place incident probe inventory contains duplicate route classes")
+    probe_names = [p["probe"] for p in matches]
+    if len(probe_names) != len(set(probe_names)):
+        raise DrillError("token.place incident probe inventory contains duplicate probe names")
     selected = {p["route_class"]: p for p in matches}
     expected = {
         "root": ("/", "GET"),
@@ -258,7 +286,9 @@ def inventory(environment: str) -> Inventory:
     if set(selected) != set(expected) or any(
         (selected[k]["route"], selected[k]["method"]) != v for k, v in expected.items()
     ):
-        raise DrillError("token.place quota inventory is missing, ambiguous, or mismatched")
+        raise DrillError(
+            "token.place incident probe inventory is missing, ambiguous, or mismatched"
+        )
     metrics = json.loads((ROOT / "platform/observability/app-metrics.json").read_text())
     item = metrics["applications"]["tokenplace"]["environments"][environment]
     return Inventory(
@@ -584,11 +614,10 @@ def _controller_uid(obj: dict) -> object:
 def _observe_live_quota(runner: Runner) -> dict:
     validator = [
         sys.executable,
+        "-S",
         str(ROOT / "scripts/validate_probe_quotas.py"),
         "--env",
         "staging",
-        "--probes",
-        str(ROOT / "clusters/staging/observability/probes/public-apps.yaml"),
     ]
     if runner(validator).returncode:
         raise DrillError("staging quota validation failed")
@@ -941,11 +970,10 @@ def build_plan(preflight: Preflight) -> dict:
                     "unit": "boolean",
                     "argv": [
                         "python3",
+                        "-S",
                         "scripts/validate_probe_quotas.py",
                         "--env",
                         "staging",
-                        "--probes",
-                        "clusters/staging/observability/probes/public-apps.yaml",
                     ],
                 }
             ],
@@ -2071,7 +2099,7 @@ def main(argv: list[str] | None = None) -> int:
     except DrillError as exc:
         print(f"token.place incident drill refused: {exc}", file=sys.stderr)
         return 2
-    except (OSError, KeyError, TypeError, json.JSONDecodeError, yaml.YAMLError):
+    except (OSError, KeyError, TypeError, json.JSONDecodeError):
         print("token.place incident drill refused: precondition validation failed", file=sys.stderr)
         return 2
 

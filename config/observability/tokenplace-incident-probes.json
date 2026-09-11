@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "environments": {
+    "staging": [
+      {
+        "route_class": "root",
+        "probe": "blackbox-tokenplace-staging-root",
+        "route": "/",
+        "method": "GET"
+      },
+      {
+        "route_class": "healthz",
+        "probe": "blackbox-tokenplace-staging-healthz",
+        "route": "/healthz",
+        "method": "GET"
+      },
+      {
+        "route_class": "livez",
+        "probe": "blackbox-tokenplace-staging-livez",
+        "route": "/livez",
+        "method": "GET"
+      },
+      {
+        "route_class": "metadata",
+        "probe": "blackbox-tokenplace-staging-metadata",
+        "route": "/api/v1/meta",
+        "method": "GET"
+      }
+    ],
+    "prod": [
+      {
+        "route_class": "root",
+        "probe": "blackbox-tokenplace-prod-root",
+        "route": "/",
+        "method": "GET"
+      },
+      {
+        "route_class": "healthz",
+        "probe": "blackbox-tokenplace-prod-healthz",
+        "route": "/healthz",
+        "method": "GET"
+      },
+      {
+        "route_class": "livez",
+        "probe": "blackbox-tokenplace-prod-livez",
+        "route": "/livez",
+        "method": "GET"
+      },
+      {
+        "route_class": "metadata",
+        "probe": "blackbox-tokenplace-prod-metadata",
+        "route": "/api/v1/meta",
+        "method": "GET"
+      }
+    ]
+  }
+}

@@ -115,6 +115,14 @@ a new evidence file in an operator-supplied private directory outside the reposi
 From the repository root, generate both plans (replace every placeholder with reviewed staging
 coordinates):
 
+The runner and its live quota preflight use only Python's standard library. The runner's small,
+strict JSON projection of the token.place Probe coordinates is committed at
+`config/observability/tokenplace-incident-probes.json` and is checked against the full quota
+contract in tests. The quota validator uses a strict reader limited to the repository's reviewed
+YAML forms and still validates the complete contract and rendered Probe graph. No Python package
+installation or repository bootstrap is required before using the commands below on an operator
+host.
+
 ```bash
 python3 scripts/tokenplace_incident_drill.py --dry-run --mode metrics-oom \
   --host "$STAGING_HOST" --kubeconfig "$STAGING_KUBECONFIG" --context sugar-staging \
