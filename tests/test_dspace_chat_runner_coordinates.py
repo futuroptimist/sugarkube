@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -13,9 +14,28 @@ from scripts import install_dspace_chat_synthetic as installer
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "config/dspace-chat-synthetic.json"
+RUNBOOK = ROOT / "docs/dspace-chat-synthetic-producer.md"
 
 UNRELATED_REVISION = "1" * 40
 WRONG_MANIFEST_SHA256 = "0" * 64
+REVISION_RE = re.compile(r"\b[0-9a-f]{40}\b")
+BASH_BLOCK_RE = re.compile(r"```bash\n(.*?)```", re.DOTALL)
+
+
+def _heading_span(text: str, heading: str, next_headings: list[str]) -> tuple[int, int]:
+    start = text.index(heading)
+    end = len(text)
+    for candidate in next_headings:
+        idx = text.find(candidate, start + len(heading))
+        if idx != -1:
+            end = min(end, idx)
+    return start, end
+
+
+def _bash_blocks_in_span(text: str, start: int, end: int) -> list[str]:
+    return [
+        match.group(1) for match in BASH_BLOCK_RE.finditer(text) if start <= match.start() < end
+    ]
 
 
 def asset_hashes(path: Path) -> dict[str, str]:
@@ -76,7 +96,6 @@ def test_materialize_cli_default_revision_is_the_current_coordinate(
 ) -> None:
     source = tmp_path / "source"
     output = tmp_path / "output"
-    browser = tmp_path / "browser"
     captured = []
     monkeypatch.setattr(installer, "materialize", lambda *args: captured.append(args))
     monkeypatch.setattr(installer, "runtime_module", lambda: runtime)
@@ -99,8 +118,6 @@ def test_materialize_cli_default_revision_is_the_current_coordinate(
             "/fixture/pnpm",
             "--pnpm-version",
             "9.0.0",
-            "--browser-bundle",
-            str(browser),
             "--browser-source-root",
             "/",
         ],
@@ -108,6 +125,32 @@ def test_materialize_cli_default_revision_is_the_current_coordinate(
 
     assert installer.main() == 0
     assert captured[0][1] == installer.CURRENT_RUNNER_REVISION
+    assert captured[0][6] is None, "system-chromium-v1 forbids a browser bundle"
+    assert captured[0][7] == json.loads(CONFIG.read_text(encoding="utf-8"))["browserContract"]
+
+
+def test_runbook_current_workflow_examples_match_configured_revision() -> None:
+    text = RUNBOOK.read_text(encoding="utf-8")
+    construct = _heading_span(text, "## 1. Construct an independent runner", ["## 2."])
+    dry_run = _heading_span(text, "## 2. Validate and dry-run installation", ["## 3."])
+    apply_section = _heading_span(
+        text,
+        "## 3. Separately authorized installation and controlled execution",
+        ["## Failure classification"],
+    )
+    blocks = [
+        block
+        for start, end in (construct, dry_run, apply_section)
+        for block in _bash_blocks_in_span(text, start, end)
+    ]
+    assert blocks, "expected runnable examples in the current construct/dry-run/apply sections"
+    revisions = {revision for block in blocks for revision in REVISION_RE.findall(block)}
+    assert revisions == {installer.CURRENT_RUNNER_REVISION}
+
+
+def test_runbook_legacy_repair_example_keeps_the_historical_revision() -> None:
+    text = RUNBOOK.read_text(encoding="utf-8")
+    assert f"--revision {installer.APPROVED_RUNNER_REVISION}" in text
 
 
 def test_current_revision_with_exact_manifest_is_accepted(tmp_path: Path) -> None:
