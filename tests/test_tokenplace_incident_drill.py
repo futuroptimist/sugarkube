@@ -5,8 +5,21 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+import yaml
 
 from scripts import tokenplace_incident_drill as drill
+
+
+def test_help_runs_without_site_packages():
+    result = subprocess.run(
+        ["python3", "-S", "scripts/tokenplace_incident_drill.py", "--help"],
+        cwd=drill.ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Build a fail-closed" in result.stdout
 
 
 def args(tmp_path: Path, **changes):
@@ -929,21 +942,46 @@ def test_evidence_publication_race_does_not_replace_existing_target(tmp_path):
     assert list(directory.glob(".tokenplace-evidence-*")) == []
 
 
-def test_duplicate_inventory_route_classes_are_rejected(monkeypatch):
-    contract = drill.yaml.safe_load(
-        (drill.ROOT / "config/observability/probe-quotas.yaml").read_text()
-    )
-    duplicate = next(
-        p.copy()
-        for p in contract["probes"]
-        if p["application"] == "tokenplace" and p["environment"] == "staging"
-    )
-    contract["probes"].append(duplicate)
-    original = drill.yaml.safe_load
-    monkeypatch.setattr(drill.yaml, "safe_load", lambda _: contract)
+def test_incident_probe_inventory_matches_quota_contract():
+    incident = json.loads(drill.INCIDENT_PROBES.read_text())
+    quota = yaml.safe_load((drill.ROOT / "config/observability/probe-quotas.yaml").read_text())
+    for environment, probes in incident["environments"].items():
+        expected = [
+            {key: probe[key] for key in ("route_class", "probe", "route", "method")}
+            for probe in quota["probes"]
+            if probe["application"] == "tokenplace" and probe["environment"] == environment
+        ]
+        assert probes == expected
+
+
+def test_duplicate_inventory_route_classes_are_rejected(tmp_path, monkeypatch):
+    contract = json.loads(drill.INCIDENT_PROBES.read_text())
+    contract["environments"]["staging"].append(contract["environments"]["staging"][0].copy())
+    path = tmp_path / "incident-probes.json"
+    path.write_text(json.dumps(contract))
+    monkeypatch.setattr(drill, "INCIDENT_PROBES", path)
     with pytest.raises(drill.DrillError, match="duplicate"):
         drill.inventory("staging")
-    monkeypatch.setattr(drill.yaml, "safe_load", original)
+
+
+@pytest.mark.parametrize(
+    "contents",
+    [
+        "not JSON",
+        '{"schema_version": 1, "environments": {}}',
+        '{"schema_version": 1, "environments": {"staging": {}, "prod": []}}',
+    ],
+)
+def test_malformed_incident_probe_inventory_is_rejected(tmp_path, monkeypatch, contents):
+    path = tmp_path / "incident-probes.json"
+    path.write_text(contents)
+    monkeypatch.setattr(drill, "INCIDENT_PROBES", path)
+    if contents == "not JSON":
+        with pytest.raises(json.JSONDecodeError):
+            drill.inventory("staging")
+    else:
+        with pytest.raises(drill.DrillError, match="contract is malformed"):
+            drill.inventory("staging")
 
 
 def test_metrics_plan_has_typed_ordered_gates_and_metrics_last(tmp_path):

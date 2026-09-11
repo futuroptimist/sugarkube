@@ -19,8 +19,6 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urlsplit
 
-import yaml
-
 ROOT = Path(__file__).resolve().parents[1]
 SAFE_NAME = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
 IMAGE = re.compile(r"[^\s:@]+(?:/[^\s:@]+)+@sha256:[0-9a-f]{64}")
@@ -31,6 +29,7 @@ STAGING_HOST = "staging.token.place"
 EXECUTION_OPERATIONS = ("--execute-stage", "--rollback-stage", "--cleanup")
 GATE_EVIDENCE_MAX_BYTES = 64 * 1024
 GATE_EVIDENCE_FRESHNESS_SECONDS = 5 * 60
+INCIDENT_PROBES = ROOT / "config/observability/tokenplace-incident-probes.json"
 RFC3339_UTC = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$")
 
 
@@ -239,12 +238,23 @@ def _publish_evidence(target: Path, payload: str) -> None:
 
 
 def inventory(environment: str) -> Inventory:
-    quota = yaml.safe_load((ROOT / "config/observability/probe-quotas.yaml").read_text())
-    matches = [
-        p
-        for p in quota["probes"]
-        if p["application"] == "tokenplace" and p["environment"] == environment
-    ]
+    contract = json.loads(INCIDENT_PROBES.read_text(encoding="utf-8"))
+    if (
+        not isinstance(contract, dict)
+        or set(contract) != {"schema_version", "environments"}
+        or contract["schema_version"] != 1
+        or not isinstance(contract["environments"], dict)
+        or set(contract["environments"]) != {"staging", "prod"}
+    ):
+        raise DrillError("token.place probe inventory contract is malformed")
+    matches = contract["environments"].get(environment)
+    required = {"route_class", "probe", "route", "method"}
+    if (
+        not isinstance(matches, list)
+        or not all(isinstance(p, dict) and set(p) == required for p in matches)
+        or not all(all(isinstance(p[key], str) for key in required) for p in matches)
+    ):
+        raise DrillError("token.place probe inventory contract is malformed")
     route_classes = [p["route_class"] for p in matches]
     if len(route_classes) != len(set(route_classes)):
         raise DrillError("token.place quota inventory contains duplicate route classes")
@@ -2071,7 +2081,7 @@ def main(argv: list[str] | None = None) -> int:
     except DrillError as exc:
         print(f"token.place incident drill refused: {exc}", file=sys.stderr)
         return 2
-    except (OSError, KeyError, TypeError, json.JSONDecodeError, yaml.YAMLError):
+    except (OSError, KeyError, TypeError, json.JSONDecodeError):
         print("token.place incident drill refused: precondition validation failed", file=sys.stderr)
         return 2
 
