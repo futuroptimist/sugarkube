@@ -106,7 +106,7 @@ crosses a rollback threshold, remove only that Probe's discovery label using the
 
 ## Step 14b: prepared staging drill (not yet performed)
 
-The helper preserves its Step 14a dry-run interface: it validates repository inventory and a
+The helper preserves its Step 14a real-incident dry-run interface: it validates repository inventory and a
 reviewed, privacy-safe JSON snapshot, then emits exact selections without invoking `kubectl`. The
 snapshot must contain the exact Deployment, inventory-derived ServiceMonitor and four Probes. It
 must also contain `OOMKilled`/137 termination evidence or bounded root/metadata 429 and healthy
@@ -128,6 +128,41 @@ python3 scripts/tokenplace_incident_drill.py --dry-run --mode metrics-oom \
   --acknowledge-state-loss
 ```
 
+For a controlled metrics-OOM rehearsal starting from a healthy baseline, select the separate
+lifecycle and provide a fourth immutable identity. `CURRENT_IMAGE_DIGEST` is the healthy baseline,
+`INCIDENT_IMAGE_DIGEST` is the reviewed fault stimulus, `REPLACEMENT_IMAGE_DIGEST` is the recovery
+candidate, and `ROLLBACK_IMAGE_DIGEST` is the reviewed emergency fallback. All four must be
+distinct. The second acknowledgement authorizes staging-only fault injection; the existing
+acknowledgement separately recognizes replacement of process-local and `emptyDir` state:
+
+```bash
+python3 scripts/tokenplace_incident_drill.py --dry-run --mode metrics-oom \
+  --lifecycle staging-rehearsal --incident-image "$INCIDENT_IMAGE_DIGEST" \
+  --host "$STAGING_HOST" --kubeconfig "$STAGING_KUBECONFIG" --context sugar-staging \
+  --environment staging --namespace "$NAMESPACE" --deployment "$DEPLOYMENT" \
+  --container "$CONTAINER" --current-image "$CURRENT_IMAGE_DIGEST" \
+  --replacement-image "$REPLACEMENT_IMAGE_DIGEST" --rollback-image "$ROLLBACK_IMAGE_DIGEST" \
+  --replicas "$REPLICAS" --memory-limit "$MEMORY_LIMIT" \
+  --service-monitor "$SERVICE_MONITOR" --run-id "$RUN_ID" \
+  --snapshot "$HEALTHY_PRIVATE_SNAPSHOT" \
+  --evidence "$PRIVATE_EVIDENCE_DIRECTORY/${RUN_ID}-metrics-oom-rehearsal.json" \
+  --acknowledge-state-loss --acknowledge-staging-fault-injection
+```
+
+The rehearsal snapshot must describe the healthy baseline and have an empty `classification`;
+fixture OOM fields are refused in this lifecycle. Offline output labels fixture classification as
+non-authoritative and declares zero cluster, production, repository, and external state changes.
+It is a plan preview, not proof that an OOM occurred and not authorization to execute.
+
+After independent review of that preview, generate the executable plan by repeating the same
+command with a new evidence filename and replacing
+`--snapshot "$HEALTHY_PRIVATE_SNAPSHOT"` with `--live-preflight`. This read-only authoritative
+preflight asserts staging identity first, reads the exact Deployment, ServiceMonitor, and four
+Probes, requires desired and available replicas to equal the reviewed replica count, and confirms
+the healthy image, memory limit, metrics mode, and unpaused discovery labels. It does not look for
+an OOM before building the rehearsal plan. An offline rehearsal plan is cryptographically distinct
+and the execution interface refuses it.
+
 An offline plan is marked as a non-executing preview. The future live preflight calls
 `scripts/cluster_identity.py assert --kubeconfig "$STAGING_KUBECONFIG" --env staging` first, then
 reads only the exact Deployment, `ServiceMonitor/tokenplace`, and inventory-derived Probes through
@@ -148,6 +183,16 @@ python3 scripts/tokenplace_incident_drill.py --execute-stage "$NEXT_STAGE" \
   --plan "$PRIVATE_PLAN" --journal "$PRIVATE_JOURNAL_DIRECTORY" \
   --kubeconfig "$STAGING_KUBECONFIG" --gate-evidence "$PRIVATE_GATE_EVIDENCE"
 ```
+
+For the rehearsal, the exact order begins with `marker`, `inject-oom-stimulus`, and
+`observe-authentic-oom`, followed by the existing containment, recovery replacement, readiness,
+compute registration and polling, relay-blind encrypted E2EE, route preservation, metrics-exit,
+metrics-last restoration, and final observation stages. Do not supply `--gate-evidence` to
+`observe-authentic-oom`: that gate reads the current Deployment, its unambiguous owned ReplicaSet
+and Pod, the exact container/image/memory limit, its OOMKilled/137 last termination, positive
+restart count and timestamp, and privacy-safe event aggregates directly through the bound staging
+kubeconfig. Operator-authored JSON and offline fixtures cannot satisfy it. A missing, ambiguous,
+wrong-owner, wrong-container, wrong-image, wrong-limit, or unconverged observation stops progress.
 
 Omit `--gate-evidence` for mutation stages. For a gate, supply an absolute path to a regular file
 outside this repository (maximum 64 KiB):
@@ -213,6 +258,14 @@ python3 scripts/tokenplace_incident_drill.py --rollback-stage "$COMPLETED_MUTATI
   --kubeconfig "$STAGING_KUBECONFIG"
 ```
 
+On any interruption or threshold failure, stop forward execution and roll back completed mutations
+in journaled reverse order. The recovery replacement inverse goes directly to the original healthy
+baseline rather than back to the incident image; the stimulus inverse is baseline-idempotent, so
+the last rollback records that the safe baseline is already present. Continue through every active
+inverse until the original image, metrics mode and exact ServiceMonitor/Probe discovery labels are
+restored. Never use the emergency fallback as an inverse: it remains a separately reviewed,
+capability-revalidated emergency action.
+
 After the original image and exact ServiceMonitor/Probe discovery labels are restored, and
 `/livez` and `/healthz` are healthy, delete only the matching run-ID/digest marker. Repeating this
 command reports the already-clean state without mutation:
@@ -222,6 +275,13 @@ python3 scripts/tokenplace_incident_drill.py --cleanup \
   --plan "$PRIVATE_PLAN" --journal "$PRIVATE_JOURNAL_DIRECTORY" \
   --kubeconfig "$STAGING_KUBECONFIG"
 ```
+
+Cleanup refuses while any mutation remains active or when the exact Deployment image, replicas,
+container, memory limit, metrics mode, discovery labels, `/livez`, or `/healthz` differs from the
+recorded healthy baseline. Marker deletion is exact—there is no selector or prefix cleanup—and is
+terminal only after baseline verification. A failure during mutation, rollback, health
+verification, or marker deletion remains recoverable from the private append-only journal; it must
+not be treated as a completed drill.
 
 The operator must capture the schema-versioned JSON plan, precondition summary, authoritative
 symptom, every printed mutation/rollback pair, Ready/digest/limit proof, compute registration and polling,
