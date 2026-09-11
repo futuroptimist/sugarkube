@@ -106,12 +106,77 @@ crosses a rollback threshold, remove only that Probe's discovery label using the
 
 ## Step 14b: prepared staging drill (not yet performed)
 
-The helper preserves its Step 14a dry-run interface: it validates repository inventory and a
-reviewed, privacy-safe JSON snapshot, then emits exact selections without invoking `kubectl`. The
-snapshot must contain the exact Deployment, inventory-derived ServiceMonitor and four Probes. It
-must also contain `OOMKilled`/137 termination evidence or bounded root/metadata 429 and healthy
-livez/healthz statuses plus a successful quota-validator result. Use a unique DNS-safe run ID and
-a new evidence file in an operator-supplied private directory outside the repository.
+### Controlled metrics-OOM rehearsal lifecycle
+
+The metrics rehearsal is explicitly different from real-incident recovery. It starts with a
+healthy immutable baseline and an empty classification object; the offline snapshot is only a
+non-authoritative inventory preview and must not claim that an OOM occurred. Supply four distinct
+immutable identities: the healthy baseline (`--current-image`), controlled historical incident
+artifact (`--stimulus-image`), recovery replacement (`--replacement-image`), and reviewed emergency
+fallback (`--rollback-image`). No value is built into the runner. Both
+`--acknowledge-state-loss` and `--acknowledge-fault-injection` are mandatory, acknowledging loss of
+process-local and `emptyDir` state and authorizing a staging-only fault. The stimulus controls are
+refused for quota drills, ordinary real-incident plans, and every non-staging identity.
+
+Generate a non-executing rehearsal preview with test/reviewed immutable values:
+
+```bash
+python3 scripts/tokenplace_incident_drill.py --dry-run --mode metrics-oom \
+  --staging-rehearsal --acknowledge-fault-injection --acknowledge-state-loss \
+  --host "$STAGING_HOST" --kubeconfig "$STAGING_KUBECONFIG" --context sugar-staging \
+  --environment staging --namespace "$NAMESPACE" --deployment "$DEPLOYMENT" \
+  --container "$CONTAINER" --current-image "$HEALTHY_BASELINE_DIGEST" \
+  --stimulus-image "$INCIDENT_STIMULUS_DIGEST" \
+  --replacement-image "$RECOVERY_IMAGE_DIGEST" --rollback-image "$FALLBACK_IMAGE_DIGEST" \
+  --replicas "$REPLICAS" --memory-limit "$MEMORY_LIMIT" \
+  --service-monitor "$SERVICE_MONITOR" --run-id "$RUN_ID" \
+  --snapshot "$HEALTHY_PRIVATE_SNAPSHOT" \
+  --evidence "$PRIVATE_EVIDENCE_DIRECTORY/${RUN_ID}-metrics-oom-rehearsal.json"
+```
+
+Before authorizing `marker`, independently verify the live cluster identity, healthy baseline
+digest and memory limit, desired and Ready replicas, exact Deployment/container, exact
+ServiceMonitor selector, all four inventory Probes, healthy `/livez` and `/healthz`, and absence of
+another drill marker or journal. The immutable plan and plan digest must be reviewed at this point.
+Create the exact run-ID/digest marker before any mutation, then invoke exactly one ordered stage at
+a time:
+
+1. `inject-oom-stimulus` replaces only the selected container image. Its journaled prestate and
+   inverse name the original healthy baseline exactly.
+2. `observe-authentic-oom` accepts no `--gate-evidence` file. The runner reads the Kubernetes API
+   through the bound staging kubeconfig and refuses until exactly one current Pod is traced through
+   its controller ReplicaSet to the exact Deployment and container at the stimulus digest and
+   reviewed memory limit. The live termination must be `OOMKilled`/137 with a positive restart
+   count and valid timestamp; event evidence is retained only as bounded reason/count/time
+   aggregates. Missing, stale-owner, wrong-image, wrong-container, unconverged, or ambiguous
+   observations fail closed. Snapshot fields and manual assertions can never pass this gate.
+3. Run the planned metrics containment stage, recovery `replace`, readiness, compute registration
+   and polling, encrypted E2EE, root/metadata preservation, metrics-exit, metrics-last restoration,
+   and final observation stages in their printed order. Normal private evidence files are required
+   only for the ordinary observation gates.
+4. Roll back active mutations in reverse journal order after any interruption or threshold failure.
+   Continue immediately until the stimulus mutation's inverse restores the original healthy image;
+   never treat the stimulus image as a cleanup baseline. Verify the original metrics mode and exact
+   discovery labels, desired/Ready replicas, digest and memory limit, then require 2xx `/livez` and
+   `/healthz` before deleting only the exact marker.
+
+If recovery replacement, readiness, compute, E2EE, or any bounded observation fails, stop forward
+execution and begin deterministic rollback. Reissue an interrupted operation unchanged so the
+journal reconciles its intent against exact pre/post state. Never improvise an image rollout, skip
+the authentic-OOM gate, substitute a synthetic snapshot, use a selector or prefix for cleanup, or
+leave the stimulus deployed while waiting for review. Keep private journals/evidence outside the
+repository; retain no Pod names, UIDs, caller identities, request data, ciphertext, headers,
+credentials, or Secret values. This lifecycle is prepared only; it does **not** state that a live
+staging rehearsal has run.
+
+The helper preserves its Step 14a real-incident dry-run interface: it validates repository inventory
+and a reviewed, privacy-safe JSON snapshot, then emits exact selections without invoking `kubectl`.
+The snapshot must contain the exact Deployment, inventory-derived ServiceMonitor and four Probes.
+A real-incident snapshot must also contain `OOMKilled`/137 termination evidence or bounded
+root/metadata 429 and healthy livez/healthz statuses plus a successful quota-validator result. The
+controlled rehearsal above instead requires an empty classification at its healthy baseline. Use a
+unique DNS-safe run ID and a new evidence file in an operator-supplied private directory outside the
+repository.
 From the repository root, generate both plans (replace every placeholder with reviewed staging
 coordinates):
 

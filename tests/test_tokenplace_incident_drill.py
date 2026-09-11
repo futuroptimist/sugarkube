@@ -93,6 +93,120 @@ def preflight(
     )
 
 
+def rehearsal_preflight(tmp_path, **changes):
+    parsed = args(
+        tmp_path,
+        staging_rehearsal=True,
+        stimulus_image="registry.example/relay@sha256:" + "d" * 64,
+        acknowledge_fault_injection=True,
+        **changes,
+    )
+    c = drill.validate(parsed)
+    data = snapshot(c)
+    data["classification"] = {}
+    return drill.preflight_snapshot("metrics-oom", c, data, rehearsal=True)
+
+
+def test_rehearsal_requires_separate_digest_and_fault_authorization(tmp_path):
+    with pytest.raises(drill.DrillError, match="fault-injection"):
+        drill.validate(
+            args(
+                tmp_path,
+                staging_rehearsal=True,
+                stimulus_image="registry.example/relay@sha256:" + "d" * 64,
+                acknowledge_fault_injection=False,
+            )
+        )
+    with pytest.raises(drill.DrillError, match="must be distinct"):
+        drill.validate(
+            args(
+                tmp_path,
+                staging_rehearsal=True,
+                stimulus_image="registry.example/relay@sha256:" + "a" * 64,
+                acknowledge_fault_injection=True,
+            )
+        )
+    with pytest.raises(drill.DrillError, match="require explicit"):
+        drill.validate(
+            args(
+                tmp_path,
+                stimulus_image="registry.example/relay@sha256:" + "d" * 64,
+            )
+        )
+
+
+def test_rehearsal_plan_starts_healthy_and_gates_authentic_oom(tmp_path):
+    checked = rehearsal_preflight(tmp_path)
+    plan = drill.build_plan(checked)
+    ids = [action["id"] for action in plan["actions"]]
+    assert ids[:3] == ["inject-oom-stimulus", "observe-authentic-oom", "pause-metrics"]
+    assert plan["lifecycle"] == "staging-rehearsal"
+    assert plan["preflight"]["classification"] == {
+        "status": "healthy-baseline; OOM not yet observed"
+    }
+    assert plan["preflight"]["offline_fixture_authoritative"] is False
+    assert plan["expected_deployment"] == {
+        "replicas": 1,
+        "container": "relay",
+        "current_image": "registry.example/relay@sha256:" + "a" * 64,
+        "replacement_image": "registry.example/relay@sha256:" + "b" * 64,
+        "rollback_image": "registry.example/relay@sha256:" + "c" * 64,
+        "stimulus_image": "registry.example/relay@sha256:" + "d" * 64,
+        "memory_limit": "512Mi",
+    }
+    stimulus = plan["actions"][0]
+    assert stimulus["old_state"]["image"] == plan["expected_deployment"]["current_image"]
+    assert stimulus["inverse"][-1].endswith(plan["expected_deployment"]["current_image"])
+    oom = plan["actions"][1]
+    assert oom["type"] == "authoritative-live-oom-gate"
+    assert oom["checks"][0]["source"] == "live-kubernetes-api"
+    replace = next(action for action in plan["actions"] if action["id"] == "replace")
+    assert replace["old_state"]["image"] == plan["expected_deployment"]["stimulus_image"]
+    assert replace["rollback_state"]["image"] == plan["expected_deployment"]["current_image"]
+
+
+def test_rehearsal_offline_snapshot_cannot_assert_oom(tmp_path):
+    parsed = args(
+        tmp_path,
+        staging_rehearsal=True,
+        stimulus_image="registry.example/relay@sha256:" + "d" * 64,
+        acknowledge_fault_injection=True,
+    )
+    c = drill.validate(parsed)
+    with pytest.raises(drill.DrillError, match="must not assert synthetic"):
+        drill.preflight_snapshot("metrics-oom", c, snapshot(c), rehearsal=True)
+
+
+def test_rehearsal_live_oom_gate_refuses_operator_evidence(tmp_path):
+    plan = drill.build_plan(rehearsal_preflight(tmp_path))
+    parsed = execution_files(tmp_path, plan)
+    for stage in ("marker", "inject-oom-stimulus"):
+        drill._record_phase(parsed.journal, plan, "execute", stage, "intent")
+        drill._record_phase(parsed.journal, plan, "execute", stage, "completed")
+    parsed.execute_stage = "observe-authentic-oom"
+    parsed.gate_evidence = tmp_path / "manual.json"
+    parsed.gate_evidence.write_text("{}")
+    marker = {
+        "metadata": {
+            "labels": {
+                "sugarkube.dev/run-id": plan["run_id"],
+                "sugarkube.dev/plan-digest": plan["plan_digest"],
+            }
+        },
+        "data": {"run-id": plan["run_id"], "plan-digest": plan["plan_digest"]},
+    }
+    with pytest.raises(drill.DrillError, match="refuses operator-authored"):
+        drill.execute_operation(
+            parsed,
+            execution_runner(
+                plan,
+                [],
+                marker,
+                initial_image=plan["expected_deployment"]["stimulus_image"],
+            ),
+        )
+
+
 @pytest.mark.parametrize(
     "change",
     [
