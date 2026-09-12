@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -746,10 +747,12 @@ def test_bounded_cardinality_wraps_network_failure_and_requires_authentic_oom(mo
     }
 
     with pytest.raises(drill.DrillError, match="bounded-cardinality request failed") as caught:
-        drill._run_bounded_cardinality(action, disruption_check=lambda: False)
+        drill._run_bounded_cardinality(action, disruption_check=lambda: drill.NO_QUALIFYING_OOM)
     assert "private network detail" not in str(caught.value)
 
-    summary = drill._run_bounded_cardinality(action, disruption_check=lambda: True)
+    summary = drill._run_bounded_cardinality(
+        action, disruption_check=lambda: {"termination_reason": "OOMKilled"}
+    )
     assert summary["stopped_on_authentic_oom"] is True
     assert summary["raw_paths_persisted"] is False
 
@@ -789,11 +792,106 @@ def test_bounded_cardinality_stops_on_accepted_live_oom(monkeypatch):
         ],
     }
 
-    summary = drill._run_bounded_cardinality(action, disruption_check=lambda: True)
+    summary = drill._run_bounded_cardinality(
+        action, disruption_check=lambda: {"termination_reason": "OOMKilled"}
+    )
 
     assert len(requested) == summary["requests"] == summary["unique_paths"] == 1
     assert summary["stop_reason"] == "accepted-authentic-oom"
     assert summary["raw_paths_persisted"] is False
+    assert "__sugarkube_cardinality_rehearsal__" not in json.dumps(summary)
+
+
+def test_bounded_cardinality_polling_continues_until_authentic_oom(monkeypatch):
+    limits = dict(drill.CARDINALITY_LIMITS, unique_paths=3, total_requests=3, concurrency=1)
+    monkeypatch.setattr(drill, "CARDINALITY_LIMITS", limits)
+    requested = []
+
+    class Missing:
+        status = 404
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def geturl(self):
+            return requested[-1]
+
+    class Opener:
+        def open(self, request, timeout):
+            requested.append(request.full_url)
+            return Missing()
+
+    observations = iter(
+        [drill.NO_QUALIFYING_OOM, drill.NO_QUALIFYING_OOM, {"termination_reason": "OOMKilled"}]
+    )
+    monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *_args: Opener())
+    action = {
+        "target": {"scheme": "https", "host": drill.STAGING_HOST, "redirects": "reject"},
+        "limits": limits,
+        "command": [
+            "internal:generate-bounded-cardinality",
+            "--host",
+            drill.STAGING_HOST,
+            "--run-id",
+            "safe-run",
+        ],
+    }
+
+    summary = drill._run_bounded_cardinality(action, disruption_check=lambda: next(observations))
+
+    assert summary["requests"] == summary["status_counts"]["404"] == 3
+    assert summary["stopped_on_authentic_oom"] is True
+
+
+def test_bounded_cardinality_accounts_successes_in_disrupted_batch(monkeypatch):
+    limits = dict(drill.CARDINALITY_LIMITS, unique_paths=3, total_requests=3, concurrency=3)
+    monkeypatch.setattr(drill, "CARDINALITY_LIMITS", limits)
+    barrier = threading.Barrier(3)
+
+    class Missing:
+        status = 404
+
+        def __init__(self, url):
+            self.url = url
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def geturl(self):
+            return self.url
+
+    class Opener:
+        def open(self, request, timeout):
+            barrier.wait()
+            if request.full_url.endswith(drill._bounded_cardinality_path("safe-run", 0)):
+                raise drill.urllib.error.URLError("connection reset")
+            return Missing(request.full_url)
+
+    monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *_args: Opener())
+    action = {
+        "target": {"scheme": "https", "host": drill.STAGING_HOST, "redirects": "reject"},
+        "limits": limits,
+        "command": [
+            "internal:generate-bounded-cardinality",
+            "--host",
+            drill.STAGING_HOST,
+            "--run-id",
+            "safe-run",
+        ],
+    }
+
+    summary = drill._run_bounded_cardinality(
+        action, disruption_check=lambda: {"termination_reason": "OOMKilled"}
+    )
+
+    assert summary["requests"] == summary["unique_paths"] == 2
+    assert summary["status_counts"] == {"404": 2}
     assert "__sugarkube_cardinality_rehearsal__" not in json.dumps(summary)
 
 

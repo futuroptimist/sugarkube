@@ -55,6 +55,14 @@ class _RequestDisruption(DrillError):
 
 
 @dataclass(frozen=True)
+class _NoQualifyingOOM:
+    """Identity-validated observation that found no qualifying OOM yet."""
+
+
+NO_QUALIFYING_OOM = _NoQualifyingOOM()
+
+
+@dataclass(frozen=True)
 class Coordinates:
     host: str
     kubeconfig: Path
@@ -496,7 +504,8 @@ def _observe_live_oom(
     runner: Runner,
     *,
     not_before: datetime | None = None,
-) -> dict:
+    allow_no_qualifying: bool = False,
+) -> dict | _NoQualifyingOOM:
     metadata = deployment.get("metadata", {})
     deployment_uid = metadata.get("uid")
     selector_labels = deployment.get("spec", {}).get("selector", {}).get("matchLabels")
@@ -589,6 +598,8 @@ def _observe_live_oom(
         if not_before is not None and parsed < not_before:
             raise DrillError("OOM termination predates the controlled stimulus")
         candidates.append((pod, finished, status["restartCount"]))
+    if not candidates and allow_no_qualifying:
+        return NO_QUALIFYING_OOM
     if len(candidates) != 1:
         raise DrillError("metrics-OOM evidence is missing or ambiguous")
     pod, finished, restart_count = candidates[0]
@@ -1920,7 +1931,7 @@ def _bounded_cardinality_path(run_id: str, sequence: int) -> str:
 def _run_bounded_cardinality(
     action: dict,
     boundary_check: Callable[[], None] | None = None,
-    disruption_check: Callable[[], bool] | None = None,
+    disruption_check: Callable[[], dict | _NoQualifyingOOM] | None = None,
 ) -> dict:
     """Run the reviewed finite HTTP stimulus and return privacy-safe aggregates."""
     if action.get("target") != {
@@ -1959,6 +1970,23 @@ def _run_bounded_cardinality(
     sent = 0
     digest = hashlib.sha256()
     cancelled = threading.Event()
+
+    def observe_disruption() -> bool:
+        if disruption_check is None:
+            return False
+        observation = disruption_check()
+        if observation is NO_QUALIFYING_OOM:
+            return False
+        if not isinstance(observation, dict):
+            raise DrillError("authoritative OOM observation returned an invalid result")
+        return True
+
+    def account(batch_hashes: list[str]) -> None:
+        nonlocal sent
+        for path_hash in sorted(batch_hashes):
+            digest.update(path_hash.encode("ascii"))
+            statuses["404"] = statuses.get("404", 0) + 1
+        sent += len(batch_hashes)
 
     def request(sequence: int) -> str:
         if cancelled.is_set():
@@ -2003,11 +2031,10 @@ def _run_bounded_cardinality(
                 count = min(limits["concurrency"], limits["total_requests"] - sent)
                 batch_started = time.monotonic()
                 futures = [pool.submit(request, sent + offset) for offset in range(count)]
+                batch_hashes = []
                 try:
-                    batch_hashes = [
-                        future.result()
-                        for future in as_completed(futures, timeout=remaining_budget)
-                    ]
+                    for future in as_completed(futures, timeout=remaining_budget):
+                        batch_hashes.append(future.result())
                 except FuturesTimeoutError as exc:
                     cancelled.set()
                     for future in futures:
@@ -2017,8 +2044,22 @@ def _run_bounded_cardinality(
                     cancelled.set()
                     for future in futures:
                         future.cancel()
-                    if disruption_check is None or not disruption_check():
+                    # The executor joins running workers before this function
+                    # returns. Preserve every successful request from this
+                    # interrupted batch in the aggregate, without retaining
+                    # its raw path.
+                    for future in futures:
+                        if future.cancelled():
+                            continue
+                        try:
+                            path_hash = future.result()
+                        except _RequestDisruption:
+                            continue
+                        if path_hash not in batch_hashes:
+                            batch_hashes.append(path_hash)
+                    if not observe_disruption():
                         raise
+                    account(batch_hashes)
                     summary = {
                         "requests": sent,
                         "unique_paths": sent,
@@ -2034,11 +2075,8 @@ def _run_bounded_cardinality(
                     for future in futures:
                         future.cancel()
                     raise
-                for path_hash in sorted(batch_hashes):
-                    digest.update(path_hash.encode("ascii"))
-                    statuses["404"] = statuses.get("404", 0) + 1
-                sent += count
-                if disruption_check is not None and disruption_check():
+                account(batch_hashes)
+                if observe_disruption():
                     cancelled.set()
                     return {
                         "requests": sent,
@@ -2069,7 +2107,14 @@ def _run_bounded_cardinality(
     }
 
 
-def _observe_rehearsal_oom(plan: dict, kubeconfig: Path, runner: Runner, not_before):
+def _observe_rehearsal_oom(
+    plan: dict,
+    kubeconfig: Path,
+    runner: Runner,
+    not_before,
+    *,
+    allow_no_qualifying: bool = False,
+):
     """Read authoritative OOM evidence for the exact reviewed Deployment."""
     expected = plan["expected_deployment"]
     deployment = _runner_json(
@@ -2114,6 +2159,7 @@ def _observe_rehearsal_oom(plan: dict, kubeconfig: Path, runner: Runner, not_bef
         ["kubectl", "--kubeconfig", str(kubeconfig), "--context", "sugar-staging"],
         runner,
         not_before=not_before,
+        allow_no_qualifying=allow_no_qualifying,
     )
 
 
@@ -2407,13 +2453,12 @@ def _execute_locked(args, runner, plan, journal, now=None):
                     runner,
                     plan["expected_deployment"]["incident_image"],
                 ),
-                lambda: bool(
-                    _observe_rehearsal_oom(
-                        plan,
-                        args.kubeconfig,
-                        runner,
-                        _stimulus_not_before(records),
-                    )
+                lambda: _observe_rehearsal_oom(
+                    plan,
+                    args.kubeconfig,
+                    runner,
+                    _stimulus_not_before(records),
+                    allow_no_qualifying=True,
                 ),
             )
         except BaseException:
