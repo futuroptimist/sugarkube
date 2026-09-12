@@ -508,8 +508,9 @@ def test_staging_rehearsal_has_separate_identities_and_live_oom_gate(tmp_path):
     assert plan["lifecycle"] == "staging-rehearsal"
     assert plan["preflight"]["classification"] == {"oom_status": "not-yet-observed"}
     assert plan["preflight"]["offline_fixture_authoritative"] is False
-    assert [action["id"] for action in plan["actions"][:3]] == [
-        "inject-oom-stimulus",
+    assert [action["id"] for action in plan["actions"][:4]] == [
+        "inject-incident-image",
+        "generate-bounded-cardinality",
         "observe-authentic-oom",
         "pause-metrics",
     ]
@@ -534,6 +535,183 @@ def test_staging_rehearsal_has_separate_identities_and_live_oom_gate(tmp_path):
         )
         == 4
     )
+
+
+def test_bounded_cardinality_contract_is_finite_private_and_separately_ordered(tmp_path):
+    plan = executable_rehearsal_plan(tmp_path)
+    actions = {action["id"]: action for action in plan["actions"]}
+    image = actions["inject-incident-image"]
+    trigger = actions["generate-bounded-cardinality"]
+    observation = actions["observe-authentic-oom"]
+
+    assert trigger["depends_on"] == [image["id"]]
+    assert observation["depends_on"] == [trigger["id"]]
+    assert trigger["target"] == {
+        "scheme": "https",
+        "host": drill.STAGING_HOST,
+        "redirects": "reject",
+    }
+    assert trigger["path_contract"]["durable_raw_paths"] is False
+    assert trigger["limits"] == drill.CARDINALITY_LIMITS
+    assert all(isinstance(value, int) and value > 0 for value in trigger["limits"].values())
+    assert trigger["limits"]["unique_paths"] == trigger["limits"]["total_requests"]
+    assert trigger["inverse"][0] == "internal:cancel-bounded-cardinality"
+    assert trigger["failure_recovery"] == image["inverse"]
+
+
+def test_image_only_journal_cannot_advance_to_authentic_oom(tmp_path):
+    plan = executable_rehearsal_plan(tmp_path)
+    parsed = execution_files(tmp_path, plan)
+    _journal_through(parsed, plan, "inject-incident-image")
+    drill._record_phase(
+        parsed.journal, plan, "execute", "inject-incident-image", "completed"
+    )
+    parsed.execute_stage = "observe-authentic-oom"
+    runner = execution_runner(
+        plan, [], _matching_marker(plan), plan["expected_deployment"]["incident_image"]
+    )
+
+    with pytest.raises(drill.DrillError, match="out of order"):
+        drill.execute_operation(parsed, runner)
+
+
+def test_bounded_cardinality_requires_separate_execution_acknowledgement(tmp_path):
+    plan = executable_rehearsal_plan(tmp_path)
+    parsed = execution_files(tmp_path, plan)
+    _journal_through(parsed, plan, "inject-incident-image")
+    drill._record_phase(
+        parsed.journal, plan, "execute", "inject-incident-image", "completed"
+    )
+    parsed.execute_stage = "generate-bounded-cardinality"
+    runner = execution_runner(
+        plan, [], _matching_marker(plan), plan["expected_deployment"]["incident_image"]
+    )
+
+    with pytest.raises(drill.DrillError, match="separate bounded-cardinality"):
+        drill.execute_operation(parsed, runner)
+
+
+def test_bounded_cardinality_failure_cancels_rolls_back_and_exactly_cleans_up(
+    tmp_path, monkeypatch
+):
+    plan = executable_rehearsal_plan(tmp_path)
+    parsed = execution_files(tmp_path, plan)
+    _journal_through(parsed, plan, "inject-incident-image")
+    drill._record_phase(
+        parsed.journal, plan, "execute", "inject-incident-image", "completed"
+    )
+    parsed.execute_stage = "generate-bounded-cardinality"
+    parsed.acknowledge_bounded_cardinality_generation = True
+    calls = []
+
+    def runner(command):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    def fail_after_workers_stop(_action, _boundary_check):
+        raise drill.DrillError("bounded-cardinality duration limit reached")
+
+    monkeypatch.setattr(drill, "_run_bounded_cardinality", fail_after_workers_stop)
+    monkeypatch.setattr(drill, "_assert_stage_preflight", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(drill, "_verify_cleanup_baseline", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        drill, "_validate_marker", lambda *_args, absent_ok=False, **_kwargs: not absent_ok
+    )
+
+    with pytest.raises(drill.DrillError, match="duration limit"):
+        drill.execute_operation(parsed, runner)
+
+    image = next(action for action in plan["actions"] if action["id"] == "inject-incident-image")
+    assert drill._bind_command(image["inverse"], parsed.kubeconfig) in calls
+    assert drill._marker_command(plan, parsed.kubeconfig, "delete") in calls
+    records = drill._journal_records(parsed.journal, plan)
+    assert (records[-1]["operation"], records[-1]["stage"], records[-1]["phase"]) == (
+        "cleanup",
+        "cleanup",
+        "completed",
+    )
+    assert "__sugarkube_cardinality_rehearsal__" not in json.dumps(records)
+
+
+def test_bounded_cardinality_persists_only_aggregates_and_hashes(monkeypatch):
+    limits = {
+        "unique_paths": 2,
+        "total_requests": 2,
+        "concurrency": 1,
+        "requests_per_second": 1000,
+        "duration_seconds": 10,
+        "request_timeout_seconds": 1,
+    }
+    monkeypatch.setattr(drill, "CARDINALITY_LIMITS", limits)
+    requested = []
+
+    class Missing:
+        status = 404
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def geturl(self):
+            return requested[-1]
+
+    class Opener:
+        def open(self, request, timeout):
+            assert timeout == 1
+            requested.append(request.full_url)
+            return Missing()
+
+    monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *_args: Opener())
+    action = {
+        "target": {"scheme": "https", "host": drill.STAGING_HOST, "redirects": "reject"},
+        "limits": limits,
+        "command": ["internal:generate-bounded-cardinality", "--run-id", "safe-run"],
+    }
+
+    summary = drill._run_bounded_cardinality(action)
+
+    assert summary == {
+        "requests": 2,
+        "unique_paths": 2,
+        "status_counts": {"404": 2},
+        "path_set_sha256": summary["path_set_sha256"],
+        "raw_paths_persisted": False,
+    }
+    durable = json.dumps(summary)
+    assert "__sugarkube_cardinality_rehearsal__" not in durable
+    assert all(url.startswith("https://staging.token.place/") for url in requested)
+
+
+def test_bounded_cardinality_rejects_destination_drift(monkeypatch):
+    limits = dict(drill.CARDINALITY_LIMITS, unique_paths=1, total_requests=1)
+    monkeypatch.setattr(drill, "CARDINALITY_LIMITS", limits)
+
+    class Drift:
+        status = 404
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def geturl(self):
+            return "https://token.place/not-staging"
+
+    class Opener:
+        def open(self, _request, timeout):
+            return Drift()
+
+    monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *_args: Opener())
+    action = {
+        "target": {"scheme": "https", "host": drill.STAGING_HOST, "redirects": "reject"},
+        "limits": limits,
+        "command": ["internal:generate-bounded-cardinality", "--run-id", "safe-run"],
+    }
+    with pytest.raises(drill.DrillError, match="destination drifted"):
+        drill._run_bounded_cardinality(action)
 
 
 @pytest.mark.parametrize(
@@ -1469,13 +1647,14 @@ def test_offline_rehearsal_cli_emits_non_executing_deterministic_plan(
     assert drill.main(argv) == 0
     plan = json.loads(capsys.readouterr().out)
     ids = [action["id"] for action in plan["actions"]]
-    assert ids[:4] == [
-        "inject-oom-stimulus",
+    assert ids[:5] == [
+        "inject-incident-image",
+        "generate-bounded-cardinality",
         "observe-authentic-oom",
         "pause-metrics",
         "replace",
     ]
-    stimulus, replace = plan["actions"][0], plan["actions"][3]
+    stimulus, replace = plan["actions"][0], plan["actions"][4]
     assert stimulus["old_state"] == {"image": c.current_image}
     assert stimulus["inverse"][-1] == f"relay={c.current_image}"
     assert replace["old_state"] == {"image": c.incident_image}
@@ -1489,13 +1668,13 @@ def test_authentic_oom_window_starts_at_stimulus_intent():
     records = [
         {
             "operation": "execute",
-            "stage": "inject-oom-stimulus",
+            "stage": "generate-bounded-cardinality",
             "phase": "intent",
             "recorded_at": "2026-09-11T12:00:00Z",
         },
         {
             "operation": "execute",
-            "stage": "inject-oom-stimulus",
+            "stage": "generate-bounded-cardinality",
             "phase": "completed",
             "recorded_at": "2026-09-11T12:00:05Z",
         },
@@ -1586,7 +1765,7 @@ def test_rehearsal_replace_executes_from_incident_image(tmp_path):
 
 def test_pending_rehearsal_image_mutations_reconcile_pre_and_post_states(tmp_path):
     for stage, pre_key, post_key in (
-        ("inject-oom-stimulus", "current_image", "incident_image"),
+        ("inject-incident-image", "current_image", "incident_image"),
         ("replace", "incident_image", "replacement_image"),
     ):
         for initial_key, mutations in ((pre_key, 1), (post_key, 0)):

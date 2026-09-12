@@ -192,14 +192,44 @@ python3 scripts/tokenplace_incident_drill.py --execute-stage "$NEXT_STAGE" \
   --kubeconfig "$STAGING_KUBECONFIG" --gate-evidence "$PRIVATE_GATE_EVIDENCE"
 ```
 
-For the rehearsal, the exact order begins with `marker`, `inject-oom-stimulus`, and
-`observe-authentic-oom`, followed by the existing containment, recovery replacement, readiness,
+For the rehearsal, the exact order begins with `marker`, `inject-incident-image`,
+`generate-bounded-cardinality`, and `observe-authentic-oom`, followed by the existing containment,
+recovery replacement, readiness,
 compute registration and polling, relay-blind encrypted E2EE, route preservation, metrics-exit,
-metrics-last restoration, and final observation stages. Do not supply `--gate-evidence` to
+metrics-last restoration, and final observation stages. Changing the image alone cannot advance
+to authentic observation. Image injection authorization does not authorize traffic. Execute the
+traffic stage separately, after reviewing its plan coordinates, with its dedicated acknowledgement:
+
+```bash
+python3 scripts/tokenplace_incident_drill.py \
+  --execute-stage generate-bounded-cardinality \
+  --acknowledge-bounded-cardinality-generation \
+  --plan "$PRIVATE_PLAN" --journal "$PRIVATE_JOURNAL_DIRECTORY" \
+  --kubeconfig "$STAGING_KUBECONFIG"
+```
+
+The trigger is fixed at 72,000 synthetic unique unmatched paths and 72,000 total requests, with
+concurrency 16, a ceiling of 400 requests per second, a 240-second wall-clock limit, and a
+five-second per-request timeout. It uses only HTTPS to `staging.token.place`, requires every
+response to remain on the exact requested staging URL without redirects and to be 404, and stops
+at the first failure, timeout, interruption, or bound. Paths are deterministically derived from
+the run ID and sequence; no credentials, payloads, user input, or production host can enter them.
+Only counts, status aggregates, and a SHA-256 path-set commitment enter the private journal—never
+the raw paths. The plan prints the forward action, cancellation boundary, healthy-image recovery,
+and exact marker cleanup coordinates.
+
+Worker cancellation is joined before recovery begins. A failure or interruption records a
+privacy-safe stopped summary, restores the exact healthy image, reasserts the reviewed staging
+identity and Deployment coordinates, verifies `/livez` and `/healthz`, and deletes only the exact
+run-owned marker. The append-only private journal remains in place. Never resume an interrupted
+traffic stage or either prior failed live run ID; create a newly reviewed plan and run ID.
+
+Do not supply `--gate-evidence` to
 `observe-authentic-oom`: that gate reads the current Deployment, its unambiguous owned ReplicaSet
 and Pod, the exact container/image/memory limit, its OOMKilled/137 last termination, positive
 restart count and timestamp, and privacy-safe event aggregates directly through the bound staging
-kubeconfig. Operator-authored JSON and offline fixtures cannot satisfy it. A missing, ambiguous,
+kubeconfig. Its lower time boundary is the durable bounded-cardinality intent, not the earlier
+image change. Operator-authored JSON and offline fixtures cannot satisfy it. A missing, ambiguous,
 wrong-owner, wrong-container, wrong-image, wrong-limit, or unconverged observation stops progress.
 
 Omit `--gate-evidence` for mutation stages. For a gate, supply an absolute path to a regular file
