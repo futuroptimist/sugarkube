@@ -72,6 +72,7 @@ def args(tmp_path: Path, **changes):
         lifecycle="real-incident",
         incident_image=None,
         acknowledge_staging_fault_injection=False,
+        acknowledge_bounded_cardinality_generation=False,
         dry_run=True,
     )
     values.update(changes)
@@ -170,6 +171,7 @@ def _portable_cli_args(parsed, evidence, *, live):
                 "--incident-image",
                 parsed.incident_image,
                 "--acknowledge-staging-fault-injection",
+                "--acknowledge-bounded-cardinality-generation",
             ]
         )
     return command
@@ -319,6 +321,7 @@ def test_package_free_complete_workflows(
             else None
         ),
         acknowledge_staging_fault_injection=lifecycle == "staging-rehearsal",
+        acknowledge_bounded_cardinality_generation=lifecycle == "staging-rehearsal",
     )
     snapshot_fixture = snapshot(drill.validate(parsed), mode=mode, degraded=degraded)
     if lifecycle == "staging-rehearsal":
@@ -499,6 +502,7 @@ def test_staging_rehearsal_has_separate_identities_and_live_oom_gate(tmp_path):
         lifecycle="staging-rehearsal",
         incident_image="registry.example/relay@sha256:" + "d" * 64,
         acknowledge_staging_fault_injection=True,
+        acknowledge_bounded_cardinality_generation=True,
     )
     c = drill.validate(parsed)
     healthy = snapshot(c)
@@ -508,8 +512,9 @@ def test_staging_rehearsal_has_separate_identities_and_live_oom_gate(tmp_path):
     assert plan["lifecycle"] == "staging-rehearsal"
     assert plan["preflight"]["classification"] == {"oom_status": "not-yet-observed"}
     assert plan["preflight"]["offline_fixture_authoritative"] is False
-    assert [action["id"] for action in plan["actions"][:3]] == [
-        "inject-oom-stimulus",
+    assert [action["id"] for action in plan["actions"][:4]] == [
+        "select-incident-image",
+        "generate-bounded-cardinality",
         "observe-authentic-oom",
         "pause-metrics",
     ]
@@ -540,6 +545,7 @@ def test_staging_rehearsal_has_separate_identities_and_live_oom_gate(tmp_path):
     "changes,message",
     [
         ({"acknowledge_staging_fault_injection": False}, "fault-injection"),
+        ({"acknowledge_bounded_cardinality_generation": False}, "bounded-cardinality"),
         ({"incident_image": None}, "incident image"),
         ({"incident_image": "registry.example/relay@sha256:" + "a" * 64}, "distinct"),
         ({"environment": "production"}, "staging"),
@@ -550,6 +556,7 @@ def test_staging_rehearsal_authorization_and_coordinates_fail_closed(tmp_path, c
         "lifecycle": "staging-rehearsal",
         "incident_image": "registry.example/relay@sha256:" + "d" * 64,
         "acknowledge_staging_fault_injection": True,
+        "acknowledge_bounded_cardinality_generation": True,
     }
     values.update(changes)
     with pytest.raises(drill.DrillError, match=message):
@@ -565,6 +572,7 @@ def test_staging_rehearsal_rejects_non_oom_mode(tmp_path):
                 lifecycle="staging-rehearsal",
                 incident_image="registry.example/relay@sha256:" + "d" * 64,
                 acknowledge_staging_fault_injection=True,
+                acknowledge_bounded_cardinality_generation=True,
             )
         )
 
@@ -576,6 +584,7 @@ def test_staging_rehearsal_rejects_preexisting_oom_evidence(tmp_path):
             lifecycle="staging-rehearsal",
             incident_image="registry.example/relay@sha256:" + "d" * 64,
             acknowledge_staging_fault_injection=True,
+            acknowledge_bounded_cardinality_generation=True,
         )
     )
     unhealthy = snapshot(c)
@@ -593,6 +602,7 @@ def test_staging_rehearsal_rejects_repository_aliases_of_same_digest(tmp_path):
                 incident_image=f"alias.example/stimulus@sha256:{digest}",
                 replacement_image=f"alias.example/recovery@sha256:{digest}",
                 acknowledge_staging_fault_injection=True,
+                acknowledge_bounded_cardinality_generation=True,
             )
         )
 
@@ -1409,6 +1419,7 @@ def test_offline_rehearsal_plan_cannot_be_executed(tmp_path):
         lifecycle="staging-rehearsal",
         incident_image="registry.example/relay@sha256:" + "d" * 64,
         acknowledge_staging_fault_injection=True,
+        acknowledge_bounded_cardinality_generation=True,
     )
     c = drill.validate(parsed)
     healthy = snapshot(c)
@@ -1426,6 +1437,7 @@ def test_live_authoritative_rehearsal_plan_is_executable(tmp_path):
         lifecycle="staging-rehearsal",
         incident_image="registry.example/relay@sha256:" + "d" * 64,
         acknowledge_staging_fault_injection=True,
+        acknowledge_bounded_cardinality_generation=True,
     )
     c = drill.validate(parsed)
     healthy = snapshot(c)
@@ -1451,6 +1463,7 @@ def test_offline_rehearsal_cli_emits_non_executing_deterministic_plan(
         replacement_image="test.invalid/relay@sha256:" + "b" * 64,
         rollback_image="test.invalid/relay@sha256:" + "c" * 64,
         acknowledge_staging_fault_injection=True,
+        acknowledge_bounded_cardinality_generation=True,
     )
     c = drill.validate(parsed)
     healthy = snapshot(c)
@@ -1469,13 +1482,14 @@ def test_offline_rehearsal_cli_emits_non_executing_deterministic_plan(
     assert drill.main(argv) == 0
     plan = json.loads(capsys.readouterr().out)
     ids = [action["id"] for action in plan["actions"]]
-    assert ids[:4] == [
-        "inject-oom-stimulus",
+    assert ids[:5] == [
+        "select-incident-image",
+        "generate-bounded-cardinality",
         "observe-authentic-oom",
         "pause-metrics",
         "replace",
     ]
-    stimulus, replace = plan["actions"][0], plan["actions"][3]
+    stimulus, replace = plan["actions"][0], plan["actions"][4]
     assert stimulus["old_state"] == {"image": c.current_image}
     assert stimulus["inverse"][-1] == f"relay={c.current_image}"
     assert replace["old_state"] == {"image": c.incident_image}
@@ -1489,19 +1503,87 @@ def test_authentic_oom_window_starts_at_stimulus_intent():
     records = [
         {
             "operation": "execute",
-            "stage": "inject-oom-stimulus",
+            "stage": "generate-bounded-cardinality",
             "phase": "intent",
             "recorded_at": "2026-09-11T12:00:00Z",
         },
         {
             "operation": "execute",
-            "stage": "inject-oom-stimulus",
+            "stage": "generate-bounded-cardinality",
             "phase": "completed",
             "recorded_at": "2026-09-11T12:00:05Z",
         },
     ]
 
     assert drill._stimulus_not_before(records) == datetime(2026, 9, 11, 12, 0, tzinfo=timezone.utc)
+
+
+def test_bounded_cardinality_contract_is_finite_private_and_ordered(tmp_path):
+    plan = executable_rehearsal_plan(tmp_path)
+    ids = [action["id"] for action in plan["actions"]]
+    trigger = next(action for action in plan["actions"] if action["type"] == "trigger")
+
+    assert ids.index("select-incident-image") < ids.index(trigger["id"])
+    assert ids.index(trigger["id"]) < ids.index("observe-authentic-oom")
+    assert trigger["depends_on"] == ["select-incident-image"]
+    assert trigger["bounds"] == drill.CARDINALITY_LIMITS
+    assert all(isinstance(value, int) and value > 0 for value in trigger["bounds"].values())
+    assert trigger["target"] == {
+        "scheme": "https",
+        "host": drill.STAGING_HOST,
+        "path_contract": "/__sugarkube_cardinality__/<sha256(run-id:index)>",
+        "expected_status": 404,
+        "redirects": "refused",
+    }
+    assert "raw_paths" not in trigger["durable_evidence"]
+
+
+def test_bounded_cardinality_execution_requires_separate_acknowledgement(tmp_path):
+    plan = executable_rehearsal_plan(tmp_path)
+    parsed = execution_files(tmp_path, plan)
+    trigger = next(action for action in plan["actions"] if action["type"] == "trigger")
+    for stage in ("marker", "select-incident-image"):
+        drill._record_phase(parsed.journal, plan, "execute", stage, "intent")
+        drill._record_phase(parsed.journal, plan, "execute", stage, "completed")
+    parsed.execute_stage = trigger["id"]
+    runner = execution_runner(
+        plan, [], _matching_marker(plan), plan["expected_deployment"]["incident_image"]
+    )
+
+    with pytest.raises(drill.DrillError, match="separate explicit authorization"):
+        drill.execute_operation(parsed, runner)
+
+
+def test_bounded_cardinality_retains_only_aggregate_hashes(tmp_path, monkeypatch):
+    limits = {
+        "unique_paths": 3,
+        "total_requests": 3,
+        "concurrency": 2,
+        "requests_per_second": 100000,
+        "duration_seconds": 10,
+        "request_timeout_seconds": 1,
+    }
+    monkeypatch.setattr(drill, "CARDINALITY_LIMITS", limits)
+    plan = executable_rehearsal_plan(tmp_path)
+    trigger = next(action for action in plan["actions"] if action["type"] == "trigger")
+    seen = []
+    monkeypatch.setattr(drill, "_cardinality_request", lambda url, timeout: seen.append(url) or 404)
+    summary = drill._run_bounded_cardinality(
+        plan,
+        trigger,
+        args(tmp_path).kubeconfig,
+        execution_runner(
+            plan, [], _matching_marker(plan), plan["expected_deployment"]["incident_image"]
+        ),
+    )
+
+    assert summary["attempted_requests"] == summary["completed_requests"] == 3
+    assert summary["status_counts"] == {"404": 3}
+    assert len(summary["path_set_sha256"]) == 64
+    assert all(
+        url.startswith("https://staging.token.place/__sugarkube_cardinality__/") for url in seen
+    )
+    assert not any(url in json.dumps(summary) for url in seen)
 
 
 @pytest.mark.parametrize(
@@ -1586,7 +1668,7 @@ def test_rehearsal_replace_executes_from_incident_image(tmp_path):
 
 def test_pending_rehearsal_image_mutations_reconcile_pre_and_post_states(tmp_path):
     for stage, pre_key, post_key in (
-        ("inject-oom-stimulus", "current_image", "incident_image"),
+        ("select-incident-image", "current_image", "incident_image"),
         ("replace", "incident_image", "replacement_image"),
     ):
         for initial_key, mutations in ((pre_key, 1), (post_key, 0)):
@@ -1840,6 +1922,7 @@ def executable_rehearsal_plan(tmp_path):
         lifecycle="staging-rehearsal",
         incident_image="registry.example/relay@sha256:" + "d" * 64,
         acknowledge_staging_fault_injection=True,
+        acknowledge_bounded_cardinality_generation=True,
     )
     c = drill.validate(parsed)
     healthy = snapshot(c)

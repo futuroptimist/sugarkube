@@ -192,8 +192,9 @@ python3 scripts/tokenplace_incident_drill.py --execute-stage "$NEXT_STAGE" \
   --kubeconfig "$STAGING_KUBECONFIG" --gate-evidence "$PRIVATE_GATE_EVIDENCE"
 ```
 
-For the rehearsal, the exact order begins with `marker`, `inject-oom-stimulus`, and
-`observe-authentic-oom`, followed by the existing containment, recovery replacement, readiness,
+For the rehearsal, the exact order begins with `marker`, `select-incident-image`,
+`generate-bounded-cardinality`, and `observe-authentic-oom`, followed by the existing containment,
+recovery replacement, readiness,
 compute registration and polling, relay-blind encrypted E2EE, route preservation, metrics-exit,
 metrics-last restoration, and final observation stages. Do not supply `--gate-evidence` to
 `observe-authentic-oom`: that gate reads the current Deployment, its unambiguous owned ReplicaSet
@@ -201,6 +202,37 @@ and Pod, the exact container/image/memory limit, its OOMKilled/137 last terminat
 restart count and timestamp, and privacy-safe event aggregates directly through the bound staging
 kubeconfig. Operator-authored JSON and offline fixtures cannot satisfy it. A missing, ambiguous,
 wrong-owner, wrong-container, wrong-image, wrong-limit, or unconverged observation stops progress.
+
+Image selection and traffic generation are separate authorization gates. The plan-generation
+invocation requires both `--acknowledge-staging-fault-injection` and
+`--acknowledge-bounded-cardinality-generation`, but that review-time acknowledgement does not
+execute traffic. The operator must invoke `generate-bounded-cardinality` separately with a fresh
+`--acknowledge-bounded-cardinality-generation`; image-stage authorization never implies it:
+
+```bash
+python3 scripts/tokenplace_incident_drill.py \
+  --execute-stage generate-bounded-cardinality \
+  --acknowledge-bounded-cardinality-generation \
+  --plan "$PRIVATE_PLAN" --journal "$PRIVATE_JOURNAL_DIRECTORY" \
+  --kubeconfig "$STAGING_KUBECONFIG"
+```
+
+The immutable contract targets only HTTPS on `staging.token.place`, refuses redirects and every
+status other than 404, and creates deterministic, run-owned synthetic names below
+`/__sugarkube_cardinality__/`. It permits at most 72,000 unique paths and 72,000 total requests,
+eight concurrent requests, 400 requests/second, five minutes wall-clock time, and five seconds per
+request. The first reached limit stops submission. Identity and Deployment coordinates are
+reasserted during the run. Durable evidence contains counts, timestamps, status aggregates, a
+hash of the generated set, and a stop reason—never raw paths, URLs, headers, tokens, or payloads.
+Workers are stopped and joined before failure handling restores the exact healthy image and
+reasserts its Deployment coordinates. Then normal reverse-order rollback and exact marker cleanup
+apply. The authentic OOM gate accepts only one live, owned Pod whose matching container has
+`OOMKilled`, exit code 137, a positive restart count, and a termination after the durable bounded
+traffic intent; changing the image alone cannot reach that gate.
+
+The two earlier failed rehearsal run IDs (the lost-journal run and the preserved-journal run) are
+nonresumable and must never be reported as successful. This correction has not executed a live
+drill; qualification and execution are separate later steps.
 
 Omit `--gate-evidence` for mutation stages. For a gate, supply an absolute path to a regular file
 outside this repository (maximum 64 KiB):
