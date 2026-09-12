@@ -1840,6 +1840,57 @@ def test_rehearsal_loader_rejects_tampered_trigger_contract(tmp_path, tamper, me
         drill._load_execution_plan(path)
 
 
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        lambda plan: plan["expected_deployment"].pop("current_image"),
+        lambda plan: plan["expected_deployment"].pop("incident_image"),
+        lambda plan: plan["expected_deployment"].pop("replacement_image"),
+        lambda plan: plan["expected_deployment"].pop("rollback_image"),
+        lambda plan: plan["expected_deployment"].update(replicas=0),
+        lambda plan: plan["expected_deployment"].update(replicas=True),
+        lambda plan: plan["expected_deployment"].update(memory_limit="512M"),
+        lambda plan: plan["expected_deployment"].update(namespace="other"),
+        lambda plan: plan["inventory"].update(namespace="other"),
+        lambda plan: plan["expected_deployment"].update(name="other"),
+        lambda plan: plan["actions"][0].update(resource="deployment/other"),
+        lambda plan: plan["actions"][0].update(old_state={"image": "wrong"}),
+        lambda plan: plan["actions"][0]["command"].__setitem__(-1, "relay=wrong"),
+        lambda plan: plan["actions"][0]["rollback"].__setitem__(-1, "relay=wrong"),
+        lambda plan: next(action for action in plan["actions"] if action["id"] == "replace").update(
+            resource="deployment/other"
+        ),
+        lambda plan: next(action for action in plan["actions"] if action["id"] == "replace").update(
+            old_state={"image": "wrong"}
+        ),
+        lambda plan: next(action for action in plan["actions"] if action["id"] == "replace").update(
+            inverse_state={"image": "wrong"}
+        ),
+        lambda plan: next(action for action in plan["actions"] if action["id"] == "replace")[
+            "command"
+        ].__setitem__(-1, "relay=registry.example/relay@sha256:" + "e" * 64),
+        lambda plan: next(action for action in plan["actions"] if action["id"] == "replace")[
+            "rollback"
+        ].__setitem__(-1, "relay=registry.example/relay@sha256:" + "e" * 64),
+        lambda plan: next(action for action in plan["actions"] if action["id"] == "replace")[
+            "inverse"
+        ].__setitem__(-1, "relay=registry.example/relay@sha256:" + "e" * 64),
+        lambda plan: next(action for action in plan["actions"] if action["id"] == "replace")[
+            "recovery_fallback"
+        ]["command"].__setitem__(-1, "relay=registry.example/relay@sha256:" + "e" * 64),
+    ],
+)
+def test_rehearsal_loader_rejects_tampered_deployment_coordinates(tmp_path, tamper):
+    plan = executable_rehearsal_plan(tmp_path)
+    tamper(plan)
+    plan["plan_digest"] = drill._plan_digest(plan)
+    path = tmp_path / "tampered-deployment-plan.json"
+    path.write_text(json.dumps(plan), encoding="utf-8")
+
+    with pytest.raises(drill.DrillError, match="coordinates"):
+        drill._load_execution_plan(path)
+
+
 def test_offline_rehearsal_cli_emits_non_executing_deterministic_plan(
     tmp_path, monkeypatch, capsys
 ):

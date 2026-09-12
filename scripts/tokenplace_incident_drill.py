@@ -1171,6 +1171,8 @@ def build_plan(preflight: Preflight) -> dict:
             "containment": containment,
         },
         "expected_deployment": {
+            "namespace": c.namespace,
+            "name": c.deployment,
             "replicas": c.replicas,
             "container": c.container,
             "current_image": c.current_image,
@@ -1260,13 +1262,34 @@ def _validate_staging_execution_contract(plan: dict) -> None:
     expected = plan.get("expected_deployment")
     if not isinstance(expected, dict) or not all(
         isinstance(expected.get(key), str) and expected[key]
-        for key in ("container", "current_image", "incident_image")
+        for key in (
+            "namespace",
+            "name",
+            "container",
+            "current_image",
+            "incident_image",
+            "replacement_image",
+            "rollback_image",
+            "memory_limit",
+        )
     ):
         raise DrillError("staging rehearsal deployment coordinates are malformed")
-    if not IMAGE.fullmatch(expected["current_image"]) or not IMAGE.fullmatch(
-        expected["incident_image"]
+    images = [
+        expected[key]
+        for key in ("current_image", "incident_image", "replacement_image", "rollback_image")
+    ]
+    if (
+        not SAFE_NAME.fullmatch(expected["namespace"])
+        or not SAFE_NAME.fullmatch(expected["name"])
+        or not SAFE_NAME.fullmatch(expected["container"])
+        or isinstance(expected.get("replicas"), bool)
+        or not isinstance(expected.get("replicas"), int)
+        or expected["replicas"] <= 0
+        or not re.fullmatch(r"[1-9][0-9]*(Mi|Gi)", expected["memory_limit"])
+        or any(not IMAGE.fullmatch(value) for value in images)
+        or len(set(images)) != len(images)
     ):
-        raise DrillError("staging rehearsal image coordinates are malformed")
+        raise DrillError("staging rehearsal deployment coordinates are malformed")
     if any(
         (
             item.get("stage") != item.get("id")
@@ -1277,7 +1300,7 @@ def _validate_staging_execution_contract(plan: dict) -> None:
         raise DrillError("staging rehearsal dependency chain is malformed")
     inventory = plan.get("inventory")
     namespace = inventory.get("namespace") if isinstance(inventory, dict) else None
-    resource = image.get("resource")
+    resource = f'deployment/{expected["name"]}'
     prefix = [
         "kubectl",
         "--kubeconfig",
@@ -1291,19 +1314,42 @@ def _validate_staging_execution_contract(plan: dict) -> None:
         resource,
     ]
     if (
-        not isinstance(namespace, str)
-        or not isinstance(resource, str)
+        namespace != expected["namespace"]
+        or image.get("resource") != resource
         or image.get("type") != "mutation"
+        or image.get("baseline_idempotent_inverse") is not True
         or image.get("old_state") != {"image": expected["current_image"]}
+        or image.get("inverse_state") is not None
         or image.get("command")
         != prefix + [f'{expected["container"]}={expected["incident_image"]}']
         or image.get("inverse") != prefix + [f'{expected["container"]}={expected["current_image"]}']
     ):
-        raise DrillError("incident image stage cannot restore the exact healthy image")
+        raise DrillError("incident image stage coordinates cannot restore the exact healthy image")
     if image.get("inverse") != image.get("rollback") or trigger.get(
         "failure_recovery"
     ) != image.get("inverse"):
         raise DrillError("staging rehearsal recovery coordinates are malformed")
+    replace = next((item for item in actions if item.get("id") == "replace"), None)
+    replacement_command = prefix + [f'{expected["container"]}={expected["replacement_image"]}']
+    rollback_command = prefix + [f'{expected["container"]}={expected["current_image"]}']
+    fallback = {
+        "kind": "reviewed-recovery-fallback",
+        "not_an_inverse": True,
+        "requires_capability_revalidation": True,
+        "command": prefix + [f'{expected["container"]}={expected["rollback_image"]}'],
+    }
+    if (
+        not isinstance(replace, dict)
+        or replace.get("type") != "mutation"
+        or replace.get("resource") != resource
+        or replace.get("old_state") != {"image": expected["incident_image"]}
+        or replace.get("inverse_state") != {"image": expected["current_image"]}
+        or replace.get("command") != replacement_command
+        or replace.get("inverse") != rollback_command
+        or replace.get("rollback") != rollback_command
+        or replace.get("recovery_fallback") != fallback
+    ):
+        raise DrillError("replacement image stage coordinates are malformed")
     run_id = plan["run_id"]
     if (
         trigger.get("type") != "trigger"
@@ -1503,11 +1549,8 @@ def _assert_stage_preflight(
         "authoritative staging identity assertion failed",
     )
     expected = plan["expected_deployment"]
-    namespace = plan["inventory"]["namespace"]
-    resource = next(
-        (a.get("resource", "") for a in plan["actions"] if a.get("id") == "replace"), ""
-    )
-    deployment = resource.split("/", 1)[-1]
+    namespace = expected["namespace"]
+    deployment = expected["name"]
     result = _run_checked(
         runner,
         [
