@@ -13,6 +13,10 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
+import urllib.error
+import urllib.request
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,6 +35,14 @@ GATE_EVIDENCE_MAX_BYTES = 64 * 1024
 GATE_EVIDENCE_FRESHNESS_SECONDS = 5 * 60
 INCIDENT_PROBES = ROOT / "config/observability/tokenplace-incident-probes.json"
 RFC3339_UTC = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$")
+CARDINALITY_LIMITS = {
+    "unique_paths": 72000,
+    "total_requests": 72000,
+    "concurrency": 8,
+    "requests_per_second": 400,
+    "duration_seconds": 300,
+    "request_timeout_seconds": 5,
+}
 
 
 class DrillError(ValueError):
@@ -112,6 +124,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--evidence", required=True, type=Path)
     result.add_argument("--acknowledge-state-loss", action="store_true")
     result.add_argument("--acknowledge-staging-fault-injection", action="store_true")
+    result.add_argument("--acknowledge-bounded-cardinality-generation", action="store_true")
     result.add_argument("--dry-run", action="store_true", required=True)
     return result
 
@@ -127,6 +140,7 @@ def execution_parser() -> argparse.ArgumentParser:
     result.add_argument("--journal", required=True, type=Path)
     result.add_argument("--kubeconfig", required=True, type=Path)
     result.add_argument("--gate-evidence", type=Path)
+    result.add_argument("--acknowledge-bounded-cardinality-generation", action="store_true")
     return result
 
 
@@ -153,6 +167,8 @@ def validate(args: argparse.Namespace) -> Coordinates:
             )
         if not getattr(args, "acknowledge_staging_fault_injection", False):
             raise DrillError("explicit staging fault-injection authorization is required")
+        if not getattr(args, "acknowledge_bounded_cardinality_generation", False):
+            raise DrillError("explicit bounded-cardinality authorization is required")
         images = (args.current_image, incident_image, args.replacement_image, args.rollback_image)
         if len({IMAGE_DIGEST.search(image).group(1) for image in images}) != 4:
             raise DrillError("baseline, incident, recovery, and fallback images must be distinct")
@@ -779,13 +795,50 @@ def build_plan(preflight: Preflight) -> dict:
             f"{c.container}={c.current_image}",
         ]
         mutation(
-            "inject-oom-stimulus",
+            "select-incident-image",
             f"deployment/{c.deployment}",
             prefix
             + ["set", "image", f"deployment/{c.deployment}", f"{c.container}={c.incident_image}"],
             baseline_inverse,
             {"image": c.current_image},
         )["baseline_idempotent_inverse"] = True
+        actions.append(
+            {
+                "id": "generate-bounded-cardinality",
+                "stage": "generate-bounded-cardinality",
+                "type": "trigger",
+                "depends_on": [previous],
+                "target": {
+                    "scheme": "https",
+                    "host": STAGING_HOST,
+                    "path_contract": "/__sugarkube_cardinality__/<sha256(run-id:index)>",
+                    "expected_status": 404,
+                    "redirects": "refused",
+                },
+                "bounds": dict(CARDINALITY_LIMITS),
+                "command": [
+                    "internal:bounded-cardinality",
+                    "--host",
+                    STAGING_HOST,
+                    "--run-id",
+                    c.run_id,
+                ],
+                "cancellation": "in-process pool boundary; stop submission, cancel, and join",
+                "inverse": baseline_inverse,
+                "rollback": baseline_inverse,
+                "cleanup": ["internal:await-all-workers"],
+                "durable_evidence": [
+                    "attempted_requests",
+                    "completed_requests",
+                    "status_counts",
+                    "path_set_sha256",
+                    "started_at",
+                    "stopped_at",
+                    "stop_reason",
+                ],
+            }
+        )
+        previous = "generate-bounded-cardinality"
         gate(
             "observe-authentic-oom",
             [
@@ -1176,6 +1229,26 @@ def _load_execution_plan(path: Path) -> dict:
                 or not all(isinstance(token, str) and token for token in value)
             ):
                 raise DrillError("plan contains a shell-string or malformed command")
+    if plan.get("lifecycle") == "staging-rehearsal":
+        ids = [action["id"] for action in actions]
+        required = [
+            "select-incident-image",
+            "generate-bounded-cardinality",
+            "observe-authentic-oom",
+        ]
+        if not all(stage in ids for stage in required) or [
+            ids.index(stage) for stage in required
+        ] != sorted(ids.index(stage) for stage in required):
+            raise DrillError("rehearsal stages are missing or out of order")
+        trigger = actions[ids.index("generate-bounded-cardinality")]
+        if (
+            trigger.get("type") != "trigger"
+            or trigger.get("bounds") != CARDINALITY_LIMITS
+            or trigger.get("target", {}).get("host") != STAGING_HOST
+            or trigger.get("target", {}).get("scheme") != "https"
+            or trigger.get("target", {}).get("redirects") != "refused"
+        ):
+            raise DrillError("bounded trigger contract is not exact")
     return plan
 
 
@@ -1583,13 +1656,13 @@ def _utc_timestamp(value: object) -> datetime:
 
 
 def _stimulus_not_before(records: list[dict]) -> datetime:
-    """Return the durable boundary recorded immediately before stimulus mutation."""
+    """Return the durable boundary recorded immediately before bounded traffic."""
     record = next(
         (
             item
             for item in reversed(records)
             if item["operation"] == "execute"
-            and item["stage"] == "inject-oom-stimulus"
+            and item["stage"] == "generate-bounded-cardinality"
             and item["phase"] == "intent"
         ),
         None,
@@ -1597,6 +1670,105 @@ def _stimulus_not_before(records: list[dict]) -> datetime:
     if record is None:
         raise DrillError("authoritative OOM gate is missing stimulus intent")
     return _utc_timestamp(record.get("recorded_at"))
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: N802
+        raise DrillError("bounded trigger refused a redirect")
+
+
+def _cardinality_request(url: str, timeout: int) -> int:
+    """Issue one redirect-refusing, body-free request using only the standard library."""
+    request = urllib.request.Request(url, method="GET", headers={"User-Agent": "sugarkube-drill/1"})
+    try:
+        with urllib.request.build_opener(_NoRedirect).open(request, timeout=timeout) as response:
+            return response.status
+    except urllib.error.HTTPError as exc:
+        if 300 <= exc.code < 400:
+            raise DrillError("bounded trigger refused a redirect") from exc
+        return exc.code
+
+
+def _run_bounded_cardinality(plan: dict, action: dict, kubeconfig: Path, runner: Runner) -> dict:
+    """Generate finite run-owned 404 paths without retaining their values."""
+    if (
+        action.get("target")
+        != {
+            "scheme": "https",
+            "host": STAGING_HOST,
+            "path_contract": "/__sugarkube_cardinality__/<sha256(run-id:index)>",
+            "expected_status": 404,
+            "redirects": "refused",
+        }
+        or action.get("bounds") != CARDINALITY_LIMITS
+    ):
+        raise DrillError("bounded trigger contract drifted")
+    bounds = action["bounds"]
+    started = datetime.now(timezone.utc)
+    deadline = time.monotonic() + bounds["duration_seconds"]
+    interval = 1.0 / bounds["requests_per_second"]
+    status_counts: dict[str, int] = {}
+    path_digest = hashlib.sha256()
+    submitted = completed = 0
+    stop_reason = "total-request-limit"
+    futures = set()
+    with ThreadPoolExecutor(max_workers=bounds["concurrency"]) as pool:
+        try:
+            while submitted < bounds["total_requests"]:
+                if time.monotonic() >= deadline:
+                    stop_reason = "duration-limit"
+                    break
+                if submitted >= bounds["unique_paths"]:
+                    stop_reason = "unique-path-limit"
+                    break
+                if not futures or submitted % bounds["requests_per_second"] == 0:
+                    _assert_stage_preflight(
+                        plan, kubeconfig, runner, plan["expected_deployment"]["incident_image"]
+                    )
+                path_id = hashlib.sha256(f"{plan['run_id']}:{submitted}".encode()).hexdigest()
+                path_digest.update(bytes.fromhex(path_id))
+                url = f"https://{STAGING_HOST}/__sugarkube_cardinality__/{path_id}"
+                futures.add(
+                    pool.submit(_cardinality_request, url, bounds["request_timeout_seconds"])
+                )
+                submitted += 1
+                if len(futures) >= bounds["concurrency"]:
+                    done, futures = wait(futures, return_when=FIRST_COMPLETED)
+                    for future in done:
+                        status = future.result()
+                        if status != action["target"]["expected_status"]:
+                            raise DrillError("bounded trigger received an unexpected status")
+                        status_counts[str(status)] = status_counts.get(str(status), 0) + 1
+                        completed += 1
+                target_time = started.timestamp() + submitted * interval
+                delay = target_time - time.time()
+                if delay > 0:
+                    time.sleep(delay)
+            for future in futures:
+                status = future.result()
+                if status != action["target"]["expected_status"]:
+                    raise DrillError("bounded trigger received an unexpected status")
+                status_counts[str(status)] = status_counts.get(str(status), 0) + 1
+                completed += 1
+        except (KeyboardInterrupt, InterruptedError):
+            stop_reason = "interrupted"
+            for future in futures:
+                future.cancel()
+            raise DrillError("bounded trigger was interrupted")
+    stopped = datetime.now(timezone.utc)
+
+    def stamp(value):
+        return value.isoformat(timespec="seconds").replace("+00:00", "Z")
+
+    return {
+        "attempted_requests": submitted,
+        "completed_requests": completed,
+        "status_counts": status_counts,
+        "path_set_sha256": path_digest.hexdigest(),
+        "started_at": stamp(started),
+        "stopped_at": stamp(stopped),
+        "stop_reason": stop_reason,
+    }
 
 
 def _minutes(spec: object, label: str) -> float:
@@ -1948,6 +2120,41 @@ def _execute_locked(args, runner, plan, journal, now=None):
         return {"status": "already-completed", "stage": stage}
     if done != expected[: len(done)] or expected[len(done)] != stage:
         raise DrillError("stage is out of order")
+    if action["type"] == "trigger":
+        if not getattr(args, "acknowledge_bounded_cardinality_generation", False):
+            raise DrillError("bounded-cardinality stage requires separate explicit authorization")
+        if args.gate_evidence is not None:
+            raise DrillError("bounded-cardinality stage refuses operator-authored evidence")
+        if pending:
+            raise DrillError("interrupted bounded trigger is nonresumable; roll back the run")
+        _record_phase(journal, plan, operation, stage, "intent")
+        try:
+            summary = _run_bounded_cardinality(plan, action, args.kubeconfig, runner)
+        except (DrillError, OSError) as exc:
+            # The pool context is a cancellation boundary: it has stopped and joined
+            # every worker before this exact healthy-image inverse is attempted.
+            _run_checked(
+                runner,
+                _bind_command(action["inverse"], args.kubeconfig),
+                "bounded-trigger emergency rollback failed",
+            )
+            _assert_stage_preflight(
+                plan, args.kubeconfig, runner, plan["expected_deployment"]["current_image"]
+            )
+            _record_phase(
+                journal,
+                plan,
+                operation,
+                stage,
+                "completed",
+                evidence_summary={"stop_reason": "failed-closed"},
+            )
+            image_stage = "select-incident-image"
+            _record_phase(journal, plan, "rollback", image_stage, "intent")
+            _record_phase(journal, plan, "rollback", image_stage, "completed")
+            raise DrillError("bounded trigger failed; exact healthy image was restored") from exc
+        _record_phase(journal, plan, operation, stage, "completed", evidence_summary=summary)
+        return {"status": "completed", "stage": stage, "evidence_summary": summary}
     if action["type"] == "gate":
         if action["id"] == "observe-authentic-oom":
             if args.gate_evidence is not None:
