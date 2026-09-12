@@ -2985,6 +2985,41 @@ def test_stage_preflight_requires_stage_specific_image(tmp_path):
     drill._assert_stage_preflight(plan, parsed.kubeconfig, runner, replacement)
 
 
+def test_stage_preflight_supports_legacy_non_rehearsal_coordinates(tmp_path):
+    plan = drill.build_plan(preflight(tmp_path, mode="quota-exhaustion"))
+    plan["expected_deployment"].pop("namespace")
+    plan["expected_deployment"].pop("name")
+    plan["plan_digest"] = drill._plan_digest(plan)
+    path = tmp_path / "legacy-plan.json"
+    path.write_text(json.dumps(plan))
+    loaded = drill._load_execution_plan(path)
+    calls = []
+
+    drill._assert_stage_preflight(loaded, tmp_path / "kubeconfig", execution_runner(loaded, calls))
+
+    deployment_get = next(
+        command for command in calls if "deployment" in command and "get" in command
+    )
+    assert deployment_get[deployment_get.index("--namespace") + 1] == plan["inventory"]["namespace"]
+    assert deployment_get[deployment_get.index("deployment") + 1] == "tokenplace"
+
+
+def test_stage_preflight_rejects_malformed_legacy_coordinates(tmp_path):
+    plan = drill.build_plan(preflight(tmp_path, mode="quota-exhaustion"))
+    plan["expected_deployment"].pop("namespace")
+    plan["expected_deployment"].pop("name")
+    next(action for action in plan["actions"] if action["id"] == "replace")[
+        "resource"
+    ] = "service/tokenplace"
+    plan["plan_digest"] = drill._plan_digest(plan)
+    path = tmp_path / "malformed-legacy-plan.json"
+    path.write_text(json.dumps(plan))
+    loaded = drill._load_execution_plan(path)
+
+    with pytest.raises(drill.DrillError, match="coordinates are malformed"):
+        drill._assert_stage_preflight(loaded, tmp_path / "kubeconfig", execution_runner(loaded, []))
+
+
 @pytest.mark.parametrize("mode", drill.MODES)
 def test_partial_run_can_rollback_and_cleanup(tmp_path, mode):
     plan = drill.build_plan(preflight(tmp_path, mode=mode))

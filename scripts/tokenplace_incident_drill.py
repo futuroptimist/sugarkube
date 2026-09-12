@@ -1548,9 +1548,29 @@ def _assert_stage_preflight(
         ],
         "authoritative staging identity assertion failed",
     )
-    expected = plan["expected_deployment"]
-    namespace = expected["namespace"]
-    deployment = expected["name"]
+    expected = plan.get("expected_deployment")
+    if not isinstance(expected, dict):
+        raise DrillError("exact deployment coordinates are malformed")
+    namespace = expected.get("namespace")
+    deployment = expected.get("name")
+    if namespace is None and deployment is None and plan.get("lifecycle") != "staging-rehearsal":
+        inventory = plan.get("inventory")
+        namespace = inventory.get("namespace") if isinstance(inventory, dict) else None
+        replacements = [
+            action
+            for action in plan.get("actions", [])
+            if isinstance(action, dict) and action.get("id") == "replace"
+        ]
+        resource = replacements[0].get("resource") if len(replacements) == 1 else None
+        match = re.fullmatch(r"deployment/([a-z0-9](?:[-a-z0-9]*[a-z0-9])?)", str(resource))
+        deployment = match.group(1) if match else None
+    if (
+        not isinstance(namespace, str)
+        or not SAFE_NAME.fullmatch(namespace)
+        or not isinstance(deployment, str)
+        or not SAFE_NAME.fullmatch(deployment)
+    ):
+        raise DrillError("exact deployment coordinates are malformed")
     result = _run_checked(
         runner,
         [
