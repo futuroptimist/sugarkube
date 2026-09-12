@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -508,8 +509,9 @@ def test_staging_rehearsal_has_separate_identities_and_live_oom_gate(tmp_path):
     assert plan["lifecycle"] == "staging-rehearsal"
     assert plan["preflight"]["classification"] == {"oom_status": "not-yet-observed"}
     assert plan["preflight"]["offline_fixture_authoritative"] is False
-    assert [action["id"] for action in plan["actions"][:3]] == [
-        "inject-oom-stimulus",
+    assert [action["id"] for action in plan["actions"][:4]] == [
+        "inject-incident-image",
+        "generate-bounded-cardinality",
         "observe-authentic-oom",
         "pause-metrics",
     ]
@@ -534,6 +536,567 @@ def test_staging_rehearsal_has_separate_identities_and_live_oom_gate(tmp_path):
         )
         == 4
     )
+
+
+def test_bounded_cardinality_contract_is_finite_private_and_separately_ordered(tmp_path):
+    plan = executable_rehearsal_plan(tmp_path)
+    actions = {action["id"]: action for action in plan["actions"]}
+    image = actions["inject-incident-image"]
+    trigger = actions["generate-bounded-cardinality"]
+    observation = actions["observe-authentic-oom"]
+
+    assert trigger["depends_on"] == [image["id"]]
+    assert observation["depends_on"] == [trigger["id"]]
+    assert trigger["target"] == {
+        "scheme": "https",
+        "host": drill.STAGING_HOST,
+        "redirects": "reject",
+    }
+    assert trigger["path_contract"]["durable_raw_paths"] is False
+    assert trigger["limits"] == drill.CARDINALITY_LIMITS
+    assert all(isinstance(value, int) and value > 0 for value in trigger["limits"].values())
+    assert trigger["limits"]["unique_paths"] == trigger["limits"]["total_requests"]
+    assert trigger["inverse"][0] == "internal:cancel-bounded-cardinality"
+    assert trigger["failure_recovery"] == image["inverse"]
+
+
+def test_image_only_journal_cannot_advance_to_authentic_oom(tmp_path):
+    plan = executable_rehearsal_plan(tmp_path)
+    parsed = execution_files(tmp_path, plan)
+    _journal_through(parsed, plan, "inject-incident-image")
+    drill._record_phase(parsed.journal, plan, "execute", "inject-incident-image", "completed")
+    parsed.execute_stage = "observe-authentic-oom"
+    runner = execution_runner(
+        plan, [], _matching_marker(plan), plan["expected_deployment"]["incident_image"]
+    )
+
+    with pytest.raises(drill.DrillError, match="out of order"):
+        drill.execute_operation(parsed, runner)
+
+
+def test_bounded_cardinality_requires_separate_execution_acknowledgement(tmp_path):
+    plan = executable_rehearsal_plan(tmp_path)
+    parsed = execution_files(tmp_path, plan)
+    _journal_through(parsed, plan, "inject-incident-image")
+    drill._record_phase(parsed.journal, plan, "execute", "inject-incident-image", "completed")
+    parsed.execute_stage = "generate-bounded-cardinality"
+    runner = execution_runner(
+        plan, [], _matching_marker(plan), plan["expected_deployment"]["incident_image"]
+    )
+
+    with pytest.raises(drill.DrillError, match="separate bounded-cardinality"):
+        drill.execute_operation(parsed, runner)
+
+
+def test_bounded_cardinality_failure_cancels_rolls_back_and_exactly_cleans_up(
+    tmp_path, monkeypatch
+):
+    plan = executable_rehearsal_plan(tmp_path)
+    parsed = execution_files(tmp_path, plan)
+    _journal_through(parsed, plan, "inject-incident-image")
+    drill._record_phase(parsed.journal, plan, "execute", "inject-incident-image", "completed")
+    parsed.execute_stage = "generate-bounded-cardinality"
+    parsed.acknowledge_bounded_cardinality_generation = True
+    calls = []
+
+    def runner(command):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    def fail_after_workers_stop(_action, _boundary_check, _disruption_check):
+        raise drill.DrillError("bounded-cardinality duration limit reached")
+
+    monkeypatch.setattr(drill, "_run_bounded_cardinality", fail_after_workers_stop)
+    monkeypatch.setattr(
+        drill, "_assert_stage_preflight", lambda *_args, **_kwargs: calls.append(["preflight"])
+    )
+    monkeypatch.setattr(drill, "_verify_cleanup_baseline", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        drill, "_validate_marker", lambda *_args, absent_ok=False, **_kwargs: not absent_ok
+    )
+
+    with pytest.raises(drill.DrillError, match="duration limit"):
+        drill.execute_operation(parsed, runner)
+
+    image = next(action for action in plan["actions"] if action["id"] == "inject-incident-image")
+    inverse = drill._bind_command(image["inverse"], parsed.kubeconfig)
+    assert inverse in calls
+    assert calls[calls.index(inverse) - 1] == ["preflight"]
+    assert drill._marker_command(plan, parsed.kubeconfig, "delete") in calls
+    records = drill._journal_records(parsed.journal, plan)
+    assert (records[-1]["operation"], records[-1]["stage"], records[-1]["phase"]) == (
+        "cleanup",
+        "cleanup",
+        "completed",
+    )
+    assert "__sugarkube_cardinality_rehearsal__" not in json.dumps(records)
+
+
+def test_bounded_cardinality_persists_only_aggregates_and_hashes(monkeypatch):
+    limits = {
+        "unique_paths": 2,
+        "total_requests": 2,
+        "concurrency": 1,
+        "requests_per_second": 1000,
+        "duration_seconds": 10,
+        "request_timeout_seconds": 1,
+    }
+    monkeypatch.setattr(drill, "CARDINALITY_LIMITS", limits)
+    requested = []
+
+    class Missing:
+        status = 404
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def geturl(self):
+            return requested[-1]
+
+    class Opener:
+        def open(self, request, timeout):
+            assert timeout == 1
+            requested.append(request.full_url)
+            return Missing()
+
+    monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *_args: Opener())
+    action = {
+        "target": {"scheme": "https", "host": drill.STAGING_HOST, "redirects": "reject"},
+        "limits": limits,
+        "command": [
+            "internal:generate-bounded-cardinality",
+            "--host",
+            drill.STAGING_HOST,
+            "--run-id",
+            "safe-run",
+        ],
+    }
+
+    summary = drill._run_bounded_cardinality(action)
+
+    assert summary == {
+        "requests": 2,
+        "unique_paths": 2,
+        "status_counts": {"404": 2},
+        "path_set_sha256": summary["path_set_sha256"],
+        "raw_paths_persisted": False,
+    }
+    durable = json.dumps(summary)
+    assert "__sugarkube_cardinality_rehearsal__" not in durable
+    assert all(url.startswith("https://staging.token.place/") for url in requested)
+
+
+def test_bounded_cardinality_rejects_destination_drift(monkeypatch):
+    limits = dict(drill.CARDINALITY_LIMITS, unique_paths=1, total_requests=1)
+    monkeypatch.setattr(drill, "CARDINALITY_LIMITS", limits)
+
+    class Drift:
+        status = 404
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def geturl(self):
+            return "https://token.place/not-staging"
+
+    class Opener:
+        def open(self, _request, timeout):
+            return Drift()
+
+    monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *_args: Opener())
+    action = {
+        "target": {"scheme": "https", "host": drill.STAGING_HOST, "redirects": "reject"},
+        "limits": limits,
+        "command": [
+            "internal:generate-bounded-cardinality",
+            "--host",
+            drill.STAGING_HOST,
+            "--run-id",
+            "safe-run",
+        ],
+    }
+    with pytest.raises(drill.DrillError, match="destination drifted"):
+        drill._run_bounded_cardinality(action)
+
+
+def test_bounded_cardinality_wraps_network_failure_and_requires_authentic_oom(monkeypatch):
+    limits = dict(drill.CARDINALITY_LIMITS, unique_paths=1, total_requests=1)
+    monkeypatch.setattr(drill, "CARDINALITY_LIMITS", limits)
+
+    class Opener:
+        def open(self, _request, timeout):
+            raise drill.urllib.error.URLError("private network detail")
+
+    monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *_args: Opener())
+    action = {
+        "target": {"scheme": "https", "host": drill.STAGING_HOST, "redirects": "reject"},
+        "limits": limits,
+        "command": [
+            "internal:generate-bounded-cardinality",
+            "--host",
+            drill.STAGING_HOST,
+            "--run-id",
+            "safe-run",
+        ],
+    }
+
+    with pytest.raises(drill.DrillError, match="bounded-cardinality request failed") as caught:
+        drill._run_bounded_cardinality(action, disruption_check=lambda: drill.NO_QUALIFYING_OOM)
+    assert "private network detail" not in str(caught.value)
+
+    summary = drill._run_bounded_cardinality(
+        action, disruption_check=lambda: {"termination_reason": "OOMKilled"}
+    )
+    assert summary["stopped_on_authentic_oom"] is True
+    assert summary["raw_paths_persisted"] is False
+
+
+def test_bounded_cardinality_stops_on_accepted_live_oom(monkeypatch):
+    limits = dict(drill.CARDINALITY_LIMITS, unique_paths=2, total_requests=2, concurrency=1)
+    monkeypatch.setattr(drill, "CARDINALITY_LIMITS", limits)
+    requested = []
+
+    class Missing:
+        status = 404
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def geturl(self):
+            return requested[-1]
+
+    class Opener:
+        def open(self, request, timeout):
+            requested.append(request.full_url)
+            return Missing()
+
+    monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *_args: Opener())
+    action = {
+        "target": {"scheme": "https", "host": drill.STAGING_HOST, "redirects": "reject"},
+        "limits": limits,
+        "command": [
+            "internal:generate-bounded-cardinality",
+            "--host",
+            drill.STAGING_HOST,
+            "--run-id",
+            "safe-run",
+        ],
+    }
+
+    summary = drill._run_bounded_cardinality(
+        action, disruption_check=lambda: {"termination_reason": "OOMKilled"}
+    )
+
+    assert len(requested) == summary["requests"] == summary["unique_paths"] == 1
+    assert summary["stop_reason"] == "accepted-authentic-oom"
+    assert summary["raw_paths_persisted"] is False
+    assert "__sugarkube_cardinality_rehearsal__" not in json.dumps(summary)
+
+
+def test_bounded_cardinality_polling_continues_until_authentic_oom(monkeypatch):
+    limits = dict(drill.CARDINALITY_LIMITS, unique_paths=3, total_requests=3, concurrency=1)
+    monkeypatch.setattr(drill, "CARDINALITY_LIMITS", limits)
+    requested = []
+
+    class Missing:
+        status = 404
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def geturl(self):
+            return requested[-1]
+
+    class Opener:
+        def open(self, request, timeout):
+            requested.append(request.full_url)
+            return Missing()
+
+    observations = iter(
+        [drill.NO_QUALIFYING_OOM, drill.NO_QUALIFYING_OOM, {"termination_reason": "OOMKilled"}]
+    )
+    monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *_args: Opener())
+    action = {
+        "target": {"scheme": "https", "host": drill.STAGING_HOST, "redirects": "reject"},
+        "limits": limits,
+        "command": [
+            "internal:generate-bounded-cardinality",
+            "--host",
+            drill.STAGING_HOST,
+            "--run-id",
+            "safe-run",
+        ],
+    }
+
+    summary = drill._run_bounded_cardinality(action, disruption_check=lambda: next(observations))
+
+    assert summary["requests"] == summary["status_counts"]["404"] == 3
+    assert summary["stopped_on_authentic_oom"] is True
+
+
+def test_bounded_cardinality_accounts_successes_in_disrupted_batch(monkeypatch):
+    limits = dict(drill.CARDINALITY_LIMITS, unique_paths=3, total_requests=3, concurrency=3)
+    monkeypatch.setattr(drill, "CARDINALITY_LIMITS", limits)
+    barrier = threading.Barrier(3)
+
+    class Missing:
+        status = 404
+
+        def __init__(self, url):
+            self.url = url
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def geturl(self):
+            return self.url
+
+    class Opener:
+        def open(self, request, timeout):
+            barrier.wait()
+            if request.full_url.endswith(drill._bounded_cardinality_path("safe-run", 0)):
+                raise drill.urllib.error.URLError("connection reset")
+            return Missing(request.full_url)
+
+    monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *_args: Opener())
+    action = {
+        "target": {"scheme": "https", "host": drill.STAGING_HOST, "redirects": "reject"},
+        "limits": limits,
+        "command": [
+            "internal:generate-bounded-cardinality",
+            "--host",
+            drill.STAGING_HOST,
+            "--run-id",
+            "safe-run",
+        ],
+    }
+
+    summary = drill._run_bounded_cardinality(
+        action, disruption_check=lambda: {"termination_reason": "OOMKilled"}
+    )
+
+    assert summary["requests"] == summary["unique_paths"] == 2
+    assert summary["status_counts"] == {"404": 2}
+    assert "__sugarkube_cardinality_rehearsal__" not in json.dumps(summary)
+
+
+def _bounded_action(reviewed_limits, **changes):
+    action = {
+        "target": {"scheme": "https", "host": drill.STAGING_HOST, "redirects": "reject"},
+        "limits": reviewed_limits,
+        "command": [
+            "internal:generate-bounded-cardinality",
+            "--host",
+            drill.STAGING_HOST,
+            "--run-id",
+            "safe-run",
+        ],
+    }
+    action.update(changes)
+    return action
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"target": {"scheme": "http"}}, "target"),
+        ({"limits": {}}, "limits"),
+        ({"command": ["internal:wrong"]}, "command"),
+        ({"path_contract": {"durable_raw_paths": True}}, "path contract"),
+        (
+            {
+                "command": [
+                    "internal:generate-bounded-cardinality",
+                    "--host",
+                    drill.STAGING_HOST,
+                    "--run-id",
+                    "unsafe/run",
+                ]
+            },
+            "identity",
+        ),
+    ],
+)
+def test_bounded_cardinality_revalidates_runtime_contract(monkeypatch, change, message):
+    limits = dict(drill.CARDINALITY_LIMITS, unique_paths=1, total_requests=1)
+    monkeypatch.setattr(drill, "CARDINALITY_LIMITS", limits)
+
+    with pytest.raises(drill.DrillError, match=message):
+        drill._run_bounded_cardinality(_bounded_action(limits, **change))
+
+
+def test_bounded_cardinality_redirect_handler_fails_closed():
+    with pytest.raises(drill.DrillError, match="attempted a redirect"):
+        drill._RejectRedirects().redirect_request(
+            None, None, 302, "found", {}, "https://example.com"
+        )
+
+
+def test_bounded_cardinality_closes_expected_http_error(monkeypatch):
+    limits = dict(drill.CARDINALITY_LIMITS, unique_paths=1, total_requests=1)
+    monkeypatch.setattr(drill, "CARDINALITY_LIMITS", limits)
+    error = drill.urllib.error.HTTPError(
+        "https://staging.token.place/missing", 404, "missing", {}, None
+    )
+    error.geturl = lambda: requested[0]
+    original_close = error.close
+    closed = False
+    requested = []
+
+    def close():
+        nonlocal closed
+        closed = True
+        original_close()
+
+    error.close = close
+
+    class Opener:
+        def open(self, request, timeout):
+            requested.append(request.full_url)
+            raise error
+
+    monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *_args: Opener())
+
+    summary = drill._run_bounded_cardinality(_bounded_action(limits))
+
+    assert summary["status_counts"] == {"404": 1}
+    assert closed is True
+
+
+def test_bounded_cardinality_rejects_unexpected_status(monkeypatch):
+    limits = dict(drill.CARDINALITY_LIMITS, unique_paths=1, total_requests=1)
+    monkeypatch.setattr(drill, "CARDINALITY_LIMITS", limits)
+
+    class Found:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def geturl(self):
+            return requested[0]
+
+    class Opener:
+        def open(self, request, timeout):
+            requested.append(request.full_url)
+            return Found()
+
+    requested = []
+    monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *_args: Opener())
+
+    with pytest.raises(drill.DrillError, match="remain unmatched"):
+        drill._run_bounded_cardinality(_bounded_action(limits))
+
+
+def test_bounded_cardinality_timeout_cancels_batch(monkeypatch):
+    limits = dict(drill.CARDINALITY_LIMITS, unique_paths=1, total_requests=1)
+    monkeypatch.setattr(drill, "CARDINALITY_LIMITS", limits)
+    monkeypatch.setattr(
+        drill,
+        "as_completed",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(drill.FuturesTimeoutError()),
+    )
+
+    class Missing:
+        status = 404
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def geturl(self):
+            return requested[0]
+
+    class Opener:
+        def open(self, request, timeout):
+            requested.append(request.full_url)
+            return Missing()
+
+    requested = []
+    monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *_args: Opener())
+
+    with pytest.raises(drill.DrillError, match="duration limit"):
+        drill._run_bounded_cardinality(_bounded_action(limits))
+
+
+def test_bounded_cardinality_interrupt_and_partial_completion_fail(monkeypatch):
+    limits = dict(drill.CARDINALITY_LIMITS, unique_paths=2, total_requests=1, concurrency=1)
+    monkeypatch.setattr(drill, "CARDINALITY_LIMITS", limits)
+
+    with pytest.raises(drill.DrillError, match="interrupted"):
+        drill._run_bounded_cardinality(
+            _bounded_action(limits),
+            boundary_check=lambda: (_ for _ in ()).throw(KeyboardInterrupt()),
+        )
+
+    class Missing:
+        status = 404
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def geturl(self):
+            return requested[0]
+
+    class Opener:
+        def open(self, request, timeout):
+            requested.append(request.full_url)
+            return Missing()
+
+    requested = []
+    monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *_args: Opener())
+    with pytest.raises(drill.DrillError, match="unique-path contract"):
+        drill._run_bounded_cardinality(_bounded_action(limits))
+
+
+def test_bounded_cardinality_rejects_invalid_disruption_result(monkeypatch):
+    limits = dict(drill.CARDINALITY_LIMITS, unique_paths=1, total_requests=1)
+    monkeypatch.setattr(drill, "CARDINALITY_LIMITS", limits)
+
+    class Missing:
+        status = 404
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def geturl(self):
+            return requested[0]
+
+    class Opener:
+        def open(self, request, timeout):
+            requested.append(request.full_url)
+            return Missing()
+
+    requested = []
+    monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *_args: Opener())
+    with pytest.raises(drill.DrillError, match="invalid result"):
+        drill._run_bounded_cardinality(_bounded_action(limits), disruption_check=lambda: None)
 
 
 @pytest.mark.parametrize(
@@ -1440,6 +2003,111 @@ def test_live_authoritative_rehearsal_plan_is_executable(tmp_path):
     assert drill._load_execution_plan(path) == plan
 
 
+@pytest.mark.parametrize(
+    "tamper,message",
+    [
+        (lambda plan: plan.update(mode="quota-exhaustion"), "trigger mode"),
+        (lambda plan: plan["actions"].pop(1), "ordered trigger stages"),
+        (
+            lambda plan: plan["actions"][1]["target"].update(host="token.place"),
+            "trigger contract",
+        ),
+        (
+            lambda plan: plan["actions"][1]["target"].update(port=443),
+            "trigger contract",
+        ),
+        (
+            lambda plan: plan["actions"][1]["target"].update(redirects="follow"),
+            "trigger contract",
+        ),
+        (
+            lambda plan: plan["actions"][1]["path_contract"].update(durable_raw_paths=True),
+            "trigger contract",
+        ),
+        (
+            lambda plan: plan["actions"][1]["limits"].update(total_requests=0),
+            "trigger contract",
+        ),
+        (
+            lambda plan: plan["actions"][2].update(depends_on=["inject-incident-image"]),
+            "dependency chain",
+        ),
+        (
+            lambda plan: plan["actions"][1].update(failure_recovery=["internal:wrong"]),
+            "recovery coordinates",
+        ),
+        (
+            lambda plan: plan["actions"][1].update(stop_conditions=["first-error"]),
+            "cancellation contract",
+        ),
+        (
+            lambda plan: plan["actions"][2].update(checks=[]),
+            "observation contract",
+        ),
+    ],
+)
+def test_rehearsal_loader_rejects_tampered_trigger_contract(tmp_path, tamper, message):
+    plan = executable_rehearsal_plan(tmp_path)
+    tamper(plan)
+    plan["plan_digest"] = drill._plan_digest(plan)
+    path = tmp_path / "tampered-plan.json"
+    path.write_text(json.dumps(plan), encoding="utf-8")
+
+    with pytest.raises(drill.DrillError, match=message):
+        drill._load_execution_plan(path)
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        lambda plan: plan["expected_deployment"].pop("current_image"),
+        lambda plan: plan["expected_deployment"].pop("incident_image"),
+        lambda plan: plan["expected_deployment"].pop("replacement_image"),
+        lambda plan: plan["expected_deployment"].pop("rollback_image"),
+        lambda plan: plan["expected_deployment"].update(replicas=0),
+        lambda plan: plan["expected_deployment"].update(replicas=True),
+        lambda plan: plan["expected_deployment"].update(memory_limit="512M"),
+        lambda plan: plan["expected_deployment"].update(namespace="other"),
+        lambda plan: plan["inventory"].update(namespace="other"),
+        lambda plan: plan["expected_deployment"].update(name="other"),
+        lambda plan: plan["actions"][0].update(resource="deployment/other"),
+        lambda plan: plan["actions"][0].update(old_state={"image": "wrong"}),
+        lambda plan: plan["actions"][0]["command"].__setitem__(-1, "relay=wrong"),
+        lambda plan: plan["actions"][0]["rollback"].__setitem__(-1, "relay=wrong"),
+        lambda plan: next(action for action in plan["actions"] if action["id"] == "replace").update(
+            resource="deployment/other"
+        ),
+        lambda plan: next(action for action in plan["actions"] if action["id"] == "replace").update(
+            old_state={"image": "wrong"}
+        ),
+        lambda plan: next(action for action in plan["actions"] if action["id"] == "replace").update(
+            inverse_state={"image": "wrong"}
+        ),
+        lambda plan: next(action for action in plan["actions"] if action["id"] == "replace")[
+            "command"
+        ].__setitem__(-1, "relay=registry.example/relay@sha256:" + "e" * 64),
+        lambda plan: next(action for action in plan["actions"] if action["id"] == "replace")[
+            "rollback"
+        ].__setitem__(-1, "relay=registry.example/relay@sha256:" + "e" * 64),
+        lambda plan: next(action for action in plan["actions"] if action["id"] == "replace")[
+            "inverse"
+        ].__setitem__(-1, "relay=registry.example/relay@sha256:" + "e" * 64),
+        lambda plan: next(action for action in plan["actions"] if action["id"] == "replace")[
+            "recovery_fallback"
+        ]["command"].__setitem__(-1, "relay=registry.example/relay@sha256:" + "e" * 64),
+    ],
+)
+def test_rehearsal_loader_rejects_tampered_deployment_coordinates(tmp_path, tamper):
+    plan = executable_rehearsal_plan(tmp_path)
+    tamper(plan)
+    plan["plan_digest"] = drill._plan_digest(plan)
+    path = tmp_path / "tampered-deployment-plan.json"
+    path.write_text(json.dumps(plan), encoding="utf-8")
+
+    with pytest.raises(drill.DrillError, match="coordinates"):
+        drill._load_execution_plan(path)
+
+
 def test_offline_rehearsal_cli_emits_non_executing_deterministic_plan(
     tmp_path, monkeypatch, capsys
 ):
@@ -1469,13 +2137,14 @@ def test_offline_rehearsal_cli_emits_non_executing_deterministic_plan(
     assert drill.main(argv) == 0
     plan = json.loads(capsys.readouterr().out)
     ids = [action["id"] for action in plan["actions"]]
-    assert ids[:4] == [
-        "inject-oom-stimulus",
+    assert ids[:5] == [
+        "inject-incident-image",
+        "generate-bounded-cardinality",
         "observe-authentic-oom",
         "pause-metrics",
         "replace",
     ]
-    stimulus, replace = plan["actions"][0], plan["actions"][3]
+    stimulus, replace = plan["actions"][0], plan["actions"][4]
     assert stimulus["old_state"] == {"image": c.current_image}
     assert stimulus["inverse"][-1] == f"relay={c.current_image}"
     assert replace["old_state"] == {"image": c.incident_image}
@@ -1489,13 +2158,13 @@ def test_authentic_oom_window_starts_at_stimulus_intent():
     records = [
         {
             "operation": "execute",
-            "stage": "inject-oom-stimulus",
+            "stage": "generate-bounded-cardinality",
             "phase": "intent",
             "recorded_at": "2026-09-11T12:00:00Z",
         },
         {
             "operation": "execute",
-            "stage": "inject-oom-stimulus",
+            "stage": "generate-bounded-cardinality",
             "phase": "completed",
             "recorded_at": "2026-09-11T12:00:05Z",
         },
@@ -1586,7 +2255,7 @@ def test_rehearsal_replace_executes_from_incident_image(tmp_path):
 
 def test_pending_rehearsal_image_mutations_reconcile_pre_and_post_states(tmp_path):
     for stage, pre_key, post_key in (
-        ("inject-oom-stimulus", "current_image", "incident_image"),
+        ("inject-incident-image", "current_image", "incident_image"),
         ("replace", "incident_image", "replacement_image"),
     ):
         for initial_key, mutations in ((pre_key, 1), (post_key, 0)):
@@ -2314,6 +2983,41 @@ def test_stage_preflight_requires_stage_specific_image(tmp_path):
     with pytest.raises(drill.DrillError, match="coordinates drifted"):
         drill._assert_stage_preflight(plan, parsed.kubeconfig, runner, current)
     drill._assert_stage_preflight(plan, parsed.kubeconfig, runner, replacement)
+
+
+def test_stage_preflight_supports_legacy_non_rehearsal_coordinates(tmp_path):
+    plan = drill.build_plan(preflight(tmp_path, mode="quota-exhaustion"))
+    plan["expected_deployment"].pop("namespace")
+    plan["expected_deployment"].pop("name")
+    plan["plan_digest"] = drill._plan_digest(plan)
+    path = tmp_path / "legacy-plan.json"
+    path.write_text(json.dumps(plan))
+    loaded = drill._load_execution_plan(path)
+    calls = []
+
+    drill._assert_stage_preflight(loaded, tmp_path / "kubeconfig", execution_runner(loaded, calls))
+
+    deployment_get = next(
+        command for command in calls if "deployment" in command and "get" in command
+    )
+    assert deployment_get[deployment_get.index("--namespace") + 1] == plan["inventory"]["namespace"]
+    assert deployment_get[deployment_get.index("deployment") + 1] == "tokenplace"
+
+
+def test_stage_preflight_rejects_malformed_legacy_coordinates(tmp_path):
+    plan = drill.build_plan(preflight(tmp_path, mode="quota-exhaustion"))
+    plan["expected_deployment"].pop("namespace")
+    plan["expected_deployment"].pop("name")
+    next(action for action in plan["actions"] if action["id"] == "replace")[
+        "resource"
+    ] = "service/tokenplace"
+    plan["plan_digest"] = drill._plan_digest(plan)
+    path = tmp_path / "malformed-legacy-plan.json"
+    path.write_text(json.dumps(plan))
+    loaded = drill._load_execution_plan(path)
+
+    with pytest.raises(drill.DrillError, match="coordinates are malformed"):
+        drill._assert_stage_preflight(loaded, tmp_path / "kubeconfig", execution_runner(loaded, []))
 
 
 @pytest.mark.parametrize("mode", drill.MODES)

@@ -13,6 +13,11 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
+import time
+import urllib.error
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,6 +31,14 @@ IMAGE_DIGEST = re.compile(r"@sha256:([0-9a-f]{64})$")
 MODES = ("metrics-oom", "quota-exhaustion")
 LIFECYCLES = ("real-incident", "staging-rehearsal")
 STAGING_HOST = "staging.token.place"
+CARDINALITY_LIMITS = {
+    "unique_paths": 72000,
+    "total_requests": 72000,
+    "concurrency": 16,
+    "requests_per_second": 400,
+    "duration_seconds": 240,
+    "request_timeout_seconds": 5,
+}
 EXECUTION_OPERATIONS = ("--execute-stage", "--rollback-stage", "--cleanup")
 GATE_EVIDENCE_MAX_BYTES = 64 * 1024
 GATE_EVIDENCE_FRESHNESS_SECONDS = 5 * 60
@@ -35,6 +48,18 @@ RFC3339_UTC = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$")
 
 class DrillError(ValueError):
     """An error safe to show without echoing operator-supplied values."""
+
+
+class _RequestDisruption(DrillError):
+    """A transport failure that may have been caused by the intended OOM."""
+
+
+@dataclass(frozen=True)
+class _NoQualifyingOOM:
+    """Identity-validated observation that found no qualifying OOM yet."""
+
+
+NO_QUALIFYING_OOM = _NoQualifyingOOM()
 
 
 @dataclass(frozen=True)
@@ -127,6 +152,7 @@ def execution_parser() -> argparse.ArgumentParser:
     result.add_argument("--journal", required=True, type=Path)
     result.add_argument("--kubeconfig", required=True, type=Path)
     result.add_argument("--gate-evidence", type=Path)
+    result.add_argument("--acknowledge-bounded-cardinality-generation", action="store_true")
     return result
 
 
@@ -478,7 +504,8 @@ def _observe_live_oom(
     runner: Runner,
     *,
     not_before: datetime | None = None,
-) -> dict:
+    allow_no_qualifying: bool = False,
+) -> dict | _NoQualifyingOOM:
     metadata = deployment.get("metadata", {})
     deployment_uid = metadata.get("uid")
     selector_labels = deployment.get("spec", {}).get("selector", {}).get("matchLabels")
@@ -571,6 +598,8 @@ def _observe_live_oom(
         if not_before is not None and parsed < not_before:
             raise DrillError("OOM termination predates the controlled stimulus")
         candidates.append((pod, finished, status["restartCount"]))
+    if not candidates and allow_no_qualifying:
+        return NO_QUALIFYING_OOM
     if len(candidates) != 1:
         raise DrillError("metrics-OOM evidence is missing or ambiguous")
     pod, finished, restart_count = candidates[0]
@@ -779,13 +808,48 @@ def build_plan(preflight: Preflight) -> dict:
             f"{c.container}={c.current_image}",
         ]
         mutation(
-            "inject-oom-stimulus",
+            "inject-incident-image",
             f"deployment/{c.deployment}",
             prefix
             + ["set", "image", f"deployment/{c.deployment}", f"{c.container}={c.incident_image}"],
             baseline_inverse,
             {"image": c.current_image},
         )["baseline_idempotent_inverse"] = True
+        previous = "inject-incident-image"
+        actions.append(
+            {
+                "id": "generate-bounded-cardinality",
+                "stage": "generate-bounded-cardinality",
+                "type": "trigger",
+                "depends_on": [previous],
+                "target": {"scheme": "https", "host": STAGING_HOST, "redirects": "reject"},
+                "path_contract": {
+                    "kind": "synthetic-run-owned-unmatched-sha256",
+                    "durable_raw_paths": False,
+                },
+                "limits": dict(CARDINALITY_LIMITS),
+                "stop_conditions": [
+                    "first-error",
+                    "timeout",
+                    "interruption",
+                    "identity-drift",
+                    "accepted-authentic-oom",
+                    "any-reviewed-limit",
+                ],
+                "command": [
+                    "internal:generate-bounded-cardinality",
+                    "--host",
+                    STAGING_HOST,
+                    "--run-id",
+                    c.run_id,
+                ],
+                "inverse": ["internal:cancel-bounded-cardinality", "--run-id", c.run_id],
+                "rollback": ["internal:cancel-bounded-cardinality", "--run-id", c.run_id],
+                "failure_recovery": baseline_inverse,
+                "cleanup": ["internal:stop-all-run-owned-load", "--run-id", c.run_id],
+            }
+        )
+        previous = "generate-bounded-cardinality"
         gate(
             "observe-authentic-oom",
             [
@@ -1107,6 +1171,8 @@ def build_plan(preflight: Preflight) -> dict:
             "containment": containment,
         },
         "expected_deployment": {
+            "namespace": c.namespace,
+            "name": c.deployment,
             "replicas": c.replicas,
             "container": c.container,
             "current_image": c.current_image,
@@ -1176,7 +1242,155 @@ def _load_execution_plan(path: Path) -> dict:
                 or not all(isinstance(token, str) and token for token in value)
             ):
                 raise DrillError("plan contains a shell-string or malformed command")
+    if plan.get("lifecycle") == "staging-rehearsal":
+        _validate_staging_execution_contract(plan)
     return plan
+
+
+def _validate_staging_execution_contract(plan: dict) -> None:
+    """Reject executable rehearsal plans whose safety contract was altered."""
+    if plan.get("mode") != "metrics-oom":
+        raise DrillError("staging rehearsal trigger mode is not the reviewed contract")
+    actions = plan["actions"]
+    if len(actions) < 3 or [item.get("id") for item in actions[:3]] != [
+        "inject-incident-image",
+        "generate-bounded-cardinality",
+        "observe-authentic-oom",
+    ]:
+        raise DrillError("staging rehearsal is missing the exact ordered trigger stages")
+    image, trigger, observe = actions[:3]
+    expected = plan.get("expected_deployment")
+    if not isinstance(expected, dict) or not all(
+        isinstance(expected.get(key), str) and expected[key]
+        for key in (
+            "namespace",
+            "name",
+            "container",
+            "current_image",
+            "incident_image",
+            "replacement_image",
+            "rollback_image",
+            "memory_limit",
+        )
+    ):
+        raise DrillError("staging rehearsal deployment coordinates are malformed")
+    images = [
+        expected[key]
+        for key in ("current_image", "incident_image", "replacement_image", "rollback_image")
+    ]
+    if (
+        not SAFE_NAME.fullmatch(expected["namespace"])
+        or not SAFE_NAME.fullmatch(expected["name"])
+        or not SAFE_NAME.fullmatch(expected["container"])
+        or isinstance(expected.get("replicas"), bool)
+        or not isinstance(expected.get("replicas"), int)
+        or expected["replicas"] <= 0
+        or not re.fullmatch(r"[1-9][0-9]*(Mi|Gi)", expected["memory_limit"])
+        or any(not IMAGE.fullmatch(value) for value in images)
+        or len(set(images)) != len(images)
+    ):
+        raise DrillError("staging rehearsal deployment coordinates are malformed")
+    if any(
+        (
+            item.get("stage") != item.get("id")
+            or item.get("depends_on") != ([] if index == 0 else [actions[index - 1]["id"]])
+        )
+        for index, item in enumerate(actions)
+    ):
+        raise DrillError("staging rehearsal dependency chain is malformed")
+    inventory = plan.get("inventory")
+    namespace = inventory.get("namespace") if isinstance(inventory, dict) else None
+    resource = f'deployment/{expected["name"]}'
+    prefix = [
+        "kubectl",
+        "--kubeconfig",
+        "<supplied-kubeconfig>",
+        "--context",
+        "sugar-staging",
+        "--namespace",
+        namespace,
+        "set",
+        "image",
+        resource,
+    ]
+    if (
+        namespace != expected["namespace"]
+        or image.get("resource") != resource
+        or image.get("type") != "mutation"
+        or image.get("baseline_idempotent_inverse") is not True
+        or image.get("old_state") != {"image": expected["current_image"]}
+        or image.get("inverse_state") is not None
+        or image.get("command")
+        != prefix + [f'{expected["container"]}={expected["incident_image"]}']
+        or image.get("inverse") != prefix + [f'{expected["container"]}={expected["current_image"]}']
+    ):
+        raise DrillError("incident image stage coordinates cannot restore the exact healthy image")
+    if image.get("inverse") != image.get("rollback") or trigger.get(
+        "failure_recovery"
+    ) != image.get("inverse"):
+        raise DrillError("staging rehearsal recovery coordinates are malformed")
+    replace = next((item for item in actions if item.get("id") == "replace"), None)
+    replacement_command = prefix + [f'{expected["container"]}={expected["replacement_image"]}']
+    rollback_command = prefix + [f'{expected["container"]}={expected["current_image"]}']
+    fallback = {
+        "kind": "reviewed-recovery-fallback",
+        "not_an_inverse": True,
+        "requires_capability_revalidation": True,
+        "command": prefix + [f'{expected["container"]}={expected["rollback_image"]}'],
+    }
+    if (
+        not isinstance(replace, dict)
+        or replace.get("type") != "mutation"
+        or replace.get("resource") != resource
+        or replace.get("old_state") != {"image": expected["incident_image"]}
+        or replace.get("inverse_state") != {"image": expected["current_image"]}
+        or replace.get("command") != replacement_command
+        or replace.get("inverse") != rollback_command
+        or replace.get("rollback") != rollback_command
+        or replace.get("recovery_fallback") != fallback
+    ):
+        raise DrillError("replacement image stage coordinates are malformed")
+    run_id = plan["run_id"]
+    if (
+        trigger.get("type") != "trigger"
+        or trigger.get("target") != {"scheme": "https", "host": STAGING_HOST, "redirects": "reject"}
+        or trigger.get("path_contract")
+        != {"kind": "synthetic-run-owned-unmatched-sha256", "durable_raw_paths": False}
+        or trigger.get("limits") != CARDINALITY_LIMITS
+        or any(
+            isinstance(value, bool) or not isinstance(value, int) or value <= 0
+            for value in trigger.get("limits", {}).values()
+        )
+        or trigger.get("command")
+        != ["internal:generate-bounded-cardinality", "--host", STAGING_HOST, "--run-id", run_id]
+        or trigger.get("inverse") != ["internal:cancel-bounded-cardinality", "--run-id", run_id]
+        or trigger.get("rollback") != trigger.get("inverse")
+        or trigger.get("cleanup") != ["internal:stop-all-run-owned-load", "--run-id", run_id]
+    ):
+        raise DrillError("bounded-cardinality trigger contract is malformed")
+    if trigger.get("stop_conditions") != [
+        "first-error",
+        "timeout",
+        "interruption",
+        "identity-drift",
+        "accepted-authentic-oom",
+        "any-reviewed-limit",
+    ]:
+        raise DrillError("bounded-cardinality cancellation contract is malformed")
+    if (
+        observe.get("type") != "gate"
+        or observe.get("checks")
+        != [
+            {
+                "metric": "authoritative_live_oomkilled_137",
+                "operator": "eq",
+                "value": True,
+                "unit": "boolean",
+            }
+        ]
+        or observe.get("on_failure") != image.get("inverse")
+    ):
+        raise DrillError("authentic OOM observation contract is malformed")
 
 
 def _private_directory(path: Path, label: str) -> Path:
@@ -1261,6 +1475,16 @@ def _journal_records(directory: Path, plan: dict) -> list[dict]:
             if pending != key or operation != "execute" or stage not in gates:
                 raise DrillError("journal transition is invalid")
             pending = None
+        elif phase == "failed":
+            if (
+                pending != key
+                or operation != "execute"
+                or stage
+                not in {action["id"] for action in plan["actions"] if action["type"] == "trigger"}
+            ):
+                raise DrillError("journal transition is invalid")
+            pending = None
+            aborting = True
         else:
             raise DrillError("journal record transition is invalid")
     return records
@@ -1324,12 +1548,29 @@ def _assert_stage_preflight(
         ],
         "authoritative staging identity assertion failed",
     )
-    expected = plan["expected_deployment"]
-    namespace = plan["inventory"]["namespace"]
-    resource = next(
-        (a.get("resource", "") for a in plan["actions"] if a.get("id") == "replace"), ""
-    )
-    deployment = resource.split("/", 1)[-1]
+    expected = plan.get("expected_deployment")
+    if not isinstance(expected, dict):
+        raise DrillError("exact deployment coordinates are malformed")
+    namespace = expected.get("namespace")
+    deployment = expected.get("name")
+    if namespace is None and deployment is None and plan.get("lifecycle") != "staging-rehearsal":
+        inventory = plan.get("inventory")
+        namespace = inventory.get("namespace") if isinstance(inventory, dict) else None
+        replacements = [
+            action
+            for action in plan.get("actions", [])
+            if isinstance(action, dict) and action.get("id") == "replace"
+        ]
+        resource = replacements[0].get("resource") if len(replacements) == 1 else None
+        match = re.fullmatch(r"deployment/([a-z0-9](?:[-a-z0-9]*[a-z0-9])?)", str(resource))
+        deployment = match.group(1) if match else None
+    if (
+        not isinstance(namespace, str)
+        or not SAFE_NAME.fullmatch(namespace)
+        or not isinstance(deployment, str)
+        or not SAFE_NAME.fullmatch(deployment)
+    ):
+        raise DrillError("exact deployment coordinates are malformed")
     result = _run_checked(
         runner,
         [
@@ -1583,19 +1824,19 @@ def _utc_timestamp(value: object) -> datetime:
 
 
 def _stimulus_not_before(records: list[dict]) -> datetime:
-    """Return the durable boundary recorded immediately before stimulus mutation."""
+    """Return the durable boundary immediately before bounded traffic begins."""
     record = next(
         (
             item
             for item in reversed(records)
             if item["operation"] == "execute"
-            and item["stage"] == "inject-oom-stimulus"
+            and item["stage"] == "generate-bounded-cardinality"
             and item["phase"] == "intent"
         ),
         None,
     )
     if record is None:
-        raise DrillError("authoritative OOM gate is missing stimulus intent")
+        raise DrillError("authoritative OOM gate is missing bounded-cardinality intent")
     return _utc_timestamp(record.get("recorded_at"))
 
 
@@ -1739,6 +1980,252 @@ def _read_gate_evidence(path: Path) -> tuple[dict, str]:
     return evidence, hashlib.sha256(payload).hexdigest()
 
 
+class _RejectRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise DrillError("bounded-cardinality target attempted a redirect")
+
+
+def _bounded_cardinality_path(run_id: str, sequence: int) -> str:
+    """Create an unmatched, nonsecret path without retaining operator input."""
+    path_digest = hashlib.sha256(f"sugarkube:{run_id}:{sequence}".encode("ascii")).hexdigest()
+    return f"/__sugarkube_cardinality_rehearsal__/{run_id}/{path_digest}"
+
+
+def _run_bounded_cardinality(
+    action: dict,
+    boundary_check: Callable[[], None] | None = None,
+    disruption_check: Callable[[], dict | _NoQualifyingOOM] | None = None,
+) -> dict:
+    """Run the reviewed finite HTTP stimulus and return privacy-safe aggregates."""
+    if action.get("target") != {
+        "scheme": "https",
+        "host": STAGING_HOST,
+        "redirects": "reject",
+    }:
+        raise DrillError("bounded-cardinality target is not the reviewed staging route")
+    limits = action.get("limits")
+    if limits != CARDINALITY_LIMITS or any(
+        isinstance(value, bool) or not isinstance(value, int) or value <= 0
+        for value in (limits or {}).values()
+    ):
+        raise DrillError("bounded-cardinality limits do not match the reviewed contract")
+    command = action.get("command")
+    if (
+        not isinstance(command, list)
+        or len(command) != 5
+        or command[:4]
+        != ["internal:generate-bounded-cardinality", "--host", STAGING_HOST, "--run-id"]
+    ):
+        raise DrillError("bounded-cardinality command is not the reviewed contract")
+    if action.get("path_contract") not in (
+        None,
+        {"kind": "synthetic-run-owned-unmatched-sha256", "durable_raw_paths": False},
+    ):
+        raise DrillError("bounded-cardinality path contract is malformed")
+    run_id = command[-1]
+    if not SAFE_NAME.fullmatch(run_id):
+        raise DrillError("bounded-cardinality run identity is unsafe")
+    opener = urllib.request.build_opener(_RejectRedirects)
+    started = time.monotonic()
+    deadline = started + limits["duration_seconds"]
+    next_boundary_check = started
+    statuses: dict[str, int] = {}
+    sent = 0
+    digest = hashlib.sha256()
+    cancelled = threading.Event()
+
+    def observe_disruption() -> bool:
+        if disruption_check is None:
+            return False
+        observation = disruption_check()
+        if observation is NO_QUALIFYING_OOM:
+            return False
+        if not isinstance(observation, dict):
+            raise DrillError("authoritative OOM observation returned an invalid result")
+        return True
+
+    def account(batch_hashes: list[str]) -> None:
+        nonlocal sent
+        for path_hash in sorted(batch_hashes):
+            digest.update(path_hash.encode("ascii"))
+            statuses["404"] = statuses.get("404", 0) + 1
+        sent += len(batch_hashes)
+
+    def request(sequence: int) -> str:
+        if cancelled.is_set():
+            raise DrillError("bounded-cardinality generation was cancelled")
+        path = _bounded_cardinality_path(run_id, sequence)
+        url = f"https://{STAGING_HOST}{path}"
+        req = urllib.request.Request(url, method="GET", headers={"Accept": "text/plain"})
+        try:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise DrillError("bounded-cardinality duration limit reached")
+            timeout = min(limits["request_timeout_seconds"], remaining)
+            with opener.open(req, timeout=timeout) as response:
+                status = response.status
+                final = urlsplit(response.geturl())
+        except urllib.error.HTTPError as exc:
+            try:
+                status = exc.code
+                final = urlsplit(exc.geturl())
+            finally:
+                exc.close()
+        except (urllib.error.URLError, TimeoutError) as exc:
+            raise _RequestDisruption("bounded-cardinality request failed") from exc
+        if final.scheme != "https" or final.hostname != STAGING_HOST or final.path != path:
+            raise DrillError("bounded-cardinality destination drifted")
+        if status != 404:
+            raise DrillError("bounded-cardinality path did not remain unmatched")
+        return hashlib.sha256(path.encode("ascii")).hexdigest()
+
+    try:
+        with ThreadPoolExecutor(max_workers=limits["concurrency"]) as pool:
+            while sent < limits["total_requests"]:
+                now = time.monotonic()
+                if boundary_check is not None and now >= next_boundary_check:
+                    boundary_check()
+                    # Coordinate drift is checked on time, not throughput, so
+                    # slow responses cannot weaken the fail-closed boundary.
+                    next_boundary_check = now + limits["request_timeout_seconds"]
+                remaining_budget = deadline - time.monotonic()
+                if remaining_budget <= 0:
+                    raise DrillError("bounded-cardinality duration limit reached")
+                count = min(limits["concurrency"], limits["total_requests"] - sent)
+                batch_started = time.monotonic()
+                futures = [pool.submit(request, sent + offset) for offset in range(count)]
+                batch_hashes = []
+                try:
+                    for future in as_completed(futures, timeout=remaining_budget):
+                        batch_hashes.append(future.result())
+                except FuturesTimeoutError as exc:
+                    cancelled.set()
+                    for future in futures:
+                        future.cancel()
+                    raise DrillError("bounded-cardinality duration limit reached") from exc
+                except _RequestDisruption:
+                    cancelled.set()
+                    for future in futures:
+                        future.cancel()
+                    # The executor joins running workers before this function
+                    # returns. Preserve every successful request from this
+                    # interrupted batch in the aggregate, without retaining
+                    # its raw path.
+                    for future in futures:
+                        if future.cancelled():
+                            continue
+                        try:
+                            path_hash = future.result()
+                        except _RequestDisruption:
+                            continue
+                        if path_hash not in batch_hashes:
+                            batch_hashes.append(path_hash)
+                    if not observe_disruption():
+                        raise
+                    account(batch_hashes)
+                    summary = {
+                        "requests": sent,
+                        "unique_paths": sent,
+                        "status_counts": statuses,
+                        "path_set_sha256": digest.hexdigest(),
+                        "raw_paths_persisted": False,
+                        "stopped_on_authentic_oom": True,
+                        "stop_reason": "accepted-authentic-oom",
+                    }
+                    return summary
+                except BaseException:
+                    cancelled.set()
+                    for future in futures:
+                        future.cancel()
+                    raise
+                account(batch_hashes)
+                if observe_disruption():
+                    cancelled.set()
+                    return {
+                        "requests": sent,
+                        "unique_paths": sent,
+                        "status_counts": statuses,
+                        "path_set_sha256": digest.hexdigest(),
+                        "raw_paths_persisted": False,
+                        "stopped_on_authentic_oom": True,
+                        "stop_reason": "accepted-authentic-oom",
+                    }
+                minimum = count / limits["requests_per_second"]
+                remaining = minimum - (time.monotonic() - batch_started)
+                if remaining > 0:
+                    time.sleep(min(remaining, max(0, deadline - time.monotonic())))
+                if time.monotonic() >= deadline:
+                    raise DrillError("bounded-cardinality duration limit reached")
+    except KeyboardInterrupt as exc:
+        cancelled.set()
+        raise DrillError("bounded-cardinality generation was interrupted") from exc
+    if sent != limits["unique_paths"]:
+        raise DrillError("bounded-cardinality unique-path contract was not completed")
+    return {
+        "requests": sent,
+        "unique_paths": sent,
+        "status_counts": statuses,
+        "path_set_sha256": digest.hexdigest(),
+        "raw_paths_persisted": False,
+    }
+
+
+def _observe_rehearsal_oom(
+    plan: dict,
+    kubeconfig: Path,
+    runner: Runner,
+    not_before,
+    *,
+    allow_no_qualifying: bool = False,
+):
+    """Read authoritative OOM evidence for the exact reviewed Deployment."""
+    expected = plan["expected_deployment"]
+    deployment = _runner_json(
+        runner,
+        [
+            "kubectl",
+            "--kubeconfig",
+            str(kubeconfig),
+            "--context",
+            "sugar-staging",
+            "--namespace",
+            plan["inventory"]["namespace"],
+            "get",
+            "deployment",
+            next(a["resource"].split("/", 1)[1] for a in plan["actions"] if a["id"] == "replace"),
+            "-o",
+            "json",
+        ],
+        "authoritative OOM Deployment lookup failed",
+    )
+    coordinates = Coordinates(
+        STAGING_HOST,
+        kubeconfig,
+        "sugar-staging",
+        "staging",
+        plan["inventory"]["namespace"],
+        deployment["metadata"]["name"],
+        expected["container"],
+        expected["incident_image"],
+        expected["replacement_image"],
+        expected["rollback_image"],
+        expected["replicas"],
+        expected["memory_limit"],
+        plan["inventory"]["service_monitor"],
+        plan["run_id"],
+        "staging-rehearsal",
+        expected["incident_image"],
+    )
+    return _observe_live_oom(
+        coordinates,
+        deployment,
+        ["kubectl", "--kubeconfig", str(kubeconfig), "--context", "sugar-staging"],
+        runner,
+        not_before=not_before,
+        allow_no_qualifying=allow_no_qualifying,
+    )
+
+
 def execute_operation(
     args: argparse.Namespace, runner: Runner = subprocess.run, now: datetime | None = None
 ) -> dict:
@@ -1792,6 +2279,59 @@ def _verify_cleanup_baseline(plan, kubeconfig, runner):
         )
         if result.returncode or not result.stdout.strip().startswith("2"):
             raise DrillError("cleanup health preservation check failed")
+
+
+def _recover_failed_trigger(plan, journal, kubeconfig, runner, trigger_pending=True):
+    """Cross the cancellation boundary and deterministically restore the baseline."""
+    if trigger_pending:
+        _record_phase(
+            journal,
+            plan,
+            "execute",
+            "generate-bounded-cardinality",
+            "failed",
+            evidence_summary={
+                "stopped": True,
+                "raw_paths_persisted": False,
+                "stop_reason": "failed-or-interrupted",
+            },
+        )
+    image = next(item for item in plan["actions"] if item["id"] == "inject-incident-image")
+    records = _journal_records(journal, plan)
+    rollback_pending = _pending_operation(records) == ("rollback", image["id"])
+    if ("rollback", image["id"]) not in _completed_operations(records):
+        if not rollback_pending:
+            _record_phase(journal, plan, "rollback", image["id"], "intent")
+        # A drifted/untrusted identity must leave recovery pending rather than
+        # directing the inverse at an unknown cluster.
+        _assert_stage_preflight(
+            plan, kubeconfig, runner, plan["expected_deployment"]["incident_image"]
+        )
+        _run_checked(
+            runner,
+            _bind_command(image["inverse"], kubeconfig),
+            "exact healthy-image recovery failed",
+        )
+        _assert_stage_preflight(
+            plan, kubeconfig, runner, plan["expected_deployment"]["current_image"]
+        )
+        _record_phase(journal, plan, "rollback", image["id"], "completed")
+    _verify_cleanup_baseline(plan, kubeconfig, runner)
+    records = _journal_records(journal, plan)
+    cleanup_pending = _pending_operation(records) == ("cleanup", "cleanup")
+    if ("cleanup", "cleanup") not in _completed_operations(records):
+        if not cleanup_pending:
+            _record_phase(journal, plan, "cleanup", "cleanup", "intent")
+        marker_present = _validate_marker(plan, kubeconfig, runner, absent_ok=True)
+        if marker_present or not cleanup_pending:
+            _run_checked(
+                runner,
+                _marker_command(plan, kubeconfig, "delete"),
+                "exact marker cleanup failed",
+            )
+        if _validate_marker(plan, kubeconfig, runner, absent_ok=True):
+            raise DrillError("exact marker cleanup post-state failed")
+        _record_phase(journal, plan, "cleanup", "cleanup", "completed")
 
 
 def _execute_locked(args, runner, plan, journal, now=None):
@@ -1948,53 +2488,55 @@ def _execute_locked(args, runner, plan, journal, now=None):
         return {"status": "already-completed", "stage": stage}
     if done != expected[: len(done)] or expected[len(done)] != stage:
         raise DrillError("stage is out of order")
+    if action["type"] == "trigger":
+        if not getattr(args, "acknowledge_bounded_cardinality_generation", False):
+            raise DrillError("separate bounded-cardinality generation authorization is required")
+        if args.gate_evidence is not None:
+            raise DrillError("bounded-cardinality generation refuses operator-authored evidence")
+        if pending:
+            _recover_failed_trigger(plan, journal, args.kubeconfig, runner)
+            raise DrillError(
+                "interrupted bounded-cardinality generation was rolled back and is nonresumable"
+            )
+        _record_phase(
+            journal,
+            plan,
+            operation,
+            stage,
+            "intent",
+            limits=action["limits"],
+            target_sha256=hashlib.sha256(STAGING_HOST.encode("ascii")).hexdigest(),
+        )
+        try:
+            summary = _run_bounded_cardinality(
+                action,
+                lambda: _assert_stage_preflight(
+                    plan,
+                    args.kubeconfig,
+                    runner,
+                    plan["expected_deployment"]["incident_image"],
+                ),
+                lambda: _observe_rehearsal_oom(
+                    plan,
+                    args.kubeconfig,
+                    runner,
+                    _stimulus_not_before(records),
+                    allow_no_qualifying=True,
+                ),
+            )
+        except BaseException:
+            # Cross the cancellation boundary before touching the cluster: the
+            # executor context has stopped and joined every request worker.
+            _recover_failed_trigger(plan, journal, args.kubeconfig, runner)
+            raise
+        _record_phase(journal, plan, operation, stage, "completed", evidence_summary=summary)
+        return {"status": "completed", "stage": stage, "summary": summary}
     if action["type"] == "gate":
         if action["id"] == "observe-authentic-oom":
             if args.gate_evidence is not None:
                 raise DrillError("authoritative OOM gate refuses operator-authored evidence")
-            expected = plan["expected_deployment"]
-            deployment = _runner_json(
-                runner,
-                [
-                    "kubectl",
-                    "--kubeconfig",
-                    str(args.kubeconfig),
-                    "--context",
-                    "sugar-staging",
-                    "--namespace",
-                    plan["inventory"]["namespace"],
-                    "get",
-                    "deployment",
-                    next(a["resource"].split("/", 1)[1] for a in actions if a["id"] == "replace"),
-                    "-o",
-                    "json",
-                ],
-                "authoritative OOM Deployment lookup failed",
-            )
-            coordinates = Coordinates(
-                STAGING_HOST,
-                args.kubeconfig,
-                "sugar-staging",
-                "staging",
-                plan["inventory"]["namespace"],
-                deployment["metadata"]["name"],
-                expected["container"],
-                expected["incident_image"],
-                expected["replacement_image"],
-                expected["rollback_image"],
-                expected["replicas"],
-                expected["memory_limit"],
-                plan["inventory"]["service_monitor"],
-                plan["run_id"],
-                "staging-rehearsal",
-                expected["incident_image"],
-            )
-            observation = _observe_live_oom(
-                coordinates,
-                deployment,
-                ["kubectl", "--kubeconfig", str(args.kubeconfig), "--context", "sugar-staging"],
-                runner,
-                not_before=_stimulus_not_before(records),
+            observation = _observe_rehearsal_oom(
+                plan, args.kubeconfig, runner, _stimulus_not_before(records)
             )
             _record_phase(
                 journal,
