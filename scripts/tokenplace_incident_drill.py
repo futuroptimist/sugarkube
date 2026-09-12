@@ -4,15 +4,19 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import contextlib
 import fcntl
 import hashlib
+import http.client
 import json
 import os
 import re
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,6 +35,14 @@ GATE_EVIDENCE_MAX_BYTES = 64 * 1024
 GATE_EVIDENCE_FRESHNESS_SECONDS = 5 * 60
 INCIDENT_PROBES = ROOT / "config/observability/tokenplace-incident-probes.json"
 RFC3339_UTC = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$")
+CARDINALITY_BOUNDS = {
+    "unique_paths": 72000,
+    "total_requests": 72000,
+    "concurrency": 8,
+    "requests_per_second": 300,
+    "duration_seconds": 300,
+}
+CARDINALITY_PATH_PREFIX = "/.well-known/sugarkube-metrics-oom/"
 
 
 class DrillError(ValueError):
@@ -127,6 +139,7 @@ def execution_parser() -> argparse.ArgumentParser:
     result.add_argument("--journal", required=True, type=Path)
     result.add_argument("--kubeconfig", required=True, type=Path)
     result.add_argument("--gate-evidence", type=Path)
+    result.add_argument("--acknowledge-bounded-cardinality", action="store_true")
     return result
 
 
@@ -779,13 +792,43 @@ def build_plan(preflight: Preflight) -> dict:
             f"{c.container}={c.current_image}",
         ]
         mutation(
-            "inject-oom-stimulus",
+            "select-incident-image",
             f"deployment/{c.deployment}",
             prefix
             + ["set", "image", f"deployment/{c.deployment}", f"{c.container}={c.incident_image}"],
             baseline_inverse,
             {"image": c.current_image},
         )["baseline_idempotent_inverse"] = True
+        actions.append(
+            {
+                "id": "generate-bounded-cardinality",
+                "stage": "generate-bounded-cardinality",
+                "type": "bounded-trigger",
+                "depends_on": [previous],
+                "target": {
+                    "scheme": "https",
+                    "host": STAGING_HOST,
+                    "path_prefix": CARDINALITY_PATH_PREFIX,
+                    "redirects": "reject",
+                    "expected_status": 404,
+                },
+                "bounds": dict(CARDINALITY_BOUNDS),
+                "synthetic_path_derivation": "sha256(plan-digest:run-id:index)",
+                "durable_evidence": "aggregate-counts-and-sha256-only",
+                "command": [
+                    "python3",
+                    "scripts/tokenplace_incident_drill.py",
+                    "--execute-stage",
+                    "generate-bounded-cardinality",
+                    "--acknowledge-bounded-cardinality",
+                ],
+                "cancellation": "process-local-stop-event-and-worker-join",
+                "inverse": baseline_inverse,
+                "rollback": baseline_inverse,
+                "cleanup": ["no-run-owned-cluster-resource"],
+            }
+        )
+        previous = "generate-bounded-cardinality"
         gate(
             "observe-authentic-oom",
             [
@@ -1116,7 +1159,13 @@ def build_plan(preflight: Preflight) -> dict:
             "memory_limit": c.memory_limit,
         },
         "inventory": {
+            **(
+                {"host": c.host, "context": c.context}
+                if c.lifecycle == "staging-rehearsal"
+                else {}
+            ),
             "namespace": c.namespace,
+            "deployment": c.deployment,
             "service_monitor": c.service_monitor,
             "probes": probes,
         },
@@ -1261,6 +1310,11 @@ def _journal_records(directory: Path, plan: dict) -> list[dict]:
             if pending != key or operation != "execute" or stage not in gates:
                 raise DrillError("journal transition is invalid")
             pending = None
+        elif phase == "failed":
+            if pending != key or operation != "execute" or stage != "generate-bounded-cardinality":
+                raise DrillError("journal transition is invalid")
+            pending = None
+            aborting = True
         else:
             raise DrillError("journal record transition is invalid")
     return records
@@ -1583,19 +1637,19 @@ def _utc_timestamp(value: object) -> datetime:
 
 
 def _stimulus_not_before(records: list[dict]) -> datetime:
-    """Return the durable boundary recorded immediately before stimulus mutation."""
+    """Return the durable boundary recorded immediately before cardinality generation."""
     record = next(
         (
             item
             for item in reversed(records)
             if item["operation"] == "execute"
-            and item["stage"] == "inject-oom-stimulus"
+            and item["stage"] == "generate-bounded-cardinality"
             and item["phase"] == "intent"
         ),
         None,
     )
     if record is None:
-        raise DrillError("authoritative OOM gate is missing stimulus intent")
+        raise DrillError("authoritative OOM gate is missing bounded-trigger intent")
     return _utc_timestamp(record.get("recorded_at"))
 
 
@@ -1750,6 +1804,102 @@ def execute_operation(
         return _execute_locked(args, runner, plan, journal, now)
 
 
+def _cardinality_path(plan: dict, index: int) -> str:
+    seed = f"{plan['plan_digest']}:{plan['run_id']}:{index}".encode("ascii")
+    return CARDINALITY_PATH_PREFIX + hashlib.sha256(seed).hexdigest()
+
+
+def _send_cardinality_request(host: str, path: str, timeout: float) -> int:
+    """Send one HTTPS request without a redirect-capable client."""
+    connection = http.client.HTTPSConnection(host, 443, timeout=timeout)
+    try:
+        connection.request("GET", path, headers={"User-Agent": "sugarkube-bounded-oom-drill/1"})
+        response = connection.getresponse()
+        response.read(1024)
+        if response.getheader("Location") is not None or 300 <= response.status < 400:
+            raise DrillError("bounded trigger refused a redirect")
+        return response.status
+    finally:
+        connection.close()
+
+
+def _run_bounded_cardinality(plan: dict, identity_check: Callable[[], None] = lambda: None) -> dict:
+    """Generate deterministic unmatched paths within every reviewed finite bound."""
+    target = next(a for a in plan["actions"] if a["id"] == "generate-bounded-cardinality")
+    if target.get("target") != {
+        "scheme": "https",
+        "host": STAGING_HOST,
+        "path_prefix": CARDINALITY_PATH_PREFIX,
+        "redirects": "reject",
+        "expected_status": 404,
+    } or plan.get("inventory", {}).get("host") != STAGING_HOST:
+        raise DrillError("bounded trigger target is not the reviewed staging route")
+    bounds = target.get("bounds")
+    if bounds != CARDINALITY_BOUNDS or any(
+        isinstance(value, bool) or not isinstance(value, int) or value <= 0
+        for value in bounds.values()
+    ):
+        raise DrillError("bounded trigger limits do not match the reviewed contract")
+
+    stop = threading.Event()
+    started = time.monotonic()
+    sent = 0
+    status_counts: dict[str, int] = {}
+    aggregate = hashlib.sha256()
+
+    def send(index: int) -> tuple[int, str]:
+        if stop.is_set():
+            raise DrillError("bounded trigger was cancelled")
+        path = _cardinality_path(plan, index)
+        remaining = bounds["duration_seconds"] - (time.monotonic() - started)
+        if remaining <= 0:
+            raise DrillError("bounded trigger reached its wall-clock limit")
+        status = _send_cardinality_request(STAGING_HOST, path, min(10.0, remaining))
+        if status != target["target"]["expected_status"]:
+            raise DrillError("bounded trigger received an unexpected response")
+        return status, hashlib.sha256(path.encode("ascii")).hexdigest()
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=bounds["concurrency"]) as pool:
+            pending: set[concurrent.futures.Future] = set()
+            for index in range(bounds["total_requests"]):
+                if index >= bounds["unique_paths"]:
+                    break
+                elapsed = time.monotonic() - started
+                if elapsed >= bounds["duration_seconds"]:
+                    raise DrillError("bounded trigger reached its wall-clock limit")
+                if index % 1024 == 0:
+                    identity_check()
+                earliest = index / bounds["requests_per_second"]
+                if elapsed < earliest:
+                    time.sleep(min(earliest - elapsed, bounds["duration_seconds"] - elapsed))
+                pending.add(pool.submit(send, index))
+                if len(pending) >= bounds["concurrency"]:
+                    done, pending = concurrent.futures.wait(
+                        pending, return_when=concurrent.futures.FIRST_COMPLETED
+                    )
+                    for future in done:
+                        status, path_hash = future.result()
+                        sent += 1
+                        status_counts[str(status)] = status_counts.get(str(status), 0) + 1
+                        aggregate.update(path_hash.encode("ascii"))
+            for future in concurrent.futures.as_completed(pending):
+                status, path_hash = future.result()
+                sent += 1
+                status_counts[str(status)] = status_counts.get(str(status), 0) + 1
+                aggregate.update(path_hash.encode("ascii"))
+    except BaseException:
+        stop.set()
+        raise
+    return {
+        "requests_completed": sent,
+        "unique_paths_generated": sent,
+        "status_counts": status_counts,
+        "path_set_sha256": aggregate.hexdigest(),
+        "raw_paths_persisted": False,
+    }
+
+
 def _record_phase(journal, plan, operation, stage, phase, **metadata):
     metadata.setdefault(
         "recorded_at", datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -1802,7 +1952,10 @@ def _execute_locked(args, runner, plan, journal, now=None):
     operation = "cleanup" if args.cleanup else "rollback" if args.rollback_stage else "execute"
     if pending and pending != (operation, stage):
         raise DrillError("a different interrupted operation must be reconciled first")
-    aborting = any(record["operation"] == "rollback" for record in records)
+    aborting = any(
+        record["operation"] == "rollback" or record.get("phase") == "failed"
+        for record in records
+    )
     if operation == "execute" and aborting:
         raise DrillError("forward execution is refused after rollback begins")
 
@@ -1948,6 +2101,57 @@ def _execute_locked(args, runner, plan, journal, now=None):
         return {"status": "already-completed", "stage": stage}
     if done != expected[: len(done)] or expected[len(done)] != stage:
         raise DrillError("stage is out of order")
+    if action["type"] == "bounded-trigger":
+        if not getattr(args, "acknowledge_bounded_cardinality", False):
+            raise DrillError("separate bounded-cardinality authorization is required")
+        if args.gate_evidence is not None:
+            raise DrillError("bounded trigger refuses operator-authored evidence")
+        image_action = next(item for item in actions if item["id"] == "select-incident-image")
+        if pending:
+            # A killed process has already cancelled and joined all process-local workers,
+            # but its unrecorded request count cannot safely be reconstructed. Never replay it.
+            _record_phase(
+                journal, plan, operation, stage, "failed", reason="interrupted-nonresumable"
+            )
+            _record_phase(journal, plan, "rollback", image_action["id"], "intent")
+            observed = _action_observed(plan, image_action, args.kubeconfig, runner)
+            if not _action_matches(plan, image_action, observed, "rollback-post"):
+                _run_checked(
+                    runner,
+                    _bind_command(image_action["inverse"], args.kubeconfig),
+                    "interrupted bounded trigger rollback failed",
+                )
+                observed = _action_observed(plan, image_action, args.kubeconfig, runner)
+                if not _action_matches(plan, image_action, observed, "rollback-post"):
+                    raise DrillError("interrupted bounded trigger rollback post-state failed")
+            _record_phase(journal, plan, "rollback", image_action["id"], "completed")
+            raise DrillError("interrupted bounded trigger is nonresumable and was rolled back")
+        if not pending:
+            _record_phase(journal, plan, operation, stage, "intent")
+        try:
+            summary = _run_bounded_cardinality(
+                plan,
+                lambda: _assert_stage_preflight(
+                    plan, args.kubeconfig, runner, plan["expected_deployment"]["incident_image"]
+                ),
+            )
+        except BaseException:
+            _record_phase(journal, plan, operation, stage, "failed", reason="cancelled-or-refused")
+            observed = _action_observed(plan, image_action, args.kubeconfig, runner)
+            _record_phase(journal, plan, "rollback", image_action["id"], "intent")
+            if not _action_matches(plan, image_action, observed, "rollback-post"):
+                _run_checked(
+                    runner,
+                    _bind_command(image_action["inverse"], args.kubeconfig),
+                    "bounded trigger cancellation rollback failed",
+                )
+                observed = _action_observed(plan, image_action, args.kubeconfig, runner)
+                if not _action_matches(plan, image_action, observed, "rollback-post"):
+                    raise DrillError("bounded trigger cancellation rollback post-state failed")
+            _record_phase(journal, plan, "rollback", image_action["id"], "completed")
+            raise
+        _record_phase(journal, plan, operation, stage, "completed", evidence_summary=summary)
+        return {"status": "completed", "stage": stage, "evidence_summary": summary}
     if action["type"] == "gate":
         if action["id"] == "observe-authentic-oom":
             if args.gate_evidence is not None:

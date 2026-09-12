@@ -140,8 +140,8 @@ For a controlled metrics-OOM rehearsal starting from a healthy baseline, select 
 lifecycle and provide a fourth immutable identity. `CURRENT_IMAGE_DIGEST` is the healthy baseline,
 `INCIDENT_IMAGE_DIGEST` is the reviewed fault stimulus, `REPLACEMENT_IMAGE_DIGEST` is the recovery
 candidate, and `ROLLBACK_IMAGE_DIGEST` is the reviewed emergency fallback. All four must be
-distinct. The second acknowledgement authorizes staging-only fault injection; the existing
-acknowledgement separately recognizes replacement of process-local and `emptyDir` state:
+distinct. The second acknowledgement authorizes only staging image selection; it does **not** authorize
+cardinality-generating traffic. The existing acknowledgement separately recognizes replacement of process-local and `emptyDir` state:
 
 ```bash
 python3 scripts/tokenplace_incident_drill.py --dry-run --mode metrics-oom \
@@ -192,10 +192,20 @@ python3 scripts/tokenplace_incident_drill.py --execute-stage "$NEXT_STAGE" \
   --kubeconfig "$STAGING_KUBECONFIG" --gate-evidence "$PRIVATE_GATE_EVIDENCE"
 ```
 
-For the rehearsal, the exact order begins with `marker`, `inject-oom-stimulus`, and
-`observe-authentic-oom`, followed by the existing containment, recovery replacement, readiness,
+For the rehearsal, the exact order begins with `marker`, `select-incident-image`,
+`generate-bounded-cardinality`, and `observe-authentic-oom`, followed by the existing containment, recovery replacement, readiness,
 compute registration and polling, relay-blind encrypted E2EE, route preservation, metrics-exit,
-metrics-last restoration, and final observation stages. Do not supply `--gate-evidence` to
+metrics-last restoration, and final observation stages. Execute `generate-bounded-cardinality` as its own invocation with the additional, explicit
+`--acknowledge-bounded-cardinality` flag. Image-selection authorization never implies this traffic
+authorization. The runner generates at most 72,000 deterministic, run-owned unique synthetic paths
+and 72,000 total requests, with concurrency 8, a ceiling of 300 requests/second, and a 300-second
+wall-clock limit. It uses HTTPS only against `staging.token.place`, expects an unmatched-path 404,
+and refuses redirects or identity drift. Its private journal retains only counts, status aggregates,
+and an aggregate SHA-256; it never retains a generated path. Timeout, interruption, unexpected
+status, or drift cancels and joins workers, records failure, and immediately applies the exact
+healthy-image inverse before further action.
+
+Do not supply `--gate-evidence` to
 `observe-authentic-oom`: that gate reads the current Deployment, its unambiguous owned ReplicaSet
 and Pod, the exact container/image/memory limit, its OOMKilled/137 last termination, positive
 restart count and timestamp, and privacy-safe event aggregates directly through the bound staging
@@ -302,3 +312,5 @@ namespace deletion. A drill passes only when both incident classes demonstrate p
 replacement, compute recovery, ordered restoration, threshold rollback, and exact cleanup while
 health coverage remains uninterrupted. Update the canonical incident records and GitHub trackers
 manually after review; use no automatic issue-closing action.
+
+The failed rehearsal run IDs that preceded this correction are nonresumable and must never be represented as successful. This correction prepares a contract only; no corrected live drill has run.
