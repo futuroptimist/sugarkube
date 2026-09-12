@@ -665,7 +665,13 @@ def test_bounded_cardinality_persists_only_aggregates_and_hashes(monkeypatch):
     action = {
         "target": {"scheme": "https", "host": drill.STAGING_HOST, "redirects": "reject"},
         "limits": limits,
-        "command": ["internal:generate-bounded-cardinality", "--run-id", "safe-run"],
+        "command": [
+            "internal:generate-bounded-cardinality",
+            "--host",
+            drill.STAGING_HOST,
+            "--run-id",
+            "safe-run",
+        ],
     }
 
     summary = drill._run_bounded_cardinality(action)
@@ -706,7 +712,13 @@ def test_bounded_cardinality_rejects_destination_drift(monkeypatch):
     action = {
         "target": {"scheme": "https", "host": drill.STAGING_HOST, "redirects": "reject"},
         "limits": limits,
-        "command": ["internal:generate-bounded-cardinality", "--run-id", "safe-run"],
+        "command": [
+            "internal:generate-bounded-cardinality",
+            "--host",
+            drill.STAGING_HOST,
+            "--run-id",
+            "safe-run",
+        ],
     }
     with pytest.raises(drill.DrillError, match="destination drifted"):
         drill._run_bounded_cardinality(action)
@@ -724,7 +736,13 @@ def test_bounded_cardinality_wraps_network_failure_and_requires_authentic_oom(mo
     action = {
         "target": {"scheme": "https", "host": drill.STAGING_HOST, "redirects": "reject"},
         "limits": limits,
-        "command": ["internal:generate-bounded-cardinality", "--run-id", "safe-run"],
+        "command": [
+            "internal:generate-bounded-cardinality",
+            "--host",
+            drill.STAGING_HOST,
+            "--run-id",
+            "safe-run",
+        ],
     }
 
     with pytest.raises(drill.DrillError, match="bounded-cardinality request failed") as caught:
@@ -734,6 +752,49 @@ def test_bounded_cardinality_wraps_network_failure_and_requires_authentic_oom(mo
     summary = drill._run_bounded_cardinality(action, disruption_check=lambda: True)
     assert summary["stopped_on_authentic_oom"] is True
     assert summary["raw_paths_persisted"] is False
+
+
+def test_bounded_cardinality_stops_on_accepted_live_oom(monkeypatch):
+    limits = dict(drill.CARDINALITY_LIMITS, unique_paths=2, total_requests=2, concurrency=1)
+    monkeypatch.setattr(drill, "CARDINALITY_LIMITS", limits)
+    requested = []
+
+    class Missing:
+        status = 404
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def geturl(self):
+            return requested[-1]
+
+    class Opener:
+        def open(self, request, timeout):
+            requested.append(request.full_url)
+            return Missing()
+
+    monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *_args: Opener())
+    action = {
+        "target": {"scheme": "https", "host": drill.STAGING_HOST, "redirects": "reject"},
+        "limits": limits,
+        "command": [
+            "internal:generate-bounded-cardinality",
+            "--host",
+            drill.STAGING_HOST,
+            "--run-id",
+            "safe-run",
+        ],
+    }
+
+    summary = drill._run_bounded_cardinality(action, disruption_check=lambda: True)
+
+    assert len(requested) == summary["requests"] == summary["unique_paths"] == 1
+    assert summary["stop_reason"] == "accepted-authentic-oom"
+    assert summary["raw_paths_persisted"] is False
+    assert "__sugarkube_cardinality_rehearsal__" not in json.dumps(summary)
 
 
 @pytest.mark.parametrize(
@@ -1638,6 +1699,47 @@ def test_live_authoritative_rehearsal_plan_is_executable(tmp_path):
     path.write_text(json.dumps(plan))
 
     assert drill._load_execution_plan(path) == plan
+
+
+@pytest.mark.parametrize(
+    "tamper,message",
+    [
+        (lambda plan: plan["actions"].pop(1), "ordered trigger stages"),
+        (
+            lambda plan: plan["actions"][1]["target"].update(host="token.place"),
+            "trigger contract",
+        ),
+        (
+            lambda plan: plan["actions"][1]["target"].update(port=443),
+            "trigger contract",
+        ),
+        (
+            lambda plan: plan["actions"][1]["target"].update(redirects="follow"),
+            "trigger contract",
+        ),
+        (
+            lambda plan: plan["actions"][1]["path_contract"].update(durable_raw_paths=True),
+            "trigger contract",
+        ),
+        (
+            lambda plan: plan["actions"][1]["limits"].update(total_requests=0),
+            "trigger contract",
+        ),
+        (
+            lambda plan: plan["actions"][2].update(depends_on=["inject-incident-image"]),
+            "dependency chain",
+        ),
+    ],
+)
+def test_rehearsal_loader_rejects_tampered_trigger_contract(tmp_path, tamper, message):
+    plan = executable_rehearsal_plan(tmp_path)
+    tamper(plan)
+    plan["plan_digest"] = drill._plan_digest(plan)
+    path = tmp_path / "tampered-plan.json"
+    path.write_text(json.dumps(plan), encoding="utf-8")
+
+    with pytest.raises(drill.DrillError, match=message):
+        drill._load_execution_plan(path)
 
 
 def test_offline_rehearsal_cli_emits_non_executing_deterministic_plan(

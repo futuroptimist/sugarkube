@@ -225,11 +225,15 @@ the raw paths. The plan prints the forward action, cancellation boundary, health
 and exact marker cleanup coordinates.
 
 Worker cancellation is joined before recovery begins. A failure or interruption records a
-privacy-safe stopped summary, reasserts staging identity before any recovery mutation, restores
+privacy-safe **failed** summary (never a completed trigger), reasserts staging identity before any
+recovery mutation, restores
 the exact healthy image, reasserts the reviewed staging identity and Deployment coordinates,
 verifies `/livez` and `/healthz`, and deletes only the exact
-run-owned marker. The append-only private journal remains in place. Never resume an interrupted
-traffic stage or either prior failed live run ID; create a newly reviewed plan and run ID.
+run-owned marker. After process death, invoking the pending trigger deterministically reconciles
+that intent through the same rollback and cleanup path; it does not send another request. The
+append-only private journal remains in place, and its failed/rollback records make every forward
+stage nonresumable. Never resume an interrupted traffic stage or either prior failed live run ID;
+create a newly reviewed plan and run ID.
 
 Do not supply `--gate-evidence` to
 `observe-authentic-oom`: that gate reads the current Deployment, its unambiguous owned ReplicaSet

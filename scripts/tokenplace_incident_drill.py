@@ -13,6 +13,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -1228,7 +1229,111 @@ def _load_execution_plan(path: Path) -> dict:
                 or not all(isinstance(token, str) and token for token in value)
             ):
                 raise DrillError("plan contains a shell-string or malformed command")
+    if plan.get("lifecycle") == "staging-rehearsal":
+        _validate_staging_execution_contract(plan)
     return plan
+
+
+def _validate_staging_execution_contract(plan: dict) -> None:
+    """Reject executable rehearsal plans whose safety contract was altered."""
+    if plan.get("mode") != "metrics-oom":
+        raise DrillError("staging rehearsal trigger mode is not the reviewed contract")
+    actions = plan["actions"]
+    if len(actions) < 3 or [item.get("id") for item in actions[:3]] != [
+        "inject-incident-image",
+        "generate-bounded-cardinality",
+        "observe-authentic-oom",
+    ]:
+        raise DrillError("staging rehearsal is missing the exact ordered trigger stages")
+    image, trigger, observe = actions[:3]
+    expected = plan.get("expected_deployment")
+    if not isinstance(expected, dict) or not all(
+        isinstance(expected.get(key), str) and expected[key]
+        for key in ("container", "current_image", "incident_image")
+    ):
+        raise DrillError("staging rehearsal deployment coordinates are malformed")
+    if not IMAGE.fullmatch(expected["current_image"]) or not IMAGE.fullmatch(
+        expected["incident_image"]
+    ):
+        raise DrillError("staging rehearsal image coordinates are malformed")
+    if any(
+        (
+            item.get("stage") != item.get("id")
+            or item.get("depends_on") != ([] if index == 0 else [actions[index - 1]["id"]])
+        )
+        for index, item in enumerate(actions)
+    ):
+        raise DrillError("staging rehearsal dependency chain is malformed")
+    inventory = plan.get("inventory")
+    namespace = inventory.get("namespace") if isinstance(inventory, dict) else None
+    resource = image.get("resource")
+    prefix = [
+        "kubectl",
+        "--kubeconfig",
+        "<supplied-kubeconfig>",
+        "--context",
+        "sugar-staging",
+        "--namespace",
+        namespace,
+        "set",
+        "image",
+        resource,
+    ]
+    if (
+        not isinstance(namespace, str)
+        or not isinstance(resource, str)
+        or image.get("type") != "mutation"
+        or image.get("old_state") != {"image": expected["current_image"]}
+        or image.get("command")
+        != prefix + [f'{expected["container"]}={expected["incident_image"]}']
+        or image.get("inverse") != prefix + [f'{expected["container"]}={expected["current_image"]}']
+    ):
+        raise DrillError("incident image stage cannot restore the exact healthy image")
+    if image.get("inverse") != image.get("rollback") or trigger.get(
+        "failure_recovery"
+    ) != image.get("inverse"):
+        raise DrillError("staging rehearsal recovery coordinates are malformed")
+    run_id = plan["run_id"]
+    if (
+        trigger.get("type") != "trigger"
+        or trigger.get("target") != {"scheme": "https", "host": STAGING_HOST, "redirects": "reject"}
+        or trigger.get("path_contract")
+        != {"kind": "synthetic-run-owned-unmatched-sha256", "durable_raw_paths": False}
+        or trigger.get("limits") != CARDINALITY_LIMITS
+        or any(
+            isinstance(value, bool) or not isinstance(value, int) or value <= 0
+            for value in trigger.get("limits", {}).values()
+        )
+        or trigger.get("command")
+        != ["internal:generate-bounded-cardinality", "--host", STAGING_HOST, "--run-id", run_id]
+        or trigger.get("inverse") != ["internal:cancel-bounded-cardinality", "--run-id", run_id]
+        or trigger.get("rollback") != trigger.get("inverse")
+        or trigger.get("cleanup") != ["internal:stop-all-run-owned-load", "--run-id", run_id]
+    ):
+        raise DrillError("bounded-cardinality trigger contract is malformed")
+    if trigger.get("stop_conditions") != [
+        "first-error",
+        "timeout",
+        "interruption",
+        "identity-drift",
+        "accepted-authentic-oom",
+        "any-reviewed-limit",
+    ]:
+        raise DrillError("bounded-cardinality cancellation contract is malformed")
+    if (
+        observe.get("type") != "gate"
+        or observe.get("checks")
+        != [
+            {
+                "metric": "authoritative_live_oomkilled_137",
+                "operator": "eq",
+                "value": True,
+                "unit": "boolean",
+            }
+        ]
+        or observe.get("on_failure") != image.get("inverse")
+    ):
+        raise DrillError("authentic OOM observation contract is malformed")
 
 
 def _private_directory(path: Path, label: str) -> Path:
@@ -1313,6 +1418,16 @@ def _journal_records(directory: Path, plan: dict) -> list[dict]:
             if pending != key or operation != "execute" or stage not in gates:
                 raise DrillError("journal transition is invalid")
             pending = None
+        elif phase == "failed":
+            if (
+                pending != key
+                or operation != "execute"
+                or stage
+                not in {action["id"] for action in plan["actions"] if action["type"] == "trigger"}
+            ):
+                raise DrillError("journal transition is invalid")
+            pending = None
+            aborting = True
         else:
             raise DrillError("journal record transition is invalid")
     return records
@@ -1820,7 +1935,20 @@ def _run_bounded_cardinality(
         for value in (limits or {}).values()
     ):
         raise DrillError("bounded-cardinality limits do not match the reviewed contract")
-    run_id = action["command"][-1]
+    command = action.get("command")
+    if (
+        not isinstance(command, list)
+        or len(command) != 5
+        or command[:4]
+        != ["internal:generate-bounded-cardinality", "--host", STAGING_HOST, "--run-id"]
+    ):
+        raise DrillError("bounded-cardinality command is not the reviewed contract")
+    if action.get("path_contract") not in (
+        None,
+        {"kind": "synthetic-run-owned-unmatched-sha256", "durable_raw_paths": False},
+    ):
+        raise DrillError("bounded-cardinality path contract is malformed")
+    run_id = command[-1]
     if not SAFE_NAME.fullmatch(run_id):
         raise DrillError("bounded-cardinality run identity is unsafe")
     opener = urllib.request.build_opener(_RejectRedirects)
@@ -1830,8 +1958,11 @@ def _run_bounded_cardinality(
     statuses: dict[str, int] = {}
     sent = 0
     digest = hashlib.sha256()
+    cancelled = threading.Event()
 
     def request(sequence: int) -> str:
+        if cancelled.is_set():
+            raise DrillError("bounded-cardinality generation was cancelled")
         path = _bounded_cardinality_path(run_id, sequence)
         url = f"https://{STAGING_HOST}{path}"
         req = urllib.request.Request(url, method="GET", headers={"Accept": "text/plain"})
@@ -1844,8 +1975,11 @@ def _run_bounded_cardinality(
                 status = response.status
                 final = urlsplit(response.geturl())
         except urllib.error.HTTPError as exc:
-            status = exc.code
-            final = urlsplit(exc.geturl())
+            try:
+                status = exc.code
+                final = urlsplit(exc.geturl())
+            finally:
+                exc.close()
         except (urllib.error.URLError, TimeoutError) as exc:
             raise _RequestDisruption("bounded-cardinality request failed") from exc
         if final.scheme != "https" or final.hostname != STAGING_HOST or final.path != path:
@@ -1875,14 +2009,37 @@ def _run_bounded_cardinality(
                         for future in as_completed(futures, timeout=remaining_budget)
                     ]
                 except FuturesTimeoutError as exc:
+                    cancelled.set()
                     for future in futures:
                         future.cancel()
                     raise DrillError("bounded-cardinality duration limit reached") from exc
                 except _RequestDisruption:
+                    cancelled.set()
                     for future in futures:
                         future.cancel()
                     if disruption_check is None or not disruption_check():
                         raise
+                    summary = {
+                        "requests": sent,
+                        "unique_paths": sent,
+                        "status_counts": statuses,
+                        "path_set_sha256": digest.hexdigest(),
+                        "raw_paths_persisted": False,
+                        "stopped_on_authentic_oom": True,
+                        "stop_reason": "accepted-authentic-oom",
+                    }
+                    return summary
+                except BaseException:
+                    cancelled.set()
+                    for future in futures:
+                        future.cancel()
+                    raise
+                for path_hash in sorted(batch_hashes):
+                    digest.update(path_hash.encode("ascii"))
+                    statuses["404"] = statuses.get("404", 0) + 1
+                sent += count
+                if disruption_check is not None and disruption_check():
+                    cancelled.set()
                     return {
                         "requests": sent,
                         "unique_paths": sent,
@@ -1890,11 +2047,8 @@ def _run_bounded_cardinality(
                         "path_set_sha256": digest.hexdigest(),
                         "raw_paths_persisted": False,
                         "stopped_on_authentic_oom": True,
+                        "stop_reason": "accepted-authentic-oom",
                     }
-                for path_hash in sorted(batch_hashes):
-                    digest.update(path_hash.encode("ascii"))
-                    statuses["404"] = statuses.get("404", 0) + 1
-                sent += count
                 minimum = count / limits["requests_per_second"]
                 remaining = minimum - (time.monotonic() - batch_started)
                 if remaining > 0:
@@ -1902,6 +2056,7 @@ def _run_bounded_cardinality(
                 if time.monotonic() >= deadline:
                     raise DrillError("bounded-cardinality duration limit reached")
     except KeyboardInterrupt as exc:
+        cancelled.set()
         raise DrillError("bounded-cardinality generation was interrupted") from exc
     if sent != limits["unique_paths"]:
         raise DrillError("bounded-cardinality unique-path contract was not completed")
@@ -2015,6 +2170,59 @@ def _verify_cleanup_baseline(plan, kubeconfig, runner):
         )
         if result.returncode or not result.stdout.strip().startswith("2"):
             raise DrillError("cleanup health preservation check failed")
+
+
+def _recover_failed_trigger(plan, journal, kubeconfig, runner, trigger_pending=True):
+    """Cross the cancellation boundary and deterministically restore the baseline."""
+    if trigger_pending:
+        _record_phase(
+            journal,
+            plan,
+            "execute",
+            "generate-bounded-cardinality",
+            "failed",
+            evidence_summary={
+                "stopped": True,
+                "raw_paths_persisted": False,
+                "stop_reason": "failed-or-interrupted",
+            },
+        )
+    image = next(item for item in plan["actions"] if item["id"] == "inject-incident-image")
+    records = _journal_records(journal, plan)
+    rollback_pending = _pending_operation(records) == ("rollback", image["id"])
+    if ("rollback", image["id"]) not in _completed_operations(records):
+        if not rollback_pending:
+            _record_phase(journal, plan, "rollback", image["id"], "intent")
+        # A drifted/untrusted identity must leave recovery pending rather than
+        # directing the inverse at an unknown cluster.
+        _assert_stage_preflight(
+            plan, kubeconfig, runner, plan["expected_deployment"]["incident_image"]
+        )
+        _run_checked(
+            runner,
+            _bind_command(image["inverse"], kubeconfig),
+            "exact healthy-image recovery failed",
+        )
+        _assert_stage_preflight(
+            plan, kubeconfig, runner, plan["expected_deployment"]["current_image"]
+        )
+        _record_phase(journal, plan, "rollback", image["id"], "completed")
+    _verify_cleanup_baseline(plan, kubeconfig, runner)
+    records = _journal_records(journal, plan)
+    cleanup_pending = _pending_operation(records) == ("cleanup", "cleanup")
+    if ("cleanup", "cleanup") not in _completed_operations(records):
+        if not cleanup_pending:
+            _record_phase(journal, plan, "cleanup", "cleanup", "intent")
+        marker_present = _validate_marker(plan, kubeconfig, runner, absent_ok=True)
+        if marker_present or not cleanup_pending:
+            _run_checked(
+                runner,
+                _marker_command(plan, kubeconfig, "delete"),
+                "exact marker cleanup failed",
+            )
+        if _validate_marker(plan, kubeconfig, runner, absent_ok=True):
+            raise DrillError("exact marker cleanup post-state failed")
+        _record_phase(journal, plan, "cleanup", "cleanup", "completed")
 
 
 def _execute_locked(args, runner, plan, journal, now=None):
@@ -2177,8 +2385,9 @@ def _execute_locked(args, runner, plan, journal, now=None):
         if args.gate_evidence is not None:
             raise DrillError("bounded-cardinality generation refuses operator-authored evidence")
         if pending:
+            _recover_failed_trigger(plan, journal, args.kubeconfig, runner)
             raise DrillError(
-                "interrupted bounded-cardinality generation is nonresumable; roll back"
+                "interrupted bounded-cardinality generation was rolled back and is nonresumable"
             )
         _record_phase(
             journal,
@@ -2210,44 +2419,7 @@ def _execute_locked(args, runner, plan, journal, now=None):
         except BaseException:
             # Cross the cancellation boundary before touching the cluster: the
             # executor context has stopped and joined every request worker.
-            _record_phase(
-                journal,
-                plan,
-                operation,
-                stage,
-                "completed",
-                evidence_summary={"stopped": True, "raw_paths_persisted": False},
-            )
-            image = next(item for item in actions if item["id"] == "inject-incident-image")
-            _record_phase(journal, plan, "rollback", image["id"], "intent")
-            # Never use a kubeconfig implicated in boundary drift for a
-            # recovery mutation. If identity cannot be re-established, the
-            # rollback intent remains pending for an operator to recover.
-            _assert_stage_preflight(
-                plan,
-                args.kubeconfig,
-                runner,
-                plan["expected_deployment"]["incident_image"],
-            )
-            _run_checked(
-                runner,
-                _bind_command(image["inverse"], args.kubeconfig),
-                "exact healthy-image recovery failed",
-            )
-            _assert_stage_preflight(
-                plan, args.kubeconfig, runner, plan["expected_deployment"]["current_image"]
-            )
-            _record_phase(journal, plan, "rollback", image["id"], "completed")
-            _verify_cleanup_baseline(plan, args.kubeconfig, runner)
-            _record_phase(journal, plan, "cleanup", "cleanup", "intent")
-            _run_checked(
-                runner,
-                _marker_command(plan, args.kubeconfig, "delete"),
-                "exact marker cleanup failed",
-            )
-            if _validate_marker(plan, args.kubeconfig, runner, absent_ok=True):
-                raise DrillError("exact marker cleanup post-state failed")
-            _record_phase(journal, plan, "cleanup", "cleanup", "completed")
+            _recover_failed_trigger(plan, journal, args.kubeconfig, runner)
             raise
         _record_phase(journal, plan, operation, stage, "completed", evidence_summary=summary)
         return {"status": "completed", "stage": stage, "summary": summary}
