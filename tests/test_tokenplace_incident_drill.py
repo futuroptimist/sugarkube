@@ -508,8 +508,9 @@ def test_staging_rehearsal_has_separate_identities_and_live_oom_gate(tmp_path):
     assert plan["lifecycle"] == "staging-rehearsal"
     assert plan["preflight"]["classification"] == {"oom_status": "not-yet-observed"}
     assert plan["preflight"]["offline_fixture_authoritative"] is False
-    assert [action["id"] for action in plan["actions"][:3]] == [
-        "inject-oom-stimulus",
+    assert [action["id"] for action in plan["actions"][:4]] == [
+        "select-incident-image",
+        "generate-bounded-cardinality",
         "observe-authentic-oom",
         "pause-metrics",
     ]
@@ -534,6 +535,93 @@ def test_staging_rehearsal_has_separate_identities_and_live_oom_gate(tmp_path):
         )
         == 4
     )
+
+
+def test_rehearsal_cardinality_contract_is_finite_private_and_ordered(tmp_path):
+    plan = executable_rehearsal_plan(tmp_path)
+    image = next(action for action in plan["actions"] if action["id"] == "select-incident-image")
+    trigger = next(
+        action for action in plan["actions"] if action["id"] == "generate-bounded-cardinality"
+    )
+    observation = next(
+        action for action in plan["actions"] if action["id"] == "observe-authentic-oom"
+    )
+
+    assert trigger["depends_on"] == [image["id"]]
+    assert observation["depends_on"] == [trigger["id"]]
+    assert trigger["target"] == {
+        "scheme": "https",
+        "host": drill.STAGING_HOST,
+        "expected_status": 404,
+    }
+    assert trigger["bounds"] == drill.CARDINALITY_LIMITS
+    assert all(
+        isinstance(trigger["bounds"][key], int) and trigger["bounds"][key] > 0
+        for key in (
+            "unique_paths",
+            "total_requests",
+            "concurrency",
+            "requests_per_second",
+            "duration_seconds",
+            "request_timeout_seconds",
+        )
+    )
+    assert trigger["bounds"]["unique_paths"] == trigger["bounds"]["total_requests"]
+    assert trigger["path_contract"]["durable_raw_paths"] is False
+    assert "--acknowledge-bounded-cardinality" in trigger["command"]
+    assert image["inverse"] == trigger["rollback"]
+
+
+def test_image_only_cannot_advance_to_observation(tmp_path):
+    plan = executable_rehearsal_plan(tmp_path)
+    parsed = execution_files(tmp_path, plan)
+    _journal_through(parsed, plan, "select-incident-image")
+    drill._record_phase(parsed.journal, plan, "execute", "select-incident-image", "completed")
+    parsed.execute_stage = "observe-authentic-oom"
+    calls = []
+    runner = execution_runner(
+        plan, calls, _matching_marker(plan), plan["expected_deployment"]["incident_image"]
+    )
+
+    with pytest.raises(drill.DrillError, match="out of order"):
+        drill.execute_operation(parsed, runner)
+
+
+def test_cardinality_stage_requires_separate_execution_acknowledgement(tmp_path):
+    plan = executable_rehearsal_plan(tmp_path)
+    parsed = execution_files(tmp_path, plan)
+    _journal_through(parsed, plan, "select-incident-image")
+    drill._record_phase(parsed.journal, plan, "execute", "select-incident-image", "completed")
+    parsed.execute_stage = "generate-bounded-cardinality"
+    runner = execution_runner(
+        plan, [], _matching_marker(plan), plan["expected_deployment"]["incident_image"]
+    )
+
+    with pytest.raises(drill.DrillError, match="separate bounded-cardinality authorization"):
+        drill.execute_operation(parsed, runner)
+
+
+def test_cardinality_request_rejects_destination_drift_and_never_logs_path():
+    class Response:
+        status = 404
+
+        def geturl(self):
+            return "https://production.token.place/not-the-requested-path"
+
+        def close(self):
+            pass
+
+    class Opener:
+        def open(self, request, timeout):
+            assert timeout == drill.CARDINALITY_LIMITS["request_timeout_seconds"]
+            return Response()
+
+    secret_path = "https://staging.token.place/.well-known/sugarkube-cardinality-drill/secret"
+    with pytest.raises(drill.DrillError, match="destination drifted") as error:
+        drill._bounded_cardinality_request(
+            Opener(), secret_path, drill.CARDINALITY_LIMITS["request_timeout_seconds"]
+        )
+    assert "secret" not in str(error.value)
 
 
 @pytest.mark.parametrize(
@@ -1470,12 +1558,13 @@ def test_offline_rehearsal_cli_emits_non_executing_deterministic_plan(
     plan = json.loads(capsys.readouterr().out)
     ids = [action["id"] for action in plan["actions"]]
     assert ids[:4] == [
-        "inject-oom-stimulus",
+        "select-incident-image",
+        "generate-bounded-cardinality",
         "observe-authentic-oom",
         "pause-metrics",
-        "replace",
     ]
-    stimulus, replace = plan["actions"][0], plan["actions"][3]
+    stimulus = plan["actions"][0]
+    replace = next(action for action in plan["actions"] if action["id"] == "replace")
     assert stimulus["old_state"] == {"image": c.current_image}
     assert stimulus["inverse"][-1] == f"relay={c.current_image}"
     assert replace["old_state"] == {"image": c.incident_image}
@@ -1489,13 +1578,13 @@ def test_authentic_oom_window_starts_at_stimulus_intent():
     records = [
         {
             "operation": "execute",
-            "stage": "inject-oom-stimulus",
+            "stage": "generate-bounded-cardinality",
             "phase": "intent",
             "recorded_at": "2026-09-11T12:00:00Z",
         },
         {
             "operation": "execute",
-            "stage": "inject-oom-stimulus",
+            "stage": "generate-bounded-cardinality",
             "phase": "completed",
             "recorded_at": "2026-09-11T12:00:05Z",
         },
@@ -1586,7 +1675,7 @@ def test_rehearsal_replace_executes_from_incident_image(tmp_path):
 
 def test_pending_rehearsal_image_mutations_reconcile_pre_and_post_states(tmp_path):
     for stage, pre_key, post_key in (
-        ("inject-oom-stimulus", "current_image", "incident_image"),
+        ("select-incident-image", "current_image", "incident_image"),
         ("replace", "incident_image", "replacement_image"),
     ):
         for initial_key, mutations in ((pre_key, 1), (post_key, 0)):

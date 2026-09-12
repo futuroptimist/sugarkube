@@ -140,8 +140,9 @@ For a controlled metrics-OOM rehearsal starting from a healthy baseline, select 
 lifecycle and provide a fourth immutable identity. `CURRENT_IMAGE_DIGEST` is the healthy baseline,
 `INCIDENT_IMAGE_DIGEST` is the reviewed fault stimulus, `REPLACEMENT_IMAGE_DIGEST` is the recovery
 candidate, and `ROLLBACK_IMAGE_DIGEST` is the reviewed emergency fallback. All four must be
-distinct. The second acknowledgement authorizes staging-only fault injection; the existing
-acknowledgement separately recognizes replacement of process-local and `emptyDir` state:
+distinct. The second acknowledgement authorizes staging-only incident-image selection; the
+existing acknowledgement separately recognizes replacement of process-local and `emptyDir`
+state. Neither acknowledgement authorizes cardinality-generating traffic:
 
 ```bash
 python3 scripts/tokenplace_incident_drill.py --dry-run --mode metrics-oom \
@@ -192,15 +193,47 @@ python3 scripts/tokenplace_incident_drill.py --execute-stage "$NEXT_STAGE" \
   --kubeconfig "$STAGING_KUBECONFIG" --gate-evidence "$PRIVATE_GATE_EVIDENCE"
 ```
 
-For the rehearsal, the exact order begins with `marker`, `inject-oom-stimulus`, and
-`observe-authentic-oom`, followed by the existing containment, recovery replacement, readiness,
+For the rehearsal, the exact order begins with `marker`, `select-incident-image`,
+`generate-bounded-cardinality`, and `observe-authentic-oom`, followed by the existing containment,
+recovery replacement, readiness,
 compute registration and polling, relay-blind encrypted E2EE, route preservation, metrics-exit,
 metrics-last restoration, and final observation stages. Do not supply `--gate-evidence` to
 `observe-authentic-oom`: that gate reads the current Deployment, its unambiguous owned ReplicaSet
 and Pod, the exact container/image/memory limit, its OOMKilled/137 last termination, positive
 restart count and timestamp, and privacy-safe event aggregates directly through the bound staging
-kubeconfig. Operator-authored JSON and offline fixtures cannot satisfy it. A missing, ambiguous,
+kubeconfig. Merely completing `select-incident-image` cannot advance to observation. The traffic
+stage requires its own `--acknowledge-bounded-cardinality` flag on that invocation; earlier image
+and state-loss acknowledgements do not carry forward. It sends at most 72,000 requests for 72,000
+unique synthetic run-owned paths, with concurrency 16, a 200 requests/second ceiling, a 420-second
+wall-clock ceiling, and a five-second request timeout. It accepts only direct HTTPS responses from
+`staging.token.place`, refuses redirects or destination drift, and expects unmatched-path 404s.
+The generated paths contain only a deterministic hash of the run identity and ordinal. Raw paths
+are never journaled: durable evidence contains request and unique-path counts, a path-set SHA-256,
+and `raw_paths_retained=false`.
+
+The trigger reasserts cluster, Deployment, container, incident image, replica, and memory-limit
+identity between bounded worker batches. A limit, timeout, unexpected response, identity drift, or
+interruption cancels pending work, waits for in-flight requests to cross their five-second boundary,
+durably marks the trigger cancelled, and applies the already-recorded exact inverse back to the
+healthy image. No traffic-generator Kubernetes resource is created. The private directory journal
+is preserved; after baseline health verification, cleanup deletes only the exact run-owned marker.
+The two earlier failed live run IDs are nonresumable and must never be reused or represented as
+successful.
+
+Operator-authored JSON and offline fixtures cannot satisfy the OOM gate. A missing, ambiguous,
 wrong-owner, wrong-container, wrong-image, wrong-limit, or unconverged observation stops progress.
+Acceptance additionally requires one unambiguous owned Pod with live Kubernetes state showing
+`OOMKilled`, exit code 137, a positive restart count, and a termination timestamp after the durable
+`generate-bounded-cardinality` intent. Stale or pre-trigger terminations are refused.
+
+Execute the separately authorized traffic gate only from the reviewed live plan:
+
+```bash
+python3 scripts/tokenplace_incident_drill.py \
+  --execute-stage generate-bounded-cardinality \
+  --plan "$PRIVATE_PLAN" --journal "$PRIVATE_JOURNAL_DIRECTORY" \
+  --kubeconfig "$STAGING_KUBECONFIG" --acknowledge-bounded-cardinality
+```
 
 Omit `--gate-evidence` for mutation stages. For a gate, supply an absolute path to a regular file
 outside this repository (maximum 64 KiB):
