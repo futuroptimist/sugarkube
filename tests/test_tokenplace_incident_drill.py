@@ -563,9 +563,7 @@ def test_image_only_journal_cannot_advance_to_authentic_oom(tmp_path):
     plan = executable_rehearsal_plan(tmp_path)
     parsed = execution_files(tmp_path, plan)
     _journal_through(parsed, plan, "inject-incident-image")
-    drill._record_phase(
-        parsed.journal, plan, "execute", "inject-incident-image", "completed"
-    )
+    drill._record_phase(parsed.journal, plan, "execute", "inject-incident-image", "completed")
     parsed.execute_stage = "observe-authentic-oom"
     runner = execution_runner(
         plan, [], _matching_marker(plan), plan["expected_deployment"]["incident_image"]
@@ -579,9 +577,7 @@ def test_bounded_cardinality_requires_separate_execution_acknowledgement(tmp_pat
     plan = executable_rehearsal_plan(tmp_path)
     parsed = execution_files(tmp_path, plan)
     _journal_through(parsed, plan, "inject-incident-image")
-    drill._record_phase(
-        parsed.journal, plan, "execute", "inject-incident-image", "completed"
-    )
+    drill._record_phase(parsed.journal, plan, "execute", "inject-incident-image", "completed")
     parsed.execute_stage = "generate-bounded-cardinality"
     runner = execution_runner(
         plan, [], _matching_marker(plan), plan["expected_deployment"]["incident_image"]
@@ -597,9 +593,7 @@ def test_bounded_cardinality_failure_cancels_rolls_back_and_exactly_cleans_up(
     plan = executable_rehearsal_plan(tmp_path)
     parsed = execution_files(tmp_path, plan)
     _journal_through(parsed, plan, "inject-incident-image")
-    drill._record_phase(
-        parsed.journal, plan, "execute", "inject-incident-image", "completed"
-    )
+    drill._record_phase(parsed.journal, plan, "execute", "inject-incident-image", "completed")
     parsed.execute_stage = "generate-bounded-cardinality"
     parsed.acknowledge_bounded_cardinality_generation = True
     calls = []
@@ -608,11 +602,13 @@ def test_bounded_cardinality_failure_cancels_rolls_back_and_exactly_cleans_up(
         calls.append(command)
         return subprocess.CompletedProcess(command, 0, "", "")
 
-    def fail_after_workers_stop(_action, _boundary_check):
+    def fail_after_workers_stop(_action, _boundary_check, _disruption_check):
         raise drill.DrillError("bounded-cardinality duration limit reached")
 
     monkeypatch.setattr(drill, "_run_bounded_cardinality", fail_after_workers_stop)
-    monkeypatch.setattr(drill, "_assert_stage_preflight", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        drill, "_assert_stage_preflight", lambda *_args, **_kwargs: calls.append(["preflight"])
+    )
     monkeypatch.setattr(drill, "_verify_cleanup_baseline", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         drill, "_validate_marker", lambda *_args, absent_ok=False, **_kwargs: not absent_ok
@@ -622,7 +618,9 @@ def test_bounded_cardinality_failure_cancels_rolls_back_and_exactly_cleans_up(
         drill.execute_operation(parsed, runner)
 
     image = next(action for action in plan["actions"] if action["id"] == "inject-incident-image")
-    assert drill._bind_command(image["inverse"], parsed.kubeconfig) in calls
+    inverse = drill._bind_command(image["inverse"], parsed.kubeconfig)
+    assert inverse in calls
+    assert calls[calls.index(inverse) - 1] == ["preflight"]
     assert drill._marker_command(plan, parsed.kubeconfig, "delete") in calls
     records = drill._journal_records(parsed.journal, plan)
     assert (records[-1]["operation"], records[-1]["stage"], records[-1]["phase"]) == (
@@ -712,6 +710,30 @@ def test_bounded_cardinality_rejects_destination_drift(monkeypatch):
     }
     with pytest.raises(drill.DrillError, match="destination drifted"):
         drill._run_bounded_cardinality(action)
+
+
+def test_bounded_cardinality_wraps_network_failure_and_requires_authentic_oom(monkeypatch):
+    limits = dict(drill.CARDINALITY_LIMITS, unique_paths=1, total_requests=1)
+    monkeypatch.setattr(drill, "CARDINALITY_LIMITS", limits)
+
+    class Opener:
+        def open(self, _request, timeout):
+            raise drill.urllib.error.URLError("private network detail")
+
+    monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *_args: Opener())
+    action = {
+        "target": {"scheme": "https", "host": drill.STAGING_HOST, "redirects": "reject"},
+        "limits": limits,
+        "command": ["internal:generate-bounded-cardinality", "--run-id", "safe-run"],
+    }
+
+    with pytest.raises(drill.DrillError, match="bounded-cardinality request failed") as caught:
+        drill._run_bounded_cardinality(action, disruption_check=lambda: False)
+    assert "private network detail" not in str(caught.value)
+
+    summary = drill._run_bounded_cardinality(action, disruption_check=lambda: True)
+    assert summary["stopped_on_authentic_oom"] is True
+    assert summary["raw_paths_persisted"] is False
 
 
 @pytest.mark.parametrize(

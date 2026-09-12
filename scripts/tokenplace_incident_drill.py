@@ -16,7 +16,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -47,6 +47,10 @@ RFC3339_UTC = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$")
 
 class DrillError(ValueError):
     """An error safe to show without echoing operator-supplied values."""
+
+
+class _RequestDisruption(DrillError):
+    """A transport failure that may have been caused by the intended OOM."""
 
 
 @dataclass(frozen=True)
@@ -1799,7 +1803,9 @@ def _bounded_cardinality_path(run_id: str, sequence: int) -> str:
 
 
 def _run_bounded_cardinality(
-    action: dict, boundary_check: Callable[[], None] | None = None
+    action: dict,
+    boundary_check: Callable[[], None] | None = None,
+    disruption_check: Callable[[], bool] | None = None,
 ) -> dict:
     """Run the reviewed finite HTTP stimulus and return privacy-safe aggregates."""
     if action.get("target") != {
@@ -1819,6 +1825,8 @@ def _run_bounded_cardinality(
         raise DrillError("bounded-cardinality run identity is unsafe")
     opener = urllib.request.build_opener(_RejectRedirects)
     started = time.monotonic()
+    deadline = started + limits["duration_seconds"]
+    next_boundary_check = started
     statuses: dict[str, int] = {}
     sent = 0
     digest = hashlib.sha256()
@@ -1828,12 +1836,18 @@ def _run_bounded_cardinality(
         url = f"https://{STAGING_HOST}{path}"
         req = urllib.request.Request(url, method="GET", headers={"Accept": "text/plain"})
         try:
-            with opener.open(req, timeout=limits["request_timeout_seconds"]) as response:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise DrillError("bounded-cardinality duration limit reached")
+            timeout = min(limits["request_timeout_seconds"], remaining)
+            with opener.open(req, timeout=timeout) as response:
                 status = response.status
                 final = urlsplit(response.geturl())
         except urllib.error.HTTPError as exc:
             status = exc.code
             final = urlsplit(exc.geturl())
+        except (urllib.error.URLError, TimeoutError) as exc:
+            raise _RequestDisruption("bounded-cardinality request failed") from exc
         if final.scheme != "https" or final.hostname != STAGING_HOST or final.path != path:
             raise DrillError("bounded-cardinality destination drifted")
         if status != 404:
@@ -1843,17 +1857,40 @@ def _run_bounded_cardinality(
     try:
         with ThreadPoolExecutor(max_workers=limits["concurrency"]) as pool:
             while sent < limits["total_requests"]:
-                if boundary_check is not None and sent % limits["requests_per_second"] < limits[
-                    "concurrency"
-                ]:
+                now = time.monotonic()
+                if boundary_check is not None and now >= next_boundary_check:
                     boundary_check()
-                elapsed = time.monotonic() - started
-                if elapsed >= limits["duration_seconds"]:
+                    # Coordinate drift is checked on time, not throughput, so
+                    # slow responses cannot weaken the fail-closed boundary.
+                    next_boundary_check = now + limits["request_timeout_seconds"]
+                remaining_budget = deadline - time.monotonic()
+                if remaining_budget <= 0:
                     raise DrillError("bounded-cardinality duration limit reached")
                 count = min(limits["concurrency"], limits["total_requests"] - sent)
                 batch_started = time.monotonic()
                 futures = [pool.submit(request, sent + offset) for offset in range(count)]
-                batch_hashes = [future.result() for future in as_completed(futures)]
+                try:
+                    batch_hashes = [
+                        future.result()
+                        for future in as_completed(futures, timeout=remaining_budget)
+                    ]
+                except FuturesTimeoutError as exc:
+                    for future in futures:
+                        future.cancel()
+                    raise DrillError("bounded-cardinality duration limit reached") from exc
+                except _RequestDisruption:
+                    for future in futures:
+                        future.cancel()
+                    if disruption_check is None or not disruption_check():
+                        raise
+                    return {
+                        "requests": sent,
+                        "unique_paths": sent,
+                        "status_counts": statuses,
+                        "path_set_sha256": digest.hexdigest(),
+                        "raw_paths_persisted": False,
+                        "stopped_on_authentic_oom": True,
+                    }
                 for path_hash in sorted(batch_hashes):
                     digest.update(path_hash.encode("ascii"))
                     statuses["404"] = statuses.get("404", 0) + 1
@@ -1861,7 +1898,9 @@ def _run_bounded_cardinality(
                 minimum = count / limits["requests_per_second"]
                 remaining = minimum - (time.monotonic() - batch_started)
                 if remaining > 0:
-                    time.sleep(remaining)
+                    time.sleep(min(remaining, max(0, deadline - time.monotonic())))
+                if time.monotonic() >= deadline:
+                    raise DrillError("bounded-cardinality duration limit reached")
     except KeyboardInterrupt as exc:
         raise DrillError("bounded-cardinality generation was interrupted") from exc
     if sent != limits["unique_paths"]:
@@ -1873,6 +1912,54 @@ def _run_bounded_cardinality(
         "path_set_sha256": digest.hexdigest(),
         "raw_paths_persisted": False,
     }
+
+
+def _observe_rehearsal_oom(plan: dict, kubeconfig: Path, runner: Runner, not_before):
+    """Read authoritative OOM evidence for the exact reviewed Deployment."""
+    expected = plan["expected_deployment"]
+    deployment = _runner_json(
+        runner,
+        [
+            "kubectl",
+            "--kubeconfig",
+            str(kubeconfig),
+            "--context",
+            "sugar-staging",
+            "--namespace",
+            plan["inventory"]["namespace"],
+            "get",
+            "deployment",
+            next(a["resource"].split("/", 1)[1] for a in plan["actions"] if a["id"] == "replace"),
+            "-o",
+            "json",
+        ],
+        "authoritative OOM Deployment lookup failed",
+    )
+    coordinates = Coordinates(
+        STAGING_HOST,
+        kubeconfig,
+        "sugar-staging",
+        "staging",
+        plan["inventory"]["namespace"],
+        deployment["metadata"]["name"],
+        expected["container"],
+        expected["incident_image"],
+        expected["replacement_image"],
+        expected["rollback_image"],
+        expected["replicas"],
+        expected["memory_limit"],
+        plan["inventory"]["service_monitor"],
+        plan["run_id"],
+        "staging-rehearsal",
+        expected["incident_image"],
+    )
+    return _observe_live_oom(
+        coordinates,
+        deployment,
+        ["kubectl", "--kubeconfig", str(kubeconfig), "--context", "sugar-staging"],
+        runner,
+        not_before=not_before,
+    )
 
 
 def execute_operation(
@@ -2111,6 +2198,14 @@ def _execute_locked(args, runner, plan, journal, now=None):
                     runner,
                     plan["expected_deployment"]["incident_image"],
                 ),
+                lambda: bool(
+                    _observe_rehearsal_oom(
+                        plan,
+                        args.kubeconfig,
+                        runner,
+                        _stimulus_not_before(records),
+                    )
+                ),
             )
         except BaseException:
             # Cross the cancellation boundary before touching the cluster: the
@@ -2125,6 +2220,15 @@ def _execute_locked(args, runner, plan, journal, now=None):
             )
             image = next(item for item in actions if item["id"] == "inject-incident-image")
             _record_phase(journal, plan, "rollback", image["id"], "intent")
+            # Never use a kubeconfig implicated in boundary drift for a
+            # recovery mutation. If identity cannot be re-established, the
+            # rollback intent remains pending for an operator to recover.
+            _assert_stage_preflight(
+                plan,
+                args.kubeconfig,
+                runner,
+                plan["expected_deployment"]["incident_image"],
+            )
             _run_checked(
                 runner,
                 _bind_command(image["inverse"], args.kubeconfig),
@@ -2145,57 +2249,14 @@ def _execute_locked(args, runner, plan, journal, now=None):
                 raise DrillError("exact marker cleanup post-state failed")
             _record_phase(journal, plan, "cleanup", "cleanup", "completed")
             raise
-        _record_phase(
-            journal, plan, operation, stage, "completed", evidence_summary=summary
-        )
+        _record_phase(journal, plan, operation, stage, "completed", evidence_summary=summary)
         return {"status": "completed", "stage": stage, "summary": summary}
     if action["type"] == "gate":
         if action["id"] == "observe-authentic-oom":
             if args.gate_evidence is not None:
                 raise DrillError("authoritative OOM gate refuses operator-authored evidence")
-            expected = plan["expected_deployment"]
-            deployment = _runner_json(
-                runner,
-                [
-                    "kubectl",
-                    "--kubeconfig",
-                    str(args.kubeconfig),
-                    "--context",
-                    "sugar-staging",
-                    "--namespace",
-                    plan["inventory"]["namespace"],
-                    "get",
-                    "deployment",
-                    next(a["resource"].split("/", 1)[1] for a in actions if a["id"] == "replace"),
-                    "-o",
-                    "json",
-                ],
-                "authoritative OOM Deployment lookup failed",
-            )
-            coordinates = Coordinates(
-                STAGING_HOST,
-                args.kubeconfig,
-                "sugar-staging",
-                "staging",
-                plan["inventory"]["namespace"],
-                deployment["metadata"]["name"],
-                expected["container"],
-                expected["incident_image"],
-                expected["replacement_image"],
-                expected["rollback_image"],
-                expected["replicas"],
-                expected["memory_limit"],
-                plan["inventory"]["service_monitor"],
-                plan["run_id"],
-                "staging-rehearsal",
-                expected["incident_image"],
-            )
-            observation = _observe_live_oom(
-                coordinates,
-                deployment,
-                ["kubectl", "--kubeconfig", str(args.kubeconfig), "--context", "sugar-staging"],
-                runner,
-                not_before=_stimulus_not_before(records),
+            observation = _observe_rehearsal_oom(
+                plan, args.kubeconfig, runner, _stimulus_not_before(records)
             )
             _record_phase(
                 journal,

@@ -212,15 +212,22 @@ The trigger is fixed at 72,000 synthetic unique unmatched paths and 72,000 total
 concurrency 16, a ceiling of 400 requests per second, a 240-second wall-clock limit, and a
 five-second per-request timeout. It uses only HTTPS to `staging.token.place`, requires every
 response to remain on the exact requested staging URL without redirects and to be 404, and stops
-at the first failure, timeout, interruption, or bound. Paths are deterministically derived from
-the run ID and sequence; no credentials, payloads, user input, or production host can enter them.
+at the first failure, timeout, interruption, or bound. The sole exception is request disruption
+for which the bound Kubernetes observer immediately confirms a new, exact OOMKilled/137 event;
+that expected disruption completes the trigger early and preserves the workload for the separate
+authentic-OOM gate. Unauthenticated network errors fail closed. Each request timeout is clipped
+to the remaining absolute wall budget, and staging identity plus Deployment coordinates are
+rechecked at least every five seconds even when responses are slow. Paths are deterministically
+derived from the run ID and sequence; no credentials, payloads, user input, or production host can
+enter them.
 Only counts, status aggregates, and a SHA-256 path-set commitment enter the private journal—never
 the raw paths. The plan prints the forward action, cancellation boundary, healthy-image recovery,
 and exact marker cleanup coordinates.
 
 Worker cancellation is joined before recovery begins. A failure or interruption records a
-privacy-safe stopped summary, restores the exact healthy image, reasserts the reviewed staging
-identity and Deployment coordinates, verifies `/livez` and `/healthz`, and deletes only the exact
+privacy-safe stopped summary, reasserts staging identity before any recovery mutation, restores
+the exact healthy image, reasserts the reviewed staging identity and Deployment coordinates,
+verifies `/livez` and `/healthz`, and deletes only the exact
 run-owned marker. The append-only private journal remains in place. Never resume an interrupted
 traffic stage or either prior failed live run ID; create a newly reviewed plan and run ID.
 
