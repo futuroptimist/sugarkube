@@ -13,6 +13,10 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
+import urllib.error
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,6 +35,14 @@ GATE_EVIDENCE_MAX_BYTES = 64 * 1024
 GATE_EVIDENCE_FRESHNESS_SECONDS = 5 * 60
 INCIDENT_PROBES = ROOT / "config/observability/tokenplace-incident-probes.json"
 RFC3339_UTC = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$")
+CARDINALITY_LIMITS = {
+    "unique_paths": 72_000,
+    "total_requests": 72_000,
+    "concurrency": 16,
+    "requests_per_second": 200,
+    "duration_seconds": 420,
+    "request_timeout_seconds": 5,
+}
 
 
 class DrillError(ValueError):
@@ -127,6 +139,7 @@ def execution_parser() -> argparse.ArgumentParser:
     result.add_argument("--journal", required=True, type=Path)
     result.add_argument("--kubeconfig", required=True, type=Path)
     result.add_argument("--gate-evidence", type=Path)
+    result.add_argument("--acknowledge-bounded-cardinality", action="store_true")
     return result
 
 
@@ -779,13 +792,48 @@ def build_plan(preflight: Preflight) -> dict:
             f"{c.container}={c.current_image}",
         ]
         mutation(
-            "inject-oom-stimulus",
+            "select-incident-image",
             f"deployment/{c.deployment}",
             prefix
             + ["set", "image", f"deployment/{c.deployment}", f"{c.container}={c.incident_image}"],
             baseline_inverse,
             {"image": c.current_image},
         )["baseline_idempotent_inverse"] = True
+        actions.append(
+            {
+                "id": "generate-bounded-cardinality",
+                "stage": "generate-bounded-cardinality",
+                "type": "trigger",
+                "depends_on": [previous],
+                "target": {"scheme": "https", "host": STAGING_HOST, "expected_status": 404},
+                "bounds": dict(CARDINALITY_LIMITS),
+                "path_contract": {
+                    "prefix": "/.well-known/sugarkube-cardinality-drill/",
+                    "synthetic": True,
+                    "run_owned": True,
+                    "durable_raw_paths": False,
+                },
+                "command": [
+                    "python3",
+                    "scripts/tokenplace_incident_drill.py",
+                    "--execute-stage",
+                    "generate-bounded-cardinality",
+                    "--plan",
+                    "<immutable-live-plan>",
+                    "--journal",
+                    "<private-journal-directory>",
+                    "--kubeconfig",
+                    "<supplied-kubeconfig>",
+                    "--acknowledge-bounded-cardinality",
+                ],
+                "cancellation": (
+                    "process-local worker pool; cancel pending futures and await workers"
+                ),
+                "rollback": baseline_inverse,
+                "cleanup": ["no cluster traffic-generator resources are created"],
+            }
+        )
+        previous = "generate-bounded-cardinality"
         gate(
             "observe-authentic-oom",
             [
@@ -1092,7 +1140,7 @@ def build_plan(preflight: Preflight) -> dict:
         preserves=("probe/livez", "probe/healthz"),
     )
     plan = {
-        "schema_version": 2,
+        "schema_version": 3,
         "mode": mode,
         "lifecycle": c.lifecycle,
         "run_id": c.run_id,
@@ -1143,7 +1191,7 @@ def _load_execution_plan(path: Path) -> dict:
         plan = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise DrillError("immutable plan cannot be read") from exc
-    if not isinstance(plan, dict) or plan.get("schema_version") != 2:
+    if not isinstance(plan, dict) or plan.get("schema_version") != 3:
         raise DrillError("unsupported plan schema")
     if plan.get("environment") != "staging" or plan.get("run_id") is None:
         raise DrillError("execution is restricted to a named staging run")
@@ -1176,6 +1224,20 @@ def _load_execution_plan(path: Path) -> dict:
                 or not all(isinstance(token, str) and token for token in value)
             ):
                 raise DrillError("plan contains a shell-string or malformed command")
+    if plan.get("lifecycle") == "staging-rehearsal":
+        trigger = next(
+            (action for action in actions if action.get("id") == "generate-bounded-cardinality"),
+            None,
+        )
+        if (
+            not isinstance(trigger, dict)
+            or trigger.get("type") != "trigger"
+            or trigger.get("target")
+            != {"scheme": "https", "host": STAGING_HOST, "expected_status": 404}
+            or trigger.get("bounds") != CARDINALITY_LIMITS
+            or trigger.get("depends_on") != ["select-incident-image"]
+        ):
+            raise DrillError("bounded cardinality contract is missing or unsafe")
     return plan
 
 
@@ -1215,7 +1277,7 @@ def _journal_records(directory: Path, plan: dict) -> list[dict]:
     aborting = False
     ordered = ["marker"] + [action["id"] for action in plan["actions"]]
     mutations = {action["id"] for action in plan["actions"] if action["type"] == "mutation"}
-    gates = {action["id"] for action in plan["actions"] if action["type"] == "gate"}
+    gates = {action["id"] for action in plan["actions"] if action["type"] in {"gate", "trigger"}}
     executed = []
     active = []
     for record in records:
@@ -1261,6 +1323,11 @@ def _journal_records(directory: Path, plan: dict) -> list[dict]:
             if pending != key or operation != "execute" or stage not in gates:
                 raise DrillError("journal transition is invalid")
             pending = None
+        elif phase == "cancelled":
+            if pending != key or operation != "execute" or stage not in gates:
+                raise DrillError("journal transition is invalid")
+            pending = None
+            aborting = True
         else:
             raise DrillError("journal record transition is invalid")
     return records
@@ -1589,7 +1656,7 @@ def _stimulus_not_before(records: list[dict]) -> datetime:
             item
             for item in reversed(records)
             if item["operation"] == "execute"
-            and item["stage"] == "inject-oom-stimulus"
+            and item["stage"] == "generate-bounded-cardinality"
             and item["phase"] == "intent"
         ),
         None,
@@ -1737,6 +1804,156 @@ def _read_gate_evidence(path: Path) -> tuple[dict, str]:
     except (OSError, RuntimeError, json.JSONDecodeError) as exc:
         raise DrillError("gate evidence cannot be read") from exc
     return evidence, hashlib.sha256(payload).hexdigest()
+
+
+class _RefuseRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: N802
+        raise DrillError("bounded cardinality trigger refused a redirect")
+
+
+def _bounded_cardinality_request(opener, url: str, timeout: int) -> int:
+    request = urllib.request.Request(
+        url,
+        headers={"User-Agent": "sugarkube-staging-cardinality-drill/1"},
+        method="GET",
+    )
+    try:
+        response = opener.open(request, timeout=timeout)
+        status, destination = response.status, response.geturl()
+        response.close()
+    except urllib.error.HTTPError as exc:
+        status, destination = exc.code, exc.geturl()
+        exc.close()
+    if urlsplit(destination).scheme != "https" or urlsplit(destination).hostname != STAGING_HOST:
+        raise DrillError("bounded cardinality trigger destination drifted")
+    if status != 404:
+        raise DrillError("bounded cardinality trigger received an unexpected status")
+    return status
+
+
+def _run_bounded_cardinality(
+    plan: dict,
+    action: dict,
+    kubeconfig: Path,
+    runner: Runner,
+    *,
+    not_before: datetime,
+) -> dict:
+    """Issue finite run-owned 404s without retaining their raw paths."""
+    if action.get("bounds") != CARDINALITY_LIMITS:
+        raise DrillError("bounded cardinality limits do not match the reviewed contract")
+    bounds = action["bounds"]
+    opener = urllib.request.build_opener(_RefuseRedirects())
+    started = time.monotonic()
+    completed = 0
+    path_digest = hashlib.sha256()
+    prefix = action["path_contract"]["prefix"]
+    seed = f"{plan['run_id']}:{plan['plan_digest']}".encode()
+    stopped_on_oom = False
+    try:
+        with ThreadPoolExecutor(max_workers=bounds["concurrency"]) as pool:
+            while completed < bounds["total_requests"]:
+                if time.monotonic() - started >= bounds["duration_seconds"]:
+                    raise DrillError("bounded cardinality trigger reached its wall-clock limit")
+                _assert_stage_preflight(
+                    plan, kubeconfig, runner, plan["expected_deployment"]["incident_image"]
+                )
+                count = min(bounds["concurrency"], bounds["total_requests"] - completed)
+                futures = []
+                for index in range(completed, completed + count):
+                    path_component = hashlib.sha256(seed + b":" + str(index).encode()).hexdigest()
+                    path_digest.update(path_component.encode())
+                    url = f"https://{STAGING_HOST}{prefix}{path_component}"
+                    futures.append(
+                        pool.submit(
+                            _bounded_cardinality_request,
+                            opener,
+                            url,
+                            bounds["request_timeout_seconds"],
+                        )
+                    )
+                for future in as_completed(futures):
+                    future.result()
+                    completed += 1
+                if completed % bounds["requests_per_second"] < bounds["concurrency"]:
+                    expected = plan["expected_deployment"]
+                    deployment = _runner_json(
+                        runner,
+                        [
+                            "kubectl",
+                            "--kubeconfig",
+                            str(kubeconfig),
+                            "--context",
+                            "sugar-staging",
+                            "--namespace",
+                            plan["inventory"]["namespace"],
+                            "get",
+                            "deployment",
+                            next(
+                                item["resource"].split("/", 1)[1]
+                                for item in plan["actions"]
+                                if item["id"] == "select-incident-image"
+                            ),
+                            "-o",
+                            "json",
+                        ],
+                        "bounded trigger Deployment observation failed",
+                    )
+                    coordinates = Coordinates(
+                        STAGING_HOST,
+                        kubeconfig,
+                        "sugar-staging",
+                        "staging",
+                        plan["inventory"]["namespace"],
+                        deployment["metadata"]["name"],
+                        expected["container"],
+                        expected["incident_image"],
+                        expected["replacement_image"],
+                        expected["rollback_image"],
+                        expected["replicas"],
+                        expected["memory_limit"],
+                        plan["inventory"]["service_monitor"],
+                        plan["run_id"],
+                        "staging-rehearsal",
+                        expected["incident_image"],
+                    )
+                    try:
+                        _observe_live_oom(
+                            coordinates,
+                            deployment,
+                            [
+                                "kubectl",
+                                "--kubeconfig",
+                                str(kubeconfig),
+                                "--context",
+                                "sugar-staging",
+                            ],
+                            runner,
+                            not_before=not_before,
+                        )
+                    except DrillError as exc:
+                        if str(exc) != "metrics-OOM evidence is missing or ambiguous":
+                            raise
+                    else:
+                        stopped_on_oom = True
+                        break
+                earliest = completed / bounds["requests_per_second"]
+                delay = earliest - (time.monotonic() - started)
+                if delay > 0:
+                    time.sleep(delay)
+                if stopped_on_oom:
+                    break
+    except BaseException:
+        for future in locals().get("futures", []):
+            future.cancel()
+        raise
+    return {
+        "requests_completed": completed,
+        "unique_paths_generated": completed,
+        "path_set_sha256": path_digest.hexdigest(),
+        "raw_paths_retained": False,
+        "stopped_on_accepted_oom": stopped_on_oom,
+    }
 
 
 def execute_operation(
@@ -1948,6 +2165,39 @@ def _execute_locked(args, runner, plan, journal, now=None):
         return {"status": "already-completed", "stage": stage}
     if done != expected[: len(done)] or expected[len(done)] != stage:
         raise DrillError("stage is out of order")
+    if action["type"] == "trigger":
+        if not getattr(args, "acknowledge_bounded_cardinality", False):
+            raise DrillError("separate bounded-cardinality authorization is required")
+        if args.gate_evidence is not None:
+            raise DrillError("bounded cardinality stage refuses operator evidence")
+        if pending:
+            raise DrillError("an interrupted bounded trigger is nonresumable; roll back")
+        _record_phase(journal, plan, operation, stage, "intent")
+        try:
+            summary = _run_bounded_cardinality(
+                plan,
+                action,
+                args.kubeconfig,
+                runner,
+                not_before=_stimulus_not_before(_journal_records(journal, plan)),
+            )
+        except BaseException:
+            _record_phase(journal, plan, operation, stage, "cancelled")
+            image_action = next(item for item in actions if item["id"] == "select-incident-image")
+            _record_phase(journal, plan, "rollback", image_action["id"], "intent")
+            _run_checked(
+                runner,
+                _bind_command(image_action["inverse"], args.kubeconfig),
+                "automatic healthy-image rollback failed",
+            )
+            _assert_stage_preflight(
+                plan, args.kubeconfig, runner, plan["expected_deployment"]["current_image"]
+            )
+            _record_phase(journal, plan, "rollback", image_action["id"], "completed")
+            _verify_cleanup_baseline(plan, args.kubeconfig, runner)
+            raise
+        _record_phase(journal, plan, operation, stage, "completed", evidence_summary=summary)
+        return {"status": "completed", "stage": stage, **summary}
     if action["type"] == "gate":
         if action["id"] == "observe-authentic-oom":
             if args.gate_evidence is not None:
