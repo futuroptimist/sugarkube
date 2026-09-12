@@ -895,6 +895,210 @@ def test_bounded_cardinality_accounts_successes_in_disrupted_batch(monkeypatch):
     assert "__sugarkube_cardinality_rehearsal__" not in json.dumps(summary)
 
 
+def _bounded_action(reviewed_limits, **changes):
+    action = {
+        "target": {"scheme": "https", "host": drill.STAGING_HOST, "redirects": "reject"},
+        "limits": reviewed_limits,
+        "command": [
+            "internal:generate-bounded-cardinality",
+            "--host",
+            drill.STAGING_HOST,
+            "--run-id",
+            "safe-run",
+        ],
+    }
+    action.update(changes)
+    return action
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"target": {"scheme": "http"}}, "target"),
+        ({"limits": {}}, "limits"),
+        ({"command": ["internal:wrong"]}, "command"),
+        ({"path_contract": {"durable_raw_paths": True}}, "path contract"),
+        (
+            {
+                "command": [
+                    "internal:generate-bounded-cardinality",
+                    "--host",
+                    drill.STAGING_HOST,
+                    "--run-id",
+                    "unsafe/run",
+                ]
+            },
+            "identity",
+        ),
+    ],
+)
+def test_bounded_cardinality_revalidates_runtime_contract(monkeypatch, change, message):
+    limits = dict(drill.CARDINALITY_LIMITS, unique_paths=1, total_requests=1)
+    monkeypatch.setattr(drill, "CARDINALITY_LIMITS", limits)
+
+    with pytest.raises(drill.DrillError, match=message):
+        drill._run_bounded_cardinality(_bounded_action(limits, **change))
+
+
+def test_bounded_cardinality_redirect_handler_fails_closed():
+    with pytest.raises(drill.DrillError, match="attempted a redirect"):
+        drill._RejectRedirects().redirect_request(
+            None, None, 302, "found", {}, "https://example.com"
+        )
+
+
+def test_bounded_cardinality_closes_expected_http_error(monkeypatch):
+    limits = dict(drill.CARDINALITY_LIMITS, unique_paths=1, total_requests=1)
+    monkeypatch.setattr(drill, "CARDINALITY_LIMITS", limits)
+    error = drill.urllib.error.HTTPError(
+        "https://staging.token.place/missing", 404, "missing", {}, None
+    )
+    error.geturl = lambda: requested[0]
+    original_close = error.close
+    closed = False
+    requested = []
+
+    def close():
+        nonlocal closed
+        closed = True
+        original_close()
+
+    error.close = close
+
+    class Opener:
+        def open(self, request, timeout):
+            requested.append(request.full_url)
+            raise error
+
+    monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *_args: Opener())
+
+    summary = drill._run_bounded_cardinality(_bounded_action(limits))
+
+    assert summary["status_counts"] == {"404": 1}
+    assert closed is True
+
+
+def test_bounded_cardinality_rejects_unexpected_status(monkeypatch):
+    limits = dict(drill.CARDINALITY_LIMITS, unique_paths=1, total_requests=1)
+    monkeypatch.setattr(drill, "CARDINALITY_LIMITS", limits)
+
+    class Found:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def geturl(self):
+            return requested[0]
+
+    class Opener:
+        def open(self, request, timeout):
+            requested.append(request.full_url)
+            return Found()
+
+    requested = []
+    monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *_args: Opener())
+
+    with pytest.raises(drill.DrillError, match="remain unmatched"):
+        drill._run_bounded_cardinality(_bounded_action(limits))
+
+
+def test_bounded_cardinality_timeout_cancels_batch(monkeypatch):
+    limits = dict(drill.CARDINALITY_LIMITS, unique_paths=1, total_requests=1)
+    monkeypatch.setattr(drill, "CARDINALITY_LIMITS", limits)
+    monkeypatch.setattr(
+        drill,
+        "as_completed",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(drill.FuturesTimeoutError()),
+    )
+
+    class Missing:
+        status = 404
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def geturl(self):
+            return requested[0]
+
+    class Opener:
+        def open(self, request, timeout):
+            requested.append(request.full_url)
+            return Missing()
+
+    requested = []
+    monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *_args: Opener())
+
+    with pytest.raises(drill.DrillError, match="duration limit"):
+        drill._run_bounded_cardinality(_bounded_action(limits))
+
+
+def test_bounded_cardinality_interrupt_and_partial_completion_fail(monkeypatch):
+    limits = dict(drill.CARDINALITY_LIMITS, unique_paths=2, total_requests=1, concurrency=1)
+    monkeypatch.setattr(drill, "CARDINALITY_LIMITS", limits)
+
+    with pytest.raises(drill.DrillError, match="interrupted"):
+        drill._run_bounded_cardinality(
+            _bounded_action(limits),
+            boundary_check=lambda: (_ for _ in ()).throw(KeyboardInterrupt()),
+        )
+
+    class Missing:
+        status = 404
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def geturl(self):
+            return requested[0]
+
+    class Opener:
+        def open(self, request, timeout):
+            requested.append(request.full_url)
+            return Missing()
+
+    requested = []
+    monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *_args: Opener())
+    with pytest.raises(drill.DrillError, match="unique-path contract"):
+        drill._run_bounded_cardinality(_bounded_action(limits))
+
+
+def test_bounded_cardinality_rejects_invalid_disruption_result(monkeypatch):
+    limits = dict(drill.CARDINALITY_LIMITS, unique_paths=1, total_requests=1)
+    monkeypatch.setattr(drill, "CARDINALITY_LIMITS", limits)
+
+    class Missing:
+        status = 404
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def geturl(self):
+            return requested[0]
+
+    class Opener:
+        def open(self, request, timeout):
+            requested.append(request.full_url)
+            return Missing()
+
+    requested = []
+    monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *_args: Opener())
+    with pytest.raises(drill.DrillError, match="invalid result"):
+        drill._run_bounded_cardinality(_bounded_action(limits), disruption_check=lambda: None)
+
+
 @pytest.mark.parametrize(
     "changes,message",
     [
@@ -1802,6 +2006,7 @@ def test_live_authoritative_rehearsal_plan_is_executable(tmp_path):
 @pytest.mark.parametrize(
     "tamper,message",
     [
+        (lambda plan: plan.update(mode="quota-exhaustion"), "trigger mode"),
         (lambda plan: plan["actions"].pop(1), "ordered trigger stages"),
         (
             lambda plan: plan["actions"][1]["target"].update(host="token.place"),
@@ -1826,6 +2031,18 @@ def test_live_authoritative_rehearsal_plan_is_executable(tmp_path):
         (
             lambda plan: plan["actions"][2].update(depends_on=["inject-incident-image"]),
             "dependency chain",
+        ),
+        (
+            lambda plan: plan["actions"][1].update(failure_recovery=["internal:wrong"]),
+            "recovery coordinates",
+        ),
+        (
+            lambda plan: plan["actions"][1].update(stop_conditions=["first-error"]),
+            "cancellation contract",
+        ),
+        (
+            lambda plan: plan["actions"][2].update(checks=[]),
+            "observation contract",
         ),
     ],
 )
