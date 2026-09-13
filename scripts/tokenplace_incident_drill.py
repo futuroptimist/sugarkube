@@ -1287,8 +1287,10 @@ def _validate_staging_execution_contract(plan: dict) -> None:
         or expected["replicas"] <= 0
         or not re.fullmatch(r"[1-9][0-9]*(Mi|Gi)", expected["memory_limit"])
         or any(not IMAGE.fullmatch(value) for value in images)
-        or len(set(images)) != len(images)
     ):
+        raise DrillError("staging rehearsal deployment coordinates are malformed")
+    image_digests = [IMAGE_DIGEST.search(value).group(1) for value in images]
+    if len(set(image_digests)) != len(image_digests):
         raise DrillError("staging rehearsal deployment coordinates are malformed")
     if any(
         (

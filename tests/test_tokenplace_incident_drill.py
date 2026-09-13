@@ -2150,6 +2150,22 @@ def test_rehearsal_loader_rejects_tampered_deployment_coordinates(tmp_path, tamp
         drill._load_execution_plan(path)
 
 
+def test_rehearsal_loader_rejects_repository_aliases_of_same_digest(tmp_path):
+    plan = executable_rehearsal_plan(tmp_path)
+    digest = plan["expected_deployment"]["replacement_image"].split("@sha256:", 1)[1]
+    incident_image = f"alias.example/stimulus@sha256:{digest}"
+    plan["expected_deployment"]["incident_image"] = incident_image
+    plan["actions"][0]["command"][-1] = f"relay={incident_image}"
+    replace = next(action for action in plan["actions"] if action["id"] == "replace")
+    replace["old_state"]["image"] = incident_image
+    plan["plan_digest"] = drill._plan_digest(plan)
+    path = tmp_path / "aliased-digest-plan.json"
+    path.write_text(json.dumps(plan), encoding="utf-8")
+
+    with pytest.raises(drill.DrillError, match="coordinates"):
+        drill._load_execution_plan(path)
+
+
 def test_offline_rehearsal_cli_emits_non_executing_deterministic_plan(
     tmp_path, monkeypatch, capsys
 ):
