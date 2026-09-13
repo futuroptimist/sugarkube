@@ -588,6 +588,48 @@ def test_bounded_cardinality_requires_separate_execution_acknowledgement(tmp_pat
         drill.execute_operation(parsed, runner)
 
 
+def test_bounded_cardinality_observer_uses_durable_trigger_intent(tmp_path, monkeypatch):
+    plan = executable_rehearsal_plan(tmp_path)
+    parsed = execution_files(tmp_path, plan)
+    _journal_through(parsed, plan, "inject-incident-image")
+    drill._record_phase(parsed.journal, plan, "execute", "inject-incident-image", "completed")
+    parsed.execute_stage = "generate-bounded-cardinality"
+    parsed.acknowledge_bounded_cardinality_generation = True
+    observed_boundaries = []
+
+    monkeypatch.setattr(drill, "_assert_stage_preflight", lambda *_args: None)
+    monkeypatch.setattr(drill, "_validate_marker", lambda *_args, **_kwargs: True)
+
+    def observe(_plan, _kubeconfig, _runner, not_before, **_kwargs):
+        observed_boundaries.append(not_before)
+        return drill.NO_QUALIFYING_OOM
+
+    def run_trigger(_action, _boundary_check, disruption_check):
+        assert disruption_check() is drill.NO_QUALIFYING_OOM
+        return {
+            "requests": drill.CARDINALITY_LIMITS["total_requests"],
+            "unique_paths": drill.CARDINALITY_LIMITS["unique_paths"],
+            "status_counts": {"404": drill.CARDINALITY_LIMITS["total_requests"]},
+            "path_set_sha256": "a" * 64,
+            "raw_paths_persisted": False,
+        }
+
+    monkeypatch.setattr(drill, "_observe_rehearsal_oom", observe)
+    monkeypatch.setattr(drill, "_run_bounded_cardinality", run_trigger)
+
+    result = drill.execute_operation(parsed, lambda command: pytest.fail(str(command)))
+
+    records = drill._journal_records(parsed.journal, plan)
+    intent = next(
+        record
+        for record in records
+        if record["stage"] == "generate-bounded-cardinality" and record["phase"] == "intent"
+    )
+    assert result["status"] == "completed"
+    assert observed_boundaries == [drill._utc_timestamp(intent["recorded_at"])]
+    assert not any(record["operation"] == "rollback" for record in records)
+
+
 def test_bounded_cardinality_failure_cancels_rolls_back_and_exactly_cleans_up(
     tmp_path, monkeypatch
 ):

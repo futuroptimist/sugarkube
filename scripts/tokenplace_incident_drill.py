@@ -2507,6 +2507,7 @@ def _execute_locked(args, runner, plan, journal, now=None):
             limits=action["limits"],
             target_sha256=hashlib.sha256(STAGING_HOST.encode("ascii")).hexdigest(),
         )
+        records = _journal_records(journal, plan)
         try:
             summary = _run_bounded_cardinality(
                 action,
