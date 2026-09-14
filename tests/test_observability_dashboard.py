@@ -38,9 +38,9 @@ def test_generator_check_and_outputs_are_deterministic(dashboards):
     assert result.returncode == 0, result.stderr
     staging, prod = dashboards
     assert staging["panels"] == prod["panels"]
-    assert len(staging["panels"]) == 60
+    assert len(staging["panels"]) == 62
     assert sum(item["type"] == "row" for item in staging["panels"]) == 11
-    assert sum(item["type"] != "row" for item in staging["panels"]) == 49
+    assert sum(item["type"] != "row" for item in staging["panels"]) == 51
 
 
 def test_public_availability_summary_includes_gitshelves_in_every_expression(dashboards):
@@ -127,7 +127,7 @@ def test_canonical_order_ids_grid_and_defaults(dashboards):
         "token.place relay and compute capacity",
         "token.place HTTP and release",
     ]
-    assert [item["id"] for item in staging["panels"]] == list(range(1, 61))
+    assert [item["id"] for item in staging["panels"]] == list(range(1, 63))
     assert panel(staging, "DSPACE instrumentation health")
     assert panel(staging, "DSPACE build identity")
     assert all(
@@ -181,7 +181,7 @@ def test_missing_application_capabilities_produce_no_series_not_healthy_zero(das
         "0 * count(dspace_release_approved_info"
         in expressions["/chat synthetic result and freshness"][0]
     )
-    for title in ("dChat request activity", "token.place dependency request activity"):
+    for title in (validator.CHAT_OUTCOME_TITLE, validator.DEPENDENCY_OUTCOME_TITLE):
         assert "0 * count(dspace_instrumentation_up" in expressions[title][0]
     token_expressions = [
         expr
@@ -269,6 +269,107 @@ def test_query_scoping_and_safe_labels(dashboards):
     assert not any("cluster=" in expr or "cluster=~" in expr for expr in core)
     assert "kube_state_metrics_build_info" not in serialized
     assert not any(f"{{{{{label}}}}}" in serialized for label in validator.FORBIDDEN_LABELS)
+
+
+def test_dspace_outcomes_keep_success_failures_and_fallback_separate(dashboards):
+    staging, _ = dashboards
+    chat = panel(staging, validator.CHAT_OUTCOME_TITLE)
+    dependency = panel(staging, validator.DEPENDENCY_OUTCOME_TITLE)
+
+    assert "sum by (provider, outcome)" in chat["targets"][0]["expr"]
+    assert chat["targets"][0]["legendFormat"] == "{{provider}} · {{outcome}}"
+    assert "fallback_used remains a separate outcome" in chat["description"]
+    assert "outcome=\"success\"" in chat["description"]
+    assert "sum by (dependency, outcome)" in dependency["targets"][0]["expr"]
+    assert dependency["targets"][0]["legendFormat"] == "{{dependency}} · {{outcome}}"
+    for outcome in ("success", "timeout", "rate_limited", "dependency_failure"):
+        # The outcome dimension, rather than a success-only filter, keeps each bounded
+        # successful or failed traffic series visible to Grafana.
+        assert f'outcome="{outcome}"' not in chat["targets"][0]["expr"]
+        assert f'outcome="{outcome}"' not in dependency["targets"][0]["expr"]
+
+
+def test_dspace_event_panels_distinguish_idle_from_missing_instrumentation(dashboards):
+    staging, _ = dashboards
+    titles = {
+        validator.CHAT_OUTCOME_TITLE,
+        validator.DEPENDENCY_OUTCOME_TITLE,
+        *validator.LATENCY_PANELS,
+    }
+    for title in titles:
+        item = panel(staging, title)
+        assert item["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
+        assert "NO DATA" in item["description"]
+        for target in item["targets"]:
+            expression = target["expr"]
+            assert "0 * count(dspace_instrumentation_up" in expression
+            assert "or vector(0)" not in expression
+
+
+def test_dspace_latency_histograms_preserve_quantiles_and_series_scope(dashboards):
+    staging, _ = dashboards
+    for title, (metric, dimension) in validator.LATENCY_PANELS.items():
+        item = panel(staging, title)
+        assert [target["refId"] for target in item["targets"]] == ["A", "B", "C"]
+        for target, quantile in zip(item["targets"], (".50", ".95", ".99"), strict=True):
+            expression = target["expr"]
+            assert f"histogram_quantile({quantile}," in expression
+            assert f"sum by (le, {dimension}, outcome) (rate({metric}" in expression
+            assert 'environment=~"$environment"' in expression
+            assert "[$__rate_interval]))" in expression
+            assert f"{{{{{dimension}}}}}" in target["legendFormat"]
+            assert "{{outcome}}" in target["legendFormat"]
+
+
+def test_dspace_rate_denominators_are_documented_and_correct(dashboards):
+    staging, _ = dashboards
+    for title in (validator.CHAT_OUTCOME_TITLE, validator.DEPENDENCY_OUTCOME_TITLE):
+        item = panel(staging, title)
+        assert "rate denominator is elapsed seconds" in item["description"]
+        expression = item["targets"][0]["expr"]
+        assert expression.count("rate(") == 1
+        assert expression.count("[$__rate_interval]") == 1
+
+
+@pytest.mark.parametrize(
+    ("title", "old", "new", "message"),
+    [
+        (
+            validator.CHAT_OUTCOME_TITLE,
+            "sum by (provider, outcome)",
+            "sum by (provider)",
+            "outcome-rate grouping",
+        ),
+        (
+            validator.DEPENDENCY_OUTCOME_TITLE,
+            "sum by (dependency, outcome)",
+            "sum by (outcome)",
+            "outcome-rate grouping",
+        ),
+        (
+            "DSPACE chat latency percentiles",
+            "sum by (le, provider, outcome)",
+            "sum by (le, provider)",
+            "histogram aggregation",
+        ),
+        (
+            "DSPACE dependency latency percentiles",
+            "histogram_quantile(.50",
+            "histogram_quantile(.90",
+            "histogram aggregation",
+        ),
+    ],
+)
+def test_dspace_outcome_and_latency_validator_contracts_fail_closed(
+    dashboards, title, old, new, message
+):
+    staging, _ = dashboards
+    changed = copy.deepcopy(staging)
+    target = panel(changed, title)["targets"][0]
+    assert old in target["expr"]
+    target["expr"] = target["expr"].replace(old, new, 1)
+    with pytest.raises(SystemExit, match=message):
+        validator._validate_semantics(changed)
 
 
 @pytest.mark.parametrize(
@@ -367,7 +468,7 @@ def test_semantic_contract_rejects_invalid_dashboard_mutations(dashboards, mutat
             "expr"
         ] += " or vector(0)"
     elif mutation == "event-capability":
-        panel(changed, "dChat request activity")["targets"][0][
+        panel(changed, validator.CHAT_OUTCOME_TITLE)["targets"][0][
             "expr"
         ] = "dspace_dchat_requests_total"
     elif mutation == "image-zero":
