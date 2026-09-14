@@ -38,9 +38,9 @@ def test_generator_check_and_outputs_are_deterministic(dashboards):
     assert result.returncode == 0, result.stderr
     staging, prod = dashboards
     assert staging["panels"] == prod["panels"]
-    assert len(staging["panels"]) == 60
+    assert len(staging["panels"]) == 64
     assert sum(item["type"] == "row" for item in staging["panels"]) == 11
-    assert sum(item["type"] != "row" for item in staging["panels"]) == 49
+    assert sum(item["type"] != "row" for item in staging["panels"]) == 53
 
 
 def test_public_availability_summary_includes_gitshelves_in_every_expression(dashboards):
@@ -48,8 +48,7 @@ def test_public_availability_summary_includes_gitshelves_in_every_expression(das
     documents = [json.loads(TEMPLATE.read_text(encoding="utf-8")), *dashboards]
     for document in documents:
         expressions = [
-            target["expr"]
-            for target in panel(document, "Public availability summary")["targets"]
+            target["expr"] for target in panel(document, "Public availability summary")["targets"]
         ]
         assert len(expressions) == 3
         assert all(expected_fleet in expression for expression in expressions)
@@ -127,7 +126,7 @@ def test_canonical_order_ids_grid_and_defaults(dashboards):
         "token.place relay and compute capacity",
         "token.place HTTP and release",
     ]
-    assert [item["id"] for item in staging["panels"]] == list(range(1, 61))
+    assert [item["id"] for item in staging["panels"]] == list(range(1, 65))
     assert panel(staging, "DSPACE instrumentation health")
     assert panel(staging, "DSPACE build identity")
     assert all(
@@ -181,8 +180,11 @@ def test_missing_application_capabilities_produce_no_series_not_healthy_zero(das
         "0 * count(dspace_release_approved_info"
         in expressions["/chat synthetic result and freshness"][0]
     )
-    for title in ("dChat request activity", "token.place dependency request activity"):
-        assert "0 * count(dspace_instrumentation_up" in expressions[title][0]
+    for title in ("DSPACE chat outcome rate", "DSPACE dependency outcome rate"):
+        assert (
+            '0 * count(dspace_instrumentation_up{environment=~"$environment"} == 1)'
+            in expressions[title][0]
+        )
     token_expressions = [
         expr
         for title, values in expressions.items()
@@ -269,6 +271,64 @@ def test_query_scoping_and_safe_labels(dashboards):
     assert not any("cluster=" in expr or "cluster=~" in expr for expr in core)
     assert "kube_state_metrics_build_info" not in serialized
     assert not any(f"{{{{{label}}}}}" in serialized for label in validator.FORBIDDEN_LABELS)
+
+
+def test_dspace_chat_outcomes_fallback_and_denominators(dashboards):
+    for document in dashboards:
+        chat_rate = panel(document, "DSPACE chat outcome rate")["targets"][0]["expr"]
+        dependency_rate = panel(document, "DSPACE dependency outcome rate")["targets"][0]["expr"]
+        assert "sum by (provider, outcome)" in chat_rate
+        assert "sum by (dependency, outcome)" in dependency_rate
+        # Healthy instrumentation supplies an explicit idle zero; missing or unhealthy
+        # instrumentation supplies no fallback series and Grafana renders NO DATA.
+        assert "dspace_instrumentation_up" in chat_rate and "== 1" in chat_rate
+        assert "dspace_instrumentation_up" in dependency_rate and "== 1" in dependency_rate
+
+        primary_panel = panel(document, "DSPACE primary-provider success ratio")
+        primary = primary_panel["targets"][0]["expr"]
+        assert primary.count('provider="tokenplace"') == 2
+        assert primary.count('outcome="success"') == 1
+        assert "fallback_used" not in primary
+        assert "all tokenplace-provider chat attempts" in primary_panel["description"]
+
+        fallback_panel = panel(document, "DSPACE fallback-use ratio")
+        fallback = fallback_panel["targets"][0]["expr"]
+        assert fallback.count("dspace_dchat_requests_total") == 2
+        assert fallback.count('outcome="fallback_used"') == 1
+        assert "all observed chat requests" in fallback_panel["description"]
+
+
+@pytest.mark.parametrize(
+    ("title", "metric", "dimension"),
+    [
+        (
+            "DSPACE chat latency percentiles",
+            "dspace_dchat_request_duration_seconds_bucket",
+            "provider",
+        ),
+        (
+            "DSPACE dependency latency percentiles",
+            "dspace_dependency_request_duration_seconds_bucket",
+            "dependency",
+        ),
+    ],
+)
+def test_dspace_latency_histograms_preserve_bounded_outcome_dimensions(
+    dashboards, title, metric, dimension
+):
+    for document in dashboards:
+        targets = panel(document, title)["targets"]
+        assert [target["refId"] for target in targets] == ["A", "B", "C"]
+        assert [target["expr"].split("(", 1)[1].split(",", 1)[0] for target in targets] == [
+            ".50",
+            ".95",
+            ".99",
+        ]
+        for target in targets:
+            assert metric in target["expr"]
+            assert f"sum by (le, {dimension}, outcome)" in target["expr"]
+            assert 'environment=~"$environment"' in target["expr"]
+            assert "dspace_instrumentation_up" not in target["expr"]
 
 
 @pytest.mark.parametrize(
@@ -367,7 +427,7 @@ def test_semantic_contract_rejects_invalid_dashboard_mutations(dashboards, mutat
             "expr"
         ] += " or vector(0)"
     elif mutation == "event-capability":
-        panel(changed, "dChat request activity")["targets"][0][
+        panel(changed, "DSPACE chat outcome rate")["targets"][0][
             "expr"
         ] = "dspace_dchat_requests_total"
     elif mutation == "image-zero":
