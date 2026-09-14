@@ -1419,8 +1419,8 @@
     {
       "id": 31,
       "type": "timeseries",
-      "title": "dChat request activity",
-      "description": "Zero means no dChat requests were observed; it is not an instrumentation failure.",
+      "title": "DSPACE chat outcome rate",
+      "description": "Chat request rate split by bounded provider and outcome. Zero is emitted only while DSPACE instrumentation reports healthy, so idle traffic differs from absent or unhealthy instrumentation (NO DATA).",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1433,24 +1433,31 @@
       },
       "targets": [
         {
-          "refId": "A",
-          "expr": "sum(rate(dspace_dchat_requests_total{environment=~\"$environment\"}[$__rate_interval])) or on() (0 * count(dspace_instrumentation_up{environment=~\"$environment\"}))",
-          "legendFormat": "dChat requests"
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(sum by (provider, outcome) (rate(dspace_dchat_requests_total{environment=~\"$environment\"}[$__rate_interval]))) and on() (((count((up{namespace=\"dspace\",service=~\"dspace.*\"} == 0) or ((kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}) unless on (namespace, pod) up{namespace=\"dspace\",service=~\"dspace.*\"})) or on() (0 * count(dspace_release_approved_info{environment=~\"$environment\"}))) and on() (count(dspace_release_approved_info{environment=~\"$environment\"}) > 0)) == 0) and on() (min(dspace_instrumentation_up{environment=~\"$environment\"}) == 1)",
+          "legendFormat": "{{provider}} {{outcome}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "((0 * count(dspace_instrumentation_up{environment=~\"$environment\"} == 1)) unless on() sum(rate(dspace_dchat_requests_total{environment=~\"$environment\"}[$__rate_interval]))) and on() (((count((up{namespace=\"dspace\",service=~\"dspace.*\"} == 0) or ((kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}) unless on (namespace, pod) up{namespace=\"dspace\",service=~\"dspace.*\"})) or on() (0 * count(dspace_release_approved_info{environment=~\"$environment\"}))) and on() (count(dspace_release_approved_info{environment=~\"$environment\"}) > 0)) == 0) and on() (min(dspace_instrumentation_up{environment=~\"$environment\"}) == 1)",
+          "legendFormat": "idle",
+          "range": true,
+          "refId": "B"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "reqps",
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "0": {
-                  "text": "No requests observed"
-                }
-              }
-            }
-          ],
           "noValue": "NO DATA"
         },
         "overrides": []
@@ -1468,8 +1475,8 @@
     {
       "id": 32,
       "type": "timeseries",
-      "title": "token.place dependency request activity",
-      "description": "Zero means no token.place dependency requests were observed; it is not an instrumentation failure.",
+      "title": "DSPACE dependency outcome rate",
+      "description": "Dependency request rate split by bounded dependency and outcome. Zero is emitted only while DSPACE instrumentation reports healthy, so idle traffic differs from absent or unhealthy instrumentation (NO DATA).",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1482,24 +1489,31 @@
       },
       "targets": [
         {
-          "refId": "A",
-          "expr": "sum(rate(dspace_dependency_requests_total{environment=~\"$environment\",dependency=\"tokenplace\"}[$__rate_interval])) or on() (0 * count(dspace_instrumentation_up{environment=~\"$environment\"}))",
-          "legendFormat": "token.place requests"
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(sum by (dependency, outcome) (rate(dspace_dependency_requests_total{environment=~\"$environment\"}[$__rate_interval]))) and on() (((count((up{namespace=\"dspace\",service=~\"dspace.*\"} == 0) or ((kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}) unless on (namespace, pod) up{namespace=\"dspace\",service=~\"dspace.*\"})) or on() (0 * count(dspace_release_approved_info{environment=~\"$environment\"}))) and on() (count(dspace_release_approved_info{environment=~\"$environment\"}) > 0)) == 0) and on() (min(dspace_instrumentation_up{environment=~\"$environment\"}) == 1)",
+          "legendFormat": "{{dependency}} {{outcome}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "((0 * count(dspace_instrumentation_up{environment=~\"$environment\"} == 1)) unless on() sum(rate(dspace_dependency_requests_total{environment=~\"$environment\"}[$__rate_interval]))) and on() (((count((up{namespace=\"dspace\",service=~\"dspace.*\"} == 0) or ((kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}) unless on (namespace, pod) up{namespace=\"dspace\",service=~\"dspace.*\"})) or on() (0 * count(dspace_release_approved_info{environment=~\"$environment\"}))) and on() (count(dspace_release_approved_info{environment=~\"$environment\"}) > 0)) == 0) and on() (min(dspace_instrumentation_up{environment=~\"$environment\"}) == 1)",
+          "legendFormat": "idle",
+          "range": true,
+          "refId": "B"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "reqps",
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "0": {
-                  "text": "No requests observed"
-                }
-              }
-            }
-          ],
           "noValue": "NO DATA"
         },
         "overrides": []
@@ -1516,6 +1530,182 @@
     },
     {
       "id": 33,
+      "type": "timeseries",
+      "title": "DSPACE primary-provider success ratio",
+      "description": "Successful configured-primary-provider chat attempts divided by all configured-primary-provider chat attempts, including fallback_used outcomes, so fallback traffic cannot inflate primary success.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 86
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "((sum(rate(dspace_dchat_requests_total{environment=~\"$environment\",provider=\"tokenplace\",outcome=\"success\"}[$__rate_interval])) or on() (0 * count(dspace_instrumentation_up{environment=~\"$environment\"} == 1))) / clamp_min(sum(rate(dspace_dchat_requests_total{environment=~\"$environment\",provider=\"tokenplace\"}[$__rate_interval])) or on() (0 * count(dspace_instrumentation_up{environment=~\"$environment\"} == 1)), 1e-9)) and on() (((count((up{namespace=\"dspace\",service=~\"dspace.*\"} == 0) or ((kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}) unless on (namespace, pod) up{namespace=\"dspace\",service=~\"dspace.*\"})) or on() (0 * count(dspace_release_approved_info{environment=~\"$environment\"}))) and on() (count(dspace_release_approved_info{environment=~\"$environment\"}) > 0)) == 0) and on() (min(dspace_instrumentation_up{environment=~\"$environment\"}) == 1)",
+          "legendFormat": "primary success"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "NO DATA"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 34,
+      "type": "timeseries",
+      "title": "DSPACE fallback-use ratio",
+      "description": "Chat requests with outcome fallback_used divided by all observed chat requests across every provider and outcome.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 86
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "((sum(rate(dspace_dchat_requests_total{environment=~\"$environment\",outcome=\"fallback_used\"}[$__rate_interval])) or on() (0 * count(dspace_instrumentation_up{environment=~\"$environment\"} == 1))) / clamp_min(sum(rate(dspace_dchat_requests_total{environment=~\"$environment\"}[$__rate_interval])) or on() (0 * count(dspace_instrumentation_up{environment=~\"$environment\"} == 1)), 1e-9)) and on() (((count((up{namespace=\"dspace\",service=~\"dspace.*\"} == 0) or ((kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}) unless on (namespace, pod) up{namespace=\"dspace\",service=~\"dspace.*\"})) or on() (0 * count(dspace_release_approved_info{environment=~\"$environment\"}))) and on() (count(dspace_release_approved_info{environment=~\"$environment\"}) > 0)) == 0) and on() (min(dspace_instrumentation_up{environment=~\"$environment\"}) == 1)",
+          "legendFormat": "fallback use"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "NO DATA"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 35,
+      "type": "timeseries",
+      "title": "DSPACE chat latency percentiles",
+      "description": "p50, p95, and p99 chat latency from buckets aggregated only by le, bounded provider, and bounded outcome. Idle or missing histograms remain NO DATA.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 94
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "((histogram_quantile(.50, sum by (le, provider, outcome) (rate(dspace_dchat_request_duration_seconds_bucket{environment=~\"$environment\"}[$__rate_interval])))) and on (provider, outcome) (sum by (provider, outcome) (rate(dspace_dchat_request_duration_seconds_count{environment=~\"$environment\"}[$__rate_interval])) > 0)) and on() (((count((up{namespace=\"dspace\",service=~\"dspace.*\"} == 0) or ((kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}) unless on (namespace, pod) up{namespace=\"dspace\",service=~\"dspace.*\"})) or on() (0 * count(dspace_release_approved_info{environment=~\"$environment\"}))) and on() (count(dspace_release_approved_info{environment=~\"$environment\"}) > 0)) == 0) and on() (min(dspace_instrumentation_up{environment=~\"$environment\"}) == 1)",
+          "legendFormat": "p50 {{provider}} {{outcome}}"
+        },
+        {
+          "refId": "B",
+          "expr": "((histogram_quantile(.95, sum by (le, provider, outcome) (rate(dspace_dchat_request_duration_seconds_bucket{environment=~\"$environment\"}[$__rate_interval])))) and on (provider, outcome) (sum by (provider, outcome) (rate(dspace_dchat_request_duration_seconds_count{environment=~\"$environment\"}[$__rate_interval])) > 0)) and on() (((count((up{namespace=\"dspace\",service=~\"dspace.*\"} == 0) or ((kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}) unless on (namespace, pod) up{namespace=\"dspace\",service=~\"dspace.*\"})) or on() (0 * count(dspace_release_approved_info{environment=~\"$environment\"}))) and on() (count(dspace_release_approved_info{environment=~\"$environment\"}) > 0)) == 0) and on() (min(dspace_instrumentation_up{environment=~\"$environment\"}) == 1)",
+          "legendFormat": "p95 {{provider}} {{outcome}}"
+        },
+        {
+          "refId": "C",
+          "expr": "((histogram_quantile(.99, sum by (le, provider, outcome) (rate(dspace_dchat_request_duration_seconds_bucket{environment=~\"$environment\"}[$__rate_interval])))) and on (provider, outcome) (sum by (provider, outcome) (rate(dspace_dchat_request_duration_seconds_count{environment=~\"$environment\"}[$__rate_interval])) > 0)) and on() (((count((up{namespace=\"dspace\",service=~\"dspace.*\"} == 0) or ((kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}) unless on (namespace, pod) up{namespace=\"dspace\",service=~\"dspace.*\"})) or on() (0 * count(dspace_release_approved_info{environment=~\"$environment\"}))) and on() (count(dspace_release_approved_info{environment=~\"$environment\"}) > 0)) == 0) and on() (min(dspace_instrumentation_up{environment=~\"$environment\"}) == 1)",
+          "legendFormat": "p99 {{provider}} {{outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "NO DATA"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 36,
+      "type": "timeseries",
+      "title": "DSPACE dependency latency percentiles",
+      "description": "p50, p95, and p99 dependency latency from buckets aggregated only by le, bounded dependency, and bounded outcome. Idle or missing histograms remain NO DATA.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 94
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "((histogram_quantile(.50, sum by (le, dependency, outcome) (rate(dspace_dependency_request_duration_seconds_bucket{environment=~\"$environment\"}[$__rate_interval])))) and on (dependency, outcome) (sum by (dependency, outcome) (rate(dspace_dependency_request_duration_seconds_count{environment=~\"$environment\"}[$__rate_interval])) > 0)) and on() (((count((up{namespace=\"dspace\",service=~\"dspace.*\"} == 0) or ((kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}) unless on (namespace, pod) up{namespace=\"dspace\",service=~\"dspace.*\"})) or on() (0 * count(dspace_release_approved_info{environment=~\"$environment\"}))) and on() (count(dspace_release_approved_info{environment=~\"$environment\"}) > 0)) == 0) and on() (min(dspace_instrumentation_up{environment=~\"$environment\"}) == 1)",
+          "legendFormat": "p50 {{dependency}} {{outcome}}"
+        },
+        {
+          "refId": "B",
+          "expr": "((histogram_quantile(.95, sum by (le, dependency, outcome) (rate(dspace_dependency_request_duration_seconds_bucket{environment=~\"$environment\"}[$__rate_interval])))) and on (dependency, outcome) (sum by (dependency, outcome) (rate(dspace_dependency_request_duration_seconds_count{environment=~\"$environment\"}[$__rate_interval])) > 0)) and on() (((count((up{namespace=\"dspace\",service=~\"dspace.*\"} == 0) or ((kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}) unless on (namespace, pod) up{namespace=\"dspace\",service=~\"dspace.*\"})) or on() (0 * count(dspace_release_approved_info{environment=~\"$environment\"}))) and on() (count(dspace_release_approved_info{environment=~\"$environment\"}) > 0)) == 0) and on() (min(dspace_instrumentation_up{environment=~\"$environment\"}) == 1)",
+          "legendFormat": "p95 {{dependency}} {{outcome}}"
+        },
+        {
+          "refId": "C",
+          "expr": "((histogram_quantile(.99, sum by (le, dependency, outcome) (rate(dspace_dependency_request_duration_seconds_bucket{environment=~\"$environment\"}[$__rate_interval])))) and on (dependency, outcome) (sum by (dependency, outcome) (rate(dspace_dependency_request_duration_seconds_count{environment=~\"$environment\"}[$__rate_interval])) > 0)) and on() (((count((up{namespace=\"dspace\",service=~\"dspace.*\"} == 0) or ((kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}) unless on (namespace, pod) up{namespace=\"dspace\",service=~\"dspace.*\"})) or on() (0 * count(dspace_release_approved_info{environment=~\"$environment\"}))) and on() (count(dspace_release_approved_info{environment=~\"$environment\"}) > 0)) == 0) and on() (min(dspace_instrumentation_up{environment=~\"$environment\"}) == 1)",
+          "legendFormat": "p99 {{dependency}} {{outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "NO DATA"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 37,
       "type": "row",
       "title": "Blackbox monitoring",
       "collapsed": false,
@@ -1523,12 +1713,12 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 86
+        "y": 102
       },
       "panels": []
     },
     {
-      "id": 34,
+      "id": 38,
       "type": "table",
       "title": "Endpoint matrix",
       "description": "Latest endpoint result without exposing raw target URLs.",
@@ -1540,7 +1730,7 @@
         "h": 9,
         "w": 12,
         "x": 0,
-        "y": 87
+        "y": 103
       },
       "targets": [
         {
@@ -1621,7 +1811,7 @@
       ]
     },
     {
-      "id": 35,
+      "id": 39,
       "type": "timeseries",
       "title": "Probe duration",
       "description": "End-to-end blackbox probe duration.",
@@ -1633,7 +1823,7 @@
         "h": 9,
         "w": 12,
         "x": 12,
-        "y": 87
+        "y": 103
       },
       "targets": [
         {
@@ -1660,7 +1850,7 @@
       }
     },
     {
-      "id": 36,
+      "id": 40,
       "type": "table",
       "title": "HTTP response status",
       "description": "HTTP response status by bounded labels.",
@@ -1672,7 +1862,7 @@
         "h": 9,
         "w": 12,
         "x": 0,
-        "y": 96
+        "y": 112
       },
       "targets": [
         {
@@ -1746,7 +1936,7 @@
       ]
     },
     {
-      "id": 37,
+      "id": 41,
       "type": "timeseries",
       "title": "TLS certificate lifetime",
       "description": "Days until the earliest certificate expiry.",
@@ -1758,7 +1948,7 @@
         "h": 9,
         "w": 12,
         "x": 12,
-        "y": 96
+        "y": 112
       },
       "targets": [
         {
@@ -1806,7 +1996,7 @@
       }
     },
     {
-      "id": 38,
+      "id": 42,
       "type": "row",
       "title": "DSPACE release integrity",
       "collapsed": false,
@@ -1814,7 +2004,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 105
+        "y": 121
       },
       "panels": []
     },
@@ -1830,7 +2020,7 @@
         "overrides": []
       },
       "options": {},
-      "id": 39,
+      "id": 43,
       "type": "table",
       "title": "Approved revision",
       "description": "Approved immutable coordinate from finalized release evidence.",
@@ -1838,7 +2028,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 106
+        "y": 122
       },
       "targets": [
         {
@@ -1893,7 +2083,7 @@
         "overrides": []
       },
       "options": {},
-      "id": 40,
+      "id": 44,
       "type": "table",
       "title": "Active build revisions by pod",
       "description": "Build identities reported by ready, Running, non-terminating DSPACE pods.",
@@ -1901,7 +2091,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 106
+        "y": 122
       },
       "targets": [
         {
@@ -1946,7 +2136,7 @@
         "overrides": []
       },
       "options": {},
-      "id": 41,
+      "id": 45,
       "type": "stat",
       "title": "Image-pin agreement",
       "description": "Zero means no active DSPACE container differs from the approved digest.",
@@ -1954,7 +2144,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 106
+        "y": 122
       },
       "targets": [
         {
@@ -1978,7 +2168,7 @@
         "overrides": []
       },
       "options": {},
-      "id": 42,
+      "id": 46,
       "type": "stat",
       "title": "DSPACE metrics-target health",
       "description": "Count of ready, Running, non-terminating DSPACE pods whose target is down or undiscovered. Zero is healthy; missing targets fail closed.",
@@ -1986,7 +2176,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 112
+        "y": 128
       },
       "targets": [
         {
@@ -2010,7 +2200,7 @@
         "overrides": []
       },
       "options": {},
-      "id": 43,
+      "id": 47,
       "type": "stat",
       "title": "/chat synthetic result and freshness",
       "description": "Success and age; missing or older than 15 minutes fails closed.",
@@ -2018,7 +2208,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 112
+        "y": 128
       },
       "targets": [
         {
@@ -2038,7 +2228,7 @@
       ]
     },
     {
-      "id": 44,
+      "id": 48,
       "type": "text",
       "title": "Release integrity references",
       "description": "Operator-owned stable references.",
@@ -2046,7 +2236,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 112
+        "y": 128
       },
       "options": {
         "mode": "markdown",
@@ -2059,7 +2249,7 @@
       }
     },
     {
-      "id": 45,
+      "id": 49,
       "type": "row",
       "title": "token.place relay and compute capacity",
       "collapsed": false,
@@ -2067,12 +2257,12 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 118
+        "y": 134
       },
       "panels": []
     },
     {
-      "id": 46,
+      "id": 50,
       "type": "stat",
       "title": "token.place scrape availability",
       "description": "Prometheus scrape health per relay pod. Missing targets remain NO DATA.",
@@ -2084,7 +2274,7 @@
         "h": 5,
         "w": 12,
         "x": 0,
-        "y": 119
+        "y": 135
       },
       "targets": [
         {
@@ -2141,7 +2331,7 @@
       }
     },
     {
-      "id": 47,
+      "id": 51,
       "type": "stat",
       "title": "token.place instrumentation health",
       "description": "Application instrumentation self-check per relay pod; zero is unhealthy and an absent series remains NO DATA.",
@@ -2153,7 +2343,7 @@
         "h": 5,
         "w": 12,
         "x": 12,
-        "y": 119
+        "y": 135
       },
       "targets": [
         {
@@ -2210,7 +2400,7 @@
       }
     },
     {
-      "id": 48,
+      "id": 52,
       "type": "timeseries",
       "title": "token.place compute-node counts",
       "description": "Registered and healthy logical compute-node gauges. max deduplicates identical values emitted by future relay replicas without multiplying capacity.",
@@ -2222,7 +2412,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 124
+        "y": 140
       },
       "targets": [
         {
@@ -2255,7 +2445,7 @@
       }
     },
     {
-      "id": 49,
+      "id": 53,
       "type": "timeseries",
       "title": "token.place oldest compute-node lease age",
       "description": "Oldest lease age reported by the relay fleet. max preserves the worst observed logical age across replicas.",
@@ -2267,7 +2457,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 124
+        "y": 140
       },
       "targets": [
         {
@@ -2295,7 +2485,7 @@
       }
     },
     {
-      "id": 50,
+      "id": 54,
       "type": "timeseries",
       "title": "token.place compute-node eviction rate",
       "description": "Summed process-local eviction counter rate grouped only by bounded reason.",
@@ -2307,7 +2497,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 132
+        "y": 148
       },
       "targets": [
         {
@@ -2335,7 +2525,7 @@
       }
     },
     {
-      "id": 51,
+      "id": 55,
       "type": "timeseries",
       "title": "token.place relay queue depth",
       "description": "Logical queue depth by bounded provider mode. max avoids multiplying a shared queue gauge across future relay replicas.",
@@ -2347,7 +2537,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 132
+        "y": 148
       },
       "targets": [
         {
@@ -2375,7 +2565,7 @@
       }
     },
     {
-      "id": 52,
+      "id": 56,
       "type": "timeseries",
       "title": "token.place oldest queued-request age",
       "description": "Oldest queued-request age by bounded provider mode. max shows the worst age without multiplying replicated logical gauges.",
@@ -2387,7 +2577,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 140
+        "y": 156
       },
       "targets": [
         {
@@ -2415,7 +2605,7 @@
       }
     },
     {
-      "id": 53,
+      "id": 57,
       "type": "timeseries",
       "title": "token.place in-flight requests by pod",
       "description": "In-flight ownership is relay-process local, so values remain per pod rather than being combined across replicas.",
@@ -2427,7 +2617,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 140
+        "y": 156
       },
       "targets": [
         {
@@ -2455,7 +2645,7 @@
       }
     },
     {
-      "id": 54,
+      "id": 58,
       "type": "timeseries",
       "title": "token.place oldest in-flight age by pod",
       "description": "Oldest in-flight age remains per relay pod because cross-replica ownership is not assumed.",
@@ -2467,7 +2657,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 148
+        "y": 164
       },
       "targets": [
         {
@@ -2495,7 +2685,7 @@
       }
     },
     {
-      "id": 55,
+      "id": 59,
       "type": "timeseries",
       "title": "token.place terminal outcome rate",
       "description": "Summed process-local terminal outcome counter rate grouped only by bounded outcome.",
@@ -2507,7 +2697,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 148
+        "y": 164
       },
       "targets": [
         {
@@ -2535,7 +2725,7 @@
       }
     },
     {
-      "id": 56,
+      "id": 60,
       "type": "row",
       "title": "token.place HTTP and release",
       "collapsed": false,
@@ -2543,12 +2733,12 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 156
+        "y": 172
       },
       "panels": []
     },
     {
-      "id": 57,
+      "id": 61,
       "type": "timeseries",
       "title": "token.place HTTP request rate",
       "description": "Summed request rate grouped by normalized route and bounded status class.",
@@ -2560,7 +2750,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 157
+        "y": 173
       },
       "targets": [
         {
@@ -2588,7 +2778,7 @@
       }
     },
     {
-      "id": 58,
+      "id": 62,
       "type": "timeseries",
       "title": "token.place HTTP 5xx ratio",
       "description": "Fraction of observed token.place HTTP requests returning a bounded 5xx status class; absent counters remain NO DATA.",
@@ -2600,7 +2790,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 157
+        "y": 173
       },
       "targets": [
         {
@@ -2646,7 +2836,7 @@
       }
     },
     {
-      "id": 59,
+      "id": 63,
       "type": "timeseries",
       "title": "token.place HTTP latency percentiles",
       "description": "Request latency percentiles from histogram buckets, grouped only by normalized route.",
@@ -2658,7 +2848,7 @@
         "h": 8,
         "w": 16,
         "x": 0,
-        "y": 165
+        "y": 181
       },
       "targets": [
         {
@@ -2696,7 +2886,7 @@
       }
     },
     {
-      "id": 60,
+      "id": 64,
       "type": "table",
       "title": "token.place build identity",
       "description": "Safe release identity per relay pod: version and revision.",
@@ -2708,7 +2898,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 165
+        "y": 181
       },
       "targets": [
         {

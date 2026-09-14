@@ -37,10 +37,16 @@ def test_generator_check_and_outputs_are_deterministic(dashboards):
     )
     assert result.returncode == 0, result.stderr
     staging, prod = dashboards
-    assert staging["panels"] == prod["panels"]
-    assert len(staging["panels"]) == 60
+    staging_panels = json.dumps(staging["panels"]).replace(
+        'provider=\\"tokenplace\\"', 'provider=\\"PRIMARY\\"'
+    )
+    prod_panels = json.dumps(prod["panels"]).replace(
+        'provider=\\"openai\\"', 'provider=\\"PRIMARY\\"'
+    )
+    assert staging_panels == prod_panels
+    assert len(staging["panels"]) == 64
     assert sum(item["type"] == "row" for item in staging["panels"]) == 11
-    assert sum(item["type"] != "row" for item in staging["panels"]) == 49
+    assert sum(item["type"] != "row" for item in staging["panels"]) == 53
 
 
 def test_public_availability_summary_includes_gitshelves_in_every_expression(dashboards):
@@ -48,8 +54,7 @@ def test_public_availability_summary_includes_gitshelves_in_every_expression(das
     documents = [json.loads(TEMPLATE.read_text(encoding="utf-8")), *dashboards]
     for document in documents:
         expressions = [
-            target["expr"]
-            for target in panel(document, "Public availability summary")["targets"]
+            target["expr"] for target in panel(document, "Public availability summary")["targets"]
         ]
         assert len(expressions) == 3
         assert all(expected_fleet in expression for expression in expressions)
@@ -104,11 +109,16 @@ def test_profiles_differ_only_by_allowlisted_identity(dashboards):
         (prod, "prod", "sugarkube-prod"),
     ):
         variables = document["templating"]["list"]
-        assert [item["name"] for item in variables] == ["environment", "cluster", "app", "route"]
+        assert [item["name"] for item in variables] == [
+            "environment",
+            "cluster",
+            "app",
+            "route",
+        ]
         assert variables[0]["query"] == environment
         assert variables[1]["query"] == cluster
         assert all(item["hide"] == 2 and item["type"] == "constant" for item in variables[:2])
-        assert all(item["allValue"] == ".*" for item in variables[2:])
+        assert all(item["allValue"] == ".*" for item in variables[2:4])
 
 
 def test_canonical_order_ids_grid_and_defaults(dashboards):
@@ -127,7 +137,7 @@ def test_canonical_order_ids_grid_and_defaults(dashboards):
         "token.place relay and compute capacity",
         "token.place HTTP and release",
     ]
-    assert [item["id"] for item in staging["panels"]] == list(range(1, 61))
+    assert [item["id"] for item in staging["panels"]] == list(range(1, 65))
     assert panel(staging, "DSPACE instrumentation health")
     assert panel(staging, "DSPACE build identity")
     assert all(
@@ -181,8 +191,15 @@ def test_missing_application_capabilities_produce_no_series_not_healthy_zero(das
         "0 * count(dspace_release_approved_info"
         in expressions["/chat synthetic result and freshness"][0]
     )
-    for title in ("dChat request activity", "token.place dependency request activity"):
-        assert "0 * count(dspace_instrumentation_up" in expressions[title][0]
+    for title in ("DSPACE chat outcome rate", "DSPACE dependency outcome rate"):
+        assert (
+            '0 * count(dspace_instrumentation_up{environment=~"$environment"} == 1)'
+            in expressions[title][1]
+        )
+        assert all(
+            expression.endswith(validator.DSPACE_COMPLETE_HEALTH_GATE)
+            for expression in expressions[title]
+        )
     token_expressions = [
         expr
         for title, values in expressions.items()
@@ -271,6 +288,238 @@ def test_query_scoping_and_safe_labels(dashboards):
     assert not any(f"{{{{{label}}}}}" in serialized for label in validator.FORBIDDEN_LABELS)
 
 
+def test_dspace_chat_outcomes_fallback_and_denominators(dashboards):
+    for document, provider in zip(dashboards, ("tokenplace", "openai")):
+        chat_rate = panel(document, "DSPACE chat outcome rate")["targets"][0]["expr"]
+        dependency_rate = panel(document, "DSPACE dependency outcome rate")["targets"][0]["expr"]
+        assert "sum by (provider, outcome)" in chat_rate
+        assert "sum by (dependency, outcome)" in dependency_rate
+        # Healthy instrumentation supplies an explicit idle zero; missing or unhealthy
+        # instrumentation supplies no fallback series and Grafana renders NO DATA.
+        assert "dspace_instrumentation_up" in chat_rate and "== 1" in chat_rate
+        assert "dspace_instrumentation_up" in dependency_rate and "== 1" in dependency_rate
+        assert "label_replace" not in chat_rate
+        assert "label_replace" not in dependency_rate
+        for title in ("DSPACE chat outcome rate", "DSPACE dependency outcome rate"):
+            targets = panel(document, title)["targets"]
+            assert len(targets) == 2
+            assert targets[1]["legendFormat"] == "idle"
+            assert "unless on() sum(rate(" in targets[1]["expr"]
+            assert all(
+                target["expr"].endswith(validator.DSPACE_COMPLETE_HEALTH_GATE) for target in targets
+            )
+        assert (
+            "mappings" not in panel(document, "DSPACE chat outcome rate")["fieldConfig"]["defaults"]
+        )
+        assert (
+            "mappings"
+            not in panel(document, "DSPACE dependency outcome rate")["fieldConfig"]["defaults"]
+        )
+
+        primary_panel = panel(document, "DSPACE primary-provider success ratio")
+        primary = primary_panel["targets"][0]["expr"]
+        assert primary.count(f'provider="{provider}"') == 2
+        assert primary.count('outcome="success"') == 1
+        assert 'outcome!="fallback_used"' not in primary
+        assert "including fallback_used outcomes" in primary_panel["description"]
+        assert primary.endswith(validator.DSPACE_COMPLETE_HEALTH_GATE)
+        assert "mappings" not in primary_panel["fieldConfig"]["defaults"]
+
+        fallback_panel = panel(document, "DSPACE fallback-use ratio")
+        fallback = fallback_panel["targets"][0]["expr"]
+        assert fallback.count("dspace_dchat_requests_total") == 2
+        assert fallback.count('outcome="fallback_used"') == 1
+        assert "all observed chat requests" in fallback_panel["description"]
+        assert fallback.endswith(validator.DSPACE_COMPLETE_HEALTH_GATE)
+        assert "mappings" not in fallback_panel["fieldConfig"]["defaults"]
+
+
+@pytest.mark.parametrize(
+    "title",
+    ["DSPACE chat latency percentiles", "DSPACE dependency latency percentiles"],
+)
+def test_dspace_latency_histograms_reject_duplicate_percentiles(tmp_path, dashboards, title):
+    staging, _ = dashboards
+    changed = copy.deepcopy(staging)
+    targets = panel(changed, title)["targets"]
+    targets[1]["expr"] = targets[1]["expr"].replace(".95", ".50", 1)
+    with pytest.raises(SystemExit, match="requires p50/p95/p99"):
+        validator.validate_dashboard(write_candidate(tmp_path, changed))
+
+
+@pytest.mark.parametrize(
+    ("title", "metric", "dimension"),
+    [
+        (
+            "DSPACE chat latency percentiles",
+            "dspace_dchat_request_duration_seconds_bucket",
+            "provider",
+        ),
+        (
+            "DSPACE dependency latency percentiles",
+            "dspace_dependency_request_duration_seconds_bucket",
+            "dependency",
+        ),
+    ],
+)
+def test_dspace_latency_histograms_preserve_bounded_outcome_dimensions(
+    dashboards, title, metric, dimension
+):
+    for document in dashboards:
+        targets = panel(document, title)["targets"]
+        assert [target["refId"] for target in targets] == ["A", "B", "C"]
+        assert [
+            target["expr"].split("histogram_quantile(", 1)[1].split(",", 1)[0] for target in targets
+        ] == [
+            ".50",
+            ".95",
+            ".99",
+        ]
+        for target in targets:
+            assert metric in target["expr"]
+            assert f"sum by (le, {dimension}, outcome)" in target["expr"]
+            assert 'environment=~"$environment"' in target["expr"]
+            assert target["expr"].endswith(validator.DSPACE_COMPLETE_HEALTH_GATE)
+            assert f"{metric.removesuffix('_bucket')}_count" in target["expr"]
+            assert f"and on ({dimension}, outcome)" in target["expr"]
+            assert "> 0" in target["expr"]
+
+
+@pytest.mark.parametrize(
+    ("title", "old", "new", "message"),
+    [
+        (
+            "DSPACE fallback-use ratio",
+            validator.DSPACE_COMPLETE_HEALTH_GATE,
+            'and on() (count(dspace_instrumentation_up{environment=~"$environment"} == 1) > 0)',
+            "complete health-gated contracts",
+        ),
+        (
+            "DSPACE chat latency percentiles",
+            "dspace_dchat_request_duration_seconds_count",
+            "dspace_dchat_request_duration_seconds_bucket",
+            "requires p50/p95/p99",
+        ),
+    ],
+)
+def test_dspace_panels_reject_partial_health_or_missing_observation_guard(
+    dashboards, title, old, new, message
+):
+    changed = copy.deepcopy(dashboards[0])
+    target = panel(changed, title)["targets"][0]
+    assert old in target["expr"]
+    target["expr"] = target["expr"].replace(old, new, 1)
+    with pytest.raises(SystemExit, match=message):
+        validator._validate_semantics(changed)
+
+
+def test_primary_success_ratio_is_not_inflated_by_fallback_traffic(dashboards):
+    successful_primary_requests = 1
+    fallback_primary_requests = 1
+    expected_ratio = successful_primary_requests / (
+        successful_primary_requests + fallback_primary_requests
+    )
+    assert expected_ratio == 0.5
+    for document in dashboards:
+        expression = panel(document, "DSPACE primary-provider success ratio")["targets"][0]["expr"]
+        denominator = expression.split("clamp_min(", 1)[1]
+        assert 'outcome!="fallback_used"' not in denominator
+
+
+@pytest.mark.parametrize(
+    "title",
+    ["DSPACE primary-provider success ratio", "DSPACE fallback-use ratio"],
+)
+@pytest.mark.parametrize("mutation", ["missing", "duplicate"])
+def test_dspace_ratios_reject_malformed_target_counts(tmp_path, dashboards, title, mutation):
+    changed = copy.deepcopy(dashboards[0])
+    targets = panel(changed, title)["targets"]
+    if mutation == "missing":
+        targets.clear()
+    else:
+        targets.append(copy.deepcopy(targets[0]))
+    with pytest.raises(SystemExit, match="exactly one PromQL target"):
+        validator.validate_dashboard(write_candidate(tmp_path, changed))
+
+
+def test_dspace_valid_zero_ratios_have_no_idle_value_mapping(dashboards):
+    for document in dashboards:
+        for title in ("DSPACE primary-provider success ratio", "DSPACE fallback-use ratio"):
+            ratio_panel = panel(document, title)
+            assert ratio_panel["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
+            assert "mappings" not in ratio_panel["fieldConfig"]["defaults"]
+            assert (
+                "or on() (0 * count(dspace_instrumentation_up" in ratio_panel["targets"][0]["expr"]
+            )
+
+
+@pytest.mark.parametrize(
+    ("title", "mutation"),
+    [
+        ("DSPACE chat latency percentiles", "missing"),
+        ("DSPACE dependency latency percentiles", "extra"),
+    ],
+)
+def test_dspace_latency_histograms_reject_malformed_target_counts(
+    tmp_path, dashboards, title, mutation
+):
+    changed = copy.deepcopy(dashboards[0])
+    targets = panel(changed, title)["targets"]
+    if mutation == "missing":
+        targets.pop()
+    else:
+        targets.append(copy.deepcopy(targets[-1]))
+    with pytest.raises(SystemExit, match="requires p50/p95/p99"):
+        validator.validate_dashboard(write_candidate(tmp_path, changed))
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("environment", "environment scoping"),
+        ("metric-inventory", "counters and latency histograms"),
+        ("outcome-contract", "complete health-gated idle contract"),
+        ("primary-shape", "include fallback outcomes"),
+        ("fallback-shape", "all chat requests"),
+        ("ratio-contract", "complete health-gated contracts"),
+        ("ratio-description", "document its denominator"),
+    ],
+)
+def test_dspace_chat_validator_rejects_each_contract_violation(
+    tmp_path, dashboards, mutation, message
+):
+    changed = copy.deepcopy(dashboards[0])
+    if mutation == "environment":
+        target = panel(changed, "DSPACE chat latency percentiles")["targets"][0]
+        target["expr"] = target["expr"].replace(
+            'environment=~"$environment"', 'environment="staging"'
+        )
+    elif mutation == "metric-inventory":
+        for target in panel(changed, "DSPACE chat latency percentiles")["targets"]:
+            target["expr"] = target["expr"].replace(
+                "dspace_dchat_request_duration_seconds_bucket", "unrecognized_bucket", 1
+            )
+    elif mutation == "outcome-contract":
+        target = panel(changed, "DSPACE chat outcome rate")["targets"][1]
+        target["legendFormat"] = "inactive"
+    elif mutation == "primary-shape":
+        target = panel(changed, "DSPACE primary-provider success ratio")["targets"][0]
+        target["expr"] = target["expr"].replace('provider="tokenplace"', 'provider="openai"', 1)
+    elif mutation == "fallback-shape":
+        target = panel(changed, "DSPACE fallback-use ratio")["targets"][0]
+        target["expr"] = target["expr"].replace(
+            'outcome="fallback_used"', 'outcome="fallback_used_dspace_dchat_requests_total"', 1
+        )
+    elif mutation == "ratio-contract":
+        target = panel(changed, "DSPACE fallback-use ratio")["targets"][0]
+        target["expr"] = target["expr"].replace("1e-9", "1e-8", 1)
+    else:
+        panel(changed, "DSPACE fallback-use ratio")["description"] = "Fallback ratio."
+
+    with pytest.raises(SystemExit, match=message):
+        validator.validate_dashboard(write_candidate(tmp_path, changed))
+
+
 @pytest.mark.parametrize(
     ("title", "target_index"),
     [
@@ -319,6 +568,7 @@ def test_raw_ip_legend_is_rejected(tmp_path, dashboards):
         "token-scope",
         "token-zero",
         "event-capability",
+        "event-presence",
         "image-zero",
         "image-prefix",
         "image-metadata",
@@ -367,9 +617,12 @@ def test_semantic_contract_rejects_invalid_dashboard_mutations(dashboards, mutat
             "expr"
         ] += " or vector(0)"
     elif mutation == "event-capability":
-        panel(changed, "dChat request activity")["targets"][0][
+        panel(changed, "DSPACE chat outcome rate")["targets"][0][
             "expr"
         ] = "dspace_dchat_requests_total"
+    elif mutation == "event-presence":
+        target = panel(changed, "DSPACE chat outcome rate")["targets"][0]
+        target["expr"] = target["expr"][: -len(validator.DSPACE_COMPLETE_HEALTH_GATE)].rstrip()
     elif mutation == "image-zero":
         panel(changed, "Image-pin agreement")["targets"][0]["expr"] = panel(
             changed, "Image-pin agreement"

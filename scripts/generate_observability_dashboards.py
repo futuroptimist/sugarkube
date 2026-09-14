@@ -14,6 +14,7 @@ PROFILES = {
         "TITLE": "Sugarkube Staging Observability",
         "ENVIRONMENT": "staging",
         "CLUSTER": "sugarkube-int",
+        "PRIMARY_PROVIDER": "tokenplace",
         "path": ROOT
         / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json",
     },
@@ -22,6 +23,7 @@ PROFILES = {
         "TITLE": "Sugarkube Production Observability",
         "ENVIRONMENT": "prod",
         "CLUSTER": "sugarkube-prod",
+        "PRIMARY_PROVIDER": "openai",
         "path": ROOT / "clusters/prod/observability/dashboards/sugarkube-prod-observability.json",
     },
 }
@@ -29,7 +31,7 @@ PROFILES = {
 
 def render(profile: dict[str, object]) -> str:
     source = TEMPLATE.read_text(encoding="utf-8")
-    for name in ("UID", "TITLE", "ENVIRONMENT", "CLUSTER"):
+    for name in ("UID", "TITLE", "ENVIRONMENT", "CLUSTER", "PRIMARY_PROVIDER"):
         source = source.replace("${" + name + "}", str(profile[name]))
     document = json.loads(source)
     return json.dumps(document, indent=2) + "\n"
