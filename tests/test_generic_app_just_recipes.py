@@ -5906,6 +5906,7 @@ def test_observability_app_metrics_inventory_tokenplace_contract_is_strict_and_c
     assert cfg["expectedTargetCount"] == 1
     assert cfg["secret"] == {"name": "tokenplace-staging-metrics-token", "key": "token"}
     assert cfg["serviceMonitor"]["path"] == "/metrics"
+    assert cfg["serviceMonitor"]["authenticationStyle"] == "authorization"
     assert cfg["serviceMonitor"]["authorization"]["credentials"] == cfg["secret"]
     assert len(cfg["serviceMonitor"]["relabelings"]) == 4
     assert cfg["targetLabels"]["namespace"] == "tokenplace"
@@ -5990,6 +5991,8 @@ def test_observability_app_metrics_inventory_dspace_staging_and_prod_are_canonic
         "type": "Bearer",
         "credentials": staging["secret"],
     }
+    assert staging["serviceMonitor"]["authenticationStyle"] == "bearerTokenSecret"
+    assert prod["serviceMonitor"]["authenticationStyle"] == "bearerTokenSecret"
     assert staging["serviceMonitor"]["path"] == "/metrics"
     assert staging["serviceMonitor"]["interval"] == "30s"
     assert staging["serviceMonitor"]["scrapeTimeout"] == "10s"
@@ -6147,10 +6150,26 @@ def test_observability_app_metrics_standard_scrape_labels_are_not_forbidden_appl
     assert "unbounded application metric label" in str(excinfo.value)
 
 
-def test_observability_app_metrics_verifier_has_no_tokenplace_specific_branch():
+def test_observability_app_metrics_verifier_selects_authentication_declaratively():
     text = APP_METRICS_SCRIPT.read_text(encoding="utf-8")
     assert 'if app == "tokenplace"' not in text
     assert 'elif app == "tokenplace"' not in text
+    verifier = text.split("def verify(app, env):", 1)[1].split("def ", 1)[0]
+    render_validator = text.split("def validate_render(", 1)[1].split("def ", 1)[0]
+    assert 'app == "dspace"' not in verifier
+    assert 'app == "dspace"' not in render_validator
+    assert 'authentication_style == "bearerTokenSecret"' in verifier
+    assert 'authentication_style == "bearerTokenSecret"' in render_validator
+
+
+def test_observability_app_metrics_rejects_unsupported_authentication_style():
+    doc = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))
+    doc["applications"]["tokenplace"]["environments"]["staging"]["serviceMonitor"][
+        "authenticationStyle"
+    ] = "app-specific"
+
+    with pytest.raises(SystemExit, match="authenticationStyle is unsupported"):
+        app_metrics.validate_inventory(doc)
 
 
 def _tokenplace_chart_like_service_monitor(namespace_line: str = "") -> str:
