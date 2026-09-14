@@ -6151,6 +6151,71 @@ def test_observability_app_metrics_verifier_has_no_tokenplace_specific_branch():
     text = APP_METRICS_SCRIPT.read_text(encoding="utf-8")
     assert 'if app == "tokenplace"' not in text
     assert 'elif app == "tokenplace"' not in text
+    assert 'app not in {"dspace", "tokenplace"}' not in text
+
+
+def test_observability_app_metrics_auth_shape_is_declarative():
+    applications = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"]
+    tokenplace = applications["tokenplace"]["environments"]["staging"]
+    dspace = applications["dspace"]["environments"]["staging"]
+
+    assert tokenplace["serviceMonitor"]["credentialsLocation"] == "authorization.credentials"
+    assert dspace["serviceMonitor"]["credentialsLocation"] == "bearerTokenSecret"
+    assert app_metrics.service_monitor_authorization(
+        {"authorization": {"type": "Bearer", "credentials": tokenplace["secret"]}},
+        tokenplace,
+    ) == ({"type": "Bearer", "credentials": tokenplace["secret"]}, tokenplace["secret"])
+    assert app_metrics.service_monitor_authorization(
+        {"bearerTokenSecret": dspace["secret"]}, dspace
+    ) == ({"type": "Bearer"}, dspace["secret"])
+
+
+def test_observability_app_metrics_authorization_rejects_unsupported_location():
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
+        "tokenplace"
+    ]["environments"]["staging"]
+    cfg["serviceMonitor"]["credentialsLocation"] = "secretRef"
+
+    with pytest.raises(SystemExit) as excinfo:
+        app_metrics.service_monitor_authorization(
+            {"bearerTokenSecret": cfg["secret"]}, cfg
+        )
+    assert "serviceMonitor.credentialsLocation is unsupported" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("credentials_location", [[], {}])
+def test_observability_app_metrics_inventory_rejects_non_string_credentials_location(
+    credentials_location,
+):
+    doc = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))
+    doc["applications"]["tokenplace"]["environments"]["staging"]["serviceMonitor"][
+        "credentialsLocation"
+    ] = credentials_location
+
+    with pytest.raises(SystemExit) as excinfo:
+        app_metrics.validate_inventory(doc)
+    assert "serviceMonitor.credentialsLocation is unsupported" in str(excinfo.value)
+
+
+def test_observability_app_metrics_inventory_allows_declarative_production_application():
+    doc = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))
+    synthetic = json.loads(json.dumps(doc["applications"]["tokenplace"]))
+    del synthetic["environments"]["staging"]
+    cfg = synthetic["environments"]["prod"]
+    cfg["namespace"] = "synthetic"
+    cfg["serviceMonitorName"] = "synthetic"
+    cfg["secret"]["name"] = "synthetic-prod-metrics-token"
+    cfg["serviceMonitor"]["authorization"]["credentials"] = cfg["secret"]
+    cfg["serviceMonitor"]["selectorMatchLabels"] = {"app.kubernetes.io/name": "synthetic"}
+    cfg["targetLabels"].update(app="synthetic", release="synthetic", namespace="synthetic")
+    cfg["allowedApplicationLabels"].update(app=["synthetic"], release=["synthetic"])
+    for relabeling in cfg["serviceMonitor"]["relabelings"]:
+        if relabeling["targetLabel"] in {"app", "release"}:
+            relabeling["replacement"] = "synthetic"
+    cfg["derivedApplicationLabels"] = {}
+    doc["applications"] = {"synthetic": synthetic}
+
+    app_metrics.validate_inventory(doc)
 
 
 def _tokenplace_chart_like_service_monitor(namespace_line: str = "") -> str:

@@ -48,7 +48,8 @@
                 "replacement": "sugarkube-int"
               }
             ],
-            "targetLabels": []
+            "targetLabels": [],
+            "credentialsLocation": "authorization.credentials"
           },
           "targetLabels": {
             "app": "tokenplace",
@@ -235,7 +236,8 @@
                 "replacement": "sugarkube-prod"
               }
             ],
-            "targetLabels": []
+            "targetLabels": [],
+            "credentialsLocation": "authorization.credentials"
           },
           "targetLabels": {
             "app": "tokenplace",
@@ -430,7 +432,8 @@
               "dspace.dev/environment",
               "dspace.dev/release",
               "dspace.dev/cluster"
-            ]
+            ],
+            "credentialsLocation": "bearerTokenSecret"
           },
           "targetLabels": {
             "app": "dspace",
@@ -616,7 +619,8 @@
                 "replacement": "sugarkube-prod"
               }
             ],
-            "targetLabels": []
+            "targetLabels": [],
+            "credentialsLocation": "bearerTokenSecret"
           },
           "targetLabels": {
             "app": "dspace",
