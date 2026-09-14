@@ -19,7 +19,7 @@ TITLE = ""
 UID = ""
 DASHBOARD_FILE = ""
 DASHBOARD_MOUNT = ""
-PROFILE_DIFFERENCES = {"uid", "title", "tags", "templating"}
+PROFILE_DIFFERENCES = {"uid", "title", "tags", "templating", "panels"}
 FORBIDDEN_LABELS = {
     "instance",
     "ip",
@@ -260,10 +260,9 @@ def _validate_semantics(dashboard: dict) -> None:
         "cluster",
         "app",
         "route",
-        "primary_provider",
     ]:
         raise SystemExit("ERROR: dashboard variables must use the canonical shape.")
-    for variable in [*variables[:2], variables[4]]:
+    for variable in variables[:2]:
         if (
             variable.get("type") != "constant"
             or variable.get("hide") != 2
@@ -325,36 +324,82 @@ def _validate_semantics(dashboard: dict) -> None:
         metric for metric in DSPACE_CHAT_METRICS if metric in "\n".join(chat_expressions)
     }:
         raise SystemExit("ERROR: DSPACE chat panels must cover counters and latency histograms.")
+    for title, metric, dimension in (
+        ("DSPACE chat outcome rate", "dspace_dchat_requests_total", "provider"),
+        ("DSPACE dependency outcome rate", "dspace_dependency_requests_total", "dependency"),
+    ):
+        expected = (
+            f"(sum by ({dimension}, outcome) (rate({metric}"
+            '{environment=~"$environment"}[$__rate_interval])) or on() '
+            "label_replace(label_replace(0 * count(dspace_instrumentation_up"
+            '{environment=~"$environment"} == 1), '
+            f'"{dimension}", "idle", "", ""), "outcome", "idle", "", "")) '
+            f"{DSPACE_INSTRUMENTATION_PRESENCE_GATE}"
+        )
+        if panel_expression(dashboard, title) != expected:
+            raise SystemExit(f"ERROR: {title} must use the complete health-gated idle contract.")
     for title in ("DSPACE chat latency percentiles", "DSPACE dependency latency percentiles"):
         targets = panel_named(dashboard, title).get("targets", [])
         expected_dimension = "provider" if "chat latency" in title else "dependency"
-        quantiles = []
-        for target in targets:
-            match = re.search(
-                r"histogram_quantile\(\.(50|95|99), sum by \(le, "
-                + expected_dimension
-                + r", outcome\) \(rate\(",
-                target.get("expr", ""),
-            )
-            quantiles.append(match.group(1) if match else None)
-        if quantiles != ["50", "95", "99"]:
+        metric = (
+            "dspace_dchat_request_duration_seconds_bucket"
+            if expected_dimension == "provider"
+            else "dspace_dependency_request_duration_seconds_bucket"
+        )
+        expected = [
+            f"(histogram_quantile(.{quantile}, sum by (le, {expected_dimension}, outcome) "
+            f'(rate({metric}{{environment=~"$environment"}}[$__rate_interval])))) '
+            f"{DSPACE_INSTRUMENTATION_PRESENCE_GATE}"
+            for quantile in ("50", "95", "99")
+        ]
+        if len(targets) != 3 or [target.get("expr") for target in targets] != expected:
             raise SystemExit(
                 f"ERROR: {title} requires p50/p95/p99 histograms grouped by le, "
                 f"{expected_dimension}, and outcome."
             )
     primary = panel_expression(dashboard, "DSPACE primary-provider success ratio")
     fallback = panel_expression(dashboard, "DSPACE fallback-use ratio")
+    profile = next(profile for profile in PROFILES.values() if profile["UID"] == dashboard["uid"])
+    provider = profile["PRIMARY_PROVIDER"]
+    primary_selector = (
+        'dspace_dchat_requests_total{environment=~"$environment",' f'provider="{provider}"'
+    )
     if (
-        primary.count('provider="$primary_provider"') != 2
+        primary.count(primary_selector) != 2
         or primary.count('outcome="success"') != 1
-        or primary.count('outcome!="fallback_used"') != 1
+        or 'outcome!="fallback_used"' in primary
+        or primary.count("dspace_dchat_requests_total") != 2
     ):
-        raise SystemExit("ERROR: primary success must exclude fallback providers and outcomes.")
+        raise SystemExit(
+            "ERROR: primary success must include fallback outcomes in its denominator."
+        )
     if (
         fallback.count("dspace_dchat_requests_total") != 2
         or fallback.count('outcome="fallback_used"') != 1
     ):
         raise SystemExit("ERROR: fallback-use ratio must use all chat requests as its denominator.")
+    expected_primary = (
+        "((sum(rate("
+        + primary_selector
+        + ',outcome="success"}[$__rate_interval])) or on() (0 * count('
+        + DSPACE_HEALTH
+        + "))) / clamp_min(sum(rate("
+        + primary_selector
+        + "}[$__rate_interval])) or on() (0 * count("
+        + DSPACE_HEALTH
+        + f")), 1e-9)) {DSPACE_INSTRUMENTATION_PRESENCE_GATE}"
+    )
+    expected_fallback = (
+        '((sum(rate(dspace_dchat_requests_total{environment=~"$environment",'
+        'outcome="fallback_used"}[$__rate_interval])) or on() (0 * count('
+        + DSPACE_HEALTH
+        + '))) / clamp_min(sum(rate(dspace_dchat_requests_total{environment=~"$environment"}'
+        "[$__rate_interval])) or on() (0 * count("
+        + DSPACE_HEALTH
+        + f")), 1e-9)) {DSPACE_INSTRUMENTATION_PRESENCE_GATE}"
+    )
+    if primary != expected_primary or fallback != expected_fallback:
+        raise SystemExit("ERROR: DSPACE ratios must use the complete health-gated contracts.")
     if any(
         "divided by" not in panel.get("description", "").lower()
         for panel in chat_panels

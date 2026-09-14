@@ -85,19 +85,6 @@
           "text": "All",
           "value": "$__all"
         }
-      },
-      {
-        "name": "primary_provider",
-        "label": "DSPACE primary provider",
-        "type": "constant",
-        "hide": 2,
-        "query": "${PRIMARY_PROVIDER}",
-        "current": {
-          "text": "${PRIMARY_PROVIDER}",
-          "value": "${PRIMARY_PROVIDER}"
-        },
-        "includeAll": false,
-        "multi": false
       }
     ]
   },
@@ -1454,17 +1441,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "reqps",
-          "noValue": "NO DATA",
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "0": {
-                  "text": "No requests observed"
-                }
-              }
-            }
-          ]
+          "noValue": "NO DATA"
         },
         "overrides": []
       },
@@ -1503,17 +1480,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "reqps",
-          "noValue": "NO DATA",
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "0": {
-                  "text": "No requests observed"
-                }
-              }
-            }
-          ]
+          "noValue": "NO DATA"
         },
         "overrides": []
       },
@@ -1531,7 +1498,7 @@
       "id": 33,
       "type": "timeseries",
       "title": "DSPACE primary-provider success ratio",
-      "description": "Successful configured-primary-provider chat attempts divided by its non-fallback chat attempts. Fallback outcomes and other providers are excluded from both numerator and denominator.",
+      "description": "Successful configured-primary-provider chat attempts divided by all configured-primary-provider chat attempts, including fallback_used outcomes, so fallback traffic cannot inflate primary success.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1545,7 +1512,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "((sum(rate(dspace_dchat_requests_total{environment=~\"$environment\",provider=\"$primary_provider\",outcome=\"success\"}[$__rate_interval])) or on() (0 * count(dspace_instrumentation_up{environment=~\"$environment\"} == 1))) / clamp_min(sum(rate(dspace_dchat_requests_total{environment=~\"$environment\",provider=\"$primary_provider\",outcome!=\"fallback_used\"}[$__rate_interval])) or on() (0 * count(dspace_instrumentation_up{environment=~\"$environment\"} == 1)), 1e-9)) and on() (count(dspace_instrumentation_up{environment=~\"$environment\"} == 1) > 0)",
+          "expr": "((sum(rate(dspace_dchat_requests_total{environment=~\"$environment\",provider=\"${PRIMARY_PROVIDER}\",outcome=\"success\"}[$__rate_interval])) or on() (0 * count(dspace_instrumentation_up{environment=~\"$environment\"} == 1))) / clamp_min(sum(rate(dspace_dchat_requests_total{environment=~\"$environment\",provider=\"${PRIMARY_PROVIDER}\"}[$__rate_interval])) or on() (0 * count(dspace_instrumentation_up{environment=~\"$environment\"} == 1)), 1e-9)) and on() (count(dspace_instrumentation_up{environment=~\"$environment\"} == 1) > 0)",
           "legendFormat": "primary success"
         }
       ],
@@ -1623,17 +1590,17 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(.50, sum by (le, provider, outcome) (rate(dspace_dchat_request_duration_seconds_bucket{environment=~\"$environment\"}[$__rate_interval])))",
+          "expr": "(histogram_quantile(.50, sum by (le, provider, outcome) (rate(dspace_dchat_request_duration_seconds_bucket{environment=~\"$environment\"}[$__rate_interval])))) and on() (count(dspace_instrumentation_up{environment=~\"$environment\"} == 1) > 0)",
           "legendFormat": "p50 {{provider}} {{outcome}}"
         },
         {
           "refId": "B",
-          "expr": "histogram_quantile(.95, sum by (le, provider, outcome) (rate(dspace_dchat_request_duration_seconds_bucket{environment=~\"$environment\"}[$__rate_interval])))",
+          "expr": "(histogram_quantile(.95, sum by (le, provider, outcome) (rate(dspace_dchat_request_duration_seconds_bucket{environment=~\"$environment\"}[$__rate_interval])))) and on() (count(dspace_instrumentation_up{environment=~\"$environment\"} == 1) > 0)",
           "legendFormat": "p95 {{provider}} {{outcome}}"
         },
         {
           "refId": "C",
-          "expr": "histogram_quantile(.99, sum by (le, provider, outcome) (rate(dspace_dchat_request_duration_seconds_bucket{environment=~\"$environment\"}[$__rate_interval])))",
+          "expr": "(histogram_quantile(.99, sum by (le, provider, outcome) (rate(dspace_dchat_request_duration_seconds_bucket{environment=~\"$environment\"}[$__rate_interval])))) and on() (count(dspace_instrumentation_up{environment=~\"$environment\"} == 1) > 0)",
           "legendFormat": "p99 {{provider}} {{outcome}}"
         }
       ],
@@ -1672,17 +1639,17 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(.50, sum by (le, dependency, outcome) (rate(dspace_dependency_request_duration_seconds_bucket{environment=~\"$environment\"}[$__rate_interval])))",
+          "expr": "(histogram_quantile(.50, sum by (le, dependency, outcome) (rate(dspace_dependency_request_duration_seconds_bucket{environment=~\"$environment\"}[$__rate_interval])))) and on() (count(dspace_instrumentation_up{environment=~\"$environment\"} == 1) > 0)",
           "legendFormat": "p50 {{dependency}} {{outcome}}"
         },
         {
           "refId": "B",
-          "expr": "histogram_quantile(.95, sum by (le, dependency, outcome) (rate(dspace_dependency_request_duration_seconds_bucket{environment=~\"$environment\"}[$__rate_interval])))",
+          "expr": "(histogram_quantile(.95, sum by (le, dependency, outcome) (rate(dspace_dependency_request_duration_seconds_bucket{environment=~\"$environment\"}[$__rate_interval])))) and on() (count(dspace_instrumentation_up{environment=~\"$environment\"} == 1) > 0)",
           "legendFormat": "p95 {{dependency}} {{outcome}}"
         },
         {
           "refId": "C",
-          "expr": "histogram_quantile(.99, sum by (le, dependency, outcome) (rate(dspace_dependency_request_duration_seconds_bucket{environment=~\"$environment\"}[$__rate_interval])))",
+          "expr": "(histogram_quantile(.99, sum by (le, dependency, outcome) (rate(dspace_dependency_request_duration_seconds_bucket{environment=~\"$environment\"}[$__rate_interval])))) and on() (count(dspace_instrumentation_up{environment=~\"$environment\"} == 1) > 0)",
           "legendFormat": "p99 {{dependency}} {{outcome}}"
         }
       ],

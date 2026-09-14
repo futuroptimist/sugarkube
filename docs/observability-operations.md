@@ -46,7 +46,7 @@ Observability** (`sugarkube-prod-observability`). Grafana's chart-rendered
 Prometheus datasource has stable UID `prometheus`, which both dashboards
 reference directly.
 
-Both environment artifacts intentionally share the same 11-row, 60-object panel layout. Regenerate
+Both environment artifacts intentionally share the same 11-row, 64-object panel layout. Regenerate
 rather than hand-editing either artifact:
 
 ```bash
@@ -54,11 +54,12 @@ python3 scripts/generate_observability_dashboards.py --write
 python3 scripts/generate_observability_dashboards.py --check
 ```
 
-Their panel arrays are identical. Only the UID, title, environment tag, hidden `environment`
-constant, and hidden `cluster` constant differ. The visible `app` and `route` selectors have the
-same `All = .*` shape in both profiles. The validator compares each artifact to the authoritative
-template and rejects one-sided title, query, visualization, transformation, target-mode, ID, order,
-or grid drift.
+Their panel arrays differ only where `${PRIMARY_PROVIDER}` is substituted: staging uses the metric
+label `tokenplace`, while production uses `openai`. Otherwise, only the UID, title, environment tag,
+hidden `environment` constant, and hidden `cluster` constant differ. The visible `app` and `route`
+selectors have the same `All = .*` shape in both profiles. The validator compares each artifact to
+the authoritative template and rejects one-sided title, query, visualization, transformation,
+target-mode, ID, order, or grid drift.
 
 The staging and repository-ready production blackbox lifecycle is documented in
 [blackbox monitoring](observability-blackbox.md). That guarded lifecycle
