@@ -335,6 +335,7 @@ def validate_inventory(doc):
             expect_keys(
                 sm,
                 {
+                    "authenticationStyle",
                     "selectorMatchLabels",
                     "path",
                     "interval",
@@ -347,6 +348,8 @@ def validate_inventory(doc):
             )
             if sm["path"] != "/metrics":
                 fail("serviceMonitor.path must be /metrics")
+            if sm["authenticationStyle"] not in {"authorization", "bearerTokenSecret"}:
+                fail("serviceMonitor.authenticationStyle is unsupported")
             for key in ("interval", "scrapeTimeout"):
                 if not isinstance(sm[key], str) or not DURATION.fullmatch(sm[key]):
                     fail(f"serviceMonitor.{key} is malformed")
@@ -1047,9 +1050,10 @@ def verify(app, env):
     ep = endpoints[0]
     if not isinstance(ep, dict):
         fail("ServiceMonitor response is structurally invalid", 1)
+    authentication_style = cfg["serviceMonitor"]["authenticationStyle"]
     authorization = ep.get("authorization")
     auth = authorization.get("credentials") if isinstance(authorization, dict) else None
-    if app == "dspace":
+    if authentication_style == "bearerTokenSecret":
         auth = ep.get("bearerTokenSecret")
         authorization = {"type": "Bearer"} if isinstance(auth, dict) else authorization
     selector = spec.get("selector")
@@ -1250,9 +1254,10 @@ def validate_render(
     ep = endpoints[0]
     if not isinstance(ep, dict):
         fail("rendered ServiceMonitor endpoint is structurally invalid")
+    authentication_style = cfg["serviceMonitor"]["authenticationStyle"]
     auth = ep.get("authorization")
     creds = auth.get("credentials") if isinstance(auth, dict) else None
-    if app == "dspace":
+    if authentication_style == "bearerTokenSecret":
         creds = ep.get("bearerTokenSecret")
         auth = {"type": "Bearer"} if isinstance(creds, dict) else auth
     if not isinstance(auth, dict) or not isinstance(creds, dict):

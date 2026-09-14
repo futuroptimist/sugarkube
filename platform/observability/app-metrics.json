@@ -12,6 +12,7 @@
             "key": "token"
           },
           "serviceMonitor": {
+            "authenticationStyle": "authorization",
             "selectorMatchLabels": {
               "app.kubernetes.io/instance": "tokenplace",
               "app.kubernetes.io/name": "tokenplace"
@@ -199,6 +200,7 @@
             "key": "token"
           },
           "serviceMonitor": {
+            "authenticationStyle": "authorization",
             "selectorMatchLabels": {
               "app.kubernetes.io/instance": "tokenplace",
               "app.kubernetes.io/name": "tokenplace"
@@ -381,6 +383,7 @@
             "key": "token"
           },
           "serviceMonitor": {
+            "authenticationStyle": "bearerTokenSecret",
             "selectorMatchLabels": {
               "app.kubernetes.io/instance": "dspace",
               "app.kubernetes.io/name": "dspace"
@@ -575,6 +578,7 @@
             "key": "token"
           },
           "serviceMonitor": {
+            "authenticationStyle": "bearerTokenSecret",
             "selectorMatchLabels": {
               "app.kubernetes.io/instance": "dspace",
               "app.kubernetes.io/name": "dspace"
