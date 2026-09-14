@@ -48,25 +48,30 @@ TOKENPLACE_DATA_TITLES = {
     "token.place HTTP latency percentiles",
     "token.place build identity",
 }
-EVENT_METRICS = {"dspace_dchat_requests_total", "dspace_dependency_requests_total"}
+EVENT_METRICS = {
+    "dspace_dchat_requests_total",
+    "dspace_dependency_requests_total",
+    "dspace_dchat_request_duration_seconds_bucket",
+    "dspace_dependency_request_duration_seconds_bucket",
+}
 CAPABILITY = 'dspace_release_approved_info{environment=~"$environment"}'
 CAPABILITY_PRESENCE_GATE = f"and on() (count({CAPABILITY}) > 0)"
 FIVE_XX_RATIO_EXPRESSIONS = {
     "5xx error ratio": (
         '(sum(rate(dspace_http_requests_total{environment=~"$environment",status_class="5xx"}'
-        '[$__rate_interval])) or on() (0 * sum(rate(dspace_http_requests_total{'
+        "[$__rate_interval])) or on() (0 * sum(rate(dspace_http_requests_total{"
         'environment=~"$environment"}[$__rate_interval])))) / clamp_min(sum(rate('
         'dspace_http_requests_total{environment=~"$environment"}[$__rate_interval])), 1e-9)'
     ),
     "token.place HTTP 5xx ratio": (
         '(sum(rate(tokenplace_http_requests_total{app="tokenplace",environment=~"$environment",'
         'release="tokenplace",cluster=~"$cluster",namespace="tokenplace",status_class="5xx"}'
-        '[$__rate_interval])) or on() (0 * sum(rate(tokenplace_http_requests_total{'
+        "[$__rate_interval])) or on() (0 * sum(rate(tokenplace_http_requests_total{"
         'app="tokenplace",environment=~"$environment",release="tokenplace",cluster=~"$cluster",'
         'namespace="tokenplace"}[$__rate_interval])))) / clamp_min(sum(rate('
         'tokenplace_http_requests_total{app="tokenplace",environment=~"$environment",'
         'release="tokenplace",cluster=~"$cluster",namespace="tokenplace"}'
-        '[$__rate_interval])), 1e-9)'
+        "[$__rate_interval])), 1e-9)"
     ),
 }
 
@@ -162,10 +167,10 @@ def _expected_dashboard(dashboard: dict) -> dict:
 
 
 def _validate_grid(items: list[dict]) -> None:
-    if len(items) != 60 or sum(panel.get("type") == "row" for panel in items) != 11:
-        raise SystemExit("ERROR: canonical dashboard must contain exactly 60 objects and 11 rows.")
+    if len(items) != 63 or sum(panel.get("type") == "row" for panel in items) != 11:
+        raise SystemExit("ERROR: canonical dashboard must contain exactly 63 objects and 11 rows.")
     ids = [panel.get("id") for panel in items]
-    if ids != list(range(1, 61)):
+    if ids != list(range(1, 64)):
         raise SystemExit(
             "ERROR: canonical dashboard panel IDs must be stable consecutive integers."
         )
@@ -279,15 +284,70 @@ def _validate_semantics(dashboard: dict) -> None:
         raise SystemExit("ERROR: token.place queries must preserve missing data.")
     for title, expected in FIVE_XX_RATIO_EXPRESSIONS.items():
         if panel_expression(dashboard, title) != expected:
-            raise SystemExit(
-                f"ERROR: {title} must use its request-family-gated 5xx zero contract."
-            )
+            raise SystemExit(f"ERROR: {title} must use its request-family-gated 5xx zero contract.")
     for metric in EVENT_METRICS:
         matches = [expr for expr in expressions if metric in expr]
         if not matches or any(
             "0 * count(dspace_instrumentation_up" not in expr for expr in matches
         ):
             raise SystemExit(f"ERROR: event-driven metric {metric} requires capability-gated zero.")
+    dspace_feature_titles = (
+        "DSPACE chat outcome rate",
+        "DSPACE dependency outcome rate",
+        "DSPACE primary success and fallback ratios",
+        "DSPACE chat latency percentiles",
+        "DSPACE dependency latency percentiles",
+    )
+    feature_targets = {
+        title: [
+            re.sub(r"\s+", " ", target.get("expr", ""))
+            for target in panel_named(dashboard, title).get("targets", [])
+        ]
+        for title in dspace_feature_titles
+    }
+    if any(
+        not targets
+        or any(
+            'environment=~"$environment"' not in expression or "vector(0)" in expression
+            for expression in targets
+        )
+        for targets in feature_targets.values()
+    ):
+        raise SystemExit(
+            "ERROR: DSPACE feature queries must preserve environment scope and missing data."
+        )
+    primary, fallback = feature_targets["DSPACE primary success and fallback ratios"]
+    if (
+        primary.count('provider="tokenplace"') != 2
+        or primary.count('outcome="success"') != 1
+        or 'outcome="fallback_used"' in primary
+        or fallback.count('outcome="fallback_used"') != 1
+        or 'provider="tokenplace"' in fallback
+        or any("clamp_min" not in expression for expression in (primary, fallback))
+    ):
+        raise SystemExit("ERROR: DSPACE primary-success or fallback ratio denominator changed.")
+    histogram_contracts = {
+        "DSPACE chat latency percentiles": (
+            "dspace_dchat_request_duration_seconds_bucket",
+            "provider",
+        ),
+        "DSPACE dependency latency percentiles": (
+            "dspace_dependency_request_duration_seconds_bucket",
+            "dependency",
+        ),
+    }
+    for title, (metric, grouping) in histogram_contracts.items():
+        targets = feature_targets[title]
+        expected_prefixes = [
+            f"histogram_quantile({quantile}, sum by (le, {grouping}) (rate({metric}"
+            for quantile in (".50", ".95", ".99")
+        ]
+        if len(targets) != 3 or any(
+            not expression.startswith(prefix)
+            or f'{metric}{{environment=~"$environment"}}' not in expression
+            for expression, prefix in zip(targets, expected_prefixes, strict=True)
+        ):
+            raise SystemExit(f"ERROR: {title} must preserve p50/p95/p99 histogram aggregation.")
     capability_targets = {
         "Image-pin agreement": [panel_expression(dashboard, "Image-pin agreement")],
         "DSPACE metrics-target health": [
@@ -295,9 +355,9 @@ def _validate_semantics(dashboard: dict) -> None:
         ],
         "/chat synthetic result and freshness": [
             re.sub(r"\s+", " ", target.get("expr", ""))
-            for target in panel_named(
-                dashboard, "/chat synthetic result and freshness"
-            ).get("targets", [])
+            for target in panel_named(dashboard, "/chat synthetic result and freshness").get(
+                "targets", []
+            )
         ],
     }
     for title, targets in capability_targets.items():
