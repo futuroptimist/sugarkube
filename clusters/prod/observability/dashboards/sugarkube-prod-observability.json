@@ -1433,9 +1433,26 @@
       },
       "targets": [
         {
-          "refId": "A",
-          "expr": "(sum by (provider, outcome) (rate(dspace_dchat_requests_total{environment=~\"$environment\"}[$__rate_interval])) or on() label_replace(label_replace(0 * count(dspace_instrumentation_up{environment=~\"$environment\"} == 1), \"provider\", \"idle\", \"\", \"\"), \"outcome\", \"idle\", \"\", \"\")) and on() (count(dspace_instrumentation_up{environment=~\"$environment\"} == 1) > 0)",
-          "legendFormat": "{{provider}} {{outcome}}"
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(sum by (provider, outcome) (rate(dspace_dchat_requests_total{environment=~\"$environment\"}[$__rate_interval]))) and on() (((count((up{namespace=\"dspace\",service=~\"dspace.*\"} == 0) or ((kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}) unless on (namespace, pod) up{namespace=\"dspace\",service=~\"dspace.*\"})) or on() (0 * count(dspace_release_approved_info{environment=~\"$environment\"}))) and on() (count(dspace_release_approved_info{environment=~\"$environment\"}) > 0)) == 0) and on() (min(dspace_instrumentation_up{environment=~\"$environment\"}) == 1)",
+          "legendFormat": "{{provider}} {{outcome}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "((0 * count(dspace_instrumentation_up{environment=~\"$environment\"} == 1)) unless on() sum(rate(dspace_dchat_requests_total{environment=~\"$environment\"}[$__rate_interval]))) and on() (((count((up{namespace=\"dspace\",service=~\"dspace.*\"} == 0) or ((kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}) unless on (namespace, pod) up{namespace=\"dspace\",service=~\"dspace.*\"})) or on() (0 * count(dspace_release_approved_info{environment=~\"$environment\"}))) and on() (count(dspace_release_approved_info{environment=~\"$environment\"}) > 0)) == 0) and on() (min(dspace_instrumentation_up{environment=~\"$environment\"}) == 1)",
+          "legendFormat": "idle",
+          "range": true,
+          "refId": "B"
         }
       ],
       "fieldConfig": {
@@ -1472,9 +1489,26 @@
       },
       "targets": [
         {
-          "refId": "A",
-          "expr": "(sum by (dependency, outcome) (rate(dspace_dependency_requests_total{environment=~\"$environment\"}[$__rate_interval])) or on() label_replace(label_replace(0 * count(dspace_instrumentation_up{environment=~\"$environment\"} == 1), \"dependency\", \"idle\", \"\", \"\"), \"outcome\", \"idle\", \"\", \"\")) and on() (count(dspace_instrumentation_up{environment=~\"$environment\"} == 1) > 0)",
-          "legendFormat": "{{dependency}} {{outcome}}"
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(sum by (dependency, outcome) (rate(dspace_dependency_requests_total{environment=~\"$environment\"}[$__rate_interval]))) and on() (((count((up{namespace=\"dspace\",service=~\"dspace.*\"} == 0) or ((kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}) unless on (namespace, pod) up{namespace=\"dspace\",service=~\"dspace.*\"})) or on() (0 * count(dspace_release_approved_info{environment=~\"$environment\"}))) and on() (count(dspace_release_approved_info{environment=~\"$environment\"}) > 0)) == 0) and on() (min(dspace_instrumentation_up{environment=~\"$environment\"}) == 1)",
+          "legendFormat": "{{dependency}} {{outcome}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "((0 * count(dspace_instrumentation_up{environment=~\"$environment\"} == 1)) unless on() sum(rate(dspace_dependency_requests_total{environment=~\"$environment\"}[$__rate_interval]))) and on() (((count((up{namespace=\"dspace\",service=~\"dspace.*\"} == 0) or ((kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}) unless on (namespace, pod) up{namespace=\"dspace\",service=~\"dspace.*\"})) or on() (0 * count(dspace_release_approved_info{environment=~\"$environment\"}))) and on() (count(dspace_release_approved_info{environment=~\"$environment\"}) > 0)) == 0) and on() (min(dspace_instrumentation_up{environment=~\"$environment\"}) == 1)",
+          "legendFormat": "idle",
+          "range": true,
+          "refId": "B"
         }
       ],
       "fieldConfig": {
@@ -1512,7 +1546,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "((sum(rate(dspace_dchat_requests_total{environment=~\"$environment\",provider=\"openai\",outcome=\"success\"}[$__rate_interval])) or on() (0 * count(dspace_instrumentation_up{environment=~\"$environment\"} == 1))) / clamp_min(sum(rate(dspace_dchat_requests_total{environment=~\"$environment\",provider=\"openai\"}[$__rate_interval])) or on() (0 * count(dspace_instrumentation_up{environment=~\"$environment\"} == 1)), 1e-9)) and on() (count(dspace_instrumentation_up{environment=~\"$environment\"} == 1) > 0)",
+          "expr": "((sum(rate(dspace_dchat_requests_total{environment=~\"$environment\",provider=\"openai\",outcome=\"success\"}[$__rate_interval])) or on() (0 * count(dspace_instrumentation_up{environment=~\"$environment\"} == 1))) / clamp_min(sum(rate(dspace_dchat_requests_total{environment=~\"$environment\",provider=\"openai\"}[$__rate_interval])) or on() (0 * count(dspace_instrumentation_up{environment=~\"$environment\"} == 1)), 1e-9)) and on() (((count((up{namespace=\"dspace\",service=~\"dspace.*\"} == 0) or ((kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}) unless on (namespace, pod) up{namespace=\"dspace\",service=~\"dspace.*\"})) or on() (0 * count(dspace_release_approved_info{environment=~\"$environment\"}))) and on() (count(dspace_release_approved_info{environment=~\"$environment\"}) > 0)) == 0) and on() (min(dspace_instrumentation_up{environment=~\"$environment\"}) == 1)",
           "legendFormat": "primary success"
         }
       ],
@@ -1551,7 +1585,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "((sum(rate(dspace_dchat_requests_total{environment=~\"$environment\",outcome=\"fallback_used\"}[$__rate_interval])) or on() (0 * count(dspace_instrumentation_up{environment=~\"$environment\"} == 1))) / clamp_min(sum(rate(dspace_dchat_requests_total{environment=~\"$environment\"}[$__rate_interval])) or on() (0 * count(dspace_instrumentation_up{environment=~\"$environment\"} == 1)), 1e-9)) and on() (count(dspace_instrumentation_up{environment=~\"$environment\"} == 1) > 0)",
+          "expr": "((sum(rate(dspace_dchat_requests_total{environment=~\"$environment\",outcome=\"fallback_used\"}[$__rate_interval])) or on() (0 * count(dspace_instrumentation_up{environment=~\"$environment\"} == 1))) / clamp_min(sum(rate(dspace_dchat_requests_total{environment=~\"$environment\"}[$__rate_interval])) or on() (0 * count(dspace_instrumentation_up{environment=~\"$environment\"} == 1)), 1e-9)) and on() (((count((up{namespace=\"dspace\",service=~\"dspace.*\"} == 0) or ((kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}) unless on (namespace, pod) up{namespace=\"dspace\",service=~\"dspace.*\"})) or on() (0 * count(dspace_release_approved_info{environment=~\"$environment\"}))) and on() (count(dspace_release_approved_info{environment=~\"$environment\"}) > 0)) == 0) and on() (min(dspace_instrumentation_up{environment=~\"$environment\"}) == 1)",
           "legendFormat": "fallback use"
         }
       ],
@@ -1590,17 +1624,17 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "(histogram_quantile(.50, sum by (le, provider, outcome) (rate(dspace_dchat_request_duration_seconds_bucket{environment=~\"$environment\"}[$__rate_interval])))) and on() (count(dspace_instrumentation_up{environment=~\"$environment\"} == 1) > 0)",
+          "expr": "((histogram_quantile(.50, sum by (le, provider, outcome) (rate(dspace_dchat_request_duration_seconds_bucket{environment=~\"$environment\"}[$__rate_interval])))) and on (provider, outcome) (sum by (provider, outcome) (rate(dspace_dchat_request_duration_seconds_count{environment=~\"$environment\"}[$__rate_interval])) > 0)) and on() (((count((up{namespace=\"dspace\",service=~\"dspace.*\"} == 0) or ((kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}) unless on (namespace, pod) up{namespace=\"dspace\",service=~\"dspace.*\"})) or on() (0 * count(dspace_release_approved_info{environment=~\"$environment\"}))) and on() (count(dspace_release_approved_info{environment=~\"$environment\"}) > 0)) == 0) and on() (min(dspace_instrumentation_up{environment=~\"$environment\"}) == 1)",
           "legendFormat": "p50 {{provider}} {{outcome}}"
         },
         {
           "refId": "B",
-          "expr": "(histogram_quantile(.95, sum by (le, provider, outcome) (rate(dspace_dchat_request_duration_seconds_bucket{environment=~\"$environment\"}[$__rate_interval])))) and on() (count(dspace_instrumentation_up{environment=~\"$environment\"} == 1) > 0)",
+          "expr": "((histogram_quantile(.95, sum by (le, provider, outcome) (rate(dspace_dchat_request_duration_seconds_bucket{environment=~\"$environment\"}[$__rate_interval])))) and on (provider, outcome) (sum by (provider, outcome) (rate(dspace_dchat_request_duration_seconds_count{environment=~\"$environment\"}[$__rate_interval])) > 0)) and on() (((count((up{namespace=\"dspace\",service=~\"dspace.*\"} == 0) or ((kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}) unless on (namespace, pod) up{namespace=\"dspace\",service=~\"dspace.*\"})) or on() (0 * count(dspace_release_approved_info{environment=~\"$environment\"}))) and on() (count(dspace_release_approved_info{environment=~\"$environment\"}) > 0)) == 0) and on() (min(dspace_instrumentation_up{environment=~\"$environment\"}) == 1)",
           "legendFormat": "p95 {{provider}} {{outcome}}"
         },
         {
           "refId": "C",
-          "expr": "(histogram_quantile(.99, sum by (le, provider, outcome) (rate(dspace_dchat_request_duration_seconds_bucket{environment=~\"$environment\"}[$__rate_interval])))) and on() (count(dspace_instrumentation_up{environment=~\"$environment\"} == 1) > 0)",
+          "expr": "((histogram_quantile(.99, sum by (le, provider, outcome) (rate(dspace_dchat_request_duration_seconds_bucket{environment=~\"$environment\"}[$__rate_interval])))) and on (provider, outcome) (sum by (provider, outcome) (rate(dspace_dchat_request_duration_seconds_count{environment=~\"$environment\"}[$__rate_interval])) > 0)) and on() (((count((up{namespace=\"dspace\",service=~\"dspace.*\"} == 0) or ((kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}) unless on (namespace, pod) up{namespace=\"dspace\",service=~\"dspace.*\"})) or on() (0 * count(dspace_release_approved_info{environment=~\"$environment\"}))) and on() (count(dspace_release_approved_info{environment=~\"$environment\"}) > 0)) == 0) and on() (min(dspace_instrumentation_up{environment=~\"$environment\"}) == 1)",
           "legendFormat": "p99 {{provider}} {{outcome}}"
         }
       ],
@@ -1639,17 +1673,17 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "(histogram_quantile(.50, sum by (le, dependency, outcome) (rate(dspace_dependency_request_duration_seconds_bucket{environment=~\"$environment\"}[$__rate_interval])))) and on() (count(dspace_instrumentation_up{environment=~\"$environment\"} == 1) > 0)",
+          "expr": "((histogram_quantile(.50, sum by (le, dependency, outcome) (rate(dspace_dependency_request_duration_seconds_bucket{environment=~\"$environment\"}[$__rate_interval])))) and on (dependency, outcome) (sum by (dependency, outcome) (rate(dspace_dependency_request_duration_seconds_count{environment=~\"$environment\"}[$__rate_interval])) > 0)) and on() (((count((up{namespace=\"dspace\",service=~\"dspace.*\"} == 0) or ((kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}) unless on (namespace, pod) up{namespace=\"dspace\",service=~\"dspace.*\"})) or on() (0 * count(dspace_release_approved_info{environment=~\"$environment\"}))) and on() (count(dspace_release_approved_info{environment=~\"$environment\"}) > 0)) == 0) and on() (min(dspace_instrumentation_up{environment=~\"$environment\"}) == 1)",
           "legendFormat": "p50 {{dependency}} {{outcome}}"
         },
         {
           "refId": "B",
-          "expr": "(histogram_quantile(.95, sum by (le, dependency, outcome) (rate(dspace_dependency_request_duration_seconds_bucket{environment=~\"$environment\"}[$__rate_interval])))) and on() (count(dspace_instrumentation_up{environment=~\"$environment\"} == 1) > 0)",
+          "expr": "((histogram_quantile(.95, sum by (le, dependency, outcome) (rate(dspace_dependency_request_duration_seconds_bucket{environment=~\"$environment\"}[$__rate_interval])))) and on (dependency, outcome) (sum by (dependency, outcome) (rate(dspace_dependency_request_duration_seconds_count{environment=~\"$environment\"}[$__rate_interval])) > 0)) and on() (((count((up{namespace=\"dspace\",service=~\"dspace.*\"} == 0) or ((kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}) unless on (namespace, pod) up{namespace=\"dspace\",service=~\"dspace.*\"})) or on() (0 * count(dspace_release_approved_info{environment=~\"$environment\"}))) and on() (count(dspace_release_approved_info{environment=~\"$environment\"}) > 0)) == 0) and on() (min(dspace_instrumentation_up{environment=~\"$environment\"}) == 1)",
           "legendFormat": "p95 {{dependency}} {{outcome}}"
         },
         {
           "refId": "C",
-          "expr": "(histogram_quantile(.99, sum by (le, dependency, outcome) (rate(dspace_dependency_request_duration_seconds_bucket{environment=~\"$environment\"}[$__rate_interval])))) and on() (count(dspace_instrumentation_up{environment=~\"$environment\"} == 1) > 0)",
+          "expr": "((histogram_quantile(.99, sum by (le, dependency, outcome) (rate(dspace_dependency_request_duration_seconds_bucket{environment=~\"$environment\"}[$__rate_interval])))) and on (dependency, outcome) (sum by (dependency, outcome) (rate(dspace_dependency_request_duration_seconds_count{environment=~\"$environment\"}[$__rate_interval])) > 0)) and on() (((count((up{namespace=\"dspace\",service=~\"dspace.*\"} == 0) or ((kube_pod_container_status_ready{namespace=\"dspace\",container=\"dspace\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=\"dspace\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=\"dspace\"}) unless on (namespace, pod) up{namespace=\"dspace\",service=~\"dspace.*\"})) or on() (0 * count(dspace_release_approved_info{environment=~\"$environment\"}))) and on() (count(dspace_release_approved_info{environment=~\"$environment\"}) > 0)) == 0) and on() (min(dspace_instrumentation_up{environment=~\"$environment\"}) == 1)",
           "legendFormat": "p99 {{dependency}} {{outcome}}"
         }
       ],

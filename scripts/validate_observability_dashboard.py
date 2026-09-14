@@ -66,7 +66,18 @@ DSPACE_CHAT_METRICS = {
 CAPABILITY = 'dspace_release_approved_info{environment=~"$environment"}'
 CAPABILITY_PRESENCE_GATE = f"and on() (count({CAPABILITY}) > 0)"
 DSPACE_HEALTH = 'dspace_instrumentation_up{environment=~"$environment"} == 1'
-DSPACE_INSTRUMENTATION_PRESENCE_GATE = f"and on() (count({DSPACE_HEALTH}) > 0)"
+DSPACE_INSTRUMENTATION_HEALTH = 'min(dspace_instrumentation_up{environment=~"$environment"}) == 1'
+DSPACE_TARGET_FAILURES = (
+    '(count((up{namespace="dspace",service=~"dspace.*"} == 0) or '
+    '((kube_pod_container_status_ready{namespace="dspace",container="dspace"} == 1 '
+    'and on (namespace, pod) kube_pod_status_phase{namespace="dspace",phase="Running"} == 1 '
+    'unless on (namespace, pod) kube_pod_deletion_timestamp{namespace="dspace"}) '
+    'unless on (namespace, pod) up{namespace="dspace",service=~"dspace.*"})) or on() '
+    f"(0 * count({CAPABILITY}))) {CAPABILITY_PRESENCE_GATE}"
+)
+DSPACE_COMPLETE_HEALTH_GATE = (
+    f"and on() (({DSPACE_TARGET_FAILURES}) == 0) " f"and on() ({DSPACE_INSTRUMENTATION_HEALTH})"
+)
 FIVE_XX_RATIO_EXPRESSIONS = {
     "5xx error ratio": (
         '(sum(rate(dspace_http_requests_total{environment=~"$environment",status_class="5xx"}'
@@ -157,7 +168,7 @@ def _has_outer_capability_presence_gate(expression: str) -> bool:
 
 
 def _has_outer_dspace_instrumentation_presence_gate(expression: str) -> bool:
-    return _has_outer_presence_gate(expression, DSPACE_INSTRUMENTATION_PRESENCE_GATE)
+    return _has_outer_presence_gate(expression, DSPACE_COMPLETE_HEALTH_GATE)
 
 
 def configure_profile(dashboard: dict) -> bool:
@@ -304,16 +315,6 @@ def _validate_semantics(dashboard: dict) -> None:
     for title, expected in FIVE_XX_RATIO_EXPRESSIONS.items():
         if panel_expression(dashboard, title) != expected:
             raise SystemExit(f"ERROR: {title} must use its request-family-gated 5xx zero contract.")
-    for metric in EVENT_METRICS:
-        matches = [expr for expr in expressions if metric in expr]
-        if not matches or any(
-            "0 * count(dspace_instrumentation_up" not in expr
-            or not _has_outer_dspace_instrumentation_presence_gate(expr)
-            for expr in matches
-        ):
-            raise SystemExit(
-                f"ERROR: event-driven metric {metric} requires a health-gated idle zero."
-            )
     chat_panels = [panel_named(dashboard, title) for title in DSPACE_CHAT_PANEL_TITLES]
     chat_expressions = [
         target.get("expr", "") for panel in chat_panels for target in panel.get("targets", [])
@@ -328,28 +329,34 @@ def _validate_semantics(dashboard: dict) -> None:
         ("DSPACE chat outcome rate", "dspace_dchat_requests_total", "provider"),
         ("DSPACE dependency outcome rate", "dspace_dependency_requests_total", "dependency"),
     ):
-        expected = (
-            f"(sum by ({dimension}, outcome) (rate({metric}"
-            '{environment=~"$environment"}[$__rate_interval])) or on() '
-            "label_replace(label_replace(0 * count(dspace_instrumentation_up"
-            '{environment=~"$environment"} == 1), '
-            f'"{dimension}", "idle", "", ""), "outcome", "idle", "", "")) '
-            f"{DSPACE_INSTRUMENTATION_PRESENCE_GATE}"
-        )
-        if panel_expression(dashboard, title) != expected:
+        rate = f'rate({metric}{{environment=~"$environment"}}[$__rate_interval])'
+        expected = [
+            f"(sum by ({dimension}, outcome) ({rate})) {DSPACE_COMPLETE_HEALTH_GATE}",
+            f"((0 * count({DSPACE_HEALTH})) unless on() sum({rate})) "
+            f"{DSPACE_COMPLETE_HEALTH_GATE}",
+        ]
+        targets = panel_named(dashboard, title).get("targets", [])
+        if (
+            [target.get("expr") for target in targets] != expected
+            or targets[0].get("legendFormat") != f"{{{{{dimension}}}}} {{{{outcome}}}}"
+            or targets[1].get("legendFormat") != "idle"
+            or any("label_replace" in expression for expression in expected)
+        ):
             raise SystemExit(f"ERROR: {title} must use the complete health-gated idle contract.")
     for title in ("DSPACE chat latency percentiles", "DSPACE dependency latency percentiles"):
         targets = panel_named(dashboard, title).get("targets", [])
         expected_dimension = "provider" if "chat latency" in title else "dependency"
         metric = (
-            "dspace_dchat_request_duration_seconds_bucket"
+            "dspace_dchat_request_duration_seconds"
             if expected_dimension == "provider"
-            else "dspace_dependency_request_duration_seconds_bucket"
+            else "dspace_dependency_request_duration_seconds"
         )
         expected = [
-            f"(histogram_quantile(.{quantile}, sum by (le, {expected_dimension}, outcome) "
-            f'(rate({metric}{{environment=~"$environment"}}[$__rate_interval])))) '
-            f"{DSPACE_INSTRUMENTATION_PRESENCE_GATE}"
+            f"((histogram_quantile(.{quantile}, sum by (le, {expected_dimension}, outcome) "
+            f'(rate({metric}_bucket{{environment=~"$environment"}}[$__rate_interval])))) '
+            f"and on ({expected_dimension}, outcome) (sum by ({expected_dimension}, outcome) "
+            f'(rate({metric}_count{{environment=~"$environment"}}[$__rate_interval])) > 0)) '
+            f"{DSPACE_COMPLETE_HEALTH_GATE}"
             for quantile in ("50", "95", "99")
         ]
         if len(targets) != 3 or [target.get("expr") for target in targets] != expected:
@@ -387,7 +394,7 @@ def _validate_semantics(dashboard: dict) -> None:
         + primary_selector
         + "}[$__rate_interval])) or on() (0 * count("
         + DSPACE_HEALTH
-        + f")), 1e-9)) {DSPACE_INSTRUMENTATION_PRESENCE_GATE}"
+        + f")), 1e-9)) {DSPACE_COMPLETE_HEALTH_GATE}"
     )
     expected_fallback = (
         '((sum(rate(dspace_dchat_requests_total{environment=~"$environment",'
@@ -396,7 +403,7 @@ def _validate_semantics(dashboard: dict) -> None:
         + '))) / clamp_min(sum(rate(dspace_dchat_requests_total{environment=~"$environment"}'
         "[$__rate_interval])) or on() (0 * count("
         + DSPACE_HEALTH
-        + f")), 1e-9)) {DSPACE_INSTRUMENTATION_PRESENCE_GATE}"
+        + f")), 1e-9)) {DSPACE_COMPLETE_HEALTH_GATE}"
     )
     if primary != expected_primary or fallback != expected_fallback:
         raise SystemExit("ERROR: DSPACE ratios must use the complete health-gated contracts.")

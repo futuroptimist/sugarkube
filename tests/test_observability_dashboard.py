@@ -194,9 +194,12 @@ def test_missing_application_capabilities_produce_no_series_not_healthy_zero(das
     for title in ("DSPACE chat outcome rate", "DSPACE dependency outcome rate"):
         assert (
             '0 * count(dspace_instrumentation_up{environment=~"$environment"} == 1)'
-            in expressions[title][0]
+            in expressions[title][1]
         )
-        assert expressions[title][0].endswith(validator.DSPACE_INSTRUMENTATION_PRESENCE_GATE)
+        assert all(
+            expression.endswith(validator.DSPACE_COMPLETE_HEALTH_GATE)
+            for expression in expressions[title]
+        )
     token_expressions = [
         expr
         for title, values in expressions.items()
@@ -295,8 +298,16 @@ def test_dspace_chat_outcomes_fallback_and_denominators(dashboards):
         # instrumentation supplies no fallback series and Grafana renders NO DATA.
         assert "dspace_instrumentation_up" in chat_rate and "== 1" in chat_rate
         assert "dspace_instrumentation_up" in dependency_rate and "== 1" in dependency_rate
-        assert '"provider", "idle"' in chat_rate and '"outcome", "idle"' in chat_rate
-        assert '"dependency", "idle"' in dependency_rate and '"outcome", "idle"' in dependency_rate
+        assert "label_replace" not in chat_rate
+        assert "label_replace" not in dependency_rate
+        for title in ("DSPACE chat outcome rate", "DSPACE dependency outcome rate"):
+            targets = panel(document, title)["targets"]
+            assert len(targets) == 2
+            assert targets[1]["legendFormat"] == "idle"
+            assert "unless on() sum(rate(" in targets[1]["expr"]
+            assert all(
+                target["expr"].endswith(validator.DSPACE_COMPLETE_HEALTH_GATE) for target in targets
+            )
         assert (
             "mappings" not in panel(document, "DSPACE chat outcome rate")["fieldConfig"]["defaults"]
         )
@@ -311,7 +322,7 @@ def test_dspace_chat_outcomes_fallback_and_denominators(dashboards):
         assert primary.count('outcome="success"') == 1
         assert 'outcome!="fallback_used"' not in primary
         assert "including fallback_used outcomes" in primary_panel["description"]
-        assert primary.endswith(validator.DSPACE_INSTRUMENTATION_PRESENCE_GATE)
+        assert primary.endswith(validator.DSPACE_COMPLETE_HEALTH_GATE)
         assert "mappings" not in primary_panel["fieldConfig"]["defaults"]
 
         fallback_panel = panel(document, "DSPACE fallback-use ratio")
@@ -319,7 +330,7 @@ def test_dspace_chat_outcomes_fallback_and_denominators(dashboards):
         assert fallback.count("dspace_dchat_requests_total") == 2
         assert fallback.count('outcome="fallback_used"') == 1
         assert "all observed chat requests" in fallback_panel["description"]
-        assert fallback.endswith(validator.DSPACE_INSTRUMENTATION_PRESENCE_GATE)
+        assert fallback.endswith(validator.DSPACE_COMPLETE_HEALTH_GATE)
         assert "mappings" not in fallback_panel["fieldConfig"]["defaults"]
 
 
@@ -368,7 +379,38 @@ def test_dspace_latency_histograms_preserve_bounded_outcome_dimensions(
             assert metric in target["expr"]
             assert f"sum by (le, {dimension}, outcome)" in target["expr"]
             assert 'environment=~"$environment"' in target["expr"]
-            assert target["expr"].endswith(validator.DSPACE_INSTRUMENTATION_PRESENCE_GATE)
+            assert target["expr"].endswith(validator.DSPACE_COMPLETE_HEALTH_GATE)
+            assert f"{metric.removesuffix('_bucket')}_count" in target["expr"]
+            assert f"and on ({dimension}, outcome)" in target["expr"]
+            assert "> 0" in target["expr"]
+
+
+@pytest.mark.parametrize(
+    ("title", "old", "new", "message"),
+    [
+        (
+            "DSPACE fallback-use ratio",
+            validator.DSPACE_COMPLETE_HEALTH_GATE,
+            'and on() (count(dspace_instrumentation_up{environment=~"$environment"} == 1) > 0)',
+            "complete health-gated contracts",
+        ),
+        (
+            "DSPACE chat latency percentiles",
+            "dspace_dchat_request_duration_seconds_count",
+            "dspace_dchat_request_duration_seconds_bucket",
+            "requires p50/p95/p99",
+        ),
+    ],
+)
+def test_dspace_panels_reject_partial_health_or_missing_observation_guard(
+    dashboards, title, old, new, message
+):
+    changed = copy.deepcopy(dashboards[0])
+    target = panel(changed, title)["targets"][0]
+    assert old in target["expr"]
+    target["expr"] = target["expr"].replace(old, new, 1)
+    with pytest.raises(SystemExit, match=message):
+        validator._validate_semantics(changed)
 
 
 def test_primary_success_ratio_is_not_inflated_by_fallback_traffic(dashboards):
@@ -458,8 +500,8 @@ def test_dspace_chat_validator_rejects_each_contract_violation(
                 "dspace_dchat_request_duration_seconds_bucket", "unrecognized_bucket", 1
             )
     elif mutation == "outcome-contract":
-        target = panel(changed, "DSPACE chat outcome rate")["targets"][0]
-        target["expr"] = target["expr"].replace('"idle"', '"inactive"', 1)
+        target = panel(changed, "DSPACE chat outcome rate")["targets"][1]
+        target["legendFormat"] = "inactive"
     elif mutation == "primary-shape":
         target = panel(changed, "DSPACE primary-provider success ratio")["targets"][0]
         target["expr"] = target["expr"].replace('provider="tokenplace"', 'provider="openai"', 1)
@@ -580,9 +622,7 @@ def test_semantic_contract_rejects_invalid_dashboard_mutations(dashboards, mutat
         ] = "dspace_dchat_requests_total"
     elif mutation == "event-presence":
         target = panel(changed, "DSPACE chat outcome rate")["targets"][0]
-        target["expr"] = target["expr"][
-            : -len(validator.DSPACE_INSTRUMENTATION_PRESENCE_GATE)
-        ].rstrip()
+        target["expr"] = target["expr"][: -len(validator.DSPACE_COMPLETE_HEALTH_GATE)].rstrip()
     elif mutation == "image-zero":
         panel(changed, "Image-pin agreement")["targets"][0]["expr"] = panel(
             changed, "Image-pin agreement"
