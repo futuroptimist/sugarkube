@@ -65,6 +65,8 @@ DSPACE_CHAT_METRICS = {
 }
 CAPABILITY = 'dspace_release_approved_info{environment=~"$environment"}'
 CAPABILITY_PRESENCE_GATE = f"and on() (count({CAPABILITY}) > 0)"
+DSPACE_HEALTH = 'dspace_instrumentation_up{environment=~"$environment"} == 1'
+DSPACE_INSTRUMENTATION_PRESENCE_GATE = f"and on() (count({DSPACE_HEALTH}) > 0)"
 FIVE_XX_RATIO_EXPRESSIONS = {
     "5xx error ratio": (
         '(sum(rate(dspace_http_requests_total{environment=~"$environment",status_class="5xx"}'
@@ -116,10 +118,10 @@ def panel_expression(dashboard: dict, title: str) -> str:
     return re.sub(r"\s+", " ", targets[0]["expr"])
 
 
-def _has_outer_capability_presence_gate(expression: str) -> bool:
-    """Return whether one parenthesized result is followed by the capability gate."""
+def _has_outer_presence_gate(expression: str, presence_gate: str) -> bool:
+    """Return whether one parenthesized result is followed by a presence gate."""
     normalized = re.sub(r"\s+", " ", expression).strip()
-    suffix = " " + CAPABILITY_PRESENCE_GATE
+    suffix = " " + presence_gate
     if not normalized.endswith(suffix):
         return False
     result = normalized[: -len(suffix)]
@@ -148,6 +150,14 @@ def _has_outer_capability_presence_gate(expression: str) -> bool:
             if depth < 0:
                 return False
     return depth == 0 and not quoted
+
+
+def _has_outer_capability_presence_gate(expression: str) -> bool:
+    return _has_outer_presence_gate(expression, CAPABILITY_PRESENCE_GATE)
+
+
+def _has_outer_dspace_instrumentation_presence_gate(expression: str) -> bool:
+    return _has_outer_presence_gate(expression, DSPACE_INSTRUMENTATION_PRESENCE_GATE)
 
 
 def configure_profile(dashboard: dict) -> bool:
@@ -250,9 +260,10 @@ def _validate_semantics(dashboard: dict) -> None:
         "cluster",
         "app",
         "route",
+        "primary_provider",
     ]:
         raise SystemExit("ERROR: dashboard variables must use the canonical shape.")
-    for variable in variables[:2]:
+    for variable in [*variables[:2], variables[4]]:
         if (
             variable.get("type") != "constant"
             or variable.get("hide") != 2
@@ -263,7 +274,7 @@ def _validate_semantics(dashboard: dict) -> None:
             )
     if any(
         variable.get("allValue") != ".*" or variable.get("includeAll") is not True
-        for variable in variables[2:]
+        for variable in variables[2:4]
     ):
         raise SystemExit("ERROR: app and route variables must expose All = .*.")
     expressions = [
@@ -297,9 +308,13 @@ def _validate_semantics(dashboard: dict) -> None:
     for metric in EVENT_METRICS:
         matches = [expr for expr in expressions if metric in expr]
         if not matches or any(
-            "0 * count(dspace_instrumentation_up" not in expr for expr in matches
+            "0 * count(dspace_instrumentation_up" not in expr
+            or not _has_outer_dspace_instrumentation_presence_gate(expr)
+            for expr in matches
         ):
-            raise SystemExit(f"ERROR: event-driven metric {metric} requires capability-gated zero.")
+            raise SystemExit(
+                f"ERROR: event-driven metric {metric} requires a health-gated idle zero."
+            )
     chat_panels = [panel_named(dashboard, title) for title in DSPACE_CHAT_PANEL_TITLES]
     chat_expressions = [
         target.get("expr", "") for panel in chat_panels for target in panel.get("targets", [])
@@ -313,22 +328,27 @@ def _validate_semantics(dashboard: dict) -> None:
     for title in ("DSPACE chat latency percentiles", "DSPACE dependency latency percentiles"):
         targets = panel_named(dashboard, title).get("targets", [])
         expected_dimension = "provider" if "chat latency" in title else "dependency"
-        if len(targets) != 3 or any(
-            not re.search(
-                r"histogram_quantile\(\.(?:50|95|99), sum by \(le, "
+        quantiles = []
+        for target in targets:
+            match = re.search(
+                r"histogram_quantile\(\.(50|95|99), sum by \(le, "
                 + expected_dimension
                 + r", outcome\) \(rate\(",
                 target.get("expr", ""),
             )
-            for target in targets
-        ):
+            quantiles.append(match.group(1) if match else None)
+        if quantiles != ["50", "95", "99"]:
             raise SystemExit(
                 f"ERROR: {title} requires p50/p95/p99 histograms grouped by le, "
                 f"{expected_dimension}, and outcome."
             )
     primary = panel_expression(dashboard, "DSPACE primary-provider success ratio")
     fallback = panel_expression(dashboard, "DSPACE fallback-use ratio")
-    if primary.count('provider="tokenplace"') != 2 or primary.count('outcome="success"') != 1:
+    if (
+        primary.count('provider="$primary_provider"') != 2
+        or primary.count('outcome="success"') != 1
+        or primary.count('outcome!="fallback_used"') != 1
+    ):
         raise SystemExit("ERROR: primary success must exclude fallback providers and outcomes.")
     if (
         fallback.count("dspace_dchat_requests_total") != 2

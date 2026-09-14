@@ -103,11 +103,19 @@ def test_profiles_differ_only_by_allowlisted_identity(dashboards):
         (prod, "prod", "sugarkube-prod"),
     ):
         variables = document["templating"]["list"]
-        assert [item["name"] for item in variables] == ["environment", "cluster", "app", "route"]
+        assert [item["name"] for item in variables] == [
+            "environment",
+            "cluster",
+            "app",
+            "route",
+            "primary_provider",
+        ]
         assert variables[0]["query"] == environment
         assert variables[1]["query"] == cluster
+        assert variables[4]["query"] == ("tokenplace" if environment == "staging" else "openai")
         assert all(item["hide"] == 2 and item["type"] == "constant" for item in variables[:2])
-        assert all(item["allValue"] == ".*" for item in variables[2:])
+        assert variables[4]["hide"] == 2 and variables[4]["type"] == "constant"
+        assert all(item["allValue"] == ".*" for item in variables[2:4])
 
 
 def test_canonical_order_ids_grid_and_defaults(dashboards):
@@ -185,6 +193,7 @@ def test_missing_application_capabilities_produce_no_series_not_healthy_zero(das
             '0 * count(dspace_instrumentation_up{environment=~"$environment"} == 1)'
             in expressions[title][0]
         )
+        assert expressions[title][0].endswith(validator.DSPACE_INSTRUMENTATION_PRESENCE_GATE)
     token_expressions = [
         expr
         for title, values in expressions.items()
@@ -286,16 +295,33 @@ def test_dspace_chat_outcomes_fallback_and_denominators(dashboards):
 
         primary_panel = panel(document, "DSPACE primary-provider success ratio")
         primary = primary_panel["targets"][0]["expr"]
-        assert primary.count('provider="tokenplace"') == 2
+        assert primary.count('provider="$primary_provider"') == 2
         assert primary.count('outcome="success"') == 1
-        assert "fallback_used" not in primary
-        assert "all tokenplace-provider chat attempts" in primary_panel["description"]
+        assert primary.count('outcome!="fallback_used"') == 1
+        assert "non-fallback chat attempts" in primary_panel["description"]
+        assert primary.endswith(validator.DSPACE_INSTRUMENTATION_PRESENCE_GATE)
+        assert "mappings" not in primary_panel["fieldConfig"]["defaults"]
 
         fallback_panel = panel(document, "DSPACE fallback-use ratio")
         fallback = fallback_panel["targets"][0]["expr"]
         assert fallback.count("dspace_dchat_requests_total") == 2
         assert fallback.count('outcome="fallback_used"') == 1
         assert "all observed chat requests" in fallback_panel["description"]
+        assert fallback.endswith(validator.DSPACE_INSTRUMENTATION_PRESENCE_GATE)
+        assert "mappings" not in fallback_panel["fieldConfig"]["defaults"]
+
+
+@pytest.mark.parametrize(
+    "title",
+    ["DSPACE chat latency percentiles", "DSPACE dependency latency percentiles"],
+)
+def test_dspace_latency_histograms_reject_duplicate_percentiles(tmp_path, dashboards, title):
+    staging, _ = dashboards
+    changed = copy.deepcopy(staging)
+    targets = panel(changed, title)["targets"]
+    targets[1]["expr"] = targets[1]["expr"].replace(".95", ".50", 1)
+    with pytest.raises(SystemExit, match="requires p50/p95/p99"):
+        validator.validate_dashboard(write_candidate(tmp_path, changed))
 
 
 @pytest.mark.parametrize(
@@ -379,6 +405,7 @@ def test_raw_ip_legend_is_rejected(tmp_path, dashboards):
         "token-scope",
         "token-zero",
         "event-capability",
+        "event-presence",
         "image-zero",
         "image-prefix",
         "image-metadata",
@@ -430,6 +457,11 @@ def test_semantic_contract_rejects_invalid_dashboard_mutations(dashboards, mutat
         panel(changed, "DSPACE chat outcome rate")["targets"][0][
             "expr"
         ] = "dspace_dchat_requests_total"
+    elif mutation == "event-presence":
+        target = panel(changed, "DSPACE chat outcome rate")["targets"][0]
+        target["expr"] = target["expr"][
+            : -len(validator.DSPACE_INSTRUMENTATION_PRESENCE_GATE)
+        ].rstrip()
     elif mutation == "image-zero":
         panel(changed, "Image-pin agreement")["targets"][0]["expr"] = panel(
             changed, "Image-pin agreement"

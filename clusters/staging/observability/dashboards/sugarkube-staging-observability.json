@@ -85,6 +85,19 @@
           "text": "All",
           "value": "$__all"
         }
+      },
+      {
+        "name": "primary_provider",
+        "label": "DSPACE primary provider",
+        "type": "constant",
+        "hide": 2,
+        "query": "tokenplace",
+        "current": {
+          "text": "tokenplace",
+          "value": "tokenplace"
+        },
+        "includeAll": false,
+        "multi": false
       }
     ]
   },
@@ -1434,7 +1447,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (provider, outcome) (rate(dspace_dchat_requests_total{environment=~\"$environment\"}[$__rate_interval])) or on() (0 * count(dspace_instrumentation_up{environment=~\"$environment\"} == 1))",
+          "expr": "(sum by (provider, outcome) (rate(dspace_dchat_requests_total{environment=~\"$environment\"}[$__rate_interval])) or on() label_replace(label_replace(0 * count(dspace_instrumentation_up{environment=~\"$environment\"} == 1), \"provider\", \"idle\", \"\", \"\"), \"outcome\", \"idle\", \"\", \"\")) and on() (count(dspace_instrumentation_up{environment=~\"$environment\"} == 1) > 0)",
           "legendFormat": "{{provider}} {{outcome}}"
         }
       ],
@@ -1483,7 +1496,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (dependency, outcome) (rate(dspace_dependency_requests_total{environment=~\"$environment\"}[$__rate_interval])) or on() (0 * count(dspace_instrumentation_up{environment=~\"$environment\"} == 1))",
+          "expr": "(sum by (dependency, outcome) (rate(dspace_dependency_requests_total{environment=~\"$environment\"}[$__rate_interval])) or on() label_replace(label_replace(0 * count(dspace_instrumentation_up{environment=~\"$environment\"} == 1), \"dependency\", \"idle\", \"\", \"\"), \"outcome\", \"idle\", \"\", \"\")) and on() (count(dspace_instrumentation_up{environment=~\"$environment\"} == 1) > 0)",
           "legendFormat": "{{dependency}} {{outcome}}"
         }
       ],
@@ -1518,7 +1531,7 @@
       "id": 33,
       "type": "timeseries",
       "title": "DSPACE primary-provider success ratio",
-      "description": "Successful tokenplace-provider chat attempts divided by all tokenplace-provider chat attempts. Fallback outcomes and other providers are excluded from both numerator and denominator.",
+      "description": "Successful configured-primary-provider chat attempts divided by its non-fallback chat attempts. Fallback outcomes and other providers are excluded from both numerator and denominator.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1532,24 +1545,14 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "(sum(rate(dspace_dchat_requests_total{environment=~\"$environment\",provider=\"tokenplace\",outcome=\"success\"}[$__rate_interval])) or on() (0 * count(dspace_instrumentation_up{environment=~\"$environment\"} == 1))) / clamp_min(sum(rate(dspace_dchat_requests_total{environment=~\"$environment\",provider=\"tokenplace\"}[$__rate_interval])), 1e-9)",
+          "expr": "((sum(rate(dspace_dchat_requests_total{environment=~\"$environment\",provider=\"$primary_provider\",outcome=\"success\"}[$__rate_interval])) or on() (0 * count(dspace_instrumentation_up{environment=~\"$environment\"} == 1))) / clamp_min(sum(rate(dspace_dchat_requests_total{environment=~\"$environment\",provider=\"$primary_provider\",outcome!=\"fallback_used\"}[$__rate_interval])) or on() (0 * count(dspace_instrumentation_up{environment=~\"$environment\"} == 1)), 1e-9)) and on() (count(dspace_instrumentation_up{environment=~\"$environment\"} == 1) > 0)",
           "legendFormat": "primary success"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "percentunit",
-          "noValue": "NO DATA",
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "0": {
-                  "text": "No requests observed"
-                }
-              }
-            }
-          ]
+          "noValue": "NO DATA"
         },
         "overrides": []
       },
@@ -1581,24 +1584,14 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "(sum(rate(dspace_dchat_requests_total{environment=~\"$environment\",outcome=\"fallback_used\"}[$__rate_interval])) or on() (0 * count(dspace_instrumentation_up{environment=~\"$environment\"} == 1))) / clamp_min(sum(rate(dspace_dchat_requests_total{environment=~\"$environment\"}[$__rate_interval])), 1e-9)",
+          "expr": "((sum(rate(dspace_dchat_requests_total{environment=~\"$environment\",outcome=\"fallback_used\"}[$__rate_interval])) or on() (0 * count(dspace_instrumentation_up{environment=~\"$environment\"} == 1))) / clamp_min(sum(rate(dspace_dchat_requests_total{environment=~\"$environment\"}[$__rate_interval])) or on() (0 * count(dspace_instrumentation_up{environment=~\"$environment\"} == 1)), 1e-9)) and on() (count(dspace_instrumentation_up{environment=~\"$environment\"} == 1) > 0)",
           "legendFormat": "fallback use"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "percentunit",
-          "noValue": "NO DATA",
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "0": {
-                  "text": "No requests observed"
-                }
-              }
-            }
-          ]
+          "noValue": "NO DATA"
         },
         "overrides": []
       },
