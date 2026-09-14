@@ -11,6 +11,7 @@ STAGING = ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-ob
 PROD = ROOT / "clusters/prod/observability/dashboards/sugarkube-prod-observability.json"
 GENERATOR = ROOT / "scripts/generate_observability_dashboards.py"
 TEMPLATE = ROOT / "platform/observability/dashboards/sugarkube-observability.template.json"
+APP_METRICS = ROOT / "platform/observability/app-metrics.json"
 sys.path.insert(0, str(ROOT))
 from scripts import generate_observability_dashboards as generator  # noqa: E402
 from scripts import validate_observability_dashboard as validator  # noqa: E402
@@ -241,6 +242,23 @@ def test_5xx_ratios_use_request_family_gated_zero_contract(dashboards):
     ):
         assert tokenplace.count(selector) == 3
     assert tokenplace.count('status_class="5xx"') == 1
+
+
+def test_tokenplace_latency_panel_uses_inventory_histogram_family(dashboards):
+    required = json.loads(APP_METRICS.read_text(encoding="utf-8"))["applications"][
+        "tokenplace"
+    ]["environments"]["staging"]["requiredMetricFamilies"]
+    histogram = "tokenplace_http_request_duration_seconds_bucket"
+
+    assert histogram in required
+    assert "tokenplace_http_request_duration_seconds" not in required
+    for dashboard in dashboards:
+        expressions = [
+            target["expr"]
+            for target in panel(dashboard, "token.place HTTP latency percentiles")["targets"]
+        ]
+        assert len(expressions) == 3
+        assert all(histogram in expression for expression in expressions)
 
 
 @pytest.mark.parametrize(
