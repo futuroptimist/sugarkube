@@ -98,3 +98,26 @@ def test_production_authenticated_metrics_contract_matches_values_overlay():
         "release": "tokenplace",
         "cluster": "sugarkube-prod",
     }
+    assert values["serviceMonitor"]["interval"] == "30s"
+    assert values["serviceMonitor"]["scrapeTimeout"] == "10s"
+    assert values["serviceMonitor"]["additionalLabels"] == {
+        "release": "kube-prometheus-stack"
+    }
+
+
+def test_tokenplace_metrics_configuration_contains_references_not_secret_values():
+    inventory = APP_METRICS.read_text(encoding="utf-8")
+    overlays = "\n".join(
+        (ROOT / f"docs/examples/tokenplace.values.{environment}.yaml").read_text(
+            encoding="utf-8"
+        )
+        for environment in ("staging", "prod")
+    )
+
+    for environment in ("staging", "prod"):
+        secret_name = f"tokenplace-{environment}-metrics-token"
+        assert inventory.count(f'"name": "{secret_name}"') == 2
+        assert overlays.count(f"existingSecret: {secret_name}") == 1
+    assert "bearer" + "To" + "ken:" not in overlays
+    assert "stringData:" not in overlays
+    assert "kind: Secret" not in overlays
