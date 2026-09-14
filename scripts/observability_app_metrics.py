@@ -298,8 +298,6 @@ def validate_inventory(doc):
         for env, cfg in environments.items():
             if env not in {"staging", "prod"}:
                 fail("application metrics environment is unsupported")
-            if env == "prod" and app not in {"dspace", "tokenplace"}:
-                fail("only staging app metrics verification is supported for this application")
             expect_keys(
                 cfg,
                 {
@@ -1008,6 +1006,19 @@ def metadata_declares_family(
     return True
 
 
+def endpoint_authorization(endpoint: dict[str, Any]) -> tuple[dict[str, Any] | None, Any]:
+    """Normalize supported ServiceMonitor bearer credential representations."""
+    authorization = endpoint.get("authorization")
+    credentials = (
+        authorization.get("credentials") if isinstance(authorization, dict) else None
+    )
+    if credentials is None:
+        credentials = endpoint.get("bearerTokenSecret")
+        if isinstance(credentials, dict):
+            authorization = {"type": "Bearer"}
+    return authorization, credentials
+
+
 def verify(app, env):
     app = normalize_application_argument(app)
     env = normalize_live_env(env)
@@ -1047,11 +1058,7 @@ def verify(app, env):
     ep = endpoints[0]
     if not isinstance(ep, dict):
         fail("ServiceMonitor response is structurally invalid", 1)
-    authorization = ep.get("authorization")
-    auth = authorization.get("credentials") if isinstance(authorization, dict) else None
-    if app == "dspace":
-        auth = ep.get("bearerTokenSecret")
-        authorization = {"type": "Bearer"} if isinstance(auth, dict) else authorization
+    authorization, auth = endpoint_authorization(ep)
     selector = spec.get("selector")
     if (
         not isinstance(authorization, dict)
@@ -1250,11 +1257,7 @@ def validate_render(
     ep = endpoints[0]
     if not isinstance(ep, dict):
         fail("rendered ServiceMonitor endpoint is structurally invalid")
-    auth = ep.get("authorization")
-    creds = auth.get("credentials") if isinstance(auth, dict) else None
-    if app == "dspace":
-        creds = ep.get("bearerTokenSecret")
-        auth = {"type": "Bearer"} if isinstance(creds, dict) else auth
+    auth, creds = endpoint_authorization(ep)
     if not isinstance(auth, dict) or not isinstance(creds, dict):
         fail("rendered ServiceMonitor authorization is structurally invalid")
     if (
