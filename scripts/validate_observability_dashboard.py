@@ -48,7 +48,24 @@ TOKENPLACE_DATA_TITLES = {
     "token.place HTTP latency percentiles",
     "token.place build identity",
 }
-EVENT_METRICS = {"dspace_dchat_requests_total", "dspace_dependency_requests_total"}
+EVENT_METRICS = {
+    "dspace_dchat_requests_total",
+    "dspace_dchat_request_duration_seconds_bucket",
+    "dspace_dependency_requests_total",
+    "dspace_dependency_request_duration_seconds_bucket",
+}
+CHAT_OUTCOME_TITLE = "DSPACE chat outcomes by provider"
+DEPENDENCY_OUTCOME_TITLE = "DSPACE dependency outcomes"
+LATENCY_PANELS = {
+    "DSPACE chat latency percentiles": (
+        "dspace_dchat_request_duration_seconds_bucket",
+        "provider",
+    ),
+    "DSPACE dependency latency percentiles": (
+        "dspace_dependency_request_duration_seconds_bucket",
+        "dependency",
+    ),
+}
 CAPABILITY = 'dspace_release_approved_info{environment=~"$environment"}'
 CAPABILITY_PRESENCE_GATE = f"and on() (count({CAPABILITY}) > 0)"
 FIVE_XX_RATIO_EXPRESSIONS = {
@@ -162,10 +179,10 @@ def _expected_dashboard(dashboard: dict) -> dict:
 
 
 def _validate_grid(items: list[dict]) -> None:
-    if len(items) != 60 or sum(panel.get("type") == "row" for panel in items) != 11:
-        raise SystemExit("ERROR: canonical dashboard must contain exactly 60 objects and 11 rows.")
+    if len(items) != 62 or sum(panel.get("type") == "row" for panel in items) != 11:
+        raise SystemExit("ERROR: canonical dashboard must contain exactly 62 objects and 11 rows.")
     ids = [panel.get("id") for panel in items]
-    if ids != list(range(1, 61)):
+    if ids != list(range(1, 63)):
         raise SystemExit(
             "ERROR: canonical dashboard panel IDs must be stable consecutive integers."
         )
@@ -288,6 +305,35 @@ def _validate_semantics(dashboard: dict) -> None:
             "0 * count(dspace_instrumentation_up" not in expr for expr in matches
         ):
             raise SystemExit(f"ERROR: event-driven metric {metric} requires capability-gated zero.")
+    outcome_contracts = {
+        CHAT_OUTCOME_TITLE: ("dspace_dchat_requests_total", "provider"),
+        DEPENDENCY_OUTCOME_TITLE: ("dspace_dependency_requests_total", "dependency"),
+    }
+    for title, (metric, dimension) in outcome_contracts.items():
+        expression = panel_expression(dashboard, title)
+        required = (
+            f"sum by ({dimension}, outcome) (rate({metric}",
+            'environment=~"$environment"',
+            "[$__rate_interval]))",
+        )
+        if any(fragment not in expression for fragment in required):
+            raise SystemExit(f"ERROR: {title} must preserve bounded outcome-rate grouping.")
+    for title, (metric, dimension) in LATENCY_PANELS.items():
+        targets = panel_named(dashboard, title).get("targets", [])
+        if len(targets) != 3:
+            raise SystemExit(f"ERROR: {title} must contain p50, p95, and p99 targets.")
+        for target, quantile in zip(targets, (".50", ".95", ".99"), strict=True):
+            expression = re.sub(r"\s+", " ", target.get("expr", ""))
+            required = (
+                f"histogram_quantile({quantile},",
+                f"sum by (le, {dimension}, outcome) (rate({metric}",
+                'environment=~"$environment"',
+                "[$__rate_interval]))",
+            )
+            if any(fragment not in expression for fragment in required):
+                raise SystemExit(
+                    f"ERROR: {title} must preserve scoped histogram aggregation."
+                )
     capability_targets = {
         "Image-pin agreement": [panel_expression(dashboard, "Image-pin agreement")],
         "DSPACE metrics-target health": [
