@@ -298,8 +298,6 @@ def validate_inventory(doc):
         for env, cfg in environments.items():
             if env not in {"staging", "prod"}:
                 fail("application metrics environment is unsupported")
-            if env == "prod" and app not in {"dspace", "tokenplace"}:
-                fail("only staging app metrics verification is supported for this application")
             expect_keys(
                 cfg,
                 {
@@ -340,6 +338,7 @@ def validate_inventory(doc):
                     "interval",
                     "scrapeTimeout",
                     "authorization",
+                    "credentialsLocation",
                     "relabelings",
                     "targetLabels",
                 },
@@ -353,6 +352,11 @@ def validate_inventory(doc):
             expect_keys(sm["authorization"], {"type", "credentials"}, "authorization")
             if sm["authorization"]["type"] != "Bearer":
                 fail("authorization.type must be Bearer")
+            if sm["credentialsLocation"] not in {
+                "authorization.credentials",
+                "bearerTokenSecret",
+            }:
+                fail("serviceMonitor.credentialsLocation is unsupported")
             expect_keys(
                 sm["authorization"].get("credentials"), {"name", "key"}, "authorization.credentials"
             )
@@ -1008,6 +1012,20 @@ def metadata_declares_family(
     return True
 
 
+def service_monitor_authorization(endpoint, cfg):
+    """Return normalized bearer authorization from the declared chart shape."""
+    location = cfg["serviceMonitor"]["credentialsLocation"]
+    if location == "authorization.credentials":
+        authorization = endpoint.get("authorization")
+        credentials = (
+            authorization.get("credentials") if isinstance(authorization, dict) else None
+        )
+        return authorization, credentials
+    credentials = endpoint.get("bearerTokenSecret")
+    authorization = {"type": "Bearer"} if isinstance(credentials, dict) else None
+    return authorization, credentials
+
+
 def verify(app, env):
     app = normalize_application_argument(app)
     env = normalize_live_env(env)
@@ -1047,11 +1065,7 @@ def verify(app, env):
     ep = endpoints[0]
     if not isinstance(ep, dict):
         fail("ServiceMonitor response is structurally invalid", 1)
-    authorization = ep.get("authorization")
-    auth = authorization.get("credentials") if isinstance(authorization, dict) else None
-    if app == "dspace":
-        auth = ep.get("bearerTokenSecret")
-        authorization = {"type": "Bearer"} if isinstance(auth, dict) else authorization
+    authorization, auth = service_monitor_authorization(ep, cfg)
     selector = spec.get("selector")
     if (
         not isinstance(authorization, dict)
@@ -1250,11 +1264,7 @@ def validate_render(
     ep = endpoints[0]
     if not isinstance(ep, dict):
         fail("rendered ServiceMonitor endpoint is structurally invalid")
-    auth = ep.get("authorization")
-    creds = auth.get("credentials") if isinstance(auth, dict) else None
-    if app == "dspace":
-        creds = ep.get("bearerTokenSecret")
-        auth = {"type": "Bearer"} if isinstance(creds, dict) else auth
+    auth, creds = service_monitor_authorization(ep, cfg)
     if not isinstance(auth, dict) or not isinstance(creds, dict):
         fail("rendered ServiceMonitor authorization is structurally invalid")
     if (
