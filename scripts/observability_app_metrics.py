@@ -352,7 +352,9 @@ def validate_inventory(doc):
             expect_keys(sm["authorization"], {"type", "credentials"}, "authorization")
             if sm["authorization"]["type"] != "Bearer":
                 fail("authorization.type must be Bearer")
-            if sm["credentialsLocation"] not in {
+            if not isinstance(sm["credentialsLocation"], str) or sm[
+                "credentialsLocation"
+            ] not in {
                 "authorization.credentials",
                 "bearerTokenSecret",
             }:

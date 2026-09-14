@@ -6170,6 +6170,20 @@ def test_observability_app_metrics_auth_shape_is_declarative():
     ) == ({"type": "Bearer"}, dspace["secret"])
 
 
+@pytest.mark.parametrize("credentials_location", [[], {}])
+def test_observability_app_metrics_inventory_rejects_non_string_credentials_location(
+    credentials_location,
+):
+    doc = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))
+    doc["applications"]["tokenplace"]["environments"]["staging"]["serviceMonitor"][
+        "credentialsLocation"
+    ] = credentials_location
+
+    with pytest.raises(SystemExit) as excinfo:
+        app_metrics.validate_inventory(doc)
+    assert "serviceMonitor.credentialsLocation is unsupported" in str(excinfo.value)
+
+
 def test_observability_app_metrics_inventory_allows_declarative_production_application():
     doc = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))
     synthetic = json.loads(json.dumps(doc["applications"]["tokenplace"]))
