@@ -6170,6 +6170,19 @@ def test_observability_app_metrics_auth_shape_is_declarative():
     ) == ({"type": "Bearer"}, dspace["secret"])
 
 
+def test_observability_app_metrics_authorization_rejects_unsupported_location():
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
+        "tokenplace"
+    ]["environments"]["staging"]
+    cfg["serviceMonitor"]["credentialsLocation"] = "secretRef"
+
+    with pytest.raises(SystemExit) as excinfo:
+        app_metrics.service_monitor_authorization(
+            {"bearerTokenSecret": cfg["secret"]}, cfg
+        )
+    assert "serviceMonitor.credentialsLocation is unsupported" in str(excinfo.value)
+
+
 @pytest.mark.parametrize("credentials_location", [[], {}])
 def test_observability_app_metrics_inventory_rejects_non_string_credentials_location(
     credentials_location,

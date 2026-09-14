@@ -1023,9 +1023,11 @@ def service_monitor_authorization(endpoint, cfg):
             authorization.get("credentials") if isinstance(authorization, dict) else None
         )
         return authorization, credentials
-    credentials = endpoint.get("bearerTokenSecret")
-    authorization = {"type": "Bearer"} if isinstance(credentials, dict) else None
-    return authorization, credentials
+    if location == "bearerTokenSecret":
+        credentials = endpoint.get("bearerTokenSecret")
+        authorization = {"type": "Bearer"} if isinstance(credentials, dict) else None
+        return authorization, credentials
+    fail("serviceMonitor.credentialsLocation is unsupported")
 
 
 def verify(app, env):
