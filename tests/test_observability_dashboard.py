@@ -1,5 +1,6 @@
 import copy
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -286,6 +287,41 @@ def test_query_scoping_and_safe_labels(dashboards):
     assert not any("cluster=" in expr or "cluster=~" in expr for expr in core)
     assert "kube_state_metrics_build_info" not in serialized
     assert not any(f"{{{{{label}}}}}" in serialized for label in validator.FORBIDDEN_LABELS)
+
+
+def test_tokenplace_phase_one_metric_families_are_covered_without_unbounded_groups(
+    dashboards,
+):
+    inventory = json.loads(
+        (ROOT / "platform/observability/app-metrics.json").read_text(encoding="utf-8")
+    )
+    required = set(
+        inventory["applications"]["tokenplace"]["environments"]["staging"][
+            "requiredMetricFamilies"
+        ]
+    )
+    allowed_groups = {
+        "le",
+        "outcome",
+        "pod",
+        "provider_mode",
+        "reason",
+        "revision",
+        "route",
+        "status_class",
+        "version",
+    }
+
+    for dashboard in dashboards:
+        expressions = [
+            target["expr"]
+            for title in validator.TOKENPLACE_DATA_TITLES
+            for target in panel(dashboard, title)["targets"]
+        ]
+        serialized = "\n".join(expressions)
+        assert all(metric in serialized for metric in required)
+        for grouping in re.findall(r"\bby\s*\(([^)]*)\)", serialized):
+            assert {label.strip() for label in grouping.split(",")} <= allowed_groups
 
 
 def test_dspace_chat_outcomes_fallback_and_denominators(dashboards):
