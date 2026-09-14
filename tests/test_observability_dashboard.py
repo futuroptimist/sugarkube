@@ -432,6 +432,53 @@ def test_dspace_latency_histograms_reject_malformed_target_counts(
 
 
 @pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("environment", "environment scoping"),
+        ("metric-inventory", "counters and latency histograms"),
+        ("outcome-contract", "complete health-gated idle contract"),
+        ("primary-shape", "include fallback outcomes"),
+        ("fallback-shape", "all chat requests"),
+        ("ratio-contract", "complete health-gated contracts"),
+        ("ratio-description", "document its denominator"),
+    ],
+)
+def test_dspace_chat_validator_rejects_each_contract_violation(
+    tmp_path, dashboards, mutation, message
+):
+    changed = copy.deepcopy(dashboards[0])
+    if mutation == "environment":
+        target = panel(changed, "DSPACE chat latency percentiles")["targets"][0]
+        target["expr"] = target["expr"].replace(
+            'environment=~"$environment"', 'environment="staging"'
+        )
+    elif mutation == "metric-inventory":
+        for target in panel(changed, "DSPACE chat latency percentiles")["targets"]:
+            target["expr"] = target["expr"].replace(
+                "dspace_dchat_request_duration_seconds_bucket", "unrecognized_bucket", 1
+            )
+    elif mutation == "outcome-contract":
+        target = panel(changed, "DSPACE chat outcome rate")["targets"][0]
+        target["expr"] = target["expr"].replace('"idle"', '"inactive"', 1)
+    elif mutation == "primary-shape":
+        target = panel(changed, "DSPACE primary-provider success ratio")["targets"][0]
+        target["expr"] = target["expr"].replace('provider="tokenplace"', 'provider="openai"', 1)
+    elif mutation == "fallback-shape":
+        target = panel(changed, "DSPACE fallback-use ratio")["targets"][0]
+        target["expr"] = target["expr"].replace(
+            'outcome="fallback_used"', 'outcome="fallback_used_dspace_dchat_requests_total"', 1
+        )
+    elif mutation == "ratio-contract":
+        target = panel(changed, "DSPACE fallback-use ratio")["targets"][0]
+        target["expr"] = target["expr"].replace("1e-9", "1e-8", 1)
+    else:
+        panel(changed, "DSPACE fallback-use ratio")["description"] = "Fallback ratio."
+
+    with pytest.raises(SystemExit, match=message):
+        validator.validate_dashboard(write_candidate(tmp_path, changed))
+
+
+@pytest.mark.parametrize(
     ("title", "target_index"),
     [
         ("Image-pin agreement", 0),
