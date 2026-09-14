@@ -6153,6 +6153,42 @@ def test_observability_app_metrics_verifier_has_no_tokenplace_specific_branch():
     assert 'elif app == "tokenplace"' not in text
 
 
+def test_observability_app_metrics_accepts_declarative_production_application():
+    doc = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))
+    cfg = json.loads(
+        json.dumps(doc["applications"]["tokenplace"]["environments"]["staging"])
+    )
+    cfg["targetLabels"].update(app="otherapp", environment="prod")
+    cfg["allowedApplicationLabels"].update(app=["otherapp"], environment=["prod"])
+    for relabeling in cfg["serviceMonitor"]["relabelings"]:
+        if relabeling["targetLabel"] == "app":
+            relabeling["replacement"] = "otherapp"
+        elif relabeling["targetLabel"] == "environment":
+            relabeling["replacement"] = "prod"
+    doc["applications"] = {"otherapp": {"environments": {"prod": cfg}}}
+
+    app_metrics.validate_inventory(doc)
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        {
+            "authorization": {
+                "type": "Bearer",
+                "credentials": {"name": "metrics-token", "key": "token"},
+            }
+        },
+        {"bearerTokenSecret": {"name": "metrics-token", "key": "token"}},
+    ],
+)
+def test_observability_app_metrics_normalizes_bearer_auth_without_application_branch(endpoint):
+    authorization, credentials = app_metrics.endpoint_authorization(endpoint)
+
+    assert authorization["type"] == "Bearer"
+    assert credentials == {"name": "metrics-token", "key": "token"}
+
+
 def _tokenplace_chart_like_service_monitor(namespace_line: str = "") -> str:
     namespace = f"  namespace: {namespace_line}\n" if namespace_line else ""
     return f"""apiVersion: apps/v1
