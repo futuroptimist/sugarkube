@@ -2607,8 +2607,8 @@
     {
       "id": 57,
       "type": "timeseries",
-      "title": "token.place in-flight requests by pod",
-      "description": "In-flight ownership is relay-process local, so values remain per pod rather than being combined across replicas.",
+      "title": "token.place in-flight requests by provider mode",
+      "description": "Highest relay-local in-flight count across replicas, grouped by bounded provider mode.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -2622,8 +2622,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max by (pod) (tokenplace_relay_in_flight_requests{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=~\"$cluster\",namespace=\"tokenplace\"})",
-          "legendFormat": "{{pod}}"
+          "expr": "max by (provider_mode) (tokenplace_relay_in_flight_requests{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=~\"$cluster\",namespace=\"tokenplace\"})",
+          "legendFormat": "{{provider_mode}}"
         }
       ],
       "fieldConfig": {
@@ -2647,8 +2647,8 @@
     {
       "id": 58,
       "type": "timeseries",
-      "title": "token.place oldest in-flight age by pod",
-      "description": "Oldest in-flight age remains per relay pod because cross-replica ownership is not assumed.",
+      "title": "token.place oldest in-flight age by provider mode",
+      "description": "Highest relay-local in-flight age across replicas, grouped by bounded provider mode.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -2662,8 +2662,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max by (pod) (tokenplace_relay_oldest_in_flight_age_seconds{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=~\"$cluster\",namespace=\"tokenplace\"})",
-          "legendFormat": "{{pod}}"
+          "expr": "max by (provider_mode) (tokenplace_relay_oldest_in_flight_age_seconds{app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=~\"$cluster\",namespace=\"tokenplace\"})",
+          "legendFormat": "{{provider_mode}}"
         }
       ],
       "fieldConfig": {
