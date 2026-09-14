@@ -6387,6 +6387,18 @@ def test_observability_app_metrics_second_application_uses_declarative_sources_w
     assert app_metrics.derive_build_labels_from_docs(cfg, docs) == {"build": "sha-123"}
 
 
+def test_observability_app_metrics_second_application_can_declare_production_without_code_changes():
+    doc = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))
+    synthetic = json.loads(json.dumps(doc["applications"]["tokenplace"]))
+    production = synthetic["environments"].pop("prod")
+    production["targetLabels"]["app"] = "synthetic"
+    production["allowedApplicationLabels"]["app"] = ["synthetic"]
+    production["serviceMonitor"]["relabelings"][0]["replacement"] = "synthetic"
+    doc["applications"] = {"synthetic": {"environments": {"prod": production}}}
+
+    app_metrics.validate_inventory(doc)
+
+
 @pytest.mark.parametrize(
     ("mutator", "message"),
     [
