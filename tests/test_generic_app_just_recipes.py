@@ -5950,7 +5950,7 @@ def test_observability_app_metrics_inventory_tokenplace_contracts_are_environmen
         "tokenplace_relay_oldest_in_flight_age_seconds",
         "tokenplace_relay_request_outcomes_total",
         "tokenplace_http_requests_total",
-        "tokenplace_http_request_duration_seconds",
+        "tokenplace_http_request_duration_seconds_bucket",
         "tokenplace_instrumentation_up",
         "tokenplace_build_info",
     }
@@ -6543,7 +6543,7 @@ def test_observability_app_metrics_verify_exercises_targets_metrics_and_public_4
         for key, value in cfg["targetLabels"].items():
             assert f'{key}="{value}"' in decoded_query
         metric = decoded_query.split("{", 1)[0]
-        series = metric + ("_bucket" if metric == "tokenplace_http_request_duration_seconds" else "")
+        series = metric
         sample_labels = {"__name__": series, "app": "tokenplace", "environment": "staging", "version": "main-deadbee", "revision": "main-deadbee"}
         if series.endswith("_bucket"):
             sample_labels["le"] = "0.5"
