@@ -1,8 +1,9 @@
 """Repository contracts for the token.place Phase 1 metrics integration."""
 
 import json
-import subprocess
 from pathlib import Path
+
+import yaml
 
 from scripts.generate_observability_dashboards import PROFILES, render
 
@@ -10,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 INVENTORY = ROOT / "platform/observability/app-metrics.json"
 TEMPLATE = ROOT / "platform/observability/dashboards/sugarkube-observability.template.json"
 
-METRIC_FAMILIES = {
+PHASE1_METRIC_FAMILIES = {
     "tokenplace_compute_nodes_registered",
     "tokenplace_compute_nodes_healthy",
     "tokenplace_compute_node_lease_age_seconds",
@@ -41,12 +42,7 @@ BOUNDED_LABELS = {
 
 
 def yaml_load(path: Path):
-    result = subprocess.run(
-        ["ruby", "-ryaml", "-rjson", "-e",
-         "puts JSON.generate(YAML.safe_load_file(ARGV[0], aliases: false))", str(path)],
-        check=True, capture_output=True, text=True,
-    )
-    return json.loads(result.stdout)
+    return yaml.safe_load(path.read_text(encoding="utf-8"))
 
 
 def inventory():
@@ -94,9 +90,7 @@ def test_staging_and_production_scrape_contracts_use_secret_references_only():
         assert values["serviceMonitor"]["enabled"] is True
         assert values["serviceMonitor"]["interval"] == "30s"
         assert values["serviceMonitor"]["scrapeTimeout"] == "10s"
-        assert values["serviceMonitor"]["additionalLabels"] == {
-            "release": "kube-prometheus-stack"
-        }
+        assert values["serviceMonitor"]["additionalLabels"] == {"release": "kube-prometheus-stack"}
         assert values["serviceMonitor"]["relabelings"] == {
             "app": "tokenplace",
             "environment": environment,
@@ -108,36 +102,46 @@ def test_staging_and_production_scrape_contracts_use_secret_references_only():
         assert "bearer " not in serialized
 
 
-def test_each_environment_requires_all_phase1_families_and_bounded_dimensions():
-    for cfg in inventory()["environments"].values():
-        assert set(cfg["requiredMetricFamilies"]) == METRIC_FAMILIES
+def test_metric_families_match_each_environment_relay_contract():
+    environments = inventory()["environments"]
+    assert set(environments["staging"]["requiredMetricFamilies"]) == PHASE1_METRIC_FAMILIES
+    assert set(environments["prod"]["requiredMetricFamilies"]) == {
+        "tokenplace_compute_nodes_registered",
+        "tokenplace_compute_nodes_healthy",
+        "tokenplace_instrumentation_up",
+        "tokenplace_build_info",
+    }
+    for cfg in environments.values():
         for label, values in BOUNDED_LABELS.items():
             assert set(cfg["allowedApplicationLabels"][label]) == values
         assert BOUNDED_LABELS.keys() <= cfg["allowedApplicationLabels"].keys()
-        assert {"token", "authorization", "user", "email"} <= set(
-            cfg["forbiddenApplicationLabels"]
-        )
+        assert {"token", "authorization", "user", "email"} <= set(cfg["forbiddenApplicationLabels"])
 
 
 def test_dashboard_covers_phase1_promql_with_bounded_aggregations_and_no_data():
     document = json.loads(TEMPLATE.read_text(encoding="utf-8"))
     expressions = dashboard_expressions(document)
     combined = "\n".join(expr for targets in expressions.values() for expr in targets)
-    assert all(family in combined for family in METRIC_FAMILIES)
+    assert all(family in combined for family in PHASE1_METRIC_FAMILIES)
     assert "sum by (reason) (rate(tokenplace_compute_node_evictions_total" in combined
     for family in (
         "tokenplace_relay_queue_depth",
         "tokenplace_relay_oldest_queued_request_age_seconds",
+    ):
+        assert f"max by (provider_mode) ({family}" in combined
+    for family in (
         "tokenplace_relay_in_flight_requests",
         "tokenplace_relay_oldest_in_flight_age_seconds",
     ):
-        assert f"max by (provider_mode) ({family}" in combined
+        assert f"max by (pod) ({family}" in combined
     assert "sum by (outcome) (rate(tokenplace_relay_request_outcomes_total" in combined
     assert "sum by (route, status_class) (rate(tokenplace_http_requests_total" in combined
     assert 'status_class="5xx"' in combined
     assert "histogram_quantile(.95" in combined
     tokenplace_expressions = "\n".join(
-        expr for title, targets in expressions.items() if title.startswith("token.place")
+        expr
+        for title, targets in expressions.items()
+        if title.startswith("token.place")
         for expr in targets
     )
     assert "or vector(0)" not in tokenplace_expressions

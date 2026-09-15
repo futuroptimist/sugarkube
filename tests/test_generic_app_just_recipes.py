@@ -5950,7 +5950,7 @@ def test_observability_app_metrics_inventory_tokenplace_contracts_are_environmen
         "tokenplace_relay_oldest_in_flight_age_seconds",
         "tokenplace_relay_request_outcomes_total",
         "tokenplace_http_requests_total",
-        "tokenplace_http_request_duration_seconds",
+        "tokenplace_http_request_duration_seconds_bucket",
         "tokenplace_instrumentation_up",
         "tokenplace_build_info",
     }
