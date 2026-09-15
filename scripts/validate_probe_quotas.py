@@ -45,6 +45,23 @@ class YAMLInputError(ValueError):
     """A privacy-safe error raised by the deliberately small YAML reader."""
 
 
+SCHEDULED_PRODUCER_FIELDS = {
+    "schemaVersion",
+    "application",
+    "environment",
+    "enabled",
+    "cadence",
+    "timeout",
+    "concurrency",
+    "quota",
+    "route",
+    "method",
+    "bucket",
+    "exemptions",
+    "failureStages",
+}
+
+
 def _yaml_scalar(text):
     """Read the scalar forms used by the repository's reviewed YAML inputs."""
     value = text.strip()
@@ -255,6 +272,80 @@ def _exact_path(value, field):
 
 def _documents(text):
     return [doc for doc in _yaml_documents(text) if isinstance(doc, dict)]
+
+
+def validate_scheduled_producers(producers):
+    """Fail closed for generic recurring producers sharing an application quota bucket."""
+    if not isinstance(producers, list):
+        raise ContractError("scheduled producers must be a list")
+    buckets = defaultdict(lambda: {"hourly": 0, "daily": 0})
+    policies = {}
+    for item in producers:
+        if not isinstance(item, dict) or set(item) != SCHEDULED_PRODUCER_FIELDS:
+            raise ContractError("scheduled producer has missing or unknown metadata")
+        if item["schemaVersion"] != 1 or item["environment"] not in ENVIRONMENTS:
+            raise ContractError("scheduled producer has invalid schema or environment")
+        for field in ("application", "bucket"):
+            if not isinstance(item[field], str) or not item[field].strip():
+                raise ContractError(f"scheduled producer has invalid {field}")
+        if not isinstance(item["enabled"], bool):
+            raise ContractError("scheduled producer has invalid enabled state")
+        cadence = _duration(item["cadence"], "cadence")
+        timeout = _duration(item["timeout"], "timeout")
+        concurrency = _positive_int(item["concurrency"], "concurrency")
+        if timeout >= cadence:
+            raise ContractError("scheduled producer timeout must be shorter than cadence")
+        route = _exact_path(item["route"], "scheduled producer route")
+        method = item["method"]
+        if method not in METHODS:
+            raise ContractError("scheduled producer has unknown method")
+        if not isinstance(item["failureStages"], list) or not item["failureStages"]:
+            raise ContractError("scheduled producer has missing failure stages")
+        if any(not isinstance(stage, str) or not stage for stage in item["failureStages"]):
+            raise ContractError("scheduled producer has invalid failure stages")
+        if len(item["failureStages"]) != len(set(item["failureStages"])):
+            raise ContractError("scheduled producer has duplicate failure stages")
+        exemptions = item["exemptions"]
+        if not isinstance(exemptions, list):
+            raise ContractError("scheduled producer has malformed exemptions")
+        exemption_keys = []
+        for exemption in exemptions:
+            if not isinstance(exemption, dict) or set(exemption) != {"route", "method"}:
+                raise ContractError("scheduled producer has malformed exemptions")
+            exemption_route = _exact_path(exemption["route"], "scheduled producer exemption")
+            if exemption["method"] not in METHODS:
+                raise ContractError("scheduled producer has malformed exemptions")
+            exemption_keys.append((exemption_route, exemption["method"]))
+        quota = item["quota"]
+        if quota is not None:
+            if not isinstance(quota, dict) or set(quota) != set(WINDOWS):
+                raise ContractError("scheduled producer has missing quota metadata")
+            for window in WINDOWS:
+                _positive_int(quota[window], f"{window} quota")
+        if not item["enabled"]:
+            continue
+        if quota is None:
+            continue  # Explicitly reviewed unlimited semantics.
+        policy_key = (item["application"], item["environment"], item["bucket"])
+        policy = (quota["hourly"], quota["daily"])
+        if policy_key in policies and policies[policy_key] != policy:
+            raise ContractError("scheduled producer has contradictory shared-bucket quota")
+        policies[policy_key] = policy
+        if (route, method) in exemption_keys:
+            continue
+        for window, seconds in WINDOWS.items():
+            buckets[(*policy_key, *policy)][window] += math.ceil(seconds / cadence) * concurrency
+    for key, totals in buckets.items():
+        application, environment, bucket, hourly, daily = key
+        limits = {"hourly": hourly, "daily": daily}
+        for window in WINDOWS:
+            if totals[window] >= limits[window]:
+                raise ContractError(
+                    f"unsafe scheduled producer: application={application} environment={environment} "
+                    f"bucket={bucket} window={window} volume={totals[window]} "
+                    f"reviewed_limit={limits[window]}"
+                )
+    return len(producers)
 
 
 def render_active(environment, runner=subprocess.run):

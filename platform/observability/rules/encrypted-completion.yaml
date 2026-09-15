@@ -1,0 +1,15 @@
+---
+groups:
+  - name: encrypted-completion-contract
+    interval: 1m
+    rules:
+      - alert: EncryptedCompletionProducerStale
+        expr: encrypted_completion_monitoring_enabled == 1 and (time() - encrypted_completion_last_attempt_timestamp_seconds > 7200 or absent(encrypted_completion_last_attempt_timestamp_seconds))
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Encrypted-completion producer is stale
+          description: The enabled producer has no fresh bounded attempt evidence; this does not inspect request material.
+      - record: encrypted_completion_monitoring_disabled
+        expr: encrypted_completion_monitoring_enabled == 0
