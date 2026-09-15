@@ -29,3 +29,23 @@ groups:
           description: The token.place ServiceMonitor target is down or missing while a production relay pod is ready; this is a telemetry failure, not proof of zero compute capacity.
           remediation: Check target discovery, bearer Secret wiring, and network policy before diagnosing compute capacity.
           runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/k3s-tokenplace-prod.md#tokenplacemetricstargetdown
+      - alert: TokenplaceEncryptedCompletionStale
+        expr: encrypted_completion_monitoring_enabled{application="tokenplace",environment="prod"} == 1 and (time() - encrypted_completion_attempt_timestamp_seconds{application="tokenplace",environment="prod"} > 7200 or absent(encrypted_completion_attempt_timestamp_seconds{application="tokenplace",environment="prod"}))
+        for: 10m
+        labels:
+          application: tokenplace
+          environment: prod
+          severity: warning
+        annotations:
+          summary: token.place encrypted-completion producer is stale
+          description: Monitoring is enabled but its bounded attempt timestamp is absent or older than two cadences.
+      - alert: TokenplaceEncryptedCompletionFailed
+        expr: encrypted_completion_monitoring_enabled{application="tokenplace",environment="prod"} == 1 and encrypted_completion_success{application="tokenplace",environment="prod"} == 0
+        for: 5m
+        labels:
+          application: tokenplace
+          environment: prod
+          severity: warning
+        annotations:
+          summary: token.place encrypted completion failed
+          description: The application-owned client reported a bounded failure stage; request material is never exported.

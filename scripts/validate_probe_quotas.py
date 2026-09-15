@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import os
 import re
@@ -251,6 +252,84 @@ def _exact_path(value, field):
     if parts.scheme or parts.netloc or parts.query or parts.fragment:
         raise ContractError(f"{field} must be an exact path without a query or fragment")
     return value
+
+
+def validate_declarative_schedules(contract_data):
+    """Fail closed on generic non-blackbox schedules, aggregating shared quota buckets."""
+    if not isinstance(contract_data, dict) or contract_data.get("schemaVersion") != 1:
+        raise ContractError("declarative schedule contract version must be 1")
+    stages = contract_data.get("failureStages")
+    if not isinstance(stages, list) or not stages or len(stages) != len(set(stages)):
+        raise ContractError("failureStages must be a finite unique list")
+    producers = contract_data.get("producers")
+    if not isinstance(producers, list):
+        raise ContractError("producers must be a list")
+    buckets = defaultdict(lambda: {window: 0 for window in WINDOWS})
+    policies = {}
+    required = {
+        "application",
+        "environment",
+        "enabled",
+        "cadence",
+        "timeout",
+        "concurrency",
+        "route",
+        "method",
+        "bucket",
+        "limits",
+        "exemptions",
+        "requestMultiplier",
+        "safetyMargin",
+    }
+    for item in producers:
+        if not isinstance(item, dict) or set(item) != required:
+            raise ContractError("producer metadata is missing or unknown")
+        if not isinstance(item["application"], str) or not item["application"]:
+            raise ContractError("application is required")
+        if item["environment"] not in ENVIRONMENTS or type(item["enabled"]) is not bool:
+            raise ContractError("producer environment or enabled state is invalid")
+        cadence = _duration(item["cadence"], "cadence")
+        timeout = _duration(item["timeout"], "timeout")
+        concurrency = _positive_int(item["concurrency"], "concurrency")
+        multiplier = _positive_int(item["requestMultiplier"], "requestMultiplier")
+        route = _exact_path(item["route"], "route")
+        method = item["method"]
+        if method not in METHODS:
+            raise ContractError("method is invalid")
+        if timeout > cadence:
+            raise ContractError("timeout cannot exceed cadence")
+        limits, exemptions, margin = item["limits"], item["exemptions"], item["safetyMargin"]
+        if not isinstance(limits, dict) or set(limits) != set(WINDOWS):
+            raise ContractError("hourly and daily limits are required")
+        for window in WINDOWS:
+            _positive_int(limits[window], f"{window} limit")
+        if not isinstance(margin, (int, float)) or isinstance(margin, bool) or not 0 <= margin < 1:
+            raise ContractError("safetyMargin must be in [0, 1)")
+        if not isinstance(exemptions, list):
+            raise ContractError("exemptions must be a list")
+        exact = []
+        for exemption in exemptions:
+            if not isinstance(exemption, dict) or set(exemption) != {"route", "method"}:
+                raise ContractError("exemption metadata is missing or unknown")
+            exact.append((_exact_path(exemption["route"], "exemption route"), exemption["method"]))
+        policy_key = (item["application"], item["environment"], item["bucket"])
+        policy = (limits["hourly"], limits["daily"], Fraction(str(margin)))
+        if policy_key in policies and policies[policy_key] != policy:
+            raise ContractError("contradictory shared-bucket policy")
+        policies[policy_key] = policy
+        if not item["enabled"] or (route, method) in exact:
+            continue
+        volume = concurrency * multiplier
+        for window, seconds in WINDOWS.items():
+            buckets[policy_key][window] += math.ceil(seconds / cadence) * volume
+    for key, totals in buckets.items():
+        hourly, daily, margin = policies[key]
+        for window, limit in (("hourly", hourly), ("daily", daily)):
+            if totals[window] >= limit * (1 - margin):
+                raise ContractError(
+                    f"unsafe schedule: bucket={key[2]} window={window} volume={totals[window]}"
+                )
+    return len(producers)
 
 
 def _documents(text):
@@ -509,6 +588,11 @@ def main(argv=None):
         type=Path,
         help="already-rendered Probe YAML (default: kubectl kustomize active graph)",
     )
+    parser.add_argument(
+        "--schedules",
+        type=Path,
+        help="optional generic declarative producer schedule JSON",
+    )
     args = parser.parse_args(argv)
     try:
         contract = _single_yaml_document(args.contracts.read_text(encoding="utf-8"))
@@ -520,13 +604,15 @@ def main(argv=None):
         )
         methods, replicas = load_modules(args.env)
         validate(args.env, rendered, contract, methods, replicas)
+        if args.schedules:
+            validate_declarative_schedules(json.loads(args.schedules.read_text(encoding="utf-8")))
     except ContractError as exc:
         print(f"probe quota validation failed: {exc}", file=sys.stderr)
         return 1
     except YAMLInputError:
         print("probe quota validation failed: YAML input is malformed", file=sys.stderr)
         return 1
-    except OSError:
+    except (OSError, json.JSONDecodeError):
         print("probe quota validation failed: unable to read an input file", file=sys.stderr)
         return 1
     print(f"probe quota validation passed: environment={args.env}")
