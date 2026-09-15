@@ -82,11 +82,70 @@ def test_malformed_evidence_metadata_is_safely_rejected(field, value):
         metrics.validate_evidence(record)
 
 
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (lambda value: value.update(producer="bad identity"), "producer is invalid"),
+        (lambda value: value.update(attemptedAt=0), "attemptedAt is invalid"),
+        (lambda value: value.update(completedAt=False), "completedAt is invalid"),
+        (lambda value: value.update(lastSuccessfulAt=-1), "lastSuccessfulAt is invalid"),
+        (lambda value: value.update(durationSeconds=float("inf")), "duration is invalid"),
+        (lambda value: value.update(responseValid=1), "assertions are invalid"),
+        (lambda value: value.update(failureStage="timeout"), "failure stage contradict"),
+        (
+            lambda value: value.update(clientDecryptionVerified=False),
+            "success requires client decryption",
+        ),
+        (lambda value: value.update(completedAt=1_699_999_999), "completion predates"),
+        (
+            lambda value: value.update(lastSuccessfulAt=1_700_000_000),
+            "must update lastSuccessfulAt",
+        ),
+        (
+            lambda value: value.update(
+                outcome="failure",
+                failureStage="timeout",
+                clientDecryptionVerified=False,
+                responseValid=False,
+                lastSuccessfulAt=1_700_000_001,
+            ),
+            "failed evidence has an invalid",
+        ),
+    ],
+)
+def test_evidence_relationships_fail_closed(mutation, message):
+    record = evidence()
+    mutation(record)
+    with pytest.raises(ValueError, match=message):
+        metrics.validate_evidence(record, now=1_700_000_003)
+
+
+@pytest.mark.parametrize("now", [False, float("nan")])
+def test_invalid_injected_clocks_are_rejected(now):
+    with pytest.raises(ValueError, match="current time is invalid"):
+        metrics.validate_evidence(evidence(), now=now)
+    with pytest.raises(ValueError, match="current time is invalid"):
+        metrics.render_metrics(producer(), now=now)
+
+
 def test_dynamic_prometheus_label_injection_is_rejected():
     value = producer(False)
     value["application"] = 'app"\\\ninjected_metric 1'
     with pytest.raises(ValueError, match="producer identity is invalid"):
         metrics.render_metrics(value)
+
+
+def test_renderer_rejects_malformed_producer_metadata_and_identity_mismatch():
+    with pytest.raises(ValueError, match="producer metadata is invalid"):
+        metrics.render_metrics(None)
+    value = producer()
+    value["cadence"] = "immediate"
+    with pytest.raises(ValueError, match="producer cadence is invalid"):
+        metrics.render_metrics(value)
+    record = evidence()
+    record["application"] = "another-app"
+    with pytest.raises(ValueError, match="identity contradicts producer"):
+        metrics.render_metrics(producer(), record, now=1_700_000_003)
 
 
 def test_stale_and_intentionally_disabled_states_are_distinguishable():
@@ -101,9 +160,7 @@ def test_stale_and_intentionally_disabled_states_are_distinguishable():
 def test_lifecycle_states_are_deterministic_for_enabled_producers():
     value = producer()
     assert 'state="never_attempted"} 1' in metrics.render_metrics(value, now=1_700_000_003)
-    assert 'state="fresh"} 1' in metrics.render_metrics(
-        value, evidence(), now=1_700_000_003
-    )
+    assert 'state="fresh"} 1' in metrics.render_metrics(value, evidence(), now=1_700_000_003)
     assert 'state="failed"} 1' in metrics.render_metrics(
         value, evidence("timeout"), now=1_700_000_003
     )
@@ -129,9 +186,7 @@ def test_telemetry_and_evidence_reject_sensitive_or_request_material():
         mutated[field] = "forbidden"
         with pytest.raises(ValueError, match="exact sanitized schema"):
             metrics.validate_evidence(mutated)
-    serialized = (
-        json.dumps(contract()) + metrics.render_metrics(producer(), value)
-    ).lower()
+    serialized = (json.dumps(contract()) + metrics.render_metrics(producer(), value)).lower()
     assert not any(term.lower() in serialized for term in sensitive)
 
 
@@ -193,6 +248,54 @@ def test_malformed_failure_stages_fail_with_contract_error(malformed):
     value["producers"][0]["failureStages"] = malformed
     with pytest.raises(quotas.ContractError, match="finite vocabulary"):
         quotas.validate_completion_contract(value)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (lambda value, item: value.update(extra=True), "top-level fields"),
+        (lambda value, item: value.update(schemaVersion=2), "schemaVersion/producers"),
+        (lambda value, item: item.update(name=""), "invalid name"),
+        (lambda value, item: item.update(enabled=1), "environment/enabled"),
+        (
+            lambda value, item: value["producers"].append(copy.deepcopy(item)),
+            "identity is duplicated",
+        ),
+        (lambda value, item: item.update(timeout=item["cadence"]), "shorter than cadence"),
+        (lambda value, item: item.update(enabled=True), "requires requestMultiplicity"),
+        (lambda value, item: item.update(method=[]), "unknown method"),
+        (lambda value, item: item.update(safetyMargin=True), "invalid safetyMargin"),
+        (lambda value, item: item.update(limits=[]), "ambiguous limits"),
+        (lambda value, item: item.update(exemptions={}), "malformed exemptions"),
+        (lambda value, item: item.update(exemptions=[{}]), "malformed exemptions"),
+        (
+            lambda value, item: item.update(exemptions=[{"route": item["route"], "method": []}]),
+            "malformed exemptions",
+        ),
+        (
+            lambda value, item: item.update(
+                exemptions=[
+                    {"route": item["route"], "method": item["method"]},
+                    {"route": item["route"], "method": item["method"]},
+                ]
+            ),
+            "duplicate exemptions",
+        ),
+    ],
+)
+def test_completion_contract_metadata_errors_are_deterministic(mutation, message):
+    value = contract()
+    mutation(value, value["producers"][0])
+    with pytest.raises(quotas.ContractError, match=message):
+        quotas.validate_completion_contract(value)
+
+
+def test_completion_contract_rejects_conflicting_shared_policy():
+    value = contract()
+    item = value["producers"][0]
+    key = (item["application"], item["environment"], item["bucket"])
+    with pytest.raises(quotas.ContractError, match="contradictory shared-bucket policy"):
+        quotas.validate_completion_contract(value, shared_policies={key: ("unlimited", 0)})
 
 
 def test_request_multiplicity_is_distinct_from_concurrency():
