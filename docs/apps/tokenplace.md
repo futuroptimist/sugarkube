@@ -4,6 +4,29 @@ Incident response for metrics OOM and quota exhaustion is in the tested
 [token.place incident runbooks](../tokenplace-incident-runbooks.md). The repository-only staging
 drill plan there does not claim that the live Step 14b drill has passed.
 
+## Encrypted-completion observability contract
+
+Issue #2809 has a repository-only, intentionally disabled producer declaration in
+`config/observability/encrypted-completion-producers.yaml`. It records an exact API v1 route and
+method, cadence, timeout, concurrency, shared hourly/daily inference budget, and a finite failure
+stage vocabulary. The generic quota validator evaluates enabled declarations strictly below the
+usable budget and preserves exact route/method exemptions; it does not special-case token.place.
+
+The bounded result consumer and `platform/observability/encrypted-completion-metrics.json` define
+payload-free signals for enabled state, verified client-side success, attempt and success
+freshness, whole-journey duration, and finite failure stage. Disabled, stale, and executed-failure
+states are intentionally distinct. Evidence rejects extra fields, so prompts, responses,
+ciphertext, keys, credentials, request identities, and other request material cannot become
+telemetry.
+
+This repository cannot safely perform the real client-owned E2EE journey: it has neither an
+application-owned client implementation nor the required credentials. Existing DSPACE `/chat`
+coverage is an isolated, intercepted, non-mutating UI journey and does not prove token.place
+client-side decryption. It is therefore reused only as the producer/metrics design precedent, not
+duplicated as recurring inference. No timer, probe, dashboard alert, staging job, or production job
+is activated by this contract. Staging and production qualification remain blocked on an
+application-owned client and separately authorized runtime execution.
+
 This is the canonical runbook for deploying token.place from GHCR artifacts to Sugarkube. The generic `just app-*` recipes are the preferred future path. The `tokenplace-oci-*` recipes remain compatibility shims and are scheduled for later removal only after the generic flow has been exercised across routine releases.
 
 ## Artifact model
