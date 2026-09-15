@@ -1,6 +1,7 @@
 """Repository contracts for the token.place Phase 1 metrics integration."""
 
 import json
+import re
 from pathlib import Path
 
 import yaml
@@ -102,15 +103,10 @@ def test_staging_and_production_scrape_contracts_use_secret_references_only():
         assert "bearer " not in serialized
 
 
-def test_metric_families_match_each_environment_relay_contract():
+def test_metric_families_match_phase1_relay_contract():
     environments = inventory()["environments"]
-    assert set(environments["staging"]["requiredMetricFamilies"]) == PHASE1_METRIC_FAMILIES
-    assert set(environments["prod"]["requiredMetricFamilies"]) == {
-        "tokenplace_compute_nodes_registered",
-        "tokenplace_compute_nodes_healthy",
-        "tokenplace_instrumentation_up",
-        "tokenplace_build_info",
-    }
+    for cfg in environments.values():
+        assert set(cfg["requiredMetricFamilies"]) == PHASE1_METRIC_FAMILIES
     for cfg in environments.values():
         for label, values in BOUNDED_LABELS.items():
             assert set(cfg["allowedApplicationLabels"][label]) == values
@@ -121,8 +117,34 @@ def test_metric_families_match_each_environment_relay_contract():
 def test_dashboard_covers_phase1_promql_with_bounded_aggregations_and_no_data():
     document = json.loads(TEMPLATE.read_text(encoding="utf-8"))
     expressions = dashboard_expressions(document)
-    combined = "\n".join(expr for targets in expressions.values() for expr in targets)
-    assert all(family in combined for family in PHASE1_METRIC_FAMILIES)
+    tokenplace_expressions = "\n".join(
+        expr
+        for title, targets in expressions.items()
+        if title.startswith("token.place")
+        for expr in targets
+    )
+    combined = tokenplace_expressions
+    identifiers = set(re.findall(r"\btokenplace_[a-zA-Z_:][a-zA-Z0-9_:]*\b", combined))
+    normalized_identifiers = set()
+    for identifier in identifiers:
+        if identifier in PHASE1_METRIC_FAMILIES:
+            normalized_identifiers.add(identifier)
+            continue
+        for suffix in ("_bucket", "_sum", "_count"):
+            if identifier.endswith(suffix):
+                histogram = f"{identifier.removesuffix(suffix)}_bucket"
+                assert histogram in PHASE1_METRIC_FAMILIES
+                normalized_identifiers.add(histogram)
+                break
+        else:
+            raise AssertionError(f"unexpected token.place metric identifier: {identifier}")
+    assert normalized_identifiers == PHASE1_METRIC_FAMILIES
+
+    aggregation_labels = set(inventory()["environments"]["staging"]["allowedApplicationLabels"])
+    aggregation_labels.update({"le", "pod", "revision", "version"})
+    for operator, labels in re.findall(r"\b(by|without)\s*\(([^)]*)\)", combined):
+        parsed_labels = {label.strip() for label in labels.split(",") if label.strip()}
+        assert parsed_labels <= aggregation_labels, (operator, parsed_labels - aggregation_labels)
     assert "sum by (reason) (rate(tokenplace_compute_node_evictions_total" in combined
     for family in (
         "tokenplace_relay_queue_depth",
@@ -138,12 +160,6 @@ def test_dashboard_covers_phase1_promql_with_bounded_aggregations_and_no_data():
     assert "sum by (route, status_class) (rate(tokenplace_http_requests_total" in combined
     assert 'status_class="5xx"' in combined
     assert "histogram_quantile(.95" in combined
-    tokenplace_expressions = "\n".join(
-        expr
-        for title, targets in expressions.items()
-        if title.startswith("token.place")
-        for expr in targets
-    )
     assert "or vector(0)" not in tokenplace_expressions
     for panel in document["panels"]:
         if panel["type"] not in {"row", "text"}:
