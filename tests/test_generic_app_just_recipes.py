@@ -5889,12 +5889,21 @@ from scripts import observability_app_metrics as app_metrics
 
 APP_METRICS_CONFIG = REPO_ROOT / "platform/observability/app-metrics.json"
 APP_METRICS_SCRIPT = REPO_ROOT / "scripts/observability_app_metrics.py"
-TOKENPLACE_MAINTENANCE_METRIC_FAMILIES = [
+TOKENPLACE_PHASE1_METRIC_FAMILIES = {
     "tokenplace_compute_nodes_registered",
     "tokenplace_compute_nodes_healthy",
+    "tokenplace_compute_node_lease_age_seconds",
+    "tokenplace_compute_node_evictions_total",
+    "tokenplace_relay_queue_depth",
+    "tokenplace_relay_oldest_queued_request_age_seconds",
+    "tokenplace_relay_in_flight_requests",
+    "tokenplace_relay_oldest_in_flight_age_seconds",
+    "tokenplace_relay_request_outcomes_total",
+    "tokenplace_http_requests_total",
+    "tokenplace_http_request_duration_seconds_bucket",
     "tokenplace_instrumentation_up",
     "tokenplace_build_info",
-]
+}
 
 
 def test_observability_app_metrics_inventory_tokenplace_contract_is_strict_and_complete():
@@ -5939,25 +5948,10 @@ def test_observability_app_metrics_inventory_tokenplace_contracts_are_environmen
         "applications"
     ]["tokenplace"]["environments"]
 
-    modern_families = {
-        "tokenplace_compute_nodes_registered",
-        "tokenplace_compute_nodes_healthy",
-        "tokenplace_compute_node_lease_age_seconds",
-        "tokenplace_compute_node_evictions_total",
-        "tokenplace_relay_queue_depth",
-        "tokenplace_relay_oldest_queued_request_age_seconds",
-        "tokenplace_relay_in_flight_requests",
-        "tokenplace_relay_oldest_in_flight_age_seconds",
-        "tokenplace_relay_request_outcomes_total",
-        "tokenplace_http_requests_total",
-        "tokenplace_http_request_duration_seconds",
-        "tokenplace_instrumentation_up",
-        "tokenplace_build_info",
-    }
-    assert set(environments["prod"]["requiredMetricFamilies"]) == set(
-        TOKENPLACE_MAINTENANCE_METRIC_FAMILIES
-    )
-    assert set(environments["staging"]["requiredMetricFamilies"]) == modern_families
+    for environment in ("staging", "prod"):
+        assert set(environments[environment]["requiredMetricFamilies"]) == (
+            TOKENPLACE_PHASE1_METRIC_FAMILIES
+        )
 
 
 def test_observability_app_metrics_inventory_accepts_both_canonical_relabeling_forms():
@@ -6543,7 +6537,7 @@ def test_observability_app_metrics_verify_exercises_targets_metrics_and_public_4
         for key, value in cfg["targetLabels"].items():
             assert f'{key}="{value}"' in decoded_query
         metric = decoded_query.split("{", 1)[0]
-        series = metric + ("_bucket" if metric == "tokenplace_http_request_duration_seconds" else "")
+        series = metric
         sample_labels = {"__name__": series, "app": "tokenplace", "environment": "staging", "version": "main-deadbee", "revision": "main-deadbee"}
         if series.endswith("_bucket"):
             sample_labels["le"] = "0.5"
@@ -6922,7 +6916,7 @@ def _tokenplace_metric_fixture(cfg, present, extra_labels=None):
     return prom_func
 
 
-def test_observability_app_metrics_verify_tokenplace_prod_maintenance_fixture_passes(
+def test_observability_app_metrics_verify_tokenplace_prod_phase1_fixture_passes(
     monkeypatch, capsys
 ):
     cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
@@ -6932,7 +6926,7 @@ def test_observability_app_metrics_verify_tokenplace_prod_maintenance_fixture_pa
     _verify_base(
         monkeypatch,
         cfg,
-        _tokenplace_metric_fixture(cfg, set(TOKENPLACE_MAINTENANCE_METRIC_FAMILIES)),
+        _tokenplace_metric_fixture(cfg, set(TOKENPLACE_PHASE1_METRIC_FAMILIES)),
     )
 
     app_metrics.verify("tokenplace", "prod")
@@ -6942,15 +6936,15 @@ def test_observability_app_metrics_verify_tokenplace_prod_maintenance_fixture_pa
     assert captured.err == ""
 
 
-@pytest.mark.parametrize("missing", TOKENPLACE_MAINTENANCE_METRIC_FAMILIES)
-def test_observability_app_metrics_verify_tokenplace_prod_requires_each_maintenance_family(
+@pytest.mark.parametrize("missing", TOKENPLACE_PHASE1_METRIC_FAMILIES)
+def test_observability_app_metrics_verify_tokenplace_prod_requires_each_phase1_family(
     monkeypatch, missing
 ):
     cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
         "tokenplace"
     ]["environments"]["prod"]
     cfg = {**cfg, "retries": {"attempts": 1, "delaySeconds": 0}}
-    present = set(TOKENPLACE_MAINTENANCE_METRIC_FAMILIES) - {missing}
+    present = set(TOKENPLACE_PHASE1_METRIC_FAMILIES) - {missing}
     _verify_base(monkeypatch, cfg, _tokenplace_metric_fixture(cfg, present))
 
     with pytest.raises(app_metrics.Error, match=f"required metric family missing: {missing}"):
@@ -6967,30 +6961,13 @@ def test_observability_app_metrics_verify_tokenplace_prod_rejects_unbounded_labe
         cfg,
         _tokenplace_metric_fixture(
             cfg,
-            set(TOKENPLACE_MAINTENANCE_METRIC_FAMILIES),
+            set(TOKENPLACE_PHASE1_METRIC_FAMILIES),
             {"request_id": "fixture-id"},
         ),
     )
 
     with pytest.raises(app_metrics.Error, match="unbounded application metric label"):
         app_metrics.verify("tokenplace", "prod")
-
-
-def test_observability_app_metrics_verify_tokenplace_staging_rejects_maintenance_only_fixture(
-    monkeypatch
-):
-    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
-        "tokenplace"
-    ]["environments"]["staging"]
-    cfg = {**cfg, "retries": {"attempts": 1, "delaySeconds": 0}}
-    _verify_base(
-        monkeypatch,
-        cfg,
-        _tokenplace_metric_fixture(cfg, set(TOKENPLACE_MAINTENANCE_METRIC_FAMILIES)),
-    )
-
-    with pytest.raises(app_metrics.Error, match="required metric family missing"):
-        app_metrics.verify("tokenplace", "staging")
 
 
 def test_observability_app_metrics_verify_target_failures_and_retries(monkeypatch):

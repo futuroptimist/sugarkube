@@ -122,17 +122,22 @@ or queue depth.
 
 ### Provision and deploy authenticated metrics
 
-Production temporarily uses the Llama 3.1 maintenance relay line. Its verifier
-contract intentionally requires only `tokenplace_compute_nodes_registered`,
-`tokenplace_compute_nodes_healthy`, `tokenplace_instrumentation_up`, and
-`tokenplace_build_info`. The approved immutable candidate is
-`ghcr.io/futuroptimist/tokenplace-relay:sha-f5c6d6b`, built from source commit
-`f5c6d6b0306112718d74a8340f39f35551b657e6`. Together with Prometheus `up`, these
-four application metric families are sufficient for zero-healthy-compute-node
-and telemetry-loss paging. Staging remains on the modern Qwen relay and retains
-the full 13-family contract. A future production promotion to the modern relay
-must restore the full production metric-family contract in the same reviewed
-rollout.
+Production and staging use the modern Qwen relay and require the full Phase 1
+13-family inventory:
+
+- `tokenplace_compute_nodes_registered`
+- `tokenplace_compute_nodes_healthy`
+- `tokenplace_compute_node_lease_age_seconds`
+- `tokenplace_compute_node_evictions_total`
+- `tokenplace_relay_queue_depth`
+- `tokenplace_relay_oldest_queued_request_age_seconds`
+- `tokenplace_relay_in_flight_requests`
+- `tokenplace_relay_oldest_in_flight_age_seconds`
+- `tokenplace_relay_request_outcomes_total`
+- `tokenplace_http_requests_total`
+- `tokenplace_http_request_duration_seconds_bucket`
+- `tokenplace_instrumentation_up`
+- `tokenplace_build_info`
 
 Create `tokenplace/tokenplace-prod-metrics-token` with key `token` before deploying
 production values. No Secret manifest belongs in Git. From a private interactive
