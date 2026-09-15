@@ -35,6 +35,23 @@ DECLARATION_FIELDS = {
     "safety_margin",
     "unlimited_operational",
 }
+PRODUCER_FIELDS = {
+    "application",
+    "environment",
+    "producer",
+    "enabled",
+    "cadence",
+    "timeout",
+    "concurrency",
+    "bucket",
+    "limits",
+    "route",
+    "method",
+    "exemptions",
+    "safety_margin",
+    "unlimited_operational",
+    "failure_stages",
+}
 
 
 class ContractError(ValueError):
@@ -379,6 +396,112 @@ def _validate_declaration(item):
             _positive_int(limits[window], f"{window} limit")
 
 
+def validate_scheduled_producers(contract_data):
+    """Validate non-Kubernetes recurring producers against shared quota buckets.
+
+    This deliberately validates declarations, not execution.  An enabled producer
+    is safe only when all request metadata is exact and its worst-case cadence and
+    concurrency remain strictly below every reviewed budget.
+    """
+    if not isinstance(contract_data, dict) or set(contract_data) != {"version", "producers"}:
+        raise ContractError("scheduled producer contract has missing or unknown fields")
+    if contract_data["version"] != 1 or not isinstance(contract_data["producers"], list):
+        raise ContractError("scheduled producer contract version or producers is invalid")
+
+    identities = set()
+    policies = {}
+    buckets = defaultdict(lambda: {"hourly": 0, "daily": 0})
+    for item in contract_data["producers"]:
+        if not isinstance(item, dict) or set(item) != PRODUCER_FIELDS:
+            raise ContractError("scheduled producer has missing or unknown metadata")
+        identity = (item["environment"], item["producer"])
+        if identity in identities:
+            raise ContractError("scheduled producer identity is duplicated")
+        identities.add(identity)
+        if item["environment"] not in ENVIRONMENTS:
+            raise ContractError("scheduled producer has an invalid environment")
+        for field in ("application", "producer", "bucket"):
+            if not isinstance(item[field], str) or not item[field].strip():
+                raise ContractError(f"scheduled producer has invalid {field}")
+        route = _exact_path(item["route"], "scheduled producer route")
+        method = item["method"]
+        if method not in METHODS:
+            raise ContractError("scheduled producer has unknown method")
+        cadence = _duration(item["cadence"], "cadence")
+        timeout = _duration(item["timeout"], "timeout")
+        concurrency = _positive_int(item["concurrency"], "concurrency")
+        if timeout >= cadence:
+            raise ContractError("scheduled producer timeout must be shorter than cadence")
+        if not isinstance(item["enabled"], bool) or not isinstance(
+            item["unlimited_operational"], bool
+        ):
+            raise ContractError("scheduled producer enabled/unlimited metadata is invalid")
+        margin = item["safety_margin"]
+        if isinstance(margin, bool) or not isinstance(margin, (int, float)) or not 0 <= margin < 1:
+            raise ContractError("scheduled producer safety_margin is invalid")
+        stages = item["failure_stages"]
+        if (
+            not isinstance(stages, list)
+            or not stages
+            or len(stages) != len(set(stages))
+            or any(
+                not isinstance(stage, str) or not re.fullmatch(r"[a-z][a-z0-9_]*", stage)
+                for stage in stages
+            )
+        ):
+            raise ContractError("scheduled producer failure_stages are invalid")
+        exemptions = item["exemptions"]
+        if not isinstance(exemptions, list):
+            raise ContractError("scheduled producer exemptions are malformed")
+        exemption_keys = []
+        for exemption in exemptions:
+            if not isinstance(exemption, dict) or set(exemption) != {"route", "method"}:
+                raise ContractError("scheduled producer exemptions are malformed")
+            exemption_route = _exact_path(exemption["route"], "scheduled producer exemption route")
+            if exemption["method"] not in METHODS:
+                raise ContractError("scheduled producer exemptions are malformed")
+            exemption_keys.append((exemption_route, exemption["method"]))
+        if len(exemption_keys) != len(set(exemption_keys)):
+            raise ContractError("scheduled producer exemptions are duplicated")
+        limits = item["limits"]
+        if item["unlimited_operational"]:
+            if limits is not None or exemptions:
+                raise ContractError("scheduled producer unlimited metadata is contradictory")
+            policy = ("unlimited", margin)
+        else:
+            if not isinstance(limits, dict) or set(limits) != set(WINDOWS):
+                raise ContractError("scheduled producer limits are missing or ambiguous")
+            for window in WINDOWS:
+                _positive_int(limits[window], f"{window} limit")
+            policy = ("metered", margin, limits["hourly"], limits["daily"])
+        policy_key = (item["application"], item["environment"], item["bucket"])
+        if policy_key in policies and policies[policy_key] != policy:
+            raise ContractError("scheduled producers have contradictory shared-bucket policy")
+        policies[policy_key] = policy
+        if (
+            not item["enabled"]
+            or item["unlimited_operational"]
+            or (route, method) in exemption_keys
+        ):
+            continue
+        key = (*policy_key, *policy)
+        for window, duration in WINDOWS.items():
+            buckets[key][window] += math.ceil(duration / cadence) * concurrency
+
+    for key, totals in buckets.items():
+        app, environment, bucket, _, margin, hourly_limit, daily_limit = key
+        limits = {"hourly": hourly_limit, "daily": daily_limit}
+        for window in WINDOWS:
+            usable = limits[window] * (1 - Fraction(str(margin)))
+            if totals[window] >= usable:
+                raise ContractError(
+                    f"unsafe producer schedule: application={app} environment={environment} "
+                    f"bucket={bucket} window={window} volume={totals[window]} "
+                    f"reviewed_limit={limits[window]}"
+                )
+    return len(contract_data["producers"])
+
+
 def validate(environment, rendered, contract_data, module_methods, replicas):
     if environment not in ENVIRONMENTS:
         raise ContractError("environment must be staging or prod")
@@ -509,6 +632,12 @@ def main(argv=None):
         type=Path,
         help="already-rendered Probe YAML (default: kubectl kustomize active graph)",
     )
+    parser.add_argument(
+        "--scheduled-producers",
+        type=Path,
+        default=config_dir / "encrypted-completion-producers.yaml",
+        help="reviewed recurring producer quota contract YAML",
+    )
     args = parser.parse_args(argv)
     try:
         contract = _single_yaml_document(args.contracts.read_text(encoding="utf-8"))
@@ -520,6 +649,13 @@ def main(argv=None):
         )
         methods, replicas = load_modules(args.env)
         validate(args.env, rendered, contract, methods, replicas)
+        # Custom app-config directories may predate recurring producers. The
+        # repository default is present and validated when this file exists.
+        if args.scheduled_producers.is_file():
+            producer_contract = _single_yaml_document(
+                args.scheduled_producers.read_text(encoding="utf-8")
+            )
+            validate_scheduled_producers(producer_contract)
     except ContractError as exc:
         print(f"probe quota validation failed: {exc}", file=sys.stderr)
         return 1

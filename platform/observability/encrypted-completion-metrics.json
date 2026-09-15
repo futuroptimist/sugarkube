@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "metricFamilies": {
+    "encrypted_completion_monitoring_enabled": "1 when scheduled monitoring is intentionally enabled; 0 distinguishes a reviewed disabled state",
+    "encrypted_completion_success": "1 only after client-side decryption and completion validation",
+    "encrypted_completion_last_attempt_timestamp_seconds": "attempt freshness, independent of outcome",
+    "encrypted_completion_last_success_timestamp_seconds": "last verified client-side completion",
+    "encrypted_completion_duration_seconds": "whole encrypted completion journey duration, not HTTP polling latency",
+    "encrypted_completion_failure_stage": "one bounded stage label from the producer descriptor"
+  },
+  "states": {
+    "disabled": "encrypted_completion_monitoring_enabled == 0",
+    "stale": "encrypted_completion_monitoring_enabled == 1 and time() - encrypted_completion_last_attempt_timestamp_seconds > 1800",
+    "failed": "encrypted_completion_monitoring_enabled == 1 and encrypted_completion_success == 0"
+  },
+  "forbiddenLabelsAndEvidenceFields": [
+    "prompt",
+    "response",
+    "payload",
+    "ciphertext",
+    "key",
+    "credential",
+    "authorization",
+    "request_id",
+    "user",
+    "session"
+  ]
+}
