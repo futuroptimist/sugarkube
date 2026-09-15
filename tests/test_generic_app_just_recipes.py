@@ -2448,9 +2448,9 @@ def test_app_chart_status_reports_pin_and_stale_latest(
     assert result.returncode == 0, result.stderr + result.stdout
     assert "app: tokenplace" in result.stdout
     assert "chart ref: oci://ghcr.io/futuroptimist/charts/tokenplace" in result.stdout
-    assert "pinned version: 0.1.4" in result.stdout
+    assert "pinned version: 0.1.7" in result.stdout
     assert "chart appVersion: main-deadbee" in result.stdout
-    assert "Pinned chart appears stale: 0.1.4 < 9.9.9" in result.stdout
+    assert "Pinned chart appears stale: 0.1.7 < 9.9.9" in result.stdout
     assert "Run: just app-chart-bump app=tokenplace version=9.9.9" in result.stdout
 
 
