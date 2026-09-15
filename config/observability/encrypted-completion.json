@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "failureStages": [
+    "none",
+    "timeout",
+    "compute_unavailable",
+    "malformed_completion",
+    "decryption_failed",
+    "interrupted"
+  ],
+  "producers": [
+    {
+      "application": "tokenplace",
+      "environment": "prod",
+      "enabled": false,
+      "cadence": "1h",
+      "timeout": "5m",
+      "concurrency": 1,
+      "route": "/api/v1/completions",
+      "method": "POST",
+      "bucket": "encrypted-completion",
+      "limits": {"hourly": 60, "daily": 1000},
+      "exemptions": [],
+      "requestMultiplier": 1,
+      "safetyMargin": 0.1
+    }
+  ]
+}

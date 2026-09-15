@@ -29,7 +29,12 @@ def yaml_load(path: Path):
 def test_tokenplace_alerts_are_production_only_and_fail_open_for_missing_capacity_telemetry():
     rules = yaml_load(RULES)["groups"][0]["rules"]
     alerts = {rule["alert"]: rule for rule in rules}
-    assert set(alerts) == {"TokenplaceNoHealthyComputeNodes", "TokenplaceMetricsTargetDown"}
+    assert set(alerts) == {
+        "TokenplaceNoHealthyComputeNodes",
+        "TokenplaceMetricsTargetDown",
+        "TokenplaceEncryptedCompletionStale",
+        "TokenplaceEncryptedCompletionFailed",
+    }
     capacity = alerts["TokenplaceNoHealthyComputeNodes"]
     assert capacity["for"] == "5m"
     assert "tokenplace_compute_nodes_healthy" in capacity["expr"]
@@ -47,6 +52,12 @@ def test_tokenplace_alerts_are_production_only_and_fail_open_for_missing_capacit
     for fallback in ("absent(", "vector(0)", "queue_depth"):
         assert fallback not in capacity["expr"]
     assert alerts["TokenplaceMetricsTargetDown"]["for"] == "10m"
+    enabled_selector = (
+        'encrypted_completion_monitoring_enabled{application="tokenplace",environment="prod"}'
+    )
+    for name in ("TokenplaceEncryptedCompletionStale", "TokenplaceEncryptedCompletionFailed"):
+        assert f"{enabled_selector} == 1" in alerts[name]["expr"]
+        assert alerts[name]["labels"]["severity"] == "warning"
 
 
 def test_production_route_is_an_exact_tokenplace_allowlist():
