@@ -2448,9 +2448,9 @@ def test_app_chart_status_reports_pin_and_stale_latest(
     assert result.returncode == 0, result.stderr + result.stdout
     assert "app: tokenplace" in result.stdout
     assert "chart ref: oci://ghcr.io/futuroptimist/charts/tokenplace" in result.stdout
-    assert "pinned version: 0.1.4" in result.stdout
+    assert "pinned version: 0.1.7" in result.stdout
     assert "chart appVersion: main-deadbee" in result.stdout
-    assert "Pinned chart appears stale: 0.1.4 < 9.9.9" in result.stdout
+    assert "Pinned chart appears stale: 0.1.7 < 9.9.9" in result.stdout
     assert "Run: just app-chart-bump app=tokenplace version=9.9.9" in result.stdout
 
 
@@ -2596,10 +2596,10 @@ def test_app_deploy_uses_app_release_namespace_chart_values(
         assert f"-f {value}" in helm_log
     if app == "tokenplace":
         assert (
-            "show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.4" in helm_log
+            "show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.7" in helm_log
         )
         assert "template tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace" in helm_log
-        assert "--version 0.1.4" in helm_log
+        assert "--version 0.1.7" in helm_log
         assert "--version 9.9.9" not in helm_log
 
 
@@ -2676,7 +2676,7 @@ def test_app_deploy_passes_tokenplace_when_manifest_metadata_env_present(
     assert "9.9.9" not in result.stdout
     assert pin_path.read_text(encoding="utf-8") == before_pin
     helm_log = Path(env["HELM_LOG"]).read_text(encoding="utf-8")
-    assert "--version 0.1.4" in helm_log
+    assert "--version 0.1.7" in helm_log
     assert "--version 9.9.9" not in helm_log
 
 
@@ -2696,7 +2696,7 @@ def test_app_redeploy_prints_chart_pin_reminder_without_latest_lookup_or_pin_mut
     assert pin_path.read_text(encoding="utf-8") == before_pin
     helm_log = Path(env["HELM_LOG"]).read_text(encoding="utf-8")
     assert "upgrade tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace" in helm_log
-    assert "--version 0.1.4" in helm_log
+    assert "--version 0.1.7" in helm_log
     assert "--version 9.9.9" not in helm_log
 
 
@@ -5584,7 +5584,7 @@ def test_direct_helm_oci_helper_matching_env_succeeds(
 
     assert result.returncode == 0, result.stderr + result.stdout
     helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
-    assert "show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.4" in helm_log
+    assert "show chart oci://ghcr.io/futuroptimist/charts/tokenplace --version 0.1.7" in helm_log
     assert "upgrade tokenplace oci://ghcr.io/futuroptimist/charts/tokenplace" in helm_log
     assert "--description" not in helm_log
 
