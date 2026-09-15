@@ -13,10 +13,12 @@ fails closed. Exemptions match only an exact path and method. Disabled declarati
 quota but must retain complete metadata so activation cannot inherit an ambiguous contract.
 
 The bounded evidence schema accepts only identity, timestamps, end-to-end duration, a success or
-failure outcome, one finite failure stage, and Boolean assertions that client-side decryption and
-response validation succeeded. It rejects extra fields. Its metrics distinguish monitoring enabled
-state, last attempt freshness, success, last successful completion, end-to-end completion duration,
-and failure stage. Completion duration is deliberately distinct from relay HTTP polling latency.
+failure outcome, one finite failure stage, the prior last-success timestamp, and Boolean assertions
+that client-side decryption and response validation succeeded. It rejects extra fields. Its metrics
+distinguish monitoring enabled state, last attempt freshness, success, last successful completion,
+end-to-end completion duration, and failure stage. Failed attempts preserve the last successful
+completion timestamp, and evidence timestamps more than five minutes in the future are rejected.
+Completion duration is deliberately distinct from relay HTTP polling latency.
 An enabled producer with an old or absent attempt metric is stale; a producer with
 `encrypted_completion_monitoring_enabled` equal to zero is intentionally disabled.
 

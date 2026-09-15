@@ -28,6 +28,7 @@ def evidence(stage="none"):
         "failureStage": stage,
         "attemptedAt": 1_700_000_000,
         "completedAt": 1_700_000_003,
+        "lastSuccessfulAt": 1_700_000_003 if success else 1_699_999_000,
         "durationSeconds": 3.25,
         "clientDecryptionVerified": success,
         "responseValid": success,
@@ -51,6 +52,29 @@ def test_finite_failure_stages_are_distinguishable(stage):
     output = metrics.render_metrics(contract()["producers"][0], evidence(stage))
     assert f'failure_stage="{stage}"' in output
     assert "encrypted_completion_success" in output and " 0\n" in output
+
+
+def test_failed_attempt_preserves_last_success_timestamp():
+    output = metrics.render_metrics(contract()["producers"][0], evidence("timeout"))
+    assert "encrypted_completion_last_success_timestamp_seconds" in output
+    assert " 1699999000\n" in output
+
+
+def test_future_evidence_is_rejected_with_bounded_clock_skew():
+    value = evidence()
+    value["attemptedAt"] = value["completedAt"] = value["lastSuccessfulAt"] = 2_000
+    metrics.validate_evidence(value, now=1_700)
+    with pytest.raises(ValueError, match="too far in the future"):
+        metrics.validate_evidence(value, now=1_699)
+
+
+def test_dynamic_prometheus_labels_are_escaped():
+    producer = contract()["producers"][0]
+    producer.update(name='producer"\\\n', application='app"\\\n', environment='stage"\\\n')
+    output = metrics.render_metrics(producer)
+    assert 'application="app\\"\\\\\\n"' in output
+    assert 'environment="stage\\"\\\\\\n"' in output
+    assert 'producer="producer\\"\\\\\\n"' in output
 
 
 def test_stale_and_intentionally_disabled_states_are_distinguishable():
@@ -114,3 +138,40 @@ def test_missing_metadata_fails_closed(field):
     del value["producers"][0][field]
     with pytest.raises(quotas.ContractError):
         quotas.validate_completion_contract(value)
+
+
+@pytest.mark.parametrize("malformed", [["none", {}], "none", None])
+def test_malformed_failure_stages_fail_with_contract_error(malformed):
+    value = contract()
+    value["producers"][0]["failureStages"] = malformed
+    with pytest.raises(quotas.ContractError, match="finite vocabulary"):
+        quotas.validate_completion_contract(value)
+
+
+def test_cross_inventory_shared_bucket_is_rejected():
+    completion = contract()
+    producer = completion["producers"][0]
+    producer["enabled"] = True
+    probes = {
+        "probes": [
+            {
+                "application": producer["application"],
+                "environment": producer["environment"],
+                "bucket": producer["bucket"],
+                "enabled": True,
+                "unlimited_operational": False,
+            }
+        ]
+    }
+    with pytest.raises(quotas.ContractError, match="reuse a metered shared bucket"):
+        quotas.reject_cross_inventory_bucket_reuse(probes, completion)
+
+
+def test_main_identifies_malformed_completion_json(tmp_path, capsys):
+    malformed = tmp_path / "completion.json"
+    malformed.write_text('{"private": "JSON_SENTINEL"', encoding="utf-8")
+    assert quotas.main(["--env", "staging", "--completion-contract", str(malformed)]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "probe quota validation failed: JSON input is malformed\n"
+    assert "JSON_SENTINEL" not in captured.err

@@ -547,8 +547,12 @@ def validate_completion_contract(contract_data):
         method = item["method"]
         if method not in METHODS:
             raise ContractError("completion producer has unknown method")
-        if set(item["failureStages"]) != expected_stages or len(item["failureStages"]) != len(
-            expected_stages
+        failure_stages = item["failureStages"]
+        if (
+            not isinstance(failure_stages, list)
+            or not all(isinstance(stage, str) for stage in failure_stages)
+            or set(failure_stages) != expected_stages
+            or len(failure_stages) != len(expected_stages)
         ):
             raise ContractError("completion producer failureStages must use the finite vocabulary")
         margin = item["safetyMargin"]
@@ -593,6 +597,22 @@ def validate_completion_contract(contract_data):
     return len(contract_data["producers"])
 
 
+def reject_cross_inventory_bucket_reuse(probe_contract, completion_contract):
+    """Keep metered buckets owned by one scheduler inventory."""
+    probe_buckets = {
+        (item["application"], item["environment"], item["bucket"])
+        for item in probe_contract["probes"]
+        if item["enabled"] and not item["unlimited_operational"]
+    }
+    for item in completion_contract["producers"]:
+        key = (item["application"], item["environment"], item["bucket"])
+        if item["enabled"] and key in probe_buckets:
+            raise ContractError(
+                "completion and probe inventories reuse a metered shared bucket: "
+                f"application={key[0]} environment={key[1]} bucket={key[2]}"
+            )
+
+
 def main(argv=None):
     configured_dir = os.environ.get("SUGARKUBE_APP_CONFIG_DIR")
     config_dir = Path(configured_dir) if configured_dir else ROOT / "config" / "observability"
@@ -618,11 +638,26 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         contract = _single_yaml_document(args.contracts.read_text(encoding="utf-8"))
+    except YAMLInputError:
+        print("probe quota validation failed: YAML input is malformed", file=sys.stderr)
+        return 1
+    except OSError:
+        print("probe quota validation failed: unable to read an input file", file=sys.stderr)
+        return 1
+    try:
         completion_contract = json.loads(args.completion_contract.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        print("probe quota validation failed: JSON input is malformed", file=sys.stderr)
+        return 1
+    except OSError:
+        print("probe quota validation failed: unable to read an input file", file=sys.stderr)
+        return 1
+    try:
         validate_completion_contract(completion_contract)
         # One inventory owns both environments. Validate its complete structure so
         # malformed declarations cannot disappear during environment selection.
         contract = select_environment_contract(contract, args.env)
+        reject_cross_inventory_bucket_reuse(contract, completion_contract)
         rendered = (
             args.probes.read_text(encoding="utf-8") if args.probes else render_active(args.env)
         )
@@ -631,7 +666,7 @@ def main(argv=None):
     except ContractError as exc:
         print(f"probe quota validation failed: {exc}", file=sys.stderr)
         return 1
-    except (YAMLInputError, json.JSONDecodeError):
+    except YAMLInputError:
         print("probe quota validation failed: YAML input is malformed", file=sys.stderr)
         return 1
     except OSError:
