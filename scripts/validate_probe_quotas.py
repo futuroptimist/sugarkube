@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import os
 import re
@@ -18,6 +19,22 @@ ROOT = Path(__file__).resolve().parents[1]
 WINDOWS = {"hourly": 3600, "daily": 86400}
 METHODS = {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
 ENVIRONMENTS = {"staging", "prod"}
+COMPLETION_FIELDS = {
+    "name",
+    "application",
+    "environment",
+    "enabled",
+    "cadence",
+    "timeout",
+    "concurrency",
+    "route",
+    "method",
+    "bucket",
+    "limits",
+    "exemptions",
+    "safetyMargin",
+    "failureStages",
+}
 DECLARATION_FIELDS = {
     "application",
     "environment",
@@ -493,6 +510,89 @@ def validate(environment, rendered, contract_data, module_methods, replicas):
     return len(active)
 
 
+def validate_completion_contract(contract_data):
+    """Validate declarative completion schedules without executing a journey."""
+    if not isinstance(contract_data, dict) or set(contract_data) != {"schemaVersion", "producers"}:
+        raise ContractError("completion contract has missing or unknown top-level fields")
+    if contract_data["schemaVersion"] != 1 or not isinstance(contract_data["producers"], list):
+        raise ContractError("completion contract schemaVersion/producers is invalid")
+    identities = set()
+    buckets = defaultdict(lambda: {"hourly": 0, "daily": 0})
+    policies = {}
+    expected_stages = {
+        "none",
+        "timeout",
+        "compute_unavailable",
+        "malformed_completion",
+        "interrupted",
+    }
+    for item in contract_data["producers"]:
+        if not isinstance(item, dict) or set(item) != COMPLETION_FIELDS:
+            raise ContractError("completion producer has missing or unknown metadata")
+        identity = (item["environment"], item["name"])
+        if identity in identities:
+            raise ContractError("completion producer identity is duplicated")
+        identities.add(identity)
+        for field in ("name", "application", "bucket"):
+            if not isinstance(item[field], str) or not item[field].strip():
+                raise ContractError(f"completion producer has invalid {field}")
+        if item["environment"] not in ENVIRONMENTS or type(item["enabled"]) is not bool:
+            raise ContractError("completion producer has invalid environment/enabled metadata")
+        cadence = _duration(item["cadence"], "cadence")
+        timeout = _duration(item["timeout"], "timeout")
+        if timeout >= cadence:
+            raise ContractError("completion producer timeout must be shorter than cadence")
+        concurrency = _positive_int(item["concurrency"], "concurrency")
+        route = _exact_path(item["route"], "completion producer route")
+        method = item["method"]
+        if method not in METHODS:
+            raise ContractError("completion producer has unknown method")
+        if set(item["failureStages"]) != expected_stages or len(item["failureStages"]) != len(
+            expected_stages
+        ):
+            raise ContractError("completion producer failureStages must use the finite vocabulary")
+        margin = item["safetyMargin"]
+        if isinstance(margin, bool) or not isinstance(margin, (int, float)) or not 0 <= margin < 1:
+            raise ContractError("completion producer has invalid safetyMargin")
+        limits = item["limits"]
+        if not isinstance(limits, dict) or set(limits) != set(WINDOWS):
+            raise ContractError("completion producer has missing or ambiguous limits")
+        for window in WINDOWS:
+            _positive_int(limits[window], f"{window} limit")
+        exemptions = item["exemptions"]
+        if not isinstance(exemptions, list):
+            raise ContractError("completion producer has malformed exemptions")
+        exemption_keys = []
+        for exemption in exemptions:
+            if not isinstance(exemption, dict) or set(exemption) != {"route", "method"}:
+                raise ContractError("completion producer has malformed exemptions")
+            exemption_route = _exact_path(exemption["route"], "completion exemption route")
+            if exemption["method"] not in METHODS:
+                raise ContractError("completion producer has malformed exemptions")
+            exemption_keys.append((exemption_route, exemption["method"]))
+        if len(exemption_keys) != len(set(exemption_keys)):
+            raise ContractError("completion producer has duplicate exemptions")
+        policy_key = (item["application"], item["environment"], item["bucket"])
+        policy = (margin, limits["hourly"], limits["daily"])
+        if policy_key in policies and policies[policy_key] != policy:
+            raise ContractError("completion producer has contradictory shared-bucket policy")
+        policies[policy_key] = policy
+        if not item["enabled"] or (route, method) in exemption_keys:
+            continue
+        for window, duration in WINDOWS.items():
+            buckets[(*policy_key, *policy)][window] += math.ceil(duration / cadence) * concurrency
+    for key, totals in buckets.items():
+        app, env, bucket, margin, hourly_limit, daily_limit = key
+        for window, limit in (("hourly", hourly_limit), ("daily", daily_limit)):
+            if totals[window] >= limit * (1 - Fraction(str(margin))):
+                raise ContractError(
+                    f"unsafe completion schedule: application={app} environment={env} "
+                    f"bucket={bucket} window={window} volume={totals[window]} "
+                    f"reviewed_limit={limit}"
+                )
+    return len(contract_data["producers"])
+
+
 def main(argv=None):
     configured_dir = os.environ.get("SUGARKUBE_APP_CONFIG_DIR")
     config_dir = Path(configured_dir) if configured_dir else ROOT / "config" / "observability"
@@ -505,6 +605,12 @@ def main(argv=None):
         help="reviewed quota contract YAML",
     )
     parser.add_argument(
+        "--completion-contract",
+        type=Path,
+        default=ROOT / "config" / "observability" / "encrypted-completion.json",
+        help="reviewed declarative encrypted-completion contract",
+    )
+    parser.add_argument(
         "--probes",
         type=Path,
         help="already-rendered Probe YAML (default: kubectl kustomize active graph)",
@@ -512,6 +618,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         contract = _single_yaml_document(args.contracts.read_text(encoding="utf-8"))
+        completion_contract = json.loads(args.completion_contract.read_text(encoding="utf-8"))
+        validate_completion_contract(completion_contract)
         # One inventory owns both environments. Validate its complete structure so
         # malformed declarations cannot disappear during environment selection.
         contract = select_environment_contract(contract, args.env)
@@ -523,7 +631,7 @@ def main(argv=None):
     except ContractError as exc:
         print(f"probe quota validation failed: {exc}", file=sys.stderr)
         return 1
-    except YAMLInputError:
+    except (YAMLInputError, json.JSONDecodeError):
         print("probe quota validation failed: YAML input is malformed", file=sys.stderr)
         return 1
     except OSError:

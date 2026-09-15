@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "producers": [
+    {
+      "name": "tokenplace-client-completion-staging",
+      "application": "tokenplace",
+      "environment": "staging",
+      "enabled": false,
+      "cadence": "6h",
+      "timeout": "240s",
+      "concurrency": 1,
+      "route": "/api/v1/relay/requests",
+      "method": "POST",
+      "bucket": "encrypted-completion",
+      "limits": {"hourly": 10, "daily": 50},
+      "exemptions": [],
+      "safetyMargin": 0.2,
+      "failureStages": [
+        "none",
+        "timeout",
+        "compute_unavailable",
+        "malformed_completion",
+        "interrupted"
+      ]
+    }
+  ]
+}
