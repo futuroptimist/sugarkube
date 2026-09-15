@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "application": "tokenplace",
+  "environment": "staging",
+  "enabled": false,
+  "cadence": "1h",
+  "timeout": "120s",
+  "concurrency": 1,
+  "quota": {"hourly": 60, "daily": 1000},
+  "route": "/api/v1/chat/completions",
+  "method": "POST",
+  "bucket": "api-v1",
+  "exemptions": [],
+  "failureStages": ["none", "timeout", "compute_unavailable", "malformed_completion", "interrupted", "decryption_failed"]
+}
