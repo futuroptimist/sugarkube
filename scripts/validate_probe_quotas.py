@@ -27,6 +27,7 @@ COMPLETION_FIELDS = {
     "cadence",
     "timeout",
     "concurrency",
+    "requestMultiplicity",
     "route",
     "method",
     "bucket",
@@ -396,7 +397,15 @@ def _validate_declaration(item):
             _positive_int(limits[window], f"{window} limit")
 
 
-def validate(environment, rendered, contract_data, module_methods, replicas):
+def validate(
+    environment,
+    rendered,
+    contract_data,
+    module_methods,
+    replicas,
+    shared_buckets=None,
+    shared_policies=None,
+):
     if environment not in ENVIRONMENTS:
         raise ContractError("environment must be staging or prod")
     if not isinstance(contract_data, dict) or contract_data.get("version") != 1:
@@ -436,8 +445,12 @@ def validate(environment, rendered, contract_data, module_methods, replicas):
         }
 
     declared = {}
-    buckets = defaultdict(lambda: {"hourly": 0, "daily": 0, "records": []})
-    bucket_policies = {}
+    buckets = (
+        shared_buckets
+        if shared_buckets is not None
+        else defaultdict(lambda: {"hourly": 0, "daily": 0, "records": []})
+    )
+    bucket_policies = shared_policies if shared_policies is not None else {}
     for item in declarations:
         _validate_declaration(item)
         name = item["probe"]
@@ -488,17 +501,20 @@ def validate(environment, rendered, contract_data, module_methods, replicas):
         bucket_policies[policy_key] = policy
         if item["unlimited_operational"] or (route, method) in exemption_keys:
             continue
-        key = (*policy_key, *policy)
         volume = fanout * multiplier
         for window, duration in WINDOWS.items():
-            buckets[key][window] += math.ceil(duration / seconds) * volume
-        buckets[key]["records"].append(name)
+            buckets[policy_key][window] += math.ceil(duration / seconds) * volume
+        buckets[policy_key]["records"].append(name)
 
     missing = sorted(set(active) - set(declared))
     if missing:
         raise ContractError(f"active Probe lacks quota declaration: {missing[0]}")
     for key, totals in buckets.items():
-        app, env, bucket, _, margin, hourly_limit, daily_limit = key
+        app, env, bucket = key
+        policy = bucket_policies[key]
+        if policy[0] == "unlimited":
+            continue
+        _, margin, hourly_limit, daily_limit = policy
         limits = {"hourly": hourly_limit, "daily": daily_limit}
         for window in WINDOWS:
             usable = limits[window] * (1 - Fraction(str(margin)))
@@ -510,15 +526,19 @@ def validate(environment, rendered, contract_data, module_methods, replicas):
     return len(active)
 
 
-def validate_completion_contract(contract_data):
+def validate_completion_contract(contract_data, shared_buckets=None, shared_policies=None):
     """Validate declarative completion schedules without executing a journey."""
     if not isinstance(contract_data, dict) or set(contract_data) != {"schemaVersion", "producers"}:
         raise ContractError("completion contract has missing or unknown top-level fields")
     if contract_data["schemaVersion"] != 1 or not isinstance(contract_data["producers"], list):
         raise ContractError("completion contract schemaVersion/producers is invalid")
     identities = set()
-    buckets = defaultdict(lambda: {"hourly": 0, "daily": 0})
-    policies = {}
+    buckets = (
+        shared_buckets
+        if shared_buckets is not None
+        else defaultdict(lambda: {"hourly": 0, "daily": 0, "records": []})
+    )
+    policies = shared_policies if shared_policies is not None else {}
     expected_stages = {
         "none",
         "timeout",
@@ -529,23 +549,32 @@ def validate_completion_contract(contract_data):
     for item in contract_data["producers"]:
         if not isinstance(item, dict) or set(item) != COMPLETION_FIELDS:
             raise ContractError("completion producer has missing or unknown metadata")
+        for field in ("name", "application", "bucket"):
+            if not isinstance(item[field], str) or not item[field].strip():
+                raise ContractError(f"completion producer has invalid {field}")
+        if (
+            not isinstance(item["environment"], str)
+            or item["environment"] not in ENVIRONMENTS
+            or type(item["enabled"]) is not bool
+        ):
+            raise ContractError("completion producer has invalid environment/enabled metadata")
         identity = (item["environment"], item["name"])
         if identity in identities:
             raise ContractError("completion producer identity is duplicated")
         identities.add(identity)
-        for field in ("name", "application", "bucket"):
-            if not isinstance(item[field], str) or not item[field].strip():
-                raise ContractError(f"completion producer has invalid {field}")
-        if item["environment"] not in ENVIRONMENTS or type(item["enabled"]) is not bool:
-            raise ContractError("completion producer has invalid environment/enabled metadata")
         cadence = _duration(item["cadence"], "cadence")
         timeout = _duration(item["timeout"], "timeout")
         if timeout >= cadence:
             raise ContractError("completion producer timeout must be shorter than cadence")
         concurrency = _positive_int(item["concurrency"], "concurrency")
+        multiplicity = item["requestMultiplicity"]
+        if multiplicity is not None:
+            multiplicity = _positive_int(multiplicity, "requestMultiplicity")
+        if item["enabled"] and multiplicity is None:
+            raise ContractError("enabled completion producer requires requestMultiplicity")
         route = _exact_path(item["route"], "completion producer route")
         method = item["method"]
-        if method not in METHODS:
+        if not isinstance(method, str) or method not in METHODS:
             raise ContractError("completion producer has unknown method")
         failure_stages = item["failureStages"]
         if (
@@ -571,22 +600,29 @@ def validate_completion_contract(contract_data):
             if not isinstance(exemption, dict) or set(exemption) != {"route", "method"}:
                 raise ContractError("completion producer has malformed exemptions")
             exemption_route = _exact_path(exemption["route"], "completion exemption route")
-            if exemption["method"] not in METHODS:
+            if not isinstance(exemption["method"], str) or exemption["method"] not in METHODS:
                 raise ContractError("completion producer has malformed exemptions")
             exemption_keys.append((exemption_route, exemption["method"]))
         if len(exemption_keys) != len(set(exemption_keys)):
             raise ContractError("completion producer has duplicate exemptions")
         policy_key = (item["application"], item["environment"], item["bucket"])
-        policy = (margin, limits["hourly"], limits["daily"])
+        policy = ("metered", margin, limits["hourly"], limits["daily"])
         if policy_key in policies and policies[policy_key] != policy:
             raise ContractError("completion producer has contradictory shared-bucket policy")
         policies[policy_key] = policy
         if not item["enabled"] or (route, method) in exemption_keys:
             continue
         for window, duration in WINDOWS.items():
-            buckets[(*policy_key, *policy)][window] += math.ceil(duration / cadence) * concurrency
+            buckets[policy_key][window] += (
+                math.ceil(duration / cadence) * concurrency * multiplicity
+            )
+        buckets[policy_key]["records"].append(item["name"])
     for key, totals in buckets.items():
-        app, env, bucket, margin, hourly_limit, daily_limit = key
+        app, env, bucket = key
+        policy = policies[key]
+        if policy[0] == "unlimited":
+            continue
+        _, margin, hourly_limit, daily_limit = policy
         for window, limit in (("hourly", hourly_limit), ("daily", daily_limit)):
             if totals[window] >= limit * (1 - Fraction(str(margin))):
                 raise ContractError(
@@ -597,20 +633,13 @@ def validate_completion_contract(contract_data):
     return len(contract_data["producers"])
 
 
-def reject_cross_inventory_bucket_reuse(probe_contract, completion_contract):
-    """Keep metered buckets owned by one scheduler inventory."""
-    probe_buckets = {
-        (item["application"], item["environment"], item["bucket"])
-        for item in probe_contract["probes"]
-        if item["enabled"] and not item["unlimited_operational"]
-    }
-    for item in completion_contract["producers"]:
-        key = (item["application"], item["environment"], item["bucket"])
-        if item["enabled"] and key in probe_buckets:
-            raise ContractError(
-                "completion and probe inventories reuse a metered shared bucket: "
-                f"application={key[0]} environment={key[1]} bucket={key[2]}"
-            )
+def _reject_duplicate_json_fields(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ContractError("JSON input has ambiguous duplicate fields")
+        result[key] = value
+    return result
 
 
 def main(argv=None):
@@ -627,7 +656,6 @@ def main(argv=None):
     parser.add_argument(
         "--completion-contract",
         type=Path,
-        default=ROOT / "config" / "observability" / "encrypted-completion.json",
         help="reviewed declarative encrypted-completion contract",
     )
     parser.add_argument(
@@ -644,25 +672,40 @@ def main(argv=None):
     except OSError:
         print("probe quota validation failed: unable to read an input file", file=sys.stderr)
         return 1
+    completion_path = args.completion_contract
+    if completion_path is None:
+        completion_path = config_dir / "encrypted-completion.json"
     try:
-        completion_contract = json.loads(args.completion_contract.read_text(encoding="utf-8"))
+        if configured_dir and args.completion_contract is None and not completion_path.exists():
+            # Existing custom inventories predate completion producers. An absent
+            # optional file therefore means that this custom inventory declares none.
+            completion_contract = {"schemaVersion": 1, "producers": []}
+        else:
+            completion_contract = json.loads(
+                completion_path.read_text(encoding="utf-8"),
+                object_pairs_hook=_reject_duplicate_json_fields,
+            )
     except json.JSONDecodeError:
         print("probe quota validation failed: JSON input is malformed", file=sys.stderr)
+        return 1
+    except ContractError as exc:
+        print(f"probe quota validation failed: {exc}", file=sys.stderr)
         return 1
     except OSError:
         print("probe quota validation failed: unable to read an input file", file=sys.stderr)
         return 1
     try:
-        validate_completion_contract(completion_contract)
+        buckets = defaultdict(lambda: {"hourly": 0, "daily": 0, "records": []})
+        policies = {}
+        validate_completion_contract(completion_contract, buckets, policies)
         # One inventory owns both environments. Validate its complete structure so
         # malformed declarations cannot disappear during environment selection.
         contract = select_environment_contract(contract, args.env)
-        reject_cross_inventory_bucket_reuse(contract, completion_contract)
         rendered = (
             args.probes.read_text(encoding="utf-8") if args.probes else render_active(args.env)
         )
         methods, replicas = load_modules(args.env)
-        validate(args.env, rendered, contract, methods, replicas)
+        validate(args.env, rendered, contract, methods, replicas, buckets, policies)
     except ContractError as exc:
         print(f"probe quota validation failed: {exc}", file=sys.stderr)
         return 1

@@ -9,6 +9,7 @@
       "cadence": "6h",
       "timeout": "240s",
       "concurrency": 1,
+      "requestMultiplicity": null,
       "route": "/api/v1/relay/requests",
       "method": "POST",
       "bucket": "encrypted-completion",

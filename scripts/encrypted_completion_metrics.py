@@ -8,6 +8,7 @@ clients may supply only the bounded assertions defined here after doing that wor
 from __future__ import annotations
 
 import math
+import re
 import time
 
 MAX_CLOCK_SKEW_SECONDS = 300
@@ -33,26 +34,39 @@ EVIDENCE_FIELDS = {
     "clientDecryptionVerified",
     "responseValid",
 }
+IDENTITY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
 
-def validate_evidence(value: dict, now: int | None = None) -> dict:
+def validate_evidence(value: dict, now: float | None = None) -> dict:
     """Return an exact sanitized evidence record or reject it fail closed."""
     if not isinstance(value, dict) or set(value) != EVIDENCE_FIELDS:
         raise ValueError("evidence does not match the exact sanitized schema")
-    if value["schemaVersion"] != 1 or value["outcome"] not in {"success", "failure"}:
+    if (
+        type(value["schemaVersion"]) is not int
+        or value["schemaVersion"] != 1
+        or not isinstance(value["outcome"], str)
+        or value["outcome"] not in {"success", "failure"}
+    ):
         raise ValueError("evidence schema or outcome is invalid")
-    if value["failureStage"] not in FAILURE_STAGES:
+    if (
+        not isinstance(value["failureStage"], str)
+        or value["failureStage"] not in FAILURE_STAGES
+    ):
         raise ValueError("evidence failure stage is invalid")
     for field in ("producer", "application", "environment"):
-        if not isinstance(value[field], str) or not value[field]:
+        if not isinstance(value[field], str) or not IDENTITY.fullmatch(value[field]):
             raise ValueError(f"evidence {field} is invalid")
     for field in ("attemptedAt", "completedAt"):
         if type(value[field]) is not int or value[field] < 1:
             raise ValueError(f"evidence {field} is invalid")
     if type(value["lastSuccessfulAt"]) is not int or value["lastSuccessfulAt"] < 0:
         raise ValueError("evidence lastSuccessfulAt is invalid")
-    current_time = int(time.time()) if now is None else now
-    if type(current_time) is not int:
+    current_time = time.time() if now is None else now
+    if (
+        isinstance(current_time, bool)
+        or not isinstance(current_time, (int, float))
+        or not math.isfinite(current_time)
+    ):
         raise ValueError("current time is invalid")
     for field in ("attemptedAt", "completedAt", "lastSuccessfulAt"):
         if value[field] > current_time + MAX_CLOCK_SKEW_SECONDS:
@@ -89,8 +103,36 @@ def _escape_label(value: str) -> str:
     return value.replace("\\", "\\\\").replace("\n", "\\n").replace('"', '\\"')
 
 
-def render_metrics(producer: dict, evidence: dict | None = None, now: int | None = None) -> str:
+def _producer_identity(producer: dict) -> None:
+    if not isinstance(producer, dict):
+        raise ValueError("producer metadata is invalid")
+    for field in ("name", "application", "environment"):
+        if not isinstance(producer.get(field), str) or not IDENTITY.fullmatch(producer[field]):
+            raise ValueError("producer identity is invalid")
+    if type(producer.get("enabled")) is not bool:
+        raise ValueError("producer enabled state is invalid")
+
+
+def _duration_seconds(value: object, field: str) -> int:
+    if not isinstance(value, str) or not re.fullmatch(r"[1-9][0-9]*[smh]", value):
+        raise ValueError(f"producer {field} is invalid")
+    return int(value[:-1]) * {"s": 1, "m": 60, "h": 3600}[value[-1]]
+
+
+def render_metrics(producer: dict, evidence: dict | None = None, now: float | None = None) -> str:
     """Render state metrics; a disabled producer is distinct from absent/stale data."""
+    _producer_identity(producer)
+    current_time = time.time() if now is None else now
+    if (
+        isinstance(current_time, bool)
+        or not isinstance(current_time, (int, float))
+        or not math.isfinite(current_time)
+    ):
+        raise ValueError("current time is invalid")
+    if not producer["enabled"] and evidence is not None:
+        raise ValueError("disabled producer cannot supply execution evidence")
+    cadence = _duration_seconds(producer.get("cadence"), "cadence")
+    timeout = _duration_seconds(producer.get("timeout"), "timeout")
     labels = (
         f'application="{_escape_label(producer["application"])}",'
         f'environment="{_escape_label(producer["environment"])}",'
@@ -103,8 +145,9 @@ def render_metrics(producer: dict, evidence: dict | None = None, now: int | None
         "# TYPE encrypted_completion_monitoring_enabled gauge",
         f"encrypted_completion_monitoring_enabled{{{labels}}} {enabled}",
     ]
+    lifecycle = "disabled" if not producer["enabled"] else "never_attempted"
     if evidence is not None:
-        evidence = validate_evidence(evidence, now=now)
+        evidence = validate_evidence(evidence, now=current_time)
         if any(
             evidence[key] != producer[source]
             for key, source in (
@@ -115,6 +158,12 @@ def render_metrics(producer: dict, evidence: dict | None = None, now: int | None
         ):
             raise ValueError("evidence identity contradicts producer")
         success = int(evidence["outcome"] == "success")
+        if current_time - evidence["attemptedAt"] > cadence + timeout:
+            lifecycle = "stale"
+        elif success:
+            lifecycle = "fresh"
+        else:
+            lifecycle = "failed"
         lines.extend(
             [
                 "# HELP encrypted_completion_success "
@@ -142,4 +191,13 @@ def render_metrics(producer: dict, evidence: dict | None = None, now: int | None
                 f'{{{labels},failure_stage="{_escape_label(evidence["failureStage"])}"}} 1',
             ]
         )
+    lines.extend(
+        [
+            "# HELP encrypted_completion_lifecycle_state "
+            "Current disabled, never-attempted, fresh, failed, or stale state.",
+            "# TYPE encrypted_completion_lifecycle_state gauge",
+            "encrypted_completion_lifecycle_state"
+            f'{{{labels},state="{lifecycle}"}} 1',
+        ]
+    )
     return "\n".join(lines) + "\n"
