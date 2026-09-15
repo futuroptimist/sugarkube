@@ -1,4 +1,5 @@
 import copy
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -42,6 +43,37 @@ def declaration(name="probe", *, app="custom", route="/", interval="60s", method
         "request_multiplier": 1,
         "safety_margin": 0.1,
         "unlimited_operational": False,
+    }
+
+
+def completion(*, cadence="100s", multiplicity=1):
+    return {
+        "schemaVersion": 1,
+        "producers": [
+            {
+                "name": "completion",
+                "application": "custom",
+                "environment": "staging",
+                "enabled": True,
+                "cadence": cadence,
+                "timeout": "30s",
+                "concurrency": 1,
+                "requestMultiplicity": multiplicity,
+                "route": "/complete",
+                "method": "POST",
+                "bucket": "public",
+                "limits": {"hourly": 60, "daily": 3000},
+                "exemptions": [],
+                "safetyMargin": 0,
+                "failureStages": [
+                    "none",
+                    "timeout",
+                    "compute_unavailable",
+                    "malformed_completion",
+                    "interrupted",
+                ],
+            }
+        ],
     }
 
 
@@ -355,6 +387,73 @@ def test_complete_validator_rejects_missing_mapping_separator_space(tmp_path):
     assert result.returncode != 0
     assert result.stdout == ""
     assert result.stderr == "probe quota validation failed: YAML input is malformed\n"
+
+
+def test_cli_aggregates_shared_probe_and_completion_budgets(tmp_path):
+    quota = declaration(interval="100s")
+    quota["limits"] = {"hourly": 60, "daily": 3000}
+    quota["safety_margin"] = 0
+    contracts = tmp_path / "probe-quotas.yaml"
+    contracts.write_text(yaml.safe_dump({"version": 1, "probes": [quota]}), encoding="utf-8")
+    completion_path = tmp_path / "encrypted-completion.json"
+    completion_path.write_text(json.dumps(completion()), encoding="utf-8")
+    probes = tmp_path / "probes.yaml"
+    probes.write_text(
+        yaml.safe_dump(probe(interval="100s", module="https_2xx")), encoding="utf-8"
+    )
+
+    result = subprocess.run(
+        [
+            "python3",
+            "-S",
+            "scripts/validate_probe_quotas.py",
+            "--env",
+            "staging",
+            "--contracts",
+            str(contracts),
+            "--completion-contract",
+            str(completion_path),
+            "--probes",
+            str(probes),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert "window=hourly volume=72 reviewed_limit=60" in result.stderr
+
+
+def test_cli_uses_custom_completion_inventory_and_keeps_legacy_absence(tmp_path, monkeypatch):
+    (tmp_path / "probe-quotas.yaml").write_text(
+        yaml.safe_dump({"version": 1, "probes": []}), encoding="utf-8"
+    )
+    probes = tmp_path / "probes.yaml"
+    probes.write_text("", encoding="utf-8")
+    monkeypatch.setenv("SUGARKUBE_APP_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(quotas, "load_modules", lambda environment: ({}, 1))
+    assert quotas.main(["--env", "staging", "--probes", str(probes)]) == 0
+
+    (tmp_path / "encrypted-completion.json").write_text(
+        '{"schemaVersion":1,"schemaVersion":1,"producers":[]}', encoding="utf-8"
+    )
+    assert quotas.main(["--env", "staging", "--probes", str(probes)]) == 1
+
+
+def test_cli_missing_explicit_completion_inventory_fails_closed(tmp_path, capsys):
+    assert (
+        quotas.main(
+            [
+                "--env",
+                "staging",
+                "--completion-contract",
+                str(tmp_path / "missing.json"),
+            ]
+        )
+        == 1
+    )
+    assert "unable to read an input file" in capsys.readouterr().err
 
 
 def test_complete_validator_rejects_malformed_contract_flow_sequence(tmp_path):
