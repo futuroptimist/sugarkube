@@ -150,6 +150,22 @@ def test_canonical_order_ids_grid_and_defaults(dashboards):
     validator.validate_dashboard(PROD)
 
 
+def test_daniel_visitor_units_and_lifecycle_labels_are_operator_visible(dashboards):
+    for document in (json.loads(TEMPLATE.read_text(encoding="utf-8")), *dashboards):
+        expected_units = {
+            "Daniel visitor journey state": "short",
+            "Daniel visitor journey success": "short",
+            "Daniel visitor journey freshness": "s",
+            "Daniel visitor journey aggregate duration": "s",
+            "Daniel visitor journey classified failure": "short",
+        }
+        for title, unit in expected_units.items():
+            assert panel(document, title)["fieldConfig"]["defaults"]["unit"] == unit
+        state = panel(document, "Daniel visitor journey state")["targets"][0]
+        assert state["legendFormat"] == "{{state}}"
+        assert "danielsmith_visitor_journey_state" in state["expr"]
+
+
 def test_all_ten_tables_are_simultaneous_single_frames(dashboards):
     staging, _ = dashboards
     tables = [item for item in staging["panels"] if item["type"] == "table"]

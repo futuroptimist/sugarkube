@@ -37,7 +37,7 @@ alertmanager:
         # These routes define eligibility only; production rule sources are deployed separately.
         - receiver: pagerduty-dspace
           matchers:
-            - alertname=~"^(DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown|DanielsmithVisitorJourneyFailed)$"
+            - alertname=~"^(DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown)$"
             - environment="prod"
             - cluster="sugarkube-prod"
             - severity="critical"

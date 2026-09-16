@@ -242,6 +242,26 @@ def _validate_semantics(dashboard: dict) -> None:
         for panel in data_panels
     ):
         raise SystemExit("ERROR: every data panel must explicitly preserve NO DATA.")
+    visitor_units = {
+        "Daniel visitor journey state": "short",
+        "Daniel visitor journey success": "short",
+        "Daniel visitor journey freshness": "s",
+        "Daniel visitor journey aggregate duration": "s",
+        "Daniel visitor journey classified failure": "short",
+    }
+    if any(
+        panel_named(dashboard, title).get("fieldConfig", {}).get("defaults", {}).get("unit")
+        != unit
+        for title, unit in visitor_units.items()
+    ):
+        raise SystemExit("ERROR: Daniel visitor panels must use canonical dimension units.")
+    state_target = panel_named(dashboard, "Daniel visitor journey state").get("targets", [])
+    if (
+        len(state_target) != 1
+        or state_target[0].get("legendFormat") != "{{state}}"
+        or 'state' not in state_target[0].get("expr", "")
+    ):
+        raise SystemExit("ERROR: Daniel visitor lifecycle labels must remain visible.")
     tables = [panel for panel in items if panel.get("type") == "table"]
     if len(tables) != 10:
         raise SystemExit("ERROR: canonical dashboard must contain exactly ten tables.")

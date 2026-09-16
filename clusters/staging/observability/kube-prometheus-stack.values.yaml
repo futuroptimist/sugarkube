@@ -34,7 +34,7 @@ alertmanager:
       routes:
         - receiver: pagerduty-dspace
           matchers:
-            - alertname=~"^(DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown|DanielsmithVisitorJourneyFailed)$"
+            - alertname=~"^(DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown)$"
             - environment="staging"
             - cluster="sugarkube-int"
             - severity="critical"

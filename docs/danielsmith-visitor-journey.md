@@ -21,12 +21,31 @@ and credentials are rejected by the exact schema. Optional immersive rendering i
 application-owned, deliberately separate from essential visitor health, and is not
 exported because revision `7c972a5` defines no sanitized optional-renderer field.
 
+The offline publishing entry point is
+`scripts/danielsmith_visitor_metrics.py --environment ENV --result RESULT.json
+--output OUTPUT.prom`. It revalidates the committed descriptor and sanitized JSON,
+then atomically writes only Prometheus text format. For a disabled descriptor omit
+`--result`; supplying a result while disabled fails closed. Tests exercise this
+handoff with temporary files only.
+
+No application producer currently calls this entry point, and no node-exporter
+textfile-collector installation or scrape target is provisioned by this change.
+Those application-owned production and installation boundaries remain unresolved;
+this repository does not execute, schedule, deploy, or claim runtime coverage for
+the journey.
+
 ## Alerts
 
-`DanielsmithVisitorJourneyFailed` reports an executed essential-journey failure.
+`DanielsmithVisitorJourneyFailed` reports a current executed essential-journey
+failure. Both alert expressions compare Prometheus evaluation time with the exported
+completion timestamp, so a frozen success or failure becomes stale after the
+15-minute cadence plus 120-second timeout. The independent
+`danielsmith_visitor_journey_monitoring_expected` recording rules remain zero in
+both environments; a future authorized activation must change the corresponding
+declaration as part of provisioning so loss of all exporter series is detectable.
 `DanielsmithVisitorJourneyStaleOrUnavailable` reports missing or stale results only
-when monitoring is enabled. Disabled monitoring is visible on the dashboard but
-never treated as success and never pages.
+when monitoring is declared expected. Disabled monitoring is visible on the
+dashboard but never treated as success and never pages.
 
 A later, separately authorized change must install and activate the pinned
 application producer, qualify staging, and only then consider production.

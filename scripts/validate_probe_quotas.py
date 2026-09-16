@@ -649,6 +649,24 @@ def validate_visitor_contract(contract_data, shared_buckets=None, shared_policie
         raise ContractError("visitor contract has missing or unknown top-level fields")
     if contract_data["sourceRevision"] != "7c972a57d5235591b0449d5d2a81dd8359bd97a5":
         raise ContractError("visitor contract source revision is not approved")
+    expected = {
+        ("danielsmith-visitor-journey-staging", "danielsmith", "staging"),
+        ("danielsmith-visitor-journey-prod", "danielsmith", "prod"),
+    }
+    producers = contract_data["producers"]
+    if (
+        not isinstance(producers, list)
+        or {
+            (item.get("name"), item.get("application"), item.get("environment"))
+            for item in producers
+            if isinstance(item, dict)
+        }
+        != expected
+        or len(producers) != len(expected)
+    ):
+        raise ContractError(
+            "visitor contract must contain the required staging and prod identities"
+        )
     return validate_completion_contract(
         {"schemaVersion": contract_data["schemaVersion"], "producers": contract_data["producers"]},
         shared_buckets,
@@ -720,11 +738,9 @@ def main(argv=None):
                 object_pairs_hook=_reject_duplicate_json_fields,
             )
         if configured_dir and args.visitor_contract is None and not visitor_path.exists():
-            visitor_contract = {
-                "schemaVersion": 1,
-                "sourceRevision": "7c972a57d5235591b0449d5d2a81dd8359bd97a5",
-                "producers": [],
-            }
+            # Preserve compatibility for custom configuration directories that
+            # predate this optional inventory. Explicit paths remain fail closed.
+            visitor_contract = None
         else:
             visitor_contract = json.loads(
                 visitor_path.read_text(encoding="utf-8"),
@@ -743,7 +759,8 @@ def main(argv=None):
         buckets = defaultdict(lambda: {"hourly": 0, "daily": 0, "records": []})
         policies = {}
         validate_completion_contract(completion_contract, buckets, policies)
-        validate_visitor_contract(visitor_contract, buckets, policies)
+        if visitor_contract is not None:
+            validate_visitor_contract(visitor_contract, buckets, policies)
         # One inventory owns both environments. Validate its complete structure so
         # malformed declarations cannot disappear during environment selection.
         contract = select_environment_contract(contract, args.env)

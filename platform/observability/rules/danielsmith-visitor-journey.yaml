@@ -3,8 +3,27 @@ groups:
   - name: danielsmith-visitor-journey
     interval: 1m
     rules:
+      # This declaration is deliberately independent of the textfile exporter.
+      # A later activation change must switch only the matching environment to 1.
+      - record: danielsmith_visitor_journey_monitoring_expected
+        expr: vector(0)
+        labels:
+          application: danielsmith
+          environment: staging
+          name: danielsmith-visitor-journey-staging
+      - record: danielsmith_visitor_journey_monitoring_expected
+        expr: vector(0)
+        labels:
+          application: danielsmith
+          environment: prod
+          name: danielsmith-visitor-journey-prod
       - alert: DanielsmithVisitorJourneyFailed
-        expr: danielsmith_visitor_journey_monitoring_enabled{application="danielsmith"} == 1 and on (application, environment, name) (danielsmith_visitor_journey_state{application="danielsmith",state="failure"} == 1)
+        expr: |
+          danielsmith_visitor_journey_monitoring_expected{application="danielsmith"} == 1
+          and on (application, environment, name)
+          danielsmith_visitor_journey_state{application="danielsmith",state="failure"} == 1
+          and on (application, environment, name)
+          time() - danielsmith_visitor_journey_freshness_timestamp_seconds{application="danielsmith"} <= 1020
         for: 5m
         labels:
           application: danielsmith
@@ -15,7 +34,16 @@ groups:
           remediation: Inspect only the bounded failure-stage metric, then qualify recovery before changing activation.
           runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/danielsmith-visitor-journey.md#alerts
       - alert: DanielsmithVisitorJourneyStaleOrUnavailable
-        expr: danielsmith_visitor_journey_monitoring_enabled{application="danielsmith"} == 1 and on (application, environment, name) (danielsmith_visitor_journey_state{application="danielsmith",state=~"stale|unavailable"} == 1 or time() - danielsmith_visitor_journey_freshness_timestamp_seconds{application="danielsmith"} > 1020)
+        expr: |
+          danielsmith_visitor_journey_monitoring_expected{application="danielsmith"} == 1
+          and on (application, environment, name)
+          (
+            time() - danielsmith_visitor_journey_freshness_timestamp_seconds{application="danielsmith"} > 1020
+            or
+            danielsmith_visitor_journey_monitoring_expected{application="danielsmith"} == 1
+            unless on (application, environment, name)
+            danielsmith_visitor_journey_freshness_timestamp_seconds{application="danielsmith"}
+          )
         for: 5m
         labels:
           application: danielsmith

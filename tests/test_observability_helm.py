@@ -46,7 +46,7 @@ LEGACY = [
 DSPACE_ALERT_MATCHER = (
     'alertname=~"^(DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|'
     "DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|"
-    'DspaceMetricsTargetDown|DanielsmithVisitorJourneyFailed)$"'
+    'DspaceMetricsTargetDown)$"'
 )
 DSPACE_ALERT_NAMES = (
     "DspaceBuildRevisionMismatch",
@@ -55,7 +55,6 @@ DSPACE_ALERT_NAMES = (
     "DspaceChatSyntheticFailed",
     "DspaceMetricsTargetDown",
 )
-PAGERDUTY_DSPACE_ALERT_NAMES = DSPACE_ALERT_NAMES + ("DanielsmithVisitorJourneyFailed",)
 
 
 def watchdog_canary():
@@ -3196,7 +3195,7 @@ def alertmanager_receivers_for_labels(config, labels):
 def test_production_alertmanager_routes_exact_eligible_label_sets():
     config = yaml_load(PROD)["alertmanager"]["config"]
     base = {"environment": "prod", "cluster": "sugarkube-prod", "severity": "critical"}
-    for alertname in PAGERDUTY_DSPACE_ALERT_NAMES:
+    for alertname in DSPACE_ALERT_NAMES:
         assert alertmanager_receivers_for_labels(config, {**base, "alertname": alertname}) == [
             "pagerduty-dspace"
         ]

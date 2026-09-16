@@ -3,9 +3,19 @@
 
 from __future__ import annotations
 
+import argparse
+import json
 import math
+import os
 import re
+import tempfile
 import time
+from pathlib import Path
+
+if __package__:
+    from scripts import validate_probe_quotas
+else:
+    import validate_probe_quotas
 
 FAILURE_STAGES = {
     "homepage_delivery",
@@ -19,6 +29,7 @@ FAILURE_STAGES = {
 RESULT_FIELDS = {"state", "freshness", "aggregateDurationMs", "failureStage"}
 IDENTITY = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 MAX_CLOCK_SKEW_SECONDS = 300
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _duration(value: object) -> int:
@@ -132,3 +143,47 @@ def render_metrics(
         f'danielsmith_visitor_journey_state{{{labels},state="{lifecycle}"}} 1',
     ]
     return "\n".join(lines) + "\n"
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Validate one descriptor/result pair and atomically publish text metrics."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--descriptor",
+        type=Path,
+        default=ROOT / "config/observability/danielsmith-visitor-journey.json",
+    )
+    parser.add_argument("--environment", required=True, choices=("staging", "prod"))
+    parser.add_argument("--result", type=Path)
+    parser.add_argument("--output", required=True, type=Path)
+    args = parser.parse_args(argv)
+    try:
+        descriptor = json.loads(args.descriptor.read_text(encoding="utf-8"))
+        validate_probe_quotas.validate_visitor_contract(descriptor)
+        producer = next(
+            item for item in descriptor["producers"] if item["environment"] == args.environment
+        )
+        result = (
+            json.loads(args.result.read_text(encoding="utf-8")) if args.result is not None else None
+        )
+        content = render_metrics(producer, result)
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError, StopIteration) as error:
+        parser.error(str(error))
+
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=".danielsmith-visitor.", dir=args.output.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            os.fchmod(stream.fileno(), 0o644)
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, args.output)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
