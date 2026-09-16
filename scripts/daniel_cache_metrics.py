@@ -51,7 +51,10 @@ def _bounded_number(value, maximum, field, *, nullable=False, integer=False):
         return math.nan
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise InvalidDocument(field)
-    number = float(value)
+    try:
+        number = float(value)
+    except (OverflowError, ValueError) as exc:
+        raise InvalidDocument(field) from exc
     if not math.isfinite(number) or number < 0 or number > maximum:
         raise InvalidDocument(field)
     if integer and not number.is_integer():
@@ -78,7 +81,7 @@ def parse_document(payload: bytes, now: datetime | None = None) -> dict[str, obj
         raise OverflowError("runtime document exceeds 262144 bytes")
     try:
         document = json.loads(payload)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (UnicodeDecodeError, ValueError, RecursionError) as exc:
         raise InvalidDocument("JSON") from exc
     if not isinstance(document, dict):
         raise InvalidDocument("document")

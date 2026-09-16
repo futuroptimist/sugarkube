@@ -1,5 +1,6 @@
 import copy
 import json
+import re
 import stat
 import subprocess
 import sys
@@ -178,6 +179,73 @@ def test_daniel_collector_preserves_all_categories_and_numeric_boundaries():
     assert all(f'category="{category}"}} 1' in output for category in metrics.FAILURES)
 
 
+def test_daniel_collector_emits_only_bounded_metric_labels_and_values():
+    repository = "distinctive-owner/distinctive-repository"
+    url = "https://example.invalid/distinctive-repository"
+    arbitrary = "distinctive-non-metric-text"
+    payload = json.loads(daniel_document("fresh"))
+    payload["source"] = arbitrary
+    payload["repos"] = {
+        repository: {"url": url, "description": arbitrary},
+        "a/two": {"url": f"{url}/two"},
+    }
+    payload["errors"] = {repository: arbitrary}
+
+    output = metrics.render(json.dumps(payload).encode(), "prod", now=FIXED_NOW)
+    series = {}
+    for line in output.splitlines():
+        if line.startswith("#"):
+            continue
+        name, labels, _value = re.fullmatch(r"(\w+)\{([^}]*)\} (\S+)", line).groups()
+        parsed_labels = dict(re.findall(r'(\w+)="([^"]*)"', labels))
+        series.setdefault(name, []).append(parsed_labels)
+
+    expected = {
+        "daniel_cache_collection_up": ({"environment"}, 1),
+        "daniel_cache_state": ({"environment", "state"}, len(metrics.STATES)),
+        "daniel_cache_data_completeness": (
+            {"environment", "completeness"},
+            len(metrics.COMPLETENESS),
+        ),
+        "daniel_cache_document_status": (
+            {"environment", "status"},
+            len(metrics.DOCUMENT_STATUSES),
+        ),
+        "daniel_cache_failure_category": (
+            {"environment", "category"},
+            len(metrics.FAILURES),
+        ),
+        "daniel_cache_freshness_age_seconds": ({"environment"}, 1),
+        "daniel_cache_refresh_duration_seconds": ({"environment"}, 1),
+        "daniel_cache_retained_data_age_seconds": ({"environment"}, 1),
+        "daniel_cache_repositories": ({"environment", "result"}, 4),
+    }
+    assert set(series) == set(expected)
+    for name, (label_keys, count) in expected.items():
+        assert len(series[name]) == count
+        assert all(set(labels) == label_keys for labels in series[name])
+        assert all(labels["environment"] == "prod" for labels in series[name])
+    assert {labels["state"] for labels in series["daniel_cache_state"]} == set(metrics.STATES)
+    assert {labels["completeness"] for labels in series["daniel_cache_data_completeness"]} == set(
+        metrics.COMPLETENESS
+    )
+    assert {labels["status"] for labels in series["daniel_cache_document_status"]} == set(
+        metrics.DOCUMENT_STATUSES
+    )
+    assert {labels["category"] for labels in series["daniel_cache_failure_category"]} == set(
+        metrics.FAILURES
+    )
+    assert {labels["result"] for labels in series["daniel_cache_repositories"]} == {
+        "configured",
+        "successful",
+        "failed",
+        "retained",
+    }
+    assert repository not in output
+    assert url not in output
+    assert arbitrary not in output
+
+
 @pytest.mark.parametrize(
     ("state", "cache_change"),
     [
@@ -239,6 +307,59 @@ def test_daniel_malformed_input_replaces_healthy_textfile(tmp_path, payload, sta
     assert 'state="unavailable"} 1' in published
     assert 'result="successful"' not in published
     assert stat.S_IMODE(path.stat().st_mode) == 0o644
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b'{"number":' + b"9" * 5_000 + b"}",
+        b"[" * 10_000 + b"]" * 10_000,
+    ],
+    ids=["integer-conversion-limit", "decoder-recursion-limit"],
+)
+def test_daniel_decoder_failures_replace_healthy_textfile(tmp_path, payload):
+    path = tmp_path / "daniel-cache.prom"
+    healthy = metrics.render(daniel_document("fresh"), "prod", now=FIXED_NOW)
+    metrics.write_textfile(path, healthy)
+
+    result = metrics.collect(
+        metrics.RUNTIME_URLS["prod"],
+        "prod",
+        opener=lambda *_args, **_kwargs: DanielResponse(payload),
+        now=FIXED_NOW,
+    )
+    metrics.write_textfile(path, result)
+
+    published = path.read_text()
+    assert 'daniel_cache_collection_up{environment="prod"} 0' in published
+    assert 'status="malformed"} 1' in published
+    assert 'state="unavailable"} 1' in published
+    assert 'completeness="none"} 1' in published
+    assert 'result="successful"' not in published
+    assert "daniel_cache_freshness_age_seconds" not in published
+    assert stat.S_IMODE(path.stat().st_mode) == 0o644
+
+
+@pytest.mark.parametrize("decoder_error", [ValueError("integer limit"), RecursionError()])
+def test_daniel_decoder_errors_are_normalized(monkeypatch, decoder_error):
+    def fail_decode(_payload):
+        raise decoder_error
+
+    monkeypatch.setattr(metrics.json, "loads", fail_decode)
+    with pytest.raises(metrics.InvalidDocument, match="JSON"):
+        metrics.parse_document(b"{}", now=FIXED_NOW)
+
+
+def test_daniel_excessive_numeric_field_is_malformed_not_oversized():
+    payload = daniel_document("fresh", cache={"refreshDurationMs": 10**3_999})
+    output = metrics.collect(
+        metrics.RUNTIME_URLS["prod"],
+        "prod",
+        opener=lambda *_args, **_kwargs: DanielResponse(payload),
+        now=FIXED_NOW,
+    )
+    assert 'status="malformed"} 1' in output
+    assert 'status="oversized"} 0' in output
 
 
 def test_daniel_successful_fetch_is_single_passive_canonical_request():
