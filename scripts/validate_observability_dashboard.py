@@ -122,6 +122,35 @@ DANIEL_PANEL_CONTRACT = {
         "s",
         "age",
     ),
+    "Daniel application-ready duration": (
+        "max by (statistic) "
+        '(daniel_performance_application_ready_seconds{environment=~"$environment"})',
+        "s",
+        "{{statistic}}",
+    ),
+    "Daniel interaction latency": (
+        "max by (statistic) "
+        '(daniel_performance_interaction_latency_seconds{environment=~"$environment"})',
+        "s",
+        "{{statistic}}",
+    ),
+    "Daniel renderer mode": (
+        "max by (renderer_mode, renderer_class) "
+        '(daniel_performance_renderer_info{environment=~"$environment"})',
+        "short",
+        "{{renderer_mode}} / {{renderer_class}}",
+    ),
+    "Daniel renderer fallback": (
+        "max by (fallback_status) "
+        '(daniel_performance_fallback_status{environment=~"$environment"})',
+        "short",
+        "{{fallback_status}}",
+    ),
+    "Daniel frame time": (
+        'max by (statistic) (daniel_performance_frame_time_seconds{environment=~"$environment"})',
+        "s",
+        "{{statistic}}",
+    ),
 }
 
 
@@ -224,10 +253,10 @@ def _expected_dashboard(dashboard: dict) -> dict:
 
 
 def _validate_grid(items: list[dict]) -> None:
-    if len(items) != 70 or sum(panel.get("type") == "row" for panel in items) != 12:
-        raise SystemExit("ERROR: canonical dashboard must contain exactly 70 objects and 12 rows.")
+    if len(items) != 76 or sum(panel.get("type") == "row" for panel in items) != 13:
+        raise SystemExit("ERROR: canonical dashboard must contain exactly 76 objects and 13 rows.")
     ids = [panel.get("id") for panel in items]
-    if ids != list(range(1, 71)):
+    if ids != list(range(1, 77)):
         raise SystemExit(
             "ERROR: canonical dashboard panel IDs must be stable consecutive integers."
         )

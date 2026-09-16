@@ -912,3 +912,48 @@ checking the five panels. Roll back by disabling and removing the timer and serv
 release flow to remove the node-exporter argument/mount only after no other textfile producer uses
 that directory. Deployment, scheduling, live verification, dashboard rollout, and observation
 remain authorized operator work; none are executed by this change.
+
+## Daniel controlled-performance collection
+
+`scripts/daniel_performance_metrics.py` consumes the application-owned, schema-version-1
+`PerformanceResultV1` JSON emitted by the controlled browser run. It is deliberately a passive
+adapter: the **same existing Daniel visitor-journey scheduler invocation** supplies the result and
+runs this collector after its journey; this integration does not own or install a timer, CronJob,
+or second browser run. The scheduler writes the application result to a private temporary file and
+invokes:
+
+```bash
+python3 /usr/local/libexec/sugarkube/daniel_performance_metrics.py \
+  --input "$PERFORMANCE_RESULT_FILE" \
+  --environment staging \
+  --output /var/lib/node_exporter/textfile_collector/daniel-performance.prom
+```
+
+Use `--environment prod` only during a separately authorized production rollout. The input is
+bounded to 65,536 bytes. Exact-key validation rejects extensions and malformed or contradictory
+results; a rejected input atomically replaces prior samples with only
+`daniel_performance_collection_up 0`, so a stale healthy result cannot survive. Valid results
+publish the fixed `completed`, `regression`, or `unavailable` state; application-ready and
+controlled keyboard-dispatch latency summaries; fixed renderer mode, renderer class, and fallback
+status; and the bounded build identity. Build tags are limited to 80 safe identifier characters,
+and the build environment must match the collector environment. Browser-session identifiers, user
+input, individual events, raw console errors, arbitrary URLs, raw GPU strings, and extra
+environment values fail exact-schema validation and are never exported.
+
+Duration summaries expose only sample count and `median`, `p95`, and `max` statistics. An
+unavailable required measurement remains an explicit result state and emits no duration series;
+it is never zero or success. Software and hardware renderer classes remain separate. Frame-time
+series exist only for an available 120-frame `controlled_hardware_v1` result from an immersive
+Chromium hardware renderer. Unsupported, software-rendered, fallback, and merely uncollected frame
+windows emit no frame-time value rather than fabricating one.
+
+The **Daniel controlled performance** dashboard row contains **Daniel application-ready
+duration**, **Daniel interaction latency**, **Daniel renderer mode**, **Daniel renderer fallback**,
+and **Daniel frame time**. All panels preserve missing series as `NO DATA`; the optional frame panel
+therefore disappears naturally when no qualified frame summary exists. This change establishes no
+production threshold or paging alert. A later authorized staging qualification must verify the
+shared scheduler handoff, textfile ownership and freshness, node-exporter scrape, all three result
+states, fallback and software/hardware separation, and actual hardware-renderer eligibility over a
+measured observation window. Production promotion and any baseline-derived objectives remain
+separate work. Rollback removes the performance collector call from the existing journey job and
+deletes `daniel-performance.prom`; it must not disable the shared visitor-journey schedule.

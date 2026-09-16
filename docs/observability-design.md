@@ -2,6 +2,14 @@
 
 This is the canonical, implementation-ready design for Sugarkube observability across the Raspberry Pi k3s platform and five supported applications: DSPACE, token.place, danielsmith.io, jobbot3000, and GitShelves. It reconciles the earlier implementation prompt in [`docs/prompts/codex/observability.md`](./prompts/codex/observability.md): that prompt is useful bootstrap context, but this document is the source of truth for phased productionization, ownership, privacy, release gates, and current-state claims.
 
+Daniel controlled-performance telemetry follows the application-owned `PerformanceResultV1`
+contract and shares the visitor-journey scheduler; Sugarkube adds no second browser schedule. The
+collector retains only bounded aggregate readiness, interaction, renderer/fallback, optional
+qualified frame, and build/environment identity fields. Missing measurements remain unavailable or
+`NO DATA`. Session identifiers, input, raw errors, arbitrary URLs, and open-ended renderer or
+environment values are outside the contract. Hardware qualification, measured baselines,
+production thresholds, alerts, and environment rollout are later verification work.
+
 This document is the design contract. The current live staging kube-prometheus-stack lifecycle is the guarded, non-Flux Helm path documented in [`docs/observability-operations.md`](./observability-operations.md). The repository still includes older Flux/Longhorn kube-prometheus-stack manifests for inactive future/legacy work; they are not live deployment evidence, must not be applied to staging or production as currently written, and must not be combined with the manual Helm lifecycle for the same release. See [`docs/observability-blackbox.md`](./observability-blackbox.md) for the runtime blackbox slice, and see [`docs/observability-alerting.md`](./observability-alerting.md) for the canonical alert delivery, routing, and drill strategy — this document covers signals and dashboards, not how a human gets paged.
 
 ## Audit scope and evidence
