@@ -245,7 +245,53 @@ def test_offline_entry_point_validates_and_atomically_publishes_temp_files(tmp_p
     assert output.read_text(encoding="utf-8").endswith('state="success"} 1\n')
 
 
-def test_offline_entry_point_rejects_duplicate_fields_and_publishes_recovery(tmp_path):
+@pytest.mark.parametrize("duplicate_field", ["enabled", "state"])
+def test_offline_entry_point_rejects_duplicate_fields_without_publish(
+    tmp_path, duplicate_field
+):
+    descriptor = tmp_path / "descriptor.json"
+    data = inventory()
+    data["producers"][0].update(enabled=True, requestMultiplicity=1)
+    descriptor_text = json.dumps(data)
+    sanitized = tmp_path / "result.json"
+    output = tmp_path / "visitor.prom"
+    now = int(time.time())
+    result_text = json.dumps(result(freshness=now))
+    if duplicate_field == "enabled":
+        descriptor_text = descriptor_text.replace(
+            '"enabled": true', '"enabled": false, "enabled": true', 1
+        )
+    else:
+        result_text = result_text.replace(
+            '"state": "success"', '"state": "failure", "state": "success"', 1
+        )
+    descriptor.write_text(descriptor_text, encoding="utf-8")
+    sanitized.write_text(result_text, encoding="utf-8")
+    original = "# existing collector output\n"
+    output.write_text(original, encoding="utf-8")
+    arguments = [
+        "python3",
+        "scripts/danielsmith_visitor_metrics.py",
+        "--descriptor",
+        str(descriptor),
+        "--environment",
+        "staging",
+        "--result",
+        str(sanitized),
+        "--output",
+        str(output),
+    ]
+    completed = subprocess.run(
+        arguments, cwd=ROOT, capture_output=True, text=True, check=False
+    )
+    assert completed.returncode != 0
+    assert output.read_text(encoding="utf-8") == original
+    assert completed.stdout == ""
+    assert descriptor_text not in completed.stderr
+    assert result_text not in completed.stderr
+
+
+def test_offline_entry_point_publishes_recovery_from_existing_output(tmp_path):
     descriptor = tmp_path / "descriptor.json"
     data = inventory()
     data["producers"][0].update(enabled=True, requestMultiplicity=1)
@@ -253,11 +299,6 @@ def test_offline_entry_point_rejects_duplicate_fields_and_publishes_recovery(tmp
     sanitized = tmp_path / "result.json"
     output = tmp_path / "visitor.prom"
     now = int(time.time())
-    sanitized.write_text(
-        '{"state":"failure","state":"success","freshness":%d,'
-        '"aggregateDurationMs":1,"failureStage":null}' % now,
-        encoding="utf-8",
-    )
     arguments = [
         "--descriptor",
         str(descriptor),
@@ -268,10 +309,6 @@ def test_offline_entry_point_rejects_duplicate_fields_and_publishes_recovery(tmp
         "--output",
         str(output),
     ]
-    with pytest.raises(SystemExit) as raised:
-        metrics.main(arguments)
-    assert raised.value.code == 2
-    assert not output.exists()
 
     sanitized.write_text(
         json.dumps(result(state="failure", freshness=now, failureStage="timeout")),
@@ -350,7 +387,8 @@ def test_actual_alert_promql_fires_and_clears_for_both_environments(tmp_path):
         success["input_series"] = [
             {
                 "series": f"danielsmith_visitor_journey_freshness_timestamp_seconds{{{labels}}}",
-                "values": "10000x30",
+                # A completion at 1m is fresh at the 10m evaluation time.
+                "values": "60x30",
             },
             {
                 "series": f'danielsmith_visitor_journey_state{{{labels},state="success"}}',
@@ -369,10 +407,17 @@ def test_actual_alert_promql_fires_and_clears_for_both_environments(tmp_path):
         failure["name"] = f"{environment} fresh failure and recovery"
         failure["input_series"][1] = {
             "series": f'danielsmith_visitor_journey_state{{{labels},state="failure"}}',
-            "values": "1x5 0x25",
+            "values": "1x5 _x25",
         }
+        failure["input_series"].append(
+            {
+                "series": f'danielsmith_visitor_journey_state{{{labels},state="recovered"}}',
+                "values": "_x5 1x25",
+            }
+        )
         failure["alert_rule_test"] = _alert_checks(environment, name, "failure", "4m", "5m") + [
-            {"eval_time": "6m", "alertname": "DanielsmithVisitorJourneyFailed", "exp_alerts": []}
+            # The replaced failure series ages out after Prometheus's lookback window.
+            {"eval_time": "11m", "alertname": "DanielsmithVisitorJourneyFailed", "exp_alerts": []}
         ]
 
         frozen = copy.deepcopy(success)
