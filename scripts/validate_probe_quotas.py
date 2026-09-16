@@ -526,7 +526,9 @@ def validate(
     return len(active)
 
 
-def validate_completion_contract(contract_data, shared_buckets=None, shared_policies=None):
+def validate_completion_contract(
+    contract_data, shared_buckets=None, shared_policies=None, expected_stages=None
+):
     """Validate declarative completion schedules without executing a journey."""
     if not isinstance(contract_data, dict) or set(contract_data) != {"schemaVersion", "producers"}:
         raise ContractError("completion contract has missing or unknown top-level fields")
@@ -539,7 +541,7 @@ def validate_completion_contract(contract_data, shared_buckets=None, shared_poli
         else defaultdict(lambda: {"hourly": 0, "daily": 0, "records": []})
     )
     policies = shared_policies if shared_policies is not None else {}
-    expected_stages = {
+    expected_stages = expected_stages or {
         "none",
         "timeout",
         "compute_unavailable",
@@ -659,6 +661,11 @@ def main(argv=None):
         help="reviewed declarative encrypted-completion contract",
     )
     parser.add_argument(
+        "--visitor-journey-contract",
+        type=Path,
+        help="reviewed declarative danielsmith.io visitor-journey contract",
+    )
+    parser.add_argument(
         "--probes",
         type=Path,
         help="already-rendered Probe YAML (default: kubectl kustomize active graph)",
@@ -685,6 +692,16 @@ def main(argv=None):
                 completion_path.read_text(encoding="utf-8"),
                 object_pairs_hook=_reject_duplicate_json_fields,
             )
+        journey_path = (
+            args.visitor_journey_contract or config_dir / "danielsmith-visitor-journey.json"
+        )
+        if configured_dir and args.visitor_journey_contract is None and not journey_path.exists():
+            journey_contract = {"schemaVersion": 1, "producers": []}
+        else:
+            journey_contract = json.loads(
+                journey_path.read_text(encoding="utf-8"),
+                object_pairs_hook=_reject_duplicate_json_fields,
+            )
     except json.JSONDecodeError:
         print("probe quota validation failed: JSON input is malformed", file=sys.stderr)
         return 1
@@ -698,6 +715,20 @@ def main(argv=None):
         buckets = defaultdict(lambda: {"hourly": 0, "daily": 0, "records": []})
         policies = {}
         validate_completion_contract(completion_contract, buckets, policies)
+        validate_completion_contract(
+            journey_contract,
+            buckets,
+            policies,
+            {
+                "homepage_delivery",
+                "javascript_initialization",
+                "essential_assets",
+                "accessible_fallback",
+                "resume_pdf",
+                "timeout",
+                "producer_interrupted",
+            },
+        )
         # One inventory owns both environments. Validate its complete structure so
         # malformed declarations cannot disappear during environment selection.
         contract = select_environment_contract(contract, args.env)

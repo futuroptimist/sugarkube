@@ -27,6 +27,9 @@ CANONICAL_CLOUDFLARE_RULES = (
 CANONICAL_TOKENPLACE_RULES = (
     ROOT / "platform" / "observability" / "rules" / "tokenplace-production.yaml"
 )
+CANONICAL_DANIELSMITH_JOURNEY_RULES = (
+    ROOT / "platform" / "observability" / "rules" / "danielsmith-visitor-journey.yaml"
+)
 SCRIPT = ROOT / "scripts" / "observability_helm.sh"
 ALERTMANAGER_VALIDATOR = ROOT / "scripts" / "verify_observability_alertmanager.rb"
 DASHBOARD = ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
@@ -567,10 +570,13 @@ def test_dspace_rules_have_one_canonical_source_and_exact_overlay(tmp_path):
     result, audit = run_helper(tmp_path, "render")
     assert result.returncode == 0
     overlay = yaml_load(tmp_path / "rules-overlay.yaml")
+    journey = yaml_load(CANONICAL_DANIELSMITH_JOURNEY_RULES)
+    journey["groups"][0]["rules"] = [journey["groups"][0]["rules"][0]]
     assert overlay == {
         "additionalPrometheusRulesMap": {
             "dspace-release-integrity": yaml_load(CANONICAL_DSPACE_RULES),
             "cloudflare-tunnel": yaml_load(CANONICAL_CLOUDFLARE_RULES),
+            "danielsmith-visitor-journey": journey,
         }
     }
     overlay_paths = re.findall(r"/[^ ]*sugarkube-observability-rules\.[^ ]*\.yaml", audit)
@@ -594,9 +600,12 @@ def test_prod_rules_overlay_ignores_invalid_staging_only_rules(tmp_path):
             path.write_text(content, encoding="utf-8")
 
     assert result.returncode == 0
+    journey = yaml_load(CANONICAL_DANIELSMITH_JOURNEY_RULES)
+    journey["groups"][0]["rules"] = [journey["groups"][0]["rules"][1]]
     assert yaml_load(tmp_path / "rules-overlay.yaml") == {
         "additionalPrometheusRulesMap": {
-            "tokenplace-production": yaml_load(CANONICAL_TOKENPLACE_RULES)
+            "tokenplace-production": yaml_load(CANONICAL_TOKENPLACE_RULES),
+            "danielsmith-visitor-journey": journey,
         }
     }
 

@@ -1,0 +1,21 @@
+---
+groups:
+  - name: danielsmith-visitor-journey
+    interval: 1m
+    rules:
+      - alert: DanielsmithVisitorJourneyFailed
+        expr: danielsmith_visitor_journey_monitoring_enabled{application="danielsmith",environment="staging"} == 1 and on (application, environment, producer) danielsmith_visitor_journey_lifecycle_state{application="danielsmith",environment="staging",state=~"failed|stale|unavailable"} == 1
+        for: 5m
+        labels: {application: danielsmith, environment: staging, cluster: sugarkube-int, severity: critical}
+        annotations:
+          summary: danielsmith.io staging visitor journey failed or stopped reporting
+          description: The enabled essential journey is failed, stale, or unavailable; optional immersive rendering is not part of this alert.
+          runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/danielsmith-visitor-journey-observability.md
+      - alert: DanielsmithVisitorJourneyFailed
+        expr: danielsmith_visitor_journey_monitoring_enabled{application="danielsmith",environment="prod"} == 1 and on (application, environment, producer) danielsmith_visitor_journey_lifecycle_state{application="danielsmith",environment="prod",state=~"failed|stale|unavailable"} == 1
+        for: 5m
+        labels: {application: danielsmith, environment: prod, cluster: sugarkube-prod, severity: critical}
+        annotations:
+          summary: danielsmith.io production visitor journey failed or stopped reporting
+          description: The enabled essential journey is failed, stale, or unavailable; optional immersive rendering is not part of this alert.
+          runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/danielsmith-visitor-journey-observability.md
