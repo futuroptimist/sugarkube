@@ -1,0 +1,26 @@
+groups:
+  - name: danielsmith-visitor-journey
+    interval: 1m
+    rules:
+      - alert: DanielsmithVisitorJourneyUnhealthy
+        expr: danielsmith_visitor_journey_lifecycle_state{state=~"failed|stale|unavailable"} == 1 and on (application, environment, producer) danielsmith_visitor_journey_monitoring_enabled == 1
+        for: 10m
+        labels:
+          application: danielsmith
+          severity: warning
+        annotations:
+          summary: danielsmith.io essential visitor journey is unhealthy
+          description: The authorized essential visitor journey is failed, stale, or unavailable; optional immersive rendering is deliberately excluded.
+          remediation: Inspect the bounded failure-stage metric and application-owned visitor-journey producer without collecting response or visitor data.
+          runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/danielsmith-visitor-journey-observability.md
+      - alert: DanielsmithVisitorJourneyFailed
+        expr: danielsmith_visitor_journey_lifecycle_state{state="failed"} == 1 and on (application, environment, producer) danielsmith_visitor_journey_monitoring_enabled == 1
+        for: 5m
+        labels:
+          application: danielsmith
+          severity: critical
+        annotations:
+          summary: danielsmith.io essential visitor journey failed
+          description: The authorized essential browser journey failed; inspect only its finite failure-stage classification.
+          remediation: Use the application-owned assertion fixtures to reproduce the bounded stage, then verify recovery before promotion.
+          runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/danielsmith-visitor-journey-observability.md

@@ -18,6 +18,7 @@ PROD_VALUES="${ROOT}/clusters/prod/observability/kube-prometheus-stack.values.ya
 DSPACE_RULES="${ROOT}/platform/observability/rules/dspace-release-integrity.yaml"
 CLOUDFLARE_RULES="${ROOT}/platform/observability/rules/cloudflare-tunnel.yaml"
 TOKENPLACE_RULES="${ROOT}/platform/observability/rules/tokenplace-production.yaml"
+DANIELSMITH_RULES="${ROOT}/platform/observability/rules/danielsmith-visitor-journey.yaml"
 STAGING_DASHBOARD="${ROOT}/clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
 PROD_DASHBOARD="${ROOT}/clusters/prod/observability/dashboards/sugarkube-prod-observability.json"
 DASHBOARD=""
@@ -106,11 +107,15 @@ create_rules_overlay() {
   ruby -ryaml -e '
     environment, output, *rule_args = ARGV
     selected_rules = if environment == "prod"
-      {"tokenplace-production" => ["token.place", rule_args.fetch(2)]}
+      {
+        "tokenplace-production" => ["token.place", rule_args.fetch(2)],
+        "danielsmith-visitor-journey" => ["Daniel visitor journey", rule_args.fetch(3)]
+      }
     else
       {
         "dspace-release-integrity" => ["DSPACE", rule_args.fetch(0)],
-        "cloudflare-tunnel" => ["Cloudflare Tunnel", rule_args.fetch(1)]
+        "cloudflare-tunnel" => ["Cloudflare Tunnel", rule_args.fetch(1)],
+        "danielsmith-visitor-journey" => ["Daniel visitor journey", rule_args.fetch(3)]
       }
     end
     rules_map = selected_rules.to_h do |key, (name, path)|
@@ -122,7 +127,7 @@ create_rules_overlay() {
       [key, rules]
     end
     File.write(output, YAML.dump("additionalPrometheusRulesMap" => rules_map))
-  ' "${ENVIRONMENT}" "${RULES_OVERLAY}" "${DSPACE_RULES}" "${CLOUDFLARE_RULES}" "${TOKENPLACE_RULES}"
+  ' "${ENVIRONMENT}" "${RULES_OVERLAY}" "${DSPACE_RULES}" "${CLOUDFLARE_RULES}" "${TOKENPLACE_RULES}" "${DANIELSMITH_RULES}"
 }
 validate_dashboard() { python3 "${DASHBOARD_VALIDATOR}" "${DASHBOARD}"; }
 validate_rendered_dashboard() { python3 "${DASHBOARD_VALIDATOR}" "${DASHBOARD}" --rendered "$1"; }

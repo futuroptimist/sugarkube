@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "producers": [
+    {
+      "name": "danielsmith-visitor-journey-staging",
+      "application": "danielsmith",
+      "environment": "staging",
+      "enabled": false,
+      "cadence": "5m",
+      "timeout": "30s",
+      "concurrency": 1,
+      "requestMultiplicity": null,
+      "bucket": "visitor-journey",
+      "limits": {"hourly": 60, "daily": 1000},
+      "safetyMargin": 0.2,
+      "failureStages": [
+        "homepage_delivery",
+        "javascript_initialization",
+        "essential_assets",
+        "accessible_fallback",
+        "resume_pdf",
+        "timeout",
+        "producer_interrupted"
+      ],
+      "optionalRendererStates": ["available", "unavailable", "disabled", "unknown"]
+    },
+    {
+      "name": "danielsmith-visitor-journey-prod",
+      "application": "danielsmith",
+      "environment": "prod",
+      "enabled": false,
+      "cadence": "5m",
+      "timeout": "30s",
+      "concurrency": 1,
+      "requestMultiplicity": null,
+      "bucket": "visitor-journey",
+      "limits": {"hourly": 60, "daily": 1000},
+      "safetyMargin": 0.2,
+      "failureStages": [
+        "homepage_delivery",
+        "javascript_initialization",
+        "essential_assets",
+        "accessible_fallback",
+        "resume_pdf",
+        "timeout",
+        "producer_interrupted"
+      ],
+      "optionalRendererStates": ["available", "unavailable", "disabled", "unknown"]
+    }
+  ]
+}

@@ -36,6 +36,21 @@ COMPLETION_FIELDS = {
     "safetyMargin",
     "failureStages",
 }
+VISITOR_FIELDS = {
+    "name",
+    "application",
+    "environment",
+    "enabled",
+    "cadence",
+    "timeout",
+    "concurrency",
+    "requestMultiplicity",
+    "bucket",
+    "limits",
+    "safetyMargin",
+    "failureStages",
+    "optionalRendererStates",
+}
 DECLARATION_FIELDS = {
     "application",
     "environment",
@@ -633,6 +648,73 @@ def validate_completion_contract(contract_data, shared_buckets=None, shared_poli
     return len(contract_data["producers"])
 
 
+def validate_visitor_journey_contract(contract_data):
+    """Validate disabled-by-default browser-journey descriptors and their quota bounds."""
+    if not isinstance(contract_data, dict) or set(contract_data) != {"schemaVersion", "producers"}:
+        raise ContractError("visitor journey contract has missing or unknown top-level fields")
+    if contract_data["schemaVersion"] != 1 or not isinstance(contract_data["producers"], list):
+        raise ContractError("visitor journey contract schemaVersion/producers is invalid")
+    expected_stages = {
+        "homepage_delivery",
+        "javascript_initialization",
+        "essential_assets",
+        "accessible_fallback",
+        "resume_pdf",
+        "timeout",
+        "producer_interrupted",
+    }
+    expected_renderer = {"available", "unavailable", "disabled", "unknown"}
+    identities = set()
+    for item in contract_data["producers"]:
+        if not isinstance(item, dict) or set(item) != VISITOR_FIELDS:
+            raise ContractError("visitor journey producer has missing or unknown metadata")
+        for field in ("name", "application", "bucket"):
+            if not isinstance(item[field], str) or not item[field].strip():
+                raise ContractError(f"visitor journey producer has invalid {field}")
+        if item["environment"] not in ENVIRONMENTS or type(item["enabled"]) is not bool:
+            raise ContractError("visitor journey producer has invalid environment/enabled metadata")
+        identity = (item["environment"], item["name"])
+        if identity in identities:
+            raise ContractError("visitor journey producer identity is duplicated")
+        identities.add(identity)
+        cadence = _duration(item["cadence"], "cadence")
+        timeout = _duration(item["timeout"], "timeout")
+        if timeout >= cadence:
+            raise ContractError("visitor journey timeout must be shorter than cadence")
+        concurrency = _positive_int(item["concurrency"], "concurrency")
+        multiplicity = item["requestMultiplicity"]
+        if multiplicity is not None:
+            multiplicity = _positive_int(multiplicity, "requestMultiplicity")
+        if item["enabled"] and multiplicity is None:
+            raise ContractError("enabled visitor journey requires a qualified requestMultiplicity")
+        if set(item["failureStages"]) != expected_stages or len(item["failureStages"]) != len(
+            expected_stages
+        ):
+            raise ContractError("visitor journey failureStages must use the application vocabulary")
+        if set(item["optionalRendererStates"]) != expected_renderer or len(
+            item["optionalRendererStates"]
+        ) != len(expected_renderer):
+            raise ContractError(
+                "visitor journey optionalRendererStates must use the finite vocabulary"
+            )
+        margin = item["safetyMargin"]
+        if isinstance(margin, bool) or not isinstance(margin, (int, float)) or not 0 <= margin < 1:
+            raise ContractError("visitor journey has invalid safetyMargin")
+        limits = item["limits"]
+        if not isinstance(limits, dict) or set(limits) != set(WINDOWS):
+            raise ContractError("visitor journey has missing or ambiguous limits")
+        for window in WINDOWS:
+            limit = _positive_int(limits[window], f"{window} limit")
+            if item["enabled"]:
+                volume = math.ceil(WINDOWS[window] / cadence) * concurrency * multiplicity
+                if volume >= limit * (1 - Fraction(str(margin))):
+                    raise ContractError(
+                        "unsafe visitor journey schedule: "
+                        f"environment={item['environment']} window={window} volume={volume}"
+                    )
+    return len(contract_data["producers"])
+
+
 def _reject_duplicate_json_fields(pairs):
     result = {}
     for key, value in pairs:
@@ -659,6 +741,12 @@ def main(argv=None):
         help="reviewed declarative encrypted-completion contract",
     )
     parser.add_argument(
+        "--visitor-journey-contract",
+        type=Path,
+        default=config_dir / "danielsmith-visitor-journey.json",
+        help="reviewed declarative visitor-journey contract",
+    )
+    parser.add_argument(
         "--probes",
         type=Path,
         help="already-rendered Probe YAML (default: kubectl kustomize active graph)",
@@ -668,6 +756,21 @@ def main(argv=None):
         contract = _single_yaml_document(args.contracts.read_text(encoding="utf-8"))
     except YAMLInputError:
         print("probe quota validation failed: YAML input is malformed", file=sys.stderr)
+        return 1
+    except OSError:
+        print("probe quota validation failed: unable to read an input file", file=sys.stderr)
+        return 1
+    try:
+        if configured_dir and not args.visitor_journey_contract.exists():
+            visitor_contract = {"schemaVersion": 1, "producers": []}
+        else:
+            visitor_contract = json.loads(
+                args.visitor_journey_contract.read_text(encoding="utf-8"),
+                object_pairs_hook=_reject_duplicate_json_fields,
+            )
+        validate_visitor_journey_contract(visitor_contract)
+    except (json.JSONDecodeError, ContractError) as exc:
+        print(f"probe quota validation failed: {exc}", file=sys.stderr)
         return 1
     except OSError:
         print("probe quota validation failed: unable to read an input file", file=sys.stderr)
