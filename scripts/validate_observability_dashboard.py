@@ -122,6 +122,42 @@ DANIEL_PANEL_CONTRACT = {
         "s",
         "age",
     ),
+    "Daniel performance result state": (
+        'max by (state) (daniel_performance_result_state{environment=~"$environment"})',
+        "short",
+        "{{state}}",
+    ),
+    "Daniel application-ready duration": (
+        "max(daniel_performance_application_ready_seconds"
+        '{environment=~"$environment",statistic="p95"})',
+        "s",
+        "p95",
+    ),
+    "Daniel controlled interaction latency": (
+        "max by (statistic) (daniel_performance_interaction_latency_seconds"
+        '{environment=~"$environment"})',
+        "s",
+        "{{statistic}}",
+    ),
+    "Daniel renderer and fallback state": (
+        "max by (renderer_class, renderer_state, fallback_status) "
+        "((daniel_performance_renderer_class"
+        '{environment=~"$environment"} == 1) * on(environment) '
+        "group_left(renderer_state) (daniel_performance_renderer_state"
+        '{environment=~"$environment"} == 1) * on(environment) '
+        "group_left(fallback_status) (daniel_performance_fallback_status"
+        '{environment=~"$environment"} == 1))',
+        "short",
+        "{{renderer_class}} {{renderer_state}} {{fallback_status}}",
+    ),
+    "Daniel controlled frame time": (
+        "max by (statistic, renderer_class) (daniel_performance_frame_time_seconds"
+        '{environment=~"$environment"} * on(environment) group_left(renderer_class) '
+        "(daniel_performance_renderer_class"
+        '{environment=~"$environment",renderer_class="hardware"} == 1))',
+        "s",
+        "{{renderer_class}} {{statistic}}",
+    ),
 }
 
 
@@ -224,10 +260,10 @@ def _expected_dashboard(dashboard: dict) -> dict:
 
 
 def _validate_grid(items: list[dict]) -> None:
-    if len(items) != 70 or sum(panel.get("type") == "row" for panel in items) != 12:
-        raise SystemExit("ERROR: canonical dashboard must contain exactly 70 objects and 12 rows.")
+    if len(items) != 76 or sum(panel.get("type") == "row" for panel in items) != 13:
+        raise SystemExit("ERROR: canonical dashboard must contain exactly 76 objects and 13 rows.")
     ids = [panel.get("id") for panel in items]
-    if ids != list(range(1, 71)):
+    if ids != list(range(1, 77)):
         raise SystemExit(
             "ERROR: canonical dashboard panel IDs must be stable consecutive integers."
         )

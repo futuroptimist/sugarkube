@@ -3122,6 +3122,180 @@
           "legendFormat": "age"
         }
       ]
+    },
+    {
+      "id": 71,
+      "type": "row",
+      "title": "Daniel controlled performance",
+      "description": "Passive controlled-run aggregates; no real-user monitoring or production thresholds.",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 214
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 72,
+      "title": "Daniel performance result state",
+      "type": "timeseries",
+      "description": "Completed, regression, or explicitly unavailable result.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 215
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (state) (daniel_performance_result_state{environment=~\"$environment\"})",
+          "legendFormat": "{{state}}"
+        }
+      ]
+    },
+    {
+      "id": 73,
+      "title": "Daniel application-ready duration",
+      "type": "timeseries",
+      "description": "Application-ready p95 from the latest controlled run.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 215
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(daniel_performance_application_ready_seconds{environment=~\"$environment\",statistic=\"p95\"})",
+          "legendFormat": "p95"
+        }
+      ]
+    },
+    {
+      "id": 74,
+      "title": "Daniel controlled interaction latency",
+      "type": "timeseries",
+      "description": "Median, p95, and maximum controlled keyboard event-dispatch latency.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 223
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (statistic) (daniel_performance_interaction_latency_seconds{environment=~\"$environment\"})",
+          "legendFormat": "{{statistic}}"
+        }
+      ]
+    },
+    {
+      "id": 75,
+      "title": "Daniel renderer and fallback state",
+      "type": "timeseries",
+      "description": "Renderer class remains distinct; fallback state and reason are bounded.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 223
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (renderer_class, renderer_state, fallback_status) ((daniel_performance_renderer_class{environment=~\"$environment\"} == 1) * on(environment) group_left(renderer_state) (daniel_performance_renderer_state{environment=~\"$environment\"} == 1) * on(environment) group_left(fallback_status) (daniel_performance_fallback_status{environment=~\"$environment\"} == 1))",
+          "legendFormat": "{{renderer_class}} {{renderer_state}} {{fallback_status}}"
+        }
+      ]
+    },
+    {
+      "id": 76,
+      "title": "Daniel controlled frame time",
+      "type": "timeseries",
+      "description": "Optional 120-frame hardware-only summary; unsupported runs remain NO DATA.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 231
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (statistic, renderer_class) (daniel_performance_frame_time_seconds{environment=~\"$environment\"} * on(environment) group_left(renderer_class) (daniel_performance_renderer_class{environment=~\"$environment\",renderer_class=\"hardware\"} == 1))",
+          "legendFormat": "{{renderer_class}} {{statistic}}"
+        }
+      ]
     }
   ]
 }

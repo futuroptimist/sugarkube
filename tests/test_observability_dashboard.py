@@ -146,9 +146,9 @@ def test_generator_check_and_outputs_are_deterministic(dashboards):
         'provider=\\"openai\\"', 'provider=\\"PRIMARY\\"'
     )
     assert staging_panels == prod_panels
-    assert len(staging["panels"]) == 70
-    assert sum(item["type"] == "row" for item in staging["panels"]) == 12
-    assert sum(item["type"] != "row" for item in staging["panels"]) == 58
+    assert len(staging["panels"]) == 76
+    assert sum(item["type"] == "row" for item in staging["panels"]) == 13
+    assert sum(item["type"] != "row" for item in staging["panels"]) == 63
 
 
 @pytest.mark.parametrize("state", metrics.STATES)
@@ -631,8 +631,9 @@ def test_canonical_order_ids_grid_and_defaults(dashboards):
         "token.place relay and compute capacity",
         "token.place HTTP and release",
         "Daniel GitHub metadata cache",
+        "Daniel controlled performance",
     ]
-    assert [item["id"] for item in staging["panels"]] == list(range(1, 71))
+    assert [item["id"] for item in staging["panels"]] == list(range(1, 77))
     assert panel(staging, "DSPACE instrumentation health")
     assert panel(staging, "DSPACE build identity")
     assert all(
