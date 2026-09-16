@@ -67,6 +67,9 @@ def test_descriptor_fails_closed_for_contract_drift_and_unsafe_schedule():
     data["sourceRevision"] = "0" * 40
     with pytest.raises(quotas.ContractError, match="source revision"):
         quotas.validate_visitor_contract(data)
+    del data["sourceRevision"]
+    with pytest.raises(quotas.ContractError, match="top-level fields"):
+        quotas.validate_visitor_contract(data)
 
 
 @pytest.mark.parametrize("mutation", ["empty", "deleted-prod", "changed-application"])
@@ -137,6 +140,55 @@ def test_result_schema_is_sanitized_finite_and_exact():
         metrics.validate_result(result(state="failure", failureStage="renderer"), now=1_010)
 
 
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        (result(state="unknown"), "state"),
+        (result(freshness=True), "freshness"),
+        (result(freshness=-1), "freshness"),
+        (result(freshness=1_311), "freshness"),
+        (result(failureStage="timeout"), "successful result"),
+    ],
+)
+def test_result_schema_rejects_each_invalid_bounded_value(value, message):
+    with pytest.raises(ValueError, match=message):
+        metrics.validate_result(value, now=1_010)
+
+
+@pytest.mark.parametrize("now", [True, math.inf, "1010"])
+def test_result_schema_rejects_invalid_clock(now):
+    with pytest.raises(ValueError, match="current time"):
+        metrics.validate_result(result(), now=now)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (lambda value: None, "metadata"),
+        (lambda value: value.update(name="bad name"), "identity"),
+        (lambda value: value.update(enabled=1), "enabled state"),
+        (lambda value: value.update(cadence="zero"), "cadence or timeout"),
+        (lambda value: value.update(timeout="15m"), "shorter than cadence"),
+    ],
+)
+def test_renderer_rejects_invalid_producer_metadata(mutation, message):
+    value = producer()
+    mutation(value)
+    if message == "metadata":
+        value = None
+    with pytest.raises(ValueError, match=message):
+        metrics.render_metrics(value, now=1_010)
+
+
+def test_renderer_rejects_invalid_clock_state_and_disabled_result():
+    with pytest.raises(ValueError, match="current time"):
+        metrics.render_metrics(producer(), now=math.nan)
+    with pytest.raises(ValueError, match="previous state"):
+        metrics.render_metrics(producer(), now=1_010, previous_state="disabled")
+    with pytest.raises(ValueError, match="disabled producer"):
+        metrics.render_metrics(producer(False), result(), now=1_010)
+
+
 def test_optional_renderer_is_separate_from_essential_metrics():
     output = metrics.render_metrics(producer(), result(), now=1_010)
     assert "renderer" not in output and "immersive" not in output
@@ -184,6 +236,48 @@ def test_offline_entry_point_validates_and_atomically_publishes_temp_files(tmp_p
     )
     assert completed.returncode != 0
     assert output.read_text(encoding="utf-8").endswith('state="success"} 1\n')
+
+
+def test_offline_entry_point_is_covered_in_process_and_cleans_failed_publish(tmp_path, monkeypatch):
+    output = tmp_path / "collector" / "visitor.prom"
+    assert (
+        metrics.main(
+            [
+                "--environment",
+                "staging",
+                "--output",
+                str(output),
+            ]
+        )
+        == 0
+    )
+    assert 'state="disabled"' in output.read_text(encoding="utf-8")
+    assert output.stat().st_mode & 0o777 == 0o644
+
+    def fail_replace(source, destination):
+        raise OSError("simulated publish failure")
+
+    monkeypatch.setattr(metrics.os, "replace", fail_replace)
+    with pytest.raises(OSError, match="simulated publish failure"):
+        metrics.main(["--environment", "prod", "--output", str(output)])
+    assert [path.name for path in output.parent.iterdir()] == ["visitor.prom"]
+
+
+def test_offline_entry_point_fails_closed_for_bad_input(tmp_path):
+    descriptor = tmp_path / "descriptor.json"
+    descriptor.write_text("{}", encoding="utf-8")
+    with pytest.raises(SystemExit) as raised:
+        metrics.main(
+            [
+                "--descriptor",
+                str(descriptor),
+                "--environment",
+                "staging",
+                "--output",
+                str(tmp_path / "visitor.prom"),
+            ]
+        )
+    assert raised.value.code == 2
 
 
 @pytest.mark.skipif(shutil.which("promtool") is None, reason="promtool is not installed")

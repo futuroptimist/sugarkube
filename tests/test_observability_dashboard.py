@@ -166,6 +166,19 @@ def test_daniel_visitor_units_and_lifecycle_labels_are_operator_visible(dashboar
         assert "danielsmith_visitor_journey_state" in state["expr"]
 
 
+def test_daniel_visitor_semantics_fail_closed(dashboards):
+    staging, _ = dashboards
+    wrong_unit = copy.deepcopy(staging)
+    panel(wrong_unit, "Daniel visitor journey success")["fieldConfig"]["defaults"]["unit"] = "s"
+    with pytest.raises(SystemExit, match="canonical dimension units"):
+        validator._validate_semantics(wrong_unit)
+
+    hidden_state = copy.deepcopy(staging)
+    panel(hidden_state, "Daniel visitor journey state")["targets"][0]["legendFormat"] = "state"
+    with pytest.raises(SystemExit, match="lifecycle labels"):
+        validator._validate_semantics(hidden_state)
+
+
 def test_all_ten_tables_are_simultaneous_single_frames(dashboards):
     staging, _ = dashboards
     tables = [item for item in staging["panels"] if item["type"] == "table"]
