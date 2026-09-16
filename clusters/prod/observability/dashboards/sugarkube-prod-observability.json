@@ -2948,6 +2948,220 @@
           }
         }
       ]
+    },
+    {
+      "id": 65,
+      "type": "row",
+      "title": "danielsmith.io visitor journey",
+      "description": "Application-owned essential journey; optional immersive rendering is intentionally separate and is not inferred.",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 189
+      }
+    },
+    {
+      "id": 66,
+      "type": "stat",
+      "title": "Daniel visitor journey state",
+      "description": "Disabled, unavailable, stale, failure, recovered, or success; disabled is never mapped to success.",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 190
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "danielsmith_visitor_journey_state{application=\"danielsmith\",environment=~\"$environment\"}",
+          "legendFormat": "{{state}}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "NO DATA",
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 67,
+      "type": "stat",
+      "title": "Daniel visitor journey success",
+      "description": "Last essential visitor-journey result only; optional immersive rendering does not affect it.",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 190
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "danielsmith_visitor_journey_success{application=\"danielsmith\",environment=~\"$environment\"}",
+          "legendFormat": "essential",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "NO DATA",
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 68,
+      "type": "stat",
+      "title": "Daniel visitor journey freshness",
+      "description": "Age of the last sanitized application-owned result.",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 190
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "time() - danielsmith_visitor_journey_freshness_timestamp_seconds{application=\"danielsmith\",environment=~\"$environment\"}",
+          "legendFormat": "age",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "NO DATA",
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 69,
+      "type": "timeseries",
+      "title": "Daniel visitor journey aggregate duration",
+      "description": "Aggregate duration across essential stages; no per-visitor or request labels.",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 196
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "danielsmith_visitor_journey_duration_seconds{application=\"danielsmith\",environment=~\"$environment\"}",
+          "legendFormat": "{{name}}"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "NO DATA",
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 70,
+      "type": "timeseries",
+      "title": "Daniel visitor journey classified failure",
+      "description": "Finite application-owned failure-stage vocabulary; none denotes success.",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 196
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "danielsmith_visitor_journey_failure_stage{application=\"danielsmith\",environment=~\"$environment\"}",
+          "legendFormat": "{{failure_stage}}"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "NO DATA",
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
     }
   ]
 }

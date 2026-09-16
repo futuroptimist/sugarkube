@@ -44,9 +44,9 @@ def test_generator_check_and_outputs_are_deterministic(dashboards):
         'provider=\\"openai\\"', 'provider=\\"PRIMARY\\"'
     )
     assert staging_panels == prod_panels
-    assert len(staging["panels"]) == 64
-    assert sum(item["type"] == "row" for item in staging["panels"]) == 11
-    assert sum(item["type"] != "row" for item in staging["panels"]) == 53
+    assert len(staging["panels"]) == 70
+    assert sum(item["type"] == "row" for item in staging["panels"]) == 12
+    assert sum(item["type"] != "row" for item in staging["panels"]) == 58
 
 
 def test_public_availability_summary_includes_gitshelves_in_every_expression(dashboards):
@@ -136,8 +136,9 @@ def test_canonical_order_ids_grid_and_defaults(dashboards):
         "DSPACE release integrity",
         "token.place relay and compute capacity",
         "token.place HTTP and release",
+        "danielsmith.io visitor journey",
     ]
-    assert [item["id"] for item in staging["panels"]] == list(range(1, 65))
+    assert [item["id"] for item in staging["panels"]] == list(range(1, 71))
     assert panel(staging, "DSPACE instrumentation health")
     assert panel(staging, "DSPACE build identity")
     assert all(

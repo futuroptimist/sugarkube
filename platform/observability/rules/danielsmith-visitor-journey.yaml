@@ -1,0 +1,27 @@
+---
+groups:
+  - name: danielsmith-visitor-journey
+    interval: 1m
+    rules:
+      - alert: DanielsmithVisitorJourneyFailed
+        expr: danielsmith_visitor_journey_monitoring_enabled{application="danielsmith"} == 1 and on (application, environment, name) (danielsmith_visitor_journey_success{application="danielsmith"} == 0)
+        for: 5m
+        labels:
+          application: danielsmith
+          severity: critical
+        annotations:
+          summary: danielsmith.io essential visitor journey failed
+          description: The application-owned essential visitor contract failed; optional immersive-rendering availability is not part of this alert.
+          remediation: Inspect only the bounded failure-stage metric, then qualify recovery before changing activation.
+          runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/danielsmith-visitor-journey.md#alerts
+      - alert: DanielsmithVisitorJourneyStaleOrUnavailable
+        expr: danielsmith_visitor_journey_monitoring_enabled{application="danielsmith"} == 1 and on (application, environment, name) (danielsmith_visitor_journey_state{application="danielsmith",state=~"stale|unavailable"} == 1)
+        for: 5m
+        labels:
+          application: danielsmith
+          severity: warning
+        annotations:
+          summary: danielsmith.io visitor journey result is stale or unavailable
+          description: An enabled producer has no current sanitized result; an intentionally disabled producer does not alert.
+          remediation: Verify the producer schedule and bounded result handoff without executing an unauthorized probe.
+          runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/danielsmith-visitor-journey.md#alerts
