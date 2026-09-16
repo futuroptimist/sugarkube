@@ -50,6 +50,40 @@ The current public stars flow does **not** require a GitHub token, Kubernetes Se
 
 The sidecar uses `refreshIntervalSeconds: 3600`. Its `cacheTtlSeconds: 7200` value gives the browser cache enough grace to avoid visible metric churn when one hourly refresh is late, so displayed stars can normally be up to about an hour old and may briefly remain older during GitHub outages or rate-limit windows.
 
+Sugarkube's `daniel-cache-exporter` reads that already-published runtime document once per
+Prometheus scrape. It is passive: it never calls GitHub and carries no GitHub credentials. The
+collector rejects documents over 262,144 bytes and treats missing, malformed, unsupported, or
+unreachable documents as `daniel_cache_document_up 0` plus the `unavailable` state; it never
+converts those cases, or a published `stale` state, into `fresh`.
+
+The **Daniel cache telemetry** dashboard row contains these aggregate, cardinality-safe panels:
+
+- **Daniel cache state and completeness** for the five fixed states and complete, partial, or no
+  data;
+- **Daniel cache freshness and retained-data age** for time since the last fully successful
+  refresh and the published oldest retained-data age;
+- **Daniel cache refresh duration**; and
+- **Daniel cache repository outcomes** for configured, successful, failed, and retained counts.
+
+Only `environment`, `state`, `completeness`, and the eight published fixed failure categories are
+eligible labels. Repository names, errors, URLs, request identities, and credentials are never
+exported as labels. A missing freshness or retained-age sample means the runtime contract supplied
+no timestamp or age; it is not a healthy zero. Before promotion, confirm the exporter target and
+bounded series without changing either application or cluster state:
+
+```bash
+kubectl --context sugar-staging -n monitoring get servicemonitor,deploy,svc \
+  -l app.kubernetes.io/name=daniel-cache-exporter
+```
+
+```promql
+max by (state) (daniel_cache_state{environment="staging"})
+```
+
+```promql
+max by (completeness) (daniel_cache_completeness{environment="staging"})
+```
+
 Staging/prod values enable the cache; dev remains disabled by the base values unless a local operator intentionally overrides it for chart testing. Because `SUGARKUBE_VERIFY_PATHS` is defined once per app config and shared by dev/staging/prod, the generic verify path list intentionally stays at `/`, `/livez`, and `/healthz`. `app-verify` cannot currently express staging/prod-only runtime JSON checks or optional paths safely, so keep `/runtime/github-metrics.json` as the required manual staging/prod sidecar verification path instead of adding it to the shared app config.
 
 ### Verify the runtime cache

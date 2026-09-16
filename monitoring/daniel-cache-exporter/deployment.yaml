@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: daniel-cache-exporter
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels: &labels
+      app.kubernetes.io/name: daniel-cache-exporter
+  template:
+    metadata:
+      labels: *labels
+    spec:
+      containers:
+        - name: exporter
+          image: python:3.12-alpine
+          command: [python3, /collector/daniel_cache_exporter.py]
+          env:
+            - name: ENVIRONMENT
+              value: staging
+            - name: DANIEL_CACHE_URL
+              value: https://staging.danielsmith.io/runtime/github-metrics.json
+          ports:
+            - name: metrics
+              containerPort: 9187
+          resources:
+            requests: {cpu: 10m, memory: 24Mi}
+            limits: {cpu: 100m, memory: 64Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - name: collector
+              mountPath: /collector
+              readOnly: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile: {type: RuntimeDefault}
+      volumes:
+        - name: collector
+          configMap: {name: daniel-cache-exporter}

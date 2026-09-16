@@ -9,5 +9,6 @@ patchesStrategicMerge:
   - patches/cloudflared-values.yaml
   - patches/cert-manager-settings.yaml
   - patches/longhorn-values.yaml
+  - patches/daniel-cache-exporter.yaml
 configurations:
   - kustomizeconfig.yaml

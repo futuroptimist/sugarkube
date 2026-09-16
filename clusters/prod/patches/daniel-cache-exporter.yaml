@@ -1,0 +1,15 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: daniel-cache-exporter
+  namespace: monitoring
+spec:
+  template:
+    spec:
+      containers:
+        - name: exporter
+          env:
+            - name: ENVIRONMENT
+              value: prod
+            - name: DANIEL_CACHE_URL
+              value: https://danielsmith.io/runtime/github-metrics.json

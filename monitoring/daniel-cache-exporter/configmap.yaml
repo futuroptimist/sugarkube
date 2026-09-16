@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: daniel-cache-exporter
+  namespace: monitoring
+data:
+  daniel_cache_exporter.py: |
+    # The executable is supplied by kustomize.configMapGenerator; this placeholder
+    # keeps the resource contract visible to static manifest readers.

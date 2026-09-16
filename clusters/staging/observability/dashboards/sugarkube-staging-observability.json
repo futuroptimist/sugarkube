@@ -2948,6 +2948,204 @@
           }
         }
       ]
+    },
+    {
+      "id": 65,
+      "type": "row",
+      "title": "Daniel cache telemetry",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 189
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "id": 66,
+      "title": "Daniel cache state and completeness",
+      "description": "Published cache state and data completeness remain separate bounded dimensions; stale and unavailable are never rendered as fresh.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 190
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (state) (daniel_cache_state{environment=~\"$environment\"})",
+          "legendFormat": "state {{state}}"
+        },
+        {
+          "refId": "B",
+          "expr": "max by (completeness) (daniel_cache_completeness{environment=~\"$environment\"})",
+          "legendFormat": "data {{completeness}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "id": 67,
+      "title": "Daniel cache freshness and retained-data age",
+      "description": "Age since the last fully successful refresh and age of the oldest retained data.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 190
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(daniel_cache_freshness_age_seconds{environment=~\"$environment\"})",
+          "legendFormat": "full refresh age"
+        },
+        {
+          "refId": "B",
+          "expr": "max(daniel_cache_retained_data_age_seconds{environment=~\"$environment\"})",
+          "legendFormat": "retained data age"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "id": 68,
+      "title": "Daniel cache refresh duration",
+      "description": "Duration of the latest passive cache refresh reported by Daniel; this exporter never starts a GitHub request.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 198
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(daniel_cache_refresh_duration_seconds{environment=~\"$environment\"})",
+          "legendFormat": "refresh duration"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "id": 69,
+      "title": "Daniel cache repository outcomes",
+      "description": "Aggregate configured, successful, failed, and retained repository counts without repository labels.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 198
+      },
+      "targets": [
+        {
+          "refId": "C",
+          "expr": "max(daniel_cache_repositories_configured{environment=~\"$environment\"})",
+          "legendFormat": "configured"
+        },
+        {
+          "refId": "S",
+          "expr": "max(daniel_cache_repositories_successful{environment=~\"$environment\"})",
+          "legendFormat": "successful"
+        },
+        {
+          "refId": "F",
+          "expr": "max(daniel_cache_repositories_failed{environment=~\"$environment\"})",
+          "legendFormat": "failed"
+        },
+        {
+          "refId": "R",
+          "expr": "max(daniel_cache_repositories_retained{environment=~\"$environment\"})",
+          "legendFormat": "retained"
+        }
+      ]
     }
   ]
 }
