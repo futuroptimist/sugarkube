@@ -24,6 +24,8 @@ change alone does not deploy them or promote a release. Follow the
 - Authoritative dashboard template:
   `platform/observability/dashboards/sugarkube-observability.template.json`.
 - Deterministic generator: `scripts/generate_observability_dashboards.py`.
+- Daniel's passive controlled-performance adapter and scheduler handoff:
+  [`docs/danielsmith-performance-observability.md`](danielsmith-performance-observability.md).
 - Generated staging artifact:
   `clusters/staging/observability/dashboards/sugarkube-staging-observability.json`.
 - Generated production artifact:

@@ -3122,6 +3122,184 @@
           "legendFormat": "age"
         }
       ]
+    },
+    {
+      "id": 71,
+      "title": "Daniel controlled performance",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 214
+      },
+      "panels": []
+    },
+    {
+      "id": 72,
+      "title": "Daniel performance result state",
+      "type": "stat",
+      "description": "Current controlled PerformanceResultV1 state; unavailable is distinct from success.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 215
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (state) (daniel_performance_result_state{environment=~\"$environment\"})",
+          "legendFormat": "{{state}}"
+        }
+      ]
+    },
+    {
+      "id": 73,
+      "title": "Daniel application-ready duration",
+      "type": "timeseries",
+      "description": "Application readiness duration. Unsupported or missing measurements remain NO DATA.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 215
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(daniel_performance_application_ready_seconds{environment=~\"$environment\",statistic=\"max\"})",
+          "legendFormat": "ready"
+        }
+      ]
+    },
+    {
+      "id": 74,
+      "title": "Daniel controlled interaction latency",
+      "type": "timeseries",
+      "description": "Controlled keyboard event-dispatch latency summaries; not end-to-end presentation latency.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 223
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (statistic) (daniel_performance_interaction_latency_seconds{environment=~\"$environment\"})",
+          "legendFormat": "{{statistic}}"
+        }
+      ]
+    },
+    {
+      "id": 75,
+      "title": "Daniel renderer and fallback state",
+      "type": "stat",
+      "description": "Renderer class and bounded fallback reason. Hardware and software populations stay distinct.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 223
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (renderer_class) (daniel_performance_renderer_class{environment=~\"$environment\"})",
+          "legendFormat": "renderer {{renderer_class}}"
+        },
+        {
+          "refId": "B",
+          "expr": "max by (fallback_reason) (daniel_performance_fallback{environment=~\"$environment\"})",
+          "legendFormat": "fallback {{fallback_reason}}"
+        }
+      ]
+    },
+    {
+      "id": 76,
+      "title": "Daniel controlled frame time",
+      "type": "timeseries",
+      "description": "Optional 120-frame controlled hardware summary. Unsupported and uncollected frames remain NO DATA.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 231
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (statistic) (daniel_performance_frame_time_seconds{environment=~\"$environment\"})",
+          "legendFormat": "{{statistic}}"
+        }
+      ]
     }
   ]
 }

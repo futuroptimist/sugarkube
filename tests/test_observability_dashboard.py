@@ -146,9 +146,9 @@ def test_generator_check_and_outputs_are_deterministic(dashboards):
         'provider=\\"openai\\"', 'provider=\\"PRIMARY\\"'
     )
     assert staging_panels == prod_panels
-    assert len(staging["panels"]) == 70
-    assert sum(item["type"] == "row" for item in staging["panels"]) == 12
-    assert sum(item["type"] != "row" for item in staging["panels"]) == 58
+    assert len(staging["panels"]) == 76
+    assert sum(item["type"] == "row" for item in staging["panels"]) == 13
+    assert sum(item["type"] != "row" for item in staging["panels"]) == 63
 
 
 @pytest.mark.parametrize("state", metrics.STATES)
@@ -516,6 +516,25 @@ def test_daniel_dashboard_contract_covers_metrics_scope_grouping_units_and_missi
         )
 
 
+def test_daniel_performance_dashboard_queries_units_legends_and_no_data(dashboards):
+    for document in (json.loads(TEMPLATE.read_text()), *dashboards):
+        for title, (expected_targets, unit) in validator.DANIEL_PERFORMANCE_PANEL_CONTRACT.items():
+            item = panel(document, title)
+            assert [
+                (target["expr"], target["legendFormat"]) for target in item["targets"]
+            ] == expected_targets
+            assert item["fieldConfig"]["defaults"]["unit"] == unit
+            assert item["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
+            assert all(
+                'environment=~"$environment"' in expression for expression, _ in expected_targets
+            )
+            assert all("vector(0)" not in expression for expression, _ in expected_targets)
+
+        frame = panel(document, "Daniel controlled frame time")
+        assert "frame_time_seconds" in frame["targets"][0]["expr"]
+        assert "measurement_state" not in frame["targets"][0]["expr"]
+
+
 @pytest.mark.parametrize(
     ("title", "mutation"),
     [
@@ -631,8 +650,9 @@ def test_canonical_order_ids_grid_and_defaults(dashboards):
         "token.place relay and compute capacity",
         "token.place HTTP and release",
         "Daniel GitHub metadata cache",
+        "Daniel controlled performance",
     ]
-    assert [item["id"] for item in staging["panels"]] == list(range(1, 71))
+    assert [item["id"] for item in staging["panels"]] == list(range(1, 77))
     assert panel(staging, "DSPACE instrumentation health")
     assert panel(staging, "DSPACE build identity")
     assert all(

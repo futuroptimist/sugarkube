@@ -123,6 +123,57 @@ DANIEL_PANEL_CONTRACT = {
         "age",
     ),
 }
+DANIEL_PERFORMANCE_PANEL_CONTRACT = {
+    "Daniel performance result state": (
+        [
+            (
+                'max by (state) (daniel_performance_result_state{environment=~"$environment"})',
+                "{{state}}",
+            )
+        ],
+        "short",
+    ),
+    "Daniel application-ready duration": (
+        [
+            (
+                'max(daniel_performance_application_ready_seconds{environment=~"$environment",statistic="max"})',
+                "ready",
+            )
+        ],
+        "s",
+    ),
+    "Daniel controlled interaction latency": (
+        [
+            (
+                'max by (statistic) (daniel_performance_interaction_latency_seconds{environment=~"$environment"})',
+                "{{statistic}}",
+            )
+        ],
+        "s",
+    ),
+    "Daniel renderer and fallback state": (
+        [
+            (
+                'max by (renderer_class) (daniel_performance_renderer_class{environment=~"$environment"})',
+                "renderer {{renderer_class}}",
+            ),
+            (
+                'max by (fallback_reason) (daniel_performance_fallback{environment=~"$environment"})',
+                "fallback {{fallback_reason}}",
+            ),
+        ],
+        "short",
+    ),
+    "Daniel controlled frame time": (
+        [
+            (
+                'max by (statistic) (daniel_performance_frame_time_seconds{environment=~"$environment"})',
+                "{{statistic}}",
+            )
+        ],
+        "s",
+    ),
+}
 
 
 def load_dashboard(path: Path) -> dict:
@@ -224,10 +275,10 @@ def _expected_dashboard(dashboard: dict) -> dict:
 
 
 def _validate_grid(items: list[dict]) -> None:
-    if len(items) != 70 or sum(panel.get("type") == "row" for panel in items) != 12:
-        raise SystemExit("ERROR: canonical dashboard must contain exactly 70 objects and 12 rows.")
+    if len(items) != 76 or sum(panel.get("type") == "row" for panel in items) != 13:
+        raise SystemExit("ERROR: canonical dashboard must contain exactly 76 objects and 13 rows.")
     ids = [panel.get("id") for panel in items]
-    if ids != list(range(1, 71)):
+    if ids != list(range(1, 77)):
         raise SystemExit(
             "ERROR: canonical dashboard panel IDs must be stable consecutive integers."
         )
@@ -356,6 +407,20 @@ def _validate_semantics(dashboard: dict) -> None:
             or "vector(0)" in expected_expression
         ):
             raise SystemExit(f"ERROR: {title} does not match the bounded Daniel contract.")
+    for title, (expected_targets, expected_unit) in DANIEL_PERFORMANCE_PANEL_CONTRACT.items():
+        panel = panel_named(dashboard, title)
+        targets = panel.get("targets", [])
+        defaults = panel.get("fieldConfig", {}).get("defaults", {})
+        actual = [(target.get("expr"), target.get("legendFormat")) for target in targets]
+        if (
+            actual != expected_targets
+            or defaults.get("unit") != expected_unit
+            or defaults.get("noValue") != "NO DATA"
+            or any("vector(0)" in expression for expression, _legend in expected_targets)
+        ):
+            raise SystemExit(
+                f"ERROR: {title} does not match the bounded Daniel performance contract."
+            )
     for title, expected in FIVE_XX_RATIO_EXPRESSIONS.items():
         if panel_expression(dashboard, title) != expected:
             raise SystemExit(f"ERROR: {title} must use its request-family-gated 5xx zero contract.")
