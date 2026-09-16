@@ -19,6 +19,9 @@ ROOT = Path(__file__).resolve().parents[1]
 WINDOWS = {"hourly": 3600, "daily": 86400}
 METHODS = {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
 ENVIRONMENTS = {"staging", "prod"}
+APPROVED_DANIELSMITH_VISITOR_SOURCE_REVISION = "7c972a57d5235591b0449d5d2a81dd8359bd97a5"
+DANIELSMITH_VISITOR_CADENCE = "15m"
+DANIELSMITH_VISITOR_TIMEOUT = "120s"
 COMPLETION_FIELDS = {
     "name",
     "application",
@@ -647,7 +650,7 @@ def validate_visitor_contract(contract_data, shared_buckets=None, shared_policie
         "producers",
     }:
         raise ContractError("visitor contract has missing or unknown top-level fields")
-    if contract_data["sourceRevision"] != "7c972a57d5235591b0449d5d2a81dd8359bd97a5":
+    if contract_data["sourceRevision"] != APPROVED_DANIELSMITH_VISITOR_SOURCE_REVISION:
         raise ContractError("visitor contract source revision is not approved")
     expected = {
         ("danielsmith-visitor-journey-staging", "danielsmith", "staging"),
@@ -667,6 +670,12 @@ def validate_visitor_contract(contract_data, shared_buckets=None, shared_policie
         raise ContractError(
             "visitor contract must contain the required staging and prod identities"
         )
+    for producer in producers:
+        if (
+            producer.get("cadence") != DANIELSMITH_VISITOR_CADENCE
+            or producer.get("timeout") != DANIELSMITH_VISITOR_TIMEOUT
+        ):
+            raise ContractError("visitor contract must use the pinned cadence and timeout")
     return validate_completion_contract(
         {"schemaVersion": contract_data["schemaVersion"], "producers": contract_data["producers"]},
         shared_buckets,

@@ -125,6 +125,14 @@ create_rules_overlay() {
              rules["groups"].is_a?(Array) && !rules["groups"].empty?
         abort "ERROR: canonical #{name} rules must contain only a nonempty groups list."
       end
+      if key == "danielsmith-visitor-journey"
+        rules["groups"].each do |group|
+          group["rules"].reject! do |rule|
+            rule["record"] == "danielsmith_visitor_journey_monitoring_expected" &&
+              rule.dig("labels", "environment") != environment
+          end
+        end
+      end
       [key, rules]
     end
     File.write(output, YAML.dump("additionalPrometheusRulesMap" => rules_map))

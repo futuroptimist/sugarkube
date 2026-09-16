@@ -32,9 +32,9 @@ MAX_CLOCK_SKEW_SECONDS = 300
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def _duration(value: object) -> int:
+def _duration(value: object, field: str) -> int:
     if not isinstance(value, str) or not re.fullmatch(r"[1-9][0-9]*[smh]", value):
-        raise ValueError("producer cadence or timeout is invalid")
+        raise ValueError(f"producer {field} is invalid")
     return int(value[:-1]) * {"s": 1, "m": 60, "h": 3600}[value[-1]]
 
 
@@ -93,7 +93,8 @@ def render_metrics(
         or not math.isfinite(current)
     ):
         raise ValueError("current time is invalid")
-    cadence, timeout = _duration(producer.get("cadence")), _duration(producer.get("timeout"))
+    cadence = _duration(producer.get("cadence"), "cadence")
+    timeout = _duration(producer.get("timeout"), "timeout")
     if timeout >= cadence:
         raise ValueError("producer timeout must be shorter than cadence")
     if not producer["enabled"] and result is not None:
@@ -146,6 +147,31 @@ def render_metrics(
     return "\n".join(lines) + "\n"
 
 
+def previous_state(output: Path, producer: dict) -> str | None:
+    """Read the prior lifecycle emitted for this exact producer, when present."""
+    if not output.exists():
+        return None
+    labels = ",".join(f'{key}="{producer[key]}"' for key in ("application", "environment", "name"))
+    prefix = f'danielsmith_visitor_journey_state{{{labels},state="'
+    matches = [
+        line[len(prefix) : -4]
+        for line in output.read_text(encoding="utf-8").splitlines()
+        if line.startswith(prefix) and line.endswith('"} 1')
+    ]
+    if not matches:
+        return None
+    if len(matches) != 1 or matches[0] not in {
+        "disabled",
+        "unavailable",
+        "stale",
+        "failure",
+        "success",
+        "recovered",
+    }:
+        raise ValueError("existing output has an invalid prior state")
+    return None if matches[0] == "disabled" else matches[0]
+
+
 def main(argv: list[str] | None = None) -> int:
     """Validate one descriptor/result pair and atomically publish text metrics."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -159,15 +185,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args(argv)
     try:
-        descriptor = json.loads(args.descriptor.read_text(encoding="utf-8"))
+        descriptor = json.loads(
+            args.descriptor.read_text(encoding="utf-8"),
+            object_pairs_hook=validate_probe_quotas._reject_duplicate_json_fields,
+        )
         validate_probe_quotas.validate_visitor_contract(descriptor)
         producer = next(
             item for item in descriptor["producers"] if item["environment"] == args.environment
         )
         result = (
-            json.loads(args.result.read_text(encoding="utf-8")) if args.result is not None else None
+            json.loads(
+                args.result.read_text(encoding="utf-8"),
+                object_pairs_hook=validate_probe_quotas._reject_duplicate_json_fields,
+            )
+            if args.result is not None
+            else None
         )
-        content = render_metrics(producer, result)
+        content = render_metrics(
+            producer, result, previous_state=previous_state(args.output, producer)
+        )
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError, StopIteration) as error:
         parser.error(str(error))
 

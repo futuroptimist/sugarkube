@@ -120,6 +120,17 @@ def yaml_load(path: Path):
     return json.loads(result.stdout)
 
 
+def visitor_rules_for(environment: str):
+    rules = yaml_load(CANONICAL_DANIELSMITH_VISITOR_RULES)
+    rules["groups"][0]["rules"] = [
+        rule
+        for rule in rules["groups"][0]["rules"]
+        if rule.get("record") != "danielsmith_visitor_journey_monitoring_expected"
+        or rule["labels"]["environment"] == environment
+    ]
+    return rules
+
+
 def test_chart_version_and_values_define_shared_staging_and_production_baseline():
     assert VERSION.read_text(encoding="utf-8").strip() == "87.19.0"
     common = yaml_load(COMMON)
@@ -578,7 +589,7 @@ def test_dspace_rules_have_one_canonical_source_and_exact_overlay(tmp_path):
         "additionalPrometheusRulesMap": {
             "dspace-release-integrity": yaml_load(CANONICAL_DSPACE_RULES),
             "cloudflare-tunnel": yaml_load(CANONICAL_CLOUDFLARE_RULES),
-            "danielsmith-visitor-journey": yaml_load(CANONICAL_DANIELSMITH_VISITOR_RULES),
+            "danielsmith-visitor-journey": visitor_rules_for("staging"),
         }
     }
     overlay_paths = re.findall(r"/[^ ]*sugarkube-observability-rules\.[^ ]*\.yaml", audit)
@@ -605,7 +616,7 @@ def test_prod_rules_overlay_ignores_invalid_staging_only_rules(tmp_path):
     assert yaml_load(tmp_path / "rules-overlay.yaml") == {
         "additionalPrometheusRulesMap": {
             "tokenplace-production": yaml_load(CANONICAL_TOKENPLACE_RULES),
-            "danielsmith-visitor-journey": yaml_load(CANONICAL_DANIELSMITH_VISITOR_RULES),
+            "danielsmith-visitor-journey": visitor_rules_for("prod"),
         }
     }
 

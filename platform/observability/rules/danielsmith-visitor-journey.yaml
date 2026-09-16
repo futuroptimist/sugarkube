@@ -23,6 +23,7 @@ groups:
           and on (application, environment, name)
           danielsmith_visitor_journey_state{application="danielsmith",state="failure"} == 1
           and on (application, environment, name)
+          # Pinned schedule freshness: 15m cadence (900s) + 120s timeout.
           time() - danielsmith_visitor_journey_freshness_timestamp_seconds{application="danielsmith"} <= 1020
         for: 5m
         labels:
@@ -38,6 +39,7 @@ groups:
           danielsmith_visitor_journey_monitoring_expected{application="danielsmith"} == 1
           and on (application, environment, name)
           (
+            # Pinned schedule freshness: 15m cadence (900s) + 120s timeout.
             time() - danielsmith_visitor_journey_freshness_timestamp_seconds{application="danielsmith"} > 1020
             or
             danielsmith_visitor_journey_monitoring_expected{application="danielsmith"} == 1

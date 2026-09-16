@@ -3,6 +3,7 @@ import json
 import math
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -49,7 +50,7 @@ def result(**updates):
 
 def test_descriptor_is_pinned_disabled_and_quota_validated():
     data = inventory()
-    assert data["sourceRevision"] == "7c972a57d5235591b0449d5d2a81dd8359bd97a5"
+    assert data["sourceRevision"] == quotas.APPROVED_DANIELSMITH_VISITOR_SOURCE_REVISION
     assert {(p["environment"], p["enabled"]) for p in data["producers"]} == {
         ("staging", False),
         ("prod", False),
@@ -69,6 +70,14 @@ def test_descriptor_fails_closed_for_contract_drift_and_unsafe_schedule():
         quotas.validate_visitor_contract(data)
     del data["sourceRevision"]
     with pytest.raises(quotas.ContractError, match="top-level fields"):
+        quotas.validate_visitor_contract(data)
+
+
+@pytest.mark.parametrize(("field", "value"), [("cadence", "30m"), ("timeout", "60s")])
+def test_descriptor_pins_schedule_used_by_alert_freshness(field, value):
+    data = inventory()
+    data["producers"][0][field] = value
+    with pytest.raises(quotas.ContractError, match="pinned cadence and timeout"):
         quotas.validate_visitor_contract(data)
 
 
@@ -108,7 +117,7 @@ def test_custom_config_keeps_optional_absence_but_explicit_missing_fails(tmp_pat
         == 1
     )
     data = inventory()
-    data["producers"][0].update(enabled=True, requestMultiplicity=1000, cadence="121s")
+    data["producers"][0].update(enabled=True, requestMultiplicity=1000)
     with pytest.raises(quotas.ContractError, match="unsafe completion schedule"):
         quotas.validate_visitor_contract(data)
 
@@ -167,7 +176,7 @@ def test_result_schema_rejects_invalid_clock(now):
         (lambda value: None, "metadata"),
         (lambda value: value.update(name="bad name"), "identity"),
         (lambda value: value.update(enabled=1), "enabled state"),
-        (lambda value: value.update(cadence="zero"), "cadence or timeout"),
+        (lambda value: value.update(cadence="zero"), "cadence"),
         (lambda value: value.update(timeout="15m"), "shorter than cadence"),
     ],
 )
@@ -202,9 +211,7 @@ def test_offline_entry_point_validates_and_atomically_publishes_temp_files(tmp_p
     data["producers"][0]["requestMultiplicity"] = 1
     descriptor.write_text(json.dumps(data), encoding="utf-8")
     sanitized = tmp_path / "result.json"
-    sanitized.write_text(
-        json.dumps(result(freshness=int(__import__("time").time()))), encoding="utf-8"
-    )
+    sanitized.write_text(json.dumps(result(freshness=int(time.time()))), encoding="utf-8")
     output = tmp_path / "collector" / "visitor.prom"
     completed = subprocess.run(
         [
@@ -236,6 +243,45 @@ def test_offline_entry_point_validates_and_atomically_publishes_temp_files(tmp_p
     )
     assert completed.returncode != 0
     assert output.read_text(encoding="utf-8").endswith('state="success"} 1\n')
+
+
+def test_offline_entry_point_rejects_duplicate_fields_and_publishes_recovery(tmp_path):
+    descriptor = tmp_path / "descriptor.json"
+    data = inventory()
+    data["producers"][0].update(enabled=True, requestMultiplicity=1)
+    descriptor.write_text(json.dumps(data), encoding="utf-8")
+    sanitized = tmp_path / "result.json"
+    output = tmp_path / "visitor.prom"
+    now = int(time.time())
+    sanitized.write_text(
+        '{"state":"failure","state":"success","freshness":%d,'
+        '"aggregateDurationMs":1,"failureStage":null}' % now,
+        encoding="utf-8",
+    )
+    arguments = [
+        "--descriptor",
+        str(descriptor),
+        "--environment",
+        "staging",
+        "--result",
+        str(sanitized),
+        "--output",
+        str(output),
+    ]
+    with pytest.raises(SystemExit) as raised:
+        metrics.main(arguments)
+    assert raised.value.code == 2
+    assert not output.exists()
+
+    sanitized.write_text(
+        json.dumps(result(state="failure", freshness=now, failureStage="timeout")),
+        encoding="utf-8",
+    )
+    assert metrics.main(arguments) == 0
+    assert 'state="failure"} 1' in output.read_text(encoding="utf-8")
+    sanitized.write_text(json.dumps(result(freshness=now)), encoding="utf-8")
+    assert metrics.main(arguments) == 0
+    assert 'state="recovered"} 1' in output.read_text(encoding="utf-8")
 
 
 def test_offline_entry_point_is_covered_in_process_and_cleans_failed_publish(tmp_path, monkeypatch):

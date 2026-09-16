@@ -24,9 +24,11 @@ exported because revision `7c972a5` defines no sanitized optional-renderer field
 The offline publishing entry point is
 `scripts/danielsmith_visitor_metrics.py --environment ENV --result RESULT.json
 --output OUTPUT.prom`. It revalidates the committed descriptor and sanitized JSON,
-then atomically writes only Prometheus text format. For a disabled descriptor omit
-`--result`; supplying a result while disabled fails closed. Tests exercise this
-handoff with temporary files only.
+then atomically writes only Prometheus text format. It rejects duplicate JSON fields
+and reads the previous lifecycle from the existing output so the first fresh success
+after an unavailable, stale, or failed result is published as recovered. For a
+disabled descriptor omit `--result`; supplying a result while disabled fails closed.
+Tests exercise this handoff with temporary files only.
 
 No application producer currently calls this entry point, and no node-exporter
 textfile-collector installation or scrape target is provisioned by this change.
@@ -38,11 +40,13 @@ the journey.
 
 `DanielsmithVisitorJourneyFailed` reports a current executed essential-journey
 failure. Both alert expressions compare Prometheus evaluation time with the exported
-completion timestamp, so a frozen success or failure becomes stale after the
-15-minute cadence plus 120-second timeout. The independent
+completion timestamp, so a frozen success or failure becomes stale after the pinned
+15-minute cadence plus 120-second timeout. Contract validation rejects schedule drift
+that would desynchronize this threshold. The independent
 `danielsmith_visitor_journey_monitoring_expected` recording rules remain zero in
-both environments; a future authorized activation must change the corresponding
-declaration as part of provisioning so loss of all exporter series is detectable.
+both environments; Helm includes only the declaration for the environment being
+rendered. A future authorized activation must change the corresponding declaration
+as part of provisioning so loss of all exporter series is detectable.
 `DanielsmithVisitorJourneyStaleOrUnavailable` reports missing or stale results only
 when monitoring is declared expected. Disabled monitoring is visible on the
 dashboard but never treated as success and never pages.
