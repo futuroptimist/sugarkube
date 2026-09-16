@@ -526,7 +526,13 @@ def validate(
     return len(active)
 
 
-def validate_completion_contract(contract_data, shared_buckets=None, shared_policies=None):
+def validate_completion_contract(
+    contract_data,
+    shared_buckets=None,
+    shared_policies=None,
+    *,
+    expected_stages=None,
+):
     """Validate declarative completion schedules without executing a journey."""
     if not isinstance(contract_data, dict) or set(contract_data) != {"schemaVersion", "producers"}:
         raise ContractError("completion contract has missing or unknown top-level fields")
@@ -539,7 +545,7 @@ def validate_completion_contract(contract_data, shared_buckets=None, shared_poli
         else defaultdict(lambda: {"hourly": 0, "daily": 0, "records": []})
     )
     policies = shared_policies if shared_policies is not None else {}
-    expected_stages = {
+    expected_stages = expected_stages or {
         "none",
         "timeout",
         "compute_unavailable",
@@ -633,6 +639,50 @@ def validate_completion_contract(contract_data, shared_buckets=None, shared_poli
     return len(contract_data["producers"])
 
 
+def validate_visitor_contract(contract_data, shared_buckets=None, shared_policies=None):
+    """Validate the pinned application-owned visitor-journey schedules."""
+    if not isinstance(contract_data, dict) or set(contract_data) != {
+        "schemaVersion",
+        "sourceRevision",
+        "producers",
+    }:
+        raise ContractError("visitor contract has missing or unknown top-level fields")
+    if contract_data["sourceRevision"] != "7c972a57d5235591b0449d5d2a81dd8359bd97a5":
+        raise ContractError("visitor contract source revision is not approved")
+    expected = {
+        ("danielsmith-visitor-journey-staging", "danielsmith", "staging"),
+        ("danielsmith-visitor-journey-prod", "danielsmith", "prod"),
+    }
+    producers = contract_data["producers"]
+    if (
+        not isinstance(producers, list)
+        or {
+            (item.get("name"), item.get("application"), item.get("environment"))
+            for item in producers
+            if isinstance(item, dict)
+        }
+        != expected
+        or len(producers) != len(expected)
+    ):
+        raise ContractError(
+            "visitor contract must contain the required staging and prod identities"
+        )
+    return validate_completion_contract(
+        {"schemaVersion": contract_data["schemaVersion"], "producers": contract_data["producers"]},
+        shared_buckets,
+        shared_policies,
+        expected_stages={
+            "homepage_delivery",
+            "javascript_initialization",
+            "essential_assets",
+            "accessible_fallback",
+            "resume_pdf",
+            "timeout",
+            "producer_interrupted",
+        },
+    )
+
+
 def _reject_duplicate_json_fields(pairs):
     result = {}
     for key, value in pairs:
@@ -658,12 +708,14 @@ def main(argv=None):
         type=Path,
         help="reviewed declarative encrypted-completion contract",
     )
+    parser.add_argument("--visitor-contract", type=Path, help="reviewed visitor-journey contract")
     parser.add_argument(
         "--probes",
         type=Path,
         help="already-rendered Probe YAML (default: kubectl kustomize active graph)",
     )
     args = parser.parse_args(argv)
+    visitor_path = args.visitor_contract or config_dir / "danielsmith-visitor-journey.json"
     try:
         contract = _single_yaml_document(args.contracts.read_text(encoding="utf-8"))
     except YAMLInputError:
@@ -685,6 +737,15 @@ def main(argv=None):
                 completion_path.read_text(encoding="utf-8"),
                 object_pairs_hook=_reject_duplicate_json_fields,
             )
+        if configured_dir and args.visitor_contract is None and not visitor_path.exists():
+            # Preserve compatibility for custom configuration directories that
+            # predate this optional inventory. Explicit paths remain fail closed.
+            visitor_contract = None
+        else:
+            visitor_contract = json.loads(
+                visitor_path.read_text(encoding="utf-8"),
+                object_pairs_hook=_reject_duplicate_json_fields,
+            )
     except json.JSONDecodeError:
         print("probe quota validation failed: JSON input is malformed", file=sys.stderr)
         return 1
@@ -698,6 +759,8 @@ def main(argv=None):
         buckets = defaultdict(lambda: {"hourly": 0, "daily": 0, "records": []})
         policies = {}
         validate_completion_contract(completion_contract, buckets, policies)
+        if visitor_contract is not None:
+            validate_visitor_contract(visitor_contract, buckets, policies)
         # One inventory owns both environments. Validate its complete structure so
         # malformed declarations cannot disappear during environment selection.
         contract = select_environment_contract(contract, args.env)
