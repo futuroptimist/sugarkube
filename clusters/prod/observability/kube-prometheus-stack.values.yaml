@@ -91,3 +91,11 @@ alertmanager:
             send_resolved: false
             max_alerts: 1
             timeout: 10s
+prometheus-node-exporter:
+  extraArgs:
+    - --collector.textfile.directory=/var/lib/node_exporter/textfile_collector
+  extraHostVolumeMounts:
+    - name: daniel-cache-textfile
+      hostPath: /var/lib/node_exporter/textfile_collector
+      mountPath: /var/lib/node_exporter/textfile_collector
+      readOnly: true

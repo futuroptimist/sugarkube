@@ -96,6 +96,33 @@ FIVE_XX_RATIO_EXPRESSIONS = {
         "[$__rate_interval])), 1e-9)"
     ),
 }
+DANIEL_PANEL_CONTRACT = {
+    "Daniel cache state": (
+        'max by (state) (daniel_cache_state{environment=~"$environment"})',
+        "short",
+        "{{state}}",
+    ),
+    "Daniel cache freshness": (
+        'max(daniel_cache_freshness_age_seconds{environment=~"$environment"})',
+        "s",
+        "age",
+    ),
+    "Daniel cache completeness": (
+        'max by (completeness) (daniel_cache_data_completeness{environment=~"$environment"})',
+        "short",
+        "{{completeness}}",
+    ),
+    "Daniel cache refresh duration": (
+        'max(daniel_cache_refresh_duration_seconds{environment=~"$environment"})',
+        "s",
+        "duration",
+    ),
+    "Daniel cache retained-data age": (
+        'max(daniel_cache_retained_data_age_seconds{environment=~"$environment"})',
+        "s",
+        "age",
+    ),
+}
 
 
 def load_dashboard(path: Path) -> dict:
@@ -332,6 +359,23 @@ def _validate_semantics(dashboard: dict) -> None:
         raise SystemExit("ERROR: token.place queries require environment and cluster variables.")
     if any("vector(0)" in expr for expr in token_expressions):
         raise SystemExit("ERROR: token.place queries must preserve missing data.")
+    for title, (
+        expected_expression,
+        expected_unit,
+        expected_legend,
+    ) in DANIEL_PANEL_CONTRACT.items():
+        daniel_panel = panel_named(dashboard, title)
+        targets = daniel_panel.get("targets", [])
+        defaults = daniel_panel.get("fieldConfig", {}).get("defaults", {})
+        if (
+            len(targets) != 1
+            or targets[0].get("expr") != expected_expression
+            or targets[0].get("legendFormat") != expected_legend
+            or defaults.get("unit") != expected_unit
+            or defaults.get("noValue") != "NO DATA"
+            or "vector(0)" in expected_expression
+        ):
+            raise SystemExit(f"ERROR: {title} does not match the bounded Daniel contract.")
     for title, expected in FIVE_XX_RATIO_EXPRESSIONS.items():
         if panel_expression(dashboard, title) != expected:
             raise SystemExit(f"ERROR: {title} must use its request-family-gated 5xx zero contract.")

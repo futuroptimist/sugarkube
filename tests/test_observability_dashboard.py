@@ -1,7 +1,12 @@
 import copy
 import json
+import re
+import stat
 import subprocess
 import sys
+import urllib.error
+from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path
 
 import pytest
@@ -12,6 +17,7 @@ PROD = ROOT / "clusters/prod/observability/dashboards/sugarkube-prod-observabili
 GENERATOR = ROOT / "scripts/generate_observability_dashboards.py"
 TEMPLATE = ROOT / "platform/observability/dashboards/sugarkube-observability.template.json"
 sys.path.insert(0, str(ROOT))
+from scripts import daniel_cache_metrics as metrics  # noqa: E402
 from scripts import generate_observability_dashboards as generator  # noqa: E402
 from scripts import validate_observability_dashboard as validator  # noqa: E402
 
@@ -29,6 +35,102 @@ def write_candidate(tmp_path, document):
     path = tmp_path / f'{document["uid"]}.json'
     path.write_text(json.dumps(document), encoding="utf-8")
     return path
+
+
+FIXED_NOW = datetime(2026, 9, 16, 0, 1, tzinfo=timezone.utc)
+
+
+def daniel_document(state="fresh", **overrides):
+    variants = {
+        "disabled": dict(
+            enabled=False,
+            dataCompleteness="none",
+            configuredRepositoryCount=0,
+            successfulRepositoryCount=0,
+            failedRepositoryCount=0,
+            retainedRepositoryCount=0,
+            failureCategories=[],
+            repos={},
+            nulls=True,
+        ),
+        "warming": dict(
+            enabled=True,
+            dataCompleteness="none",
+            configuredRepositoryCount=2,
+            successfulRepositoryCount=0,
+            failedRepositoryCount=0,
+            retainedRepositoryCount=0,
+            failureCategories=[],
+            repos={},
+            nulls=True,
+        ),
+        "fresh": dict(
+            enabled=True,
+            dataCompleteness="complete",
+            configuredRepositoryCount=2,
+            successfulRepositoryCount=2,
+            failedRepositoryCount=0,
+            retainedRepositoryCount=0,
+            failureCategories=[],
+            repos={"a/one": {}, "a/two": {}},
+            nulls=False,
+        ),
+        "stale": dict(
+            enabled=True,
+            dataCompleteness="partial",
+            configuredRepositoryCount=2,
+            successfulRepositoryCount=1,
+            failedRepositoryCount=1,
+            retainedRepositoryCount=1,
+            failureCategories=["timeout"],
+            repos={"a/one": {}, "a/two": {}},
+            nulls=False,
+        ),
+        "unavailable": dict(
+            enabled=True,
+            dataCompleteness="none",
+            configuredRepositoryCount=2,
+            successfulRepositoryCount=0,
+            failedRepositoryCount=2,
+            retainedRepositoryCount=0,
+            failureCategories=["network"],
+            repos={},
+            nulls=False,
+        ),
+    }
+    values = variants[state]
+    nulls = values.pop("nulls")
+    repos = values.pop("repos")
+    cache = {
+        "state": state,
+        "lastSuccessfulRefreshAt": (
+            None if state in {"disabled", "warming", "unavailable"} else "2026-09-16T00:00:00Z"
+        ),
+        "refreshDurationMs": None if nulls else 3_600_000,
+        "oldestDataFetchedAt": None if not repos else "2026-09-15T23:59:00Z",
+        "retainedDataAgeSeconds": None if not repos else 60,
+        **values,
+    }
+    cache.update(overrides.pop("cache", {}))
+    document = {
+        "schemaVersion": 1,
+        "generatedAt": None if nulls else "2026-09-15T23:59:00Z",
+        "expiresAt": None if nulls else "2026-09-16T01:14:00Z",
+        "source": "static-neutral-placeholder" if state == "disabled" else "github-api",
+        "repos": repos,
+        "errors": {},
+        "cache": cache,
+    }
+    document.update(overrides)
+    return json.dumps(document).encode()
+
+
+class DanielResponse(BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return None
 
 
 def test_generator_check_and_outputs_are_deterministic(dashboards):
@@ -49,6 +151,343 @@ def test_generator_check_and_outputs_are_deterministic(dashboards):
     assert sum(item["type"] != "row" for item in staging["panels"]) == 58
 
 
+@pytest.mark.parametrize("state", metrics.STATES)
+def test_daniel_collector_accepts_every_published_state(state):
+    output = metrics.render(daniel_document(state), "staging", now=FIXED_NOW)
+    assert f'state="{state}"}} 1' in output
+    expected = {"fresh": "complete", "stale": "partial"}.get(state, "none")
+    assert f'completeness="{expected}"}} 1' in output
+
+
+def test_daniel_collector_preserves_all_categories_and_numeric_boundaries():
+    payload = daniel_document(
+        "stale",
+        cache={
+            "failureCategories": list(metrics.FAILURES),
+            "configuredRepositoryCount": 50,
+            "successfulRepositoryCount": 49,
+            "failedRepositoryCount": 1,
+            "retainedRepositoryCount": 1,
+            "refreshDurationMs": metrics.MAX_DURATION_MS,
+            "retainedDataAgeSeconds": metrics.MAX_AGE_SECONDS,
+        },
+        repos={f"a/repo-{index}": {} for index in range(50)},
+    )
+    output = metrics.render(payload, "prod", now=FIXED_NOW)
+    assert 'refresh_duration_seconds{environment="prod"} 3600' in output
+    assert 'retained_data_age_seconds{environment="prod"} 3.1536e+07' in output
+    assert all(f'category="{category}"}} 1' in output for category in metrics.FAILURES)
+
+
+def test_daniel_collector_emits_only_bounded_metric_labels_and_values():
+    repository = "distinctive-owner/distinctive-repository"
+    url = "https://example.invalid/distinctive-repository"
+    arbitrary = "distinctive-non-metric-text"
+    payload = json.loads(daniel_document("fresh"))
+    payload["source"] = arbitrary
+    payload["repos"] = {
+        repository: {"url": url, "description": arbitrary},
+        "a/two": {"url": f"{url}/two"},
+    }
+    payload["errors"] = {repository: arbitrary}
+
+    output = metrics.render(json.dumps(payload).encode(), "prod", now=FIXED_NOW)
+    series = {}
+    for line in output.splitlines():
+        if line.startswith("#"):
+            continue
+        name, labels, _value = re.fullmatch(r"(\w+)\{([^}]*)\} (\S+)", line).groups()
+        parsed_labels = dict(re.findall(r'(\w+)="([^"]*)"', labels))
+        series.setdefault(name, []).append(parsed_labels)
+
+    expected = {
+        "daniel_cache_collection_up": ({"environment"}, 1),
+        "daniel_cache_state": ({"environment", "state"}, len(metrics.STATES)),
+        "daniel_cache_data_completeness": (
+            {"environment", "completeness"},
+            len(metrics.COMPLETENESS),
+        ),
+        "daniel_cache_document_status": (
+            {"environment", "status"},
+            len(metrics.DOCUMENT_STATUSES),
+        ),
+        "daniel_cache_failure_category": (
+            {"environment", "category"},
+            len(metrics.FAILURES),
+        ),
+        "daniel_cache_freshness_age_seconds": ({"environment"}, 1),
+        "daniel_cache_refresh_duration_seconds": ({"environment"}, 1),
+        "daniel_cache_retained_data_age_seconds": ({"environment"}, 1),
+        "daniel_cache_repositories": ({"environment", "result"}, 4),
+    }
+    assert set(series) == set(expected)
+    for name, (label_keys, count) in expected.items():
+        assert len(series[name]) == count
+        assert all(set(labels) == label_keys for labels in series[name])
+        assert all(labels["environment"] == "prod" for labels in series[name])
+    assert {labels["state"] for labels in series["daniel_cache_state"]} == set(metrics.STATES)
+    assert {labels["completeness"] for labels in series["daniel_cache_data_completeness"]} == set(
+        metrics.COMPLETENESS
+    )
+    assert {labels["status"] for labels in series["daniel_cache_document_status"]} == set(
+        metrics.DOCUMENT_STATUSES
+    )
+    assert {labels["category"] for labels in series["daniel_cache_failure_category"]} == set(
+        metrics.FAILURES
+    )
+    assert {labels["result"] for labels in series["daniel_cache_repositories"]} == {
+        "configured",
+        "successful",
+        "failed",
+        "retained",
+    }
+    assert repository not in output
+    assert url not in output
+    assert arbitrary not in output
+
+
+@pytest.mark.parametrize(
+    ("state", "cache_change"),
+    [
+        ("fresh", {"dataCompleteness": "none"}),
+        ("fresh", {"failedRepositoryCount": 1}),
+        ("fresh", {"successfulRepositoryCount": True}),
+        ("stale", {"retainedRepositoryCount": 2}),
+        ("unavailable", {"successfulRepositoryCount": 1}),
+        ("warming", {"refreshDurationMs": 1}),
+    ],
+)
+def test_daniel_collector_rejects_contradictory_or_invalid_cache_fields(state, cache_change):
+    with pytest.raises(metrics.InvalidDocument):
+        metrics.parse_document(daniel_document(state, cache=cache_change), now=FIXED_NOW)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"schemaVersion": True},
+        {"source": None},
+        {"generatedAt": 123},
+        {"expiresAt": "not-a-timestamp"},
+        {"errors": []},
+    ],
+)
+def test_daniel_collector_rejects_invalid_envelope_types(change):
+    with pytest.raises(metrics.InvalidDocument):
+        metrics.parse_document(daniel_document("fresh", **change), now=FIXED_NOW)
+
+
+def test_daniel_collector_rejects_missing_fields_and_structured_categories():
+    missing = json.loads(daniel_document("fresh"))
+    del missing["cache"]["failedRepositoryCount"]
+    structured = json.loads(daniel_document("stale"))
+    structured["cache"]["failureCategories"] = [{"code": "timeout"}]
+    for payload in (missing, structured):
+        with pytest.raises(metrics.InvalidDocument):
+            metrics.parse_document(json.dumps(payload).encode(), now=FIXED_NOW)
+
+
+@pytest.mark.parametrize(
+    ("payload", "status"),
+    [(b"not json", "malformed"), (b"{" + b" " * metrics.MAX_BYTES, "oversized")],
+)
+def test_daniel_malformed_input_replaces_healthy_textfile(tmp_path, payload, status):
+    path = tmp_path / "daniel-cache.prom"
+    metrics.write_textfile(path, metrics.render(daniel_document("fresh"), "prod", now=FIXED_NOW))
+    result = metrics.collect(
+        metrics.RUNTIME_URLS["prod"],
+        "prod",
+        opener=lambda *_args, **_kwargs: DanielResponse(payload),
+        now=FIXED_NOW,
+    )
+    metrics.write_textfile(path, result)
+    published = path.read_text()
+    assert 'daniel_cache_collection_up{environment="prod"} 0' in published
+    assert f'status="{status}"}} 1' in published
+    assert 'state="unavailable"} 1' in published
+    assert 'result="successful"' not in published
+    assert stat.S_IMODE(path.stat().st_mode) == 0o644
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b'{"number":' + b"9" * 5_000 + b"}",
+        b"[" * 10_000 + b"]" * 10_000,
+    ],
+    ids=["integer-conversion-limit", "decoder-recursion-limit"],
+)
+def test_daniel_decoder_failures_replace_healthy_textfile(tmp_path, payload):
+    path = tmp_path / "daniel-cache.prom"
+    healthy = metrics.render(daniel_document("fresh"), "prod", now=FIXED_NOW)
+    metrics.write_textfile(path, healthy)
+
+    result = metrics.collect(
+        metrics.RUNTIME_URLS["prod"],
+        "prod",
+        opener=lambda *_args, **_kwargs: DanielResponse(payload),
+        now=FIXED_NOW,
+    )
+    metrics.write_textfile(path, result)
+
+    published = path.read_text()
+    assert 'daniel_cache_collection_up{environment="prod"} 0' in published
+    assert 'status="malformed"} 1' in published
+    assert 'state="unavailable"} 1' in published
+    assert 'completeness="none"} 1' in published
+    assert 'result="successful"' not in published
+    assert "daniel_cache_freshness_age_seconds" not in published
+    assert stat.S_IMODE(path.stat().st_mode) == 0o644
+
+
+@pytest.mark.parametrize("decoder_error", [ValueError("integer limit"), RecursionError()])
+def test_daniel_decoder_errors_are_normalized(monkeypatch, decoder_error):
+    def fail_decode(_payload):
+        raise decoder_error
+
+    monkeypatch.setattr(metrics.json, "loads", fail_decode)
+    with pytest.raises(metrics.InvalidDocument, match="JSON"):
+        metrics.parse_document(b"{}", now=FIXED_NOW)
+
+
+def test_daniel_excessive_numeric_field_is_malformed_not_oversized():
+    payload = daniel_document("fresh", cache={"refreshDurationMs": 10**3_999})
+    output = metrics.collect(
+        metrics.RUNTIME_URLS["prod"],
+        "prod",
+        opener=lambda *_args, **_kwargs: DanielResponse(payload),
+        now=FIXED_NOW,
+    )
+    assert 'status="malformed"} 1' in output
+    assert 'status="oversized"} 0' in output
+
+
+def test_daniel_successful_fetch_is_single_passive_canonical_request():
+    seen = []
+
+    def opener(request, **kwargs):
+        seen.append((request.full_url, dict(request.header_items()), kwargs))
+        return DanielResponse(daniel_document("fresh"))
+
+    output = metrics.collect(
+        metrics.RUNTIME_URLS["staging"], "staging", opener=opener, now=FIXED_NOW
+    )
+    assert 'daniel_cache_collection_up{environment="staging"} 1' in output
+    assert len(seen) == 1 and seen[0][0] == metrics.RUNTIME_URLS["staging"]
+    assert not any(key.lower() == "authorization" for key in seen[0][1])
+    assert "api.github.com" not in json.dumps(seen)
+
+
+def test_daniel_stale_total_failure_preserves_retained_records():
+    payload = daniel_document(
+        "stale",
+        cache={
+            "successfulRepositoryCount": 0,
+            "failedRepositoryCount": 2,
+            "retainedRepositoryCount": 2,
+        },
+    )
+    output = metrics.render(payload, "prod", now=FIXED_NOW)
+    assert 'state="stale"} 1' in output
+    assert 'result="successful"} 0' in output
+    assert 'result="retained"} 2' in output
+
+
+def test_daniel_missing_response_is_unavailable_and_replaces_samples():
+    def missing(*_args, **_kwargs):
+        raise OSError("endpoint unavailable")
+
+    output = metrics.collect(metrics.RUNTIME_URLS["staging"], "staging", opener=missing)
+    assert 'daniel_cache_collection_up{environment="staging"} 0' in output
+    assert 'status="unavailable"} 1' in output
+    assert 'result="successful"' not in output
+
+
+def test_daniel_redirect_is_rejected_without_contacting_destination():
+    seen = []
+
+    def redirect(request, **_kwargs):
+        seen.append(request.full_url)
+        raise urllib.error.HTTPError(request.full_url, 302, "redirect", {}, None)
+
+    output = metrics.collect(metrics.RUNTIME_URLS["prod"], "prod", opener=redirect)
+    assert seen == [metrics.RUNTIME_URLS["prod"]]
+    assert 'status="unavailable"} 1' in output
+    with pytest.raises(ValueError, match="canonical runtime URL"):
+        metrics.collect("https://example.test/runtime/github-metrics.json", "prod")
+
+
+def test_daniel_redirect_handler_rejects_before_following():
+    request = urllib.request.Request(metrics.RUNTIME_URLS["prod"])
+    with pytest.raises(urllib.error.HTTPError, match="redirect rejected"):
+        metrics._RejectRedirects().redirect_request(
+            request, None, 302, "Found", {}, "https://example.invalid/redirect"
+        )
+
+
+def test_daniel_response_url_must_remain_canonical():
+    response = DanielResponse(daniel_document("fresh"))
+    response.geturl = lambda: "https://example.invalid/redirect"
+    output = metrics.collect(
+        metrics.RUNTIME_URLS["prod"], "prod", opener=lambda *_args, **_kwargs: response
+    )
+    assert 'status="unavailable"} 1' in output
+
+
+@pytest.mark.parametrize(
+    ("change", "field"),
+    [
+        ({"schemaVersion": 2}, "schemaVersion"),
+        ({"cache": {"state": "unknown"}}, "cache enum"),
+        ({"cache": {"enabled": False}}, "cache.enabled"),
+        ({"cache": {"successfulRepositoryCount": 0.5}}, "successful"),
+        ({"cache": {"retainedDataAgeSeconds": -1}}, "retained age"),
+        ({"generatedAt": "2026-99-99T00:00:00Z"}, "generatedAt"),
+        ({"generatedAt": "2026-09-16T00:00:00+01:00Z"}, "generatedAt"),
+    ],
+)
+def test_daniel_collector_rejects_additional_invalid_contract_values(change, field):
+    cache_change = change.pop("cache", None)
+    payload = daniel_document("fresh", cache=cache_change or {}, **change)
+    with pytest.raises(metrics.InvalidDocument, match=field):
+        metrics.parse_document(payload, now=FIXED_NOW)
+
+
+def test_daniel_textfile_cleans_up_temporary_file_after_replace_failure(tmp_path, monkeypatch):
+    def fail_replace(*_args):
+        raise OSError("replacement failed")
+
+    monkeypatch.setattr(metrics.os, "replace", fail_replace)
+    with pytest.raises(OSError, match="replacement failed"):
+        metrics.write_textfile(tmp_path / "daniel-cache.prom", "sample\n")
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_daniel_main_collects_and_writes_requested_environment(tmp_path, monkeypatch):
+    output_path = tmp_path / "daniel-cache.prom"
+    monkeypatch.setattr(
+        metrics,
+        "collect",
+        lambda url, environment: f'{url} environment="{environment}"\n',
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "daniel_cache_metrics.py",
+            "--url",
+            metrics.RUNTIME_URLS["staging"],
+            "--environment",
+            "staging",
+            "--output",
+            str(output_path),
+        ],
+    )
+    assert metrics.main() == 0
+    assert output_path.read_text() == (f'{metrics.RUNTIME_URLS["staging"]} environment="staging"\n')
+    assert stat.S_IMODE(output_path.stat().st_mode) == 0o644
+
+
 def test_public_availability_summary_includes_gitshelves_in_every_expression(dashboards):
     expected_fleet = "blackbox-(dspace|tokenplace|danielsmith|jobbot3000|gitshelves)"
     documents = [json.loads(TEMPLATE.read_text(encoding="utf-8")), *dashboards]
@@ -58,6 +497,61 @@ def test_public_availability_summary_includes_gitshelves_in_every_expression(das
         ]
         assert len(expressions) == 3
         assert all(expected_fleet in expression for expression in expressions)
+
+
+def test_daniel_dashboard_contract_covers_metrics_scope_grouping_units_and_missing_data(
+    dashboards,
+):
+    for document in (json.loads(TEMPLATE.read_text()), *dashboards):
+        for title, (expression, unit, legend) in validator.DANIEL_PANEL_CONTRACT.items():
+            item = panel(document, title)
+            assert item["targets"] == [{"refId": "A", "expr": expression, "legendFormat": legend}]
+            assert item["fieldConfig"]["defaults"]["unit"] == unit
+            assert item["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
+            assert 'environment=~"$environment"' in expression
+            assert "vector(0)" not in expression
+        assert "by (state)" in validator.DANIEL_PANEL_CONTRACT["Daniel cache state"][0]
+        assert (
+            "by (completeness)" in validator.DANIEL_PANEL_CONTRACT["Daniel cache completeness"][0]
+        )
+
+
+@pytest.mark.parametrize(
+    ("title", "mutation"),
+    [
+        (
+            "Daniel cache freshness",
+            lambda item: item["targets"][0].update(
+                expr=item["targets"][0]["expr"].replace("freshness_age", "wrong_age")
+            ),
+        ),
+        (
+            "Daniel cache refresh duration",
+            lambda item: item["targets"][0].update(
+                expr=item["targets"][0]["expr"].replace('{environment=~"$environment"}', "")
+            ),
+        ),
+        (
+            "Daniel cache state",
+            lambda item: item["targets"][0].update(
+                expr='max by (repository) (daniel_cache_state{environment=~"$environment"})'
+            ),
+        ),
+        (
+            "Daniel cache completeness",
+            lambda item: item["targets"][0].update(
+                expr=item["targets"][0]["expr"] + " or vector(0)"
+            ),
+        ),
+    ],
+)
+def test_daniel_dashboard_validator_rejects_contract_regressions(
+    tmp_path, dashboards, title, mutation
+):
+    changed = copy.deepcopy(dashboards[0])
+    mutation(panel(changed, title))
+    with pytest.raises(SystemExit, match="bounded Daniel contract"):
+        validator.validate_dashboard(write_candidate(tmp_path, changed))
 
 
 def test_finalized_staging_evidence_link_is_current(dashboards):
@@ -136,6 +630,7 @@ def test_canonical_order_ids_grid_and_defaults(dashboards):
         "DSPACE release integrity",
         "token.place relay and compute capacity",
         "token.place HTTP and release",
+        "Daniel GitHub metadata cache",
         "danielsmith.io visitor journey",
     ]
     assert [item["id"] for item in staging["panels"]] == list(range(1, 71))

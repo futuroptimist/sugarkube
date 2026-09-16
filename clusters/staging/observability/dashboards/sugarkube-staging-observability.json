@@ -2952,6 +2952,180 @@
     {
       "id": 65,
       "type": "row",
+      "title": "Daniel GitHub metadata cache",
+      "description": "Passive, bounded cache telemetry; not application availability.",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 189
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 66,
+      "title": "Daniel cache state",
+      "type": "timeseries",
+      "description": "Latest published lifecycle state; stale and unavailable remain explicit.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 190
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (state) (daniel_cache_state{environment=~\"$environment\"})",
+          "legendFormat": "{{state}}"
+        }
+      ]
+    },
+    {
+      "id": 67,
+      "title": "Daniel cache freshness",
+      "type": "timeseries",
+      "description": "Age since the last fully successful refresh.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 190
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(daniel_cache_freshness_age_seconds{environment=~\"$environment\"})",
+          "legendFormat": "age"
+        }
+      ]
+    },
+    {
+      "id": 68,
+      "title": "Daniel cache completeness",
+      "type": "timeseries",
+      "description": "Complete, partial, or empty published data.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 198
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (completeness) (daniel_cache_data_completeness{environment=~\"$environment\"})",
+          "legendFormat": "{{completeness}}"
+        }
+      ]
+    },
+    {
+      "id": 69,
+      "title": "Daniel cache refresh duration",
+      "type": "timeseries",
+      "description": "Duration of the latest refresh attempt.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 198
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(daniel_cache_refresh_duration_seconds{environment=~\"$environment\"})",
+          "legendFormat": "duration"
+        }
+      ]
+    },
+    {
+      "id": 70,
+      "title": "Daniel cache retained-data age",
+      "type": "timeseries",
+      "description": "Age of the oldest retained repository record.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 206
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(daniel_cache_retained_data_age_seconds{environment=~\"$environment\"})",
+          "legendFormat": "age"
+        }
+      ]
+    },
+    {
+      "id": 71,
+      "type": "row",
       "title": "danielsmith.io visitor journey",
       "description": "Application-owned essential journey; optional immersive rendering is intentionally separate and is not inferred.",
       "collapsed": false,
@@ -2959,11 +3133,11 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 189
+        "y": 214
       }
     },
     {
-      "id": 66,
+      "id": 72,
       "type": "stat",
       "title": "Daniel visitor journey state",
       "description": "Disabled, unavailable, stale, failure, recovered, or success; disabled is never mapped to success.",
@@ -2971,7 +3145,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 190
+        "y": 215
       },
       "targets": [
         {
@@ -3004,7 +3178,7 @@
       }
     },
     {
-      "id": 67,
+      "id": 73,
       "type": "stat",
       "title": "Daniel visitor journey success",
       "description": "Last essential visitor-journey result only; optional immersive rendering does not affect it.",
@@ -3012,7 +3186,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 190
+        "y": 215
       },
       "targets": [
         {
@@ -3045,7 +3219,7 @@
       }
     },
     {
-      "id": 68,
+      "id": 74,
       "type": "stat",
       "title": "Daniel visitor journey freshness",
       "description": "Age of the last sanitized application-owned result.",
@@ -3053,7 +3227,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 190
+        "y": 215
       },
       "targets": [
         {
@@ -3086,7 +3260,7 @@
       }
     },
     {
-      "id": 69,
+      "id": 75,
       "type": "timeseries",
       "title": "Daniel visitor journey aggregate duration",
       "description": "Aggregate duration across essential stages; no per-visitor or request labels.",
@@ -3094,7 +3268,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 196
+        "y": 221
       },
       "targets": [
         {
@@ -3125,7 +3299,7 @@
       }
     },
     {
-      "id": 70,
+      "id": 76,
       "type": "timeseries",
       "title": "Daniel visitor journey classified failure",
       "description": "Finite application-owned failure-stage vocabulary; none denotes success.",
@@ -3133,7 +3307,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 196
+        "y": 221
       },
       "targets": [
         {
