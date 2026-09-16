@@ -122,6 +122,36 @@ DANIEL_PANEL_CONTRACT = {
         "s",
         "age",
     ),
+    "Daniel performance result state": (
+        'max by (state) (daniel_performance_result_state{environment=~"$environment"})',
+        "short",
+        "{{state}}",
+    ),
+    "Daniel application readiness": (
+        'max(daniel_performance_application_ready_seconds{environment=~"$environment",stat="p95"})',
+        "s",
+        "p95",
+    ),
+    "Daniel interaction latency": (
+        "max by (stat) (daniel_performance_interaction_latency_seconds"
+        '{environment=~"$environment"})',
+        "s",
+        "{{stat}}",
+    ),
+    "Daniel renderer and fallback state": (
+        "max by (renderer_class) (daniel_performance_renderer_class"
+        '{environment=~"$environment"}) or max by (renderer_state) '
+        '(daniel_performance_renderer_state{environment=~"$environment"}) or max by '
+        "(fallback_reason) (daniel_performance_fallback_reason"
+        '{environment=~"$environment"})',
+        "short",
+        "{{renderer_class}} {{renderer_state}} {{fallback_reason}}",
+    ),
+    "Daniel frame time (qualified hardware only)": (
+        'max by (stat) (daniel_performance_frame_time_seconds{environment=~"$environment"})',
+        "s",
+        "{{stat}}",
+    ),
 }
 
 
@@ -224,10 +254,10 @@ def _expected_dashboard(dashboard: dict) -> dict:
 
 
 def _validate_grid(items: list[dict]) -> None:
-    if len(items) != 70 or sum(panel.get("type") == "row" for panel in items) != 12:
-        raise SystemExit("ERROR: canonical dashboard must contain exactly 70 objects and 12 rows.")
+    if len(items) != 76 or sum(panel.get("type") == "row" for panel in items) != 13:
+        raise SystemExit("ERROR: canonical dashboard must contain exactly 76 objects and 13 rows.")
     ids = [panel.get("id") for panel in items]
-    if ids != list(range(1, 71)):
+    if ids != list(range(1, 77)):
         raise SystemExit(
             "ERROR: canonical dashboard panel IDs must be stable consecutive integers."
         )

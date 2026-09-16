@@ -3122,6 +3122,180 @@
           "legendFormat": "age"
         }
       ]
+    },
+    {
+      "id": 71,
+      "type": "row",
+      "title": "Daniel controlled performance",
+      "description": "Passive controlled-run performance results; missing and unsupported measurements remain NO DATA.",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 214
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 72,
+      "title": "Daniel performance result state",
+      "type": "timeseries",
+      "description": "Controlled browser measurement; absent series render as NO DATA.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 215
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (state) (daniel_performance_result_state{environment=~\"$environment\"})",
+          "legendFormat": "{{state}}"
+        }
+      ]
+    },
+    {
+      "id": 73,
+      "title": "Daniel application readiness",
+      "type": "timeseries",
+      "description": "Controlled browser measurement; absent series render as NO DATA.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 215
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(daniel_performance_application_ready_seconds{environment=~\"$environment\",stat=\"p95\"})",
+          "legendFormat": "p95"
+        }
+      ]
+    },
+    {
+      "id": 74,
+      "title": "Daniel interaction latency",
+      "type": "timeseries",
+      "description": "Controlled browser measurement; absent series render as NO DATA.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 223
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (stat) (daniel_performance_interaction_latency_seconds{environment=~\"$environment\"})",
+          "legendFormat": "{{stat}}"
+        }
+      ]
+    },
+    {
+      "id": 75,
+      "title": "Daniel renderer and fallback state",
+      "type": "timeseries",
+      "description": "Controlled browser measurement; absent series render as NO DATA.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 223
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (renderer_class) (daniel_performance_renderer_class{environment=~\"$environment\"}) or max by (renderer_state) (daniel_performance_renderer_state{environment=~\"$environment\"}) or max by (fallback_reason) (daniel_performance_fallback_reason{environment=~\"$environment\"})",
+          "legendFormat": "{{renderer_class}} {{renderer_state}} {{fallback_reason}}"
+        }
+      ]
+    },
+    {
+      "id": 76,
+      "title": "Daniel frame time (qualified hardware only)",
+      "type": "timeseries",
+      "description": "Controlled browser measurement; absent series render as NO DATA.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 231
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (stat) (daniel_performance_frame_time_seconds{environment=~\"$environment\"})",
+          "legendFormat": "{{stat}}"
+        }
+      ]
     }
   ]
 }
