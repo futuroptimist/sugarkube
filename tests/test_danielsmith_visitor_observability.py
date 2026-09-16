@@ -117,6 +117,17 @@ def test_generated_dashboards_and_rules_cover_bounded_contract():
             "Daniel visitor journey aggregate duration",
             "Daniel visitor journey classified failure",
         } <= panels.keys()
+        for title in (
+            "Daniel visitor journey state",
+            "Daniel visitor journey success",
+            "Daniel visitor journey classified failure",
+        ):
+            assert panels[title]["fieldConfig"]["defaults"]["unit"] == "short"
+        assert panels["Daniel visitor journey freshness"]["fieldConfig"]["defaults"]["unit"] == "s"
+        assert (
+            panels["Daniel visitor journey aggregate duration"]["fieldConfig"]["defaults"]["unit"]
+            == "s"
+        )
     rules = yaml.safe_load(RULES.read_text(encoding="utf-8"))["groups"][0]["rules"]
     assert {r["alert"] for r in rules} == {
         "DanielsmithVisitorJourneyFailed",
@@ -124,5 +135,9 @@ def test_generated_dashboards_and_rules_cover_bounded_contract():
     }
     text = RULES.read_text(encoding="utf-8")
     assert 'monitoring_enabled{application="danielsmith"} == 1' in text
+    assert 'state="failure"' in text
     assert 'state=~"stale|unavailable"' in text
+    assert "time() - danielsmith_visitor_journey_freshness_timestamp_seconds" in text
+    assert "> 1020" in text
+    assert "danielsmith_visitor_journey_success" not in text
     assert not any(word in text.lower() for word in ("request_id", "cookie", "visitor_id"))

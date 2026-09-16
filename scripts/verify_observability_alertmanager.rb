@@ -100,7 +100,7 @@ pd_matchers = ['alertname="SugarkubePagerDutyTest"', "environment=\"#{label_envi
                "cluster=\"#{cluster}\"", 'severity="critical"']
 hc_matchers = ['alertname="SugarkubeObservabilityWatchdog"', "environment=\"#{label_environment}\"",
                "cluster=\"#{cluster}\"", 'purpose="observability-watchdog"']
-dspace_matchers = ['alertname=~"^(DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown)$"',
+dspace_matchers = ['alertname=~"^(DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|DspaceMetricsTargetDown|DanielsmithVisitorJourneyFailed)$"',
                    "environment=\"#{label_environment}\"", "cluster=\"#{cluster}\"", 'severity="critical"']
 cloudflare_matchers = ['alertname="CloudflareTunnelNoHealthyConnections"',
                        "environment=\"#{label_environment}\"", "cluster=\"#{cluster}\"", 'severity="critical"']

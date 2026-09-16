@@ -4,7 +4,7 @@ groups:
     interval: 1m
     rules:
       - alert: DanielsmithVisitorJourneyFailed
-        expr: danielsmith_visitor_journey_monitoring_enabled{application="danielsmith"} == 1 and on (application, environment, name) (danielsmith_visitor_journey_success{application="danielsmith"} == 0)
+        expr: danielsmith_visitor_journey_monitoring_enabled{application="danielsmith"} == 1 and on (application, environment, name) (danielsmith_visitor_journey_state{application="danielsmith",state="failure"} == 1)
         for: 5m
         labels:
           application: danielsmith
@@ -15,7 +15,7 @@ groups:
           remediation: Inspect only the bounded failure-stage metric, then qualify recovery before changing activation.
           runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/danielsmith-visitor-journey.md#alerts
       - alert: DanielsmithVisitorJourneyStaleOrUnavailable
-        expr: danielsmith_visitor_journey_monitoring_enabled{application="danielsmith"} == 1 and on (application, environment, name) (danielsmith_visitor_journey_state{application="danielsmith",state=~"stale|unavailable"} == 1)
+        expr: danielsmith_visitor_journey_monitoring_enabled{application="danielsmith"} == 1 and on (application, environment, name) (danielsmith_visitor_journey_state{application="danielsmith",state=~"stale|unavailable"} == 1 or time() - danielsmith_visitor_journey_freshness_timestamp_seconds{application="danielsmith"} > 1020)
         for: 5m
         labels:
           application: danielsmith

@@ -2989,7 +2989,7 @@
       "fieldConfig": {
         "defaults": {
           "noValue": "NO DATA",
-          "unit": "s"
+          "unit": "short"
         },
         "overrides": []
       },
@@ -3030,7 +3030,7 @@
       "fieldConfig": {
         "defaults": {
           "noValue": "NO DATA",
-          "unit": "s"
+          "unit": "short"
         },
         "overrides": []
       },
@@ -3149,7 +3149,7 @@
       "fieldConfig": {
         "defaults": {
           "noValue": "NO DATA",
-          "unit": "s"
+          "unit": "short"
         },
         "overrides": []
       },
