@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import math
 import os
@@ -72,7 +73,11 @@ def parse_document(payload: bytes, now: datetime | None = None) -> dict[str, obj
     if not isinstance(enabled, bool) or enabled != (state != "disabled"):
         raise InvalidDocument("cache.enabled")
     failures = cache.get("failureCategories")
-    if not isinstance(failures, list) or len(failures) != len(set(failures)):
+    if (
+        not isinstance(failures, list)
+        or any(not isinstance(item, str) for item in failures)
+        or len(failures) != len(set(failures))
+    ):
         raise InvalidDocument("cache.failureCategories")
     if any(item not in FAILURES for item in failures):
         raise InvalidDocument("cache.failureCategories")
@@ -102,9 +107,7 @@ def parse_document(payload: bytes, now: datetime | None = None) -> dict[str, obj
         except ValueError as exc:
             raise InvalidDocument("lastSuccessfulRefreshAt") from exc
         age = ((now or datetime.now(timezone.utc)) - parsed).total_seconds()
-        if age < 0:
-            raise InvalidDocument("lastSuccessfulRefreshAt")
-        values["freshness_age"] = age
+        values["freshness_age"] = _bounded_number(age, MAX_AGE_SECONDS, "lastSuccessfulRefreshAt")
     return values
 
 
@@ -175,9 +178,25 @@ def collect(url: str, environment: str, *, opener=urllib.request.urlopen) -> str
         status = "oversized"
     except InvalidDocument:
         status = "malformed"
-    except (OSError, TimeoutError):
+    except (OSError, TimeoutError, http.client.HTTPException):
         status = "unavailable"
     return render(None, environment, status)
+
+
+def write_textfile(output_path: Path, output: str) -> None:
+    """Durably publish a world-readable node-exporter textfile."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(dir=output_path.parent, prefix=".daniel-cache-", text=True)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            os.fchmod(handle.fileno(), 0o644)
+            handle.write(output)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, output_path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 def main() -> int:
@@ -187,15 +206,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     output = collect(args.url, args.environment)
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(dir=args.output.parent, prefix=".daniel-cache-", text=True)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(output)
-        os.replace(temporary, args.output)
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
+    write_textfile(args.output, output)
     return 0
 
 

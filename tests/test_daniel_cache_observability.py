@@ -1,5 +1,7 @@
+import http.client
 import json
 import re
+import stat
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
@@ -10,6 +12,7 @@ from scripts import daniel_cache_metrics as metrics
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE = ROOT / "platform/observability/dashboards/sugarkube-observability.template.json"
+PROD_VALUES = ROOT / "clusters/prod/observability/kube-prometheus-stack.values.yaml"
 
 
 def document(state="fresh", completeness="complete", failures=None, **overrides):
@@ -86,18 +89,29 @@ def test_fixed_failure_categories_and_unknown_category_rejected():
         metrics.render(document("stale", "partial", ["raw error text"]), "prod")
 
 
+def test_structured_failure_category_is_malformed_instead_of_crashing():
+    output = metrics.collect(
+        "https://example.test/runtime/github-metrics.json",
+        "prod",
+        opener=lambda *_args, **_kwargs: Response(document(failures=[{"code": "timeout"}])),
+    )
+    assert 'daniel_cache_collection_up{environment="prod"} 0' in output
+    assert 'status="malformed"} 1' in output
+
+
+class Response(BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return None
+
+
 @pytest.mark.parametrize(
     ("payload", "status"),
     [(b"not json", "malformed"), (b"{" + b" " * metrics.MAX_BYTES, "oversized")],
 )
 def test_malformed_and_oversized_payloads_fail_closed(payload, status):
-    class Response(BytesIO):
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_):
-            return None
-
     output = metrics.collect(
         "https://danielsmith.io/runtime/github-metrics.json",
         "prod",
@@ -106,6 +120,45 @@ def test_malformed_and_oversized_payloads_fail_closed(payload, status):
     assert 'daniel_cache_collection_up{environment="prod"} 0' in output
     assert f'status="{status}"}} 1' in output
     assert 'state="unavailable"} 1' in output
+
+
+def test_truncated_http_response_is_unavailable():
+    class TruncatedResponse(Response):
+        def read(self, _size):
+            raise http.client.IncompleteRead(b'{"schemaVersion":')
+
+    output = metrics.collect(
+        "https://example.test/runtime/github-metrics.json",
+        "prod",
+        opener=lambda *_args, **_kwargs: TruncatedResponse(),
+    )
+    assert 'daniel_cache_collection_up{environment="prod"} 0' in output
+    assert 'status="unavailable"} 1' in output
+
+
+def test_freshness_age_is_bounded():
+    with pytest.raises(metrics.InvalidDocument, match="lastSuccessfulRefreshAt"):
+        metrics.render(
+            document(lastSuccessfulRefreshAt="2025-09-15T23:59:59Z"),
+            "prod",
+            now=datetime(2026, 9, 16, tzinfo=timezone.utc),
+        )
+
+
+def test_textfile_is_atomically_published_with_readable_permissions(tmp_path):
+    output = tmp_path / "nested" / "daniel-cache.prom"
+    metrics.write_textfile(output, "metric 1\n")
+    assert output.read_text() == "metric 1\n"
+    assert stat.S_IMODE(output.stat().st_mode) == 0o644
+    assert not list(output.parent.glob(".daniel-cache-*"))
+
+
+def test_production_node_exporter_mounts_textfile_directory():
+    values = PROD_VALUES.read_text()
+    assert "--collector.textfile.directory=/var/lib/node_exporter/textfile_collector" in values
+    assert "hostPath: /var/lib/node_exporter/textfile_collector" in values
+    assert "mountPath: /var/lib/node_exporter/textfile_collector" in values
+    assert "readOnly: true" in values
 
 
 def test_missing_endpoint_is_unavailable_and_collection_is_passive():
