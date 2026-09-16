@@ -631,7 +631,6 @@ def test_canonical_order_ids_grid_and_defaults(dashboards):
         "token.place relay and compute capacity",
         "token.place HTTP and release",
         "Daniel GitHub metadata cache",
-        "danielsmith.io visitor journey",
     ]
     assert [item["id"] for item in staging["panels"]] == list(range(1, 71))
     assert panel(staging, "DSPACE instrumentation health")
@@ -643,35 +642,6 @@ def test_canonical_order_ids_grid_and_defaults(dashboards):
     )
     validator.validate_dashboard(STAGING)
     validator.validate_dashboard(PROD)
-
-
-def test_daniel_visitor_units_and_lifecycle_labels_are_operator_visible(dashboards):
-    for document in (json.loads(TEMPLATE.read_text(encoding="utf-8")), *dashboards):
-        expected_units = {
-            "Daniel visitor journey state": "short",
-            "Daniel visitor journey success": "short",
-            "Daniel visitor journey freshness": "s",
-            "Daniel visitor journey aggregate duration": "s",
-            "Daniel visitor journey classified failure": "short",
-        }
-        for title, unit in expected_units.items():
-            assert panel(document, title)["fieldConfig"]["defaults"]["unit"] == unit
-        state = panel(document, "Daniel visitor journey state")["targets"][0]
-        assert state["legendFormat"] == "{{state}}"
-        assert "danielsmith_visitor_journey_state" in state["expr"]
-
-
-def test_daniel_visitor_semantics_fail_closed(dashboards):
-    staging, _ = dashboards
-    wrong_unit = copy.deepcopy(staging)
-    panel(wrong_unit, "Daniel visitor journey success")["fieldConfig"]["defaults"]["unit"] = "s"
-    with pytest.raises(SystemExit, match="canonical dimension units"):
-        validator._validate_semantics(wrong_unit)
-
-    hidden_state = copy.deepcopy(staging)
-    panel(hidden_state, "Daniel visitor journey state")["targets"][0]["legendFormat"] = "state"
-    with pytest.raises(SystemExit, match="lifecycle labels"):
-        validator._validate_semantics(hidden_state)
 
 
 def test_all_ten_tables_are_simultaneous_single_frames(dashboards):

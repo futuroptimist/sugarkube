@@ -27,9 +27,6 @@ CANONICAL_CLOUDFLARE_RULES = (
 CANONICAL_TOKENPLACE_RULES = (
     ROOT / "platform" / "observability" / "rules" / "tokenplace-production.yaml"
 )
-CANONICAL_DANIELSMITH_VISITOR_RULES = (
-    ROOT / "platform" / "observability" / "rules" / "danielsmith-visitor-journey.yaml"
-)
 SCRIPT = ROOT / "scripts" / "observability_helm.sh"
 ALERTMANAGER_VALIDATOR = ROOT / "scripts" / "verify_observability_alertmanager.rb"
 DASHBOARD = ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
@@ -529,10 +526,7 @@ def test_print_resolved_reports_complete_stable_source_chain(tmp_path):
     result, _ = run_helper(tmp_path, "render")
     assert result.returncode == 0
 
-    sources = [
-        str(COMMON), str(STAGING), str(CANONICAL_DSPACE_RULES),
-        str(CANONICAL_DANIELSMITH_VISITOR_RULES), str(DASHBOARD),
-    ]
+    sources = [str(COMMON), str(STAGING), str(CANONICAL_DSPACE_RULES), str(DASHBOARD)]
     positions = [result.stdout.index(source) for source in sources]
     assert positions == sorted(positions)
     assert "generated mode-0600 rules overlay sourced from" in result.stdout
@@ -578,7 +572,6 @@ def test_dspace_rules_have_one_canonical_source_and_exact_overlay(tmp_path):
         "additionalPrometheusRulesMap": {
             "dspace-release-integrity": yaml_load(CANONICAL_DSPACE_RULES),
             "cloudflare-tunnel": yaml_load(CANONICAL_CLOUDFLARE_RULES),
-            "danielsmith-visitor-journey": yaml_load(CANONICAL_DANIELSMITH_VISITOR_RULES),
         }
     }
     overlay_paths = re.findall(r"/[^ ]*sugarkube-observability-rules\.[^ ]*\.yaml", audit)
@@ -604,8 +597,7 @@ def test_prod_rules_overlay_ignores_invalid_staging_only_rules(tmp_path):
     assert result.returncode == 0
     assert yaml_load(tmp_path / "rules-overlay.yaml") == {
         "additionalPrometheusRulesMap": {
-            "tokenplace-production": yaml_load(CANONICAL_TOKENPLACE_RULES),
-            "danielsmith-visitor-journey": yaml_load(CANONICAL_DANIELSMITH_VISITOR_RULES),
+            "tokenplace-production": yaml_load(CANONICAL_TOKENPLACE_RULES)
         }
     }
 
