@@ -81,7 +81,7 @@ prometheus-node-exporter:
   extraArgs:
     - --collector.textfile.directory=/var/lib/node_exporter/textfile_collector
   extraHostVolumeMounts:
-    - name: observability-textfiles
+    - name: dspace-chat-textfile
       hostPath: /var/lib/node_exporter/textfile_collector
       mountPath: /var/lib/node_exporter/textfile_collector
       readOnly: true

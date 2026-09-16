@@ -864,17 +864,34 @@ drill.
 
 Daniel's schema-version-1 `/runtime/github-metrics.json` document is a passive source: fetching it
 reads the file already published by the Daniel cache sidecar and does not call GitHub. Install
-`scripts/daniel_cache_metrics.py` on one monitored node per environment and run it from the existing
-node-exporter textfile schedule. For example, the scheduled command for staging is:
+`scripts/daniel_cache_metrics.py` on exactly one monitored node per environment. Installation and
+scheduling are **later authorized operator actions**; this repository change does not perform them.
+On the selected node, an operator should copy the reviewed script to
+`/usr/local/libexec/sugarkube/daniel_cache_metrics.py`, owned by `root:root` and mode `0755`, then
+create a root-owned systemd oneshot service running as the unprivileged `node_exporter` identity.
+Schedule it with a systemd timer at startup and every 15 minutes (`OnBootSec=2m`,
+`OnUnitActiveSec=15m`, `RandomizedDelaySec=30s`). The service's `ExecStart` must be exactly one of:
 
 ```bash
-python3 scripts/daniel_cache_metrics.py \
+python3 /usr/local/libexec/sugarkube/daniel_cache_metrics.py \
   --url https://staging.danielsmith.io/runtime/github-metrics.json \
   --environment staging \
   --output /var/lib/node_exporter/textfile_collector/daniel-cache.prom
 ```
 
-Use `https://danielsmith.io/runtime/github-metrics.json` and `--environment prod` for production.
+For the production node use:
+
+```bash
+python3 /usr/local/libexec/sugarkube/daniel_cache_metrics.py \
+  --url https://danielsmith.io/runtime/github-metrics.json \
+  --environment prod \
+  --output /var/lib/node_exporter/textfile_collector/daniel-cache.prom
+```
+
+The staging command should likewise use the installed `/usr/local/libexec/sugarkube/` path shown
+for production. Grant the execution identity write access only to the textfile directory; the
+collector needs no token, environment credential, or GitHub access. Node-exporter mounts the host
+directory read-only and reads the collector's `0644` atomic replacement.
 The collector caps the response at 262,144 bytes and atomically replaces the textfile. Missing,
 unavailable, malformed, and oversized documents set `daniel_cache_collection_up` to `0`, publish
 an explicit bounded `daniel_cache_document_status`, and select `unavailable`/`none`; they never
@@ -887,5 +904,11 @@ freshness**, **Daniel cache completeness**, **Daniel cache refresh duration**, a
 retained-data age**. These panels use aggregate queries and show `NO DATA` rather than synthesizing
 a healthy zero. Treat them as product-metadata diagnostics, not application availability or a
 paging signal. After an authorized rollout, verify the textfile timestamp, node-exporter scrape,
-all five panels, and stale/unavailable behavior. This change does not install a timer or mutate a
-cluster; deployment and live observation remain operator work.
+all five panels, and stale/unavailable behavior. Specifically, run the oneshot once, confirm
+`systemctl status` and the timer's next activation, inspect the `.prom` file's owner/mode and
+timestamp, and query `daniel_cache_collection_up{environment="staging"}` (or `"prod"`) before
+checking the five panels. Roll back by disabling and removing the timer and service, deleting
+`daniel-cache.prom` and the installed script, and then using the normal guarded observability
+release flow to remove the node-exporter argument/mount only after no other textfile producer uses
+that directory. Deployment, scheduling, live verification, dashboard rollout, and observation
+remain authorized operator work; none are executed by this change.
