@@ -417,6 +417,77 @@ def test_daniel_redirect_is_rejected_without_contacting_destination():
         metrics.collect("https://example.test/runtime/github-metrics.json", "prod")
 
 
+def test_daniel_redirect_handler_rejects_before_following():
+    request = urllib.request.Request(metrics.RUNTIME_URLS["prod"])
+    with pytest.raises(urllib.error.HTTPError, match="redirect rejected"):
+        metrics._RejectRedirects().redirect_request(
+            request, None, 302, "Found", {}, "https://example.invalid/redirect"
+        )
+
+
+def test_daniel_response_url_must_remain_canonical():
+    response = DanielResponse(daniel_document("fresh"))
+    response.geturl = lambda: "https://example.invalid/redirect"
+    output = metrics.collect(
+        metrics.RUNTIME_URLS["prod"], "prod", opener=lambda *_args, **_kwargs: response
+    )
+    assert 'status="unavailable"} 1' in output
+
+
+@pytest.mark.parametrize(
+    ("change", "field"),
+    [
+        ({"schemaVersion": 2}, "schemaVersion"),
+        ({"cache": {"state": "unknown"}}, "cache enum"),
+        ({"cache": {"enabled": False}}, "cache.enabled"),
+        ({"cache": {"successfulRepositoryCount": 0.5}}, "successful"),
+        ({"cache": {"retainedDataAgeSeconds": -1}}, "retained age"),
+        ({"generatedAt": "2026-99-99T00:00:00Z"}, "generatedAt"),
+        ({"generatedAt": "2026-09-16T00:00:00+01:00Z"}, "generatedAt"),
+    ],
+)
+def test_daniel_collector_rejects_additional_invalid_contract_values(change, field):
+    cache_change = change.pop("cache", None)
+    payload = daniel_document("fresh", cache=cache_change or {}, **change)
+    with pytest.raises(metrics.InvalidDocument, match=field):
+        metrics.parse_document(payload, now=FIXED_NOW)
+
+
+def test_daniel_textfile_cleans_up_temporary_file_after_replace_failure(tmp_path, monkeypatch):
+    def fail_replace(*_args):
+        raise OSError("replacement failed")
+
+    monkeypatch.setattr(metrics.os, "replace", fail_replace)
+    with pytest.raises(OSError, match="replacement failed"):
+        metrics.write_textfile(tmp_path / "daniel-cache.prom", "sample\n")
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_daniel_main_collects_and_writes_requested_environment(tmp_path, monkeypatch):
+    output_path = tmp_path / "daniel-cache.prom"
+    monkeypatch.setattr(
+        metrics,
+        "collect",
+        lambda url, environment: f'{url} environment="{environment}"\n',
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "daniel_cache_metrics.py",
+            "--url",
+            metrics.RUNTIME_URLS["staging"],
+            "--environment",
+            "staging",
+            "--output",
+            str(output_path),
+        ],
+    )
+    assert metrics.main() == 0
+    assert output_path.read_text() == (f'{metrics.RUNTIME_URLS["staging"]} environment="staging"\n')
+    assert stat.S_IMODE(output_path.stat().st_mode) == 0o644
+
+
 def test_public_availability_summary_includes_gitshelves_in_every_expression(dashboards):
     expected_fleet = "blackbox-(dspace|tokenplace|danielsmith|jobbot3000|gitshelves)"
     documents = [json.loads(TEMPLATE.read_text(encoding="utf-8")), *dashboards]
