@@ -2948,6 +2948,220 @@
           }
         }
       ]
+    },
+    {
+      "id": 65,
+      "type": "row",
+      "title": "Daniel visitor journey",
+      "description": "Application-owned essential visitor journey; scheduling remains disabled until separately authorized.",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 189
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 66,
+      "type": "timeseries",
+      "title": "Daniel visitor journey lifecycle",
+      "description": "Disabled, unavailable, stale, failed, recovered, and successful remain distinct.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 190
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "daniel_visitor_journey_lifecycle_state{application=\"danielsmith\",environment=~\"$environment\"}",
+          "legendFormat": "{{state}}"
+        }
+      ]
+    },
+    {
+      "id": 67,
+      "type": "timeseries",
+      "title": "Daniel visitor journey success and freshness",
+      "description": "Essential journey result and age; absent or disabled producers remain NO DATA.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 190
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "daniel_visitor_journey_success{application=\"danielsmith\",environment=~\"$environment\"}",
+          "legendFormat": "success"
+        }
+      ]
+    },
+    {
+      "id": 68,
+      "type": "timeseries",
+      "title": "Daniel visitor journey result age",
+      "description": "Seconds since the sanitized application result completed.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 198
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "time() - daniel_visitor_journey_freshness_timestamp_seconds{application=\"danielsmith\",environment=~\"$environment\"}",
+          "legendFormat": "age"
+        }
+      ]
+    },
+    {
+      "id": 69,
+      "type": "timeseries",
+      "title": "Daniel visitor journey duration",
+      "description": "Aggregate essential journey duration, excluding optional immersive rendering.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 198
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "daniel_visitor_journey_duration_seconds{application=\"danielsmith\",environment=~\"$environment\"}",
+          "legendFormat": "duration"
+        }
+      ]
+    },
+    {
+      "id": 70,
+      "type": "timeseries",
+      "title": "Daniel visitor journey failure and optional renderer",
+      "description": "Finite essential failure stages and separately owned optional renderer state.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 198
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "daniel_visitor_journey_failure_stage{application=\"danielsmith\",environment=~\"$environment\"} or daniel_visitor_journey_optional_renderer_state{application=\"danielsmith\",environment=~\"$environment\"}",
+          "legendFormat": "{{failure_stage}} {{state}}"
+        }
+      ]
     }
   ]
 }

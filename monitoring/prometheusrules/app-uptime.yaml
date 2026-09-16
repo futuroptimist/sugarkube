@@ -15,3 +15,38 @@ spec:
           annotations:
             summary: "Targets down for ingress/tunnel"
             description: "No scraped targets for Traefik or Cloudflared for 10m."
+    - name: daniel-visitor-journey
+      rules:
+        - alert: DanielVisitorJourneyFailed
+          expr: >-
+            daniel_visitor_journey_monitoring_enabled{application="danielsmith"} == 1
+            and on (application, environment, producer)
+            daniel_visitor_journey_lifecycle_state{application="danielsmith",state="failed"} == 1
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Daniel essential visitor journey failed"
+            description: "The application-owned essential visitor journey reports a bounded failure stage."
+        - alert: DanielVisitorJourneyStale
+          expr: >-
+            daniel_visitor_journey_monitoring_enabled{application="danielsmith"} == 1
+            and on (application, environment, producer)
+            daniel_visitor_journey_lifecycle_state{application="danielsmith",state=~"stale|unavailable"} == 1
+          for: 20m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Daniel visitor journey result unavailable or stale"
+            description: "An authorized producer has no current sanitized result."
+        - alert: DanielOptionalRendererUnavailable
+          expr: >-
+            daniel_visitor_journey_monitoring_enabled{application="danielsmith"} == 1
+            and on (application, environment, producer)
+            daniel_visitor_journey_optional_renderer_state{application="danielsmith",state=~"failure|unavailable"} == 1
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Daniel optional immersive renderer unavailable"
+            description: "Optional rendering is degraded; essential visitor health is evaluated separately."

@@ -36,6 +36,16 @@ COMPLETION_FIELDS = {
     "safetyMargin",
     "failureStages",
 }
+VISITOR_FIELDS = COMPLETION_FIELDS | {"optionalRendererEnabled"}
+VISITOR_FAILURE_STAGES = {
+    "homepage_delivery",
+    "javascript_initialization",
+    "essential_assets",
+    "accessible_fallback",
+    "resume_pdf",
+    "timeout",
+    "producer_interrupted",
+}
 DECLARATION_FIELDS = {
     "application",
     "environment",
@@ -633,6 +643,47 @@ def validate_completion_contract(contract_data, shared_buckets=None, shared_poli
     return len(contract_data["producers"])
 
 
+def validate_visitor_contract(contract_data, shared_buckets=None, shared_policies=None):
+    """Validate disabled-by-default Daniel journey descriptors and their quota shape."""
+    if not isinstance(contract_data, dict) or set(contract_data) != {"schemaVersion", "producers"}:
+        raise ContractError("visitor contract has missing or unknown top-level fields")
+    if contract_data["schemaVersion"] != 1 or not isinstance(contract_data["producers"], list):
+        raise ContractError("visitor contract schemaVersion/producers is invalid")
+    converted = {"schemaVersion": 1, "producers": []}
+    environments = set()
+    for item in contract_data["producers"]:
+        if not isinstance(item, dict) or set(item) != VISITOR_FIELDS:
+            raise ContractError("visitor producer has missing or unknown metadata")
+        if type(item["optionalRendererEnabled"]) is not bool:
+            raise ContractError("visitor optional renderer enabled state is invalid")
+        if (
+            not isinstance(item["failureStages"], list)
+            or len(item["failureStages"]) != len(VISITOR_FAILURE_STAGES)
+            or set(item["failureStages"]) != VISITOR_FAILURE_STAGES
+        ):
+            raise ContractError(
+                "visitor producer failureStages must use the application vocabulary"
+            )
+        if item["application"] != "danielsmith":
+            raise ContractError("visitor producer application is invalid")
+        environments.add(item["environment"])
+        converted_item = {
+            key: value for key, value in item.items() if key != "optionalRendererEnabled"
+        }
+        # Reuse cadence, timeout, concurrency, route, quota, and fail-closed checks.
+        converted_item["failureStages"] = [
+            "none",
+            "timeout",
+            "compute_unavailable",
+            "malformed_completion",
+            "interrupted",
+        ]
+        converted["producers"].append(converted_item)
+    if environments != ENVIRONMENTS:
+        raise ContractError("visitor contract must declare staging and prod")
+    return validate_completion_contract(converted, shared_buckets, shared_policies)
+
+
 def _reject_duplicate_json_fields(pairs):
     result = {}
     for key, value in pairs:
@@ -657,6 +708,11 @@ def main(argv=None):
         "--completion-contract",
         type=Path,
         help="reviewed declarative encrypted-completion contract",
+    )
+    parser.add_argument(
+        "--visitor-contract",
+        type=Path,
+        help="reviewed declarative Daniel visitor-journey contract",
     )
     parser.add_argument(
         "--probes",
@@ -694,10 +750,29 @@ def main(argv=None):
     except OSError:
         print("probe quota validation failed: unable to read an input file", file=sys.stderr)
         return 1
+    visitor_path = args.visitor_contract
+    if visitor_path is None:
+        visitor_path = config_dir / "daniel-visitor-journey.json"
+    try:
+        if configured_dir and args.visitor_contract is None and not visitor_path.exists():
+            visitor_contract = {"schemaVersion": 1, "producers": []}
+        else:
+            visitor_contract = json.loads(
+                visitor_path.read_text(encoding="utf-8"),
+                object_pairs_hook=_reject_duplicate_json_fields,
+            )
+    except (json.JSONDecodeError, ContractError):
+        print("probe quota validation failed: visitor JSON input is malformed", file=sys.stderr)
+        return 1
+    except OSError:
+        print("probe quota validation failed: unable to read an input file", file=sys.stderr)
+        return 1
     try:
         buckets = defaultdict(lambda: {"hourly": 0, "daily": 0, "records": []})
         policies = {}
         validate_completion_contract(completion_contract, buckets, policies)
+        if visitor_contract["producers"]:
+            validate_visitor_contract(visitor_contract, buckets, policies)
         # One inventory owns both environments. Validate its complete structure so
         # malformed declarations cannot disappear during environment selection.
         contract = select_environment_contract(contract, args.env)
