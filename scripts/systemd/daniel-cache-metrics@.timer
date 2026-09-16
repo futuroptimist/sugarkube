@@ -1,0 +1,12 @@
+[Unit]
+Description=Collect passive Daniel cache metrics every minute (%i)
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=10s
+Persistent=true
+Unit=daniel-cache-metrics@%i.service
+
+[Install]
+WantedBy=timers.target

@@ -859,3 +859,54 @@ verification is intentionally rejected until production observability is codifie
 Merging this repository support does not deploy any application, create any
 Secret, dashboard, alert rule, schedulability check, shared-state check, or live
 drill.
+
+### Daniel cache collection and dashboard
+
+The **Daniel cache telemetry** dashboard row reads the schema-version-1 cache contract that
+`danielsmith.io` publishes at `/runtime/github-metrics.json`. Its panels are **Daniel cache state**,
+**Daniel cache completeness**, **Daniel cache freshness age**, **Daniel cache refresh duration**,
+**Daniel cache repository counts**, and **Daniel cache retained-data age**. Queries aggregate only
+by the fixed `environment`, `state`, `completeness`, and `failure_category` domains. Repository
+names, URLs, errors, request identities, and credentials never become labels.
+
+Collection is deliberately passive: `scripts/daniel_cache_metrics.py` performs one GET of the
+published Daniel runtime document and never contacts the GitHub API. It limits responses to
+262,144 bytes and validates the bounded states (`disabled`, `warming`, `fresh`, `stale`, and
+`unavailable`), completeness values (`complete`, `partial`, and `none`), eight documented failure
+categories, durations, ages, and repository counts. A missing, unreachable, malformed, oversized,
+or incompatible document emits `daniel_cache_collection_up 0`, `state="unavailable"`, and
+`completeness="none"`; it does not preserve a previous fresh sample. Stale documents remain
+explicitly stale. These diagnostic signals must not page as application-availability signals.
+
+Install the script and unit templates on the node that supplies the selected environment's node
+exporter textfile directory. Use only the matching environment instance; never point one cluster at
+the other environment.
+
+```bash
+sudo install -m 0755 scripts/daniel_cache_metrics.py \
+  /usr/local/libexec/sugarkube-daniel-cache-metrics
+sudo install -m 0644 scripts/systemd/daniel-cache-metrics@.service \
+  scripts/systemd/daniel-cache-metrics@.timer /etc/systemd/system/
+sudo install -d -m 0755 /etc/sugarkube /var/lib/node_exporter/textfile_collector
+printf '%s\n' 'DANIEL_CACHE_RUNTIME_URL=https://staging.danielsmith.io/runtime/github-metrics.json' \
+  | sudo tee /etc/sugarkube/daniel-cache-metrics-staging.env >/dev/null
+sudo systemctl daemon-reload
+sudo systemctl enable --now daniel-cache-metrics@staging.timer
+```
+
+For production, use `https://danielsmith.io/runtime/github-metrics.json`, the `prod` environment
+file, and `daniel-cache-metrics@prod.timer`. No GitHub credential belongs in either file. Verify the
+passive collector, bounded label set, textfile ingestion, and dashboard queries before promotion:
+
+```bash
+sudo systemctl start daniel-cache-metrics@staging.service
+sudo systemctl status daniel-cache-metrics@staging.service
+cat /var/lib/node_exporter/textfile_collector/daniel-cache-staging.prom
+curl -fsS 'http://localhost:9100/metrics' | grep '^daniel_cache_'
+python3 scripts/generate_observability_dashboards.py --check
+```
+
+A nonzero oneshot result is expected when collection fails, but the collector atomically replaces
+the textfile with the fail-closed unavailable series first. Check the Daniel endpoint and service
+journal; do not add a GitHub token or make the collector call GitHub. Deployment, timer enablement,
+and live dashboard verification remain explicit staging/production rollout work.

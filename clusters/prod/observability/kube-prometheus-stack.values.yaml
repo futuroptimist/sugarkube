@@ -21,6 +21,14 @@ additionalPrometheusRulesMap:
             annotations:
               summary: Sugarkube production observability watchdog
               runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-operations.md#observability-watchdog
+prometheus-node-exporter:
+  extraArgs:
+    - --collector.textfile.directory=/var/lib/node_exporter/textfile_collector
+  extraHostVolumeMounts:
+    - name: app-telemetry-textfile
+      hostPath: /var/lib/node_exporter/textfile_collector
+      mountPath: /var/lib/node_exporter/textfile_collector
+      readOnly: true
 alertmanager:
   alertmanagerSpec:
     secrets:

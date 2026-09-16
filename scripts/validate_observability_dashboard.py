@@ -32,6 +32,14 @@ FORBIDDEN_LABELS = {
     "pod_cidr",
     "uuid",
 }
+DANIEL_CACHE_PANEL_TITLES = {
+    "Daniel cache state",
+    "Daniel cache completeness",
+    "Daniel cache freshness age",
+    "Daniel cache refresh duration",
+    "Daniel cache repository counts",
+    "Daniel cache retained-data age",
+}
 TOKENPLACE_DATA_TITLES = {
     "token.place scrape availability",
     "token.place instrumentation health",
@@ -197,10 +205,10 @@ def _expected_dashboard(dashboard: dict) -> dict:
 
 
 def _validate_grid(items: list[dict]) -> None:
-    if len(items) != 64 or sum(panel.get("type") == "row" for panel in items) != 11:
-        raise SystemExit("ERROR: canonical dashboard must contain exactly 64 objects and 11 rows.")
+    if len(items) != 71 or sum(panel.get("type") == "row" for panel in items) != 12:
+        raise SystemExit("ERROR: canonical dashboard must contain exactly 71 objects and 12 rows.")
     ids = [panel.get("id") for panel in items]
-    if ids != list(range(1, 65)):
+    if ids != list(range(1, 72)):
         raise SystemExit(
             "ERROR: canonical dashboard panel IDs must be stable consecutive integers."
         )
@@ -312,6 +320,31 @@ def _validate_semantics(dashboard: dict) -> None:
         raise SystemExit("ERROR: token.place queries require environment and cluster variables.")
     if any("vector(0)" in expr for expr in token_expressions):
         raise SystemExit("ERROR: token.place queries must preserve missing data.")
+    daniel_expressions = [
+        target["expr"]
+        for title in DANIEL_CACHE_PANEL_TITLES
+        for target in panel_named(dashboard, title).get("targets", [])
+    ]
+    if any('environment=~"$environment"' not in expr for expr in daniel_expressions):
+        raise SystemExit("ERROR: Daniel cache queries require environment scoping.")
+    if any(
+        re.search(r"\b(repo|repository|url|error|request_id)\s*=", expr)
+        for expr in daniel_expressions
+    ):
+        raise SystemExit("ERROR: Daniel cache queries contain an unbounded label selector.")
+    required_daniel_metrics = {
+        "daniel_cache_state_info",
+        "daniel_cache_data_completeness_info",
+        "daniel_cache_last_successful_refresh_age_seconds",
+        "daniel_cache_refresh_duration_seconds",
+        "daniel_cache_configured_repositories",
+        "daniel_cache_successful_repositories",
+        "daniel_cache_failed_repositories",
+        "daniel_cache_retained_repositories",
+        "daniel_cache_retained_data_age_seconds",
+    }
+    if any(metric not in "\n".join(daniel_expressions) for metric in required_daniel_metrics):
+        raise SystemExit("ERROR: Daniel cache dashboard coverage is incomplete.")
     for title, expected in FIVE_XX_RATIO_EXPRESSIONS.items():
         if panel_expression(dashboard, title) != expected:
             raise SystemExit(f"ERROR: {title} must use its request-family-gated 5xx zero contract.")

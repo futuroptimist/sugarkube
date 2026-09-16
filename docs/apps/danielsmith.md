@@ -291,3 +291,9 @@ just cf-tunnel-route host=danielsmith.io
 
 - danielsmith.io is static-site only; a failing rollout is usually an image, chart, ingress, TLS, or Cloudflare issue rather than an in-cluster backend dependency.
 - Verify `/` in addition to health endpoints so static assets and Traefik host routing are exercised before production promotion.
+
+### Sugarkube cache telemetry
+
+Sugarkube converts this already-published runtime contract into bounded aggregate metrics without
+triggering a refresh or calling GitHub. Installation, failure semantics, dashboard panel names, and
+verification commands are documented in the [Daniel cache collection runbook](../observability-operations.md#daniel-cache-collection-and-dashboard).
