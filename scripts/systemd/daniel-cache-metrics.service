@@ -1,0 +1,20 @@
+[Unit]
+Description=Collect bounded Daniel cache telemetry
+Documentation=https://github.com/futuroptimist/sugarkube/blob/main/docs/observability-operations.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/sugarkube/daniel-cache-metrics.env
+ExecStart=/usr/local/libexec/sugarkube-daniel-cache-metrics --environment ${DANIEL_CACHE_ENVIRONMENT} --url ${DANIEL_CACHE_URL}
+NoNewPrivileges=yes
+PrivateDevices=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/node_exporter/textfile_collector
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native

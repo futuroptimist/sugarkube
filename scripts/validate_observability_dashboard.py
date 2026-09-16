@@ -48,6 +48,14 @@ TOKENPLACE_DATA_TITLES = {
     "token.place HTTP latency percentiles",
     "token.place build identity",
 }
+DANIEL_CACHE_TITLES = {
+    "Daniel cache state",
+    "Daniel cache completeness",
+    "Daniel cache freshness age",
+    "Daniel cache refresh duration",
+    "Daniel cache retained-data age",
+    "Daniel cache repository counts",
+}
 EVENT_METRICS = {"dspace_dchat_requests_total", "dspace_dependency_requests_total"}
 DSPACE_CHAT_PANEL_TITLES = {
     "DSPACE chat outcome rate",
@@ -197,10 +205,10 @@ def _expected_dashboard(dashboard: dict) -> dict:
 
 
 def _validate_grid(items: list[dict]) -> None:
-    if len(items) != 64 or sum(panel.get("type") == "row" for panel in items) != 11:
-        raise SystemExit("ERROR: canonical dashboard must contain exactly 64 objects and 11 rows.")
+    if len(items) != 71 or sum(panel.get("type") == "row" for panel in items) != 12:
+        raise SystemExit("ERROR: canonical dashboard must contain exactly 71 objects and 12 rows.")
     ids = [panel.get("id") for panel in items]
-    if ids != list(range(1, 65)):
+    if ids != list(range(1, 72)):
         raise SystemExit(
             "ERROR: canonical dashboard panel IDs must be stable consecutive integers."
         )
@@ -312,6 +320,17 @@ def _validate_semantics(dashboard: dict) -> None:
         raise SystemExit("ERROR: token.place queries require environment and cluster variables.")
     if any("vector(0)" in expr for expr in token_expressions):
         raise SystemExit("ERROR: token.place queries must preserve missing data.")
+    daniel_expressions = [
+        target["expr"]
+        for title in DANIEL_CACHE_TITLES
+        for target in panel_named(dashboard, title).get("targets", [])
+    ]
+    if any('environment=~"$environment"' not in expr for expr in daniel_expressions):
+        raise SystemExit("ERROR: Daniel cache queries require environment scoping.")
+    if any("vector(0)" in expr for expr in daniel_expressions):
+        raise SystemExit("ERROR: Daniel cache queries must preserve missing data.")
+    if any(label in "\n".join(daniel_expressions) for label in ("repo=", "repository=", "url=")):
+        raise SystemExit("ERROR: Daniel cache queries contain an unbounded label.")
     for title, expected in FIVE_XX_RATIO_EXPRESSIONS.items():
         if panel_expression(dashboard, title) != expected:
             raise SystemExit(f"ERROR: {title} must use its request-family-gated 5xx zero contract.")

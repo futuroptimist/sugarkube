@@ -1,0 +1,12 @@
+[Unit]
+Description=Collect Daniel cache telemetry every minute
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=1min
+RandomizedDelaySec=5s
+Persistent=true
+Unit=daniel-cache-metrics.service
+
+[Install]
+WantedBy=timers.target

@@ -859,3 +859,51 @@ verification is intentionally rejected until production observability is codifie
 Merging this repository support does not deploy any application, create any
 Secret, dashboard, alert rule, schedulability check, shared-state check, or live
 drill.
+
+## Daniel cache telemetry collection
+
+Daniel publishes schema-version-1 cache diagnostics at
+`/runtime/github-metrics.json`. The Sugarkube collector reads that already-published
+document only; it does not call GitHub, refresh the cache, follow redirects, or
+collect repository names. Its Prometheus labels are limited to `environment`, the
+five fixed cache states, the three completeness values, the eight fixed failure
+categories, and four aggregate count results.
+
+The collector rejects documents larger than 256 KiB and malformed or contradictory
+contracts. A failed fetch or validation writes `daniel_cache_collection_success 0`
+and the `unavailable` state. It never substitutes `fresh` for missing, stale, or
+unavailable data. Valid documents expose these aggregate families through the
+existing node-exporter textfile collector:
+
+- `daniel_cache_state` and `daniel_cache_completeness`;
+- `daniel_cache_freshness_age_seconds` and
+  `daniel_cache_retained_data_age_seconds`;
+- `daniel_cache_refresh_duration_seconds`;
+- `daniel_cache_repositories` for configured, successful, failed, and retained
+  counts; and
+- `daniel_cache_failure_category` for the fixed upstream categories.
+
+After the corresponding cluster rollout is separately approved, install the
+environment-specific systemd timer on the Prometheus node:
+
+```bash
+sudo scripts/install_daniel_cache_metrics.sh staging
+sudo systemctl start daniel-cache-metrics.service
+sudo systemctl status daniel-cache-metrics.timer daniel-cache-metrics.service
+```
+
+Use `prod` only on the production cluster. Then verify collection without dumping
+the JSON document or any repository data:
+
+```bash
+curl -fsS http://127.0.0.1:9100/metrics |
+  grep -E '^daniel_cache_(collection_success|state|completeness|freshness_age_seconds|refresh_duration_seconds|retained_data_age_seconds|repositories|failure_category)'
+```
+
+The **Daniel cache telemetry** Grafana row contains **Daniel cache state**,
+**Daniel cache completeness**, **Daniel cache freshness age**, **Daniel cache
+refresh duration**, **Daniel cache retained-data age**, and **Daniel cache
+repository counts**. Every query is environment-scoped, aggregate-only, preserves
+Prometheus `NO DATA`, and never groups by repository identity. Merging these assets
+does not install the timer or mutate staging or production; approved rollout and
+live endpoint, scrape, query, and observation-window verification remain required.
