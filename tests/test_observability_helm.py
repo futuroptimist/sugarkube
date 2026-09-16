@@ -43,7 +43,7 @@ LEGACY = [
 DSPACE_ALERT_MATCHER = (
     'alertname=~"^(DspaceBuildRevisionMismatch|DspaceMixedBuildRevisions|'
     "DspaceDeploymentImagePinMismatch|DspaceChatSyntheticFailed|"
-    'DspaceMetricsTargetDown)$"'
+    'DspaceMetricsTargetDown|DanielsmithVisitorJourneyFailed)$"'
 )
 DSPACE_ALERT_NAMES = (
     "DspaceBuildRevisionMismatch",
@@ -52,6 +52,7 @@ DSPACE_ALERT_NAMES = (
     "DspaceChatSyntheticFailed",
     "DspaceMetricsTargetDown",
 )
+DANIELSMITH_VISITOR_ALERT = "DanielsmithVisitorJourneyFailed"
 
 
 def watchdog_canary():
@@ -3217,6 +3218,33 @@ def test_production_alertmanager_routes_exact_eligible_label_sets():
         assert alertmanager_receivers_for_labels(config, labels) == ["null"]
 
 
+@pytest.mark.parametrize(
+    ("values_path", "environment", "cluster"),
+    [(STAGING, "staging", "sugarkube-int"), (PROD, "prod", "sugarkube-prod")],
+)
+def test_danielsmith_visitor_critical_alert_has_exact_pagerduty_eligibility(
+    values_path, environment, cluster
+):
+    config = yaml_load(values_path)["alertmanager"]["config"]
+    eligible = {
+        "alertname": DANIELSMITH_VISITOR_ALERT,
+        "environment": environment,
+        "cluster": cluster,
+        "severity": "critical",
+    }
+    assert alertmanager_receivers_for_labels(config, eligible) == ["pagerduty-dspace"]
+    for labels in (
+        {**eligible, "environment": "prod" if environment == "staging" else "staging"},
+        {
+            **eligible,
+            "cluster": "sugarkube-prod" if cluster == "sugarkube-int" else "sugarkube-int",
+        },
+        {**eligible, "severity": "warning"},
+        {**eligible, "alertname": "UnrelatedCriticalAlert"},
+    ):
+        assert alertmanager_receivers_for_labels(config, labels) == ["null"]
+
+
 def test_production_alertmanager_has_exact_routes_and_file_backed_receivers():
     config = yaml_load(PROD)["alertmanager"]["config"]
     assert [route["receiver"] for route in config["route"]["routes"]] == [
@@ -3382,3 +3410,29 @@ def test_production_alertmanager_validator_rejects_missing_or_broadened_routes(t
     )
     assert result.returncode == 16
     assert "PRIVATE_ROUTE_FIXTURE_SENTINEL" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("values_path", "environment"), [(STAGING, "staging"), (PROD, "prod")]
+)
+@pytest.mark.parametrize("mutation", ["remove-daniel", "broaden-alert-names"])
+def test_alertmanager_validator_rejects_changed_danielsmith_allowlist(
+    tmp_path, values_path, environment, mutation
+):
+    config = yaml_load(values_path)["alertmanager"]["config"]
+    if mutation == "remove-daniel":
+        config["route"]["routes"][0]["matchers"][0] = DSPACE_ALERT_MATCHER.replace(
+            "|DanielsmithVisitorJourneyFailed", ""
+        )
+    else:
+        config["route"]["routes"][0]["matchers"][0] = 'alertname=~".*"'
+    manifest = tmp_path / f"{environment}-{mutation}.yaml"
+    manifest.write_text(production_alertmanager_fixture(config=config), encoding="utf-8")
+    result = subprocess.run(
+        ["ruby", str(ALERTMANAGER_VALIDATOR), environment, "rendered", str(manifest)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 16
+    assert "DSPACE route matchers are not the exact alert allowlist" in result.stderr
