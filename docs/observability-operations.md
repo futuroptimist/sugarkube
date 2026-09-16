@@ -859,3 +859,33 @@ verification is intentionally rejected until production observability is codifie
 Merging this repository support does not deploy any application, create any
 Secret, dashboard, alert rule, schedulability check, shared-state check, or live
 drill.
+
+## Daniel GitHub metadata cache collection
+
+Daniel's schema-version-1 `/runtime/github-metrics.json` document is a passive source: fetching it
+reads the file already published by the Daniel cache sidecar and does not call GitHub. Install
+`scripts/daniel_cache_metrics.py` on one monitored node per environment and run it from the existing
+node-exporter textfile schedule. For example, the scheduled command for staging is:
+
+```bash
+python3 scripts/daniel_cache_metrics.py \
+  --url https://staging.danielsmith.io/runtime/github-metrics.json \
+  --environment staging \
+  --output /var/lib/node_exporter/textfile_collector/daniel-cache.prom
+```
+
+Use `https://danielsmith.io/runtime/github-metrics.json` and `--environment prod` for production.
+The collector caps the response at 262,144 bytes and atomically replaces the textfile. Missing,
+unavailable, malformed, and oversized documents set `daniel_cache_collection_up` to `0`, publish
+an explicit bounded `daniel_cache_document_status`, and select `unavailable`/`none`; they never
+appear fresh or complete. The source's five states, three completeness values, eight fixed failure
+categories, durations, ages, and aggregate repository counts are preserved. Repository names,
+URLs, raw errors, request identities, and credentials are never labels.
+
+The **Daniel GitHub metadata cache** dashboard row contains **Daniel cache state**, **Daniel cache
+freshness**, **Daniel cache completeness**, **Daniel cache refresh duration**, and **Daniel cache
+retained-data age**. These panels use aggregate queries and show `NO DATA` rather than synthesizing
+a healthy zero. Treat them as product-metadata diagnostics, not application availability or a
+paging signal. After an authorized rollout, verify the textfile timestamp, node-exporter scrape,
+all five panels, and stale/unavailable behavior. This change does not install a timer or mutate a
+cluster; deployment and live observation remain operator work.
