@@ -122,57 +122,13 @@ DANIEL_PANEL_CONTRACT = {
         "s",
         "age",
     ),
-    "Daniel performance result state": (
-        "max by (state) ((max by (environment, state) "
-        '(daniel_performance_result_state{environment=~"$environment"})) and on(environment) '
-        "(max by (environment) (daniel_performance_measurement_timestamp_seconds"
-        '{environment=~"$environment"}) > time() - 86400))',
-        "short",
-        "{{state}}",
-    ),
-    "Daniel application-ready duration": (
-        "max((max by (environment) (daniel_performance_application_ready_seconds"
-        '{environment=~"$environment",statistic="p95"})) and on(environment) '
-        "(max by (environment) (daniel_performance_measurement_timestamp_seconds"
-        '{environment=~"$environment"}) > time() - 86400))',
-        "s",
-        "p95",
-    ),
-    "Daniel controlled interaction latency": (
-        "max by (statistic) ((max by (environment, statistic) "
-        "(daniel_performance_interaction_latency_seconds"
-        '{environment=~"$environment"})) and on(environment) '
-        "(max by (environment) (daniel_performance_measurement_timestamp_seconds"
-        '{environment=~"$environment"}) > time() - 86400))',
-        "s",
-        "{{statistic}}",
-    ),
-    "Daniel renderer and fallback state": (
-        "max by (renderer_class, renderer_state, fallback_status) "
-        "(((max by (environment, renderer_class) (daniel_performance_renderer_class"
-        '{environment=~"$environment"} == 1)) * on(environment) '
-        "group_left(renderer_state) (max by (environment, renderer_state) "
-        '(daniel_performance_renderer_state{environment=~"$environment"} == 1)) '
-        "* on(environment) group_left(fallback_status) "
-        "(max by (environment, fallback_status) (daniel_performance_fallback_status"
-        '{environment=~"$environment"} == 1))) and on(environment) '
-        "(max by (environment) (daniel_performance_measurement_timestamp_seconds"
-        '{environment=~"$environment"}) > time() - 86400))',
-        "short",
-        "{{renderer_class}} {{renderer_state}} {{fallback_status}}",
-    ),
-    "Daniel controlled frame time": (
-        "max by (statistic, renderer_class) (((max by (environment, statistic) "
-        "(daniel_performance_frame_time_seconds"
-        '{environment=~"$environment"})) * on(environment) group_left(renderer_class) '
-        "(max by (environment, renderer_class) (daniel_performance_renderer_class"
-        '{environment=~"$environment",renderer_class="hardware"} == 1))) '
-        "and on(environment) (max by (environment) "
-        "(daniel_performance_measurement_timestamp_seconds"
-        '{environment=~"$environment"}) > time() - 86400))',
-        "s",
-        "{{renderer_class}} {{statistic}}",
-    ),
+    'Daniel collection/document status': ('max by (environment, status) (daniel_performance_document_status{environment=~"$environment"})', 'short', '{{environment}} {{status}}'),  # noqa: E501
+    'Daniel measurement age': ('time() - max by (environment, instance, job) (daniel_performance_measurement_timestamp_seconds{environment=~"$environment"})', 's', '{{environment}} age'),  # noqa: E501
+    'Daniel performance result state': ('max by (environment, state) ((max by (environment, instance, job, state) (daniel_performance_result_state{environment=~"$environment"})) and on(environment, instance, job) (max by (environment, instance, job) (daniel_performance_measurement_timestamp_seconds{environment=~"$environment"}) > time() - 86400))', 'short', '{{environment}} {{state}}'),  # noqa: E501
+    'Daniel application-ready duration': ('max by (environment, renderer_class, renderer_state, fallback_status) ((max by (environment, instance, job, renderer_class, renderer_state, fallback_status) (daniel_performance_application_ready_seconds{environment=~"$environment",statistic="p95"})) and on(environment, instance, job) (max by (environment, instance, job) (daniel_performance_measurement_timestamp_seconds{environment=~"$environment"}) > time() - 86400))', 's', '{{environment}} {{renderer_class}} {{renderer_state}} {{fallback_status}} p95'),  # noqa: E501
+    'Daniel controlled interaction latency': ('max by (environment, renderer_class, renderer_state, fallback_status, statistic) ((max by (environment, instance, job, renderer_class, renderer_state, fallback_status, statistic) (daniel_performance_interaction_latency_seconds{environment=~"$environment"})) and on(environment, instance, job) (max by (environment, instance, job) (daniel_performance_measurement_timestamp_seconds{environment=~"$environment"}) > time() - 86400))', 's', '{{environment}} {{renderer_class}} {{renderer_state}} {{fallback_status}} {{statistic}}'),  # noqa: E501
+    'Daniel renderer and fallback state': ('max by (environment, renderer_class, renderer_state, fallback_status) (((max by (environment, instance, job, renderer_class) (daniel_performance_renderer_class{environment=~"$environment"} == 1)) * on(environment, instance, job) group_left(renderer_state) (max by (environment, instance, job, renderer_state) (daniel_performance_renderer_state{environment=~"$environment"} == 1)) * on(environment, instance, job) group_left(fallback_status) (max by (environment, instance, job, fallback_status) (daniel_performance_fallback_status{environment=~"$environment"} == 1))) and on(environment, instance, job) (max by (environment, instance, job) (daniel_performance_measurement_timestamp_seconds{environment=~"$environment"}) > time() - 86400))', 'short', '{{environment}} {{renderer_class}} {{renderer_state}} {{fallback_status}}'),  # noqa: E501
+    'Daniel controlled frame time': ('max by (environment, renderer_class, renderer_state, fallback_status, statistic) ((max by (environment, instance, job, renderer_class, renderer_state, fallback_status, statistic) (daniel_performance_frame_time_seconds{environment=~"$environment"})) and on(environment, instance, job) (max by (environment, instance, job) (daniel_performance_measurement_timestamp_seconds{environment=~"$environment"}) > time() - 86400))', 's', '{{environment}} {{renderer_class}} {{renderer_state}} {{fallback_status}} {{statistic}}'),  # noqa: E501
 }
 
 
@@ -275,10 +231,10 @@ def _expected_dashboard(dashboard: dict) -> dict:
 
 
 def _validate_grid(items: list[dict]) -> None:
-    if len(items) != 76 or sum(panel.get("type") == "row" for panel in items) != 13:
-        raise SystemExit("ERROR: canonical dashboard must contain exactly 76 objects and 13 rows.")
+    if len(items) != 78 or sum(panel.get("type") == "row" for panel in items) != 13:
+        raise SystemExit("ERROR: canonical dashboard must contain exactly 78 objects and 13 rows.")
     ids = [panel.get("id") for panel in items]
-    if ids != list(range(1, 77)):
+    if ids != list(range(1, 79)):
         raise SystemExit(
             "ERROR: canonical dashboard panel IDs must be stable consecutive integers."
         )

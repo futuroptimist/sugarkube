@@ -2,7 +2,6 @@
 
 import json
 import re
-from pathlib import Path
 
 import pytest
 
@@ -36,7 +35,7 @@ def result(state="completed", renderer_class="hardware", fallback=False, frame=T
     return {
         "schemaVersion": 1,
         "state": state,
-        "measuredAt": 1_800_000_000,
+        "measuredAt": 1_700_000_000,
         "build": {"environment": "staging", "tag": "v1.2.3-sha256:abc"},
         "environment": {
             "browser": "chromium",
@@ -85,7 +84,7 @@ def test_measurement_timestamp_is_exported_for_dashboard_freshness():
     output = metrics.render(encoded(), "staging")
     assert (
         'daniel_performance_measurement_timestamp_seconds{environment="staging"} '
-        "1800000000" in output
+        "1700000000" in output
     )
 
 
@@ -96,11 +95,29 @@ def test_boolean_schema_version_fails_closed():
         metrics.parse_document(json.dumps(value).encode(), "staging")
 
 
+def test_future_timestamp_uses_injected_clock_and_fails_closed(tmp_path):
+    value = result()
+    value["measuredAt"] = 10_061
+    payload = json.dumps(value).encode()
+    with pytest.raises(metrics.InvalidDocument, match="clock skew"):
+        metrics.parse_document(payload, "staging", now=10_000)
+    source = tmp_path / "future.json"
+    source.write_bytes(payload)
+    output = metrics.collect(source, "staging", now=10_000)
+    assert 'status="malformed"} 1' in output
+    assert "measurement_timestamp_seconds" not in output
+
+
 @pytest.mark.parametrize("renderer_class", metrics.RENDERER_CLASSES)
 def test_renderer_classes_stay_distinct_and_only_hardware_has_frames(renderer_class):
     output = metrics.render(encoded(renderer_class=renderer_class), "staging")
     assert f'renderer_class="{renderer_class}"}} 1' in output
     assert ("daniel_performance_frame_time_seconds" in output) is (renderer_class == "hardware")
+    assert (
+        f'daniel_performance_application_ready_seconds{{environment="staging",'
+        f'renderer_class="{renderer_class}",renderer_state="immersive",'
+        'fallback_status="none",statistic="p95"} 0.008'
+    ) in output
 
 
 def test_fallback_is_explicit_and_does_not_fabricate_frames():
@@ -111,6 +128,10 @@ def test_fallback_is_explicit_and_does_not_fabricate_frames():
     assert 'fallback_status="software_renderer"} 1' in output
     assert 'measurement="frame_time",reason="renderer_fallback"} 1' in output
     assert "daniel_performance_frame_time_seconds" not in output
+    assert (
+        'renderer_class="unknown",renderer_state="fallback",'
+        'fallback_status="software_renderer",statistic="p95"'
+    ) not in output  # unavailable results have no timing series
 
 
 def test_optional_missing_frame_summary_is_no_data_not_zero():
@@ -169,6 +190,10 @@ def test_only_bounded_labels_and_safe_build_identity_are_exported():
     }
     assert "daniel_performance_build_info" not in output
 
+    changed_build = result()
+    changed_build["build"]["tag"] = "another-valid-build"
+    assert metrics.render(json.dumps(changed_build).encode(), "staging") == output
+
 
 def test_atomic_textfile_entrypoint_consumes_existing_scheduler_result(tmp_path):
     source, output = tmp_path / "result.json", tmp_path / "metrics.prom"
@@ -179,5 +204,28 @@ def test_atomic_textfile_entrypoint_consumes_existing_scheduler_result(tmp_path)
     )
     assert 'daniel_performance_collection_up{environment="staging"} 1' in output.read_text()
     assert output.stat().st_mode & 0o777 == 0o644
-    # This integration is a passive adapter: it defines no timer or scheduler.
-    assert not list(Path("scripts/systemd").glob("*daniel*performance*"))
+
+
+@pytest.mark.parametrize("failure", ["missing", "unreadable", "malformed", "oversized", "private"])
+def test_valid_output_is_atomically_replaced_by_failure_without_private_data(tmp_path, failure):
+    source, output = tmp_path / "result.json", tmp_path / "metrics.prom"
+    source.write_bytes(encoded())
+    metrics.write_textfile(output, metrics.collect(source, "staging"))
+    assert "application_ready_seconds" in output.read_text()
+    if failure == "missing":
+        source.unlink()
+    elif failure == "unreadable":
+        source = tmp_path  # opening a directory as a file fails on every supported platform
+    elif failure == "malformed":
+        source.write_text("not-json")
+    elif failure == "oversized":
+        source.write_bytes(b"x" * (metrics.MAX_BYTES + 1))
+    else:
+        private = result()
+        private["sessionToken"] = "SECRET_PRIVATE_VALUE"
+        source.write_text(json.dumps(private))
+    metrics.write_textfile(output, metrics.collect(source, "staging"))
+    replaced = output.read_text()
+    assert "application_ready_seconds" not in replaced
+    assert "SECRET_PRIVATE_VALUE" not in replaced
+    assert 'daniel_performance_collection_up{environment="staging"} 0' in replaced

@@ -9,6 +9,7 @@ import math
 import os
 import re
 import tempfile
+import time
 from pathlib import Path
 
 MAX_BYTES = 65_536
@@ -21,6 +22,7 @@ RENDERER_STATES = ("immersive", "fallback", "unavailable")
 FALLBACK_STATUSES = ("none", "unsupported_webgl", "software_renderer", "performance", "unknown")
 MEASUREMENTS = ("application_ready", "interaction_latency", "frame_time")
 EVENTS_PER_ACTION = 2
+MAX_FUTURE_SKEW_SECONDS = 60
 UNAVAILABLE_REASONS = ("none", "not_collected", "unsupported_environment", "renderer_fallback")
 BUILD_TAG = re.compile(r"^[A-Za-z0-9._:-]{1,80}$")
 SUMMARY_KEYS = {"state", "sampleCount", "medianMs", "p95Ms", "maxMs"}
@@ -90,7 +92,7 @@ def _summary(value, field):
     }
 
 
-def parse_document(payload: bytes, environment: str) -> dict:
+def parse_document(payload: bytes, environment: str, *, now: float | None = None) -> dict:
     """Parse the exact V1 schema without retaining open-ended payload values."""
     if len(payload) > MAX_BYTES:
         raise OverflowError("performance result exceeds 65536 bytes")
@@ -105,7 +107,13 @@ def parse_document(payload: bytes, environment: str) -> dict:
         or document["state"] not in RESULT_STATES
     ):
         raise InvalidDocument("schemaVersion/state")
-    _integer(document["measuredAt"], 0, 9_007_199_254_740_991, "measuredAt")
+    measured_at = _integer(
+        document["measuredAt"], 0, 9_007_199_254_740_991, "measuredAt"
+    )
+    if now is None:
+        now = time.time()
+    if measured_at > int(now) + MAX_FUTURE_SKEW_SECONDS:
+        raise InvalidDocument("measuredAt exceeds the allowed clock skew")
 
     build = _record(document["build"], {"environment", "tag"}, "build")
     if (
@@ -205,8 +213,10 @@ def parse_document(payload: bytes, environment: str) -> dict:
     }
 
 
-def render(payload: bytes | None, environment: str, status="valid") -> str:
-    values = parse_document(payload, environment) if payload is not None else None
+def render(
+    payload: bytes | None, environment: str, status="valid", *, now: float | None = None
+) -> str:
+    values = parse_document(payload, environment, now=now) if payload is not None else None
     state = values["state"] if values else "unavailable"
     lines = [
         "# HELP daniel_performance_collection_up Whether the passive result was "
@@ -273,25 +283,28 @@ def render(payload: bytes | None, environment: str, status="valid") -> str:
             if summary["state"] == "available":
                 lines.extend(
                     f'daniel_performance_{name}_seconds{{environment="{environment}",'
+                    f'renderer_class="{values["renderer_class"]}",'
+                    f'renderer_state="{values["renderer_state"]}",'
+                    f'fallback_status="{values["fallback"]}",'
                     f'statistic="{statistic}"}} {summary[statistic] / 1000:g}'
                     for statistic in ("median", "p95", "max")
                 )
     return "\n".join(lines) + "\n"
 
 
-def collect(path: Path | None, environment: str) -> str:
+def collect(path: Path | None, environment: str, *, now: float | None = None) -> str:
     try:
         if path is None:
-            return render(None, environment, "unavailable")
+            return render(None, environment, "unavailable", now=now)
         with path.open("rb") as stream:
             payload = stream.read(MAX_BYTES + 1)
-        return render(payload, environment)
+        return render(payload, environment, now=now)
     except OverflowError:
-        return render(None, environment, "oversized")
+        return render(None, environment, "oversized", now=now)
     except InvalidDocument:
-        return render(None, environment, "malformed")
+        return render(None, environment, "malformed", now=now)
     except OSError:
-        return render(None, environment, "unavailable")
+        return render(None, environment, "unavailable", now=now)
 
 
 def write_textfile(path: Path, content: str) -> None:

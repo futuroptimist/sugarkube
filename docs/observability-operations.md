@@ -916,10 +916,13 @@ remain authorized operator work; none are executed by this change.
 ## Daniel controlled-performance collection
 
 Daniel revision `26f0745d91f6522e0fd8d618929db74d563d6f07` owns the exact
-`PerformanceResultV1` contract. Sugarkube consumes a result file produced by the
-**existing visitor-journey scheduler**; it does not add a timer, a second browser
-run, or real-user monitoring. The scheduler must invoke the controlled profile and
-then pass its sanitized JSON file to the passive adapter:
+`PerformanceResultV1` contract. The shared Sugarkube base contains the visitor-journey
+**routing prerequisite**, but no scheduler or producer for this performance result.
+Step 08a is therefore blocked on #2810 / Step 06 for scheduler integration and a
+deterministic result handoff test. This change is only passive adapter and dashboard
+preparation: it does not add a timer, browser run, or real-user monitoring. Once Step
+06 lands, its scheduler must invoke the controlled profile and pass the sanitized JSON
+file to the passive adapter:
 
 ```bash
 python3 /usr/local/libexec/sugarkube/daniel_performance_metrics.py \
@@ -941,28 +944,36 @@ renderer-class, renderer-state, fallback-status, and measurement-status domains;
 application-ready, controlled keyboard interaction, and optional frame summary
 statistics; and the validated deployment environment. The measurement's Unix
 timestamp is exported so dashboard queries can hide results older than 24 hours.
+Timestamps more than the repository-standard 60-second clock skew into the future are
+rejected using the collector clock; malformed status replaces prior duration data.
 The build tag is validated but deliberately not exported, preventing successive
 deployments from creating unbounded Prometheus series. Browser sessions, typed
 input, individual events, raw console errors, arbitrary URLs, raw renderer strings,
-and extra environment fields are rejected rather than exported. Hardware,
-software, and unknown renderer classes
-remain separate. Frame durations exist only for a validated 120-sample
+and extra environment fields are rejected rather than exported. Hardware, software,
+unknown, immersive, and fallback timing populations remain separate through fixed
+renderer class, renderer state, and fallback status labels. Frame durations exist
+only for a validated 120-sample
 `controlled_hardware_v1` Chromium result; software, fallback, unsupported, and
 not-collected results expose a reason and leave the duration series absent.
 
-The **Daniel controlled performance** dashboard row contains **Daniel performance
-result state**, **Daniel application-ready duration**, **Daniel controlled
-interaction latency**, **Daniel renderer and fallback state**, and **Daniel
-controlled frame time**. All queries retain environment scope and display `NO
-DATA`; none synthesize zero. Each query aggregates producers by environment before
-joining renderer state and excludes measurements older than 24 hours, so multiple
-node-exporter targets cannot create many-to-many matches and retained files cannot
-appear current indefinitely. There are no performance alerts or production limits.
+The **Daniel controlled performance** dashboard row contains **Daniel
+collection/document status**, **Daniel measurement age**, **Daniel performance result
+state**, **Daniel application-ready duration**, **Daniel controlled interaction
+latency**, **Daniel renderer and fallback state**, and **Daniel controlled frame
+time**. All queries retain environment scope and display `NO DATA`; none synthesize
+zero. Duration series carry renderer identity directly. Freshness joins retain the
+node-exporter `instance` and `job` target identity before aggregation, so two targets
+cannot create many-to-many matches or let one target's fresh timestamp revive another
+target's stale data. Results older than 24 hours disappear from result and duration
+panels while measurement age remains visible and document status distinguishes a
+valid application-level unavailable result from malformed, oversized, or missing
+input. There are no performance alerts or production limits.
 The application may report `regression` only against a producer-supplied controlled
 comparison, and the dashboard must not be interpreted as a production threshold.
 
-Later authorized staging qualification must prove scheduler handoff, file
-ownership and freshness, textfile scraping, each result state, fallback behavior,
+After #2810 / Step 06, a deterministic integration test must prove scheduler handoff.
+Later authorized staging qualification must prove file ownership and freshness,
+textfile scraping, each result state, fallback behavior,
 and `NO DATA` for unsupported frames. It must record the browser version, viewport,
 renderer class, profile, build, and measured baseline. Production qualification
 must repeat that evidence on representative hardware before anyone proposes a

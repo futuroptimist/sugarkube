@@ -3139,9 +3139,9 @@
     },
     {
       "id": 72,
-      "title": "Daniel performance result state",
+      "title": "Daniel collection/document status",
       "type": "timeseries",
-      "description": "Completed, regression, or explicitly unavailable result.",
+      "description": "Selected bounded document status; valid is collected and validated.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -3164,16 +3164,16 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max by (state) ((max by (environment, state) (daniel_performance_result_state{environment=~\"$environment\"})) and on(environment) (max by (environment) (daniel_performance_measurement_timestamp_seconds{environment=~\"$environment\"}) > time() - 86400))",
-          "legendFormat": "{{state}}"
+          "expr": "max by (environment, status) (daniel_performance_document_status{environment=~\"$environment\"})",
+          "legendFormat": "{{environment}} {{status}}"
         }
       ]
     },
     {
       "id": 73,
-      "title": "Daniel application-ready duration",
+      "title": "Daniel measurement age",
       "type": "timeseries",
-      "description": "Application-ready p95 from the latest controlled run.",
+      "description": "Age of the retained controlled result; remains visible when stale.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -3196,52 +3196,20 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max((max by (environment) (daniel_performance_application_ready_seconds{environment=~\"$environment\",statistic=\"p95\"})) and on(environment) (max by (environment) (daniel_performance_measurement_timestamp_seconds{environment=~\"$environment\"}) > time() - 86400))",
-          "legendFormat": "p95"
+          "expr": "time() - max by (environment, instance, job) (daniel_performance_measurement_timestamp_seconds{environment=~\"$environment\"})",
+          "legendFormat": "{{environment}} age"
         }
       ]
     },
     {
       "id": 74,
-      "title": "Daniel controlled interaction latency",
+      "title": "Daniel performance result state",
       "type": "timeseries",
-      "description": "Median, p95, and maximum controlled keyboard event-dispatch latency.",
+      "description": "Completed, regression, or explicitly unavailable current result.",
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 223
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "noValue": "NO DATA",
-          "min": 0
-        },
-        "overrides": []
-      },
-      "options": {},
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "max by (statistic) ((max by (environment, statistic) (daniel_performance_interaction_latency_seconds{environment=~\"$environment\"})) and on(environment) (max by (environment) (daniel_performance_measurement_timestamp_seconds{environment=~\"$environment\"}) > time() - 86400))",
-          "legendFormat": "{{statistic}}"
-        }
-      ]
-    },
-    {
-      "id": 75,
-      "title": "Daniel renderer and fallback state",
-      "type": "timeseries",
-      "description": "Renderer class remains distinct; fallback state and reason are bounded.",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
         "y": 223
       },
       "datasource": {
@@ -3260,16 +3228,48 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max by (renderer_class, renderer_state, fallback_status) (((max by (environment, renderer_class) (daniel_performance_renderer_class{environment=~\"$environment\"} == 1)) * on(environment) group_left(renderer_state) (max by (environment, renderer_state) (daniel_performance_renderer_state{environment=~\"$environment\"} == 1)) * on(environment) group_left(fallback_status) (max by (environment, fallback_status) (daniel_performance_fallback_status{environment=~\"$environment\"} == 1))) and on(environment) (max by (environment) (daniel_performance_measurement_timestamp_seconds{environment=~\"$environment\"}) > time() - 86400))",
-          "legendFormat": "{{renderer_class}} {{renderer_state}} {{fallback_status}}"
+          "expr": "max by (environment, state) ((max by (environment, instance, job, state) (daniel_performance_result_state{environment=~\"$environment\"})) and on(environment, instance, job) (max by (environment, instance, job) (daniel_performance_measurement_timestamp_seconds{environment=~\"$environment\"}) > time() - 86400))",
+          "legendFormat": "{{environment}} {{state}}"
+        }
+      ]
+    },
+    {
+      "id": 75,
+      "title": "Daniel application-ready duration",
+      "type": "timeseries",
+      "description": "Application-ready p95 by renderer identity from the current controlled run.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 223
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (environment, renderer_class, renderer_state, fallback_status) ((max by (environment, instance, job, renderer_class, renderer_state, fallback_status) (daniel_performance_application_ready_seconds{environment=~\"$environment\",statistic=\"p95\"})) and on(environment, instance, job) (max by (environment, instance, job) (daniel_performance_measurement_timestamp_seconds{environment=~\"$environment\"}) > time() - 86400))",
+          "legendFormat": "{{environment}} {{renderer_class}} {{renderer_state}} {{fallback_status}} p95"
         }
       ]
     },
     {
       "id": 76,
-      "title": "Daniel controlled frame time",
+      "title": "Daniel controlled interaction latency",
       "type": "timeseries",
-      "description": "Optional 120-frame hardware-only summary; unsupported runs remain NO DATA.",
+      "description": "Controlled keyboard latency by renderer identity from the current run.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -3292,8 +3292,72 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max by (statistic, renderer_class) (((max by (environment, statistic) (daniel_performance_frame_time_seconds{environment=~\"$environment\"})) * on(environment) group_left(renderer_class) (max by (environment, renderer_class) (daniel_performance_renderer_class{environment=~\"$environment\",renderer_class=\"hardware\"} == 1))) and on(environment) (max by (environment) (daniel_performance_measurement_timestamp_seconds{environment=~\"$environment\"}) > time() - 86400))",
-          "legendFormat": "{{renderer_class}} {{statistic}}"
+          "expr": "max by (environment, renderer_class, renderer_state, fallback_status, statistic) ((max by (environment, instance, job, renderer_class, renderer_state, fallback_status, statistic) (daniel_performance_interaction_latency_seconds{environment=~\"$environment\"})) and on(environment, instance, job) (max by (environment, instance, job) (daniel_performance_measurement_timestamp_seconds{environment=~\"$environment\"}) > time() - 86400))",
+          "legendFormat": "{{environment}} {{renderer_class}} {{renderer_state}} {{fallback_status}} {{statistic}}"
+        }
+      ]
+    },
+    {
+      "id": 77,
+      "title": "Daniel renderer and fallback state",
+      "type": "timeseries",
+      "description": "Bounded renderer class, state, and fallback reason by target.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 231
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (environment, renderer_class, renderer_state, fallback_status) (((max by (environment, instance, job, renderer_class) (daniel_performance_renderer_class{environment=~\"$environment\"} == 1)) * on(environment, instance, job) group_left(renderer_state) (max by (environment, instance, job, renderer_state) (daniel_performance_renderer_state{environment=~\"$environment\"} == 1)) * on(environment, instance, job) group_left(fallback_status) (max by (environment, instance, job, fallback_status) (daniel_performance_fallback_status{environment=~\"$environment\"} == 1))) and on(environment, instance, job) (max by (environment, instance, job) (daniel_performance_measurement_timestamp_seconds{environment=~\"$environment\"}) > time() - 86400))",
+          "legendFormat": "{{environment}} {{renderer_class}} {{renderer_state}} {{fallback_status}}"
+        }
+      ]
+    },
+    {
+      "id": 78,
+      "title": "Daniel controlled frame time",
+      "type": "timeseries",
+      "description": "Optional 120-frame hardware summary; unsupported runs remain NO DATA.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 239
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (environment, renderer_class, renderer_state, fallback_status, statistic) ((max by (environment, instance, job, renderer_class, renderer_state, fallback_status, statistic) (daniel_performance_frame_time_seconds{environment=~\"$environment\"})) and on(environment, instance, job) (max by (environment, instance, job) (daniel_performance_measurement_timestamp_seconds{environment=~\"$environment\"}) > time() - 86400))",
+          "legendFormat": "{{environment}} {{renderer_class}} {{renderer_state}} {{fallback_status}} {{statistic}}"
         }
       ]
     }
