@@ -20,6 +20,7 @@ RENDERER_CLASSES = ("hardware", "software", "unknown")
 RENDERER_STATES = ("immersive", "fallback", "unavailable")
 FALLBACK_STATUSES = ("none", "unsupported_webgl", "software_renderer", "performance", "unknown")
 MEASUREMENTS = ("application_ready", "interaction_latency", "frame_time")
+EVENTS_PER_ACTION = 2
 UNAVAILABLE_REASONS = ("none", "not_collected", "unsupported_environment", "renderer_fallback")
 BUILD_TAG = re.compile(r"^[A-Za-z0-9._:-]{1,80}$")
 SUMMARY_KEYS = {"state", "sampleCount", "medianMs", "p95Ms", "maxMs"}
@@ -98,7 +99,11 @@ def parse_document(payload: bytes, environment: str) -> dict:
     except (UnicodeDecodeError, ValueError, RecursionError) as error:
         raise InvalidDocument("JSON") from error
     _record(document, TOP_LEVEL_KEYS, "document")
-    if document["schemaVersion"] != 1 or document["state"] not in RESULT_STATES:
+    if (
+        type(document["schemaVersion"]) is not int
+        or document["schemaVersion"] != 1
+        or document["state"] not in RESULT_STATES
+    ):
         raise InvalidDocument("schemaVersion/state")
     _integer(document["measuredAt"], 0, 9_007_199_254_740_991, "measuredAt")
 
@@ -144,8 +149,8 @@ def parse_document(payload: bytes, environment: str) -> dict:
     samples = _integer(conditions["requestedSamples"], 1, MAX_SAMPLES, "requestedSamples")
     if (
         conditions["interactionName"] != "keyboard_movement"
-        or conditions["eventsPerAction"] != 2
-        or samples != actions * 2
+        or conditions["eventsPerAction"] != EVENTS_PER_ACTION
+        or samples != actions * EVENTS_PER_ACTION
     ):
         raise InvalidDocument("controlled interaction")
 
@@ -190,7 +195,7 @@ def parse_document(payload: bytes, environment: str) -> dict:
         raise InvalidDocument("frame samples")
     return {
         "state": document["state"],
-        "tag": build["tag"],
+        "measured_at": document["measuredAt"],
         "renderer_class": runtime["rendererClass"],
         "renderer_state": renderer["state"],
         "fallback": renderer["fallbackReason"],
@@ -219,6 +224,15 @@ def render(payload: bytes | None, environment: str, status="valid") -> str:
             for item in domain
         )
     if values:
+        lines.extend(
+            (
+                "# HELP daniel_performance_measurement_timestamp_seconds Unix time of the "
+                "controlled measurement.",
+                "# TYPE daniel_performance_measurement_timestamp_seconds gauge",
+                f'daniel_performance_measurement_timestamp_seconds{{environment="{environment}"}} '
+                f'{values["measured_at"]}',
+            )
+        )
         for metric, domain, selected, label in (
             (
                 "daniel_performance_renderer_class",
@@ -243,15 +257,13 @@ def render(payload: bytes | None, environment: str, status="valid") -> str:
                 f'{metric}{{environment="{environment}",{label}="{item}"}} {int(item == selected)}'
                 for item in domain
             )
-        lines.append(
-            f'daniel_performance_build_info{{environment="{environment}",'
-            f'build_tag="{values["tag"]}"}} 1'
-        )
-        for name, summary in (
-            ("application_ready", values["ready"]),
-            ("interaction_latency", values["interaction"]),
-            ("frame_time", values["frame"]),
-        ):
+        summaries = {
+            "application_ready": values["ready"],
+            "interaction_latency": values["interaction"],
+            "frame_time": values["frame"],
+        }
+        for name in MEASUREMENTS:
+            summary = summaries[name]
             reason = summary.get("reason", "none")
             lines.extend(
                 f'daniel_performance_measurement_status{{environment="{environment}",'
@@ -292,6 +304,11 @@ def write_textfile(path: Path, content: str) -> None:
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
+        directory_fd = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)

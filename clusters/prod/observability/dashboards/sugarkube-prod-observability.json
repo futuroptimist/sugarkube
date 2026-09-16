@@ -3164,7 +3164,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max by (state) (daniel_performance_result_state{environment=~\"$environment\"})",
+          "expr": "max by (state) ((max by (environment, state) (daniel_performance_result_state{environment=~\"$environment\"})) and on(environment) (max by (environment) (daniel_performance_measurement_timestamp_seconds{environment=~\"$environment\"}) > time() - 86400))",
           "legendFormat": "{{state}}"
         }
       ]
@@ -3196,7 +3196,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max(daniel_performance_application_ready_seconds{environment=~\"$environment\",statistic=\"p95\"})",
+          "expr": "max((max by (environment) (daniel_performance_application_ready_seconds{environment=~\"$environment\",statistic=\"p95\"})) and on(environment) (max by (environment) (daniel_performance_measurement_timestamp_seconds{environment=~\"$environment\"}) > time() - 86400))",
           "legendFormat": "p95"
         }
       ]
@@ -3228,7 +3228,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max by (statistic) (daniel_performance_interaction_latency_seconds{environment=~\"$environment\"})",
+          "expr": "max by (statistic) ((max by (environment, statistic) (daniel_performance_interaction_latency_seconds{environment=~\"$environment\"})) and on(environment) (max by (environment) (daniel_performance_measurement_timestamp_seconds{environment=~\"$environment\"}) > time() - 86400))",
           "legendFormat": "{{statistic}}"
         }
       ]
@@ -3260,7 +3260,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max by (renderer_class, renderer_state, fallback_status) ((daniel_performance_renderer_class{environment=~\"$environment\"} == 1) * on(environment) group_left(renderer_state) (daniel_performance_renderer_state{environment=~\"$environment\"} == 1) * on(environment) group_left(fallback_status) (daniel_performance_fallback_status{environment=~\"$environment\"} == 1))",
+          "expr": "max by (renderer_class, renderer_state, fallback_status) (((max by (environment, renderer_class) (daniel_performance_renderer_class{environment=~\"$environment\"} == 1)) * on(environment) group_left(renderer_state) (max by (environment, renderer_state) (daniel_performance_renderer_state{environment=~\"$environment\"} == 1)) * on(environment) group_left(fallback_status) (max by (environment, fallback_status) (daniel_performance_fallback_status{environment=~\"$environment\"} == 1))) and on(environment) (max by (environment) (daniel_performance_measurement_timestamp_seconds{environment=~\"$environment\"}) > time() - 86400))",
           "legendFormat": "{{renderer_class}} {{renderer_state}} {{fallback_status}}"
         }
       ]
@@ -3292,7 +3292,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max by (statistic, renderer_class) (daniel_performance_frame_time_seconds{environment=~\"$environment\"} * on(environment) group_left(renderer_class) (daniel_performance_renderer_class{environment=~\"$environment\",renderer_class=\"hardware\"} == 1))",
+          "expr": "max by (statistic, renderer_class) (((max by (environment, statistic) (daniel_performance_frame_time_seconds{environment=~\"$environment\"})) * on(environment) group_left(renderer_class) (max by (environment, renderer_class) (daniel_performance_renderer_class{environment=~\"$environment\",renderer_class=\"hardware\"} == 1))) and on(environment) (max by (environment) (daniel_performance_measurement_timestamp_seconds{environment=~\"$environment\"}) > time() - 86400))",
           "legendFormat": "{{renderer_class}} {{statistic}}"
         }
       ]

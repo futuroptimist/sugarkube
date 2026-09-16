@@ -930,8 +930,8 @@ python3 /usr/local/libexec/sugarkube/daniel_performance_metrics.py \
 
 Omit `--result` when the shared scheduler has no result. That publishes an explicit
 unavailable collection and result state without publishing durations. Malformed
-and documents larger than 65,536 bytes similarly publish bounded `malformed` or
-`oversized` status. The textfile is replaced atomically with mode `0644`; the
+documents and documents larger than 65,536 bytes similarly publish bounded
+`malformed` or `oversized` status. The textfile is replaced atomically with mode `0644`; the
 existing node-exporter textfile scrape and Prometheus retention remain unchanged.
 This change intentionally installs no service or schedule and performs no runtime
 mutation.
@@ -939,11 +939,13 @@ mutation.
 The collector accepts only the exact schema. It publishes one-hot result,
 renderer-class, renderer-state, fallback-status, and measurement-status domains;
 application-ready, controlled keyboard interaction, and optional frame summary
-statistics; and the validated deployment environment and build tag. A build tag is
-limited to 80 identifier characters and must belong to the selected `staging` or
-`prod` environment. Browser sessions, typed input, individual events, raw console
-errors, arbitrary URLs, raw renderer strings, and extra environment fields are
-rejected rather than exported. Hardware, software, and unknown renderer classes
+statistics; and the validated deployment environment. The measurement's Unix
+timestamp is exported so dashboard queries can hide results older than 24 hours.
+The build tag is validated but deliberately not exported, preventing successive
+deployments from creating unbounded Prometheus series. Browser sessions, typed
+input, individual events, raw console errors, arbitrary URLs, raw renderer strings,
+and extra environment fields are rejected rather than exported. Hardware,
+software, and unknown renderer classes
 remain separate. Frame durations exist only for a validated 120-sample
 `controlled_hardware_v1` Chromium result; software, fallback, unsupported, and
 not-collected results expose a reason and leave the duration series absent.
@@ -952,7 +954,10 @@ The **Daniel controlled performance** dashboard row contains **Daniel performanc
 result state**, **Daniel application-ready duration**, **Daniel controlled
 interaction latency**, **Daniel renderer and fallback state**, and **Daniel
 controlled frame time**. All queries retain environment scope and display `NO
-DATA`; none synthesize zero. There are no performance alerts or production limits.
+DATA`; none synthesize zero. Each query aggregates producers by environment before
+joining renderer state and excludes measurements older than 24 hours, so multiple
+node-exporter targets cannot create many-to-many matches and retained files cannot
+appear current indefinitely. There are no performance alerts or production limits.
 The application may report `regression` only against a producer-supplied controlled
 comparison, and the dashboard must not be interpreted as a production threshold.
 

@@ -123,38 +123,53 @@ DANIEL_PANEL_CONTRACT = {
         "age",
     ),
     "Daniel performance result state": (
-        'max by (state) (daniel_performance_result_state{environment=~"$environment"})',
+        "max by (state) ((max by (environment, state) "
+        '(daniel_performance_result_state{environment=~"$environment"})) and on(environment) '
+        "(max by (environment) (daniel_performance_measurement_timestamp_seconds"
+        '{environment=~"$environment"}) > time() - 86400))',
         "short",
         "{{state}}",
     ),
     "Daniel application-ready duration": (
-        "max(daniel_performance_application_ready_seconds"
-        '{environment=~"$environment",statistic="p95"})',
+        "max((max by (environment) (daniel_performance_application_ready_seconds"
+        '{environment=~"$environment",statistic="p95"})) and on(environment) '
+        "(max by (environment) (daniel_performance_measurement_timestamp_seconds"
+        '{environment=~"$environment"}) > time() - 86400))',
         "s",
         "p95",
     ),
     "Daniel controlled interaction latency": (
-        "max by (statistic) (daniel_performance_interaction_latency_seconds"
-        '{environment=~"$environment"})',
+        "max by (statistic) ((max by (environment, statistic) "
+        "(daniel_performance_interaction_latency_seconds"
+        '{environment=~"$environment"})) and on(environment) '
+        "(max by (environment) (daniel_performance_measurement_timestamp_seconds"
+        '{environment=~"$environment"}) > time() - 86400))',
         "s",
         "{{statistic}}",
     ),
     "Daniel renderer and fallback state": (
         "max by (renderer_class, renderer_state, fallback_status) "
-        "((daniel_performance_renderer_class"
-        '{environment=~"$environment"} == 1) * on(environment) '
-        "group_left(renderer_state) (daniel_performance_renderer_state"
-        '{environment=~"$environment"} == 1) * on(environment) '
-        "group_left(fallback_status) (daniel_performance_fallback_status"
-        '{environment=~"$environment"} == 1))',
+        "(((max by (environment, renderer_class) (daniel_performance_renderer_class"
+        '{environment=~"$environment"} == 1)) * on(environment) '
+        "group_left(renderer_state) (max by (environment, renderer_state) "
+        '(daniel_performance_renderer_state{environment=~"$environment"} == 1)) '
+        "* on(environment) group_left(fallback_status) "
+        "(max by (environment, fallback_status) (daniel_performance_fallback_status"
+        '{environment=~"$environment"} == 1))) and on(environment) '
+        "(max by (environment) (daniel_performance_measurement_timestamp_seconds"
+        '{environment=~"$environment"}) > time() - 86400))',
         "short",
         "{{renderer_class}} {{renderer_state}} {{fallback_status}}",
     ),
     "Daniel controlled frame time": (
-        "max by (statistic, renderer_class) (daniel_performance_frame_time_seconds"
-        '{environment=~"$environment"} * on(environment) group_left(renderer_class) '
-        "(daniel_performance_renderer_class"
-        '{environment=~"$environment",renderer_class="hardware"} == 1))',
+        "max by (statistic, renderer_class) (((max by (environment, statistic) "
+        "(daniel_performance_frame_time_seconds"
+        '{environment=~"$environment"})) * on(environment) group_left(renderer_class) '
+        "(max by (environment, renderer_class) (daniel_performance_renderer_class"
+        '{environment=~"$environment",renderer_class="hardware"} == 1))) '
+        "and on(environment) (max by (environment) "
+        "(daniel_performance_measurement_timestamp_seconds"
+        '{environment=~"$environment"}) > time() - 86400))',
         "s",
         "{{renderer_class}} {{statistic}}",
     ),

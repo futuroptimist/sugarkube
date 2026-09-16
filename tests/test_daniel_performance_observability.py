@@ -81,6 +81,21 @@ def test_completed_regression_and_unavailable_are_distinct(state):
         assert 'measurement="application_ready",reason="not_collected"} 1' in output
 
 
+def test_measurement_timestamp_is_exported_for_dashboard_freshness():
+    output = metrics.render(encoded(), "staging")
+    assert (
+        'daniel_performance_measurement_timestamp_seconds{environment="staging"} '
+        "1800000000" in output
+    )
+
+
+def test_boolean_schema_version_fails_closed():
+    value = result()
+    value["schemaVersion"] = True
+    with pytest.raises(metrics.InvalidDocument):
+        metrics.parse_document(json.dumps(value).encode(), "staging")
+
+
 @pytest.mark.parametrize("renderer_class", metrics.RENDERER_CLASSES)
 def test_renderer_classes_stay_distinct_and_only_hardware_has_frames(renderer_class):
     output = metrics.render(encoded(renderer_class=renderer_class), "staging")
@@ -148,12 +163,11 @@ def test_only_bounded_labels_and_safe_build_identity_are_exported():
         "renderer_class",
         "renderer_state",
         "fallback_status",
-        "build_tag",
         "measurement",
         "reason",
         "statistic",
     }
-    assert 'build_tag="v1.2.3-sha256:abc"' in output
+    assert "daniel_performance_build_info" not in output
 
 
 def test_atomic_textfile_entrypoint_consumes_existing_scheduler_result(tmp_path):
