@@ -979,3 +979,28 @@ renderer class, profile, build, and measured baseline. Production qualification
 must repeat that evidence on representative hardware before anyone proposes a
 threshold, paging alert, or promotion. Rollback removes only the adapter invocation
 and `daniel-performance.prom`; it must not disable the shared visitor scheduler.
+
+### Cross-application resource, placement, and release overview
+
+The **Cross-application resource, placement and release overview** row compares only the
+`dspace`, `tokenplace`, and `danielsmith` namespaces in the environment and cluster profile
+selected by this dashboard. Its dedicated **Workload** selector is intentionally separate from
+the probe-oriented **Probe application** selector. Kubernetes metrics are selected by namespace
+from the profile's Prometheus datasource; the queries do not assume that kube-state-metrics or
+cAdvisor emits application or environment labels.
+
+Desired and ready replicas are deduplicated per Deployment before they are summed, so multiple
+replicas and rolling updates are not double counted. Placement counts distinct nodes only when a
+pod is Ready, Running, and non-terminating; a merely scheduled or terminating pod is not treated as
+serving. Memory working set is shown beside configured memory limits, and CPU throttling is shown
+only when the cAdvisor CFS metrics exist. A missing limit or unsupported metric remains **NO DATA**,
+not a healthy zero.
+
+**Deployment image coordinates** are the image strings attached to serving pod specifications.
+They help locate a deployment but are not proof of the bytes currently running or of an
+application build. **Application build identity** separately shows bounded, application-reported
+version and revision data when a producer supplies it; absent identity remains **NO DATA**. Use the
+[DSPACE release-integrity runbook](observability-dspace-release-integrity.md) and the existing
+DSPACE release-integrity row for runtime proof, and use the specialized token.place rows and
+[token.place incident runbooks](tokenplace-incident-runbooks.md) for relay diagnostics rather than
+inferring either from this overview.

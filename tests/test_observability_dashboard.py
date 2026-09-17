@@ -146,9 +146,9 @@ def test_generator_check_and_outputs_are_deterministic(dashboards):
         'provider=\\"openai\\"', 'provider=\\"PRIMARY\\"'
     )
     assert staging_panels == prod_panels
-    assert len(staging["panels"]) == 78
-    assert sum(item["type"] == "row" for item in staging["panels"]) == 13
-    assert sum(item["type"] != "row" for item in staging["panels"]) == 65
+    assert len(staging["panels"]) == 85
+    assert sum(item["type"] == "row" for item in staging["panels"]) == 14
+    assert sum(item["type"] != "row" for item in staging["panels"]) == 71
 
 
 @pytest.mark.parametrize("state", metrics.STATES)
@@ -608,6 +608,7 @@ def test_profiles_differ_only_by_allowlisted_identity(dashboards):
             "cluster",
             "app",
             "route",
+            "workload",
         ]
         assert variables[0]["query"] == environment
         assert variables[1]["query"] == cluster
@@ -632,8 +633,9 @@ def test_canonical_order_ids_grid_and_defaults(dashboards):
         "token.place HTTP and release",
         "Daniel GitHub metadata cache",
         "Daniel controlled performance",
+        "Cross-application resource, placement and release overview",
     ]
-    assert [item["id"] for item in staging["panels"]] == list(range(1, 79))
+    assert [item["id"] for item in staging["panels"]] == list(range(1, 86))
     assert panel(staging, "DSPACE instrumentation health")
     assert panel(staging, "DSPACE build identity")
     assert all(
@@ -673,10 +675,10 @@ def test_daniel_queries_are_target_safe_and_expose_stale_or_missing_health(dashb
     assert " or " not in validator.panel_expression(staging, "Daniel controlled frame time")
 
 
-def test_all_ten_tables_are_simultaneous_single_frames(dashboards):
+def test_all_twelve_tables_are_simultaneous_single_frames(dashboards):
     staging, _ = dashboards
     tables = [item for item in staging["panels"] if item["type"] == "table"]
-    assert len(tables) == 10
+    assert len(tables) == 12
     for table in tables:
         assert len(table["targets"]) == 1
         assert table["targets"][0]["format"] == "table"
@@ -1300,3 +1302,92 @@ def test_dashboard_loading_and_profile_identity_fail_closed(tmp_path):
         validator.load_dashboard(non_object)
     with pytest.raises(SystemExit, match="supported profile"):
         validator.configure_profile({"uid": "unknown", "title": "Unknown"})
+
+
+OVERVIEW_TITLES = tuple(validator.OVERVIEW_PANEL_CONTRACT)
+
+
+def test_cross_application_overview_handles_replica_rollouts_and_single_node_placement(dashboards):
+    """The query shape preserves deployments but counts a shared serving node only once."""
+    staging, _ = dashboards
+    replicas = panel(staging, "Desired versus ready replicas")
+    assert all("max by (namespace, deployment)" in target["expr"] for target in replicas["targets"])
+    assert all("sum by (namespace)" in target["expr"] for target in replicas["targets"])
+    placement = validator.panel_expression(staging, "Serving workload node placement")
+    assert "count by (namespace) (count by (namespace, node)" in placement
+    assert 'condition="true"' in placement and 'phase="Running"' in placement
+    assert "kube_pod_deletion_timestamp" in placement
+
+
+def test_cross_application_overview_preserves_missing_limits_throttling_and_builds(dashboards):
+    staging, _ = dashboards
+    for title in (
+        "Memory working set versus configured limit",
+        "CPU throttling",
+        "Application build identity",
+    ):
+        item = panel(staging, title)
+        assert item["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
+        assert all("vector(0)" not in target["expr"] for target in item["targets"])
+    assert "unsupported" in panel(staging, "CPU throttling")["description"].lower()
+    assert "Missing producers" in panel(staging, "Application build identity")["description"]
+
+
+def test_cross_application_overview_is_profile_and_workload_scoped_without_double_counting(
+    dashboards,
+):
+    staging, prod = dashboards
+    for document, environment in ((staging, "staging"), (prod, "prod")):
+        selector = document["templating"]["list"][-1]
+        assert selector["name"] == "workload"
+        assert selector["query"] == "dspace,tokenplace,danielsmith"
+        assert selector["allValue"] == "dspace|tokenplace|danielsmith"
+        for title in OVERVIEW_TITLES:
+            assert all(
+                'namespace=~"$workload"' in target["expr"]
+                for target in panel(document, title)["targets"]
+            )
+        assert document["templating"]["list"][0]["query"] == environment
+    memory = panel(staging, "Memory working set versus configured limit")
+    cpu = panel(staging, "CPU throttling")
+    assert all("max by (namespace, pod, container)" in x["expr"] for x in memory["targets"])
+    assert all("max by (namespace, pod, container)" in x["expr"] for x in cpu["targets"])
+
+
+@pytest.mark.parametrize(
+    ("title", "mutation", "message"),
+    [
+        ("Serving workload node placement", "drop-ready", "required metric contract"),
+        ("Serving workload node placement", "drop-running", "required metric contract"),
+        ("Serving workload node placement", "drop-terminating", "required metric contract"),
+        ("Memory working set versus configured limit", "zero", "preserve"),
+        ("CPU throttling", "scope", "namespace scope"),
+        ("Application build identity", "scope", "namespace scope"),
+    ],
+)
+def test_cross_application_overview_rejects_unsafe_or_unknown_as_healthy(
+    dashboards, title, mutation, message
+):
+    staging, _ = dashboards
+    changed = copy.deepcopy(staging)
+    target = panel(changed, title)["targets"][0]
+    if mutation == "drop-ready":
+        target["expr"] = target["expr"].replace(
+            'kube_pod_status_ready{namespace=~"$workload",condition="true"} == 1 '
+            "and on (namespace, pod) ",
+            "",
+        )
+    elif mutation == "drop-running":
+        target["expr"] = target["expr"].replace(
+            'kube_pod_status_phase{namespace=~"$workload",phase="Running"} == 1', "vector(1)"
+        )
+    elif mutation == "drop-terminating":
+        target["expr"] = target["expr"].replace(
+            ' unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=~"$workload"}', ""
+        )
+    elif mutation == "zero":
+        target["expr"] += " or vector(0)"
+    else:
+        target["expr"] = target["expr"].replace('namespace=~"$workload"', 'namespace=~".*"')
+    with pytest.raises(SystemExit, match=message):
+        validator._validate_semantics(changed)
