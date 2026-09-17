@@ -146,9 +146,9 @@ def test_generator_check_and_outputs_are_deterministic(dashboards):
         'provider=\\"openai\\"', 'provider=\\"PRIMARY\\"'
     )
     assert staging_panels == prod_panels
-    assert len(staging["panels"]) == 70
-    assert sum(item["type"] == "row" for item in staging["panels"]) == 12
-    assert sum(item["type"] != "row" for item in staging["panels"]) == 58
+    assert len(staging["panels"]) == 78
+    assert sum(item["type"] == "row" for item in staging["panels"]) == 13
+    assert sum(item["type"] != "row" for item in staging["panels"]) == 65
 
 
 @pytest.mark.parametrize("state", metrics.STATES)
@@ -631,8 +631,9 @@ def test_canonical_order_ids_grid_and_defaults(dashboards):
         "token.place relay and compute capacity",
         "token.place HTTP and release",
         "Daniel GitHub metadata cache",
+        "Daniel controlled performance",
     ]
-    assert [item["id"] for item in staging["panels"]] == list(range(1, 71))
+    assert [item["id"] for item in staging["panels"]] == list(range(1, 79))
     assert panel(staging, "DSPACE instrumentation health")
     assert panel(staging, "DSPACE build identity")
     assert all(
@@ -642,6 +643,34 @@ def test_canonical_order_ids_grid_and_defaults(dashboards):
     )
     validator.validate_dashboard(STAGING)
     validator.validate_dashboard(PROD)
+
+
+def test_daniel_queries_are_target_safe_and_expose_stale_or_missing_health(dashboards):
+    staging, _ = dashboards
+    age = validator.panel_expression(staging, "Daniel measurement age")
+    health = validator.panel_expression(staging, "Daniel collection/document status")
+    assert "time() -" in age and "time() - 86400" not in age
+    assert "status" in health and "collection_up" not in health
+    for title in (
+        "Daniel performance result state",
+        "Daniel application-ready duration",
+        "Daniel controlled interaction latency",
+        "Daniel renderer and fallback state",
+        "Daniel controlled frame time",
+    ):
+        expression = validator.panel_expression(staging, title)
+        assert "on(environment, instance, job)" in expression
+        assert "time() - 86400" in expression
+    for title in (
+        "Daniel application-ready duration",
+        "Daniel controlled interaction latency",
+        "Daniel controlled frame time",
+    ):
+        expression = validator.panel_expression(staging, title)
+        assert all(
+            label in expression for label in ("renderer_class", "renderer_state", "fallback_status")
+        )
+    assert " or " not in validator.panel_expression(staging, "Daniel controlled frame time")
 
 
 def test_all_ten_tables_are_simultaneous_single_frames(dashboards):
