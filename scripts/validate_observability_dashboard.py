@@ -250,6 +250,17 @@ def _metric_selectors_are_workload_scoped(expression: str, metrics: set[str]) ->
     return True
 
 
+def _metric_matchers(expression: str, metric: str) -> list[str]:
+    """Return the matcher text for every selector of one metric."""
+    return [
+        match.group(1) or ""
+        for match in re.finditer(
+            rf"(?<![a-zA-Z0-9_:]){re.escape(metric)}(?![a-zA-Z0-9_:])" r"(?:\s*\{([^{}]*)\})?",
+            expression,
+        )
+    ]
+
+
 def load_dashboard(path: Path) -> dict:
     try:
         dashboard = json.loads(path.read_text(encoding="utf-8"))
@@ -491,6 +502,9 @@ def _validate_semantics(dashboard: dict) -> None:
             raise SystemExit(
                 f"ERROR: {title} must exclude unready, non-Running, and terminating pods."
             )
+    serving_target = panel_named(dashboard, "Serving workload node placement")["targets"][0]
+    if serving_target.get("instant") is not True or serving_target.get("range") is not False:
+        raise SystemExit("ERROR: serving-node placement must be an instant-only current value.")
     placement = panel_expression(dashboard, "Serving workload node placement")
     if "count by (namespace) (count by (namespace, node)" not in placement:
         raise SystemExit(
@@ -498,17 +512,70 @@ def _validate_semantics(dashboard: dict) -> None:
         )
     replicas = panel_named(dashboard, "Desired versus ready replicas")
     if any(
-        "max by (namespace, deployment)" not in target["expr"] for target in replicas["targets"]
+        not target["expr"].startswith("max by (namespace, deployment)")
+        or "sum by" in target["expr"]
+        or "{{deployment}}" not in target.get("legendFormat", "")
+        for target in replicas["targets"]
     ):
-        raise SystemExit("ERROR: replica overview must deduplicate rolling-update scrape series.")
+        raise SystemExit("ERROR: replica overview must preserve namespace and deployment identity.")
     memory = panel_named(dashboard, "Memory working set versus configured limit")
     if any(
         "max by (namespace, pod, container)" not in target["expr"] for target in memory["targets"]
     ):
         raise SystemExit("ERROR: memory overview must deduplicate container scrape series.")
+    memory_text = "\n".join(target["expr"] for target in memory["targets"])
+    if any(
+        fragment not in memory_text
+        for fragment in (
+            'pod!=""',
+            'container!=""',
+            'container!="POD"',
+            'resource="memory"',
+            "> 0",
+            "and on (namespace, pod, container)",
+            "count by (namespace)",
+            "== count by (namespace)",
+        )
+    ):
+        raise SystemExit("ERROR: memory limits require complete positive container coverage.")
+    cpu = panel_expression(dashboard, "CPU throttling")
+    if any(
+        fragment not in cpu
+        for fragment in (
+            'pod!=""',
+            'container!=""',
+            'container!="POD"',
+            "and on (namespace, pod, container)",
+            "> 0",
+            "count by (namespace)",
+            "== count by (namespace)",
+        )
+    ):
+        raise SystemExit("ERROR: CPU throttling requires matched, positive container coverage.")
     image_panel = panel_named(dashboard, "Deployment image coordinates")
-    if "not runtime/build proof" not in image_panel.get("description", ""):
+    image_expression = panel_expression(dashboard, "Deployment image coordinates")
+    if (
+        "not runtime/build proof" not in image_panel.get("description", "")
+        or "image_spec" not in image_expression
+        or "max by (namespace, pod, container, image_spec)" not in image_expression
+        or "{{image_spec}}" not in image_panel["targets"][0].get("legendFormat", "")
+        or image_panel["transformations"][0]["options"]["renameByName"].get("image_spec")
+        != "Configured image coordinate"
+    ):
         raise SystemExit("ERROR: image coordinates must disclaim runtime/build proof.")
+    build_expression = panel_expression(dashboard, "Application build identity")
+    dspace_matchers = _metric_matchers(build_expression, "dspace_build_info")
+    token_matchers = _metric_matchers(build_expression, "tokenplace_build_info")
+    if (
+        len(dspace_matchers) != 1
+        or 'environment=~"$environment"' not in dspace_matchers[0]
+        or len(token_matchers) != 1
+        or 'environment=~"$environment"' not in token_matchers[0]
+        or 'cluster=~"$cluster"' not in token_matchers[0]
+        or 'app="tokenplace"' not in token_matchers[0]
+        or 'release="tokenplace"' not in token_matchers[0]
+    ):
+        raise SystemExit("ERROR: build identity selectors must retain exact profile scope.")
     if "kube_state_metrics_build_info" in expression_text:
         raise SystemExit("ERROR: unavailable kube-state-metrics build identity is forbidden.")
     if re.search(

@@ -989,16 +989,20 @@ the probe-oriented **Probe application** selector. Kubernetes metrics are select
 from the profile's Prometheus datasource; the queries do not assume that kube-state-metrics or
 cAdvisor emits application or environment labels.
 
-Desired and ready replicas are deduplicated per Deployment before they are summed, so multiple
-replicas and rolling updates are not double counted. Placement counts distinct nodes only when a
-pod is Ready, Running, and non-terminating; a merely scheduled or terminating pod is not treated as
-serving. Memory working set is shown beside configured memory limits, and CPU throttling is shown
-only when the cAdvisor CFS metrics exist. A missing limit or unsupported metric remains **NO DATA**,
-not a healthy zero.
+Desired and ready replicas are deduplicated and kept separate by namespace and Deployment, so
+rolling-update identities remain visible. Placement is an instant-only count of distinct nodes and
+includes a pod only when it is Ready, Running, and non-terminating; a merely scheduled, historical,
+or terminating pod is not treated as serving. Memory working set remains observable for every
+non-infrastructure container, while its namespace limit is shown only when that same deduplicated
+container population has complete, positive limit coverage. CPU throttling likewise requires each
+reported container to have both CFS metrics and a positive denominator. A missing or zero limit,
+partial metric coverage, or an unsupported metric remains **NO DATA**, not a partial total or a
+healthy zero.
 
-**Deployment image coordinates** are the image strings attached to serving pod specifications.
-They help locate a deployment but are not proof of the bytes currently running or of an
-application build. **Application build identity** separately shows bounded, application-reported
+**Deployment image coordinates** are the `image_spec` strings attached to serving pod
+specifications. They are distinct from the runtime status `image` label and help locate a configured
+deployment, but are not proof of the bytes currently running or of an application build.
+**Application build identity** separately shows bounded, application-reported
 version and revision data when a producer supplies it; absent identity remains **NO DATA**. Use the
 [DSPACE release-integrity runbook](observability-dspace-release-integrity.md) and the existing
 DSPACE release-integrity row for runtime proof, and use the specialized token.place rows and
