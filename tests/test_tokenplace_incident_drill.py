@@ -1208,6 +1208,27 @@ def test_quota_staging_rehearsal_rejects_oom_only_incident_image(tmp_path):
         )
 
 
+@pytest.mark.parametrize(
+    "changes,message",
+    [
+        ({"acknowledge_staging_fault_injection": False}, "fault-injection"),
+        ({"acknowledge_state_loss": False}, "state loss"),
+        ({"mode": "not-a-mode"}, "mode"),
+        ({"lifecycle": "not-a-lifecycle"}, "lifecycle"),
+    ],
+)
+def test_quota_staging_rehearsal_controls_fail_closed(tmp_path, changes, message):
+    values = {
+        "mode": "quota-exhaustion",
+        "lifecycle": "staging-rehearsal",
+        "acknowledge_staging_fault_injection": True,
+    }
+    values.update(changes)
+
+    with pytest.raises(drill.DrillError, match=message):
+        drill.validate(args(tmp_path, **values))
+
+
 def test_staging_rehearsal_rejects_preexisting_oom_evidence(tmp_path):
     c = drill.validate(
         args(
@@ -2087,12 +2108,24 @@ def test_live_authoritative_quota_rehearsal_plan_is_executable(tmp_path):
     assert drill._load_execution_plan(path) == plan
 
 
-def executable_quota_rehearsal_plan(tmp_path):
+def test_quota_rehearsal_allows_reviewed_fallback_to_match_baseline(tmp_path):
+    current_image = "registry.example/relay@sha256:" + "a" * 64
+    plan = executable_quota_rehearsal_plan(
+        tmp_path, current_image=current_image, rollback_image=current_image
+    )
+    path = tmp_path / "shared-baseline-fallback-plan.json"
+    path.write_text(json.dumps(plan), encoding="utf-8")
+
+    assert drill._load_execution_plan(path) == plan
+
+
+def executable_quota_rehearsal_plan(tmp_path, **changes):
     parsed = args(
         tmp_path,
         mode="quota-exhaustion",
         lifecycle="staging-rehearsal",
         acknowledge_staging_fault_injection=True,
+        **changes,
     )
     coordinates = drill.validate(parsed)
     checked = drill._validate_snapshot(
@@ -2110,6 +2143,12 @@ def executable_quota_rehearsal_plan(tmp_path):
     [
         (
             lambda plan: plan["expected_deployment"].update(
+                rollback_image="relay:latest"
+            ),
+            "coordinates",
+        ),
+        (
+            lambda plan: plan["expected_deployment"].update(
                 incident_image="unexpected"
             ),
             "must not specify an incident image",
@@ -2120,35 +2159,88 @@ def executable_quota_rehearsal_plan(tmp_path):
         ),
         (lambda plan: plan["inventory"].update(namespace="other"), "inventory"),
         (
-            lambda plan: plan["actions"][0].update(resource="probe/unreviewed"),
+            lambda plan: next(
+                action for action in plan["actions"] if action["id"] == "pause-root"
+            ).update(resource="probe/unreviewed"),
             "actions",
         ),
         (
-            lambda plan: plan["actions"][0]["command"].__setitem__(-1, "--server-side"),
+            lambda plan: next(
+                action for action in plan["actions"] if action["id"] == "pause-metadata"
+            ).update(resource="probe/unreviewed"),
             "actions",
         ),
         (
-            lambda plan: plan["actions"][0]["inverse"].__setitem__(-1, "--server-side"),
-            "actions",
-        ),
-        (
-            lambda plan: plan["actions"][2].update(depends_on=["pause-root"]),
-            "actions",
-        ),
-        (
-            lambda plan: plan["actions"][3]["duration"].update(value=0),
-            "actions",
-        ),
-        (
-            lambda plan: plan["actions"][7].update(
-                on_failure=["kubectl", "delete", "pod"]
+            lambda plan: next(
+                action for action in plan["actions"] if action["id"] == "replace"
+            )["command"].__setitem__(
+                -1, "relay=registry.example/relay@sha256:" + "e" * 64
             ),
             "actions",
         ),
         (
-            lambda plan: plan["actions"][8]["rollback"].__setitem__(
-                -1, "--server-side"
+            lambda plan: next(
+                action for action in plan["actions"] if action["id"] == "replace"
+            )["inverse"].__setitem__(
+                -1, "relay=registry.example/relay@sha256:" + "e" * 64
             ),
+            "actions",
+        ),
+        (
+            lambda plan: next(
+                action for action in plan["actions"] if action["id"] == "replace"
+            )["rollback"].__setitem__(
+                -1, "relay=registry.example/relay@sha256:" + "e" * 64
+            ),
+            "actions",
+        ),
+        (
+            lambda plan: next(
+                action for action in plan["actions"] if action["id"] == "replace"
+            )["recovery_fallback"]["command"].__setitem__(
+                -1, "relay=registry.example/relay@sha256:" + "e" * 64
+            ),
+            "actions",
+        ),
+        (
+            lambda plan: next(
+                action for action in plan["actions"] if action["id"] == "replace"
+            ).update(depends_on=["pause-root"]),
+            "actions",
+        ),
+        (
+            lambda plan: next(
+                action for action in plan["actions"] if action["id"] == "quota-validator"
+            ).update(checks=[]),
+            "actions",
+        ),
+        (
+            lambda plan: plan["actions"].pop(
+                next(
+                    index
+                    for index, action in enumerate(plan["actions"])
+                    if action["id"] == "observe-root"
+                )
+            ),
+            "actions",
+        ),
+        (
+            lambda plan: plan["actions"].__setitem__(
+                slice(8, 12),
+                [plan["actions"][10], plan["actions"][11], plan["actions"][8], plan["actions"][9]],
+            ),
+            "actions",
+        ),
+        (
+            lambda plan: next(
+                action for action in plan["actions"] if action["id"] == "observe-root"
+            )["duration"].update(value=5),
+            "actions",
+        ),
+        (
+            lambda plan: next(
+                action for action in plan["actions"] if action["id"] == "observe-metadata"
+            )["duration"].update(value=5),
             "actions",
         ),
     ],

@@ -157,6 +157,11 @@ def execution_parser() -> argparse.ArgumentParser:
 
 
 def validate(args: argparse.Namespace) -> Coordinates:
+    if args.mode not in MODES:
+        raise DrillError("drill mode is unsupported")
+    lifecycle = getattr(args, "lifecycle", "real-incident")
+    if lifecycle not in LIFECYCLES:
+        raise DrillError("drill lifecycle is unsupported")
     if args.environment != "staging" or args.context != "sugar-staging":
         raise DrillError("an explicit staging environment and sugar-staging context are required")
     if not args.kubeconfig.is_file():
@@ -168,7 +173,6 @@ def validate(args: argparse.Namespace) -> Coordinates:
     for field in ("current_image", "replacement_image", "rollback_image"):
         if not IMAGE.fullmatch(getattr(args, field)):
             raise DrillError(f"{field.replace('_', ' ')} must use an immutable sha256 digest")
-    lifecycle = getattr(args, "lifecycle", "real-incident")
     incident_image = getattr(args, "incident_image", None)
     if lifecycle == "staging-rehearsal":
         if not getattr(args, "acknowledge_staging_fault_injection", False):
@@ -1300,8 +1304,7 @@ def _validate_staging_execution_contract(plan: dict) -> None:
             or expected["replicas"] <= 0
             or not re.fullmatch(r"[1-9][0-9]*(Mi|Gi)", expected["memory_limit"])
             or any(not IMAGE.fullmatch(value) for value in images)
-            or len({IMAGE_DIGEST.search(value).group(1) for value in images})
-            != len(images)
+            or expected["current_image"] == expected["replacement_image"]
         ):
             raise DrillError(
                 "quota staging rehearsal deployment coordinates are malformed"
