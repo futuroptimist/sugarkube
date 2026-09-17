@@ -179,9 +179,28 @@ current artifact exposes `TOKENPLACE_METRICS_MODE=normal|degraded`, containment 
 degraded value; otherwise it uses only the exact ServiceMonitor pause fallback. Replacement and
 rollback remain bound to their separately reviewed immutable digests.
 
-Repeat with `--mode quota-exhaustion`, a new run ID, and a new evidence filename. The generated
-plan includes a deterministic digest. A future Step 14b operator can create its unique marker and
-then execute or validate exactly one ordered stage per invocation (the live drill has **not** run):
+For a quota-exhaustion staging rehearsal, repeat the healthy-baseline review with
+`--mode quota-exhaustion --lifecycle staging-rehearsal`, a new run ID, a new evidence filename,
+and both `--acknowledge-state-loss` and `--acknowledge-staging-fault-injection`. Do **not** provide
+`--incident-image`: quota recovery uses only the immutable current (healthy baseline), replacement
+(recovery candidate), and rollback (reviewed emergency fallback) image roles already required by
+the command. The quota rehearsal does not inject an image or generate OOM traffic. Its preflight
+instead requires the route-specific root and metadata 429 classification, healthy `/livez` and
+`/healthz`, and a successful quota-validator result. Synthetic/local coordinates are test fixtures,
+not release-selection guidance; operators must supply only independently reviewed deployment
+coordinates.
+
+The quota plan pauses only the root and metadata Probes, replaces the workload, runs readiness,
+compute, relay-blind E2EE, and quota-validator gates, then restores and observes root before
+restoring and observing metadata. Health Probes and the ServiceMonitor remain discovered, and the
+plan records a metrics-preservation gate rather than a metrics pause. A failed restored-route gate
+reapplies only that Probe's pause; workload, compute, or E2EE failure restores the current healthy
+image. The rollback digest remains a separately reviewed emergency fallback and is never an
+automatic inverse.
+
+The generated plan includes a deterministic digest. A future Step 14b operator can create its
+unique marker and then execute or validate exactly one ordered stage per invocation (the live
+drill has **not** run):
 
 ```bash
 python3 scripts/tokenplace_incident_drill.py --execute-stage marker \
@@ -192,7 +211,7 @@ python3 scripts/tokenplace_incident_drill.py --execute-stage "$NEXT_STAGE" \
   --kubeconfig "$STAGING_KUBECONFIG" --gate-evidence "$PRIVATE_GATE_EVIDENCE"
 ```
 
-For the rehearsal, the exact order begins with `marker`, `inject-incident-image`,
+For the metrics-OOM rehearsal, the exact order begins with `marker`, `inject-incident-image`,
 `generate-bounded-cardinality`, and `observe-authentic-oom`, followed by the existing containment,
 recovery replacement, readiness,
 compute registration and polling, relay-blind encrypted E2EE, route preservation, metrics-exit,
@@ -333,9 +352,12 @@ verification, or marker deletion remains recoverable from the private append-onl
 not be treated as a completed drill.
 
 The operator must capture the schema-versioned JSON plan, precondition summary, authoritative
-symptom, every printed mutation/rollback pair, Ready/digest/limit proof, compute registration and polling,
-encrypted E2EE request/response/retrieval/decryption result, each bounded observation gate, quota
-validator output, and final four-state change declaration. Evidence stays aggregate and redacted.
+symptom, every printed mutation/rollback pair, Ready/digest/limit proof, compute registration and
+polling, encrypted E2EE request/response/retrieval/decryption result, each bounded observation
+gate, quota-validator output for quota rehearsals, and final four-state change declaration. Quota
+evidence must retain the separate root/metadata 429 and livez/healthz health classification plus
+the ordered Probe pause/restore results; metrics-OOM evidence retains the authentic OOM observation.
+Evidence stays aggregate and redacted.
 
 The runner creates one exact ConfigMap marker named from the unique run ID and plan digest and keeps
 its append-only journal outside the repository. Cleanup never uses a selector, prefix, or broad

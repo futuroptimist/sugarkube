@@ -171,17 +171,25 @@ def validate(args: argparse.Namespace) -> Coordinates:
     lifecycle = getattr(args, "lifecycle", "real-incident")
     incident_image = getattr(args, "incident_image", None)
     if lifecycle == "staging-rehearsal":
-        if args.mode != "metrics-oom":
-            raise DrillError("staging rehearsal is supported only for metrics-OOM")
-        if not IMAGE.fullmatch(incident_image or ""):
-            raise DrillError(
-                "incident image must use a separately supplied immutable sha256 digest"
-            )
         if not getattr(args, "acknowledge_staging_fault_injection", False):
             raise DrillError("explicit staging fault-injection authorization is required")
-        images = (args.current_image, incident_image, args.replacement_image, args.rollback_image)
-        if len({IMAGE_DIGEST.search(image).group(1) for image in images}) != 4:
-            raise DrillError("baseline, incident, recovery, and fallback images must be distinct")
+        if args.mode == "metrics-oom":
+            if not IMAGE.fullmatch(incident_image or ""):
+                raise DrillError(
+                    "incident image must use a separately supplied immutable sha256 digest"
+                )
+            images = (
+                args.current_image,
+                incident_image,
+                args.replacement_image,
+                args.rollback_image,
+            )
+            if len({IMAGE_DIGEST.search(image).group(1) for image in images}) != 4:
+                raise DrillError(
+                    "baseline, incident, recovery, and fallback images must be distinct"
+                )
+        elif incident_image is not None:
+            raise DrillError("incident image is only valid for a metrics-OOM staging rehearsal")
     elif incident_image is not None or getattr(args, "acknowledge_staging_fault_injection", False):
         raise DrillError("rehearsal stimulus controls require staging-rehearsal lifecycle")
     if args.current_image == args.replacement_image:
@@ -800,7 +808,7 @@ def build_plan(preflight: Preflight) -> dict:
         )
         previous = stage
 
-    if c.lifecycle == "staging-rehearsal":
+    if c.lifecycle == "staging-rehearsal" and mode == "metrics-oom":
         baseline_inverse = prefix + [
             "set",
             "image",
@@ -922,7 +930,13 @@ def build_plan(preflight: Preflight) -> dict:
         prefix
         + ["set", "image", f"deployment/{c.deployment}", f"{c.container}={c.replacement_image}"],
         replace_inverse,
-        {"image": c.incident_image if c.lifecycle == "staging-rehearsal" else c.current_image},
+        {
+            "image": (
+                c.incident_image
+                if c.lifecycle == "staging-rehearsal" and mode == "metrics-oom"
+                else c.current_image
+            )
+        },
         {
             "kind": "reviewed-recovery-fallback",
             "not_an_inverse": True,
@@ -1249,8 +1263,11 @@ def _load_execution_plan(path: Path) -> dict:
 
 def _validate_staging_execution_contract(plan: dict) -> None:
     """Reject executable rehearsal plans whose safety contract was altered."""
+    if plan.get("mode") == "quota-exhaustion":
+        _validate_quota_staging_execution_contract(plan)
+        return
     if plan.get("mode") != "metrics-oom":
-        raise DrillError("staging rehearsal trigger mode is not the reviewed contract")
+        raise DrillError("staging rehearsal mode is not the reviewed contract")
     actions = plan["actions"]
     if len(actions) < 3 or [item.get("id") for item in actions[:3]] != [
         "inject-incident-image",
@@ -1393,6 +1410,59 @@ def _validate_staging_execution_contract(plan: dict) -> None:
         or observe.get("on_failure") != image.get("inverse")
     ):
         raise DrillError("authentic OOM observation contract is malformed")
+
+
+def _validate_quota_staging_execution_contract(plan: dict) -> None:
+    """Keep quota rehearsals bound to their reviewed, non-OOM recovery contract."""
+    actions = plan["actions"]
+    identifiers = [item.get("id") for item in actions]
+    required = [
+        "pause-root",
+        "pause-metadata",
+        "replace",
+        "quota-validator",
+        "restore-root",
+        "observe-root",
+        "restore-metadata",
+        "observe-metadata",
+        "preserve-metrics-last",
+        "observe-metrics",
+    ]
+    if any(stage not in identifiers for stage in required) or any(
+        stage in identifiers
+        for stage in (
+            "inject-incident-image",
+            "generate-bounded-cardinality",
+            "observe-authentic-oom",
+        )
+    ):
+        raise DrillError(
+            "quota staging rehearsal trigger mode or stages are not the reviewed contract"
+        )
+    if any(
+        item.get("stage") != item.get("id")
+        or item.get("depends_on") != ([] if index == 0 else [actions[index - 1]["id"]])
+        for index, item in enumerate(actions)
+    ):
+        raise DrillError("staging rehearsal dependency chain is malformed")
+    expected = plan.get("expected_deployment")
+    image_keys = ("current_image", "replacement_image", "rollback_image")
+    if (
+        not isinstance(expected, dict)
+        or expected.get("incident_image") is not None
+        or any(not IMAGE.fullmatch(expected.get(key, "")) for key in image_keys)
+    ):
+        raise DrillError("quota staging rehearsal image coordinates are malformed")
+    replace = next(item for item in actions if item.get("id") == "replace")
+    if (
+        replace.get("old_state") != {"image": expected["current_image"]}
+        or replace.get("inverse_state") != {"image": expected["current_image"]}
+        or replace.get("command", [])[-1:]
+        != [f'{expected.get("container")}={expected["replacement_image"]}']
+        or replace.get("inverse", [])[-1:]
+        != [f'{expected.get("container")}={expected["current_image"]}']
+    ):
+        raise DrillError("quota replacement image stage coordinates are malformed")
 
 
 def _private_directory(path: Path, label: str) -> Path:
