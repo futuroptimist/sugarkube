@@ -1,0 +1,57 @@
+---
+groups:
+  - name: danielsmith-visitor-journey
+    interval: 1m
+    rules:
+      # This declaration is deliberately independent of the textfile exporter.
+      # A later activation change must switch only the matching environment to 1.
+      - record: danielsmith_visitor_journey_monitoring_expected
+        expr: vector(0)
+        labels:
+          application: danielsmith
+          environment: staging
+          name: danielsmith-visitor-journey-staging
+      - record: danielsmith_visitor_journey_monitoring_expected
+        expr: vector(0)
+        labels:
+          application: danielsmith
+          environment: prod
+          name: danielsmith-visitor-journey-prod
+      - alert: DanielsmithVisitorJourneyFailed
+        expr: |
+          danielsmith_visitor_journey_monitoring_expected{application="danielsmith"} == 1
+          and on (application, environment, name)
+          danielsmith_visitor_journey_state{application="danielsmith",state="failure"} == 1
+          and on (application, environment, name)
+          # Pinned schedule freshness: 15m cadence (900s) + 120s timeout.
+          time() - danielsmith_visitor_journey_freshness_timestamp_seconds{application="danielsmith"} <= 1020
+        for: 5m
+        labels:
+          application: danielsmith
+          severity: critical
+        annotations:
+          summary: danielsmith.io essential visitor journey failed
+          description: The application-owned essential visitor contract failed; optional immersive-rendering availability is not part of this alert.
+          remediation: Inspect only the bounded failure-stage metric, then qualify recovery before changing activation.
+          runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/danielsmith-visitor-journey.md#alerts
+      - alert: DanielsmithVisitorJourneyStaleOrUnavailable
+        expr: |
+          danielsmith_visitor_journey_monitoring_expected{application="danielsmith"} == 1
+          and on (application, environment, name)
+          (
+            # Pinned schedule freshness: 15m cadence (900s) + 120s timeout.
+            time() - danielsmith_visitor_journey_freshness_timestamp_seconds{application="danielsmith"} > 1020
+            or
+            danielsmith_visitor_journey_monitoring_expected{application="danielsmith"} == 1
+            unless on (application, environment, name)
+            danielsmith_visitor_journey_freshness_timestamp_seconds{application="danielsmith"}
+          )
+        for: 5m
+        labels:
+          application: danielsmith
+          severity: warning
+        annotations:
+          summary: danielsmith.io visitor journey result is stale or unavailable
+          description: An enabled producer has no current sanitized result; an intentionally disabled producer does not alert.
+          remediation: Verify the producer schedule and bounded result handoff without executing an unauthorized probe.
+          runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/danielsmith-visitor-journey.md#alerts

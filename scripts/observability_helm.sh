@@ -18,6 +18,7 @@ PROD_VALUES="${ROOT}/clusters/prod/observability/kube-prometheus-stack.values.ya
 DSPACE_RULES="${ROOT}/platform/observability/rules/dspace-release-integrity.yaml"
 CLOUDFLARE_RULES="${ROOT}/platform/observability/rules/cloudflare-tunnel.yaml"
 TOKENPLACE_RULES="${ROOT}/platform/observability/rules/tokenplace-production.yaml"
+DANIELSMITH_VISITOR_RULES="${ROOT}/platform/observability/rules/danielsmith-visitor-journey.yaml"
 STAGING_DASHBOARD="${ROOT}/clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
 PROD_DASHBOARD="${ROOT}/clusters/prod/observability/dashboards/sugarkube-prod-observability.json"
 DASHBOARD=""
@@ -83,6 +84,7 @@ EOT
   else
     printf '  - generated mode-0600 rules overlay sourced from %s\n' "$TOKENPLACE_RULES"
   fi
+  printf '  - shared disabled-by-default visitor rules sourced from %s\n' "$DANIELSMITH_VISITOR_RULES"
   printf 'dashboard source (--set-file): %s\n' "$DASHBOARD"
   printf 'Grafana LAN URL: %s (same NodePort is available through the other %s nodes)\n' "$GRAFANA_URL" "$ENVIRONMENT"
 }
@@ -106,11 +108,15 @@ create_rules_overlay() {
   ruby -ryaml -e '
     environment, output, *rule_args = ARGV
     selected_rules = if environment == "prod"
-      {"tokenplace-production" => ["token.place", rule_args.fetch(2)]}
+      {
+        "tokenplace-production" => ["token.place", rule_args.fetch(2)],
+        "danielsmith-visitor-journey" => ["danielsmith.io visitor journey", rule_args.fetch(3)]
+      }
     else
       {
         "dspace-release-integrity" => ["DSPACE", rule_args.fetch(0)],
-        "cloudflare-tunnel" => ["Cloudflare Tunnel", rule_args.fetch(1)]
+        "cloudflare-tunnel" => ["Cloudflare Tunnel", rule_args.fetch(1)],
+        "danielsmith-visitor-journey" => ["danielsmith.io visitor journey", rule_args.fetch(3)]
       }
     end
     rules_map = selected_rules.to_h do |key, (name, path)|
@@ -119,10 +125,18 @@ create_rules_overlay() {
              rules["groups"].is_a?(Array) && !rules["groups"].empty?
         abort "ERROR: canonical #{name} rules must contain only a nonempty groups list."
       end
+      if key == "danielsmith-visitor-journey"
+        rules["groups"].each do |group|
+          group["rules"].reject! do |rule|
+            rule["record"] == "danielsmith_visitor_journey_monitoring_expected" &&
+              rule.dig("labels", "environment") != environment
+          end
+        end
+      end
       [key, rules]
     end
     File.write(output, YAML.dump("additionalPrometheusRulesMap" => rules_map))
-  ' "${ENVIRONMENT}" "${RULES_OVERLAY}" "${DSPACE_RULES}" "${CLOUDFLARE_RULES}" "${TOKENPLACE_RULES}"
+  ' "${ENVIRONMENT}" "${RULES_OVERLAY}" "${DSPACE_RULES}" "${CLOUDFLARE_RULES}" "${TOKENPLACE_RULES}" "${DANIELSMITH_VISITOR_RULES}"
 }
 validate_dashboard() { python3 "${DASHBOARD_VALIDATOR}" "${DASHBOARD}"; }
 validate_rendered_dashboard() { python3 "${DASHBOARD_VALIDATOR}" "${DASHBOARD}" --rendered "$1"; }
