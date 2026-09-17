@@ -146,9 +146,9 @@ def test_generator_check_and_outputs_are_deterministic(dashboards):
         'provider=\\"openai\\"', 'provider=\\"PRIMARY\\"'
     )
     assert staging_panels == prod_panels
-    assert len(staging["panels"]) == 78
-    assert sum(item["type"] == "row" for item in staging["panels"]) == 13
-    assert sum(item["type"] != "row" for item in staging["panels"]) == 65
+    assert len(staging["panels"]) == 85
+    assert sum(item["type"] == "row" for item in staging["panels"]) == 14
+    assert sum(item["type"] != "row" for item in staging["panels"]) == 71
 
 
 @pytest.mark.parametrize("state", metrics.STATES)
@@ -606,13 +606,16 @@ def test_profiles_differ_only_by_allowlisted_identity(dashboards):
         assert [item["name"] for item in variables] == [
             "environment",
             "cluster",
+            "workload",
             "app",
             "route",
         ]
         assert variables[0]["query"] == environment
         assert variables[1]["query"] == cluster
         assert all(item["hide"] == 2 and item["type"] == "constant" for item in variables[:2])
-        assert all(item["allValue"] == ".*" for item in variables[2:4])
+        assert variables[2]["query"] == "dspace,tokenplace,danielsmith"
+        assert variables[2]["allValue"] == "(dspace|tokenplace|danielsmith)"
+        assert all(item["allValue"] == ".*" for item in variables[3:5])
 
 
 def test_canonical_order_ids_grid_and_defaults(dashboards):
@@ -632,8 +635,9 @@ def test_canonical_order_ids_grid_and_defaults(dashboards):
         "token.place HTTP and release",
         "Daniel GitHub metadata cache",
         "Daniel controlled performance",
+        "Cross-application resource, placement, and release",
     ]
-    assert [item["id"] for item in staging["panels"]] == list(range(1, 79))
+    assert [item["id"] for item in staging["panels"]] == list(range(1, 86))
     assert panel(staging, "DSPACE instrumentation health")
     assert panel(staging, "DSPACE build identity")
     assert all(
@@ -643,6 +647,78 @@ def test_canonical_order_ids_grid_and_defaults(dashboards):
     )
     validator.validate_dashboard(STAGING)
     validator.validate_dashboard(PROD)
+
+
+def test_resource_overview_handles_replica_rollouts_placement_and_absence(dashboards):
+    staging, _ = dashboards
+    replicas = panel(staging, "Desired versus ready replicas")["targets"]
+    assert len(replicas) == 2
+    assert all("max by (namespace, deployment)" in target["expr"] for target in replicas)
+    assert not any("sum" in target["expr"] for target in replicas)
+
+    placement = panel(staging, "Serving workload node placement")["targets"][0]["expr"]
+    assert "count by (namespace, node)" in placement  # many replicas on one node count once
+    assert "count by (namespace)" in placement
+    assert 'condition="true"' in placement and 'phase="Running"' in placement
+    assert "unless on (namespace, pod) kube_pod_deletion_timestamp" in placement
+
+    memory = panel(staging, "Memory working set versus configured limit")
+    throttling = panel(staging, "CPU throttling availability")
+    build = panel(staging, "Application build identity")
+    assert len(memory["targets"]) == 2
+    assert 'resource="memory",unit="byte"' in memory["targets"][1]["expr"]
+    assert "vector(0)" not in json.dumps([memory, throttling, build])
+    assert all(
+        item["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
+        for item in (memory, throttling, build)
+    )
+    assert "daniel" not in build["targets"][0]["expr"]  # no invented Daniel build metric
+
+
+@pytest.mark.parametrize(
+    ("title", "old", "new", "message"),
+    [
+        (
+            "Serving workload node placement",
+            " unless on (namespace, pod) kube_pod_deletion_timestamp",
+            "",
+            "Ready, Running, and non-terminating",
+        ),
+        (
+            "Serving workload node placement",
+            "count by (namespace, node)",
+            "sum by (namespace, node)",
+            "deduplicate replicas",
+        ),
+        (
+            "Memory working set versus configured limit",
+            'resource="memory",unit="byte"',
+            'resource="memory"',
+            "emitted resource and unit labels",
+        ),
+        (
+            "CPU throttling availability",
+            'namespace=~"$workload"',
+            'namespace=~".*"',
+            "bounded workload-scoped absence",
+        ),
+        (
+            "Application build identity",
+            'environment=~"$environment"',
+            'environment=~".*"',
+            "selected generated profile",
+        ),
+    ],
+)
+def test_resource_overview_validator_rejects_scope_absence_and_double_counting(
+    tmp_path, dashboards, title, old, new, message
+):
+    changed = copy.deepcopy(dashboards[0])
+    target = panel(changed, title)["targets"][-1 if title.startswith("Memory") else 0]
+    assert old in target["expr"]
+    target["expr"] = target["expr"].replace(old, new, 1)
+    with pytest.raises(SystemExit, match=message):
+        validator.validate_dashboard(write_candidate(tmp_path, changed))
 
 
 def test_daniel_queries_are_target_safe_and_expose_stale_or_missing_health(dashboards):
@@ -673,10 +749,10 @@ def test_daniel_queries_are_target_safe_and_expose_stale_or_missing_health(dashb
     assert " or " not in validator.panel_expression(staging, "Daniel controlled frame time")
 
 
-def test_all_ten_tables_are_simultaneous_single_frames(dashboards):
+def test_all_twelve_tables_are_simultaneous_single_frames(dashboards):
     staging, _ = dashboards
     tables = [item for item in staging["panels"] if item["type"] == "table"]
-    assert len(tables) == 10
+    assert len(tables) == 12
     for table in tables:
         assert len(table["targets"]) == 1
         assert table["targets"][0]["format"] == "table"

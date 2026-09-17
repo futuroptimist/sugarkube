@@ -250,6 +250,29 @@ is single-cluster. Prometheus `externalLabels` are added
 for remote/exported series, not to samples returned by local Prometheus queries, so dashboard
 expressions must not select `cluster="sugarkube-prod"` (or any other external cluster label).
 
+### Cross-application resource, placement, and release overview
+
+The **Application workload** selector is deliberately independent of the probe-oriented
+**Probe application** selector. It is bounded to the `dspace`, `tokenplace`, and `danielsmith`
+namespaces. The generated staging or production dashboard supplies the profile; Kubernetes
+queries use namespace scoping rather than an invented environment label that kube-state-metrics
+does not emit.
+
+The overview keeps desired and ready deployment gauges separate so multiple replicas and rolling
+updates remain visible rather than being collapsed into a misleading deficit. Placement counts a
+node only after deduplicating Ready, Running, non-terminating pods by namespace, pod, and node, so
+several serving replicas on one node still report one node. Memory working set and configured
+memory limit are also separate series. A missing limit, unavailable CFS throttling metric, or
+missing application build metric remains **NO DATA** rather than becoming a healthy zero.
+
+**Deployment image coordinates** reports the image string configured on a serving pod. It is a
+deployment coordinate, not evidence that the expected bytes are running and not application build
+proof. **Application build identity** only displays application-emitted `dspace_build_info` or
+`tokenplace_build_info`; Daniel has no equivalent metric in this contract, so selecting only
+Daniel correctly displays **NO DATA**. Use **DSPACE release integrity** for DSPACE runtime/image
+agreement and the existing token.place release panels and runbook procedures for detailed
+application diagnostics; the cross-application overview intentionally does not duplicate them.
+
 Grafana remains LAN-only at <http://sugarkube0.local:30300>, with the same NodePort on the other
 production nodes and no public endpoint. Grafana persistence remains disabled: mutable UI-created
 state is ephemeral, but the immutable dashboard is Helm-provisioned through its ConfigMap and

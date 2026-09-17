@@ -45,6 +45,24 @@
         "multi": false
       },
       {
+        "name": "workload",
+        "label": "Application workload",
+        "type": "custom",
+        "query": "dspace,tokenplace,danielsmith",
+        "options": [],
+        "current": {
+          "text": "All",
+          "value": [
+            "$__all"
+          ]
+        },
+        "includeAll": true,
+        "multi": true,
+        "allValue": "(dspace|tokenplace|danielsmith)",
+        "hide": 0,
+        "skipUrlSync": false
+      },
+      {
         "name": "app",
         "label": "Probe application",
         "type": "query",
@@ -3358,6 +3376,298 @@
           "refId": "A",
           "expr": "max by (environment, renderer_class, renderer_state, fallback_status, statistic) ((max by (environment, instance, job, renderer_class, renderer_state, fallback_status, statistic) (daniel_performance_frame_time_seconds{environment=~\"$environment\"})) and on(environment, instance, job) (max by (environment, instance, job) (daniel_performance_measurement_timestamp_seconds{environment=~\"$environment\"}) > time() - 86400))",
           "legendFormat": "{{environment}} {{renderer_class}} {{renderer_state}} {{fallback_status}} {{statistic}}"
+        }
+      ]
+    },
+    {
+      "id": 79,
+      "type": "row",
+      "title": "Cross-application resource, placement, and release",
+      "description": "Bounded overview for DSPACE, token.place, and Daniel. Use the existing DSPACE release-integrity section and token.place diagnostics/runbook for application-specific proof and diagnosis.",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 247
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 80,
+      "type": "timeseries",
+      "title": "Desired versus ready replicas",
+      "description": "Deployment desired and ready replicas. Separate series preserve rolling-update surplus or deficit without summing replicas twice.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 248
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (namespace, deployment) (kube_deployment_spec_replicas{namespace=~\"$workload\"})",
+          "legendFormat": "{{namespace}} / {{deployment}} desired"
+        },
+        {
+          "refId": "B",
+          "expr": "max by (namespace, deployment) (kube_deployment_status_replicas_ready{namespace=~\"$workload\"})",
+          "legendFormat": "{{namespace}} / {{deployment}} ready"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 81,
+      "type": "timeseries",
+      "title": "Serving workload node placement",
+      "description": "Distinct nodes hosting at least one Ready, Running, non-terminating pod. Pods are deduplicated by namespace, pod, and node before nodes are counted.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 248
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count by (namespace) (count by (namespace, node) (kube_pod_info{namespace=~\"$workload\"} and on (namespace, pod) (kube_pod_status_ready{namespace=~\"$workload\",condition=\"true\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=~\"$workload\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=~\"$workload\"})))",
+          "legendFormat": "{{namespace}} nodes"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 82,
+      "type": "timeseries",
+      "title": "Memory working set versus configured limit",
+      "description": "Working set and configured memory limit by application. A missing limit remains NO DATA; it is never treated as zero.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 256
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (namespace) (max by (namespace, pod, container) (container_memory_working_set_bytes{namespace=~\"$workload\",container!=\"\",container!=\"POD\"}))",
+          "legendFormat": "{{namespace}} working set"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (namespace) (max by (namespace, pod, container) (kube_pod_container_resource_limits{namespace=~\"$workload\",resource=\"memory\",unit=\"byte\"}))",
+          "legendFormat": "{{namespace}} configured limit"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "NO DATA"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 83,
+      "type": "timeseries",
+      "title": "CPU throttling availability",
+      "description": "Ratio of throttled to total CFS periods. Unsupported or missing runtime metrics remain NO DATA.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 256
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (namespace) (rate(container_cpu_cfs_throttled_periods_total{namespace=~\"$workload\",container!=\"\",container!=\"POD\"}[$__rate_interval])) / clamp_min(sum by (namespace) (rate(container_cpu_cfs_periods_total{namespace=~\"$workload\",container!=\"\",container!=\"POD\"}[$__rate_interval])), 1e-9)",
+          "legendFormat": "{{namespace}} throttled"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "NO DATA"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 84,
+      "type": "table",
+      "title": "Deployment image coordinates",
+      "description": "Configured pod image coordinates for serving workloads. These coordinates are deployment intent, not proof of running content; use specialized release-integrity diagnostics for runtime proof.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 264
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (namespace, container, image) (kube_pod_container_info{namespace=~\"$workload\"} and on (namespace, pod) (kube_pod_status_ready{namespace=~\"$workload\",condition=\"true\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=~\"$workload\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=~\"$workload\"}))",
+          "legendFormat": "",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value": true,
+              "__name__": true
+            },
+            "indexByName": {
+              "namespace": 0,
+              "container": 1,
+              "image": 2
+            },
+            "renameByName": {
+              "namespace": "Application",
+              "container": "Container",
+              "image": "Deployment coordinate"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 85,
+      "type": "table",
+      "title": "Application build identity",
+      "description": "Application-emitted build identity when available. Missing instrumentation, including applications without this metric, remains NO DATA.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 264
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (namespace, version, revision) (dspace_build_info{namespace=~\"$workload\",environment=~\"$environment\"} or tokenplace_build_info{namespace=~\"$workload\",environment=~\"$environment\",cluster=~\"$cluster\"})",
+          "legendFormat": "",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value": true,
+              "__name__": true
+            },
+            "indexByName": {
+              "namespace": 0,
+              "version": 1,
+              "revision": 2
+            },
+            "renameByName": {
+              "namespace": "Application",
+              "version": "Version",
+              "revision": "Revision"
+            }
+          }
         }
       ]
     }

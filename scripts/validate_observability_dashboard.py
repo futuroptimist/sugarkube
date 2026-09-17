@@ -194,6 +194,37 @@ DANIEL_PANEL_CONTRACT = {
     ),  # noqa: E501
 }
 
+OVERVIEW_TITLES = {
+    "Desired versus ready replicas",
+    "Serving workload node placement",
+    "Memory working set versus configured limit",
+    "CPU throttling availability",
+    "Deployment image coordinates",
+    "Application build identity",
+}
+OVERVIEW_METRICS = {
+    "Desired versus ready replicas": {
+        "kube_deployment_spec_replicas",
+        "kube_deployment_status_replicas_ready",
+    },
+    "Serving workload node placement": {
+        "kube_pod_info",
+        "kube_pod_status_ready",
+        "kube_pod_status_phase",
+        "kube_pod_deletion_timestamp",
+    },
+    "Memory working set versus configured limit": {
+        "container_memory_working_set_bytes",
+        "kube_pod_container_resource_limits",
+    },
+    "CPU throttling availability": {
+        "container_cpu_cfs_throttled_periods_total",
+        "container_cpu_cfs_periods_total",
+    },
+    "Deployment image coordinates": {"kube_pod_container_info"},
+    "Application build identity": {"dspace_build_info", "tokenplace_build_info"},
+}
+
 
 def load_dashboard(path: Path) -> dict:
     try:
@@ -294,10 +325,10 @@ def _expected_dashboard(dashboard: dict) -> dict:
 
 
 def _validate_grid(items: list[dict]) -> None:
-    if len(items) != 78 or sum(panel.get("type") == "row" for panel in items) != 13:
-        raise SystemExit("ERROR: canonical dashboard must contain exactly 78 objects and 13 rows.")
+    if len(items) != 85 or sum(panel.get("type") == "row" for panel in items) != 14:
+        raise SystemExit("ERROR: canonical dashboard must contain exactly 85 objects and 14 rows.")
     ids = [panel.get("id") for panel in items]
-    if ids != list(range(1, 79)):
+    if ids != list(range(1, 86)):
         raise SystemExit(
             "ERROR: canonical dashboard panel IDs must be stable consecutive integers."
         )
@@ -340,8 +371,8 @@ def _validate_semantics(dashboard: dict) -> None:
     ):
         raise SystemExit("ERROR: every data panel must explicitly preserve NO DATA.")
     tables = [panel for panel in items if panel.get("type") == "table"]
-    if len(tables) != 10:
-        raise SystemExit("ERROR: canonical dashboard must contain exactly ten tables.")
+    if len(tables) != 12:
+        raise SystemExit("ERROR: canonical dashboard must contain exactly twelve tables.")
     for table in tables:
         targets = table.get("targets", [])
         transforms = table.get("transformations", [])
@@ -366,6 +397,7 @@ def _validate_semantics(dashboard: dict) -> None:
     if [variable.get("name") for variable in variables] != [
         "environment",
         "cluster",
+        "workload",
         "app",
         "route",
     ]:
@@ -381,9 +413,18 @@ def _validate_semantics(dashboard: dict) -> None:
             )
     if any(
         variable.get("allValue") != ".*" or variable.get("includeAll") is not True
-        for variable in variables[2:4]
+        for variable in variables[3:5]
     ):
         raise SystemExit("ERROR: app and route variables must expose All = .*.")
+    workload = variables[2]
+    if (
+        workload.get("type") != "custom"
+        or workload.get("query") != "dspace,tokenplace,danielsmith"
+        or workload.get("multi") is not True
+        or workload.get("includeAll") is not True
+        or workload.get("allValue") != "(dspace|tokenplace|danielsmith)"
+    ):
+        raise SystemExit("ERROR: workload must be the bounded three-application selector.")
     expressions = [
         target["expr"]
         for panel in items
@@ -397,6 +438,53 @@ def _validate_semantics(dashboard: dict) -> None:
         r"cluster\s*(?:=|=~)", "\n".join(expr for expr in expressions if "$cluster" not in expr)
     ):
         raise SystemExit("ERROR: core local queries must not select an external cluster label.")
+    overview = [panel_named(dashboard, title) for title in OVERVIEW_TITLES]
+    overview_expressions = {
+        item["title"]: [target.get("expr", "") for target in item.get("targets", [])]
+        for item in overview
+    }
+    placement = overview_expressions["Serving workload node placement"][0]
+    image_coordinates = overview_expressions["Deployment image coordinates"][0]
+    for expression in (placement, image_coordinates):
+        if (
+            'condition="true"' not in expression
+            or 'phase="Running"' not in expression
+            or "kube_pod_deletion_timestamp" not in expression
+            or "unless on (namespace, pod)" not in expression
+        ):
+            raise SystemExit(
+                "ERROR: serving workloads must be Ready, Running, and non-terminating."
+            )
+    for title, required_metrics in OVERVIEW_METRICS.items():
+        joined = "\n".join(overview_expressions[title])
+        if not required_metrics <= {metric for metric in required_metrics if metric in joined}:
+            raise SystemExit(f"ERROR: {title} is missing its required source metrics.")
+        if (
+            any('namespace=~"$workload"' not in expr for expr in overview_expressions[title])
+            or "vector(0)" in joined
+        ):
+            raise SystemExit(f"ERROR: {title} must preserve bounded workload-scoped absence.")
+    if "count by (namespace, node)" not in placement or "count by (namespace)" not in placement:
+        raise SystemExit("ERROR: placement must deduplicate replicas before counting nodes.")
+    replicas = overview_expressions["Desired versus ready replicas"]
+    if len(replicas) != 2 or any("max by (namespace, deployment)" not in expr for expr in replicas):
+        raise SystemExit("ERROR: replica gauges must be separate and deduplicated per deployment.")
+    memory = "\n".join(overview_expressions["Memory working set versus configured limit"])
+    if 'resource="memory",unit="byte"' not in memory:
+        raise SystemExit("ERROR: memory limits must use the emitted resource and unit labels.")
+    throttling = overview_expressions["CPU throttling availability"][0]
+    if throttling.count('namespace=~"$workload"') != 2:
+        raise SystemExit(
+            "ERROR: CPU throttling availability must preserve bounded workload-scoped absence."
+        )
+    build = "\n".join(overview_expressions["Application build identity"])
+    if build.count('environment=~"$environment"') != 2 or 'cluster=~"$cluster"' not in build:
+        raise SystemExit("ERROR: build identity must use the selected generated profile.")
+    if any(
+        item.get("fieldConfig", {}).get("defaults", {}).get("noValue") != "NO DATA"
+        for item in overview
+    ):
+        raise SystemExit("ERROR: overview panels must expose unsupported or absent data.")
     token_expressions = [
         target["expr"]
         for title in TOKENPLACE_DATA_TITLES
