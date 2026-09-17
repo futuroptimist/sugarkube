@@ -3487,7 +3487,7 @@
         },
         {
           "refId": "B",
-          "expr": "sum by (namespace) (max by (namespace, pod, container) (kube_pod_container_resource_limits{namespace=~\"$workload\",resource=\"memory\",unit=\"byte\"}))",
+          "expr": "sum by (namespace) (max by (namespace, pod, container) (kube_pod_container_resource_limits{namespace=~\"$workload\",container!=\"\",resource=\"memory\",unit=\"byte\"})) and on (namespace) (count by (namespace) (max by (namespace, pod, container) (kube_pod_container_resource_limits{namespace=~\"$workload\",container!=\"\",resource=\"memory\",unit=\"byte\"})) == count by (namespace) (max by (namespace, pod, container) (container_memory_working_set_bytes{namespace=~\"$workload\",container!=\"\",image!=\"\"})))",
           "legendFormat": "{{namespace}} configured limit"
         }
       ]

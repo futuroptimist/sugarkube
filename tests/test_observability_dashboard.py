@@ -1331,6 +1331,12 @@ def test_cross_application_overview_preserves_missing_limits_throttling_and_buil
         assert all("vector(0)" not in target["expr"] for target in item["targets"])
     assert "unsupported" in panel(staging, "CPU throttling")["description"].lower()
     assert "Missing producers" in panel(staging, "Application build identity")["description"]
+    limit_expression = panel(staging, "Memory working set versus configured limit")["targets"][1][
+        "expr"
+    ]
+    assert "and on (namespace)" in limit_expression
+    assert "count by (namespace)" in limit_expression
+    assert limit_expression.count("container_memory_working_set_bytes") == 1
 
 
 def test_cross_application_overview_is_profile_and_workload_scoped_without_double_counting(
@@ -1390,4 +1396,15 @@ def test_cross_application_overview_rejects_unsafe_or_unknown_as_healthy(
     else:
         target["expr"] = target["expr"].replace('namespace=~"$workload"', 'namespace=~".*"')
     with pytest.raises(SystemExit, match=message):
+        validator._validate_semantics(changed)
+
+
+def test_cross_application_overview_rejects_partially_unscoped_multi_metric_target(dashboards):
+    staging, _ = dashboards
+    changed = copy.deepcopy(staging)
+    target = panel(changed, "Application build identity")["targets"][0]
+    target["expr"] = target["expr"].replace(
+        'tokenplace_build_info{namespace=~"$workload",', "tokenplace_build_info{"
+    )
+    with pytest.raises(SystemExit, match="namespace scope"):
         validator._validate_semantics(changed)

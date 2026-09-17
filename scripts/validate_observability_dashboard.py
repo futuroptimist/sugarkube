@@ -235,6 +235,21 @@ OVERVIEW_PANEL_CONTRACT = {
 }
 
 
+def _metric_selectors_are_workload_scoped(expression: str, metrics: set[str]) -> bool:
+    """Return whether every required metric selector carries the workload matcher."""
+    for metric in metrics:
+        selectors = re.finditer(
+            rf"(?<![a-zA-Z0-9_:]){re.escape(metric)}(?![a-zA-Z0-9_:])" r"(?:\s*\{([^{}]*)\})?",
+            expression,
+        )
+        if any(
+            match.group(1) is None or 'namespace=~"$workload"' not in match.group(1)
+            for match in selectors
+        ):
+            return False
+    return True
+
+
 def load_dashboard(path: Path) -> dict:
     try:
         dashboard = json.loads(path.read_text(encoding="utf-8"))
@@ -457,7 +472,7 @@ def _validate_semantics(dashboard: dict) -> None:
         ):
             raise SystemExit(f"ERROR: {title} does not contain its required metric contract.")
         if any(
-            'namespace=~"$workload"' not in expression
+            not _metric_selectors_are_workload_scoped(expression, contract["metrics"])
             for expression in overview_expressions
         ):
             raise SystemExit(f"ERROR: {title} must use the dedicated workload namespace scope.")
@@ -483,14 +498,12 @@ def _validate_semantics(dashboard: dict) -> None:
         )
     replicas = panel_named(dashboard, "Desired versus ready replicas")
     if any(
-        "max by (namespace, deployment)" not in target["expr"]
-        for target in replicas["targets"]
+        "max by (namespace, deployment)" not in target["expr"] for target in replicas["targets"]
     ):
         raise SystemExit("ERROR: replica overview must deduplicate rolling-update scrape series.")
     memory = panel_named(dashboard, "Memory working set versus configured limit")
     if any(
-        "max by (namespace, pod, container)" not in target["expr"]
-        for target in memory["targets"]
+        "max by (namespace, pod, container)" not in target["expr"] for target in memory["targets"]
     ):
         raise SystemExit("ERROR: memory overview must deduplicate container scrape series.")
     image_panel = panel_named(dashboard, "Deployment image coordinates")
