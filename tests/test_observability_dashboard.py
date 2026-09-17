@@ -146,9 +146,9 @@ def test_generator_check_and_outputs_are_deterministic(dashboards):
         'provider=\\"openai\\"', 'provider=\\"PRIMARY\\"'
     )
     assert staging_panels == prod_panels
-    assert len(staging["panels"]) == 70
-    assert sum(item["type"] == "row" for item in staging["panels"]) == 12
-    assert sum(item["type"] != "row" for item in staging["panels"]) == 58
+    assert len(staging["panels"]) == 77
+    assert sum(item["type"] == "row" for item in staging["panels"]) == 13
+    assert sum(item["type"] != "row" for item in staging["panels"]) == 64
 
 
 @pytest.mark.parametrize("state", metrics.STATES)
@@ -516,6 +516,59 @@ def test_daniel_dashboard_contract_covers_metrics_scope_grouping_units_and_missi
         )
 
 
+def test_daniel_visitor_dashboard_contract_is_scoped_bounded_and_fail_closed(dashboards):
+    documents = (json.loads(TEMPLATE.read_text()), *dashboards)
+    categorical = {
+        "Daniel visitor journey state",
+        "Daniel visitor journey success",
+        "Daniel visitor journey failure stage",
+        "Daniel visitor journey unavailable or stale",
+    }
+    for document in documents:
+        for title, (expression, unit, legend) in validator.DANIEL_VISITOR_PANEL_CONTRACT.items():
+            item = panel(document, title)
+            assert item["targets"] == [{"refId": "A", "expr": expression, "legendFormat": legend}]
+            assert item["fieldConfig"]["defaults"]["unit"] == unit
+            assert item["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
+            assert 'application="danielsmith"' in expression
+            assert 'environment=~"$environment"' in expression
+            assert 'cluster=~"$cluster"' in expression
+            assert 'name=~"danielsmith-visitor-journey-$environment"' in expression
+            assert "vector(0)" not in expression
+            if title in categorical:
+                assert unit == "short"
+        assert validator.DANIEL_VISITOR_PANEL_CONTRACT["Daniel visitor journey freshness"][1] == "s"
+        assert (
+            validator.DANIEL_VISITOR_PANEL_CONTRACT["Daniel visitor journey aggregate duration"][1]
+            == "s"
+        )
+
+
+def test_daniel_visitor_success_and_duration_exclude_disabled_stale_and_unavailable():
+    for title in (
+        "Daniel visitor journey success",
+        "Daniel visitor journey aggregate duration",
+    ):
+        expression = validator.DANIEL_VISITOR_PANEL_CONTRACT[title][0]
+        assert "monitoring_enabled" in expression and "== 1" in expression
+        assert "<= 1020" in expression
+        assert 'state=~"success|recovered|failure"' in expression
+        assert not any(
+            state in expression.split('state=~"', 1)[-1].split('"', 1)[0]
+            for state in ("disabled", "stale", "unavailable")
+        )
+
+
+@pytest.mark.parametrize("title", validator.DANIEL_VISITOR_PANEL_CONTRACT)
+def test_daniel_visitor_dashboard_validator_rejects_contract_regressions(
+    tmp_path, dashboards, title
+):
+    changed = copy.deepcopy(dashboards[0])
+    panel(changed, title)["targets"][0]["expr"] += " or vector(0)"
+    with pytest.raises(SystemExit, match="visitor journey contract"):
+        validator.validate_dashboard(write_candidate(tmp_path, changed))
+
+
 @pytest.mark.parametrize(
     ("title", "mutation"),
     [
@@ -631,8 +684,9 @@ def test_canonical_order_ids_grid_and_defaults(dashboards):
         "token.place relay and compute capacity",
         "token.place HTTP and release",
         "Daniel GitHub metadata cache",
+        "Daniel visitor journey",
     ]
-    assert [item["id"] for item in staging["panels"]] == list(range(1, 71))
+    assert [item["id"] for item in staging["panels"]] == list(range(1, 78))
     assert panel(staging, "DSPACE instrumentation health")
     assert panel(staging, "DSPACE build identity")
     assert all(
