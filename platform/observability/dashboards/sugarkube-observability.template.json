@@ -3122,6 +3122,212 @@
           "legendFormat": "age"
         }
       ]
+    },
+    {
+      "id": 71,
+      "type": "row",
+      "title": "Daniel visitor journey",
+      "description": "Application-owned essential visitor lifecycle; disabled, unavailable, and stale monitoring never imply success.",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 214
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 72,
+      "title": "Daniel visitor journey state",
+      "type": "timeseries",
+      "description": "Bounded producer lifecycle, including disabled, unavailable, stale, failure, recovered, and success.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 215
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (state) (danielsmith_visitor_journey_state{application=\"danielsmith\",environment=~\"$environment\",cluster=~\"$cluster\",name=~\"danielsmith-visitor-journey-$environment\"})",
+          "legendFormat": "{{state}}"
+        }
+      ]
+    },
+    {
+      "id": 73,
+      "title": "Daniel visitor journey success",
+      "type": "timeseries",
+      "description": "Latest result only when the current lifecycle is success or recovered; disabled, unavailable, and stale monitoring remain NO DATA.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 215
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (application, environment, cluster, name) (danielsmith_visitor_journey_success{application=\"danielsmith\",environment=~\"$environment\",cluster=~\"$cluster\",name=~\"danielsmith-visitor-journey-$environment\"}) and on (application, environment, cluster, name) max by (application, environment, cluster, name) (danielsmith_visitor_journey_state{application=\"danielsmith\",environment=~\"$environment\",cluster=~\"$cluster\",name=~\"danielsmith-visitor-journey-$environment\",state=~\"success|recovered\"})",
+          "legendFormat": "success"
+        }
+      ]
+    },
+    {
+      "id": 74,
+      "title": "Daniel visitor journey freshness",
+      "type": "timeseries",
+      "description": "Age of the last sanitized application-owned result.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 223
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(time() - danielsmith_visitor_journey_freshness_timestamp_seconds{application=\"danielsmith\",environment=~\"$environment\",cluster=~\"$cluster\",name=~\"danielsmith-visitor-journey-$environment\"})",
+          "legendFormat": "age"
+        }
+      ]
+    },
+    {
+      "id": 75,
+      "title": "Daniel visitor journey aggregate duration",
+      "type": "timeseries",
+      "description": "Aggregate duration of the last essential visitor journey.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 223
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(danielsmith_visitor_journey_duration_seconds{application=\"danielsmith\",environment=~\"$environment\",cluster=~\"$cluster\",name=~\"danielsmith-visitor-journey-$environment\"})",
+          "legendFormat": "duration"
+        }
+      ]
+    },
+    {
+      "id": 76,
+      "title": "Daniel visitor journey failure stage",
+      "type": "timeseries",
+      "description": "Last bounded failure stage only while the current lifecycle is failure.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 231
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (application, environment, cluster, name, failure_stage) (danielsmith_visitor_journey_failure_stage{application=\"danielsmith\",environment=~\"$environment\",cluster=~\"$cluster\",name=~\"danielsmith-visitor-journey-$environment\",failure_stage!=\"none\"}) and on (application, environment, cluster, name) max by (application, environment, cluster, name) (danielsmith_visitor_journey_state{application=\"danielsmith\",environment=~\"$environment\",cluster=~\"$cluster\",name=~\"danielsmith-visitor-journey-$environment\",state=\"failure\"})",
+          "legendFormat": "{{failure_stage}}"
+        }
+      ]
+    },
+    {
+      "id": 77,
+      "title": "Daniel visitor journey stale or unavailable",
+      "type": "timeseries",
+      "description": "Explicit stale and unavailable lifecycle signals; disabled monitoring remains visible in the state panel.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 231
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (state) (danielsmith_visitor_journey_state{application=\"danielsmith\",environment=~\"$environment\",cluster=~\"$cluster\",name=~\"danielsmith-visitor-journey-$environment\",state=~\"stale|unavailable\"})",
+          "legendFormat": "{{state}}"
+        }
+      ]
     }
   ]
 }
