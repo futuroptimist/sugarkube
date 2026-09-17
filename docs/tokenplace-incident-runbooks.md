@@ -179,9 +179,25 @@ current artifact exposes `TOKENPLACE_METRICS_MODE=normal|degraded`, containment 
 degraded value; otherwise it uses only the exact ServiceMonitor pause fallback. Replacement and
 rollback remain bound to their separately reviewed immutable digests.
 
-Repeat with `--mode quota-exhaustion`, a new run ID, and a new evidence filename. The generated
-plan includes a deterministic digest. A future Step 14b operator can create its unique marker and
-then execute or validate exactly one ordered stage per invocation (the live drill has **not** run):
+For a controlled quota-exhaustion rehearsal, repeat the command with `--mode quota-exhaustion`,
+`--lifecycle staging-rehearsal`, both acknowledgements, a new run ID, and a new evidence filename.
+Do not pass `--incident-image`: quota rehearsal needs only the immutable current, recovery, and
+emergency-fallback image identities for their named roles. Its snapshot and live preflight must
+retain the bounded root/metadata 429, healthy `/livez` and `/healthz`, and successful quota-validator
+evidence described above. The environment, context, canonical staging host, healthy Deployment,
+inventory, replica, discovery-label, private-evidence, and authorization checks remain fail closed.
+
+The quota plan pauses only the root and metadata Probe discovery labels, never the `/livez` or
+`/healthz` Probes. It performs the recovery replacement and encrypted E2EE checks, reruns the quota
+validator, then restores and observes root for 15 minutes before restoring and observing metadata
+for 15 minutes. A failed gate holds the current containment or applies the exact printed inverse;
+the reviewed immutable fallback remains a separately authorized recovery option rather than an
+automatic inverse. The plan contains no incident-image injection, bounded-cardinality generation,
+or authentic-OOM observation action.
+
+Each generated plan includes a deterministic digest. A future Step 14b operator can create its
+unique marker and then execute or validate exactly one ordered stage per invocation (the live drill
+has **not** run):
 
 ```bash
 python3 scripts/tokenplace_incident_drill.py --execute-stage marker \
@@ -192,7 +208,7 @@ python3 scripts/tokenplace_incident_drill.py --execute-stage "$NEXT_STAGE" \
   --kubeconfig "$STAGING_KUBECONFIG" --gate-evidence "$PRIVATE_GATE_EVIDENCE"
 ```
 
-For the rehearsal, the exact order begins with `marker`, `inject-incident-image`,
+For the metrics-OOM rehearsal, the exact order begins with `marker`, `inject-incident-image`,
 `generate-bounded-cardinality`, and `observe-authentic-oom`, followed by the existing containment,
 recovery replacement, readiness,
 compute registration and polling, relay-blind encrypted E2EE, route preservation, metrics-exit,

@@ -171,17 +171,18 @@ def validate(args: argparse.Namespace) -> Coordinates:
     lifecycle = getattr(args, "lifecycle", "real-incident")
     incident_image = getattr(args, "incident_image", None)
     if lifecycle == "staging-rehearsal":
-        if args.mode != "metrics-oom":
-            raise DrillError("staging rehearsal is supported only for metrics-OOM")
-        if not IMAGE.fullmatch(incident_image or ""):
-            raise DrillError(
-                "incident image must use a separately supplied immutable sha256 digest"
-            )
         if not getattr(args, "acknowledge_staging_fault_injection", False):
             raise DrillError("explicit staging fault-injection authorization is required")
-        images = (args.current_image, incident_image, args.replacement_image, args.rollback_image)
-        if len({IMAGE_DIGEST.search(image).group(1) for image in images}) != 4:
-            raise DrillError("baseline, incident, recovery, and fallback images must be distinct")
+        if args.mode == "metrics-oom":
+            if not IMAGE.fullmatch(incident_image or ""):
+                raise DrillError(
+                    "incident image must use a separately supplied immutable sha256 digest"
+                )
+            images = (args.current_image, incident_image, args.replacement_image, args.rollback_image)
+            if len({IMAGE_DIGEST.search(image).group(1) for image in images}) != 4:
+                raise DrillError("baseline, incident, recovery, and fallback images must be distinct")
+        elif incident_image is not None:
+            raise DrillError("incident image is only valid for a metrics-OOM staging rehearsal")
     elif incident_image is not None or getattr(args, "acknowledge_staging_fault_injection", False):
         raise DrillError("rehearsal stimulus controls require staging-rehearsal lifecycle")
     if args.current_image == args.replacement_image:
@@ -800,7 +801,7 @@ def build_plan(preflight: Preflight) -> dict:
         )
         previous = stage
 
-    if c.lifecycle == "staging-rehearsal":
+    if c.lifecycle == "staging-rehearsal" and mode == "metrics-oom":
         baseline_inverse = prefix + [
             "set",
             "image",
@@ -922,7 +923,11 @@ def build_plan(preflight: Preflight) -> dict:
         prefix
         + ["set", "image", f"deployment/{c.deployment}", f"{c.container}={c.replacement_image}"],
         replace_inverse,
-        {"image": c.incident_image if c.lifecycle == "staging-rehearsal" else c.current_image},
+        {
+            "image": c.incident_image
+            if c.lifecycle == "staging-rehearsal" and mode == "metrics-oom"
+            else c.current_image
+        },
         {
             "kind": "reviewed-recovery-fallback",
             "not_an_inverse": True,
@@ -1249,9 +1254,31 @@ def _load_execution_plan(path: Path) -> dict:
 
 def _validate_staging_execution_contract(plan: dict) -> None:
     """Reject executable rehearsal plans whose safety contract was altered."""
-    if plan.get("mode") != "metrics-oom":
+    mode = plan.get("mode")
+    if mode not in MODES:
         raise DrillError("staging rehearsal trigger mode is not the reviewed contract")
     actions = plan["actions"]
+    if mode == "quota-exhaustion":
+        identifiers = [item.get("id") for item in actions]
+        forbidden = {
+            "inject-incident-image",
+            "generate-bounded-cardinality",
+            "observe-authentic-oom",
+        }
+        required = {
+            "pause-root",
+            "pause-metadata",
+            "quota-validator",
+            "restore-root",
+            "observe-root",
+            "restore-metadata",
+            "observe-metadata",
+        }
+        if forbidden.intersection(identifiers):
+            raise DrillError("staging rehearsal trigger mode is not the reviewed contract")
+        if not required.issubset(identifiers):
+            raise DrillError("quota rehearsal stages are not the reviewed contract")
+        return
     if len(actions) < 3 or [item.get("id") for item in actions[:3]] != [
         "inject-incident-image",
         "generate-bounded-cardinality",
