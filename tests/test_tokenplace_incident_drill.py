@@ -166,13 +166,9 @@ def _portable_cli_args(parsed, evidence, *, live):
     else:
         command.extend(["--snapshot", str(parsed.snapshot)])
     if parsed.lifecycle == "staging-rehearsal":
-        command.extend(
-            [
-                "--incident-image",
-                parsed.incident_image,
-                "--acknowledge-staging-fault-injection",
-            ]
-        )
+        if parsed.incident_image is not None:
+            command.extend(["--incident-image", parsed.incident_image])
+        command.append("--acknowledge-staging-fault-injection")
     return command
 
 
@@ -303,6 +299,7 @@ print('429' if url.endswith('/') or url.endswith('/api/v1/meta') else '200', end
     [
         ("metrics-oom", True, "staging-rehearsal"),
         ("metrics-oom", False, "staging-rehearsal"),
+        ("quota-exhaustion", True, "staging-rehearsal"),
         ("quota-exhaustion", True, "real-incident"),
     ],
 )
@@ -316,13 +313,13 @@ def test_package_free_complete_workflows(
         lifecycle=lifecycle,
         incident_image=(
             "registry.example/relay@sha256:" + "d" * 64
-            if lifecycle == "staging-rehearsal"
+            if lifecycle == "staging-rehearsal" and mode == "metrics-oom"
             else None
         ),
         acknowledge_staging_fault_injection=lifecycle == "staging-rehearsal",
     )
     snapshot_fixture = snapshot(drill.validate(parsed), mode=mode, degraded=degraded)
-    if lifecycle == "staging-rehearsal":
+    if lifecycle == "staging-rehearsal" and mode == "metrics-oom":
         snapshot_fixture["classification"] = {}
     parsed.snapshot.write_text(json.dumps(snapshot_fixture), encoding="utf-8")
     evidence = tmp_path / "private-evidence" / ("live.json" if live else "snapshot-plan.json")
@@ -1161,8 +1158,44 @@ def test_staging_rehearsal_authorization_and_coordinates_fail_closed(tmp_path, c
         drill.validate(args(tmp_path, **values))
 
 
-def test_staging_rehearsal_rejects_non_oom_mode(tmp_path):
-    with pytest.raises(drill.DrillError, match="supported only for metrics-OOM"):
+def test_quota_staging_rehearsal_uses_role_specific_images_and_actions(tmp_path):
+    parsed = args(
+        tmp_path,
+        mode="quota-exhaustion",
+        lifecycle="staging-rehearsal",
+        acknowledge_staging_fault_injection=True,
+    )
+    checked = drill.validate(parsed)
+    plan = drill.build_plan(
+        drill.preflight_snapshot(
+            "quota-exhaustion", checked, snapshot(checked, mode="quota-exhaustion")
+        )
+    )
+
+    ids = [action["id"] for action in plan["actions"]]
+    assert not {
+        "inject-incident-image",
+        "generate-bounded-cardinality",
+        "observe-authentic-oom",
+        "pause-metrics",
+    }.intersection(ids)
+    assert {
+        "pause-root",
+        "pause-metadata",
+        "quota-validator",
+        "restore-root",
+        "observe-root",
+        "restore-metadata",
+        "observe-metadata",
+    }.issubset(ids)
+    assert plan["expected_deployment"]["incident_image"] is None
+    assert next(action for action in plan["actions"] if action["id"] == "replace")[
+        "old_state"
+    ] == {"image": checked.current_image}
+
+
+def test_quota_staging_rehearsal_rejects_oom_incident_image(tmp_path):
+    with pytest.raises(drill.DrillError, match="only valid for a metrics-OOM"):
         drill.validate(
             args(
                 tmp_path,

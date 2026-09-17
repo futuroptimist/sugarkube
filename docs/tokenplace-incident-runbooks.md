@@ -179,9 +179,29 @@ current artifact exposes `TOKENPLACE_METRICS_MODE=normal|degraded`, containment 
 degraded value; otherwise it uses only the exact ServiceMonitor pause fallback. Replacement and
 rollback remain bound to their separately reviewed immutable digests.
 
-Repeat with `--mode quota-exhaustion`, a new run ID, and a new evidence filename. The generated
-plan includes a deterministic digest. A future Step 14b operator can create its unique marker and
-then execute or validate exactly one ordered stage per invocation (the live drill has **not** run):
+For a quota-exhaustion staging rehearsal, repeat the command with `--mode quota-exhaustion`, a new
+run ID, and a new evidence filename, but omit `--incident-image`. Quota rehearsal images have only
+three explicit roles: the currently deployed baseline, the recovery candidate, and the emergency
+fallback. Each must be an immutable, operator-reviewed digest; no fourth image is invented merely
+to satisfy parsing. Both `--acknowledge-state-loss` and
+`--acknowledge-staging-fault-injection` remain mandatory. The first acknowledges the state lost by
+the planned recovery replacement, while the second authorizes the staging-only Probe containment
+and rehearsal. The same staging host, environment, context, kubeconfig, inventory, healthy
+baseline, and private evidence checks fail closed.
+
+The quota snapshot or live preflight must provide route-specific 429 classification for root and
+metadata, 2xx results for `/livez` and `/healthz`, and a successful quota-validator result. Its plan
+does not inject an incident image, generate cardinality, or observe an OOM. It pauses only the root
+and metadata Probe discovery labels, keeps both health Probes and the ServiceMonitor discovered,
+replaces the workload with the reviewed recovery image, reruns the quota validator, and restores
+root then metadata through separate 15-minute gates. Metrics observation remains last. On failure,
+hold containment or apply the exact printed inverse in reverse order until the original image and
+Probe labels are restored; the emergency fallback remains a separately reviewed action, never an
+inverse.
+
+Each generated plan includes a deterministic digest. A future Step 14b operator can create its
+unique marker and then execute or validate exactly one ordered stage per invocation (the live drill
+has **not** run):
 
 ```bash
 python3 scripts/tokenplace_incident_drill.py --execute-stage marker \
@@ -192,7 +212,7 @@ python3 scripts/tokenplace_incident_drill.py --execute-stage "$NEXT_STAGE" \
   --kubeconfig "$STAGING_KUBECONFIG" --gate-evidence "$PRIVATE_GATE_EVIDENCE"
 ```
 
-For the rehearsal, the exact order begins with `marker`, `inject-incident-image`,
+For the metrics-OOM rehearsal, the exact order begins with `marker`, `inject-incident-image`,
 `generate-bounded-cardinality`, and `observe-authentic-oom`, followed by the existing containment,
 recovery replacement, readiness,
 compute registration and polling, relay-blind encrypted E2EE, route preservation, metrics-exit,
