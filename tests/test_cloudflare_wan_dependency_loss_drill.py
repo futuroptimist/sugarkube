@@ -1122,23 +1122,24 @@ def test_external_timeout_after_disruption_runs_exact_cleanup(tmp_path: Path) ->
 
 
 def test_actual_helper_rejects_accidental_restart(tmp_path: Path) -> None:
-    harness = StatefulDrillHarness(tmp_path, restart=[1, 0])
-    # The changed count becomes the baseline, so change it only after disruption.
-    process = harness.start()
-    deadline = time.monotonic() + 20
-    changed = False
-    while time.monotonic() < deadline:
-        state = harness.current()
-        if state["tables"] == [True, True]:
-            state["restart"][0] = 2
-            harness.state.write_text(json.dumps(state))
-            changed = True
-            break
-        time.sleep(.01)
-    stdout, stderr = process.communicate(timeout=5)
-    assert changed, "helper never installed both disruption tables"
-    assert process.returncode != 0, stdout
-    assert "UID/restart set changed" in stderr
+    harness = StatefulDrillHarness(tmp_path, restart=[1, 0], restart_during=0)
+    result = harness.run()
+    events = harness.events()
+    disrupted = next(
+        i for i, event in enumerate(events)
+        if event.get("event") == "table" and event.get("present") is True
+    )
+    baseline = next(
+        i for i, event in enumerate(events)
+        if event.get("event") == "pods" and event["restarts"] == [1, 0]
+    )
+    changed = next(
+        i for i, event in enumerate(events)
+        if event.get("event") == "pods" and event["restarts"] == [2, 0]
+    )
+    assert baseline < disrupted < changed
+    assert result.returncode != 0, result.stdout
+    assert "UID/restart set changed" in result.stderr
     assert harness.current()["tables"] == [False, False]
 
 

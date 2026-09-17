@@ -3376,6 +3376,212 @@
     },
     {
       "id": 79,
+      "type": "row",
+      "title": "Daniel visitor journey",
+      "description": "Application-owned, disabled-by-default essential visitor-journey telemetry. Dashboard queries never execute the journey.",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 247
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 80,
+      "title": "Daniel visitor journey state",
+      "type": "timeseries",
+      "description": "Current enabled lifecycle state, gated by the independent expected declaration and completion age. Disabled, stale, unavailable, or missing telemetry remains NO DATA.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 248
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (state) ((label_replace((danielsmith_visitor_journey_state{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"} or danielsmith_visitor_journey_state{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\")) and on (application, environment, name, cluster) ((label_replace((danielsmith_visitor_journey_monitoring_expected{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"} or danielsmith_visitor_journey_monitoring_expected{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1) and on (application, environment, name, cluster) (label_replace((danielsmith_visitor_journey_monitoring_enabled{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"} or danielsmith_visitor_journey_monitoring_enabled{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1)) and on (application, environment, name, cluster) (time() - label_replace((danielsmith_visitor_journey_freshness_timestamp_seconds{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"} or danielsmith_visitor_journey_freshness_timestamp_seconds{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") <= 1020))",
+          "legendFormat": "{{state}}"
+        }
+      ]
+    },
+    {
+      "id": 81,
+      "title": "Daniel visitor journey success",
+      "type": "timeseries",
+      "description": "Last essential-journey result only while independently expected, enabled, and no older than 1020 seconds; stale, disabled, or missing telemetry remains NO DATA.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 248
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (application, environment, name, cluster) (label_replace((danielsmith_visitor_journey_success{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"} or danielsmith_visitor_journey_success{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\")) and on (application, environment, name, cluster) ((label_replace((danielsmith_visitor_journey_monitoring_expected{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"} or danielsmith_visitor_journey_monitoring_expected{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1) and on (application, environment, name, cluster) (label_replace((danielsmith_visitor_journey_monitoring_enabled{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"} or danielsmith_visitor_journey_monitoring_enabled{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1)) and on (application, environment, name, cluster) (time() - label_replace((danielsmith_visitor_journey_freshness_timestamp_seconds{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"} or danielsmith_visitor_journey_freshness_timestamp_seconds{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") <= 1020) and on (application, environment, name, cluster) (label_replace((danielsmith_visitor_journey_state{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",state=~\"success|recovered|failure\",cluster=~\"$cluster\"} or danielsmith_visitor_journey_state{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",state=~\"success|recovered|failure\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1)",
+          "legendFormat": "success"
+        }
+      ]
+    },
+    {
+      "id": 82,
+      "title": "Daniel visitor journey freshness",
+      "type": "timeseries",
+      "description": "Increasing age in seconds of the last sanitized completion while monitoring is independently expected and enabled. It remains visible after the result becomes stale.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 256
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "time() - max by (application, environment, name, cluster) (label_replace((danielsmith_visitor_journey_freshness_timestamp_seconds{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"} or danielsmith_visitor_journey_freshness_timestamp_seconds{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\")) and on (application, environment, name, cluster) ((label_replace((danielsmith_visitor_journey_monitoring_expected{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"} or danielsmith_visitor_journey_monitoring_expected{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1) and on (application, environment, name, cluster) (label_replace((danielsmith_visitor_journey_monitoring_enabled{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"} or danielsmith_visitor_journey_monitoring_enabled{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1))",
+          "legendFormat": "age"
+        }
+      ]
+    },
+    {
+      "id": 83,
+      "title": "Daniel visitor journey aggregate duration",
+      "type": "timeseries",
+      "description": "Aggregate duration of the current essential journey while independently expected, enabled, and no older than 1020 seconds.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 256
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (application, environment, name, cluster) (label_replace((danielsmith_visitor_journey_duration_seconds{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"} or danielsmith_visitor_journey_duration_seconds{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\")) and on (application, environment, name, cluster) ((label_replace((danielsmith_visitor_journey_monitoring_expected{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"} or danielsmith_visitor_journey_monitoring_expected{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1) and on (application, environment, name, cluster) (label_replace((danielsmith_visitor_journey_monitoring_enabled{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"} or danielsmith_visitor_journey_monitoring_enabled{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1)) and on (application, environment, name, cluster) (time() - label_replace((danielsmith_visitor_journey_freshness_timestamp_seconds{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"} or danielsmith_visitor_journey_freshness_timestamp_seconds{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") <= 1020) and on (application, environment, name, cluster) (label_replace((danielsmith_visitor_journey_state{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",state=~\"success|recovered|failure\",cluster=~\"$cluster\"} or danielsmith_visitor_journey_state{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",state=~\"success|recovered|failure\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1)",
+          "legendFormat": "duration"
+        }
+      ]
+    },
+    {
+      "id": 84,
+      "title": "Daniel visitor journey failure stage",
+      "type": "timeseries",
+      "description": "Bounded failure stage only for an independently expected, enabled failure no older than 1020 seconds.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 264
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (application, environment, name, cluster, failure_stage) (label_replace((danielsmith_visitor_journey_failure_stage{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",failure_stage!=\"none\",cluster=~\"$cluster\"} or danielsmith_visitor_journey_failure_stage{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",failure_stage!=\"none\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\")) and on (application, environment, name, cluster) ((label_replace((danielsmith_visitor_journey_monitoring_expected{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"} or danielsmith_visitor_journey_monitoring_expected{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1) and on (application, environment, name, cluster) (label_replace((danielsmith_visitor_journey_monitoring_enabled{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"} or danielsmith_visitor_journey_monitoring_enabled{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1)) and on (application, environment, name, cluster) (time() - label_replace((danielsmith_visitor_journey_freshness_timestamp_seconds{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"} or danielsmith_visitor_journey_freshness_timestamp_seconds{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") <= 1020) and on (application, environment, name, cluster) (label_replace((danielsmith_visitor_journey_state{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",state=\"failure\",cluster=~\"$cluster\"} or danielsmith_visitor_journey_state{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",state=\"failure\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1)",
+          "legendFormat": "{{failure_stage}}"
+        }
+      ]
+    },
+    {
+      "id": 85,
+      "title": "Daniel visitor journey unavailable or stale",
+      "type": "timeseries",
+      "description": "Expected telemetry that is missing or older than 1020 seconds, plus explicit unavailable or stale lifecycle signals. Expected=0 remains NO DATA.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 264
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (state) (label_replace(((label_replace((danielsmith_visitor_journey_monitoring_expected{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"} or danielsmith_visitor_journey_monitoring_expected{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1) unless on (application, environment, name, cluster) label_replace((danielsmith_visitor_journey_freshness_timestamp_seconds{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"} or danielsmith_visitor_journey_freshness_timestamp_seconds{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\")) or ((label_replace((danielsmith_visitor_journey_monitoring_expected{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"} or danielsmith_visitor_journey_monitoring_expected{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1) and on (application, environment, name, cluster) (time() - label_replace((danielsmith_visitor_journey_freshness_timestamp_seconds{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"} or danielsmith_visitor_journey_freshness_timestamp_seconds{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") > 1020)), \"state\", \"stale\", \"\", \"\") or ((label_replace((danielsmith_visitor_journey_state{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",state=~\"unavailable|stale\",cluster=~\"$cluster\"} or danielsmith_visitor_journey_state{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",state=~\"unavailable|stale\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\")) and on (application, environment, name, cluster) (label_replace((danielsmith_visitor_journey_monitoring_expected{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"} or danielsmith_visitor_journey_monitoring_expected{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1)))",
+          "legendFormat": "{{state}}"
+        }
+      ]
+    },
+    {
+      "id": 86,
       "title": "Cross-application resource, placement and release overview",
       "type": "row",
       "description": "Bounded Kubernetes resource and release coordinates for the selected application namespaces in this dashboard profile. Detailed DSPACE release integrity and token.place diagnostics remain in their specialized rows and linked runbooks.",
@@ -3383,11 +3589,11 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 247
+        "y": 272
       }
     },
     {
-      "id": 80,
+      "id": 87,
       "title": "Desired versus ready replicas",
       "type": "timeseries",
       "description": "Deployment-level desired and ready replica counts, kept separate by application namespace and Deployment. max by removes duplicate scrape series while preserving rolling-update workload identities.",
@@ -3395,7 +3601,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 248
+        "y": 273
       },
       "datasource": {
         "type": "prometheus",
@@ -3424,7 +3630,7 @@
       ]
     },
     {
-      "id": 81,
+      "id": 88,
       "title": "Serving workload node placement",
       "type": "stat",
       "description": "Distinct nodes hosting Ready, Running, non-terminating pods. Scheduled, unready, and terminating pods are excluded; multiple replicas on one node count once.",
@@ -3432,7 +3638,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 248
+        "y": 273
       },
       "datasource": {
         "type": "prometheus",
@@ -3458,7 +3664,7 @@
       ]
     },
     {
-      "id": 82,
+      "id": 89,
       "title": "Memory working set versus configured limit",
       "type": "timeseries",
       "description": "Working set for every observed application container and the summed configured limit only when that same container population has complete, positive memory-limit coverage. Empty and POD infrastructure containers are excluded; absent, zero, or partial limits leave only observable working-set data and report the limit as NO DATA.",
@@ -3466,7 +3672,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 256
+        "y": 281
       },
       "datasource": {
         "type": "prometheus",
@@ -3495,7 +3701,7 @@
       ]
     },
     {
-      "id": 83,
+      "id": 90,
       "title": "CPU throttling",
       "type": "timeseries",
       "description": "Ratio of throttled to total CFS periods only when every application container observed in the working-set cohort has both metrics and a positive period denominator. Empty and POD infrastructure containers are excluded; partial or unsupported metric coverage, missing metrics, and zero denominators remain NO DATA.",
@@ -3503,7 +3709,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 256
+        "y": 281
       },
       "datasource": {
         "type": "prometheus",
@@ -3528,7 +3734,7 @@
       ]
     },
     {
-      "id": 84,
+      "id": 91,
       "title": "Deployment image coordinates",
       "type": "table",
       "description": "Configured image_spec coordinates declared for Ready, Running, non-terminating serving containers. image_spec is specification data distinct from the runtime status image label; these coordinates are not runtime/build proof, so use specialized release-integrity evidence for that claim.",
@@ -3536,7 +3742,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 264
+        "y": 289
       },
       "datasource": {
         "type": "prometheus",
@@ -3587,7 +3793,7 @@
       ]
     },
     {
-      "id": 85,
+      "id": 92,
       "title": "Application build identity",
       "type": "table",
       "description": "Application-reported version and revision when available. Missing producers, including unsupported applications, remain NO DATA; see the DSPACE release-integrity and token.place diagnostic rows for detailed evidence.",
@@ -3595,7 +3801,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 264
+        "y": 289
       },
       "datasource": {
         "type": "prometheus",
