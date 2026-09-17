@@ -123,6 +123,89 @@ DANIEL_PANEL_CONTRACT = {
         "age",
     ),
 }
+DANIEL_VISITOR_PANEL_CONTRACT = {
+    "Daniel visitor journey state": (
+        'max by (state) (danielsmith_visitor_journey_state{application="danielsmith",'
+        'environment=~"$environment",cluster=~"$cluster",'
+        'name="danielsmith-visitor-journey-${ENVIRONMENT}"})',
+        "short",
+        "{{state}}",
+    ),
+    "Daniel visitor journey success": (
+        'danielsmith_visitor_journey_success{application="danielsmith",'
+        'environment=~"$environment",cluster=~"$cluster",'
+        'name="danielsmith-visitor-journey-${ENVIRONMENT}"} '
+        "and on (application, environment, name, cluster) "
+        'danielsmith_visitor_journey_monitoring_expected{application="danielsmith",'
+        'environment=~"$environment",cluster=~"$cluster",'
+        'name="danielsmith-visitor-journey-${ENVIRONMENT}"} == 1 '
+        "and on (application, environment, name, cluster) "
+        'danielsmith_visitor_journey_state{application="danielsmith",'
+        'environment=~"$environment",cluster=~"$cluster",'
+        'name="danielsmith-visitor-journey-${ENVIRONMENT}",state=~"success|recovered"} == 1 '
+        "and on (application, environment, name, cluster) "
+        "time() - danielsmith_visitor_journey_freshness_timestamp_seconds{"
+        'application="danielsmith",environment=~"$environment",cluster=~"$cluster",'
+        'name="danielsmith-visitor-journey-${ENVIRONMENT}"} <= 1020',
+        "short",
+        "success",
+    ),
+    "Daniel visitor journey freshness": (
+        "time() - danielsmith_visitor_journey_freshness_timestamp_seconds{"
+        'application="danielsmith",environment=~"$environment",cluster=~"$cluster",'
+        'name="danielsmith-visitor-journey-${ENVIRONMENT}"} '
+        "and on (application, environment, name, cluster) "
+        'danielsmith_visitor_journey_monitoring_expected{application="danielsmith",'
+        'environment=~"$environment",cluster=~"$cluster",'
+        'name="danielsmith-visitor-journey-${ENVIRONMENT}"} == 1',
+        "s",
+        "age",
+    ),
+    "Daniel visitor journey aggregate duration": (
+        'danielsmith_visitor_journey_duration_seconds{application="danielsmith",'
+        'environment=~"$environment",cluster=~"$cluster",'
+        'name="danielsmith-visitor-journey-${ENVIRONMENT}"} '
+        "and on (application, environment, name, cluster) "
+        'danielsmith_visitor_journey_monitoring_expected{application="danielsmith",'
+        'environment=~"$environment",cluster=~"$cluster",'
+        'name="danielsmith-visitor-journey-${ENVIRONMENT}"} == 1',
+        "s",
+        "duration",
+    ),
+    "Daniel visitor journey failure stage": (
+        "max by (failure_stage) (danielsmith_visitor_journey_failure_stage{"
+        'application="danielsmith",environment=~"$environment",cluster=~"$cluster",'
+        'name="danielsmith-visitor-journey-${ENVIRONMENT}",failure_stage!="none"}) '
+        "and on (application, environment, name, cluster) "
+        'danielsmith_visitor_journey_monitoring_expected{application="danielsmith",'
+        'environment=~"$environment",cluster=~"$cluster",'
+        'name="danielsmith-visitor-journey-${ENVIRONMENT}"} == 1 '
+        "and on (application, environment, name, cluster) "
+        'danielsmith_visitor_journey_state{application="danielsmith",'
+        'environment=~"$environment",cluster=~"$cluster",'
+        'name="danielsmith-visitor-journey-${ENVIRONMENT}",state="failure"} == 1)',
+        "short",
+        "{{failure_stage}}",
+    ),
+    "Daniel visitor journey stale or unavailable": (
+        'max(danielsmith_visitor_journey_monitoring_expected{application="danielsmith",'
+        'environment=~"$environment",cluster=~"$cluster",'
+        'name="danielsmith-visitor-journey-${ENVIRONMENT}"} == 1 and on '
+        "(application, environment, name, cluster) "
+        "(time() - danielsmith_visitor_journey_freshness_timestamp_seconds{"
+        'application="danielsmith",environment=~"$environment",cluster=~"$cluster",'
+        'name="danielsmith-visitor-journey-${ENVIRONMENT}"} > 1020 or '
+        'danielsmith_visitor_journey_monitoring_expected{application="danielsmith",'
+        'environment=~"$environment",cluster=~"$cluster",'
+        'name="danielsmith-visitor-journey-${ENVIRONMENT}"} == 1 unless on '
+        "(application, environment, name, cluster) "
+        'danielsmith_visitor_journey_freshness_timestamp_seconds{application="danielsmith",'
+        'environment=~"$environment",cluster=~"$cluster",'
+        'name="danielsmith-visitor-journey-${ENVIRONMENT}"}))',
+        "short",
+        "stale or unavailable",
+    ),
+}
 
 
 def load_dashboard(path: Path) -> dict:
@@ -224,10 +307,10 @@ def _expected_dashboard(dashboard: dict) -> dict:
 
 
 def _validate_grid(items: list[dict]) -> None:
-    if len(items) != 70 or sum(panel.get("type") == "row" for panel in items) != 12:
-        raise SystemExit("ERROR: canonical dashboard must contain exactly 70 objects and 12 rows.")
+    if len(items) != 77 or sum(panel.get("type") == "row" for panel in items) != 13:
+        raise SystemExit("ERROR: canonical dashboard must contain exactly 77 objects and 13 rows.")
     ids = [panel.get("id") for panel in items]
-    if ids != list(range(1, 71)):
+    if ids != list(range(1, 78)):
         raise SystemExit(
             "ERROR: canonical dashboard panel IDs must be stable consecutive integers."
         )
@@ -356,6 +439,27 @@ def _validate_semantics(dashboard: dict) -> None:
             or "vector(0)" in expected_expression
         ):
             raise SystemExit(f"ERROR: {title} does not match the bounded Daniel contract.")
+    for title, (
+        expected_expression,
+        expected_unit,
+        expected_legend,
+    ) in DANIEL_VISITOR_PANEL_CONTRACT.items():
+        environment = dashboard["templating"]["list"][0]["query"]
+        expected_expression = expected_expression.replace("${ENVIRONMENT}", environment)
+        visitor_panel = panel_named(dashboard, title)
+        targets = visitor_panel.get("targets", [])
+        defaults = visitor_panel.get("fieldConfig", {}).get("defaults", {})
+        if (
+            len(targets) != 1
+            or targets[0].get("expr") != expected_expression
+            or targets[0].get("legendFormat") != expected_legend
+            or defaults.get("unit") != expected_unit
+            or defaults.get("noValue") != "NO DATA"
+            or 'environment=~"$environment"' not in expected_expression
+            or 'cluster=~"$cluster"' not in expected_expression
+            or "vector(0)" in expected_expression
+        ):
+            raise SystemExit(f"ERROR: {title} does not match the bounded Daniel visitor contract.")
     for title, expected in FIVE_XX_RATIO_EXPRESSIONS.items():
         if panel_expression(dashboard, title) != expected:
             raise SystemExit(f"ERROR: {title} must use its request-family-gated 5xx zero contract.")
