@@ -290,32 +290,32 @@ DANIEL_VISITOR_PANEL_CONTRACT = {
     ),
 }
 DANIEL_VISITOR_LAYOUT_CONTRACT = {
-    "Daniel visitor journey": (71, "row", {"h": 1, "w": 24, "x": 0, "y": 214}),
-    "Daniel visitor journey state": (72, "timeseries", {"h": 8, "w": 12, "x": 0, "y": 215}),
+    "Daniel visitor journey": (79, "row", {"h": 1, "w": 24, "x": 0, "y": 247}),
+    "Daniel visitor journey state": (80, "timeseries", {"h": 8, "w": 12, "x": 0, "y": 248}),
     "Daniel visitor journey success": (
-        73,
+        81,
         "timeseries",
-        {"h": 8, "w": 12, "x": 12, "y": 215},
+        {"h": 8, "w": 12, "x": 12, "y": 248},
     ),
     "Daniel visitor journey freshness": (
-        74,
+        82,
         "timeseries",
-        {"h": 8, "w": 12, "x": 0, "y": 223},
+        {"h": 8, "w": 12, "x": 0, "y": 256},
     ),
     "Daniel visitor journey aggregate duration": (
-        75,
+        83,
         "timeseries",
-        {"h": 8, "w": 12, "x": 12, "y": 223},
+        {"h": 8, "w": 12, "x": 12, "y": 256},
     ),
     "Daniel visitor journey failure stage": (
-        76,
+        84,
         "timeseries",
-        {"h": 8, "w": 12, "x": 0, "y": 231},
+        {"h": 8, "w": 12, "x": 0, "y": 264},
     ),
     "Daniel visitor journey unavailable or stale": (
-        77,
+        85,
         "timeseries",
-        {"h": 8, "w": 12, "x": 12, "y": 231},
+        {"h": 8, "w": 12, "x": 12, "y": 264},
     ),
 }
 

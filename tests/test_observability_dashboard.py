@@ -710,12 +710,46 @@ def test_daniel_visitor_promql_lifecycle_semantics_with_promtool(tmp_path, dashb
 
 
 def test_daniel_visitor_dashboard_layout_is_stable(dashboards):
+    expected_layout = {
+        "Daniel visitor journey": (79, "row", {"h": 1, "w": 24, "x": 0, "y": 247}),
+        "Daniel visitor journey state": (
+            80,
+            "timeseries",
+            {"h": 8, "w": 12, "x": 0, "y": 248},
+        ),
+        "Daniel visitor journey success": (
+            81,
+            "timeseries",
+            {"h": 8, "w": 12, "x": 12, "y": 248},
+        ),
+        "Daniel visitor journey freshness": (
+            82,
+            "timeseries",
+            {"h": 8, "w": 12, "x": 0, "y": 256},
+        ),
+        "Daniel visitor journey aggregate duration": (
+            83,
+            "timeseries",
+            {"h": 8, "w": 12, "x": 12, "y": 256},
+        ),
+        "Daniel visitor journey failure stage": (
+            84,
+            "timeseries",
+            {"h": 8, "w": 12, "x": 0, "y": 264},
+        ),
+        "Daniel visitor journey unavailable or stale": (
+            85,
+            "timeseries",
+            {"h": 8, "w": 12, "x": 12, "y": 264},
+        ),
+    }
+    assert validator.DANIEL_VISITOR_LAYOUT_CONTRACT == expected_layout
     for document in (json.loads(TEMPLATE.read_text()), *dashboards):
         for title, (
             expected_id,
             expected_type,
             expected_grid_position,
-        ) in validator.DANIEL_VISITOR_LAYOUT_CONTRACT.items():
+        ) in expected_layout.items():
             item = panel(document, title)
             assert item["id"] == expected_id
             assert item["type"] == expected_type
