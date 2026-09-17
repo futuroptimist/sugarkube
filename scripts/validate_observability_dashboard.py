@@ -214,6 +214,7 @@ OVERVIEW_PANEL_CONTRACT = {
     },
     "CPU throttling": {
         "metrics": {
+            "container_memory_working_set_bytes",
             "container_cpu_cfs_throttled_periods_total",
             "container_cpu_cfs_periods_total",
         },
@@ -539,19 +540,25 @@ def _validate_semantics(dashboard: dict) -> None:
     ):
         raise SystemExit("ERROR: memory limits require complete positive container coverage.")
     cpu = panel_expression(dashboard, "CPU throttling")
-    if any(
-        fragment not in cpu
-        for fragment in (
-            'pod!=""',
-            'container!=""',
-            'container!="POD"',
-            "and on (namespace, pod, container)",
-            "> 0",
-            "count by (namespace)",
-            "== count by (namespace)",
+    if (
+        any(
+            fragment not in cpu
+            for fragment in (
+                'pod!=""',
+                'container!=""',
+                'container!="POD"',
+                "and on (namespace, pod, container)",
+                "> 0",
+                "count by (namespace)",
+                "== count by (namespace)",
+            )
         )
+        or cpu.count("container_memory_working_set_bytes") < 1
+        or cpu.count("== count by (namespace)") < 3
     ):
-        raise SystemExit("ERROR: CPU throttling requires matched, positive container coverage.")
+        raise SystemExit(
+            "ERROR: CPU throttling requires complete observed, matched, positive container coverage."
+        )
     image_panel = panel_named(dashboard, "Deployment image coordinates")
     image_expression = panel_expression(dashboard, "Deployment image coordinates")
     if (

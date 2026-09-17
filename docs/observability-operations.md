@@ -994,8 +994,9 @@ rolling-update identities remain visible. Placement is an instant-only count of 
 includes a pod only when it is Ready, Running, and non-terminating; a merely scheduled, historical,
 or terminating pod is not treated as serving. Memory working set remains observable for every
 non-infrastructure container, while its namespace limit is shown only when that same deduplicated
-container population has complete, positive limit coverage. CPU throttling likewise requires each
-reported container to have both CFS metrics and a positive denominator. A missing or zero limit,
+container population has complete, positive limit coverage. CPU throttling uses that independently
+observed working-set population and requires each of its containers to have both CFS metrics and a
+positive denominator. A missing or zero limit,
 partial metric coverage, or an unsupported metric remains **NO DATA**, not a partial total or a
 healthy zero.
 

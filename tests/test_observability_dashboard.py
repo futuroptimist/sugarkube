@@ -1344,7 +1344,8 @@ def test_cross_application_overview_preserves_missing_limits_throttling_and_buil
     assert "> 0" in limit_expression
     cpu_expression = panel(staging, "CPU throttling")["targets"][0]["expr"]
     assert cpu_expression.count("and on (namespace, pod, container)") >= 2
-    assert cpu_expression.count("count by (namespace)") >= 4
+    assert cpu_expression.count("count by (namespace)") >= 6
+    assert "container_memory_working_set_bytes" in cpu_expression
 
 
 def test_cross_application_overview_is_profile_and_workload_scoped_without_double_counting(
@@ -1415,6 +1416,17 @@ def test_cross_application_overview_rejects_partially_unscoped_multi_metric_targ
         'tokenplace_build_info{namespace=~"$workload",', "tokenplace_build_info{"
     )
     with pytest.raises(SystemExit, match="namespace scope"):
+        validator._validate_semantics(changed)
+
+
+def test_cross_application_overview_rejects_cpu_without_observed_population_guard(dashboards):
+    staging, _ = dashboards
+    changed = copy.deepcopy(staging)
+    target = panel(changed, "CPU throttling")["targets"][0]
+    guard = " == count by (namespace) (max by (namespace, pod, container) (container_memory_working_set_bytes"
+    assert guard in target["expr"]
+    target["expr"] = target["expr"].replace(guard, guard.replace(" == ", " or "), 1)
+    with pytest.raises(SystemExit, match="complete observed"):
         validator._validate_semantics(changed)
 
 
@@ -1515,37 +1527,56 @@ def test_actual_overview_promql_preserves_identity_coverage_and_serving_state(da
                         f"{limit}x10",
                     )
                 )
-    # CPU: complete zero numerator, missing either side, and a zero denominator.
+    # CPU: complete zero/nonzero controls, missing either side, a zero denominator,
+    # and same-namespace mixed support. Working set defines the observed population.
     cpu_cases = {
-        "cpu-full": (True, True, 60),
-        "cpu-no-num": (False, True, 60),
-        "cpu-no-den": (True, False, 60),
-        "cpu-zero-den": (True, True, 0),
+        "cpu-full": (("app", True, True, 0, 60),),
+        "cpu-nonzero": (("app", True, True, 6, 60),),
+        "cpu-no-num": (("app", False, True, 0, 60),),
+        "cpu-no-den": (("app", True, False, 0, 60),),
+        "cpu-zero-den": (("app", True, True, 0, 0),),
+        "cpu-mixed": (
+            ("supported", True, True, 0, 60),
+            ("unsupported", False, False, 0, 0),
+        ),
     }
-    for namespace, (has_num, has_den, denominator_step) in cpu_cases.items():
-        labels = {"namespace": namespace, "pod": "pod", "container": "app", "image": "runtime"}
-        if has_num:
-            inputs.append(series("container_cpu_cfs_throttled_periods_total", labels, "0+0x10"))
-            if namespace == "cpu-full":
+    for namespace, containers in cpu_cases.items():
+        for container, has_num, has_den, numerator_step, denominator_step in containers:
+            labels = {
+                "namespace": namespace,
+                "pod": "pod",
+                "container": container,
+                "image": "runtime",
+            }
+            inputs.append(series("container_memory_working_set_bytes", labels, "10x10"))
+            if has_num:
                 inputs.append(
                     series(
                         "container_cpu_cfs_throttled_periods_total",
-                        {**labels, "job": "duplicate"},
-                        "0+0x10",
+                        labels,
+                        f"0+{numerator_step}x10",
                     )
                 )
-        if has_den:
-            inputs.append(
-                series("container_cpu_cfs_periods_total", labels, f"0+{denominator_step}x10")
-            )
-            if namespace == "cpu-full":
+                if namespace == "cpu-full":
+                    inputs.append(
+                        series(
+                            "container_cpu_cfs_throttled_periods_total",
+                            {**labels, "job": "duplicate"},
+                            "0+0x10",
+                        )
+                    )
+            if has_den:
                 inputs.append(
-                    series(
-                        "container_cpu_cfs_periods_total",
-                        {**labels, "job": "duplicate"},
-                        f"0+{denominator_step}x10",
-                    )
+                    series("container_cpu_cfs_periods_total", labels, f"0+{denominator_step}x10")
                 )
+                if namespace == "cpu-full":
+                    inputs.append(
+                        series(
+                            "container_cpu_cfs_periods_total",
+                            {**labels, "job": "duplicate"},
+                            f"0+{denominator_step}x10",
+                        )
+                    )
     # Configured coordinates retain simultaneous old/new image_spec values, not status image.
     for pod_name, spec, status in (
         ("web-old", "repo/app:v1", "repo/app@sha256:old"),
@@ -1635,6 +1666,12 @@ def test_actual_overview_promql_preserves_identity_coverage_and_serving_state(da
         "memory usage",
         _overview_expression(staging, "Memory working set versus configured limit"),
         [
+            ('{namespace="cpu-full"}', 10),
+            ('{namespace="cpu-mixed"}', 20),
+            ('{namespace="cpu-no-den"}', 10),
+            ('{namespace="cpu-no-num"}', 10),
+            ('{namespace="cpu-nonzero"}', 10),
+            ('{namespace="cpu-zero-den"}', 10),
             ('{namespace="full"}', 30),
             ('{namespace="mixed"}', 25),
             ('{namespace="rollout"}', 31),
@@ -1650,7 +1687,7 @@ def test_actual_overview_promql_preserves_identity_coverage_and_serving_state(da
     query(
         "cpu coverage",
         _overview_expression(staging, "CPU throttling"),
-        [('{namespace="cpu-full"}', 0)],
+        [('{namespace="cpu-full"}', 0), ('{namespace="cpu-nonzero"}', 0.1)],
     )
     query(
         "image specs",
