@@ -1264,30 +1264,100 @@ def _load_execution_plan(path: Path) -> dict:
 def _validate_staging_execution_contract(plan: dict) -> None:
     """Reject executable rehearsal plans whose safety contract was altered."""
     if plan.get("mode") == "quota-exhaustion":
-        identifiers = [item.get("id") for item in plan["actions"]]
-        expected_identifiers = [
-            "pause-root",
-            "pause-metadata",
-            "replace",
-            "workload-readiness",
-            "compute-registration",
-            "compute-polling",
-            "encrypted-e2ee",
-            "quota-validator",
-            "restore-root",
-            "observe-root",
-            "restore-metadata",
-            "observe-metadata",
-            "preserve-metrics-last",
-            "observe-metrics",
-        ]
         expected = plan.get("expected_deployment")
-        if isinstance(expected, dict) and expected.get("incident_image") is not None:
-            raise DrillError("staging rehearsal trigger mode is not the reviewed contract")
-        if identifiers != expected_identifiers:
-            raise DrillError("quota staging rehearsal actions are not the reviewed contract")
-        if not isinstance(expected, dict) or expected.get("incident_image") is not None:
+        if not isinstance(expected, dict):
             raise DrillError("quota staging rehearsal image coordinates are malformed")
+        if expected.get("incident_image") is not None:
+            raise DrillError(
+                "quota staging rehearsal must not specify an incident image"
+            )
+        coordinate_keys = {
+            "namespace",
+            "name",
+            "replicas",
+            "container",
+            "current_image",
+            "incident_image",
+            "replacement_image",
+            "rollback_image",
+            "memory_limit",
+        }
+        images = [
+            expected.get(key)
+            for key in ("current_image", "replacement_image", "rollback_image")
+        ]
+        if (
+            set(expected) != coordinate_keys
+            or not all(
+                isinstance(expected.get(key), str) and expected[key]
+                for key in coordinate_keys - {"replicas", "incident_image"}
+            )
+            or not SAFE_NAME.fullmatch(expected["namespace"])
+            or not SAFE_NAME.fullmatch(expected["name"])
+            or not SAFE_NAME.fullmatch(expected["container"])
+            or isinstance(expected.get("replicas"), bool)
+            or not isinstance(expected.get("replicas"), int)
+            or expected["replicas"] <= 0
+            or not re.fullmatch(r"[1-9][0-9]*(Mi|Gi)", expected["memory_limit"])
+            or any(not IMAGE.fullmatch(value) for value in images)
+            or len({IMAGE_DIGEST.search(value).group(1) for value in images})
+            != len(images)
+        ):
+            raise DrillError(
+                "quota staging rehearsal deployment coordinates are malformed"
+            )
+
+        reviewed_inventory = inventory("staging")
+        expected_inventory = {
+            "namespace": reviewed_inventory.namespace,
+            "service_monitor": reviewed_inventory.service_monitor,
+            "probes": reviewed_inventory.probe_map(),
+        }
+        if (
+            plan.get("inventory") != expected_inventory
+            or expected["namespace"] != reviewed_inventory.namespace
+        ):
+            raise DrillError(
+                "quota staging rehearsal inventory is not the reviewed contract"
+            )
+
+        coordinates = Coordinates(
+            host=STAGING_HOST,
+            kubeconfig=Path("<supplied-kubeconfig>"),
+            context="sugar-staging",
+            environment="staging",
+            namespace=expected["namespace"],
+            deployment=expected["name"],
+            container=expected["container"],
+            current_image=expected["current_image"],
+            replacement_image=expected["replacement_image"],
+            rollback_image=expected["rollback_image"],
+            replicas=expected["replicas"],
+            memory_limit=expected["memory_limit"],
+            service_monitor=reviewed_inventory.service_monitor,
+            run_id=plan["run_id"],
+            lifecycle="staging-rehearsal",
+        )
+        release = "kube-prometheus-stack"
+        probes = reviewed_inventory.probe_map()
+        reviewed_plan = build_plan(
+            Preflight(
+                coordinates=coordinates,
+                inventory=reviewed_inventory,
+                mode="quota-exhaustion",
+                source="live-authoritative",
+                classification=(),
+                metrics_mode_state="absent",
+                discovery_labels=(
+                    (probes["root"]["probe"], release),
+                    (probes["metadata"]["probe"], release),
+                ),
+            )
+        )
+        if plan["actions"] != reviewed_plan["actions"]:
+            raise DrillError(
+                "quota staging rehearsal actions are not the reviewed contract"
+            )
         return
     if plan.get("mode") != "metrics-oom":
         raise DrillError("staging rehearsal trigger mode is not the reviewed contract")
@@ -1340,8 +1410,10 @@ def _validate_staging_execution_contract(plan: dict) -> None:
         for index, item in enumerate(actions)
     ):
         raise DrillError("staging rehearsal dependency chain is malformed")
-    inventory = plan.get("inventory")
-    namespace = inventory.get("namespace") if isinstance(inventory, dict) else None
+    plan_inventory = plan.get("inventory")
+    namespace = (
+        plan_inventory.get("namespace") if isinstance(plan_inventory, dict) else None
+    )
     resource = f'deployment/{expected["name"]}'
     prefix = [
         "kubectl",

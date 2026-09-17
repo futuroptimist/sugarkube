@@ -2080,6 +2080,14 @@ def test_live_authoritative_rehearsal_plan_is_executable(tmp_path):
 
 
 def test_live_authoritative_quota_rehearsal_plan_is_executable(tmp_path):
+    plan = executable_quota_rehearsal_plan(tmp_path)
+    path = tmp_path / "live-quota-plan.json"
+    path.write_text(json.dumps(plan))
+
+    assert drill._load_execution_plan(path) == plan
+
+
+def executable_quota_rehearsal_plan(tmp_path):
     parsed = args(
         tmp_path,
         mode="quota-exhaustion",
@@ -2094,17 +2102,72 @@ def test_live_authoritative_quota_rehearsal_plan_is_executable(tmp_path):
         snapshot(coordinates, mode="quota-exhaustion"),
         "live-authoritative",
     )
-    plan = drill.build_plan(checked)
-    path = tmp_path / "live-quota-plan.json"
-    path.write_text(json.dumps(plan))
-
-    assert drill._load_execution_plan(path) == plan
+    return drill.build_plan(checked)
 
 
 @pytest.mark.parametrize(
     "tamper,message",
     [
-        (lambda plan: plan.update(mode="quota-exhaustion"), "trigger mode"),
+        (
+            lambda plan: plan["expected_deployment"].update(
+                incident_image="unexpected"
+            ),
+            "must not specify an incident image",
+        ),
+        (
+            lambda plan: plan["expected_deployment"].update(namespace="other"),
+            "inventory",
+        ),
+        (lambda plan: plan["inventory"].update(namespace="other"), "inventory"),
+        (
+            lambda plan: plan["actions"][0].update(resource="probe/unreviewed"),
+            "actions",
+        ),
+        (
+            lambda plan: plan["actions"][0]["command"].__setitem__(-1, "--server-side"),
+            "actions",
+        ),
+        (
+            lambda plan: plan["actions"][0]["inverse"].__setitem__(-1, "--server-side"),
+            "actions",
+        ),
+        (
+            lambda plan: plan["actions"][2].update(depends_on=["pause-root"]),
+            "actions",
+        ),
+        (
+            lambda plan: plan["actions"][3]["duration"].update(value=0),
+            "actions",
+        ),
+        (
+            lambda plan: plan["actions"][7].update(
+                on_failure=["kubectl", "delete", "pod"]
+            ),
+            "actions",
+        ),
+        (
+            lambda plan: plan["actions"][8]["rollback"].__setitem__(
+                -1, "--server-side"
+            ),
+            "actions",
+        ),
+    ],
+)
+def test_quota_rehearsal_loader_rejects_tampered_contract(tmp_path, tamper, message):
+    plan = executable_quota_rehearsal_plan(tmp_path)
+    tamper(plan)
+    plan["plan_digest"] = drill._plan_digest(plan)
+    path = tmp_path / "tampered-quota-plan.json"
+    path.write_text(json.dumps(plan), encoding="utf-8")
+
+    with pytest.raises(drill.DrillError, match=message):
+        drill._load_execution_plan(path)
+
+
+@pytest.mark.parametrize(
+    "tamper,message",
+    [
+        (lambda plan: plan.update(mode="quota-exhaustion"), "incident image"),
         (lambda plan: plan["actions"].pop(1), "ordered trigger stages"),
         (
             lambda plan: plan["actions"][1]["target"].update(host="token.place"),
