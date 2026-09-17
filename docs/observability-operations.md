@@ -373,6 +373,28 @@ is not rollout evidence.
 
 ## Runtime expectations
 
+### Cross-application resource, placement, and release overview
+
+The dashboard's cross-application row has a dedicated selector limited to the `dspace`,
+`tokenplace`, and `danielsmith` namespaces. It does not reuse the public-probe application
+selector. Replica series remain grouped by deployment so multiple replicas and overlapping
+deployments during a rolling update are not collapsed or added twice. Placement counts distinct
+nodes only for pods that are Ready, Running, and not terminating; merely scheduled pods are not
+serving capacity.
+
+Memory working set is shown only alongside a positive configured memory limit. A missing limit is
+therefore `NO DATA`, not an implied unlimited or healthy value. CPU throttling similarly remains
+`NO DATA` when the container runtime does not publish both CFS-period metric families. The panels
+never manufacture a zero for absent telemetry.
+
+The deployment-image table reports the image coordinate from Kubernetes pod specifications owned
+by deployment ReplicaSets. It is **deployment intent, not proof of the bytes currently running**.
+Application-reported build identity is separate and remains `NO DATA` where an application does not
+publish a bounded build metric. Use the existing **DSPACE release integrity** row and
+[release-integrity runbook](observability-dspace-release-integrity.md) for DSPACE runtime proof; use
+the existing token.place diagnostic rows and [incident runbooks](tokenplace-incident-runbooks.md)
+for token.place diagnosis rather than treating this overview as either specialized check.
+
 ### token.place Phase 1 dashboard slice
 
 The two token.place rows use one environment-neutral layout. Their metric families have been

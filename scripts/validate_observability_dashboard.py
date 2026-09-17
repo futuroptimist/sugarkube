@@ -194,6 +194,49 @@ DANIEL_PANEL_CONTRACT = {
     ),  # noqa: E501
 }
 
+OVERVIEW_PANEL_CONTRACT = {
+    "Desired versus ready replicas by workload": [
+        'max by (namespace, deployment) (kube_deployment_spec_replicas{namespace=~"$workload"})',
+        'max by (namespace, deployment) '
+        '(kube_deployment_status_replicas_ready{namespace=~"$workload"})',
+    ],
+    "Distinct nodes serving Ready workloads": [
+        'count by (namespace) (count by (namespace, node) '
+        '((kube_pod_status_ready{namespace=~"$workload",condition="true"} == 1 and on '
+        '(namespace, pod) kube_pod_status_phase{namespace=~"$workload",phase="Running"} == 1) '
+        'unless on (namespace, pod) '
+        'kube_pod_deletion_timestamp{namespace=~"$workload"}))'
+    ],
+    "Memory working set versus configured memory limit": [
+        '(sum by (namespace) (container_memory_working_set_bytes{namespace=~"$workload",'
+        'container!="",container!="POD"})) and on (namespace) (sum by (namespace) '
+        '(kube_pod_container_resource_limits{namespace=~"$workload",resource="memory",'
+        'unit="byte"}) > 0)',
+        '(sum by (namespace) (kube_pod_container_resource_limits{namespace=~"$workload",'
+        'resource="memory",unit="byte"})) > 0',
+    ],
+    "CPU throttling ratio where supported": [
+        'sum by (namespace) (rate(container_cpu_cfs_throttled_periods_total{namespace=~'
+        '"$workload",container!="",container!="POD"}[$__rate_interval])) / clamp_min(sum by '
+        '(namespace) (rate(container_cpu_cfs_periods_total{namespace=~"$workload",container!="",'
+        'container!="POD"}[$__rate_interval])), 1e-9)'
+    ],
+    "Deployment image coordinates (not runtime proof)": [
+        'max by (namespace, owner_name, container, image) (kube_pod_container_info{namespace=~'
+        '"$workload",container!="",container!="POD"} * on (namespace, pod) '
+        'group_left(replicaset) max by (namespace, pod, replicaset) '
+        '(label_replace(kube_pod_owner{namespace=~"$workload",owner_kind="ReplicaSet"}, '
+        '"replicaset", "$1", "owner_name", "(.*)")) * on (namespace, replicaset) '
+        'group_left(owner_name) kube_replicaset_owner{namespace=~"$workload",'
+        'owner_kind="Deployment"})'
+    ],
+    "Application build identity when available": [
+        'max by (namespace, version, revision) (dspace_build_info{environment=~"$environment",'
+        'namespace=~"$workload"} or tokenplace_build_info{app="tokenplace",environment=~'
+        '"$environment",release="tokenplace",cluster=~"$cluster",namespace=~"$workload"})'
+    ],
+}
+
 
 def load_dashboard(path: Path) -> dict:
     try:
@@ -294,10 +337,10 @@ def _expected_dashboard(dashboard: dict) -> dict:
 
 
 def _validate_grid(items: list[dict]) -> None:
-    if len(items) != 78 or sum(panel.get("type") == "row" for panel in items) != 13:
-        raise SystemExit("ERROR: canonical dashboard must contain exactly 78 objects and 13 rows.")
+    if len(items) != 85 or sum(panel.get("type") == "row" for panel in items) != 14:
+        raise SystemExit("ERROR: canonical dashboard must contain exactly 85 objects and 14 rows.")
     ids = [panel.get("id") for panel in items]
-    if ids != list(range(1, 79)):
+    if ids != list(range(1, 86)):
         raise SystemExit(
             "ERROR: canonical dashboard panel IDs must be stable consecutive integers."
         )
@@ -340,8 +383,8 @@ def _validate_semantics(dashboard: dict) -> None:
     ):
         raise SystemExit("ERROR: every data panel must explicitly preserve NO DATA.")
     tables = [panel for panel in items if panel.get("type") == "table"]
-    if len(tables) != 10:
-        raise SystemExit("ERROR: canonical dashboard must contain exactly ten tables.")
+    if len(tables) != 12:
+        raise SystemExit("ERROR: canonical dashboard must contain exactly twelve tables.")
     for table in tables:
         targets = table.get("targets", [])
         transforms = table.get("transformations", [])
@@ -368,6 +411,7 @@ def _validate_semantics(dashboard: dict) -> None:
         "cluster",
         "app",
         "route",
+        "workload",
     ]:
         raise SystemExit("ERROR: dashboard variables must use the canonical shape.")
     for variable in variables[:2]:
@@ -384,6 +428,15 @@ def _validate_semantics(dashboard: dict) -> None:
         for variable in variables[2:4]
     ):
         raise SystemExit("ERROR: app and route variables must expose All = .*.")
+    workload = variables[4]
+    if (
+        workload.get("type") != "custom"
+        or workload.get("query") != "dspace,tokenplace,danielsmith"
+        or workload.get("allValue") != "dspace|tokenplace|danielsmith"
+        or workload.get("includeAll") is not True
+        or workload.get("multi") is not True
+    ):
+        raise SystemExit("ERROR: workload must be the dedicated bounded application selector.")
     expressions = [
         target["expr"]
         for panel in items
@@ -397,6 +450,18 @@ def _validate_semantics(dashboard: dict) -> None:
         r"cluster\s*(?:=|=~)", "\n".join(expr for expr in expressions if "$cluster" not in expr)
     ):
         raise SystemExit("ERROR: core local queries must not select an external cluster label.")
+    for title, expected_expressions in OVERVIEW_PANEL_CONTRACT.items():
+        overview_panel = panel_named(dashboard, title)
+        actual = [target.get("expr") for target in overview_panel.get("targets", [])]
+        if actual != expected_expressions:
+            raise SystemExit(f"ERROR: {title} does not match the bounded overview contract.")
+        if overview_panel.get("fieldConfig", {}).get("defaults", {}).get("noValue") != "NO DATA":
+            raise SystemExit(f"ERROR: {title} must explicitly preserve NO DATA.")
+        if any("vector(0)" in expression for expression in actual):
+            raise SystemExit(f"ERROR: {title} must not convert missing telemetry to zero.")
+    image_panel = panel_named(dashboard, "Deployment image coordinates (not runtime proof)")
+    if "not proof of running content" not in image_panel.get("description", ""):
+        raise SystemExit("ERROR: image coordinates must disclaim runtime-content proof.")
     token_expressions = [
         target["expr"]
         for title in TOKENPLACE_DATA_TITLES

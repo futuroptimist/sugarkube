@@ -146,9 +146,9 @@ def test_generator_check_and_outputs_are_deterministic(dashboards):
         'provider=\\"openai\\"', 'provider=\\"PRIMARY\\"'
     )
     assert staging_panels == prod_panels
-    assert len(staging["panels"]) == 78
-    assert sum(item["type"] == "row" for item in staging["panels"]) == 13
-    assert sum(item["type"] != "row" for item in staging["panels"]) == 65
+    assert len(staging["panels"]) == 85
+    assert sum(item["type"] == "row" for item in staging["panels"]) == 14
+    assert sum(item["type"] != "row" for item in staging["panels"]) == 71
 
 
 @pytest.mark.parametrize("state", metrics.STATES)
@@ -608,11 +608,14 @@ def test_profiles_differ_only_by_allowlisted_identity(dashboards):
             "cluster",
             "app",
             "route",
+            "workload",
         ]
         assert variables[0]["query"] == environment
         assert variables[1]["query"] == cluster
         assert all(item["hide"] == 2 and item["type"] == "constant" for item in variables[:2])
         assert all(item["allValue"] == ".*" for item in variables[2:4])
+        assert variables[4]["query"] == "dspace,tokenplace,danielsmith"
+        assert variables[4]["allValue"] == "dspace|tokenplace|danielsmith"
 
 
 def test_canonical_order_ids_grid_and_defaults(dashboards):
@@ -632,8 +635,9 @@ def test_canonical_order_ids_grid_and_defaults(dashboards):
         "token.place HTTP and release",
         "Daniel GitHub metadata cache",
         "Daniel controlled performance",
+        "Cross-application resource, placement, and release overview",
     ]
-    assert [item["id"] for item in staging["panels"]] == list(range(1, 79))
+    assert [item["id"] for item in staging["panels"]] == list(range(1, 86))
     assert panel(staging, "DSPACE instrumentation health")
     assert panel(staging, "DSPACE build identity")
     assert all(
@@ -643,6 +647,75 @@ def test_canonical_order_ids_grid_and_defaults(dashboards):
     )
     validator.validate_dashboard(STAGING)
     validator.validate_dashboard(PROD)
+
+
+def test_cross_application_overview_handles_rollouts_absence_and_single_node_placement(
+    dashboards,
+):
+    for document in (json.loads(TEMPLATE.read_text()), *dashboards):
+        variables = document["templating"]["list"]
+        workload = next(item for item in variables if item["name"] == "workload")
+        assert workload["query"].split(",") == ["dspace", "tokenplace", "danielsmith"]
+        assert workload["allValue"] == "dspace|tokenplace|danielsmith"
+        assert workload["query"] != variables[2]["query"]
+
+        for title, expected in validator.OVERVIEW_PANEL_CONTRACT.items():
+            item = panel(document, title)
+            assert [target["expr"] for target in item["targets"]] == expected
+            assert item["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
+            assert all('namespace=~"$workload"' in expression for expression in expected)
+            assert not any("vector(0)" in expression for expression in expected)
+
+        replicas = validator.OVERVIEW_PANEL_CONTRACT[
+            "Desired versus ready replicas by workload"
+        ]
+        # Deployment-preserving max handles replica counts and simultaneous rolling deployments
+        # without summing duplicate scrape series into a fleet-wide double count.
+        assert all("max by (namespace, deployment)" in expression for expression in replicas)
+        placement = validator.OVERVIEW_PANEL_CONTRACT[
+            "Distinct nodes serving Ready workloads"
+        ][0]
+        assert "count by (namespace, node)" in placement  # one node remains one distinct node
+        assert 'condition="true"' in placement and 'phase="Running"' in placement
+        assert "unless on (namespace, pod) kube_pod_deletion_timestamp" in placement
+
+        memory = validator.OVERVIEW_PANEL_CONTRACT[
+            "Memory working set versus configured memory limit"
+        ]
+        assert all("kube_pod_container_resource_limits" in expression for expression in memory)
+        assert all("> 0" in expression for expression in memory)
+        throttle = validator.OVERVIEW_PANEL_CONTRACT[
+            "CPU throttling ratio where supported"
+        ][0]
+        assert "container_cpu_cfs_throttled_periods_total" in throttle
+        assert "container_cpu_cfs_periods_total" in throttle
+        build = validator.OVERVIEW_PANEL_CONTRACT[
+            "Application build identity when available"
+        ][0]
+        assert "dspace_build_info" in build and "tokenplace_build_info" in build
+        assert "daniel" not in build  # unsupported identity remains NO DATA
+
+
+@pytest.mark.parametrize(
+    ("title", "old", "new"),
+    [
+        ("Desired versus ready replicas by workload", "max by", "sum by"),
+        ("Distinct nodes serving Ready workloads", 'phase="Running"', 'phase="Pending"'),
+        ("Distinct nodes serving Ready workloads", " unless on ", " and on "),
+        ("Memory working set versus configured memory limit", ") > 0", ") >= 0"),
+        ("CPU throttling ratio where supported", "container_cpu_cfs_periods_total", "vector(0)"),
+        ("Application build identity when available", 'namespace=~"$workload"', 'namespace=~".*"'),
+    ],
+)
+def test_overview_validator_rejects_double_count_serving_absence_and_scope_regressions(
+    dashboards, title, old, new
+):
+    changed = copy.deepcopy(dashboards[0])
+    target = panel(changed, title)["targets"][0]
+    assert old in target["expr"]
+    target["expr"] = target["expr"].replace(old, new, 1)
+    with pytest.raises(SystemExit, match="bounded overview contract"):
+        validator._validate_semantics(changed)
 
 
 def test_daniel_queries_are_target_safe_and_expose_stale_or_missing_health(dashboards):
@@ -673,10 +746,10 @@ def test_daniel_queries_are_target_safe_and_expose_stale_or_missing_health(dashb
     assert " or " not in validator.panel_expression(staging, "Daniel controlled frame time")
 
 
-def test_all_ten_tables_are_simultaneous_single_frames(dashboards):
+def test_all_twelve_tables_are_simultaneous_single_frames(dashboards):
     staging, _ = dashboards
     tables = [item for item in staging["panels"] if item["type"] == "table"]
-    assert len(tables) == 10
+    assert len(tables) == 12
     for table in tables:
         assert len(table["targets"]) == 1
         assert table["targets"][0]["format"] == "table"
