@@ -3164,7 +3164,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max by (state) (danielsmith_visitor_journey_state{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"})",
+          "expr": "max by (state) (danielsmith_visitor_journey_state{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\"})",
           "legendFormat": "{{state}}"
         }
       ]
@@ -3196,7 +3196,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max by (application, environment, name, cluster) (danielsmith_visitor_journey_success{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"}) and on (application, environment, name, cluster) (danielsmith_visitor_journey_monitoring_enabled{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"} == 1) and on (application, environment, name, cluster) (time() - danielsmith_visitor_journey_freshness_timestamp_seconds{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"} <= 1020) and on (application, environment, name, cluster) (danielsmith_visitor_journey_state{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\",state=~\"success|recovered|failure\"} == 1)",
+          "expr": "max by (application, environment, name) (danielsmith_visitor_journey_success{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\"}) and on (application, environment, name) (danielsmith_visitor_journey_monitoring_enabled{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\"} == 1) and on (application, environment, name) (time() - danielsmith_visitor_journey_freshness_timestamp_seconds{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\"} <= 1020) and on (application, environment, name) (danielsmith_visitor_journey_state{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",state=~\"success|recovered|failure\"} == 1)",
           "legendFormat": "success"
         }
       ]
@@ -3228,7 +3228,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "time() - max by (application, environment, name, cluster) (danielsmith_visitor_journey_freshness_timestamp_seconds{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"}) and on (application, environment, name, cluster) (danielsmith_visitor_journey_monitoring_enabled{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"} == 1)",
+          "expr": "time() - max by (application, environment, name) (danielsmith_visitor_journey_freshness_timestamp_seconds{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\"}) and on (application, environment, name) (danielsmith_visitor_journey_monitoring_enabled{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\"} == 1)",
           "legendFormat": "age"
         }
       ]
@@ -3260,7 +3260,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max by (application, environment, name, cluster) (danielsmith_visitor_journey_duration_seconds{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"}) and on (application, environment, name, cluster) (danielsmith_visitor_journey_monitoring_enabled{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"} == 1) and on (application, environment, name, cluster) (time() - danielsmith_visitor_journey_freshness_timestamp_seconds{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"} <= 1020) and on (application, environment, name, cluster) (danielsmith_visitor_journey_state{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\",state=~\"success|recovered|failure\"} == 1)",
+          "expr": "max by (application, environment, name) (danielsmith_visitor_journey_duration_seconds{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\"}) and on (application, environment, name) (danielsmith_visitor_journey_monitoring_enabled{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\"} == 1) and on (application, environment, name) (time() - danielsmith_visitor_journey_freshness_timestamp_seconds{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\"} <= 1020) and on (application, environment, name) (danielsmith_visitor_journey_state{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",state=~\"success|recovered|failure\"} == 1)",
           "legendFormat": "duration"
         }
       ]
@@ -3292,7 +3292,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max by (application, environment, name, cluster, failure_stage) (danielsmith_visitor_journey_failure_stage{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\",failure_stage!=\"none\"}) and on (application, environment, name, cluster) (danielsmith_visitor_journey_state{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\",state=\"failure\"} == 1)",
+          "expr": "max by (application, environment, name, failure_stage) (danielsmith_visitor_journey_failure_stage{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",failure_stage!=\"none\"}) and on (application, environment, name) (danielsmith_visitor_journey_monitoring_enabled{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\"} == 1) and on (application, environment, name) (time() - danielsmith_visitor_journey_freshness_timestamp_seconds{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\"} <= 1020) and on (application, environment, name) (danielsmith_visitor_journey_state{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",state=\"failure\"} == 1)",
           "legendFormat": "{{failure_stage}}"
         }
       ]
@@ -3324,7 +3324,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max by (state) (danielsmith_visitor_journey_state{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\",state=~\"disabled|unavailable|stale\"})",
+          "expr": "max by (state) (danielsmith_visitor_journey_state{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",state=~\"disabled|unavailable|stale\"})",
           "legendFormat": "{{state}}"
         }
       ]

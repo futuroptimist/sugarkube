@@ -532,7 +532,7 @@ def test_daniel_visitor_dashboard_contract_is_scoped_bounded_and_fail_closed(das
             assert item["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
             assert 'application="danielsmith"' in expression
             assert 'environment=~"$environment"' in expression
-            assert 'cluster=~"$cluster"' in expression
+            assert "cluster=" not in expression
             assert 'name=~"danielsmith-visitor-journey-$environment"' in expression
             assert "vector(0)" not in expression
             if title in categorical:
@@ -544,19 +544,45 @@ def test_daniel_visitor_dashboard_contract_is_scoped_bounded_and_fail_closed(das
         )
 
 
-def test_daniel_visitor_success_and_duration_exclude_disabled_stale_and_unavailable():
+def test_daniel_visitor_dashboard_layout_is_stable(dashboards):
+    for document in (json.loads(TEMPLATE.read_text()), *dashboards):
+        for title, (
+            expected_id,
+            expected_type,
+            expected_grid_position,
+        ) in validator.DANIEL_VISITOR_LAYOUT_CONTRACT.items():
+            item = panel(document, title)
+            assert item["id"] == expected_id
+            assert item["type"] == expected_type
+            assert item["gridPos"] == expected_grid_position
+
+
+def test_daniel_visitor_results_exclude_disabled_stale_and_unavailable():
     for title in (
         "Daniel visitor journey success",
         "Daniel visitor journey aggregate duration",
+        "Daniel visitor journey failure stage",
     ):
         expression = validator.DANIEL_VISITOR_PANEL_CONTRACT[title][0]
         assert "monitoring_enabled" in expression and "== 1" in expression
         assert "<= 1020" in expression
-        assert 'state=~"success|recovered|failure"' in expression
+        assert (
+            'state="failure"' in expression
+            if title == "Daniel visitor journey failure stage"
+            else 'state=~"success|recovered|failure"' in expression
+        )
         assert not any(
             state in expression.split('state=~"', 1)[-1].split('"', 1)[0]
             for state in ("disabled", "stale", "unavailable")
         )
+
+
+@pytest.mark.parametrize("title", validator.DANIEL_VISITOR_LAYOUT_CONTRACT)
+def test_daniel_visitor_dashboard_validator_rejects_layout_regressions(tmp_path, dashboards, title):
+    changed = copy.deepcopy(dashboards[0])
+    panel(changed, title)["gridPos"]["y"] += 1
+    with pytest.raises(SystemExit, match="stable visitor layout contract"):
+        validator.validate_dashboard(write_candidate(tmp_path, changed))
 
 
 @pytest.mark.parametrize("title", validator.DANIEL_VISITOR_PANEL_CONTRACT)

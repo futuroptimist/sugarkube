@@ -125,9 +125,9 @@ DANIEL_PANEL_CONTRACT = {
 }
 DANIEL_VISITOR_SELECTOR = (
     'application="danielsmith",environment=~"$environment",'
-    'name=~"danielsmith-visitor-journey-$environment",cluster=~"$cluster"'
+    'name=~"danielsmith-visitor-journey-$environment"'
 )
-DANIEL_VISITOR_IDENTITY = "application, environment, name, cluster"
+DANIEL_VISITOR_IDENTITY = "application, environment, name"
 DANIEL_VISITOR_ENABLED = (
     f"danielsmith_visitor_journey_monitoring_enabled{{{DANIEL_VISITOR_SELECTOR}}} == 1"
 )
@@ -175,6 +175,8 @@ DANIEL_VISITOR_PANEL_CONTRACT = {
         f"max by ({DANIEL_VISITOR_IDENTITY}, failure_stage) "
         f"(danielsmith_visitor_journey_failure_stage"
         f'{{{DANIEL_VISITOR_SELECTOR},failure_stage!="none"}}) '
+        f"and on ({DANIEL_VISITOR_IDENTITY}) ({DANIEL_VISITOR_ENABLED}) "
+        f"and on ({DANIEL_VISITOR_IDENTITY}) {DANIEL_VISITOR_CURRENT} "
         f"and on ({DANIEL_VISITOR_IDENTITY}) "
         f'(danielsmith_visitor_journey_state{{{DANIEL_VISITOR_SELECTOR},state="failure"}} == 1)',
         "short",
@@ -185,6 +187,35 @@ DANIEL_VISITOR_PANEL_CONTRACT = {
         'state=~"disabled|unavailable|stale"})',
         "short",
         "{{state}}",
+    ),
+}
+DANIEL_VISITOR_LAYOUT_CONTRACT = {
+    "Daniel visitor journey": (71, "row", {"h": 1, "w": 24, "x": 0, "y": 214}),
+    "Daniel visitor journey state": (72, "timeseries", {"h": 8, "w": 12, "x": 0, "y": 215}),
+    "Daniel visitor journey success": (
+        73,
+        "timeseries",
+        {"h": 8, "w": 12, "x": 12, "y": 215},
+    ),
+    "Daniel visitor journey freshness": (
+        74,
+        "timeseries",
+        {"h": 8, "w": 12, "x": 0, "y": 223},
+    ),
+    "Daniel visitor journey aggregate duration": (
+        75,
+        "timeseries",
+        {"h": 8, "w": 12, "x": 12, "y": 223},
+    ),
+    "Daniel visitor journey failure stage": (
+        76,
+        "timeseries",
+        {"h": 8, "w": 12, "x": 0, "y": 231},
+    ),
+    "Daniel visitor journey unavailable or stale": (
+        77,
+        "timeseries",
+        {"h": 8, "w": 12, "x": 12, "y": 231},
     ),
 }
 
@@ -326,6 +357,18 @@ def _validate_grid(items: list[dict]) -> None:
 
 def _validate_semantics(dashboard: dict) -> None:
     items = list(panels(dashboard))
+    for title, (
+        expected_id,
+        expected_type,
+        expected_grid_position,
+    ) in DANIEL_VISITOR_LAYOUT_CONTRACT.items():
+        visitor_panel = panel_named(dashboard, title)
+        if (
+            visitor_panel.get("id") != expected_id
+            or visitor_panel.get("type") != expected_type
+            or visitor_panel.get("gridPos") != expected_grid_position
+        ):
+            raise SystemExit(f"ERROR: {title} does not match the stable visitor layout contract.")
     _validate_grid(items)
     data_panels = [panel for panel in items if panel.get("type") not in {"row", "text"}]
     if any(
