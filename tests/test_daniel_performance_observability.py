@@ -2,6 +2,9 @@
 
 import json
 import re
+import runpy
+import subprocess
+import sys
 
 import pytest
 
@@ -158,6 +161,36 @@ def test_malformed_privacy_sensitive_and_unbounded_payloads_fail_closed(mutate):
         metrics.parse_document(json.dumps(value).encode(), "staging")
 
 
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda value: value["environment"].update(browser="netscape"),
+        lambda value: value["environment"].update(browserMajorVersion=True),
+        lambda value: value["environment"].update(viewportWidth=0),
+        lambda value: value["environment"].update(frameMeasurementProfile="experimental"),
+        lambda value: value["conditions"].update(warmupMs=True),
+        lambda value: value["conditions"].update(warmupMs=float("inf")),
+        lambda value: value["conditions"].update(eventsPerAction=3),
+        lambda value: value["conditions"].update(requestedSamples=39),
+        lambda value: value["renderer"].update(state="broken"),
+        lambda value: value["renderer"].update(fallbackReason="none", state="fallback"),
+        lambda value: value.update(applicationReady=[]),
+        lambda value: value["applicationReady"].update(state="broken"),
+        lambda value: value.update(applicationReady={"state": "unavailable", "reason": "private"}),
+        lambda value: value.update(state="unavailable"),
+        lambda value: value["interactionLatency"].update(sampleCount=39),
+        lambda value: value["environment"].update(
+            rendererClass="software", frameMeasurementProfile="controlled_hardware_v1"
+        ),
+    ],
+)
+def test_invalid_contract_values_fail_closed(mutate):
+    value = result()
+    mutate(value)
+    with pytest.raises(metrics.InvalidDocument):
+        metrics.parse_document(json.dumps(value, allow_nan=True).encode(), "staging")
+
+
 def test_oversized_and_missing_payloads_publish_explicit_status(tmp_path):
     oversized = tmp_path / "result.json"
     oversized.write_bytes(b" " * (metrics.MAX_BYTES + 1))
@@ -204,6 +237,64 @@ def test_atomic_textfile_entrypoint_consumes_existing_scheduler_result(tmp_path)
     )
     assert 'daniel_performance_collection_up{environment="staging"} 1' in output.read_text()
     assert output.stat().st_mode & 0o777 == 0o644
+
+
+def test_cli_without_result_publishes_bounded_unavailable_metrics(tmp_path):
+    output = tmp_path / "metrics.prom"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(metrics.Path(metrics.__file__)),
+            "--environment",
+            "staging",
+            "--output",
+            str(output),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0
+    assert completed.stdout == completed.stderr == ""
+    content = output.read_text()
+    assert len(content) < 2_000
+    assert 'status="unavailable"} 1' in content
+    assert "_seconds{" not in content
+
+
+def test_main_module_path_and_omitted_result_are_covered(tmp_path, monkeypatch):
+    output = tmp_path / "module-metrics.prom"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            str(metrics.Path(metrics.__file__)),
+            "--environment",
+            "staging",
+            "--output",
+            str(output),
+        ],
+    )
+    with pytest.raises(SystemExit, match="0"):
+        runpy.run_path(str(metrics.Path(metrics.__file__)), run_name="__main__")
+    assert 'status="unavailable"} 1' in output.read_text()
+
+
+def test_atomic_replacement_failure_preserves_output_and_removes_temporary_file(
+    tmp_path, monkeypatch
+):
+    output = tmp_path / "metrics.prom"
+    output.write_text("prior output\n")
+
+    def fail_replace(_source, _destination):
+        raise OSError("injected replacement failure")
+
+    monkeypatch.setattr(metrics.os, "replace", fail_replace)
+    with pytest.raises(OSError, match="replacement failure"):
+        metrics.write_textfile(output, "new output\n")
+
+    assert output.read_text() == "prior output\n"
+    assert list(tmp_path.glob(".daniel-performance-*")) == []
 
 
 @pytest.mark.parametrize("failure", ["missing", "unreadable", "malformed", "oversized", "private"])

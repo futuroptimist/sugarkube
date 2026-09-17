@@ -668,8 +668,7 @@ def test_daniel_queries_are_target_safe_and_expose_stale_or_missing_health(dashb
     ):
         expression = validator.panel_expression(staging, title)
         assert all(
-            label in expression
-            for label in ("renderer_class", "renderer_state", "fallback_status")
+            label in expression for label in ("renderer_class", "renderer_state", "fallback_status")
         )
     assert " or " not in validator.panel_expression(staging, "Daniel controlled frame time")
 

@@ -107,9 +107,7 @@ def parse_document(payload: bytes, environment: str, *, now: float | None = None
         or document["state"] not in RESULT_STATES
     ):
         raise InvalidDocument("schemaVersion/state")
-    measured_at = _integer(
-        document["measuredAt"], 0, 9_007_199_254_740_991, "measuredAt"
-    )
+    measured_at = _integer(document["measuredAt"], 0, 9_007_199_254_740_991, "measuredAt")
     if now is None:
         now = time.time()
     if measured_at > int(now) + MAX_FUTURE_SKEW_SECONDS:
