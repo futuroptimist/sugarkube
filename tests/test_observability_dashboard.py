@@ -1,6 +1,8 @@
 import copy
 import json
+import os
 import re
+import shutil
 import stat
 import subprocess
 import sys
@@ -139,16 +141,25 @@ def test_generator_check_and_outputs_are_deterministic(dashboards):
     )
     assert result.returncode == 0, result.stderr
     staging, prod = dashboards
-    staging_panels = json.dumps(staging["panels"]).replace(
-        'provider=\\"tokenplace\\"', 'provider=\\"PRIMARY\\"'
+    staging_panels = (
+        json.dumps(staging["panels"])
+        .replace('provider=\\"tokenplace\\"', 'provider=\\"PRIMARY\\"')
+        .replace(
+            '\\"sugarkube-int\\", \\"cluster\\", \\"^$\\"', '\\"CLUSTER\\", \\"cluster\\", \\"^$\\"'
+        )
     )
-    prod_panels = json.dumps(prod["panels"]).replace(
-        'provider=\\"openai\\"', 'provider=\\"PRIMARY\\"'
+    prod_panels = (
+        json.dumps(prod["panels"])
+        .replace('provider=\\"openai\\"', 'provider=\\"PRIMARY\\"')
+        .replace(
+            '\\"sugarkube-prod\\", \\"cluster\\", \\"^$\\"',
+            '\\"CLUSTER\\", \\"cluster\\", \\"^$\\"',
+        )
     )
     assert staging_panels == prod_panels
-    assert len(staging["panels"]) == 78
-    assert sum(item["type"] == "row" for item in staging["panels"]) == 13
-    assert sum(item["type"] != "row" for item in staging["panels"]) == 65
+    assert len(staging["panels"]) == 85
+    assert sum(item["type"] == "row" for item in staging["panels"]) == 14
+    assert sum(item["type"] != "row" for item in staging["panels"]) == 71
 
 
 @pytest.mark.parametrize("state", metrics.STATES)
@@ -516,6 +527,276 @@ def test_daniel_dashboard_contract_covers_metrics_scope_grouping_units_and_missi
         )
 
 
+def test_daniel_visitor_dashboard_contract_is_scoped_bounded_and_fail_closed(dashboards):
+    documents = (json.loads(TEMPLATE.read_text()), *dashboards)
+    categorical = {
+        "Daniel visitor journey state",
+        "Daniel visitor journey success",
+        "Daniel visitor journey failure stage",
+        "Daniel visitor journey unavailable or stale",
+    }
+    for document in documents:
+        cluster = next(
+            variable["current"]["value"]
+            for variable in document["templating"]["list"]
+            if variable["name"] == "cluster"
+        )
+        for title, (expression, unit, legend) in validator.DANIEL_VISITOR_PANEL_CONTRACT.items():
+            expression = expression.replace("${CLUSTER}", cluster)
+            item = panel(document, title)
+            assert item["targets"] == [{"refId": "A", "expr": expression, "legendFormat": legend}]
+            assert item["fieldConfig"]["defaults"]["unit"] == unit
+            assert item["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
+            assert 'application="danielsmith"' in expression
+            assert 'environment=~"$environment"' in expression
+            assert 'cluster=~"$cluster"' in expression
+            assert 'cluster=""' in expression
+            assert f'"cluster", "{cluster}", "cluster", "^$"' in expression
+            assert 'name=~"danielsmith-visitor-journey-$environment"' in expression
+            assert "vector(0)" not in expression
+            if title in categorical:
+                assert unit == "short"
+        assert validator.DANIEL_VISITOR_PANEL_CONTRACT["Daniel visitor journey freshness"][1] == "s"
+        assert (
+            validator.DANIEL_VISITOR_PANEL_CONTRACT["Daniel visitor journey aggregate duration"][1]
+            == "s"
+        )
+
+
+def _promtool_series(metric, value, **labels):
+    label_text = ",".join(f'{name}="{label}"' for name, label in labels.items())
+    return {"series": f"{metric}{{{label_text}}}", "values": f"{value}x31"}
+
+
+def _visitor_fixture(expected=1, enabled=1, freshness=780, state="success", **labels):
+    identity = {
+        "application": "danielsmith",
+        "environment": "staging",
+        "name": "danielsmith-visitor-journey-staging",
+        **labels,
+    }
+    series = [
+        _promtool_series("danielsmith_visitor_journey_monitoring_expected", expected, **identity),
+        _promtool_series("danielsmith_visitor_journey_monitoring_enabled", enabled, **identity),
+    ]
+    if freshness is not None:
+        series.extend(
+            [
+                _promtool_series(
+                    "danielsmith_visitor_journey_freshness_timestamp_seconds",
+                    freshness,
+                    **identity,
+                ),
+                _promtool_series("danielsmith_visitor_journey_state", 1, state=state, **identity),
+                _promtool_series(
+                    "danielsmith_visitor_journey_success",
+                    int(state in ("success", "recovered")),
+                    **identity,
+                ),
+                _promtool_series(
+                    "danielsmith_visitor_journey_failure_stage",
+                    int(state == "failure"),
+                    failure_stage="navigation" if state == "failure" else "none",
+                    **identity,
+                ),
+            ]
+        )
+    return series
+
+
+def test_daniel_visitor_promql_lifecycle_semantics_with_promtool(tmp_path, dashboards):
+    """Evaluate the rendered dashboard PromQL rather than approximating it in Python."""
+    promtool = os.environ.get("PROMTOOL") or shutil.which("promtool")
+    if not promtool:
+        # TODO: Ensure offline PromQL evaluation runs where promtool is available.
+        # Root cause: Neither PROMTOOL nor PATH supplies a promtool executable in this environment.
+        # Estimated fix: Provide promtool through PROMTOOL or PATH and rerun this test.
+        pytest.skip("promtool is required for offline dashboard PromQL evaluation")
+
+    expressions = {
+        title: panel(dashboards[0], title)["targets"][0]["expr"]
+        .replace("$environment", "staging")
+        .replace("$cluster", "sugarkube-int")
+        for title in validator.DANIEL_VISITOR_PANEL_CONTRACT
+    }
+    identity = {
+        "application": "danielsmith",
+        "cluster": "sugarkube-int",
+        "environment": "staging",
+        "name": "danielsmith-visitor-journey-staging",
+    }
+
+    def sample(labels, value):
+        return {
+            "labels": "{" + ",".join(f'{k}="{v}"' for k, v in labels.items()) + "}",
+            "value": value,
+        }
+
+    cases = []
+
+    def add_case(series, checks):
+        cases.append(
+            {
+                "interval": "1m",
+                "input_series": series,
+                "promql_expr_test": [
+                    {
+                        "expr": expressions[title],
+                        "eval_time": "30m",
+                        "exp_samples": expected,
+                    }
+                    for title, expected in checks.items()
+                ],
+            }
+        )
+
+    for state in ("success", "recovered"):
+        add_case(
+            _visitor_fixture(state=state),
+            {
+                "Daniel visitor journey state": [sample({"state": state}, 1)],
+                "Daniel visitor journey success": [sample(identity, 1)],
+                "Daniel visitor journey freshness": [sample(identity, 1020)],
+                "Daniel visitor journey unavailable or stale": [],
+            },
+        )
+    add_case(
+        _visitor_fixture(state="failure"),
+        {
+            "Daniel visitor journey success": [sample(identity, 0)],
+            "Daniel visitor journey failure stage": [
+                sample({**identity, "failure_stage": "navigation"}, 1)
+            ],
+        },
+    )
+    add_case(
+        _visitor_fixture(freshness=779),
+        {
+            "Daniel visitor journey state": [],
+            "Daniel visitor journey success": [],
+            "Daniel visitor journey unavailable or stale": [sample({"state": "stale"}, 1)],
+        },
+    )
+    add_case(
+        _visitor_fixture(freshness=779, state="failure"),
+        {"Daniel visitor journey failure stage": []},
+    )
+    add_case(
+        _visitor_fixture(expected=0, enabled=0, freshness=None),
+        {
+            "Daniel visitor journey success": [],
+            "Daniel visitor journey unavailable or stale": [],
+        },
+    )
+    add_case(
+        _visitor_fixture(freshness=None),
+        {"Daniel visitor journey unavailable or stale": [sample({"state": "stale"}, 1)]},
+    )
+    add_case(
+        _visitor_fixture(cluster="wrong-cluster"),
+        {"Daniel visitor journey success": [], "Daniel visitor journey state": []},
+    )
+    add_case(
+        _visitor_fixture(environment="prod", name="danielsmith-visitor-journey-prod"),
+        {"Daniel visitor journey success": [], "Daniel visitor journey state": []},
+    )
+
+    fixture = tmp_path / "visitor-dashboard-promql.yml"
+    fixture.write_text(json.dumps({"rule_files": [], "tests": cases}), encoding="utf-8")
+    completed = subprocess.run(
+        [promtool, "test", "rules", str(fixture)],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+def test_daniel_visitor_dashboard_layout_is_stable(dashboards):
+    expected_layout = {
+        "Daniel visitor journey": (79, "row", {"h": 1, "w": 24, "x": 0, "y": 247}),
+        "Daniel visitor journey state": (
+            80,
+            "timeseries",
+            {"h": 8, "w": 12, "x": 0, "y": 248},
+        ),
+        "Daniel visitor journey success": (
+            81,
+            "timeseries",
+            {"h": 8, "w": 12, "x": 12, "y": 248},
+        ),
+        "Daniel visitor journey freshness": (
+            82,
+            "timeseries",
+            {"h": 8, "w": 12, "x": 0, "y": 256},
+        ),
+        "Daniel visitor journey aggregate duration": (
+            83,
+            "timeseries",
+            {"h": 8, "w": 12, "x": 12, "y": 256},
+        ),
+        "Daniel visitor journey failure stage": (
+            84,
+            "timeseries",
+            {"h": 8, "w": 12, "x": 0, "y": 264},
+        ),
+        "Daniel visitor journey unavailable or stale": (
+            85,
+            "timeseries",
+            {"h": 8, "w": 12, "x": 12, "y": 264},
+        ),
+    }
+    assert validator.DANIEL_VISITOR_LAYOUT_CONTRACT == expected_layout
+    for document in (json.loads(TEMPLATE.read_text()), *dashboards):
+        for title, (
+            expected_id,
+            expected_type,
+            expected_grid_position,
+        ) in expected_layout.items():
+            item = panel(document, title)
+            assert item["id"] == expected_id
+            assert item["type"] == expected_type
+            assert item["gridPos"] == expected_grid_position
+
+
+def test_daniel_visitor_results_exclude_disabled_stale_and_unavailable():
+    for title in (
+        "Daniel visitor journey success",
+        "Daniel visitor journey aggregate duration",
+        "Daniel visitor journey failure stage",
+    ):
+        expression = validator.DANIEL_VISITOR_PANEL_CONTRACT[title][0]
+        assert "monitoring_enabled" in expression and "== 1" in expression
+        assert "<= 1020" in expression
+        assert (
+            'state="failure"' in expression
+            if title == "Daniel visitor journey failure stage"
+            else 'state=~"success|recovered|failure"' in expression
+        )
+        assert not any(
+            state in expression.split('state=~"', 1)[-1].split('"', 1)[0]
+            for state in ("disabled", "stale", "unavailable")
+        )
+
+
+@pytest.mark.parametrize("title", validator.DANIEL_VISITOR_LAYOUT_CONTRACT)
+def test_daniel_visitor_dashboard_validator_rejects_layout_regressions(tmp_path, dashboards, title):
+    changed = copy.deepcopy(dashboards[0])
+    panel(changed, title)["gridPos"]["y"] += 1
+    with pytest.raises(SystemExit, match="stable visitor layout contract"):
+        validator.validate_dashboard(write_candidate(tmp_path, changed))
+
+
+@pytest.mark.parametrize("title", validator.DANIEL_VISITOR_PANEL_CONTRACT)
+def test_daniel_visitor_dashboard_validator_rejects_contract_regressions(
+    tmp_path, dashboards, title
+):
+    changed = copy.deepcopy(dashboards[0])
+    panel(changed, title)["targets"][0]["expr"] += " or vector(0)"
+    with pytest.raises(SystemExit, match="visitor journey contract"):
+        validator.validate_dashboard(write_candidate(tmp_path, changed))
+
+
 @pytest.mark.parametrize(
     ("title", "mutation"),
     [
@@ -632,8 +913,9 @@ def test_canonical_order_ids_grid_and_defaults(dashboards):
         "token.place HTTP and release",
         "Daniel GitHub metadata cache",
         "Daniel controlled performance",
+        "Daniel visitor journey",
     ]
-    assert [item["id"] for item in staging["panels"]] == list(range(1, 79))
+    assert [item["id"] for item in staging["panels"]] == list(range(1, 86))
     assert panel(staging, "DSPACE instrumentation health")
     assert panel(staging, "DSPACE build identity")
     assert all(

@@ -193,6 +193,131 @@ DANIEL_PANEL_CONTRACT = {
         "{{environment}} {{renderer_class}} {{renderer_state}} {{fallback_status}} {{statistic}}",
     ),  # noqa: E501
 }
+DANIEL_VISITOR_SELECTOR = (
+    'application="danielsmith",environment=~"$environment",'
+    'name=~"danielsmith-visitor-journey-$environment",cluster=~"$cluster"'
+)
+DANIEL_VISITOR_BASE_SELECTOR = (
+    'application="danielsmith",environment=~"$environment",'
+    'name=~"danielsmith-visitor-journey-$environment"'
+)
+DANIEL_VISITOR_IDENTITY = "application, environment, name, cluster"
+
+
+def _visitor_metric(metric, extra_selector=""):
+    selector = DANIEL_VISITOR_BASE_SELECTOR + extra_selector
+    return (
+        f'label_replace(({metric}{{{selector},cluster=~"$cluster"}} or '
+        f'{metric}{{{selector},cluster=""}}), "cluster", "${{CLUSTER}}", "cluster", "^$")'
+    )
+
+
+DANIEL_VISITOR_EXPECTED = _visitor_metric("danielsmith_visitor_journey_monitoring_expected")
+DANIEL_VISITOR_ENABLED = _visitor_metric("danielsmith_visitor_journey_monitoring_enabled")
+DANIEL_VISITOR_FRESHNESS = _visitor_metric(
+    "danielsmith_visitor_journey_freshness_timestamp_seconds"
+)
+DANIEL_VISITOR_CURRENT = f"(time() - {DANIEL_VISITOR_FRESHNESS} <= 1020)"
+DANIEL_VISITOR_ACTIVE_STATE = (
+    _visitor_metric(
+        "danielsmith_visitor_journey_state",
+        ',state=~"success|recovered|failure"',
+    )
+    + " == 1"
+)
+DANIEL_VISITOR_EXPECTED_ENABLED = (
+    f"({DANIEL_VISITOR_EXPECTED} == 1) and on ({DANIEL_VISITOR_IDENTITY}) "
+    f"({DANIEL_VISITOR_ENABLED} == 1)"
+)
+DANIEL_VISITOR_FAILURE_STAGE = _visitor_metric(
+    "danielsmith_visitor_journey_failure_stage", ',failure_stage!="none"'
+)
+DANIEL_VISITOR_UNAVAILABLE_STATE = _visitor_metric(
+    "danielsmith_visitor_journey_state", ',state=~"unavailable|stale"'
+)
+DANIEL_VISITOR_PANEL_CONTRACT = {
+    "Daniel visitor journey state": (
+        f"max by (state) (({_visitor_metric('danielsmith_visitor_journey_state')}) "
+        f"and on ({DANIEL_VISITOR_IDENTITY}) ({DANIEL_VISITOR_EXPECTED_ENABLED}) "
+        f"and on ({DANIEL_VISITOR_IDENTITY}) {DANIEL_VISITOR_CURRENT})",
+        "short",
+        "{{state}}",
+    ),
+    "Daniel visitor journey success": (
+        f"max by ({DANIEL_VISITOR_IDENTITY}) "
+        f"({_visitor_metric('danielsmith_visitor_journey_success')}) "
+        f"and on ({DANIEL_VISITOR_IDENTITY}) ({DANIEL_VISITOR_EXPECTED_ENABLED}) "
+        f"and on ({DANIEL_VISITOR_IDENTITY}) {DANIEL_VISITOR_CURRENT} "
+        f"and on ({DANIEL_VISITOR_IDENTITY}) ({DANIEL_VISITOR_ACTIVE_STATE})",
+        "short",
+        "success",
+    ),
+    "Daniel visitor journey freshness": (
+        f"time() - max by ({DANIEL_VISITOR_IDENTITY}) "
+        f"({DANIEL_VISITOR_FRESHNESS}) "
+        f"and on ({DANIEL_VISITOR_IDENTITY}) ({DANIEL_VISITOR_EXPECTED_ENABLED})",
+        "s",
+        "age",
+    ),
+    "Daniel visitor journey aggregate duration": (
+        f"max by ({DANIEL_VISITOR_IDENTITY}) "
+        f"({_visitor_metric('danielsmith_visitor_journey_duration_seconds')}) "
+        f"and on ({DANIEL_VISITOR_IDENTITY}) ({DANIEL_VISITOR_EXPECTED_ENABLED}) "
+        f"and on ({DANIEL_VISITOR_IDENTITY}) {DANIEL_VISITOR_CURRENT} "
+        f"and on ({DANIEL_VISITOR_IDENTITY}) ({DANIEL_VISITOR_ACTIVE_STATE})",
+        "s",
+        "duration",
+    ),
+    "Daniel visitor journey failure stage": (
+        f"max by ({DANIEL_VISITOR_IDENTITY}, failure_stage) "
+        f"({DANIEL_VISITOR_FAILURE_STAGE}) "
+        f"and on ({DANIEL_VISITOR_IDENTITY}) ({DANIEL_VISITOR_EXPECTED_ENABLED}) "
+        f"and on ({DANIEL_VISITOR_IDENTITY}) {DANIEL_VISITOR_CURRENT} "
+        f"and on ({DANIEL_VISITOR_IDENTITY}) "
+        f"({_visitor_metric('danielsmith_visitor_journey_state', ',state=\"failure\"')} == 1)",
+        "short",
+        "{{failure_stage}}",
+    ),
+    "Daniel visitor journey unavailable or stale": (
+        f"max by (state) (label_replace((({DANIEL_VISITOR_EXPECTED} == 1) "
+        f"unless on ({DANIEL_VISITOR_IDENTITY}) {DANIEL_VISITOR_FRESHNESS}) or "
+        f"(({DANIEL_VISITOR_EXPECTED} == 1) and on ({DANIEL_VISITOR_IDENTITY}) "
+        f'(time() - {DANIEL_VISITOR_FRESHNESS} > 1020)), "state", "stale", "", "") or '
+        f"(({DANIEL_VISITOR_UNAVAILABLE_STATE}) "
+        f"and on ({DANIEL_VISITOR_IDENTITY}) ({DANIEL_VISITOR_EXPECTED} == 1)))",
+        "short",
+        "{{state}}",
+    ),
+}
+DANIEL_VISITOR_LAYOUT_CONTRACT = {
+    "Daniel visitor journey": (79, "row", {"h": 1, "w": 24, "x": 0, "y": 247}),
+    "Daniel visitor journey state": (80, "timeseries", {"h": 8, "w": 12, "x": 0, "y": 248}),
+    "Daniel visitor journey success": (
+        81,
+        "timeseries",
+        {"h": 8, "w": 12, "x": 12, "y": 248},
+    ),
+    "Daniel visitor journey freshness": (
+        82,
+        "timeseries",
+        {"h": 8, "w": 12, "x": 0, "y": 256},
+    ),
+    "Daniel visitor journey aggregate duration": (
+        83,
+        "timeseries",
+        {"h": 8, "w": 12, "x": 12, "y": 256},
+    ),
+    "Daniel visitor journey failure stage": (
+        84,
+        "timeseries",
+        {"h": 8, "w": 12, "x": 0, "y": 264},
+    ),
+    "Daniel visitor journey unavailable or stale": (
+        85,
+        "timeseries",
+        {"h": 8, "w": 12, "x": 12, "y": 264},
+    ),
+}
 
 
 def load_dashboard(path: Path) -> dict:
@@ -294,10 +419,10 @@ def _expected_dashboard(dashboard: dict) -> dict:
 
 
 def _validate_grid(items: list[dict]) -> None:
-    if len(items) != 78 or sum(panel.get("type") == "row" for panel in items) != 13:
-        raise SystemExit("ERROR: canonical dashboard must contain exactly 78 objects and 13 rows.")
+    if len(items) != 85 or sum(panel.get("type") == "row" for panel in items) != 14:
+        raise SystemExit("ERROR: canonical dashboard must contain exactly 85 objects and 14 rows.")
     ids = [panel.get("id") for panel in items]
-    if ids != list(range(1, 79)):
+    if ids != list(range(1, 86)):
         raise SystemExit(
             "ERROR: canonical dashboard panel IDs must be stable consecutive integers."
         )
@@ -332,6 +457,18 @@ def _validate_grid(items: list[dict]) -> None:
 
 def _validate_semantics(dashboard: dict) -> None:
     items = list(panels(dashboard))
+    for title, (
+        expected_id,
+        expected_type,
+        expected_grid_position,
+    ) in DANIEL_VISITOR_LAYOUT_CONTRACT.items():
+        visitor_panel = panel_named(dashboard, title)
+        if (
+            visitor_panel.get("id") != expected_id
+            or visitor_panel.get("type") != expected_type
+            or visitor_panel.get("gridPos") != expected_grid_position
+        ):
+            raise SystemExit(f"ERROR: {title} does not match the stable visitor layout contract.")
     _validate_grid(items)
     data_panels = [panel for panel in items if panel.get("type") not in {"row", "text"}]
     if any(
@@ -426,6 +563,29 @@ def _validate_semantics(dashboard: dict) -> None:
             or "vector(0)" in expected_expression
         ):
             raise SystemExit(f"ERROR: {title} does not match the bounded Daniel contract.")
+    for title, (
+        expected_expression,
+        expected_unit,
+        expected_legend,
+    ) in DANIEL_VISITOR_PANEL_CONTRACT.items():
+        cluster_value = next(
+            variable["current"]["value"]
+            for variable in variables
+            if variable.get("name") == "cluster"
+        )
+        expected_expression = expected_expression.replace("${CLUSTER}", cluster_value)
+        visitor_panel = panel_named(dashboard, title)
+        targets = visitor_panel.get("targets", [])
+        defaults = visitor_panel.get("fieldConfig", {}).get("defaults", {})
+        if (
+            len(targets) != 1
+            or targets[0].get("expr") != expected_expression
+            or targets[0].get("legendFormat") != expected_legend
+            or defaults.get("unit") != expected_unit
+            or defaults.get("noValue") != "NO DATA"
+            or "vector(0)" in expected_expression
+        ):
+            raise SystemExit(f"ERROR: {title} does not match the visitor journey contract.")
     for title, expected in FIVE_XX_RATIO_EXPRESSIONS.items():
         if panel_expression(dashboard, title) != expected:
             raise SystemExit(f"ERROR: {title} must use its request-family-gated 5xx zero contract.")
