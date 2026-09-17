@@ -1433,9 +1433,11 @@ def test_cross_application_overview_rejects_broadened_profile_branch(dashboards,
 
 def _overview_expression(document, title, target=0, workload=".*"):
     expression = panel(document, title)["targets"][target]["expr"]
+    # rate() needs at least two samples in its range; keep the 1m-spaced fixture
+    # deterministic by evaluating the dashboard queries over a wider window.
     return (
         expression.replace("$workload", workload)
-        .replace("$__rate_interval", "1m")
+        .replace("$__rate_interval", "5m")
         .replace("$environment", "staging")
         .replace("$cluster", "sugarkube-int")
     )
