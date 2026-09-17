@@ -157,9 +157,9 @@ def test_generator_check_and_outputs_are_deterministic(dashboards):
         )
     )
     assert staging_panels == prod_panels
-    assert len(staging["panels"]) == 85
-    assert sum(item["type"] == "row" for item in staging["panels"]) == 14
-    assert sum(item["type"] != "row" for item in staging["panels"]) == 71
+    assert len(staging["panels"]) == 92
+    assert sum(item["type"] == "row" for item in staging["panels"]) == 15
+    assert sum(item["type"] != "row" for item in staging["panels"]) == 77
 
 
 @pytest.mark.parametrize("state", metrics.STATES)
@@ -1624,8 +1624,8 @@ def test_cross_application_overview_preserves_missing_limits_throttling_and_buil
     assert limit_expression.count("container_memory_working_set_bytes") >= 2
     assert "> 0" in limit_expression
     cpu_expression = panel(staging, "CPU throttling")["targets"][0]["expr"]
-    assert cpu_expression.count("and on (namespace, pod, container)") >= 2
-    assert cpu_expression.count("count by (namespace)") >= 6
+    assert cpu_expression.count("and on (namespace, pod, container)") == 6
+    assert cpu_expression.count("count by (namespace)") == 2
     assert "container_memory_working_set_bytes" in cpu_expression
 
 
@@ -1700,13 +1700,19 @@ def test_cross_application_overview_rejects_partially_unscoped_multi_metric_targ
         validator._validate_semantics(changed)
 
 
-def test_cross_application_overview_rejects_cpu_without_observed_population_guard(dashboards):
+def test_cross_application_overview_rejects_cpu_without_identity_matched_guard(dashboards):
     staging, _ = dashboards
     changed = copy.deepcopy(staging)
     target = panel(changed, "CPU throttling")["targets"][0]
-    guard = " == count by (namespace) (max by (namespace, pod, container) (container_memory_working_set_bytes"
-    assert guard in target["expr"]
-    target["expr"] = target["expr"].replace(guard, guard.replace(" == ", " or "), 1)
+    expression = target["expr"]
+    guard_start = expression.rindex("count by (namespace) (((")
+    guard_end = expression.index(" == count by (namespace)", guard_start)
+    matched_guard = expression[guard_start:guard_end]
+    numerator_end = matched_guard.index(") and on (namespace, pod, container)")
+    # Restore the former count-only guard: its population size can be satisfied by
+    # stale CFS identities that are not members of the current observed population.
+    count_only_guard = matched_guard[:numerator_end] + ")"
+    target["expr"] = expression.replace(matched_guard, count_only_guard, 1)
     with pytest.raises(SystemExit, match="complete observed"):
         validator._validate_semantics(changed)
 
@@ -1820,6 +1826,11 @@ def test_actual_overview_promql_preserves_identity_coverage_and_serving_state(da
             ("supported", True, True, 0, 60),
             ("unsupported", False, False, 0, 0),
         ),
+        "cpu-rollout": (
+            ("supported", True, True, 0, 60),
+            ("unsupported", False, False, 0, 0),
+        ),
+        "cpu-stale-control": (("current", True, True, 6, 60),),
     }
     for namespace, containers in cpu_cases.items():
         for container, has_num, has_den, numerator_step, denominator_step in containers:
@@ -1858,6 +1869,22 @@ def test_actual_overview_promql_preserves_identity_coverage_and_serving_state(da
                             f"0+{denominator_step}x10",
                         )
                     )
+    # Old rollout CFS samples remain rate-eligible after their working-set identity
+    # disappears. They must neither fill a current coverage gap nor dilute a fully
+    # covered current container's nonzero ratio.
+    for namespace in ("cpu-rollout", "cpu-stale-control"):
+        labels = {
+            "namespace": namespace,
+            "pod": "old-pod",
+            "container": "old",
+            "image": "runtime",
+        }
+        inputs += [
+            series("container_memory_working_set_bytes", labels, "10x4 stale _x5"),
+            series("container_cpu_cfs_throttled_periods_total", labels, "0+0x4 stale _x5"),
+            series("container_cpu_cfs_periods_total", labels, "0+60x4 stale _x5"),
+        ]
+
     # Configured coordinates retain simultaneous old/new image_spec values, not status image.
     for pod_name, spec, status in (
         ("web-old", "repo/app:v1", "repo/app@sha256:old"),
@@ -1952,6 +1979,8 @@ def test_actual_overview_promql_preserves_identity_coverage_and_serving_state(da
             ('{namespace="cpu-no-den"}', 10),
             ('{namespace="cpu-no-num"}', 10),
             ('{namespace="cpu-nonzero"}', 10),
+            ('{namespace="cpu-rollout"}', 20),
+            ('{namespace="cpu-stale-control"}', 10),
             ('{namespace="cpu-zero-den"}', 10),
             ('{namespace="full"}', 30),
             ('{namespace="mixed"}', 25),
@@ -1968,7 +1997,11 @@ def test_actual_overview_promql_preserves_identity_coverage_and_serving_state(da
     query(
         "cpu coverage",
         _overview_expression(staging, "CPU throttling"),
-        [('{namespace="cpu-full"}', 0), ('{namespace="cpu-nonzero"}', 0.1)],
+        [
+            ('{namespace="cpu-full"}', 0),
+            ('{namespace="cpu-nonzero"}', 0.1),
+            ('{namespace="cpu-stale-control"}', 0.1),
+        ],
     )
     query(
         "image specs",

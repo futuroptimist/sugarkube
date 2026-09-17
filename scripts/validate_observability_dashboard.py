@@ -486,10 +486,10 @@ def _expected_dashboard(dashboard: dict) -> dict:
 
 
 def _validate_grid(items: list[dict]) -> None:
-    if len(items) != 85 or sum(panel.get("type") == "row" for panel in items) != 14:
-        raise SystemExit("ERROR: canonical dashboard must contain exactly 85 objects and 14 rows.")
+    if len(items) != 92 or sum(panel.get("type") == "row" for panel in items) != 15:
+        raise SystemExit("ERROR: canonical dashboard must contain exactly 92 objects and 15 rows.")
     ids = [panel.get("id") for panel in items]
-    if ids != list(range(1, 86)):
+    if ids != list(range(1, 93)):
         raise SystemExit(
             "ERROR: canonical dashboard panel IDs must be stable consecutive integers."
         )
@@ -690,8 +690,13 @@ def _validate_semantics(dashboard: dict) -> None:
                 "== count by (namespace)",
             )
         )
-        or cpu.count("container_memory_working_set_bytes") < 1
-        or cpu.count("== count by (namespace)") < 3
+        or cpu.count("container_memory_working_set_bytes") < 4
+        or cpu.count(
+            "and on (namespace, pod, container) max by (namespace, pod, container) "
+            "(container_memory_working_set_bytes"
+        )
+        < 3
+        or cpu.count("== count by (namespace)") != 1
     ):
         raise SystemExit(
             "ERROR: CPU throttling requires complete observed, matched, positive container coverage."
