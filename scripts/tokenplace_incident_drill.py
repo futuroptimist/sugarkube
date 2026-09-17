@@ -157,6 +157,11 @@ def execution_parser() -> argparse.ArgumentParser:
 
 
 def validate(args: argparse.Namespace) -> Coordinates:
+    if args.mode not in MODES:
+        raise DrillError("drill mode is unsupported")
+    lifecycle = getattr(args, "lifecycle", "real-incident")
+    if lifecycle not in LIFECYCLES:
+        raise DrillError("drill lifecycle is unsupported")
     if args.environment != "staging" or args.context != "sugar-staging":
         raise DrillError("an explicit staging environment and sugar-staging context are required")
     if not args.kubeconfig.is_file():
@@ -168,20 +173,27 @@ def validate(args: argparse.Namespace) -> Coordinates:
     for field in ("current_image", "replacement_image", "rollback_image"):
         if not IMAGE.fullmatch(getattr(args, field)):
             raise DrillError(f"{field.replace('_', ' ')} must use an immutable sha256 digest")
-    lifecycle = getattr(args, "lifecycle", "real-incident")
     incident_image = getattr(args, "incident_image", None)
     if lifecycle == "staging-rehearsal":
-        if args.mode != "metrics-oom":
-            raise DrillError("staging rehearsal is supported only for metrics-OOM")
-        if not IMAGE.fullmatch(incident_image or ""):
-            raise DrillError(
-                "incident image must use a separately supplied immutable sha256 digest"
-            )
         if not getattr(args, "acknowledge_staging_fault_injection", False):
             raise DrillError("explicit staging fault-injection authorization is required")
-        images = (args.current_image, incident_image, args.replacement_image, args.rollback_image)
-        if len({IMAGE_DIGEST.search(image).group(1) for image in images}) != 4:
-            raise DrillError("baseline, incident, recovery, and fallback images must be distinct")
+        if args.mode == "metrics-oom":
+            if not IMAGE.fullmatch(incident_image or ""):
+                raise DrillError(
+                    "incident image must use a separately supplied immutable sha256 digest"
+                )
+            images = (
+                args.current_image,
+                incident_image,
+                args.replacement_image,
+                args.rollback_image,
+            )
+            if len({IMAGE_DIGEST.search(image).group(1) for image in images}) != 4:
+                raise DrillError(
+                    "baseline, incident, recovery, and fallback images must be distinct"
+                )
+        elif incident_image is not None:
+            raise DrillError("incident image is only valid for metrics-OOM staging rehearsal")
     elif incident_image is not None or getattr(args, "acknowledge_staging_fault_injection", False):
         raise DrillError("rehearsal stimulus controls require staging-rehearsal lifecycle")
     if args.current_image == args.replacement_image:
@@ -800,7 +812,7 @@ def build_plan(preflight: Preflight) -> dict:
         )
         previous = stage
 
-    if c.lifecycle == "staging-rehearsal":
+    if c.lifecycle == "staging-rehearsal" and mode == "metrics-oom":
         baseline_inverse = prefix + [
             "set",
             "image",
@@ -922,7 +934,13 @@ def build_plan(preflight: Preflight) -> dict:
         prefix
         + ["set", "image", f"deployment/{c.deployment}", f"{c.container}={c.replacement_image}"],
         replace_inverse,
-        {"image": c.incident_image if c.lifecycle == "staging-rehearsal" else c.current_image},
+        {
+            "image": (
+                c.incident_image
+                if c.lifecycle == "staging-rehearsal" and mode == "metrics-oom"
+                else c.current_image
+            )
+        },
         {
             "kind": "reviewed-recovery-fallback",
             "not_an_inverse": True,
@@ -1249,6 +1267,101 @@ def _load_execution_plan(path: Path) -> dict:
 
 def _validate_staging_execution_contract(plan: dict) -> None:
     """Reject executable rehearsal plans whose safety contract was altered."""
+    if plan.get("mode") == "quota-exhaustion":
+        expected = plan.get("expected_deployment")
+        if not isinstance(expected, dict):
+            raise DrillError("quota staging rehearsal image coordinates are malformed")
+        if expected.get("incident_image") is not None:
+            raise DrillError(
+                "quota staging rehearsal must not specify an incident image"
+            )
+        coordinate_keys = {
+            "namespace",
+            "name",
+            "replicas",
+            "container",
+            "current_image",
+            "incident_image",
+            "replacement_image",
+            "rollback_image",
+            "memory_limit",
+        }
+        images = [
+            expected.get(key)
+            for key in ("current_image", "replacement_image", "rollback_image")
+        ]
+        if (
+            set(expected) != coordinate_keys
+            or not all(
+                isinstance(expected.get(key), str) and expected[key]
+                for key in coordinate_keys - {"replicas", "incident_image"}
+            )
+            or not SAFE_NAME.fullmatch(expected["namespace"])
+            or not SAFE_NAME.fullmatch(expected["name"])
+            or not SAFE_NAME.fullmatch(expected["container"])
+            or isinstance(expected.get("replicas"), bool)
+            or not isinstance(expected.get("replicas"), int)
+            or expected["replicas"] <= 0
+            or not re.fullmatch(r"[1-9][0-9]*(Mi|Gi)", expected["memory_limit"])
+            or any(not IMAGE.fullmatch(value) for value in images)
+            or expected["current_image"] == expected["replacement_image"]
+        ):
+            raise DrillError(
+                "quota staging rehearsal deployment coordinates are malformed"
+            )
+
+        reviewed_inventory = inventory("staging")
+        expected_inventory = {
+            "namespace": reviewed_inventory.namespace,
+            "service_monitor": reviewed_inventory.service_monitor,
+            "probes": reviewed_inventory.probe_map(),
+        }
+        if (
+            plan.get("inventory") != expected_inventory
+            or expected["namespace"] != reviewed_inventory.namespace
+        ):
+            raise DrillError(
+                "quota staging rehearsal inventory is not the reviewed contract"
+            )
+
+        coordinates = Coordinates(
+            host=STAGING_HOST,
+            kubeconfig=Path("<supplied-kubeconfig>"),
+            context="sugar-staging",
+            environment="staging",
+            namespace=expected["namespace"],
+            deployment=expected["name"],
+            container=expected["container"],
+            current_image=expected["current_image"],
+            replacement_image=expected["replacement_image"],
+            rollback_image=expected["rollback_image"],
+            replicas=expected["replicas"],
+            memory_limit=expected["memory_limit"],
+            service_monitor=reviewed_inventory.service_monitor,
+            run_id=plan["run_id"],
+            lifecycle="staging-rehearsal",
+        )
+        release = "kube-prometheus-stack"
+        probes = reviewed_inventory.probe_map()
+        reviewed_plan = build_plan(
+            Preflight(
+                coordinates=coordinates,
+                inventory=reviewed_inventory,
+                mode="quota-exhaustion",
+                source="live-authoritative",
+                classification=(),
+                metrics_mode_state="absent",
+                discovery_labels=(
+                    (probes["root"]["probe"], release),
+                    (probes["metadata"]["probe"], release),
+                ),
+            )
+        )
+        if plan["actions"] != reviewed_plan["actions"]:
+            raise DrillError(
+                "quota staging rehearsal actions are not the reviewed contract"
+            )
+        return
     if plan.get("mode") != "metrics-oom":
         raise DrillError("staging rehearsal trigger mode is not the reviewed contract")
     actions = plan["actions"]
@@ -1300,8 +1413,10 @@ def _validate_staging_execution_contract(plan: dict) -> None:
         for index, item in enumerate(actions)
     ):
         raise DrillError("staging rehearsal dependency chain is malformed")
-    inventory = plan.get("inventory")
-    namespace = inventory.get("namespace") if isinstance(inventory, dict) else None
+    plan_inventory = plan.get("inventory")
+    namespace = (
+        plan_inventory.get("namespace") if isinstance(plan_inventory, dict) else None
+    )
     resource = f'deployment/{expected["name"]}'
     prefix = [
         "kubectl",

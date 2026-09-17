@@ -179,9 +179,29 @@ current artifact exposes `TOKENPLACE_METRICS_MODE=normal|degraded`, containment 
 degraded value; otherwise it uses only the exact ServiceMonitor pause fallback. Replacement and
 rollback remain bound to their separately reviewed immutable digests.
 
-Repeat with `--mode quota-exhaustion`, a new run ID, and a new evidence filename. The generated
-plan includes a deterministic digest. A future Step 14b operator can create its unique marker and
-then execute or validate exactly one ordered stage per invocation (the live drill has **not** run):
+For a quota rehearsal, repeat the command with `--mode quota-exhaustion`, a new run ID, and a new
+evidence filename, but omit `--incident-image`. Quota validation requires only the immutable
+baseline, recovery-candidate, and emergency-fallback image roles already named by
+`--current-image`, `--replacement-image`, and `--rollback-image`; do not invent a fourth image or
+select an arbitrary registry release. Keep both acknowledgements: the staging fault-injection
+acknowledgement authorizes the staging-only Probe containment, while the state-loss
+acknowledgement authorizes the recovery replacement. This runner does not generate quota traffic.
+The reviewed snapshot or live preflight must supply route-specific classification (`429` for root
+and metadata, `200` for `/livez` and `/healthz`) plus successful quota-validator evidence.
+
+The quota plan pauses only the root and metadata Probe discovery labels, leaving `/livez` and
+`/healthz` continuously discovered. After replacement and the readiness, compute, and encrypted
+E2EE gates, it runs the quota validator, restores root and observes it for 15 minutes, then restores
+metadata and observes it for 15 minutes. A failed quota-validation gate holds that narrow
+containment without another mutation. On interruption or threshold failure, apply completed
+inverses in reverse order to restore the exact Probe labels and original image; the separately
+reviewed fallback remains a capability-revalidated emergency action, never an automatic inverse.
+Capture the route classification, validator result, exact Probe label mutations and inverses,
+recovery gates, both observation windows, final health, and cleanup result in private evidence.
+
+Every generated plan includes a deterministic digest. A future Step 14b operator can create its
+unique marker and then execute or validate exactly one ordered stage per invocation (the live
+drill has **not** run):
 
 ```bash
 python3 scripts/tokenplace_incident_drill.py --execute-stage marker \
@@ -192,7 +212,7 @@ python3 scripts/tokenplace_incident_drill.py --execute-stage "$NEXT_STAGE" \
   --kubeconfig "$STAGING_KUBECONFIG" --gate-evidence "$PRIVATE_GATE_EVIDENCE"
 ```
 
-For the rehearsal, the exact order begins with `marker`, `inject-incident-image`,
+For the metrics-OOM rehearsal, the exact order begins with `marker`, `inject-incident-image`,
 `generate-bounded-cardinality`, and `observe-authentic-oom`, followed by the existing containment,
 recovery replacement, readiness,
 compute registration and polling, relay-blind encrypted E2EE, route preservation, metrics-exit,

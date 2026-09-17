@@ -166,11 +166,12 @@ def _portable_cli_args(parsed, evidence, *, live):
     else:
         command.extend(["--snapshot", str(parsed.snapshot)])
     if parsed.lifecycle == "staging-rehearsal":
+        command.append("--acknowledge-staging-fault-injection")
+    if parsed.lifecycle == "staging-rehearsal" and parsed.mode == "metrics-oom":
         command.extend(
             [
                 "--incident-image",
                 parsed.incident_image,
-                "--acknowledge-staging-fault-injection",
             ]
         )
     return command
@@ -303,6 +304,7 @@ print('429' if url.endswith('/') or url.endswith('/api/v1/meta') else '200', end
     [
         ("metrics-oom", True, "staging-rehearsal"),
         ("metrics-oom", False, "staging-rehearsal"),
+        ("quota-exhaustion", True, "staging-rehearsal"),
         ("quota-exhaustion", True, "real-incident"),
     ],
 )
@@ -316,13 +318,13 @@ def test_package_free_complete_workflows(
         lifecycle=lifecycle,
         incident_image=(
             "registry.example/relay@sha256:" + "d" * 64
-            if lifecycle == "staging-rehearsal"
+            if lifecycle == "staging-rehearsal" and mode == "metrics-oom"
             else None
         ),
         acknowledge_staging_fault_injection=lifecycle == "staging-rehearsal",
     )
     snapshot_fixture = snapshot(drill.validate(parsed), mode=mode, degraded=degraded)
-    if lifecycle == "staging-rehearsal":
+    if lifecycle == "staging-rehearsal" and mode == "metrics-oom":
         snapshot_fixture["classification"] = {}
     parsed.snapshot.write_text(json.dumps(snapshot_fixture), encoding="utf-8")
     evidence = tmp_path / "private-evidence" / ("live.json" if live else "snapshot-plan.json")
@@ -1161,8 +1163,40 @@ def test_staging_rehearsal_authorization_and_coordinates_fail_closed(tmp_path, c
         drill.validate(args(tmp_path, **values))
 
 
-def test_staging_rehearsal_rejects_non_oom_mode(tmp_path):
-    with pytest.raises(drill.DrillError, match="supported only for metrics-OOM"):
+def test_quota_staging_rehearsal_uses_quota_contract_without_incident_image(tmp_path):
+    parsed = args(
+        tmp_path,
+        mode="quota-exhaustion",
+        lifecycle="staging-rehearsal",
+        acknowledge_staging_fault_injection=True,
+    )
+    coordinates = drill.validate(parsed)
+    plan = drill.build_plan(
+        drill.preflight_snapshot(
+            "quota-exhaustion", coordinates, snapshot(coordinates, mode=parsed.mode)
+        )
+    )
+
+    identifiers = [action["id"] for action in plan["actions"]]
+    assert not {
+        "inject-incident-image",
+        "generate-bounded-cardinality",
+        "observe-authentic-oom",
+    }.intersection(identifiers)
+    assert {
+        "pause-root",
+        "pause-metadata",
+        "quota-validator",
+        "restore-root",
+        "observe-root",
+        "restore-metadata",
+        "observe-metadata",
+    }.issubset(identifiers)
+    assert plan["expected_deployment"]["incident_image"] is None
+
+
+def test_quota_staging_rehearsal_rejects_oom_only_incident_image(tmp_path):
+    with pytest.raises(drill.DrillError, match="only valid for metrics-OOM"):
         drill.validate(
             args(
                 tmp_path,
@@ -1172,6 +1206,27 @@ def test_staging_rehearsal_rejects_non_oom_mode(tmp_path):
                 acknowledge_staging_fault_injection=True,
             )
         )
+
+
+@pytest.mark.parametrize(
+    "changes,message",
+    [
+        ({"acknowledge_staging_fault_injection": False}, "fault-injection"),
+        ({"acknowledge_state_loss": False}, "state loss"),
+        ({"mode": "not-a-mode"}, "mode"),
+        ({"lifecycle": "not-a-lifecycle"}, "lifecycle"),
+    ],
+)
+def test_quota_staging_rehearsal_controls_fail_closed(tmp_path, changes, message):
+    values = {
+        "mode": "quota-exhaustion",
+        "lifecycle": "staging-rehearsal",
+        "acknowledge_staging_fault_injection": True,
+    }
+    values.update(changes)
+
+    with pytest.raises(drill.DrillError, match=message):
+        drill.validate(args(tmp_path, **values))
 
 
 def test_staging_rehearsal_rejects_preexisting_oom_evidence(tmp_path):
@@ -2045,10 +2100,166 @@ def test_live_authoritative_rehearsal_plan_is_executable(tmp_path):
     assert drill._load_execution_plan(path) == plan
 
 
+def test_live_authoritative_quota_rehearsal_plan_is_executable(tmp_path):
+    plan = executable_quota_rehearsal_plan(tmp_path)
+    path = tmp_path / "live-quota-plan.json"
+    path.write_text(json.dumps(plan))
+
+    assert drill._load_execution_plan(path) == plan
+
+
+def test_quota_rehearsal_allows_reviewed_fallback_to_match_baseline(tmp_path):
+    current_image = "registry.example/relay@sha256:" + "a" * 64
+    plan = executable_quota_rehearsal_plan(
+        tmp_path, current_image=current_image, rollback_image=current_image
+    )
+    path = tmp_path / "shared-baseline-fallback-plan.json"
+    path.write_text(json.dumps(plan), encoding="utf-8")
+
+    assert drill._load_execution_plan(path) == plan
+
+
+def executable_quota_rehearsal_plan(tmp_path, **changes):
+    parsed = args(
+        tmp_path,
+        mode="quota-exhaustion",
+        lifecycle="staging-rehearsal",
+        acknowledge_staging_fault_injection=True,
+        **changes,
+    )
+    coordinates = drill.validate(parsed)
+    checked = drill._validate_snapshot(
+        "quota-exhaustion",
+        coordinates,
+        drill.inventory("staging"),
+        snapshot(coordinates, mode="quota-exhaustion"),
+        "live-authoritative",
+    )
+    return drill.build_plan(checked)
+
+
 @pytest.mark.parametrize(
     "tamper,message",
     [
-        (lambda plan: plan.update(mode="quota-exhaustion"), "trigger mode"),
+        (
+            lambda plan: plan["expected_deployment"].update(
+                rollback_image="relay:latest"
+            ),
+            "coordinates",
+        ),
+        (
+            lambda plan: plan["expected_deployment"].update(
+                incident_image="unexpected"
+            ),
+            "must not specify an incident image",
+        ),
+        (
+            lambda plan: plan["expected_deployment"].update(namespace="other"),
+            "inventory",
+        ),
+        (lambda plan: plan["inventory"].update(namespace="other"), "inventory"),
+        (
+            lambda plan: next(
+                action for action in plan["actions"] if action["id"] == "pause-root"
+            ).update(resource="probe/unreviewed"),
+            "actions",
+        ),
+        (
+            lambda plan: next(
+                action for action in plan["actions"] if action["id"] == "pause-metadata"
+            ).update(resource="probe/unreviewed"),
+            "actions",
+        ),
+        (
+            lambda plan: next(
+                action for action in plan["actions"] if action["id"] == "replace"
+            )["command"].__setitem__(
+                -1, "relay=registry.example/relay@sha256:" + "e" * 64
+            ),
+            "actions",
+        ),
+        (
+            lambda plan: next(
+                action for action in plan["actions"] if action["id"] == "replace"
+            )["inverse"].__setitem__(
+                -1, "relay=registry.example/relay@sha256:" + "e" * 64
+            ),
+            "actions",
+        ),
+        (
+            lambda plan: next(
+                action for action in plan["actions"] if action["id"] == "replace"
+            )["rollback"].__setitem__(
+                -1, "relay=registry.example/relay@sha256:" + "e" * 64
+            ),
+            "actions",
+        ),
+        (
+            lambda plan: next(
+                action for action in plan["actions"] if action["id"] == "replace"
+            )["recovery_fallback"]["command"].__setitem__(
+                -1, "relay=registry.example/relay@sha256:" + "e" * 64
+            ),
+            "actions",
+        ),
+        (
+            lambda plan: next(
+                action for action in plan["actions"] if action["id"] == "replace"
+            ).update(depends_on=["pause-root"]),
+            "actions",
+        ),
+        (
+            lambda plan: next(
+                action for action in plan["actions"] if action["id"] == "quota-validator"
+            ).update(checks=[]),
+            "actions",
+        ),
+        (
+            lambda plan: plan["actions"].pop(
+                next(
+                    index
+                    for index, action in enumerate(plan["actions"])
+                    if action["id"] == "observe-root"
+                )
+            ),
+            "actions",
+        ),
+        (
+            lambda plan: plan["actions"].__setitem__(
+                slice(8, 12),
+                [plan["actions"][10], plan["actions"][11], plan["actions"][8], plan["actions"][9]],
+            ),
+            "actions",
+        ),
+        (
+            lambda plan: next(
+                action for action in plan["actions"] if action["id"] == "observe-root"
+            )["duration"].update(value=5),
+            "actions",
+        ),
+        (
+            lambda plan: next(
+                action for action in plan["actions"] if action["id"] == "observe-metadata"
+            )["duration"].update(value=5),
+            "actions",
+        ),
+    ],
+)
+def test_quota_rehearsal_loader_rejects_tampered_contract(tmp_path, tamper, message):
+    plan = executable_quota_rehearsal_plan(tmp_path)
+    tamper(plan)
+    plan["plan_digest"] = drill._plan_digest(plan)
+    path = tmp_path / "tampered-quota-plan.json"
+    path.write_text(json.dumps(plan), encoding="utf-8")
+
+    with pytest.raises(drill.DrillError, match=message):
+        drill._load_execution_plan(path)
+
+
+@pytest.mark.parametrize(
+    "tamper,message",
+    [
+        (lambda plan: plan.update(mode="quota-exhaustion"), "incident image"),
         (lambda plan: plan["actions"].pop(1), "ordered trigger stages"),
         (
             lambda plan: plan["actions"][1]["target"].update(host="token.place"),
