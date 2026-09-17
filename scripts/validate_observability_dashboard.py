@@ -125,30 +125,58 @@ DANIEL_PANEL_CONTRACT = {
 }
 DANIEL_VISITOR_SELECTOR = (
     'application="danielsmith",environment=~"$environment",'
+    'name=~"danielsmith-visitor-journey-$environment",cluster=~"$cluster"'
+)
+DANIEL_VISITOR_BASE_SELECTOR = (
+    'application="danielsmith",environment=~"$environment",'
     'name=~"danielsmith-visitor-journey-$environment"'
 )
-DANIEL_VISITOR_IDENTITY = "application, environment, name"
-DANIEL_VISITOR_ENABLED = (
-    f"danielsmith_visitor_journey_monitoring_enabled{{{DANIEL_VISITOR_SELECTOR}}} == 1"
+DANIEL_VISITOR_IDENTITY = "application, environment, name, cluster"
+
+
+def _visitor_metric(metric, extra_selector=""):
+    selector = DANIEL_VISITOR_BASE_SELECTOR + extra_selector
+    return (
+        f'label_replace(({metric}{{{selector},cluster=~"$cluster"}} or '
+        f'{metric}{{{selector},cluster=""}}), "cluster", "${{CLUSTER}}", "cluster", "^$")'
+    )
+
+
+DANIEL_VISITOR_EXPECTED = _visitor_metric("danielsmith_visitor_journey_monitoring_expected")
+DANIEL_VISITOR_ENABLED = _visitor_metric("danielsmith_visitor_journey_monitoring_enabled")
+DANIEL_VISITOR_FRESHNESS = _visitor_metric(
+    "danielsmith_visitor_journey_freshness_timestamp_seconds"
 )
-DANIEL_VISITOR_CURRENT = (
-    f"(time() - danielsmith_visitor_journey_freshness_timestamp_seconds"
-    f"{{{DANIEL_VISITOR_SELECTOR}}} <= 1020)"
-)
+DANIEL_VISITOR_CURRENT = f"(time() - {DANIEL_VISITOR_FRESHNESS} <= 1020)"
 DANIEL_VISITOR_ACTIVE_STATE = (
-    f"danielsmith_visitor_journey_state{{{DANIEL_VISITOR_SELECTOR},"
-    'state=~"success|recovered|failure"} == 1'
+    _visitor_metric(
+        "danielsmith_visitor_journey_state",
+        ',state=~"success|recovered|failure"',
+    )
+    + " == 1"
+)
+DANIEL_VISITOR_EXPECTED_ENABLED = (
+    f"({DANIEL_VISITOR_EXPECTED} == 1) and on ({DANIEL_VISITOR_IDENTITY}) "
+    f"({DANIEL_VISITOR_ENABLED} == 1)"
+)
+DANIEL_VISITOR_FAILURE_STAGE = _visitor_metric(
+    "danielsmith_visitor_journey_failure_stage", ',failure_stage!="none"'
+)
+DANIEL_VISITOR_UNAVAILABLE_STATE = _visitor_metric(
+    "danielsmith_visitor_journey_state", ',state=~"unavailable|stale"'
 )
 DANIEL_VISITOR_PANEL_CONTRACT = {
     "Daniel visitor journey state": (
-        f"max by (state) (danielsmith_visitor_journey_state{{{DANIEL_VISITOR_SELECTOR}}})",
+        f"max by (state) (({_visitor_metric('danielsmith_visitor_journey_state')}) "
+        f"and on ({DANIEL_VISITOR_IDENTITY}) ({DANIEL_VISITOR_EXPECTED_ENABLED}) "
+        f"and on ({DANIEL_VISITOR_IDENTITY}) {DANIEL_VISITOR_CURRENT})",
         "short",
         "{{state}}",
     ),
     "Daniel visitor journey success": (
         f"max by ({DANIEL_VISITOR_IDENTITY}) "
-        f"(danielsmith_visitor_journey_success{{{DANIEL_VISITOR_SELECTOR}}}) "
-        f"and on ({DANIEL_VISITOR_IDENTITY}) ({DANIEL_VISITOR_ENABLED}) "
+        f"({_visitor_metric('danielsmith_visitor_journey_success')}) "
+        f"and on ({DANIEL_VISITOR_IDENTITY}) ({DANIEL_VISITOR_EXPECTED_ENABLED}) "
         f"and on ({DANIEL_VISITOR_IDENTITY}) {DANIEL_VISITOR_CURRENT} "
         f"and on ({DANIEL_VISITOR_IDENTITY}) ({DANIEL_VISITOR_ACTIVE_STATE})",
         "short",
@@ -156,16 +184,15 @@ DANIEL_VISITOR_PANEL_CONTRACT = {
     ),
     "Daniel visitor journey freshness": (
         f"time() - max by ({DANIEL_VISITOR_IDENTITY}) "
-        f"(danielsmith_visitor_journey_freshness_timestamp_seconds"
-        f"{{{DANIEL_VISITOR_SELECTOR}}}) "
-        f"and on ({DANIEL_VISITOR_IDENTITY}) ({DANIEL_VISITOR_ENABLED})",
+        f"({DANIEL_VISITOR_FRESHNESS}) "
+        f"and on ({DANIEL_VISITOR_IDENTITY}) ({DANIEL_VISITOR_EXPECTED_ENABLED})",
         "s",
         "age",
     ),
     "Daniel visitor journey aggregate duration": (
         f"max by ({DANIEL_VISITOR_IDENTITY}) "
-        f"(danielsmith_visitor_journey_duration_seconds{{{DANIEL_VISITOR_SELECTOR}}}) "
-        f"and on ({DANIEL_VISITOR_IDENTITY}) ({DANIEL_VISITOR_ENABLED}) "
+        f"({_visitor_metric('danielsmith_visitor_journey_duration_seconds')}) "
+        f"and on ({DANIEL_VISITOR_IDENTITY}) ({DANIEL_VISITOR_EXPECTED_ENABLED}) "
         f"and on ({DANIEL_VISITOR_IDENTITY}) {DANIEL_VISITOR_CURRENT} "
         f"and on ({DANIEL_VISITOR_IDENTITY}) ({DANIEL_VISITOR_ACTIVE_STATE})",
         "s",
@@ -173,18 +200,21 @@ DANIEL_VISITOR_PANEL_CONTRACT = {
     ),
     "Daniel visitor journey failure stage": (
         f"max by ({DANIEL_VISITOR_IDENTITY}, failure_stage) "
-        f"(danielsmith_visitor_journey_failure_stage"
-        f'{{{DANIEL_VISITOR_SELECTOR},failure_stage!="none"}}) '
-        f"and on ({DANIEL_VISITOR_IDENTITY}) ({DANIEL_VISITOR_ENABLED}) "
+        f"({DANIEL_VISITOR_FAILURE_STAGE}) "
+        f"and on ({DANIEL_VISITOR_IDENTITY}) ({DANIEL_VISITOR_EXPECTED_ENABLED}) "
         f"and on ({DANIEL_VISITOR_IDENTITY}) {DANIEL_VISITOR_CURRENT} "
         f"and on ({DANIEL_VISITOR_IDENTITY}) "
-        f'(danielsmith_visitor_journey_state{{{DANIEL_VISITOR_SELECTOR},state="failure"}} == 1)',
+        f"({_visitor_metric('danielsmith_visitor_journey_state', ',state=\"failure\"')} == 1)",
         "short",
         "{{failure_stage}}",
     ),
     "Daniel visitor journey unavailable or stale": (
-        f"max by (state) (danielsmith_visitor_journey_state{{{DANIEL_VISITOR_SELECTOR},"
-        'state=~"disabled|unavailable|stale"})',
+        f"max by (state) (label_replace((({DANIEL_VISITOR_EXPECTED} == 1) "
+        f"unless on ({DANIEL_VISITOR_IDENTITY}) {DANIEL_VISITOR_FRESHNESS}) or "
+        f"(({DANIEL_VISITOR_EXPECTED} == 1) and on ({DANIEL_VISITOR_IDENTITY}) "
+        f'(time() - {DANIEL_VISITOR_FRESHNESS} > 1020)), "state", "stale", "", "") or '
+        f"(({DANIEL_VISITOR_UNAVAILABLE_STATE}) "
+        f"and on ({DANIEL_VISITOR_IDENTITY}) ({DANIEL_VISITOR_EXPECTED} == 1)))",
         "short",
         "{{state}}",
     ),
@@ -468,6 +498,12 @@ def _validate_semantics(dashboard: dict) -> None:
         expected_unit,
         expected_legend,
     ) in DANIEL_VISITOR_PANEL_CONTRACT.items():
+        cluster_value = next(
+            variable["current"]["value"]
+            for variable in variables
+            if variable.get("name") == "cluster"
+        )
+        expected_expression = expected_expression.replace("${CLUSTER}", cluster_value)
         visitor_panel = panel_named(dashboard, title)
         targets = visitor_panel.get("targets", [])
         defaults = visitor_panel.get("fieldConfig", {}).get("defaults", {})

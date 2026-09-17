@@ -1,6 +1,8 @@
 import copy
 import json
+import os
 import re
+import shutil
 import stat
 import subprocess
 import sys
@@ -139,11 +141,20 @@ def test_generator_check_and_outputs_are_deterministic(dashboards):
     )
     assert result.returncode == 0, result.stderr
     staging, prod = dashboards
-    staging_panels = json.dumps(staging["panels"]).replace(
-        'provider=\\"tokenplace\\"', 'provider=\\"PRIMARY\\"'
+    staging_panels = (
+        json.dumps(staging["panels"])
+        .replace('provider=\\"tokenplace\\"', 'provider=\\"PRIMARY\\"')
+        .replace(
+            '\\"sugarkube-int\\", \\"cluster\\", \\"^$\\"', '\\"CLUSTER\\", \\"cluster\\", \\"^$\\"'
+        )
     )
-    prod_panels = json.dumps(prod["panels"]).replace(
-        'provider=\\"openai\\"', 'provider=\\"PRIMARY\\"'
+    prod_panels = (
+        json.dumps(prod["panels"])
+        .replace('provider=\\"openai\\"', 'provider=\\"PRIMARY\\"')
+        .replace(
+            '\\"sugarkube-prod\\", \\"cluster\\", \\"^$\\"',
+            '\\"CLUSTER\\", \\"cluster\\", \\"^$\\"',
+        )
     )
     assert staging_panels == prod_panels
     assert len(staging["panels"]) == 77
@@ -525,14 +536,22 @@ def test_daniel_visitor_dashboard_contract_is_scoped_bounded_and_fail_closed(das
         "Daniel visitor journey unavailable or stale",
     }
     for document in documents:
+        cluster = next(
+            variable["current"]["value"]
+            for variable in document["templating"]["list"]
+            if variable["name"] == "cluster"
+        )
         for title, (expression, unit, legend) in validator.DANIEL_VISITOR_PANEL_CONTRACT.items():
+            expression = expression.replace("${CLUSTER}", cluster)
             item = panel(document, title)
             assert item["targets"] == [{"refId": "A", "expr": expression, "legendFormat": legend}]
             assert item["fieldConfig"]["defaults"]["unit"] == unit
             assert item["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
             assert 'application="danielsmith"' in expression
             assert 'environment=~"$environment"' in expression
-            assert "cluster=" not in expression
+            assert 'cluster=~"$cluster"' in expression
+            assert 'cluster=""' in expression
+            assert f'"cluster", "{cluster}", "cluster", "^$"' in expression
             assert 'name=~"danielsmith-visitor-journey-$environment"' in expression
             assert "vector(0)" not in expression
             if title in categorical:
@@ -542,6 +561,152 @@ def test_daniel_visitor_dashboard_contract_is_scoped_bounded_and_fail_closed(das
             validator.DANIEL_VISITOR_PANEL_CONTRACT["Daniel visitor journey aggregate duration"][1]
             == "s"
         )
+
+
+def _promtool_series(metric, value, **labels):
+    label_text = ",".join(f'{name}="{label}"' for name, label in labels.items())
+    return {"series": f"{metric}{{{label_text}}}", "values": f"{value}x31"}
+
+
+def _visitor_fixture(expected=1, enabled=1, freshness=780, state="success", **labels):
+    identity = {
+        "application": "danielsmith",
+        "environment": "staging",
+        "name": "danielsmith-visitor-journey-staging",
+        **labels,
+    }
+    series = [
+        _promtool_series("danielsmith_visitor_journey_monitoring_expected", expected, **identity),
+        _promtool_series("danielsmith_visitor_journey_monitoring_enabled", enabled, **identity),
+    ]
+    if freshness is not None:
+        series.extend(
+            [
+                _promtool_series(
+                    "danielsmith_visitor_journey_freshness_timestamp_seconds",
+                    freshness,
+                    **identity,
+                ),
+                _promtool_series("danielsmith_visitor_journey_state", 1, state=state, **identity),
+                _promtool_series(
+                    "danielsmith_visitor_journey_success",
+                    int(state in ("success", "recovered")),
+                    **identity,
+                ),
+                _promtool_series(
+                    "danielsmith_visitor_journey_failure_stage",
+                    int(state == "failure"),
+                    failure_stage="navigation" if state == "failure" else "none",
+                    **identity,
+                ),
+            ]
+        )
+    return series
+
+
+def test_daniel_visitor_promql_lifecycle_semantics_with_promtool(tmp_path, dashboards):
+    """Evaluate the rendered dashboard PromQL rather than approximating it in Python."""
+    promtool = os.environ.get("PROMTOOL") or shutil.which("promtool")
+    if not promtool:
+        pytest.skip("promtool is required for offline dashboard PromQL evaluation")
+
+    expressions = {
+        title: panel(dashboards[0], title)["targets"][0]["expr"]
+        .replace("$environment", "staging")
+        .replace("$cluster", "sugarkube-int")
+        for title in validator.DANIEL_VISITOR_PANEL_CONTRACT
+    }
+    identity = {
+        "application": "danielsmith",
+        "cluster": "sugarkube-int",
+        "environment": "staging",
+        "name": "danielsmith-visitor-journey-staging",
+    }
+
+    def sample(labels, value):
+        return {
+            "labels": "{" + ",".join(f'{k}="{v}"' for k, v in labels.items()) + "}",
+            "value": value,
+        }
+
+    cases = []
+
+    def add_case(series, checks):
+        cases.append(
+            {
+                "interval": "1m",
+                "input_series": series,
+                "promql_expr_test": [
+                    {
+                        "expr": expressions[title],
+                        "eval_time": "30m",
+                        "exp_samples": expected,
+                    }
+                    for title, expected in checks.items()
+                ],
+            }
+        )
+
+    for state in ("success", "recovered"):
+        add_case(
+            _visitor_fixture(state=state),
+            {
+                "Daniel visitor journey state": [sample({"state": state}, 1)],
+                "Daniel visitor journey success": [sample(identity, 1)],
+                "Daniel visitor journey freshness": [sample(identity, 1020)],
+                "Daniel visitor journey unavailable or stale": [],
+            },
+        )
+    add_case(
+        _visitor_fixture(state="failure"),
+        {
+            "Daniel visitor journey success": [sample(identity, 0)],
+            "Daniel visitor journey failure stage": [
+                sample({**identity, "failure_stage": "navigation"}, 1)
+            ],
+        },
+    )
+    add_case(
+        _visitor_fixture(freshness=779),
+        {
+            "Daniel visitor journey state": [],
+            "Daniel visitor journey success": [],
+            "Daniel visitor journey unavailable or stale": [sample({"state": "stale"}, 1)],
+        },
+    )
+    add_case(
+        _visitor_fixture(freshness=779, state="failure"),
+        {"Daniel visitor journey failure stage": []},
+    )
+    add_case(
+        _visitor_fixture(expected=0, enabled=0, freshness=None),
+        {
+            "Daniel visitor journey success": [],
+            "Daniel visitor journey unavailable or stale": [],
+        },
+    )
+    add_case(
+        _visitor_fixture(freshness=None),
+        {"Daniel visitor journey unavailable or stale": [sample({"state": "stale"}, 1)]},
+    )
+    add_case(
+        _visitor_fixture(cluster="wrong-cluster"),
+        {"Daniel visitor journey success": [], "Daniel visitor journey state": []},
+    )
+    add_case(
+        _visitor_fixture(environment="prod", name="danielsmith-visitor-journey-prod"),
+        {"Daniel visitor journey success": [], "Daniel visitor journey state": []},
+    )
+
+    fixture = tmp_path / "visitor-dashboard-promql.yml"
+    fixture.write_text(json.dumps({"rule_files": [], "tests": cases}), encoding="utf-8")
+    completed = subprocess.run(
+        [promtool, "test", "rules", str(fixture)],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
 
 
 def test_daniel_visitor_dashboard_layout_is_stable(dashboards):
