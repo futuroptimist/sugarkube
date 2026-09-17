@@ -608,6 +608,9 @@ def test_daniel_visitor_promql_lifecycle_semantics_with_promtool(tmp_path, dashb
     """Evaluate the rendered dashboard PromQL rather than approximating it in Python."""
     promtool = os.environ.get("PROMTOOL") or shutil.which("promtool")
     if not promtool:
+        # TODO: Ensure offline PromQL evaluation runs where promtool is available.
+        # Root cause: Neither PROMTOOL nor PATH supplies a promtool executable in this environment.
+        # Estimated fix: Provide promtool through PROMTOOL or PATH and rerun this test.
         pytest.skip("promtool is required for offline dashboard PromQL evaluation")
 
     expressions = {
