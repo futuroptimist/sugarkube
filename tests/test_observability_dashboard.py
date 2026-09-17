@@ -146,9 +146,9 @@ def test_generator_check_and_outputs_are_deterministic(dashboards):
         'provider=\\"openai\\"', 'provider=\\"PRIMARY\\"'
     )
     assert staging_panels == prod_panels
-    assert len(staging["panels"]) == 78
-    assert sum(item["type"] == "row" for item in staging["panels"]) == 13
-    assert sum(item["type"] != "row" for item in staging["panels"]) == 65
+    assert len(staging["panels"]) == 85
+    assert sum(item["type"] == "row" for item in staging["panels"]) == 14
+    assert sum(item["type"] != "row" for item in staging["panels"]) == 71
 
 
 @pytest.mark.parametrize("state", metrics.STATES)
@@ -606,13 +606,16 @@ def test_profiles_differ_only_by_allowlisted_identity(dashboards):
         assert [item["name"] for item in variables] == [
             "environment",
             "cluster",
+            "workload",
             "app",
             "route",
         ]
         assert variables[0]["query"] == environment
         assert variables[1]["query"] == cluster
         assert all(item["hide"] == 2 and item["type"] == "constant" for item in variables[:2])
-        assert all(item["allValue"] == ".*" for item in variables[2:4])
+        assert variables[2]["query"] == "dspace,tokenplace,danielsmith"
+        assert variables[2]["includeAll"] is False and variables[2]["multi"] is False
+        assert all(item["allValue"] == ".*" for item in variables[3:5])
 
 
 def test_canonical_order_ids_grid_and_defaults(dashboards):
@@ -632,8 +635,9 @@ def test_canonical_order_ids_grid_and_defaults(dashboards):
         "token.place HTTP and release",
         "Daniel GitHub metadata cache",
         "Daniel controlled performance",
+        "Cross-application resource, placement, and release overview",
     ]
-    assert [item["id"] for item in staging["panels"]] == list(range(1, 79))
+    assert [item["id"] for item in staging["panels"]] == list(range(1, 86))
     assert panel(staging, "DSPACE instrumentation health")
     assert panel(staging, "DSPACE build identity")
     assert all(
@@ -673,10 +677,10 @@ def test_daniel_queries_are_target_safe_and_expose_stale_or_missing_health(dashb
     assert " or " not in validator.panel_expression(staging, "Daniel controlled frame time")
 
 
-def test_all_ten_tables_are_simultaneous_single_frames(dashboards):
+def test_all_twelve_tables_are_simultaneous_single_frames(dashboards):
     staging, _ = dashboards
     tables = [item for item in staging["panels"] if item["type"] == "table"]
-    assert len(tables) == 10
+    assert len(tables) == 12
     for table in tables:
         assert len(table["targets"]) == 1
         assert table["targets"][0]["format"] == "table"
@@ -738,6 +742,80 @@ def test_missing_application_capabilities_produce_no_series_not_healthy_zero(das
         for item in prod["panels"]
         if item["type"] not in {"row", "text"}
     )
+
+
+def test_resource_overview_handles_replica_rollout_placement_and_absence(dashboards):
+    staging, _ = dashboards
+    replicas = panel(staging, "Desired versus ready replicas by workload")
+    assert len(replicas["targets"]) == 2
+    assert all("max by (namespace, deployment)" in target["expr"] for target in replicas["targets"])
+    assert "spec_replicas" in replicas["targets"][0]["expr"]
+    assert "status_replicas_ready" in replicas["targets"][1]["expr"]
+    assert replicas["targets"][0]["legendFormat"].endswith(" desired")
+    assert replicas["targets"][1]["legendFormat"].endswith(" ready")
+
+    placement = validator.panel_expression(staging, "Distinct nodes hosting serving workloads")
+    assert "count by (namespace) (count by (namespace, node)" in placement
+    assert 'condition="true"' in placement and 'phase="Running"' in placement
+    assert "unless on (namespace, pod) kube_pod_deletion_timestamp" in placement
+
+    memory = panel(staging, "Memory working set versus configured limit")
+    throttling = panel(staging, "CPU throttling ratio (when supported)")
+    build = panel(staging, "Application build identity (when available)")
+    assert len(memory["targets"]) == 2
+    assert 'resource="memory",unit="byte"' in memory["targets"][1]["expr"]
+    assert "container_cpu_cfs_throttled_periods_total" in throttling["targets"][0]["expr"]
+    assert "container_cpu_cfs_periods_total" in throttling["targets"][0]["expr"]
+    assert "danielsmith" in build["description"] and "NO DATA" in build["description"]
+    for item in (memory, throttling, build):
+        assert item["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
+        assert all("vector(0)" not in target["expr"] for target in item["targets"])
+
+
+def test_resource_overview_is_profile_and_application_scoped(dashboards):
+    for document, environment in ((dashboards[0], "staging"), (dashboards[1], "prod")):
+        workload = document["templating"]["list"][2]
+        assert [option["value"] for option in workload["options"]] == [
+            "dspace",
+            "tokenplace",
+            "danielsmith",
+        ]
+        for title in validator.RESOURCE_OVERVIEW_CONTRACT:
+            assert all(
+                'namespace=~"$workload"' in target["expr"]
+                for target in panel(document, title)["targets"]
+            )
+        build = validator.panel_expression(document, "Application build identity (when available)")
+        assert 'environment=~"$environment"' in build
+        assert 'cluster=~"$cluster"' in build
+        assert document["templating"]["list"][0]["query"] == environment
+
+
+@pytest.mark.parametrize(
+    ("title", "old", "new"),
+    [
+        ("Desired versus ready replicas by workload", "max by (namespace, deployment)", "sum"),
+        ("Distinct nodes hosting serving workloads", 'condition="true"', 'condition="false"'),
+        ("Distinct nodes hosting serving workloads", 'phase="Running"', 'phase="Pending"'),
+        ("Distinct nodes hosting serving workloads", "kube_pod_deletion_timestamp", "up"),
+        (
+            "Distinct nodes hosting serving workloads",
+            "count by (namespace, node)",
+            "count by (namespace, pod)",
+        ),
+        ("Memory working set versus configured limit", 'namespace=~"$workload"', 'namespace=~".*"'),
+        ("CPU throttling ratio (when supported)", "container_cpu_cfs_periods_total", "up"),
+        ("Application build identity (when available)", "tokenplace_build_info", "up"),
+    ],
+)
+def test_resource_overview_rejects_rollout_absence_and_scope_regressions(
+    dashboards, title, old, new
+):
+    changed = copy.deepcopy(dashboards[0])
+    target = next(target for target in panel(changed, title)["targets"] if old in target["expr"])
+    target["expr"] = target["expr"].replace(old, new, 1)
+    with pytest.raises(SystemExit):
+        validator._validate_semantics(changed)
 
 
 def test_5xx_ratios_use_request_family_gated_zero_contract(dashboards):
@@ -1129,7 +1207,7 @@ def test_semantic_contract_rejects_invalid_dashboard_mutations(dashboards, mutat
     elif mutation == "constant-variable":
         changed["templating"]["list"][0]["hide"] = 0
     elif mutation == "query-variable":
-        changed["templating"]["list"][2]["includeAll"] = False
+        changed["templating"]["list"][3]["includeAll"] = False
     elif mutation == "build-info":
         changed["panels"][1]["targets"][0]["expr"] = "kube_state_metrics_build_info"
     elif mutation == "external-cluster":

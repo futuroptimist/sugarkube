@@ -194,6 +194,40 @@ DANIEL_PANEL_CONTRACT = {
     ),  # noqa: E501
 }
 
+RESOURCE_OVERVIEW_CONTRACT = {
+    "Desired versus ready replicas by workload": {
+        "metrics": {"kube_deployment_spec_replicas", "kube_deployment_status_replicas_ready"},
+        "targets": 2,
+    },
+    "Distinct nodes hosting serving workloads": {
+        "metrics": {
+            "kube_pod_status_ready",
+            "kube_pod_status_phase",
+            "kube_pod_deletion_timestamp",
+        },
+        "targets": 1,
+    },
+    "Memory working set versus configured limit": {
+        "metrics": {"container_memory_working_set_bytes", "kube_pod_container_resource_limits"},
+        "targets": 2,
+    },
+    "CPU throttling ratio (when supported)": {
+        "metrics": {
+            "container_cpu_cfs_throttled_periods_total",
+            "container_cpu_cfs_periods_total",
+        },
+        "targets": 1,
+    },
+    "Deployment image coordinates (not runtime proof)": {
+        "metrics": {"kube_pod_container_info"},
+        "targets": 1,
+    },
+    "Application build identity (when available)": {
+        "metrics": {"dspace_build_info", "tokenplace_build_info", "kube_namespace_created"},
+        "targets": 1,
+    },
+}
+
 
 def load_dashboard(path: Path) -> dict:
     try:
@@ -294,10 +328,10 @@ def _expected_dashboard(dashboard: dict) -> dict:
 
 
 def _validate_grid(items: list[dict]) -> None:
-    if len(items) != 78 or sum(panel.get("type") == "row" for panel in items) != 13:
-        raise SystemExit("ERROR: canonical dashboard must contain exactly 78 objects and 13 rows.")
+    if len(items) != 85 or sum(panel.get("type") == "row" for panel in items) != 14:
+        raise SystemExit("ERROR: canonical dashboard must contain exactly 85 objects and 14 rows.")
     ids = [panel.get("id") for panel in items]
-    if ids != list(range(1, 79)):
+    if ids != list(range(1, 86)):
         raise SystemExit(
             "ERROR: canonical dashboard panel IDs must be stable consecutive integers."
         )
@@ -340,8 +374,8 @@ def _validate_semantics(dashboard: dict) -> None:
     ):
         raise SystemExit("ERROR: every data panel must explicitly preserve NO DATA.")
     tables = [panel for panel in items if panel.get("type") == "table"]
-    if len(tables) != 10:
-        raise SystemExit("ERROR: canonical dashboard must contain exactly ten tables.")
+    if len(tables) != 12:
+        raise SystemExit("ERROR: canonical dashboard must contain exactly twelve tables.")
     for table in tables:
         targets = table.get("targets", [])
         transforms = table.get("transformations", [])
@@ -366,6 +400,7 @@ def _validate_semantics(dashboard: dict) -> None:
     if [variable.get("name") for variable in variables] != [
         "environment",
         "cluster",
+        "workload",
         "app",
         "route",
     ]:
@@ -379,9 +414,19 @@ def _validate_semantics(dashboard: dict) -> None:
             raise SystemExit(
                 "ERROR: environment and cluster must be hidden single-value constants."
             )
+    workload = variables[2]
+    if (
+        workload.get("type") != "custom"
+        or workload.get("query") != "dspace,tokenplace,danielsmith"
+        or workload.get("multi") is not False
+        or workload.get("includeAll") is not False
+        or [option.get("value") for option in workload.get("options", [])]
+        != ["dspace", "tokenplace", "danielsmith"]
+    ):
+        raise SystemExit("ERROR: workload must select exactly the three supported applications.")
     if any(
         variable.get("allValue") != ".*" or variable.get("includeAll") is not True
-        for variable in variables[2:4]
+        for variable in variables[3:5]
     ):
         raise SystemExit("ERROR: app and route variables must expose All = .*.")
     expressions = [
@@ -391,6 +436,49 @@ def _validate_semantics(dashboard: dict) -> None:
         if isinstance(target.get("expr"), str)
     ]
     expression_text = "\n".join(expressions)
+    overview_expressions = []
+    for title, contract in RESOURCE_OVERVIEW_CONTRACT.items():
+        overview_panel = panel_named(dashboard, title)
+        targets = overview_panel.get("targets", [])
+        panel_text = "\n".join(target.get("expr", "") for target in targets)
+        if len(targets) != contract["targets"] or not contract["metrics"] <= {
+            metric for metric in contract["metrics"] if metric in panel_text
+        }:
+            raise SystemExit(f"ERROR: {title} does not contain its required metric contract.")
+        if any('namespace=~"$workload"' not in target.get("expr", "") for target in targets):
+            raise SystemExit(f"ERROR: {title} must use the dedicated workload namespace selector.")
+        if any("vector(0)" in target.get("expr", "") for target in targets):
+            raise SystemExit(f"ERROR: {title} must preserve unavailable data as NO DATA.")
+        overview_expressions.extend(target.get("expr", "") for target in targets)
+    placement = panel_expression(dashboard, "Distinct nodes hosting serving workloads")
+    image_coordinates = panel_expression(
+        dashboard, "Deployment image coordinates (not runtime proof)"
+    )
+    replica_targets = panel_named(dashboard, "Desired versus ready replicas by workload").get(
+        "targets", []
+    )
+    if any(
+        "max by (namespace, deployment)" not in target.get("expr", "") for target in replica_targets
+    ):
+        raise SystemExit(
+            "ERROR: replica state must preserve each deployment during rolling updates."
+        )
+    for expression in (placement, image_coordinates):
+        if (
+            'condition="true"' not in expression
+            or 'phase="Running"' not in expression
+            or "kube_pod_deletion_timestamp" not in expression
+            or " unless on (namespace, pod) " not in expression
+        ):
+            raise SystemExit(
+                "ERROR: serving workloads must be Ready, Running, and non-terminating."
+            )
+    if "count by (namespace) (count by (namespace, node)" not in placement:
+        raise SystemExit(
+            "ERROR: placement must count distinct nodes without replica double counting."
+        )
+    if any(re.search(r'namespace(?:=|=~)"(?!\$workload)', expr) for expr in overview_expressions):
+        raise SystemExit("ERROR: overview Kubernetes queries may only use the workload namespace.")
     if "kube_state_metrics_build_info" in expression_text:
         raise SystemExit("ERROR: unavailable kube-state-metrics build identity is forbidden.")
     if re.search(

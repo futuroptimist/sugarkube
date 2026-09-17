@@ -373,6 +373,28 @@ is not rollout evidence.
 
 ## Runtime expectations
 
+### Cross-application resource, placement, and release overview
+
+The **Cross-application resource, placement, and release overview** uses its own
+single-value **Workload application** selector, limited to `dspace`, `tokenplace`, and
+`danielsmith`. It does not reuse the probe-oriented application selector. Kubernetes
+queries select the chosen namespace and show desired and ready deployment replicas,
+distinct nodes with Ready and Running non-terminating pods, aggregate container memory
+working set beside configured memory limits, and CPU CFS throttling when the runtime
+exports both required counters. Multiple replicas on one node count that node once.
+Scheduled-only, non-Ready, and terminating pods are not considered serving.
+
+Missing limits and unsupported throttling metrics remain **NO DATA**, rather than a
+synthetic healthy zero. The deployment image table labels image tags as **deployment
+coordinates**: a tag is configuration context, not proof of the bytes executing in a
+container. Application-emitted build version and revision are the stronger runtime/build
+identity where available; a missing compatible identity (including Daniel's current
+contract) also remains **NO DATA**. For detailed proof and diagnosis, continue to use the
+existing **DSPACE release integrity** row and
+[DSPACE release-integrity runbook](observability-dspace-release-integrity.md), or the
+existing token.place rows and [token.place incident runbooks](tokenplace-incident-runbooks.md).
+The overview intentionally does not duplicate those specialized checks.
+
 ### token.place Phase 1 dashboard slice
 
 The two token.place rows use one environment-neutral layout. Their metric families have been
