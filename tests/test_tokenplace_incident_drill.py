@@ -3563,7 +3563,7 @@ contexts:
 current-context: sugar-staging
 users:
 - name: test
-  user: {}
+  user: {"token": "dummy-client-only-token"}
 """,
         encoding="utf-8",
     )
@@ -3573,7 +3573,14 @@ users:
         "json",
     ]
 
-    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        check=False,
+        stdin=subprocess.DEVNULL,
+        timeout=10,
+    )
 
     assert result.returncode == 0, result.stderr
     rendered = json.loads(result.stdout)
