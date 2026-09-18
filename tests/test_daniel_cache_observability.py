@@ -250,6 +250,42 @@ def test_descriptor_failure_replaces_previously_healthy_textfile(tmp_path):
     assert "daniel_github_cache_collection_timestamp_seconds" in published
 
 
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda descriptor: descriptor["producers"].__setitem__(0, None),
+        lambda descriptor: descriptor.update(sourceRevision="0" * 40),
+    ],
+)
+def test_invalid_descriptor_shape_replaces_previously_healthy_textfile(tmp_path, mutation):
+    descriptor = json.loads(DESCRIPTOR.read_text())
+    mutation(descriptor)
+    descriptor_path = tmp_path / "descriptor.json"
+    descriptor_path.write_text(json.dumps(descriptor))
+    output = tmp_path / "cache.prom"
+    output.write_text("daniel_github_cache_collection_up 1\n")
+
+    with pytest.raises(SystemExit):
+        metrics.main(
+            [
+                "--descriptor",
+                str(descriptor_path),
+                "--environment",
+                "staging",
+                "--output",
+                str(output),
+            ]
+        )
+
+    published = output.read_text()
+    collection = next(
+        line
+        for line in published.splitlines()
+        if line.startswith('daniel_github_cache_collection_up{environment="staging"')
+    )
+    assert collection.endswith(" 0")
+
+
 def test_descriptor_schema_version_rejects_boolean():
     descriptor = json.loads(DESCRIPTOR.read_text())
     descriptor["schemaVersion"] = True

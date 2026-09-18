@@ -3,6 +3,7 @@ import json
 import os
 import pty
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -143,6 +144,112 @@ def cache_rules_for(environment: str):
         or rule["labels"]["environment"] == environment
     ]
     return rules
+
+
+def test_daniel_cache_alerts_match_global_application_signals_after_transport_identity(
+    tmp_path,
+):
+    """Evaluate the identity/global join contract with Prometheus itself."""
+    promtool = shutil.which("promtool")
+    if promtool is None:
+        pytest.skip("promtool is unavailable")
+
+    rules = cache_rules_for("staging")
+    expected = next(
+        rule for rule in rules["groups"][0]["rules"] if rule.get("record")
+    )
+    expected["expr"] = "vector(1)"
+    rules_path = tmp_path / "rules.yaml"
+    rules_path.write_text(json.dumps(rules), encoding="utf-8")
+    identity = 'environment="staging",name="danielsmith-github-cache-staging"'
+    alert_labels = {
+        "application": "danielsmith",
+        "environment": "staging",
+        "name": "danielsmith-github-cache-staging",
+        "severity": "warning",
+    }
+
+    def current_inputs(application_series):
+        return [
+            {
+                "series": f"daniel_github_cache_collection_up{{{identity}}}",
+                "values": "1x41",
+            },
+            {
+                "series": f"daniel_github_cache_monitoring_enabled{{{identity}}}",
+                "values": "1x41",
+            },
+            {
+                "series": f"daniel_github_cache_collection_timestamp_seconds{{{identity}}}",
+                "values": "2000x41",
+            },
+            application_series,
+        ]
+
+    cases = []
+    for alert, series in (
+        ("DanielGithubCacheStale", 'daniel_github_cache_state{state="stale"}'),
+        (
+            "DanielGithubCacheUnavailable",
+            'daniel_github_cache_state{state="unavailable"}',
+        ),
+        (
+            "DanielGithubCacheRefreshFailure",
+            'daniel_github_cache_refresh_failure{category="timeout"}',
+        ),
+    ):
+        cases.append(
+            {
+                "interval": "1m",
+                "input_series": current_inputs({"series": series, "values": "1x41"}),
+                "alert_rule_test": [
+                    {
+                        "eval_time": "21m",
+                        "alertname": alert,
+                        "exp_alerts": [{"exp_labels": alert_labels}],
+                    }
+                ],
+            }
+        )
+    # A global stale signal must not bypass absent/stale transport gating.
+    cases.append(
+        {
+            "interval": "1m",
+            "input_series": [
+                {"series": 'daniel_github_cache_state{state="stale"}', "values": "1x41"}
+            ],
+            "alert_rule_test": [
+                {
+                    "eval_time": "21m",
+                    "alertname": "DanielGithubCacheExpectedButMissing",
+                    "exp_alerts": [{"exp_labels": alert_labels}],
+                },
+                {
+                    "eval_time": "21m",
+                    "alertname": "DanielGithubCacheStale",
+                    "exp_alerts": [],
+                },
+            ],
+        }
+    )
+    fixture = tmp_path / "rules-test.yaml"
+    fixture.write_text(
+        json.dumps(
+            {
+                "rule_files": [str(rules_path)],
+                "evaluation_interval": "1m",
+                "tests": cases,
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [promtool, "test", "rules", str(fixture)],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_chart_version_and_values_define_shared_staging_and_production_baseline():

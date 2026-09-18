@@ -41,10 +41,77 @@ SOURCE_BY_STATE = {
     "stale": "github-api",
     "unavailable": "github-api-unavailable",
 }
+DESCRIPTOR_REVISION = "c4d45d96f593d0075096c55ea0a71215350b5ed3"
+DESCRIPTOR_FIELDS = {
+    "name",
+    "application",
+    "environment",
+    "enabled",
+    "cadence",
+    "timeout",
+    "concurrency",
+    "requestMultiplicity",
+    "url",
+    "bucket",
+    "limits",
+    "safetyMargin",
+}
 
 
 class InvalidDocument(ValueError):
     """The passive document does not satisfy the pinned application contract."""
+
+
+def validate_descriptor(descriptor: object) -> list[dict[str, object]]:
+    """Validate the complete installed descriptor without repository imports."""
+    if not isinstance(descriptor, dict) or set(descriptor) != {
+        "schemaVersion",
+        "sourceRevision",
+        "producers",
+    }:
+        raise InvalidDocument("descriptor fields")
+    if type(descriptor["schemaVersion"]) is not int or descriptor["schemaVersion"] != 1:
+        raise InvalidDocument("descriptor schemaVersion")
+    if descriptor["sourceRevision"] != DESCRIPTOR_REVISION:
+        raise InvalidDocument("descriptor sourceRevision")
+    producers = descriptor["producers"]
+    if not isinstance(producers, list) or len(producers) != 2:
+        raise InvalidDocument("descriptor producers")
+    validated = []
+    for producer in producers:
+        if not isinstance(producer, dict) or set(producer) != DESCRIPTOR_FIELDS:
+            raise InvalidDocument("descriptor producer fields")
+        environment = producer["environment"]
+        if type(environment) is not str or environment not in RUNTIME_URLS:
+            raise InvalidDocument("descriptor producer environment")
+        expected = {
+            "name": f"danielsmith-github-cache-{environment}",
+            "application": "danielsmith",
+            "url": RUNTIME_URLS[environment],
+            "cadence": "15m",
+            "timeout": "10s",
+            "concurrency": 1,
+            "requestMultiplicity": 1,
+            "bucket": "github-cache-transport",
+            "limits": {"hourly": 60, "daily": 1000},
+            "safetyMargin": 0.2,
+        }
+        if any(producer[key] != value for key, value in expected.items()):
+            raise InvalidDocument("descriptor producer metadata")
+        if (
+            type(producer["concurrency"]) is not int
+            or type(producer["requestMultiplicity"]) is not int
+            or type(producer["safetyMargin"]) is not float
+            or not isinstance(producer["limits"], dict)
+            or any(type(value) is not int for value in producer["limits"].values())
+        ):
+            raise InvalidDocument("descriptor producer metadata types")
+        if type(producer["enabled"]) is not bool:
+            raise InvalidDocument("descriptor producer enabled")
+        validated.append(producer)
+    if {producer["environment"] for producer in validated} != set(RUNTIME_URLS):
+        raise InvalidDocument("descriptor producer identities")
+    return validated
 
 
 def _reject_duplicate_json_fields(pairs):
@@ -438,23 +505,8 @@ def main(argv: list[str] | None = None) -> int:
             args.descriptor.read_text(encoding="utf-8"),
             object_pairs_hook=_reject_duplicate_json_fields,
         )
-        if not isinstance(descriptor, dict) or type(descriptor.get("schemaVersion")) is not int:
-            raise InvalidDocument("descriptor schemaVersion")
-        producers = descriptor.get("producers")
-        if descriptor["schemaVersion"] != 1 or not isinstance(producers, list):
-            raise InvalidDocument("descriptor")
-        producer = next(item for item in producers if item.get("environment") == args.environment)
-        expected = {
-            "name": f"danielsmith-github-cache-{args.environment}",
-            "url": RUNTIME_URLS[args.environment],
-            "cadence": "15m",
-            "timeout": "10s",
-        }
-        if (
-            any(producer.get(key) != value for key, value in expected.items())
-            or type(producer.get("enabled")) is not bool
-        ):
-            raise InvalidDocument("descriptor producer")
+        producers = validate_descriptor(descriptor)
+        producer = next(item for item in producers if item["environment"] == args.environment)
         output = collect(producer)
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError, StopIteration) as error:
         # Replace a formerly healthy textfile before reporting configuration failure.

@@ -26,7 +26,9 @@ groups:
             (time() - daniel_github_cache_collection_timestamp_seconds <= 910))
           or
           (daniel_github_cache_monitoring_expected{application="danielsmith"} == 1
-            and ignoring (application, environment, name)
+            # Application state is intentionally global; transport identity was
+            # established above, so retain the expected producer via an empty match.
+            and on ()
             daniel_github_cache_state{state="disabled"} == 1)
         for: 20m
         labels:
@@ -58,7 +60,8 @@ groups:
           daniel_github_cache_collection_up == 1
           and on (environment, name)
           (time() - daniel_github_cache_collection_timestamp_seconds <= 910)
-          and ignoring (environment, name)
+          # Application signals are intentionally global after transport identity is established.
+          and on ()
           daniel_github_cache_state{state="stale"} == 1
         for: 20m
         labels:
@@ -75,7 +78,8 @@ groups:
           daniel_github_cache_collection_up == 1
           and on (environment, name)
           (time() - daniel_github_cache_collection_timestamp_seconds <= 910)
-          and ignoring (environment, name)
+          # Application signals are intentionally global after transport identity is established.
+          and on ()
           daniel_github_cache_state{state="unavailable"} == 1
         for: 20m
         labels:
@@ -92,7 +96,8 @@ groups:
           daniel_github_cache_collection_up == 1
           and on (environment, name)
           (time() - daniel_github_cache_collection_timestamp_seconds <= 910)
-          and ignoring (environment, name)
+          # Application signals are intentionally global after transport identity is established.
+          and on ()
           max(daniel_github_cache_refresh_failure) == 1
         for: 20m
         labels:
