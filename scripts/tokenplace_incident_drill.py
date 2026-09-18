@@ -2755,6 +2755,31 @@ def _recover_failed_trigger(plan, journal, kubeconfig, runner, trigger_pending=T
         _record_phase(journal, plan, "cleanup", "cleanup", "completed")
 
 
+def _reconcile_failed_quota_cleanup(plan, journal, kubeconfig, runner):
+    """Remove the exact quota marker after establishing the cluster identity."""
+    records = _journal_records(journal, plan)
+    cleanup_completed = ("cleanup", "cleanup") in _completed_operations(records)
+    if cleanup_completed:
+        _assert_staging_identity(kubeconfig, runner)
+        marker_present = _validate_marker(plan, kubeconfig, runner, absent_ok=True)
+        if marker_present:
+            raise DrillError("completed exact marker cleanup post-state failed")
+        return
+    cleanup_pending = _pending_operation(records) == ("cleanup", "cleanup")
+    if not cleanup_pending:
+        _record_phase(journal, plan, "cleanup", "cleanup", "intent")
+    _assert_staging_identity(kubeconfig, runner)
+    marker_present = _validate_marker(plan, kubeconfig, runner, absent_ok=True)
+    if marker_present:
+        _run_checked(
+            runner, _marker_command(plan, kubeconfig, "delete"), "exact marker cleanup failed"
+        )
+    if _validate_marker(plan, kubeconfig, runner, absent_ok=True):
+        raise DrillError("exact marker cleanup post-state failed")
+    if ("cleanup", "cleanup") not in _completed_operations(_journal_records(journal, plan)):
+        _record_phase(journal, plan, "cleanup", "cleanup", "completed")
+
+
 def _recover_failed_quota_trigger(plan, journal, kubeconfig, runner, failure_summary=None):
     """Record failure and remove only the run marker; quota stimulus mutates no cluster object."""
     _record_phase(
@@ -2770,19 +2795,32 @@ def _recover_failed_quota_trigger(plan, journal, kubeconfig, runner, failure_sum
             **(failure_summary or {"stop_reason": "failed-or-interrupted"}),
         },
     )
-    records = _journal_records(journal, plan)
-    cleanup_pending = _pending_operation(records) == ("cleanup", "cleanup")
-    if not cleanup_pending:
-        _record_phase(journal, plan, "cleanup", "cleanup", "intent")
-    _assert_staging_identity(kubeconfig, runner)
-    if _validate_marker(plan, kubeconfig, runner, absent_ok=True):
-        _run_checked(
-            runner, _marker_command(plan, kubeconfig, "delete"), "exact marker cleanup failed"
-        )
-    if _validate_marker(plan, kubeconfig, runner, absent_ok=True):
-        raise DrillError("exact marker cleanup post-state failed")
-    if ("cleanup", "cleanup") not in _completed_operations(_journal_records(journal, plan)):
-        _record_phase(journal, plan, "cleanup", "cleanup", "completed")
+    _reconcile_failed_quota_cleanup(plan, journal, kubeconfig, runner)
+
+
+def _is_failed_quota_cleanup(plan, records, operation):
+    if operation != "cleanup":
+        return False
+    quota_ids = {
+        action["id"] for action in plan["actions"] if action.get("type") == "quota-trigger"
+    }
+    if quota_ids != {"generate-bounded-quota"}:
+        return False
+    completed = _completed_operations(records)
+    if any(
+        ("execute", action["id"]) in completed
+        for action in plan["actions"]
+        if action.get("type") == "mutation"
+    ):
+        return False
+    pending = _pending_operation(records)
+    failed = any(
+        record["operation"] == "execute"
+        and record["stage"] == "generate-bounded-quota"
+        and record["phase"] == "failed"
+        for record in records
+    )
+    return failed or pending == ("execute", "generate-bounded-quota")
 
 
 def _execute_locked(args, runner, plan, journal, now=None):
@@ -2791,6 +2829,18 @@ def _execute_locked(args, runner, plan, journal, now=None):
     pending = _pending_operation(records)
     stage = "cleanup" if args.cleanup else args.execute_stage or args.rollback_stage
     operation = "cleanup" if args.cleanup else "rollback" if args.rollback_stage else "execute"
+    failed_quota_cleanup = _is_failed_quota_cleanup(plan, records, operation)
+    if failed_quota_cleanup:
+        # A marker-only failed stimulus never crossed into containment, so its
+        # cleanup depends on trusted identity and ownership, not Deployment state.
+        if pending == ("execute", "generate-bounded-quota"):
+            _recover_failed_quota_trigger(plan, journal, args.kubeconfig, runner)
+        else:
+            _reconcile_failed_quota_cleanup(plan, journal, args.kubeconfig, runner)
+        return {
+            "status": "already-clean" if ("cleanup", "cleanup") in completed else "clean",
+            "run_id": plan["run_id"],
+        }
     if pending and pending != (operation, stage):
         raise DrillError("a different interrupted operation must be reconciled first")
     aborting = any(record["operation"] == "rollback" for record in records)

@@ -1460,13 +1460,79 @@ def test_failed_quota_cleanup_requires_identity_then_is_retryable(tmp_path):
 
     parsed.cleanup = True
     parsed.execute_stage = None
+    with pytest.raises(drill.DrillError, match="identity"):
+        drill.execute_operation(parsed, untrusted_runner)
+    assert not any("delete" in command for command in rejected_calls)
+
     calls = []
-    result = drill.execute_operation(parsed, execution_runner(plan, calls, _matching_marker(plan)))
+    trusted = execution_runner(plan, calls, _matching_marker(plan))
+
+    def drifted_runner(command):
+        if "deployment" in command and "get" in command:
+            raise AssertionError("marker-only cleanup must not inspect the Deployment")
+        return trusted(command)
+
+    result = drill.execute_operation(parsed, drifted_runner)
     assert result["status"] == "clean"
     assert drill._marker_command(plan, parsed.kubeconfig, "delete") in calls
+    assert not any("curl" in command or "probe" in command for command in calls)
+    assert not any("set" in command or "label" in command for command in calls)
     records = drill._journal_records(parsed.journal, plan)
     cleanup = [record["phase"] for record in records if record["operation"] == "cleanup"]
     assert cleanup == ["intent", "completed"]
+    calls.clear()
+    assert drill.execute_operation(parsed, drifted_runner)["status"] == "already-clean"
+    assert not any("delete" in command for command in calls)
+
+
+def test_failed_quota_cleanup_rejects_marker_ownership_mismatch(tmp_path):
+    plan = executable_quota_rehearsal_plan(
+        tmp_path,
+        enable_bounded_quota_stimulus=True,
+        acknowledge_bounded_quota_stimulus=True,
+    )
+    parsed = execution_files(tmp_path, plan)
+    _journal_through(parsed, plan, "generate-bounded-quota")
+    drill._record_phase(parsed.journal, plan, "execute", "generate-bounded-quota", "failed")
+    drill._record_phase(parsed.journal, plan, "cleanup", "cleanup", "intent")
+    parsed.cleanup = True
+    parsed.execute_stage = None
+    calls = []
+    wrong_marker = {"data": {"run-id": "another-run", "plan-digest": plan["plan_digest"]}}
+
+    with pytest.raises(drill.DrillError, match="ownership"):
+        drill.execute_operation(parsed, execution_runner(plan, calls, wrong_marker))
+
+    assert not any("delete" in command for command in calls)
+    assert drill._pending_operation(drill._journal_records(parsed.journal, plan)) == (
+        "cleanup",
+        "cleanup",
+    )
+
+
+def test_interrupted_quota_intent_cleanup_skips_deployment_and_traffic(tmp_path):
+    plan = executable_quota_rehearsal_plan(
+        tmp_path,
+        enable_bounded_quota_stimulus=True,
+        acknowledge_bounded_quota_stimulus=True,
+    )
+    parsed = execution_files(tmp_path, plan)
+    _journal_through(parsed, plan, "generate-bounded-quota")
+    parsed.cleanup = True
+    parsed.execute_stage = None
+    calls = []
+    base = execution_runner(plan, calls, _matching_marker(plan))
+
+    def runner(command):
+        if "deployment" in command and "get" in command:
+            raise AssertionError("interrupted quota cleanup must not inspect the Deployment")
+        return base(command)
+
+    assert drill.execute_operation(parsed, runner)["status"] == "clean"
+    records = drill._journal_records(parsed.journal, plan)
+    assert [record["phase"] for record in records[-3:]] == ["failed", "intent", "completed"]
+    assert not any(command[0] == "curl" for command in calls)
+    assert not any("set" in command or "label" in command for command in calls)
 
 
 def test_quota_gate_reobserves_live_tuple(tmp_path, monkeypatch):
