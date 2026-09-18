@@ -185,9 +185,23 @@ baseline, recovery-candidate, and emergency-fallback image roles already named b
 `--current-image`, `--replacement-image`, and `--rollback-image`; do not invent a fourth image or
 select an arbitrary registry release. Keep both acknowledgements: the staging fault-injection
 acknowledgement authorizes the staging-only Probe containment, while the state-loss
-acknowledgement authorizes the recovery replacement. This runner does not generate quota traffic.
-The reviewed snapshot or live preflight must supply route-specific classification (`429` for root
-and metadata, `200` for `/livez` and `/healthz`) plus successful quota-validator evidence.
+acknowledgement authorizes the recovery replacement. Plan generation does not generate quota traffic.
+Ordinary plan generation and every `--dry-run` remain non-executing. A staging-rehearsal live
+preflight instead requires a clean all-`200` baseline for root, metadata, `/livez`, and `/healthz`,
+a successful quota validator, the exact reviewed Deployment image and replica state, no paused
+Probe labels, and no pre-existing drill marker. Mixed status states are refused. Real-incident
+plans continue to require the established `429`/`429`/`200`/`200` tuple.
+
+The executable rehearsal plan begins with `establish-bounded-quota`. It is the only source-defined
+quota request generator and requires the additional
+`--acknowledge-bounded-quota-stimulus` execution acknowledgement. It is restricted to
+`https://staging.token.place/` and `/api/v1/meta`; it never sends load to `/livez` or `/healthz`.
+The source-enforced ceiling is 1,200 total requests, concurrency 4, 120 seconds, five seconds per
+request, and zero retries. Before every batch it revalidates staging identity, Deployment/image
+coordinates, and the run marker, then observes all four classification routes. It stops immediately
+when `429`/`429`/`200`/`200` is observed. A mixed status, redirect, unexpected response, coordinate
+drift, timeout, interruption, or exhausted request budget fails closed without beginning Probe
+containment or image replacement; merely sending every request is never success.
 
 The quota plan pauses only the root and metadata Probe discovery labels, leaving `/livez` and
 `/healthz` continuously discovered. After replacement and the readiness, compute, and encrypted
@@ -198,6 +212,12 @@ inverses in reverse order to restore the exact Probe labels and original image; 
 reviewed fallback remains a capability-revalidated emergency action, never an automatic inverse.
 Capture the route classification, validator result, exact Probe label mutations and inverses,
 recovery gates, both observation windows, final health, and cleanup result in private evidence.
+Stimulus evidence contains only aggregate request/status counts, the final four route statuses, and
+the stop reason—never response bodies, headers, client identity, or secrets. The forward coordinate
+is `--execute-stage establish-bounded-quota`; its failure/rollback coordinate is the internal
+`stop-quota-stimulus` cancellation boundary (no Deployment or image mutation exists to undo), and
+the run-level cleanup coordinate remains `--cleanup`, after completed mutations have been rolled
+back in reverse order.
 
 Every generated plan includes a deterministic digest. A future Step 14b operator can create its
 unique marker and then execute or validate exactly one ordered stage per invocation (the live
@@ -210,6 +230,16 @@ python3 scripts/tokenplace_incident_drill.py --execute-stage marker \
 python3 scripts/tokenplace_incident_drill.py --execute-stage "$NEXT_STAGE" \
   --plan "$PRIVATE_PLAN" --journal "$PRIVATE_JOURNAL_DIRECTORY" \
   --kubeconfig "$STAGING_KUBECONFIG" --gate-evidence "$PRIVATE_GATE_EVIDENCE"
+```
+
+For `establish-bounded-quota`, omit `--gate-evidence` and add the deliberate authorization:
+
+```bash
+python3 scripts/tokenplace_incident_drill.py \
+  --execute-stage establish-bounded-quota \
+  --plan "$PRIVATE_PLAN" --journal "$PRIVATE_JOURNAL_DIRECTORY" \
+  --kubeconfig "$STAGING_KUBECONFIG" \
+  --acknowledge-bounded-quota-stimulus
 ```
 
 For the metrics-OOM rehearsal, the exact order begins with `marker`, `inject-incident-image`,

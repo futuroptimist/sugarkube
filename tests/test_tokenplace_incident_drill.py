@@ -85,7 +85,12 @@ def snapshot(c, *, mode="metrics-oom", degraded=True, metrics_mode_value="normal
         {"termination_reason": "OOMKilled", "exit_code": 137}
         if mode == "metrics-oom"
         else {
-            "route_statuses": {"root": 429, "metadata": 429, "livez": 200, "healthz": 200},
+            "route_statuses": {
+                "root": 200 if c.lifecycle == "staging-rehearsal" else 429,
+                "metadata": 200 if c.lifecycle == "staging-rehearsal" else 429,
+                "livez": 200,
+                "healthz": 200,
+            },
             "quota_validator_success": True,
         }
     )
@@ -281,7 +286,7 @@ sys.stderr.write('unexpected kubectl: ' + repr(args)); sys.exit(91)
 import json, os, sys
 with open(os.environ['COMMAND_LOG'], 'a') as stream: stream.write(json.dumps(['curl', *sys.argv[1:]]) + '\\n')
 url = sys.argv[-1]
-print('429' if url.endswith('/') or url.endswith('/api/v1/meta') else '200', end='')
+print(os.environ.get('PUBLIC_ROUTE_STATUS', '429') if url.endswith('/') or url.endswith('/api/v1/meta') else '200', end='')
 """,
         encoding="utf-8",
     )
@@ -295,6 +300,7 @@ print('429' if url.endswith('/') or url.endswith('/api/v1/meta') else '200', end
         COMMAND_LOG=str(log),
         STUB_DATA=str(payload),
         PROBE_YAML=str(drill.ROOT / "clusters/staging/observability/probes/public-apps.yaml"),
+        PUBLIC_ROUTE_STATUS="200" if parsed.lifecycle == "staging-rehearsal" else "429",
     )
     return env, log
 
@@ -2128,29 +2134,111 @@ def executable_quota_rehearsal_plan(tmp_path, **changes):
         **changes,
     )
     coordinates = drill.validate(parsed)
+    healthy = snapshot(coordinates, mode="quota-exhaustion")
+    healthy["classification"]["route_statuses"] = {
+        "root": 200,
+        "metadata": 200,
+        "livez": 200,
+        "healthz": 200,
+    }
     checked = drill._validate_snapshot(
         "quota-exhaustion",
         coordinates,
         drill.inventory("staging"),
-        snapshot(coordinates, mode="quota-exhaustion"),
+        healthy,
         "live-authoritative",
     )
     return drill.build_plan(checked)
+
+
+def test_quota_stimulus_is_explicit_bounded_and_route_restricted(tmp_path):
+    plan = executable_quota_rehearsal_plan(tmp_path)
+    trigger = plan["actions"][0]
+
+    assert trigger["id"] == "establish-bounded-quota"
+    assert trigger["limits"] == drill.QUOTA_STIMULUS_LIMITS
+    assert trigger["limits"]["retries"] == 0
+    assert trigger["target"]["routes"] == ["/", "/api/v1/meta"]
+    assert "/livez" not in trigger["target"]["routes"]
+    assert "/healthz" not in trigger["target"]["routes"]
+    assert plan["expected_deployment"]["current_image"] not in trigger["command"]
+    ordinary = drill.build_plan(preflight(tmp_path, mode="quota-exhaustion"))
+    assert all(action["type"] != "quota-trigger" for action in ordinary["actions"])
+
+
+def test_bounded_quota_stimulus_stops_on_verified_condition(monkeypatch, tmp_path):
+    action = executable_quota_rehearsal_plan(tmp_path)["actions"][0]
+    opened = []
+
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *unused):
+            return None
+
+        def geturl(self):
+            return opened[-1]
+
+    class Opener:
+        def open(self, request, timeout):
+            opened.append(request.full_url)
+            return Response()
+
+    monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *unused: Opener())
+    observations = iter(
+        [
+            {"root": 200, "metadata": 200, "livez": 200, "healthz": 200},
+            {"root": 429, "metadata": 429, "livez": 200, "healthz": 200},
+        ]
+    )
+    summary = drill._run_bounded_quota_stimulus(action, lambda: None, lambda: next(observations))
+
+    assert summary["requests"] == action["limits"]["concurrency"]
+    assert summary["stop_reason"] == "quota-condition-observed"
+    assert {drill.urlsplit(url).path for url in opened} == {"/", "/api/v1/meta"}
+
+
+def test_bounded_quota_stimulus_fails_closed_without_condition(monkeypatch, tmp_path):
+    action = executable_quota_rehearsal_plan(tmp_path)["actions"][0]
+    action["limits"] = {**drill.QUOTA_STIMULUS_LIMITS, "total_requests": 4}
+    monkeypatch.setattr(drill, "QUOTA_STIMULUS_LIMITS", action["limits"])
+
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *unused):
+            return None
+
+        def geturl(self):
+            return "https://staging.token.place/"
+
+    class Opener:
+        def open(self, request, timeout):
+            response = Response()
+            response.geturl = lambda: request.full_url
+            return response
+
+    monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *unused: Opener())
+    healthy = {"root": 200, "metadata": 200, "livez": 200, "healthz": 200}
+    with pytest.raises(drill.DrillError, match="not established"):
+        drill._run_bounded_quota_stimulus(action, lambda: None, lambda: healthy)
 
 
 @pytest.mark.parametrize(
     "tamper,message",
     [
         (
-            lambda plan: plan["expected_deployment"].update(
-                rollback_image="relay:latest"
-            ),
+            lambda plan: plan["expected_deployment"].update(rollback_image="relay:latest"),
             "coordinates",
         ),
         (
-            lambda plan: plan["expected_deployment"].update(
-                incident_image="unexpected"
-            ),
+            lambda plan: plan["expected_deployment"].update(incident_image="unexpected"),
             "must not specify an incident image",
         ),
         (
@@ -2171,35 +2259,27 @@ def executable_quota_rehearsal_plan(tmp_path, **changes):
             "actions",
         ),
         (
-            lambda plan: next(
-                action for action in plan["actions"] if action["id"] == "replace"
-            )["command"].__setitem__(
-                -1, "relay=registry.example/relay@sha256:" + "e" * 64
-            ),
+            lambda plan: next(action for action in plan["actions"] if action["id"] == "replace")[
+                "command"
+            ].__setitem__(-1, "relay=registry.example/relay@sha256:" + "e" * 64),
             "actions",
         ),
         (
-            lambda plan: next(
-                action for action in plan["actions"] if action["id"] == "replace"
-            )["inverse"].__setitem__(
-                -1, "relay=registry.example/relay@sha256:" + "e" * 64
-            ),
+            lambda plan: next(action for action in plan["actions"] if action["id"] == "replace")[
+                "inverse"
+            ].__setitem__(-1, "relay=registry.example/relay@sha256:" + "e" * 64),
             "actions",
         ),
         (
-            lambda plan: next(
-                action for action in plan["actions"] if action["id"] == "replace"
-            )["rollback"].__setitem__(
-                -1, "relay=registry.example/relay@sha256:" + "e" * 64
-            ),
+            lambda plan: next(action for action in plan["actions"] if action["id"] == "replace")[
+                "rollback"
+            ].__setitem__(-1, "relay=registry.example/relay@sha256:" + "e" * 64),
             "actions",
         ),
         (
-            lambda plan: next(
-                action for action in plan["actions"] if action["id"] == "replace"
-            )["recovery_fallback"]["command"].__setitem__(
-                -1, "relay=registry.example/relay@sha256:" + "e" * 64
-            ),
+            lambda plan: next(action for action in plan["actions"] if action["id"] == "replace")[
+                "recovery_fallback"
+            ]["command"].__setitem__(-1, "relay=registry.example/relay@sha256:" + "e" * 64),
             "actions",
         ),
         (
