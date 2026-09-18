@@ -74,10 +74,10 @@ tests:
       - expr: sugarkube:sli_successful_events:increase1h{application="token.place",environment="prod"}
         eval_time: 60m
         exp_samples: []
-      - expr: sugarkube:sli_observation_state{application="token.place",environment="prod"}
+      - expr: sugarkube:sli_observation_state{application="token.place"}
         eval_time: 60m
         exp_samples:
-          - labels: '{__name__="sugarkube:sli_observation_state",application="token.place",environment="prod",observation_state="missing_or_stale_telemetry",signal_type="actual_request_success",sli="tokenplace-request-success"}'
+          - labels: '{__name__="sugarkube:sli_observation_state",application="token.place",observation_state="missing_or_stale_telemetry",signal_type="actual_request_success",sli="tokenplace-request-success"}'
             value: 1
 
   - name: dspace eligible all-failure traffic records zero successes
@@ -177,6 +177,32 @@ tests:
         eval_time: 120m
         exp_samples:
           - labels: '{__name__="sugarkube:sli_observation_state",application="DSPACE",environment="staging",observation_state="successful_eligible_traffic",signal_type="actual_request_success",sli="dspace-chat-request-success"}'
+            value: 1
+
+  - name: expected ready pods report missing telemetry when all targets are absent
+    interval: 30s
+    input_series:
+      - series: kube_pod_container_status_ready{namespace="tokenplace",container="relay",pod="a"}
+        values: '1x3'
+      - series: kube_pod_status_phase{namespace="tokenplace",phase="Running",pod="a"}
+        values: '1x3'
+      - series: kube_pod_container_status_ready{namespace="dspace",container="dspace",pod="a"}
+        values: '1x3'
+      - series: kube_pod_status_phase{namespace="dspace",phase="Running",pod="a"}
+        values: '1x3'
+    promql_expr_test:
+      - expr: sugarkube:sli_eligible_events:increase1h{signal_type="actual_request_success"}
+        eval_time: 1m
+        exp_samples: []
+      - expr: sugarkube:sli_successful_events:increase1h{signal_type="actual_request_success"}
+        eval_time: 1m
+        exp_samples: []
+      - expr: sugarkube:sli_observation_state{signal_type="actual_request_success"}
+        eval_time: 1m
+        exp_samples:
+          - labels: '{__name__="sugarkube:sli_observation_state",application="token.place",observation_state="missing_or_stale_telemetry",signal_type="actual_request_success",sli="tokenplace-request-success"}'
+            value: 1
+          - labels: '{__name__="sugarkube:sli_observation_state",application="DSPACE",observation_state="missing_or_stale_telemetry",signal_type="actual_request_success",sli="dspace-chat-request-success"}'
             value: 1
 
   - name: disabled encrypted completion is explicit

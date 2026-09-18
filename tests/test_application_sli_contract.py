@@ -88,6 +88,19 @@ def test_expected_ready_sources_are_matched_for_current_and_full_window_coverage
     assert "count by (environment) ((kube_pod_" not in expressions
 
 
+def test_missing_telemetry_state_is_derived_from_expected_ready_sources():
+    document = yaml.safe_load(RULES.read_text(encoding="utf-8"))
+    missing_rules = [
+        rule for rule in document["groups"][0]["rules"]
+        if rule.get("labels", {}).get("observation_state") == "missing_or_stale_telemetry"
+    ]
+    assert len(missing_rules) == 2
+    for rule in missing_rules:
+        assert "kube_pod_container_status_ready" in rule["expr"]
+        assert "sli_source_current" in rule["expr"]
+        assert "up{" not in rule["expr"]
+
+
 def test_success_recordings_have_only_an_eligible_traffic_zero_fallback():
     document = yaml.safe_load(RULES.read_text(encoding="utf-8"))
     success_rules = [
