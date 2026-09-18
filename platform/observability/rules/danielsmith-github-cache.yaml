@@ -1,0 +1,55 @@
+---
+groups:
+  - name: danielsmith-github-cache
+    interval: 1m
+    rules:
+      - record: daniel_github_cache_monitoring_expected
+        expr: vector(0)
+        labels: {application: danielsmith, environment: staging, name: danielsmith-github-cache-staging}
+      - record: daniel_github_cache_monitoring_expected
+        expr: vector(0)
+        labels: {application: danielsmith, environment: prod, name: danielsmith-github-cache-prod}
+      - alert: DanielGithubCacheTelemetryMissing
+        expr: |
+          daniel_github_cache_monitoring_expected{application="danielsmith"} == 1
+          unless on (application, environment, name)
+          daniel_github_cache_monitoring_enabled{application="danielsmith"} == 1
+        for: 10m
+        labels: {application: danielsmith, severity: warning}
+        annotations:
+          summary: danielsmith.io GitHub-cache telemetry is missing
+          description: Collection is expected but its explicit enabled marker is absent; disabled monitoring is never treated as success.
+          runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/danielsmith-github-cache.md#alerts
+      - alert: DanielGithubCacheStale
+        expr: |
+          daniel_github_cache_monitoring_expected{application="danielsmith"} == 1
+          and on (application, environment, name) daniel_github_cache_monitoring_enabled == 1
+          and on (application, environment, name) daniel_github_cache_state{state="stale"} == 1
+        for: 15m
+        labels: {application: danielsmith, severity: warning}
+        annotations:
+          summary: danielsmith.io GitHub cache is serving retained data
+          description: A refresh failed and true retained-data age continues from the oldest last-good record.
+          runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/danielsmith-github-cache.md#alerts
+      - alert: DanielGithubCacheUnavailable
+        expr: |
+          daniel_github_cache_monitoring_expected{application="danielsmith"} == 1
+          and on (application, environment, name) daniel_github_cache_monitoring_enabled == 1
+          and on (application, environment, name) daniel_github_cache_state{state="unavailable"} == 1
+        for: 15m
+        labels: {application: danielsmith, severity: warning}
+        annotations:
+          summary: danielsmith.io GitHub cache has no usable data
+          description: The application reports neither current nor retained repository data; this is diagnostic and not site-availability paging.
+          runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/danielsmith-github-cache.md#alerts
+      - alert: DanielGithubCacheRefreshFailure
+        expr: |
+          daniel_github_cache_monitoring_expected{application="danielsmith"} == 1
+          and on (application, environment, name) daniel_github_cache_monitoring_enabled == 1
+          and on (application, environment, name) daniel_github_cache_refresh_failure == 1
+        for: 15m
+        labels: {application: danielsmith, severity: warning}
+        annotations:
+          summary: danielsmith.io GitHub-cache refresh has a current bounded failure
+          description: Inspect the fixed category label; arbitrary upstream errors and repository identities are never transported.
+          runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/danielsmith-github-cache.md#alerts
