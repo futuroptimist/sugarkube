@@ -1266,9 +1266,9 @@ def test_bounded_quota_stimulus_stops_on_proven_tuple(monkeypatch, tmp_path):
     requested = []
 
     class Response:
-        def __init__(self, request):
+        def __init__(self, request, status):
             self.request = request
-            self.status = 200 if request.full_url.endswith(("/livez", "/healthz")) else 429
+            self.status = status
 
         def __enter__(self):
             return self
@@ -1282,12 +1282,16 @@ def test_bounded_quota_stimulus_stops_on_proven_tuple(monkeypatch, tmp_path):
     class Opener:
         def open(self, request, timeout):
             requested.append((request.full_url, timeout))
-            return Response(request)
+            status = 200
+            if len(requested) > 4 and not request.full_url.endswith(("/livez", "/healthz")):
+                status = 429
+            return Response(request, status)
 
     monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *_args: Opener())
     summary = drill._run_bounded_quota(action)
     assert summary["route_statuses"] == action["success_condition"]
-    assert summary["request_counts"] == {"root": 1, "metadata": 1}
+    assert summary["request_counts"] == {"root": 2, "metadata": 2, "livez": 2, "healthz": 2}
+    assert summary["total_requests"] == 8
     assert all("staging.token.place" in url for url, _ in requested)
     assert not any(
         "token.place/livez" in url or "token.place/healthz" in url for url, _ in requested[:2]
@@ -1324,13 +1328,102 @@ def test_bounded_quota_stimulus_exhausts_finite_budget(monkeypatch):
         def geturl(self):
             return self.request.full_url
 
+    requested = []
+
     class Opener:
         def open(self, request, timeout):
+            requested.append((request.full_url, timeout))
             return Response(request)
 
     monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *_args: Opener())
     with pytest.raises(drill.DrillError, match="request budget"):
         drill._run_bounded_quota(action)
+    assert len(requested) == drill.QUOTA_STIMULUS_LIMITS["total_requests"]
+
+
+def test_bounded_quota_stops_without_another_request_after_unsafe_response(monkeypatch):
+    action = {
+        "target": {"scheme": "https", "host": drill.STAGING_HOST, "redirects": "reject"},
+        "routes": {"root": "/", "metadata": "/api/v1/meta"},
+        "limits": drill.QUOTA_STIMULUS_LIMITS,
+        "success_condition": {"root": 429, "metadata": 429, "livez": 200, "healthz": 200},
+        "command": [
+            "internal:generate-bounded-quota",
+            "--host",
+            drill.STAGING_HOST,
+            "--run-id",
+            "quota-test",
+        ],
+    }
+    statuses = iter((200, 200, 200, 200, 500))
+
+    class Response:
+        def __init__(self, request):
+            self.request, self.status = request, next(statuses)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def geturl(self):
+            return self.request.full_url
+
+    class Opener:
+        def open(self, request, timeout):
+            return Response(request)
+
+    monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *_args: Opener())
+    with pytest.raises(drill._QuotaStimulusFailure) as failure:
+        drill._run_bounded_quota(action)
+    assert failure.value.summary["total_requests"] == 5
+    assert failure.value.summary["stop_reason"] == "unsafe-response"
+
+
+def test_bounded_quota_rejects_response_completed_after_deadline(monkeypatch):
+    action = {
+        "target": {"scheme": "https", "host": drill.STAGING_HOST, "redirects": "reject"},
+        "routes": {"root": "/", "metadata": "/api/v1/meta"},
+        "limits": drill.QUOTA_STIMULUS_LIMITS,
+        "success_condition": {"root": 429, "metadata": 429, "livez": 200, "healthz": 200},
+        "command": [
+            "internal:generate-bounded-quota",
+            "--host",
+            drill.STAGING_HOST,
+            "--run-id",
+            "quota-test",
+        ],
+    }
+    clock = {"value": 0.0}
+
+    class Response:
+        status = 200
+
+        def __init__(self, request):
+            self.request = request
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def geturl(self):
+            return self.request.full_url
+
+    class Opener:
+        def open(self, request, timeout):
+            assert timeout == drill.QUOTA_STIMULUS_LIMITS["request_timeout_seconds"]
+            clock["value"] = drill.QUOTA_STIMULUS_LIMITS["duration_seconds"]
+            return Response(request)
+
+    monkeypatch.setattr(drill.time, "monotonic", lambda: clock["value"])
+    monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *_args: Opener())
+    with pytest.raises(drill._QuotaStimulusFailure) as failure:
+        drill._run_bounded_quota(action)
+    assert failure.value.summary["total_requests"] == 1
+    assert failure.value.summary["stop_reason"] == "duration-budget"
 
 
 def test_bounded_quota_redirect_reports_quota_context():
@@ -1403,6 +1496,56 @@ def test_quota_gate_reobserves_live_tuple(tmp_path, monkeypatch):
 
     with pytest.raises(drill.DrillError, match="no longer present"):
         drill.execute_operation(parsed, lambda command: pytest.fail(str(command)))
+
+
+def test_quota_gate_rejects_stale_trigger_before_route_observation(tmp_path, monkeypatch):
+    plan = executable_quota_rehearsal_plan(
+        tmp_path,
+        enable_bounded_quota_stimulus=True,
+        acknowledge_bounded_quota_stimulus=True,
+    )
+    parsed = execution_files(tmp_path, plan)
+    _journal_through(parsed, plan, "generate-bounded-quota")
+    drill._record_phase(
+        parsed.journal,
+        plan,
+        "execute",
+        "generate-bounded-quota",
+        "completed",
+        recorded_at="2000-01-01T00:00:00Z",
+        evidence_summary={
+            "route_statuses": {"root": 429, "metadata": 429, "livez": 200, "healthz": 200}
+        },
+    )
+    parsed.execute_stage = "verify-quota-condition"
+    monkeypatch.setattr(drill, "_assert_stage_preflight", lambda *_args: None)
+    monkeypatch.setattr(drill, "_validate_marker", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        drill,
+        "_observe_bounded_quota_routes",
+        lambda _timeout: pytest.fail("stale evidence must not generate endpoint traffic"),
+    )
+
+    with pytest.raises(drill.DrillError, match="stale"):
+        drill.execute_operation(
+            parsed,
+            lambda command: pytest.fail(str(command)),
+            now=datetime(2026, 9, 18, tzinfo=timezone.utc),
+        )
+
+
+def test_conflicting_quota_marker_is_rejected():
+    plan = {"run_id": "this-run", "plan_digest": "a" * 64, "inventory": {"namespace": "app"}}
+
+    def runner(command):
+        marker = {
+            "metadata": {"name": "sugarkube-incident-other-run"},
+            "data": {"run-id": "other-run", "plan-digest": "b" * 64},
+        }
+        return subprocess.CompletedProcess(command, 0, json.dumps({"items": [marker]}), "")
+
+    with pytest.raises(drill.DrillError, match="conflicting"):
+        drill._validate_no_conflicting_markers(plan, Path("/tmp/kubeconfig"), runner)
 
 
 def test_quota_staging_rehearsal_rejects_oom_only_incident_image(tmp_path):

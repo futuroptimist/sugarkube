@@ -199,24 +199,30 @@ incident or production; the parser and immutable-plan validator reject both. Off
 render declarative coordinates and cannot emit requests.
 
 Execution is separately authorized with `--acknowledge-bounded-quota-stimulus` on the exact
-`generate-bounded-quota` stage. The source ceiling is 256 stimulus requests total, concurrency 2,
-30 seconds wall time, a three-second request timeout, and zero retries. Stimulus requests alternate
+`generate-bounded-quota` stage. The source ceiling is 256 HTTP attempts total—including health
+observations—concurrency 2, 30 seconds wall time, a three-second per-request timeout, and zero
+retries. Stimulus requests alternate
 only between `GET /` and `GET /api/v1/meta` on `https://staging.token.place`; `/livez` and
 `/healthz` are status observations, never load targets. Each batch reasserts cluster, Deployment,
 image, memory, replica, and marker identity. It stops immediately at `429/429/200/200`, on drift,
 on a mixed or unreachable state, on loss of either health route, or when any budget expires.
 Sending the budget is not success: only the exact tuple advances the source-derived
-`verify-quota-condition` gate. That gate observes all four routes again and advances to the
-existing Probe containment/replacement sequence only while the exact tuple is still live.
+`verify-quota-condition` gate. The required order is marker creation, `generate-bounded-quota`,
+then `verify-quota-condition`. That gate requires the trigger record to be no more than 30 seconds
+old, observes all four routes again, and advances to the existing Probe containment/replacement
+sequence only while the exact tuple and its gate record remain fresh.
 
 The trigger journal retains only per-route counts, the final four status codes, and zero-retry
 metadata; it contains no URL query, header, caller identity, request identifier, response body, or
 credential. Forward coordinates are `generate-bounded-quota` then `verify-quota-condition`.
 Failure/rollback coordinates are `internal:stop-bounded-quota --run-id $RUN_ID`, followed by
+`--cleanup --plan "$PLAN" --journal "$JOURNAL" --kubeconfig "$STAGING_KUBECONFIG"` to reconcile
 deletion of only the exact run-owned marker. Cleanup still removes that marker if Deployment
 coordinates drift after stimulus stops; it never acts on the drifted Deployment. The stage cannot
 change a Deployment, image, Probe, or ServiceMonitor. An interrupted or failed stimulus is
-nonresumable: retain its private journal, clean up, and prepare a new reviewed run ID.
+nonresumable: retain its private journal, clean up, and prepare a new reviewed run ID. Stopping
+traffic or deleting the marker does not restore quota already consumed; wait for the provider's
+quota window to recover and obtain fresh operator authorization before creating a replacement run.
 
 The quota plan pauses only the root and metadata Probe discovery labels, leaving `/livez` and
 `/healthz` continuously discovered. After replacement and the readiness, compute, and encrypted
