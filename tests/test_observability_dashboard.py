@@ -157,9 +157,9 @@ def test_generator_check_and_outputs_are_deterministic(dashboards):
         )
     )
     assert staging_panels == prod_panels
-    assert len(staging["panels"]) == 85
-    assert sum(item["type"] == "row" for item in staging["panels"]) == 14
-    assert sum(item["type"] != "row" for item in staging["panels"]) == 71
+    assert len(staging["panels"]) == 92
+    assert sum(item["type"] == "row" for item in staging["panels"]) == 15
+    assert sum(item["type"] != "row" for item in staging["panels"]) == 77
 
 
 @pytest.mark.parametrize("state", metrics.STATES)
@@ -889,6 +889,7 @@ def test_profiles_differ_only_by_allowlisted_identity(dashboards):
             "cluster",
             "app",
             "route",
+            "workload",
         ]
         assert variables[0]["query"] == environment
         assert variables[1]["query"] == cluster
@@ -914,8 +915,9 @@ def test_canonical_order_ids_grid_and_defaults(dashboards):
         "Daniel GitHub metadata cache",
         "Daniel controlled performance",
         "Daniel visitor journey",
+        "Cross-application resource, placement and release overview",
     ]
-    assert [item["id"] for item in staging["panels"]] == list(range(1, 86))
+    assert [item["id"] for item in staging["panels"]] == list(range(1, 93))
     assert panel(staging, "DSPACE instrumentation health")
     assert panel(staging, "DSPACE build identity")
     assert all(
@@ -955,10 +957,10 @@ def test_daniel_queries_are_target_safe_and_expose_stale_or_missing_health(dashb
     assert " or " not in validator.panel_expression(staging, "Daniel controlled frame time")
 
 
-def test_all_ten_tables_are_simultaneous_single_frames(dashboards):
+def test_all_twelve_tables_are_simultaneous_single_frames(dashboards):
     staging, _ = dashboards
     tables = [item for item in staging["panels"] if item["type"] == "table"]
-    assert len(tables) == 10
+    assert len(tables) == 12
     for table in tables:
         assert len(table["targets"]) == 1
         assert table["targets"][0]["format"] == "table"
@@ -1582,3 +1584,458 @@ def test_dashboard_loading_and_profile_identity_fail_closed(tmp_path):
         validator.load_dashboard(non_object)
     with pytest.raises(SystemExit, match="supported profile"):
         validator.configure_profile({"uid": "unknown", "title": "Unknown"})
+
+
+OVERVIEW_TITLES = tuple(validator.OVERVIEW_PANEL_CONTRACT)
+
+
+def test_cross_application_overview_handles_replica_rollouts_and_single_node_placement(dashboards):
+    """The query shape preserves deployments but counts a shared serving node only once."""
+    staging, _ = dashboards
+    replicas = panel(staging, "Desired versus ready replicas")
+    assert all("max by (namespace, deployment)" in target["expr"] for target in replicas["targets"])
+    assert all("sum by (namespace)" not in target["expr"] for target in replicas["targets"])
+    assert all("{{deployment}}" in target["legendFormat"] for target in replicas["targets"])
+    placement = validator.panel_expression(staging, "Serving workload node placement")
+    assert "count by (namespace) (count by (namespace, node)" in placement
+    assert 'condition="true"' in placement and 'phase="Running"' in placement
+    assert "kube_pod_deletion_timestamp" in placement
+    target = panel(staging, "Serving workload node placement")["targets"][0]
+    assert target["instant"] is True and target["range"] is False
+
+
+def test_cross_application_overview_preserves_missing_limits_throttling_and_builds(dashboards):
+    staging, _ = dashboards
+    for title in (
+        "Memory working set versus configured limit",
+        "CPU throttling",
+        "Application build identity",
+    ):
+        item = panel(staging, title)
+        assert item["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
+        assert all("vector(0)" not in target["expr"] for target in item["targets"])
+    assert "unsupported" in panel(staging, "CPU throttling")["description"].lower()
+    assert "Missing producers" in panel(staging, "Application build identity")["description"]
+    limit_expression = panel(staging, "Memory working set versus configured limit")["targets"][1][
+        "expr"
+    ]
+    assert "and on (namespace)" in limit_expression
+    assert "count by (namespace)" in limit_expression
+    assert limit_expression.count("container_memory_working_set_bytes") >= 2
+    assert "> 0" in limit_expression
+    cpu_expression = panel(staging, "CPU throttling")["targets"][0]["expr"]
+    assert cpu_expression.count("and on (namespace, pod, container)") == 6
+    assert cpu_expression.count("count by (namespace)") == 2
+    assert "container_memory_working_set_bytes" in cpu_expression
+
+
+def test_cross_application_overview_is_profile_and_workload_scoped_without_double_counting(
+    dashboards,
+):
+    staging, prod = dashboards
+    for document, environment in ((staging, "staging"), (prod, "prod")):
+        selector = document["templating"]["list"][-1]
+        assert selector["name"] == "workload"
+        assert selector["query"] == "dspace,tokenplace,danielsmith"
+        assert selector["allValue"] == "dspace|tokenplace|danielsmith"
+        for title in OVERVIEW_TITLES:
+            assert all(
+                'namespace=~"$workload"' in target["expr"]
+                for target in panel(document, title)["targets"]
+            )
+        assert document["templating"]["list"][0]["query"] == environment
+    memory = panel(staging, "Memory working set versus configured limit")
+    cpu = panel(staging, "CPU throttling")
+    assert all("max by (namespace, pod, container)" in x["expr"] for x in memory["targets"])
+    assert all("max by (namespace, pod, container)" in x["expr"] for x in cpu["targets"])
+
+
+@pytest.mark.parametrize(
+    ("title", "mutation", "message"),
+    [
+        ("Serving workload node placement", "drop-ready", "required metric contract"),
+        ("Serving workload node placement", "drop-running", "required metric contract"),
+        ("Serving workload node placement", "drop-terminating", "required metric contract"),
+        ("Memory working set versus configured limit", "zero", "preserve"),
+        ("CPU throttling", "scope", "namespace scope"),
+        ("Application build identity", "scope", "namespace scope"),
+    ],
+)
+def test_cross_application_overview_rejects_unsafe_or_unknown_as_healthy(
+    dashboards, title, mutation, message
+):
+    staging, _ = dashboards
+    changed = copy.deepcopy(staging)
+    target = panel(changed, title)["targets"][0]
+    if mutation == "drop-ready":
+        target["expr"] = target["expr"].replace(
+            'kube_pod_status_ready{namespace=~"$workload",condition="true"} == 1 '
+            "and on (namespace, pod) ",
+            "",
+        )
+    elif mutation == "drop-running":
+        target["expr"] = target["expr"].replace(
+            'kube_pod_status_phase{namespace=~"$workload",phase="Running"} == 1', "vector(1)"
+        )
+    elif mutation == "drop-terminating":
+        target["expr"] = target["expr"].replace(
+            ' unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=~"$workload"}', ""
+        )
+    elif mutation == "zero":
+        target["expr"] += " or vector(0)"
+    else:
+        target["expr"] = target["expr"].replace('namespace=~"$workload"', 'namespace=~".*"')
+    with pytest.raises(SystemExit, match=message):
+        validator._validate_semantics(changed)
+
+
+def test_cross_application_overview_rejects_partially_unscoped_multi_metric_target(dashboards):
+    staging, _ = dashboards
+    changed = copy.deepcopy(staging)
+    target = panel(changed, "Application build identity")["targets"][0]
+    target["expr"] = target["expr"].replace(
+        'tokenplace_build_info{namespace=~"$workload",', "tokenplace_build_info{"
+    )
+    with pytest.raises(SystemExit, match="namespace scope"):
+        validator._validate_semantics(changed)
+
+
+def test_cross_application_overview_rejects_cpu_without_identity_matched_guard(dashboards):
+    staging, _ = dashboards
+    changed = copy.deepcopy(staging)
+    target = panel(changed, "CPU throttling")["targets"][0]
+    expression = target["expr"]
+    guard_start = expression.rindex("count by (namespace) (((")
+    guard_end = expression.index(" == count by (namespace)", guard_start)
+    matched_guard = expression[guard_start:guard_end]
+    numerator_end = matched_guard.index(") and on (namespace, pod, container)")
+    # Restore the former count-only guard: its population size can be satisfied by
+    # stale CFS identities that are not members of the current observed population.
+    count_only_guard = matched_guard[:numerator_end] + ")"
+    target["expr"] = expression.replace(matched_guard, count_only_guard, 1)
+    with pytest.raises(SystemExit, match="complete observed"):
+        validator._validate_semantics(changed)
+
+
+@pytest.mark.parametrize("metric", ["dspace_build_info", "tokenplace_build_info"])
+def test_cross_application_overview_rejects_broadened_profile_branch(dashboards, metric):
+    staging, _ = dashboards
+    changed = copy.deepcopy(staging)
+    target = panel(changed, "Application build identity")["targets"][0]
+    selector = validator._metric_matchers(target["expr"], metric)[0]
+    target["expr"] = target["expr"].replace(
+        selector, selector.replace('environment=~"$environment"', 'environment=~".*"'), 1
+    )
+    with pytest.raises(SystemExit, match="exact profile scope"):
+        validator._validate_semantics(changed)
+
+
+def _overview_expression(document, title, target=0, workload=".*"):
+    expression = panel(document, title)["targets"][target]["expr"]
+    # rate() needs at least two samples in its range; keep the 1m-spaced fixture
+    # deterministic by evaluating the dashboard queries over a wider window.
+    return (
+        expression.replace("$workload", workload)
+        .replace("$__rate_interval", "5m")
+        .replace("$environment", "staging")
+        .replace("$cluster", "sugarkube-int")
+    )
+
+
+def test_actual_overview_promql_preserves_identity_coverage_and_serving_state(dashboards, tmp_path):
+    """Evaluate the dashboard's PromQL, including absent/partial and rollout cases."""
+    assert shutil.which("promtool"), "promtool is required for dashboard PromQL tests"
+    staging, _ = dashboards
+
+    def series(metric, labels, values="1x10"):
+        rendered = ",".join(f'{key}="{value}"' for key, value in labels.items())
+        return {"series": f"{metric}{{{rendered}}}", "values": values}
+
+    inputs = []
+    # Two deployments and duplicate scrapes prove identity preservation and deduplication.
+    for metric, values in (
+        ("kube_deployment_spec_replicas", {"web": 2, "worker": 1}),
+        ("kube_deployment_status_replicas_ready", {"web": 2, "worker": 1}),
+    ):
+        for deployment, value in values.items():
+            inputs += [
+                series(
+                    metric,
+                    {"namespace": "dspace", "deployment": deployment, "job": job},
+                    f"{value}x10",
+                )
+                for job in ("ksm-a", "ksm-b")
+            ]
+    # Serving placement: two nodes, shared replicas, plus excluded pending/unready/terminating pods.
+    pods = (
+        ("web-old", "node-a", 1, "Running", False),
+        ("web-new", "node-b", 1, "Running", False),
+        ("worker", "node-a", 1, "Running", False),
+        ("pending", "node-c", 0, "Pending", False),
+        ("terminating", "node-c", 1, "Running", True),
+    )
+    for pod_name, node, ready, phase, terminating in pods:
+        base = {"namespace": "dspace", "pod": pod_name}
+        inputs.append(series("kube_pod_info", {**base, "node": node}))
+        inputs.append(series("kube_pod_status_ready", {**base, "condition": "true"}, f"{ready}x10"))
+        inputs.append(series("kube_pod_status_phase", {**base, "phase": phase}))
+        if terminating:
+            inputs.append(series("kube_pod_deletion_timestamp", base))
+    token_base = {"namespace": "tokenplace", "pod": "relay"}
+    inputs += [
+        series("kube_pod_info", {**token_base, "node": "node-a"}),
+        series("kube_pod_status_ready", {**token_base, "condition": "true"}),
+        series("kube_pod_status_phase", {**token_base, "phase": "Running"}),
+    ]
+    # Memory populations cover complete, absent, mixed, zero, duplicate, and rollout cases.
+    memory_cases = {
+        "full": (("a", 10, 100), ("b", 20, 200)),
+        "unlimited": (("a", 11, None),),
+        "mixed": (("a", 12, 120), ("b", 13, None)),
+        "zero": (("a", 14, 0),),
+        "rollout": (("old", 15, 150), ("new", 16, 160)),
+    }
+    for namespace, containers in memory_cases.items():
+        for index, (container, usage, limit) in enumerate(containers):
+            labels = {"namespace": namespace, "pod": f"pod-{index}", "container": container}
+            for job in ("cadvisor-a", "cadvisor-b") if namespace == "full" else ("cadvisor-a",):
+                inputs.append(
+                    series(
+                        "container_memory_working_set_bytes",
+                        {**labels, "image": "runtime", "job": job},
+                        f"{usage}x10",
+                    )
+                )
+            if limit is not None:
+                inputs.append(
+                    series(
+                        "kube_pod_container_resource_limits",
+                        {**labels, "resource": "memory", "unit": "byte"},
+                        f"{limit}x10",
+                    )
+                )
+    # CPU: complete zero/nonzero controls, missing either side, a zero denominator,
+    # and same-namespace mixed support. Working set defines the observed population.
+    cpu_cases = {
+        "cpu-full": (("app", True, True, 0, 60),),
+        "cpu-nonzero": (("app", True, True, 6, 60),),
+        "cpu-no-num": (("app", False, True, 0, 60),),
+        "cpu-no-den": (("app", True, False, 0, 60),),
+        "cpu-zero-den": (("app", True, True, 0, 0),),
+        "cpu-mixed": (
+            ("supported", True, True, 0, 60),
+            ("unsupported", False, False, 0, 0),
+        ),
+        "cpu-rollout": (
+            ("supported", True, True, 0, 60),
+            ("unsupported", False, False, 0, 0),
+        ),
+        "cpu-stale-control": (("current", True, True, 6, 60),),
+    }
+    for namespace, containers in cpu_cases.items():
+        for container, has_num, has_den, numerator_step, denominator_step in containers:
+            labels = {
+                "namespace": namespace,
+                "pod": "pod",
+                "container": container,
+                "image": "runtime",
+            }
+            inputs.append(series("container_memory_working_set_bytes", labels, "10x10"))
+            if has_num:
+                inputs.append(
+                    series(
+                        "container_cpu_cfs_throttled_periods_total",
+                        labels,
+                        f"0+{numerator_step}x10",
+                    )
+                )
+                if namespace == "cpu-full":
+                    inputs.append(
+                        series(
+                            "container_cpu_cfs_throttled_periods_total",
+                            {**labels, "job": "duplicate"},
+                            "0+0x10",
+                        )
+                    )
+            if has_den:
+                inputs.append(
+                    series("container_cpu_cfs_periods_total", labels, f"0+{denominator_step}x10")
+                )
+                if namespace == "cpu-full":
+                    inputs.append(
+                        series(
+                            "container_cpu_cfs_periods_total",
+                            {**labels, "job": "duplicate"},
+                            f"0+{denominator_step}x10",
+                        )
+                    )
+    # Old rollout CFS samples remain rate-eligible after their working-set identity
+    # disappears. They must neither fill a current coverage gap nor dilute a fully
+    # covered current container's nonzero ratio.
+    for namespace in ("cpu-rollout", "cpu-stale-control"):
+        labels = {
+            "namespace": namespace,
+            "pod": "old-pod",
+            "container": "old",
+            "image": "runtime",
+        }
+        inputs += [
+            series("container_memory_working_set_bytes", labels, "10x4 stale _x5"),
+            series("container_cpu_cfs_throttled_periods_total", labels, "0+0x4 stale _x5"),
+            series("container_cpu_cfs_periods_total", labels, "0+60x4 stale _x5"),
+        ]
+
+    # Configured coordinates retain simultaneous old/new image_spec values, not status image.
+    for pod_name, spec, status in (
+        ("web-old", "repo/app:v1", "repo/app@sha256:old"),
+        ("web-new", "repo/app:v2", "repo/app@sha256:new"),
+    ):
+        inputs.append(
+            series(
+                "kube_pod_container_info",
+                {
+                    "namespace": "dspace",
+                    "pod": pod_name,
+                    "container": "app",
+                    "image_spec": spec,
+                    "image": status,
+                },
+            )
+        )
+    inputs += [
+        series(
+            "dspace_build_info",
+            {
+                "namespace": "dspace",
+                "pod": "web",
+                "environment": "staging",
+                "version": "1",
+                "revision": "abc",
+            },
+        ),
+        series(
+            "dspace_build_info",
+            {
+                "namespace": "other",
+                "pod": "leak",
+                "environment": "staging",
+                "version": "9",
+                "revision": "bad",
+            },
+        ),
+        series(
+            "tokenplace_build_info",
+            {
+                "namespace": "tokenplace",
+                "pod": "relay",
+                "environment": "prod",
+                "cluster": "sugarkube-int",
+                "app": "tokenplace",
+                "release": "tokenplace",
+                "version": "2",
+                "revision": "wrong-profile",
+            },
+        ),
+    ]
+
+    tests = []
+
+    def query(name, expression, samples):
+        tests.append(
+            {
+                "expr": expression,
+                "eval_time": "5m",
+                "exp_samples": [{"labels": labels, "value": value} for labels, value in samples],
+            }
+        )
+
+    query(
+        "replicas",
+        _overview_expression(staging, "Desired versus ready replicas"),
+        [
+            ('{deployment="web", namespace="dspace"}', 2),
+            ('{deployment="worker", namespace="dspace"}', 1),
+        ],
+    )
+    query(
+        "ready replicas",
+        _overview_expression(staging, "Desired versus ready replicas", 1),
+        [
+            ('{deployment="web", namespace="dspace"}', 2),
+            ('{deployment="worker", namespace="dspace"}', 1),
+        ],
+    )
+    query(
+        "placement",
+        _overview_expression(staging, "Serving workload node placement"),
+        [('{namespace="dspace"}', 2), ('{namespace="tokenplace"}', 1)],
+    )
+    query(
+        "memory usage",
+        _overview_expression(staging, "Memory working set versus configured limit"),
+        [
+            ('{namespace="cpu-full"}', 10),
+            ('{namespace="cpu-mixed"}', 20),
+            ('{namespace="cpu-no-den"}', 10),
+            ('{namespace="cpu-no-num"}', 10),
+            ('{namespace="cpu-nonzero"}', 10),
+            ('{namespace="cpu-rollout"}', 20),
+            ('{namespace="cpu-stale-control"}', 10),
+            ('{namespace="cpu-zero-den"}', 10),
+            ('{namespace="full"}', 30),
+            ('{namespace="mixed"}', 25),
+            ('{namespace="rollout"}', 31),
+            ('{namespace="unlimited"}', 11),
+            ('{namespace="zero"}', 14),
+        ],
+    )
+    query(
+        "complete memory limits",
+        _overview_expression(staging, "Memory working set versus configured limit", 1),
+        [('{namespace="full"}', 300), ('{namespace="rollout"}', 310)],
+    )
+    query(
+        "cpu coverage",
+        _overview_expression(staging, "CPU throttling"),
+        [
+            ('{namespace="cpu-full"}', 0),
+            ('{namespace="cpu-nonzero"}', 0.1),
+            ('{namespace="cpu-stale-control"}', 0.1),
+        ],
+    )
+    query(
+        "image specs",
+        _overview_expression(staging, "Deployment image coordinates"),
+        [
+            ('{container="app", image_spec="repo/app:v1", namespace="dspace", pod="web-old"}', 1),
+            ('{container="app", image_spec="repo/app:v2", namespace="dspace", pod="web-new"}', 1),
+        ],
+    )
+    query(
+        "build scope and absent Daniel identity",
+        _overview_expression(
+            staging, "Application build identity", workload="dspace|tokenplace|danielsmith"
+        ),
+        [('{namespace="dspace", pod="web", revision="abc", version="1"}', 1)],
+    )
+    fixture = tmp_path / "overview-promql.yaml"
+    fixture.write_text(
+        json.dumps(
+            {
+                "evaluation_interval": "1m",
+                "tests": [
+                    {
+                        "name": "actual overview expressions",
+                        "interval": "1m",
+                        "input_series": inputs,
+                        "promql_expr_test": tests,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    completed = subprocess.run(
+        ["promtool", "test", "rules", str(fixture)], capture_output=True, text=True, check=False
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr

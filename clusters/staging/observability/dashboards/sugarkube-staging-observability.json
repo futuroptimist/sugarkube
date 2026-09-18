@@ -85,6 +85,19 @@
           "text": "All",
           "value": "$__all"
         }
+      },
+      {
+        "name": "workload",
+        "label": "Workload",
+        "type": "custom",
+        "query": "dspace,tokenplace,danielsmith",
+        "includeAll": true,
+        "multi": true,
+        "allValue": "dspace|tokenplace|danielsmith",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
       }
     ]
   },
@@ -3564,6 +3577,277 @@
           "refId": "A",
           "expr": "max by (state) (label_replace(((label_replace((danielsmith_visitor_journey_monitoring_expected{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"} or danielsmith_visitor_journey_monitoring_expected{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1) unless on (application, environment, name, cluster) label_replace((danielsmith_visitor_journey_freshness_timestamp_seconds{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"} or danielsmith_visitor_journey_freshness_timestamp_seconds{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\")) or ((label_replace((danielsmith_visitor_journey_monitoring_expected{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"} or danielsmith_visitor_journey_monitoring_expected{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1) and on (application, environment, name, cluster) (time() - label_replace((danielsmith_visitor_journey_freshness_timestamp_seconds{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"} or danielsmith_visitor_journey_freshness_timestamp_seconds{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") > 1020)), \"state\", \"stale\", \"\", \"\") or ((label_replace((danielsmith_visitor_journey_state{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",state=~\"unavailable|stale\",cluster=~\"$cluster\"} or danielsmith_visitor_journey_state{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",state=~\"unavailable|stale\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\")) and on (application, environment, name, cluster) (label_replace((danielsmith_visitor_journey_monitoring_expected{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=~\"$cluster\"} or danielsmith_visitor_journey_monitoring_expected{application=\"danielsmith\",environment=~\"$environment\",name=~\"danielsmith-visitor-journey-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1)))",
           "legendFormat": "{{state}}"
+        }
+      ]
+    },
+    {
+      "id": 86,
+      "title": "Cross-application resource, placement and release overview",
+      "type": "row",
+      "description": "Bounded Kubernetes resource and release coordinates for the selected application namespaces in this dashboard profile. Detailed DSPACE release integrity and token.place diagnostics remain in their specialized rows and linked runbooks.",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 272
+      }
+    },
+    {
+      "id": 87,
+      "title": "Desired versus ready replicas",
+      "type": "timeseries",
+      "description": "Deployment-level desired and ready replica counts, kept separate by application namespace and Deployment. max by removes duplicate scrape series while preserving rolling-update workload identities.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 273
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (namespace, deployment) (kube_deployment_spec_replicas{namespace=~\"$workload\"})",
+          "legendFormat": "{{namespace}} {{deployment}} desired"
+        },
+        {
+          "refId": "B",
+          "expr": "max by (namespace, deployment) (kube_deployment_status_replicas_ready{namespace=~\"$workload\"})",
+          "legendFormat": "{{namespace}} {{deployment}} ready"
+        }
+      ]
+    },
+    {
+      "id": 88,
+      "title": "Serving workload node placement",
+      "type": "stat",
+      "description": "Distinct nodes hosting Ready, Running, non-terminating pods. Scheduled, unready, and terminating pods are excluded; multiple replicas on one node count once.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 273
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count by (namespace) (count by (namespace, node) (kube_pod_info{namespace=~\"$workload\",node!=\"\"} and on (namespace, pod) (kube_pod_status_ready{namespace=~\"$workload\",condition=\"true\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=~\"$workload\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=~\"$workload\"})))",
+          "legendFormat": "{{namespace}} serving nodes",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 89,
+      "title": "Memory working set versus configured limit",
+      "type": "timeseries",
+      "description": "Working set for every observed application container and the summed configured limit only when that same container population has complete, positive memory-limit coverage. Empty and POD infrastructure containers are excluded; absent, zero, or partial limits leave only observable working-set data and report the limit as NO DATA.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 281
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (namespace) (max by (namespace, pod, container) (container_memory_working_set_bytes{namespace=~\"$workload\",pod!=\"\",container!=\"\",container!=\"POD\",image!=\"\"}))",
+          "legendFormat": "{{namespace}} working set"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (namespace) ((max by (namespace, pod, container) (kube_pod_container_resource_limits{namespace=~\"$workload\",pod!=\"\",container!=\"\",container!=\"POD\",resource=\"memory\",unit=\"byte\"} > 0) and on (namespace, pod, container) max by (namespace, pod, container) (container_memory_working_set_bytes{namespace=~\"$workload\",pod!=\"\",container!=\"\",container!=\"POD\",image!=\"\"}))) and on (namespace) (count by (namespace) ((max by (namespace, pod, container) (kube_pod_container_resource_limits{namespace=~\"$workload\",pod!=\"\",container!=\"\",container!=\"POD\",resource=\"memory\",unit=\"byte\"} > 0) and on (namespace, pod, container) max by (namespace, pod, container) (container_memory_working_set_bytes{namespace=~\"$workload\",pod!=\"\",container!=\"\",container!=\"POD\",image!=\"\"}))) == count by (namespace) (max by (namespace, pod, container) (container_memory_working_set_bytes{namespace=~\"$workload\",pod!=\"\",container!=\"\",container!=\"POD\",image!=\"\"})))",
+          "legendFormat": "{{namespace}} configured limit"
+        }
+      ]
+    },
+    {
+      "id": 90,
+      "title": "CPU throttling",
+      "type": "timeseries",
+      "description": "Ratio of throttled to total CFS periods only when every application container observed in the working-set cohort has both metrics and a positive period denominator. Empty and POD infrastructure containers are excluded; partial or unsupported metric coverage, missing metrics, and zero denominators remain NO DATA.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 281
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "NO DATA",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(sum by (namespace) (((max by (namespace, pod, container) (rate(container_cpu_cfs_throttled_periods_total{namespace=~\"$workload\",pod!=\"\",container!=\"\",container!=\"POD\",image!=\"\"}[$__rate_interval])) and on (namespace, pod, container) (max by (namespace, pod, container) (rate(container_cpu_cfs_periods_total{namespace=~\"$workload\",pod!=\"\",container!=\"\",container!=\"POD\",image!=\"\"}[$__rate_interval])) > 0)) and on (namespace, pod, container) max by (namespace, pod, container) (container_memory_working_set_bytes{namespace=~\"$workload\",pod!=\"\",container!=\"\",container!=\"POD\",image!=\"\"}))) / sum by (namespace) ((((max by (namespace, pod, container) (rate(container_cpu_cfs_periods_total{namespace=~\"$workload\",pod!=\"\",container!=\"\",container!=\"POD\",image!=\"\"}[$__rate_interval])) > 0) and on (namespace, pod, container) max by (namespace, pod, container) (rate(container_cpu_cfs_throttled_periods_total{namespace=~\"$workload\",pod!=\"\",container!=\"\",container!=\"POD\",image!=\"\"}[$__rate_interval]))) and on (namespace, pod, container) max by (namespace, pod, container) (container_memory_working_set_bytes{namespace=~\"$workload\",pod!=\"\",container!=\"\",container!=\"POD\",image!=\"\"})))) and on (namespace) (count by (namespace) (((max by (namespace, pod, container) (rate(container_cpu_cfs_throttled_periods_total{namespace=~\"$workload\",pod!=\"\",container!=\"\",container!=\"POD\",image!=\"\"}[$__rate_interval])) and on (namespace, pod, container) (max by (namespace, pod, container) (rate(container_cpu_cfs_periods_total{namespace=~\"$workload\",pod!=\"\",container!=\"\",container!=\"POD\",image!=\"\"}[$__rate_interval])) > 0)) and on (namespace, pod, container) max by (namespace, pod, container) (container_memory_working_set_bytes{namespace=~\"$workload\",pod!=\"\",container!=\"\",container!=\"POD\",image!=\"\"}))) == count by (namespace) (max by (namespace, pod, container) (container_memory_working_set_bytes{namespace=~\"$workload\",pod!=\"\",container!=\"\",container!=\"POD\",image!=\"\"})))",
+          "legendFormat": "{{namespace}} throttled periods"
+        }
+      ]
+    },
+    {
+      "id": 91,
+      "title": "Deployment image coordinates",
+      "type": "table",
+      "description": "Configured image_spec coordinates declared for Ready, Running, non-terminating serving containers. image_spec is specification data distinct from the runtime status image label; these coordinates are not runtime/build proof, so use specialized release-integrity evidence for that claim.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 289
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (namespace, pod, container, image_spec) (kube_pod_container_info{namespace=~\"$workload\",image_spec!=\"\"} and on (namespace, pod) (kube_pod_status_ready{namespace=~\"$workload\",condition=\"true\"} == 1 and on (namespace, pod) kube_pod_status_phase{namespace=~\"$workload\",phase=\"Running\"} == 1 unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=~\"$workload\"}))",
+          "legendFormat": "{{namespace}} {{pod}} {{container}} {{image_spec}}",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value": true,
+              "__name__": true
+            },
+            "indexByName": {
+              "namespace": 0,
+              "pod": 1,
+              "container": 2,
+              "image_spec": 3
+            },
+            "renameByName": {
+              "namespace": "Application",
+              "pod": "Pod",
+              "container": "Container",
+              "image_spec": "Configured image coordinate"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 92,
+      "title": "Application build identity",
+      "type": "table",
+      "description": "Application-reported version and revision when available. Missing producers, including unsupported applications, remain NO DATA; see the DSPACE release-integrity and token.place diagnostic rows for detailed evidence.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 289
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (namespace, pod, version, revision) (dspace_build_info{namespace=~\"$workload\",environment=~\"$environment\"}) or max by (namespace, pod, version, revision) (tokenplace_build_info{namespace=~\"$workload\",app=\"tokenplace\",environment=~\"$environment\",release=\"tokenplace\",cluster=~\"$cluster\"})",
+          "legendFormat": "{{namespace}} {{pod}} {{version}} {{revision}}",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value": true,
+              "__name__": true
+            },
+            "indexByName": {
+              "namespace": 0,
+              "pod": 1,
+              "version": 2,
+              "revision": 3
+            },
+            "renameByName": {
+              "namespace": "Application",
+              "pod": "Pod",
+              "version": "Version",
+              "revision": "Revision"
+            }
+          }
         }
       ]
     }

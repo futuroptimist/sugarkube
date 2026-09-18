@@ -319,6 +319,73 @@ DANIEL_VISITOR_LAYOUT_CONTRACT = {
     ),
 }
 
+OVERVIEW_PANEL_CONTRACT = {
+    "Desired versus ready replicas": {
+        "metrics": {"kube_deployment_spec_replicas", "kube_deployment_status_replicas_ready"},
+        "targets": 2,
+    },
+    "Serving workload node placement": {
+        "metrics": {
+            "kube_pod_info",
+            "kube_pod_status_ready",
+            "kube_pod_status_phase",
+            "kube_pod_deletion_timestamp",
+        },
+        "targets": 1,
+    },
+    "Memory working set versus configured limit": {
+        "metrics": {"container_memory_working_set_bytes", "kube_pod_container_resource_limits"},
+        "targets": 2,
+    },
+    "CPU throttling": {
+        "metrics": {
+            "container_memory_working_set_bytes",
+            "container_cpu_cfs_throttled_periods_total",
+            "container_cpu_cfs_periods_total",
+        },
+        "targets": 1,
+    },
+    "Deployment image coordinates": {
+        "metrics": {
+            "kube_pod_container_info",
+            "kube_pod_status_ready",
+            "kube_pod_status_phase",
+            "kube_pod_deletion_timestamp",
+        },
+        "targets": 1,
+    },
+    "Application build identity": {
+        "metrics": {"dspace_build_info", "tokenplace_build_info"},
+        "targets": 1,
+    },
+}
+
+
+def _metric_selectors_are_workload_scoped(expression: str, metrics: set[str]) -> bool:
+    """Return whether every required metric selector carries the workload matcher."""
+    for metric in metrics:
+        selectors = re.finditer(
+            rf"(?<![a-zA-Z0-9_:]){re.escape(metric)}(?![a-zA-Z0-9_:])" r"(?:\s*\{([^{}]*)\})?",
+            expression,
+        )
+        if any(
+            match.group(1) is None or 'namespace=~"$workload"' not in match.group(1)
+            for match in selectors
+        ):
+            return False
+    return True
+
+
+def _metric_matchers(expression: str, metric: str) -> list[str]:
+    """Return the matcher text for every selector of one metric."""
+    return [
+        match.group(1) or ""
+        for match in re.finditer(
+            rf"(?<![a-zA-Z0-9_:]){re.escape(metric)}(?![a-zA-Z0-9_:])" r"(?:\s*\{([^{}]*)\})?",
+            expression,
+        )
+    ]
+
 
 def load_dashboard(path: Path) -> dict:
     try:
@@ -419,10 +486,10 @@ def _expected_dashboard(dashboard: dict) -> dict:
 
 
 def _validate_grid(items: list[dict]) -> None:
-    if len(items) != 85 or sum(panel.get("type") == "row" for panel in items) != 14:
-        raise SystemExit("ERROR: canonical dashboard must contain exactly 85 objects and 14 rows.")
+    if len(items) != 92 or sum(panel.get("type") == "row" for panel in items) != 15:
+        raise SystemExit("ERROR: canonical dashboard must contain exactly 92 objects and 15 rows.")
     ids = [panel.get("id") for panel in items]
-    if ids != list(range(1, 86)):
+    if ids != list(range(1, 93)):
         raise SystemExit(
             "ERROR: canonical dashboard panel IDs must be stable consecutive integers."
         )
@@ -477,8 +544,8 @@ def _validate_semantics(dashboard: dict) -> None:
     ):
         raise SystemExit("ERROR: every data panel must explicitly preserve NO DATA.")
     tables = [panel for panel in items if panel.get("type") == "table"]
-    if len(tables) != 10:
-        raise SystemExit("ERROR: canonical dashboard must contain exactly ten tables.")
+    if len(tables) != 12:
+        raise SystemExit("ERROR: canonical dashboard must contain exactly twelve tables.")
     for table in tables:
         targets = table.get("targets", [])
         transforms = table.get("transformations", [])
@@ -505,6 +572,7 @@ def _validate_semantics(dashboard: dict) -> None:
         "cluster",
         "app",
         "route",
+        "workload",
     ]:
         raise SystemExit("ERROR: dashboard variables must use the canonical shape.")
     for variable in variables[:2]:
@@ -521,6 +589,15 @@ def _validate_semantics(dashboard: dict) -> None:
         for variable in variables[2:4]
     ):
         raise SystemExit("ERROR: app and route variables must expose All = .*.")
+    workload = variables[4]
+    if (
+        workload.get("type") != "custom"
+        or workload.get("query") != "dspace,tokenplace,danielsmith"
+        or workload.get("includeAll") is not True
+        or workload.get("multi") is not True
+        or workload.get("allValue") != "dspace|tokenplace|danielsmith"
+    ):
+        raise SystemExit("ERROR: workload selector must contain exactly the three supported apps.")
     expressions = [
         target["expr"]
         for panel in items
@@ -528,6 +605,126 @@ def _validate_semantics(dashboard: dict) -> None:
         if isinstance(target.get("expr"), str)
     ]
     expression_text = "\n".join(expressions)
+
+    overview_row = panel_named(
+        dashboard, "Cross-application resource, placement and release overview"
+    )
+    if overview_row.get("type") != "row":
+        raise SystemExit("ERROR: cross-application overview must be a dedicated row.")
+    for title, contract in OVERVIEW_PANEL_CONTRACT.items():
+        overview_panel = panel_named(dashboard, title)
+        targets = overview_panel.get("targets", [])
+        overview_expressions = [target.get("expr", "") for target in targets]
+        combined = "\n".join(overview_expressions)
+        if len(targets) != contract["targets"] or not contract["metrics"] <= set(
+            re.findall(r"[a-zA-Z_:][a-zA-Z0-9_:]*", combined)
+        ):
+            raise SystemExit(f"ERROR: {title} does not contain its required metric contract.")
+        if any(
+            not _metric_selectors_are_workload_scoped(expression, contract["metrics"])
+            for expression in overview_expressions
+        ):
+            raise SystemExit(f"ERROR: {title} must use the dedicated workload namespace scope.")
+        if any("vector(0)" in expression for expression in overview_expressions):
+            raise SystemExit(f"ERROR: {title} must preserve unsupported or missing data.")
+    for title in ("Serving workload node placement", "Deployment image coordinates"):
+        expression = panel_expression(dashboard, title)
+        if not all(
+            fragment in expression
+            for fragment in (
+                'kube_pod_status_ready{namespace=~"$workload",condition="true"} == 1',
+                'kube_pod_status_phase{namespace=~"$workload",phase="Running"} == 1',
+                'unless on (namespace, pod) kube_pod_deletion_timestamp{namespace=~"$workload"}',
+            )
+        ):
+            raise SystemExit(
+                f"ERROR: {title} must exclude unready, non-Running, and terminating pods."
+            )
+    serving_target = panel_named(dashboard, "Serving workload node placement")["targets"][0]
+    if serving_target.get("instant") is not True or serving_target.get("range") is not False:
+        raise SystemExit("ERROR: serving-node placement must be an instant-only current value.")
+    placement = panel_expression(dashboard, "Serving workload node placement")
+    if "count by (namespace) (count by (namespace, node)" not in placement:
+        raise SystemExit(
+            "ERROR: placement must count distinct serving nodes without pod double counting."
+        )
+    replicas = panel_named(dashboard, "Desired versus ready replicas")
+    if any(
+        not target["expr"].startswith("max by (namespace, deployment)")
+        or "sum by" in target["expr"]
+        or "{{deployment}}" not in target.get("legendFormat", "")
+        for target in replicas["targets"]
+    ):
+        raise SystemExit("ERROR: replica overview must preserve namespace and deployment identity.")
+    memory = panel_named(dashboard, "Memory working set versus configured limit")
+    if any(
+        "max by (namespace, pod, container)" not in target["expr"] for target in memory["targets"]
+    ):
+        raise SystemExit("ERROR: memory overview must deduplicate container scrape series.")
+    memory_text = "\n".join(target["expr"] for target in memory["targets"])
+    if any(
+        fragment not in memory_text
+        for fragment in (
+            'pod!=""',
+            'container!=""',
+            'container!="POD"',
+            'resource="memory"',
+            "> 0",
+            "and on (namespace, pod, container)",
+            "count by (namespace)",
+            "== count by (namespace)",
+        )
+    ):
+        raise SystemExit("ERROR: memory limits require complete positive container coverage.")
+    cpu = panel_expression(dashboard, "CPU throttling")
+    if (
+        any(
+            fragment not in cpu
+            for fragment in (
+                'pod!=""',
+                'container!=""',
+                'container!="POD"',
+                "and on (namespace, pod, container)",
+                "> 0",
+                "count by (namespace)",
+                "== count by (namespace)",
+            )
+        )
+        or cpu.count("container_memory_working_set_bytes") < 4
+        or cpu.count(
+            "and on (namespace, pod, container) max by (namespace, pod, container) "
+            "(container_memory_working_set_bytes"
+        )
+        < 3
+        or cpu.count("== count by (namespace)") != 1
+    ):
+        raise SystemExit(
+            "ERROR: CPU throttling requires complete observed, matched, positive container coverage."
+        )
+    image_panel = panel_named(dashboard, "Deployment image coordinates")
+    image_expression = panel_expression(dashboard, "Deployment image coordinates")
+    if (
+        "not runtime/build proof" not in image_panel.get("description", "")
+        or "image_spec" not in image_expression
+        or "max by (namespace, pod, container, image_spec)" not in image_expression
+        or "{{image_spec}}" not in image_panel["targets"][0].get("legendFormat", "")
+        or image_panel["transformations"][0]["options"]["renameByName"].get("image_spec")
+        != "Configured image coordinate"
+    ):
+        raise SystemExit("ERROR: image coordinates must disclaim runtime/build proof.")
+    build_expression = panel_expression(dashboard, "Application build identity")
+    dspace_matchers = _metric_matchers(build_expression, "dspace_build_info")
+    token_matchers = _metric_matchers(build_expression, "tokenplace_build_info")
+    if (
+        len(dspace_matchers) != 1
+        or 'environment=~"$environment"' not in dspace_matchers[0]
+        or len(token_matchers) != 1
+        or 'environment=~"$environment"' not in token_matchers[0]
+        or 'cluster=~"$cluster"' not in token_matchers[0]
+        or 'app="tokenplace"' not in token_matchers[0]
+        or 'release="tokenplace"' not in token_matchers[0]
+    ):
+        raise SystemExit("ERROR: build identity selectors must retain exact profile scope.")
     if "kube_state_metrics_build_info" in expression_text:
         raise SystemExit("ERROR: unavailable kube-state-metrics build identity is forbidden.")
     if re.search(
