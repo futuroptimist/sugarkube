@@ -18,7 +18,7 @@ def contract():
 
 def test_contract_is_bounded_complete_and_explicitly_unmeasured():
     value = contract()
-    assert validator.validate(value) == 7
+    assert validator.validate(value) == 8
     assert {sli["signalType"] for sli in value["slis"]} == validator.SIGNALS
     assert all(sli["objective"] is None for sli in value["slis"])
     assert all(sli["measurementState"] == "unmeasured" for sli in value["slis"])
@@ -40,6 +40,13 @@ def test_contract_is_bounded_complete_and_explicitly_unmeasured():
         (lambda sli, doc: sli.update(denominator="sum(metric) or vector(0)"), "zero fallback"),
         (lambda sli, doc: doc.update(retention="91d"), "90d maximum"),
         (lambda sli, doc: sli.update(observationWindow="91d"), "supported retention"),
+        (lambda sli, doc: sli.update(application=""), "non-empty string"),
+        (lambda sli, doc: sli.update(exclusions=[""]), "non-empty string list"),
+        (lambda sli, doc: sli.update(observationWindow="60minutes"), "invalid duration"),
+        (
+            lambda sli, doc: sli.update(numerator="sum(metric) or on(environment) 0 * sum(metric)"),
+            "eligible-traffic predicate",
+        ),
     ],
 )
 def test_validator_rejects_unsafe_or_fabricated_contracts(mutation, message):
@@ -60,6 +67,8 @@ def test_recordings_are_non_alerting_reset_aware_and_guarded_by_complete_fresh_h
     assert "instance" not in expressions and "pod" not in expressions
     assert "vector(0)" not in expressions and "probe_success" not in expressions
     assert "count_over_time(" in expressions and ">= 120" in expressions
+    assert "resets(" in expressions
+    assert any(rule["record"] == "sugarkube:sli_observation_state" for rule in rules)
     assert "timestamp(" in expressions and "time() - 60" in expressions
     assert "> 0" in expressions  # no eligible traffic remains absent rather than successful
 
@@ -72,17 +81,28 @@ def test_success_recordings_have_only_an_eligible_traffic_zero_fallback():
     ]
     assert len(success_rules) == 2
     for rule in success_rules:
-        assert "0 * sum by (environment) (increase(" in rule["expr"]
+        assert "0 * (sum by (environment) (increase(" in rule["expr"]
         assert "> 0" in rule["expr"]
+
+
+def test_observation_states_are_exclusive_and_contract_labelled():
+    document = yaml.safe_load(RULES.read_text(encoding="utf-8"))
+    states = [rule for rule in document["groups"][0]["rules"] if rule["record"].endswith("observation_state")]
+    assert {rule["labels"]["observation_state"] for rule in states} == {
+        "successful_eligible_traffic", "failed_eligible_traffic", "no_eligible_traffic",
+        "missing_or_stale_telemetry", "reset_or_incomplete_history",
+        "intentionally_disabled_monitoring",
+    }
+    assert all({"application", "sli", "signal_type", "observation_state"} <= rule["labels"].keys() for rule in states)
 
 
 def test_dashboard_keeps_signal_classes_separate_and_budget_unmeasured():
     path = ROOT / "platform/observability/dashboards/sugarkube-observability.template.json"
     dashboard = json.loads(path.read_text())
     panels = {panel["title"]: panel for panel in dashboard["panels"]}
-    success = panels["Actual-request success (1h observation)"]
+    success = panels["Application SLI observation state"]
     expression = success["targets"][0]["expr"]
-    assert "sli_successful_events" in expression and "probe_success" not in expression
+    assert "sli_observation_state" in expression and "probe_success" not in expression
     assert success["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
     budget = panels["Error budget and burn"]
     assert "UNMEASURED — NO DATA" in budget["options"]["content"]

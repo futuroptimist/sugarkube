@@ -3867,9 +3867,9 @@
     },
     {
       "id": 94,
-      "title": "Actual-request success (1h observation)",
+      "title": "Application SLI observation state",
       "type": "stat",
-      "description": "Observed real-request success only. Positive eligible traffic yields a ratio; no eligible traffic, missing/stale telemetry, or incomplete history remains NO DATA and must be diagnosed separately. Replica series are aggregated by recording rules; probe_success is intentionally excluded.",
+      "description": "Exactly one contract state per application, environment, SLI, and signal type. Counts and ratios are exposed only behind the same full-observation gate.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -3882,7 +3882,7 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "percentunit",
+          "unit": "short",
           "noValue": "NO DATA",
           "min": 0,
           "max": 1
@@ -3893,8 +3893,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (application, environment) (sugarkube:sli_successful_events:increase1h{environment=~\"$environment\"}) / sum by (application, environment) (sugarkube:sli_eligible_events:increase1h{environment=~\"$environment\"}) and on (application, environment) sum by (application, environment) (sugarkube:sli_eligible_events:increase1h{environment=~\"$environment\"}) > 0",
-          "legendFormat": "{{application}} {{environment}} actual requests",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sugarkube:sli_observation_state{environment=~\"$environment\"}",
+          "legendFormat": "{{application}} {{sli}} {{signal_type}}: {{observation_state}}",
           "instant": true,
           "range": false
         }
@@ -3930,14 +3934,22 @@
           "expr": "sugarkube:sli_eligible_events:increase1h{environment=~\"$environment\"}",
           "legendFormat": "{{application}} eligible",
           "instant": true,
-          "range": false
+          "range": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         },
         {
           "refId": "B",
           "expr": "sugarkube:sli_eligible_events:increase1h{environment=~\"$environment\"} - sugarkube:sli_successful_events:increase1h{environment=~\"$environment\"}",
           "legendFormat": "{{application}} failed",
           "instant": true,
-          "range": false
+          "range": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ]
     },

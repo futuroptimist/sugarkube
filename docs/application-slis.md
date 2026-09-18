@@ -5,17 +5,19 @@ DSPACE, and danielsmith.io. It deliberately separates public HTTP probe health, 
 completion, and actual request success. A successful probe says nothing about all real-user
 requests, and a synthetic result is not counted as production traffic.
 
-No reviewed numerical objective exists in this repository, so every entry is `unmeasured`.
+No reviewed numerical objective exists in this repository, so every entry is `unmeasured`; the encrypted-completion synthetic is additionally and explicitly disabled.
 Consequently the shared dashboard says **UNMEASURED — NO DATA** for budget and burn rather than
 inventing an uptime promise. This change adds recording rules only; it adds no alert, route, page,
 probe activation, or producer.
 
+The existing `encrypted_completion_monitoring_enabled` and `encrypted_completion_lifecycle_state` metrics define a disabled synthetic contract; this does not create or activate a producer.
+
 The request recordings use a one-hour window, aggregate replicas, and retain Prometheus's native
-counter-reset handling. The configured 30-second scrape interval must provide at least 120 samples
+counter-reset handling. A reset makes the window `reset_or_incomplete_history`, rather than a usable ratio. The configured 30-second scrape interval must provide at least 120 samples
 for every observed source series in that hour, and the latest sample must be no older than 60
 seconds. These guards make stale, gapped, or partial history NO DATA. Recordings are also absent
 when there is no eligible traffic instead of converting that absence to success or failure.
-Operators must interpret the states separately:
+The `sugarkube:sli_observation_state` recording emits exactly one mutually exclusive state per application, environment, SLI, and signal type. Operators must interpret the states separately:
 
 - a positive denominator with all successes is successful eligible traffic;
 - a positive denominator with fewer successes is failed eligible traffic; an absent success

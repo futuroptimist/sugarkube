@@ -3,6 +3,20 @@
   "retention": "90d",
   "slis": [
     {
+      "id": "tokenplace-encrypted-completion",
+      "application": "token.place",
+      "userJourney": "The encrypted completion synthetic reaches its terminal lifecycle state.",
+      "signalType": "synthetic_completion",
+      "dataSource": "encrypted_completion_lifecycle_state",
+      "numerator": "encrypted_completion_lifecycle_state when encrypted_completion_monitoring_enabled is one",
+      "denominator": "an enabled encrypted completion synthetic evaluation",
+      "exclusions": ["intentionally disabled monitoring", "actual relay request outcomes", "HTTP probes"],
+      "observationWindow": "1h",
+      "objective": null,
+      "measurementState": "unmeasured",
+      "monitoringState": "disabled"
+    },
+    {
       "id": "tokenplace-request-success",
       "application": "token.place",
       "userJourney": "An eligible relay request reaches a terminal outcome.",

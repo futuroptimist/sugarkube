@@ -6,6 +6,8 @@ tests:
   - name: complete fresh history aggregates replicas and preserves eligible failures
     interval: 30s
     input_series:
+      - series: tokenplace_instrumentation_up{app="tokenplace",environment="prod"}
+        values: '1x121'
       - series: tokenplace_relay_request_outcomes_total{app="tokenplace",environment="prod",pod="a",outcome="completed"}
         values: '0+1x120'
       - series: tokenplace_relay_request_outcomes_total{app="tokenplace",environment="prod",pod="a",outcome="failed"}
@@ -16,38 +18,42 @@ tests:
       - expr: sugarkube:sli_eligible_events:increase1h{application="token.place",environment="prod"}
         eval_time: 60m
         exp_samples:
-          - labels: '{__name__="sugarkube:sli_eligible_events:increase1h",application="token.place",environment="prod",signal_type="actual_request_success"}'
+          - labels: '{__name__="sugarkube:sli_eligible_events:increase1h",application="token.place",environment="prod",signal_type="actual_request_success",sli="tokenplace-request-success"}'
             value: 241
       - expr: sugarkube:sli_successful_events:increase1h{application="token.place",environment="prod"}
         eval_time: 60m
         exp_samples:
-          - labels: '{__name__="sugarkube:sli_successful_events:increase1h",application="token.place",environment="prod",signal_type="actual_request_success"}'
+          - labels: '{__name__="sugarkube:sli_successful_events:increase1h",application="token.place",environment="prod",signal_type="actual_request_success",sli="tokenplace-request-success"}'
             value: 240
   - name: counter reset is handled with complete history
     interval: 30s
     input_series:
+      - series: tokenplace_instrumentation_up{app="tokenplace",environment="prod"}
+        values: '1x121'
       - series: dspace_dchat_requests_total{environment="staging",pod="a",outcome="success"}
         values: '0+1x60 0+1x59'
     promql_expr_test:
       - expr: sugarkube:sli_eligible_events:increase1h{application="DSPACE",environment="staging"}
         eval_time: 60m
-        exp_samples:
-          - labels: '{__name__="sugarkube:sli_eligible_events:increase1h",application="DSPACE",environment="staging",signal_type="actual_request_success"}'
-            value: 118.99159663865547
+        exp_samples: []
   - name: absent success outcome becomes zero only with eligible traffic
     interval: 30s
     input_series:
+      - series: dspace_instrumentation_up{environment="staging"}
+        values: '1x121'
       - series: dspace_dchat_requests_total{environment="staging",pod="a",outcome="failure"}
         values: '0+1x120'
     promql_expr_test:
       - expr: sugarkube:sli_successful_events:increase1h{application="DSPACE",environment="staging"}
         eval_time: 60m
         exp_samples:
-          - labels: '{__name__="sugarkube:sli_successful_events:increase1h",application="DSPACE",environment="staging",signal_type="actual_request_success"}'
+          - labels: '{__name__="sugarkube:sli_successful_events:increase1h",application="DSPACE",environment="staging",signal_type="actual_request_success",sli="dspace-chat-request-success"}'
             value: 0
   - name: no traffic does not become success
     interval: 30s
     input_series:
+      - series: dspace_instrumentation_up{environment="staging"}
+        values: '1x121'
       - series: dspace_dchat_requests_total{environment="staging",pod="a",outcome="success"}
         values: '0x121'
     promql_expr_test:
@@ -60,6 +66,8 @@ tests:
   - name: partial history stays absent
     interval: 30s
     input_series:
+      - series: tokenplace_instrumentation_up{app="tokenplace",environment="prod"}
+        values: '1x121'
       - series: tokenplace_relay_request_outcomes_total{app="tokenplace",environment="prod",pod="a",outcome="failed"}
         values: '_x2 0+1x118'
     promql_expr_test:
@@ -72,6 +80,10 @@ tests:
   - name: stale telemetry stays absent
     interval: 30s
     input_series:
+      - series: dspace_instrumentation_up{environment="staging"}
+        values: '1x116 _x5'
+      - series: up{namespace="dspace",service="dspace-metrics",environment="staging"}
+        values: '1x121'
       - series: dspace_dchat_requests_total{environment="staging",pod="a",outcome="failure"}
         values: '0+1x116 _x4'
     promql_expr_test:
