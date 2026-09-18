@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -1433,7 +1434,7 @@ def test_bounded_quota_redirect_reports_quota_context():
         )
 
 
-def test_failed_quota_cleanup_ignores_deployment_drift_and_records_intent(tmp_path, monkeypatch):
+def test_failed_quota_cleanup_requires_identity_then_is_retryable(tmp_path):
     plan = executable_quota_rehearsal_plan(
         tmp_path,
         enable_bounded_quota_stimulus=True,
@@ -1441,26 +1442,27 @@ def test_failed_quota_cleanup_ignores_deployment_drift_and_records_intent(tmp_pa
     )
     parsed = execution_files(tmp_path, plan)
     _journal_through(parsed, plan, "generate-bounded-quota")
+    rejected_calls = []
+
+    def untrusted_runner(command):
+        rejected_calls.append(command)
+        return subprocess.CompletedProcess(command, 1, "", "identity rejected")
+
+    with pytest.raises(drill.DrillError, match="identity"):
+        drill._recover_failed_quota_trigger(
+            plan, parsed.journal, parsed.kubeconfig, untrusted_runner
+        )
+
+    assert not any("delete" in command for command in rejected_calls)
+    records = drill._journal_records(parsed.journal, plan)
+    cleanup = [record["phase"] for record in records if record["operation"] == "cleanup"]
+    assert cleanup == ["intent"]
+
+    parsed.cleanup = True
+    parsed.execute_stage = None
     calls = []
-    marker_states = iter((True, False))
-
-    monkeypatch.setattr(
-        drill,
-        "_assert_stage_preflight",
-        lambda *_args, **_kwargs: pytest.fail("cleanup must not inspect a drifted Deployment"),
-    )
-    monkeypatch.setattr(
-        drill,
-        "_validate_marker",
-        lambda *_args, **_kwargs: next(marker_states),
-    )
-
-    def runner(command):
-        calls.append(command)
-        return subprocess.CompletedProcess(command, 0, "", "")
-
-    drill._recover_failed_quota_trigger(plan, parsed.journal, parsed.kubeconfig, runner)
-
+    result = drill.execute_operation(parsed, execution_runner(plan, calls, _matching_marker(plan)))
+    assert result["status"] == "clean"
     assert drill._marker_command(plan, parsed.kubeconfig, "delete") in calls
     records = drill._journal_records(parsed.journal, plan)
     cleanup = [record["phase"] for record in records if record["operation"] == "cleanup"]
@@ -1546,6 +1548,46 @@ def test_conflicting_quota_marker_is_rejected():
 
     with pytest.raises(drill.DrillError, match="conflicting"):
         drill._validate_no_conflicting_markers(plan, Path("/tmp/kubeconfig"), runner)
+
+
+@pytest.mark.parametrize("payload", [{}, [], {"items": {}}])
+def test_marker_inventory_rejects_malformed_payload(payload):
+    plan = {"run_id": "this-run", "plan_digest": "a" * 64, "inventory": {"namespace": "app"}}
+
+    def runner(command):
+        return subprocess.CompletedProcess(command, 0, json.dumps(payload), "")
+
+    with pytest.raises(drill.DrillError, match="inventory is malformed"):
+        drill._validate_no_conflicting_markers(plan, Path("/tmp/kubeconfig"), runner)
+
+
+def test_quota_inventory_is_checked_before_http_or_intent(tmp_path, monkeypatch):
+    plan = executable_quota_rehearsal_plan(
+        tmp_path,
+        enable_bounded_quota_stimulus=True,
+        acknowledge_bounded_quota_stimulus=True,
+    )
+    parsed = execution_files(tmp_path, plan)
+    drill._record_phase(parsed.journal, plan, "execute", "marker", "intent")
+    drill._record_phase(parsed.journal, plan, "execute", "marker", "completed")
+    parsed.execute_stage = "generate-bounded-quota"
+    parsed.acknowledge_bounded_quota_stimulus = True
+    monkeypatch.setattr(drill, "_assert_stage_preflight", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(drill, "_validate_marker", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        drill,
+        "_run_bounded_quota",
+        lambda *_args, **_kwargs: pytest.fail("inventory rejection must precede HTTP"),
+    )
+
+    with pytest.raises(drill.DrillError, match="inventory is malformed"):
+        drill.execute_operation(
+            parsed, lambda command: subprocess.CompletedProcess(command, 0, "{}", "")
+        )
+    assert not any(
+        record["stage"] == "generate-bounded-quota"
+        for record in drill._journal_records(parsed.journal, plan)
+    )
 
 
 def test_quota_staging_rehearsal_rejects_oom_only_incident_image(tmp_path):
@@ -3096,6 +3138,19 @@ def execution_runner(plan, calls, marker=None, initial_image=None):
                 command, 0, json.dumps({"metadata": {"labels": labels}}), ""
             )
         if "configmap" in command and "get" in command:
+            if command[command.index("configmap") + 1] == "-o":
+                inventory_marker = None
+                if state["marker"]:
+                    inventory_marker = json.loads(json.dumps(state["marker"]))
+                    inventory_marker.setdefault("metadata", {}).setdefault(
+                        "name", drill._marker_name(plan)
+                    )
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    json.dumps({"items": [inventory_marker] if inventory_marker else []}),
+                    "",
+                )
             return subprocess.CompletedProcess(
                 command, 0, json.dumps(state["marker"]) if state["marker"] else "", ""
             )
@@ -3224,6 +3279,45 @@ def test_marker_is_unique_one_stage_and_resumable(tmp_path):
     assert not any("create" in command or "delete" in command for command in calls)
 
 
+@pytest.mark.skipif(shutil.which("kubectl") is None, reason="kubectl is not installed")
+def test_generated_marker_command_is_accepted_by_kubectl_client_dry_run(tmp_path):
+    plan = drill.build_plan(preflight(tmp_path))
+    kubeconfig = tmp_path / "client-only-kubeconfig"
+    kubeconfig.write_text(
+        """apiVersion: v1
+kind: Config
+clusters:
+- name: staging
+  cluster:
+    server: https://127.0.0.1:1
+contexts:
+- name: sugar-staging
+  context:
+    cluster: staging
+    user: test
+current-context: sugar-staging
+users:
+- name: test
+  user: {}
+""",
+        encoding="utf-8",
+    )
+    command = drill._marker_command(plan, kubeconfig, "create") + [
+        "--dry-run=client",
+        "-o",
+        "json",
+    ]
+
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+
+    assert result.returncode == 0, result.stderr
+    rendered = json.loads(result.stdout)
+    assert rendered["data"] == {
+        "plan-digest": plan["plan_digest"],
+        "run-id": plan["run_id"],
+    }
+
+
 def test_out_of_order_and_marker_collision_fail_closed(tmp_path):
     plan = drill.build_plan(preflight(tmp_path))
     parsed = execution_files(tmp_path, plan)
@@ -3237,7 +3331,7 @@ def test_out_of_order_and_marker_collision_fail_closed(tmp_path):
         "metadata": {"labels": {"sugarkube.dev/run-id": "another-run"}},
         "data": {},
     }
-    with pytest.raises(drill.DrillError, match="ownership"):
+    with pytest.raises(drill.DrillError, match="marker"):
         drill.execute_operation(parsed, execution_runner(plan, [], wrong))
 
 

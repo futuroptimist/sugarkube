@@ -1748,13 +1748,8 @@ def _run_checked(
     return result
 
 
-def _assert_stage_preflight(
-    plan: dict,
-    kubeconfig: Path,
-    runner: Runner,
-    expected_image: str | set[str] | None = None,
-) -> None:
-    """Reassert authoritative identity and the immutable deployment coordinates."""
+def _assert_staging_identity(kubeconfig: Path, runner: Runner) -> None:
+    """Establish the authoritative cluster boundary before any recovery mutation."""
     _run_checked(
         runner,
         [
@@ -1768,6 +1763,16 @@ def _assert_stage_preflight(
         ],
         "authoritative staging identity assertion failed",
     )
+
+
+def _assert_stage_preflight(
+    plan: dict,
+    kubeconfig: Path,
+    runner: Runner,
+    expected_image: str | set[str] | None = None,
+) -> None:
+    """Reassert authoritative identity and the immutable deployment coordinates."""
+    _assert_staging_identity(kubeconfig, runner)
     expected = plan.get("expected_deployment")
     if not isinstance(expected, dict):
         raise DrillError("exact deployment coordinates are malformed")
@@ -1851,7 +1856,6 @@ def _marker_command(plan: dict, kubeconfig: Path, verb: str) -> list[str]:
             "create",
             "configmap",
             name,
-            "--labels=sugarkube.dev/incident-drill=true",
             f"--from-literal=run-id={plan['run_id']}",
             f"--from-literal=plan-digest={plan['plan_digest']}",
         ]
@@ -1861,11 +1865,10 @@ def _marker_command(plan: dict, kubeconfig: Path, verb: str) -> list[str]:
 
 
 def _validate_no_conflicting_markers(plan: dict, kubeconfig: Path, runner: Runner) -> None:
-    """Reject any labelled drill marker not owned by this exact immutable run."""
+    """Reject any named drill marker not owned by this exact immutable run."""
     command = _marker_command(plan, kubeconfig, "get")[:7] + [
         "get",
         "configmap",
-        "--selector=sugarkube.dev/incident-drill=true",
         "-o",
         "json",
     ]
@@ -1873,14 +1876,26 @@ def _validate_no_conflicting_markers(plan: dict, kubeconfig: Path, runner: Runne
     if result.returncode:
         raise DrillError("drill marker inventory lookup failed")
     try:
-        items = json.loads(result.stdout).get("items", [])
-    except (AttributeError, json.JSONDecodeError) as exc:
+        payload = json.loads(result.stdout)
+        if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
+            raise TypeError
+        items = payload["items"]
+    except (TypeError, json.JSONDecodeError) as exc:
         raise DrillError("drill marker inventory is malformed") from exc
     expected_name = _marker_name(plan)
     for marker in items:
-        data = marker.get("data", {})
+        if not isinstance(marker, dict) or not isinstance(marker.get("metadata"), dict):
+            raise DrillError("drill marker inventory is malformed")
+        name = marker["metadata"].get("name")
+        if not isinstance(name, str):
+            raise DrillError("drill marker inventory is malformed")
+        if not name.startswith(("tokenplace-drill-", "sugarkube-incident-")):
+            continue
+        data = marker.get("data")
+        if not isinstance(data, dict):
+            raise DrillError("drill marker inventory is malformed")
         if (
-            marker.get("metadata", {}).get("name") != expected_name
+            name != expected_name
             or data.get("run-id") != plan["run_id"]
             or data.get("plan-digest") != plan["plan_digest"]
         ):
@@ -2759,6 +2774,7 @@ def _recover_failed_quota_trigger(plan, journal, kubeconfig, runner, failure_sum
     cleanup_pending = _pending_operation(records) == ("cleanup", "cleanup")
     if not cleanup_pending:
         _record_phase(journal, plan, "cleanup", "cleanup", "intent")
+    _assert_staging_identity(kubeconfig, runner)
     if _validate_marker(plan, kubeconfig, runner, absent_ok=True):
         _run_checked(
             runner, _marker_command(plan, kubeconfig, "delete"), "exact marker cleanup failed"
@@ -2852,6 +2868,7 @@ def _execute_locked(args, runner, plan, journal, now=None):
         return {"status": "clean", "run_id": plan["run_id"]}
 
     if stage == "marker" and operation == "execute":
+        _validate_no_conflicting_markers(plan, args.kubeconfig, runner)
         present = _validate_marker(plan, args.kubeconfig, runner, absent_ok=True)
         if pending:
             if not present:
@@ -2941,6 +2958,8 @@ def _execute_locked(args, runner, plan, journal, now=None):
             raise DrillError(
                 "interrupted bounded quota stimulus was cleaned up and is nonresumable"
             )
+        # Reject contaminated inventories before durable intent or endpoint traffic.
+        _validate_no_conflicting_markers(plan, args.kubeconfig, runner)
         _record_phase(journal, plan, operation, stage, "intent", limits=action["limits"])
         try:
 

@@ -218,7 +218,9 @@ credential. Forward coordinates are `generate-bounded-quota` then `verify-quota-
 Failure/rollback coordinates are `internal:stop-bounded-quota --run-id $RUN_ID`, followed by
 `--cleanup --plan "$PLAN" --journal "$JOURNAL" --kubeconfig "$STAGING_KUBECONFIG"` to reconcile
 deletion of only the exact run-owned marker. Cleanup still removes that marker if Deployment
-coordinates drift after stimulus stops; it never acts on the drifted Deployment. The stage cannot
+coordinates drift after stimulus stops, but only after authoritative staging identity and exact
+marker ownership are re-established. If cluster identity cannot be established, cleanup remains
+durably pending and performs no deletion; it never acts on the drifted Deployment. The stage cannot
 change a Deployment, image, Probe, or ServiceMonitor. An interrupted or failed stimulus is
 nonresumable: retain its private journal, clean up, and prepare a new reviewed run ID. Stopping
 traffic or deleting the marker does not restore quota already consumed; wait for the provider's
