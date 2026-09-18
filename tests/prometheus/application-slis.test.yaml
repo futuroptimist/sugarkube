@@ -2,16 +2,29 @@
 rule_files:
   - ../../platform/observability/rules/application-slis.yaml
 evaluation_interval: 30s
+
 tests:
-  - name: complete fresh history aggregates replicas and preserves eligible failures
+  - name: complete multi-replica tokenplace traffic is successful
     interval: 30s
     input_series:
-      - series: tokenplace_instrumentation_up{app="tokenplace",environment="prod"}
+      - series: kube_pod_container_status_ready{namespace="tokenplace",container="relay",environment="prod",pod="a"}
+        values: '1x121'
+      - series: kube_pod_container_status_ready{namespace="tokenplace",container="relay",environment="prod",pod="b"}
+        values: '1x121'
+      - series: kube_pod_status_phase{namespace="tokenplace",phase="Running",environment="prod",pod="a"}
+        values: '1x121'
+      - series: kube_pod_status_phase{namespace="tokenplace",phase="Running",environment="prod",pod="b"}
+        values: '1x121'
+      - series: up{app="tokenplace",namespace="tokenplace",release="tokenplace",environment="prod",pod="a"}
+        values: '1x121'
+      - series: up{app="tokenplace",namespace="tokenplace",release="tokenplace",environment="prod",pod="b"}
+        values: '1x121'
+      - series: tokenplace_instrumentation_up{app="tokenplace",environment="prod",pod="a"}
+        values: '1x121'
+      - series: tokenplace_instrumentation_up{app="tokenplace",environment="prod",pod="b"}
         values: '1x121'
       - series: tokenplace_relay_request_outcomes_total{app="tokenplace",environment="prod",pod="a",outcome="completed"}
         values: '0+1x120'
-      - series: tokenplace_relay_request_outcomes_total{app="tokenplace",environment="prod",pod="a",outcome="failed"}
-        values: '0x118 0 1 1'
       - series: tokenplace_relay_request_outcomes_total{app="tokenplace",environment="prod",pod="b",outcome="completed"}
         values: '0+1x120'
     promql_expr_test:
@@ -19,27 +32,64 @@ tests:
         eval_time: 60m
         exp_samples:
           - labels: '{__name__="sugarkube:sli_eligible_events:increase1h",application="token.place",environment="prod",signal_type="actual_request_success",sli="tokenplace-request-success"}'
-            value: 241
+            value: 240
       - expr: sugarkube:sli_successful_events:increase1h{application="token.place",environment="prod"}
         eval_time: 60m
         exp_samples:
           - labels: '{__name__="sugarkube:sli_successful_events:increase1h",application="token.place",environment="prod",signal_type="actual_request_success",sli="tokenplace-request-success"}'
             value: 240
-  - name: counter reset is handled with complete history
+      - expr: sugarkube:sli_observation_state{application="token.place",environment="prod"}
+        eval_time: 60m
+        exp_samples:
+          - labels: '{__name__="sugarkube:sli_observation_state",application="token.place",environment="prod",observation_state="successful_eligible_traffic",signal_type="actual_request_success",sli="tokenplace-request-success"}'
+            value: 1
+
+  - name: vanished expected replica fails closed as missing telemetry
     interval: 30s
     input_series:
-      - series: tokenplace_instrumentation_up{app="tokenplace",environment="prod"}
+      - series: kube_pod_container_status_ready{namespace="tokenplace",container="relay",environment="prod",pod="a"}
         values: '1x121'
-      - series: dspace_dchat_requests_total{environment="staging",pod="a",outcome="success"}
-        values: '0+1x60 0+1x59'
+      - series: kube_pod_container_status_ready{namespace="tokenplace",container="relay",environment="prod",pod="b"}
+        values: '1x121'
+      - series: kube_pod_status_phase{namespace="tokenplace",phase="Running",environment="prod",pod="a"}
+        values: '1x121'
+      - series: kube_pod_status_phase{namespace="tokenplace",phase="Running",environment="prod",pod="b"}
+        values: '1x121'
+      - series: up{app="tokenplace",namespace="tokenplace",release="tokenplace",environment="prod",pod="a"}
+        values: '1x121'
+      - series: up{app="tokenplace",namespace="tokenplace",release="tokenplace",environment="prod",pod="b"}
+        values: '1x100 _x21'
+      - series: tokenplace_instrumentation_up{app="tokenplace",environment="prod",pod="a"}
+        values: '1x121'
+      - series: tokenplace_instrumentation_up{app="tokenplace",environment="prod",pod="b"}
+        values: '1x100 _x21'
+      - series: tokenplace_relay_request_outcomes_total{app="tokenplace",environment="prod",pod="a",outcome="completed"}
+        values: '0+1x120'
+      - series: tokenplace_relay_request_outcomes_total{app="tokenplace",environment="prod",pod="b",outcome="completed"}
+        values: '0+1x99 _x21'
     promql_expr_test:
-      - expr: sugarkube:sli_eligible_events:increase1h{application="DSPACE",environment="staging"}
+      - expr: sugarkube:sli_eligible_events:increase1h{application="token.place",environment="prod"}
         eval_time: 60m
         exp_samples: []
-  - name: absent success outcome becomes zero only with eligible traffic
+      - expr: sugarkube:sli_successful_events:increase1h{application="token.place",environment="prod"}
+        eval_time: 60m
+        exp_samples: []
+      - expr: sugarkube:sli_observation_state{application="token.place",environment="prod"}
+        eval_time: 60m
+        exp_samples:
+          - labels: '{__name__="sugarkube:sli_observation_state",application="token.place",environment="prod",observation_state="missing_or_stale_telemetry",signal_type="actual_request_success",sli="tokenplace-request-success"}'
+            value: 1
+
+  - name: dspace eligible all-failure traffic records zero successes
     interval: 30s
-    input_series:
-      - series: dspace_instrumentation_up{environment="staging"}
+    input_series: &complete_dspace_failure
+      - series: kube_pod_container_status_ready{namespace="dspace",container="dspace",environment="staging",pod="a"}
+        values: '1x121'
+      - series: kube_pod_status_phase{namespace="dspace",phase="Running",environment="staging",pod="a"}
+        values: '1x121'
+      - series: up{namespace="dspace",service="dspace-metrics",environment="staging",pod="a"}
+        values: '1x121'
+      - series: dspace_instrumentation_up{environment="staging",pod="a"}
         values: '1x121'
       - series: dspace_dchat_requests_total{environment="staging",pod="a",outcome="failure"}
         values: '0+1x120'
@@ -49,50 +99,94 @@ tests:
         exp_samples:
           - labels: '{__name__="sugarkube:sli_successful_events:increase1h",application="DSPACE",environment="staging",signal_type="actual_request_success",sli="dspace-chat-request-success"}'
             value: 0
-  - name: no traffic does not become success
+      - expr: sugarkube:sli_observation_state{application="DSPACE",environment="staging"}
+        eval_time: 60m
+        exp_samples:
+          - labels: '{__name__="sugarkube:sli_observation_state",application="DSPACE",environment="staging",observation_state="failed_eligible_traffic",signal_type="actual_request_success",sli="dspace-chat-request-success"}'
+            value: 1
+
+  - name: dspace no traffic has an exclusive state and no measurements
     interval: 30s
     input_series:
-      - series: dspace_instrumentation_up{environment="staging"}
+      - series: kube_pod_container_status_ready{namespace="dspace",container="dspace",environment="staging",pod="a"}
+        values: '1x121'
+      - series: kube_pod_status_phase{namespace="dspace",phase="Running",environment="staging",pod="a"}
+        values: '1x121'
+      - series: up{namespace="dspace",service="dspace-metrics",environment="staging",pod="a"}
+        values: '1x121'
+      - series: dspace_instrumentation_up{environment="staging",pod="a"}
         values: '1x121'
       - series: dspace_dchat_requests_total{environment="staging",pod="a",outcome="success"}
         values: '0x121'
     promql_expr_test:
-      - expr: sugarkube:sli_eligible_events:increase1h{application="DSPACE",environment="staging"}
+      - expr: sugarkube:sli_eligible_events:increase1h{application="DSPACE"}
         eval_time: 60m
         exp_samples: []
-      - expr: sugarkube:sli_successful_events:increase1h{application="DSPACE",environment="staging"}
+      - expr: sugarkube:sli_successful_events:increase1h{application="DSPACE"}
         eval_time: 60m
         exp_samples: []
-  - name: partial history stays absent
+      - expr: sugarkube:sli_observation_state{application="DSPACE",environment="staging"}
+        eval_time: 60m
+        exp_samples:
+          - labels: '{__name__="sugarkube:sli_observation_state",application="DSPACE",environment="staging",observation_state="no_eligible_traffic",signal_type="actual_request_success",sli="dspace-chat-request-success"}'
+            value: 1
+
+  - name: dspace reset satisfies health but reports incomplete history
     interval: 30s
     input_series:
-      - series: tokenplace_instrumentation_up{app="tokenplace",environment="prod"}
+      - series: kube_pod_container_status_ready{namespace="dspace",container="dspace",environment="staging",pod="a"}
         values: '1x121'
-      - series: tokenplace_relay_request_outcomes_total{app="tokenplace",environment="prod",pod="a",outcome="failed"}
-        values: '_x2 0+1x118'
+      - series: kube_pod_status_phase{namespace="dspace",phase="Running",environment="staging",pod="a"}
+        values: '1x121'
+      - series: up{namespace="dspace",service="dspace-metrics",environment="staging",pod="a"}
+        values: '1x121'
+      - series: dspace_instrumentation_up{environment="staging",pod="a"}
+        values: '1x121'
+      - series: dspace_dchat_requests_total{environment="staging",pod="a",outcome="success"}
+        values: '0+1x60 0+1x59'
     promql_expr_test:
-      - expr: sugarkube:sli_eligible_events:increase1h{application="token.place",environment="prod"}
+      - expr: sugarkube:sli_eligible_events:increase1h{application="DSPACE"}
         eval_time: 60m
         exp_samples: []
-      - expr: sugarkube:sli_successful_events:increase1h{application="token.place",environment="prod"}
+      - expr: sugarkube:sli_observation_state{application="DSPACE",environment="staging"}
         eval_time: 60m
-        exp_samples: []
-  - name: stale telemetry stays absent
+        exp_samples:
+          - labels: '{__name__="sugarkube:sli_observation_state",application="DSPACE",environment="staging",observation_state="reset_or_incomplete_history",signal_type="actual_request_success",sli="dspace-chat-request-success"}'
+            value: 1
+
+  - name: partial history recovers only after a complete hour
     interval: 30s
     input_series:
-      - series: dspace_instrumentation_up{environment="staging"}
-        values: '1x116 _x5'
-      - series: up{namespace="dspace",service="dspace-metrics",environment="staging"}
-        values: '1x121'
-      - series: dspace_dchat_requests_total{environment="staging",pod="a",outcome="failure"}
-        values: '0+1x116 _x4'
+      - series: kube_pod_container_status_ready{namespace="dspace",container="dspace",environment="staging",pod="a"}
+        values: '1x241'
+      - series: kube_pod_status_phase{namespace="dspace",phase="Running",environment="staging",pod="a"}
+        values: '1x241'
+      - series: up{namespace="dspace",service="dspace-metrics",environment="staging",pod="a"}
+        values: '1x241'
+      - series: dspace_instrumentation_up{environment="staging",pod="a"}
+        values: '1x241'
+      - series: dspace_dchat_requests_total{environment="staging",pod="a",outcome="success"}
+        values: '_x2 0+1x238'
     promql_expr_test:
-      - expr: sugarkube:sli_eligible_events:increase1h{application="DSPACE",environment="staging"}
+      - expr: sugarkube:sli_observation_state{application="DSPACE",environment="staging"}
         eval_time: 60m
-        exp_samples: []
-  - name: absent telemetry stays absent
+        exp_samples:
+          - labels: '{__name__="sugarkube:sli_observation_state",application="DSPACE",environment="staging",observation_state="reset_or_incomplete_history",signal_type="actual_request_success",sli="dspace-chat-request-success"}'
+            value: 1
+      - expr: sugarkube:sli_observation_state{application="DSPACE",environment="staging"}
+        eval_time: 120m
+        exp_samples:
+          - labels: '{__name__="sugarkube:sli_observation_state",application="DSPACE",environment="staging",observation_state="successful_eligible_traffic",signal_type="actual_request_success",sli="dspace-chat-request-success"}'
+            value: 1
+
+  - name: disabled encrypted completion is explicit
     interval: 30s
+    input_series:
+      - series: encrypted_completion_monitoring_enabled{environment="prod"}
+        values: '0x3'
     promql_expr_test:
-      - expr: sugarkube:sli_eligible_events:increase1h
-        eval_time: 60m
-        exp_samples: []
+      - expr: sugarkube:sli_observation_state{application="token.place",sli="tokenplace-encrypted-completion",environment="prod"}
+        eval_time: 1m
+        exp_samples:
+          - labels: '{__name__="sugarkube:sli_observation_state",application="token.place",environment="prod",observation_state="intentionally_disabled_monitoring",signal_type="synthetic_completion",sli="tokenplace-encrypted-completion"}'
+            value: 1

@@ -64,13 +64,27 @@ def test_recordings_are_non_alerting_reset_aware_and_guarded_by_complete_fresh_h
     expressions = "\n".join(rule["expr"] for rule in rules)
     assert "increase(" in expressions
     assert "sum by (environment)" in expressions
-    assert "instance" not in expressions and "pod" not in expressions
+    assert "kube_pod_container_status_ready" in expressions
+    assert "kube_pod_status_phase" in expressions
+    assert "unless on (namespace, pod) kube_pod_deletion_timestamp" in expressions
+    assert "count by (environment)" in expressions
     assert "vector(0)" not in expressions and "probe_success" not in expressions
     assert "count_over_time(" in expressions and ">= 120" in expressions
     assert "resets(" in expressions
     assert any(rule["record"] == "sugarkube:sli_observation_state" for rule in rules)
-    assert "timestamp(" in expressions and "time() - 60" in expressions
+    assert "sli_source_current" in expressions
+    assert "sli_source_history_complete" in expressions
+    assert "count_over_time(up{" in expressions
     assert "> 0" in expressions  # no eligible traffic remains absent rather than successful
+
+
+def test_expected_ready_sources_are_matched_for_current_and_full_window_coverage():
+    expressions = RULES.read_text(encoding="utf-8")
+    for namespace, container in (("tokenplace", "relay"), ("dspace", "dspace")):
+        selector = f'kube_pod_container_status_ready{{namespace="{namespace}",container="{container}"}}'
+        assert selector in expressions
+        assert f"max_over_time({selector}[1h])" in expressions
+    assert expressions.count("and on (environment, pod)") >= 8
 
 
 def test_success_recordings_have_only_an_eligible_traffic_zero_fallback():
@@ -94,6 +108,13 @@ def test_observation_states_are_exclusive_and_contract_labelled():
         "intentionally_disabled_monitoring",
     }
     assert all({"application", "sli", "signal_type", "observation_state"} <= rule["labels"].keys() for rule in states)
+    identities = {(rule["labels"]["sli"], rule["labels"]["signal_type"]) for rule in states}
+    assert identities == {
+        ("tokenplace-request-success", "actual_request_success"),
+        ("dspace-chat-request-success", "actual_request_success"),
+        ("tokenplace-encrypted-completion", "synthetic_completion"),
+    }
+    assert sum(rule["labels"]["signal_type"] == "actual_request_success" for rule in states) == 10
 
 
 def test_dashboard_keeps_signal_classes_separate_and_budget_unmeasured():
@@ -104,6 +125,8 @@ def test_dashboard_keeps_signal_classes_separate_and_budget_unmeasured():
     expression = success["targets"][0]["expr"]
     assert "sli_observation_state" in expression and "probe_success" not in expression
     assert success["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
+    assert "two actual-request SLIs" in success["description"]
+    assert "probe, DSPACE synthetic, and Daniel visitor panels" in success["description"]
     budget = panels["Error budget and burn"]
     assert "UNMEASURED — NO DATA" in budget["options"]["content"]
     assert not budget.get("targets")

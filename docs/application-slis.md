@@ -13,11 +13,14 @@ probe activation, or producer.
 The existing `encrypted_completion_monitoring_enabled` and `encrypted_completion_lifecycle_state` metrics define a disabled synthetic contract; this does not create or activate a producer.
 
 The request recordings use a one-hour window, aggregate replicas, and retain Prometheus's native
-counter-reset handling. A reset makes the window `reset_or_incomplete_history`, rather than a usable ratio. The configured 30-second scrape interval must provide at least 120 samples
+counter-reset handling. The gate derives the expected source set from Ready, Running, non-terminating
+pods and requires each source to have a healthy metrics target, healthy instrumentation, and complete
+counter history. A source that disappears cannot silently leave a surviving replica to represent the
+whole application. A reset makes the window `reset_or_incomplete_history`, rather than a usable ratio. The configured 30-second scrape interval must provide at least 120 samples
 for every observed source series in that hour, and the latest sample must be no older than 60
 seconds. These guards make stale, gapped, or partial history NO DATA. Recordings are also absent
 when there is no eligible traffic instead of converting that absence to success or failure.
-The `sugarkube:sli_observation_state` recording emits exactly one mutually exclusive state per application, environment, SLI, and signal type. Operators must interpret the states separately:
+In this first slice, `sugarkube:sli_observation_state` emits exactly one mutually exclusive state for the two actual-request SLIs and the explicitly disabled encrypted-completion SLI. It does not record states for every contract entry. Operators should continue to use the preserved probe panels, DSPACE synthetic panels, and Daniel visitor panels for those source-specific views. Interpret the recorded states separately:
 
 - a positive denominator with all successes is successful eligible traffic;
 - a positive denominator with fewer successes is failed eligible traffic; an absent success

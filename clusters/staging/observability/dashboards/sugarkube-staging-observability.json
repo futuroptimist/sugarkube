@@ -3869,7 +3869,7 @@
       "id": 94,
       "title": "Application SLI observation state",
       "type": "stat",
-      "description": "Exactly one contract state per application, environment, SLI, and signal type. Counts and ratios are exposed only behind the same full-observation gate.",
+      "description": "Exclusive states for the two actual-request SLIs and the disabled token.place encrypted-completion SLI in this first slice. Use the existing probe, DSPACE synthetic, and Daniel visitor panels for their source-specific state. Counts and ratios share the full-observation gate.",
       "gridPos": {
         "h": 8,
         "w": 12,
