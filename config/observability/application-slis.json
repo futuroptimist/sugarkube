@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "retention": "90d",
+  "slis": [
+    {
+      "id": "dspace-http-requests",
+      "application": "dspace",
+      "userJourney": "A player receives a non-5xx response from an eligible DSPACE route.",
+      "signalType": "actual_request_success",
+      "dataSource": "dspace_http_requests_total",
+      "numerator": "sum(increase(dspace_http_requests_total{route!~\"/healthz|/livez|/metrics\",status_class!~\"5xx|unknown\"}[5m]))",
+      "denominator": "sum(increase(dspace_http_requests_total{route!~\"/healthz|/livez|/metrics\"}[5m]))",
+      "exclusions": ["health, liveness, and metrics routes", "unknown status classes from the success numerator"],
+      "observationWindow": "5m",
+      "objective": null
+    },
+    {
+      "id": "dspace-chat-synthetic",
+      "application": "dspace",
+      "userJourney": "The isolated scheduled /chat check completes successfully.",
+      "signalType": "synthetic_completion",
+      "dataSource": "dspace_chat_synthetic_success and dspace_chat_synthetic_timestamp_seconds",
+      "numerator": "last fresh dspace_chat_synthetic_success result",
+      "denominator": "one authorized fresh synthetic execution",
+      "exclusions": ["real player requests", "stale or absent producer telemetry"],
+      "observationWindow": "15m",
+      "objective": null
+    },
+    {
+      "id": "tokenplace-http-requests",
+      "application": "tokenplace",
+      "userJourney": "An API v1 relay caller receives a non-5xx response.",
+      "signalType": "actual_request_success",
+      "dataSource": "tokenplace_http_requests_total",
+      "numerator": "sum(increase(tokenplace_http_requests_total{route=~\"/api/v1/.*\",status_class!~\"5xx|unknown\"}[5m]))",
+      "denominator": "sum(increase(tokenplace_http_requests_total{route=~\"/api/v1/.*\"}[5m]))",
+      "exclusions": ["health, liveness, metrics, diagnostics, and non-v1 routes", "unknown status classes from the success numerator"],
+      "observationWindow": "5m",
+      "objective": null
+    },
+    {
+      "id": "tokenplace-encrypted-completion",
+      "application": "tokenplace",
+      "userJourney": "An authorized client submits, retrieves, decrypts, and validates one encrypted completion.",
+      "signalType": "synthetic_completion",
+      "dataSource": "encrypted_completion_success and encrypted_completion_lifecycle_state",
+      "numerator": "last fresh client-verified encrypted completion success",
+      "denominator": "one authorized fresh completion execution",
+      "exclusions": ["relay HTTP health", "real user requests", "disabled, stale, or never-attempted producer states"],
+      "observationWindow": "6h",
+      "objective": null
+    },
+    {
+      "id": "danielsmith-visitor-journey",
+      "application": "danielsmith",
+      "userJourney": "The authorized essential visitor journey reaches the accessible fallback and resume.",
+      "signalType": "synthetic_completion",
+      "dataSource": "danielsmith_visitor_journey_success and danielsmith_visitor_journey_state",
+      "numerator": "last fresh essential visitor journey success",
+      "denominator": "one authorized fresh visitor journey execution",
+      "exclusions": ["optional immersive rendering", "real visitors", "disabled, stale, or unavailable producer states"],
+      "observationWindow": "17m",
+      "objective": null
+    },
+    {
+      "id": "shared-public-http-probes",
+      "application": "shared",
+      "userJourney": "An in-cluster blackbox probe receives the configured public HTTP response.",
+      "signalType": "http_probe_health",
+      "dataSource": "probe_success",
+      "numerator": "sum(probe_success{application=~\"dspace|tokenplace|danielsmith\"} == 1)",
+      "denominator": "count(probe_success{application=~\"dspace|tokenplace|danielsmith\"})",
+      "exclusions": ["real-user request success", "synthetic application completion", "external-client reachability"],
+      "observationWindow": "5m",
+      "objective": null
+    }
+  ]
+}

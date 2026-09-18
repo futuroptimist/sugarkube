@@ -1,0 +1,39 @@
+---
+groups:
+  - name: application-slis
+    interval: 1m
+    rules:
+      # Ratios deliberately remain absent for missing telemetry and zero eligible traffic.
+      # increase() handles counter resets and sum() combines replicas before division.
+      - record: sugarkube:sli_eligible_requests:increase5m
+        expr: sum by (environment) (increase(dspace_http_requests_total{route!~"/healthz|/livez|/metrics"}[5m]))
+        labels: {application: dspace, sli: dspace-http-requests, signal_type: actual_request_success}
+      - record: sugarkube:sli_successful_requests:increase5m
+        expr: sum by (environment) (increase(dspace_http_requests_total{route!~"/healthz|/livez|/metrics",status_class!~"5xx|unknown"}[5m]))
+        labels: {application: dspace, sli: dspace-http-requests, signal_type: actual_request_success}
+      - record: sugarkube:sli_eligible_requests:increase5m
+        expr: sum by (environment) (increase(tokenplace_http_requests_total{route=~"/api/v1/.*"}[5m]))
+        labels: {application: tokenplace, sli: tokenplace-http-requests, signal_type: actual_request_success}
+      - record: sugarkube:sli_successful_requests:increase5m
+        expr: sum by (environment) (increase(tokenplace_http_requests_total{route=~"/api/v1/.*",status_class!~"5xx|unknown"}[5m]))
+        labels: {application: tokenplace, sli: tokenplace-http-requests, signal_type: actual_request_success}
+      - record: sugarkube:sli_success_ratio:ratio5m
+        expr: sugarkube:sli_successful_requests:increase5m / sugarkube:sli_eligible_requests:increase5m
+      - record: sugarkube:sli_objective_state
+        expr: vector(1)
+        labels: {application: dspace, sli: dspace-http-requests, objective_state: unmeasured}
+      - record: sugarkube:sli_objective_state
+        expr: vector(1)
+        labels: {application: tokenplace, sli: tokenplace-http-requests, objective_state: unmeasured}
+      - record: sugarkube:sli_objective_state
+        expr: vector(1)
+        labels: {application: dspace, sli: dspace-chat-synthetic, objective_state: unmeasured}
+      - record: sugarkube:sli_objective_state
+        expr: vector(1)
+        labels: {application: tokenplace, sli: tokenplace-encrypted-completion, objective_state: unmeasured}
+      - record: sugarkube:sli_objective_state
+        expr: vector(1)
+        labels: {application: danielsmith, sli: danielsmith-visitor-journey, objective_state: unmeasured}
+      - record: sugarkube:sli_objective_state
+        expr: vector(1)
+        labels: {application: shared, sli: shared-public-http-probes, objective_state: unmeasured}

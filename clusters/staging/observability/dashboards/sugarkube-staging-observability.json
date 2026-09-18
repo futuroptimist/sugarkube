@@ -3850,6 +3850,107 @@
           }
         }
       ]
+    },
+    {
+      "id": 93,
+      "title": "Application SLI and error-budget foundation",
+      "type": "row",
+      "description": "Non-alerting SLI evidence. Probe, synthetic completion, and actual request signals are intentionally separate.",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 297
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "NO DATA"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "id": 94,
+      "title": "Actual request success (5m)",
+      "type": "timeseries",
+      "description": "Eligible request success only. NO DATA means absent/incomplete telemetry or no eligible traffic; it is not 100%. increase() handles observed resets and aggregates replicas before division.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 298
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sugarkube:sli_success_ratio:ratio5m{environment=~\"$environment\"}",
+          "legendFormat": "{{application}} actual requests"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "NO DATA",
+          "mappings": [
+            {
+              "options": {
+                "1": {
+                  "text": "UNMEASURED \u2014 NO DATA"
+                }
+              },
+              "type": "value"
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {},
+      "id": 95,
+      "title": "Objective, budget, and burn state",
+      "type": "stat",
+      "description": "No reviewed numerical objective exists. UNMEASURED is explicit; error budget and burn are NO DATA, never an inferred uptime promise.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 298
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sugarkube:sli_objective_state{environment=~\"$environment\"} or sugarkube:sli_objective_state",
+          "legendFormat": "{{application}} / {{sli}}",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 96,
+      "title": "SLI interpretation and history limits",
+      "type": "text",
+      "description": "Operator semantics for this non-alerting foundation.",
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 306
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "**Separate evidence:** HTTP probe health \u2260 synthetic completion \u2260 actual request success.  **States:** eligible success, eligible failure, no traffic, missing/stale telemetry, reset/incomplete history, and intentionally disabled monitoring must not be collapsed.  **History:** Prometheus retention is at most 90d and 100GB; these panels claim only their displayed 5m/latest-result windows.  **Alerts:** none are defined by this SLI rule group."
+      }
     }
   ]
 }
