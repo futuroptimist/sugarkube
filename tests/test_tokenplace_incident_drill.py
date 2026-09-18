@@ -2138,19 +2138,96 @@ def executable_quota_rehearsal_plan(tmp_path, **changes):
     return drill.build_plan(checked)
 
 
+def healthy_quota_rehearsal_plan(tmp_path):
+    parsed = args(
+        tmp_path,
+        mode="quota-exhaustion",
+        lifecycle="staging-rehearsal",
+        acknowledge_staging_fault_injection=True,
+    )
+    coordinates = drill.validate(parsed)
+    data = snapshot(coordinates, mode="quota-exhaustion")
+    data["classification"]["route_statuses"] = {
+        "root": 200,
+        "metadata": 200,
+        "livez": 200,
+        "healthz": 200,
+    }
+    checked = drill._validate_snapshot(
+        "quota-exhaustion", coordinates, drill.inventory("staging"), data, "live-authoritative"
+    )
+    return drill.build_plan(checked)
+
+
+def test_quota_stimulus_is_rehearsal_only_and_absent_from_existing_incident_plan(tmp_path):
+    rehearsal = healthy_quota_rehearsal_plan(tmp_path)
+    trigger = rehearsal["actions"][0]
+    assert trigger["id"] == "establish-bounded-quota"
+    assert trigger["target"]["routes"] == ["/", "/api/v1/meta"]
+    assert trigger["limits"] == drill.QUOTA_STIMULUS_LIMITS
+    assert trigger["failure_recovery"]["outcome"] == "stop-without-mutation"
+    assert not any("kubectl" in token for token in trigger["command"])
+
+    existing_incident = drill.build_plan(preflight(tmp_path, mode="quota-exhaustion"))
+    assert not any(action["type"] == "trigger" for action in existing_incident["actions"])
+
+
+@pytest.mark.parametrize(
+    "statuses,message",
+    [
+        ([200] * 8 + [429, 429, 200, 200], None),
+        ([200] * 12, "declared budget"),
+        ([200, 200, 429, 200, 200, 200], "mixed or unsafe"),
+    ],
+)
+def test_bounded_quota_stimulus_success_and_safe_failure(tmp_path, monkeypatch, statuses, message):
+    action = healthy_quota_rehearsal_plan(tmp_path)["actions"][0]
+    action["limits"] = {**action["limits"], "total_requests": 12}
+    monkeypatch.setattr(drill, "QUOTA_STIMULUS_LIMITS", action["limits"])
+    calls = []
+    values = iter(statuses)
+
+    def status(path, timeout):
+        calls.append((path, timeout))
+        return next(values)
+
+    if message:
+        with pytest.raises(drill.DrillError, match=message):
+            drill._run_bounded_quota_stimulus(action, request_status=status)
+    else:
+        result = drill._run_bounded_quota_stimulus(action, request_status=status)
+        assert result["quota_condition_established"] is True
+        assert result["route_statuses"] == {
+            "root": 429,
+            "metadata": 429,
+            "livez": 200,
+            "healthz": 200,
+        }
+    assert len(calls) <= 12
+    assert {path for path, _ in calls} <= {"/", "/api/v1/meta", "/livez", "/healthz"}
+
+
+def test_bounded_quota_stimulus_requires_dedicated_acknowledgement(tmp_path):
+    plan = healthy_quota_rehearsal_plan(tmp_path)
+    parsed = execution_files(tmp_path, plan)
+    runner = execution_runner(plan, [])
+    parsed.execute_stage = "marker"
+    drill.execute_operation(parsed, runner)
+    parsed.execute_stage = "establish-bounded-quota"
+
+    with pytest.raises(drill.DrillError, match="separate bounded quota-stimulus"):
+        drill.execute_operation(parsed, runner)
+
+
 @pytest.mark.parametrize(
     "tamper,message",
     [
         (
-            lambda plan: plan["expected_deployment"].update(
-                rollback_image="relay:latest"
-            ),
+            lambda plan: plan["expected_deployment"].update(rollback_image="relay:latest"),
             "coordinates",
         ),
         (
-            lambda plan: plan["expected_deployment"].update(
-                incident_image="unexpected"
-            ),
+            lambda plan: plan["expected_deployment"].update(incident_image="unexpected"),
             "must not specify an incident image",
         ),
         (
@@ -2171,35 +2248,27 @@ def executable_quota_rehearsal_plan(tmp_path, **changes):
             "actions",
         ),
         (
-            lambda plan: next(
-                action for action in plan["actions"] if action["id"] == "replace"
-            )["command"].__setitem__(
-                -1, "relay=registry.example/relay@sha256:" + "e" * 64
-            ),
+            lambda plan: next(action for action in plan["actions"] if action["id"] == "replace")[
+                "command"
+            ].__setitem__(-1, "relay=registry.example/relay@sha256:" + "e" * 64),
             "actions",
         ),
         (
-            lambda plan: next(
-                action for action in plan["actions"] if action["id"] == "replace"
-            )["inverse"].__setitem__(
-                -1, "relay=registry.example/relay@sha256:" + "e" * 64
-            ),
+            lambda plan: next(action for action in plan["actions"] if action["id"] == "replace")[
+                "inverse"
+            ].__setitem__(-1, "relay=registry.example/relay@sha256:" + "e" * 64),
             "actions",
         ),
         (
-            lambda plan: next(
-                action for action in plan["actions"] if action["id"] == "replace"
-            )["rollback"].__setitem__(
-                -1, "relay=registry.example/relay@sha256:" + "e" * 64
-            ),
+            lambda plan: next(action for action in plan["actions"] if action["id"] == "replace")[
+                "rollback"
+            ].__setitem__(-1, "relay=registry.example/relay@sha256:" + "e" * 64),
             "actions",
         ),
         (
-            lambda plan: next(
-                action for action in plan["actions"] if action["id"] == "replace"
-            )["recovery_fallback"]["command"].__setitem__(
-                -1, "relay=registry.example/relay@sha256:" + "e" * 64
-            ),
+            lambda plan: next(action for action in plan["actions"] if action["id"] == "replace")[
+                "recovery_fallback"
+            ]["command"].__setitem__(-1, "relay=registry.example/relay@sha256:" + "e" * 64),
             "actions",
         ),
         (
