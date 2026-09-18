@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Convert Daniel's passive runtime cache document to bounded Prometheus metrics."""
+"""Transport and revalidate Daniel's already-published GitHub-cache telemetry."""
 
 from __future__ import annotations
 
 import argparse
 import http.client
 import json
-import math
 import os
 import tempfile
 import urllib.error
@@ -14,7 +13,17 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
+if __package__:
+    from scripts import validate_probe_quotas
+else:
+    import validate_probe_quotas
+
+ROOT = Path(__file__).resolve().parents[1]
 MAX_BYTES = 262_144
+MAX_METRICS_BYTES = 8_192
+MAX_COUNT = 50
+MAX_DURATION_MS = 3_600_000
+MAX_AGE_SECONDS = 31_536_000
 STATES = ("disabled", "warming", "fresh", "stale", "unavailable")
 COMPLETENESS = ("complete", "partial", "none")
 FAILURES = (
@@ -28,17 +37,10 @@ FAILURES = (
     "upstream",
 )
 DOCUMENT_STATUSES = ("valid", "malformed", "oversized", "unavailable")
-MAX_COUNT = 50
-MAX_DURATION_MS = 3_600_000
-MAX_AGE_SECONDS = 31_536_000
-RUNTIME_URLS = {
-    "staging": "https://staging.danielsmith.io/runtime/github-metrics.json",
-    "prod": "https://danielsmith.io/runtime/github-metrics.json",
-}
 
 
 class InvalidDocument(ValueError):
-    pass
+    """The passive document does not satisfy the pinned application contract."""
 
 
 class _RejectRedirects(urllib.request.HTTPRedirectHandler):
@@ -46,53 +48,52 @@ class _RejectRedirects(urllib.request.HTTPRedirectHandler):
         raise urllib.error.HTTPError(req.full_url, code, "redirect rejected", headers, fp)
 
 
-def _bounded_number(value, maximum, field, *, nullable=False, integer=False):
-    if nullable and value is None:
-        return math.nan
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+def _integer(value: object, maximum: int, field: str) -> int:
+    if type(value) is not int or not 0 <= value <= maximum:
         raise InvalidDocument(field)
-    try:
-        number = float(value)
-    except (OverflowError, ValueError) as exc:
-        raise InvalidDocument(field) from exc
-    if not math.isfinite(number) or number < 0 or number > maximum:
-        raise InvalidDocument(field)
-    if integer and not number.is_integer():
-        raise InvalidDocument(field)
-    return number
+    return value
 
 
-def _timestamp(value, field, *, nullable=False):
+def _timestamp(value: object, field: str, *, nullable: bool = False) -> datetime | None:
     if nullable and value is None:
         return None
-    if not isinstance(value, str) or not value.endswith("Z") or len(value) > 40:
+    if not isinstance(value, str) or len(value) > 24 or not value.endswith("Z"):
         raise InvalidDocument(field)
     try:
         parsed = datetime.fromisoformat(value[:-1] + "+00:00")
     except ValueError as exc:
         raise InvalidDocument(field) from exc
-    if parsed.tzinfo is None or parsed.utcoffset() != timezone.utc.utcoffset(parsed):
+    if parsed.isoformat(timespec="milliseconds").replace("+00:00", "Z") != value:
         raise InvalidDocument(field)
     return parsed
 
 
 def parse_document(payload: bytes, now: datetime | None = None) -> dict[str, object]:
+    """Mirror the pinned app validator and check the surrounding passive envelope."""
     if len(payload) > MAX_BYTES:
         raise OverflowError("runtime document exceeds 262144 bytes")
     try:
-        document = json.loads(payload)
+        document = json.loads(
+            payload, object_pairs_hook=validate_probe_quotas._reject_duplicate_json_fields
+        )
     except (UnicodeDecodeError, ValueError, RecursionError) as exc:
         raise InvalidDocument("JSON") from exc
-    if not isinstance(document, dict):
-        raise InvalidDocument("document")
-    required = {"schemaVersion", "generatedAt", "expiresAt", "source", "repos", "errors", "cache"}
-    if not required <= document.keys():
-        raise InvalidDocument("required fields")
-    version = document["schemaVersion"]
-    if isinstance(version, bool) or version != 1:
+    if not isinstance(document, dict) or set(document) != {
+        "schemaVersion",
+        "generatedAt",
+        "expiresAt",
+        "source",
+        "repos",
+        "errors",
+        "cache",
+    }:
+        raise InvalidDocument("document fields")
+    if document["schemaVersion"] != 1 or type(document["schemaVersion"]) is not int:
         raise InvalidDocument("schemaVersion")
     generated = _timestamp(document["generatedAt"], "generatedAt", nullable=True)
     expires = _timestamp(document["expiresAt"], "expiresAt", nullable=True)
+    if (generated is None) != (expires is None) or (generated and expires <= generated):
+        raise InvalidDocument("envelope timestamps")
     if not isinstance(document["source"], str) or not document["source"]:
         raise InvalidDocument("source")
     repos, errors = document["repos"], document["errors"]
@@ -100,10 +101,12 @@ def parse_document(payload: bytes, now: datetime | None = None) -> dict[str, obj
         raise InvalidDocument("repos/errors")
 
     cache = document["cache"]
-    required_cache = {
+    fields = {
         "enabled",
         "state",
         "lastSuccessfulRefreshAt",
+        "oldestDataFetchedAt",
+        "retainedDataAgeSeconds",
         "dataCompleteness",
         "refreshDurationMs",
         "failureCategories",
@@ -111,202 +114,209 @@ def parse_document(payload: bytes, now: datetime | None = None) -> dict[str, obj
         "successfulRepositoryCount",
         "failedRepositoryCount",
         "retainedRepositoryCount",
-        "oldestDataFetchedAt",
-        "retainedDataAgeSeconds",
     }
-    if not isinstance(cache, dict) or not required_cache <= cache.keys():
-        raise InvalidDocument("cache required fields")
-    state, completeness = cache["state"], cache["dataCompleteness"]
-    if state not in STATES or completeness not in COMPLETENESS:
+    if not isinstance(cache, dict) or set(cache) != fields:
+        raise InvalidDocument("cache fields")
+    enabled, state, completeness = cache["enabled"], cache["state"], cache["dataCompleteness"]
+    if type(enabled) is not bool or state not in STATES or completeness not in COMPLETENESS:
         raise InvalidDocument("cache enum")
-    enabled = cache["enabled"]
-    if not isinstance(enabled, bool) or enabled != (state != "disabled"):
-        raise InvalidDocument("cache.enabled")
     failures = cache["failureCategories"]
     if (
         not isinstance(failures, list)
-        or any(not isinstance(item, str) for item in failures)
+        or len(failures) > len(FAILURES)
+        or any(type(item) is not str or item not in FAILURES for item in failures)
         or len(failures) != len(set(failures))
-        or any(item not in FAILURES for item in failures)
     ):
-        raise InvalidDocument("cache.failureCategories")
-
-    values: dict[str, object] = {
-        "state": state,
-        "completeness": completeness,
-        "failures": set(failures),
-        "duration": _bounded_number(
-            cache["refreshDurationMs"], MAX_DURATION_MS, "duration", nullable=True
-        )
-        / 1000,
-        "retained_age": _bounded_number(
-            cache["retainedDataAgeSeconds"], MAX_AGE_SECONDS, "retained age", nullable=True
-        ),
+        raise InvalidDocument("failureCategories")
+    counts = {
+        key: _integer(cache[f"{key}RepositoryCount"], MAX_COUNT, key)
+        for key in ("configured", "successful", "failed", "retained")
     }
-    for name in ("configured", "successful", "failed", "retained"):
-        values[name] = _bounded_number(
-            cache[f"{name}RepositoryCount"], MAX_COUNT, name, integer=True
-        )
+    duration = cache["refreshDurationMs"]
+    age = cache["retainedDataAgeSeconds"]
+    if duration is not None:
+        duration = _integer(duration, MAX_DURATION_MS, "refreshDurationMs")
+    if age is not None:
+        age = _integer(age, MAX_AGE_SECONDS, "retainedDataAgeSeconds")
     last_success = _timestamp(
         cache["lastSuccessfulRefreshAt"], "lastSuccessfulRefreshAt", nullable=True
     )
     oldest = _timestamp(cache["oldestDataFetchedAt"], "oldestDataFetchedAt", nullable=True)
-    values["freshness_age"] = math.nan
-    if last_success is not None:
-        age = ((now or datetime.now(timezone.utc)) - last_success).total_seconds()
-        values["freshness_age"] = _bounded_number(age, MAX_AGE_SECONDS, "lastSuccessfulRefreshAt")
-
-    configured, successful = values["configured"], values["successful"]
-    failed, retained = values["failed"], values["retained"]
-    disabled = state == "disabled"
-    warming = state == "warming"
-    has_data = bool(repos)
+    has_data = counts["successful"] > 0 or counts["retained"] > 0
+    completed = state in {"fresh", "stale", "unavailable"}
     contradictory = (
-        (generated is None) != (expires is None)
-        or (generated is not None and expires <= generated)
-        or retained > failed
-        or len(repos) != successful + retained
+        enabled != (state != "disabled")
+        or (enabled and counts["configured"] == 0)
+        or (state != "warming" and counts["successful"] + counts["failed"] != counts["configured"])
+        or counts["retained"] > counts["failed"]
+        or (completed and duration is None)
+        or (counts["failed"] > 0) != bool(failures)
         or (
-            disabled
+            state in {"disabled", "warming"}
             and (
-                completeness != "none"
-                or any((configured, successful, failed, retained))
-                or has_data
+                (state == "disabled" and counts["configured"] != 0)
+                or any(counts[key] for key in ("successful", "failed", "retained"))
+                or completeness != "none"
+                or duration is not None
+                or last_success is not None
+                or oldest is not None
+                or age is not None
                 or failures
-                or last_success
-                or oldest
-                or not math.isnan(values["duration"])
-                or not math.isnan(values["retained_age"])
             )
         )
-        or (
-            warming
-            and (
-                completeness != "none"
-                or successful
-                or failed
-                or retained
-                or has_data
-                or failures
-                or last_success
-                or oldest
-                or generated
-                or expires
-                or not math.isnan(values["duration"])
-                or not math.isnan(values["retained_age"])
-            )
-        )
-        or (not disabled and not warming and successful + failed != configured)
         or (
             state == "fresh"
             and (
                 completeness != "complete"
-                or failed
-                or retained
-                or successful != configured
-                or not has_data
-                or failures
                 or last_success is None
-                or oldest is None
+                or counts["failed"] != 0
+                or failures
             )
         )
         or (
             state == "stale"
-            and (
-                completeness != "partial"
-                or not failed
-                or not has_data
-                or not failures
-                or oldest is None
-            )
+            and (completeness != "partial" or counts["failed"] == 0 or not has_data)
         )
-        or (
-            state == "unavailable"
-            and (
-                completeness != "none"
-                or successful
-                or retained
-                or has_data
-                or not failed
-                or not failures
-                or oldest is not None
-            )
-        )
-        or ((state in {"fresh", "stale"}) != (not math.isnan(values["retained_age"])))
-        or (state not in {"disabled", "warming"}) != (not math.isnan(values["duration"]))
+        or (state == "unavailable" and (completeness != "none" or has_data))
+        or (has_data != (oldest is not None and age is not None))
+        or len(repos) != counts["successful"] + counts["retained"]
     )
+    current = now or datetime.now(timezone.utc)
+    if any(ts is not None and ts > current for ts in (generated, last_success, oldest)):
+        raise InvalidDocument("future timestamp")
     if contradictory:
         raise InvalidDocument("cache state/count relationship")
-    return values
+    return {
+        "enabled": enabled,
+        "state": state,
+        "completeness": completeness,
+        "failures": set(failures),
+        "counts": counts,
+        "duration": duration,
+        "age": age,
+        "last_success": last_success,
+        "oldest": oldest,
+    }
 
 
-def render(payload: bytes | None, environment: str, status="valid", now=None) -> str:
-    values = parse_document(payload, now) if payload is not None else None
-    state = values["state"] if values else "unavailable"
-    completeness = values["completeness"] if values else "none"
+def _metric(name: str, value: int | float, label: str = "") -> str:
+    rendered = str(int(value)) if isinstance(value, int) or value.is_integer() else f"{value:g}"
+    return f"{name}{label} {rendered}"
+
+
+def render(
+    values: dict[str, object] | None,
+    *,
+    monitoring_enabled: bool,
+    status: str,
+    collection_up: bool | None = None,
+) -> str:
+    """Render canonical application metrics plus bounded transport health."""
     lines = [
-        "# HELP daniel_cache_collection_up Whether the passive runtime document "
-        "was collected and validated.",
-        "# TYPE daniel_cache_collection_up gauge",
-        f'daniel_cache_collection_up{{environment="{environment}"}} {1 if values else 0}',
+        "# HELP daniel_github_cache_monitoring_enabled Whether collection is authorized.",
+        "# TYPE daniel_github_cache_monitoring_enabled gauge",
+        _metric("daniel_github_cache_monitoring_enabled", int(monitoring_enabled)),
+        "# HELP daniel_github_cache_collection_up Whether the passive snapshot was validated.",
+        "# TYPE daniel_github_cache_collection_up gauge",
+        _metric(
+            "daniel_github_cache_collection_up",
+            int(values is not None if collection_up is None else collection_up),
+        ),
     ]
-    for metric, domain, selected, label in (
-        ("daniel_cache_state", STATES, state, "state"),
-        ("daniel_cache_data_completeness", COMPLETENESS, completeness, "completeness"),
-        ("daniel_cache_document_status", DOCUMENT_STATUSES, status, "status"),
-    ):
-        lines += [
-            f'{metric}{{environment="{environment}",{label}="{item}"}} {int(item == selected)}'
-            for item in domain
-        ]
-    failures = values["failures"] if values else set()
-    lines += [
-        f'daniel_cache_failure_category{{environment="{environment}",'
-        f'category="{item}"}} {int(item in failures)}'
-        for item in FAILURES
-    ]
-    if values:
-        for suffix, key in (
-            ("freshness_age_seconds", "freshness_age"),
-            ("refresh_duration_seconds", "duration"),
-            ("retained_data_age_seconds", "retained_age"),
-        ):
-            if not math.isnan(values[key]):
-                lines.append(
-                    f'daniel_cache_{suffix}{{environment="{environment}"}} {values[key]:g}'
-                )
-        for key in ("configured", "successful", "failed", "retained"):
-            lines.append(
-                f'daniel_cache_repositories{{environment="{environment}",'
-                f'result="{key}"}} {values[key]:g}'
+    for item in DOCUMENT_STATUSES:
+        lines.append(
+            _metric(
+                "daniel_github_cache_document_status", int(item == status), f'{{status="{item}"}}'
             )
-    return "\n".join(lines) + "\n"
+        )
+    if values is None:
+        return "\n".join(lines) + "\n"
+    lines.append(_metric("daniel_github_cache_enabled", int(values["enabled"])))
+    for item in STATES:
+        lines.append(
+            _metric(
+                "daniel_github_cache_state", int(item == values["state"]), f'{{state="{item}"}}'
+            )
+        )
+    for item in COMPLETENESS:
+        lines.append(
+            _metric(
+                "daniel_github_cache_data_completeness",
+                int(item == values["completeness"]),
+                f'{{completeness="{item}"}}',
+            )
+        )
+    for item in FAILURES:
+        lines.append(
+            _metric(
+                "daniel_github_cache_refresh_failure",
+                int(item in values["failures"]),
+                f'{{category="{item}"}}',
+            )
+        )
+    lines.extend(
+        [
+            _metric(
+                "daniel_github_cache_last_success_unixtime_seconds",
+                values["last_success"].timestamp() if values["last_success"] else 0,
+            ),
+            _metric(
+                "daniel_github_cache_oldest_data_unixtime_seconds",
+                values["oldest"].timestamp() if values["oldest"] else 0,
+            ),
+            _metric("daniel_github_cache_retained_data_age_seconds", values["age"] or 0),
+            _metric("daniel_github_cache_refresh_duration_milliseconds", values["duration"] or 0),
+        ]
+    )
+    for key in ("configured", "successful", "failed", "retained"):
+        lines.append(_metric(f"daniel_github_cache_{key}_repositories", values["counts"][key]))
+    output = "\n".join(lines) + "\n"
+    if len(output.encode()) > MAX_METRICS_BYTES:
+        raise InvalidDocument("serialized metrics")
+    return output
 
 
-def collect(url: str, environment: str, *, opener=None, now=None) -> str:
-    if url != RUNTIME_URLS[environment]:
-        raise ValueError("URL must be the canonical runtime URL for the selected environment")
+def collect(producer: dict, *, opener=None, now=None) -> str:
+    """Read only the passive application snapshot; disabled producers do no I/O."""
+    if not producer["enabled"]:
+        neutral = {
+            "enabled": False,
+            "state": "disabled",
+            "completeness": "none",
+            "failures": set(),
+            "counts": {key: 0 for key in ("configured", "successful", "failed", "retained")},
+            "duration": None,
+            "age": None,
+            "last_success": None,
+            "oldest": None,
+        }
+        return render(
+            neutral,
+            monitoring_enabled=False,
+            status="unavailable",
+            collection_up=False,
+        )
     open_url = opener or urllib.request.build_opener(_RejectRedirects()).open
     try:
         request = urllib.request.Request(
-            url,
+            producer["url"],
             headers={
                 "Accept": "application/json",
                 "User-Agent": "sugarkube-daniel-cache-collector/1",
             },
         )
         with open_url(request, timeout=10) as response:
-            if getattr(response, "geturl", lambda: url)() != url:
+            if getattr(response, "geturl", lambda: producer["url"])() != producer["url"]:
                 raise urllib.error.URLError("redirected response rejected")
             payload = response.read(MAX_BYTES + 1)
-        return render(payload, environment, now=now)
+        return render(parse_document(payload, now), monitoring_enabled=True, status="valid")
     except OverflowError:
         status = "oversized"
-    except InvalidDocument:
+    except (InvalidDocument, validate_probe_quotas.ContractError):
         status = "malformed"
     except (OSError, TimeoutError, http.client.HTTPException, urllib.error.URLError):
         status = "unavailable"
-    return render(None, environment, status)
+    return render(None, monitoring_enabled=True, status=status)
 
 
 def write_textfile(output_path: Path, output: str) -> None:
@@ -324,13 +334,29 @@ def write_textfile(output_path: Path, output: str) -> None:
             os.unlink(temporary)
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--url", required=True)
-    parser.add_argument("--environment", choices=tuple(RUNTIME_URLS), required=True)
+    parser.add_argument(
+        "--descriptor",
+        type=Path,
+        default=ROOT / "config/observability/danielsmith-github-cache.json",
+    )
+    parser.add_argument("--environment", choices=("staging", "prod"), required=True)
     parser.add_argument("--output", type=Path, required=True)
-    args = parser.parse_args()
-    write_textfile(args.output, collect(args.url, args.environment))
+    args = parser.parse_args(argv)
+    try:
+        descriptor = json.loads(
+            args.descriptor.read_text(encoding="utf-8"),
+            object_pairs_hook=validate_probe_quotas._reject_duplicate_json_fields,
+        )
+        validate_probe_quotas.validate_daniel_cache_contract(descriptor)
+        producer = next(
+            item for item in descriptor["producers"] if item["environment"] == args.environment
+        )
+        output = collect(producer)
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError, StopIteration) as error:
+        parser.error(str(error))
+    write_textfile(args.output, output)
     return 0
 
 

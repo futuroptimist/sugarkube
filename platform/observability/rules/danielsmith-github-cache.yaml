@@ -1,0 +1,84 @@
+groups:
+  - name: danielsmith-github-cache
+    interval: 1m
+    rules:
+      # Activation changes only this environment-specific declaration to vector(1).
+      - record: daniel_github_cache_monitoring_expected
+        expr: vector(0)
+        labels:
+          application: danielsmith
+          environment: staging
+          name: danielsmith-github-cache-staging
+      - record: daniel_github_cache_monitoring_expected
+        expr: vector(0)
+        labels:
+          application: danielsmith
+          environment: prod
+          name: danielsmith-github-cache-prod
+      - alert: DanielGithubCacheExpectedButMissing
+        expr: |
+          daniel_github_cache_monitoring_expected{application="danielsmith"} == 1
+          unless on ()
+          daniel_github_cache_collection_up
+        for: 20m
+        labels:
+          application: danielsmith
+          severity: warning
+        annotations:
+          summary: Expected Daniel GitHub-cache telemetry is missing
+          description: Collection is authorized but no bounded transport-health series is present.
+          runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/danielsmith-github-cache.md#alerts
+      - alert: DanielGithubCacheCollectionFailed
+        expr: |
+          daniel_github_cache_monitoring_expected{application="danielsmith"} == 1
+          and on ()
+          daniel_github_cache_monitoring_enabled == 1
+          and on ()
+          daniel_github_cache_collection_up == 0
+        for: 20m
+        labels:
+          application: danielsmith
+          severity: warning
+        annotations:
+          summary: Daniel GitHub-cache snapshot is unavailable or malformed
+          description: The passive collector failed closed and did not publish application cache state.
+          runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/danielsmith-github-cache.md#alerts
+      - alert: DanielGithubCacheStale
+        expr: |
+          daniel_github_cache_monitoring_expected{application="danielsmith"} == 1
+          and on ()
+          daniel_github_cache_state{state="stale"} == 1
+        for: 20m
+        labels:
+          application: danielsmith
+          severity: warning
+        annotations:
+          summary: Daniel GitHub-cache is serving retained data
+          description: A refresh failed and retained last-good data remains available with its original age.
+          runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/danielsmith-github-cache.md#alerts
+      - alert: DanielGithubCacheUnavailable
+        expr: |
+          daniel_github_cache_monitoring_expected{application="danielsmith"} == 1
+          and on ()
+          daniel_github_cache_state{state="unavailable"} == 1
+        for: 20m
+        labels:
+          application: danielsmith
+          severity: warning
+        annotations:
+          summary: Daniel GitHub-cache has no current or retained data
+          description: The latest refresh produced no usable GitHub metadata; application availability is independent.
+          runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/danielsmith-github-cache.md#alerts
+      - alert: DanielGithubCacheRefreshFailure
+        expr: |
+          daniel_github_cache_monitoring_expected{application="danielsmith"} == 1
+          and on ()
+          max(daniel_github_cache_refresh_failure) == 1
+        for: 20m
+        labels:
+          application: danielsmith
+          severity: warning
+        annotations:
+          summary: Daniel GitHub-cache refresh has a current bounded failure
+          description: Inspect the fixed category series; arbitrary upstream errors are never exported.
+          runbook_url: https://github.com/futuroptimist/sugarkube/blob/main/docs/danielsmith-github-cache.md#alerts
