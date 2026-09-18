@@ -1,0 +1,35 @@
+---
+groups:
+  - name: application-sli-foundation
+    interval: 1m
+    rules:
+      # Objective values are deliberately absent: the repository has no reviewed numerical SLO.
+      - record: sugarkube_application_sli_contract
+        expr: vector(1)
+        labels: {application: dspace, sli: dspace-http-requests, signal_type: actual_request_success, objective: unmeasured, observation_window: 1h}
+      - record: sugarkube_application_sli_contract
+        expr: vector(1)
+        labels: {application: dspace, sli: dspace-chat-synthetic, signal_type: synthetic_completion, objective: unmeasured, observation_window: 15m}
+      - record: sugarkube_application_sli_contract
+        expr: vector(1)
+        labels: {application: tokenplace, sli: tokenplace-encrypted-completion, signal_type: synthetic_completion, objective: unmeasured, observation_window: 15m}
+      - record: sugarkube_application_sli_contract
+        expr: vector(1)
+        labels: {application: danielsmith, sli: danielsmith-essential-visitor, signal_type: synthetic_completion, objective: unmeasured, observation_window: 17m}
+      - record: sugarkube_application_sli_contract
+        expr: vector(1)
+        labels: {application: shared, sli: public-http-probes, signal_type: http_probe_health, objective: unmeasured, observation_window: 15m}
+      - record: sugarkube_application_sli_eligible_requests_1h
+        expr: sum by (environment) (increase(dspace_http_requests_total{route!~"/(healthz|livez|metrics)"}[1h]))
+        labels: {application: dspace, sli: dspace-http-requests}
+      - record: sugarkube_application_sli_successful_requests_1h
+        expr: sum by (environment) (increase(dspace_http_requests_total{route!~"/(healthz|livez|metrics)",status_class!="5xx"}[1h]))
+        labels: {application: dspace, sli: dspace-http-requests}
+      - record: sugarkube_application_sli_request_state
+        expr: label_replace(sugarkube_application_sli_eligible_requests_1h{sli="dspace-http-requests"} > 0 and on(environment) sugarkube_application_sli_successful_requests_1h{sli="dspace-http-requests"} == sugarkube_application_sli_eligible_requests_1h{sli="dspace-http-requests"}, "state", "successful_eligible_traffic", "", "")
+      - record: sugarkube_application_sli_request_state
+        expr: label_replace(sugarkube_application_sli_eligible_requests_1h{sli="dspace-http-requests"} > 0 and on(environment) sugarkube_application_sli_successful_requests_1h{sli="dspace-http-requests"} < sugarkube_application_sli_eligible_requests_1h{sli="dspace-http-requests"}, "state", "failed_eligible_traffic", "", "")
+      - record: sugarkube_application_sli_request_state
+        expr: label_replace(sugarkube_application_sli_eligible_requests_1h{sli="dspace-http-requests"} == 0 and on(environment) min by(environment) (dspace_instrumentation_up == 1), "state", "no_eligible_traffic", "", "")
+      - record: sugarkube_application_sli_request_state
+        expr: label_replace(sum by(environment) (resets(dspace_http_requests_total{route!~"/(healthz|livez|metrics)"}[1h])) > 0, "state", "reset_or_incomplete_history", "", "")

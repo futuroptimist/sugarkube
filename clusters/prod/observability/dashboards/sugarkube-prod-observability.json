@@ -3850,6 +3850,127 @@
           }
         }
       ]
+    },
+    {
+      "id": 93,
+      "type": "row",
+      "title": "Application SLI contract and error-budget foundation",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 297
+      }
+    },
+    {
+      "id": 94,
+      "type": "text",
+      "title": "Objective and error-budget status",
+      "description": "No reviewed numerical SLO exists; no budget or burn rate is calculated and no alert is activated.",
+      "options": {
+        "mode": "markdown",
+        "content": "## NO DATA \u2014 objective unmeasured\n\nProbe health, synthetic completion, and actual request success remain separate signals. A probe never substitutes for real-user request success. Retention is capped at 90d and can be shorter under the size cap; reset or incomplete history is not a full error-budget window.\n\n[SLI contract semantics](https://github.com/futuroptimist/sugarkube/blob/main/docs/application-sli-contract.md)"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 10,
+        "x": 0,
+        "y": 298
+      }
+    },
+    {
+      "id": 95,
+      "type": "table",
+      "title": "Supported SLI contracts",
+      "description": "Machine-readable contracts only. Every objective is explicitly unmeasured, so budget and burn output remains NO DATA.",
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "NO DATA"
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sugarkube_application_sli_contract{application=~\"dspace|tokenplace|danielsmith|shared\"}",
+          "format": "table",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "gridPos": {
+        "h": 7,
+        "w": 14,
+        "x": 10,
+        "y": 298
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value": true,
+              "__name__": true
+            },
+            "indexByName": {
+              "application": 0,
+              "sli": 1,
+              "signal_type": 2,
+              "objective": 3,
+              "observation_window": 4
+            },
+            "renameByName": {
+              "application": "Application",
+              "sli": "SLI",
+              "signal_type": "Signal type",
+              "objective": "Objective",
+              "observation_window": "Window"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 96,
+      "type": "state-timeline",
+      "title": "DSPACE actual-request SLI state",
+      "description": "Separates successful and failed eligible traffic, no traffic, and reset/incomplete history. Missing telemetry stays NO DATA instead of becoming zero.",
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "NO DATA"
+        },
+        "overrides": []
+      },
+      "options": {
+        "mergeValues": true,
+        "showValue": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sugarkube_application_sli_request_state{application=\"dspace\",environment=~\"$environment\"}",
+          "legendFormat": "{{state}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 305
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      }
     }
   ]
 }

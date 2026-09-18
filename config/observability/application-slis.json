@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "retention": "90d",
+  "slis": [
+    {
+      "id": "dspace-http-requests",
+      "application": "dspace",
+      "userJourney": "A user receives a non-5xx response from a bounded, non-operational HTTP route.",
+      "signalType": "actual_request_success",
+      "dataSource": "dspace_http_requests_total",
+      "numerator": "sum(increase(dspace_http_requests_total{route!~\"/(healthz|livez|metrics)\",status_class!=\"5xx\"}[1h]))",
+      "denominator": "sum(increase(dspace_http_requests_total{route!~\"/(healthz|livez|metrics)\"}[1h]))",
+      "exclusions": ["healthz, livez, and metrics routes", "5xx responses from the numerator"],
+      "observationWindow": "1h",
+      "objective": null,
+      "measurementState": "unmeasured"
+    },
+    {
+      "id": "dspace-chat-synthetic",
+      "application": "dspace",
+      "userJourney": "The isolated staging /chat synthetic completes within its producer contract.",
+      "signalType": "synthetic_completion",
+      "dataSource": "dspace_chat_synthetic_success",
+      "numerator": "dspace_chat_synthetic_success",
+      "denominator": "one fresh scheduled synthetic execution",
+      "exclusions": ["stale or missing executions", "real-user requests"],
+      "observationWindow": "15m",
+      "objective": null,
+      "measurementState": "unmeasured"
+    },
+    {
+      "id": "tokenplace-encrypted-completion",
+      "application": "tokenplace",
+      "userJourney": "A client completes the bounded relay-blind encrypted request, retrieval, and decryption journey.",
+      "signalType": "synthetic_completion",
+      "dataSource": "encrypted_completion_success",
+      "numerator": "encrypted_completion_success",
+      "denominator": "one fresh enabled completion attempt",
+      "exclusions": ["disabled, stale, or missing attempts", "health and registration probes", "real-user requests"],
+      "observationWindow": "15m",
+      "objective": null,
+      "measurementState": "unmeasured"
+    },
+    {
+      "id": "danielsmith-essential-visitor",
+      "application": "danielsmith",
+      "userJourney": "The application-owned essential visitor journey completes successfully.",
+      "signalType": "synthetic_completion",
+      "dataSource": "danielsmith_visitor_journey_success",
+      "numerator": "danielsmith_visitor_journey_success",
+      "denominator": "one fresh enabled visitor execution",
+      "exclusions": ["optional immersive rendering", "disabled, stale, or unavailable executions", "real-user requests"],
+      "observationWindow": "17m",
+      "objective": null,
+      "measurementState": "unmeasured"
+    },
+    {
+      "id": "public-http-probes",
+      "application": "dspace,tokenplace,danielsmith",
+      "userJourney": "The configured public HTTP endpoint is reachable from the blackbox exporter.",
+      "signalType": "http_probe_health",
+      "dataSource": "probe_success",
+      "numerator": "probe_success",
+      "denominator": "one configured probe execution",
+      "exclusions": ["application request success", "synthetic journey completion", "disabled probe targets"],
+      "observationWindow": "15m",
+      "objective": null,
+      "measurementState": "unmeasured"
+    }
+  ]
+}
