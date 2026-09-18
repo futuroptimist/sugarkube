@@ -36,6 +36,7 @@ def test_contract_is_bounded_complete_and_explicitly_unmeasured():
             lambda sli, doc: sli.update(dataSource="probe_success", numerator="probe_success"),
             "substitute|probe cannot",
         ),
+        (lambda sli, doc: sli.update(numerator="probe_success"), "probe cannot"),
         (lambda sli, doc: sli.update(objective=0.999), "no reviewed numerical objective"),
         (lambda sli, doc: sli.update(denominator="sum(metric) or vector(0)"), "zero fallback"),
         (lambda sli, doc: doc.update(retention="91d"), "90d maximum"),
@@ -55,6 +56,83 @@ def test_validator_rejects_unsafe_or_fabricated_contracts(mutation, message):
     mutation(actual, value)
     with pytest.raises(validator.ContractError, match=message):
         validator.validate(value)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (lambda doc: [], "must be an object"),
+        (lambda doc: {**doc, "schemaVersion": True}, "unsupported top-level"),
+        (lambda doc: {**doc, "unexpected": True}, "unsupported top-level"),
+        (lambda doc: {**doc, "retention": 90}, "non-empty duration string"),
+        (lambda doc: {**doc, "retention": ""}, "non-empty duration string"),
+        (lambda doc: {**doc, "slis": []}, "non-empty list"),
+        (lambda doc: {**doc, "slis": [None]}, "each SLI must be an object"),
+        (
+            lambda doc: {**doc, "slis": [{**doc["slis"][0], "unexpected": True}]},
+            "bounded schema",
+        ),
+        (
+            lambda doc: {**doc, "slis": [{**doc["slis"][0], "monitoringState": "enabled"}]},
+            "monitoringState must be disabled",
+        ),
+        (
+            lambda doc: {**doc, "slis": [doc["slis"][0], doc["slis"][0]]},
+            "duplicate SLI id",
+        ),
+        (
+            lambda doc: {**doc, "slis": [{**doc["slis"][0], "measurementState": "measured"}]},
+            "must be unmeasured",
+        ),
+        (
+            lambda doc: {**doc, "slis": [{**doc["slis"][0], "exclusions": "none"}]},
+            "non-empty string list",
+        ),
+        (
+            lambda doc: {**doc, "slis": [{**doc["slis"][0], "application": "unknown"}]},
+            "three applications",
+        ),
+    ],
+)
+def test_validator_rejects_malformed_contract_shapes(mutation, message):
+    with pytest.raises(validator.ContractError, match=message):
+        validator.validate(mutation(copy.deepcopy(contract())))
+
+
+def test_encrypted_completion_requires_disabled_eligibility_gate():
+    value = copy.deepcopy(contract())
+    encrypted = next(sli for sli in value["slis"] if sli["id"] == "tokenplace-encrypted-completion")
+    encrypted["numerator"] = "encrypted_completion_lifecycle_state"
+    with pytest.raises(validator.ContractError, match="explicitly disabled"):
+        validator.validate(value)
+
+
+def test_recording_label_validation_rejects_malformed_and_unknown_rules(tmp_path):
+    value = contract()
+    malformed = tmp_path / "malformed.yaml"
+    malformed.write_text("groups: [", encoding="utf-8")
+    with pytest.raises(validator.ContractError, match="invalid application SLI rules"):
+        validator.validate_recording_labels(value, malformed)
+
+    unknown = tmp_path / "unknown.yaml"
+    unknown.write_text(
+        yaml.safe_dump({"groups": [{"rules": [{"record": "example", "labels": {}}]}]}),
+        encoding="utf-8",
+    )
+    with pytest.raises(validator.ContractError, match="labels are not canonical"):
+        validator.validate_recording_labels(value, unknown)
+
+
+def test_validator_main_reports_success_and_clean_errors(tmp_path, capsys):
+    assert validator.main([str(CONTRACT)]) == 0
+    assert "validated 8 application SLIs" in capsys.readouterr().out
+
+    invalid = tmp_path / "invalid.json"
+    invalid.write_text("not JSON", encoding="utf-8")
+    with pytest.raises(SystemExit) as error:
+        validator.main([str(invalid)])
+    assert error.value.code == 2
+    assert "Expecting value" in capsys.readouterr().err
 
 
 def test_recordings_are_non_alerting_reset_aware_and_guarded_by_complete_fresh_history():
@@ -81,7 +159,9 @@ def test_recordings_are_non_alerting_reset_aware_and_guarded_by_complete_fresh_h
 def test_expected_ready_sources_are_matched_for_current_and_full_window_coverage():
     expressions = RULES.read_text(encoding="utf-8")
     for namespace, container in (("tokenplace", "relay"), ("dspace", "dspace")):
-        selector = f'kube_pod_container_status_ready{{namespace="{namespace}",container="{container}"}}'
+        selector = (
+            f'kube_pod_container_status_ready{{namespace="{namespace}",container="{container}"}}'
+        )
         assert selector in expressions
         assert f"max_over_time({selector}[1h])" in expressions
     assert expressions.count("and on (namespace, pod)") >= 8
@@ -91,7 +171,8 @@ def test_expected_ready_sources_are_matched_for_current_and_full_window_coverage
 def test_missing_telemetry_state_is_derived_from_expected_ready_sources():
     document = yaml.safe_load(RULES.read_text(encoding="utf-8"))
     missing_rules = [
-        rule for rule in document["groups"][0]["rules"]
+        rule
+        for rule in document["groups"][0]["rules"]
         if rule.get("labels", {}).get("observation_state") == "missing_or_stale_telemetry"
     ]
     assert len(missing_rules) == 2
@@ -104,8 +185,7 @@ def test_missing_telemetry_state_is_derived_from_expected_ready_sources():
 def test_success_recordings_have_only_an_eligible_traffic_zero_fallback():
     document = yaml.safe_load(RULES.read_text(encoding="utf-8"))
     success_rules = [
-        rule for rule in document["groups"][0]["rules"]
-        if "sli_successful_events" in rule["record"]
+        rule for rule in document["groups"][0]["rules"] if "sli_successful_events" in rule["record"]
     ]
     assert len(success_rules) == 2
     for rule in success_rules:
@@ -115,13 +195,23 @@ def test_success_recordings_have_only_an_eligible_traffic_zero_fallback():
 
 def test_observation_states_are_exclusive_and_contract_labelled():
     document = yaml.safe_load(RULES.read_text(encoding="utf-8"))
-    states = [rule for rule in document["groups"][0]["rules"] if rule["record"].endswith("observation_state")]
+    states = [
+        rule
+        for rule in document["groups"][0]["rules"]
+        if rule["record"].endswith("observation_state")
+    ]
     assert {rule["labels"]["observation_state"] for rule in states} == {
-        "successful_eligible_traffic", "failed_eligible_traffic", "no_eligible_traffic",
-        "missing_or_stale_telemetry", "reset_or_incomplete_history",
+        "successful_eligible_traffic",
+        "failed_eligible_traffic",
+        "no_eligible_traffic",
+        "missing_or_stale_telemetry",
+        "reset_or_incomplete_history",
         "intentionally_disabled_monitoring",
     }
-    assert all({"application", "sli", "signal_type", "observation_state"} <= rule["labels"].keys() for rule in states)
+    assert all(
+        {"application", "sli", "signal_type", "observation_state"} <= rule["labels"].keys()
+        for rule in states
+    )
     identities = {(rule["labels"]["sli"], rule["labels"]["signal_type"]) for rule in states}
     assert identities == {
         ("tokenplace-request-success", "actual_request_success"),
@@ -149,7 +239,11 @@ def test_dashboard_keeps_signal_classes_separate_and_budget_unmeasured():
 def test_semantics_name_all_required_lifecycle_states():
     text = (ROOT / "docs/application-slis.md").read_text(encoding="utf-8").lower()
     for phrase in (
-        "successful eligible traffic", "no eligible traffic", "missing telemetry",
-        "incomplete history", "intentionally disabled monitoring", "failed eligible traffic",
+        "successful eligible traffic",
+        "no eligible traffic",
+        "missing telemetry",
+        "incomplete history",
+        "intentionally disabled monitoring",
+        "failed eligible traffic",
     ):
         assert phrase in text
