@@ -67,7 +67,7 @@ def test_recordings_are_non_alerting_reset_aware_and_guarded_by_complete_fresh_h
     assert "kube_pod_container_status_ready" in expressions
     assert "kube_pod_status_phase" in expressions
     assert "unless on (namespace, pod) kube_pod_deletion_timestamp" in expressions
-    assert "count by (environment)" in expressions
+    assert "count ((kube_pod_" in expressions
     assert "vector(0)" not in expressions and "probe_success" not in expressions
     assert "count_over_time(" in expressions and ">= 120" in expressions
     assert "resets(" in expressions
@@ -84,7 +84,8 @@ def test_expected_ready_sources_are_matched_for_current_and_full_window_coverage
         selector = f'kube_pod_container_status_ready{{namespace="{namespace}",container="{container}"}}'
         assert selector in expressions
         assert f"max_over_time({selector}[1h])" in expressions
-    assert expressions.count("and on (environment, pod)") >= 8
+    assert expressions.count("and on (namespace, pod)") >= 8
+    assert "count by (environment) ((kube_pod_" not in expressions
 
 
 def test_success_recordings_have_only_an_eligible_traffic_zero_fallback():

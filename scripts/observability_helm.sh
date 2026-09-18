@@ -137,6 +137,14 @@ create_rules_overlay() {
           end
         end
       end
+      if key == "application-slis"
+        rules["groups"].each do |group|
+          group["rules"].each do |rule|
+            next unless rule["record"]&.start_with?("sugarkube:sli_")
+            (rule["labels"] ||= {})["environment"] = environment
+          end
+        end
+      end
       [key, rules]
     end
     File.write(output, YAML.dump("additionalPrometheusRulesMap" => rules_map))
