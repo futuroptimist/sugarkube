@@ -171,6 +171,28 @@ def test_daniel_cache_alerts_match_global_application_signals_after_transport_id
         "name": "danielsmith-github-cache-staging",
         "severity": "warning",
     }
+    alert_annotations = {
+        "DanielGithubCacheStale": {
+            "summary": "Daniel GitHub-cache is serving retained data",
+            "description": "A refresh failed and retained last-good data remains available with its original age.",
+            "runbook_url": "https://github.com/futuroptimist/sugarkube/blob/main/docs/danielsmith-github-cache.md#alerts",
+        },
+        "DanielGithubCacheUnavailable": {
+            "summary": "Daniel GitHub-cache has no current or retained data",
+            "description": "The latest refresh produced no usable GitHub metadata; application availability is independent.",
+            "runbook_url": "https://github.com/futuroptimist/sugarkube/blob/main/docs/danielsmith-github-cache.md#alerts",
+        },
+        "DanielGithubCacheRefreshFailure": {
+            "summary": "Daniel GitHub-cache refresh has a current bounded failure",
+            "description": "Inspect the fixed category series; arbitrary upstream errors are never exported.",
+            "runbook_url": "https://github.com/futuroptimist/sugarkube/blob/main/docs/danielsmith-github-cache.md#alerts",
+        },
+        "DanielGithubCacheExpectedButMissing": {
+            "summary": "Expected Daniel GitHub-cache telemetry is missing",
+            "description": "Collection is authorized but no bounded transport-health series is present.",
+            "runbook_url": "https://github.com/futuroptimist/sugarkube/blob/main/docs/danielsmith-github-cache.md#alerts",
+        },
+    }
 
     def current_inputs(application_series):
         return [
@@ -209,7 +231,12 @@ def test_daniel_cache_alerts_match_global_application_signals_after_transport_id
                     {
                         "eval_time": "21m",
                         "alertname": alert,
-                        "exp_alerts": [{"exp_labels": alert_labels}],
+                        "exp_alerts": [
+                            {
+                                "exp_labels": alert_labels,
+                                "exp_annotations": alert_annotations[alert],
+                            }
+                        ],
                     }
                 ],
             }
@@ -225,7 +252,14 @@ def test_daniel_cache_alerts_match_global_application_signals_after_transport_id
                 {
                     "eval_time": "21m",
                     "alertname": "DanielGithubCacheExpectedButMissing",
-                    "exp_alerts": [{"exp_labels": alert_labels}],
+                    "exp_alerts": [
+                        {
+                            "exp_labels": alert_labels,
+                            "exp_annotations": alert_annotations[
+                                "DanielGithubCacheExpectedButMissing"
+                            ],
+                        }
+                    ],
                 },
                 {
                     "eval_time": "21m",
