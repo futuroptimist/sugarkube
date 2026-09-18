@@ -92,8 +92,13 @@ tests:
       - series: dspace_instrumentation_up{namespace="dspace",environment="staging",pod="a"}
         values: '1x121'
       - series: dspace_dchat_requests_total{namespace="dspace",environment="staging",pod="a",outcome="failure"}
-        values: '0+1x120'
+        values: '0x60 1x61'
     promql_expr_test:
+      - expr: sugarkube:sli_eligible_events:increase1h{application="DSPACE",environment="staging"}
+        eval_time: 60m
+        exp_samples:
+          - labels: '{__name__="sugarkube:sli_eligible_events:increase1h",application="DSPACE",environment="staging",signal_type="actual_request_success",sli="dspace-chat-request-success"}'
+            value: 1
       - expr: sugarkube:sli_successful_events:increase1h{application="DSPACE",environment="staging"}
         eval_time: 60m
         exp_samples:
