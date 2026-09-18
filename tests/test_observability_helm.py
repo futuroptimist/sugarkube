@@ -152,9 +152,9 @@ def test_daniel_cache_alerts_match_global_application_signals_after_transport_id
     """Evaluate the identity/global join contract with Prometheus itself."""
     promtool = shutil.which("promtool")
     if promtool is None:
-        # TODO: Provision promtool in the local and CI test environments.
-        # Root cause: The current local and CI test environments do not include promtool.
-        # Estimated fix: Add promtool provisioning in a separately scoped CI change.
+        # TODO: Document promtool setup for developers who run rule tests locally.
+        # Root cause: Promtool is not guaranteed locally; CI provisions it and runs this fixture.
+        # Estimated fix: Add promtool guidance to local developer tooling and documentation.
         pytest.skip("promtool is unavailable")
 
     rules = cache_rules_for("staging")
