@@ -1,50 +1,85 @@
 ---
 rule_files:
   - ../../platform/observability/rules/application-slis.yaml
-evaluation_interval: 10m
+evaluation_interval: 30s
 tests:
-  - name: outage recovery and multiple replicas preserve eligible failures
-    interval: 10m
+  - name: complete fresh history aggregates replicas and preserves eligible failures
+    interval: 30s
     input_series:
       - series: tokenplace_relay_request_outcomes_total{app="tokenplace",environment="prod",pod="a",outcome="completed"}
-        values: '0 1 2 3 4 5 6'
+        values: '0+1x120'
       - series: tokenplace_relay_request_outcomes_total{app="tokenplace",environment="prod",pod="a",outcome="failed"}
-        values: '0 0 1 1 1 1 1'
+        values: '0x118 0 1 1'
       - series: tokenplace_relay_request_outcomes_total{app="tokenplace",environment="prod",pod="b",outcome="completed"}
-        values: '0 1 2 3 4 5 6'
+        values: '0+1x120'
     promql_expr_test:
       - expr: sugarkube:sli_eligible_events:increase1h{application="token.place",environment="prod"}
         eval_time: 60m
         exp_samples:
           - labels: '{__name__="sugarkube:sli_eligible_events:increase1h",application="token.place",environment="prod",signal_type="actual_request_success"}'
-            value: 13
+            value: 241
       - expr: sugarkube:sli_successful_events:increase1h{application="token.place",environment="prod"}
         eval_time: 60m
         exp_samples:
           - labels: '{__name__="sugarkube:sli_successful_events:increase1h",application="token.place",environment="prod",signal_type="actual_request_success"}'
-            value: 12
-  - name: counter reset is handled by increase
-    interval: 10m
+            value: 240
+  - name: counter reset is handled with complete history
+    interval: 30s
     input_series:
       - series: dspace_dchat_requests_total{environment="staging",pod="a",outcome="success"}
-        values: '0 5 10 2 4 6 8'
+        values: '0+1x60 0+1x59'
     promql_expr_test:
       - expr: sugarkube:sli_eligible_events:increase1h{application="DSPACE",environment="staging"}
         eval_time: 60m
         exp_samples:
           - labels: '{__name__="sugarkube:sli_eligible_events:increase1h",application="DSPACE",environment="staging",signal_type="actual_request_success"}'
-            value: 15.6
+            value: 118.99159663865547
+  - name: absent success outcome becomes zero only with eligible traffic
+    interval: 30s
+    input_series:
+      - series: dspace_dchat_requests_total{environment="staging",pod="a",outcome="failure"}
+        values: '0+1x120'
+    promql_expr_test:
+      - expr: sugarkube:sli_successful_events:increase1h{application="DSPACE",environment="staging"}
+        eval_time: 60m
+        exp_samples:
+          - labels: '{__name__="sugarkube:sli_successful_events:increase1h",application="DSPACE",environment="staging",signal_type="actual_request_success"}'
+            value: 0
   - name: no traffic does not become success
-    interval: 10m
+    interval: 30s
     input_series:
       - series: dspace_dchat_requests_total{environment="staging",pod="a",outcome="success"}
-        values: '0x7'
+        values: '0x121'
+    promql_expr_test:
+      - expr: sugarkube:sli_eligible_events:increase1h{application="DSPACE",environment="staging"}
+        eval_time: 60m
+        exp_samples: []
+      - expr: sugarkube:sli_successful_events:increase1h{application="DSPACE",environment="staging"}
+        eval_time: 60m
+        exp_samples: []
+  - name: partial history stays absent
+    interval: 30s
+    input_series:
+      - series: tokenplace_relay_request_outcomes_total{app="tokenplace",environment="prod",pod="a",outcome="failed"}
+        values: '_x2 0+1x118'
+    promql_expr_test:
+      - expr: sugarkube:sli_eligible_events:increase1h{application="token.place",environment="prod"}
+        eval_time: 60m
+        exp_samples: []
+      - expr: sugarkube:sli_successful_events:increase1h{application="token.place",environment="prod"}
+        eval_time: 60m
+        exp_samples: []
+  - name: stale telemetry stays absent
+    interval: 30s
+    input_series:
+      - series: dspace_dchat_requests_total{environment="staging",pod="a",outcome="failure"}
+        values: '0+1x116 _x4'
     promql_expr_test:
       - expr: sugarkube:sli_eligible_events:increase1h{application="DSPACE",environment="staging"}
         eval_time: 60m
         exp_samples: []
   - name: absent telemetry stays absent
-    interval: 10m
+    interval: 30s
     promql_expr_test:
       - expr: sugarkube:sli_eligible_events:increase1h
         eval_time: 60m

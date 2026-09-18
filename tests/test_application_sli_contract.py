@@ -50,7 +50,7 @@ def test_validator_rejects_unsafe_or_fabricated_contracts(mutation, message):
         validator.validate(value)
 
 
-def test_recordings_are_non_alerting_reset_aware_replica_aggregates_without_zero_fallback():
+def test_recordings_are_non_alerting_reset_aware_and_guarded_by_complete_fresh_history():
     document = yaml.safe_load(RULES.read_text(encoding="utf-8"))
     rules = document["groups"][0]["rules"]
     assert rules and all("record" in rule and "alert" not in rule for rule in rules)
@@ -59,7 +59,21 @@ def test_recordings_are_non_alerting_reset_aware_replica_aggregates_without_zero
     assert "sum by (environment)" in expressions
     assert "instance" not in expressions and "pod" not in expressions
     assert "vector(0)" not in expressions and "probe_success" not in expressions
+    assert "count_over_time(" in expressions and ">= 120" in expressions
+    assert "timestamp(" in expressions and "time() - 60" in expressions
     assert "> 0" in expressions  # no eligible traffic remains absent rather than successful
+
+
+def test_success_recordings_have_only_an_eligible_traffic_zero_fallback():
+    document = yaml.safe_load(RULES.read_text(encoding="utf-8"))
+    success_rules = [
+        rule for rule in document["groups"][0]["rules"]
+        if "sli_successful_events" in rule["record"]
+    ]
+    assert len(success_rules) == 2
+    for rule in success_rules:
+        assert "0 * sum by (environment) (increase(" in rule["expr"]
+        assert "> 0" in rule["expr"]
 
 
 def test_dashboard_keeps_signal_classes_separate_and_budget_unmeasured():

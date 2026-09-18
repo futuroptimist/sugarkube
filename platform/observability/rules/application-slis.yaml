@@ -4,24 +4,57 @@ groups:
     interval: 1m
     rules:
       # These aggregate across replicas and intentionally disappear for no traffic or missing data.
-      # increase() tolerates an observed counter reset; it cannot repair history lost before a scrape.
+      # A 30-second scrape produces at least 120 samples per complete hour. Requiring that coverage
+      # for every observed series also rejects stale counters, scrape gaps, and partial history.
       - record: sugarkube:sli_eligible_events:increase1h
-        expr: sum by (environment) (increase(tokenplace_relay_request_outcomes_total{app="tokenplace"}[1h])) > 0
+        expr: |
+          (sum by (environment) (increase(tokenplace_relay_request_outcomes_total{app="tokenplace"}[1h])) > 0)
+          and on (environment)
+          (min by (environment) (count_over_time(tokenplace_relay_request_outcomes_total{app="tokenplace"}[1h])) >= 120)
+          and on (environment)
+          (min by (environment) (timestamp(tokenplace_relay_request_outcomes_total{app="tokenplace"})) > time() - 60)
         labels:
           application: token.place
           signal_type: actual_request_success
       - record: sugarkube:sli_successful_events:increase1h
-        expr: sum by (environment) (increase(tokenplace_relay_request_outcomes_total{app="tokenplace",outcome="completed"}[1h]))
+        expr: |
+          (
+            sum by (environment) (increase(tokenplace_relay_request_outcomes_total{app="tokenplace",outcome="completed"}[1h]))
+            or on (environment)
+            (0 * sum by (environment) (increase(tokenplace_relay_request_outcomes_total{app="tokenplace"}[1h])))
+          )
+          and on (environment)
+          (sum by (environment) (increase(tokenplace_relay_request_outcomes_total{app="tokenplace"}[1h])) > 0)
+          and on (environment)
+          (min by (environment) (count_over_time(tokenplace_relay_request_outcomes_total{app="tokenplace"}[1h])) >= 120)
+          and on (environment)
+          (min by (environment) (timestamp(tokenplace_relay_request_outcomes_total{app="tokenplace"})) > time() - 60)
         labels:
           application: token.place
           signal_type: actual_request_success
       - record: sugarkube:sli_eligible_events:increase1h
-        expr: sum by (environment) (increase(dspace_dchat_requests_total[1h])) > 0
+        expr: |
+          (sum by (environment) (increase(dspace_dchat_requests_total[1h])) > 0)
+          and on (environment)
+          (min by (environment) (count_over_time(dspace_dchat_requests_total[1h])) >= 120)
+          and on (environment)
+          (min by (environment) (timestamp(dspace_dchat_requests_total)) > time() - 60)
         labels:
           application: DSPACE
           signal_type: actual_request_success
       - record: sugarkube:sli_successful_events:increase1h
-        expr: sum by (environment) (increase(dspace_dchat_requests_total{outcome="success"}[1h]))
+        expr: |
+          (
+            sum by (environment) (increase(dspace_dchat_requests_total{outcome="success"}[1h]))
+            or on (environment)
+            (0 * sum by (environment) (increase(dspace_dchat_requests_total[1h])))
+          )
+          and on (environment)
+          (sum by (environment) (increase(dspace_dchat_requests_total[1h])) > 0)
+          and on (environment)
+          (min by (environment) (count_over_time(dspace_dchat_requests_total[1h])) >= 120)
+          and on (environment)
+          (min by (environment) (timestamp(dspace_dchat_requests_total)) > time() - 60)
         labels:
           application: DSPACE
           signal_type: actual_request_success

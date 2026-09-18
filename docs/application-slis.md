@@ -11,14 +11,18 @@ inventing an uptime promise. This change adds recording rules only; it adds no a
 probe activation, or producer.
 
 The request recordings use a one-hour window, aggregate replicas, and retain Prometheus's native
-counter-reset handling. They are absent when there is no eligible traffic instead of converting
-absence to success or failure. Operators must interpret the states separately:
+counter-reset handling. The configured 30-second scrape interval must provide at least 120 samples
+for every observed source series in that hour, and the latest sample must be no older than 60
+seconds. These guards make stale, gapped, or partial history NO DATA. Recordings are also absent
+when there is no eligible traffic instead of converting that absence to success or failure.
+Operators must interpret the states separately:
 
 - a positive denominator with all successes is successful eligible traffic;
-- a positive denominator with fewer successes is failed eligible traffic;
+- a positive denominator with fewer successes is failed eligible traffic; an absent success
+  outcome is conditionally represented as zero only in this state;
 - an absent denominator with healthy source telemetry is no eligible traffic;
 - absent or stale source telemetry is missing telemetry, not zero traffic;
-- a reset or less than one hour of samples is incomplete history;
+- less than one hour of samples, a scrape gap, or history lost before a scrape is incomplete history;
 - an expected/enabled value of zero is intentionally disabled monitoring.
 
 Prometheus is configured for at most 90 days of retention, subject to its 100 GB size cap. The
