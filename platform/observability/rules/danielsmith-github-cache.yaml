@@ -18,8 +18,10 @@ groups:
       - alert: DanielGithubCacheExpectedButMissing
         expr: |
           daniel_github_cache_monitoring_expected{application="danielsmith"} == 1
-          unless on ()
-          daniel_github_cache_collection_up
+          unless on (environment, name)
+          (daniel_github_cache_collection_up
+            and on (environment, name)
+            (time() - daniel_github_cache_collection_timestamp_seconds < 1200))
         for: 20m
         labels:
           application: danielsmith
@@ -31,9 +33,9 @@ groups:
       - alert: DanielGithubCacheCollectionFailed
         expr: |
           daniel_github_cache_monitoring_expected{application="danielsmith"} == 1
-          and on ()
+          and on (environment, name)
           daniel_github_cache_monitoring_enabled == 1
-          and on ()
+          and on (environment, name)
           daniel_github_cache_collection_up == 0
         for: 20m
         labels:
@@ -46,7 +48,7 @@ groups:
       - alert: DanielGithubCacheStale
         expr: |
           daniel_github_cache_monitoring_expected{application="danielsmith"} == 1
-          and on ()
+          and on (environment, name)
           daniel_github_cache_state{state="stale"} == 1
         for: 20m
         labels:
@@ -59,7 +61,7 @@ groups:
       - alert: DanielGithubCacheUnavailable
         expr: |
           daniel_github_cache_monitoring_expected{application="danielsmith"} == 1
-          and on ()
+          and on (environment, name)
           daniel_github_cache_state{state="unavailable"} == 1
         for: 20m
         labels:
@@ -72,8 +74,8 @@ groups:
       - alert: DanielGithubCacheRefreshFailure
         expr: |
           daniel_github_cache_monitoring_expected{application="danielsmith"} == 1
-          and on ()
-          max(daniel_github_cache_refresh_failure) == 1
+          and on (environment, name)
+          max by (environment, name) (daniel_github_cache_refresh_failure) == 1
         for: 20m
         labels:
           application: danielsmith

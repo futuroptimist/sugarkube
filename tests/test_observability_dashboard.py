@@ -19,7 +19,7 @@ PROD = ROOT / "clusters/prod/observability/dashboards/sugarkube-prod-observabili
 GENERATOR = ROOT / "scripts/generate_observability_dashboards.py"
 TEMPLATE = ROOT / "platform/observability/dashboards/sugarkube-observability.template.json"
 sys.path.insert(0, str(ROOT))
-from scripts import daniel_cache_metrics as metrics  # noqa: E402
+from scripts import daniel_cache_metrics_legacy as metrics  # noqa: E402
 from scripts import generate_observability_dashboards as generator  # noqa: E402
 from scripts import validate_observability_dashboard as validator  # noqa: E402
 

@@ -65,11 +65,11 @@ def test_disabled_collection_does_not_open_transport():
         raise AssertionError("disabled collection performed I/O")
 
     output = metrics.collect(producer, opener=forbidden)
-    assert "daniel_github_cache_monitoring_enabled 0" in output
-    assert "daniel_github_cache_collection_up 0" in output
-    assert "daniel_github_cache_enabled 0" in output
-    assert 'daniel_github_cache_state{state="disabled"} 1' in output
-    assert 'daniel_github_cache_state{state="fresh"} 0' in output
+    assert 'daniel_github_cache_monitoring_enabled{environment="staging"' in output
+    assert 'daniel_github_cache_collection_up{environment="staging"' in output
+    assert 'daniel_github_cache_enabled{environment="staging"' in output
+    assert 'state="disabled"} 1' in output
+    assert 'state="fresh"} 0' in output
 
 
 @pytest.mark.parametrize("state", metrics.STATES)
@@ -193,7 +193,7 @@ def test_enabled_collection_reads_only_the_passive_snapshot():
 
     output = metrics.collect(producer, opener=opener, now=NOW)
     assert calls == [(producer["url"], 10)]
-    assert "daniel_github_cache_collection_up 1" in output
+    assert 'daniel_github_cache_collection_up{environment="staging"' in output
     assert "github.com" not in output
 
 
@@ -201,4 +201,53 @@ def test_quota_validator_rejects_unsafe_enabled_cadence():
     descriptor = json.loads(DESCRIPTOR.read_text())
     descriptor["producers"][0].update(enabled=True, cadence="1m")
     with pytest.raises(quotas.ContractError, match="pinned cadence"):
+        quotas.validate_daniel_cache_contract(descriptor)
+
+
+def test_stale_snapshot_requires_last_success_and_true_age():
+    document = snapshot(
+        state="stale",
+        dataCompleteness="partial",
+        failureCategories=["timeout"],
+        successfulRepositoryCount=0,
+        failedRepositoryCount=1,
+        retainedRepositoryCount=1,
+        lastSuccessfulRefreshAt=None,
+    )
+    with pytest.raises(metrics.InvalidDocument, match="lastSuccessfulRefreshAt"):
+        metrics.parse_document(encoded(document), NOW)
+    document["cache"]["lastSuccessfulRefreshAt"] = "2026-09-17T12:00:00.000Z"
+    document["cache"]["retainedDataAgeSeconds"] = 1
+    with pytest.raises(metrics.InvalidDocument, match="does not match"):
+        metrics.parse_document(encoded(document), NOW)
+
+
+def test_descriptor_failure_replaces_previously_healthy_textfile(tmp_path):
+    output = tmp_path / "cache.prom"
+    output.write_text("daniel_github_cache_collection_up 1\n")
+    missing = tmp_path / "missing.json"
+    with pytest.raises(SystemExit):
+        metrics.main(
+            [
+                "--descriptor",
+                str(missing),
+                "--environment",
+                "prod",
+                "--output",
+                str(output),
+            ]
+        )
+    published = output.read_text()
+    assert any(
+        line.startswith('daniel_github_cache_collection_up{environment="prod"')
+        and line.endswith(" 0")
+        for line in published.splitlines()
+    )
+    assert "daniel_github_cache_collection_timestamp_seconds" in published
+
+
+def test_descriptor_schema_version_rejects_boolean():
+    descriptor = json.loads(DESCRIPTOR.read_text())
+    descriptor["schemaVersion"] = True
+    with pytest.raises(quotas.ContractError, match="schemaVersion"):
         quotas.validate_daniel_cache_contract(descriptor)

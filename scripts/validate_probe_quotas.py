@@ -715,7 +715,7 @@ def validate_daniel_cache_contract(contract_data, shared_buckets=None, shared_po
         "producers",
     }:
         raise ContractError("Daniel cache contract has missing or unknown top-level fields")
-    if contract_data["schemaVersion"] != 1:
+    if type(contract_data["schemaVersion"]) is not int or contract_data["schemaVersion"] != 1:
         raise ContractError("Daniel cache contract schemaVersion is invalid")
     if contract_data["sourceRevision"] != APPROVED_DANIELSMITH_CACHE_SOURCE_REVISION:
         raise ContractError("Daniel cache contract source revision is not approved")
