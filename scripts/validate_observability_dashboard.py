@@ -486,10 +486,10 @@ def _expected_dashboard(dashboard: dict) -> dict:
 
 
 def _validate_grid(items: list[dict]) -> None:
-    if len(items) != 92 or sum(panel.get("type") == "row" for panel in items) != 15:
-        raise SystemExit("ERROR: canonical dashboard must contain exactly 92 objects and 15 rows.")
+    if len(items) != 96 or sum(panel.get("type") == "row" for panel in items) != 16:
+        raise SystemExit("ERROR: canonical dashboard must contain exactly 96 objects and 16 rows.")
     ids = [panel.get("id") for panel in items]
-    if ids != list(range(1, 93)):
+    if ids != list(range(1, 97)):
         raise SystemExit(
             "ERROR: canonical dashboard panel IDs must be stable consecutive integers."
         )

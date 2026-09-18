@@ -3850,6 +3850,112 @@
           }
         }
       ]
+    },
+    {
+      "id": 93,
+      "title": "Application SLI and error-budget foundation",
+      "type": "row",
+      "description": "Contract-backed, non-alerting views. HTTP probes, synthetic completions, and actual request success remain separate; see docs/application-slis.md.",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 297
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 94,
+      "title": "Actual-request success (1h observation)",
+      "type": "stat",
+      "description": "Observed real-request success only. Positive eligible traffic yields a ratio; no eligible traffic, missing/stale telemetry, or incomplete history remains NO DATA and must be diagnosed separately. Replica series are aggregated by recording rules; probe_success is intentionally excluded.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 298
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "NO DATA",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (application, environment) (sugarkube:sli_successful_events:increase1h{environment=~\"$environment\"}) / sum by (application, environment) (sugarkube:sli_eligible_events:increase1h{environment=~\"$environment\"}) and on (application, environment) sum by (application, environment) (sugarkube:sli_eligible_events:increase1h{environment=~\"$environment\"}) > 0",
+          "legendFormat": "{{application}} {{environment}} actual requests",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 95,
+      "title": "Actual-request eligible and failed events (1h)",
+      "type": "stat",
+      "description": "Eligible and failed event counts keep successful traffic distinct from failed eligible traffic. An empty result is deliberately not coerced to zero: consult scrape/instrumentation health to distinguish no traffic from missing telemetry, and treat a new/reset series as incomplete history.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 298
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sugarkube:sli_eligible_events:increase1h{environment=~\"$environment\"}",
+          "legendFormat": "{{application}} eligible",
+          "instant": true,
+          "range": false
+        },
+        {
+          "refId": "B",
+          "expr": "sugarkube:sli_eligible_events:increase1h{environment=~\"$environment\"} - sugarkube:sli_successful_events:increase1h{environment=~\"$environment\"}",
+          "legendFormat": "{{application}} failed",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 96,
+      "title": "Error budget and burn",
+      "type": "text",
+      "description": "No reviewed numerical objective exists. Retention is at most 90d and can be shorter because of the size cap, restarts, gaps, resets, or recent installation.",
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 306
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "## UNMEASURED \u2014 NO DATA\n\nNo error budget or burn rate is calculated until a reviewed objective and supportable history window are added to the contract. This panel never activates an alert."
+      }
     }
   ]
 }

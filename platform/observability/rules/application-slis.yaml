@@ -1,0 +1,27 @@
+---
+groups:
+  - name: application-slis
+    interval: 1m
+    rules:
+      # These aggregate across replicas and intentionally disappear for no traffic or missing data.
+      # increase() tolerates an observed counter reset; it cannot repair history lost before a scrape.
+      - record: sugarkube:sli_eligible_events:increase1h
+        expr: sum by (environment) (increase(tokenplace_relay_request_outcomes_total{app="tokenplace"}[1h])) > 0
+        labels:
+          application: token.place
+          signal_type: actual_request_success
+      - record: sugarkube:sli_successful_events:increase1h
+        expr: sum by (environment) (increase(tokenplace_relay_request_outcomes_total{app="tokenplace",outcome="completed"}[1h]))
+        labels:
+          application: token.place
+          signal_type: actual_request_success
+      - record: sugarkube:sli_eligible_events:increase1h
+        expr: sum by (environment) (increase(dspace_dchat_requests_total[1h])) > 0
+        labels:
+          application: DSPACE
+          signal_type: actual_request_success
+      - record: sugarkube:sli_successful_events:increase1h
+        expr: sum by (environment) (increase(dspace_dchat_requests_total{outcome="success"}[1h]))
+        labels:
+          application: DSPACE
+          signal_type: actual_request_success
