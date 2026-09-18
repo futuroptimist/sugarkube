@@ -1,0 +1,28 @@
+---
+groups:
+  - name: application-slis
+    interval: 1m
+    rules:
+      # These are measurements, not objectives. Empty/reset-incomplete windows remain absent.
+      - record: sugarkube_sli:eligible_events:24h
+        expr: sum without (instance, pod, job) (increase(tokenplace_http_requests_total{route!~"/metrics|/healthz|/livez"}[24h]))
+        labels:
+          sli: tokenplace-request-success
+          signal_type: actual_request_success
+      - record: sugarkube_sli:successful_events:24h
+        expr: sum without (instance, pod, job) (increase(tokenplace_http_requests_total{route!~"/metrics|/healthz|/livez",status_class!="5xx"}[24h]))
+        labels:
+          sli: tokenplace-request-success
+          signal_type: actual_request_success
+      - record: sugarkube_sli:eligible_events:24h
+        expr: sum without (instance, pod, job) (increase(dspace_http_requests_total{route!~"/metrics|/healthz|/livez|/health"}[24h]))
+        labels:
+          sli: dspace-request-success
+          signal_type: actual_request_success
+      - record: sugarkube_sli:successful_events:24h
+        expr: sum without (instance, pod, job) (increase(dspace_http_requests_total{route!~"/metrics|/healthz|/livez|/health",status_class!="5xx"}[24h]))
+        labels:
+          sli: dspace-request-success
+          signal_type: actual_request_success
+      - record: sugarkube_sli:success_ratio:24h
+        expr: sugarkube_sli:successful_events:24h / sugarkube_sli:eligible_events:24h

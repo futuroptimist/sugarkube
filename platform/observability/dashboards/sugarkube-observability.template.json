@@ -3850,6 +3850,132 @@
           }
         }
       ]
+    },
+    {
+      "id": 93,
+      "title": "Application SLI and error-budget foundation",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 297
+      },
+      "panels": []
+    },
+    {
+      "id": 94,
+      "title": "Actual request success (24h)",
+      "type": "stat",
+      "description": "Existing application counters only, aggregated across replicas. Operational routes are excluded. NO DATA means absent telemetry, no eligible traffic, or unavailable/incomplete history; it is never converted to success or failure. This is not HTTP probe or synthetic-completion health.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 298
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "NO DATA",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sugarkube_sli:success_ratio:24h{environment=~\"$environment\"}",
+          "legendFormat": "{{sli}}",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 95,
+      "title": "Actual request eligible events (24h)",
+      "type": "table",
+      "description": "Denominator evidence for instrumented traffic. Zero is NO ELIGIBLE TRAFFIC; absence is MISSING/STALE or RESET/INCOMPLETE HISTORY. The 24h view is shorter than the 15d minimum configured retention, but retention alone does not prove complete history.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 298
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sugarkube_sli:eligible_events:24h{environment=~\"$environment\"}",
+          "legendFormat": "{{sli}}",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true
+            },
+            "indexByName": {
+              "sli": 0,
+              "Value": 1
+            },
+            "renameByName": {
+              "sli": "SLI",
+              "Value": "Eligible events"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 96,
+      "title": "SLI contract and objective state",
+      "type": "text",
+      "description": "Contract semantics and objective status.",
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 306
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "### Objective: UNMEASURED \u2014 budget and burn: NO DATA\nNo reviewed numerical target exists. HTTP probes, synthetic completions, and actual request success remain separate. Disabled monitoring is not success. Existing DSPACE chat, token.place encrypted-completion, and Daniel visitor panels provide their source-specific state. [Contract and operator semantics](https://github.com/futuroptimist/sugarkube/blob/main/docs/application-sli-contract.md)."
+      }
     }
   ]
 }

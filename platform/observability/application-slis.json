@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "retention": {
+    "minimumEnvironmentRetention": "15d",
+    "maximumContractWindow": "24h",
+    "historyRequirement": "A window is complete only after 24h of continuous, non-reset telemetry; configured retention is a ceiling, not evidence that history exists."
+  },
+  "objectives": {
+    "state": "unmeasured",
+    "target": null,
+    "budgetOutput": "NO DATA",
+    "burnOutput": "NO DATA",
+    "reason": "No reviewed numerical application objective exists in this repository."
+  },
+  "slis": [
+    {
+      "id": "tokenplace-http-probe", "application": "token.place", "userJourney": "Reach the public token.place endpoint", "signalType": "http_probe_health",
+      "dataSource": "probe_success{app=\"tokenplace\"}", "numerator": "successful eligible probe evaluations", "denominator": "eligible probe evaluations", "exclusions": ["missing or stale probe telemetry", "application request outcomes"], "observationWindow": "24h", "monitoring": "configured", "represents": "HTTP probe health only; never real-user request success"
+    },
+    {
+      "id": "tokenplace-request-success", "application": "token.place", "userJourney": "Complete an eligible relay HTTP request", "signalType": "actual_request_success",
+      "dataSource": "tokenplace_http_requests_total", "numerator": "increase of eligible non-5xx requests across all replicas", "denominator": "increase of all eligible requests across all replicas", "exclusions": ["/metrics", "/healthz", "/livez", "counter-reset or incomplete windows"], "observationWindow": "24h", "monitoring": "configured", "represents": "actual instrumented requests; not encrypted end-to-end completion"
+    },
+    {
+      "id": "tokenplace-encrypted-completion", "application": "token.place", "userJourney": "Submit, decrypt, and validate an encrypted completion", "signalType": "synthetic_completion",
+      "dataSource": "encrypted_completion_success and encrypted_completion_lifecycle_state", "numerator": "fresh successful application-owned completions", "denominator": "fresh eligible application-owned attempts", "exclusions": ["disabled declarations", "never-attempted, stale, or missing telemetry", "DSPACE chat synthetic"], "observationWindow": "24h", "monitoring": "intentionally_disabled", "represents": "synthetic end-to-end completion; producer is not qualified"
+    },
+    {
+      "id": "dspace-http-probe", "application": "DSPACE", "userJourney": "Reach the public DSPACE endpoint", "signalType": "http_probe_health",
+      "dataSource": "probe_success{app=\"dspace\"}", "numerator": "successful eligible probe evaluations", "denominator": "eligible probe evaluations", "exclusions": ["missing or stale probe telemetry", "application request outcomes"], "observationWindow": "24h", "monitoring": "configured", "represents": "HTTP probe health only; never real-user request success"
+    },
+    {
+      "id": "dspace-request-success", "application": "DSPACE", "userJourney": "Complete an eligible DSPACE HTTP request", "signalType": "actual_request_success",
+      "dataSource": "dspace_http_requests_total", "numerator": "increase of eligible non-5xx requests across all replicas", "denominator": "increase of all eligible requests across all replicas", "exclusions": ["/metrics", "/healthz", "/livez", "/health", "counter-reset or incomplete windows"], "observationWindow": "24h", "monitoring": "configured", "represents": "actual instrumented requests"
+    },
+    {
+      "id": "dspace-chat-completion", "application": "DSPACE", "userJourney": "Complete the isolated /chat synthetic", "signalType": "synthetic_completion",
+      "dataSource": "dspace_chat_synthetic_success and dspace_chat_synthetic_timestamp_seconds", "numerator": "fresh successful synthetic completions", "denominator": "fresh executed synthetic completions", "exclusions": ["missing or stale telemetry", "actual request traffic"], "observationWindow": "24h", "monitoring": "configured", "represents": "synthetic completion only"
+    },
+    {
+      "id": "danielsmith-http-probe", "application": "danielsmith.io", "userJourney": "Reach the public danielsmith.io endpoint", "signalType": "http_probe_health",
+      "dataSource": "probe_success{app=\"danielsmith\"}", "numerator": "successful eligible probe evaluations", "denominator": "eligible probe evaluations", "exclusions": ["missing or stale probe telemetry", "application request outcomes"], "observationWindow": "24h", "monitoring": "configured", "represents": "HTTP probe health only; never real-user request success"
+    },
+    {
+      "id": "danielsmith-visitor-completion", "application": "danielsmith.io", "userJourney": "Complete the essential visitor journey", "signalType": "synthetic_completion",
+      "dataSource": "danielsmith_visitor_journey_success and danielsmith_visitor_journey_state", "numerator": "fresh successful essential visitor completions", "denominator": "fresh executed essential visitor completions", "exclusions": ["disabled monitoring", "missing or stale telemetry", "optional immersive rendering", "actual request traffic"], "observationWindow": "24h", "monitoring": "intentionally_disabled", "represents": "synthetic completion only"
+    }
+  ]
+}

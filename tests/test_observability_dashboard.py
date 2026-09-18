@@ -157,9 +157,9 @@ def test_generator_check_and_outputs_are_deterministic(dashboards):
         )
     )
     assert staging_panels == prod_panels
-    assert len(staging["panels"]) == 92
-    assert sum(item["type"] == "row" for item in staging["panels"]) == 15
-    assert sum(item["type"] != "row" for item in staging["panels"]) == 77
+    assert len(staging["panels"]) == 96
+    assert sum(item["type"] == "row" for item in staging["panels"]) == 16
+    assert sum(item["type"] != "row" for item in staging["panels"]) == 80
 
 
 @pytest.mark.parametrize("state", metrics.STATES)
@@ -916,8 +916,9 @@ def test_canonical_order_ids_grid_and_defaults(dashboards):
         "Daniel controlled performance",
         "Daniel visitor journey",
         "Cross-application resource, placement and release overview",
+        "Application SLI and error-budget foundation",
     ]
-    assert [item["id"] for item in staging["panels"]] == list(range(1, 93))
+    assert [item["id"] for item in staging["panels"]] == list(range(1, 97))
     assert panel(staging, "DSPACE instrumentation health")
     assert panel(staging, "DSPACE build identity")
     assert all(
@@ -957,10 +958,10 @@ def test_daniel_queries_are_target_safe_and_expose_stale_or_missing_health(dashb
     assert " or " not in validator.panel_expression(staging, "Daniel controlled frame time")
 
 
-def test_all_twelve_tables_are_simultaneous_single_frames(dashboards):
+def test_all_thirteen_tables_are_simultaneous_single_frames(dashboards):
     staging, _ = dashboards
     tables = [item for item in staging["panels"] if item["type"] == "table"]
-    assert len(tables) == 12
+    assert len(tables) == 13
     for table in tables:
         assert len(table["targets"]) == 1
         assert table["targets"][0]["format"] == "table"
