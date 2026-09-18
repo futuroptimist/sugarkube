@@ -1367,9 +1367,47 @@ def _load_execution_plan(path: Path) -> dict:
                 or not all(isinstance(token, str) and token for token in value)
             ):
                 raise DrillError("plan contains a shell-string or malformed command")
+    has_bounded_stage = any(
+        action.get("id") in {"generate-bounded-quota", "verify-quota-condition"}
+        or action.get("type") == "quota-trigger"
+        or (action.get("command") or [None])[0] == "internal:generate-bounded-quota"
+        for action in actions
+    )
+    if has_bounded_stage and (
+        plan.get("mode") != "quota-exhaustion" or plan.get("lifecycle") != "staging-rehearsal"
+    ):
+        raise DrillError("bounded quota stages require the quota staging rehearsal contract")
+    if plan.get("mode") == "quota-exhaustion" and plan.get("lifecycle") != "staging-rehearsal":
+        _validate_quota_plan_classification(plan)
     if plan.get("lifecycle") == "staging-rehearsal":
         _validate_staging_execution_contract(plan)
     return plan
+
+
+def _validate_quota_plan_classification(plan: dict) -> bool:
+    """Return whether the immutable plan authorizes the bounded staging stimulus."""
+    preflight = plan.get("preflight")
+    classification = preflight.get("classification") if isinstance(preflight, dict) else None
+    healthy_baseline = {
+        "root_baseline_status": 200,
+        "metadata_baseline_status": 200,
+        "livez_baseline_status": 200,
+        "healthz_baseline_status": 200,
+    }
+    ordinary_quota = {
+        "root_status": 429,
+        "metadata_status": 429,
+        "livez_status": 200,
+        "healthz_status": 200,
+        "quota_validator_success": True,
+    }
+    if classification == healthy_baseline:
+        if plan.get("lifecycle") != "staging-rehearsal":
+            raise DrillError("healthy quota baseline is restricted to a staging rehearsal")
+        return True
+    if classification == ordinary_quota:
+        return False
+    raise DrillError("quota plan classification is missing or contradicts its safety contract")
 
 
 def _validate_staging_execution_contract(plan: dict) -> None:
@@ -1424,6 +1462,7 @@ def _validate_staging_execution_contract(plan: dict) -> None:
         ):
             raise DrillError("quota staging rehearsal inventory is not the reviewed contract")
 
+        quota_stimulus = _validate_quota_plan_classification(plan)
         coordinates = Coordinates(
             host=STAGING_HOST,
             kubeconfig=Path("<supplied-kubeconfig>"),
@@ -1440,9 +1479,7 @@ def _validate_staging_execution_contract(plan: dict) -> None:
             service_monitor=reviewed_inventory.service_monitor,
             run_id=plan["run_id"],
             lifecycle="staging-rehearsal",
-            quota_stimulus=any(
-                item.get("id") == "generate-bounded-quota" for item in plan["actions"]
-            ),
+            quota_stimulus=quota_stimulus,
         )
         release = "kube-prometheus-stack"
         probes = reviewed_inventory.probe_map()
@@ -1452,7 +1489,7 @@ def _validate_staging_execution_contract(plan: dict) -> None:
                 inventory=reviewed_inventory,
                 mode="quota-exhaustion",
                 source="live-authoritative",
-                classification=(),
+                classification=tuple(plan["preflight"]["classification"].items()),
                 metrics_mode_state="absent",
                 discovery_labels=(
                     (probes["root"]["probe"], release),

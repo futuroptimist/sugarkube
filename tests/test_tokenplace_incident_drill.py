@@ -2569,6 +2569,72 @@ def test_live_authoritative_quota_rehearsal_plan_is_executable(tmp_path):
     assert drill._load_execution_plan(path) == plan
 
 
+def test_live_authoritative_healthy_quota_stimulus_plan_is_executable(tmp_path):
+    plan = executable_quota_rehearsal_plan(
+        tmp_path,
+        enable_bounded_quota_stimulus=True,
+        acknowledge_bounded_quota_stimulus=True,
+    )
+    path = tmp_path / "healthy-quota-stimulus-plan.json"
+    path.write_text(json.dumps(plan), encoding="utf-8")
+
+    assert drill._load_execution_plan(path) == plan
+
+
+def _remove_quota_prerequisites(plan):
+    plan["actions"] = plan["actions"][2:]
+    plan["actions"][0]["depends_on"] = []
+
+
+def _remove_quota_generation(plan):
+    plan["actions"].pop(0)
+    plan["actions"][0]["depends_on"] = []
+
+
+def _reorder_quota_prerequisites(plan):
+    plan["actions"][:2] = reversed(plan["actions"][:2])
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        _remove_quota_prerequisites,
+        _remove_quota_generation,
+        _reorder_quota_prerequisites,
+        lambda plan: plan["preflight"].pop("classification"),
+        lambda plan: plan["preflight"].update(
+            classification={
+                "root_status": 429,
+                "metadata_status": 429,
+                "livez_status": 200,
+                "healthz_status": 200,
+                "quota_validator_success": True,
+            }
+        ),
+        lambda plan: plan.update(lifecycle="real-incident"),
+    ],
+)
+def test_quota_stimulus_plan_tampering_fails_before_runner_or_http(tmp_path, tamper):
+    plan = executable_quota_rehearsal_plan(
+        tmp_path,
+        enable_bounded_quota_stimulus=True,
+        acknowledge_bounded_quota_stimulus=True,
+    )
+    tamper(plan)
+    plan["plan_digest"] = drill._plan_digest(plan)
+    parsed = execution_files(tmp_path, plan)
+    parsed.execute_stage = plan["actions"][0]["id"]
+    parsed.acknowledge_bounded_quota_stimulus = True
+    calls = []
+
+    with pytest.raises(drill.DrillError, match="quota|actions"):
+        drill._load_execution_plan(parsed.plan)
+    with pytest.raises(drill.DrillError, match="quota|actions"):
+        drill.execute_operation(parsed, execution_runner(plan, calls))
+
+    assert calls == []
+
+
 def test_quota_rehearsal_allows_reviewed_fallback_to_match_baseline(tmp_path):
     current_image = "registry.example/relay@sha256:" + "a" * 64
     plan = executable_quota_rehearsal_plan(
