@@ -118,7 +118,7 @@ def daniel_document(state="fresh", **overrides):
         "schemaVersion": 1,
         "generatedAt": None if nulls else "2026-09-15T23:59:00Z",
         "expiresAt": None if nulls else "2026-09-16T01:14:00Z",
-        "source": "static-neutral-placeholder" if state == "disabled" else "github-api",
+        "source": metrics.SOURCE_VALUES[state],
         "repos": repos,
         "errors": {},
         "cache": cache,
@@ -195,12 +195,10 @@ def test_daniel_collector_emits_only_bounded_metric_labels_and_values():
     url = "https://example.invalid/distinctive-repository"
     arbitrary = "distinctive-non-metric-text"
     payload = json.loads(daniel_document("fresh"))
-    payload["source"] = arbitrary
     payload["repos"] = {
         repository: {"url": url, "description": arbitrary},
         "a/two": {"url": f"{url}/two"},
     }
-    payload["errors"] = {repository: arbitrary}
 
     output = metrics.render(json.dumps(payload).encode(), "prod", now=FIXED_NOW)
     series = {}
@@ -213,6 +211,7 @@ def test_daniel_collector_emits_only_bounded_metric_labels_and_values():
 
     expected = {
         "daniel_cache_collection_up": ({"environment"}, 1),
+        "daniel_cache_monitoring_enabled": ({"environment"}, 1),
         "daniel_cache_state": ({"environment", "state"}, len(metrics.STATES)),
         "daniel_cache_data_completeness": (
             {"environment", "completeness"},

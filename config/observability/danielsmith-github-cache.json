@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "sourceRevision": "c4d45d96f593d0075096c55ea0a71215350b5ed3",
+  "producers": [
+    {
+      "name": "danielsmith-github-cache-staging",
+      "application": "danielsmith",
+      "environment": "staging",
+      "enabled": false,
+      "cadence": "5m",
+      "timeout": "10s",
+      "url": "https://staging.danielsmith.io/runtime/github-metrics.json",
+      "transport": "passive-snapshot"
+    },
+    {
+      "name": "danielsmith-github-cache-prod",
+      "application": "danielsmith",
+      "environment": "prod",
+      "enabled": false,
+      "cadence": "5m",
+      "timeout": "10s",
+      "url": "https://danielsmith.io/runtime/github-metrics.json",
+      "transport": "passive-snapshot"
+    }
+  ]
+}

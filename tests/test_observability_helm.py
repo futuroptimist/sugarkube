@@ -30,6 +30,9 @@ CANONICAL_TOKENPLACE_RULES = (
 CANONICAL_DANIELSMITH_VISITOR_RULES = (
     ROOT / "platform" / "observability" / "rules" / "danielsmith-visitor-journey.yaml"
 )
+CANONICAL_DANIELSMITH_CACHE_RULES = (
+    ROOT / "platform" / "observability" / "rules" / "danielsmith-github-cache.yaml"
+)
 SCRIPT = ROOT / "scripts" / "observability_helm.sh"
 ALERTMANAGER_VALIDATOR = ROOT / "scripts" / "verify_observability_alertmanager.rb"
 DASHBOARD = ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
@@ -126,6 +129,17 @@ def visitor_rules_for(environment: str):
         rule
         for rule in rules["groups"][0]["rules"]
         if rule.get("record") != "danielsmith_visitor_journey_monitoring_expected"
+        or rule["labels"]["environment"] == environment
+    ]
+    return rules
+
+
+def cache_rules_for(environment: str):
+    rules = yaml_load(CANONICAL_DANIELSMITH_CACHE_RULES)
+    rules["groups"][0]["rules"] = [
+        rule
+        for rule in rules["groups"][0]["rules"]
+        if rule.get("record") != "daniel_cache_monitoring_expected"
         or rule["labels"]["environment"] == environment
     ]
     return rules
@@ -590,6 +604,7 @@ def test_dspace_rules_have_one_canonical_source_and_exact_overlay(tmp_path):
             "dspace-release-integrity": yaml_load(CANONICAL_DSPACE_RULES),
             "cloudflare-tunnel": yaml_load(CANONICAL_CLOUDFLARE_RULES),
             "danielsmith-visitor-journey": visitor_rules_for("staging"),
+            "danielsmith-github-cache": cache_rules_for("staging"),
         }
     }
     overlay_paths = re.findall(r"/[^ ]*sugarkube-observability-rules\.[^ ]*\.yaml", audit)
@@ -617,6 +632,7 @@ def test_prod_rules_overlay_ignores_invalid_staging_only_rules(tmp_path):
         "additionalPrometheusRulesMap": {
             "tokenplace-production": yaml_load(CANONICAL_TOKENPLACE_RULES),
             "danielsmith-visitor-journey": visitor_rules_for("prod"),
+            "danielsmith-github-cache": cache_rules_for("prod"),
         }
     }
 

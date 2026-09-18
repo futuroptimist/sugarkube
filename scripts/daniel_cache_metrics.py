@@ -31,6 +31,14 @@ DOCUMENT_STATUSES = ("valid", "malformed", "oversized", "unavailable")
 MAX_COUNT = 50
 MAX_DURATION_MS = 3_600_000
 MAX_AGE_SECONDS = 31_536_000
+SOURCE_VALUES = {
+    "disabled": "static-neutral-placeholder",
+    "warming": "github-api-warming",
+    "fresh": "github-api",
+    "stale": "github-api",
+    "unavailable": "github-api-unavailable",
+}
+SOURCE_REVISION = "c4d45d96f593d0075096c55ea0a71215350b5ed3"
 RUNTIME_URLS = {
     "staging": "https://staging.danielsmith.io/runtime/github-metrics.json",
     "prod": "https://danielsmith.io/runtime/github-metrics.json",
@@ -86,17 +94,20 @@ def parse_document(payload: bytes, now: datetime | None = None) -> dict[str, obj
     if not isinstance(document, dict):
         raise InvalidDocument("document")
     required = {"schemaVersion", "generatedAt", "expiresAt", "source", "repos", "errors", "cache"}
-    if not required <= document.keys():
+    if set(document) != required:
         raise InvalidDocument("required fields")
     version = document["schemaVersion"]
     if isinstance(version, bool) or version != 1:
         raise InvalidDocument("schemaVersion")
     generated = _timestamp(document["generatedAt"], "generatedAt", nullable=True)
     expires = _timestamp(document["expiresAt"], "expiresAt", nullable=True)
-    if not isinstance(document["source"], str) or not document["source"]:
-        raise InvalidDocument("source")
     repos, errors = document["repos"], document["errors"]
-    if not isinstance(repos, dict) or len(repos) > MAX_COUNT or not isinstance(errors, dict):
+    if (
+        not isinstance(repos, dict)
+        or len(repos) > MAX_COUNT
+        or not isinstance(errors, dict)
+        or errors
+    ):
         raise InvalidDocument("repos/errors")
 
     cache = document["cache"]
@@ -114,11 +125,13 @@ def parse_document(payload: bytes, now: datetime | None = None) -> dict[str, obj
         "oldestDataFetchedAt",
         "retainedDataAgeSeconds",
     }
-    if not isinstance(cache, dict) or not required_cache <= cache.keys():
+    if not isinstance(cache, dict) or set(cache) != required_cache:
         raise InvalidDocument("cache required fields")
     state, completeness = cache["state"], cache["dataCompleteness"]
     if state not in STATES or completeness not in COMPLETENESS:
         raise InvalidDocument("cache enum")
+    if document["source"] != SOURCE_VALUES[state]:
+        raise InvalidDocument("source")
     enabled = cache["enabled"]
     if not isinstance(enabled, bool) or enabled != (state != "disabled"):
         raise InvalidDocument("cache.enabled")
@@ -240,15 +253,26 @@ def parse_document(payload: bytes, now: datetime | None = None) -> dict[str, obj
     return values
 
 
-def render(payload: bytes | None, environment: str, status="valid", now=None) -> str:
+def render(
+    payload: bytes | None,
+    environment: str,
+    status="valid",
+    now=None,
+    *,
+    monitoring_enabled: bool = True,
+) -> str:
     values = parse_document(payload, now) if payload is not None else None
-    state = values["state"] if values else "unavailable"
+    state = values["state"] if values else ("unavailable" if monitoring_enabled else "disabled")
     completeness = values["completeness"] if values else "none"
     lines = [
         "# HELP daniel_cache_collection_up Whether the passive runtime document "
         "was collected and validated.",
         "# TYPE daniel_cache_collection_up gauge",
         f'daniel_cache_collection_up{{environment="{environment}"}} {1 if values else 0}',
+        "# HELP daniel_cache_monitoring_enabled Whether passive collection is authorized.",
+        "# TYPE daniel_cache_monitoring_enabled gauge",
+        f'daniel_cache_monitoring_enabled{{environment="{environment}"}} '
+        f"{int(monitoring_enabled)}",
     ]
     for metric, domain, selected, label in (
         ("daniel_cache_state", STATES, state, "state"),
@@ -309,6 +333,49 @@ def collect(url: str, environment: str, *, opener=None, now=None) -> str:
     return render(None, environment, status)
 
 
+def load_producer(descriptor: Path, environment: str) -> dict[str, object]:
+    """Load one pinned producer without accepting open-ended collection coordinates."""
+    document = json.loads(descriptor.read_text(encoding="utf-8"))
+    if set(document) != {"schemaVersion", "sourceRevision", "producers"}:
+        raise ValueError("invalid descriptor fields")
+    if document["schemaVersion"] != 1 or document["sourceRevision"] != SOURCE_REVISION:
+        raise ValueError("invalid descriptor version")
+    matches = [item for item in document["producers"] if item.get("environment") == environment]
+    if len(matches) != 1:
+        raise ValueError("descriptor environment identity is missing or duplicated")
+    producer = matches[0]
+    expected_name = f"danielsmith-github-cache-{environment}"
+    if set(producer) != {
+        "name",
+        "application",
+        "environment",
+        "enabled",
+        "cadence",
+        "timeout",
+        "url",
+        "transport",
+    } or producer != {
+        "name": expected_name,
+        "application": "danielsmith",
+        "environment": environment,
+        "enabled": False,
+        "cadence": "5m",
+        "timeout": "10s",
+        "url": RUNTIME_URLS[environment],
+        "transport": "passive-snapshot",
+    }:
+        raise ValueError("descriptor producer is not the pinned disabled contract")
+    return producer
+
+
+def collect_producer(producer: dict[str, object], *, opener=None, now=None) -> str:
+    """Collect the passive snapshot only when the reviewed producer is enabled."""
+    environment = str(producer["environment"])
+    if not producer["enabled"]:
+        return render(None, environment, "unavailable", monitoring_enabled=False)
+    return collect(str(producer["url"]), environment, opener=opener, now=now)
+
+
 def write_textfile(output_path: Path, output: str) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(dir=output_path.parent, prefix=".daniel-cache-", text=True)
@@ -326,11 +393,19 @@ def write_textfile(output_path: Path, output: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--url", required=True)
+    parser.add_argument("--url")
+    parser.add_argument("--descriptor", type=Path)
     parser.add_argument("--environment", choices=tuple(RUNTIME_URLS), required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    write_textfile(args.output, collect(args.url, args.environment))
+    if bool(args.url) == bool(args.descriptor):
+        parser.error("pass exactly one of --url or --descriptor")
+    output = (
+        collect(args.url, args.environment)
+        if args.url
+        else collect_producer(load_producer(args.descriptor, args.environment))
+    )
+    write_textfile(args.output, output)
     return 0
 
 
