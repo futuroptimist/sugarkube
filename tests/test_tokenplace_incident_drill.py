@@ -1195,6 +1195,144 @@ def test_quota_staging_rehearsal_uses_quota_contract_without_incident_image(tmp_
     assert plan["expected_deployment"]["incident_image"] is None
 
 
+def test_bounded_quota_stimulus_is_explicit_and_requires_healthy_baseline(tmp_path):
+    parsed = args(
+        tmp_path,
+        mode="quota-exhaustion",
+        lifecycle="staging-rehearsal",
+        acknowledge_staging_fault_injection=True,
+        enable_bounded_quota_stimulus=True,
+        acknowledge_bounded_quota_stimulus=True,
+    )
+    coordinates = drill.validate(parsed)
+    healthy = snapshot(coordinates, mode="quota-exhaustion")
+    healthy["classification"]["route_statuses"] = dict.fromkeys(
+        ("root", "metadata", "livez", "healthz"), 200
+    )
+    plan = drill.build_plan(drill.preflight_snapshot("quota-exhaustion", coordinates, healthy))
+
+    assert [item["id"] for item in plan["actions"][:2]] == [
+        "generate-bounded-quota",
+        "verify-quota-condition",
+    ]
+    trigger = plan["actions"][0]
+    assert trigger["routes"] == {"root": "/", "metadata": "/api/v1/meta"}
+    assert trigger["limits"] == drill.QUOTA_STIMULUS_LIMITS
+    assert trigger["failure_recovery"] == {"outcome": "stop-without-containment", "mutation": None}
+    assert not any(
+        item.get("resource", "").startswith("deployment/") for item in plan["actions"][:2]
+    )
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"acknowledge_bounded_quota_stimulus": False},
+        {"lifecycle": "real-incident"},
+        {"mode": "metrics-oom"},
+        {"environment": "prod"},
+    ],
+)
+def test_bounded_quota_stimulus_authorization_fails_closed(tmp_path, changes):
+    values = {
+        "mode": "quota-exhaustion",
+        "lifecycle": "staging-rehearsal",
+        "acknowledge_staging_fault_injection": True,
+        "enable_bounded_quota_stimulus": True,
+        "acknowledge_bounded_quota_stimulus": True,
+    }
+    values.update(changes)
+    with pytest.raises(drill.DrillError):
+        drill.validate(args(tmp_path, **values))
+
+
+def test_bounded_quota_stimulus_stops_on_proven_tuple(monkeypatch, tmp_path):
+    parsed = args(
+        tmp_path,
+        mode="quota-exhaustion",
+        lifecycle="staging-rehearsal",
+        acknowledge_staging_fault_injection=True,
+        enable_bounded_quota_stimulus=True,
+        acknowledge_bounded_quota_stimulus=True,
+    )
+    coordinates = drill.validate(parsed)
+    healthy = snapshot(coordinates, mode="quota-exhaustion")
+    healthy["classification"]["route_statuses"] = dict.fromkeys(
+        ("root", "metadata", "livez", "healthz"), 200
+    )
+    action = drill.build_plan(drill.preflight_snapshot("quota-exhaustion", coordinates, healthy))[
+        "actions"
+    ][0]
+    requested = []
+
+    class Response:
+        def __init__(self, request):
+            self.request = request
+            self.status = 200 if request.full_url.endswith(("/livez", "/healthz")) else 429
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def geturl(self):
+            return self.request.full_url
+
+    class Opener:
+        def open(self, request, timeout):
+            requested.append((request.full_url, timeout))
+            return Response(request)
+
+    monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *_args: Opener())
+    summary = drill._run_bounded_quota(action)
+    assert summary["route_statuses"] == action["success_condition"]
+    assert summary["request_counts"] == {"root": 1, "metadata": 1}
+    assert all("staging.token.place" in url for url, _ in requested)
+    assert not any(
+        "token.place/livez" in url or "token.place/healthz" in url for url, _ in requested[:2]
+    )
+
+
+def test_bounded_quota_stimulus_exhausts_finite_budget(monkeypatch):
+    action = {
+        "target": {"scheme": "https", "host": drill.STAGING_HOST, "redirects": "reject"},
+        "routes": {"root": "/", "metadata": "/api/v1/meta"},
+        "limits": drill.QUOTA_STIMULUS_LIMITS,
+        "success_condition": {"root": 429, "metadata": 429, "livez": 200, "healthz": 200},
+        "command": [
+            "internal:generate-bounded-quota",
+            "--host",
+            drill.STAGING_HOST,
+            "--run-id",
+            "quota-test",
+        ],
+    }
+
+    class Response:
+        status = 200
+
+        def __init__(self, request):
+            self.request = request
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def geturl(self):
+            return self.request.full_url
+
+    class Opener:
+        def open(self, request, timeout):
+            return Response(request)
+
+    monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *_args: Opener())
+    with pytest.raises(drill.DrillError, match="request budget"):
+        drill._run_bounded_quota(action)
+
+
 def test_quota_staging_rehearsal_rejects_oom_only_incident_image(tmp_path):
     with pytest.raises(drill.DrillError, match="only valid for metrics-OOM"):
         drill.validate(
