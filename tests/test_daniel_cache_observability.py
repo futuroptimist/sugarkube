@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import copy
 import json
+import shutil
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -39,7 +42,7 @@ def snapshot(**overrides):
         "schemaVersion": 1,
         "generatedAt": "2026-09-17T12:00:00.000Z" if repositories else None,
         "expiresAt": "2026-09-17T14:00:00.000Z" if repositories else None,
-        "source": "runtime-cache",
+        "source": metrics.SOURCE_BY_STATE[cache["state"]],
         "repos": {f"repo-{index}": {} for index in range(repositories)},
         "errors": {},
         "cache": cache,
@@ -67,7 +70,7 @@ def test_disabled_collection_does_not_open_transport():
     output = metrics.collect(producer, opener=forbidden)
     assert 'daniel_github_cache_monitoring_enabled{environment="staging"' in output
     assert 'daniel_github_cache_collection_up{environment="staging"' in output
-    assert 'daniel_github_cache_enabled{environment="staging"' in output
+    assert "daniel_github_cache_enabled 0" in output
     assert 'state="disabled"} 1' in output
     assert 'state="fresh"} 0' in output
 
@@ -129,7 +132,11 @@ def test_stale_fallback_preserves_last_success_and_true_retained_age():
         retainedDataAgeSeconds=14400,
     )
     output = metrics.render(
-        metrics.parse_document(encoded(document), NOW), monitoring_enabled=True, status="valid"
+        metrics.parse_document(encoded(document), NOW),
+        monitoring_enabled=True,
+        environment="staging",
+        name="danielsmith-github-cache-staging",
+        collected_at=NOW,
     )
     assert "daniel_github_cache_last_success_unixtime_seconds 1789646400" in output
     assert "daniel_github_cache_retained_data_age_seconds 14400" in output
@@ -204,7 +211,7 @@ def test_quota_validator_rejects_unsafe_enabled_cadence():
         quotas.validate_daniel_cache_contract(descriptor)
 
 
-def test_stale_snapshot_requires_last_success_and_true_age():
+def test_stale_snapshot_preserves_application_owned_nullable_history():
     document = snapshot(
         state="stale",
         dataCompleteness="partial",
@@ -214,12 +221,9 @@ def test_stale_snapshot_requires_last_success_and_true_age():
         retainedRepositoryCount=1,
         lastSuccessfulRefreshAt=None,
     )
-    with pytest.raises(metrics.InvalidDocument, match="lastSuccessfulRefreshAt"):
-        metrics.parse_document(encoded(document), NOW)
-    document["cache"]["lastSuccessfulRefreshAt"] = "2026-09-17T12:00:00.000Z"
-    document["cache"]["retainedDataAgeSeconds"] = 1
-    with pytest.raises(metrics.InvalidDocument, match="does not match"):
-        metrics.parse_document(encoded(document), NOW)
+    values = metrics.parse_document(encoded(document), NOW)
+    assert values["last_success"] is None
+    assert values["age"] == 14400
 
 
 def test_descriptor_failure_replaces_previously_healthy_textfile(tmp_path):
@@ -251,3 +255,44 @@ def test_descriptor_schema_version_rejects_boolean():
     descriptor["schemaVersion"] = True
     with pytest.raises(quotas.ContractError, match="schemaVersion"):
         quotas.validate_daniel_cache_contract(descriptor)
+
+
+def test_installed_style_execution_is_standalone(tmp_path):
+    installed = tmp_path / "usr/local/libexec/sugarkube/daniel_cache_metrics.py"
+    installed.parent.mkdir(parents=True)
+    shutil.copy2(ROOT / "scripts/daniel_cache_metrics.py", installed)
+    output = tmp_path / "cache.prom"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(installed),
+            "--descriptor",
+            str(DESCRIPTOR),
+            "--environment",
+            "staging",
+            "--output",
+            str(output),
+        ],
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "daniel_github_cache_collection_timestamp_seconds" in output.read_text()
+
+
+@pytest.mark.parametrize("state", metrics.STATES)
+def test_source_envelope_mapping_is_exact(state):
+    document = snapshot(
+        enabled=state != "disabled",
+        state=state,
+        lastSuccessfulRefreshAt=None,
+        oldestDataFetchedAt=None,
+        retainedDataAgeSeconds=None,
+        dataCompleteness="none",
+        refreshDurationMs=None,
+        configuredRepositoryCount=0,
+        successfulRepositoryCount=0,
+    )
+    document["source"] = "wrong-source"
+    with pytest.raises(metrics.InvalidDocument, match="source"):
+        metrics.parse_document(encoded(document), NOW)

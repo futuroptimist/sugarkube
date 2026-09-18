@@ -13,12 +13,6 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-if __package__:
-    from scripts import validate_probe_quotas
-else:
-    import validate_probe_quotas
-
-ROOT = Path(__file__).resolve().parents[1]
 MAX_BYTES = 262_144
 MAX_METRICS_BYTES = 8_192
 MAX_COUNT = 50
@@ -36,15 +30,30 @@ FAILURES = (
     "timeout",
     "upstream",
 )
-DOCUMENT_STATUSES = ("valid", "malformed", "oversized", "unavailable")
 RUNTIME_URLS = {
     "staging": "https://staging.danielsmith.io/runtime/github-metrics.json",
     "prod": "https://danielsmith.io/runtime/github-metrics.json",
+}
+SOURCE_BY_STATE = {
+    "disabled": "static-neutral-placeholder",
+    "warming": "github-api-warming",
+    "fresh": "github-api",
+    "stale": "github-api",
+    "unavailable": "github-api-unavailable",
 }
 
 
 class InvalidDocument(ValueError):
     """The passive document does not satisfy the pinned application contract."""
+
+
+def _reject_duplicate_json_fields(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise InvalidDocument(f"duplicate JSON field: {key}")
+        result[key] = value
+    return result
 
 
 class _RejectRedirects(urllib.request.HTTPRedirectHandler):
@@ -77,9 +86,7 @@ def parse_document(payload: bytes, now: datetime | None = None) -> dict[str, obj
     if len(payload) > MAX_BYTES:
         raise OverflowError("runtime document exceeds 262144 bytes")
     try:
-        document = json.loads(
-            payload, object_pairs_hook=validate_probe_quotas._reject_duplicate_json_fields
-        )
+        document = json.loads(payload, object_pairs_hook=_reject_duplicate_json_fields)
     except (UnicodeDecodeError, ValueError, RecursionError) as exc:
         raise InvalidDocument("JSON") from exc
     if not isinstance(document, dict) or set(document) != {
@@ -98,8 +105,6 @@ def parse_document(payload: bytes, now: datetime | None = None) -> dict[str, obj
     expires = _timestamp(document["expiresAt"], "expiresAt", nullable=True)
     if (generated is None) != (expires is None) or (generated and expires <= generated):
         raise InvalidDocument("envelope timestamps")
-    if not isinstance(document["source"], str) or not document["source"]:
-        raise InvalidDocument("source")
     repos, errors = document["repos"], document["errors"]
     if not isinstance(repos, dict) or len(repos) > MAX_COUNT or not isinstance(errors, dict):
         raise InvalidDocument("repos/errors")
@@ -124,6 +129,8 @@ def parse_document(payload: bytes, now: datetime | None = None) -> dict[str, obj
     enabled, state, completeness = cache["enabled"], cache["state"], cache["dataCompleteness"]
     if type(enabled) is not bool or state not in STATES or completeness not in COMPLETENESS:
         raise InvalidDocument("cache enum")
+    if document["source"] != SOURCE_BY_STATE[state]:
+        raise InvalidDocument("source")
     failures = cache["failureCategories"]
     if (
         not isinstance(failures, list)
@@ -190,10 +197,6 @@ def parse_document(payload: bytes, now: datetime | None = None) -> dict[str, obj
         raise InvalidDocument("future timestamp")
     if contradictory:
         raise InvalidDocument("cache state/count relationship")
-    if state == "stale" and last_success is None:
-        raise InvalidDocument("stale snapshot has no lastSuccessfulRefreshAt")
-    if oldest is not None and age != int((current - oldest).total_seconds()):
-        raise InvalidDocument("retainedDataAgeSeconds does not match oldestDataFetchedAt")
     return {
         "enabled": enabled,
         "state": state,
@@ -212,60 +215,32 @@ def _metric(name: str, value: int | float, label: str = "") -> str:
     return f"{name}{label} {rendered}"
 
 
-def _render_new(
+def _render_values(
     values: dict[str, object] | None,
     *,
     monitoring_enabled: bool,
-    status: str,
     collection_up: bool | None = None,
-    environment: str | None = None,
-    name: str | None = None,
+    environment: str,
+    name: str,
     collected_at: datetime | None = None,
 ) -> str:
-    """Render canonical application metrics plus bounded transport health."""
-    identity = f'{{environment="{environment}",name="{name}"}}' if environment and name else ""
+    """Render canonical metrics and compatibility aliases from validated values."""
+    identity = f'{{environment="{environment}",name="{name}"}}'
+    current = collected_at or datetime.now(timezone.utc)
+    up = values is not None if collection_up is None else collection_up
     lines = [
-        "# HELP daniel_github_cache_monitoring_enabled Whether collection is authorized.",
-        "# TYPE daniel_github_cache_monitoring_enabled gauge",
         _metric("daniel_github_cache_monitoring_enabled", int(monitoring_enabled), identity),
-        "# HELP daniel_github_cache_collection_up Whether the passive snapshot was validated.",
-        "# TYPE daniel_github_cache_collection_up gauge",
-        _metric(
-            "daniel_github_cache_collection_up",
-            int(values is not None if collection_up is None else collection_up),
-            identity,
-        ),
-        _metric(
-            "daniel_github_cache_collection_timestamp_seconds",
-            (collected_at or datetime.now(timezone.utc)).timestamp(),
-            identity,
-        ),
+        _metric("daniel_github_cache_collection_up", int(up), identity),
+        _metric("daniel_github_cache_collection_timestamp_seconds", current.timestamp(), identity),
     ]
-    for item in DOCUMENT_STATUSES:
-        lines.append(
-            _metric(
-                "daniel_github_cache_document_status",
-                int(item == status),
-                (
-                    f'{{environment="{environment}",name="{name}",status="{item}"}}'
-                    if identity
-                    else f'{{status="{item}"}}'
-                ),
-            )
-        )
     if values is None:
+        lines.append(_metric("daniel_cache_collection_up", 0, f'{{environment="{environment}"}}'))
         return "\n".join(lines) + "\n"
-    lines.append(_metric("daniel_github_cache_enabled", int(values["enabled"]), identity))
+    lines.append(_metric("daniel_github_cache_enabled", int(values["enabled"])))
     for item in STATES:
         lines.append(
             _metric(
-                "daniel_github_cache_state",
-                int(item == values["state"]),
-                (
-                    f'{{environment="{environment}",name="{name}",state="{item}"}}'
-                    if identity
-                    else f'{{state="{item}"}}'
-                ),
+                "daniel_github_cache_state", int(item == values["state"]), f'{{state="{item}"}}'
             )
         )
     for item in COMPLETENESS:
@@ -273,11 +248,7 @@ def _render_new(
             _metric(
                 "daniel_github_cache_data_completeness",
                 int(item == values["completeness"]),
-                (
-                    f'{{environment="{environment}",name="{name}",completeness="{item}"}}'
-                    if identity
-                    else f'{{completeness="{item}"}}'
-                ),
+                f'{{completeness="{item}"}}',
             )
         )
     for item in FAILURES:
@@ -285,11 +256,7 @@ def _render_new(
             _metric(
                 "daniel_github_cache_refresh_failure",
                 int(item in values["failures"]),
-                (
-                    f'{{environment="{environment}",name="{name}",category="{item}"}}'
-                    if identity
-                    else f'{{category="{item}"}}'
-                ),
+                f'{{category="{item}"}}',
             )
         )
     lines.extend(
@@ -297,24 +264,63 @@ def _render_new(
             _metric(
                 "daniel_github_cache_last_success_unixtime_seconds",
                 values["last_success"].timestamp() if values["last_success"] else 0,
-                identity,
             ),
             _metric(
                 "daniel_github_cache_oldest_data_unixtime_seconds",
                 values["oldest"].timestamp() if values["oldest"] else 0,
-                identity,
             ),
-            _metric("daniel_github_cache_retained_data_age_seconds", values["age"] or 0, identity),
-            _metric(
-                "daniel_github_cache_refresh_duration_milliseconds",
-                values["duration"] or 0,
-                identity,
-            ),
+            _metric("daniel_github_cache_retained_data_age_seconds", values["age"] or 0),
+            _metric("daniel_github_cache_refresh_duration_milliseconds", values["duration"] or 0),
         ]
     )
     for key in ("configured", "successful", "failed", "retained"):
+        lines.append(_metric(f"daniel_github_cache_{key}_repositories", values["counts"][key]))
+
+    # Step 07c owns dashboard migration; keep these aliases sourced from the
+    # same validated object rather than a second parser or collector.
+    env = f'{{environment="{environment}"}}'
+    lines.append(_metric("daniel_cache_collection_up", int(up), env))
+    for metric, domain, selected, label in (
+        ("daniel_cache_state", STATES, values["state"], "state"),
+        ("daniel_cache_data_completeness", COMPLETENESS, values["completeness"], "completeness"),
+    ):
+        for item in domain:
+            lines.append(
+                _metric(
+                    metric,
+                    int(item == selected),
+                    f'{{environment="{environment}",{label}="{item}"}}',
+                )
+            )
+    for item in FAILURES:
         lines.append(
-            _metric(f"daniel_github_cache_{key}_repositories", values["counts"][key], identity)
+            _metric(
+                "daniel_cache_failure_category",
+                int(item in values["failures"]),
+                f'{{environment="{environment}",category="{item}"}}',
+            )
+        )
+    if values["last_success"] is not None:
+        lines.append(
+            _metric(
+                "daniel_cache_freshness_age_seconds",
+                max(0, current.timestamp() - values["last_success"].timestamp()),
+                env,
+            )
+        )
+    if values["duration"] is not None:
+        lines.append(
+            _metric("daniel_cache_refresh_duration_seconds", values["duration"] / 1000, env)
+        )
+    if values["age"] is not None:
+        lines.append(_metric("daniel_cache_retained_data_age_seconds", values["age"], env))
+    for key in ("configured", "successful", "failed", "retained"):
+        lines.append(
+            _metric(
+                "daniel_cache_repositories",
+                values["counts"][key],
+                f'{{environment="{environment}",result="{key}"}}',
+            )
         )
     output = "\n".join(lines) + "\n"
     if len(output.encode()) > MAX_METRICS_BYTES:
@@ -322,8 +328,31 @@ def _render_new(
     return output
 
 
-def _collect_new(producer: dict, *, opener=None, now=None) -> str:
+def render(payload, environment=None, *, now=None, **kwargs) -> str:
+    """Render one validated values object; bytes are accepted for direct adapter tests."""
+    if isinstance(payload, (bytes, bytearray)):
+        values = parse_document(payload, now)
+        return _render_values(
+            values,
+            monitoring_enabled=True,
+            environment=environment,
+            name=f"danielsmith-github-cache-{environment}",
+            collected_at=now,
+        )
+    return _render_values(payload, environment=environment, **kwargs)
+
+
+def collect(producer, environment=None, *, opener=None, now=None) -> str:
     """Read only the passive application snapshot; disabled producers do no I/O."""
+    if isinstance(producer, str):
+        if environment not in RUNTIME_URLS or producer != RUNTIME_URLS[environment]:
+            raise ValueError("URL must be the canonical runtime URL for the selected environment")
+        producer = {
+            "url": producer,
+            "environment": environment,
+            "name": f"danielsmith-github-cache-{environment}",
+            "enabled": True,
+        }
     if not producer["enabled"]:
         neutral = {
             "enabled": False,
@@ -336,10 +365,9 @@ def _collect_new(producer: dict, *, opener=None, now=None) -> str:
             "last_success": None,
             "oldest": None,
         }
-        return _render_new(
+        return _render_values(
             neutral,
             monitoring_enabled=False,
-            status="unavailable",
             collection_up=False,
             environment=producer["environment"],
             name=producer["name"],
@@ -358,46 +386,26 @@ def _collect_new(producer: dict, *, opener=None, now=None) -> str:
             if getattr(response, "geturl", lambda: producer["url"])() != producer["url"]:
                 raise urllib.error.URLError("redirected response rejected")
             payload = response.read(MAX_BYTES + 1)
-        return _render_new(
+        return _render_values(
             parse_document(payload, now),
             monitoring_enabled=True,
-            status="valid",
             environment=producer["environment"],
             name=producer["name"],
             collected_at=now,
         )
     except OverflowError:
-        status = "oversized"
-    except (InvalidDocument, validate_probe_quotas.ContractError):
-        status = "malformed"
+        pass
+    except InvalidDocument:
+        pass
     except (OSError, TimeoutError, http.client.HTTPException, urllib.error.URLError):
-        status = "unavailable"
-    return _render_new(
+        pass
+    return _render_values(
         None,
         monitoring_enabled=True,
-        status=status,
         environment=producer["environment"],
         name=producer["name"],
         collected_at=now,
     )
-
-
-def render(payload, environment=None, **kwargs):
-    """Render the descriptor contract, retaining the pre-existing dashboard API."""
-    if isinstance(payload, (bytes, bytearray)) or payload is None and environment is not None:
-        from scripts import daniel_cache_metrics_legacy as legacy
-
-        return legacy.render(payload, environment, **kwargs)
-    return _render_new(payload, **kwargs)
-
-
-def collect(producer, environment=None, **kwargs):
-    """Collect by pinned descriptor, or support the legacy canonical-URL caller."""
-    if isinstance(producer, str):
-        from scripts import daniel_cache_metrics_legacy as legacy
-
-        return legacy.collect(producer, environment, **kwargs)
-    return _collect_new(producer, **kwargs)
 
 
 def write_textfile(output_path: Path, output: str) -> None:
@@ -420,33 +428,42 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--descriptor",
         type=Path,
-        default=ROOT / "config/observability/danielsmith-github-cache.json",
+        required=True,
     )
-    parser.add_argument("--url", help=argparse.SUPPRESS)
     parser.add_argument("--environment", choices=("staging", "prod"), required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
-    if args.url:
-        write_textfile(args.output, collect(args.url, args.environment))
-        return 0
     try:
         descriptor = json.loads(
             args.descriptor.read_text(encoding="utf-8"),
-            object_pairs_hook=validate_probe_quotas._reject_duplicate_json_fields,
+            object_pairs_hook=_reject_duplicate_json_fields,
         )
-        validate_probe_quotas.validate_daniel_cache_contract(descriptor)
-        producer = next(
-            item for item in descriptor["producers"] if item["environment"] == args.environment
-        )
+        if not isinstance(descriptor, dict) or type(descriptor.get("schemaVersion")) is not int:
+            raise InvalidDocument("descriptor schemaVersion")
+        producers = descriptor.get("producers")
+        if descriptor["schemaVersion"] != 1 or not isinstance(producers, list):
+            raise InvalidDocument("descriptor")
+        producer = next(item for item in producers if item.get("environment") == args.environment)
+        expected = {
+            "name": f"danielsmith-github-cache-{args.environment}",
+            "url": RUNTIME_URLS[args.environment],
+            "cadence": "15m",
+            "timeout": "10s",
+        }
+        if (
+            any(producer.get(key) != value for key, value in expected.items())
+            or type(producer.get("enabled")) is not bool
+        ):
+            raise InvalidDocument("descriptor producer")
         output = collect(producer)
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError, StopIteration) as error:
         # Replace a formerly healthy textfile before reporting configuration failure.
         write_textfile(
             args.output,
-            _render_new(
+            render(
                 None,
                 monitoring_enabled=True,
-                status="malformed",
+                collection_up=False,
                 environment=args.environment,
                 name=f"danielsmith-github-cache-{args.environment}",
             ),

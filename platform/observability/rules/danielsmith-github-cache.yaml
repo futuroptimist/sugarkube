@@ -19,9 +19,15 @@ groups:
         expr: |
           daniel_github_cache_monitoring_expected{application="danielsmith"} == 1
           unless on (environment, name)
-          (daniel_github_cache_collection_up
+          (daniel_github_cache_collection_up == 1
             and on (environment, name)
-            (time() - daniel_github_cache_collection_timestamp_seconds < 1200))
+            daniel_github_cache_monitoring_enabled == 1
+            and on (environment, name)
+            (time() - daniel_github_cache_collection_timestamp_seconds <= 910))
+          or
+          (daniel_github_cache_monitoring_expected{application="danielsmith"} == 1
+            and ignoring (application, environment, name)
+            daniel_github_cache_state{state="disabled"} == 1)
         for: 20m
         labels:
           application: danielsmith
@@ -49,6 +55,10 @@ groups:
         expr: |
           daniel_github_cache_monitoring_expected{application="danielsmith"} == 1
           and on (environment, name)
+          daniel_github_cache_collection_up == 1
+          and on (environment, name)
+          (time() - daniel_github_cache_collection_timestamp_seconds <= 910)
+          and ignoring (environment, name)
           daniel_github_cache_state{state="stale"} == 1
         for: 20m
         labels:
@@ -62,6 +72,10 @@ groups:
         expr: |
           daniel_github_cache_monitoring_expected{application="danielsmith"} == 1
           and on (environment, name)
+          daniel_github_cache_collection_up == 1
+          and on (environment, name)
+          (time() - daniel_github_cache_collection_timestamp_seconds <= 910)
+          and ignoring (environment, name)
           daniel_github_cache_state{state="unavailable"} == 1
         for: 20m
         labels:
@@ -75,7 +89,11 @@ groups:
         expr: |
           daniel_github_cache_monitoring_expected{application="danielsmith"} == 1
           and on (environment, name)
-          max by (environment, name) (daniel_github_cache_refresh_failure) == 1
+          daniel_github_cache_collection_up == 1
+          and on (environment, name)
+          (time() - daniel_github_cache_collection_timestamp_seconds <= 910)
+          and ignoring (environment, name)
+          max(daniel_github_cache_refresh_failure) == 1
         for: 20m
         labels:
           application: danielsmith

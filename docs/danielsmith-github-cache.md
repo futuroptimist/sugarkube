@@ -36,14 +36,12 @@ snapshot naturally clears every failure category and represents recovery without
 ## Transport and provisioning
 
 The collector uses node exporter's existing textfile transport. An authorized operator installs the
-reviewed script, its validator dependency, and the pinned descriptor on one monitored node per
+reviewed standalone script and the pinned descriptor on one monitored node per
 environment:
 
 ```bash
 install -D -m 0755 scripts/daniel_cache_metrics.py \
   /usr/local/libexec/sugarkube/daniel_cache_metrics.py
-install -D -m 0644 scripts/validate_probe_quotas.py \
-  /usr/local/libexec/sugarkube/validate_probe_quotas.py
 install -D -m 0644 config/observability/danielsmith-github-cache.json \
   /etc/sugarkube/danielsmith-github-cache.json
 ```
@@ -66,8 +64,10 @@ The Helm rules overlay provisions structurally equivalent staging and production
 `daniel_github_cache_monitoring_expected` recording rule is `vector(0)` in both environments, so the
 rules stay inactive until separately authorized. The rules distinguish expected-but-missing
 transport, failed validation/transport, stale retained data, unavailable data, and current bounded
-refresh failures. Every series carries the canonical environment and producer name. A collection
-timestamp also makes an unchanged textfile fail the missing-telemetry alert after 20 minutes, so a
+refresh failures. Only transport-health series carry the fixed descriptor environment and producer
+name; application series retain their bounded application-owned dimensions. A collection timestamp
+also makes an unchanged textfile fail transport validation after the pinned 15-minute
+cadence plus its 10-second timeout, so a
 stopped timer or a descriptor failure cannot preserve apparently healthy telemetry indefinitely.
 
 ## Alerts
