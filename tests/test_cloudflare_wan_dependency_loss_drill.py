@@ -66,7 +66,8 @@ class StatefulDrillHarness:
             "CF_DRILL_NODE_EXECUTOR": str(node),
             # Signal/timeout tests need enough budget to reach and block in the
             # disruption sleep even on a heavily loaded CI worker.
-            "CF_DRILL_TEST_DISRUPTION_SECONDS": "30" if state["block_long_sleep"] else "1",
+            # One second can expire before the first post-disruption observation.
+            "CF_DRILL_TEST_DISRUPTION_SECONDS": "30" if state["block_long_sleep"] else "5",
         }
 
     def start(self, wrapper: list[str] | None = None) -> subprocess.Popen[str]:
