@@ -2177,6 +2177,44 @@ class _RejectRedirects(urllib.request.HTTPRedirectHandler):
         raise DrillError("bounded-cardinality target attempted a redirect")
 
 
+class _RejectQuotaRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise DrillError("bounded quota target attempted a redirect")
+
+
+def _bounded_quota_status(opener, path: str, timeout: float) -> int:
+    request = urllib.request.Request(
+        f"https://{STAGING_HOST}{path}", method="GET", headers={"Accept": "text/plain"}
+    )
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            value, final = response.status, urlsplit(response.geturl())
+    except urllib.error.HTTPError as exc:
+        try:
+            value, final = exc.code, urlsplit(exc.geturl())
+        finally:
+            exc.close()
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise DrillError("bounded quota request failed") from exc
+    if final.scheme != "https" or final.hostname != STAGING_HOST or final.path != path:
+        raise DrillError("bounded quota destination drifted")
+    return value
+
+
+def _observe_bounded_quota_routes(timeout: float) -> dict[str, int]:
+    """Re-observe every route without adding traffic to either stimulus route."""
+    opener = urllib.request.build_opener(_RejectQuotaRedirects)
+    return {
+        name: _bounded_quota_status(opener, path, timeout)
+        for name, path in {
+            "root": "/",
+            "metadata": "/api/v1/meta",
+            "livez": "/livez",
+            "healthz": "/healthz",
+        }.items()
+    }
+
+
 def _bounded_cardinality_path(run_id: str, sequence: int) -> str:
     """Create an unmatched, nonsecret path without retaining operator input."""
     path_digest = hashlib.sha256(f"sugarkube:{run_id}:{sequence}".encode("ascii")).hexdigest()
@@ -2205,7 +2243,7 @@ def _run_bounded_quota(action: dict, boundary_check: Callable[[], None] | None =
         or not SAFE_NAME.fullmatch(command[-1])
     ):
         raise DrillError("bounded quota command is not the reviewed contract")
-    opener = urllib.request.build_opener(_RejectRedirects)
+    opener = urllib.request.build_opener(_RejectQuotaRedirects)
     deadline = time.monotonic() + limits["duration_seconds"]
     counts = {"root": 0, "metadata": 0}
     latest = {"root": 200, "metadata": 200, "livez": 200, "healthz": 200}
@@ -2214,24 +2252,9 @@ def _run_bounded_quota(action: dict, boundary_check: Callable[[], None] | None =
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise DrillError("bounded quota duration limit reached")
-        request = urllib.request.Request(
-            f"https://{STAGING_HOST}{path}", method="GET", headers={"Accept": "text/plain"}
+        return _bounded_quota_status(
+            opener, path, min(limits["request_timeout_seconds"], remaining)
         )
-        try:
-            with opener.open(
-                request, timeout=min(limits["request_timeout_seconds"], remaining)
-            ) as response:
-                value, final = response.status, urlsplit(response.geturl())
-        except urllib.error.HTTPError as exc:
-            try:
-                value, final = exc.code, urlsplit(exc.geturl())
-            finally:
-                exc.close()
-        except (urllib.error.URLError, TimeoutError) as exc:
-            raise DrillError("bounded quota request failed") from exc
-        if final.scheme != "https" or final.hostname != STAGING_HOST or final.path != path:
-            raise DrillError("bounded quota destination drifted")
-        return value
 
     while sum(counts.values()) < limits["total_requests"]:
         if boundary_check is not None:
@@ -2608,7 +2631,10 @@ def _recover_failed_quota_trigger(plan, journal, kubeconfig, runner):
         "failed",
         evidence_summary={"stopped": True, "requests_resumable": False, "condition_met": False},
     )
-    _assert_stage_preflight(plan, kubeconfig, runner, plan["expected_deployment"]["current_image"])
+    records = _journal_records(journal, plan)
+    cleanup_pending = _pending_operation(records) == ("cleanup", "cleanup")
+    if not cleanup_pending:
+        _record_phase(journal, plan, "cleanup", "cleanup", "intent")
     if _validate_marker(plan, kubeconfig, runner, absent_ok=True):
         _run_checked(
             runner, _marker_command(plan, kubeconfig, "delete"), "exact marker cleanup failed"
@@ -2784,11 +2810,16 @@ def _execute_locked(args, runner, plan, journal, now=None):
             )
         _record_phase(journal, plan, operation, stage, "intent", limits=action["limits"])
         try:
+
+            def quota_boundary_check():
+                _assert_stage_preflight(
+                    plan, args.kubeconfig, runner, plan["expected_deployment"]["current_image"]
+                )
+                _validate_marker(plan, args.kubeconfig, runner)
+
             summary = _run_bounded_quota(
                 action,
-                lambda: _assert_stage_preflight(
-                    plan, args.kubeconfig, runner, plan["expected_deployment"]["current_image"]
-                ),
+                quota_boundary_check,
             )
         except BaseException:
             _recover_failed_quota_trigger(plan, journal, args.kubeconfig, runner)
@@ -2855,13 +2886,18 @@ def _execute_locked(args, runner, plan, journal, now=None):
             summary = trigger_record.get("evidence_summary") if trigger_record else None
             if not isinstance(summary, dict) or summary.get("route_statuses") != expected:
                 raise DrillError("bounded quota evidence does not prove the required condition")
+            observed = _observe_bounded_quota_routes(
+                QUOTA_STIMULUS_LIMITS["request_timeout_seconds"]
+            )
+            if observed != expected:
+                raise DrillError("bounded quota condition is no longer present")
             _record_phase(
                 journal,
                 plan,
                 operation,
                 stage,
                 "completed",
-                evidence_summary={"route_statuses": expected, "source": "bounded-quota-trigger"},
+                evidence_summary={"route_statuses": observed, "source": "live-revalidation"},
             )
             return {"status": "completed", "stage": stage}
         if action["id"] == "observe-authentic-oom":

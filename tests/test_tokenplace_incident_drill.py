@@ -1333,6 +1333,78 @@ def test_bounded_quota_stimulus_exhausts_finite_budget(monkeypatch):
         drill._run_bounded_quota(action)
 
 
+def test_bounded_quota_redirect_reports_quota_context():
+    with pytest.raises(drill.DrillError, match="bounded quota target"):
+        drill._RejectQuotaRedirects().redirect_request(
+            None, None, 302, "redirect", {}, "https://example.invalid"
+        )
+
+
+def test_failed_quota_cleanup_ignores_deployment_drift_and_records_intent(tmp_path, monkeypatch):
+    plan = executable_quota_rehearsal_plan(
+        tmp_path,
+        enable_bounded_quota_stimulus=True,
+        acknowledge_bounded_quota_stimulus=True,
+    )
+    parsed = execution_files(tmp_path, plan)
+    _journal_through(parsed, plan, "generate-bounded-quota")
+    calls = []
+    marker_states = iter((True, False))
+
+    monkeypatch.setattr(
+        drill,
+        "_assert_stage_preflight",
+        lambda *_args, **_kwargs: pytest.fail("cleanup must not inspect a drifted Deployment"),
+    )
+    monkeypatch.setattr(
+        drill,
+        "_validate_marker",
+        lambda *_args, **_kwargs: next(marker_states),
+    )
+
+    def runner(command):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    drill._recover_failed_quota_trigger(plan, parsed.journal, parsed.kubeconfig, runner)
+
+    assert drill._marker_command(plan, parsed.kubeconfig, "delete") in calls
+    records = drill._journal_records(parsed.journal, plan)
+    cleanup = [record["phase"] for record in records if record["operation"] == "cleanup"]
+    assert cleanup == ["intent", "completed"]
+
+
+def test_quota_gate_reobserves_live_tuple(tmp_path, monkeypatch):
+    plan = executable_quota_rehearsal_plan(
+        tmp_path,
+        enable_bounded_quota_stimulus=True,
+        acknowledge_bounded_quota_stimulus=True,
+    )
+    parsed = execution_files(tmp_path, plan)
+    _journal_through(parsed, plan, "generate-bounded-quota")
+    drill._record_phase(
+        parsed.journal,
+        plan,
+        "execute",
+        "generate-bounded-quota",
+        "completed",
+        evidence_summary={
+            "route_statuses": {"root": 429, "metadata": 429, "livez": 200, "healthz": 200}
+        },
+    )
+    parsed.execute_stage = "verify-quota-condition"
+    monkeypatch.setattr(drill, "_assert_stage_preflight", lambda *_args: None)
+    monkeypatch.setattr(drill, "_validate_marker", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        drill,
+        "_observe_bounded_quota_routes",
+        lambda _timeout: {"root": 200, "metadata": 200, "livez": 200, "healthz": 200},
+    )
+
+    with pytest.raises(drill.DrillError, match="no longer present"):
+        drill.execute_operation(parsed, lambda command: pytest.fail(str(command)))
+
+
 def test_quota_staging_rehearsal_rejects_oom_only_incident_image(tmp_path):
     with pytest.raises(drill.DrillError, match="only valid for metrics-OOM"):
         drill.validate(
@@ -2266,11 +2338,16 @@ def executable_quota_rehearsal_plan(tmp_path, **changes):
         **changes,
     )
     coordinates = drill.validate(parsed)
+    observed = snapshot(coordinates, mode="quota-exhaustion")
+    if coordinates.quota_stimulus:
+        observed["classification"]["route_statuses"] = dict.fromkeys(
+            ("root", "metadata", "livez", "healthz"), 200
+        )
     checked = drill._validate_snapshot(
         "quota-exhaustion",
         coordinates,
         drill.inventory("staging"),
-        snapshot(coordinates, mode="quota-exhaustion"),
+        observed,
         "live-authoritative",
     )
     return drill.build_plan(checked)
@@ -2280,15 +2357,11 @@ def executable_quota_rehearsal_plan(tmp_path, **changes):
     "tamper,message",
     [
         (
-            lambda plan: plan["expected_deployment"].update(
-                rollback_image="relay:latest"
-            ),
+            lambda plan: plan["expected_deployment"].update(rollback_image="relay:latest"),
             "coordinates",
         ),
         (
-            lambda plan: plan["expected_deployment"].update(
-                incident_image="unexpected"
-            ),
+            lambda plan: plan["expected_deployment"].update(incident_image="unexpected"),
             "must not specify an incident image",
         ),
         (
@@ -2309,35 +2382,27 @@ def executable_quota_rehearsal_plan(tmp_path, **changes):
             "actions",
         ),
         (
-            lambda plan: next(
-                action for action in plan["actions"] if action["id"] == "replace"
-            )["command"].__setitem__(
-                -1, "relay=registry.example/relay@sha256:" + "e" * 64
-            ),
+            lambda plan: next(action for action in plan["actions"] if action["id"] == "replace")[
+                "command"
+            ].__setitem__(-1, "relay=registry.example/relay@sha256:" + "e" * 64),
             "actions",
         ),
         (
-            lambda plan: next(
-                action for action in plan["actions"] if action["id"] == "replace"
-            )["inverse"].__setitem__(
-                -1, "relay=registry.example/relay@sha256:" + "e" * 64
-            ),
+            lambda plan: next(action for action in plan["actions"] if action["id"] == "replace")[
+                "inverse"
+            ].__setitem__(-1, "relay=registry.example/relay@sha256:" + "e" * 64),
             "actions",
         ),
         (
-            lambda plan: next(
-                action for action in plan["actions"] if action["id"] == "replace"
-            )["rollback"].__setitem__(
-                -1, "relay=registry.example/relay@sha256:" + "e" * 64
-            ),
+            lambda plan: next(action for action in plan["actions"] if action["id"] == "replace")[
+                "rollback"
+            ].__setitem__(-1, "relay=registry.example/relay@sha256:" + "e" * 64),
             "actions",
         ),
         (
-            lambda plan: next(
-                action for action in plan["actions"] if action["id"] == "replace"
-            )["recovery_fallback"]["command"].__setitem__(
-                -1, "relay=registry.example/relay@sha256:" + "e" * 64
-            ),
+            lambda plan: next(action for action in plan["actions"] if action["id"] == "replace")[
+                "recovery_fallback"
+            ]["command"].__setitem__(-1, "relay=registry.example/relay@sha256:" + "e" * 64),
             "actions",
         ),
         (

@@ -206,13 +206,15 @@ only between `GET /` and `GET /api/v1/meta` on `https://staging.token.place`; `/
 image, memory, replica, and marker identity. It stops immediately at `429/429/200/200`, on drift,
 on a mixed or unreachable state, on loss of either health route, or when any budget expires.
 Sending the budget is not success: only the exact tuple advances the source-derived
-`verify-quota-condition` gate and then the existing Probe containment/replacement sequence.
+`verify-quota-condition` gate. That gate observes all four routes again and advances to the
+existing Probe containment/replacement sequence only while the exact tuple is still live.
 
 The trigger journal retains only per-route counts, the final four status codes, and zero-retry
 metadata; it contains no URL query, header, caller identity, request identifier, response body, or
 credential. Forward coordinates are `generate-bounded-quota` then `verify-quota-condition`.
 Failure/rollback coordinates are `internal:stop-bounded-quota --run-id $RUN_ID`, followed by
-identity/image revalidation and deletion of only the exact run-owned marker. The stage cannot
+deletion of only the exact run-owned marker. Cleanup still removes that marker if Deployment
+coordinates drift after stimulus stops; it never acts on the drifted Deployment. The stage cannot
 change a Deployment, image, Probe, or ServiceMonitor. An interrupted or failed stimulus is
 nonresumable: retain its private journal, clean up, and prepare a new reviewed run ID.
 
