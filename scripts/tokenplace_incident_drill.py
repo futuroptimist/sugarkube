@@ -2354,7 +2354,7 @@ def _run_bounded_quota(action: dict, boundary_check: Callable[[float], None] | N
     opener = urllib.request.build_opener(_RejectQuotaRedirects)
     deadline = time.monotonic() + limits["duration_seconds"]
     counts = {"root": 0, "metadata": 0, "livez": 0, "healthz": 0}
-    latest = {"root": 200, "metadata": 200, "livez": 200, "healthz": 200}
+    latest = {"root": None, "metadata": None, "livez": None, "healthz": None}
 
     def summary(reason: str) -> dict:
         return {
@@ -2379,11 +2379,15 @@ def _run_bounded_quota(action: dict, boundary_check: Callable[[float], None] | N
             value = _bounded_quota_status(
                 opener, path, min(limits["request_timeout_seconds"], remaining)
             )
+        except KeyboardInterrupt as exc:
+            exc.summary = summary("interrupted-request")
+            raise
         except DrillError as exc:
             raise _QuotaStimulusFailure(str(exc), summary("transport-failure")) from exc
+        # Retain a response that arrived even when the wall-clock check rejects it.
+        latest[name] = value
         if time.monotonic() >= deadline:
             stop("bounded quota duration limit reached", "duration-budget")
-        latest[name] = value
         if name in {"livez", "healthz"} and value != 200:
             stop("bounded quota health preservation failed", "unhealthy-observation")
         if name in {"root", "metadata"} and value not in {200, 429}:
@@ -2409,6 +2413,9 @@ def _run_bounded_quota(action: dict, boundary_check: Callable[[float], None] | N
                 stop("bounded quota duration limit reached", "duration-budget")
             try:
                 boundary_check(remaining)
+            except KeyboardInterrupt as exc:
+                exc.summary = summary("interrupted-boundary-check")
+                raise
             except DrillError as exc:
                 raise _QuotaStimulusFailure(str(exc), summary("boundary-drift")) from exc
             if time.monotonic() >= deadline:

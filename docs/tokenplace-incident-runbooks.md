@@ -212,9 +212,10 @@ then `verify-quota-condition`. That gate requires the trigger record to be no mo
 old, observes all four routes again, and advances to the existing Probe containment/replacement
 sequence only while the exact tuple and its gate record remain fresh.
 
-The trigger journal retains only per-route counts, the final four status codes, and zero-retry
-metadata; it contains no URL query, header, caller identity, request identifier, response body, or
-credential. Forward coordinates are `generate-bounded-quota` then `verify-quota-condition`.
+The trigger journal retains only per-route attempt counts, each route's last observed status (an
+explicit `null` when no response was observed), and zero-retry metadata; it contains no URL query,
+header, caller identity, request identifier, response body, or credential. Forward coordinates are
+`generate-bounded-quota` then `verify-quota-condition`.
 Failure/rollback coordinates are `internal:stop-bounded-quota --run-id $RUN_ID`, followed by
 `--cleanup --plan "$PLAN" --journal "$JOURNAL" --kubeconfig "$STAGING_KUBECONFIG"` to reconcile
 deletion of only the exact run-owned marker. Cleanup still removes that marker if Deployment

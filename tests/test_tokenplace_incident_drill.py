@@ -1434,6 +1434,139 @@ def test_bounded_quota_redirect_reports_quota_context():
         )
 
 
+def _execute_quota_trigger(tmp_path, monkeypatch, opener, runner_wrapper=lambda runner: runner):
+    plan = executable_quota_rehearsal_plan(
+        tmp_path,
+        enable_bounded_quota_stimulus=True,
+        acknowledge_bounded_quota_stimulus=True,
+    )
+    parsed = execution_files(tmp_path, plan)
+    parsed.execute_stage = "generate-bounded-quota"
+    parsed.acknowledge_bounded_quota_stimulus = True
+    drill._record_phase(parsed.journal, plan, "execute", "marker", "intent")
+    drill._record_phase(parsed.journal, plan, "execute", "marker", "completed")
+    calls = []
+    runner = runner_wrapper(execution_runner(plan, calls, _matching_marker(plan)))
+    monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *_args: opener)
+    return plan, parsed, calls, runner
+
+
+def _failed_quota_evidence(parsed, plan):
+    records = drill._journal_records(parsed.journal, plan)
+    failures = [
+        record
+        for record in records
+        if record["stage"] == "generate-bounded-quota" and record["phase"] == "failed"
+    ]
+    assert len(failures) == 1
+    return failures[0]["evidence_summary"]
+
+
+def test_failed_quota_first_transport_attempt_records_unobserved_statuses(tmp_path, monkeypatch):
+    class Opener:
+        def open(self, _request, timeout):
+            raise drill.urllib.error.URLError("offline fixture")
+
+    plan, parsed, _calls, runner = _execute_quota_trigger(tmp_path, monkeypatch, Opener())
+    with pytest.raises(drill.DrillError, match="request failed"):
+        drill.execute_operation(parsed, runner)
+
+    assert _failed_quota_evidence(parsed, plan) == {
+        "stopped": True,
+        "requests_resumable": False,
+        "condition_met": False,
+        "request_counts": {"root": 1, "metadata": 0, "livez": 0, "healthz": 0},
+        "total_requests": 1,
+        "route_statuses": {"root": None, "metadata": None, "livez": None, "healthz": None},
+        "retries": 0,
+        "stop_reason": "transport-failure",
+    }
+
+
+@pytest.mark.parametrize("responses", [[], [200, 200]])
+def test_interrupted_quota_records_attempted_traffic_and_reraises(tmp_path, monkeypatch, responses):
+    statuses = iter(responses)
+
+    class Response:
+        def __init__(self, request, status):
+            self.request, self.status = request, status
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def geturl(self):
+            return self.request.full_url
+
+    class Opener:
+        def open(self, request, timeout):
+            try:
+                return Response(request, next(statuses))
+            except StopIteration:
+                raise KeyboardInterrupt("operator interrupted")
+
+    plan, parsed, calls, runner = _execute_quota_trigger(tmp_path, monkeypatch, Opener())
+    with pytest.raises(KeyboardInterrupt, match="operator interrupted"):
+        drill.execute_operation(parsed, runner)
+
+    observed = len(responses)
+    expected_statuses = {
+        "root": 200 if observed >= 1 else None,
+        "metadata": 200 if observed >= 2 else None,
+        "livez": None,
+        "healthz": None,
+    }
+    evidence = _failed_quota_evidence(parsed, plan)
+    assert evidence["request_counts"] == {
+        "root": 1,
+        "metadata": 1 if observed >= 1 else 0,
+        "livez": 1 if observed >= 2 else 0,
+        "healthz": 0,
+    }
+    assert evidence["total_requests"] == observed + 1
+    assert evidence["route_statuses"] == expected_statuses
+    assert evidence["retries"] == 0
+    assert evidence["stop_reason"] == "interrupted-request"
+    assert not any(command[0] == "curl" for command in calls)
+
+
+def test_failed_quota_evidence_survives_blocked_cleanup(tmp_path, monkeypatch):
+    class Opener:
+        def open(self, _request, timeout):
+            raise drill.urllib.error.URLError("offline fixture")
+
+    identity_checks = 0
+
+    def reject_recovery_identity(runner):
+        def wrapped(command):
+            nonlocal identity_checks
+            if "cluster_identity.py" in " ".join(command):
+                identity_checks += 1
+                if identity_checks > 1:
+                    return subprocess.CompletedProcess(command, 1, "", "identity rejected")
+            return runner(command)
+
+        return wrapped
+
+    plan, parsed, calls, runner = _execute_quota_trigger(
+        tmp_path, monkeypatch, Opener(), reject_recovery_identity
+    )
+    with pytest.raises(drill.DrillError, match="request failed"):
+        drill.execute_operation(parsed, runner)
+
+    evidence = _failed_quota_evidence(parsed, plan)
+    assert evidence["total_requests"] == 1
+    assert evidence["route_statuses"] == dict.fromkeys(("root", "metadata", "livez", "healthz"))
+    assert evidence["stop_reason"] == "transport-failure"
+    assert drill._pending_operation(drill._journal_records(parsed.journal, plan)) == (
+        "cleanup",
+        "cleanup",
+    )
+    assert not any("delete" in command for command in calls)
+
+
 def test_failed_quota_cleanup_requires_identity_then_is_retryable(tmp_path):
     plan = executable_quota_rehearsal_plan(
         tmp_path,
