@@ -85,7 +85,11 @@ def snapshot(c, *, mode="metrics-oom", degraded=True, metrics_mode_value="normal
         {"termination_reason": "OOMKilled", "exit_code": 137}
         if mode == "metrics-oom"
         else {
-            "route_statuses": {"root": 429, "metadata": 429, "livez": 200, "healthz": 200},
+            "route_statuses": (
+                {"root": 200, "metadata": 200, "livez": 200, "healthz": 200}
+                if c.lifecycle == "staging-rehearsal"
+                else {"root": 429, "metadata": 429, "livez": 200, "healthz": 200}
+            ),
             "quota_validator_success": True,
         }
     )
@@ -281,7 +285,8 @@ sys.stderr.write('unexpected kubectl: ' + repr(args)); sys.exit(91)
 import json, os, sys
 with open(os.environ['COMMAND_LOG'], 'a') as stream: stream.write(json.dumps(['curl', *sys.argv[1:]]) + '\\n')
 url = sys.argv[-1]
-print('429' if url.endswith('/') or url.endswith('/api/v1/meta') else '200', end='')
+quota_status = os.environ.get('STUB_QUOTA_STATUS', '429')
+print(quota_status if url.endswith('/') or url.endswith('/api/v1/meta') else '200', end='')
 """,
         encoding="utf-8",
     )
@@ -294,6 +299,11 @@ print('429' if url.endswith('/') or url.endswith('/api/v1/meta') else '200', end
         PATH=str(bin_dir) + os.pathsep + env.get("PATH", ""),
         COMMAND_LOG=str(log),
         STUB_DATA=str(payload),
+        STUB_QUOTA_STATUS=(
+            "200"
+            if parsed.mode == "quota-exhaustion" and parsed.lifecycle == "staging-rehearsal"
+            else "429"
+        ),
         PROBE_YAML=str(drill.ROOT / "clusters/staging/observability/probes/public-apps.yaml"),
     )
     return env, log
@@ -2142,15 +2152,11 @@ def executable_quota_rehearsal_plan(tmp_path, **changes):
     "tamper,message",
     [
         (
-            lambda plan: plan["expected_deployment"].update(
-                rollback_image="relay:latest"
-            ),
+            lambda plan: plan["expected_deployment"].update(rollback_image="relay:latest"),
             "coordinates",
         ),
         (
-            lambda plan: plan["expected_deployment"].update(
-                incident_image="unexpected"
-            ),
+            lambda plan: plan["expected_deployment"].update(incident_image="unexpected"),
             "must not specify an incident image",
         ),
         (
@@ -2171,35 +2177,27 @@ def executable_quota_rehearsal_plan(tmp_path, **changes):
             "actions",
         ),
         (
-            lambda plan: next(
-                action for action in plan["actions"] if action["id"] == "replace"
-            )["command"].__setitem__(
-                -1, "relay=registry.example/relay@sha256:" + "e" * 64
-            ),
+            lambda plan: next(action for action in plan["actions"] if action["id"] == "replace")[
+                "command"
+            ].__setitem__(-1, "relay=registry.example/relay@sha256:" + "e" * 64),
             "actions",
         ),
         (
-            lambda plan: next(
-                action for action in plan["actions"] if action["id"] == "replace"
-            )["inverse"].__setitem__(
-                -1, "relay=registry.example/relay@sha256:" + "e" * 64
-            ),
+            lambda plan: next(action for action in plan["actions"] if action["id"] == "replace")[
+                "inverse"
+            ].__setitem__(-1, "relay=registry.example/relay@sha256:" + "e" * 64),
             "actions",
         ),
         (
-            lambda plan: next(
-                action for action in plan["actions"] if action["id"] == "replace"
-            )["rollback"].__setitem__(
-                -1, "relay=registry.example/relay@sha256:" + "e" * 64
-            ),
+            lambda plan: next(action for action in plan["actions"] if action["id"] == "replace")[
+                "rollback"
+            ].__setitem__(-1, "relay=registry.example/relay@sha256:" + "e" * 64),
             "actions",
         ),
         (
-            lambda plan: next(
-                action for action in plan["actions"] if action["id"] == "replace"
-            )["recovery_fallback"]["command"].__setitem__(
-                -1, "relay=registry.example/relay@sha256:" + "e" * 64
-            ),
+            lambda plan: next(action for action in plan["actions"] if action["id"] == "replace")[
+                "recovery_fallback"
+            ]["command"].__setitem__(-1, "relay=registry.example/relay@sha256:" + "e" * 64),
             "actions",
         ),
         (
@@ -3799,3 +3797,126 @@ def test_action_prestate_accepts_exact_forward_and_inverse_states(tmp_path, mode
                 command, 0, json.dumps(payload), ""
             )
             drill._assert_action_prestate(plan, action, kubeconfig, runner, inverse=inverse)
+
+
+def test_quota_stimulus_is_rehearsal_only_bounded_and_route_restricted(tmp_path):
+    ordinary = drill.build_plan(preflight(tmp_path, mode="quota-exhaustion"))
+    assert all(action["type"] != "quota-trigger" for action in ordinary["actions"])
+
+    parsed = args(
+        tmp_path,
+        mode="quota-exhaustion",
+        lifecycle="staging-rehearsal",
+        acknowledge_staging_fault_injection=True,
+    )
+    coordinates = drill.validate(parsed)
+    plan = drill.build_plan(
+        drill.preflight_snapshot(
+            "quota-exhaustion", coordinates, snapshot(coordinates, mode="quota-exhaustion")
+        )
+    )
+    action = plan["actions"][0]
+    assert action["id"] == "establish-quota-condition"
+    assert action["target"]["routes"] == ["/", "/api/v1/meta"]
+    assert action["limits"] == drill.QUOTA_STIMULUS_LIMITS
+    assert action["limits"]["retries"] == 0
+    assert "/livez" not in action["target"]["routes"]
+    assert "/healthz" not in action["target"]["routes"]
+    assert "kubectl" not in " ".join(action["command"] + action["inverse"])
+    assert plan["state_changes"] == {
+        "cluster": False,
+        "production": False,
+        "repository": False,
+        "external": False,
+    }
+
+
+def test_bounded_quota_stimulus_stops_on_exact_success(monkeypatch):
+    requested = []
+
+    class Response:
+        status = 200
+
+        def __init__(self, url):
+            self.url = url
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def geturl(self):
+            return self.url
+
+    class Opener:
+        def open(self, request, timeout):
+            requested.append((request.full_url, timeout))
+            return Response(request.full_url)
+
+    monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *_: Opener())
+    states = iter(
+        [
+            {"root": 200, "metadata": 200, "livez": 200, "healthz": 200},
+            {"root": 429, "metadata": 429, "livez": 200, "healthz": 200},
+        ]
+    )
+    action = {
+        "target": {
+            "scheme": "https",
+            "host": drill.STAGING_HOST,
+            "routes": ["/", "/api/v1/meta"],
+            "redirects": "reject",
+        },
+        "limits": dict(drill.QUOTA_STIMULUS_LIMITS),
+        "command": ["internal:establish-quota-condition", "--host", drill.STAGING_HOST],
+    }
+    result = drill._run_bounded_quota_stimulus(
+        action,
+        lambda: {"route_statuses": next(states), "quota_validator_success": True},
+    )
+    assert result["success_condition_observed"] is True
+    assert result["requests"] == 6
+    assert result["stimulus_requests"] == 2
+    assert [urlsplit[0] for urlsplit in requested] == [
+        "https://staging.token.place/",
+        "https://staging.token.place/api/v1/meta",
+    ]
+
+
+def test_bounded_quota_stimulus_fails_closed_without_condition(monkeypatch):
+    class Response:
+        status = 200
+
+        def __init__(self, url):
+            self.url = url
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def geturl(self):
+            return self.url
+
+    class Opener:
+        def open(self, request, timeout):
+            return Response(request.full_url)
+
+    monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *_: Opener())
+    action = {
+        "target": {
+            "scheme": "https",
+            "host": drill.STAGING_HOST,
+            "routes": ["/", "/api/v1/meta"],
+            "redirects": "reject",
+        },
+        "limits": dict(drill.QUOTA_STIMULUS_LIMITS),
+        "command": ["internal:establish-quota-condition", "--host", drill.STAGING_HOST],
+    }
+    healthy = {"root": 200, "metadata": 200, "livez": 200, "healthz": 200}
+    with pytest.raises(drill.DrillError, match="request budget"):
+        drill._run_bounded_quota_stimulus(
+            action, lambda: {"route_statuses": healthy, "quota_validator_success": True}
+        )

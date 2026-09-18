@@ -185,9 +185,41 @@ baseline, recovery-candidate, and emergency-fallback image roles already named b
 `--current-image`, `--replacement-image`, and `--rollback-image`; do not invent a fourth image or
 select an arbitrary registry release. Keep both acknowledgements: the staging fault-injection
 acknowledgement authorizes the staging-only Probe containment, while the state-loss
-acknowledgement authorizes the recovery replacement. This runner does not generate quota traffic.
-The reviewed snapshot or live preflight must supply route-specific classification (`429` for root
-and metadata, `200` for `/livez` and `/healthz`) plus successful quota-validator evidence.
+acknowledgement authorizes the recovery replacement. An offline preview does not generate quota
+traffic and cannot be executed. The staging-rehearsal preflight must instead prove the exact healthy
+baseline (`200` for root, metadata, `/livez`, and `/healthz`), successful quota validation, the
+reviewed Deployment identity, unpaused discovery, and absence of a conflicting drill marker. Mixed,
+unreachable, already-exhausted, drifted, or marker-contaminated starting states are refused. A
+real-incident plan continues to require the exact post-stimulus tuple (`429`, `429`, `200`, `200`).
+
+After independent review, the live staging-rehearsal plan begins with
+`establish-quota-condition`. This is the only quota traffic stage and must be invoked separately
+with `--acknowledge-bounded-quota-stimulus`; neither normal plan generation nor any dry run sends a
+request. Its source-enforced ceiling is 122 total requests, concurrency one, 60 seconds wall time,
+five seconds per request, and zero retries. The 122-request ceiling includes status-only root and
+metadata verification requests. Requests alternate only between the inventory-defined
+`GET /` and `GET /api/v1/meta` routes on `staging.token.place`; redirects, other hosts, other paths,
+non-200/non-429 responses, transport errors, identity drift, and any mixed route state fail closed.
+The stage observes `/livez` and `/healthz` but never sends stimulus load to either route. It stops
+immediately only after observing the exact `429`/`429`/`200`/`200` tuple. Exhausting any budget
+without that tuple is a failed stage, never evidence of success.
+
+```bash
+python3 scripts/tokenplace_incident_drill.py \
+  --execute-stage establish-quota-condition \
+  --acknowledge-bounded-quota-stimulus \
+  --plan "$PRIVATE_PLAN" --journal "$PRIVATE_JOURNAL_DIRECTORY" \
+  --kubeconfig "$STAGING_KUBECONFIG"
+```
+
+The forward coordinate is `internal:establish-quota-condition --host staging.token.place`; the
+cancellation/rollback and cleanup coordinate is `internal:stop-quota-stimulus`. Cancellation is a
+local no-more-requests boundary and never changes a Deployment, image, Probe, ServiceMonitor, or
+quota store. On failure or interruption the journal records `success_condition_observed=false`,
+the stimulus becomes nonresumable, and the operator must stop, clean up the exact run-owned marker,
+and obtain review for a new run ID. Evidence contains only aggregate request/status counts, the two
+route-class names, zero retries, the declared limits, and whether the exact tuple was observed; it
+must not contain URLs, headers, tokens, caller identities, payloads, or response bodies.
 
 The quota plan pauses only the root and metadata Probe discovery labels, leaving `/livez` and
 `/healthz` continuously discovered. After replacement and the readiness, compute, and encrypted
