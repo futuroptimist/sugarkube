@@ -98,29 +98,39 @@ FIVE_XX_RATIO_EXPRESSIONS = {
 }
 DANIEL_PANEL_CONTRACT = {
     "Daniel cache state": (
-        'max by (state) (daniel_cache_state{environment=~"$environment"})',
-        "short",
+        'max by (state) ((daniel_github_cache_state{cluster=~"$cluster"} and on (cluster) (daniel_github_cache_collection_up{environment=~"$environment",name=~"danielsmith-github-cache-$environment",cluster=~"$cluster"} == 1 and on (environment, name, cluster) (time() - daniel_github_cache_collection_timestamp_seconds{environment=~"$environment",name=~"danielsmith-github-cache-$environment",cluster=~"$cluster"} <= 910))))',  # noqa: E501
+        "none",
         "{{state}}",
     ),
     "Daniel cache freshness": (
-        'max(daniel_cache_freshness_age_seconds{environment=~"$environment"})',
+        'max((time() - daniel_github_cache_last_success_unixtime_seconds{cluster=~"$cluster"} > 0 and on (cluster) ((daniel_github_cache_collection_up{environment=~"$environment",name=~"danielsmith-github-cache-$environment",cluster=~"$cluster"} == 1 and on (environment, name, cluster) (time() - daniel_github_cache_collection_timestamp_seconds{environment=~"$environment",name=~"danielsmith-github-cache-$environment",cluster=~"$cluster"} <= 910)) and on (environment, name, cluster) (daniel_github_cache_monitoring_enabled{environment=~"$environment",name=~"danielsmith-github-cache-$environment",cluster=~"$cluster"} == 1)) and on (cluster) (daniel_github_cache_state{cluster=~"$cluster",state="fresh"} == 1)))',  # noqa: E501
         "s",
         "age",
     ),
     "Daniel cache completeness": (
-        'max by (completeness) (daniel_cache_data_completeness{environment=~"$environment"})',
-        "short",
+        'max by (completeness) ((daniel_github_cache_data_completeness{cluster=~"$cluster"} and on (cluster) ((daniel_github_cache_collection_up{environment=~"$environment",name=~"danielsmith-github-cache-$environment",cluster=~"$cluster"} == 1 and on (environment, name, cluster) (time() - daniel_github_cache_collection_timestamp_seconds{environment=~"$environment",name=~"danielsmith-github-cache-$environment",cluster=~"$cluster"} <= 910)) and on (environment, name, cluster) (daniel_github_cache_monitoring_enabled{environment=~"$environment",name=~"danielsmith-github-cache-$environment",cluster=~"$cluster"} == 1))))',  # noqa: E501
+        "none",
         "{{completeness}}",
     ),
     "Daniel cache refresh duration": (
-        'max(daniel_cache_refresh_duration_seconds{environment=~"$environment"})',
-        "s",
+        'max((daniel_github_cache_refresh_duration_milliseconds{cluster=~"$cluster"} and on (cluster) ((daniel_github_cache_collection_up{environment=~"$environment",name=~"danielsmith-github-cache-$environment",cluster=~"$cluster"} == 1 and on (environment, name, cluster) (time() - daniel_github_cache_collection_timestamp_seconds{environment=~"$environment",name=~"danielsmith-github-cache-$environment",cluster=~"$cluster"} <= 910)) and on (environment, name, cluster) (daniel_github_cache_monitoring_enabled{environment=~"$environment",name=~"danielsmith-github-cache-$environment",cluster=~"$cluster"} == 1))))',  # noqa: E501
+        "ms",
         "duration",
     ),
     "Daniel cache retained-data age": (
-        'max(daniel_cache_retained_data_age_seconds{environment=~"$environment"})',
+        'max((daniel_github_cache_retained_data_age_seconds{cluster=~"$cluster"} and on (cluster) ((daniel_github_cache_collection_up{environment=~"$environment",name=~"danielsmith-github-cache-$environment",cluster=~"$cluster"} == 1 and on (environment, name, cluster) (time() - daniel_github_cache_collection_timestamp_seconds{environment=~"$environment",name=~"danielsmith-github-cache-$environment",cluster=~"$cluster"} <= 910)) and on (environment, name, cluster) (daniel_github_cache_monitoring_enabled{environment=~"$environment",name=~"danielsmith-github-cache-$environment",cluster=~"$cluster"} == 1)) and on (cluster) (daniel_github_cache_state{cluster=~"$cluster",state="stale"} == 1)))',  # noqa: E501
         "s",
         "age",
+    ),
+    "Daniel cache failure categories": (
+        'max by (category) ((daniel_github_cache_refresh_failure{cluster=~"$cluster"} == 1 and on (cluster) ((daniel_github_cache_collection_up{environment=~"$environment",name=~"danielsmith-github-cache-$environment",cluster=~"$cluster"} == 1 and on (environment, name, cluster) (time() - daniel_github_cache_collection_timestamp_seconds{environment=~"$environment",name=~"danielsmith-github-cache-$environment",cluster=~"$cluster"} <= 910)) and on (environment, name, cluster) (daniel_github_cache_monitoring_enabled{environment=~"$environment",name=~"danielsmith-github-cache-$environment",cluster=~"$cluster"} == 1))))',  # noqa: E501
+        "none",
+        "{{category}}",
+    ),
+    "Daniel cache collection health": (
+        'min by (environment, name, cluster) (daniel_github_cache_collection_up{environment=~"$environment",name=~"danielsmith-github-cache-$environment",cluster=~"$cluster"} and on (environment, name, cluster) daniel_github_cache_monitoring_enabled{environment=~"$environment",name=~"danielsmith-github-cache-$environment",cluster=~"$cluster"} == 1 and on (environment, name, cluster) (time() - daniel_github_cache_collection_timestamp_seconds{environment=~"$environment",name=~"danielsmith-github-cache-$environment",cluster=~"$cluster"} <= 910))',  # noqa: E501
+        "none",
+        "{{environment}} {{name}}",
     ),
     "Daniel collection/document status": (
         "max by (environment, status) "
@@ -486,12 +496,13 @@ def _expected_dashboard(dashboard: dict) -> dict:
 
 
 def _validate_grid(items: list[dict]) -> None:
-    if len(items) != 92 or sum(panel.get("type") == "row" for panel in items) != 15:
-        raise SystemExit("ERROR: canonical dashboard must contain exactly 92 objects and 15 rows.")
+    if len(items) != 94 or sum(panel.get("type") == "row" for panel in items) != 15:
+        raise SystemExit("ERROR: canonical dashboard must contain exactly 94 objects and 15 rows.")
     ids = [panel.get("id") for panel in items]
-    if ids != list(range(1, 93)):
+    if ids != [*range(1, 71), 93, 94, *range(71, 93)]:
         raise SystemExit(
-            "ERROR: canonical dashboard panel IDs must be stable consecutive integers."
+            "ERROR: canonical dashboard panel IDs and Daniel cache insertion order "
+            "must remain stable."
         )
     rectangles = []
     for panel in items:

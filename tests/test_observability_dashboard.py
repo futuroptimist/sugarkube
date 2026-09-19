@@ -157,9 +157,9 @@ def test_generator_check_and_outputs_are_deterministic(dashboards):
         )
     )
     assert staging_panels == prod_panels
-    assert len(staging["panels"]) == 92
+    assert len(staging["panels"]) == 94
     assert sum(item["type"] == "row" for item in staging["panels"]) == 15
-    assert sum(item["type"] != "row" for item in staging["panels"]) == 77
+    assert sum(item["type"] != "row" for item in staging["panels"]) == 79
 
 
 @pytest.mark.parametrize("state", metrics.STATES)
@@ -786,19 +786,21 @@ def test_daniel_visitor_dashboard_validator_rejects_contract_regressions(
         (
             "Daniel cache freshness",
             lambda item: item["targets"][0].update(
-                expr=item["targets"][0]["expr"].replace("freshness_age", "wrong_age")
+                expr=item["targets"][0]["expr"].replace("last_success_unixtime", "wrong_unixtime")
             ),
         ),
         (
             "Daniel cache refresh duration",
             lambda item: item["targets"][0].update(
-                expr=item["targets"][0]["expr"].replace('{environment=~"$environment"}', "")
+                expr=item["targets"][0]["expr"].replace(
+                    'cluster=~"$cluster"', 'cluster=~"wrong"', 1
+                )
             ),
         ),
         (
             "Daniel cache state",
             lambda item: item["targets"][0].update(
-                expr='max by (repository) (daniel_cache_state{environment=~"$environment"})'
+                expr=item["targets"][0]["expr"].replace("max by (state)", "max by (repository)", 1)
             ),
         ),
         (
@@ -816,6 +818,49 @@ def test_daniel_dashboard_validator_rejects_contract_regressions(
     mutation(panel(changed, title))
     with pytest.raises(SystemExit, match="bounded Daniel contract"):
         validator.validate_dashboard(write_candidate(tmp_path, changed))
+
+
+def test_daniel_cache_panels_use_canonical_scoped_fail_closed_contract(dashboards):
+    expected = {
+        "Daniel cache state": (66, "none"),
+        "Daniel cache freshness": (67, "s"),
+        "Daniel cache completeness": (68, "none"),
+        "Daniel cache refresh duration": (69, "ms"),
+        "Daniel cache retained-data age": (70, "s"),
+        "Daniel cache failure categories": (93, "none"),
+        "Daniel cache collection health": (94, "none"),
+    }
+    for document in dashboards:
+        for title, (panel_id, unit) in expected.items():
+            item = panel(document, title)
+            expression = item["targets"][0]["expr"]
+            assert item["id"] == panel_id
+            assert item["fieldConfig"]["defaults"] == {
+                "unit": unit,
+                "noValue": "NO DATA",
+                "min": 0,
+            }
+            assert "daniel_cache_" not in expression
+            assert "daniel_github_cache_" in expression
+            assert 'cluster=~"$cluster"' in expression
+            assert "vector(0)" not in expression
+        scoped = "\n".join(validator.panel_expression(document, title) for title in expected)
+        assert 'environment=~"$environment"' in scoped
+        assert 'name=~"danielsmith-github-cache-$environment"' in scoped
+        assert 'state="fresh"' in validator.panel_expression(document, "Daniel cache freshness")
+        assert 'state="stale"' in validator.panel_expression(
+            document, "Daniel cache retained-data age"
+        )
+        assert "== 1" in validator.panel_expression(document, "Daniel cache failure categories")
+
+
+def test_daniel_cache_added_panels_fill_existing_grid_slot(dashboards):
+    for document in dashboards:
+        failure = panel(document, "Daniel cache failure categories")
+        health = panel(document, "Daniel cache collection health")
+        assert failure["gridPos"] == {"h": 8, "w": 6, "x": 12, "y": 206}
+        assert health["gridPos"] == {"h": 8, "w": 6, "x": 18, "y": 206}
+        assert panel(document, "Daniel controlled performance")["gridPos"]["y"] == 214
 
 
 def test_finalized_staging_evidence_link_is_current(dashboards):
@@ -900,7 +945,12 @@ def test_canonical_order_ids_grid_and_defaults(dashboards):
         "Daniel visitor journey",
         "Cross-application resource, placement and release overview",
     ]
-    assert [item["id"] for item in staging["panels"]] == list(range(1, 93))
+    assert [item["id"] for item in staging["panels"]] == [
+        *range(1, 71),
+        93,
+        94,
+        *range(71, 93),
+    ]
     assert panel(staging, "DSPACE instrumentation health")
     assert panel(staging, "DSPACE build identity")
     assert all(
