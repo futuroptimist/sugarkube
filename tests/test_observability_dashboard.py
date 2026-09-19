@@ -905,6 +905,9 @@ def test_daniel_cache_promql_lifecycle_semantics_with_promtool(tmp_path, dashboa
     """Exercise label normalization and the fail-closed cache lifecycle contract."""
     promtool = os.environ.get("PROMTOOL") or shutil.which("promtool")
     if not promtool:
+        # TODO: Ensure offline PromQL evaluation runs where promtool is available.
+        # Root cause: Neither PROMTOOL nor PATH supplies a promtool executable in this environment.
+        # Estimated fix: Provide promtool through PROMTOOL or PATH and rerun this test.
         pytest.skip("promtool is required for offline dashboard PromQL evaluation")
 
     def sample(labels, value):
