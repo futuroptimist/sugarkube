@@ -2980,7 +2980,7 @@
       "id": 66,
       "title": "Daniel cache state",
       "type": "timeseries",
-      "description": "Latest published lifecycle state; stale and unavailable remain explicit.",
+      "description": "Latest published lifecycle state; disabled, stale, and unavailable remain explicit.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -2993,7 +2993,7 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
+          "unit": "none",
           "noValue": "NO DATA",
           "min": 0
         },
@@ -3003,7 +3003,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max by (state) (daniel_cache_state{environment=~\"$environment\"})",
+          "expr": "max by (state) (((label_replace((daniel_github_cache_state{state!=\"disabled\",cluster=~\"$cluster\"} or daniel_github_cache_state{state!=\"disabled\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1) and on (cluster) ((label_replace((daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1) and on (environment, name, cluster) (label_replace((daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1) and on (environment, name, cluster) (time() - label_replace((daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") >= 0) and on (environment, name, cluster) (time() - label_replace((daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") <= 910))) or ((label_replace((daniel_github_cache_state{state=\"disabled\",cluster=~\"$cluster\"} or daniel_github_cache_state{state=\"disabled\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1) and on (cluster) (label_replace((daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 0)))",
           "legendFormat": "{{state}}"
         }
       ]
@@ -3012,7 +3012,7 @@
       "id": 67,
       "title": "Daniel cache freshness",
       "type": "timeseries",
-      "description": "Age since the last fully successful refresh.",
+      "description": "Age since the last fully successful refresh; non-fresh states render as NO DATA.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -3035,7 +3035,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max(daniel_cache_freshness_age_seconds{environment=~\"$environment\"})",
+          "expr": "max(((time() - label_replace((daniel_github_cache_last_success_unixtime_seconds{cluster=~\"$cluster\"} or daniel_github_cache_last_success_unixtime_seconds{cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") > 0) and on (cluster) ((label_replace((daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1) and on (environment, name, cluster) (label_replace((daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1) and on (environment, name, cluster) (time() - label_replace((daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") >= 0) and on (environment, name, cluster) (time() - label_replace((daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") <= 910))) and on (cluster) (label_replace((daniel_github_cache_state{state=\"fresh\",cluster=~\"$cluster\"} or daniel_github_cache_state{state=\"fresh\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1))",
           "legendFormat": "age"
         }
       ]
@@ -3044,7 +3044,7 @@
       "id": 68,
       "title": "Daniel cache completeness",
       "type": "timeseries",
-      "description": "Complete, partial, or empty published data.",
+      "description": "Complete, partial, or none from the validated cache document.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -3057,7 +3057,7 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
+          "unit": "none",
           "noValue": "NO DATA",
           "min": 0
         },
@@ -3067,7 +3067,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max by (completeness) (daniel_cache_data_completeness{environment=~\"$environment\"})",
+          "expr": "max by (completeness) ((label_replace((daniel_github_cache_data_completeness{cluster=~\"$cluster\"} or daniel_github_cache_data_completeness{cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\")) and on (cluster) ((label_replace((daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1) and on (environment, name, cluster) (label_replace((daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1) and on (environment, name, cluster) (time() - label_replace((daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") >= 0) and on (environment, name, cluster) (time() - label_replace((daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") <= 910)))",
           "legendFormat": "{{completeness}}"
         }
       ]
@@ -3076,7 +3076,7 @@
       "id": 69,
       "title": "Daniel cache refresh duration",
       "type": "timeseries",
-      "description": "Duration of the latest refresh attempt.",
+      "description": "Duration of the latest refresh attempt, when monitoring and transport are healthy.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -3089,7 +3089,7 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "s",
+          "unit": "ms",
           "noValue": "NO DATA",
           "min": 0
         },
@@ -3099,7 +3099,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max(daniel_cache_refresh_duration_seconds{environment=~\"$environment\"})",
+          "expr": "max((label_replace((daniel_github_cache_refresh_duration_milliseconds{cluster=~\"$cluster\"} or daniel_github_cache_refresh_duration_milliseconds{cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") > 0) and on (cluster) ((label_replace((daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1) and on (environment, name, cluster) (label_replace((daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1) and on (environment, name, cluster) (time() - label_replace((daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") >= 0) and on (environment, name, cluster) (time() - label_replace((daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") <= 910)))",
           "legendFormat": "duration"
         }
       ]
@@ -3108,7 +3108,7 @@
       "id": 70,
       "title": "Daniel cache retained-data age",
       "type": "timeseries",
-      "description": "Age of the oldest retained repository record.",
+      "description": "Age of the oldest retained repository record; shown only for explicit stale state.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -3131,8 +3131,72 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max(daniel_cache_retained_data_age_seconds{environment=~\"$environment\"})",
+          "expr": "max(((label_replace((daniel_github_cache_retained_data_age_seconds{cluster=~\"$cluster\"} or daniel_github_cache_retained_data_age_seconds{cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\")) and on (cluster) ((label_replace((daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1) and on (environment, name, cluster) (label_replace((daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1) and on (environment, name, cluster) (time() - label_replace((daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") >= 0) and on (environment, name, cluster) (time() - label_replace((daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") <= 910))) and on (cluster) (label_replace((daniel_github_cache_state{state=\"stale\",cluster=~\"$cluster\"} or daniel_github_cache_state{state=\"stale\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1))",
           "legendFormat": "age"
+        }
+      ]
+    },
+    {
+      "id": 93,
+      "title": "Daniel cache failure categories",
+      "type": "timeseries",
+      "description": "Active bounded refresh failure categories; arbitrary upstream errors are never displayed.",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 206
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (category) ((label_replace((daniel_github_cache_refresh_failure{cluster=~\"$cluster\"} or daniel_github_cache_refresh_failure{cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1) and on (cluster) ((label_replace((daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1) and on (environment, name, cluster) (label_replace((daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1) and on (environment, name, cluster) (time() - label_replace((daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") >= 0) and on (environment, name, cluster) (time() - label_replace((daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") <= 910)))",
+          "legendFormat": "{{category}}"
+        }
+      ]
+    },
+    {
+      "id": 94,
+      "title": "Daniel cache collection health",
+      "type": "timeseries",
+      "description": "Monitoring-enabled, successful, recent collector transport health; zero is an explicit non-success state.",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 206
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "noValue": "NO DATA",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "min by (environment, name, cluster) ((label_replace((daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1) and on (environment, name, cluster) (label_replace((daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") == 1) and on (environment, name, cluster) (time() - label_replace((daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") >= 0) and on (environment, name, cluster) (time() - label_replace((daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"sugarkube-int\", \"cluster\", \"^$\") <= 910))",
+          "legendFormat": "{{environment}} {{name}}"
         }
       ]
     },
