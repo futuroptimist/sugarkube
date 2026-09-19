@@ -1434,6 +1434,162 @@ def test_bounded_quota_redirect_reports_quota_context():
         )
 
 
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"target": {}}, "target"),
+        ({"routes": {"root": "/"}}, "routes"),
+        ({"limits": {}}, "limits"),
+        ({"limits": {**drill.QUOTA_STIMULUS_LIMITS, "retries": 1}}, "limits"),
+        ({"command": ["internal:generate-bounded-quota"]}, "command"),
+    ],
+)
+def test_bounded_quota_rejects_altered_contract(change, message):
+    action = {
+        "target": {"scheme": "https", "host": drill.STAGING_HOST, "redirects": "reject"},
+        "routes": {"root": "/", "metadata": "/api/v1/meta"},
+        "limits": drill.QUOTA_STIMULUS_LIMITS,
+        "success_condition": {"root": 429, "metadata": 429, "livez": 200, "healthz": 200},
+        "command": [
+            "internal:generate-bounded-quota",
+            "--host",
+            drill.STAGING_HOST,
+            "--run-id",
+            "quota-test",
+        ],
+    }
+    action.update(change)
+
+    with pytest.raises(drill.DrillError, match=message):
+        drill._run_bounded_quota(action)
+
+
+def test_bounded_quota_status_rejects_transport_and_destination_drift():
+    class TransportFailure:
+        def open(self, _request, timeout):
+            raise drill.urllib.error.URLError("offline fixture")
+
+    with pytest.raises(drill.DrillError, match="request failed"):
+        drill._bounded_quota_status(TransportFailure(), "/", 1)
+
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def geturl(self):
+            return "https://example.invalid/"
+
+    class Redirected:
+        def open(self, _request, timeout):
+            return Response()
+
+    with pytest.raises(drill.DrillError, match="destination drifted"):
+        drill._bounded_quota_status(Redirected(), "/", 1)
+
+
+def test_bounded_quota_status_accepts_http_error_status():
+    error = drill.urllib.error.HTTPError(f"https://{drill.STAGING_HOST}/", 429, "quota", {}, None)
+
+    class Opener:
+        def open(self, _request, timeout):
+            raise error
+
+    assert drill._bounded_quota_status(Opener(), "/", 1) == 429
+
+
+def test_observe_bounded_quota_routes_checks_all_routes(monkeypatch):
+    observed = []
+    monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *_args: object())
+
+    def status(_opener, path, timeout):
+        observed.append((path, timeout))
+        return 200
+
+    monkeypatch.setattr(drill, "_bounded_quota_status", status)
+    assert drill._observe_bounded_quota_routes(2.5) == {
+        "root": 200,
+        "metadata": 200,
+        "livez": 200,
+        "healthz": 200,
+    }
+    assert observed == [("/", 2.5), ("/api/v1/meta", 2.5), ("/livez", 2.5), ("/healthz", 2.5)]
+
+
+def test_runner_timeout_is_forwarded_and_reported():
+    calls = []
+
+    def runner(command, timeout=None):
+        calls.append((command, timeout))
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    command = ["kubectl", "get", "deployment"]
+    assert drill._runner_with_timeout(runner, command, 2.5).returncode == 0
+    assert calls == [(command, 2.5)]
+
+    def timed_out(command, timeout=None):
+        raise subprocess.TimeoutExpired(command, timeout)
+
+    with pytest.raises(drill.DrillError, match="boundary check timed out"):
+        drill._runner_with_timeout(timed_out, command, 2.5)
+
+
+@pytest.mark.parametrize(
+    ("boundary_error", "reason"),
+    [(drill.DrillError("deployment drift"), "boundary-drift"), (KeyboardInterrupt(), None)],
+)
+def test_bounded_quota_retains_boundary_failure_evidence(monkeypatch, boundary_error, reason):
+    action = {
+        "target": {"scheme": "https", "host": drill.STAGING_HOST, "redirects": "reject"},
+        "routes": {"root": "/", "metadata": "/api/v1/meta"},
+        "limits": drill.QUOTA_STIMULUS_LIMITS,
+        "success_condition": {"root": 429, "metadata": 429, "livez": 200, "healthz": 200},
+        "command": [
+            "internal:generate-bounded-quota",
+            "--host",
+            drill.STAGING_HOST,
+            "--run-id",
+            "quota-test",
+        ],
+    }
+
+    class Response:
+        status = 200
+
+        def __init__(self, request):
+            self.request = request
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def geturl(self):
+            return self.request.full_url
+
+    class Opener:
+        def open(self, request, timeout):
+            return Response(request)
+
+    def boundary(_remaining):
+        raise boundary_error
+
+    monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *_args: Opener())
+    expected = (
+        KeyboardInterrupt if isinstance(boundary_error, KeyboardInterrupt) else drill.DrillError
+    )
+    with pytest.raises(expected) as failure:
+        drill._run_bounded_quota(action, boundary)
+    summary = getattr(failure.value, "summary", None)
+    assert summary["total_requests"] == 4
+    assert summary["stop_reason"] == (reason or "interrupted-boundary-check")
+
+
 def _execute_quota_trigger(tmp_path, monkeypatch, opener, runner_wrapper=lambda runner: runner):
     plan = executable_quota_rehearsal_plan(
         tmp_path,
@@ -1449,6 +1605,50 @@ def _execute_quota_trigger(tmp_path, monkeypatch, opener, runner_wrapper=lambda 
     runner = runner_wrapper(execution_runner(plan, calls, _matching_marker(plan)))
     monkeypatch.setattr(drill.urllib.request, "build_opener", lambda *_args: opener)
     return plan, parsed, calls, runner
+
+
+def test_execute_quota_trigger_runs_boundary_and_records_completion(tmp_path, monkeypatch):
+    plan, parsed, calls, runner = _execute_quota_trigger(tmp_path, monkeypatch, object())
+    expected = {
+        "request_counts": {"root": 2, "metadata": 2, "livez": 2, "healthz": 2},
+        "total_requests": 8,
+        "route_statuses": {"root": 429, "metadata": 429, "livez": 200, "healthz": 200},
+        "retries": 0,
+        "stop_reason": "condition-established",
+    }
+
+    def run_quota(_action, boundary_check):
+        boundary_check(10)
+        return expected
+
+    monkeypatch.setattr(drill, "_run_bounded_quota", run_quota)
+    result = drill.execute_operation(parsed, runner)
+
+    assert result == {
+        "status": "completed",
+        "stage": "generate-bounded-quota",
+        "summary": expected,
+    }
+    assert any("cluster_identity.py" in " ".join(command) for command in calls)
+    assert drill._journal_records(parsed.journal, plan)[-1]["evidence_summary"] == expected
+
+
+@pytest.mark.parametrize(
+    ("attribute", "value", "message"),
+    [
+        ("acknowledge_bounded_quota_stimulus", False, "separate bounded quota"),
+        ("gate_evidence", {"operator": "supplied"}, "operator-authored"),
+    ],
+)
+def test_execute_quota_trigger_rejects_missing_runtime_authorization(
+    tmp_path, monkeypatch, attribute, value, message
+):
+    _plan, parsed, calls, runner = _execute_quota_trigger(tmp_path, monkeypatch, object())
+    setattr(parsed, attribute, value)
+
+    with pytest.raises(drill.DrillError, match=message):
+        drill.execute_operation(parsed, runner)
+    assert not any("delete" in command for command in calls)
 
 
 def _failed_quota_evidence(parsed, plan):
@@ -1699,6 +1899,68 @@ def test_quota_gate_reobserves_live_tuple(tmp_path, monkeypatch):
         drill.execute_operation(parsed, lambda command: pytest.fail(str(command)))
 
 
+def test_quota_gate_records_fresh_live_tuple(tmp_path, monkeypatch):
+    plan = executable_quota_rehearsal_plan(
+        tmp_path,
+        enable_bounded_quota_stimulus=True,
+        acknowledge_bounded_quota_stimulus=True,
+    )
+    parsed = execution_files(tmp_path, plan)
+    _journal_through(parsed, plan, "generate-bounded-quota")
+    expected = {"root": 429, "metadata": 429, "livez": 200, "healthz": 200}
+    drill._record_phase(
+        parsed.journal,
+        plan,
+        "execute",
+        "generate-bounded-quota",
+        "completed",
+        evidence_summary={"route_statuses": expected},
+    )
+    parsed.execute_stage = "verify-quota-condition"
+    monkeypatch.setattr(drill, "_assert_stage_preflight", lambda *_args: None)
+    monkeypatch.setattr(drill, "_validate_marker", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(drill, "_observe_bounded_quota_routes", lambda _timeout: expected)
+
+    assert drill.execute_operation(parsed, lambda command: pytest.fail(str(command))) == {
+        "status": "completed",
+        "stage": "verify-quota-condition",
+    }
+    record = drill._journal_records(parsed.journal, plan)[-1]
+    assert record["evidence_summary"] == {
+        "route_statuses": expected,
+        "source": "live-revalidation",
+    }
+
+
+def test_quota_gate_rejects_malformed_trigger_evidence(tmp_path, monkeypatch):
+    plan = executable_quota_rehearsal_plan(
+        tmp_path,
+        enable_bounded_quota_stimulus=True,
+        acknowledge_bounded_quota_stimulus=True,
+    )
+    parsed = execution_files(tmp_path, plan)
+    _journal_through(parsed, plan, "generate-bounded-quota")
+    drill._record_phase(
+        parsed.journal,
+        plan,
+        "execute",
+        "generate-bounded-quota",
+        "completed",
+        evidence_summary={"route_statuses": {"root": 429}},
+    )
+    parsed.execute_stage = "verify-quota-condition"
+    monkeypatch.setattr(drill, "_assert_stage_preflight", lambda *_args: None)
+    monkeypatch.setattr(drill, "_validate_marker", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        drill,
+        "_observe_bounded_quota_routes",
+        lambda _timeout: pytest.fail("invalid evidence must not generate endpoint traffic"),
+    )
+
+    with pytest.raises(drill.DrillError, match="does not prove"):
+        drill.execute_operation(parsed, lambda command: pytest.fail(str(command)))
+
+
 def test_quota_gate_rejects_stale_trigger_before_route_observation(tmp_path, monkeypatch):
     plan = executable_quota_rehearsal_plan(
         tmp_path,
@@ -1746,6 +2008,36 @@ def test_conflicting_quota_marker_is_rejected():
         return subprocess.CompletedProcess(command, 0, json.dumps({"items": [marker]}), "")
 
     with pytest.raises(drill.DrillError, match="conflicting"):
+        drill._validate_no_conflicting_markers(plan, Path("/tmp/kubeconfig"), runner)
+
+
+@pytest.mark.parametrize(
+    "marker",
+    [
+        None,
+        {},
+        {"metadata": {}},
+        {"metadata": {"name": 42}},
+        {"metadata": {"name": "tokenplace-drill-old"}},
+    ],
+)
+def test_marker_inventory_rejects_malformed_entries(marker):
+    plan = {"run_id": "this-run", "plan_digest": "a" * 64, "inventory": {"namespace": "app"}}
+
+    def runner(command):
+        return subprocess.CompletedProcess(command, 0, json.dumps({"items": [marker]}), "")
+
+    with pytest.raises(drill.DrillError, match="inventory is malformed"):
+        drill._validate_no_conflicting_markers(plan, Path("/tmp/kubeconfig"), runner)
+
+
+def test_marker_inventory_reports_lookup_failure():
+    plan = {"run_id": "this-run", "plan_digest": "a" * 64, "inventory": {"namespace": "app"}}
+
+    def runner(command):
+        return subprocess.CompletedProcess(command, 1, "", "offline fixture")
+
+    with pytest.raises(drill.DrillError, match="lookup failed"):
         drill._validate_no_conflicting_markers(plan, Path("/tmp/kubeconfig"), runner)
 
 
