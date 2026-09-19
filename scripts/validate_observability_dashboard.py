@@ -96,39 +96,69 @@ FIVE_XX_RATIO_EXPRESSIONS = {
         "[$__rate_interval])), 1e-9)"
     ),
 }
+DANIEL_CACHE_BASE_SELECTOR = (
+    'environment=~"$environment",name=~"danielsmith-github-cache-$environment"'
+)
+DANIEL_CACHE_IDENTITY = "environment, name, cluster"
+
+
+def _cache_metric(metric, extra_selector="", *, transport=False):
+    selector = DANIEL_CACHE_BASE_SELECTOR if transport else ""
+    selector += extra_selector if selector else extra_selector.removeprefix(",")
+    if selector:
+        selector += ","
+    return (
+        f'label_replace(({metric}{{{selector}cluster=~"$cluster"}} or '
+        f'{metric}{{{selector}cluster=""}}), "cluster", "${{CLUSTER}}", "cluster", "^$")'
+    )
+
+
+DANIEL_CACHE_ENABLED = _cache_metric("daniel_github_cache_monitoring_enabled", transport=True)
+DANIEL_CACHE_UP = _cache_metric("daniel_github_cache_collection_up", transport=True)
+DANIEL_CACHE_TIMESTAMP = _cache_metric(
+    "daniel_github_cache_collection_timestamp_seconds", transport=True
+)
+DANIEL_CACHE_CURRENT = (
+    f"({DANIEL_CACHE_ENABLED} == 1) and on ({DANIEL_CACHE_IDENTITY}) "
+    f"({DANIEL_CACHE_UP} == 1) and on ({DANIEL_CACHE_IDENTITY}) "
+    f"(time() - {DANIEL_CACHE_TIMESTAMP} >= 0) and on ({DANIEL_CACHE_IDENTITY}) "
+    f"(time() - {DANIEL_CACHE_TIMESTAMP} <= 910)"
+)
+
+
 DANIEL_PANEL_CONTRACT = {
     "Daniel cache state": (
-        'max by (state) (daniel_github_cache_state and on () (daniel_github_cache_collection_up{environment=~"$environment",name=~"danielsmith-github-cache-$environment"} == on (environment, name) daniel_github_cache_monitoring_enabled{environment=~"$environment",name=~"danielsmith-github-cache-$environment"} and on (environment, name) (time() - daniel_github_cache_collection_timestamp_seconds{environment=~"$environment",name=~"danielsmith-github-cache-$environment"} >= -60 and on (environment, name) time() - daniel_github_cache_collection_timestamp_seconds{environment=~"$environment",name=~"danielsmith-github-cache-$environment"} <= 910)))',  # noqa: E501
+        f'max by (state) ((({_cache_metric("daniel_github_cache_state", ",state!=\"disabled\"")} == 1) and on (cluster) ({DANIEL_CACHE_CURRENT})) or (({_cache_metric("daniel_github_cache_state", ",state=\"disabled\"")} == 1) and on (cluster) ({DANIEL_CACHE_ENABLED} == 0)))',  # noqa: E501
         "none",
         "{{state}}",
     ),
     "Daniel cache freshness": (
-        'max((time() - daniel_github_cache_last_success_unixtime_seconds > 0 and on () (daniel_github_cache_collection_up{environment=~"$environment",name=~"danielsmith-github-cache-$environment"} == 1 and on (environment, name) daniel_github_cache_monitoring_enabled{environment=~"$environment",name=~"danielsmith-github-cache-$environment"} == 1 and on (environment, name) (time() - daniel_github_cache_collection_timestamp_seconds{environment=~"$environment",name=~"danielsmith-github-cache-$environment"} >= -60 and on (environment, name) time() - daniel_github_cache_collection_timestamp_seconds{environment=~"$environment",name=~"danielsmith-github-cache-$environment"} <= 910))) and on () (daniel_github_cache_state{state="fresh"} == 1))',  # noqa: E501
+        f'max(((time() - {_cache_metric("daniel_github_cache_last_success_unixtime_seconds")} > 0) and on (cluster) ({DANIEL_CACHE_CURRENT})) and on (cluster) ({_cache_metric("daniel_github_cache_state", ",state=\"fresh\"")} == 1))',  # noqa: E501
         "s",
         "age",
     ),
     "Daniel cache completeness": (
-        'max by (completeness) (daniel_github_cache_data_completeness and on () (daniel_github_cache_collection_up{environment=~"$environment",name=~"danielsmith-github-cache-$environment"} == 1 and on (environment, name) daniel_github_cache_monitoring_enabled{environment=~"$environment",name=~"danielsmith-github-cache-$environment"} == 1 and on (environment, name) (time() - daniel_github_cache_collection_timestamp_seconds{environment=~"$environment",name=~"danielsmith-github-cache-$environment"} >= -60 and on (environment, name) time() - daniel_github_cache_collection_timestamp_seconds{environment=~"$environment",name=~"danielsmith-github-cache-$environment"} <= 910)))',  # noqa: E501
+        f'max by (completeness) (({_cache_metric("daniel_github_cache_data_completeness")}) and on (cluster) ({DANIEL_CACHE_CURRENT}))',
         "none",
         "{{completeness}}",
     ),
     "Daniel cache refresh duration": (
-        'max((daniel_github_cache_refresh_duration_milliseconds > 0) and on () (daniel_github_cache_collection_up{environment=~"$environment",name=~"danielsmith-github-cache-$environment"} == 1 and on (environment, name) daniel_github_cache_monitoring_enabled{environment=~"$environment",name=~"danielsmith-github-cache-$environment"} == 1 and on (environment, name) (time() - daniel_github_cache_collection_timestamp_seconds{environment=~"$environment",name=~"danielsmith-github-cache-$environment"} >= -60 and on (environment, name) time() - daniel_github_cache_collection_timestamp_seconds{environment=~"$environment",name=~"danielsmith-github-cache-$environment"} <= 910)))',  # noqa: E501
+        f'max(({_cache_metric("daniel_github_cache_refresh_duration_milliseconds")} > 0) and on (cluster) ({DANIEL_CACHE_CURRENT}))',
         "ms",
         "duration",
     ),
     "Daniel cache retained-data age": (
-        'max((daniel_github_cache_retained_data_age_seconds and on () (daniel_github_cache_collection_up{environment=~"$environment",name=~"danielsmith-github-cache-$environment"} == 1 and on (environment, name) daniel_github_cache_monitoring_enabled{environment=~"$environment",name=~"danielsmith-github-cache-$environment"} == 1 and on (environment, name) (time() - daniel_github_cache_collection_timestamp_seconds{environment=~"$environment",name=~"danielsmith-github-cache-$environment"} >= -60 and on (environment, name) time() - daniel_github_cache_collection_timestamp_seconds{environment=~"$environment",name=~"danielsmith-github-cache-$environment"} <= 910))) and on () (daniel_github_cache_state{state="stale"} == 1))',  # noqa: E501
+        f'max((({_cache_metric("daniel_github_cache_retained_data_age_seconds")}) and on (cluster) ({DANIEL_CACHE_CURRENT})) and on (cluster) ({_cache_metric("daniel_github_cache_state", ",state=\"stale\"")} == 1))',  # noqa: E501
         "s",
         "age",
     ),
     "Daniel cache failure categories": (
-        'max by (category) ((daniel_github_cache_refresh_failure == 1) and on () (daniel_github_cache_collection_up{environment=~"$environment",name=~"danielsmith-github-cache-$environment"} == 1 and on (environment, name) daniel_github_cache_monitoring_enabled{environment=~"$environment",name=~"danielsmith-github-cache-$environment"} == 1 and on (environment, name) (time() - daniel_github_cache_collection_timestamp_seconds{environment=~"$environment",name=~"danielsmith-github-cache-$environment"} >= -60 and on (environment, name) time() - daniel_github_cache_collection_timestamp_seconds{environment=~"$environment",name=~"danielsmith-github-cache-$environment"} <= 910)))',  # noqa: E501
+        f'max by (category) (({_cache_metric("daniel_github_cache_refresh_failure")} == 1) and on (cluster) ({DANIEL_CACHE_CURRENT}))',
         "none",
         "{{category}}",
     ),
     "Daniel cache collection health": (
-        'min by (environment, name) (daniel_github_cache_collection_up{environment=~"$environment",name=~"danielsmith-github-cache-$environment"} and on (environment, name) daniel_github_cache_monitoring_enabled{environment=~"$environment",name=~"danielsmith-github-cache-$environment"} == 1 and on (environment, name) (time() - daniel_github_cache_collection_timestamp_seconds{environment=~"$environment",name=~"danielsmith-github-cache-$environment"} >= -60 and on (environment, name) time() - daniel_github_cache_collection_timestamp_seconds{environment=~"$environment",name=~"danielsmith-github-cache-$environment"} <= 910))',  # noqa: E501
+        f"min by (environment, name, cluster) ({DANIEL_CACHE_CURRENT})",
         "none",
         "{{environment}} {{name}}",
     ),
@@ -759,6 +789,12 @@ def _validate_semantics(dashboard: dict) -> None:
         expected_unit,
         expected_legend,
     ) in DANIEL_PANEL_CONTRACT.items():
+        cluster_value = next(
+            variable["current"]["value"]
+            for variable in dashboard["templating"]["list"]
+            if variable["name"] == "cluster"
+        )
+        expected_expression = expected_expression.replace("${CLUSTER}", cluster_value)
         daniel_panel = panel_named(dashboard, title)
         targets = daniel_panel.get("targets", [])
         defaults = daniel_panel.get("fieldConfig", {}).get("defaults", {})
