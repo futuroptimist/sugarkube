@@ -497,6 +497,24 @@ def test_daniel_dashboard_contract_covers_metrics_scope_grouping_units_and_missi
     dashboards,
 ):
     for document in (json.loads(TEMPLATE.read_text()), *dashboards):
+        for title, (expected_targets, unit) in validator.DANIEL_CACHE_PANEL_CONTRACT.items():
+            item = panel(document, title)
+            assert item["targets"] == [
+                {
+                    "refId": chr(ord("A") + index),
+                    "expr": expression,
+                    "legendFormat": legend,
+                }
+                for index, (expression, legend) in enumerate(expected_targets)
+            ]
+            assert item["fieldConfig"]["defaults"]["unit"] == unit
+            assert item["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
+            assert all(
+                'environment=~"$environment"' in expression for expression, _ in expected_targets
+            )
+            assert all('cluster=~"$cluster"' in expression for expression, _ in expected_targets)
+            assert all("vector(0)" not in expression for expression, _ in expected_targets)
+            assert all("daniel_cache_" not in expression for expression, _ in expected_targets)
         for title, (expression, unit, legend) in validator.DANIEL_PANEL_CONTRACT.items():
             item = panel(document, title)
             assert item["targets"] == [{"refId": "A", "expr": expression, "legendFormat": legend}]
@@ -504,10 +522,19 @@ def test_daniel_dashboard_contract_covers_metrics_scope_grouping_units_and_missi
             assert item["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
             assert 'environment=~"$environment"' in expression
             assert "vector(0)" not in expression
-        assert "by (state)" in validator.DANIEL_PANEL_CONTRACT["Daniel cache state"][0]
+        assert "by (state)" in validator.DANIEL_CACHE_PANEL_CONTRACT["Daniel cache state"][0][0][0]
         assert (
-            "by (completeness)" in validator.DANIEL_PANEL_CONTRACT["Daniel cache completeness"][0]
+            "by (completeness)"
+            in validator.DANIEL_CACHE_PANEL_CONTRACT["Daniel cache completeness"][0][0][0]
         )
+        state_targets = panel(document, "Daniel cache state")["targets"]
+        assert any(
+            "daniel_github_cache_refresh_failure" in target["expr"] for target in state_targets
+        )
+        assert {target["legendFormat"] for target in state_targets} >= {
+            "monitoring enabled",
+            "collection up",
+        }
 
 
 def test_daniel_visitor_dashboard_contract_is_scoped_bounded_and_fail_closed(dashboards):
@@ -786,19 +813,19 @@ def test_daniel_visitor_dashboard_validator_rejects_contract_regressions(
         (
             "Daniel cache freshness",
             lambda item: item["targets"][0].update(
-                expr=item["targets"][0]["expr"].replace("freshness_age", "wrong_age")
+                expr=item["targets"][0]["expr"].replace("last_success", "wrong_timestamp")
             ),
         ),
         (
             "Daniel cache refresh duration",
             lambda item: item["targets"][0].update(
-                expr=item["targets"][0]["expr"].replace('{environment=~"$environment"}', "")
+                expr=item["targets"][0]["expr"].replace('cluster=~"$cluster"', 'cluster="wrong"')
             ),
         ),
         (
             "Daniel cache state",
             lambda item: item["targets"][0].update(
-                expr='max by (repository) (daniel_cache_state{environment=~"$environment"})'
+                expr=item["targets"][0]["expr"].replace("by (state)", "by (repository)")
             ),
         ),
         (
@@ -814,7 +841,7 @@ def test_daniel_dashboard_validator_rejects_contract_regressions(
 ):
     changed = copy.deepcopy(dashboards[0])
     mutation(panel(changed, title))
-    with pytest.raises(SystemExit, match="bounded Daniel contract"):
+    with pytest.raises(SystemExit, match="bounded Daniel cache contract"):
         validator.validate_dashboard(write_candidate(tmp_path, changed))
 
 
