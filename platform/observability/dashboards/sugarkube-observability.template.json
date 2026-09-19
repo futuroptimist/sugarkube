@@ -3916,7 +3916,7 @@
       ]
     },
     {
-      "id": 93,
+      "id": 95,
       "title": "Application SLI and error-budget foundation",
       "type": "row",
       "description": "Contract-backed, non-alerting views. HTTP probes, synthetic completions, and actual request success remain separate; see docs/application-slis.md.",
@@ -3930,7 +3930,7 @@
       "panels": []
     },
     {
-      "id": 94,
+      "id": 96,
       "title": "Application SLI observation state",
       "type": "stat",
       "description": "Exclusive states for the two actual-request SLIs and the disabled token.place encrypted-completion SLI in this first slice. Use the existing probe, DSPACE synthetic, and Daniel visitor panels for their source-specific state. Counts and ratios share the full-observation gate.",
@@ -3969,7 +3969,7 @@
       ]
     },
     {
-      "id": 95,
+      "id": 97,
       "title": "Actual-request eligible and failed events (1h)",
       "type": "stat",
       "description": "Eligible and failed event counts keep successful traffic distinct from failed eligible traffic. An empty result is deliberately not coerced to zero: consult scrape/instrumentation health to distinguish no traffic from missing telemetry, and treat a new/reset series as incomplete history.",
@@ -4018,7 +4018,7 @@
       ]
     },
     {
-      "id": 96,
+      "id": 98,
       "title": "Error budget and burn",
       "type": "text",
       "description": "No reviewed numerical objective exists. Retention is at most 90d and can be shorter because of the size cap, restarts, gaps, resets, or recent installation.",
