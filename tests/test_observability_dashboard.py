@@ -503,11 +503,26 @@ def test_daniel_dashboard_contract_covers_metrics_scope_grouping_units_and_missi
             assert item["fieldConfig"]["defaults"]["unit"] == unit
             assert item["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
             assert 'environment=~"$environment"' in expression
+            if title.startswith("Daniel cache"):
+                assert 'cluster=~"$cluster"' in expression
+                assert 'name=~"danielsmith-github-cache-$environment"' in expression
+                assert "daniel_cache_" not in expression
             assert "vector(0)" not in expression
         assert "by (state)" in validator.DANIEL_PANEL_CONTRACT["Daniel cache state"][0]
         assert (
             "by (completeness)" in validator.DANIEL_PANEL_CONTRACT["Daniel cache completeness"][0]
         )
+        assert panel(document, "Daniel cache state")["id"] == 66
+        assert (
+            panel(document, "Daniel cache completeness")["fieldConfig"]["defaults"]["unit"]
+            == "none"
+        )
+        assert 'state="fresh"' in validator.DANIEL_PANEL_CONTRACT["Daniel cache freshness"][0]
+        assert (
+            'state="stale"' in validator.DANIEL_PANEL_CONTRACT["Daniel cache retained-data age"][0]
+        )
+        assert "monitoring_enabled" in validator.DANIEL_PANEL_CONTRACT["Daniel cache state"][0]
+        assert "collection_up" in validator.DANIEL_PANEL_CONTRACT["Daniel cache state"][0]
 
 
 def test_daniel_visitor_dashboard_contract_is_scoped_bounded_and_fail_closed(dashboards):
@@ -786,13 +801,13 @@ def test_daniel_visitor_dashboard_validator_rejects_contract_regressions(
         (
             "Daniel cache freshness",
             lambda item: item["targets"][0].update(
-                expr=item["targets"][0]["expr"].replace("freshness_age", "wrong_age")
+                expr=item["targets"][0]["expr"].replace("last_success", "wrong_age")
             ),
         ),
         (
             "Daniel cache refresh duration",
             lambda item: item["targets"][0].update(
-                expr=item["targets"][0]["expr"].replace('{environment=~"$environment"}', "")
+                expr=item["targets"][0]["expr"].replace(',cluster=~"$cluster"', "")
             ),
         ),
         (
