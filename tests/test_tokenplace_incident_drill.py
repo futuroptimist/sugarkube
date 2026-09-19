@@ -1356,7 +1356,7 @@ def test_bounded_quota_stops_without_another_request_after_unsafe_response(monke
             "quota-test",
         ],
     }
-    statuses = iter((200, 200, 200, 200, 500))
+    statuses = iter((200, 200, 200, 200, 403))
 
     class Response:
         def __init__(self, request):
@@ -1494,12 +1494,21 @@ def test_bounded_quota_status_rejects_transport_and_destination_drift():
 
 def test_bounded_quota_status_accepts_http_error_status():
     error = drill.urllib.error.HTTPError(f"https://{drill.STAGING_HOST}/", 429, "quota", {}, None)
+    requested = []
 
     class Opener:
-        def open(self, _request, timeout):
+        def open(self, request, timeout):
+            requested.append(request)
             raise error
 
     assert drill._bounded_quota_status(Opener(), "/", 1) == 429
+    assert len(requested) == 1
+    request = requested[0]
+    assert request.full_url == f"https://{drill.STAGING_HOST}/"
+    assert request.get_method() == "GET"
+    headers = {name.lower(): value for name, value in request.header_items()}
+    assert headers["accept"] == "text/plain"
+    assert headers["user-agent"] == drill.QUOTA_DRILL_USER_AGENT
 
 
 def test_observe_bounded_quota_routes_checks_all_routes(monkeypatch):

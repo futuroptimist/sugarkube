@@ -34,6 +34,7 @@ IMAGE_DIGEST = re.compile(r"@sha256:([0-9a-f]{64})$")
 MODES = ("metrics-oom", "quota-exhaustion")
 LIFECYCLES = ("real-incident", "staging-rehearsal")
 STAGING_HOST = "staging.token.place"
+QUOTA_DRILL_USER_AGENT = "sugarkube-tokenplace-quota-drill/1.0"
 CARDINALITY_LIMITS = {
     "unique_paths": 72000,
     "total_requests": 72000,
@@ -2292,7 +2293,9 @@ class _RejectQuotaRedirects(urllib.request.HTTPRedirectHandler):
 
 def _bounded_quota_status(opener, path: str, timeout: float) -> int:
     request = urllib.request.Request(
-        f"https://{STAGING_HOST}{path}", method="GET", headers={"Accept": "text/plain"}
+        f"https://{STAGING_HOST}{path}",
+        method="GET",
+        headers={"Accept": "text/plain", "User-Agent": QUOTA_DRILL_USER_AGENT},
     )
     try:
         with opener.open(request, timeout=timeout) as response:
