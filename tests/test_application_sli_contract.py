@@ -1,5 +1,7 @@
 import copy
 import json
+import runpy
+import sys
 from pathlib import Path
 
 import pytest
@@ -133,6 +135,13 @@ def test_validator_main_reports_success_and_clean_errors(tmp_path, capsys):
         validator.main([str(invalid)])
     assert error.value.code == 2
     assert "Expecting value" in capsys.readouterr().err
+
+
+def test_validator_module_entrypoint(monkeypatch):
+    monkeypatch.setattr(sys, "argv", [str(validator.__file__), str(CONTRACT)])
+    with pytest.raises(SystemExit) as error:
+        runpy.run_path(str(validator.__file__), run_name="__main__")
+    assert error.value.code == 0
 
 
 def test_recordings_are_non_alerting_reset_aware_and_guarded_by_complete_fresh_history():
