@@ -2980,7 +2980,7 @@
       "id": 66,
       "title": "Daniel cache state",
       "type": "timeseries",
-      "description": "Latest published lifecycle state; stale and unavailable remain explicit.",
+      "description": "Current lifecycle, bounded refresh failures, and collection/transport health; disabled and unhealthy transport are explicit non-success states.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -3003,8 +3003,18 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max by (state) (daniel_cache_state{environment=~\"$environment\"})",
+          "expr": "max by (state) ((daniel_github_cache_state == 1) and on () (daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} == 1) and on () (time() - daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} <= 910))",
           "legendFormat": "{{state}}"
+        },
+        {
+          "refId": "B",
+          "expr": "max by (category) ((daniel_github_cache_refresh_failure == 1) and on () (daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} == 1) and on () (daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} == 1) and on () (time() - daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} <= 910))",
+          "legendFormat": "failure: {{category}}"
+        },
+        {
+          "refId": "C",
+          "expr": "max(daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"}) * on() max(daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"}) * on() (max(daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"}) >= bool time() - 910)",
+          "legendFormat": "collection/transport healthy"
         }
       ]
     },
@@ -3012,7 +3022,7 @@
       "id": 67,
       "title": "Daniel cache freshness",
       "type": "timeseries",
-      "description": "Age since the last fully successful refresh.",
+      "description": "Age since the last fully successful refresh; unavailable, disabled, and missing telemetry render as NO DATA.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -3035,7 +3045,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max(daniel_cache_freshness_age_seconds{environment=~\"$environment\"})",
+          "expr": "max((time() - daniel_github_cache_last_success_unixtime_seconds) and on () (daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} == 1) and on () (daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} == 1) and on () (time() - daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} <= 910) and on () (daniel_github_cache_state{state=~\"fresh|stale\"} == 1))",
           "legendFormat": "age"
         }
       ]
@@ -3044,7 +3054,7 @@
       "id": 68,
       "title": "Daniel cache completeness",
       "type": "timeseries",
-      "description": "Complete, partial, or empty published data.",
+      "description": "Selected complete, partial, or none state from a current enabled collection.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -3067,7 +3077,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max by (completeness) (daniel_cache_data_completeness{environment=~\"$environment\"})",
+          "expr": "max by (completeness) ((daniel_github_cache_data_completeness == 1) and on () (daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} == 1) and on () (daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} == 1) and on () (time() - daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} <= 910))",
           "legendFormat": "{{completeness}}"
         }
       ]
@@ -3076,7 +3086,7 @@
       "id": 69,
       "title": "Daniel cache refresh duration",
       "type": "timeseries",
-      "description": "Duration of the latest refresh attempt.",
+      "description": "Milliseconds spent on the latest completed refresh attempt.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -3089,7 +3099,7 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "s",
+          "unit": "ms",
           "noValue": "NO DATA",
           "min": 0
         },
@@ -3099,7 +3109,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max(daniel_cache_refresh_duration_seconds{environment=~\"$environment\"})",
+          "expr": "max(daniel_github_cache_refresh_duration_milliseconds and on () (daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} == 1) and on () (daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} == 1) and on () (time() - daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} <= 910) and on () (daniel_github_cache_state{state=~\"fresh|stale|unavailable\"} == 1))",
           "legendFormat": "duration"
         }
       ]
@@ -3108,7 +3118,7 @@
       "id": 70,
       "title": "Daniel cache retained-data age",
       "type": "timeseries",
-      "description": "Age of the oldest retained repository record.",
+      "description": "Age of the oldest current or retained repository record; unavailable, disabled, and missing telemetry render as NO DATA.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -3131,7 +3141,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max(daniel_cache_retained_data_age_seconds{environment=~\"$environment\"})",
+          "expr": "max(daniel_github_cache_retained_data_age_seconds and on () (daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} == 1) and on () (daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} == 1) and on () (time() - daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} <= 910) and on () (daniel_github_cache_state{state=~\"fresh|stale\"} == 1))",
           "legendFormat": "age"
         }
       ]
