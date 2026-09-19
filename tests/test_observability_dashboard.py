@@ -499,15 +499,76 @@ def test_daniel_dashboard_contract_covers_metrics_scope_grouping_units_and_missi
     for document in (json.loads(TEMPLATE.read_text()), *dashboards):
         for title, (expression, unit, legend) in validator.DANIEL_PANEL_CONTRACT.items():
             item = panel(document, title)
-            assert item["targets"] == [{"refId": "A", "expr": expression, "legendFormat": legend}]
+            expected_targets = [{"refId": "A", "expr": expression, "legendFormat": legend}]
+            if title == "Daniel cache state":
+                expected_targets.extend(validator.DANIEL_CACHE_STATE_AUXILIARY_TARGETS)
+            assert item["targets"] == expected_targets
             assert item["fieldConfig"]["defaults"]["unit"] == unit
             assert item["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
-            assert 'environment=~"$environment"' in expression
-            assert "vector(0)" not in expression
+            assert all("vector(0)" not in target["expr"] for target in expected_targets)
         assert "by (state)" in validator.DANIEL_PANEL_CONTRACT["Daniel cache state"][0]
         assert (
             "by (completeness)" in validator.DANIEL_PANEL_CONTRACT["Daniel cache completeness"][0]
         )
+
+
+def test_daniel_cache_panels_use_only_canonical_scoped_metrics_and_correct_units(dashboards):
+    cache_titles = [
+        title for title in validator.DANIEL_PANEL_CONTRACT if title.startswith("Daniel cache ")
+    ]
+    expected_units = {
+        "Daniel cache state": "short",
+        "Daniel cache freshness": "s",
+        "Daniel cache completeness": "short",
+        "Daniel cache refresh duration": "ms",
+        "Daniel cache retained-data age": "s",
+    }
+    for document in (json.loads(TEMPLATE.read_text()), *dashboards):
+        for title in cache_titles:
+            item = panel(document, title)
+            expressions = [target["expr"] for target in item["targets"]]
+            assert item["fieldConfig"]["defaults"]["unit"] == expected_units[title]
+            assert item["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
+            assert all("daniel_cache_" not in expression for expression in expressions)
+            assert all("daniel_github_cache_" in expression for expression in expressions)
+            assert all('environment=~"$environment"' in expression for expression in expressions)
+            assert all('cluster=~"$cluster"' in expression for expression in expressions)
+            assert all(
+                'name=~"danielsmith-github-cache-$environment"' in expression
+                for expression in expressions
+            )
+
+        state_targets = panel(document, "Daniel cache state")["targets"]
+        assert {target["refId"] for target in state_targets} == {"A", "B", "C"}
+        assert "daniel_github_cache_refresh_failure" in state_targets[1]["expr"]
+        assert state_targets[1]["legendFormat"] == "failure: {{category}}"
+        assert state_targets[2]["legendFormat"] == "collection/transport healthy"
+        assert "monitoring_enabled" in state_targets[2]["expr"]
+        assert "collection_up" in state_targets[2]["expr"]
+        assert "collection_timestamp_seconds" in state_targets[2]["expr"]
+
+
+def test_daniel_cache_migration_preserves_layout_and_generated_identity(dashboards):
+    template = json.loads(TEMPLATE.read_text())
+    expected_layout = {
+        title: (panel(template, title)["id"], panel(template, title)["gridPos"])
+        for title in validator.DANIEL_PANEL_CONTRACT
+        if title.startswith("Daniel cache ")
+    }
+    assert expected_layout == {
+        "Daniel cache state": (66, {"h": 8, "w": 12, "x": 0, "y": 190}),
+        "Daniel cache freshness": (67, {"h": 8, "w": 12, "x": 12, "y": 190}),
+        "Daniel cache completeness": (68, {"h": 8, "w": 12, "x": 0, "y": 198}),
+        "Daniel cache refresh duration": (69, {"h": 8, "w": 12, "x": 12, "y": 198}),
+        "Daniel cache retained-data age": (70, {"h": 8, "w": 12, "x": 0, "y": 206}),
+    }
+    for environment, document in zip(("staging", "prod"), dashboards, strict=True):
+        assert (
+            generator.render(generator.PROFILES[environment])
+            == json.dumps(document, indent=2) + "\n"
+        )
+        for title, layout in expected_layout.items():
+            assert (panel(document, title)["id"], panel(document, title)["gridPos"]) == layout
 
 
 def test_daniel_visitor_dashboard_contract_is_scoped_bounded_and_fail_closed(dashboards):
@@ -786,19 +847,19 @@ def test_daniel_visitor_dashboard_validator_rejects_contract_regressions(
         (
             "Daniel cache freshness",
             lambda item: item["targets"][0].update(
-                expr=item["targets"][0]["expr"].replace("freshness_age", "wrong_age")
+                expr=item["targets"][0]["expr"].replace("last_success_unixtime", "wrong_age")
             ),
         ),
         (
             "Daniel cache refresh duration",
             lambda item: item["targets"][0].update(
-                expr=item["targets"][0]["expr"].replace('{environment=~"$environment"}', "")
+                expr=item["targets"][0]["expr"].replace(',cluster=~"$cluster"', "")
             ),
         ),
         (
             "Daniel cache state",
             lambda item: item["targets"][0].update(
-                expr='max by (repository) (daniel_cache_state{environment=~"$environment"})'
+                expr=item["targets"][0]["expr"].replace("by (state)", "by (repository)")
             ),
         ),
         (
