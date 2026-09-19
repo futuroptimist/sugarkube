@@ -19,6 +19,7 @@ DSPACE_RULES="${ROOT}/platform/observability/rules/dspace-release-integrity.yaml
 CLOUDFLARE_RULES="${ROOT}/platform/observability/rules/cloudflare-tunnel.yaml"
 TOKENPLACE_RULES="${ROOT}/platform/observability/rules/tokenplace-production.yaml"
 DANIELSMITH_VISITOR_RULES="${ROOT}/platform/observability/rules/danielsmith-visitor-journey.yaml"
+DANIELSMITH_CACHE_RULES="${ROOT}/platform/observability/rules/danielsmith-github-cache.yaml"
 APPLICATION_SLI_RULES="${ROOT}/platform/observability/rules/application-slis.yaml"
 STAGING_DASHBOARD="${ROOT}/clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
 PROD_DASHBOARD="${ROOT}/clusters/prod/observability/dashboards/sugarkube-prod-observability.json"
@@ -86,6 +87,7 @@ EOT
     printf '  - generated mode-0600 rules overlay sourced from %s\n' "$TOKENPLACE_RULES"
   fi
   printf '  - shared disabled-by-default visitor rules sourced from %s\n' "$DANIELSMITH_VISITOR_RULES"
+  printf '  - shared disabled-by-default GitHub-cache rules sourced from %s\n' "$DANIELSMITH_CACHE_RULES"
   printf '  - shared non-alerting application SLI rules sourced from %s\n' "$APPLICATION_SLI_RULES"
   printf 'dashboard source (--set-file): %s\n' "$DASHBOARD"
   printf 'Grafana LAN URL: %s (same NodePort is available through the other %s nodes)\n' "$GRAFANA_URL" "$ENVIRONMENT"
@@ -113,14 +115,16 @@ create_rules_overlay() {
       {
         "tokenplace-production" => ["token.place", rule_args.fetch(2)],
         "danielsmith-visitor-journey" => ["danielsmith.io visitor journey", rule_args.fetch(3)],
-        "application-slis" => ["application SLIs", rule_args.fetch(4)]
+        "danielsmith-github-cache" => ["danielsmith.io GitHub cache", rule_args.fetch(4)],
+        "application-slis" => ["application SLIs", rule_args.fetch(5)]
       }
     else
       {
         "dspace-release-integrity" => ["DSPACE", rule_args.fetch(0)],
         "cloudflare-tunnel" => ["Cloudflare Tunnel", rule_args.fetch(1)],
         "danielsmith-visitor-journey" => ["danielsmith.io visitor journey", rule_args.fetch(3)],
-        "application-slis" => ["application SLIs", rule_args.fetch(4)]
+        "danielsmith-github-cache" => ["danielsmith.io GitHub cache", rule_args.fetch(4)],
+        "application-slis" => ["application SLIs", rule_args.fetch(5)]
       }
     end
     rules_map = selected_rules.to_h do |key, (name, path)|
@@ -129,10 +133,10 @@ create_rules_overlay() {
              rules["groups"].is_a?(Array) && !rules["groups"].empty?
         abort "ERROR: canonical #{name} rules must contain only a nonempty groups list."
       end
-      if key == "danielsmith-visitor-journey"
+      if ["danielsmith-visitor-journey", "danielsmith-github-cache"].include?(key)
         rules["groups"].each do |group|
           group["rules"].reject! do |rule|
-            rule["record"] == "danielsmith_visitor_journey_monitoring_expected" &&
+            rule["record"].to_s.end_with?("_monitoring_expected") &&
               rule.dig("labels", "environment") != environment
           end
         end
@@ -148,7 +152,7 @@ create_rules_overlay() {
       [key, rules]
     end
     File.write(output, YAML.dump("additionalPrometheusRulesMap" => rules_map))
-  ' "${ENVIRONMENT}" "${RULES_OVERLAY}" "${DSPACE_RULES}" "${CLOUDFLARE_RULES}" "${TOKENPLACE_RULES}" "${DANIELSMITH_VISITOR_RULES}" "${APPLICATION_SLI_RULES}"
+  ' "${ENVIRONMENT}" "${RULES_OVERLAY}" "${DSPACE_RULES}" "${CLOUDFLARE_RULES}" "${TOKENPLACE_RULES}" "${DANIELSMITH_VISITOR_RULES}" "${DANIELSMITH_CACHE_RULES}" "${APPLICATION_SLI_RULES}"
 }
 validate_dashboard() { python3 "${DASHBOARD_VALIDATOR}" "${DASHBOARD}"; }
 validate_rendered_dashboard() { python3 "${DASHBOARD_VALIDATOR}" "${DASHBOARD}" --rendered "$1"; }
