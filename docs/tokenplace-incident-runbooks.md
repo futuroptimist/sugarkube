@@ -185,9 +185,47 @@ baseline, recovery-candidate, and emergency-fallback image roles already named b
 `--current-image`, `--replacement-image`, and `--rollback-image`; do not invent a fourth image or
 select an arbitrary registry release. Keep both acknowledgements: the staging fault-injection
 acknowledgement authorizes the staging-only Probe containment, while the state-loss
-acknowledgement authorizes the recovery replacement. This runner does not generate quota traffic.
-The reviewed snapshot or live preflight must supply route-specific classification (`429` for root
-and metadata, `200` for `/livez` and `/healthz`) plus successful quota-validator evidence.
+acknowledgement authorizes the recovery replacement. Ordinary plan generation does not generate
+or schedule quota traffic. A normal quota plan still requires route-specific classification
+(`429` for root and metadata, `200` for `/livez` and `/healthz`) plus successful quota-validator
+evidence.
+
+The sole source-defined way to establish that condition is an explicitly opted-in
+`staging-rehearsal` plan generated with both `--enable-bounded-quota-stimulus` and
+`--acknowledge-bounded-quota-stimulus`. Its preflight is a distinct healthy baseline: all four
+routes must be `200`, the validator must pass, the Deployment must be converged at the reviewed
+immutable image, and all discovery labels must be unpaused. Never use these options for a real
+incident or production; the parser and immutable-plan validator reject both. Offline dry runs only
+render declarative coordinates and cannot emit requests.
+
+Execution is separately authorized with `--acknowledge-bounded-quota-stimulus` on the exact
+`generate-bounded-quota` stage. The source ceiling is 256 HTTP attempts total—including health
+observations—concurrency 2, 30 seconds wall time, a three-second per-request timeout, and zero
+retries. Stimulus requests alternate
+only between `GET /` and `GET /api/v1/meta` on `https://staging.token.place`; `/livez` and
+`/healthz` are status observations, never load targets. Each batch reasserts cluster, Deployment,
+image, memory, replica, and marker identity. It stops immediately at `429/429/200/200`, on drift,
+on a mixed or unreachable state, on loss of either health route, or when any budget expires.
+Sending the budget is not success: only the exact tuple advances the source-derived
+`verify-quota-condition` gate. The required order is marker creation, `generate-bounded-quota`,
+then `verify-quota-condition`. That gate requires the trigger record to be no more than 30 seconds
+old, observes all four routes again, and advances to the existing Probe containment/replacement
+sequence only while the exact tuple and its gate record remain fresh.
+
+The trigger journal retains only per-route attempt counts, each route's last observed status (an
+explicit `null` when no response was observed), and zero-retry metadata; it contains no URL query,
+header, caller identity, request identifier, response body, or credential. Forward coordinates are
+`generate-bounded-quota` then `verify-quota-condition`.
+Failure/rollback coordinates are `internal:stop-bounded-quota --run-id $RUN_ID`, followed by
+`--cleanup --plan "$PLAN" --journal "$JOURNAL" --kubeconfig "$STAGING_KUBECONFIG"` to reconcile
+deletion of only the exact run-owned marker. Cleanup still removes that marker if Deployment
+coordinates drift after stimulus stops, but only after authoritative staging identity and exact
+marker ownership are re-established. If cluster identity cannot be established, cleanup remains
+durably pending and performs no deletion; it never acts on the drifted Deployment. The stage cannot
+change a Deployment, image, Probe, or ServiceMonitor. An interrupted or failed stimulus is
+nonresumable: retain its private journal, clean up, and prepare a new reviewed run ID. Stopping
+traffic or deleting the marker does not restore quota already consumed; wait for the provider's
+quota window to recover and obtain fresh operator authorization before creating a replacement run.
 
 The quota plan pauses only the root and metadata Probe discovery labels, leaving `/livez` and
 `/healthz` continuously discovered. After replacement and the readiness, compute, and encrypted

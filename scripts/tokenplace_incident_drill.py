@@ -7,6 +7,7 @@ import argparse
 import contextlib
 import fcntl
 import hashlib
+import inspect
 import json
 import os
 import re
@@ -17,7 +18,9 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
+from concurrent.futures import as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -39,6 +42,14 @@ CARDINALITY_LIMITS = {
     "duration_seconds": 240,
     "request_timeout_seconds": 5,
 }
+QUOTA_STIMULUS_LIMITS = {
+    "total_requests": 256,
+    "concurrency": 2,
+    "duration_seconds": 30,
+    "request_timeout_seconds": 3,
+    "retries": 0,
+}
+QUOTA_EVIDENCE_FRESHNESS_SECONDS = 30
 EXECUTION_OPERATIONS = ("--execute-stage", "--rollback-stage", "--cleanup")
 GATE_EVIDENCE_MAX_BYTES = 64 * 1024
 GATE_EVIDENCE_FRESHNESS_SECONDS = 5 * 60
@@ -52,6 +63,14 @@ class DrillError(ValueError):
 
 class _RequestDisruption(DrillError):
     """A transport failure that may have been caused by the intended OOM."""
+
+
+class _QuotaStimulusFailure(DrillError):
+    """A stopped quota stimulus with privacy-safe evidence for durable recovery."""
+
+    def __init__(self, message: str, summary: dict):
+        super().__init__(message)
+        self.summary = summary
 
 
 @dataclass(frozen=True)
@@ -80,6 +99,7 @@ class Coordinates:
     run_id: str
     lifecycle: str = "real-incident"
     incident_image: str | None = None
+    quota_stimulus: bool = False
 
 
 @dataclass(frozen=True)
@@ -137,6 +157,8 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--evidence", required=True, type=Path)
     result.add_argument("--acknowledge-state-loss", action="store_true")
     result.add_argument("--acknowledge-staging-fault-injection", action="store_true")
+    result.add_argument("--enable-bounded-quota-stimulus", action="store_true")
+    result.add_argument("--acknowledge-bounded-quota-stimulus", action="store_true")
     result.add_argument("--dry-run", action="store_true", required=True)
     return result
 
@@ -153,6 +175,7 @@ def execution_parser() -> argparse.ArgumentParser:
     result.add_argument("--kubeconfig", required=True, type=Path)
     result.add_argument("--gate-evidence", type=Path)
     result.add_argument("--acknowledge-bounded-cardinality-generation", action="store_true")
+    result.add_argument("--acknowledge-bounded-quota-stimulus", action="store_true")
     return result
 
 
@@ -160,10 +183,21 @@ def validate(args: argparse.Namespace) -> Coordinates:
     if args.mode not in MODES:
         raise DrillError("drill mode is unsupported")
     lifecycle = getattr(args, "lifecycle", "real-incident")
+    quota_stimulus = getattr(args, "enable_bounded_quota_stimulus", False)
     if lifecycle not in LIFECYCLES:
         raise DrillError("drill lifecycle is unsupported")
     if args.environment != "staging" or args.context != "sugar-staging":
         raise DrillError("an explicit staging environment and sugar-staging context are required")
+    if quota_stimulus and (
+        args.mode != "quota-exhaustion"
+        or lifecycle != "staging-rehearsal"
+        or not getattr(args, "acknowledge_bounded_quota_stimulus", False)
+    ):
+        raise DrillError(
+            "bounded quota stimulus requires explicit quota staging-rehearsal authorization"
+        )
+    if getattr(args, "acknowledge_bounded_quota_stimulus", False) and not quota_stimulus:
+        raise DrillError("bounded quota stimulus acknowledgement requires the explicit opt-in")
     if not args.kubeconfig.is_file():
         raise DrillError("kubeconfig is missing or is not a regular file")
     if not isinstance(args.host, str) or args.host.strip().lower().rstrip(".") != STAGING_HOST:
@@ -213,7 +247,7 @@ def validate(args: argparse.Namespace) -> Coordinates:
         for field in Coordinates.__dataclass_fields__
         if hasattr(args, field)
     }
-    values.update(lifecycle=lifecycle, incident_image=incident_image)
+    values.update(lifecycle=lifecycle, incident_image=incident_image, quota_stimulus=quota_stimulus)
     return Coordinates(**values)
 
 
@@ -390,7 +424,9 @@ def _validate_snapshot(
             for key in ("restart_count", "termination_time", "event_aggregates"):
                 classification_items.append((key, evidence[key]))
         classification = tuple(classification_items)
-    elif mode == "quota-exhaustion":
+    elif mode == "quota-exhaustion" and not (
+        c.lifecycle == "staging-rehearsal" and c.quota_stimulus
+    ):
         statuses = evidence.get("route_statuses")
         if (
             statuses != {"root": 429, "metadata": 429, "livez": 200, "healthz": 200}
@@ -405,6 +441,15 @@ def _validate_snapshot(
             ("livez_status", 200),
             ("healthz_status", 200),
             ("quota_validator_success", True),
+        )
+    elif mode == "quota-exhaustion":
+        statuses = evidence.get("route_statuses")
+        if statuses != {"root": 200, "metadata": 200, "livez": 200, "healthz": 200}:
+            raise DrillError("quota stimulus requires a separate healthy all-200 baseline")
+        if evidence.get("quota_validator_success") is not True:
+            raise DrillError("quota stimulus requires validator success")
+        classification = tuple(
+            (f"{name}_baseline_status", status) for name, status in statuses.items()
         )
     else:
         if evidence:
@@ -431,6 +476,22 @@ def preflight_snapshot(mode: str, c: Coordinates, snapshot: dict) -> Preflight:
 
 
 Runner = Callable[[list[str]], subprocess.CompletedProcess[str]]
+
+
+def _runner_with_timeout(runner: Runner, command: list[str], timeout: float):
+    """Pass a source-derived timeout when the runner supports subprocess semantics."""
+    try:
+        parameters = inspect.signature(runner).parameters.values()
+    except (TypeError, ValueError):
+        parameters = ()
+    supports_timeout = any(
+        parameter.name == "timeout" or parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters
+    )
+    try:
+        return runner(command, timeout=max(timeout, 0.001)) if supports_timeout else runner(command)
+    except subprocess.TimeoutExpired as exc:
+        raise DrillError("bounded quota boundary check timed out") from exc
 
 
 def preflight_live(
@@ -811,6 +872,52 @@ def build_plan(preflight: Preflight) -> dict:
             }
         )
         previous = stage
+
+    if c.lifecycle == "staging-rehearsal" and mode == "quota-exhaustion" and c.quota_stimulus:
+        routes = {name: probes[name]["route"] for name in ("root", "metadata")}
+        actions.append(
+            {
+                "id": "generate-bounded-quota",
+                "stage": "generate-bounded-quota",
+                "type": "quota-trigger",
+                "depends_on": [],
+                "target": {"scheme": "https", "host": STAGING_HOST, "redirects": "reject"},
+                "routes": routes,
+                "limits": dict(QUOTA_STIMULUS_LIMITS),
+                "success_condition": {"root": 429, "metadata": 429, "livez": 200, "healthz": 200},
+                "command": [
+                    "internal:generate-bounded-quota",
+                    "--host",
+                    STAGING_HOST,
+                    "--run-id",
+                    c.run_id,
+                ],
+                "inverse": ["internal:stop-bounded-quota", "--run-id", c.run_id],
+                "rollback": ["internal:stop-bounded-quota", "--run-id", c.run_id],
+                "cleanup": ["internal:stop-bounded-quota", "--run-id", c.run_id],
+                "failure_recovery": {"outcome": "stop-without-containment", "mutation": None},
+            }
+        )
+        previous = "generate-bounded-quota"
+        gate(
+            "verify-quota-condition",
+            [
+                {
+                    "metric": f"{name}_status",
+                    "operator": "eq",
+                    "value": value,
+                    "unit": "http_status",
+                }
+                for name, value in (
+                    ("root", 429),
+                    ("metadata", 429),
+                    ("livez", 200),
+                    ("healthz", 200),
+                )
+            ],
+            {"outcome": "stop-without-containment", "mutation": None},
+            preserves=("deployment/image", "probe/livez", "probe/healthz"),
+        )
 
     if c.lifecycle == "staging-rehearsal" and mode == "metrics-oom":
         baseline_inverse = prefix + [
@@ -1260,9 +1367,47 @@ def _load_execution_plan(path: Path) -> dict:
                 or not all(isinstance(token, str) and token for token in value)
             ):
                 raise DrillError("plan contains a shell-string or malformed command")
+    has_bounded_stage = any(
+        action.get("id") in {"generate-bounded-quota", "verify-quota-condition"}
+        or action.get("type") == "quota-trigger"
+        or (action.get("command") or [None])[0] == "internal:generate-bounded-quota"
+        for action in actions
+    )
+    if has_bounded_stage and (
+        plan.get("mode") != "quota-exhaustion" or plan.get("lifecycle") != "staging-rehearsal"
+    ):
+        raise DrillError("bounded quota stages require the quota staging rehearsal contract")
+    if plan.get("mode") == "quota-exhaustion" and plan.get("lifecycle") != "staging-rehearsal":
+        _validate_quota_plan_classification(plan)
     if plan.get("lifecycle") == "staging-rehearsal":
         _validate_staging_execution_contract(plan)
     return plan
+
+
+def _validate_quota_plan_classification(plan: dict) -> bool:
+    """Return whether the immutable plan authorizes the bounded staging stimulus."""
+    preflight = plan.get("preflight")
+    classification = preflight.get("classification") if isinstance(preflight, dict) else None
+    healthy_baseline = {
+        "root_baseline_status": 200,
+        "metadata_baseline_status": 200,
+        "livez_baseline_status": 200,
+        "healthz_baseline_status": 200,
+    }
+    ordinary_quota = {
+        "root_status": 429,
+        "metadata_status": 429,
+        "livez_status": 200,
+        "healthz_status": 200,
+        "quota_validator_success": True,
+    }
+    if classification == healthy_baseline:
+        if plan.get("lifecycle") != "staging-rehearsal":
+            raise DrillError("healthy quota baseline is restricted to a staging rehearsal")
+        return True
+    if classification == ordinary_quota:
+        return False
+    raise DrillError("quota plan classification is missing or contradicts its safety contract")
 
 
 def _validate_staging_execution_contract(plan: dict) -> None:
@@ -1272,9 +1417,7 @@ def _validate_staging_execution_contract(plan: dict) -> None:
         if not isinstance(expected, dict):
             raise DrillError("quota staging rehearsal image coordinates are malformed")
         if expected.get("incident_image") is not None:
-            raise DrillError(
-                "quota staging rehearsal must not specify an incident image"
-            )
+            raise DrillError("quota staging rehearsal must not specify an incident image")
         coordinate_keys = {
             "namespace",
             "name",
@@ -1287,8 +1430,7 @@ def _validate_staging_execution_contract(plan: dict) -> None:
             "memory_limit",
         }
         images = [
-            expected.get(key)
-            for key in ("current_image", "replacement_image", "rollback_image")
+            expected.get(key) for key in ("current_image", "replacement_image", "rollback_image")
         ]
         if (
             set(expected) != coordinate_keys
@@ -1306,9 +1448,7 @@ def _validate_staging_execution_contract(plan: dict) -> None:
             or any(not IMAGE.fullmatch(value) for value in images)
             or expected["current_image"] == expected["replacement_image"]
         ):
-            raise DrillError(
-                "quota staging rehearsal deployment coordinates are malformed"
-            )
+            raise DrillError("quota staging rehearsal deployment coordinates are malformed")
 
         reviewed_inventory = inventory("staging")
         expected_inventory = {
@@ -1320,10 +1460,9 @@ def _validate_staging_execution_contract(plan: dict) -> None:
             plan.get("inventory") != expected_inventory
             or expected["namespace"] != reviewed_inventory.namespace
         ):
-            raise DrillError(
-                "quota staging rehearsal inventory is not the reviewed contract"
-            )
+            raise DrillError("quota staging rehearsal inventory is not the reviewed contract")
 
+        quota_stimulus = _validate_quota_plan_classification(plan)
         coordinates = Coordinates(
             host=STAGING_HOST,
             kubeconfig=Path("<supplied-kubeconfig>"),
@@ -1340,6 +1479,7 @@ def _validate_staging_execution_contract(plan: dict) -> None:
             service_monitor=reviewed_inventory.service_monitor,
             run_id=plan["run_id"],
             lifecycle="staging-rehearsal",
+            quota_stimulus=quota_stimulus,
         )
         release = "kube-prometheus-stack"
         probes = reviewed_inventory.probe_map()
@@ -1349,7 +1489,7 @@ def _validate_staging_execution_contract(plan: dict) -> None:
                 inventory=reviewed_inventory,
                 mode="quota-exhaustion",
                 source="live-authoritative",
-                classification=(),
+                classification=tuple(plan["preflight"]["classification"].items()),
                 metrics_mode_state="absent",
                 discovery_labels=(
                     (probes["root"]["probe"], release),
@@ -1358,9 +1498,7 @@ def _validate_staging_execution_contract(plan: dict) -> None:
             )
         )
         if plan["actions"] != reviewed_plan["actions"]:
-            raise DrillError(
-                "quota staging rehearsal actions are not the reviewed contract"
-            )
+            raise DrillError("quota staging rehearsal actions are not the reviewed contract")
         return
     if plan.get("mode") != "metrics-oom":
         raise DrillError("staging rehearsal trigger mode is not the reviewed contract")
@@ -1414,9 +1552,7 @@ def _validate_staging_execution_contract(plan: dict) -> None:
     ):
         raise DrillError("staging rehearsal dependency chain is malformed")
     plan_inventory = plan.get("inventory")
-    namespace = (
-        plan_inventory.get("namespace") if isinstance(plan_inventory, dict) else None
-    )
+    namespace = plan_inventory.get("namespace") if isinstance(plan_inventory, dict) else None
     resource = f'deployment/{expected["name"]}'
     prefix = [
         "kubectl",
@@ -1597,7 +1733,11 @@ def _journal_records(directory: Path, plan: dict) -> list[dict]:
                 pending != key
                 or operation != "execute"
                 or stage
-                not in {action["id"] for action in plan["actions"] if action["type"] == "trigger"}
+                not in {
+                    action["id"]
+                    for action in plan["actions"]
+                    if action["type"] in {"trigger", "quota-trigger"}
+                }
             ):
                 raise DrillError("journal transition is invalid")
             pending = None
@@ -1645,13 +1785,8 @@ def _run_checked(
     return result
 
 
-def _assert_stage_preflight(
-    plan: dict,
-    kubeconfig: Path,
-    runner: Runner,
-    expected_image: str | set[str] | None = None,
-) -> None:
-    """Reassert authoritative identity and the immutable deployment coordinates."""
+def _assert_staging_identity(kubeconfig: Path, runner: Runner) -> None:
+    """Establish the authoritative cluster boundary before any recovery mutation."""
     _run_checked(
         runner,
         [
@@ -1665,6 +1800,16 @@ def _assert_stage_preflight(
         ],
         "authoritative staging identity assertion failed",
     )
+
+
+def _assert_stage_preflight(
+    plan: dict,
+    kubeconfig: Path,
+    runner: Runner,
+    expected_image: str | set[str] | None = None,
+) -> None:
+    """Reassert authoritative identity and the immutable deployment coordinates."""
+    _assert_staging_identity(kubeconfig, runner)
     expected = plan.get("expected_deployment")
     if not isinstance(expected, dict):
         raise DrillError("exact deployment coordinates are malformed")
@@ -1754,6 +1899,44 @@ def _marker_command(plan: dict, kubeconfig: Path, verb: str) -> list[str]:
     if verb == "get":
         return base + [verb, "configmap", name, "--ignore-not-found", "-o", "json"]
     return base + [verb, "configmap", name]
+
+
+def _validate_no_conflicting_markers(plan: dict, kubeconfig: Path, runner: Runner) -> None:
+    """Reject any named drill marker not owned by this exact immutable run."""
+    command = _marker_command(plan, kubeconfig, "get")[:7] + [
+        "get",
+        "configmap",
+        "-o",
+        "json",
+    ]
+    result = runner(command)
+    if result.returncode:
+        raise DrillError("drill marker inventory lookup failed")
+    try:
+        payload = json.loads(result.stdout)
+        if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
+            raise TypeError
+        items = payload["items"]
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise DrillError("drill marker inventory is malformed") from exc
+    expected_name = _marker_name(plan)
+    for marker in items:
+        if not isinstance(marker, dict) or not isinstance(marker.get("metadata"), dict):
+            raise DrillError("drill marker inventory is malformed")
+        name = marker["metadata"].get("name")
+        if not isinstance(name, str):
+            raise DrillError("drill marker inventory is malformed")
+        if not name.startswith(("tokenplace-drill-", "sugarkube-incident-")):
+            continue
+        data = marker.get("data")
+        if not isinstance(data, dict):
+            raise DrillError("drill marker inventory is malformed")
+        if (
+            name != expected_name
+            or data.get("run-id") != plan["run_id"]
+            or data.get("plan-digest") != plan["plan_digest"]
+        ):
+            raise DrillError("a conflicting drill marker is present")
 
 
 def _assert_action_prestate(
@@ -2102,10 +2285,154 @@ class _RejectRedirects(urllib.request.HTTPRedirectHandler):
         raise DrillError("bounded-cardinality target attempted a redirect")
 
 
+class _RejectQuotaRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise DrillError("bounded quota target attempted a redirect")
+
+
+def _bounded_quota_status(opener, path: str, timeout: float) -> int:
+    request = urllib.request.Request(
+        f"https://{STAGING_HOST}{path}", method="GET", headers={"Accept": "text/plain"}
+    )
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            value, final = response.status, urlsplit(response.geturl())
+    except urllib.error.HTTPError as exc:
+        try:
+            value, final = exc.code, urlsplit(exc.geturl())
+        finally:
+            exc.close()
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise DrillError("bounded quota request failed") from exc
+    if final.scheme != "https" or final.hostname != STAGING_HOST or final.path != path:
+        raise DrillError("bounded quota destination drifted")
+    return value
+
+
+def _observe_bounded_quota_routes(timeout: float) -> dict[str, int]:
+    """Re-observe every route without adding traffic to either stimulus route."""
+    opener = urllib.request.build_opener(_RejectQuotaRedirects)
+    return {
+        name: _bounded_quota_status(opener, path, timeout)
+        for name, path in {
+            "root": "/",
+            "metadata": "/api/v1/meta",
+            "livez": "/livez",
+            "healthz": "/healthz",
+        }.items()
+    }
+
+
 def _bounded_cardinality_path(run_id: str, sequence: int) -> str:
     """Create an unmatched, nonsecret path without retaining operator input."""
     path_digest = hashlib.sha256(f"sugarkube:{run_id}:{sequence}".encode("ascii")).hexdigest()
     return f"/__sugarkube_cardinality_rehearsal__/{run_id}/{path_digest}"
+
+
+def _run_bounded_quota(action: dict, boundary_check: Callable[[float], None] | None = None) -> dict:
+    """Apply only the reviewed finite quota load and prove the complete result tuple."""
+    if action.get("target") != {"scheme": "https", "host": STAGING_HOST, "redirects": "reject"}:
+        raise DrillError("bounded quota target is not the reviewed staging host")
+    if action.get("routes") != {"root": "/", "metadata": "/api/v1/meta"}:
+        raise DrillError("bounded quota routes are not the reviewed public routes")
+    limits = action.get("limits")
+    if limits != QUOTA_STIMULUS_LIMITS or any(
+        isinstance(value, bool) or not isinstance(value, int) or value < 0
+        for value in (limits or {}).values()
+    ):
+        raise DrillError("bounded quota limits do not match the reviewed contract")
+    if limits["retries"] != 0 or limits["concurrency"] > 2:
+        raise DrillError("bounded quota retry or concurrency boundary is unsafe")
+    command = action.get("command")
+    if (
+        not isinstance(command, list)
+        or command[:4] != ["internal:generate-bounded-quota", "--host", STAGING_HOST, "--run-id"]
+        or len(command) != 5
+        or not SAFE_NAME.fullmatch(command[-1])
+    ):
+        raise DrillError("bounded quota command is not the reviewed contract")
+    opener = urllib.request.build_opener(_RejectQuotaRedirects)
+    deadline = time.monotonic() + limits["duration_seconds"]
+    counts = {"root": 0, "metadata": 0, "livez": 0, "healthz": 0}
+    latest = {"root": None, "metadata": None, "livez": None, "healthz": None}
+
+    def summary(reason: str) -> dict:
+        return {
+            "request_counts": dict(counts),
+            "total_requests": sum(counts.values()),
+            "route_statuses": dict(latest),
+            "retries": 0,
+            "stop_reason": reason,
+        }
+
+    def stop(message: str, reason: str):
+        raise _QuotaStimulusFailure(message, summary(reason))
+
+    def status(name: str, path: str) -> int:
+        if sum(counts.values()) >= limits["total_requests"]:
+            stop("quota condition was not established within the request budget", "request-budget")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            stop("bounded quota duration limit reached", "duration-budget")
+        counts[name] += 1
+        try:
+            value = _bounded_quota_status(
+                opener, path, min(limits["request_timeout_seconds"], remaining)
+            )
+        except KeyboardInterrupt as exc:
+            exc.summary = summary("interrupted-request")
+            raise
+        except DrillError as exc:
+            raise _QuotaStimulusFailure(str(exc), summary("transport-failure")) from exc
+        # Retain a response that arrived even when the wall-clock check rejects it.
+        latest[name] = value
+        if time.monotonic() >= deadline:
+            stop("bounded quota duration limit reached", "duration-budget")
+        if name in {"livez", "healthz"} and value != 200:
+            stop("bounded quota health preservation failed", "unhealthy-observation")
+        if name in {"root", "metadata"} and value not in {200, 429}:
+            stop("bounded quota route entered a mixed unsafe state", "unsafe-response")
+        return value
+
+    # Re-establish the plan's all-healthy baseline at the execution boundary.
+    # These are still HTTP attempts and therefore consume the same total budget.
+    for name, path in {
+        "root": "/",
+        "metadata": "/api/v1/meta",
+        "livez": "/livez",
+        "healthz": "/healthz",
+    }.items():
+        latest[name] = status(name, path)
+    if set(latest.values()) != {200}:
+        stop("bounded quota healthy baseline drifted", "baseline-drift")
+
+    while True:
+        if boundary_check is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                stop("bounded quota duration limit reached", "duration-budget")
+            try:
+                boundary_check(remaining)
+            except KeyboardInterrupt as exc:
+                exc.summary = summary("interrupted-boundary-check")
+                raise
+            except DrillError as exc:
+                raise _QuotaStimulusFailure(str(exc), summary("boundary-drift")) from exc
+            if time.monotonic() >= deadline:
+                stop("bounded quota duration limit reached", "duration-budget")
+        for name, path in action["routes"].items():
+            latest[name] = status(name, path)
+        # Health endpoints are observations, never members of the stimulus route set.
+        latest["livez"] = status("livez", "/livez")
+        latest["healthz"] = status("healthz", "/healthz")
+        if latest == action["success_condition"]:
+            return summary("condition-established")
+        if latest["livez"] != 200 or latest["healthz"] != 200:
+            stop("bounded quota health preservation failed", "unhealthy-observation")
+        if latest["root"] not in {200, 429} or latest["metadata"] not in {200, 429}:
+            stop("bounded quota route entered a mixed unsafe state", "unsafe-response")
+        if (latest["root"] == 429) != (latest["metadata"] == 429):
+            stop("bounded quota route entered a mixed unsafe state", "mixed-response")
 
 
 def _run_bounded_cardinality(
@@ -2363,6 +2690,27 @@ def _record_phase(journal, plan, operation, stage, phase, **metadata):
     )
 
 
+def _fresh_quota_record(records, stage: str, now: datetime | None = None) -> dict:
+    record = next(
+        (
+            item
+            for item in reversed(records)
+            if item["operation"] == "execute"
+            and item["stage"] == stage
+            and item["phase"] == "completed"
+        ),
+        None,
+    )
+    if record is None:
+        raise DrillError("fresh bounded quota evidence is missing")
+    recorded_at = _utc_timestamp(record.get("recorded_at"))
+    clock = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    age = (clock - recorded_at).total_seconds()
+    if age < 0 or age > QUOTA_EVIDENCE_FRESHNESS_SECONDS:
+        raise DrillError("bounded quota evidence is stale")
+    return record
+
+
 def _verify_cleanup_baseline(plan, kubeconfig, runner):
     _assert_stage_preflight(plan, kubeconfig, runner, plan["expected_deployment"]["current_image"])
     baselines = {}
@@ -2451,12 +2799,92 @@ def _recover_failed_trigger(plan, journal, kubeconfig, runner, trigger_pending=T
         _record_phase(journal, plan, "cleanup", "cleanup", "completed")
 
 
+def _reconcile_failed_quota_cleanup(plan, journal, kubeconfig, runner):
+    """Remove the exact quota marker after establishing the cluster identity."""
+    records = _journal_records(journal, plan)
+    cleanup_completed = ("cleanup", "cleanup") in _completed_operations(records)
+    if cleanup_completed:
+        _assert_staging_identity(kubeconfig, runner)
+        marker_present = _validate_marker(plan, kubeconfig, runner, absent_ok=True)
+        if marker_present:
+            raise DrillError("completed exact marker cleanup post-state failed")
+        return
+    cleanup_pending = _pending_operation(records) == ("cleanup", "cleanup")
+    if not cleanup_pending:
+        _record_phase(journal, plan, "cleanup", "cleanup", "intent")
+    _assert_staging_identity(kubeconfig, runner)
+    marker_present = _validate_marker(plan, kubeconfig, runner, absent_ok=True)
+    if marker_present:
+        _run_checked(
+            runner, _marker_command(plan, kubeconfig, "delete"), "exact marker cleanup failed"
+        )
+    if _validate_marker(plan, kubeconfig, runner, absent_ok=True):
+        raise DrillError("exact marker cleanup post-state failed")
+    if ("cleanup", "cleanup") not in _completed_operations(_journal_records(journal, plan)):
+        _record_phase(journal, plan, "cleanup", "cleanup", "completed")
+
+
+def _recover_failed_quota_trigger(plan, journal, kubeconfig, runner, failure_summary=None):
+    """Record failure and remove only the run marker; quota stimulus mutates no cluster object."""
+    _record_phase(
+        journal,
+        plan,
+        "execute",
+        "generate-bounded-quota",
+        "failed",
+        evidence_summary={
+            "stopped": True,
+            "requests_resumable": False,
+            "condition_met": False,
+            **(failure_summary or {"stop_reason": "failed-or-interrupted"}),
+        },
+    )
+    _reconcile_failed_quota_cleanup(plan, journal, kubeconfig, runner)
+
+
+def _is_failed_quota_cleanup(plan, records, operation):
+    if operation != "cleanup":
+        return False
+    quota_ids = {
+        action["id"] for action in plan["actions"] if action.get("type") == "quota-trigger"
+    }
+    if quota_ids != {"generate-bounded-quota"}:
+        return False
+    completed = _completed_operations(records)
+    if any(
+        ("execute", action["id"]) in completed
+        for action in plan["actions"]
+        if action.get("type") == "mutation"
+    ):
+        return False
+    pending = _pending_operation(records)
+    failed = any(
+        record["operation"] == "execute"
+        and record["stage"] == "generate-bounded-quota"
+        and record["phase"] == "failed"
+        for record in records
+    )
+    return failed or pending == ("execute", "generate-bounded-quota")
+
+
 def _execute_locked(args, runner, plan, journal, now=None):
     records = _journal_records(journal, plan)
     completed = _completed_operations(records)
     pending = _pending_operation(records)
     stage = "cleanup" if args.cleanup else args.execute_stage or args.rollback_stage
     operation = "cleanup" if args.cleanup else "rollback" if args.rollback_stage else "execute"
+    failed_quota_cleanup = _is_failed_quota_cleanup(plan, records, operation)
+    if failed_quota_cleanup:
+        # A marker-only failed stimulus never crossed into containment, so its
+        # cleanup depends on trusted identity and ownership, not Deployment state.
+        if pending == ("execute", "generate-bounded-quota"):
+            _recover_failed_quota_trigger(plan, journal, args.kubeconfig, runner)
+        else:
+            _reconcile_failed_quota_cleanup(plan, journal, args.kubeconfig, runner)
+        return {
+            "status": "already-clean" if ("cleanup", "cleanup") in completed else "clean",
+            "run_id": plan["run_id"],
+        }
     if pending and pending != (operation, stage):
         raise DrillError("a different interrupted operation must be reconciled first")
     aborting = any(record["operation"] == "rollback" for record in records)
@@ -2534,6 +2962,7 @@ def _execute_locked(args, runner, plan, journal, now=None):
         return {"status": "clean", "run_id": plan["run_id"]}
 
     if stage == "marker" and operation == "execute":
+        _validate_no_conflicting_markers(plan, args.kubeconfig, runner)
         present = _validate_marker(plan, args.kubeconfig, runner, absent_ok=True)
         if pending:
             if not present:
@@ -2605,6 +3034,67 @@ def _execute_locked(args, runner, plan, journal, now=None):
         return {"status": "already-completed", "stage": stage}
     if done != expected[: len(done)] or expected[len(done)] != stage:
         raise DrillError("stage is out of order")
+    quota_ids = [item["id"] for item in actions]
+    if "verify-quota-condition" in quota_ids and quota_ids.index(stage) > quota_ids.index(
+        "verify-quota-condition"
+    ):
+        # The first containment command must remain adjacent to a current,
+        # source-observed condition rather than trusting an old journal tuple.
+        if stage == quota_ids[quota_ids.index("verify-quota-condition") + 1]:
+            _fresh_quota_record(records, "verify-quota-condition", now)
+    if action["type"] == "quota-trigger":
+        if not getattr(args, "acknowledge_bounded_quota_stimulus", False):
+            raise DrillError("separate bounded quota stimulus authorization is required")
+        if args.gate_evidence is not None:
+            raise DrillError("bounded quota stimulus refuses operator-authored evidence")
+        if pending:
+            _recover_failed_quota_trigger(plan, journal, args.kubeconfig, runner)
+            raise DrillError(
+                "interrupted bounded quota stimulus was cleaned up and is nonresumable"
+            )
+        # Reject contaminated inventories before durable intent or endpoint traffic.
+        _validate_no_conflicting_markers(plan, args.kubeconfig, runner)
+        _record_phase(journal, plan, operation, stage, "intent", limits=action["limits"])
+        try:
+
+            def quota_boundary_check(_remaining):
+                boundary_deadline = time.monotonic() + _remaining
+
+                def bounded_runner(command):
+                    remaining = boundary_deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise DrillError("bounded quota duration limit reached")
+                    return _runner_with_timeout(runner, command, remaining)
+
+                _assert_stage_preflight(
+                    plan,
+                    args.kubeconfig,
+                    bounded_runner,
+                    plan["expected_deployment"]["current_image"],
+                )
+                _validate_marker(plan, args.kubeconfig, bounded_runner)
+                _validate_no_conflicting_markers(plan, args.kubeconfig, bounded_runner)
+
+            summary = _run_bounded_quota(
+                action,
+                quota_boundary_check,
+            )
+        except BaseException as exc:
+            try:
+                _recover_failed_quota_trigger(
+                    plan,
+                    journal,
+                    args.kubeconfig,
+                    runner,
+                    getattr(exc, "summary", None),
+                )
+            except DrillError:
+                # Recovery remains durably pending, but never replace the
+                # stimulus failure/interruption that caused it.
+                raise exc
+            raise
+        _record_phase(journal, plan, operation, stage, "completed", evidence_summary=summary)
+        return {"status": "completed", "stage": stage, "summary": summary}
     if action["type"] == "trigger":
         if not getattr(args, "acknowledge_bounded_cardinality_generation", False):
             raise DrillError("separate bounded-cardinality generation authorization is required")
@@ -2650,6 +3140,28 @@ def _execute_locked(args, runner, plan, journal, now=None):
         _record_phase(journal, plan, operation, stage, "completed", evidence_summary=summary)
         return {"status": "completed", "stage": stage, "summary": summary}
     if action["type"] == "gate":
+        if action["id"] == "verify-quota-condition":
+            if args.gate_evidence is not None:
+                raise DrillError("quota condition gate refuses operator-authored evidence")
+            trigger_record = _fresh_quota_record(records, "generate-bounded-quota", now)
+            expected = {"root": 429, "metadata": 429, "livez": 200, "healthz": 200}
+            summary = trigger_record.get("evidence_summary")
+            if not isinstance(summary, dict) or summary.get("route_statuses") != expected:
+                raise DrillError("bounded quota evidence does not prove the required condition")
+            observed = _observe_bounded_quota_routes(
+                QUOTA_STIMULUS_LIMITS["request_timeout_seconds"]
+            )
+            if observed != expected:
+                raise DrillError("bounded quota condition is no longer present")
+            _record_phase(
+                journal,
+                plan,
+                operation,
+                stage,
+                "completed",
+                evidence_summary={"route_statuses": observed, "source": "live-revalidation"},
+            )
+            return {"status": "completed", "stage": stage}
         if action["id"] == "observe-authentic-oom":
             if args.gate_evidence is not None:
                 raise DrillError("authoritative OOM gate refuses operator-authored evidence")
@@ -2733,8 +3245,8 @@ def main(argv: list[str] | None = None) -> int:
         if executing:
             result = execute_operation(
                 args,
-                lambda command: subprocess.run(
-                    command, capture_output=True, text=True, check=False
+                lambda command, timeout=None: subprocess.run(
+                    command, capture_output=True, text=True, check=False, timeout=timeout
                 ),
             )
             print(json.dumps(result, sort_keys=True))
