@@ -516,6 +516,15 @@ def test_daniel_dashboard_contract_covers_metrics_scope_grouping_units_and_missi
         )
 
 
+def test_daniel_cache_fstring_replacement_fields_do_not_contain_backslashes():
+    source = (ROOT / "scripts/validate_observability_dashboard.py").read_text(encoding="utf-8")
+    contract_source = source.partition("DANIEL_PANEL_CONTRACT = {")[2].partition(
+        "DANIEL_VISITOR_SELECTOR ="
+    )[0]
+
+    assert "\\" not in contract_source
+
+
 def test_daniel_visitor_dashboard_contract_is_scoped_bounded_and_fail_closed(dashboards):
     documents = (json.loads(TEMPLATE.read_text()), *dashboards)
     categorical = {
