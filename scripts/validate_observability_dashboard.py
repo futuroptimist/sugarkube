@@ -96,32 +96,84 @@ FIVE_XX_RATIO_EXPRESSIONS = {
         "[$__rate_interval])), 1e-9)"
     ),
 }
-DANIEL_PANEL_CONTRACT = {
+DANIEL_CACHE_HEALTH_GATE = (
+    'max(daniel_github_cache_collection_up{environment=~"$environment",'
+    'name=~"danielsmith-github-cache-$environment",cluster=~"$cluster"}) == 1 '
+    'and on() max(daniel_github_cache_monitoring_enabled{environment=~"$environment",'
+    'name=~"danielsmith-github-cache-$environment",cluster=~"$cluster"}) == 1 '
+    "and on() (time() - max(daniel_github_cache_collection_timestamp_seconds{"
+    'environment=~"$environment",name=~"danielsmith-github-cache-$environment",'
+    'cluster=~"$cluster"}) <= 910)'
+)
+DANIEL_CACHE_PANEL_CONTRACT = {
     "Daniel cache state": (
-        'max by (state) (daniel_cache_state{environment=~"$environment"})',
+        [
+            (
+                "max by (state) (daniel_github_cache_state) "
+                f"and on() ({DANIEL_CACHE_HEALTH_GATE})",
+                "{{state}}",
+            ),
+            (
+                "max by (category) (daniel_github_cache_refresh_failure) "
+                f"and on() ({DANIEL_CACHE_HEALTH_GATE})",
+                "failure {{category}}",
+            ),
+            (
+                'max(daniel_github_cache_monitoring_enabled{environment=~"$environment",'
+                'name=~"danielsmith-github-cache-$environment",cluster=~"$cluster"})',
+                "monitoring enabled",
+            ),
+            (
+                'max(daniel_github_cache_collection_up{environment=~"$environment",'
+                'name=~"danielsmith-github-cache-$environment",cluster=~"$cluster"})',
+                "collection up",
+            ),
+        ],
         "short",
-        "{{state}}",
     ),
     "Daniel cache freshness": (
-        'max(daniel_cache_freshness_age_seconds{environment=~"$environment"})',
+        [
+            (
+                "time() - max(daniel_github_cache_last_success_unixtime_seconds) "
+                "and on() (max(daniel_github_cache_last_success_unixtime_seconds) > 0) "
+                f"and on() ({DANIEL_CACHE_HEALTH_GATE})",
+                "age",
+            )
+        ],
         "s",
-        "age",
     ),
     "Daniel cache completeness": (
-        'max by (completeness) (daniel_cache_data_completeness{environment=~"$environment"})',
+        [
+            (
+                "max by (completeness) (daniel_github_cache_data_completeness) "
+                f"and on() ({DANIEL_CACHE_HEALTH_GATE})",
+                "{{completeness}}",
+            )
+        ],
         "short",
-        "{{completeness}}",
     ),
     "Daniel cache refresh duration": (
-        'max(daniel_cache_refresh_duration_seconds{environment=~"$environment"})',
-        "s",
-        "duration",
+        [
+            (
+                "max(daniel_github_cache_refresh_duration_milliseconds) "
+                f"and on() ({DANIEL_CACHE_HEALTH_GATE})",
+                "duration",
+            )
+        ],
+        "ms",
     ),
     "Daniel cache retained-data age": (
-        'max(daniel_cache_retained_data_age_seconds{environment=~"$environment"})',
+        [
+            (
+                "max(daniel_github_cache_retained_data_age_seconds) "
+                f"and on() ({DANIEL_CACHE_HEALTH_GATE})",
+                "age",
+            )
+        ],
         "s",
-        "age",
     ),
+}
+DANIEL_PANEL_CONTRACT = {
     "Daniel collection/document status": (
         "max by (environment, status) "
         '(daniel_performance_document_status{environment=~"$environment"})',
@@ -524,6 +576,21 @@ def _validate_grid(items: list[dict]) -> None:
 
 def _validate_semantics(dashboard: dict) -> None:
     items = list(panels(dashboard))
+    for title, (expected_targets, expected_unit) in DANIEL_CACHE_PANEL_CONTRACT.items():
+        daniel_panel = panel_named(dashboard, title)
+        targets = daniel_panel.get("targets", [])
+        defaults = daniel_panel.get("fieldConfig", {}).get("defaults", {})
+        expected = [
+            {"refId": chr(ord("A") + index), "expr": expression, "legendFormat": legend}
+            for index, (expression, legend) in enumerate(expected_targets)
+        ]
+        if (
+            targets != expected
+            or defaults.get("unit") != expected_unit
+            or defaults.get("noValue") != "NO DATA"
+            or any("vector(0)" in expression for expression, _legend in expected_targets)
+        ):
+            raise SystemExit(f"ERROR: {title} does not match the bounded Daniel cache contract.")
     for title, (
         expected_id,
         expected_type,
