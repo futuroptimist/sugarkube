@@ -516,6 +516,14 @@ def test_daniel_dashboard_contract_covers_metrics_scope_grouping_units_and_missi
         )
 
 
+def test_daniel_cache_contract_fstrings_do_not_contain_escaped_quotes():
+    source = (ROOT / "scripts/validate_observability_dashboard.py").read_text(encoding="utf-8")
+    contract_source = source.split("DANIEL_PANEL_CONTRACT =", 1)[1]
+    cache_contract_source = contract_source.split('    "Daniel collection/document status":', 1)[0]
+
+    assert r'\"' not in cache_contract_source
+
+
 def test_daniel_visitor_dashboard_contract_is_scoped_bounded_and_fail_closed(dashboards):
     documents = (json.loads(TEMPLATE.read_text()), *dashboards)
     categorical = {
