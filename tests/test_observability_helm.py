@@ -3,6 +3,7 @@ import json
 import os
 import pty
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -29,6 +30,9 @@ CANONICAL_TOKENPLACE_RULES = (
 )
 CANONICAL_DANIELSMITH_VISITOR_RULES = (
     ROOT / "platform" / "observability" / "rules" / "danielsmith-visitor-journey.yaml"
+)
+CANONICAL_DANIELSMITH_CACHE_RULES = (
+    ROOT / "platform" / "observability" / "rules" / "danielsmith-github-cache.yaml"
 )
 SCRIPT = ROOT / "scripts" / "observability_helm.sh"
 ALERTMANAGER_VALIDATOR = ROOT / "scripts" / "verify_observability_alertmanager.rb"
@@ -129,6 +133,160 @@ def visitor_rules_for(environment: str):
         or rule["labels"]["environment"] == environment
     ]
     return rules
+
+
+def cache_rules_for(environment: str):
+    rules = yaml_load(CANONICAL_DANIELSMITH_CACHE_RULES)
+    rules["groups"][0]["rules"] = [
+        rule
+        for rule in rules["groups"][0]["rules"]
+        if rule.get("record") != "daniel_github_cache_monitoring_expected"
+        or rule["labels"]["environment"] == environment
+    ]
+    return rules
+
+
+def test_daniel_cache_alerts_match_global_application_signals_after_transport_identity(
+    tmp_path,
+):
+    """Evaluate the identity/global join contract with Prometheus itself."""
+    promtool = shutil.which("promtool")
+    if promtool is None:
+        # TODO: Document promtool setup for developers who run rule tests locally.
+        # Root cause: Promtool is not guaranteed locally; CI provisions it and runs this fixture.
+        # Estimated fix: Add promtool guidance to local developer tooling and documentation.
+        pytest.skip("promtool is unavailable")
+
+    rules = cache_rules_for("staging")
+    expected = next(
+        rule for rule in rules["groups"][0]["rules"] if rule.get("record")
+    )
+    expected["expr"] = "vector(1)"
+    rules_path = tmp_path / "rules.yaml"
+    rules_path.write_text(json.dumps(rules), encoding="utf-8")
+    identity = 'environment="staging",name="danielsmith-github-cache-staging"'
+    alert_labels = {
+        "application": "danielsmith",
+        "environment": "staging",
+        "name": "danielsmith-github-cache-staging",
+        "severity": "warning",
+    }
+    alert_annotations = {
+        "DanielGithubCacheStale": {
+            "summary": "Daniel GitHub-cache is serving retained data",
+            "description": "A refresh failed and retained last-good data remains available with its original age.",
+            "runbook_url": "https://github.com/futuroptimist/sugarkube/blob/main/docs/danielsmith-github-cache.md#alerts",
+        },
+        "DanielGithubCacheUnavailable": {
+            "summary": "Daniel GitHub-cache has no current or retained data",
+            "description": "The latest refresh produced no usable GitHub metadata; application availability is independent.",
+            "runbook_url": "https://github.com/futuroptimist/sugarkube/blob/main/docs/danielsmith-github-cache.md#alerts",
+        },
+        "DanielGithubCacheRefreshFailure": {
+            "summary": "Daniel GitHub-cache refresh has a current bounded failure",
+            "description": "Inspect the fixed category series; arbitrary upstream errors are never exported.",
+            "runbook_url": "https://github.com/futuroptimist/sugarkube/blob/main/docs/danielsmith-github-cache.md#alerts",
+        },
+        "DanielGithubCacheExpectedButMissing": {
+            "summary": "Expected Daniel GitHub-cache telemetry is missing",
+            "description": "Collection is authorized but no bounded transport-health series is present.",
+            "runbook_url": "https://github.com/futuroptimist/sugarkube/blob/main/docs/danielsmith-github-cache.md#alerts",
+        },
+    }
+
+    def current_inputs(application_series):
+        return [
+            {
+                "series": f"daniel_github_cache_collection_up{{{identity}}}",
+                "values": "1x41",
+            },
+            {
+                "series": f"daniel_github_cache_monitoring_enabled{{{identity}}}",
+                "values": "1x41",
+            },
+            {
+                "series": f"daniel_github_cache_collection_timestamp_seconds{{{identity}}}",
+                "values": "2000x41",
+            },
+            application_series,
+        ]
+
+    cases = []
+    for alert, series in (
+        ("DanielGithubCacheStale", 'daniel_github_cache_state{state="stale"}'),
+        (
+            "DanielGithubCacheUnavailable",
+            'daniel_github_cache_state{state="unavailable"}',
+        ),
+        (
+            "DanielGithubCacheRefreshFailure",
+            'daniel_github_cache_refresh_failure{category="timeout"}',
+        ),
+    ):
+        cases.append(
+            {
+                "interval": "1m",
+                "input_series": current_inputs({"series": series, "values": "1x41"}),
+                "alert_rule_test": [
+                    {
+                        "eval_time": "21m",
+                        "alertname": alert,
+                        "exp_alerts": [
+                            {
+                                "exp_labels": alert_labels,
+                                "exp_annotations": alert_annotations[alert],
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+    # A global stale signal must not bypass absent/stale transport gating.
+    cases.append(
+        {
+            "interval": "1m",
+            "input_series": [
+                {"series": 'daniel_github_cache_state{state="stale"}', "values": "1x41"}
+            ],
+            "alert_rule_test": [
+                {
+                    "eval_time": "21m",
+                    "alertname": "DanielGithubCacheExpectedButMissing",
+                    "exp_alerts": [
+                        {
+                            "exp_labels": alert_labels,
+                            "exp_annotations": alert_annotations[
+                                "DanielGithubCacheExpectedButMissing"
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "eval_time": "21m",
+                    "alertname": "DanielGithubCacheStale",
+                    "exp_alerts": [],
+                },
+            ],
+        }
+    )
+    fixture = tmp_path / "rules-test.yaml"
+    fixture.write_text(
+        json.dumps(
+            {
+                "rule_files": [str(rules_path)],
+                "evaluation_interval": "1m",
+                "tests": cases,
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [promtool, "test", "rules", str(fixture)],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_chart_version_and_values_define_shared_staging_and_production_baseline():
@@ -590,6 +748,7 @@ def test_dspace_rules_have_one_canonical_source_and_exact_overlay(tmp_path):
             "dspace-release-integrity": yaml_load(CANONICAL_DSPACE_RULES),
             "cloudflare-tunnel": yaml_load(CANONICAL_CLOUDFLARE_RULES),
             "danielsmith-visitor-journey": visitor_rules_for("staging"),
+            "danielsmith-github-cache": cache_rules_for("staging"),
         }
     }
     overlay_paths = re.findall(r"/[^ ]*sugarkube-observability-rules\.[^ ]*\.yaml", audit)
@@ -617,6 +776,7 @@ def test_prod_rules_overlay_ignores_invalid_staging_only_rules(tmp_path):
         "additionalPrometheusRulesMap": {
             "tokenplace-production": yaml_load(CANONICAL_TOKENPLACE_RULES),
             "danielsmith-visitor-journey": visitor_rules_for("prod"),
+            "danielsmith-github-cache": cache_rules_for("prod"),
         }
     }
 

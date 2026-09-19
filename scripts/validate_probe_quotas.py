@@ -20,8 +20,23 @@ WINDOWS = {"hourly": 3600, "daily": 86400}
 METHODS = {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
 ENVIRONMENTS = {"staging", "prod"}
 APPROVED_DANIELSMITH_VISITOR_SOURCE_REVISION = "7c972a57d5235591b0449d5d2a81dd8359bd97a5"
+APPROVED_DANIELSMITH_CACHE_SOURCE_REVISION = "c4d45d96f593d0075096c55ea0a71215350b5ed3"
 DANIELSMITH_VISITOR_CADENCE = "15m"
 DANIELSMITH_VISITOR_TIMEOUT = "120s"
+DANIELSMITH_CACHE_FIELDS = {
+    "name",
+    "application",
+    "environment",
+    "enabled",
+    "cadence",
+    "timeout",
+    "concurrency",
+    "requestMultiplicity",
+    "url",
+    "bucket",
+    "limits",
+    "safetyMargin",
+}
 COMPLETION_FIELDS = {
     "name",
     "application",
@@ -692,6 +707,64 @@ def validate_visitor_contract(contract_data, shared_buckets=None, shared_policie
     )
 
 
+def validate_daniel_cache_contract(contract_data, shared_buckets=None, shared_policies=None):
+    """Validate the pinned passive GitHub-cache transport and its request quota."""
+    if not isinstance(contract_data, dict) or set(contract_data) != {
+        "schemaVersion",
+        "sourceRevision",
+        "producers",
+    }:
+        raise ContractError("Daniel cache contract has missing or unknown top-level fields")
+    if type(contract_data["schemaVersion"]) is not int or contract_data["schemaVersion"] != 1:
+        raise ContractError("Daniel cache contract schemaVersion is invalid")
+    if contract_data["sourceRevision"] != APPROVED_DANIELSMITH_CACHE_SOURCE_REVISION:
+        raise ContractError("Daniel cache contract source revision is not approved")
+    expected = {
+        "staging": (
+            "danielsmith-github-cache-staging",
+            "https://staging.danielsmith.io/runtime/github-metrics.json",
+        ),
+        "prod": (
+            "danielsmith-github-cache-prod",
+            "https://danielsmith.io/runtime/github-metrics.json",
+        ),
+    }
+    producers = contract_data["producers"]
+    if not isinstance(producers, list) or len(producers) != 2:
+        raise ContractError("Daniel cache contract must contain staging and prod producers")
+    completion_producers = []
+    for producer in producers:
+        if not isinstance(producer, dict) or set(producer) != DANIELSMITH_CACHE_FIELDS:
+            raise ContractError("Daniel cache producer has missing or unknown metadata")
+        environment = producer.get("environment")
+        if (
+            environment not in expected
+            or (producer.get("name"), producer.get("url")) != expected[environment]
+        ):
+            raise ContractError("Daniel cache producer identity or URL is not canonical")
+        if producer.get("application") != "danielsmith":
+            raise ContractError("Daniel cache producer application is not canonical")
+        if producer.get("cadence") != "15m" or producer.get("timeout") != "10s":
+            raise ContractError("Daniel cache producer must use the pinned cadence and timeout")
+        completion_producers.append(
+            {
+                **{key: value for key, value in producer.items() if key != "url"},
+                "route": "/runtime/github-metrics.json",
+                "method": "GET",
+                "exemptions": [],
+                "failureStages": ["transport"],
+            }
+        )
+    if {producer["environment"] for producer in producers} != set(expected):
+        raise ContractError("Daniel cache contract must contain unique staging and prod producers")
+    return validate_completion_contract(
+        {"schemaVersion": 1, "producers": completion_producers},
+        shared_buckets,
+        shared_policies,
+        expected_stages={"transport"},
+    )
+
+
 def _reject_duplicate_json_fields(pairs):
     result = {}
     for key, value in pairs:
@@ -718,6 +791,7 @@ def main(argv=None):
         help="reviewed declarative encrypted-completion contract",
     )
     parser.add_argument("--visitor-contract", type=Path, help="reviewed visitor-journey contract")
+    parser.add_argument("--daniel-cache-contract", type=Path, help="reviewed Daniel cache contract")
     parser.add_argument(
         "--probes",
         type=Path,
@@ -725,6 +799,7 @@ def main(argv=None):
     )
     args = parser.parse_args(argv)
     visitor_path = args.visitor_contract or config_dir / "danielsmith-visitor-journey.json"
+    cache_path = args.daniel_cache_contract or config_dir / "danielsmith-github-cache.json"
     try:
         contract = _single_yaml_document(args.contracts.read_text(encoding="utf-8"))
     except YAMLInputError:
@@ -755,6 +830,13 @@ def main(argv=None):
                 visitor_path.read_text(encoding="utf-8"),
                 object_pairs_hook=_reject_duplicate_json_fields,
             )
+        if configured_dir and args.daniel_cache_contract is None and not cache_path.exists():
+            cache_contract = None
+        else:
+            cache_contract = json.loads(
+                cache_path.read_text(encoding="utf-8"),
+                object_pairs_hook=_reject_duplicate_json_fields,
+            )
     except json.JSONDecodeError:
         print("probe quota validation failed: JSON input is malformed", file=sys.stderr)
         return 1
@@ -770,6 +852,8 @@ def main(argv=None):
         validate_completion_contract(completion_contract, buckets, policies)
         if visitor_contract is not None:
             validate_visitor_contract(visitor_contract, buckets, policies)
+        if cache_contract is not None:
+            validate_daniel_cache_contract(cache_contract, buckets, policies)
         # One inventory owns both environments. Validate its complete structure so
         # malformed declarations cannot disappear during environment selection.
         contract = select_environment_contract(contract, args.env)
