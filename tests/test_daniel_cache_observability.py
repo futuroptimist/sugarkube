@@ -293,6 +293,63 @@ def test_descriptor_schema_version_rejects_boolean():
         quotas.validate_daniel_cache_contract(descriptor)
 
 
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (lambda value: value.update(schemaVersion=True), "schemaVersion"),
+        (lambda value: value.update(producers=[]), "producers"),
+        (
+            lambda value: value["producers"][0].update(environment="preview"),
+            "environment",
+        ),
+        (lambda value: value["producers"][0].update(cadence="1m"), "metadata"),
+        (lambda value: value["producers"][0].update(concurrency=True), "metadata types"),
+        (lambda value: value["producers"][0].update(enabled=1), "enabled"),
+        (
+            lambda value: value["producers"][1].update(
+                environment="staging",
+                name="danielsmith-github-cache-staging",
+                url=metrics.RUNTIME_URLS["staging"],
+            ),
+            "identities",
+        ),
+    ],
+)
+def test_standalone_descriptor_validator_rejects_invalid_contracts(mutation, message):
+    descriptor = json.loads(DESCRIPTOR.read_text())
+    mutation(descriptor)
+
+    with pytest.raises(metrics.InvalidDocument, match=message):
+        metrics.validate_descriptor(descriptor)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (lambda value: value.update(sourceRevision="0" * 40), "revision"),
+        (lambda value: value.update(producers=[]), "staging and prod"),
+        (lambda value: value["producers"][0].pop("url"), "metadata"),
+        (lambda value: value["producers"][0].update(url="https://example.com"), "canonical"),
+        (lambda value: value["producers"][0].update(application="other"), "application"),
+        (lambda value: value["producers"][0].update(timeout="30s"), "cadence and timeout"),
+        (
+            lambda value: value["producers"][1].update(
+                environment="staging",
+                name="danielsmith-github-cache-staging",
+                url=metrics.RUNTIME_URLS["staging"],
+            ),
+            "unique staging and prod",
+        ),
+    ],
+)
+def test_quota_validator_rejects_invalid_cache_contracts(mutation, message):
+    descriptor = json.loads(DESCRIPTOR.read_text())
+    mutation(descriptor)
+
+    with pytest.raises(quotas.ContractError, match=message):
+        quotas.validate_daniel_cache_contract(descriptor)
+
+
 def test_installed_style_execution_is_standalone(tmp_path):
     installed = tmp_path / "usr/local/libexec/sugarkube/daniel_cache_metrics.py"
     installed.parent.mkdir(parents=True)
