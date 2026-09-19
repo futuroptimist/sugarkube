@@ -118,6 +118,14 @@ DANIEL_CACHE_UP = _cache_metric("daniel_github_cache_collection_up", transport=T
 DANIEL_CACHE_TIMESTAMP = _cache_metric(
     "daniel_github_cache_collection_timestamp_seconds", transport=True
 )
+DANIEL_CACHE_ACTIVE_STATE = _cache_metric(
+    "daniel_github_cache_state", ',state!="disabled"'
+)
+DANIEL_CACHE_DISABLED_STATE = _cache_metric(
+    "daniel_github_cache_state", ',state="disabled"'
+)
+DANIEL_CACHE_FRESH_STATE = _cache_metric("daniel_github_cache_state", ',state="fresh"')
+DANIEL_CACHE_STALE_STATE = _cache_metric("daniel_github_cache_state", ',state="stale"')
 DANIEL_CACHE_CURRENT = (
     f"({DANIEL_CACHE_ENABLED} == 1) and on ({DANIEL_CACHE_IDENTITY}) "
     f"({DANIEL_CACHE_UP} == 1) and on ({DANIEL_CACHE_IDENTITY}) "
@@ -128,12 +136,12 @@ DANIEL_CACHE_CURRENT = (
 
 DANIEL_PANEL_CONTRACT = {
     "Daniel cache state": (
-        f'max by (state) ((({_cache_metric("daniel_github_cache_state", ",state!=\"disabled\"")} == 1) and on (cluster) ({DANIEL_CACHE_CURRENT})) or (({_cache_metric("daniel_github_cache_state", ",state=\"disabled\"")} == 1) and on (cluster) ({DANIEL_CACHE_ENABLED} == 0)))',  # noqa: E501
+        f"max by (state) ((({DANIEL_CACHE_ACTIVE_STATE} == 1) and on (cluster) ({DANIEL_CACHE_CURRENT})) or (({DANIEL_CACHE_DISABLED_STATE} == 1) and on (cluster) ({DANIEL_CACHE_ENABLED} == 0)))",  # noqa: E501
         "none",
         "{{state}}",
     ),
     "Daniel cache freshness": (
-        f'max(((time() - {_cache_metric("daniel_github_cache_last_success_unixtime_seconds")} > 0) and on (cluster) ({DANIEL_CACHE_CURRENT})) and on (cluster) ({_cache_metric("daniel_github_cache_state", ",state=\"fresh\"")} == 1))',  # noqa: E501
+        f'max(((time() - {_cache_metric("daniel_github_cache_last_success_unixtime_seconds")} > 0) and on (cluster) ({DANIEL_CACHE_CURRENT})) and on (cluster) ({DANIEL_CACHE_FRESH_STATE} == 1))',  # noqa: E501
         "s",
         "age",
     ),
@@ -148,7 +156,7 @@ DANIEL_PANEL_CONTRACT = {
         "duration",
     ),
     "Daniel cache retained-data age": (
-        f'max((({_cache_metric("daniel_github_cache_retained_data_age_seconds")}) and on (cluster) ({DANIEL_CACHE_CURRENT})) and on (cluster) ({_cache_metric("daniel_github_cache_state", ",state=\"stale\"")} == 1))',  # noqa: E501
+        f'max((({_cache_metric("daniel_github_cache_retained_data_age_seconds")}) and on (cluster) ({DANIEL_CACHE_CURRENT})) and on (cluster) ({DANIEL_CACHE_STALE_STATE} == 1))',  # noqa: E501
         "s",
         "age",
     ),
@@ -272,6 +280,9 @@ DANIEL_VISITOR_EXPECTED_ENABLED = (
 DANIEL_VISITOR_FAILURE_STAGE = _visitor_metric(
     "danielsmith_visitor_journey_failure_stage", ',failure_stage!="none"'
 )
+DANIEL_VISITOR_FAILURE_STATE = _visitor_metric(
+    "danielsmith_visitor_journey_state", ',state="failure"'
+)
 DANIEL_VISITOR_UNAVAILABLE_STATE = _visitor_metric(
     "danielsmith_visitor_journey_state", ',state=~"unavailable|stale"'
 )
@@ -314,7 +325,7 @@ DANIEL_VISITOR_PANEL_CONTRACT = {
         f"and on ({DANIEL_VISITOR_IDENTITY}) ({DANIEL_VISITOR_EXPECTED_ENABLED}) "
         f"and on ({DANIEL_VISITOR_IDENTITY}) {DANIEL_VISITOR_CURRENT} "
         f"and on ({DANIEL_VISITOR_IDENTITY}) "
-        f"({_visitor_metric('danielsmith_visitor_journey_state', ',state=\"failure\"')} == 1)",
+        f"({DANIEL_VISITOR_FAILURE_STATE} == 1)",
         "short",
         "{{failure_stage}}",
     ),
