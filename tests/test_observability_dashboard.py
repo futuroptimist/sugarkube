@@ -497,7 +497,13 @@ def test_daniel_dashboard_contract_covers_metrics_scope_grouping_units_and_missi
     dashboards,
 ):
     for document in (json.loads(TEMPLATE.read_text()), *dashboards):
+        cluster = next(
+            variable["current"]["value"]
+            for variable in document["templating"]["list"]
+            if variable["name"] == "cluster"
+        )
         for title, (expression, unit, legend) in validator.DANIEL_PANEL_CONTRACT.items():
+            expression = expression.replace("${CLUSTER}", cluster)
             item = panel(document, title)
             assert item["targets"] == [{"refId": "A", "expr": expression, "legendFormat": legend}]
             assert item["fieldConfig"]["defaults"]["unit"] == unit
