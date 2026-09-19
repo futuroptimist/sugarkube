@@ -793,7 +793,6 @@ def test_prod_rules_overlay_ignores_invalid_staging_only_rules(tmp_path):
             "application-slis": application_sli_rules_for("prod"),
         }
     }
-}
 
 
 @pytest.mark.parametrize(
