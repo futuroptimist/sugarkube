@@ -157,9 +157,9 @@ def test_generator_check_and_outputs_are_deterministic(dashboards):
         )
     )
     assert staging_panels == prod_panels
-    assert len(staging["panels"]) == 92
+    assert len(staging["panels"]) == 94
     assert sum(item["type"] == "row" for item in staging["panels"]) == 15
-    assert sum(item["type"] != "row" for item in staging["panels"]) == 77
+    assert sum(item["type"] != "row" for item in staging["panels"]) == 79
 
 
 @pytest.mark.parametrize("state", metrics.STATES)
@@ -497,7 +497,13 @@ def test_daniel_dashboard_contract_covers_metrics_scope_grouping_units_and_missi
     dashboards,
 ):
     for document in (json.loads(TEMPLATE.read_text()), *dashboards):
+        cluster = next(
+            variable["current"]["value"]
+            for variable in document["templating"]["list"]
+            if variable["name"] == "cluster"
+        )
         for title, (expression, unit, legend) in validator.DANIEL_PANEL_CONTRACT.items():
+            expression = expression.replace("${CLUSTER}", cluster)
             item = panel(document, title)
             assert item["targets"] == [{"refId": "A", "expr": expression, "legendFormat": legend}]
             assert item["fieldConfig"]["defaults"]["unit"] == unit
@@ -786,19 +792,21 @@ def test_daniel_visitor_dashboard_validator_rejects_contract_regressions(
         (
             "Daniel cache freshness",
             lambda item: item["targets"][0].update(
-                expr=item["targets"][0]["expr"].replace("freshness_age", "wrong_age")
+                expr=item["targets"][0]["expr"].replace("last_success_unixtime", "wrong_unixtime")
             ),
         ),
         (
             "Daniel cache refresh duration",
             lambda item: item["targets"][0].update(
-                expr=item["targets"][0]["expr"].replace('{environment=~"$environment"}', "")
+                expr=item["targets"][0]["expr"].replace(
+                    'name=~"danielsmith-github-cache-$environment"', 'name=~"wrong"', 1
+                )
             ),
         ),
         (
             "Daniel cache state",
             lambda item: item["targets"][0].update(
-                expr='max by (repository) (daniel_cache_state{environment=~"$environment"})'
+                expr=item["targets"][0]["expr"].replace("max by (state)", "max by (repository)", 1)
             ),
         ),
         (
@@ -816,6 +824,186 @@ def test_daniel_dashboard_validator_rejects_contract_regressions(
     mutation(panel(changed, title))
     with pytest.raises(SystemExit, match="bounded Daniel contract"):
         validator.validate_dashboard(write_candidate(tmp_path, changed))
+
+
+def test_daniel_cache_panels_use_canonical_scoped_fail_closed_contract(dashboards):
+    expected = {
+        "Daniel cache state": (66, "none"),
+        "Daniel cache freshness": (67, "s"),
+        "Daniel cache completeness": (68, "none"),
+        "Daniel cache refresh duration": (69, "ms"),
+        "Daniel cache retained-data age": (70, "s"),
+        "Daniel cache failure categories": (93, "none"),
+        "Daniel cache collection health": (94, "none"),
+    }
+    for document in dashboards:
+        for title, (panel_id, unit) in expected.items():
+            item = panel(document, title)
+            expression = item["targets"][0]["expr"]
+            assert item["id"] == panel_id
+            assert item["fieldConfig"]["defaults"] == {
+                "unit": unit,
+                "noValue": "NO DATA",
+                "min": 0,
+            }
+            assert "daniel_cache_" not in expression
+            assert "daniel_github_cache_" in expression
+            assert 'cluster=~"$cluster"' in expression
+            assert 'cluster=""' in expression
+            assert '"cluster", "sugarkube-' in expression
+            assert ">= 0" in expression
+            assert "<= 910" in expression
+            assert "vector(0)" not in expression
+        scoped = "\n".join(validator.panel_expression(document, title) for title in expected)
+        assert 'environment=~"$environment"' in scoped
+        assert 'name=~"danielsmith-github-cache-$environment"' in scoped
+        assert 'state="fresh"' in validator.panel_expression(document, "Daniel cache freshness")
+        assert 'state="stale"' in validator.panel_expression(
+            document, "Daniel cache retained-data age"
+        )
+        assert "== 1" in validator.panel_expression(document, "Daniel cache failure categories")
+
+
+def test_daniel_cache_state_preserves_disabled_and_rejects_failed_collection():
+    expression = validator.DANIEL_PANEL_CONTRACT["Daniel cache state"][0]
+    assert 'state="disabled"' in expression
+    assert "daniel_github_cache_collection_up" in expression
+    assert f"{validator.DANIEL_CACHE_ENABLED} == 0" in expression
+    assert f"{validator.DANIEL_CACHE_UP} == 1" in expression
+
+
+def test_daniel_cache_refresh_duration_excludes_unknown_zero():
+    expression = validator.DANIEL_PANEL_CONTRACT["Daniel cache refresh duration"][0]
+    assert "daniel_github_cache_refresh_duration_milliseconds" in expression
+    assert '"cluster", "${CLUSTER}", "cluster", "^$") > 0' in expression
+
+
+def _cache_fixture(enabled=1, up=1, timestamp=1000, state="fresh", **identity):
+    transport_identity = {
+        "environment": "staging",
+        "name": "danielsmith-github-cache-staging",
+        **identity,
+    }
+    return [
+        _promtool_series("daniel_github_cache_monitoring_enabled", enabled, **transport_identity),
+        _promtool_series("daniel_github_cache_collection_up", up, **transport_identity),
+        _promtool_series(
+            "daniel_github_cache_collection_timestamp_seconds",
+            timestamp,
+            **transport_identity,
+        ),
+        _promtool_series("daniel_github_cache_state", 1, state=state),
+        _promtool_series("daniel_github_cache_data_completeness", 1, completeness="complete"),
+        _promtool_series("daniel_github_cache_last_success_unixtime_seconds", 950),
+        _promtool_series("daniel_github_cache_retained_data_age_seconds", 600),
+        _promtool_series("daniel_github_cache_refresh_duration_milliseconds", 25),
+        _promtool_series("daniel_github_cache_refresh_failure", 1, category="timeout"),
+    ]
+
+
+def test_daniel_cache_promql_lifecycle_semantics_with_promtool(tmp_path, dashboards):
+    """Exercise label normalization and the fail-closed cache lifecycle contract."""
+    promtool = os.environ.get("PROMTOOL") or shutil.which("promtool")
+    if not promtool:
+        # TODO: Ensure offline PromQL evaluation runs where promtool is available.
+        # Root cause: Neither PROMTOOL nor PATH supplies a promtool executable in this environment.
+        # Estimated fix: Provide promtool through PROMTOOL or PATH and rerun this test.
+        pytest.skip("promtool is required for offline dashboard PromQL evaluation")
+
+    def sample(labels, value):
+        return {
+            "labels": "{" + ",".join(f'{key}="{value}"' for key, value in labels.items()) + "}",
+            "value": value,
+        }
+
+    cases = []
+    titles = list(validator.DANIEL_PANEL_CONTRACT)[:7]
+    for document, environment, cluster in (
+        (dashboards[0], "staging", "sugarkube-int"),
+        (dashboards[1], "prod", "sugarkube-prod"),
+    ):
+        expressions = {
+            title: panel(document, title)["targets"][0]["expr"]
+            .replace("$environment", environment)
+            .replace("$cluster", cluster)
+            for title in titles
+        }
+        identity = {
+            "environment": environment,
+            "name": f"danielsmith-github-cache-{environment}",
+            "cluster": cluster,
+        }
+
+        def add_case(series, expected_titles):
+            cases.append(
+                {
+                    "interval": "1m",
+                    "input_series": series,
+                    "promql_expr_test": [
+                        {
+                            "expr": expressions[title],
+                            "eval_time": "30m",
+                            "exp_samples": expected_titles.get(title, []),
+                        }
+                        for title in titles
+                    ],
+                }
+            )
+
+        fixture_identity = {
+            "environment": environment,
+            "name": f"danielsmith-github-cache-{environment}",
+        }
+        add_case(
+            _cache_fixture(**fixture_identity),
+            {
+                "Daniel cache state": [sample({"state": "fresh"}, 1)],
+                "Daniel cache freshness": [sample({}, 850)],
+                "Daniel cache completeness": [sample({"completeness": "complete"}, 1)],
+                "Daniel cache refresh duration": [sample({}, 25)],
+                "Daniel cache failure categories": [sample({"category": "timeout"}, 1)],
+                "Daniel cache collection health": [sample(identity, 1)],
+            },
+        )
+        add_case(
+            _cache_fixture(enabled=0, up=0, state="disabled", **fixture_identity),
+            {"Daniel cache state": [sample({"state": "disabled"}, 1)]},
+        )
+        add_case(
+            _cache_fixture(state="stale", **fixture_identity),
+            {
+                "Daniel cache state": [sample({"state": "stale"}, 1)],
+                "Daniel cache completeness": [sample({"completeness": "complete"}, 1)],
+                "Daniel cache refresh duration": [sample({}, 25)],
+                "Daniel cache retained-data age": [sample({}, 600)],
+                "Daniel cache failure categories": [sample({"category": "timeout"}, 1)],
+                "Daniel cache collection health": [sample(identity, 1)],
+            },
+        )
+        add_case(_cache_fixture(up=0, **fixture_identity), {})
+        add_case(_cache_fixture(timestamp=889, **fixture_identity), {})
+        add_case(_cache_fixture(timestamp=1801, **fixture_identity), {})
+        add_case([], {})
+        add_case(_cache_fixture(environment="wrong", name="danielsmith-github-cache-wrong"), {})
+
+    fixture = tmp_path / "cache-dashboard-promql.yml"
+    fixture.write_text(json.dumps({"rule_files": [], "tests": cases}), encoding="utf-8")
+    completed = subprocess.run(
+        [promtool, "test", "rules", str(fixture)],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+def test_daniel_cache_added_panels_fill_existing_grid_slot(dashboards):
+    for document in dashboards:
+        failure = panel(document, "Daniel cache failure categories")
+        health = panel(document, "Daniel cache collection health")
+        assert failure["gridPos"] == {"h": 8, "w": 6, "x": 12, "y": 206}
+        assert health["gridPos"] == {"h": 8, "w": 6, "x": 18, "y": 206}
+        assert panel(document, "Daniel controlled performance")["gridPos"]["y"] == 214
 
 
 def test_finalized_staging_evidence_link_is_current(dashboards):
@@ -900,7 +1088,12 @@ def test_canonical_order_ids_grid_and_defaults(dashboards):
         "Daniel visitor journey",
         "Cross-application resource, placement and release overview",
     ]
-    assert [item["id"] for item in staging["panels"]] == list(range(1, 93))
+    assert [item["id"] for item in staging["panels"]] == [
+        *range(1, 71),
+        93,
+        94,
+        *range(71, 93),
+    ]
     assert panel(staging, "DSPACE instrumentation health")
     assert panel(staging, "DSPACE build identity")
     assert all(
