@@ -3003,7 +3003,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max by (state) ((daniel_github_cache_state{cluster=~\"$cluster\"} and on (cluster) (daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} == 1 and on (environment, name, cluster) (time() - daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} <= 910))))",
+          "expr": "max by (state) (daniel_github_cache_state and on () (daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\"} == on (environment, name) daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\"} and on (environment, name) (time() - daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\"} >= -60 and on (environment, name) time() - daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\"} <= 910)))",
           "legendFormat": "{{state}}"
         }
       ]
@@ -3035,7 +3035,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max((time() - daniel_github_cache_last_success_unixtime_seconds{cluster=~\"$cluster\"} > 0 and on (cluster) ((daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} == 1 and on (environment, name, cluster) (time() - daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} <= 910)) and on (environment, name, cluster) (daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} == 1)) and on (cluster) (daniel_github_cache_state{cluster=~\"$cluster\",state=\"fresh\"} == 1)))",
+          "expr": "max((time() - daniel_github_cache_last_success_unixtime_seconds > 0 and on () (daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\"} == 1 and on (environment, name) daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\"} == 1 and on (environment, name) (time() - daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\"} >= -60 and on (environment, name) time() - daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\"} <= 910))) and on () (daniel_github_cache_state{state=\"fresh\"} == 1))",
           "legendFormat": "age"
         }
       ]
@@ -3067,7 +3067,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max by (completeness) ((daniel_github_cache_data_completeness{cluster=~\"$cluster\"} and on (cluster) ((daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} == 1 and on (environment, name, cluster) (time() - daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} <= 910)) and on (environment, name, cluster) (daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} == 1))))",
+          "expr": "max by (completeness) (daniel_github_cache_data_completeness and on () (daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\"} == 1 and on (environment, name) daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\"} == 1 and on (environment, name) (time() - daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\"} >= -60 and on (environment, name) time() - daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\"} <= 910)))",
           "legendFormat": "{{completeness}}"
         }
       ]
@@ -3099,7 +3099,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max((daniel_github_cache_refresh_duration_milliseconds{cluster=~\"$cluster\"} and on (cluster) ((daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} == 1 and on (environment, name, cluster) (time() - daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} <= 910)) and on (environment, name, cluster) (daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} == 1))))",
+          "expr": "max((daniel_github_cache_refresh_duration_milliseconds > 0) and on () (daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\"} == 1 and on (environment, name) daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\"} == 1 and on (environment, name) (time() - daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\"} >= -60 and on (environment, name) time() - daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\"} <= 910)))",
           "legendFormat": "duration"
         }
       ]
@@ -3131,7 +3131,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max((daniel_github_cache_retained_data_age_seconds{cluster=~\"$cluster\"} and on (cluster) ((daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} == 1 and on (environment, name, cluster) (time() - daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} <= 910)) and on (environment, name, cluster) (daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} == 1)) and on (cluster) (daniel_github_cache_state{cluster=~\"$cluster\",state=\"stale\"} == 1)))",
+          "expr": "max((daniel_github_cache_retained_data_age_seconds and on () (daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\"} == 1 and on (environment, name) daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\"} == 1 and on (environment, name) (time() - daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\"} >= -60 and on (environment, name) time() - daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\"} <= 910))) and on () (daniel_github_cache_state{state=\"stale\"} == 1))",
           "legendFormat": "age"
         }
       ]
@@ -3163,7 +3163,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max by (category) ((daniel_github_cache_refresh_failure{cluster=~\"$cluster\"} == 1 and on (cluster) ((daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} == 1 and on (environment, name, cluster) (time() - daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} <= 910)) and on (environment, name, cluster) (daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} == 1))))",
+          "expr": "max by (category) ((daniel_github_cache_refresh_failure == 1) and on () (daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\"} == 1 and on (environment, name) daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\"} == 1 and on (environment, name) (time() - daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\"} >= -60 and on (environment, name) time() - daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\"} <= 910)))",
           "legendFormat": "{{category}}"
         }
       ]
@@ -3195,7 +3195,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "min by (environment, name, cluster) (daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} and on (environment, name, cluster) daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} == 1 and on (environment, name, cluster) (time() - daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} <= 910))",
+          "expr": "min by (environment, name) (daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\"} and on (environment, name) daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\"} == 1 and on (environment, name) (time() - daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\"} >= -60 and on (environment, name) time() - daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\"} <= 910))",
           "legendFormat": "{{environment}} {{name}}"
         }
       ]

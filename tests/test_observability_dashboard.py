@@ -793,7 +793,7 @@ def test_daniel_visitor_dashboard_validator_rejects_contract_regressions(
             "Daniel cache refresh duration",
             lambda item: item["targets"][0].update(
                 expr=item["targets"][0]["expr"].replace(
-                    'cluster=~"$cluster"', 'cluster=~"wrong"', 1
+                    'name=~"danielsmith-github-cache-$environment"', 'name=~"wrong"', 1
                 )
             ),
         ),
@@ -842,7 +842,11 @@ def test_daniel_cache_panels_use_canonical_scoped_fail_closed_contract(dashboard
             }
             assert "daniel_cache_" not in expression
             assert "daniel_github_cache_" in expression
-            assert 'cluster=~"$cluster"' in expression
+            # These textfile series are queried from the local Prometheus. Its
+            # external cluster label is not attached to locally stored series.
+            assert 'cluster=~"$cluster"' not in expression
+            assert ">= -60" in expression
+            assert "<= 910" in expression
             assert "vector(0)" not in expression
         scoped = "\n".join(validator.panel_expression(document, title) for title in expected)
         assert 'environment=~"$environment"' in scoped
@@ -852,6 +856,20 @@ def test_daniel_cache_panels_use_canonical_scoped_fail_closed_contract(dashboard
             document, "Daniel cache retained-data age"
         )
         assert "== 1" in validator.panel_expression(document, "Daniel cache failure categories")
+
+
+def test_daniel_cache_state_preserves_disabled_and_rejects_failed_collection():
+    expression = validator.DANIEL_PANEL_CONTRACT["Daniel cache state"][0]
+    assert (
+        "daniel_github_cache_collection_up" in expression
+        and "== on (environment, name) daniel_github_cache_monitoring_enabled" in expression
+    )
+    assert "== 1" not in expression
+
+
+def test_daniel_cache_refresh_duration_excludes_unknown_zero():
+    expression = validator.DANIEL_PANEL_CONTRACT["Daniel cache refresh duration"][0]
+    assert "daniel_github_cache_refresh_duration_milliseconds > 0" in expression
 
 
 def test_daniel_cache_added_panels_fill_existing_grid_slot(dashboards):
