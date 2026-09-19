@@ -157,9 +157,9 @@ def test_generator_check_and_outputs_are_deterministic(dashboards):
         )
     )
     assert staging_panels == prod_panels
-    assert len(staging["panels"]) == 94
-    assert sum(item["type"] == "row" for item in staging["panels"]) == 15
-    assert sum(item["type"] != "row" for item in staging["panels"]) == 79
+    assert len(staging["panels"]) == 98
+    assert sum(item["type"] == "row" for item in staging["panels"]) == 16
+    assert sum(item["type"] != "row" for item in staging["panels"]) == 82
 
 
 @pytest.mark.parametrize("state", metrics.STATES)
@@ -1087,12 +1087,14 @@ def test_canonical_order_ids_grid_and_defaults(dashboards):
         "Daniel controlled performance",
         "Daniel visitor journey",
         "Cross-application resource, placement and release overview",
+        "Application SLI and error-budget foundation",
     ]
     assert [item["id"] for item in staging["panels"]] == [
         *range(1, 71),
         93,
         94,
         *range(71, 93),
+        *range(95, 99),
     ]
     assert panel(staging, "DSPACE instrumentation health")
     assert panel(staging, "DSPACE build identity")
