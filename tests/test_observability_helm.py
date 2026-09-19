@@ -34,6 +34,9 @@ CANONICAL_DANIELSMITH_VISITOR_RULES = (
 CANONICAL_DANIELSMITH_CACHE_RULES = (
     ROOT / "platform" / "observability" / "rules" / "danielsmith-github-cache.yaml"
 )
+CANONICAL_APPLICATION_SLI_RULES = (
+    ROOT / "platform" / "observability" / "rules" / "application-slis.yaml"
+)
 SCRIPT = ROOT / "scripts" / "observability_helm.sh"
 ALERTMANAGER_VALIDATOR = ROOT / "scripts" / "verify_observability_alertmanager.rb"
 DASHBOARD = ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
@@ -143,6 +146,15 @@ def cache_rules_for(environment: str):
         if rule.get("record") != "daniel_github_cache_monitoring_expected"
         or rule["labels"]["environment"] == environment
     ]
+    return rules
+
+
+def application_sli_rules_for(environment: str):
+    rules = yaml_load(CANONICAL_APPLICATION_SLI_RULES)
+    for group in rules["groups"]:
+        for rule in group["rules"]:
+            if rule["record"].startswith("sugarkube:sli_"):
+                rule.setdefault("labels", {})["environment"] = environment
     return rules
 
 
@@ -749,6 +761,7 @@ def test_dspace_rules_have_one_canonical_source_and_exact_overlay(tmp_path):
             "cloudflare-tunnel": yaml_load(CANONICAL_CLOUDFLARE_RULES),
             "danielsmith-visitor-journey": visitor_rules_for("staging"),
             "danielsmith-github-cache": cache_rules_for("staging"),
+            "application-slis": application_sli_rules_for("staging"),
         }
     }
     overlay_paths = re.findall(r"/[^ ]*sugarkube-observability-rules\.[^ ]*\.yaml", audit)
@@ -777,6 +790,7 @@ def test_prod_rules_overlay_ignores_invalid_staging_only_rules(tmp_path):
             "tokenplace-production": yaml_load(CANONICAL_TOKENPLACE_RULES),
             "danielsmith-visitor-journey": visitor_rules_for("prod"),
             "danielsmith-github-cache": cache_rules_for("prod"),
+            "application-slis": application_sli_rules_for("prod"),
         }
     }
 

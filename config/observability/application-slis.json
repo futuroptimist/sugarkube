@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "retention": "90d",
+  "slis": [
+    {
+      "id": "tokenplace-encrypted-completion",
+      "application": "token.place",
+      "userJourney": "The encrypted completion synthetic reaches its terminal lifecycle state.",
+      "signalType": "synthetic_completion",
+      "dataSource": "encrypted_completion_lifecycle_state",
+      "numerator": "encrypted_completion_lifecycle_state when encrypted_completion_monitoring_enabled is one",
+      "denominator": "an enabled encrypted completion synthetic evaluation",
+      "exclusions": ["intentionally disabled monitoring", "actual relay request outcomes", "HTTP probes"],
+      "observationWindow": "1h",
+      "objective": null,
+      "measurementState": "unmeasured",
+      "monitoringState": "disabled"
+    },
+    {
+      "id": "tokenplace-request-success",
+      "application": "token.place",
+      "userJourney": "An eligible relay request reaches a terminal outcome.",
+      "signalType": "actual_request_success",
+      "dataSource": "tokenplace_relay_request_outcomes_total",
+      "numerator": "sum(increase(tokenplace_relay_request_outcomes_total{outcome=\"completed\"}[1h]))",
+      "denominator": "sum(increase(tokenplace_relay_request_outcomes_total[1h]))",
+      "exclusions": ["non-terminal in-flight work", "scrape gaps", "counter history before a reset"],
+      "observationWindow": "1h",
+      "objective": null,
+      "measurementState": "unmeasured"
+    },
+    {
+      "id": "dspace-chat-request-success",
+      "application": "DSPACE",
+      "userJourney": "A real /chat request completes with the application-owned success outcome.",
+      "signalType": "actual_request_success",
+      "dataSource": "dspace_dchat_requests_total",
+      "numerator": "sum(increase(dspace_dchat_requests_total{outcome=\"success\"}[1h]))",
+      "denominator": "sum(increase(dspace_dchat_requests_total[1h]))",
+      "exclusions": ["dependency-only events", "synthetic completion state", "scrape gaps", "counter history before a reset"],
+      "observationWindow": "1h",
+      "objective": null,
+      "measurementState": "unmeasured"
+    },
+    {
+      "id": "dspace-chat-synthetic-completion",
+      "application": "DSPACE",
+      "userJourney": "The bounded isolated /chat synthetic completes.",
+      "signalType": "synthetic_completion",
+      "dataSource": "dspace_chat_synthetic_success",
+      "numerator": "current successful completion when fresh",
+      "denominator": "current eligible completion when producer telemetry is fresh",
+      "exclusions": ["missing or stale producer telemetry", "runs outside the approved producer"],
+      "observationWindow": "15m",
+      "objective": null,
+      "measurementState": "unmeasured"
+    },
+    {
+      "id": "danielsmith-visitor-completion",
+      "application": "danielsmith.io",
+      "userJourney": "The essential visitor journey completes through the accessible fallback and resume asset.",
+      "signalType": "synthetic_completion",
+      "dataSource": "danielsmith_visitor_journey_success",
+      "numerator": "current successful or recovered completion when expected, enabled, and fresh",
+      "denominator": "current eligible completion when expected, enabled, and fresh",
+      "exclusions": ["intentionally disabled monitoring", "missing or stale telemetry", "optional immersive rendering"],
+      "observationWindow": "17m",
+      "objective": null,
+      "measurementState": "unmeasured"
+    },
+    {
+      "id": "tokenplace-public-http-probe",
+      "application": "token.place",
+      "userJourney": "The public HTTP probe receives its configured healthy response.",
+      "signalType": "http_probe_health",
+      "dataSource": "probe_success",
+      "numerator": "successful configured probe evaluations",
+      "denominator": "eligible configured probe evaluations",
+      "exclusions": ["real-user request outcomes", "targets not selected by the probe inventory"],
+      "observationWindow": "1h",
+      "objective": null,
+      "measurementState": "unmeasured"
+    },
+    {
+      "id": "dspace-public-http-probe",
+      "application": "DSPACE",
+      "userJourney": "The public HTTP probe receives its configured healthy response.",
+      "signalType": "http_probe_health",
+      "dataSource": "probe_success",
+      "numerator": "successful configured probe evaluations",
+      "denominator": "eligible configured probe evaluations",
+      "exclusions": ["real-user chat outcomes", "synthetic chat completion"],
+      "observationWindow": "1h",
+      "objective": null,
+      "measurementState": "unmeasured"
+    },
+    {
+      "id": "danielsmith-public-http-probe",
+      "application": "danielsmith.io",
+      "userJourney": "The public HTTP probe receives its configured healthy response.",
+      "signalType": "http_probe_health",
+      "dataSource": "probe_success",
+      "numerator": "successful configured probe evaluations",
+      "denominator": "eligible configured probe evaluations",
+      "exclusions": ["essential visitor completion", "real-user browser behavior"],
+      "observationWindow": "1h",
+      "objective": null,
+      "measurementState": "unmeasured"
+    }
+  ]
+}
