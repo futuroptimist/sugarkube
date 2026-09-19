@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 STAGING = ROOT / "clusters/staging/observability/dashboards/sugarkube-staging-observability.json"
 PROD = ROOT / "clusters/prod/observability/dashboards/sugarkube-prod-observability.json"
 GENERATOR = ROOT / "scripts/generate_observability_dashboards.py"
+VALIDATOR = ROOT / "scripts/validate_observability_dashboard.py"
 TEMPLATE = ROOT / "platform/observability/dashboards/sugarkube-observability.template.json"
 sys.path.insert(0, str(ROOT))
 from scripts import daniel_cache_metrics as metrics  # noqa: E402
@@ -514,6 +515,19 @@ def test_daniel_dashboard_contract_covers_metrics_scope_grouping_units_and_missi
         assert (
             "by (completeness)" in validator.DANIEL_PANEL_CONTRACT["Daniel cache completeness"][0]
         )
+
+
+def test_daniel_cache_fstring_replacement_fields_do_not_contain_backslashes():
+    source = VALIDATOR.read_text(encoding="utf-8")
+    contract_source = source.split("DANIEL_PANEL_CONTRACT = {", 1)[1].split(
+        '    "Daniel collection/document status":', 1
+    )[0]
+    cache_fstrings = [
+        line for line in contract_source.splitlines() if line.lstrip().startswith("f")
+    ]
+
+    assert cache_fstrings
+    assert all("\\" not in line for line in cache_fstrings)
 
 
 def test_daniel_visitor_dashboard_contract_is_scoped_bounded_and_fail_closed(dashboards):
