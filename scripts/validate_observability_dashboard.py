@@ -96,29 +96,44 @@ FIVE_XX_RATIO_EXPRESSIONS = {
         "[$__rate_interval])), 1e-9)"
     ),
 }
+DANIEL_CACHE_TRANSPORT = (
+    'daniel_github_cache_monitoring_enabled{environment=~"$environment",'
+    'name=~"danielsmith-github-cache-$environment",cluster=~"$cluster"} == 1) '
+    "and on (environment, name, cluster) "
+    '(daniel_github_cache_collection_up{environment=~"$environment",'
+    'name=~"danielsmith-github-cache-$environment",cluster=~"$cluster"} == 1'
+)
+DANIEL_CACHE_GATE = f"and on (cluster) ({DANIEL_CACHE_TRANSPORT})"
 DANIEL_PANEL_CONTRACT = {
     "Daniel cache state": (
-        'max by (state) (daniel_cache_state{environment=~"$environment"})',
-        "short",
+        'max by (state) (daniel_github_cache_state{cluster=~"$cluster"} ' f"{DANIEL_CACHE_GATE})",
+        "none",
         "{{state}}",
     ),
     "Daniel cache freshness": (
-        'max(daniel_cache_freshness_age_seconds{environment=~"$environment"})',
+        'max((time() - daniel_github_cache_last_success_unixtime_seconds{cluster=~"$cluster"}) '
+        'and on (cluster) (daniel_github_cache_state{cluster=~"$cluster",state="fresh"} == 1) '
+        f"{DANIEL_CACHE_GATE})",
         "s",
         "age",
     ),
     "Daniel cache completeness": (
-        'max by (completeness) (daniel_cache_data_completeness{environment=~"$environment"})',
-        "short",
+        'max by (completeness) (daniel_github_cache_data_completeness{cluster=~"$cluster"} '
+        f"{DANIEL_CACHE_GATE})",
+        "none",
         "{{completeness}}",
     ),
     "Daniel cache refresh duration": (
-        'max(daniel_cache_refresh_duration_seconds{environment=~"$environment"})',
+        'max((daniel_github_cache_refresh_duration_milliseconds{cluster=~"$cluster"} / 1000) '
+        'and on (cluster) (daniel_github_cache_enabled{cluster=~"$cluster"} == 1) '
+        f"{DANIEL_CACHE_GATE})",
         "s",
         "duration",
     ),
     "Daniel cache retained-data age": (
-        'max(daniel_cache_retained_data_age_seconds{environment=~"$environment"})',
+        'max(daniel_github_cache_retained_data_age_seconds{cluster=~"$cluster"} '
+        'and on (cluster) (daniel_github_cache_state{cluster=~"$cluster",state="stale"} == 1) '
+        f"{DANIEL_CACHE_GATE})",
         "s",
         "age",
     ),
