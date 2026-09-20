@@ -6424,6 +6424,10 @@ def test_observability_app_metrics_tokenplace_digest_matches_public_build_labels
 def test_observability_app_metrics_derived_value_normalizers_fail_closed():
     assert app_metrics.normalize_derived_value("main-deadbee", "identity") == "main-deadbee"
     assert app_metrics.normalize_derived_value("a" * 81, "public_token") == "a" * 80
+    for separator in (":", ".", "_"):
+        assert app_metrics.normalize_derived_value(
+            "a" * 79 + separator + "b", "public_token"
+        ) == "a" * 79
 
     with pytest.raises(app_metrics.Error, match="unsupported"):
         app_metrics.normalize_derived_value("main-deadbee", "regex")

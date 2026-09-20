@@ -28,7 +28,7 @@ K8S_NAME = re.compile(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?")
 DURATION = re.compile(r"[1-9][0-9]*[smh]")
 STATUS = re.compile(r"[1-5][0-9][0-9]")
 SAFE_VALUE = re.compile(r"[-A-Za-z0-9_./:*]+")
-PUBLIC_TOKEN_VALUE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}")
+PUBLIC_TOKEN_VALUE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]{0,78}[A-Za-z0-9])?")
 SAFE_ROUTE_VALUE = re.compile(r"[-A-Za-z0-9_./:*\[\]]+")
 PROM_LABEL = re.compile(r"[a-zA-Z_][a-zA-Z0-9_]*")
 PROM_METRIC = re.compile(r"[a-zA-Z_:][a-zA-Z0-9_:]*")
@@ -760,7 +760,8 @@ def normalize_derived_value(value: str, normalizer: str) -> str:
     if normalizer == "identity":
         return value
     if normalizer == "public_token":
-        normalized = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip()).strip(".-_")[:80]
+        normalized = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip()).strip(".-_")
+        normalized = normalized[:80].rstrip(".-_")
         if not normalized or not PUBLIC_TOKEN_VALUE.fullmatch(normalized):
             fail("derived build label value is malformed (details redacted)", 1)
         return normalized
