@@ -1356,7 +1356,7 @@ def test_bounded_quota_stops_without_another_request_after_unsafe_response(monke
             "quota-test",
         ],
     }
-    statuses = iter((200, 200, 200, 200, 500))
+    statuses = iter((200, 200, 200, 200, 403))
 
     class Response:
         def __init__(self, request):
@@ -1380,6 +1380,39 @@ def test_bounded_quota_stops_without_another_request_after_unsafe_response(monke
         drill._run_bounded_quota(action)
     assert failure.value.summary["total_requests"] == 5
     assert failure.value.summary["stop_reason"] == "unsafe-response"
+
+
+def test_bounded_quota_status_uses_reviewed_request_headers():
+    requested = []
+
+    class Response:
+        status = 200
+
+        def __init__(self, request):
+            self.request = request
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def geturl(self):
+            return self.request.full_url
+
+    class Opener:
+        def open(self, request, timeout):
+            requested.append(request)
+            return Response(request)
+
+    assert drill._bounded_quota_status(Opener(), "/", 1) == 200
+    assert len(requested) == 1
+    request = requested[0]
+    headers = {name.lower(): value for name, value in request.header_items()}
+    assert request.get_method() == "GET"
+    assert request.full_url == f"https://{drill.STAGING_HOST}/"
+    assert headers["accept"] == "text/plain"
+    assert headers["user-agent"] == "sugarkube-tokenplace-quota-drill/1.0"
 
 
 def test_bounded_quota_rejects_response_completed_after_deadline(monkeypatch):
