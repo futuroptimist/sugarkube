@@ -28,6 +28,7 @@ K8S_NAME = re.compile(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?")
 DURATION = re.compile(r"[1-9][0-9]*[smh]")
 STATUS = re.compile(r"[1-5][0-9][0-9]")
 SAFE_VALUE = re.compile(r"[-A-Za-z0-9_./:*]+")
+PUBLIC_TOKEN_VALUE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}")
 SAFE_ROUTE_VALUE = re.compile(r"[-A-Za-z0-9_./:*\[\]]+")
 PROM_LABEL = re.compile(r"[a-zA-Z_][a-zA-Z0-9_]*")
 PROM_METRIC = re.compile(r"[a-zA-Z_:][a-zA-Z0-9_:]*")
@@ -545,7 +546,9 @@ def validate_inventory(doc):
                     r"[A-Z_][A-Z0-9_]{0,62}", source["env"]
                 ):
                     fail("derived environment variable name is unsafe")
-                if source["normalizer"] != "identity":
+                if not isinstance(source["normalizer"], str) or source[
+                    "normalizer"
+                ] not in {"identity", "public_token"}:
                     fail("derived normalizer is unsupported")
             forbidden = cfg["forbiddenApplicationLabels"]
             unique_string_list(forbidden, "forbidden labels", prometheus_label)
@@ -754,11 +757,20 @@ def prom(path, expected_data_type=dict):
 
 
 def normalize_derived_value(value: str, normalizer: str) -> str:
-    if normalizer != "identity":
-        fail("derived normalizer is unsupported")
     if not isinstance(value, str) or not value or not SAFE_VALUE.fullmatch(value):
         fail("derived build label value is malformed (details redacted)", 1)
-    return value
+    if normalizer == "identity":
+        return value
+    if normalizer == "public_token":
+        # Match token.place's pinned producer: strip before truncating, which may
+        # intentionally leave a trailing separator after truncation.
+        # https://github.com/futuroptimist/token.place/blob/dba47d022cb9748f1239954e236314c1bb2e4229/release_metadata.py
+        normalized = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip()).strip(".-_")
+        normalized = normalized[:80]
+        if not normalized or not PUBLIC_TOKEN_VALUE.fullmatch(normalized):
+            fail("derived build label value is malformed (details redacted)", 1)
+        return normalized
+    fail("derived normalizer is unsupported")
 
 
 def find_env_value(workload: dict[str, Any], source: dict[str, Any]) -> str:

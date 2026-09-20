@@ -5931,13 +5931,13 @@ def test_observability_app_metrics_inventory_tokenplace_contract_is_strict_and_c
             "workload": {"kind": "Deployment", "name": "tokenplace"},
             "container": "relay",
             "env": "TOKENPLACE_IMAGE_TAG",
-            "normalizer": "identity",
+            "normalizer": "public_token",
         },
         "revision": {
             "workload": {"kind": "Deployment", "name": "tokenplace"},
             "container": "relay",
             "env": "TOKENPLACE_IMAGE_TAG",
-            "normalizer": "identity",
+            "normalizer": "public_token",
         },
     }
     assert "token" in cfg["forbiddenApplicationLabels"]
@@ -6387,6 +6387,62 @@ def test_observability_app_metrics_validate_render_derives_build_labels_from_dep
         "version": "main-deadbee",
         "revision": "main-deadbee",
     }
+
+
+@pytest.mark.parametrize("env", ["staging", "prod"])
+@pytest.mark.parametrize(
+    ("image_tag", "public_tag"),
+    [
+        (
+            "sha256:5d761cefc0495926b63da1e0a4119155a005e165e469da90e7f19be0f7fdff8e",
+            "sha256-5d761cefc0495926b63da1e0a4119155a005e165e469da90e7f19be0f7fdff8e",
+        ),
+        ("1.0.0-" + "a" * 73 + ".b", "1.0.0-" + "a" * 73 + "."),
+    ],
+)
+def test_observability_app_metrics_tokenplace_digest_matches_public_build_labels(
+    env, image_tag, public_tag
+):
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
+        "tokenplace"
+    ]["environments"][env]
+    docs = [{
+        "kind": "Deployment",
+        "metadata": {"name": "tokenplace", "namespace": "tokenplace"},
+        "spec": {"template": {"spec": {"containers": [{
+            "name": "relay",
+            "env": [{"name": "TOKENPLACE_IMAGE_TAG", "value": image_tag}],
+        }]}}},
+    }]
+
+    derived = app_metrics.derive_build_labels_from_docs(cfg, docs)
+
+    assert derived == {"version": public_tag, "revision": public_tag}
+    app_metrics.validate_metric_labels(
+        cfg,
+        {
+            "__name__": "tokenplace_build_info",
+            "version": public_tag,
+            "revision": public_tag,
+        },
+        derived,
+    )
+
+
+def test_observability_app_metrics_derived_value_normalizers_fail_closed():
+    assert app_metrics.normalize_derived_value("main-deadbee", "identity") == "main-deadbee"
+    assert app_metrics.normalize_derived_value("a" * 81, "public_token") == "a" * 80
+    boundary_separators = ((":", "-"), (".", "."), ("_", "_"), ("-", "-"))
+    for separator, normalized_separator in boundary_separators:
+        assert app_metrics.normalize_derived_value(
+            "a" * 79 + separator + "b", "public_token"
+        ) == "a" * 79 + normalized_separator
+
+    with pytest.raises(app_metrics.Error, match="unsupported"):
+        app_metrics.normalize_derived_value("main-deadbee", "regex")
+    for unsafe in ("sha256:abc def", "sha256:@abc", "\tsha256:abc", ":"):
+        with pytest.raises(app_metrics.Error, match="malformed"):
+            app_metrics.normalize_derived_value(unsafe, "public_token")
 
 
 @pytest.mark.parametrize(
@@ -8261,6 +8317,22 @@ def test_observability_app_metrics_inventory_validation_failures_are_controlled(
         app_metrics.validate_inventory(doc)
     assert message in str(excinfo.value)
 
+
+@pytest.mark.parametrize("normalizer", [[], {}])
+def test_observability_app_metrics_inventory_rejects_non_string_normalizers(
+    normalizer,
+):
+    doc = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))
+    doc["applications"]["tokenplace"]["environments"]["staging"][
+        "derivedApplicationLabels"
+    ]["version"]["normalizer"] = normalizer
+
+    with pytest.raises(app_metrics.Error) as excinfo:
+        app_metrics.validate_inventory(doc)
+
+    assert excinfo.value.code == 2
+    assert str(excinfo.value) == "ERROR: derived normalizer is unsupported"
+    assert str(normalizer) not in str(excinfo.value)
 
 
 def test_observability_app_metrics_inventory_accepts_colon_metric_family():
