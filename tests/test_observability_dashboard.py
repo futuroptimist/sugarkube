@@ -1,3 +1,4 @@
+import ast
 import copy
 import json
 import os
@@ -514,6 +515,29 @@ def test_daniel_dashboard_contract_covers_metrics_scope_grouping_units_and_missi
         assert (
             "by (completeness)" in validator.DANIEL_PANEL_CONTRACT["Daniel cache completeness"][0]
         )
+
+
+def test_daniel_cache_fstring_replacement_fields_do_not_contain_backslashes():
+    source = (ROOT / "scripts/validate_observability_dashboard.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    contract = next(
+        node.value
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "DANIEL_PANEL_CONTRACT"
+            for target in node.targets
+        )
+    )
+
+    replacement_fields = []
+    for node in ast.walk(contract):
+        if not isinstance(node, ast.FormattedValue):
+            continue
+        field = ast.get_source_segment(source, node.value)
+        assert field is not None
+        replacement_fields.append(field)
+    assert all("\\" not in field for field in replacement_fields)
 
 
 def test_daniel_visitor_dashboard_contract_is_scoped_bounded_and_fail_closed(dashboards):
