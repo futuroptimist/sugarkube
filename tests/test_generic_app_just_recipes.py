@@ -5931,13 +5931,13 @@ def test_observability_app_metrics_inventory_tokenplace_contract_is_strict_and_c
             "workload": {"kind": "Deployment", "name": "tokenplace"},
             "container": "relay",
             "env": "TOKENPLACE_IMAGE_TAG",
-            "normalizer": "identity",
+            "normalizer": "public_token",
         },
         "revision": {
             "workload": {"kind": "Deployment", "name": "tokenplace"},
             "container": "relay",
             "env": "TOKENPLACE_IMAGE_TAG",
-            "normalizer": "identity",
+            "normalizer": "public_token",
         },
     }
     assert "token" in cfg["forbiddenApplicationLabels"]
@@ -5949,9 +5949,14 @@ def test_observability_app_metrics_inventory_tokenplace_contracts_are_environmen
     ]["tokenplace"]["environments"]
 
     for environment in ("staging", "prod"):
-        assert set(environments[environment]["requiredMetricFamilies"]) == (
+        contract = environments[environment]
+        assert set(contract["requiredMetricFamilies"]) == (
             TOKENPLACE_PHASE1_METRIC_FAMILIES
         )
+        for label in ("version", "revision"):
+            source = contract["derivedApplicationLabels"][label]
+            assert source["env"] == "TOKENPLACE_IMAGE_TAG"
+            assert source["normalizer"] == "public_token"
 
 
 def test_observability_app_metrics_inventory_accepts_both_canonical_relabeling_forms():
@@ -6387,6 +6392,59 @@ def test_observability_app_metrics_validate_render_derives_build_labels_from_dep
         "version": "main-deadbee",
         "revision": "main-deadbee",
     }
+
+
+def test_observability_app_metrics_public_token_reconciles_image_digest_build_labels():
+    digest = "5d761cefc0495926b63da1e0a4119155a005e165e469da90e7f19be0f7fdff8e"
+    raw_image_tag = f"sha256:{digest}"
+    public_metric_label = f"sha256-{digest}"
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
+        "tokenplace"
+    ]["environments"]["staging"]
+    docs = [
+        {
+            "kind": "Deployment",
+            "metadata": {"name": "tokenplace", "namespace": "tokenplace"},
+            "spec": {
+                "template": {
+                    "spec": {
+                        "containers": [
+                            {
+                                "name": "relay",
+                                "env": [
+                                    {
+                                        "name": "TOKENPLACE_IMAGE_TAG",
+                                        "value": raw_image_tag,
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                }
+            },
+        }
+    ]
+
+    derived = app_metrics.derive_build_labels_from_docs(cfg, docs)
+
+    assert derived == {
+        "version": public_metric_label,
+        "revision": public_metric_label,
+    }
+
+
+def test_observability_app_metrics_derived_value_normalizers_are_bounded_and_fail_closed():
+    assert (
+        app_metrics.normalize_derived_value("release_1.2-rc1", "identity")
+        == "release_1.2-rc1"
+    )
+    assert app_metrics.normalize_derived_value("a" * 100, "public_token") == "a" * 80
+    with pytest.raises(app_metrics.Error, match="malformed"):
+        app_metrics.normalize_derived_value("sha256:abc def", "public_token")
+    with pytest.raises(app_metrics.Error, match="malformed"):
+        app_metrics.normalize_derived_value("...", "public_token")
+    with pytest.raises(app_metrics.Error, match="unsupported"):
+        app_metrics.normalize_derived_value("safe", "replace")
 
 
 @pytest.mark.parametrize(
