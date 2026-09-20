@@ -8309,6 +8309,22 @@ def test_observability_app_metrics_inventory_validation_failures_are_controlled(
     assert message in str(excinfo.value)
 
 
+@pytest.mark.parametrize("normalizer", [[], {}])
+def test_observability_app_metrics_inventory_rejects_non_string_normalizers(
+    normalizer,
+):
+    doc = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))
+    doc["applications"]["tokenplace"]["environments"]["staging"][
+        "derivedApplicationLabels"
+    ]["version"]["normalizer"] = normalizer
+
+    with pytest.raises(app_metrics.Error) as excinfo:
+        app_metrics.validate_inventory(doc)
+
+    assert excinfo.value.code == 2
+    assert str(excinfo.value) == "ERROR: derived normalizer is unsupported"
+    assert str(normalizer) not in str(excinfo.value)
+
 
 def test_observability_app_metrics_inventory_accepts_colon_metric_family():
     doc = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))

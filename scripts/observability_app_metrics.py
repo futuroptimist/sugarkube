@@ -546,7 +546,9 @@ def validate_inventory(doc):
                     r"[A-Z_][A-Z0-9_]{0,62}", source["env"]
                 ):
                     fail("derived environment variable name is unsafe")
-                if source["normalizer"] not in {"identity", "public_token"}:
+                if not isinstance(source["normalizer"], str) or source[
+                    "normalizer"
+                ] not in {"identity", "public_token"}:
                     fail("derived normalizer is unsupported")
             forbidden = cfg["forbiddenApplicationLabels"]
             unique_string_list(forbidden, "forbidden labels", prometheus_label)
