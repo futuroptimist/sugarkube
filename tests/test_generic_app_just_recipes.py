@@ -5931,13 +5931,13 @@ def test_observability_app_metrics_inventory_tokenplace_contract_is_strict_and_c
             "workload": {"kind": "Deployment", "name": "tokenplace"},
             "container": "relay",
             "env": "TOKENPLACE_IMAGE_TAG",
-            "normalizer": "identity",
+            "normalizer": "public_token",
         },
         "revision": {
             "workload": {"kind": "Deployment", "name": "tokenplace"},
             "container": "relay",
             "env": "TOKENPLACE_IMAGE_TAG",
-            "normalizer": "identity",
+            "normalizer": "public_token",
         },
     }
     assert "token" in cfg["forbiddenApplicationLabels"]
@@ -6387,6 +6387,49 @@ def test_observability_app_metrics_validate_render_derives_build_labels_from_dep
         "version": "main-deadbee",
         "revision": "main-deadbee",
     }
+
+
+@pytest.mark.parametrize("env", ["staging", "prod"])
+def test_observability_app_metrics_tokenplace_digest_matches_public_build_labels(env):
+    digest = "sha256:" + "5d761cefc0495926b63da1e0a4119155a005e165e469da90e7f19be0f7fdff8e"
+    public_digest = (
+        "sha256-5d761cefc0495926b63da1e0a4119155a005e165e469da90e7f19be0f7fdff8e"
+    )
+    cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
+        "tokenplace"
+    ]["environments"][env]
+    docs = [{
+        "kind": "Deployment",
+        "metadata": {"name": "tokenplace", "namespace": "tokenplace"},
+        "spec": {"template": {"spec": {"containers": [{
+            "name": "relay",
+            "env": [{"name": "TOKENPLACE_IMAGE_TAG", "value": digest}],
+        }]}}},
+    }]
+
+    derived = app_metrics.derive_build_labels_from_docs(cfg, docs)
+
+    assert derived == {"version": public_digest, "revision": public_digest}
+    app_metrics.validate_metric_labels(
+        cfg,
+        {
+            "__name__": "tokenplace_build_info",
+            "version": public_digest,
+            "revision": public_digest,
+        },
+        derived,
+    )
+
+
+def test_observability_app_metrics_derived_value_normalizers_fail_closed():
+    assert app_metrics.normalize_derived_value("main-deadbee", "identity") == "main-deadbee"
+    assert app_metrics.normalize_derived_value("a" * 81, "public_token") == "a" * 80
+
+    with pytest.raises(app_metrics.Error, match="unsupported"):
+        app_metrics.normalize_derived_value("main-deadbee", "regex")
+    for unsafe in ("sha256:abc def", "sha256:@abc", "\tsha256:abc", ":"):
+        with pytest.raises(app_metrics.Error, match="malformed"):
+            app_metrics.normalize_derived_value(unsafe, "public_token")
 
 
 @pytest.mark.parametrize(
