@@ -6390,11 +6390,19 @@ def test_observability_app_metrics_validate_render_derives_build_labels_from_dep
 
 
 @pytest.mark.parametrize("env", ["staging", "prod"])
-def test_observability_app_metrics_tokenplace_digest_matches_public_build_labels(env):
-    digest = "sha256:" + "5d761cefc0495926b63da1e0a4119155a005e165e469da90e7f19be0f7fdff8e"
-    public_digest = (
-        "sha256-5d761cefc0495926b63da1e0a4119155a005e165e469da90e7f19be0f7fdff8e"
-    )
+@pytest.mark.parametrize(
+    ("image_tag", "public_tag"),
+    [
+        (
+            "sha256:5d761cefc0495926b63da1e0a4119155a005e165e469da90e7f19be0f7fdff8e",
+            "sha256-5d761cefc0495926b63da1e0a4119155a005e165e469da90e7f19be0f7fdff8e",
+        ),
+        ("1.0.0-" + "a" * 73 + ".b", "1.0.0-" + "a" * 73 + "."),
+    ],
+)
+def test_observability_app_metrics_tokenplace_digest_matches_public_build_labels(
+    env, image_tag, public_tag
+):
     cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"][
         "tokenplace"
     ]["environments"][env]
@@ -6403,19 +6411,19 @@ def test_observability_app_metrics_tokenplace_digest_matches_public_build_labels
         "metadata": {"name": "tokenplace", "namespace": "tokenplace"},
         "spec": {"template": {"spec": {"containers": [{
             "name": "relay",
-            "env": [{"name": "TOKENPLACE_IMAGE_TAG", "value": digest}],
+            "env": [{"name": "TOKENPLACE_IMAGE_TAG", "value": image_tag}],
         }]}}},
     }]
 
     derived = app_metrics.derive_build_labels_from_docs(cfg, docs)
 
-    assert derived == {"version": public_digest, "revision": public_digest}
+    assert derived == {"version": public_tag, "revision": public_tag}
     app_metrics.validate_metric_labels(
         cfg,
         {
             "__name__": "tokenplace_build_info",
-            "version": public_digest,
-            "revision": public_digest,
+            "version": public_tag,
+            "revision": public_tag,
         },
         derived,
     )
@@ -6424,10 +6432,11 @@ def test_observability_app_metrics_tokenplace_digest_matches_public_build_labels
 def test_observability_app_metrics_derived_value_normalizers_fail_closed():
     assert app_metrics.normalize_derived_value("main-deadbee", "identity") == "main-deadbee"
     assert app_metrics.normalize_derived_value("a" * 81, "public_token") == "a" * 80
-    for separator in (":", ".", "_"):
+    boundary_separators = ((":", "-"), (".", "."), ("_", "_"), ("-", "-"))
+    for separator, normalized_separator in boundary_separators:
         assert app_metrics.normalize_derived_value(
             "a" * 79 + separator + "b", "public_token"
-        ) == "a" * 79
+        ) == "a" * 79 + normalized_separator
 
     with pytest.raises(app_metrics.Error, match="unsupported"):
         app_metrics.normalize_derived_value("main-deadbee", "regex")
