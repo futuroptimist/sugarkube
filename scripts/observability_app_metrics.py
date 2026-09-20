@@ -545,7 +545,7 @@ def validate_inventory(doc):
                     r"[A-Z_][A-Z0-9_]{0,62}", source["env"]
                 ):
                     fail("derived environment variable name is unsafe")
-                if source["normalizer"] != "identity":
+                if source["normalizer"] not in {"identity", "public_token"}:
                     fail("derived normalizer is unsupported")
             forbidden = cfg["forbiddenApplicationLabels"]
             unique_string_list(forbidden, "forbidden labels", prometheus_label)
@@ -754,11 +754,19 @@ def prom(path, expected_data_type=dict):
 
 
 def normalize_derived_value(value: str, normalizer: str) -> str:
-    if normalizer != "identity":
+    if normalizer not in {"identity", "public_token"}:
         fail("derived normalizer is unsupported")
-    if not isinstance(value, str) or not value or not SAFE_VALUE.fullmatch(value):
+    if not isinstance(value, str):
         fail("derived build label value is malformed (details redacted)", 1)
-    return value
+    source_value = value.strip() if normalizer == "public_token" else value
+    if not source_value or not SAFE_VALUE.fullmatch(source_value):
+        fail("derived build label value is malformed (details redacted)", 1)
+    if normalizer == "identity":
+        return source_value
+    normalized = re.sub(r"[^A-Za-z0-9._-]+", "-", source_value).strip(".-_")[:80]
+    if not normalized or not re.fullmatch(r"[A-Za-z0-9._-]+", normalized):
+        fail("derived build label value is malformed (details redacted)", 1)
+    return normalized
 
 
 def find_env_value(workload: dict[str, Any], source: dict[str, Any]) -> str:

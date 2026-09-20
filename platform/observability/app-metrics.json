@@ -176,7 +176,7 @@
               },
               "container": "relay",
               "env": "TOKENPLACE_IMAGE_TAG",
-              "normalizer": "identity"
+              "normalizer": "public_token"
             },
             "revision": {
               "workload": {
@@ -185,7 +185,7 @@
               },
               "container": "relay",
               "env": "TOKENPLACE_IMAGE_TAG",
-              "normalizer": "identity"
+              "normalizer": "public_token"
             }
           },
           "transferredTargetLabels": {},
@@ -364,7 +364,7 @@
               },
               "container": "relay",
               "env": "TOKENPLACE_IMAGE_TAG",
-              "normalizer": "identity"
+              "normalizer": "public_token"
             },
             "revision": {
               "workload": {
@@ -373,7 +373,7 @@
               },
               "container": "relay",
               "env": "TOKENPLACE_IMAGE_TAG",
-              "normalizer": "identity"
+              "normalizer": "public_token"
             }
           },
           "transferredTargetLabels": {},
