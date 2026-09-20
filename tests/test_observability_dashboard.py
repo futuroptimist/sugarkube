@@ -530,11 +530,13 @@ def test_daniel_cache_fstring_replacement_fields_do_not_contain_backslashes():
         )
     )
 
-    replacement_fields = (
-        ast.get_source_segment(source, node)
-        for node in ast.walk(contract)
-        if isinstance(node, ast.FormattedValue)
-    )
+    replacement_fields = []
+    for node in ast.walk(contract):
+        if not isinstance(node, ast.FormattedValue):
+            continue
+        field = ast.get_source_segment(source, node.value)
+        assert field is not None
+        replacement_fields.append(field)
     assert all("\\" not in field for field in replacement_fields)
 
 
