@@ -71,6 +71,7 @@ Review the safety notes before working with power components.
 - [software/index.md](software/index.md) — single stop for automation, playbooks, and contributor tooling
 - [design/tailscale-remote-ops.md](design/tailscale-remote-ops.md) — privacy-preserving Tailscale remote-operations topology
 - [design/app-agnostic-platform.md](design/app-agnostic-platform.md) — forward-looking design for evolving Sugarkube's app-specific engines toward an app-agnostic contract
+- [design/static-429-boundary-emulation.md](design/static-429-boundary-emulation.md) — staging-only design for observing a pre-existing, narrowly scoped static HTTP-429 boundary
 
 ## Learn the Fundamentals
 - [solar_basics.md](solar_basics.md) — how photovoltaic panels work
