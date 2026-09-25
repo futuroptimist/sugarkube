@@ -80,6 +80,8 @@ Review the safety notes before working with power components.
 - [outage_catalog.md](outage_catalog.md) — structured archive of incidents
 - [tokenplace-incident-runbooks.md](tokenplace-incident-runbooks.md) — fail-closed token.place
   metrics-OOM and quota-exhaustion recovery, plus the unperformed staging drill plan
+- [design/static-429-boundary-emulation.md](design/static-429-boundary-emulation.md) — design-only,
+  staging-only static HTTP-429 boundary emulation, separate from quota exhaustion
 
 Start with the basics and progress toward a fully autonomous solar cube.
 
