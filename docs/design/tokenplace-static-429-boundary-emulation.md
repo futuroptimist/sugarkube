@@ -1,16 +1,23 @@
+---
+personas:
+  - software
+---
+
 # token.place static 429 boundary-emulation design
 
 ## Status and purpose
 
 This document proposes a future, independently implemented workflow named **static 429 boundary
 emulation**. It is a staging-only observation of a pre-existing, narrowly scoped edge rule. It is
-not a mode or stage of `tokenplace_incident_drill.py`, and it must never restore or call the removed
+not a mode or stage of `tokenplace_incident_drill.py`, and it must never call or reuse that tool's
 bounded quota-stimulus executor.
 
 The historical experiment used a temporary WAF custom rule. It returned `429` for `/` and
-`/api/v1/meta`, while `/livez` and `/healthz` returned `200`. The prior bounded quota executor
-existed at `7c48c8184b69ee190863d29281ed97317d830474` and was removed by current commit
-`d43154c670299baa3c1e43357f53ac2c8ece3cb0`. Its failure was correct and fail-closed:
+`/api/v1/meta`, while `/livez` and `/healthz` returned `200`. The bounded quota-stimulus executor
+was introduced by commit `d43154c670299baa3c1e43357f53ac2c8ece3cb0`, remains available through
+`tokenplace_incident_drill.py`, and received stable User-Agent handling in commit
+`7c48c8184b69ee190863d29281ed97317d830474`. During the historical experiment, its failure was
+correct and fail-closed:
 `baseline-drift`, because the ordinary healthy baseline is `200/200/200/200` before stimulus.
 Marker cleanup completed, no Deployment mutation occurred, and the WAF custom rule was deleted.
 
@@ -41,10 +48,14 @@ gate.
   identify and validate an already-present rule/configuration whose scope is exactly the canonical
   staging authority, the two emulated paths, and the intended method. The future observer receives
   no credentials or capability to manage that rule.
-- **Short lifetime:** after the evidence is reviewed, an independently authorized owner must remove
-  the rule immediately. The run is incomplete until a fresh, independently obtained cleanup
-  attestation proves that exact rule is absent. Failure to prove removal is a failed, escalated run,
-  never assumed cleanup.
+- **Short lifetime:** the authorization must set a removal deadline no later than the end of its
+  time box. An independently authorized owner must begin removing the rule immediately when route
+  observation finishes or aborts, whether it succeeds or fails, without waiting for evidence
+  review. If observation never starts, the owner must still remove the rule before the authorization
+  expires. A delayed review, failed observer, or unreachable reviewer never extends the deadline.
+  The run is incomplete until a fresh, independently obtained cleanup attestation proves that exact
+  rule is absent. A missed deadline or failure to prove removal is a failed run that the owner must
+  immediately escalate through the staging incident path; cleanup is never assumed.
 
 The observer fails closed before or during the run on any unexpected status, redirect, transport or
 TLS error, stale or future-dated evidence, hostname/path/method mismatch, rule scope broader than
@@ -86,8 +97,10 @@ that a claim is true or current.
 4. Implement one bounded observation of each emulation route and separate observations of both
    health controls, with redirects disabled and a strict timeout. Stop at the first contract
    violation. Never generate quota stimulus.
-5. Record the privacy-safe result, require evidence review, then block completion until the exact
-   cleanup attestation is fresh and hash-bound to the preflight rule identity.
+5. Record the privacy-safe result and trigger owner-performed removal as soon as observation ends or
+   aborts. Evidence review may proceed while removal is under way and must not delay it. Block
+   completion until the exact cleanup attestation is fresh and hash-bound to the preflight rule
+   identity; escalate any missed removal deadline through the staging incident path.
 
 Required unit tests must cover production and non-canonical-host refusal; missing opt-in; URL,
 method, path, port, query, and redirect rejection; exact `429/429/200/200` acceptance; every
