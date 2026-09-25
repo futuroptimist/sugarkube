@@ -14,10 +14,14 @@ bounded quota-stimulus executor.
 
 The historical experiment used a temporary WAF custom rule. It returned `429` for `/` and
 `/api/v1/meta`, while `/livez` and `/healthz` returned `200`. The bounded quota-stimulus executor
-was introduced by commit `d43154c670299baa3c1e43357f53ac2c8ece3cb0`, remains available through
-`tokenplace_incident_drill.py`, and received stable User-Agent handling in commit
-`7c48c8184b69ee190863d29281ed97317d830474`. During the historical experiment, its failure was
-correct and fail-closed:
+did not yet exist at commit `d43154c670299baa3c1e43357f53ac2c8ece3cb0`; commit
+`ad4cd677c2e07f2472d9a12442d5753e03f9233f` introduced it later, and commit
+`7c48c8184b69ee190863d29281ed97317d830474` later incorporated stable User-Agent handling. Thus,
+although the original operational account described `d43154c670299baa3c1e43357f53ac2c8ece3cb0`
+as removing the executor, repository history contradicts that account: the executor was introduced
+after that commit and remains available through `tokenplace_incident_drill.py` and its opt-in flags.
+The static observer must remain isolated from it without removing, disabling, invoking, or changing
+it. During the historical experiment, the executor's failure was correct and fail-closed:
 `baseline-drift`, because the ordinary healthy baseline is `200/200/200/200` before stimulus.
 Marker cleanup completed, no Deployment mutation occurred, and the WAF custom rule was deleted.
 
@@ -48,14 +52,18 @@ gate.
   identify and validate an already-present rule/configuration whose scope is exactly the canonical
   staging authority, the two emulated paths, and the intended method. The future observer receives
   no credentials or capability to manage that rule.
-- **Short lifetime:** the authorization must set a removal deadline no later than the end of its
-  time box. An independently authorized owner must begin removing the rule immediately when route
-  observation finishes or aborts, whether it succeeds or fails, without waiting for evidence
-  review. If observation never starts, the owner must still remove the rule before the authorization
-  expires. A delayed review, failed observer, or unreachable reviewer never extends the deadline.
-  The run is incomplete until a fresh, independently obtained cleanup attestation proves that exact
-  rule is absent. A missed deadline or failure to prove removal is a failed run that the owner must
-  immediately escalate through the staging incident path; cleanup is never assumed.
+- **Owned, bounded cleanup:** before observation, the authorization must name the removal owner, set
+  a bounded evidence-review window, and record an explicit handoff and staging-incident escalation
+  path. It must also set a removal deadline no later than the end of its time box. Failure,
+  interruption, abandonment, or authorization expiry triggers immediate owner-performed removal of
+  the exact pre-existing rule, even if observation never starts or evidence review never completes;
+  successful observation triggers the same immediate removal without waiting for review. A delayed
+  review, failed observer, or unreachable reviewer never extends the deadline. The non-mutating
+  observer may signal the owner but must never perform removal. Any failed run remains
+  `failed/cleanup-pending` until fresh, independently verified absence evidence proves that the same
+  rule identity is absent. A missed deadline or failure to prove removal requires immediate owner
+  escalation through the recorded staging incident path; cleanup is never assumed, and eventual
+  cleanup cannot convert a failed observation into success.
 
 The observer fails closed before or during the run on any unexpected status, redirect, transport or
 TLS error, stale or future-dated evidence, hostname/path/method mismatch, rule scope broader than
@@ -98,15 +106,20 @@ that a claim is true or current.
    health controls, with redirects disabled and a strict timeout. Stop at the first contract
    violation. Never generate quota stimulus.
 5. Record the privacy-safe result and trigger owner-performed removal as soon as observation ends or
-   aborts. Evidence review may proceed while removal is under way and must not delay it. Block
-   completion until the exact cleanup attestation is fresh and hash-bound to the preflight rule
-   identity; escalate any missed removal deadline through the staging incident path.
+   aborts, is abandoned, or its authorization expires. Evidence review may proceed while removal is
+   under way and must not delay it. Keep failures in `failed/cleanup-pending` until the exact cleanup
+   attestation is fresh, independently verified, and hash-bound to the preflight rule identity;
+   escalate any missed review or removal deadline through the staging incident path. Later cleanup
+   closes the cleanup obligation but never changes the failed observation result to success.
 
 Required unit tests must cover production and non-canonical-host refusal; missing opt-in; URL,
 method, path, port, query, and redirect rejection; exact `429/429/200/200` acceptance; every
 unexpected or mixed status; health-control independence; timeout, TLS, DNS, and other transport
 failures; stale/future evidence; duplicate or unknown schema fields; broad or changed rule scope;
-hash mismatch; privacy-field rejection; cleanup absence/failure; and proof that no Kubernetes,
+hash mismatch; privacy-field rejection; cleanup after success, failure, interruption, abandonment,
+never-started observation, review-window expiry, and authorization expiry; missed-deadline handoff
+and escalation; persistent `failed/cleanup-pending` state until independent identity-bound absence
+proof; failure immutability after eventual cleanup; and proof that no Kubernetes,
 Cloudflare-management, registry, Deployment, Probe, ServiceMonitor, or data-plane mutation path is
 reachable. Tests must also prove that emulation evidence cannot satisfy the quota-exhaustion runner
 and that its healthy baseline remains unchanged.
