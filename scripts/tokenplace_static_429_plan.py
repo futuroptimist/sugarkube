@@ -110,6 +110,13 @@ class PlanError(ValueError):
     """The local planning input fails closed."""
 
 
+class PrivateArgumentParser(argparse.ArgumentParser):
+    """Refuse invalid arguments without disclosing their contents."""
+
+    def error(self, message: str) -> None:
+        self.exit(2, "plan refused: invalid command-line arguments\n")
+
+
 def _pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
@@ -122,7 +129,9 @@ def _pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 def load_input_bytes(raw: bytes) -> dict[str, Any]:
     try:
         value = json.loads(raw.decode("utf-8"), object_pairs_hook=_pairs)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except PlanError:
+        raise
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
         raise PlanError("input must be UTF-8 JSON") from exc
     if not isinstance(value, dict):
         raise PlanError("input must be an object")
@@ -382,7 +391,7 @@ def write_exclusive(path: Path, plan: dict[str, Any]) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = PrivateArgumentParser(description=__doc__)
     parser.add_argument("--input", required=True, type=Path)
     parser.add_argument("--rule-identity", required=True, type=Path)
     parser.add_argument("--reviewed-configuration", required=True, type=Path)

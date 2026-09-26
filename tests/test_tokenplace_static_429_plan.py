@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 import socket
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -550,3 +551,61 @@ def test_duplicate_key_diagnostic_does_not_echo_attacker_input():
     with pytest.raises(planner.PlanError) as error:
         planner.load_input_bytes((f'{{"{sentinel}":1,"{sentinel}":2}}').encode())
     assert sentinel not in str(error.value)
+
+
+def test_cli_rejects_unrecognized_arguments_privately(tmp_path, capsys):
+    output_path = tmp_path / "plan.json"
+    sentinel = "FAKE_REVIEW_SENTINEL"
+    with pytest.raises(SystemExit) as error:
+        planner.main(
+            [
+                "--input",
+                str(tmp_path / "input.json"),
+                "--rule-identity",
+                str(tmp_path / "identity"),
+                "--reviewed-configuration",
+                str(tmp_path / "configuration"),
+                "--output",
+                str(output_path),
+                "--lifecycle",
+                "authorized-static-emulation",
+                "--unexpected",
+                sentinel,
+            ]
+        )
+    diagnostics = capsys.readouterr()
+    assert error.value.code == 2
+    assert sentinel not in diagnostics.out + diagnostics.err
+    assert "Traceback" not in diagnostics.out + diagnostics.err
+    assert not output_path.exists()
+
+
+def test_cli_rejects_oversized_json_integer_privately(tmp_path, capsys):
+    output_path = tmp_path / "plan.json"
+    input_path = tmp_path / "input.json"
+    sentinel = "FAKE_REVIEW_SENTINEL"
+    previous_limit = sys.get_int_max_str_digits()
+    try:
+        sys.set_int_max_str_digits(640)
+        input_path.write_text('{"authorization":' + "9" * 5000 + f',"{sentinel}":true}}')
+        result = planner.main(
+            [
+                "--input",
+                str(input_path),
+                "--rule-identity",
+                str(tmp_path / "identity"),
+                "--reviewed-configuration",
+                str(tmp_path / "configuration"),
+                "--output",
+                str(output_path),
+                "--lifecycle",
+                "authorized-static-emulation",
+            ]
+        )
+    finally:
+        sys.set_int_max_str_digits(previous_limit)
+    diagnostics = capsys.readouterr()
+    assert result == 2
+    assert sentinel not in diagnostics.out + diagnostics.err
+    assert "Traceback" not in diagnostics.out + diagnostics.err
+    assert not output_path.exists()
