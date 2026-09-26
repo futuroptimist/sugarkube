@@ -4,8 +4,9 @@ import copy
 import hashlib
 import importlib.util
 import json
+import os
 import socket
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -157,6 +158,13 @@ def test_duplicate_and_unknown_fields_are_rejected():
         build(value)
 
 
+def test_schema_version_must_be_an_integer_not_a_boolean():
+    value = valid_input()
+    value["schemaVersion"] = True
+    with pytest.raises(planner.PlanError, match="schemaVersion"):
+        build(value)
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
@@ -172,6 +180,15 @@ def test_hashes_are_strict_and_bind_local_bytes(field, value):
         build(document)
     with pytest.raises(planner.PlanError, match="identity bytes"):
         planner.build_plan(raw(valid_input()), b"changed", CONFIGURATION, now=NOW)
+
+
+@pytest.mark.parametrize(("identity", "configuration"), [(b"", CONFIGURATION), (IDENTITY, b"")])
+def test_bound_local_files_must_not_be_empty(identity, configuration):
+    value = valid_input()
+    value["ruleAttestation"]["ruleIdentitySha256"] = digest(identity)
+    value["ruleAttestation"]["reviewedConfigurationSha256"] = digest(configuration)
+    with pytest.raises(planner.PlanError, match="must not be empty"):
+        planner.build_plan(raw(value), identity, configuration, now=NOW)
 
 
 @pytest.mark.parametrize("field", ["authorizedAt", "declaredAt"])
@@ -204,6 +221,14 @@ def test_malformed_contradictory_or_unbounded_windows_are_rejected(field, value)
         build(document)
 
 
+@pytest.mark.parametrize("deadline", ["2026-09-26T11:59:59Z", "2026-09-26T12:25:00Z"])
+def test_removal_deadline_must_be_future_dated_within_rehearsal(deadline):
+    value = valid_input()
+    value["authorization"]["removalDeadline"] = deadline
+    with pytest.raises(planner.PlanError, match="future-dated within the rehearsal window"):
+        build(value)
+
+
 @pytest.mark.parametrize("field", sorted(planner.POLICY_FIELDS))
 @pytest.mark.parametrize("bad", [None, 0, -1, True, "5"])
 def test_policy_bounds_are_required_positive_integers(field, bad):
@@ -213,6 +238,14 @@ def test_policy_bounds_are_required_positive_integers(field, bad):
     else:
         value["policy"][field] = bad
     with pytest.raises(planner.PlanError):
+        build(value)
+
+
+@pytest.mark.parametrize("field", sorted(planner.POLICY_FIELDS))
+def test_policy_values_cannot_exceed_safety_maximums(field):
+    value = valid_input()
+    value["policy"][field] = planner.POLICY_MAXIMUMS[field] + 1
+    with pytest.raises(planner.PlanError, match="safety maximum"):
         build(value)
 
 
@@ -238,6 +271,39 @@ def test_output_is_exclusively_created_and_never_overwritten(tmp_path):
     assert path.stat().st_mode & 0o777 == 0o600
 
 
+def test_output_file_and_parent_directory_are_synced(tmp_path, monkeypatch):
+    synced = []
+    real_fsync = os.fsync
+
+    def recording_fsync(descriptor):
+        synced.append(descriptor)
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(os, "fsync", recording_fsync)
+    planner.write_exclusive(tmp_path / "plan.json", build())
+    assert len(synced) == 2
+
+
+def test_output_descriptor_is_closed_if_fdopen_fails(tmp_path, monkeypatch):
+    path = tmp_path / "plan.json"
+    closed = []
+    real_close = os.close
+
+    def failing_fdopen(*args, **kwargs):
+        raise OSError("fdopen failed")
+
+    def recording_close(descriptor):
+        closed.append(descriptor)
+        real_close(descriptor)
+
+    monkeypatch.setattr(os, "fdopen", failing_fdopen)
+    monkeypatch.setattr(os, "close", recording_close)
+    with pytest.raises(OSError, match="fdopen failed"):
+        planner.write_exclusive(path, build())
+    assert len(closed) == 1
+    assert not path.exists()
+
+
 def test_module_has_no_network_or_live_operation_surface(monkeypatch):
     def forbidden(*args, **kwargs):
         raise AssertionError("network operation attempted")
@@ -258,24 +324,62 @@ def test_cli_requires_matching_lifecycle_and_local_files(tmp_path):
     identity_path = tmp_path / "identity"
     config_path = tmp_path / "configuration"
     output_path = tmp_path / "plan.json"
-    input_path.write_bytes(raw(valid_input()))
+    value = valid_input()
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    timestamps = {
+        "authorizedAt": now - timedelta(minutes=5),
+        "rehearsalStartsAt": now - timedelta(minutes=1),
+        "rehearsalEndsAt": now + timedelta(minutes=20),
+        "reviewStartsAt": now - timedelta(minutes=1),
+        "reviewEndsAt": now + timedelta(minutes=40),
+        "removalDeadline": now + timedelta(minutes=20),
+        "expiresAt": now + timedelta(hours=1),
+    }
+    value["authorization"].update(
+        {field: timestamp.strftime("%Y-%m-%dT%H:%M:%SZ") for field, timestamp in timestamps.items()}
+    )
+    value["ruleAttestation"]["declaredAt"] = (now - timedelta(minutes=4)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    input_path.write_bytes(raw(value))
     identity_path.write_bytes(IDENTITY)
     config_path.write_bytes(CONFIGURATION)
-    # The CLI uses the real clock, so test its pre-build lifecycle gate without a network mock.
-    assert planner.main(
+    assert (
+        planner.main(
+            [
+                "--input",
+                str(input_path),
+                "--rule-identity",
+                str(identity_path),
+                "--reviewed-configuration",
+                str(config_path),
+                "--output",
+                str(output_path),
+                "--lifecycle",
+                "authorized-static-emulation",
+            ]
+        )
+        == 0
+    )
+    assert json.loads(output_path.read_text())["networkCapable"] is False
+
+
+def test_cli_rejects_non_object_authorization_without_traceback(tmp_path, capsys):
+    input_path = tmp_path / "input.json"
+    input_path.write_text('{"authorization":[]}')
+    result = planner.main(
         [
             "--input",
             str(input_path),
             "--rule-identity",
-            str(identity_path),
+            str(tmp_path / "unused-identity"),
             "--reviewed-configuration",
-            str(config_path),
+            str(tmp_path / "unused-configuration"),
             "--output",
-            str(output_path),
+            str(tmp_path / "plan.json"),
             "--lifecycle",
             "authorized-static-emulation",
         ]
-    ) in (0, 2)
-    assert (
-        not output_path.exists() or json.loads(output_path.read_text())["networkCapable"] is False
     )
+    assert result == 2
+    assert "plan refused" in capsys.readouterr().err

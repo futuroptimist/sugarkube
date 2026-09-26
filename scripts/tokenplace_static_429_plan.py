@@ -69,6 +69,14 @@ POLICY_FIELDS = {
     "timeoutSeconds",
     "retentionSeconds",
 }
+POLICY_MAXIMUMS = {
+    "maxEvidenceAgeSeconds": 86_400,
+    "maxFutureSkewSeconds": 300,
+    "maxRehearsalWindowSeconds": 3_600,
+    "maxReviewWindowSeconds": 86_400,
+    "timeoutSeconds": 60,
+    "retentionSeconds": 2_592_000,
+}
 PROHIBITED_KEYS = {
     "token",
     "tokens",
@@ -190,7 +198,7 @@ def build_plan(
     value = load_input_bytes(raw)
     _privacy_check(value)
     _exact(value, ROOT_FIELDS, "input")
-    if value["schemaVersion"] != SCHEMA_VERSION:
+    if type(value["schemaVersion"]) is not int or value["schemaVersion"] != SCHEMA_VERSION:
         raise PlanError("unsupported schemaVersion")
 
     target = _exact(value["target"], TARGET_FIELDS, "target")
@@ -209,9 +217,15 @@ def build_plan(
     for field in POLICY_FIELDS:
         if type(policy[field]) is not int or policy[field] <= 0:
             raise PlanError(f"policy {field} must be a positive integer supplied by the caller")
+        if policy[field] > POLICY_MAXIMUMS[field]:
+            raise PlanError(f"policy {field} exceeds the safety maximum")
     for field in ("ruleIdentitySha256", "reviewedConfigurationSha256"):
         if not isinstance(attestation[field], str) or not SHA256_RE.fullmatch(attestation[field]):
             raise PlanError(f"{field} must be a lowercase SHA-256 digest")
+    if not rule_identity:
+        raise PlanError("rule identity bytes must not be empty")
+    if not reviewed_configuration:
+        raise PlanError("reviewed configuration bytes must not be empty")
     if attestation["ruleIdentitySha256"] != _digest(rule_identity):
         raise PlanError("rule identity bytes do not match the attested hash")
     if attestation["reviewedConfigurationSha256"] != _digest(reviewed_configuration):
@@ -258,11 +272,13 @@ def build_plan(
         <= timestamps["expiresAt"]
     ):
         raise PlanError("review window is inconsistent with authorization")
-    if (
-        timestamps["removalDeadline"] > timestamps["rehearsalEndsAt"]
-        or timestamps["removalDeadline"] > timestamps["expiresAt"]
+    if not (
+        current < timestamps["removalDeadline"]
+        and timestamps["rehearsalStartsAt"]
+        <= timestamps["removalDeadline"]
+        <= timestamps["rehearsalEndsAt"]
     ):
-        raise PlanError("removal deadline exceeds the rehearsal time box")
+        raise PlanError("removal deadline must be future-dated within the rehearsal window")
     if (timestamps["rehearsalEndsAt"] - timestamps["rehearsalStartsAt"]).total_seconds() > policy[
         "maxRehearsalWindowSeconds"
     ]:
@@ -304,10 +320,26 @@ def write_exclusive(path: Path, plan: dict[str, Any]) -> None:
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError as exc:
         raise PlanError(f"refusing to overwrite existing plan: {path}") from exc
+    raw_descriptor = descriptor
     try:
-        with os.fdopen(descriptor, "wb") as output:
+        output = os.fdopen(descriptor, "wb")
+        raw_descriptor = -1
+        with output:
             output.write(payload)
+            output.flush()
+            os.fsync(output.fileno())
+        try:
+            directory_descriptor = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_descriptor)
+            finally:
+                os.close(directory_descriptor)
+        except OSError:
+            # Some filesystems do not support directory fsync. The file itself is durable.
+            pass
     except BaseException:
+        if raw_descriptor >= 0:
+            os.close(raw_descriptor)
         path.unlink(missing_ok=True)
         raise
 
@@ -323,7 +355,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         raw = args.input.read_bytes()
         value = load_input_bytes(raw)
-        if value.get("authorization", {}).get("lifecycle") != args.lifecycle:
+        authorization = value.get("authorization")
+        if not isinstance(authorization, dict) or authorization.get("lifecycle") != args.lifecycle:
             raise PlanError("CLI lifecycle does not match authorization")
         plan = build_plan(
             raw, args.rule_identity.read_bytes(), args.reviewed_configuration.read_bytes()
