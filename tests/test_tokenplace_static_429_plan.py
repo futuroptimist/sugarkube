@@ -168,6 +168,26 @@ def test_duplicate_and_unknown_fields_are_rejected():
         build(value)
 
 
+def test_excessive_nesting_during_json_decoding_is_rejected():
+    document = ("[" * 10000 + "0" + "]" * 10000).encode()
+    with pytest.raises(planner.PlanError, match="UTF-8 JSON"):
+        planner.load_input_bytes(document)
+
+
+def test_excessive_nesting_during_privacy_validation_is_rejected(monkeypatch):
+    previous_limit = sys.getrecursionlimit()
+    document = ("[" * 1100 + "0" + "]" * 1100).encode()
+    try:
+        sys.setrecursionlimit(5000)
+        nested = json.loads(document)
+        monkeypatch.setattr(planner, "load_input_bytes", lambda unused: {"nested": nested})
+        sys.setrecursionlimit(1000)
+        with pytest.raises(planner.PlanError, match="nesting is too deep"):
+            planner.build_plan(document, IDENTITY, CONFIGURATION, now=NOW)
+    finally:
+        sys.setrecursionlimit(previous_limit)
+
+
 @pytest.mark.parametrize("document", [b"null", b"[]", b'"input"', b"1"])
 def test_json_root_must_be_an_object(document):
     with pytest.raises(planner.PlanError, match="input must be an object"):
@@ -693,6 +713,43 @@ def test_cli_rejects_oversized_json_integer_privately(tmp_path, capsys):
     diagnostics = capsys.readouterr()
     assert result == 2
     assert sentinel not in diagnostics.out + diagnostics.err
+    assert "Traceback" not in diagnostics.out + diagnostics.err
+    assert not output_path.exists()
+
+
+def test_cli_rejects_excessively_nested_json_privately(tmp_path, capsys):
+    input_path = tmp_path / "input.json"
+    identity_path = tmp_path / "identity"
+    configuration_path = tmp_path / "configuration"
+    output_path = tmp_path / "plan.json"
+    input_path.write_text(
+        '{"authorization":{"lifecycle":"authorized-static-emulation"},"unexpected":'
+        + "[" * 1100
+        + "0"
+        + "]" * 1100
+        + "}"
+    )
+    identity_path.write_bytes(IDENTITY)
+    configuration_path.write_bytes(CONFIGURATION)
+
+    result = planner.main(
+        [
+            "--input",
+            str(input_path),
+            "--rule-identity",
+            str(identity_path),
+            "--reviewed-configuration",
+            str(configuration_path),
+            "--output",
+            str(output_path),
+            "--lifecycle",
+            "authorized-static-emulation",
+        ]
+    )
+
+    diagnostics = capsys.readouterr()
+    assert result == 2
+    assert diagnostics.err == "plan refused: invalid local planning input\n"
     assert "Traceback" not in diagnostics.out + diagnostics.err
     assert not output_path.exists()
 

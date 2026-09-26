@@ -131,7 +131,7 @@ def load_input_bytes(raw: bytes) -> dict[str, Any]:
         value = json.loads(raw.decode("utf-8"), object_pairs_hook=_pairs)
     except PlanError:
         raise
-    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError, ValueError) as exc:
         raise PlanError("input must be UTF-8 JSON") from exc
     if not isinstance(value, dict):
         raise PlanError("input must be an object")
@@ -210,7 +210,10 @@ def build_plan(
 ) -> dict[str, Any]:
     """Validate exact local bytes and return a deterministic, non-executable plan."""
     value = load_input_bytes(raw)
-    _privacy_check(value)
+    try:
+        _privacy_check(value)
+    except RecursionError as exc:
+        raise PlanError("input nesting is too deep") from exc
     _exact(value, ROOT_FIELDS, "input")
     if type(value["schemaVersion"]) is not int or value["schemaVersion"] != SCHEMA_VERSION:
         raise PlanError("unsupported schemaVersion")
