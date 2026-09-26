@@ -36,6 +36,7 @@ def valid_input() -> dict:
         "healthControlPaths": ["/livez", "/healthz"],
         "followRedirects": False,
     }
+    scope_hash = digest(json.dumps(scope, sort_keys=True, separators=(",", ":")).encode())
     return {
         "schemaVersion": 1,
         "target": scope,
@@ -51,6 +52,9 @@ def valid_input() -> dict:
             "removalOwner": "staging edge owner",
             "handoff": "staging operations handoff",
             "escalation": "staging incident channel",
+            "approvedRuleIdentitySha256": digest(IDENTITY),
+            "approvedReviewer": "independent reviewer",
+            "approvedScopeSha256": scope_hash,
         },
         "ruleAttestation": {
             "reviewer": "independent reviewer",
@@ -63,11 +67,15 @@ def valid_input() -> dict:
         },
         "policy": {
             "maxEvidenceAgeSeconds": 1800,
-            "maxFutureSkewSeconds": 30,
+            "maxFutureSkewSeconds": 0,
             "maxRehearsalWindowSeconds": 1800,
             "maxReviewWindowSeconds": 3600,
             "timeoutSeconds": 5,
             "retentionSeconds": 86400,
+            "approvedAuthorizationLifetimeSeconds": 7200,
+            "approvedEvidenceAgeSeconds": 1800,
+            "approvedTimeoutSeconds": 5,
+            "approvedRetentionSeconds": 86400,
         },
     }
 
@@ -165,6 +173,13 @@ def test_schema_version_must_be_an_integer_not_a_boolean():
         build(value)
 
 
+def test_schema_version_rejects_float():
+    value = valid_input()
+    value["schemaVersion"] = 1.0
+    with pytest.raises(planner.PlanError, match="schemaVersion"):
+        build(value)
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
@@ -204,6 +219,13 @@ def test_stale_and_future_evidence_is_rejected(field):
         build(value)
 
 
+def test_declared_evidence_one_second_in_the_future_is_rejected():
+    value = valid_input()
+    value["ruleAttestation"]["declaredAt"] = "2026-09-26T12:00:01Z"
+    with pytest.raises(planner.PlanError, match="future"):
+        build(value)
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
@@ -229,7 +251,27 @@ def test_removal_deadline_must_be_future_dated_within_rehearsal(deadline):
         build(value)
 
 
-@pytest.mark.parametrize("field", sorted(planner.POLICY_FIELDS))
+@pytest.mark.parametrize("field", ["rehearsalEndsAt", "reviewEndsAt", "expiresAt"])
+def test_elapsed_lifecycle_deadlines_cannot_be_revived_by_later_expiry(field):
+    value = valid_input()
+    value["authorization"].update(
+        {
+            "rehearsalEndsAt": "2026-09-26T12:20:00Z",
+            "reviewEndsAt": "2026-09-26T12:45:00Z",
+            "removalDeadline": "2026-09-26T12:20:00Z",
+            "expiresAt": "2026-09-26T13:00:00Z",
+        }
+    )
+    validation_time = {
+        "rehearsalEndsAt": datetime(2026, 9, 26, 12, 21, tzinfo=timezone.utc),
+        "reviewEndsAt": datetime(2026, 9, 26, 12, 46, tzinfo=timezone.utc),
+        "expiresAt": datetime(2026, 9, 26, 13, 1, tzinfo=timezone.utc),
+    }[field]
+    with pytest.raises(planner.PlanError):
+        planner.build_plan(raw(value), IDENTITY, CONFIGURATION, now=validation_time)
+
+
+@pytest.mark.parametrize("field", sorted(planner.POLICY_FIELDS - {"maxFutureSkewSeconds"}))
 @pytest.mark.parametrize("bad", [None, 0, -1, True, "5"])
 def test_policy_bounds_are_required_positive_integers(field, bad):
     value = valid_input()
@@ -241,11 +283,35 @@ def test_policy_bounds_are_required_positive_integers(field, bad):
         build(value)
 
 
-@pytest.mark.parametrize("field", sorted(planner.POLICY_FIELDS))
-def test_policy_values_cannot_exceed_safety_maximums(field):
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("maxFutureSkewSeconds", 1, "future evidence"),
+        ("timeoutSeconds", 6, "timeout exceeds"),
+        ("maxEvidenceAgeSeconds", 1801, "freshness exceeds"),
+        ("retentionSeconds", 86401, "retention exceeds"),
+        ("approvedAuthorizationLifetimeSeconds", 3899, "lifetime exceeds"),
+    ],
+)
+def test_policy_values_must_fit_explicit_reviewed_bounds(field, value, message):
+    document = valid_input()
+    document["policy"][field] = value
+    with pytest.raises(planner.PlanError, match=message):
+        build(document)
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("approvedRuleIdentitySha256", "sha256:" + "0" * 64),
+        ("approvedReviewer", "different reviewer"),
+        ("approvedScopeSha256", "sha256:" + "0" * 64),
+    ],
+)
+def test_authorization_explicitly_binds_rule_reviewer_and_scope(field, replacement):
     value = valid_input()
-    value["policy"][field] = planner.POLICY_MAXIMUMS[field] + 1
-    with pytest.raises(planner.PlanError, match="safety maximum"):
+    value["authorization"][field] = replacement
+    with pytest.raises(planner.PlanError, match="authorization does not bind"):
         build(value)
 
 
@@ -257,6 +323,20 @@ def test_prohibited_privacy_fields_are_rejected(field):
     value = valid_input()
     value[field] = "redacted"
     with pytest.raises(planner.PlanError, match="privacy"):
+        build(value)
+
+
+@pytest.mark.parametrize(
+    ("field", "secret"),
+    [
+        ("handoff", "Authorization Bearer FAKE_REVIEW_SENTINEL"),
+        ("escalation", "Cookie session FAKE_REVIEW_SENTINEL"),
+    ],
+)
+def test_named_fields_reject_credential_material(field, secret):
+    value = valid_input()
+    value["authorization"][field] = secret
+    with pytest.raises(planner.PlanError):
         build(value)
 
 
@@ -304,6 +384,24 @@ def test_output_descriptor_is_closed_if_fdopen_fails(tmp_path, monkeypatch):
     assert not path.exists()
 
 
+def test_output_is_removed_when_directory_sync_fails(tmp_path, monkeypatch):
+    path = tmp_path / "plan.json"
+    calls = 0
+    real_fsync = os.fsync
+
+    def failing_directory_fsync(descriptor):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("private filesystem detail")
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(os, "fsync", failing_directory_fsync)
+    with pytest.raises(OSError):
+        planner.write_exclusive(path, build())
+    assert not path.exists()
+
+
 def test_module_has_no_network_or_live_operation_surface(monkeypatch):
     def forbidden(*args, **kwargs):
         raise AssertionError("network operation attempted")
@@ -319,13 +417,13 @@ def test_module_has_no_network_or_live_operation_surface(monkeypatch):
     assert plan["networkCapable"] is False
 
 
-def test_cli_requires_matching_lifecycle_and_local_files(tmp_path):
+def test_cli_requires_matching_lifecycle_and_local_files(tmp_path, monkeypatch):
     input_path = tmp_path / "input.json"
     identity_path = tmp_path / "identity"
     config_path = tmp_path / "configuration"
     output_path = tmp_path / "plan.json"
     value = valid_input()
-    now = datetime.now(timezone.utc).replace(microsecond=0)
+    now = NOW
     timestamps = {
         "authorizedAt": now - timedelta(minutes=5),
         "rehearsalStartsAt": now - timedelta(minutes=1),
@@ -341,6 +439,13 @@ def test_cli_requires_matching_lifecycle_and_local_files(tmp_path):
     value["ruleAttestation"]["declaredAt"] = (now - timedelta(minutes=4)).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
     )
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return NOW if tz is not None else NOW.replace(tzinfo=None)
+
+    monkeypatch.setattr(planner, "datetime", FrozenDateTime)
     input_path.write_bytes(raw(value))
     identity_path.write_bytes(IDENTITY)
     config_path.write_bytes(CONFIGURATION)
@@ -382,4 +487,66 @@ def test_cli_rejects_non_object_authorization_without_traceback(tmp_path, capsys
         ]
     )
     assert result == 2
-    assert "plan refused" in capsys.readouterr().err
+    diagnostics = capsys.readouterr().err
+    assert "plan refused" in diagnostics
+    assert "Traceback" not in diagnostics
+
+
+@pytest.mark.parametrize("lifecycle", [None, "quota-exhaustion"])
+def test_cli_rejects_missing_or_incorrect_lifecycle_without_output(tmp_path, capsys, lifecycle):
+    input_path = tmp_path / "input.json"
+    input_path.write_bytes(raw(valid_input()))
+    identity_path = tmp_path / "identity"
+    identity_path.write_bytes(IDENTITY)
+    config_path = tmp_path / "configuration"
+    config_path.write_bytes(CONFIGURATION)
+    output_path = tmp_path / "plan.json"
+    arguments = [
+        "--input",
+        str(input_path),
+        "--rule-identity",
+        str(identity_path),
+        "--reviewed-configuration",
+        str(config_path),
+        "--output",
+        str(output_path),
+    ]
+    if lifecycle is not None:
+        arguments.extend(["--lifecycle", lifecycle])
+    assert planner.main(arguments) == 2
+    assert not output_path.exists()
+    assert "Traceback" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("authorization", [None, [], "bad", 1])
+def test_cli_rejects_malformed_authorization_privately(tmp_path, capsys, authorization):
+    sentinel = "FAKE_REVIEW_SENTINEL"
+    input_path = tmp_path / sentinel
+    input_path.write_text(json.dumps({"authorization": authorization}))
+    output_path = tmp_path / "plan.json"
+    result = planner.main(
+        [
+            "--input",
+            str(input_path),
+            "--rule-identity",
+            str(tmp_path / "missing-rule"),
+            "--reviewed-configuration",
+            str(tmp_path / "missing-config"),
+            "--output",
+            str(output_path),
+            "--lifecycle",
+            "authorized-static-emulation",
+        ]
+    )
+    diagnostics = capsys.readouterr().err
+    assert result == 2
+    assert not output_path.exists()
+    assert sentinel not in diagnostics
+    assert "Traceback" not in diagnostics
+
+
+def test_duplicate_key_diagnostic_does_not_echo_attacker_input():
+    sentinel = "FAKE_REVIEW_SENTINEL"
+    with pytest.raises(planner.PlanError) as error:
+        planner.load_input_bytes((f'{{"{sentinel}":1,"{sentinel}":2}}').encode())
+    assert sentinel not in str(error.value)
