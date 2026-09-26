@@ -5,6 +5,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import runpy
 import socket
 import sys
 from datetime import datetime, timedelta, timezone
@@ -167,6 +168,45 @@ def test_duplicate_and_unknown_fields_are_rejected():
         build(value)
 
 
+@pytest.mark.parametrize("document", [b"null", b"[]", b'"input"', b"1"])
+def test_json_root_must_be_an_object(document):
+    with pytest.raises(planner.PlanError, match="input must be an object"):
+        planner.load_input_bytes(document)
+
+
+@pytest.mark.parametrize(
+    ("timestamp", "message"),
+    [
+        ("2026-09-26T12:00:00+00:00", "ending in Z"),
+        ("not-a-timestampZ", "malformed"),
+        ("2026-09-26T12:00:00.100000Z", "whole UTC seconds"),
+    ],
+)
+def test_timestamps_must_be_canonical_whole_utc_seconds(timestamp, message):
+    value = valid_input()
+    value["authorization"]["authorizedAt"] = timestamp
+    with pytest.raises(planner.PlanError, match=message):
+        build(value)
+
+
+@pytest.mark.parametrize("label", ["", " " * 81, "private/channel"])
+def test_named_labels_are_bounded_and_safe(label):
+    value = valid_input()
+    value["authorization"]["handoff"] = label
+    with pytest.raises(planner.PlanError, match="short named value|prohibited data"):
+        build(value)
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"), [("decision", "pending"), ("rulePreExisting", False)]
+)
+def test_rule_declaration_must_be_approved_and_pre_existing(field, replacement):
+    value = valid_input()
+    value["ruleAttestation"][field] = replacement
+    with pytest.raises(planner.PlanError, match="pre-existing rule approved"):
+        build(value)
+
+
 def test_schema_version_must_be_an_integer_not_a_boolean():
     value = valid_input()
     value["schemaVersion"] = True
@@ -301,6 +341,33 @@ def test_policy_values_must_fit_explicit_reviewed_bounds(field, value, message):
         build(document)
 
 
+def test_validation_time_must_be_utc():
+    non_utc = NOW.astimezone(timezone(timedelta(hours=1)))
+    with pytest.raises(planner.PlanError, match="validation time must be UTC"):
+        planner.build_plan(raw(valid_input()), IDENTITY, CONFIGURATION, now=non_utc)
+
+
+@pytest.mark.parametrize(
+    ("updates", "message"),
+    [
+        ({"maxReviewWindowSeconds": 1000}, "review window exceeds"),
+        ({"maxRehearsalWindowSeconds": 7201}, "window policy exceeds"),
+        ({"timeoutSeconds": 1201, "approvedTimeoutSeconds": 1201}, "rehearsal window"),
+    ],
+)
+def test_time_policy_relationships_are_enforced(updates, message):
+    value = valid_input()
+    value["policy"].update(updates)
+    with pytest.raises(planner.PlanError, match=message):
+        build(value)
+
+
+def test_planning_before_rehearsal_starts_is_rejected():
+    before_rehearsal = NOW - timedelta(seconds=1)
+    with pytest.raises(planner.PlanError, match="outside its bounded authorization window"):
+        planner.build_plan(raw(valid_input()), IDENTITY, CONFIGURATION, now=before_rehearsal)
+
+
 @pytest.mark.parametrize(
     ("field", "replacement"),
     [
@@ -399,6 +466,25 @@ def test_output_is_removed_when_directory_sync_fails(tmp_path, monkeypatch):
 
     monkeypatch.setattr(os, "fsync", failing_directory_fsync)
     with pytest.raises(OSError):
+        planner.write_exclusive(path, build())
+    assert not path.exists()
+
+
+def test_write_failure_preserves_error_when_created_output_disappeared(tmp_path, monkeypatch):
+    path = tmp_path / "plan.json"
+    calls = 0
+    real_fsync = os.fsync
+
+    def remove_then_fail(descriptor):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            path.unlink()
+            raise OSError("directory sync failed")
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(os, "fsync", remove_then_fail)
+    with pytest.raises(OSError, match="directory sync failed"):
         planner.write_exclusive(path, build())
     assert not path.exists()
 
@@ -609,3 +695,14 @@ def test_cli_rejects_oversized_json_integer_privately(tmp_path, capsys):
     assert sentinel not in diagnostics.out + diagnostics.err
     assert "Traceback" not in diagnostics.out + diagnostics.err
     assert not output_path.exists()
+
+
+def test_script_entry_point_help_exits_successfully(monkeypatch, capsys):
+    script = ROOT / "scripts/tokenplace_static_429_plan.py"
+    monkeypatch.setattr(sys, "argv", [str(script), "--help"])
+    with pytest.raises(SystemExit) as exit_info:
+        runpy.run_path(str(script), run_name="__main__")
+    assert exit_info.value.code == 0
+    help_text = capsys.readouterr().out
+    assert "usage:" in help_text
+    assert "--lifecycle" in help_text
