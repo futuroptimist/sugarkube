@@ -7,9 +7,12 @@ management or cleanup capability; attestations accepted here are declarations.
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
+import os
 import re
+import sys
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -137,7 +140,7 @@ class ObserverError(ValueError):
 
 
 class Transport(Protocol):
-    def request(self, *, method: str, url: str, timeout: int, follow_redirects: bool) -> int:
+    def request(self, *, method: str, url: str, timeout: float, follow_redirects: bool) -> int:
         """Return an integer status without returning headers or a body."""
 
 
@@ -156,7 +159,7 @@ class UrllibTransport:
     def __init__(self) -> None:
         self._opener = urllib.request.build_opener(RejectRedirects)
 
-    def request(self, *, method: str, url: str, timeout: int, follow_redirects: bool) -> int:
+    def request(self, *, method: str, url: str, timeout: float, follow_redirects: bool) -> int:
         if method != "GET" or follow_redirects:
             raise ObserverError("transport-contract")
         request = urllib.request.Request(url, method="GET")
@@ -197,14 +200,16 @@ def _load(raw: bytes) -> dict[str, Any]:
 
 
 def _privacy(value: Any) -> None:
-    if isinstance(value, dict):
-        for key, child in value.items():
-            if re.sub(r"[^a-z]", "", key.lower()) in PROHIBITED_KEYS:
-                raise ObserverError("privacy-field")
-            _privacy(child)
-    elif isinstance(value, list):
-        for child in value:
-            _privacy(child)
+    pending = [value]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, dict):
+            for key, child in item.items():
+                if re.sub(r"[^a-z]", "", key.lower()) in PROHIBITED_KEYS:
+                    raise ObserverError("privacy-field")
+                pending.append(child)
+        elif isinstance(item, list):
+            pending.extend(item)
 
 
 def _exact(value: Any, fields: set[str]) -> dict[str, Any]:
@@ -237,13 +242,21 @@ def _now(now: datetime | None) -> datetime:
 
 
 def _safe_name(value: Any) -> str:
-    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 ._-]{0,79}", value):
+    if (
+        not isinstance(value, str)
+        or value != value.strip()
+        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 ._-]{0,79}", value)
+    ):
         raise ObserverError("named-value-invalid")
     return value
 
 
 def validate_inputs(
-    plan_raw: bytes, review_raw: bytes, *, now: datetime | None = None
+    plan_raw: bytes,
+    review_raw: bytes,
+    *,
+    now: datetime | None = None,
+    allow_expired: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Validate an immutable planner output and the required second declaration."""
     plan = _exact(_load(plan_raw), PLAN_FIELDS)
@@ -296,6 +309,9 @@ def validate_inputs(
         raise ObserverError("timeout-invalid")
     if type(policy.get("retentionSeconds")) is not int or policy["retentionSeconds"] < 1:
         raise ObserverError("retention-invalid")
+    for field in ("approvedTimeoutSeconds", "approvedRetentionSeconds"):
+        if type(policy.get(field)) is not int or policy[field] < 1:
+            raise ObserverError("policy-drift")
     for field in ("maxEvidenceAgeSeconds", "approvedEvidenceAgeSeconds"):
         if type(policy.get(field)) is not int or policy[field] < 1:
             raise ObserverError("freshness-invalid")
@@ -309,23 +325,28 @@ def validate_inputs(
         raise ObserverError("policy-drift")
     authorized = _time(authorization["authorizedAt"])
     rule_declared = _time(declaration["declaredAt"])
+    rehearsal_starts = _time(authorization["rehearsalStartsAt"])
+    rehearsal_ends = _time(authorization["rehearsalEndsAt"])
+    expires = _time(authorization["expiresAt"])
+    removal_deadline = _time(authorization["removalDeadline"])
+    review_starts = _time(authorization["reviewStartsAt"])
+    review_ends = _time(authorization["reviewEndsAt"])
+    if not (
+        authorized <= rehearsal_starts < rehearsal_ends <= expires
+        and authorized <= review_starts < review_ends <= expires
+        and authorized <= removal_deadline <= expires
+    ):
+        raise ObserverError("authorization-window-invalid")
     if authorized > current or rule_declared > current:
         raise ObserverError("plan-evidence-future")
-    if any(
+    if not allow_expired and any(
         (current - value).total_seconds() > policy["maxEvidenceAgeSeconds"]
         for value in (authorized, rule_declared)
     ):
         raise ObserverError("plan-evidence-stale")
-    if not (
-        _time(authorization["rehearsalStartsAt"])
-        <= current
-        < _time(authorization["rehearsalEndsAt"])
-        <= _time(authorization["expiresAt"])
-    ):
+    if not allow_expired and not (rehearsal_starts <= current < rehearsal_ends <= expires):
         raise ObserverError("plan-expired")
-    if current >= _time(authorization["removalDeadline"]) or current >= _time(
-        authorization["reviewEndsAt"]
-    ):
+    if not allow_expired and (current >= removal_deadline or current >= review_ends):
         raise ObserverError("plan-expired")
     if review["lifecycle"] != LIFECYCLE or review["decision"] != "approved":
         raise ObserverError("second-review-invalid")
@@ -333,7 +354,9 @@ def validate_inputs(
     if reviewer == declaration.get("reviewer"):
         raise ObserverError("reviewers-not-distinct")
     declared = _time(review["declaredAt"])
-    if declared > current or (current - declared).total_seconds() > policy["maxEvidenceAgeSeconds"]:
+    if declared > current or (
+        not allow_expired and (current - declared).total_seconds() > policy["maxEvidenceAgeSeconds"]
+    ):
         raise ObserverError("second-review-not-fresh")
     if (
         review["planSha256"] != _digest(plan_raw)
@@ -377,8 +400,7 @@ def _record(
         {"path": path, "observed": statuses[path] is not None, "status": statuses[path]}
         for path in ROUTES
     ]
-    observation_raw = json.dumps(observation, sort_keys=True, separators=(",", ":")).encode()
-    return {
+    record = {
         "schemaVersion": SCHEMA_VERSION,
         "evidenceType": "static-429-boundary-observation",
         "lifecycle": LIFECYCLE,
@@ -390,7 +412,6 @@ def _record(
         "originAttributed": False,
         "planSha256": _digest(plan_raw),
         "reviewedConfigurationSha256": plan["reviewedConfigurationSha256"],
-        "observationSha256": _digest(observation_raw),
         "secondReviewerDeclaration": {
             "reviewer": review["reviewer"],
             "authenticated": False,
@@ -405,22 +426,42 @@ def _record(
         "cleanupRequired": _signal(plan, current),
         "cleanupAttestation": None,
     }
+    record_raw = json.dumps(record, sort_keys=True, separators=(",", ":")).encode()
+    record["observationSha256"] = _digest(record_raw)
+    return record
+
+
+def _observation_time(now: datetime | None) -> datetime:
+    """Use an injected instant in tests, but a fresh production wall clock."""
+    return _now(now) if now is not None else _now(None)
 
 
 def observe(
     plan_raw: bytes, review_raw: bytes, transport: Transport, *, now: datetime | None = None
 ) -> dict[str, Any]:
     """Perform the exact one-shot tuple, stopping on the first violation."""
-    current = _now(now)
+    current = _observation_time(now)
     plan, review = validate_inputs(plan_raw, review_raw, now=current)
     statuses: dict[str, int | None] = dict.fromkeys(ROUTES)
     outcome, reason = "success", "exact-status-tuple"
+    authorization = plan["authorization"]
+    deadline = min(
+        _time(authorization["rehearsalEndsAt"]),
+        _time(authorization["reviewEndsAt"]),
+        _time(authorization["removalDeadline"]),
+        _time(authorization["expiresAt"]),
+    )
     for path in ROUTES:
         try:
+            request_time = _observation_time(now)
+            remaining = (deadline - request_time).total_seconds()
+            if remaining <= 0:
+                outcome, reason = "failed", "authorization-expired"
+                break
             status = transport.request(
                 method="GET",
                 url=f"https://{AUTHORITY}{path}",
-                timeout=plan["policy"]["timeoutSeconds"],
+                timeout=min(plan["policy"]["timeoutSeconds"], remaining),
                 follow_redirects=False,
             )
             if type(status) is not int or not 100 <= status <= 599:
@@ -435,13 +476,16 @@ def observe(
         except (KeyboardInterrupt, TimeoutError, ConnectionError, OSError, ObserverError):
             outcome, reason = "failed", "observation-interrupted"
             break
-    return _record(plan_raw, plan, review, current, statuses, outcome, reason)
+    completed = _observation_time(now)
+    if completed >= deadline and outcome == "success":
+        outcome, reason = "failed", "authorization-expired"
+    return _record(plan_raw, plan, review, completed, statuses, outcome, reason)
 
 
 def abandon(plan_raw: bytes, review_raw: bytes, *, now: datetime | None = None) -> dict[str, Any]:
     """Record a never-started or abandoned run while still requiring cleanup."""
     current = _now(now)
-    plan, review = validate_inputs(plan_raw, review_raw, now=current)
+    plan, review = validate_inputs(plan_raw, review_raw, now=current, allow_expired=True)
     return _record(plan_raw, plan, review, current, dict.fromkeys(ROUTES), "failed", "abandoned")
 
 
@@ -478,3 +522,52 @@ def attest_cleanup(
         "independentlyProven": False,
     }
     return result
+
+
+def _write_record(path: str, record: dict[str, Any]) -> None:
+    encoded = (json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    if path == "-":
+        sys.stdout.buffer.write(encoded)
+        return
+    temporary = f"{path}.tmp.{os.getpid()}"
+    try:
+        with open(temporary, "xb") as stream:
+            stream.write(encoded)
+        os.link(temporary, path)
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run the standalone observer and emit only redacted evidence or errors."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--plan", required=True, help="immutable offline plan JSON")
+    parser.add_argument("--review", required=True, help="second-reviewer declaration JSON")
+    parser.add_argument("--output", required=True, help="new evidence path, or - for stdout")
+    parser.add_argument("--acknowledge-cleanup", action="store_true", required=True)
+    parser.add_argument(
+        "--abandon", action="store_true", help="record a run without network access"
+    )
+    args = parser.parse_args(argv)
+    try:
+        with open(args.plan, "rb") as stream:
+            plan_raw = stream.read()
+        with open(args.review, "rb") as stream:
+            review_raw = stream.read()
+        record = (
+            abandon(plan_raw, review_raw)
+            if args.abandon
+            else observe(plan_raw, review_raw, UrllibTransport())
+        )
+        _write_record(args.output, record)
+    except (ObserverError, OSError):
+        print("observer-error: operation-failed", file=sys.stderr)
+        return 2
+    return 0 if record["outcome"] == "success" else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

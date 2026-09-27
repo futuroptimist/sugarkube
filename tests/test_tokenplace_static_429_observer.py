@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -219,6 +220,100 @@ def test_abandonment_is_never_started_failed_and_cleanup_pending():
         for route, path in zip(result["routes"], ("/", "/api/v1/meta", "/livez", "/healthz"))
     )
     assert result["cleanupRequired"]["required"] is True
+
+
+def test_expired_abandonment_still_emits_overdue_cleanup_signal():
+    plan = plan_bytes()
+    result = observer.abandon(
+        plan, review(plan), now=datetime(2026, 9, 26, 12, 20, tzinfo=timezone.utc)
+    )
+    assert result["reason"] == "abandoned"
+    assert result["cleanupRequired"]["deadlineMissed"] is True
+    assert result["cleanupRequired"]["escalationRequired"] is True
+
+
+def test_reviewer_names_cannot_use_outer_whitespace_to_evade_identity_check():
+    plan = plan_bytes()
+    with pytest.raises(observer.ObserverError, match="named-value-invalid"):
+        observer.validate_inputs(plan, review(plan, reviewer="second reviewer "), now=NOW)
+
+
+@pytest.mark.parametrize("field", ["approvedTimeoutSeconds", "approvedRetentionSeconds"])
+@pytest.mark.parametrize("value", [None, True, "5", 0])
+def test_approved_policy_bounds_require_positive_integers(field, value):
+    plan = json.loads(plan_bytes())
+    plan["policy"][field] = value
+    raw = encoded(plan)
+    with pytest.raises(observer.ObserverError, match="policy-drift"):
+        observer.validate_inputs(raw, review(raw), now=NOW)
+
+
+def test_observation_digest_binds_the_complete_initial_record():
+    result, _ = run()
+    claimed = result.pop("observationSha256")
+    assert claimed == digest(encoded(result))
+    result["outcome"] = "failed"
+    assert claimed != digest(encoded(result))
+
+
+def test_privacy_walk_is_iterative_for_deep_decoded_values():
+    value = {}
+    for _ in range(2000):
+        value = {"safe": value}
+    observer._privacy(value)
+
+
+def test_rechecks_authorization_between_requests_and_uses_completion_time(monkeypatch):
+    plan = plan_bytes()
+    instants = iter(
+        [
+            NOW,
+            NOW,
+            datetime(2026, 9, 26, 12, 10, tzinfo=timezone.utc),
+            datetime(2026, 9, 26, 12, 21, tzinfo=timezone.utc),
+            datetime(2026, 9, 26, 12, 21, tzinfo=timezone.utc),
+        ]
+    )
+    monkeypatch.setattr(observer, "_observation_time", lambda unused: next(instants))
+    result = observer.observe(plan, review(plan), FakeTransport(), now=None)
+    assert result["reason"] == "authorization-expired"
+    assert result["routes"][2]["observed"] is False
+    assert result["cleanupRequired"]["deadlineMissed"] is True
+
+
+def test_cli_help_exposes_standalone_lifecycle_options():
+    completed = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/tokenplace_static_429_observer.py"), "--help"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0
+    assert "--acknowledge-cleanup" in completed.stdout
+    assert "--abandon" in completed.stdout
+
+
+def test_cli_abandon_writes_evidence_without_network(tmp_path):
+    plan = plan_bytes()
+    plan_path = tmp_path / "plan.json"
+    review_path = tmp_path / "review.json"
+    output_path = tmp_path / "evidence.json"
+    plan_path.write_bytes(plan)
+    review_path.write_bytes(review(plan))
+    status = observer.main(
+        [
+            "--plan",
+            str(plan_path),
+            "--review",
+            str(review_path),
+            "--output",
+            str(output_path),
+            "--acknowledge-cleanup",
+            "--abandon",
+        ]
+    )
+    assert status == 1
+    assert json.loads(output_path.read_bytes())["reason"] == "abandoned"
 
 
 def cleanup(result, **updates):  # noqa: ANN003
