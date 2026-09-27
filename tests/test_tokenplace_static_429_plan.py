@@ -168,10 +168,18 @@ def test_duplicate_and_unknown_fields_are_rejected():
         build(value)
 
 
-def test_excessive_nesting_during_json_decoding_is_rejected():
-    document = ("[" * 10000 + "0" + "]" * 10000).encode()
-    with pytest.raises(planner.PlanError, match="UTF-8 JSON"):
-        planner.load_input_bytes(document)
+def test_excessive_nesting_during_json_decoding_is_rejected(monkeypatch):
+    error = RecursionError("decoder nesting is too deep")
+
+    def raise_recursion_error(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(planner.json, "loads", raise_recursion_error)
+
+    with pytest.raises(planner.PlanError, match="^input must be UTF-8 JSON$") as caught:
+        planner.load_input_bytes(b"{}")
+
+    assert caught.value.__cause__ is error
 
 
 def test_excessive_nesting_during_privacy_validation_is_rejected(monkeypatch):
