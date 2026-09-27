@@ -106,6 +106,26 @@ CLEANUP_FIELDS = {
     "ruleIdentitySha256",
     "cleanupProofSha256",
 }
+RECORD_FIELDS = {
+    "schemaVersion",
+    "evidenceType",
+    "lifecycle",
+    "observedAt",
+    "outcome",
+    "reason",
+    "cleanupState",
+    "quotaDrillEvidence",
+    "originAttributed",
+    "planSha256",
+    "reviewedConfigurationSha256",
+    "secondReviewerDeclaration",
+    "evidencePolicy",
+    "ruleScopeReviewer",
+    "routes",
+    "cleanupRequired",
+    "cleanupAttestation",
+    "observationSha256",
+}
 PROHIBITED_KEYS = {
     "token",
     "tokens",
@@ -160,7 +180,14 @@ class UrllibTransport:
         self._opener = urllib.request.build_opener(RejectRedirects)
 
     def request(self, *, method: str, url: str, timeout: float, follow_redirects: bool) -> int:
-        if method != "GET" or follow_redirects:
+        allowed_urls = {f"https://{AUTHORITY}{path}" for path in ROUTES}
+        if (
+            method != "GET"
+            or follow_redirects
+            or url not in allowed_urls
+            or type(timeout) not in (int, float)
+            or timeout <= 0
+        ):
             raise ObserverError("transport-contract")
         request = urllib.request.Request(url, method="GET")
         try:
@@ -171,10 +198,20 @@ class UrllibTransport:
             # rejected redirects.  Only the integer status crosses this boundary.
             exc.close()
             return exc.code
+        except OSError as exc:
+            raise ObserverError("transport-failure") from exc
 
 
 def _digest(raw: bytes) -> str:
     return "sha256:" + hashlib.sha256(raw).hexdigest()
+
+
+def _canonical(value: Any) -> bytes:
+    return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+
+
+def _scope_digest(target: dict[str, Any]) -> str:
+    return _digest(_canonical({field: target[field] for field in TARGET_FIELDS}))
 
 
 def _pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -257,6 +294,7 @@ def validate_inputs(
     *,
     now: datetime | None = None,
     allow_expired: bool = False,
+    allow_rejected: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Validate an immutable planner output and the required second declaration."""
     plan = _exact(_load(plan_raw), PLAN_FIELDS)
@@ -303,24 +341,29 @@ def validate_inputs(
     ):
         if not isinstance(digest, str) or not SHA256_RE.fullmatch(digest):
             raise ObserverError("digest-invalid")
+    rule_reviewer = _safe_name(declaration.get("reviewer"))
+    for field in ("removalOwner", "handoff", "escalation"):
+        _safe_name(authorization.get(field))
     if authorization.get("approvedRuleIdentitySha256") != plan["ruleIdentitySha256"]:
         raise ObserverError("rule-identity-mismatch")
+    if authorization.get("approvedReviewer") != rule_reviewer:
+        raise ObserverError("rule-reviewer-mismatch")
+    if authorization.get("approvedScopeSha256") != _scope_digest(target):
+        raise ObserverError("scope-mismatch")
     if type(policy.get("timeoutSeconds")) is not int or policy["timeoutSeconds"] < 1:
         raise ObserverError("timeout-invalid")
     if type(policy.get("retentionSeconds")) is not int or policy["retentionSeconds"] < 1:
         raise ObserverError("retention-invalid")
-    for field in ("approvedTimeoutSeconds", "approvedRetentionSeconds"):
+    for field in POLICY_FIELDS - {"maxFutureSkewSeconds", "timeoutSeconds", "retentionSeconds"}:
         if type(policy.get(field)) is not int or policy[field] < 1:
             raise ObserverError("policy-drift")
-    for field in ("maxEvidenceAgeSeconds", "approvedEvidenceAgeSeconds"):
-        if type(policy.get(field)) is not int or policy[field] < 1:
-            raise ObserverError("freshness-invalid")
-    if policy["maxEvidenceAgeSeconds"] > policy["approvedEvidenceAgeSeconds"]:
-        raise ObserverError("freshness-invalid")
     if (
         policy["maxFutureSkewSeconds"] != 0
+        or policy["maxEvidenceAgeSeconds"] > policy["approvedEvidenceAgeSeconds"]
         or policy["timeoutSeconds"] > policy["approvedTimeoutSeconds"]
         or policy["retentionSeconds"] > policy["approvedRetentionSeconds"]
+        or policy["maxRehearsalWindowSeconds"] > policy["approvedAuthorizationLifetimeSeconds"]
+        or policy["maxReviewWindowSeconds"] > policy["approvedAuthorizationLifetimeSeconds"]
     ):
         raise ObserverError("policy-drift")
     authorized = _time(authorization["authorizedAt"])
@@ -333,13 +376,20 @@ def validate_inputs(
     review_ends = _time(authorization["reviewEndsAt"])
     if not (
         authorized <= rehearsal_starts < rehearsal_ends <= expires
-        and authorized <= review_starts < review_ends <= expires
-        and authorized <= removal_deadline <= expires
+        and rehearsal_starts <= review_starts < review_ends <= expires
+        and rehearsal_starts <= removal_deadline <= rehearsal_ends
+    ):
+        raise ObserverError("authorization-window-invalid")
+    if (
+        (expires - authorized).total_seconds() > policy["approvedAuthorizationLifetimeSeconds"]
+        or (rehearsal_ends - rehearsal_starts).total_seconds() > policy["maxRehearsalWindowSeconds"]
+        or (review_ends - review_starts).total_seconds() > policy["maxReviewWindowSeconds"]
+        or policy["timeoutSeconds"] > (rehearsal_ends - rehearsal_starts).total_seconds()
     ):
         raise ObserverError("authorization-window-invalid")
     if authorized > current or rule_declared > current:
         raise ObserverError("plan-evidence-future")
-    if not allow_expired and any(
+    if any(
         (current - value).total_seconds() > policy["maxEvidenceAgeSeconds"]
         for value in (authorized, rule_declared)
     ):
@@ -348,15 +398,17 @@ def validate_inputs(
         raise ObserverError("plan-expired")
     if not allow_expired and (current >= removal_deadline or current >= review_ends):
         raise ObserverError("plan-expired")
-    if review["lifecycle"] != LIFECYCLE or review["decision"] != "approved":
+    if review["lifecycle"] != LIFECYCLE or review["decision"] not in (
+        {"approved", "rejected"} if allow_rejected else {"approved"}
+    ):
         raise ObserverError("second-review-invalid")
     reviewer = _safe_name(review["reviewer"])
     if reviewer == declaration.get("reviewer"):
         raise ObserverError("reviewers-not-distinct")
     declared = _time(review["declaredAt"])
-    if declared > current or (
-        not allow_expired and (current - declared).total_seconds() > policy["maxEvidenceAgeSeconds"]
-    ):
+    if not review_starts <= declared < review_ends:
+        raise ObserverError("second-review-window-invalid")
+    if declared > current or (current - declared).total_seconds() > policy["maxEvidenceAgeSeconds"]:
         raise ObserverError("second-review-not-fresh")
     if (
         review["planSha256"] != _digest(plan_raw)
@@ -389,6 +441,7 @@ def _signal(plan: dict[str, Any], current: datetime) -> dict[str, Any]:
 
 def _record(
     plan_raw: bytes,
+    review_raw: bytes,
     plan: dict[str, Any],
     review: dict[str, Any],
     current: datetime,
@@ -414,6 +467,8 @@ def _record(
         "reviewedConfigurationSha256": plan["reviewedConfigurationSha256"],
         "secondReviewerDeclaration": {
             "reviewer": review["reviewer"],
+            "declaredAt": review["declaredAt"],
+            "sha256": _digest(review_raw),
             "authenticated": False,
             "independentlyProven": False,
         },
@@ -421,13 +476,15 @@ def _record(
             "freshnessSeconds": plan["policy"]["maxEvidenceAgeSeconds"],
             "retentionSeconds": plan["policy"]["retentionSeconds"],
             "retentionEndsAt": review["retentionEndsAt"],
+            "secondReviewDeclaredAt": review["declaredAt"],
+            "secondReviewSha256": _digest(review_raw),
         },
+        "ruleScopeReviewer": plan["authorization"]["approvedReviewer"],
         "routes": observation,
         "cleanupRequired": _signal(plan, current),
         "cleanupAttestation": None,
     }
-    record_raw = json.dumps(record, sort_keys=True, separators=(",", ":")).encode()
-    record["observationSha256"] = _digest(record_raw)
+    record["observationSha256"] = _digest(_canonical(record))
     return record
 
 
@@ -436,15 +493,145 @@ def _observation_time(now: datetime | None) -> datetime:
     return _now(now) if now is not None else _now(None)
 
 
+def _validate_observation_record(record: dict[str, Any]) -> None:
+    """Validate the canonical pending record before attaching cleanup evidence."""
+    _exact(record, RECORD_FIELDS)
+    if (
+        record["schemaVersion"] != SCHEMA_VERSION
+        or record["evidenceType"] != "static-429-boundary-observation"
+        or record["lifecycle"] != LIFECYCLE
+        or record["outcome"] not in {"success", "failed"}
+        or not isinstance(record["reason"], str)
+        or record["cleanupState"] != "cleanup-pending"
+        or record["cleanupAttestation"] is not None
+        or record["quotaDrillEvidence"] is not False
+        or record["originAttributed"] is not False
+    ):
+        raise ObserverError("observation-record-invalid")
+    _time(record["observedAt"])
+    for field in ("planSha256", "reviewedConfigurationSha256", "observationSha256"):
+        if not isinstance(record[field], str) or not SHA256_RE.fullmatch(record[field]):
+            raise ObserverError("observation-record-invalid")
+    second = _exact(
+        record["secondReviewerDeclaration"],
+        {"reviewer", "declaredAt", "sha256", "authenticated", "independentlyProven"},
+    )
+    policy = _exact(
+        record["evidencePolicy"],
+        {
+            "freshnessSeconds",
+            "retentionSeconds",
+            "retentionEndsAt",
+            "secondReviewDeclaredAt",
+            "secondReviewSha256",
+        },
+    )
+    if (
+        second["authenticated"] is not False
+        or second["independentlyProven"] is not False
+        or second["declaredAt"] != policy["secondReviewDeclaredAt"]
+        or second["sha256"] != policy["secondReviewSha256"]
+        or any(
+            type(policy[field]) is not int or policy[field] < 1
+            for field in ("freshnessSeconds", "retentionSeconds")
+        )
+    ):
+        raise ObserverError("observation-record-invalid")
+    _safe_name(second["reviewer"])
+    _safe_name(record["ruleScopeReviewer"])
+    _time(policy["secondReviewDeclaredAt"])
+    _time(policy["retentionEndsAt"])
+    if not all(
+        isinstance(policy[field], str) and SHA256_RE.fullmatch(policy[field])
+        for field in ("secondReviewSha256",)
+    ):
+        raise ObserverError("observation-record-invalid")
+    if not isinstance(record["routes"], list) or len(record["routes"]) != len(ROUTES):
+        raise ObserverError("observation-record-invalid")
+    for path, route in zip(ROUTES, record["routes"]):
+        route = _exact(route, {"path", "observed", "status"})
+        if (
+            route["path"] != path
+            or type(route["observed"]) is not bool
+            or (route["status"] is None) != (not route["observed"])
+            or (
+                route["status"] is not None
+                and (type(route["status"]) is not int or not 100 <= route["status"] <= 599)
+            )
+        ):
+            raise ObserverError("observation-record-invalid")
+    signal = _exact(
+        record["cleanupRequired"],
+        {
+            "required",
+            "urgency",
+            "ruleIdentitySha256",
+            "owner",
+            "deadline",
+            "handoff",
+            "escalation",
+            "deadlineMissed",
+            "escalationRequired",
+            "observerPerformedCleanup",
+        },
+    )
+    if (
+        signal["required"] is not True
+        or signal["urgency"] != "immediate"
+        or signal["observerPerformedCleanup"] is not False
+        or type(signal["deadlineMissed"]) is not bool
+        or signal["escalationRequired"] is not signal["deadlineMissed"]
+        or not isinstance(signal["ruleIdentitySha256"], str)
+        or not SHA256_RE.fullmatch(signal["ruleIdentitySha256"])
+    ):
+        raise ObserverError("observation-record-invalid")
+    for field in ("owner", "handoff", "escalation"):
+        _safe_name(signal[field])
+    _time(signal["deadline"])
+
+
 def observe(
     plan_raw: bytes, review_raw: bytes, transport: Transport, *, now: datetime | None = None
 ) -> dict[str, Any]:
     """Perform the exact one-shot tuple, stopping on the first violation."""
     current = _observation_time(now)
-    plan, review = validate_inputs(plan_raw, review_raw, now=current)
+    plan, review = validate_inputs(
+        plan_raw, review_raw, now=current, allow_expired=True, allow_rejected=True
+    )
     statuses: dict[str, int | None] = dict.fromkeys(ROUTES)
-    outcome, reason = "success", "exact-status-tuple"
     authorization = plan["authorization"]
+    if review["decision"] != "approved":
+        return _record(
+            plan_raw,
+            review_raw,
+            plan,
+            review,
+            current,
+            statuses,
+            "failed",
+            "review-rejected",
+        )
+    if not (
+        _time(authorization["rehearsalStartsAt"])
+        <= current
+        < min(
+            _time(authorization["rehearsalEndsAt"]),
+            _time(authorization["reviewEndsAt"]),
+            _time(authorization["removalDeadline"]),
+            _time(authorization["expiresAt"]),
+        )
+    ):
+        return _record(
+            plan_raw,
+            review_raw,
+            plan,
+            review,
+            current,
+            statuses,
+            "failed",
+            "authorization-expired",
+        )
+    outcome, reason = "success", "exact-status-tuple"
     deadline = min(
         _time(authorization["rehearsalEndsAt"]),
         _time(authorization["reviewEndsAt"]),
@@ -479,14 +666,23 @@ def observe(
     completed = _observation_time(now)
     if completed >= deadline and outcome == "success":
         outcome, reason = "failed", "authorization-expired"
-    return _record(plan_raw, plan, review, completed, statuses, outcome, reason)
+    return _record(plan_raw, review_raw, plan, review, completed, statuses, outcome, reason)
 
 
 def abandon(plan_raw: bytes, review_raw: bytes, *, now: datetime | None = None) -> dict[str, Any]:
     """Record a never-started or abandoned run while still requiring cleanup."""
     current = _now(now)
     plan, review = validate_inputs(plan_raw, review_raw, now=current, allow_expired=True)
-    return _record(plan_raw, plan, review, current, dict.fromkeys(ROUTES), "failed", "abandoned")
+    return _record(
+        plan_raw,
+        review_raw,
+        plan,
+        review,
+        current,
+        dict.fromkeys(ROUTES),
+        "failed",
+        "abandoned",
+    )
 
 
 def attest_cleanup(
@@ -494,6 +690,17 @@ def attest_cleanup(
 ) -> dict[str, Any]:
     """Close cleanup only; never rewrite the immutable observation outcome."""
     current = _now(now)
+    try:
+        _validate_observation_record(record)
+    except ObserverError as exc:
+        raise ObserverError("observation-record-invalid") from exc
+    claimed_observation = record.get("observationSha256")
+    unsigned_record = json.loads(json.dumps(record))
+    unsigned_record.pop("observationSha256", None)
+    if not isinstance(claimed_observation, str) or claimed_observation != _digest(
+        _canonical(unsigned_record)
+    ):
+        raise ObserverError("observation-record-invalid")
     attestation = _exact(_load(attestation_raw), CLEANUP_FIELDS)
     if attestation["schemaVersion"] != SCHEMA_VERSION or attestation["decision"] != "absent":
         raise ObserverError("cleanup-attestation-invalid")
@@ -503,13 +710,22 @@ def attest_cleanup(
     if attestation["ruleIdentitySha256"] != signal.get("ruleIdentitySha256"):
         raise ObserverError("cleanup-identity-mismatch")
     reviewer = _safe_name(attestation["reviewer"])
-    if reviewer == record.get("secondReviewerDeclaration", {}).get("reviewer"):
+    excluded_reviewers = {
+        record.get("ruleScopeReviewer"),
+        record.get("secondReviewerDeclaration", {}).get("reviewer"),
+        signal.get("owner"),
+    }
+    if reviewer in excluded_reviewers:
         raise ObserverError("cleanup-review-not-independent")
     declared = _time(attestation["declaredAt"])
     freshness = record.get("evidencePolicy", {}).get("freshnessSeconds")
     if type(freshness) is not int or freshness < 1:
         raise ObserverError("cleanup-policy-invalid")
-    if declared > current or (current - declared).total_seconds() > freshness:
+    if (
+        declared < _time(record["observedAt"])
+        or declared > current
+        or (current - declared).total_seconds() > freshness
+    ):
         raise ObserverError("cleanup-proof-not-fresh")
     result = json.loads(json.dumps(record))
     result["cleanupState"] = "cleanup-proven"
@@ -518,6 +734,7 @@ def attest_cleanup(
         "declaredAt": attestation["declaredAt"],
         "ruleIdentitySha256": attestation["ruleIdentitySha256"],
         "cleanupProofSha256": attestation["cleanupProofSha256"],
+        "cleanupAttestationSha256": _digest(attestation_raw),
         "authenticated": False,
         "independentlyProven": False,
     }

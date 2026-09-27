@@ -5,6 +5,7 @@ import importlib.util
 import json
 import subprocess
 import sys
+import urllib.error
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -181,8 +182,14 @@ def test_plan_target_and_lifecycle_drift_fail_before_transport(section, field, r
 )
 def test_second_review_must_be_current_distinct_and_bound(updates):
     plan = plan_bytes()
-    with pytest.raises(observer.ObserverError):
-        observer.observe(plan, review(plan, **updates), FakeTransport(), now=NOW)
+    transport = FakeTransport()
+    if updates == {"decision": "rejected"}:
+        result = observer.observe(plan, review(plan, **updates), transport, now=NOW)
+        assert result["reason"] == "review-rejected"
+    else:
+        with pytest.raises(observer.ObserverError):
+            observer.observe(plan, review(plan, **updates), transport, now=NOW)
+    assert transport.calls == []
 
 
 def test_duplicate_unknown_and_privacy_fields_are_rejected():
@@ -204,10 +211,17 @@ def test_duplicate_unknown_and_privacy_fields_are_rejected():
         datetime(2026, 9, 26, 12, 20, tzinfo=timezone.utc),
     ],
 )
-def test_future_or_expired_plan_fails_closed(now):
+def test_future_or_expired_plan_fails_closed_without_transport(now):
     plan = plan_bytes()
-    with pytest.raises(observer.ObserverError):
-        observer.observe(plan, review(plan), FakeTransport(), now=now)
+    transport = FakeTransport()
+    if now < NOW:
+        with pytest.raises(observer.ObserverError):
+            observer.observe(plan, review(plan), transport, now=now)
+    else:
+        result = observer.observe(plan, review(plan), transport, now=now)
+        assert result["reason"] == "authorization-expired"
+        assert result["cleanupState"] == "cleanup-pending"
+    assert transport.calls == []
 
 
 def test_abandonment_is_never_started_failed_and_cleanup_pending():
@@ -312,8 +326,10 @@ def test_cli_abandon_writes_evidence_without_network(tmp_path):
             "--abandon",
         ]
     )
-    assert status == 1
-    assert json.loads(output_path.read_bytes())["reason"] == "abandoned"
+    # The fixture authorization is stale against the real CLI clock and must be
+    # rejected even in abandonment mode.
+    assert status == 2
+    assert not output_path.exists()
 
 
 def cleanup(result, **updates):  # noqa: ANN003
@@ -339,6 +355,7 @@ def test_identity_bound_cleanup_closes_obligation_without_rewriting_failed_outco
     assert closed["routes"] == failed["routes"]
     assert closed["cleanupAttestation"]["authenticated"] is False
     assert closed["cleanupAttestation"]["independentlyProven"] is False
+    assert closed["cleanupAttestation"]["cleanupAttestationSha256"].startswith("sha256:")
 
 
 @pytest.mark.parametrize(
@@ -356,6 +373,104 @@ def test_cleanup_proof_must_be_fresh_independent_and_identity_bound(updates):
     result, _ = run()
     with pytest.raises(observer.ObserverError):
         cleanup(result, **updates)
+
+
+@pytest.mark.parametrize("reviewer", ["independent reviewer", "staging edge owner"])
+def test_cleanup_reviewer_is_independent_of_rule_review_and_removal_owner(reviewer):
+    result, _ = run()
+    with pytest.raises(observer.ObserverError, match="cleanup-review-not-independent"):
+        cleanup(result, reviewer=reviewer)
+
+
+@pytest.mark.parametrize("field", ["outcome", "reason", "observedAt", "planSha256"])
+def test_cleanup_rejects_tampered_observation_evidence(field):
+    result, _ = run()
+    result[field] = "tampered"
+    with pytest.raises(observer.ObserverError, match="observation-record-invalid"):
+        cleanup(result)
+
+
+def test_cleanup_rejects_malformed_nested_record_even_with_recomputed_digest():
+    result, _ = run()
+    result["routes"][0]["status"] = "429"
+    unsigned = dict(result)
+    unsigned.pop("observationSha256")
+    result["observationSha256"] = digest(encoded(unsigned))
+    with pytest.raises(observer.ObserverError, match="observation-record-invalid"):
+        cleanup(result)
+
+
+def test_second_review_artifacts_are_bound_alongside_retention():
+    plan = plan_bytes()
+    declaration = review(plan)
+    result = observer.observe(plan, declaration, FakeTransport(), now=NOW)
+    assert result["evidencePolicy"]["secondReviewDeclaredAt"] == "2026-09-26T12:04:00Z"
+    assert result["evidencePolicy"]["secondReviewSha256"] == digest(declaration)
+    assert result["secondReviewerDeclaration"]["sha256"] == digest(declaration)
+
+
+@pytest.mark.parametrize(
+    "field",
+    sorted(observer.POLICY_FIELDS - {"maxFutureSkewSeconds"}),
+)
+@pytest.mark.parametrize("value", [None, True, "5", 0])
+def test_every_caller_policy_bound_requires_a_positive_integer(field, value):
+    plan = json.loads(plan_bytes())
+    plan["policy"][field] = value
+    raw = encoded(plan)
+    with pytest.raises(observer.ObserverError):
+        observer.validate_inputs(raw, review(raw), now=NOW)
+
+
+def test_authorization_reviewer_scope_and_review_window_are_bound():
+    for field, value in (
+        ("approvedReviewer", "different reviewer"),
+        ("approvedScopeSha256", "sha256:" + "0" * 64),
+        ("reviewStartsAt", "2026-09-26T12:05:00Z"),
+    ):
+        plan = json.loads(plan_bytes())
+        plan["authorization"][field] = value
+        raw = encoded(plan)
+        with pytest.raises(observer.ObserverError):
+            observer.observe(raw, review(raw), FakeTransport(), now=NOW)
+
+
+@pytest.mark.parametrize(
+    ("method", "url", "follow_redirects"),
+    [
+        ("POST", "https://staging.token.place/", False),
+        ("GET", "http://staging.token.place/", False),
+        ("GET", "https://staging.token.place/other", False),
+        ("GET", "https://staging.token.place/@evil", False),
+        ("GET", "https://staging.token.place/", True),
+    ],
+)
+def test_urllib_transport_direct_use_rejects_noncanonical_requests(method, url, follow_redirects):
+    transport = observer.UrllibTransport()
+    with pytest.raises(observer.ObserverError, match="transport-contract"):
+        transport.request(method=method, url=url, timeout=1, follow_redirects=follow_redirects)
+
+
+def test_urllib_transport_redacts_underlying_failures_without_retry():
+    class FailingOpener:
+        def __init__(self):
+            self.calls = 0
+
+        def open(self, request, timeout):  # noqa: ANN001, ANN201, ARG002
+            self.calls += 1
+            raise urllib.error.URLError("private host detail")
+
+    transport = observer.UrllibTransport()
+    transport._opener = FailingOpener()
+    with pytest.raises(observer.ObserverError, match="^transport-failure$") as caught:
+        transport.request(
+            method="GET",
+            url="https://staging.token.place/",
+            timeout=1,
+            follow_redirects=False,
+        )
+    assert "private" not in str(caught.value)
+    assert transport._opener.calls == 1
 
 
 def test_missed_deadline_signal_names_escalation_without_performing_cleanup():
