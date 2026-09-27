@@ -660,7 +660,10 @@ def observe(
             if status != EXPECTED[path]:
                 outcome, reason = "failed", "unexpected-status"
                 break
-        except (KeyboardInterrupt, TimeoutError, ConnectionError, OSError, ObserverError):
+        except KeyboardInterrupt:
+            outcome, reason = "failed", "observation-interrupted"
+            break
+        except Exception:
             outcome, reason = "failed", "observation-interrupted"
             break
     completed = _observation_time(now)

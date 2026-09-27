@@ -133,6 +133,16 @@ def test_timeout_dns_tls_transport_and_interruption_are_redacted_and_not_retried
     assert "private" not in json.dumps(result)
 
 
+def test_ordinary_transport_exception_is_redacted_and_not_retried():
+    result, transport = run((RuntimeError("sensitive transport detail"),))
+
+    assert result["outcome"] == "failed"
+    assert result["reason"] == "observation-interrupted"
+    assert result["cleanupState"] == "cleanup-pending"
+    assert len(transport.calls) == 1
+    assert "sensitive transport detail" not in json.dumps(result)
+
+
 @pytest.mark.parametrize("status", [None, True, "429", 99, 600])
 def test_malformed_transport_result_fails_closed(status):
     result, _ = run((status,))
