@@ -1,0 +1,300 @@
+from __future__ import annotations
+
+import hashlib
+import importlib.util
+import json
+import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+from test_tokenplace_static_429_plan import CONFIGURATION, IDENTITY, valid_input  # noqa: E402
+
+PLAN_SPEC = importlib.util.spec_from_file_location(
+    "tokenplace_static_429_plan", ROOT / "scripts/tokenplace_static_429_plan.py"
+)
+assert PLAN_SPEC and PLAN_SPEC.loader
+planner = importlib.util.module_from_spec(PLAN_SPEC)
+PLAN_SPEC.loader.exec_module(planner)
+SPEC = importlib.util.spec_from_file_location(
+    "tokenplace_static_429_observer", ROOT / "scripts/tokenplace_static_429_observer.py"
+)
+assert SPEC and SPEC.loader
+observer = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(observer)
+NOW = datetime(2026, 9, 26, 12, 5, tzinfo=timezone.utc)
+
+
+def encoded(value) -> bytes:  # noqa: ANN001
+    return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+
+
+def digest(value: bytes) -> str:
+    return "sha256:" + hashlib.sha256(value).hexdigest()
+
+
+def plan_bytes() -> bytes:
+    value = planner.build_plan(
+        json.dumps(valid_input(), separators=(",", ":")).encode(),
+        IDENTITY,
+        CONFIGURATION,
+        now=NOW,
+    )
+    return encoded(value)
+
+
+def review(plan: bytes, **updates) -> bytes:  # noqa: ANN003
+    value = {
+        "schemaVersion": 1,
+        "lifecycle": "authorized-static-emulation",
+        "reviewer": "second reviewer",
+        "decision": "approved",
+        "declaredAt": "2026-09-26T12:04:00Z",
+        "planSha256": digest(plan),
+        "ruleIdentitySha256": digest(IDENTITY),
+        "retentionSeconds": 86400,
+        "retentionEndsAt": "2026-09-27T12:04:00Z",
+    }
+    value.update(updates)
+    return encoded(value)
+
+
+class FakeTransport:
+    def __init__(self, results=(429, 429, 200, 200)):
+        self.results = iter(results)
+        self.calls = []
+
+    def request(self, **kwargs):  # noqa: ANN003, ANN201
+        self.calls.append(kwargs)
+        result = next(self.results)
+        if isinstance(result, BaseException):
+            raise result
+        return result
+
+
+def run(results=(429, 429, 200, 200)):
+    plan = plan_bytes()
+    transport = FakeTransport(results)
+    return observer.observe(plan, review(plan), transport, now=NOW), transport
+
+
+def test_exact_tuple_uses_four_fixed_one_shot_gets_and_safe_evidence():
+    result, transport = run()
+    assert result["outcome"] == "success"
+    assert [route["status"] for route in result["routes"]] == [429, 429, 200, 200]
+    assert transport.calls == [
+        {
+            "method": "GET",
+            "url": f"https://staging.token.place{path}",
+            "timeout": 5,
+            "follow_redirects": False,
+        }
+        for path in ("/", "/api/v1/meta", "/livez", "/healthz")
+    ]
+    assert result["quotaDrillEvidence"] is False
+    assert result["originAttributed"] is False
+    assert result["cleanupState"] == "cleanup-pending"
+    assert result["cleanupRequired"]["observerPerformedCleanup"] is False
+
+
+@pytest.mark.parametrize("statuses", [(200,), (429, 200), (429, 429, 429), (429, 429, 200, 429)])
+def test_every_unexpected_status_stops_without_fabricating_unattempted_statuses(statuses):
+    result, transport = run(statuses)
+    assert result["outcome"] == "failed"
+    assert len(transport.calls) == len(statuses)
+    assert [route["observed"] for route in result["routes"]] == [
+        index < len(statuses) for index in range(4)
+    ]
+    assert all(route["status"] is None for route in result["routes"][len(statuses) :])
+
+
+@pytest.mark.parametrize("status", [300, 301, 302, 307, 308, 399])
+def test_redirects_are_rejected_and_not_followed(status):
+    result, transport = run((status,))
+    assert result["reason"] == "redirect-rejected"
+    assert len(transport.calls) == 1
+    assert transport.calls[0]["follow_redirects"] is False
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [TimeoutError("private"), ConnectionError("private"), OSError("private"), KeyboardInterrupt()],
+)
+def test_timeout_dns_tls_transport_and_interruption_are_redacted_and_not_retried(failure):
+    result, transport = run((failure,))
+    assert result["outcome"] == "failed"
+    assert result["reason"] == "observation-interrupted"
+    assert len(transport.calls) == 1
+    assert "private" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("status", [None, True, "429", 99, 600])
+def test_malformed_transport_result_fails_closed(status):
+    result, _ = run((status,))
+    assert result["outcome"] == "failed"
+    assert result["routes"][0]["status"] is None
+
+
+@pytest.mark.parametrize(
+    ("section", "field", "replacement"),
+    [
+        ("target", "scheme", "http"),
+        ("target", "authority", "token.place"),
+        ("target", "authority", "user@staging.token.place"),
+        ("target", "authority", "staging.token.place:443"),
+        ("target", "authority", "staging.token.place?x=1"),
+        ("target", "authority", "staging.token.place#x"),
+        ("target", "method", "POST"),
+        ("target", "emulationPaths", ["/", "/api/v1/meta/"]),
+        ("target", "healthControlPaths", ["/livez"]),
+        ("target", "followRedirects", True),
+        ("authorization", "lifecycle", "quota-exhaustion"),
+    ],
+)
+def test_plan_target_and_lifecycle_drift_fail_before_transport(section, field, replacement):
+    plan = json.loads(plan_bytes())
+    plan[section][field] = replacement
+    transport = FakeTransport()
+    raw = encoded(plan)
+    with pytest.raises(observer.ObserverError):
+        observer.observe(raw, review(raw), transport, now=NOW)
+    assert transport.calls == []
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {"lifecycle": "quota-exhaustion"},
+        {"decision": "rejected"},
+        {"reviewer": "independent reviewer"},
+        {"declaredAt": "2026-09-26T12:06:00Z"},
+        {"declaredAt": "2026-09-25T12:04:00Z"},
+        {"planSha256": "sha256:" + "0" * 64},
+        {"ruleIdentitySha256": "sha256:" + "0" * 64},
+        {"retentionSeconds": 2},
+        {"retentionEndsAt": "2026-09-27T12:03:59Z"},
+    ],
+)
+def test_second_review_must_be_current_distinct_and_bound(updates):
+    plan = plan_bytes()
+    with pytest.raises(observer.ObserverError):
+        observer.observe(plan, review(plan, **updates), FakeTransport(), now=NOW)
+
+
+def test_duplicate_unknown_and_privacy_fields_are_rejected():
+    plan = plan_bytes()
+    good = json.loads(review(plan))
+    for bad in (
+        review(plan)[:-1] + b',"reviewer":"duplicate"}',
+        encoded(good | {"unknown": 1}),
+        encoded(good | {"responseBody": "secret"}),
+    ):
+        with pytest.raises(observer.ObserverError):
+            observer.validate_inputs(plan, bad, now=NOW)
+
+
+@pytest.mark.parametrize(
+    "now",
+    [
+        datetime(2026, 9, 26, 11, 59, tzinfo=timezone.utc),
+        datetime(2026, 9, 26, 12, 20, tzinfo=timezone.utc),
+    ],
+)
+def test_future_or_expired_plan_fails_closed(now):
+    plan = plan_bytes()
+    with pytest.raises(observer.ObserverError):
+        observer.observe(plan, review(plan), FakeTransport(), now=now)
+
+
+def test_abandonment_is_never_started_failed_and_cleanup_pending():
+    plan = plan_bytes()
+    result = observer.abandon(plan, review(plan), now=NOW)
+    assert result["outcome"] == "failed"
+    assert result["reason"] == "abandoned"
+    assert all(
+        route == {"path": path, "observed": False, "status": None}
+        for route, path in zip(result["routes"], ("/", "/api/v1/meta", "/livez", "/healthz"))
+    )
+    assert result["cleanupRequired"]["required"] is True
+
+
+def cleanup(result, **updates):  # noqa: ANN003
+    proof = b"privacy-safe independent absence proof"
+    value = {
+        "schemaVersion": 1,
+        "reviewer": "cleanup reviewer",
+        "decision": "absent",
+        "declaredAt": "2026-09-26T12:06:00Z",
+        "ruleIdentitySha256": digest(IDENTITY),
+        "cleanupProofSha256": digest(proof),
+    }
+    value.update(updates)
+    return observer.attest_cleanup(result, encoded(value), proof, now=NOW + timedelta(minutes=2))
+
+
+def test_identity_bound_cleanup_closes_obligation_without_rewriting_failed_outcome():
+    failed, _ = run((500,))
+    closed = cleanup(failed)
+    assert failed["cleanupState"] == "cleanup-pending"
+    assert closed["cleanupState"] == "cleanup-proven"
+    assert closed["outcome"] == "failed"
+    assert closed["routes"] == failed["routes"]
+    assert closed["cleanupAttestation"]["authenticated"] is False
+    assert closed["cleanupAttestation"]["independentlyProven"] is False
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {"reviewer": "second reviewer"},
+        {"decision": "present"},
+        {"declaredAt": "2026-09-26T12:20:00Z"},
+        {"declaredAt": "2026-09-26T11:00:00Z"},
+        {"ruleIdentitySha256": "sha256:" + "0" * 64},
+        {"cleanupProofSha256": "sha256:" + "0" * 64},
+    ],
+)
+def test_cleanup_proof_must_be_fresh_independent_and_identity_bound(updates):
+    result, _ = run()
+    with pytest.raises(observer.ObserverError):
+        cleanup(result, **updates)
+
+
+def test_missed_deadline_signal_names_escalation_without_performing_cleanup():
+    plan = json.loads(plan_bytes())
+    plan["authorization"]["removalDeadline"] = "2026-09-26T12:05:00Z"
+    # Validation prevents starting at the deadline; the local signal still handles a run
+    # whose request completes after its preflight validation.
+    validated, second = observer.validate_inputs(plan_bytes(), review(plan_bytes()), now=NOW)
+    signal = observer._signal(validated, NOW)  # noqa: SLF001 - focused contract test
+    assert signal["deadlineMissed"] is False
+    signal = observer._signal(validated, datetime(2026, 9, 26, 12, 21, tzinfo=timezone.utc))
+    assert signal["escalationRequired"] is True
+    assert signal["escalation"] == "staging incident channel"
+    assert signal["observerPerformedCleanup"] is False
+
+
+def test_module_has_no_mutation_or_quota_runner_surface_and_planner_is_unchanged():
+    source = (ROOT / "scripts/tokenplace_static_429_observer.py").read_text()
+    lowered = source.lower()
+    for forbidden in (
+        "cloudflare",
+        "kubernetes",
+        "servicemonitor",
+        "deployment",
+        "registry",
+        "subprocess",
+    ):
+        assert forbidden not in lowered
+    assert "tokenplace_incident_drill" not in source
+    assert (
+        "tokenplace_static_429_observer"
+        not in (ROOT / "scripts/tokenplace_incident_drill.py").read_text()
+    )
+    assert (
+        hashlib.sha256((ROOT / "scripts/tokenplace_static_429_plan.py").read_bytes()).hexdigest()
+        == "3c3ee3a00387d6bb11dfb3d5605e3635c41ca7534208a1689991bee7f79522bb"
+    )
