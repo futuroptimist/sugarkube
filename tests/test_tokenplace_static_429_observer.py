@@ -410,6 +410,28 @@ def test_cleanup_rejects_malformed_nested_record_even_with_recomputed_digest():
         cleanup(result)
 
 
+def test_cleanup_rejects_inconsistent_success_even_with_recomputed_digest():
+    result, _ = run()
+    result["routes"][0]["status"] = 200
+    unsigned = dict(result)
+    unsigned.pop("observationSha256")
+    result["observationSha256"] = digest(encoded(unsigned))
+
+    with pytest.raises(observer.ObserverError, match="observation-record-invalid"):
+        cleanup(result)
+
+
+def test_cleanup_rejects_failed_record_using_success_reason():
+    result, _ = run((500,))
+    result["reason"] = "exact-status-tuple"
+    unsigned = dict(result)
+    unsigned.pop("observationSha256")
+    result["observationSha256"] = digest(encoded(unsigned))
+
+    with pytest.raises(observer.ObserverError, match="observation-record-invalid"):
+        cleanup(result)
+
+
 def test_second_review_artifacts_are_bound_alongside_retention():
     plan = plan_bytes()
     declaration = review(plan)

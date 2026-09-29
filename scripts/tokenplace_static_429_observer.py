@@ -560,6 +560,14 @@ def _validate_observation_record(record: dict[str, Any]) -> None:
             )
         ):
             raise ObserverError("observation-record-invalid")
+    if record["outcome"] == "success":
+        if record["reason"] != "exact-status-tuple" or any(
+            route != {"path": path, "observed": True, "status": EXPECTED[path]}
+            for path, route in zip(ROUTES, record["routes"])
+        ):
+            raise ObserverError("observation-record-invalid")
+    elif record["reason"] == "exact-status-tuple":
+        raise ObserverError("observation-record-invalid")
     signal = _exact(
         record["cleanupRequired"],
         {
