@@ -83,6 +83,50 @@ def run(results=(429, 429, 200, 200)):
     return observer.observe(plan, review(plan), transport, now=NOW), transport
 
 
+@pytest.mark.parametrize("value", [True, 1.0])
+@pytest.mark.parametrize("document", ["plan", "review"])
+def test_schema_versions_require_exact_integers_before_transport(document, value):
+    plan = plan_bytes()
+    declaration = review(plan)
+    if document == "plan":
+        changed = json.loads(plan)
+        changed["schemaVersion"] = value
+        plan = encoded(changed)
+        declaration = review(plan)
+    else:
+        changed = json.loads(declaration)
+        changed["schemaVersion"] = value
+        declaration = encoded(changed)
+    transport = FakeTransport()
+
+    with pytest.raises(observer.ObserverError, match="schema-version"):
+        observer.observe(plan, declaration, transport, now=NOW)
+
+    assert transport.calls == []
+
+
+def test_boolean_future_skew_is_rejected_before_transport():
+    plan = json.loads(plan_bytes())
+    plan["policy"]["maxFutureSkewSeconds"] = False
+    raw = encoded(plan)
+    transport = FakeTransport()
+
+    with pytest.raises(observer.ObserverError, match="policy-drift"):
+        observer.observe(raw, review(raw), transport, now=NOW)
+
+    assert transport.calls == []
+
+
+def test_list_review_decision_is_rejected_before_transport():
+    plan = plan_bytes()
+    transport = FakeTransport()
+
+    with pytest.raises(observer.ObserverError, match="second-review-invalid"):
+        observer.observe(plan, review(plan, decision=["approved"]), transport, now=NOW)
+
+    assert transport.calls == []
+
+
 def test_exact_tuple_uses_four_fixed_one_shot_gets_and_safe_evidence():
     result, transport = run()
     assert result["outcome"] == "success"
@@ -408,6 +452,37 @@ def test_cleanup_rejects_malformed_nested_record_even_with_recomputed_digest():
     result["observationSha256"] = digest(encoded(unsigned))
     with pytest.raises(observer.ObserverError, match="observation-record-invalid"):
         cleanup(result)
+
+
+@pytest.mark.parametrize("value", [True, 1.0])
+def test_cleanup_rejects_non_integer_record_schema_version(value):
+    result, _ = run()
+    result["schemaVersion"] = value
+    unsigned = dict(result)
+    unsigned.pop("observationSha256")
+    result["observationSha256"] = digest(encoded(unsigned))
+
+    with pytest.raises(observer.ObserverError, match="observation-record-invalid"):
+        cleanup(result)
+
+
+def test_cleanup_rejects_list_outcome_as_observer_error():
+    result, _ = run()
+    result["outcome"] = ["success"]
+    unsigned = dict(result)
+    unsigned.pop("observationSha256")
+    result["observationSha256"] = digest(encoded(unsigned))
+
+    with pytest.raises(observer.ObserverError, match="observation-record-invalid"):
+        cleanup(result)
+
+
+@pytest.mark.parametrize("value", [False, 1.0])
+def test_cleanup_attestation_schema_version_requires_exact_integer(value):
+    result, _ = run()
+
+    with pytest.raises(observer.ObserverError, match="cleanup-attestation-invalid"):
+        cleanup(result, schemaVersion=value)
 
 
 def test_cleanup_rejects_inconsistent_success_even_with_recomputed_digest():

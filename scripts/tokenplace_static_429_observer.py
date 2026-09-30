@@ -300,7 +300,12 @@ def validate_inputs(
     plan = _exact(_load(plan_raw), PLAN_FIELDS)
     review = _exact(_load(review_raw), REVIEW_FIELDS)
     current = _now(now)
-    if plan["schemaVersion"] != 1 or review["schemaVersion"] != SCHEMA_VERSION:
+    if (
+        type(plan["schemaVersion"]) is not int
+        or plan["schemaVersion"] != 1
+        or type(review["schemaVersion"]) is not int
+        or review["schemaVersion"] != SCHEMA_VERSION
+    ):
         raise ObserverError("schema-version")
     if (
         plan["planType"],
@@ -327,7 +332,11 @@ def validate_inputs(
     policy = _exact(plan["policy"], POLICY_FIELDS)
     if authorization.get("lifecycle") != LIFECYCLE:
         raise ObserverError("lifecycle-invalid")
-    if not isinstance(declaration, dict) or declaration.get("decision") != "approved":
+    if (
+        not isinstance(declaration, dict)
+        or not isinstance(declaration.get("decision"), str)
+        or declaration["decision"] != "approved"
+    ):
         raise ObserverError("rule-review-invalid")
     if (
         declaration.get("authenticated") is not False
@@ -358,7 +367,8 @@ def validate_inputs(
         if type(policy.get(field)) is not int or policy[field] < 1:
             raise ObserverError("policy-drift")
     if (
-        policy["maxFutureSkewSeconds"] != 0
+        type(policy["maxFutureSkewSeconds"]) is not int
+        or policy["maxFutureSkewSeconds"] != 0
         or policy["maxEvidenceAgeSeconds"] > policy["approvedEvidenceAgeSeconds"]
         or policy["timeoutSeconds"] > policy["approvedTimeoutSeconds"]
         or policy["retentionSeconds"] > policy["approvedRetentionSeconds"]
@@ -398,8 +408,10 @@ def validate_inputs(
         raise ObserverError("plan-expired")
     if not allow_expired and (current >= removal_deadline or current >= review_ends):
         raise ObserverError("plan-expired")
-    if review["lifecycle"] != LIFECYCLE or review["decision"] not in (
-        {"approved", "rejected"} if allow_rejected else {"approved"}
+    if (
+        review["lifecycle"] != LIFECYCLE
+        or not isinstance(review["decision"], str)
+        or review["decision"] not in ({"approved", "rejected"} if allow_rejected else {"approved"})
     ):
         raise ObserverError("second-review-invalid")
     reviewer = _safe_name(review["reviewer"])
@@ -497,9 +509,11 @@ def _validate_observation_record(record: dict[str, Any]) -> None:
     """Validate the canonical pending record before attaching cleanup evidence."""
     _exact(record, RECORD_FIELDS)
     if (
-        record["schemaVersion"] != SCHEMA_VERSION
+        type(record["schemaVersion"]) is not int
+        or record["schemaVersion"] != SCHEMA_VERSION
         or record["evidenceType"] != "static-429-boundary-observation"
         or record["lifecycle"] != LIFECYCLE
+        or not isinstance(record["outcome"], str)
         or record["outcome"] not in {"success", "failed"}
         or not isinstance(record["reason"], str)
         or record["cleanupState"] != "cleanup-pending"
@@ -713,7 +727,12 @@ def attest_cleanup(
     ):
         raise ObserverError("observation-record-invalid")
     attestation = _exact(_load(attestation_raw), CLEANUP_FIELDS)
-    if attestation["schemaVersion"] != SCHEMA_VERSION or attestation["decision"] != "absent":
+    if (
+        type(attestation["schemaVersion"]) is not int
+        or attestation["schemaVersion"] != SCHEMA_VERSION
+        or not isinstance(attestation["decision"], str)
+        or attestation["decision"] != "absent"
+    ):
         raise ObserverError("cleanup-attestation-invalid")
     if not proof or attestation["cleanupProofSha256"] != _digest(proof):
         raise ObserverError("cleanup-proof-mismatch")
