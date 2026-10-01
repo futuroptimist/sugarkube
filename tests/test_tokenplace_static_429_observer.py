@@ -615,3 +615,190 @@ def test_module_has_no_mutation_or_quota_runner_surface_and_planner_is_unchanged
         hashlib.sha256((ROOT / "scripts/tokenplace_static_429_plan.py").read_bytes()).hexdigest()
         == "3c3ee3a00387d6bb11dfb3d5605e3635c41ca7534208a1689991bee7f79522bb"
     )
+
+
+def test_redirect_handler_and_urllib_response_contract(monkeypatch):
+    assert observer.RejectRedirects().redirect_request(None, None, None, None, None, None) is None
+
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *unused):
+            return None
+
+    class Opener:
+        def open(self, request, timeout):  # noqa: ANN001, ANN201, ARG002
+            return Response()
+
+    transport = observer.UrllibTransport()
+    transport._opener = Opener()
+    assert (
+        transport.request(
+            method="GET",
+            url="https://staging.token.place/healthz",
+            timeout=1,
+            follow_redirects=False,
+        )
+        == 200
+    )
+
+    error = urllib.error.HTTPError("safe", 429, "expected", {}, None)
+    monkeypatch.setattr(
+        transport._opener, "open", lambda *args, **kwargs: (_ for _ in ()).throw(error)
+    )
+    assert (
+        transport.request(
+            method="GET",
+            url="https://staging.token.place/",
+            timeout=1,
+            follow_redirects=False,
+        )
+        == 429
+    )
+
+
+@pytest.mark.parametrize(
+    ("raw", "reason"),
+    [
+        (b"[]", "schema-mismatch"),
+        (b'"unterminated', "malformed-input"),
+    ],
+)
+def test_json_loader_fails_closed_for_non_object_or_malformed_input(raw, reason):
+    with pytest.raises(observer.ObserverError, match=reason):
+        observer._load(raw)
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["not-a-time", "2026-09-26T12:05:00+00:00", "2026-09-26T12:05:00.1Z"],
+)
+def test_timestamp_parser_requires_canonical_utc_seconds(value):
+    with pytest.raises(observer.ObserverError, match="timestamp-invalid"):
+        observer._time(value)
+
+
+def test_clock_requires_utc_without_fractional_seconds():
+    for value in (
+        NOW.replace(tzinfo=None),
+        NOW.replace(microsecond=1),
+    ):
+        with pytest.raises(observer.ObserverError, match="clock-invalid"):
+            observer._observation_time(value)
+
+
+@pytest.mark.parametrize(
+    ("section", "field", "value", "reason"),
+    [
+        (None, "planType", "different", "plan-kind"),
+        ("target", "authority", "different.example", "target-drift"),
+        (None, "expectedStatuses", {}, "status-contract-drift"),
+        ("reviewerDeclaration", "decision", "rejected", "rule-review-invalid"),
+        ("reviewerDeclaration", "authenticated", True, "declaration-overclaim"),
+        (None, "inputSha256", "bad", "digest-invalid"),
+        (
+            "authorization",
+            "approvedRuleIdentitySha256",
+            "sha256:" + "0" * 64,
+            "rule-identity-mismatch",
+        ),
+        ("authorization", "approvedReviewer", "different", "rule-reviewer-mismatch"),
+    ],
+)
+def test_preflight_reports_specific_contract_drift(section, field, value, reason):
+    plan = json.loads(plan_bytes())
+    (plan if section is None else plan[section])[field] = value
+    raw = encoded(plan)
+    with pytest.raises(observer.ObserverError, match=reason):
+        observer.validate_inputs(raw, review(raw), now=NOW)
+
+
+def test_cleanup_rejects_wrong_route_count_and_invalid_names():
+    result, _ = run()
+    for mutate in (
+        lambda record: record["routes"].pop(),
+        lambda record: record.__setitem__("ruleScopeReviewer", " bad"),
+    ):
+        changed = json.loads(json.dumps(result))
+        mutate(changed)
+        changed["observationSha256"] = digest(
+            encoded({key: value for key, value in changed.items() if key != "observationSha256"})
+        )
+        with pytest.raises(
+            observer.ObserverError, match="observation-record-invalid|named-value-invalid"
+        ):
+            cleanup(changed)
+
+
+def test_completion_after_deadline_converts_success_to_failure(monkeypatch):
+    instants = iter([NOW] * 5 + [datetime(2026, 9, 26, 12, 21, tzinfo=timezone.utc)])
+    monkeypatch.setattr(observer, "_observation_time", lambda unused: next(instants))
+    plan = plan_bytes()
+    result = observer.observe(plan, review(plan), FakeTransport(), now=None)
+    assert result["outcome"] == "failed"
+    assert result["reason"] == "authorization-expired"
+
+
+def test_cleanup_rejects_invalid_record_policy_even_with_valid_digest():
+    result, _ = run()
+    result["evidencePolicy"]["freshnessSeconds"] = 0
+    result["observationSha256"] = digest(
+        encoded({key: value for key, value in result.items() if key != "observationSha256"})
+    )
+    with pytest.raises(observer.ObserverError, match="observation-record-invalid"):
+        cleanup(result)
+
+
+def test_record_writer_is_atomic_and_refuses_overwrite(tmp_path):
+    path = tmp_path / "record.json"
+    observer._write_record(str(path), {"outcome": "failed"})
+    assert json.loads(path.read_text()) == {"outcome": "failed"}
+    with pytest.raises(FileExistsError):
+        observer._write_record(str(path), {"outcome": "success"})
+    assert not list(tmp_path.glob("*.tmp.*"))
+
+
+def test_cli_returns_failed_outcome_status_and_redacts_errors(tmp_path, capsys, monkeypatch):
+    plan = plan_bytes()
+    plan_path = tmp_path / "plan.json"
+    review_path = tmp_path / "review.json"
+    plan_path.write_bytes(plan)
+    review_path.write_bytes(review(plan))
+    monkeypatch.setattr(observer, "abandon", lambda *args, **kwargs: {"outcome": "failed"})
+    assert (
+        observer.main(
+            [
+                "--plan",
+                str(plan_path),
+                "--review",
+                str(review_path),
+                "--output",
+                "-",
+                "--acknowledge-cleanup",
+                "--abandon",
+            ]
+        )
+        == 1
+    )
+    monkeypatch.setattr(
+        observer, "abandon", lambda *args, **kwargs: (_ for _ in ()).throw(OSError("secret"))
+    )
+    assert (
+        observer.main(
+            [
+                "--plan",
+                str(plan_path),
+                "--review",
+                str(review_path),
+                "--output",
+                "-",
+                "--acknowledge-cleanup",
+                "--abandon",
+            ]
+        )
+        == 2
+    )
+    assert "secret" not in capsys.readouterr().err
