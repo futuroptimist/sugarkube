@@ -50,6 +50,7 @@ QUOTA_STIMULUS_LIMITS = {
     "request_timeout_seconds": 3,
     "retries": 0,
 }
+QUOTA_STIMULUS_USER_AGENT = "sugarkube-tokenplace-quota-drill/1.0"
 QUOTA_EVIDENCE_FRESHNESS_SECONDS = 30
 EXECUTION_OPERATIONS = ("--execute-stage", "--rollback-stage", "--cleanup")
 GATE_EVIDENCE_MAX_BYTES = 64 * 1024
