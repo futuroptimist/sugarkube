@@ -754,6 +754,11 @@ def test_timestamp_parser_requires_canonical_utc_seconds(value):
         observer._time(value)
 
 
+def test_timestamp_parser_sanitizes_invalid_calendar_values_ending_in_z():
+    with pytest.raises(observer.ObserverError, match="^timestamp-invalid$"):
+        observer._time("2026-02-30T12:05:00Z")
+
+
 def test_clock_requires_utc_without_fractional_seconds():
     for value in (
         NOW.replace(tzinfo=None),
@@ -789,6 +794,48 @@ def test_preflight_reports_specific_contract_drift(section, field, value, reason
         observer.validate_inputs(raw, review(raw), now=NOW)
 
 
+@pytest.mark.parametrize(
+    ("mutate", "now", "reason"),
+    [
+        (
+            lambda plan: plan["authorization"].__setitem__(
+                "reviewStartsAt", "2026-09-26T12:46:00Z"
+            ),
+            NOW,
+            "authorization-window-invalid",
+        ),
+        (
+            lambda plan: plan["authorization"].__setitem__("expiresAt", "2026-09-26T14:00:00Z"),
+            NOW,
+            "authorization-window-invalid",
+        ),
+        (
+            lambda plan: None,
+            datetime(2026, 9, 26, 11, 54, tzinfo=timezone.utc),
+            "plan-evidence-future",
+        ),
+        (lambda plan: None, datetime(2026, 9, 26, 12, 20, tzinfo=timezone.utc), "plan-expired"),
+        (
+            lambda plan: plan["authorization"].__setitem__(
+                "removalDeadline", "2026-09-26T12:04:00Z"
+            ),
+            NOW,
+            "plan-expired",
+        ),
+    ],
+)
+def test_direct_validation_rejects_invalid_authorization_before_transport(mutate, now, reason):
+    plan = json.loads(plan_bytes())
+    mutate(plan)
+    raw = encoded(plan)
+    transport = FakeTransport()
+
+    with pytest.raises(observer.ObserverError, match=f"^{reason}$"):
+        observer.validate_inputs(raw, review(raw), now=now)
+
+    assert transport.calls == []
+
+
 def test_cleanup_rejects_wrong_route_count_and_invalid_names():
     result, _ = run()
     for mutate in (
@@ -804,6 +851,35 @@ def test_cleanup_rejects_wrong_route_count_and_invalid_names():
             observer.ObserverError, match="observation-record-invalid|named-value-invalid"
         ):
             cleanup(changed)
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda record: (
+            record["evidencePolicy"].__setitem__("secondReviewSha256", "invalid"),
+            record["secondReviewerDeclaration"].__setitem__("sha256", "invalid"),
+        ),
+        lambda record: record["cleanupRequired"].__setitem__("required", False),
+    ],
+)
+def test_cleanup_rejects_malformed_digests_and_signals_with_recomputed_hash(mutate):
+    result, _ = run()
+    mutate(result)
+    result["observationSha256"] = digest(
+        encoded({key: value for key, value in result.items() if key != "observationSha256"})
+    )
+
+    with pytest.raises(observer.ObserverError, match="^observation-record-invalid$"):
+        cleanup(result)
+
+
+def test_cleanup_rejects_structurally_valid_tampering_without_a_matching_hash():
+    result, _ = run()
+    result["reviewedConfigurationSha256"] = "sha256:" + "0" * 64
+
+    with pytest.raises(observer.ObserverError, match="^observation-record-invalid$"):
+        cleanup(result)
 
 
 def test_completion_after_deadline_converts_success_to_failure(monkeypatch):
@@ -832,6 +908,19 @@ def test_record_writer_is_atomic_and_refuses_overwrite(tmp_path):
     with pytest.raises(FileExistsError):
         observer._write_record(str(path), {"outcome": "success"})
     assert not list(tmp_path.glob("*.tmp.*"))
+
+
+def test_record_writer_tolerates_a_temporary_file_removed_during_cleanup(tmp_path, monkeypatch):
+    path = tmp_path / "record.json"
+
+    def remove_temporary_then_fail(temporary, destination):  # noqa: ANN001, ARG001
+        Path(temporary).unlink()
+        raise OSError("simulated link failure")
+
+    monkeypatch.setattr(observer.os, "link", remove_temporary_then_fail)
+    with pytest.raises(OSError, match="simulated link failure"):
+        observer._write_record(str(path), {"outcome": "failed"})
+    assert not path.exists()
 
 
 def test_cli_returns_failed_outcome_status_and_redacts_errors(tmp_path, capsys, monkeypatch):
