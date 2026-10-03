@@ -697,7 +697,9 @@ def observe(
 def abandon(plan_raw: bytes, review_raw: bytes, *, now: datetime | None = None) -> dict[str, Any]:
     """Record a never-started or abandoned run while still requiring cleanup."""
     current = _now(now)
-    plan, review = validate_inputs(plan_raw, review_raw, now=current, allow_expired=True)
+    plan, review = validate_inputs(
+        plan_raw, review_raw, now=current, allow_expired=True, allow_rejected=True
+    )
     return _record(
         plan_raw,
         review_raw,
@@ -794,6 +796,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--plan", required=True, help="immutable offline plan JSON")
     parser.add_argument("--review", required=True, help="second-reviewer declaration JSON")
     parser.add_argument("--output", required=True, help="new evidence path, or - for stdout")
+    parser.add_argument("--lifecycle", required=True, choices=("authorized-static-emulation",))
     parser.add_argument("--acknowledge-cleanup", action="store_true", required=True)
     parser.add_argument(
         "--abandon", action="store_true", help="record a run without network access"

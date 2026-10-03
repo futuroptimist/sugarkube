@@ -300,6 +300,15 @@ def test_expired_abandonment_still_emits_overdue_cleanup_signal():
     assert result["cleanupRequired"]["escalationRequired"] is True
 
 
+def test_rejected_review_abandonment_emits_cleanup_without_transport():
+    plan = plan_bytes()
+    result = observer.abandon(plan, review(plan, decision="rejected"), now=NOW)
+    assert result["outcome"] == "failed"
+    assert result["reason"] == "abandoned"
+    assert result["cleanupState"] == "cleanup-pending"
+    assert all(route["observed"] is False for route in result["routes"])
+
+
 def test_reviewer_names_cannot_use_outer_whitespace_to_evade_identity_check():
     plan = plan_bytes()
     with pytest.raises(observer.ObserverError, match="named-value-invalid"):
@@ -357,8 +366,70 @@ def test_cli_help_exposes_standalone_lifecycle_options():
         text=True,
     )
     assert completed.returncode == 0
+    assert "--lifecycle" in completed.stdout
+    assert "authorized-static-emulation" in completed.stdout
     assert "--acknowledge-cleanup" in completed.stdout
     assert "--abandon" in completed.stdout
+
+
+@pytest.mark.parametrize("lifecycle", [None, "quota-exhaustion"])
+def test_cli_requires_exact_lifecycle_before_observation(tmp_path, monkeypatch, lifecycle):
+    plan = plan_bytes()
+    plan_path = tmp_path / "plan.json"
+    review_path = tmp_path / "review.json"
+    plan_path.write_bytes(plan)
+    review_path.write_bytes(review(plan))
+    called = False
+
+    def unexpected_observe(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        nonlocal called
+        called = True
+        raise AssertionError("observation must not start")
+
+    monkeypatch.setattr(observer, "observe", unexpected_observe)
+    arguments = [
+        "--plan",
+        str(plan_path),
+        "--review",
+        str(review_path),
+        "--output",
+        "-",
+        "--acknowledge-cleanup",
+    ]
+    if lifecycle is not None:
+        arguments.extend(("--lifecycle", lifecycle))
+
+    with pytest.raises(SystemExit, match="2"):
+        observer.main(arguments)
+    assert called is False
+
+
+def test_cli_observes_with_explicit_lifecycle(tmp_path, monkeypatch):
+    plan = plan_bytes()
+    plan_path = tmp_path / "plan.json"
+    review_path = tmp_path / "review.json"
+    plan_path.write_bytes(plan)
+    review_path.write_bytes(review(plan))
+    monkeypatch.setattr(observer, "observe", lambda *args, **kwargs: {"outcome": "success"})
+    written = {}
+    monkeypatch.setattr(observer, "_write_record", lambda path, record: written.update(record))
+
+    status = observer.main(
+        [
+            "--plan",
+            str(plan_path),
+            "--review",
+            str(review_path),
+            "--output",
+            "-",
+            "--lifecycle",
+            "authorized-static-emulation",
+            "--acknowledge-cleanup",
+        ]
+    )
+
+    assert status == 0
+    assert written == {"outcome": "success"}
 
 
 def test_cli_abandon_writes_evidence_without_network(tmp_path):
@@ -376,6 +447,8 @@ def test_cli_abandon_writes_evidence_without_network(tmp_path):
             str(review_path),
             "--output",
             str(output_path),
+            "--lifecycle",
+            "authorized-static-emulation",
             "--acknowledge-cleanup",
             "--abandon",
         ]
@@ -777,6 +850,8 @@ def test_cli_returns_failed_outcome_status_and_redacts_errors(tmp_path, capsys, 
                 str(review_path),
                 "--output",
                 "-",
+                "--lifecycle",
+                "authorized-static-emulation",
                 "--acknowledge-cleanup",
                 "--abandon",
             ]
@@ -795,6 +870,8 @@ def test_cli_returns_failed_outcome_status_and_redacts_errors(tmp_path, capsys, 
                 str(review_path),
                 "--output",
                 "-",
+                "--lifecycle",
+                "authorized-static-emulation",
                 "--acknowledge-cleanup",
                 "--abandon",
             ]
