@@ -1421,8 +1421,9 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
         exit 1
     fi
 
+    # Validate the explicit override now; values-derived hosts are checked by preflight.
     host="$(python3 "{{ justfile_directory() }}/scripts/app_chart.py" resolve-host \
-      --values "${values}" --host "${host}")"
+      --values '' --host "${host}")"
 
     python3 "{{ justfile_directory() }}/scripts/cluster_identity.py" assert --kubeconfig "${KUBECONFIG}" --env "${requested_env}" >/dev/null
 
