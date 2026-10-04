@@ -2750,6 +2750,10 @@ def test_standard_app_redeploy_has_authoritative_values_and_render_mutation_pari
     [
         ("ingress: [invalid\n", "values parsing failed while resolving ingress host"),
         ("ingress:\n  enabled: true\n", "no nonempty ingress.host was resolved"),
+        (
+            'ingress:\n  enabled: true\n  host: "$(printf K053_EXECUTED)"\n',
+            "ingress.host must be a lowercase DNS",
+        ),
     ],
 )
 def test_app_redeploy_host_resolution_failure_stops_before_release_activity(
@@ -8932,3 +8936,154 @@ def test_gitshelves_generic_deploy_rejects_moving_tags(tag: str, generic_app_stu
     result = _run_just(["app-deploy", "app=gitshelves", "env=staging", f"tag={tag}"], generic_app_stub_env)
     assert result.returncode != 0
     assert "mutable tag" in (result.stderr + result.stdout).lower()
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "example.test",
+        "localhost",
+        "staging.token.place",
+        "xn--bcher-kva.test",
+        "*.example.test",
+        "a" * 63 + ".test",
+        ".".join(["a" * 63] * 3 + ["a" * 61]),
+        "",
+    ],
+)
+def test_ingress_host_supported_dns_names(host: str, tmp_path: Path) -> None:
+    values = tmp_path / "values.yaml"
+    values.write_text(json.dumps({"ingress": {"host": host}}))
+    assert app_chart.expected_ingress_host((str(values),), "") == host
+    assert app_chart.expected_ingress_host((), host) == host
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "$(printf K053)",
+        "`printf K053`",
+        "example.test;true",
+        "a\nb.test",
+        "example.test,other=value",
+        "https://example.test",
+        "example.test:443",
+        "[::1]",
+        "127.0.0.1",
+        "Example.test",
+        "example.test.",
+        "-a.test",
+        "a-.test",
+        "a..test",
+        "a_b.test",
+        "*.*.test",
+        "a" * 64 + ".test",
+        ".".join(["a" * 63] * 4),
+    ],
+)
+def test_ingress_host_rejected_from_values_and_override(host: str, tmp_path: Path) -> None:
+    values = tmp_path / "values.yaml"
+    values.write_text(json.dumps({"ingress": {"enabled": True, "host": host}}))
+    for paths, explicit in [((str(values),), ""), ((), host)]:
+        with pytest.raises(ValueError, match="ingress.host must be a lowercase DNS"):
+            app_chart.expected_ingress_host(paths, explicit)
+
+
+@pytest.mark.parametrize("recipe", ["_helm-oci-deploy", "helm-oci-install", "helm-oci-upgrade"])
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "$(printf K053_EXECUTED >&2)",
+        "`printf K053_EXECUTED >&2`",
+        '"; printf K053_EXECUTED >&2; #',
+        "'; printf K053_EXECUTED >&2; #",
+        "literal 'quote' and \\\nbackslash $HOME ; & | ( )",
+    ],
+)
+def test_helm_transport_preserves_description_as_data(
+    recipe: str, payload: str, generic_app_stub_env: dict[str, str], tmp_path: Path
+) -> None:
+    env = generic_app_stub_env.copy()
+    helm = tmp_path / "bin" / "helm"
+    original = helm.with_name("helm-stub")
+    helm.rename(original)
+    argv_log = tmp_path / "argv.jsonl"
+    values_path = tmp_path / "values 'quoted' $(printf K053_EXECUTED).yaml"
+    values_path.write_text("{}\n")
+    version_path = tmp_path / "version 'quoted' $(printf K053_EXECUTED).txt"
+    version_path.write_text("1.2.3\n")
+    _write_executable(
+        helm,
+        f"""#!{sys.executable}
+import json, os, sys
+with open({str(argv_log)!r}, "a") as log:
+    log.write(json.dumps(sys.argv[1:]) + "\\n")
+os.execv({str(original)!r}, [{str(original)!r}, *sys.argv[1:]])
+""",
+    )
+    result = _run_just(
+        [
+            recipe,
+            "tokenplace",
+            "tokenplace",
+            "oci://ghcr.io/futuroptimist/charts/tokenplace",
+            str(values_path),
+            "",
+            "",
+            str(version_path),
+            "main-deadbee",
+            "",
+            "int",
+            payload,
+            "tokenplace",
+        ],
+        env,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = [json.loads(line) for line in argv_log.read_text().splitlines()]
+    upgrade = next(call for call in calls if call[0] == "upgrade")
+    assert upgrade[upgrade.index("--description") + 1] == payload
+    assert upgrade[upgrade.index("-f") + 1] == str(values_path)
+    assert upgrade[upgrade.index("--version") + 1] == "1.2.3"
+    assert "K053_EXECUTED\n" not in result.stderr
+
+
+@pytest.mark.parametrize("recipe", ["_helm-oci-deploy", "helm-oci-install", "helm-oci-upgrade"])
+def test_helm_transport_rejects_host_before_external_commands(
+    recipe: str, generic_app_stub_env: dict[str, str]
+) -> None:
+    env = generic_app_stub_env
+    result = _run_just(
+        [
+            recipe,
+            "release=tokenplace",
+            "namespace=tokenplace",
+            "chart=oci://ghcr.io/futuroptimist/charts/tokenplace",
+            "host=$(printf K053_EXECUTED >&2)",
+            "env=staging",
+            "tag=main-deadbee",
+        ],
+        env,
+    )
+    assert result.returncode != 0
+    assert "ingress.host must be a lowercase DNS" in result.stderr
+    assert "K053_EXECUTED\n" not in result.stderr
+    assert not Path(env["HELM_LOG"]).exists()
+    assert not Path(env["HELM_LOG"]).with_name("kubectl.log").exists()
+
+
+def test_dotenv_shlex_decoding_is_not_a_transport_security_boundary(tmp_path: Path) -> None:
+    from scripts.app_config import parse_dotenv, shell_emit
+
+    config = tmp_path / "app.env"
+    # No raw '$(' sequence; shlex concatenates adjacent quoted segments into one.
+    config.write_text("SUGARKUBE_RELEASE=\"$\"'(printf K053_EXECUTED)'\n")
+    resolved = parse_dotenv(config)
+    assert resolved["SUGARKUBE_RELEASE"] == "$(printf K053_EXECUTED)"
+    result = subprocess.run(
+        ["bash", "-c", shell_emit(resolved) + '\nprintf "%s" "$SUGARKUBE_RELEASE"'],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    assert result.stdout == resolved["SUGARKUBE_RELEASE"]
