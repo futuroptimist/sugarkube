@@ -3,6 +3,7 @@
 
 import argparse
 import getpass
+import http.client
 import json
 import os
 import re
@@ -21,8 +22,14 @@ MAX_IMAGE_BYTES = 32 * 1024 * 1024
 
 
 def valid_png_chunks(content):
+    # Chromium renderer screenshots use non-interlaced 8-bit RGB or RGBA.
+    # Reject other encodings rather than archiving an unverified image.
     offset = len(PNG_SIGNATURE)
     seen_data = False
+    data_ended = False
+    seen_palette = False
+    compressed = []
+    row_size = height = 0
     while offset < len(content):
         if offset + 12 > len(content):
             return False
@@ -31,6 +38,10 @@ def valid_png_chunks(content):
         if end > len(content):
             return False
         kind = content[offset + 4 : offset + 8]
+        if not re.fullmatch(b"[A-Za-z]{2}[A-Z][A-Za-z]", kind):
+            return False
+        if kind[0] < 97 and kind not in (b"IHDR", b"PLTE", b"IDAT", b"IEND"):
+            return False
         payload = content[offset + 8 : end - 4]
         checksum = struct.unpack(">I", content[end - 4 : end])[0]
         if zlib.crc32(kind + payload) != checksum:
@@ -38,12 +49,48 @@ def valid_png_chunks(content):
         if offset == len(PNG_SIGNATURE):
             if kind != b"IHDR" or size != 13:
                 return False
+            width, height, depth, color, compression, filtering, interlace = struct.unpack(
+                ">IIBBBBB", payload
+            )
+            if (
+                not 1 <= width <= 4096
+                or not 1 <= height <= 16000
+                or depth != 8
+                or color not in (2, 6)
+                or compression != 0
+                or filtering != 0
+                or interlace != 0
+            ):
+                return False
+            row_size = width * (3 if color == 2 else 4) + 1
         elif kind == b"IHDR":
             return False
+        if kind == b"PLTE":
+            if seen_palette or seen_data or not 3 <= size <= 768 or size % 3:
+                return False
+            seen_palette = True
+        if seen_data and kind != b"IDAT":
+            data_ended = True
         if kind == b"IDAT":
+            if data_ended:
+                return False
             seen_data = True
+            compressed.append(payload)
         if kind == b"IEND":
-            return size == 0 and end == len(content) and seen_data
+            if not (size == 0 and end == len(content) and seen_data):
+                return False
+            decoder = zlib.decompressobj()
+            try:
+                pixels = decoder.decompress(b"".join(compressed), row_size * height + 1)
+            except zlib.error:
+                return False
+            return (
+                decoder.eof
+                and not decoder.unused_data
+                and not decoder.unconsumed_tail
+                and len(pixels) == row_size * height
+                and all(pixels[row * row_size] <= 4 for row in range(height))
+            )
         offset = end
     return False
 
@@ -181,7 +228,7 @@ def main():
     )
     try:
         image = capture(args, credential)
-    except (ValueError, OSError, urllib.error.URLError):
+    except (ValueError, OSError, urllib.error.URLError, http.client.HTTPException):
         # Server diagnostics can include request headers; do not echo them.
         print("Capture failed; check URL, credentials, time range, and renderer.", file=sys.stderr)
         return 1

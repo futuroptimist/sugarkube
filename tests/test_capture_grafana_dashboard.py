@@ -396,3 +396,120 @@ def test_corrupt_png_chunks_are_not_archived(tmp_path, content):
 )
 def test_incomplete_chunk_sequences_are_rejected(content):
     assert not capture.valid_png_chunks(content)
+
+
+@pytest.mark.parametrize(
+    "compressed",
+    [
+        b"invalid compressed pixels",
+        zlib.compress(b"\0" * 7)[:-1],
+        zlib.compress(b"\0" * 7) + b"trailing data",
+        zlib.compress(b"\0" * 6),
+        zlib.compress(b"\0" * 100000),
+        zlib.compress(b"\5" + b"\0" * 6),
+    ],
+)
+def test_invalid_pixel_stream_is_not_archived(tmp_path, compressed):
+    content = (
+        capture.PNG_SIGNATURE
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", 2, 1, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", compressed)
+        + chunk(b"IEND", b"")
+    )
+    with pytest.raises(ValueError, match="PNG"):
+        capture.capture(arguments(tmp_path), "local-test-credential", Renderer(body=content))
+    assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        (0, 1, 8, 2, 0, 0, 0),
+        (4097, 1, 8, 2, 0, 0, 0),
+        (2, 0, 8, 2, 0, 0, 0),
+        (2, 16001, 8, 2, 0, 0, 0),
+        (2, 1, 16, 2, 0, 0, 0),
+        (2, 1, 8, 3, 0, 0, 0),
+        (2, 1, 8, 2, 1, 0, 0),
+        (2, 1, 8, 2, 0, 1, 0),
+        (2, 1, 8, 2, 0, 0, 1),
+    ],
+)
+def test_unsupported_png_encoding_is_rejected(header):
+    content = capture.PNG_SIGNATURE + chunk(b"IHDR", struct.pack(">IIBBBBB", *header))
+    assert not capture.valid_png_chunks(content)
+
+
+def test_rgba_png_with_split_image_chunks_is_accepted(tmp_path):
+    compressed = zlib.compress(b"\0" * 18)
+    content = (
+        capture.PNG_SIGNATURE
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", 2, 2, 8, 6, 0, 0, 0))
+        + chunk(b"IDAT", compressed[:3])
+        + chunk(b"IDAT", compressed[3:])
+        + chunk(b"IEND", b"")
+    )
+    path = capture.capture(
+        arguments(tmp_path, height=2), "local-test-credential", Renderer(body=content)
+    )
+    assert path.read_bytes() == content
+
+
+def test_truncated_http_read_has_sanitized_cli_failure(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "capture_grafana_dashboard.py",
+            "--url",
+            "https://grafana.example.internal",
+            "--environment",
+            "staging",
+            "--output-dir",
+            str(tmp_path),
+        ],
+    )
+    monkeypatch.setenv("GRAFANA_CAPTURE_CREDENTIAL", "private-cli-credential")
+
+    class TruncatedResponse(BytesIO):
+        status = 200
+        headers = Message()
+        headers["Content-Type"] = "image/png"
+
+        def read(self, size):
+            raise capture.http.client.IncompleteRead(b"private response contents", 100)
+
+    class TruncatedRenderer:
+        def open(self, *args, **kwargs):
+            return TruncatedResponse()
+
+    monkeypatch.setattr(capture.urllib.request, "build_opener", lambda *args: TruncatedRenderer())
+    assert capture.main() == 1
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert "Capture failed" in output.err
+    assert "private" not in output.err
+    assert "Traceback" not in output.err
+    assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize(
+    "middle",
+    [
+        chunk(b"ABCD", b"unknown critical chunk"),
+        chunk(b"ab1d", b"invalid chunk name"),
+        chunk(b"PLTE", b"x"),
+        chunk(b"PLTE", b"\0" * 3) * 2,
+        chunk(b"IDAT", b"") + chunk(b"PLTE", b"\0" * 3),
+        chunk(b"IDAT", b"") + chunk(b"tEXt", b"key\0value"),
+    ],
+)
+def test_invalid_chunk_order_and_critical_chunks_are_rejected(middle):
+    content = (
+        capture.PNG_SIGNATURE
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", 2, 1, 8, 2, 0, 0, 0))
+        + middle
+        + chunk(b"IDAT", zlib.compress(b"\0" * 7))
+        + chunk(b"IEND", b"")
+    )
+    assert not capture.valid_png_chunks(content)
