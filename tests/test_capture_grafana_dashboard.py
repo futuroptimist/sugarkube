@@ -225,3 +225,87 @@ def test_sync_failure_removes_incomplete_evidence(tmp_path, monkeypatch, failed_
     with pytest.raises(OSError):
         capture.capture(arguments(tmp_path), "local-test-credential", Renderer())
     assert not list(tmp_path.iterdir())
+
+
+def test_epoch_milliseconds_are_preserved():
+    assert capture.instant("1790812800000", 0) == 1790812800000
+
+
+@pytest.mark.parametrize("credential", ["", "invalid\ncredential", "invalid\rcredential"])
+def test_invalid_credential_is_rejected_before_request(tmp_path, credential):
+    renderer = Renderer()
+    with pytest.raises(ValueError):
+        capture.capture(arguments(tmp_path), credential, renderer)
+    assert renderer.request is None
+
+
+@pytest.mark.parametrize("prompt", [False, True])
+@pytest.mark.parametrize("succeeds", [False, True])
+def test_cli_credentials_output_and_safe_errors(tmp_path, monkeypatch, capsys, prompt, succeeds):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "capture_grafana_dashboard.py",
+            "--url",
+            "https://grafana.example.internal",
+            "--environment",
+            "staging",
+            "--width",
+            "2",
+            "--height",
+            "1",
+            "--output-dir",
+            str(tmp_path),
+        ],
+    )
+    credential = "private-cli-credential"
+    if prompt:
+        monkeypatch.delenv("GRAFANA_CAPTURE_CREDENTIAL", raising=False)
+        monkeypatch.setattr(capture.getpass, "getpass", lambda message: credential)
+    else:
+        monkeypatch.setenv("GRAFANA_CAPTURE_CREDENTIAL", credential)
+        monkeypatch.setattr(
+            capture.getpass, "getpass", lambda message: pytest.fail("unexpected prompt")
+        )
+    renderer = Renderer() if succeeds else Renderer(body=b"error " + credential.encode())
+    monkeypatch.setattr(capture.urllib.request, "build_opener", lambda *args: renderer)
+    assert capture.main() == (0 if succeeds else 1)
+    output = capsys.readouterr()
+    assert credential not in output.out + output.err
+    assert renderer.request.get_header("Authorization") == "Bearer " + credential
+    if succeeds:
+        assert Path(output.out.strip()).is_file()
+        assert output.err == ""
+    else:
+        assert output.out == ""
+        assert "Capture failed" in output.err
+        assert not list(tmp_path.iterdir())
+
+
+def test_script_entry_point(tmp_path, monkeypatch):
+    import runpy
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "capture_grafana_dashboard.py",
+            "--url",
+            "https://grafana.example.internal",
+            "--environment",
+            "prod",
+            "--width",
+            "2",
+            "--height",
+            "1",
+            "--output-dir",
+            str(tmp_path),
+        ],
+    )
+    monkeypatch.setenv("GRAFANA_CAPTURE_CREDENTIAL", "local-test-credential")
+    monkeypatch.setattr(capture.urllib.request, "build_opener", lambda *args: Renderer())
+    with pytest.raises(SystemExit) as result:
+        runpy.run_path(str(ROOT / "scripts/capture_grafana_dashboard.py"), run_name="__main__")
+    assert result.value.code == 0
+    assert len(list(tmp_path.iterdir())) == 2
