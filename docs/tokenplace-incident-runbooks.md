@@ -11,6 +11,10 @@ Implementation history is tracked in
 that the Step 14b staging drill has run. Never use this procedure to close an incident or tracker
 before the evidence and human review exist.
 
+For repository-only defense-in-depth analysis, see the
+[unmatched-path edge evaluation](design/tokenplace-unmatched-edge-evaluation.md).
+Its offline replay rejects a shared unmatched budget; it authorizes no live rule.
+
 ## Safety contract shared by both incidents
 
 Classification is read-only. Mutation is a separately authorized phase. Before mutation, record
