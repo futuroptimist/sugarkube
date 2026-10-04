@@ -1150,6 +1150,8 @@ def test_configuration_reconciliation_requires_one_absolute_kubeconfig(
         ("monitor", "approved disabled baseline"),
         ("drift", "unrelated Helm values drift"),
         ("image", "live image coordinate differs"),
+        ("missing-image", "live image coordinate differs"),
+        ("missing-image-id", "live image coordinate differs"),
     ),
 )
 def test_configuration_reconciliation_preconditions_fail_before_reservation(
@@ -1201,6 +1203,10 @@ def test_configuration_reconciliation_preconditions_fail_before_reservation(
         observed = [ready]
     elif failure == "image":
         observed = [{**ready, "applicationImageID": f"{manifest.IMAGE_REF}@sha256:{'9' * 64}"}] * 2
+    if failure in {"missing-image", "missing-image-id"}:
+        incomplete = dict(ready)
+        incomplete.pop("applicationImage" if failure == "missing-image" else "applicationImageID")
+        observed = [ready, incomplete]
     monkeypatch.setattr(rollback, "pods", lambda *_args, **_kwargs: observed)
     monkeypatch.setattr(
         rollback,

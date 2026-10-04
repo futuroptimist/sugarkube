@@ -1172,6 +1172,10 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
     if recovery:
         args._recovery_failed_stage = "live-state-and-provenance"
     print(summary(before_helm, before_identity, before_pods, target, values_proof))
+    if configuration_reconciliation and any(
+        not application_image(pod) or not application_image_id(pod) for pod in before_pods
+    ):
+        raise RollbackError("live image coordinate differs from finalized provenance")
     current_images = {application_image(pod) for pod in before_pods if application_image(pod)}
     current_ids: set[str] = set()
     for pod in before_pods:
