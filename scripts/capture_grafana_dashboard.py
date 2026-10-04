@@ -6,6 +6,7 @@ import getpass
 import json
 import os
 import re
+import stat
 import struct
 import sys
 import urllib.error
@@ -103,27 +104,34 @@ def capture(args, credential, opener=None, now=None):
     }
     created = []
     complete = False
+    directory_descriptor = os.open(destination, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
+        directory_stat = os.fstat(directory_descriptor)
+        if directory_stat.st_uid != os.getuid() or stat.S_IMODE(directory_stat.st_mode) & 0o077:
+            raise ValueError(
+                "Capture directory must be owned by this user with private permissions."
+            )
         for path, payload in (
             (image, content),
             (metadata, (json.dumps(manifest, indent=2) + "\n").encode()),
         ):
-            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            created.append(path)
+            descriptor = os.open(
+                path.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=directory_descriptor
+            )
+            created.append(path.name)
             with os.fdopen(descriptor, "wb") as output:
                 output.write(payload)
                 output.flush()
                 os.fsync(output.fileno())
-        directory_descriptor = os.open(destination, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(directory_descriptor)
-        finally:
-            os.close(directory_descriptor)
+        os.fsync(directory_descriptor)
         complete = True
     finally:
-        if not complete:
-            for path in reversed(created):
-                path.unlink(missing_ok=True)
+        try:
+            if not complete:
+                for name in reversed(created):
+                    os.unlink(name, dir_fd=directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
     return image
 
 

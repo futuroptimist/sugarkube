@@ -309,3 +309,53 @@ def test_script_entry_point(tmp_path, monkeypatch):
         runpy.run_path(str(ROOT / "scripts/capture_grafana_dashboard.py"), run_name="__main__")
     assert result.value.code == 0
     assert len(list(tmp_path.iterdir())) == 2
+
+
+@pytest.mark.parametrize("mode", [0o777, 0o770, 0o755])
+def test_existing_output_directory_must_be_private(tmp_path, mode):
+    destination = tmp_path / "unsafe"
+    destination.mkdir(mode=mode)
+    destination.chmod(mode)
+    with pytest.raises(ValueError, match="private permissions"):
+        capture.capture(arguments(destination), "local-test-credential", Renderer())
+    assert not list(destination.iterdir())
+
+
+def test_output_directory_symlink_is_rejected(tmp_path):
+    target = tmp_path / "target"
+    target.mkdir(mode=0o700)
+    destination = tmp_path / "link"
+    destination.symlink_to(target, target_is_directory=True)
+    with pytest.raises(OSError):
+        capture.capture(arguments(destination), "local-test-credential", Renderer())
+    assert not list(target.iterdir())
+
+
+def test_output_directory_owner_must_match(tmp_path, monkeypatch):
+    actual_uid = capture.os.getuid()
+    monkeypatch.setattr(capture.os, "getuid", lambda: actual_uid + 1)
+    with pytest.raises(ValueError, match="owned by this user"):
+        capture.capture(arguments(tmp_path), "local-test-credential", Renderer())
+    assert not list(tmp_path.iterdir())
+
+
+def test_artifacts_use_verified_directory_descriptor(tmp_path, monkeypatch):
+    original_open = capture.os.open
+    opened_directory = None
+    relative_opens = []
+
+    def verified_open(path, flags, mode=0o777, *, dir_fd=None):
+        nonlocal opened_directory
+        descriptor = original_open(path, flags, mode, dir_fd=dir_fd)
+        if flags & capture.os.O_DIRECTORY:
+            assert flags & capture.os.O_NOFOLLOW
+            opened_directory = descriptor
+        elif flags & capture.os.O_CREAT:
+            assert dir_fd == opened_directory
+            assert Path(path).name == path
+            relative_opens.append(path)
+        return descriptor
+
+    monkeypatch.setattr(capture.os, "open", verified_open)
+    capture.capture(arguments(tmp_path), "local-test-credential", Renderer())
+    assert len(relative_opens) == 2
