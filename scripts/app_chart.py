@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 import re
@@ -600,9 +601,32 @@ def print_summary(app: str, env: str, tag: str, chart: str, version: str, pin: s
     print(f"chart pin: {pin}")
 
 
+def validate_ingress_host(host: str) -> str:
+    """Accept Kubernetes Ingress DNS names, including a single wildcard label."""
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        is_ip = False
+    else:
+        is_ip = True
+    name = host[2:] if host.startswith("*.") else host
+    label = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+    if host and (
+        len(host) > 253
+        or not re.fullmatch(rf"{label}(?:\.{label})*", name)
+        or is_ip
+    ):
+        raise ValueError(
+            "ingress.host must be a lowercase DNS hostname (optionally prefixed with '*.'), "
+            "at most 253 characters with labels of at most 63 characters; "
+            "IP addresses, ports, and URLs are not supported"
+        )
+    return host
+
+
 def expected_ingress_host(values: tuple[str, ...], explicit: str) -> str:
     if explicit:
-        return explicit
+        return validate_ingress_host(explicit)
     document = merged_values_document(values)
     _, resolved_host = nested_value(document, ("ingress", "host"))
     _, resolved_enabled = nested_value(document, ("ingress", "enabled"))
@@ -612,7 +636,7 @@ def expected_ingress_host(values: tuple[str, ...], explicit: str) -> str:
         raise SystemExit(
             "ERROR: ingress.enabled is true but no nonempty ingress.host was resolved."
         )
-    return host if enabled != "false" else ""
+    return validate_ingress_host(host) if enabled != "false" else ""
 
 
 def resolved_values_scalar(values: tuple[str, ...], path_parts: tuple[str, ...]) -> str:

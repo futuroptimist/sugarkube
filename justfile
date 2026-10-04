@@ -1297,8 +1297,8 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
       export KUBECONFIG="${HOME}/.kube/config"
     fi
     raw_args=(
-        "{{ release }}" "{{ namespace }}" "{{ chart }}" "{{ values }}" "{{ host }}" "{{ version }}"
-        "{{ version_file }}" "{{ tag }}" "{{ default_tag }}" "{{ env }}" "{{ description }}" "{{ app }}"
+        {{ quote(release) }} {{ quote(namespace) }} {{ quote(chart) }} {{ quote(values) }} {{ quote(host) }} {{ quote(version) }}
+        {{ quote(version_file) }} {{ quote(tag) }} {{ quote(default_tag) }} {{ quote(env) }} {{ quote(description) }} {{ quote(app) }}
     )
 
     release=""
@@ -1318,7 +1318,9 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
         local key="${1}"
         local value="${2}"
 
-        value="$(echo "${value}" | xargs)"
+        # Trim surrounding whitespace without parsing quotes or backslashes as shell syntax.
+        value="${value#"${value%%[![:space:]]*}"}"
+        value="${value%"${value##*[![:space:]]}"}"
 
         while [[ "${value}" == "${key}="* ]]; do
             value="${value#${key}=}"
@@ -1412,12 +1414,15 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
       image_tag="$(python3 "{{ justfile_directory() }}/scripts/app_config.py" validate-tag "${image_tag}" --env "${requested_env}")"
     fi
 
-    allow_install="$(normalize_prefixed_value allow_install "{{ allow_install }}")"
+    allow_install="$(normalize_prefixed_value allow_install {{ quote(allow_install) }})"
 
     if [ -z "${release}" ] || [ -z "${namespace}" ] || [ -z "${chart}" ]; then
         echo "Set release, namespace, and chart to deploy." >&2
         exit 1
     fi
+
+    host="$(python3 "{{ justfile_directory() }}/scripts/app_chart.py" resolve-host \
+      --values "${values}" --host "${host}")"
 
     python3 "{{ justfile_directory() }}/scripts/cluster_identity.py" assert --kubeconfig "${KUBECONFIG}" --env "${requested_env}" >/dev/null
 
@@ -1473,7 +1478,8 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     if [ -n "${values}" ]; then
         IFS=',' read -ra value_files <<< "${values}"
         for value_file in "${value_files[@]}"; do
-            value_file="$(echo "${value_file}" | xargs)"
+            value_file="${value_file#"${value_file%%[![:space:]]*}"}"
+            value_file="${value_file%"${value_file##*[![:space:]]}"}"
             if [ -n "${value_file}" ]; then
                 value_args+=(-f "${value_file}")
             fi
@@ -1728,10 +1734,10 @@ _helm-oci-deploy release='' namespace='' chart='' values='' host='' version='' v
     wait_for_rollouts
 
 helm-oci-install release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' env='' description='' app='':
-    @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' '{{ env }}' '{{ description }}' '{{ app }}' allow_install='true'
+    @just _helm-oci-deploy {{ quote(release) }} {{ quote(namespace) }} {{ quote(chart) }} {{ quote(values) }} {{ quote(host) }} {{ quote(version) }} {{ quote(version_file) }} {{ quote(tag) }} {{ quote(default_tag) }} {{ quote(env) }} {{ quote(description) }} {{ quote(app) }} allow_install='true'
 
 helm-oci-upgrade release='' namespace='' chart='' values='' host='' version='' version_file='' tag='' default_tag='' env='' description='' app='':
-    @just _helm-oci-deploy '{{ release }}' '{{ namespace }}' '{{ chart }}' '{{ values }}' '{{ host }}' '{{ version }}' '{{ version_file }}' '{{ tag }}' '{{ default_tag }}' '{{ env }}' '{{ description }}' '{{ app }}' allow_install='false'
+    @just _helm-oci-deploy {{ quote(release) }} {{ quote(namespace) }} {{ quote(chart) }} {{ quote(values) }} {{ quote(host) }} {{ quote(version) }} {{ quote(version_file) }} {{ quote(tag) }} {{ quote(default_tag) }} {{ quote(env) }} {{ quote(description) }} {{ quote(app) }} allow_install='false'
 
 # Print resolved Sugarkube app deployment config for an app/environment.
 app-config app env='staging' config='':
