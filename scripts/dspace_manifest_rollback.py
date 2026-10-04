@@ -715,7 +715,7 @@ def assert_production_target(kubeconfig: str, runner: Runner) -> None:
 def configuration_comparison_baselines(
     live_values: dict[str, Any], desired_values: dict[str, Any]
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Build strict baselines, canonicalizing only an omitted live image repository."""
+    """Compare the exact legacy baseline with the intended digest-pinned values."""
     baseline = copy.deepcopy(live_values)
     baseline.pop("metrics", None)
     baseline.pop("serviceMonitor", None)
@@ -1228,7 +1228,7 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
                 coordinate,
                 target["chartVersion"],
                 tuple(str(path) for path in values),
-                target["imageTag"],
+                image_value,
             ),
         )
         if render_errors:

@@ -160,7 +160,6 @@ def _verify_setup(
     tmp_path: Path,
     *,
     provider: str = "token-place",
-    rollback: bool = False,
     overrides: dict[str, object] | None = None,
     legacy: bool = False,
     legacy_310: bool = False,
@@ -418,7 +417,6 @@ def test_verify_setup_rejects_conflicting_legacy_flags(
 
 
 @pytest.mark.parametrize("provider,has_token_args", [("token-place", True), ("openai", False)])
-@pytest.mark.parametrize("rollback", [False, True], ids=("standard", "rollback"))
 @pytest.mark.parametrize(
     "runtime_image_id",
     ["containerd://" + DIGEST, "ghcr.io/democratizedspace/dspace@" + DIGEST],
@@ -429,10 +427,9 @@ def test_verify_uses_safe_exact_smoke_argv(
     tmp_path: Path,
     provider: str,
     has_token_args: bool,
-    rollback: bool,
     runtime_image_id: str,
 ) -> None:
-    args, seen = _verify_setup(monkeypatch, tmp_path, provider=provider, rollback=rollback)
+    args, seen = _verify_setup(monkeypatch, tmp_path, provider=provider)
     # Exercise both supported imageID spellings through the complete verifier.
     original = verifier.command
 

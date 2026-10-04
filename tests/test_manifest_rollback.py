@@ -1478,8 +1478,9 @@ def test_configuration_reconciliation_reasserts_target_immediately_before_upgrad
 
 
 @pytest.mark.parametrize("after_revision", (10, 11))
+@pytest.mark.parametrize("render_drift", (False, True))
 def test_configuration_reconciliation_completes_all_production_gates(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, after_revision: int
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, after_revision: int, render_drift: bool
 ) -> None:
     args, commands, evidence, verifier = pre_reservation_case(
         tmp_path, monkeypatch, environment="prod"
@@ -1542,7 +1543,6 @@ def test_configuration_reconciliation_completes_all_production_gates(
     stored_proof = [{"check": "helmStoredValues", "passed": True, "details": "safe"}]
     finalized: dict[str, object] = {}
     monkeypatch.setattr(rollback.app_chart, "merged_values_document", lambda _paths: desired)
-    monkeypatch.setattr(rollback.app_chart, "validate_rendered_manifest", lambda *_args: [])
 
     def verify_stored(_approved: object, values: object, _environment: str) -> object:
         assert values == desired
@@ -1621,7 +1621,10 @@ def test_configuration_reconciliation_completes_all_production_gates(
         elif command[0] == "helm" and "values" in command and "get" in command:
             return json.dumps(desired if "--all" in command else live)
         elif command[0] == "helm" and "template" in command:
-            return "live render" if "live-values.json" in " ".join(command) else "target render"
+            if "live-values.json" in " ".join(command):
+                return "live render"
+            rendered = production_render(selected)
+            return rendered.replace(f"@{selected['imageDigest']}", "") if render_drift else rendered
         elif command[0] == "helm" and "manifest" in command:
             return "live render"
         elif command[:2] == [str(verifier), "verify"]:
@@ -1644,6 +1647,13 @@ def test_configuration_reconciliation_completes_all_production_gates(
         ):
             return '{"items": []}'
         return ""
+
+    if render_drift:
+        with pytest.raises(rollback.RollbackError, match="strict application chart render"):
+            rollback.rollback(args, runner)
+        assert_no_mutation(commands)
+        assert not evidence.exists()
+        return
 
     if after_revision == 11:
         with pytest.raises(rollback.RollbackError, match="preserved evidence"):
@@ -2109,10 +2119,11 @@ def recovery_execution_case(
         lambda *call_args, **call_kwargs: state["finalize_calls"].append((call_args, call_kwargs))
         or {"verificationResults": [{"check": "ownership", "passed": True}]},
     )
+    validate_render = rollback.app_chart.validate_rendered_manifest
     monkeypatch.setattr(
         rollback.app_chart,
         "validate_rendered_manifest",
-        lambda *call_args: state["render_calls"].append(call_args) or [],
+        lambda *call_args: state["render_calls"].append(call_args) or validate_render(*call_args),
     )
     monkeypatch.setattr(rollback.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(rollback, "chart_pin", lambda _path: "3.0.3")
@@ -2212,7 +2223,7 @@ def recovery_execution_case(
         if command[0] == "helm" and "manifest" in command:
             return "different render" if fault == "render" else "current render"
         if command[0] == "helm" and "template" in command:
-            return "current render" if "live-values.json" in joined else "approved render"
+            return "current render" if "live-values.json" in joined else production_render(selected)
         if command[:2] == [str(args.verifier), "verify"]:
             if fault == "runtime":
                 raise rollback.RollbackError("runtime ownership failed")
@@ -2575,3 +2586,67 @@ def test_main_validates_and_normalizes_production_recovery_flags(
     ) == 0
     assert observed[0].configuration_reconciliation is True
     assert observed[0].baseline_manifest == rollback.PRODUCTION_BASELINE
+
+
+def production_render(target: dict[str, object]) -> str:
+    """Offline Helm output exercised through the real production chart validator."""
+    labels = {"app.kubernetes.io/instance": "dspace", "app.kubernetes.io/name": "dspace"}
+    metadata = {"name": "dspace", "namespace": "dspace", "labels": labels}
+    secret_reference = {"name": "dspace-prod-metrics-token", "key": "token"}
+    image = f"{manifest.IMAGE_REF}:{target['imageTag']}@{target['imageDigest']}"
+    deployment = {
+        "kind": "Deployment",
+        "metadata": metadata,
+        "spec": {
+            "template": {
+                "spec": {
+                    "containers": [
+                        {
+                            "name": "dspace",
+                            "image": image,
+                            "env": [
+                                {
+                                    "name": "METRICS_TOKEN",
+                                    "valueFrom": {"secretKeyRef": secret_reference},
+                                }
+                            ],
+                        }
+                    ]
+                }
+            }
+        },
+    }
+    monitor = {
+        "kind": "ServiceMonitor",
+        "metadata": {**metadata, "labels": {**labels, "release": "kube-prometheus-stack"}},
+        "spec": {
+            "selector": {"matchLabels": labels},
+            "namespaceSelector": {"matchNames": ["dspace"]},
+            "endpoints": [
+                {
+                    "path": "/metrics",
+                    "interval": "30s",
+                    "scrapeTimeout": "10s",
+                    "bearerTokenSecret": secret_reference,
+                    "relabelings": [
+                        {"action": "replace", "targetLabel": key, "replacement": value}
+                        for key, value in [
+                            ("app", "dspace"),
+                            ("environment", "prod"),
+                            ("namespace", "dspace"),
+                            ("release", "dspace"),
+                            ("cluster", "sugarkube-prod"),
+                        ]
+                    ],
+                }
+            ],
+        },
+    }
+    return "\n---\n".join(
+        json.dumps(item)
+        for item in [
+            deployment,
+            {"kind": "Service", "metadata": metadata},
+            monitor,
+        ]
+    )
