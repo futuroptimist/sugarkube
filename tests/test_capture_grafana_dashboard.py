@@ -359,3 +359,40 @@ def test_artifacts_use_verified_directory_descriptor(tmp_path, monkeypatch):
     monkeypatch.setattr(capture.os, "open", verified_open)
     capture.capture(arguments(tmp_path), "local-test-credential", Renderer())
     assert len(relative_opens) == 2
+
+
+def malformed_pngs():
+    header = chunk(b"IHDR", struct.pack(">IIBBBBB", 2, 1, 8, 2, 0, 0, 0))
+    data = chunk(b"IDAT", zlib.compress(b"\0" * 7))
+    end = chunk(b"IEND", b"")
+    bad_crc = bytearray(data)
+    bad_crc[-1] ^= 1
+    prefix = capture.PNG_SIGNATURE + header
+    return [
+        prefix + bytes(bad_crc) + end,
+        prefix + struct.pack(">I", 100000) + b"IDAT" + end,
+        prefix + header + data + end,
+        prefix + end,
+        prefix + chunk(b"IEND", b"unexpected") + end,
+        prefix + end + data + end,
+    ]
+
+
+@pytest.mark.parametrize("content", malformed_pngs())
+def test_corrupt_png_chunks_are_not_archived(tmp_path, content):
+    with pytest.raises(ValueError, match="PNG"):
+        capture.capture(arguments(tmp_path), "local-test-credential", Renderer(body=content))
+    assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        capture.PNG_SIGNATURE,
+        capture.PNG_SIGNATURE + b"short",
+        capture.PNG_SIGNATURE + chunk(b"IHDR", b"short"),
+        capture.PNG_SIGNATURE + chunk(b"IDAT", b"unexpected"),
+    ],
+)
+def test_incomplete_chunk_sequences_are_rejected(content):
+    assert not capture.valid_png_chunks(content)

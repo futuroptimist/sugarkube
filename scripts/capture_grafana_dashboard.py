@@ -12,11 +12,40 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+import zlib
 from datetime import datetime, timezone
 from pathlib import Path
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 MAX_IMAGE_BYTES = 32 * 1024 * 1024
+
+
+def valid_png_chunks(content):
+    offset = len(PNG_SIGNATURE)
+    seen_data = False
+    while offset < len(content):
+        if offset + 12 > len(content):
+            return False
+        size = struct.unpack(">I", content[offset : offset + 4])[0]
+        end = offset + 12 + size
+        if end > len(content):
+            return False
+        kind = content[offset + 4 : offset + 8]
+        payload = content[offset + 8 : end - 4]
+        checksum = struct.unpack(">I", content[end - 4 : end])[0]
+        if zlib.crc32(kind + payload) != checksum:
+            return False
+        if offset == len(PNG_SIGNATURE):
+            if kind != b"IHDR" or size != 13:
+                return False
+        elif kind == b"IHDR":
+            return False
+        if kind == b"IDAT":
+            seen_data = True
+        if kind == b"IEND":
+            return size == 0 and end == len(content) and seen_data
+        offset = end
+    return False
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -86,6 +115,7 @@ def capture(args, credential, opener=None, now=None):
         or content[12:16] != b"IHDR"
         or struct.unpack(">II", content[16:24]) != (args.width, args.height)
         or not content.endswith(b"\x00\x00\x00\x00IEND\xaeB`\x82")
+        or not valid_png_chunks(content)
     ):
         raise ValueError("Grafana returned an incomplete, oversized, or unexpected PNG.")
     destination = Path(args.output_dir)
