@@ -144,6 +144,130 @@ Only fixed aggregate counters leave the replay process. No observed paths, query
 credentials, payloads, request IDs, source identities or addresses are collected. Future evidence
 needs its own reviewed retention/access/expiry contract; this evaluation creates no observer.
 
+## Stronger-signal investigation: executable design specification
+
+The follow-up keeps the enforcement objective open. It does not replace the rejected shared-budget
+counterexample above. A trusted, specific attack signal could narrow the match, but neither the
+provider capability nor its discrimination accuracy is established by repository evidence. This
+section and `SignalCandidate` are an offline specification, not an edge expression or integration.
+The original command output and original counterexample remain unchanged.
+
+### Finite state and candidate decision
+
+| Input | Closed vocabulary | Required state to enter the hypothetical budget |
+| --- | --- | --- |
+| Route category | The eight categories above | `unmatched` |
+| Method | The eight methods above | Any; methods do not establish abuse |
+| Capability | `available`, `unavailable`, `unknown` | `available` |
+| Provenance | `verified`, `absent`, `spoofed`, `stale` | `verified` |
+| Signal | `attack`, `none`, `unknown` | `attack` |
+| Normalization | `equivalent`, `ambiguous`, `drift`, `unknown` | `equivalent` |
+
+All five required states must hold simultaneously. Otherwise the request forwards without
+consuming the hypothetical budget. Preserved and unknown routes always forward, even with an
+attack signal. Eligible traffic uses the original shared 100-per-60-second fixed-window budget;
+its boundary burst limitation remains unchanged. Disabled mode forwards every valid finite input.
+Malformed fixture values reject the offline invocation with a fixed error; this is not a proposed
+HTTP error response. In a future adapter, unknown external values must map to the bounded unknown
+state and forward, never become a new label or an enforcement decision.
+
+`verified` is only a fixture assertion here. The model performs no signature verification,
+provider lookup, route matching, URL parsing or normalization. A request header cannot establish
+trusted provenance. `equivalent` would require separately reviewed edge-to-origin normalization
+and complete router parity. The model accepts no ground-truth abuse or legitimacy argument.
+
+### Signals and missing qualifications
+
+- A trusted provider attack-signature result is the conditional candidate. Each approved detection
+  would map to one reviewed finite signal class. No particular detection ID, provider expression,
+  score cutoff, entitlement or confidence level is selected. Benign-shaped random requests may
+  carry no signature at all; therefore coverage of the original workload remains unknown.
+- Automation alone is not abuse. API and compute clients are legitimately automated. Cloudflare's
+  [bot-score documentation](https://developers.cloudflare.com/bots/concepts/bot-score/) describes
+  low-score false positives from stripped User-Agent headers and restricts granular scores to
+  Enterprise Bot Management. Current account capabilities have not been inspected.
+- A source-defined protocol violation might protect a narrower subset, but a 404, 405, unusual
+  method, long path or encoded path alone is not a reviewed forbidden contract.
+- Positive client proof may preserve a recognized client. Absence of proof must not imply abuse.
+  Adding authentication, challenges or client changes requires a separate product decision.
+- Per-client bursts, path diversity and reputation introduce identity-linked state and shared-client
+  collisions. They are not implemented or authorized by this finite aggregate specification.
+  Hashing an identity does not make its cardinality finite or remove its privacy implications.
+- User-Agent, referrer, fetch metadata, path entropy, global rate, 404 ratio and a trap-route hit
+  are not sufficient standalone signals. Keep benign automation and stale bookmarks as explicit
+  counterexamples. Response-based counting occurs after a response, so it cannot remove that
+  request's initial origin work; see [rate-limit parameters](https://developers.cloudflare.com/waf/rate-limiting-rules/parameters/).
+
+### Route and normalization test matrix
+
+The executable test exhausts the hypothetical budget and checks all **9,216** combinations of
+route, method, capability, provenance, signal and normalization. Only the eight method variants
+of the fully qualified unmatched state may be denied. It also checks all combinations disabled,
+untrusted/default inputs, invalid finite states, time reversal and fixed-window boundaries.
+
+The following router/normalization cases are **required future differential fixtures, not executed
+router tests in this PR**. Before a provider adapter is proposed, bind them to the full immutable
+application router inventory and the documented edge behavior. Public source route templates and
+synthetic inputs are allowed; observed request paths are not fixture material.
+
+| Family | Required cases | Expected behavior |
+| --- | --- | --- |
+| Browser/public | Root, static assets, metadata, version, public key, model/community routes | Preserve registered methods plus automatic HEAD/OPTIONS and application-owned errors |
+| Health/metrics | Liveness/readiness/API health; valid and invalid metrics authentication | Forward; preserve authentication and health semantics |
+| E2EE/compute | API-v1 request/response/retrieval/cancel/progress; register/poll/control and aliases | Forward all registered methods and application-owned rejections |
+| Legitimate missing | Stale bookmark, typo, missing asset, crawler, text/accessibility client | No block, including missing or misleading automation signals |
+| Router drift | New route, alias, dynamic parameter, method mismatch, ambiguous classification | Forward unknowns; stop candidate qualification |
+| Normalization | Escaped unreserved characters, repeated separators, dot segments, case, Unicode, encoded slash and double encoding | Do not guess equivalence; disagreement forwards and rejects qualification |
+
+Cloudflare documents normalization before rule evaluation and optional normalization toward the
+origin; see [URL normalization](https://developers.cloudflare.com/rules/normalization/).
+A synthetic `equivalent` flag cannot establish this parity.
+
+### Adversarial fixtures and decisive counterexamples
+
+Run the stronger-signal replay without changing the original CLI:
+
+```sh
+python3 -c 'import json; from scripts.tokenplace_edge_replay import signal_replay; print(json.dumps(signal_replay(), sort_keys=True))'
+pytest -q tests/test_tokenplace_edge_replay.py
+```
+
+Across three fixed windows the fixture contains 3,000 signaled attack attempts, 3,000 unsignaled
+attack attempts, 144 preserved requests, nine ordinary missing-page requests without the signal,
+nine legitimate missing-page requests incorrectly carrying the signal, and three unknown requests.
+The population labels are synthetic accounting ground truth, never inputs to the matcher.
+
+| Result | Count | Interpretation |
+| --- | --- | --- |
+| Signaled attacks forwarded | 300 / 3,000 | 90% reduction only for the hypothetical matched subset |
+| Unsignaled attacks forwarded | 3,000 / 3,000 | No bound on traffic lacking the signal |
+| All modeled attacks forwarded | 3,300 / 6,000 | 45% reduction for this chosen mixture, not an observed rate |
+| Preserved requests forwarded | 144 / 144 | Finite model compatibility only |
+| Ordinary missing pages forwarded | 9 / 9 | Improvement only when the signal is absent |
+| Legitimate requests with false signals blocked | 9 / 9 | Counterexample still rejects safety qualification |
+| Unknown requests forwarded | 3 / 3 | Unknowns cannot justify enforcement |
+| Attacks forwarded with edge disabled | 6,000 / 6,000 | Metric safety must remain independently application-owned |
+
+A provider with any legitimate overlap can still cause collateral blocking. A provider that misses
+benign-shaped attacks may not meet the mitigation objective. No classifier accuracy, production
+false-positive rate, live reduction or successful mitigation follows from assigning fixture flags.
+
+### Acceptance gates and implementation boundary
+
+Retain every gate above, including zero legitimate blocks, complete route coverage, separately
+approved observations, rollback thresholds and application metrics tests with the edge disabled.
+Additionally require a named source-backed signal, trusted provenance, confirmed capabilities,
+normalization parity, and independent aggregate false-positive/coverage evidence. Missing evidence
+is an explicit failed qualification gate, not a default assumption of safety. Include attack-first,
+legitimate-first and interleaved sequences plus boundary bursts in any adapter qualification.
+The fixed adversarial ordering here is sufficient to reject the candidate, not exhaustive load proof.
+
+Export only fixed counters and approved finite states. Never retain observed paths, queries,
+headers, cookies, tokens, credentials, payloads, fingerprints, addresses or identity hashes as
+keys. Provider IDs need a reviewed finite mapping; arbitrary IDs collapse to unknown. The current
+aggregate evidence schema is not extended by this work. No new observer, collection, identity store,
+provider adapter, rule expression, client challenge or deployment is included. Keep #2780 open.
+
 ## Remaining acceptance gaps
 
 The finite candidate and its counterexample are reviewable, privacy-safe and reproducible.
