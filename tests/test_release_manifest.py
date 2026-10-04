@@ -2009,7 +2009,9 @@ def test_verifier_capabilities_requires_exact_ordered_v1_list(
 
 
 @pytest.mark.parametrize("coordinate", [None, "tag-only", "different-digest"])
-def test_finalize_requires_desired_pin_even_when_current_image_id_matches(coordinate: str) -> None:
+def test_finalize_requires_desired_pin_even_when_current_image_id_matches(
+    coordinate: str | None,
+) -> None:
     image = f"{manifest.IMAGE_REF}:main-abcdef0"
     if coordinate == "different-digest":
         image += "@sha256:" + "9" * 64

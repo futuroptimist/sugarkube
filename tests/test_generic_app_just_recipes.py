@@ -650,7 +650,10 @@ if retag_marker and "--descriptor" in args and "charts/dspace" not in ref:
     marker.touch()
 if "--descriptor" in args:
     value = {{"digest": chart if "charts/dspace" in ref else image}}
-elif args[:2] == ["manifest", "fetch"] and (ref.endswith("@" + image) or ref.endswith("@sha256:" + "9" * 64)):
+elif args[:2] == ["manifest", "fetch"] and (
+    ref.endswith("@" + image)
+    or ("charts/dspace" not in ref and ref.endswith("@sha256:" + "9" * 64))
+):
     value = {{"manifests": [{{"digest": platform}}]}}
 elif args[:2] == ["manifest", "fetch"] and ref.endswith("@" + platform):
     value = {{"config": {{"digest": image_config}}}}
@@ -9151,3 +9154,19 @@ def test_registry_retag_after_validation_cannot_change_applied_image(
     assert "image.tag=main-abcdef0@sha256:" + "1" * 64 in upgrades[0]
     assert not evidence.exists()
     assert Path(str(evidence) + ".reservation").exists()
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+@pytest.mark.parametrize("recipe", ["app-deploy", "app-redeploy"])
+def test_manifest_snapshot_cleanup_cannot_remove_inherited_path(
+    tmp_path: Path, generic_app_stub_env: dict[str, str], recipe: str
+) -> None:
+    sentinel = tmp_path / "retain"
+    sentinel.write_text("untouched")
+    invalid = tmp_path / "invalid.json"
+    invalid.write_text("{}")
+    env = {**generic_app_stub_env, "runtime_proof": str(sentinel)}
+    result = _run_just([recipe, "dspace", "staging", "main-abcdef0", "", str(invalid)], env)
+    assert result.returncode != 0
+    assert sentinel.read_text() == "untouched"
+    assert not Path(env["HELM_LOG"]).exists()

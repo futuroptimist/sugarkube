@@ -1982,6 +1982,8 @@ dspace-release-verify env manifest smoke_runner config='' kubeconfig='' expected
 app-deploy app env='staging' tag='' config='' manifest='' evidence='' staging_evidence='' smoke_runner='' kubeconfig='' staging_config='' staging_kubeconfig='' confirm='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
+    image_coordinate=''
+    runtime_proof=''
 
     inputs=({{ quote(app) }} {{ quote(env) }} {{ quote(tag) }} {{ quote(config) }} {{ quote(manifest) }} {{ quote(evidence) }} {{ quote(staging_evidence) }} {{ quote(smoke_runner) }} {{ quote(kubeconfig) }} {{ quote(staging_config) }} {{ quote(staging_kubeconfig) }} {{ quote(confirm) }})
     destinations=(app_input env_input tag_input config_input release_manifest evidence_output staging_record runtime_smoke kubeconfig_input staging_config_input staging_kubeconfig_input production_confirmation)
@@ -2109,6 +2111,8 @@ app-deploy app env='staging' tag='' config='' manifest='' evidence='' staging_ev
 app-redeploy app env='staging' tag='' config='' manifest='' evidence='' staging_evidence='' smoke_runner='' kubeconfig='' staging_config='' staging_kubeconfig='' confirm='':
     #!/usr/bin/env bash
     set -Eeuo pipefail
+    image_coordinate=''
+    runtime_proof=''
 
     inputs=({{ quote(app) }} {{ quote(env) }} {{ quote(tag) }} {{ quote(config) }} {{ quote(manifest) }} {{ quote(evidence) }} {{ quote(staging_evidence) }} {{ quote(smoke_runner) }} {{ quote(kubeconfig) }} {{ quote(staging_config) }} {{ quote(staging_kubeconfig) }} {{ quote(confirm) }})
     destinations=(app_input env_input tag_input config_input release_manifest evidence_output staging_record runtime_smoke kubeconfig_input staging_config_input staging_kubeconfig_input production_confirmation)
