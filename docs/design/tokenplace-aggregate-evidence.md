@@ -81,8 +81,10 @@ validates structure and bounds, not truthfulness, source health or incident caus
   remediation even though expired records are never exported. Monitor cleanup success locally;
   do not claim expiry ran merely because time passed. This PR performs no scheduling or adoption.
 - Use a dedicated directory outside this checkout, owned by the operator, mode `0700`; files
-  must be regular, owned by that operator, mode `0600`, with one link. Symlinks, hard links,
-  unexpected entries and oversized files fail closed. No automatic permission repair occurs.
+  must be regular, owned by that operator, mode `0600`, with one link. The final store directory
+  component and stored entries cannot be symlinks; ancestor components may be symlinks, so use
+  a trusted parent path. Hard links, unexpected entries and oversized files fail closed.
+  No automatic permission repair occurs.
   The same-UID operator and privileged administrator remain trusted; this is access control,
   not encryption or secure erasure. Use encrypted storage where required and exclude the store
   from sync, backup and source control unless their independent retention/access policy is approved.

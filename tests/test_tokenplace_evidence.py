@@ -288,6 +288,27 @@ def test_unsafe_bucket_files_are_never_exported(tmp_path, kind):
         evidence.operate(store, "export", now=NOW)
 
 
+@pytest.mark.parametrize("suffix", ["", "/", "/.", "//./"])
+@pytest.mark.parametrize("operation", ["append", "prune", "export"])
+def test_store_symlink_suffixes_fail_before_any_mutation(tmp_path, suffix, operation):
+    store = tmp_path / "store"
+    append(store)
+    before = {p.name: p.read_bytes() for p in store.iterdir()}
+    link = tmp_path / "link"
+    link.symlink_to(store, target_is_directory=True)
+    # Keep the raw string: pathlib would otherwise remove the bypassing suffix.
+    with pytest.raises(OSError):
+        evidence.operate(str(link) + suffix, operation, evidence.encode(bucket()), now=NOW)
+    assert {p.name: p.read_bytes() for p in store.iterdir()} == before
+
+
+@pytest.mark.parametrize("suffix", ["/", "/.", "//./"])
+def test_real_store_directory_suffixes_remain_supported(tmp_path, suffix):
+    store = tmp_path / "store"
+    append(store)
+    assert evidence.operate(str(store) + suffix, "export", now=NOW) == evidence.encode(bucket())
+
+
 def test_store_symlink_foreign_owner_and_repository_are_rejected(tmp_path, monkeypatch):
     store = tmp_path / "store"
     append(store)

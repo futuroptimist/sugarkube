@@ -167,7 +167,10 @@ def check_file(fd):
 @contextmanager
 def private_store(path, create):
     """Require a dedicated owner-only directory; pin all operations to its descriptor."""
-    target = Path(path).resolve()
+    # Remove trailing separators and dot components lexically, without following links.
+    # Otherwise the kernel can follow a final symlink before applying O_NOFOLLOW.
+    path = Path(path)
+    target = path.resolve()
     repository = Path(__file__).resolve().parents[1]
     if target == repository or repository in target.parents:
         raise EvidenceError("store must be outside the repository")
