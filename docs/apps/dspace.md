@@ -80,12 +80,26 @@ just dspace-prod-metrics-reconcile \
   confirm="dspace:prod:1a31a569aff2dbeb238e8c2688b9e85140d2077d"
 ```
 
+New deployment, reconciliation, recovery, and rollback output pins the application image as
+`repository:tag@sha256:digest` using the reviewed manifest identity. Deployment and redeployment
+use one private manifest snapshot for validation, rendering, application, and finalization. Runtime
+verification requires that pin in both the Deployment template and its pods; a matching current
+`imageID` alone does not protect a future restart. Historical finalized evidence remains readable.
+The exact legacy reconciliation baseline remains tag-only on input and migrates to pinned output.
+
+The current evidence contract requires the observed `imageID` digest to equal the approved index
+digest. A distinct platform digest is rejected: accepting index/platform equivalence would require
+additional authenticated platform membership evidence, which this change does not introduce.
+
 ### One-time production pull-policy recovery
 
 The failed revision-10 reconciliation evidence is immutable and remains failed. After this change is
 merged, a separately authorized operator may repair only the reviewed incident state: revision 10,
 chart 3.0.3, and complete approved values with the sole delta
-`image.pullPolicy=IfNotPresent`. This is **not** a rerun of
+`image.pullPolicy=IfNotPresent` and the historical tag-only image coordinate. Recovery also migrates
+that coordinate to the reviewed digest pin. The legacy runtime exception is restricted to the exact
+approved 3.0.3 production tuple at revision 10 during recovery preflight; revision 11 must be pinned.
+This is **not** a rerun of
 `dspace-prod-metrics-reconcile`. The command fails closed on any other revision, chart, invocation,
 pod, image, Secret contract, provenance, or values state; it performs at most one digest-qualified
 upgrade to revision 11 and writes a new private evidence record.

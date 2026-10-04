@@ -1559,6 +1559,8 @@ def test_configuration_reconciliation_completes_all_production_gates(
 
     before_pods = [ready("1"), ready("2")]
     after_pods = [ready("3"), ready("4")]
+    for item in after_pods:
+        item["applicationImage"] += f"@{selected['imageDigest']}"
     terminating_pods = [{**ready("2"), "terminating": True}, *after_pods]
     state = {"upgraded": False, "description": "", "post_upgrade_pod_reads": 0}
     staged_target: dict[str, object] = {}
@@ -1654,13 +1656,13 @@ def test_configuration_reconciliation_completes_all_production_gates(
     assert sum("upgrade" in command for command in commands) == 1
     assert upgrade[upgrade.index("--kubeconfig") + 1] == str(kubeconfig)
     assert f"oci://{manifest.CHART_REF}@{selected['chartDigest']}" in upgrade
-    assert f"image.tag={selected['imageTag']}" in upgrade
+    assert f"image.tag={selected['imageTag']}@{selected['imageDigest']}" in upgrade
     assert "image.pullPolicy=Always" in upgrade
     rendered = next(command for command in commands if "template" in command)
     assert "image.pullPolicy=Always" in rendered
     forbidden = ("--reuse-values", "--version", selected["semanticTag"], "rollback")
     assert not any(item in upgrade for item in forbidden)
-    assert selected["imageDigest"] not in next(
+    assert selected["imageDigest"] in next(
         item for item in upgrade if item.startswith("image.tag=")
     )
     assert finalized["helm_stored_values_result"] is stored_proof
@@ -1668,7 +1670,7 @@ def test_configuration_reconciliation_completes_all_production_gates(
         {"revision": 10, "chart": f"dspace-{selected['chartVersion']}"}
     ]
     assert finalized["expected_image_coordinate"] == (
-        f"{manifest.IMAGE_REF}:{selected['imageTag']}"
+        f"{manifest.IMAGE_REF}:{selected['imageTag']}@{selected['imageDigest']}"
     )
     assert result["state"] == "succeeded"
     assert result["helm"]["beforeRevision"] == 9
@@ -2050,10 +2052,13 @@ def recovery_execution_case(
         "metrics": {"enabled": True},
         "serviceMonitor": {"enabled": True},
     }
+    desired["image"]["tag"] += f"@{selected['imageDigest']}"
     user_values = json.loads(json.dumps(desired))
+    user_values["image"]["tag"] = selected["imageTag"]
     user_values["image"].pop("pullPolicy")
     computed_before = json.loads(json.dumps(desired))
     computed_before["image"]["pullPolicy"] = "IfNotPresent"
+    computed_before["image"]["tag"] = selected["imageTag"]
     state = {
         "upgraded": False,
         "description": "",
@@ -2074,6 +2079,7 @@ def recovery_execution_case(
         rollback, "verifier_capabilities", lambda *_args: {"contract": "repository"}
     )
     monkeypatch.setattr(rollback, "verifier_accepts_runtime_arguments", lambda *_args: True)
+
     def preflight(*call_args: object, **call_kwargs: object) -> dict[str, bool]:
         state["preflight_calls"].append((call_args, call_kwargs))
         if fault == "provenance":
@@ -2094,9 +2100,7 @@ def recovery_execution_case(
     monkeypatch.setattr(
         rollback.release,
         "finalize",
-        lambda *call_args, **call_kwargs: state["finalize_calls"].append(
-            (call_args, call_kwargs)
-        )
+        lambda *call_args, **call_kwargs: state["finalize_calls"].append((call_args, call_kwargs))
         or {"verificationResults": [{"check": "ownership", "passed": True}]},
     )
     monkeypatch.setattr(
@@ -2151,6 +2155,8 @@ def recovery_execution_case(
         }
 
     before_pods, after_pods = [ready("old-1"), ready("old-2")], [ready("new-1"), ready("new-2")]
+    for item in after_pods:
+        item["applicationImage"] += f"@{selected['imageDigest']}"
     monkeypatch.setattr(
         rollback,
         "pods",
@@ -2306,7 +2312,7 @@ def test_production_metrics_recovery_completes_revision_10_to_11(
         str(path) for path in args._test_values
     ]
     assert f"image.repository={manifest.IMAGE_REF}" in upgrade
-    assert f"image.tag={selected['imageTag']}" in upgrade
+    assert f"image.tag={selected['imageTag']}@{selected['imageDigest']}" in upgrade
     assert "image.pullPolicy=Always" in upgrade
     assert "--wait" in upgrade and upgrade[upgrade.index("--timeout") + 1] == "7m"
     assert "--reuse-values" not in upgrade

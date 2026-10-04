@@ -581,6 +581,8 @@ def runtime_verifier_command(
     ]
     if args.config:
         command.extend(("--config", str(args.config)))
+    if expected_revision == 10 and getattr(args, "production_metrics_recovery", False):
+        command.append("--legacy-recovery-preflight")
     if expected_revision is not None:
         command.extend(("--expected-helm-revision", str(expected_revision)))
     return command
@@ -663,8 +665,6 @@ def verify_post_pods(
     before: list[dict[str, Any]],
     target: dict[str, Any],
     changed: bool,
-    *,
-    retain_tag: bool = False,
 ) -> None:
     if any(p["terminating"] for p in after):
         raise RollbackError("terminating old DSPACE pods remain")
@@ -675,8 +675,7 @@ def verify_post_pods(
     if changed and (old & new or old == new):
         raise RollbackError("DSPACE pod replacement was not proved")
     expected_image = f"{release.IMAGE_REF}:{target['imageTag']}"
-    if not retain_tag:
-        expected_image += f"@{target['imageDigest']}"
+    expected_image += f"@{target['imageDigest']}"
     for pod in after:
         if application_image(pod) != expected_image:
             raise RollbackError("DSPACE container image coordinate does not match target")
@@ -733,6 +732,12 @@ def configuration_comparison_baselines(
         raise RollbackError("unrelated Helm values drift blocks configuration reconciliation")
     if "repository" not in live_image:
         live_image["repository"] = release.IMAGE_REF
+    # The approved migration starts from the exact legacy tag-only coordinate.
+    # This comparison does not authorize a different tag or a different digest.
+    desired_tag = desired_image.get("tag", "")
+    if isinstance(desired_tag, str) and "@sha256:" in desired_tag:
+        if live_image.get("tag") == desired_tag.split("@", 1)[0]:
+            live_image["tag"] = desired_tag
     return baseline, desired_baseline
 
 
@@ -868,9 +873,7 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             "targetManifestFingerprint": failed["targetManifestFingerprint"],
         }
         args._recovery_failed_stage = "live-state-and-provenance"
-    image_value = target["imageTag"]
-    if not configuration_reconciliation:
-        image_value += f"@{target['imageDigest']}"
+    image_value = f"{target['imageTag']}@{target['imageDigest']}"
     # The manifest module's OCI and cluster proof functions deliberately accept
     # candidate records. Project the exact candidate portion of the validated
     # final record rather than reimplementing or weakening those validators.
@@ -999,7 +1002,7 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             raise RollbackError("desired values are structurally invalid")
         desired_values["image"] = {
             "repository": release.IMAGE_REF,
-            "tag": target["imageTag"],
+            "tag": image_value,
             "pullPolicy": "Always",
         }
         current_values_path = staged_directory / "live-values.json"
@@ -1055,6 +1058,7 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
         if recovery:
             recovery_values = copy.deepcopy(desired_values)
             recovery_values["image"].pop("pullPolicy")
+            recovery_values["image"]["tag"] = target["imageTag"]
             if live_values != recovery_values:
                 raise RollbackError(
                     "live values have drift beyond the sole recoverable pull policy"
@@ -1100,6 +1104,7 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
                 )
             strict_computed = copy.deepcopy(expected_computed)
             strict_computed["image"]["pullPolicy"] = "Always"
+            strict_computed["image"]["tag"] = image_value
             try:
                 release.verify_helm_stored_values(approved, strict_computed, "prod")
             except release.ManifestError as exc:
@@ -1111,9 +1116,7 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             validate_verifier_result(
                 json_command(
                     runner,
-                    runtime_verifier_command(
-                        args, target, verifier_manifest, expected_revision=10
-                    ),
+                    runtime_verifier_command(args, target, verifier_manifest, expected_revision=10),
                     "recovery runtime preflight",
                 ),
                 target,
@@ -1453,7 +1456,6 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             before_pods,
             target,
             changed,
-            retain_tag=configuration_reconciliation,
         )
         if configuration_reconciliation and len(after_pods) != 2:
             raise RollbackError("reconciliation did not produce exactly two Ready DSPACE pods")
@@ -1540,11 +1542,20 @@ def _rollback(args: argparse.Namespace, runner: Runner, staged_directory: Path) 
             helm_history=after_history,
         )
         verifier_command = [
-            str(args.verifier), "verify", "--environment", args.environment,
-            "--release", "dspace", "--namespace", "dspace",
-            "--application-version", target["applicationVersion"],
-            "--source-revision", target["sourceRevision"],
-            "--provider", target["expectedDefaultChatProvider"],
+            str(args.verifier),
+            "verify",
+            "--environment",
+            args.environment,
+            "--release",
+            "dspace",
+            "--namespace",
+            "dspace",
+            "--application-version",
+            target["applicationVersion"],
+            "--source-revision",
+            target["sourceRevision"],
+            "--provider",
+            target["expectedDefaultChatProvider"],
         ]
         # The repository verifier owns these extended arguments.  Preserve the
         # original verify contract for compatible third-party verifiers rather

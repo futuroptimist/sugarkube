@@ -335,7 +335,11 @@ def pod(name: str, digest: str = DIGEST) -> dict[str, object]:
                 {"kind": "ReplicaSet", "name": "dspace-rs", "uid": "rs-uid", "controller": True}
             ],
         },
-        "spec": {"containers": [{"name": "dspace", "image": f"{manifest.IMAGE_REF}:main-abcdef0"}]},
+        "spec": {
+            "containers": [
+                {"name": "dspace", "image": f"{manifest.IMAGE_REF}:main-abcdef0@{DIGEST}"}
+            ]
+        },
         "status": {
             "phase": "Running",
             "startTime": "2026-07-26T12:01:00Z",
@@ -612,7 +616,7 @@ def test_schema_v2_finalization_and_staging_gate_preserve_chart_provenance() -> 
             {
                 "image": {
                     "repository": manifest.IMAGE_REF,
-                    "tag": staging["imageTag"],
+                    "tag": f"{staging['imageTag']}@{staging['imageDigest']}",
                     "pullPolicy": "Always",
                 }
             },
@@ -638,7 +642,7 @@ def test_schema_v2_requires_and_round_trips_helm_stored_values_check() -> None:
             {
                 "image": {
                     "repository": manifest.IMAGE_REF,
-                    "tag": value["imageTag"],
+                    "tag": f"{value['imageTag']}@{value['imageDigest']}",
                     "pullPolicy": "Always",
                 }
             },
@@ -667,7 +671,11 @@ def test_helm_stored_values_reject_missing_or_non_object_image(image: object) ->
 )
 def test_helm_stored_values_reject_image_mismatch(field: str, wrong: str) -> None:
     value = split_candidate("prod")
-    image = {"repository": manifest.IMAGE_REF, "tag": value["imageTag"], "pullPolicy": "Always"}
+    image = {
+        "repository": manifest.IMAGE_REF,
+        "tag": f"{value['imageTag']}@{value['imageDigest']}",
+        "pullPolicy": "Always",
+    }
     image[field] = wrong
     with pytest.raises(manifest.ManifestError, match="stored image values"):
         manifest.verify_helm_stored_values(value, {"image": image}, "prod")
@@ -678,7 +686,7 @@ def production_stored_values() -> dict[str, object]:
     return {
         "image": {
             "repository": manifest.IMAGE_REF,
-            "tag": value["imageTag"],
+            "tag": f"{value['imageTag']}@{value['imageDigest']}",
             "pullPolicy": "Always",
         },
         "metrics": {
@@ -707,12 +715,10 @@ def test_committed_production_values_pass_stored_values_contract() -> None:
     recovery = json.loads(
         Path("docs/apps/dspace.prod-recovery-coordinates.json").read_text(encoding="utf-8")
     )
-    approved = manifest.candidate(
-        recovery, "prod", "openai", "2026-07-31T12:00:00Z", "operator"
-    )
+    approved = manifest.candidate(recovery, "prod", "openai", "2026-07-31T12:00:00Z", "operator")
     values["image"] = {
         "repository": manifest.IMAGE_REF,
-        "tag": approved["imageTag"],
+        "tag": f"{approved['imageTag']}@{approved['imageDigest']}",
         "pullPolicy": "Always",
     }
 
@@ -905,7 +911,7 @@ def test_helm_stored_values_reject_production_staging_leaks_secret_safely(
     stored = {
         "image": {
             "repository": manifest.IMAGE_REF,
-            "tag": value["imageTag"],
+            "tag": f"{value['imageTag']}@{value['imageDigest']}",
             "pullPolicy": "Always",
         },
         **leak,
@@ -1288,7 +1294,7 @@ def test_finalize_cli_collects_bound_evidence_before_consuming_reservation(
                     {
                         "image": {
                             "repository": manifest.IMAGE_REF,
-                            "tag": selected["imageTag"],
+                            "tag": f"{selected['imageTag']}@{selected['imageDigest']}",
                             "pullPolicy": "Always",
                         }
                     }
@@ -2000,3 +2006,22 @@ def test_verifier_capabilities_requires_exact_ordered_v1_list(
     }
     with pytest.raises(manifest.ManifestError, match="ordered v1 contract"):
         manifest.validate_verifier_capabilities(value, "staging", "dspace", "dspace")
+
+
+@pytest.mark.parametrize("coordinate", [None, "tag-only", "different-digest"])
+def test_finalize_requires_desired_pin_even_when_current_image_id_matches(coordinate: str) -> None:
+    image = f"{manifest.IMAGE_REF}:main-abcdef0"
+    if coordinate == "different-digest":
+        image += "@sha256:" + "9" * 64
+    observed = {"items": [pod("dspace-a")]}
+    observed["items"][0]["spec"]["containers"][0]["image"] = image
+    kwargs = {} if coordinate is None else {"expected_image_coordinate": image}
+    with pytest.raises(manifest.ManifestError, match="image"):
+        finalize(pods_json=observed, **kwargs)
+
+
+def test_unproved_platform_digest_is_not_equivalent_to_approved_index() -> None:
+    observed = {"items": [pod("dspace-a")]}
+    observed["items"][0]["status"]["containerStatuses"][0]["imageID"] = PLATFORM_DIGEST
+    with pytest.raises(manifest.ManifestError, match="imageID"):
+        finalize(pods_json=observed)

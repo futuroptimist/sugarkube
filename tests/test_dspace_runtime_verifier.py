@@ -185,7 +185,7 @@ def _verify_setup(
     version = str(selected_coordinates["applicationVersion"]) if use_coordinates else "3.1.0"
     chart_version = str(selected_coordinates["chartVersion"]) if use_coordinates else "3.1.0"
     canonical = f"ghcr.io/democratizedspace/dspace:{image_tag}"
-    declared = f"{canonical}@{digest}" if rollback else canonical
+    declared = override.get("declared_image", f"{canonical}@{digest}")
 
     def build(image: str = canonical, build_revision: str = revision) -> str:
         return json.dumps(
@@ -1980,3 +1980,50 @@ def test_main_maps_config_errors_to_bounded_failure(
     captured = capsys.readouterr()
     assert "manifest/evidence mismatch" in captured.err
     assert SENTINEL not in captured.out + captured.err
+
+
+@pytest.mark.parametrize("desired", ["", "tag-only", "wrong-digest"])
+def test_matching_running_image_id_does_not_authorize_unpinned_restart(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, desired: str
+) -> None:
+    image = "ghcr.io/democratizedspace/dspace:main-abcdef0"
+    if desired == "wrong-digest":
+        image += "@sha256:" + "9" * 64
+    elif desired == "":
+        image = ""
+    args, _commands = _verify_setup(monkeypatch, tmp_path, overrides={"deployment_image": image})
+    with pytest.raises(verifier.VerificationError, match="cluster identity"):
+        verifier.verify(args)
+
+
+@pytest.mark.parametrize("legacy", [True, False])
+def test_tag_only_runtime_exception_is_limited_to_exact_recovery_preflight(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, legacy: bool
+) -> None:
+    selected = verifier.LEGACY_303_COORDINATES
+    chart = f"dspace-{selected['chartVersion']}"
+    args, _ = _verify_setup(
+        monkeypatch,
+        tmp_path,
+        legacy=legacy,
+        provider="openai",
+        overrides={
+            "declared_image": f"{verifier.release_manifest.IMAGE_REF}:{selected['imageTag']}",
+            "helm_statuses": [
+                {
+                    "chart": {"metadata": {"name": "dspace", "version": selected["chartVersion"]}},
+                    "version": 10,
+                }
+            ]
+            * 2,
+            "helm_histories": [[{"revision": 10, "chart": chart}]] * 2,
+        },
+    )
+    args.environment = "prod"
+    args.expected_helm_revision = 10
+    args.legacy_recovery_preflight = True
+    if legacy:
+        verifier.verify(args)
+    else:
+        with pytest.raises(verifier.VerificationError, match="legacy recovery identity"):
+            verifier.verify(args)

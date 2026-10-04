@@ -2011,6 +2011,11 @@ app-deploy app env='staging' tag='' config='' manifest='' evidence='' staging_ev
         echo "ERROR: manifest=<approved-candidate.json> is required for DSPACE ${SUGARKUBE_ENV}." >&2
         exit 2
       fi
+      # Use one private manifest snapshot through preflight, reservation and finalization.
+      manifest_snapshot="$(mktemp)"
+      trap 'rm -f "${manifest_snapshot:-}" "${runtime_proof:-}"' EXIT
+      cp -- "${release_manifest}" "${manifest_snapshot}"
+      release_manifest="${manifest_snapshot}"
       if [ -z "${runtime_smoke}" ]; then
         echo "ERROR: smoke_runner=<executable> is required for DSPACE ${SUGARKUBE_ENV}." >&2
         exit 2
@@ -2040,10 +2045,13 @@ app-deploy app env='staging' tag='' config='' manifest='' evidence='' staging_ev
       if [ -z "${chart_version}" ]; then
         chart_version="$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' "${SUGARKUBE_VERSION_FILE}" | head -n1)"
       fi
-      chart_coordinate="$(python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" preflight \
+      deployment_coordinates="$(python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" preflight \
         --manifest "${release_manifest}" --environment "${SUGARKUBE_ENV}" \
         --image-tag "${SUGARKUBE_TAG}" --chart-version "${chart_version}" \
-        --chart-ref "${SUGARKUBE_CHART}" --print-chart-coordinate)"
+        --chart-ref "${SUGARKUBE_CHART}" --print-deployment-coordinates)"
+      chart_coordinate="${deployment_coordinates%%$'\n'*}"
+      image_coordinate="${deployment_coordinates#*$'\n'}"
+      [[ "${image_coordinate}" =~ ^[a-z0-9._-]+@sha256:[0-9a-f]{64}$ ]] || { echo "ERROR: missing reviewed image digest" >&2; exit 2; }
       if [ -z "${evidence_output}" ]; then
         evidence_output="$(python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" evidence-path --manifest "${release_manifest}")"
       fi
@@ -2055,7 +2063,7 @@ app-deploy app env='staging' tag='' config='' manifest='' evidence='' staging_ev
     python3 "{{ justfile_directory() }}/scripts/app_chart.py" preflight \
       --app "${SUGARKUBE_APP}" \
       --env "${SUGARKUBE_ENV}" \
-      --tag "${SUGARKUBE_TAG}" \
+      --tag "${image_coordinate:-${SUGARKUBE_TAG}}" \
       --chart "${chart_coordinate:-${SUGARKUBE_CHART}}" \
       --version "${SUGARKUBE_VERSION:-}" \
       --version-file "${SUGARKUBE_VERSION_FILE:-}" \
@@ -2075,7 +2083,7 @@ app-deploy app env='staging' tag='' config='' manifest='' evidence='' staging_ev
     if ! just --justfile "{{ justfile_directory() }}/justfile" _helm-oci-deploy \
       "${SUGARKUBE_RELEASE}" "${SUGARKUBE_NAMESPACE}" "${chart_coordinate:-${SUGARKUBE_CHART}}" \
       "${SUGARKUBE_VALUES}" "${resolved_host}" "${SUGARKUBE_VERSION:-}" "${SUGARKUBE_VERSION_FILE:-}" \
-      "${SUGARKUBE_TAG}" '' "${SUGARKUBE_ENV}" "${helm_description:-}" "${SUGARKUBE_APP}" \
+      "${image_coordinate:-${SUGARKUBE_TAG}}" '' "${SUGARKUBE_ENV}" "${helm_description:-}" "${SUGARKUBE_APP}" \
       true "${mutation_marker:-}" true; then
       if [ -n "${evidence_reservation:-}" ] && [ ! -e "${mutation_marker}" ]; then
         rm -f "$(realpath -m "${evidence_output}").reservation"
@@ -2085,7 +2093,7 @@ app-deploy app env='staging' tag='' config='' manifest='' evidence='' staging_ev
     [ -z "${mutation_marker:-}" ] || rm -f "${mutation_marker}"
     if [ "${SUGARKUBE_APP}" = dspace ] && { [ "${SUGARKUBE_ENV}" = staging ] || [ "${SUGARKUBE_ENV}" = prod ]; }; then
       runtime_proof="$(mktemp)"
-      trap 'rm -f "${runtime_proof:-}"' EXIT
+      trap 'rm -f "${manifest_snapshot:-}" "${runtime_proof:-}"' EXIT
       just --justfile "{{ justfile_directory() }}/justfile" dspace-release-verify \
         "${SUGARKUBE_ENV}" "${release_manifest}" "${runtime_smoke}" "${config_input}" "${KUBECONFIG}" >"${runtime_proof}"
       python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" finalize \
@@ -2127,6 +2135,11 @@ app-redeploy app env='staging' tag='' config='' manifest='' evidence='' staging_
     [ -n "${runtime_smoke}" ] || runtime_smoke="${DSPACE_SMOKE_RUNNER:-}"
     if [ "${SUGARKUBE_APP}" = dspace ] && { [ "${SUGARKUBE_ENV}" = staging ] || [ "${SUGARKUBE_ENV}" = prod ]; }; then
       if [ -z "${release_manifest}" ]; then echo "ERROR: manifest=<approved-candidate.json> is required for DSPACE ${SUGARKUBE_ENV}." >&2; exit 2; fi
+      # Use one private manifest snapshot through preflight, reservation and finalization.
+      manifest_snapshot="$(mktemp)"
+      trap 'rm -f "${manifest_snapshot:-}" "${runtime_proof:-}"' EXIT
+      cp -- "${release_manifest}" "${manifest_snapshot}"
+      release_manifest="${manifest_snapshot}"
       if [ -z "${runtime_smoke}" ]; then echo "ERROR: smoke_runner=<executable> is required for DSPACE ${SUGARKUBE_ENV}." >&2; exit 2; fi
       if [ ! -f "${runtime_smoke}" ] || [ ! -x "${runtime_smoke}" ]; then echo "ERROR: smoke_runner must be an existing executable file for DSPACE ${SUGARKUBE_ENV}." >&2; exit 2; fi
       if [ "${SUGARKUBE_ENV}" = prod ]; then
@@ -2142,8 +2155,11 @@ app-redeploy app env='staging' tag='' config='' manifest='' evidence='' staging_
       fi
       chart_version="${SUGARKUBE_VERSION:-}"
       if [ -z "${chart_version}" ]; then chart_version="$(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' "${SUGARKUBE_VERSION_FILE}" | head -n1)"; fi
-      chart_coordinate="$(python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" preflight --manifest "${release_manifest}" --environment "${SUGARKUBE_ENV}" --image-tag "${SUGARKUBE_TAG}" --chart-version "${chart_version}" \
-        --chart-ref "${SUGARKUBE_CHART}" --print-chart-coordinate)"
+      deployment_coordinates="$(python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" preflight --manifest "${release_manifest}" --environment "${SUGARKUBE_ENV}" --image-tag "${SUGARKUBE_TAG}" --chart-version "${chart_version}" \
+        --chart-ref "${SUGARKUBE_CHART}" --print-deployment-coordinates)"
+      chart_coordinate="${deployment_coordinates%%$'\n'*}"
+      image_coordinate="${deployment_coordinates#*$'\n'}"
+      [[ "${image_coordinate}" =~ ^[a-z0-9._-]+@sha256:[0-9a-f]{64}$ ]] || { echo "ERROR: missing reviewed image digest" >&2; exit 2; }
       if [ -z "${evidence_output}" ]; then evidence_output="$(python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" evidence-path --manifest "${release_manifest}")"; fi
     fi
 
@@ -2153,7 +2169,7 @@ app-redeploy app env='staging' tag='' config='' manifest='' evidence='' staging_
     python3 "{{ justfile_directory() }}/scripts/app_chart.py" preflight \
       --app "${SUGARKUBE_APP}" \
       --env "${SUGARKUBE_ENV}" \
-      --tag "${SUGARKUBE_TAG}" \
+      --tag "${image_coordinate:-${SUGARKUBE_TAG}}" \
       --chart "${chart_coordinate:-${SUGARKUBE_CHART}}" \
       --version "${SUGARKUBE_VERSION:-}" \
       --version-file "${SUGARKUBE_VERSION_FILE:-}" \
@@ -2173,7 +2189,7 @@ app-redeploy app env='staging' tag='' config='' manifest='' evidence='' staging_
     if ! just --justfile "{{ justfile_directory() }}/justfile" _helm-oci-deploy \
       "${SUGARKUBE_RELEASE}" "${SUGARKUBE_NAMESPACE}" "${chart_coordinate:-${SUGARKUBE_CHART}}" \
       "${SUGARKUBE_VALUES}" "${resolved_host}" "${SUGARKUBE_VERSION:-}" "${SUGARKUBE_VERSION_FILE:-}" \
-      "${SUGARKUBE_TAG}" '' "${SUGARKUBE_ENV}" "${helm_description:-}" "${SUGARKUBE_APP}" \
+      "${image_coordinate:-${SUGARKUBE_TAG}}" '' "${SUGARKUBE_ENV}" "${helm_description:-}" "${SUGARKUBE_APP}" \
       false "${mutation_marker:-}" true; then
       if [ -n "${evidence_reservation:-}" ] && [ ! -e "${mutation_marker}" ]; then
         rm -f "$(realpath -m "${evidence_output}").reservation"
@@ -2183,7 +2199,7 @@ app-redeploy app env='staging' tag='' config='' manifest='' evidence='' staging_
     [ -z "${mutation_marker:-}" ] || rm -f "${mutation_marker}"
     if [ "${SUGARKUBE_APP}" = dspace ] && { [ "${SUGARKUBE_ENV}" = staging ] || [ "${SUGARKUBE_ENV}" = prod ]; }; then
       runtime_proof="$(mktemp)"
-      trap 'rm -f "${runtime_proof:-}"' EXIT
+      trap 'rm -f "${manifest_snapshot:-}" "${runtime_proof:-}"' EXIT
       just --justfile "{{ justfile_directory() }}/justfile" dspace-release-verify "${SUGARKUBE_ENV}" "${release_manifest}" "${runtime_smoke}" "${config_input}" "${KUBECONFIG}" >"${runtime_proof}"
       python3 "{{ justfile_directory() }}/scripts/dspace_release_manifest.py" finalize --manifest "${release_manifest}" --output "${evidence_output}" \
         --environment "${SUGARKUBE_ENV}" --image-tag "${SUGARKUBE_TAG}" --chart-version "${chart_version}" --kubeconfig "${KUBECONFIG}" \

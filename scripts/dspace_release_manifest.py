@@ -734,6 +734,9 @@ def finalize(
     helm_history: object = None,
 ) -> dict[str, Any]:
     validate(value, False)
+    pinned_image = f"{IMAGE_REF}:{value['imageTag']}@{value['imageDigest']}"
+    if expected_image_coordinate is not None and expected_image_coordinate != pinned_image:
+        raise ManifestError("expected image coordinate must preserve the approved digest")
     selected = {
         "environment": environment,
         "imageTag": image_tag,
@@ -819,7 +822,7 @@ def finalize(
         application = [container for container in containers if container.get("name") == "dspace"]
         if len(application) != 1:
             raise ManifestError("pod must contain exactly one dspace application container")
-        expected_image = expected_image_coordinate or f"{IMAGE_REF}:{image_tag}"
+        expected_image = pinned_image
         if application[0].get("image") != expected_image:
             raise ManifestError(
                 "pod application image does not match approved repository and imageTag"
@@ -937,7 +940,7 @@ def verify_helm_stored_values(
         raise ManifestError("Helm stored image values do not match approved coordinates")
     expected = {
         "repository": IMAGE_REF,
-        "tag": value["imageTag"],
+        "tag": f"{value['imageTag']}@{value['imageDigest']}",
         "pullPolicy": "Always",
     }
     if any(image.get(field) != expected_value for field, expected_value in expected.items()):
@@ -1163,6 +1166,7 @@ def main(argv: list[str] | None = None) -> int:
     flight.add_argument("--image-tag")
     flight.add_argument("--chart-version")
     flight.add_argument("--print-chart-coordinate", action="store_true")
+    flight.add_argument("--print-deployment-coordinates", action="store_true")
     finish = sub.add_parser("finalize")
     finish.add_argument("--manifest", type=Path, required=True)
     finish.add_argument("--output", type=Path, required=True)
@@ -1229,7 +1233,10 @@ def main(argv: list[str] | None = None) -> int:
                 args.image_tag,
                 args.chart_version,
             )
-            if args.print_chart_coordinate:
+            if args.print_deployment_coordinates:
+                sys.stdout.write(chart_coordinate(source) + "\n")
+                sys.stdout.write(f"{source['imageTag']}@{source['imageDigest']}\n")
+            elif args.print_chart_coordinate:
                 sys.stdout.write(chart_coordinate(source) + "\n")
             else:
                 sys.stdout.write(_canonical(result))

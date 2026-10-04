@@ -103,6 +103,12 @@ def validate_tag(tag: str, env: str | None = None) -> str:
     normalized_env = normalize_env(env) if env is not None else None
     if normalized_env == "dev" and SEMVER_RE.fullmatch(tag):
         return tag
+    if "@" in tag:
+        name, digest = tag.split("@", 1)
+        if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+            raise AppConfigError("image digest must be canonical sha256")
+        validate_tag(name, env)
+        return tag
     tag_lc = tag.lower()
     if "latest" not in tag_lc and not SEMVER_RE.fullmatch(tag) and BRANCH_SHA_RE.fullmatch(tag):
         return tag
