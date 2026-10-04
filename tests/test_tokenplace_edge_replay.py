@@ -1,6 +1,7 @@
 """Offline evidence for rejecting a broad unmatched-path limiter."""
 
 import importlib.util
+import itertools
 import json
 import runpy
 from pathlib import Path
@@ -68,3 +69,86 @@ def test_rejects_time_reversal_without_resetting_budget():
     with pytest.raises(ValueError, match="monotonic integer"):
         candidate.admit("unmatched", "GET", 59)
     assert candidate.used == 1
+
+
+TRUSTED = dict(capability="available", provenance="verified", normalization="equivalent")
+
+
+def test_signal_replay_preserves_missing_pages_but_cannot_prove_safety_or_total_bound():
+    assert replay.signal_replay() == {
+        "signaled_attempts": 3000,
+        "signaled_forwarded": 300,
+        "unsignaled_attempts": 3000,
+        "unsignaled_forwarded": 3000,
+        "disabled_attack_forwarded": 6000,
+        "preserved_forwarded": 144,
+        "legitimate_missing_forwarded": 9,
+        "false_signal_legitimate_blocked": 9,
+        "unknown_forwarded": 3,
+    }
+    assert replay.signal_replay() == replay.signal_replay()
+
+
+def test_exhaustive_signal_matrix_after_budget_exhaustion():
+    candidate, disabled = replay.SignalCandidate(True), replay.SignalCandidate()
+    for _ in range(replay.BUDGET):
+        assert candidate.admit("unmatched", "GET", 0, signal="attack", **TRUSTED)
+    for category, method, capability, provenance, signal, normalization in itertools.product(
+        replay.CATEGORIES,
+        replay.METHODS,
+        replay.CAPABILITIES,
+        replay.PROVENANCE,
+        replay.SIGNALS,
+        replay.NORMALIZATION,
+    ):
+        fields = dict(
+            capability=capability, provenance=provenance, signal=signal, normalization=normalization
+        )
+        eligible = (category, capability, provenance, signal, normalization) == (
+            "unmatched",
+            "available",
+            "verified",
+            "attack",
+            "equivalent",
+        )
+        assert candidate.admit(category, method, 0, **fields) is not eligible
+        assert disabled.admit(category, method, 0, **fields)
+    assert candidate.used == replay.BUDGET
+
+
+@pytest.mark.parametrize("normalization", replay.NORMALIZATION)
+def test_normalization_states_never_block_preserved_or_unknown_routes(normalization):
+    candidate = replay.SignalCandidate(True)
+    for category in (*replay.PRESERVED, "unknown"):
+        for method in replay.METHODS:
+            assert candidate.admit(
+                category,
+                method,
+                0,
+                capability="available",
+                provenance="verified",
+                signal="attack",
+                normalization=normalization,
+            )
+    assert candidate.used == 0
+
+
+@pytest.mark.parametrize("field", ["capability", "provenance", "signal", "normalization"])
+@pytest.mark.parametrize("value", ["private-unbounded-value", None, True, [], {}])
+def test_signal_states_reject_arbitrary_values_without_echo(field, value):
+    with pytest.raises(ValueError, match="^unsupported finite signal state$"):
+        replay.SignalCandidate(True).admit("unmatched", "GET", 0, **{field: value})
+
+
+def test_signal_default_and_untrusted_inputs_do_not_consume_budget():
+    candidate = replay.SignalCandidate(True)
+    for _ in range(2 * replay.BUDGET):
+        assert candidate.admit("unmatched", "GET", 0)
+        assert candidate.admit("unmatched", "GET", 0, signal="attack", provenance="spoofed")
+    assert candidate.used == 0
+    for _ in range(replay.BUDGET):
+        assert candidate.admit("unmatched", "GET", 59, signal="attack", **TRUSTED)
+    assert not candidate.admit("unmatched", "POST", 59, signal="attack", **TRUSTED)
+    assert candidate.admit("unmatched", "POST", 60, signal="attack", **TRUSTED)
+    with pytest.raises(ValueError, match="monotonic integer"):
+        candidate.admit("unmatched", "GET", 59, signal="attack", **TRUSTED)

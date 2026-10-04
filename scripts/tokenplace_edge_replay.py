@@ -43,6 +43,101 @@ class Candidate:
         return True
 
 
+# Fixture assertions only: no provider adapter verifies or collects these states.
+CAPABILITIES = ("available", "unavailable", "unknown")
+PROVENANCE = ("verified", "absent", "spoofed", "stale")
+SIGNALS = ("attack", "none", "unknown")
+NORMALIZATION = ("equivalent", "ambiguous", "drift", "unknown")
+
+
+class SignalCandidate(Candidate):
+    """Hypothetical budget narrowed by a trusted signal; never a deployed rule.
+
+    ``verified`` and ``equivalent`` are synthetic assertions, not attestations.
+    Caller-supplied headers must never be allowed to establish these states.
+    """
+
+    def admit(
+        self,
+        category,
+        method,
+        second,
+        *,
+        capability="unknown",
+        provenance="absent",
+        signal="unknown",
+        normalization="unknown",
+    ):
+        for value, domain in (
+            (category, CATEGORIES),
+            (method, METHODS),
+            (capability, CAPABILITIES),
+            (provenance, PROVENANCE),
+            (signal, SIGNALS),
+            (normalization, NORMALIZATION),
+        ):
+            if type(value) is not str or value not in domain:
+                raise ValueError("unsupported finite signal state")
+        eligible = (
+            category == "unmatched"
+            and capability == "available"
+            and provenance == "verified"
+            and signal == "attack"
+            and normalization == "equivalent"
+        )
+        # Reuse the original time validation, shared budget and fixed-window semantics.
+        return super().admit("unmatched" if eligible else "unknown", method, second)
+
+
+def signal_replay():
+    """Expose both signature false positives and attacks lacking the signature.
+
+    Population names are synthetic ground truth for accounting only. The matcher
+    receives finite signal assertions and never an abuse/legitimacy label.
+    """
+    candidate, disabled = SignalCandidate(True), SignalCandidate()
+    trusted = dict(capability="available", provenance="verified", normalization="equivalent")
+    counts = Counter(
+        signaled_attempts=0,
+        signaled_forwarded=0,
+        unsignaled_attempts=0,
+        unsignaled_forwarded=0,
+        disabled_attack_forwarded=0,
+        preserved_forwarded=0,
+        legitimate_missing_forwarded=0,
+        false_signal_legitimate_blocked=0,
+        unknown_forwarded=0,
+    )
+    for window in range(3):
+        second = window * WINDOW_SECONDS
+        for signal, label in (("attack", "signaled"), ("none", "unsignaled")):
+            for index in range(1000):
+                method = METHODS[index % len(METHODS)]
+                counts[f"{label}_attempts"] += 1
+                counts[f"{label}_forwarded"] += candidate.admit(
+                    "unmatched", method, second, signal=signal, **trusted
+                )
+                counts["disabled_attack_forwarded"] += disabled.admit(
+                    "unmatched", method, second, signal=signal, **trusted
+                )
+        for category in PRESERVED:
+            for method in METHODS:
+                counts["preserved_forwarded"] += candidate.admit(
+                    category, method, second, signal="attack", **trusted
+                )
+        for method in ("GET", "HEAD", "OPTIONS"):
+            counts["legitimate_missing_forwarded"] += candidate.admit(
+                "unmatched", method, second, signal="none", **trusted
+            )
+            counts["false_signal_legitimate_blocked"] += not candidate.admit(
+                "unmatched", method, second, signal="attack", **trusted
+            )
+        counts["unknown_forwarded"] += candidate.admit(
+            "unknown", "GET", second, signal="attack", **trusted
+        )
+    return dict(counts)
+
+
 def replay():
     """Return only fixed aggregate keys from deterministic category-level traffic.
 
