@@ -160,3 +160,68 @@ def test_optional_producer_dependencies_are_visible_in_both_dashboards():
             if panel["title"].startswith("Daniel") and panel["type"] != "row":
                 assert "Requires the optional" in panel["description"]
                 assert panel["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
+
+
+@pytest.mark.parametrize("failed_write", [1, 2])
+@pytest.mark.parametrize("failure", [OSError, KeyboardInterrupt])
+def test_write_failure_removes_only_this_capture(tmp_path, monkeypatch, failed_write, failure):
+    existing = tmp_path / "previous-capture.png"
+    existing.write_bytes(b"previous evidence")
+    original_fdopen = capture.os.fdopen
+    writes = 0
+
+    class InterruptedWrite:
+        def __init__(self, descriptor, mode):
+            self.stream = original_fdopen(descriptor, mode)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self.stream.close()
+
+        def flush(self):
+            self.stream.flush()
+
+        def fileno(self):
+            return self.stream.fileno()
+
+        def write(self, payload):
+            nonlocal writes
+            writes += 1
+            if writes == failed_write:
+                self.stream.write(payload[:8])
+                raise failure("simulated interrupted write")
+            return self.stream.write(payload)
+
+    monkeypatch.setattr(capture.os, "fdopen", InterruptedWrite)
+    with pytest.raises(failure):
+        capture.capture(arguments(tmp_path), "local-test-credential", Renderer())
+    assert list(tmp_path.iterdir()) == [existing]
+    assert existing.read_bytes() == b"previous evidence"
+
+
+def test_existing_sidecar_is_preserved_on_collision(tmp_path):
+    now = datetime(2026, 10, 1, tzinfo=timezone.utc)
+    sidecar = tmp_path / "sugarkube-staging-observability-panel-35-20261001T000000000000Z.json"
+    sidecar.write_bytes(b"previous metadata")
+    with pytest.raises(FileExistsError):
+        capture.capture(arguments(tmp_path), "local-test-credential", Renderer(), now)
+    assert list(tmp_path.iterdir()) == [sidecar]
+    assert sidecar.read_bytes() == b"previous metadata"
+
+
+@pytest.mark.parametrize("failed_sync", [1, 2, 3])
+def test_sync_failure_removes_incomplete_evidence(tmp_path, monkeypatch, failed_sync):
+    syncs = 0
+
+    def failing_sync(descriptor):
+        nonlocal syncs
+        syncs += 1
+        if syncs == failed_sync:
+            raise OSError("simulated durability failure")
+
+    monkeypatch.setattr(capture.os, "fsync", failing_sync)
+    with pytest.raises(OSError):
+        capture.capture(arguments(tmp_path), "local-test-credential", Renderer())
+    assert not list(tmp_path.iterdir())

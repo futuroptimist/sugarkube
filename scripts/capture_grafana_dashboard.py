@@ -101,13 +101,29 @@ def capture(args, credential, opener=None, now=None):
         "panel_id": args.panel_id,
         **query,
     }
-    for path, payload in (
-        (image, content),
-        (metadata, (json.dumps(manifest, indent=2) + "\n").encode()),
-    ):
-        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(descriptor, "wb") as output:
-            output.write(payload)
+    created = []
+    complete = False
+    try:
+        for path, payload in (
+            (image, content),
+            (metadata, (json.dumps(manifest, indent=2) + "\n").encode()),
+        ):
+            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            created.append(path)
+            with os.fdopen(descriptor, "wb") as output:
+                output.write(payload)
+                output.flush()
+                os.fsync(output.fileno())
+        directory_descriptor = os.open(destination, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
+        complete = True
+    finally:
+        if not complete:
+            for path in reversed(created):
+                path.unlink(missing_ok=True)
     return image
 
 
