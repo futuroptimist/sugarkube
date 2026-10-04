@@ -358,7 +358,7 @@
       "id": 6,
       "type": "stat",
       "title": "DSPACE instrumentation health",
-      "description": "Application instrumentation self-check.",
+      "description": "Application instrumentation self-check. A successful scrape alone does not prove that the deployed DSPACE release exports this metric; absent instrumentation remains NO DATA and requires a metrics-capable application release.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -2980,7 +2980,7 @@
       "id": 66,
       "title": "Daniel cache state",
       "type": "timeseries",
-      "description": "Latest published lifecycle state; disabled, stale, and unavailable remain explicit.",
+      "description": "Latest published lifecycle state; disabled, stale, and unavailable remain explicit. Requires the optional GitHub-cache collector and its published metrics; without that producer, NO DATA is expected, not a healthy cache.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -3012,7 +3012,7 @@
       "id": 67,
       "title": "Daniel cache freshness",
       "type": "timeseries",
-      "description": "Age since the last fully successful refresh; non-fresh states render as NO DATA.",
+      "description": "Age since the last fully successful refresh; non-fresh states render as NO DATA. Requires the optional GitHub-cache collector and its published metrics; without that producer, NO DATA is expected, not a healthy cache.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -3044,7 +3044,7 @@
       "id": 68,
       "title": "Daniel cache completeness",
       "type": "timeseries",
-      "description": "Complete, partial, or none from the validated cache document.",
+      "description": "Complete, partial, or none from the validated cache document. Requires the optional GitHub-cache collector and its published metrics; without that producer, NO DATA is expected, not a healthy cache.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -3076,7 +3076,7 @@
       "id": 69,
       "title": "Daniel cache refresh duration",
       "type": "timeseries",
-      "description": "Duration of the latest refresh attempt, when monitoring and transport are healthy.",
+      "description": "Duration of the latest refresh attempt, when monitoring and transport are healthy. Requires the optional GitHub-cache collector and its published metrics; without that producer, NO DATA is expected, not a healthy cache.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -3108,7 +3108,7 @@
       "id": 70,
       "title": "Daniel cache retained-data age",
       "type": "timeseries",
-      "description": "Age of the oldest retained repository record; shown only for explicit stale state.",
+      "description": "Age of the oldest retained repository record; shown only for explicit stale state. Requires the optional GitHub-cache collector and its published metrics; without that producer, NO DATA is expected, not a healthy cache.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -3140,7 +3140,7 @@
       "id": 93,
       "title": "Daniel cache failure categories",
       "type": "timeseries",
-      "description": "Active bounded refresh failure categories; arbitrary upstream errors are never displayed.",
+      "description": "Active bounded refresh failure categories; arbitrary upstream errors are never displayed. Requires the optional GitHub-cache collector and its published metrics; without that producer, NO DATA is expected, not a healthy cache.",
       "gridPos": {
         "h": 8,
         "w": 6,
@@ -3172,7 +3172,7 @@
       "id": 94,
       "title": "Daniel cache collection health",
       "type": "timeseries",
-      "description": "Monitoring-enabled, successful, recent collector transport health; zero is an explicit non-success state.",
+      "description": "Monitoring-enabled, successful, recent collector transport health; zero is an explicit non-success state. Requires the optional GitHub-cache collector and its published metrics; without that producer, NO DATA is expected, not a healthy cache.",
       "gridPos": {
         "h": 8,
         "w": 6,
@@ -3218,7 +3218,7 @@
       "id": 72,
       "title": "Daniel collection/document status",
       "type": "timeseries",
-      "description": "Selected bounded document status; valid is collected and validated.",
+      "description": "Selected bounded document status; valid is collected and validated. Requires the optional controlled-run collector and a supported measurement; absent or unsupported results remain NO DATA, not zero latency.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -3250,7 +3250,7 @@
       "id": 73,
       "title": "Daniel measurement age",
       "type": "timeseries",
-      "description": "Age of the retained controlled result; remains visible when stale.",
+      "description": "Age of the retained controlled result; remains visible when stale. Requires the optional controlled-run collector and a supported measurement; absent or unsupported results remain NO DATA, not zero latency.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -3282,7 +3282,7 @@
       "id": 74,
       "title": "Daniel performance result state",
       "type": "timeseries",
-      "description": "Completed, regression, or explicitly unavailable current result.",
+      "description": "Completed, regression, or explicitly unavailable current result. Requires the optional controlled-run collector and a supported measurement; absent or unsupported results remain NO DATA, not zero latency.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -3314,7 +3314,7 @@
       "id": 75,
       "title": "Daniel application-ready duration",
       "type": "timeseries",
-      "description": "Application-ready p95 by renderer identity from the current controlled run.",
+      "description": "Application-ready p95 by renderer identity from the current controlled run. Requires the optional controlled-run collector and a supported measurement; absent or unsupported results remain NO DATA, not zero latency.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -3346,7 +3346,7 @@
       "id": 76,
       "title": "Daniel controlled interaction latency",
       "type": "timeseries",
-      "description": "Controlled keyboard latency by renderer identity from the current run.",
+      "description": "Controlled keyboard latency by renderer identity from the current run. Requires the optional controlled-run collector and a supported measurement; absent or unsupported results remain NO DATA, not zero latency.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -3378,7 +3378,7 @@
       "id": 77,
       "title": "Daniel renderer and fallback state",
       "type": "timeseries",
-      "description": "Bounded renderer class, state, and fallback reason by target.",
+      "description": "Bounded renderer class, state, and fallback reason by target. Requires the optional controlled-run collector and a supported measurement; absent or unsupported results remain NO DATA, not zero latency.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -3410,7 +3410,7 @@
       "id": 78,
       "title": "Daniel controlled frame time",
       "type": "timeseries",
-      "description": "Optional 120-frame hardware summary; unsupported runs remain NO DATA.",
+      "description": "Optional 120-frame hardware summary; unsupported runs remain NO DATA. Requires the optional controlled-run collector and a supported measurement; absent or unsupported results remain NO DATA, not zero latency.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -3456,7 +3456,7 @@
       "id": 80,
       "title": "Daniel visitor journey state",
       "type": "timeseries",
-      "description": "Current enabled lifecycle state, gated by the independent expected declaration and completion age. Disabled, stale, unavailable, or missing telemetry remains NO DATA.",
+      "description": "Current enabled lifecycle state, gated by the independent expected declaration and completion age. Disabled, stale, unavailable, or missing telemetry remains NO DATA. Requires the optional application-owned visitor journey producer; disabled or unconfigured monitoring is not evidence of a successful journey.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -3488,7 +3488,7 @@
       "id": 81,
       "title": "Daniel visitor journey success",
       "type": "timeseries",
-      "description": "Last essential-journey result only while independently expected, enabled, and no older than 1020 seconds; stale, disabled, or missing telemetry remains NO DATA.",
+      "description": "Last essential-journey result only while independently expected, enabled, and no older than 1020 seconds; stale, disabled, or missing telemetry remains NO DATA. Requires the optional application-owned visitor journey producer; disabled or unconfigured monitoring is not evidence of a successful journey.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -3520,7 +3520,7 @@
       "id": 82,
       "title": "Daniel visitor journey freshness",
       "type": "timeseries",
-      "description": "Increasing age in seconds of the last sanitized completion while monitoring is independently expected and enabled. It remains visible after the result becomes stale.",
+      "description": "Increasing age in seconds of the last sanitized completion while monitoring is independently expected and enabled. It remains visible after the result becomes stale. Requires the optional application-owned visitor journey producer; disabled or unconfigured monitoring is not evidence of a successful journey.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -3552,7 +3552,7 @@
       "id": 83,
       "title": "Daniel visitor journey aggregate duration",
       "type": "timeseries",
-      "description": "Aggregate duration of the current essential journey while independently expected, enabled, and no older than 1020 seconds.",
+      "description": "Aggregate duration of the current essential journey while independently expected, enabled, and no older than 1020 seconds. Requires the optional application-owned visitor journey producer; disabled or unconfigured monitoring is not evidence of a successful journey.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -3584,7 +3584,7 @@
       "id": 84,
       "title": "Daniel visitor journey failure stage",
       "type": "timeseries",
-      "description": "Bounded failure stage only for an independently expected, enabled failure no older than 1020 seconds.",
+      "description": "Bounded failure stage only for an independently expected, enabled failure no older than 1020 seconds. Requires the optional application-owned visitor journey producer; disabled or unconfigured monitoring is not evidence of a successful journey.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -3616,7 +3616,7 @@
       "id": 85,
       "title": "Daniel visitor journey unavailable or stale",
       "type": "timeseries",
-      "description": "Expected telemetry that is missing or older than 1020 seconds, plus explicit unavailable or stale lifecycle signals. Expected=0 remains NO DATA.",
+      "description": "Expected telemetry that is missing or older than 1020 seconds, plus explicit unavailable or stale lifecycle signals. Expected=0 remains NO DATA. Requires the optional application-owned visitor journey producer; disabled or unconfigured monitoring is not evidence of a successful journey.",
       "gridPos": {
         "h": 8,
         "w": 12,

@@ -35,6 +35,20 @@ prometheus:
             requests:
               storage: 128Gi
 grafana:
+  # Prepared for a dedicated rendering host; keep disabled on the 8 GiB Pi nodes.
+  imageRenderer:
+    enabled: false
+    image:
+      tag: "5.12.5"
+      pullPolicy: IfNotPresent
+    healthcheckPath: /healthz
+    existingSecret: grafana-renderer-auth
+    resources:
+      requests:
+        cpu: "4"
+        memory: 16Gi
+      limits:
+        memory: 16Gi
   admin:
     existingSecret: grafana-admin-credentials
     userKey: admin-user

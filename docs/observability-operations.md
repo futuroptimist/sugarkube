@@ -256,6 +256,77 @@ state is ephemeral, but the immutable dashboard is Helm-provisioned through its 
 should reappear automatically after Grafana pod replacement. API verification remains the
 acceptance proof after the replacement.
 
+### Dashboard data gaps, history, and private image capture
+
+Staging and production dashboards are generated from the same template. Environment,
+cluster identity, and primary chat provider remain profile-specific; the six-hour default
+time range is unchanged. Run `python scripts/generate_observability_dashboards.py --check`
+and the dashboard validator for each generated JSON before changing provisioned dashboards.
+
+A successful scrape does not prove that the application exports every metric family.
+DSPACE instrumentation must come from a metrics-capable application release. Chat and
+dependency rates show an idle zero only behind the existing complete health gate;
+latency percentiles require actual observations. Missing instrumentation or histograms
+remain **NO DATA**. The optional Daniel cache, controlled performance, and visitor journey
+panels now explain their producer dependencies in their panel descriptions. Missing
+producers require an application release or collector configuration, not fabricated
+dashboard values. Confirm those producers separately before interpreting an empty panel
+as a dashboard defect; production application-release parity is still an external dependency.
+
+Both environments retain the desired `90d` / `100GB` policy and `128Gi` storage request.
+Select a longer dashboard range, such as the last 90 days, to view retained time series.
+Instant inventory tables intentionally show the state at the selected end time. Retention
+is a deletion limit, not a guarantee of 90 days of samples: size pressure can remove older
+blocks first, downtime creates gaps, and a new or replaced volume cannot recover old data.
+Grafana persistence does not store Prometheus history. Before any later approved deployment,
+verify loaded retention, the runtime byte limit, the oldest available sample, and the existing
+PVC migration boundary described above in **each** environment. The seven-day blackbox
+missing-target lookback is a discovery window; it does not reduce stored retention.
+
+The pinned kube-prometheus-stack chart `87.19.0` uses Grafana chart `12.8.0`, which supports
+the remote image renderer service and an existing authentication Secret. Common values
+prepare renderer image `5.12.5`, `/healthz`, and Secret `grafana-renderer-auth`, but keep
+the renderer **disabled**. Its [upstream requirements](https://github.com/grafana/grafana-image-renderer/blob/v5.12.5/docs/sources/_index.md)
+recommend 16 GiB of memory and four CPU cores; the documented 8 GiB Pi nodes cannot meet
+that budget. ARM64 is supported. Use a separately provisioned rendering host, or a suitable
+dedicated Kubernetes node, before enabling it in a separately reviewed release. Do not
+enable it on the current Pi nodes by merely changing the flag. No live renderer availability
+or screenshot was verified by the offline changes in this section.
+
+For an in-cluster dedicated node, supply scheduling constraints, enable
+`grafana.imageRenderer.enabled`, and provision the chart's required `token` Secret key
+securely before deployment. For an external renderer, keep the deployment disabled,
+configure `grafana.grafana.ini.rendering.server_url` and `callback_url`, and use
+`grafana.envValueFrom` to supply the `GF_RENDERING_RENDERER_TOKEN` authentication setting
+from the existing Secret. The chart's `imageRenderer.serverURL` and `renderingCallbackURL`
+are only applied when its deployment is enabled. Ensure the renderer can reach Grafana
+on a private route. Both ends must use the same authentication
+credential. The callback must reach the internal Grafana service; it is not the operator's
+localhost tunnel. Render and inspect the pinned chart before requesting deployment approval.
+Use the remote service rather than the deprecated browser plugin.
+
+After renderer availability is verified in the later live stage, capture a panel with:
+
+```bash
+python scripts/capture_grafana_dashboard.py \
+  --url https://grafana.example.internal --environment staging \
+  --panel-id 35 --from now-30d --to now \
+  --output-dir /tmp/sugarkube-grafana-captures
+```
+
+The helper prompts privately for a Grafana service account credential, or reads the injected
+`GRAFANA_CAPTURE_CREDENTIAL` binding. Use a read-only account authorized for this dashboard.
+Prefer HTTPS; HTTP is supported for an operator-managed private tunnel. Credentials never
+appear in command arguments, metadata, or diagnostic output, and redirects are rejected.
+Only a successful PNG response with the requested dimensions is retained. Omit `--panel-id`
+for a dashboard viewport and set `--height` as needed (up to 16000 pixels); the default 1200
+pixel viewport is not a promise that all dashboard rows fit. Use panel captures for complete
+evidence of individual queries. Each PNG has a UTC timestamp and a JSON sidecar with absolute
+time bounds, dashboard identity, and dimensions. Files have private permissions. These are
+private image captures, not Grafana's public snapshot API. Keep them outside the checkout
+or in ignored `artifacts/`, review their content before sharing, and archive them separately
+for posterity: Prometheus retention does not retain screenshots.
+
 ### Post-merge production procedure
 
 1. Export `KUBECONFIG="$HOME/.kube/config-sugarkube-prod"`, verify the current context is
