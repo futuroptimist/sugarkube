@@ -2032,7 +2032,6 @@ def test_unproved_platform_digest_is_not_equivalent_to_approved_index() -> None:
         finalize(pods_json=observed)
 
 
-
 def test_preflight_emits_chart_and_image_from_one_validated_manifest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
