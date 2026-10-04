@@ -335,7 +335,11 @@ def pod(name: str, digest: str = DIGEST) -> dict[str, object]:
                 {"kind": "ReplicaSet", "name": "dspace-rs", "uid": "rs-uid", "controller": True}
             ],
         },
-        "spec": {"containers": [{"name": "dspace", "image": f"{manifest.IMAGE_REF}:main-abcdef0"}]},
+        "spec": {
+            "containers": [
+                {"name": "dspace", "image": f"{manifest.IMAGE_REF}:main-abcdef0@{DIGEST}"}
+            ]
+        },
         "status": {
             "phase": "Running",
             "startTime": "2026-07-26T12:01:00Z",
@@ -612,7 +616,7 @@ def test_schema_v2_finalization_and_staging_gate_preserve_chart_provenance() -> 
             {
                 "image": {
                     "repository": manifest.IMAGE_REF,
-                    "tag": staging["imageTag"],
+                    "tag": f"{staging['imageTag']}@{staging['imageDigest']}",
                     "pullPolicy": "Always",
                 }
             },
@@ -638,7 +642,7 @@ def test_schema_v2_requires_and_round_trips_helm_stored_values_check() -> None:
             {
                 "image": {
                     "repository": manifest.IMAGE_REF,
-                    "tag": value["imageTag"],
+                    "tag": f"{value['imageTag']}@{value['imageDigest']}",
                     "pullPolicy": "Always",
                 }
             },
@@ -667,7 +671,11 @@ def test_helm_stored_values_reject_missing_or_non_object_image(image: object) ->
 )
 def test_helm_stored_values_reject_image_mismatch(field: str, wrong: str) -> None:
     value = split_candidate("prod")
-    image = {"repository": manifest.IMAGE_REF, "tag": value["imageTag"], "pullPolicy": "Always"}
+    image = {
+        "repository": manifest.IMAGE_REF,
+        "tag": f"{value['imageTag']}@{value['imageDigest']}",
+        "pullPolicy": "Always",
+    }
     image[field] = wrong
     with pytest.raises(manifest.ManifestError, match="stored image values"):
         manifest.verify_helm_stored_values(value, {"image": image}, "prod")
@@ -678,7 +686,7 @@ def production_stored_values() -> dict[str, object]:
     return {
         "image": {
             "repository": manifest.IMAGE_REF,
-            "tag": value["imageTag"],
+            "tag": f"{value['imageTag']}@{value['imageDigest']}",
             "pullPolicy": "Always",
         },
         "metrics": {
@@ -707,12 +715,10 @@ def test_committed_production_values_pass_stored_values_contract() -> None:
     recovery = json.loads(
         Path("docs/apps/dspace.prod-recovery-coordinates.json").read_text(encoding="utf-8")
     )
-    approved = manifest.candidate(
-        recovery, "prod", "openai", "2026-07-31T12:00:00Z", "operator"
-    )
+    approved = manifest.candidate(recovery, "prod", "openai", "2026-07-31T12:00:00Z", "operator")
     values["image"] = {
         "repository": manifest.IMAGE_REF,
-        "tag": approved["imageTag"],
+        "tag": f"{approved['imageTag']}@{approved['imageDigest']}",
         "pullPolicy": "Always",
     }
 
@@ -905,7 +911,7 @@ def test_helm_stored_values_reject_production_staging_leaks_secret_safely(
     stored = {
         "image": {
             "repository": manifest.IMAGE_REF,
-            "tag": value["imageTag"],
+            "tag": f"{value['imageTag']}@{value['imageDigest']}",
             "pullPolicy": "Always",
         },
         **leak,
@@ -1288,7 +1294,7 @@ def test_finalize_cli_collects_bound_evidence_before_consuming_reservation(
                     {
                         "image": {
                             "repository": manifest.IMAGE_REF,
-                            "tag": selected["imageTag"],
+                            "tag": f"{selected['imageTag']}@{selected['imageDigest']}",
                             "pullPolicy": "Always",
                         }
                     }
@@ -1725,8 +1731,11 @@ def test_public_read_only_and_reservation_dispatch(tmp_path: Path, monkeypatch, 
     ) == manifest.reservation_path(output)
 
 
+@pytest.mark.parametrize(
+    "coordinate_flag", ["--print-chart-coordinate", "--print-deployment-coordinates"]
+)
 def test_preflight_chart_coordinate_is_not_printed_after_failed_validation(
-    tmp_path: Path, monkeypatch, capsys
+    tmp_path: Path, monkeypatch, capsys, coordinate_flag: str
 ) -> None:
     source = tmp_path / "candidate.json"
     invalid = candidate()
@@ -1738,7 +1747,7 @@ def test_preflight_chart_coordinate_is_not_printed_after_failed_validation(
         "preflight",
         lambda *args, **kwargs: real_preflight(*args, **kwargs, runner=oras_runner()),
     )
-    assert manifest.main(["preflight", "--manifest", str(source), "--print-chart-coordinate"]) == 2
+    assert manifest.main(["preflight", "--manifest", str(source), coordinate_flag]) == 2
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "chartDigest" in captured.err
@@ -2000,3 +2009,64 @@ def test_verifier_capabilities_requires_exact_ordered_v1_list(
     }
     with pytest.raises(manifest.ManifestError, match="ordered v1 contract"):
         manifest.validate_verifier_capabilities(value, "staging", "dspace", "dspace")
+
+
+@pytest.mark.parametrize("coordinate", [None, "tag-only", "different-digest"])
+def test_finalize_requires_desired_pin_even_when_current_image_id_matches(
+    coordinate: str | None,
+) -> None:
+    image = f"{manifest.IMAGE_REF}:main-abcdef0"
+    if coordinate == "different-digest":
+        image += "@sha256:" + "9" * 64
+    observed = {"items": [pod("dspace-a")]}
+    observed["items"][0]["spec"]["containers"][0]["image"] = image
+    kwargs = {} if coordinate is None else {"expected_image_coordinate": image}
+    with pytest.raises(manifest.ManifestError, match="image"):
+        finalize(pods_json=observed, **kwargs)
+
+
+def test_unproved_platform_digest_is_not_equivalent_to_approved_index() -> None:
+    observed = {"items": [pod("dspace-a")]}
+    observed["items"][0]["status"]["containerStatuses"][0]["imageID"] = PLATFORM_DIGEST
+    with pytest.raises(manifest.ManifestError, match="imageID"):
+        finalize(pods_json=observed)
+
+
+def test_preflight_emits_chart_and_image_from_one_validated_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = tmp_path / "candidate.json"
+    approved = candidate()
+    source.write_text(manifest._canonical(approved))
+    real_preflight = manifest.preflight
+
+    def checked_preflight(*args, **kwargs):
+        result = real_preflight(*args, **kwargs, runner=oras_runner())
+        # A later source-file edit must not alter either coordinate emitted by this validation.
+        changed = {**approved, "imageDigest": "sha256:" + "9" * 64}
+        source.write_text(manifest._canonical(changed))
+        return result
+
+    monkeypatch.setattr(manifest, "preflight", checked_preflight)
+    assert (
+        manifest.main(
+            [
+                "preflight",
+                "--manifest",
+                str(source),
+                "--environment",
+                "staging",
+                "--image-tag",
+                approved["imageTag"],
+                "--chart-version",
+                approved["chartVersion"],
+                "--print-deployment-coordinates",
+            ]
+        )
+        == 0
+    )
+    assert capsys.readouterr().out.splitlines() == [
+        f"oci://{manifest.CHART_REF}@{CHART_DIGEST}",
+        f"{approved['imageTag']}@{DIGEST}",
+    ]
+    assert json.loads(source.read_text())["imageDigest"] != approved["imageDigest"]

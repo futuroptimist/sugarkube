@@ -446,7 +446,15 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
 
     canonical_image = f"{release_manifest.IMAGE_REF}:{expected['image_tag']}"
     rollback_image = f"{canonical_image}@{expected['digest']}"
-    permitted_images = {canonical_image, rollback_image}
+    permitted_images = {rollback_image}
+    if getattr(args, "legacy_recovery_preflight", False):
+        if (
+            args.environment != "prod"
+            or args.expected_helm_revision != 10
+            or any(manifest.get(key) != value for key, value in LEGACY_303_COORDINATES.items())
+        ):
+            fail("legacy recovery identity")
+        permitted_images = {canonical_image}
     token_values = values_expectations(values) if expected["provider"] == "token-place" else None
     try:
         deployment = json.loads(
@@ -753,6 +761,7 @@ def parser() -> argparse.ArgumentParser:
             item.add_argument("--source-revision")
             item.add_argument("--provider", choices=("token-place", "openai"))
             item.add_argument("--expected-helm-revision", type=int)
+            item.add_argument("--legacy-recovery-preflight", action="store_true")
     return result
 
 

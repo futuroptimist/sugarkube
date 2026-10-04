@@ -517,3 +517,16 @@ def test_dspace_env_specific_chart_and_prod_tag_pins() -> None:
     assert staging["SUGARKUBE_VERSION_FILE"] == "docs/apps/dspace.staging.version"
     assert prod["SUGARKUBE_VERSION_FILE"] == "docs/apps/dspace.prod.version"
     assert app_config.resolve_tag(prod, "", prod_fallback=True) == "main-1a31a56"
+
+
+@pytest.mark.parametrize("digest", ["", "sha256:abc", "sha512:" + "1" * 64, "sha256:" + "A" * 64])
+def test_image_digest_suffix_fails_closed(digest: str) -> None:
+    with pytest.raises(app_config.AppConfigError, match="digest"):
+        app_config.validate_tag("main-abcdef0@" + digest, "prod")
+
+
+def test_canonical_image_digest_keeps_immutable_tag_validation() -> None:
+    suffix = "@sha256:" + "1" * 64
+    assert app_config.validate_tag("main-abcdef0" + suffix, "prod") == "main-abcdef0" + suffix
+    with pytest.raises(app_config.AppConfigError):
+        app_config.validate_tag("latest" + suffix, "prod")

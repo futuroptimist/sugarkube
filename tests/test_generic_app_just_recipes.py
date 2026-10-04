@@ -133,7 +133,7 @@ set -euo pipefail
 printf '%s\n' "$*" >> {str(tmp_path / "kubectl.log")!r}
 printf 'kubectl %s\n' "$*" >> {str(tmp_path / "commands.log")!r}
 if [[ "$*" == *"get pods"* && "$*" == *"-o json"* ]]; then
-  printf '{{"items":[{{"metadata":{{"name":"dspace-0","labels":{{"app.kubernetes.io/name":"dspace","app.kubernetes.io/instance":"dspace"}},"ownerReferences":[{{"kind":"ReplicaSet","name":"dspace-rs","uid":"rs-uid","controller":true}}]}},"spec":{{"containers":[{{"name":"dspace","image":"ghcr.io/democratizedspace/dspace:main-abcdef0"}}]}},"status":{{"phase":"Running","startTime":"2026-07-26T12:10:00Z","conditions":[{{"type":"Ready","status":"True"}}],"containerStatuses":[{{"name":"dspace","imageID":"ghcr.io/democratizedspace/dspace@sha256:%s","state":{{"running":{{}}}}}}]}}}}]}}\n' "${{SUGARKUBE_STUB_IMAGE_DIGEST_HEX:-1111111111111111111111111111111111111111111111111111111111111111}}"
+  printf '{{"items":[{{"metadata":{{"name":"dspace-0","labels":{{"app.kubernetes.io/name":"dspace","app.kubernetes.io/instance":"dspace"}},"ownerReferences":[{{"kind":"ReplicaSet","name":"dspace-rs","uid":"rs-uid","controller":true}}]}},"spec":{{"containers":[{{"name":"dspace","image":"ghcr.io/democratizedspace/dspace:main-abcdef0@sha256:1111111111111111111111111111111111111111111111111111111111111111"}}]}},"status":{{"phase":"Running","startTime":"2026-07-26T12:10:00Z","conditions":[{{"type":"Ready","status":"True"}}],"containerStatuses":[{{"name":"dspace","imageID":"ghcr.io/democratizedspace/dspace@sha256:%s","state":{{"running":{{}}}}}}]}}}}]}}\n' "${{SUGARKUBE_STUB_IMAGE_DIGEST_HEX:-1111111111111111111111111111111111111111111111111111111111111111}}"
   exit 0
 fi
 if [[ "$*" == *"get replicasets,deployments"* && "$*" == *"-o json"* ]]; then
@@ -211,13 +211,13 @@ if [[ "$*" == *"get values"* ]]; then
   if [ "${{SUGARKUBE_STUB_NODE_ENV:-staging}}" = prod ]; then
     printf '{{"image":{{"repository":"%s","tag":"%s","pullPolicy":"%s"}},"metrics":{{"enabled":true,"auth":{{"existingSecret":"dspace-prod-metrics-token","secretKey":"token"}}}},"serviceMonitor":{{"enabled":true,"interval":"30s","scrapeTimeout":"10s","additionalLabels":{{"release":"kube-prometheus-stack"}},"cluster":"sugarkube-prod"}},"ingress":{{"host":"%s"}}}}\n' \
       "${{SUGARKUBE_STUB_HELM_REPOSITORY:-ghcr.io/democratizedspace/dspace}}" \
-      "${{SUGARKUBE_STUB_HELM_TAG:-main-abcdef0}}" \
+      "${{SUGARKUBE_STUB_HELM_TAG:-main-abcdef0@sha256:1111111111111111111111111111111111111111111111111111111111111111}}" \
       "${{SUGARKUBE_STUB_HELM_PULL_POLICY:-Always}}" \
       "${{SUGARKUBE_STUB_HELM_HOST:-example.test}}"
   else
     printf '{{"image":{{"repository":"%s","tag":"%s","pullPolicy":"%s"}},"metrics":{{"enabled":false}},"serviceMonitor":{{"enabled":false}},"ingress":{{"host":"%s"}}}}\n' \
       "${{SUGARKUBE_STUB_HELM_REPOSITORY:-ghcr.io/democratizedspace/dspace}}" \
-      "${{SUGARKUBE_STUB_HELM_TAG:-main-abcdef0}}" \
+      "${{SUGARKUBE_STUB_HELM_TAG:-main-abcdef0@sha256:1111111111111111111111111111111111111111111111111111111111111111}}" \
       "${{SUGARKUBE_STUB_HELM_PULL_POLICY:-Always}}" \
       "${{SUGARKUBE_STUB_HELM_HOST:-example.test}}"
   fi
@@ -636,9 +636,24 @@ args = sys.argv[1:]
 with Path({str(tmp_path / "commands.log")!r}).open("a", encoding="utf-8") as log:
     log.write("oras " + " ".join(args) + "\\n")
 ref = args[-1]
+mutation_target = os.environ.get("SUGARKUBE_STUB_MUTATE_MANIFEST")
+if mutation_target and "--descriptor" in args:
+    source = Path(mutation_target)
+    changed = json.loads(source.read_text())
+    changed["imageDigest"] = "sha256:" + "9" * 64
+    source.write_text(json.dumps(changed))
+retag_marker = os.environ.get("SUGARKUBE_STUB_RETAG_MARKER")
+if retag_marker and "--descriptor" in args and "charts/dspace" not in ref:
+    marker = Path(retag_marker)
+    if marker.exists():
+        image = "sha256:" + "9" * 64
+    marker.touch()
 if "--descriptor" in args:
     value = {{"digest": chart if "charts/dspace" in ref else image}}
-elif args[:2] == ["manifest", "fetch"] and ref.endswith("@" + image):
+elif args[:2] == ["manifest", "fetch"] and (
+    ref.endswith("@" + image)
+    or ("charts/dspace" not in ref and ref.endswith("@sha256:" + "9" * 64))
+):
     value = {{"manifests": [{{"digest": platform}}]}}
 elif args[:2] == ["manifest", "fetch"] and ref.endswith("@" + platform):
     value = {{"config": {{"digest": image_config}}}}
@@ -3642,7 +3657,8 @@ def test_dspace_deploy_routes_documented_sparse_named_arguments(
 
     assert result.returncode == 0, result.stderr + result.stdout
     verifier = Path(generic_app_stub_env["RUNTIME_VERIFIER_LOG"]).read_text(encoding="utf-8")
-    assert f"--manifest {manifest}" in verifier
+    assert "--manifest /" in verifier
+    assert f"--manifest {manifest}" not in verifier
     assert f"--smoke-runner {generic_app_stub_env['DSPACE_SMOKE_RUNNER']}" in verifier
     assert "manifest=manifest=" not in verifier
     helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
@@ -3671,14 +3687,16 @@ def test_dspace_staging_wrappers_route_sparse_named_arguments_once(
     )
 
     assert result.returncode == 0, result.stderr + result.stdout
-    verifier_lines = Path(generic_app_stub_env["RUNTIME_VERIFIER_LOG"]).read_text(
-        encoding="utf-8"
-    ).splitlines()
+    verifier_lines = (
+        Path(generic_app_stub_env["RUNTIME_VERIFIER_LOG"]).read_text(encoding="utf-8").splitlines()
+    )
     assert len(verifier_lines) == 2
-    assert verifier_lines[1].count(f"--manifest {manifest}") == 1
-    assert verifier_lines[1].count(
-        f"--smoke-runner {generic_app_stub_env['DSPACE_SMOKE_RUNNER']}"
-    ) == 1
+    assert verifier_lines[1].count("--manifest ") == 1
+    assert f"--manifest {manifest}" not in verifier_lines[1]
+    assert (
+        verifier_lines[1].count(f"--smoke-runner {generic_app_stub_env['DSPACE_SMOKE_RUNNER']}")
+        == 1
+    )
 
 
 @pytest.mark.usefixtures("ensure_just_available")
@@ -3756,7 +3774,8 @@ def test_dspace_promote_prod_routes_sparse_named_arguments_through_both_gates(
     assert "--environment staging" in verifier_lines[0]
     assert f"--manifest {staging_evidence}" in verifier_lines[0]
     assert "--environment prod" in verifier_lines[2]
-    assert f"--manifest {prod_manifest}" in verifier_lines[2]
+    assert "--manifest /" in verifier_lines[2]
+    assert f"--manifest {prod_manifest}" not in verifier_lines[2]
     assert json.loads(prod_evidence.read_text(encoding="utf-8"))["recordType"] == "final"
     helm_lines = Path(env["HELM_LOG"]).read_text(encoding="utf-8").splitlines()
     assert sum(line.startswith("upgrade ") for line in helm_lines) == 1
@@ -3764,7 +3783,9 @@ def test_dspace_promote_prod_routes_sparse_named_arguments_through_both_gates(
     ordered_events = [
         next(i for i, line in enumerate(commands) if line == "release-manifest staging-gate"),
         next(i for i, line in enumerate(commands) if line == "runtime-verifier staging"),
-        next(i for i, line in enumerate(commands) if line == "release-manifest authorize-production"),
+        next(
+            i for i, line in enumerate(commands) if line == "release-manifest authorize-production"
+        ),
         next(i for i, line in enumerate(commands) if line == "release-manifest preflight"),
         next(i for i, line in enumerate(commands) if line.startswith("helm template ")),
         next(i for i, line in enumerate(commands) if line == "release-manifest reserve"),
@@ -5887,6 +5908,7 @@ raise SystemExit(rc)
     )
     assert delegated["calls"] == [["context"], expected_operation]
 
+
 # Focused declarative app-metrics verifier coverage; kept here with the just recipe
 # tests so Phase 1 remains scoped to the generic app operator surface.
 from scripts import observability_app_metrics as app_metrics
@@ -6904,7 +6926,6 @@ def test_observability_app_metrics_public_uses_actual_success_status_without_bod
     assert response.closed
 
 
-
 def _verify_base(monkeypatch, cfg, prom_func):
     sm = {
         "metadata": {
@@ -7081,7 +7102,6 @@ def test_observability_app_metrics_verify_rejects_extra_relevant_target_and_retr
     assert all(count == 2 for count in seen.values())
 
 
-
 def test_observability_app_metrics_verify_retries_then_reports_missing_family_without_public_check(monkeypatch):
     cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"]["tokenplace"]["environments"]["staging"]
     cfg = json.loads(json.dumps(cfg))
@@ -7119,6 +7139,7 @@ def test_observability_app_metrics_verify_retries_then_reports_missing_family_wi
         if app_metrics.metric_family_from_series(app_metrics.urllib.parse.unquote(path.rsplit("query=", 1)[-1]).split("{", 1)[0]) == missing_family
     ]
     assert len(attempts_for_missing) == cfg["retries"]["attempts"] * 4
+
 
 def test_observability_app_metrics_verify_fails_malformed_prometheus_without_sleep(monkeypatch):
     cfg = json.loads(APP_METRICS_CONFIG.read_text(encoding="utf-8"))["applications"]["tokenplace"]["environments"]["staging"]
@@ -7228,6 +7249,7 @@ def test_observability_app_metrics_malformed_kubernetes_nested_objects_fail_cont
     with pytest.raises(app_metrics.Error) as excinfo:
         app_metrics.verify("tokenplace", "staging")
     assert "structurally invalid" in str(excinfo.value) or "exactly one endpoint" in str(excinfo.value)
+
 
 @pytest.mark.parametrize(
     ("env", "secret_name"),
@@ -8357,6 +8379,7 @@ def test_observability_app_metrics_url_and_k8s_label_valid_helpers_accept_safe_v
     app_metrics.k8s_label_key("example.com/component", "label key")
     app_metrics.k8s_label_key("a." * 125 + "a/name", "label key")
 
+
 @pytest.mark.parametrize(
     ("mutator", "message"),
     [
@@ -9087,3 +9110,63 @@ def test_dotenv_shlex_decoding_is_not_a_transport_security_boundary(tmp_path: Pa
         check=True,
     )
     assert result.stdout == resolved["SUGARKUBE_RELEASE"]
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+@pytest.mark.parametrize("recipe", ["app-deploy", "app-redeploy"])
+def test_reviewed_image_survives_source_manifest_mutation(
+    tmp_path: Path, generic_app_stub_env: dict[str, str], recipe: str
+) -> None:
+    candidate = tmp_path / "candidate.json"
+    evidence = tmp_path / "final.json"
+    _write_dspace_candidate(candidate, "staging")
+    env = {**generic_app_stub_env, "SUGARKUBE_STUB_MUTATE_MANIFEST": str(candidate)}
+    result = _run_just(
+        [recipe, "dspace", "staging", "main-abcdef0", "", str(candidate), str(evidence)], env
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert json.loads(candidate.read_text())["imageDigest"] == "sha256:" + "9" * 64
+    assert json.loads(evidence.read_text())["imageDigest"] == "sha256:" + "1" * 64
+    commands = Path(env["HELM_LOG"]).read_text().splitlines()
+    for command in commands:
+        if command.startswith(("template ", "upgrade ")):
+            assert "image.tag=main-abcdef0@sha256:" + "1" * 64 in command
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+@pytest.mark.parametrize("recipe", ["app-deploy", "app-redeploy"])
+def test_registry_retag_after_validation_cannot_change_applied_image(
+    tmp_path: Path, generic_app_stub_env: dict[str, str], recipe: str
+) -> None:
+    candidate = tmp_path / "candidate.json"
+    evidence = tmp_path / "final.json"
+    _write_dspace_candidate(candidate, "staging")
+    env = {**generic_app_stub_env, "SUGARKUBE_STUB_RETAG_MARKER": str(tmp_path / "retag")}
+    result = _run_just(
+        [recipe, "dspace", "staging", "main-abcdef0", "", str(candidate), str(evidence)], env
+    )
+    # Final provenance detects the registry change, while the sole mutation remains pinned.
+    assert result.returncode != 0
+    assert "imageDigest" in result.stderr
+    commands = Path(env["HELM_LOG"]).read_text().splitlines()
+    upgrades = [line for line in commands if line.startswith("upgrade ")]
+    assert len(upgrades) == 1
+    assert "image.tag=main-abcdef0@sha256:" + "1" * 64 in upgrades[0]
+    assert not evidence.exists()
+    assert Path(str(evidence) + ".reservation").exists()
+
+
+@pytest.mark.usefixtures("ensure_just_available")
+@pytest.mark.parametrize("recipe", ["app-deploy", "app-redeploy"])
+def test_manifest_snapshot_cleanup_cannot_remove_inherited_path(
+    tmp_path: Path, generic_app_stub_env: dict[str, str], recipe: str
+) -> None:
+    sentinel = tmp_path / "retain"
+    sentinel.write_text("untouched")
+    invalid = tmp_path / "invalid.json"
+    invalid.write_text("{}")
+    env = {**generic_app_stub_env, "runtime_proof": str(sentinel)}
+    result = _run_just([recipe, "dspace", "staging", "main-abcdef0", "", str(invalid)], env)
+    assert result.returncode != 0
+    assert sentinel.read_text() == "untouched"
+    assert not Path(env["HELM_LOG"]).exists()

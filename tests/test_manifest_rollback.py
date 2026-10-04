@@ -1150,6 +1150,8 @@ def test_configuration_reconciliation_requires_one_absolute_kubeconfig(
         ("monitor", "approved disabled baseline"),
         ("drift", "unrelated Helm values drift"),
         ("image", "live image coordinate differs"),
+        ("missing-image", "live image coordinate differs"),
+        ("missing-image-id", "live image coordinate differs"),
     ),
 )
 def test_configuration_reconciliation_preconditions_fail_before_reservation(
@@ -1201,6 +1203,10 @@ def test_configuration_reconciliation_preconditions_fail_before_reservation(
         observed = [ready]
     elif failure == "image":
         observed = [{**ready, "applicationImageID": f"{manifest.IMAGE_REF}@sha256:{'9' * 64}"}] * 2
+    if failure in {"missing-image", "missing-image-id"}:
+        incomplete = dict(ready)
+        incomplete.pop("applicationImage" if failure == "missing-image" else "applicationImageID")
+        observed = [ready, incomplete]
     monkeypatch.setattr(rollback, "pods", lambda *_args, **_kwargs: observed)
     monkeypatch.setattr(
         rollback,
@@ -1472,8 +1478,9 @@ def test_configuration_reconciliation_reasserts_target_immediately_before_upgrad
 
 
 @pytest.mark.parametrize("after_revision", (10, 11))
+@pytest.mark.parametrize("render_drift", (False, True))
 def test_configuration_reconciliation_completes_all_production_gates(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, after_revision: int
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, after_revision: int, render_drift: bool
 ) -> None:
     args, commands, evidence, verifier = pre_reservation_case(
         tmp_path, monkeypatch, environment="prod"
@@ -1536,7 +1543,6 @@ def test_configuration_reconciliation_completes_all_production_gates(
     stored_proof = [{"check": "helmStoredValues", "passed": True, "details": "safe"}]
     finalized: dict[str, object] = {}
     monkeypatch.setattr(rollback.app_chart, "merged_values_document", lambda _paths: desired)
-    monkeypatch.setattr(rollback.app_chart, "validate_rendered_manifest", lambda *_args: [])
 
     def verify_stored(_approved: object, values: object, _environment: str) -> object:
         assert values == desired
@@ -1559,6 +1565,8 @@ def test_configuration_reconciliation_completes_all_production_gates(
 
     before_pods = [ready("1"), ready("2")]
     after_pods = [ready("3"), ready("4")]
+    for item in after_pods:
+        item["applicationImage"] += f"@{selected['imageDigest']}"
     terminating_pods = [{**ready("2"), "terminating": True}, *after_pods]
     state = {"upgraded": False, "description": "", "post_upgrade_pod_reads": 0}
     staged_target: dict[str, object] = {}
@@ -1613,7 +1621,10 @@ def test_configuration_reconciliation_completes_all_production_gates(
         elif command[0] == "helm" and "values" in command and "get" in command:
             return json.dumps(desired if "--all" in command else live)
         elif command[0] == "helm" and "template" in command:
-            return "live render" if "live-values.json" in " ".join(command) else "target render"
+            if "live-values.json" in " ".join(command):
+                return "live render"
+            rendered = production_render(selected)
+            return rendered.replace(f"@{selected['imageDigest']}", "") if render_drift else rendered
         elif command[0] == "helm" and "manifest" in command:
             return "live render"
         elif command[:2] == [str(verifier), "verify"]:
@@ -1637,6 +1648,13 @@ def test_configuration_reconciliation_completes_all_production_gates(
             return '{"items": []}'
         return ""
 
+    if render_drift:
+        with pytest.raises(rollback.RollbackError, match="strict application chart render"):
+            rollback.rollback(args, runner)
+        assert_no_mutation(commands)
+        assert not evidence.exists()
+        return
+
     if after_revision == 11:
         with pytest.raises(rollback.RollbackError, match="preserved evidence"):
             rollback.rollback(args, runner)
@@ -1654,13 +1672,13 @@ def test_configuration_reconciliation_completes_all_production_gates(
     assert sum("upgrade" in command for command in commands) == 1
     assert upgrade[upgrade.index("--kubeconfig") + 1] == str(kubeconfig)
     assert f"oci://{manifest.CHART_REF}@{selected['chartDigest']}" in upgrade
-    assert f"image.tag={selected['imageTag']}" in upgrade
+    assert f"image.tag={selected['imageTag']}@{selected['imageDigest']}" in upgrade
     assert "image.pullPolicy=Always" in upgrade
     rendered = next(command for command in commands if "template" in command)
     assert "image.pullPolicy=Always" in rendered
     forbidden = ("--reuse-values", "--version", selected["semanticTag"], "rollback")
     assert not any(item in upgrade for item in forbidden)
-    assert selected["imageDigest"] not in next(
+    assert selected["imageDigest"] in next(
         item for item in upgrade if item.startswith("image.tag=")
     )
     assert finalized["helm_stored_values_result"] is stored_proof
@@ -1668,7 +1686,7 @@ def test_configuration_reconciliation_completes_all_production_gates(
         {"revision": 10, "chart": f"dspace-{selected['chartVersion']}"}
     ]
     assert finalized["expected_image_coordinate"] == (
-        f"{manifest.IMAGE_REF}:{selected['imageTag']}"
+        f"{manifest.IMAGE_REF}:{selected['imageTag']}@{selected['imageDigest']}"
     )
     assert result["state"] == "succeeded"
     assert result["helm"]["beforeRevision"] == 9
@@ -2050,10 +2068,13 @@ def recovery_execution_case(
         "metrics": {"enabled": True},
         "serviceMonitor": {"enabled": True},
     }
+    desired["image"]["tag"] += f"@{selected['imageDigest']}"
     user_values = json.loads(json.dumps(desired))
+    user_values["image"]["tag"] = selected["imageTag"]
     user_values["image"].pop("pullPolicy")
     computed_before = json.loads(json.dumps(desired))
     computed_before["image"]["pullPolicy"] = "IfNotPresent"
+    computed_before["image"]["tag"] = selected["imageTag"]
     state = {
         "upgraded": False,
         "description": "",
@@ -2074,6 +2095,7 @@ def recovery_execution_case(
         rollback, "verifier_capabilities", lambda *_args: {"contract": "repository"}
     )
     monkeypatch.setattr(rollback, "verifier_accepts_runtime_arguments", lambda *_args: True)
+
     def preflight(*call_args: object, **call_kwargs: object) -> dict[str, bool]:
         state["preflight_calls"].append((call_args, call_kwargs))
         if fault == "provenance":
@@ -2094,15 +2116,14 @@ def recovery_execution_case(
     monkeypatch.setattr(
         rollback.release,
         "finalize",
-        lambda *call_args, **call_kwargs: state["finalize_calls"].append(
-            (call_args, call_kwargs)
-        )
+        lambda *call_args, **call_kwargs: state["finalize_calls"].append((call_args, call_kwargs))
         or {"verificationResults": [{"check": "ownership", "passed": True}]},
     )
+    validate_render = rollback.app_chart.validate_rendered_manifest
     monkeypatch.setattr(
         rollback.app_chart,
         "validate_rendered_manifest",
-        lambda *call_args: state["render_calls"].append(call_args) or [],
+        lambda *call_args: state["render_calls"].append(call_args) or validate_render(*call_args),
     )
     monkeypatch.setattr(rollback.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(rollback, "chart_pin", lambda _path: "3.0.3")
@@ -2151,6 +2172,8 @@ def recovery_execution_case(
         }
 
     before_pods, after_pods = [ready("old-1"), ready("old-2")], [ready("new-1"), ready("new-2")]
+    for item in after_pods:
+        item["applicationImage"] += f"@{selected['imageDigest']}"
     monkeypatch.setattr(
         rollback,
         "pods",
@@ -2200,7 +2223,7 @@ def recovery_execution_case(
         if command[0] == "helm" and "manifest" in command:
             return "different render" if fault == "render" else "current render"
         if command[0] == "helm" and "template" in command:
-            return "current render" if "live-values.json" in joined else "approved render"
+            return "current render" if "live-values.json" in joined else production_render(selected)
         if command[:2] == [str(args.verifier), "verify"]:
             if fault == "runtime":
                 raise rollback.RollbackError("runtime ownership failed")
@@ -2306,7 +2329,7 @@ def test_production_metrics_recovery_completes_revision_10_to_11(
         str(path) for path in args._test_values
     ]
     assert f"image.repository={manifest.IMAGE_REF}" in upgrade
-    assert f"image.tag={selected['imageTag']}" in upgrade
+    assert f"image.tag={selected['imageTag']}@{selected['imageDigest']}" in upgrade
     assert "image.pullPolicy=Always" in upgrade
     assert "--wait" in upgrade and upgrade[upgrade.index("--timeout") + 1] == "7m"
     assert "--reuse-values" not in upgrade
@@ -2563,3 +2586,67 @@ def test_main_validates_and_normalizes_production_recovery_flags(
     ) == 0
     assert observed[0].configuration_reconciliation is True
     assert observed[0].baseline_manifest == rollback.PRODUCTION_BASELINE
+
+
+def production_render(target: dict[str, object]) -> str:
+    """Offline Helm output exercised through the real production chart validator."""
+    labels = {"app.kubernetes.io/instance": "dspace", "app.kubernetes.io/name": "dspace"}
+    metadata = {"name": "dspace", "namespace": "dspace", "labels": labels}
+    secret_reference = {"name": "dspace-prod-metrics-token", "key": "token"}
+    image = f"{manifest.IMAGE_REF}:{target['imageTag']}@{target['imageDigest']}"
+    deployment = {
+        "kind": "Deployment",
+        "metadata": metadata,
+        "spec": {
+            "template": {
+                "spec": {
+                    "containers": [
+                        {
+                            "name": "dspace",
+                            "image": image,
+                            "env": [
+                                {
+                                    "name": "METRICS_TOKEN",
+                                    "valueFrom": {"secretKeyRef": secret_reference},
+                                }
+                            ],
+                        }
+                    ]
+                }
+            }
+        },
+    }
+    monitor = {
+        "kind": "ServiceMonitor",
+        "metadata": {**metadata, "labels": {**labels, "release": "kube-prometheus-stack"}},
+        "spec": {
+            "selector": {"matchLabels": labels},
+            "namespaceSelector": {"matchNames": ["dspace"]},
+            "endpoints": [
+                {
+                    "path": "/metrics",
+                    "interval": "30s",
+                    "scrapeTimeout": "10s",
+                    "bearerTokenSecret": secret_reference,
+                    "relabelings": [
+                        {"action": "replace", "targetLabel": key, "replacement": value}
+                        for key, value in [
+                            ("app", "dspace"),
+                            ("environment", "prod"),
+                            ("namespace", "dspace"),
+                            ("release", "dspace"),
+                            ("cluster", "sugarkube-prod"),
+                        ]
+                    ],
+                }
+            ],
+        },
+    }
+    return "\n---\n".join(
+        json.dumps(item)
+        for item in [
+            deployment,
+            {"kind": "Service", "metadata": metadata},
+            monitor,
+        ]
+    )
