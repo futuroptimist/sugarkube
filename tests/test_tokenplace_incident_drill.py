@@ -5052,3 +5052,18 @@ def test_opt_in_preflight_collects_models_baseline(tmp_path, monkeypatch):
     checked = drill.preflight_live("quota-exhaustion", c, runner)
     assert dict(checked.classification)["models_baseline_status"] == 200
     assert calls[-1][-1] == f"https://{drill.STAGING_HOST}/api/v1/models"
+
+
+@pytest.mark.parametrize("failure_index", range(5))
+def test_models_preflight_stops_at_first_failed_baseline(failure_index):
+    calls = []
+
+    def runner(command):
+        if command[0] == "curl":
+            calls.append(command[-1])
+        value = "503" if len(calls) == failure_index + 1 else "200"
+        return subprocess.CompletedProcess(command, 0, value, "")
+
+    with pytest.raises(drill.DrillError, match="healthy all-200 baseline"):
+        drill._observe_live_quota(runner, include_models=True)
+    assert len(calls) == failure_index + 1

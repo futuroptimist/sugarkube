@@ -753,6 +753,8 @@ def _observe_live_quota(runner: Runner, *, include_models=False) -> dict:
             statuses[route] = int(result.stdout.strip()) if result.returncode == 0 else 0
         except ValueError as exc:
             raise DrillError("status-only route observation failed") from exc
+        if include_models and statuses[route] != 200:
+            raise DrillError("quota stimulus requires a separate healthy all-200 baseline")
     return {"route_statuses": statuses, "quota_validator_success": True}
 
 
