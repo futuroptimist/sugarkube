@@ -194,32 +194,59 @@ or schedule quota traffic. A normal quota plan still requires route-specific cla
 (`429` for root and metadata, `200` for `/livez` and `/healthz`) plus successful quota-validator
 evidence.
 
-The sole source-defined way to establish that condition is an explicitly opted-in
-`staging-rehearsal` plan generated with both `--enable-bounded-quota-stimulus` and
-`--acknowledge-bounded-quota-stimulus`. Its preflight is a distinct healthy baseline: all four
-routes must be `200`, the validator must pass, the Deployment must be converged at the reviewed
-immutable image, and all discovery labels must be unpaused. Never use these options for a real
-incident or production; the parser and immutable-plan validator reject both. Offline dry runs only
-render declarative coordinates and cannot emit requests.
+The opt-in application-quota rehearsal uses a different acceptance contract. Public root and
+metadata reads are quota-exempt in the reviewed application; replaying them cannot exhaust its
+quota. Generate a new `staging-rehearsal` plan with both `--enable-bounded-quota-stimulus` and
+`--acknowledge-bounded-quota-stimulus`. Its baseline requires `200` from root, metadata, `/livez`,
+`/healthz`, and `/api/v1/models`, a passing quota validator, a converged Deployment at the reviewed
+immutable image, and unpaused discovery labels. Old four-route stimulus plans are rejected;
+never reinterpret an old journal as a new successful rehearsal. Historical non-stimulus incident
+plans retain their separate classification and recovery contract above.
 
-Execution is separately authorized with `--acknowledge-bounded-quota-stimulus` on the exact
-`generate-bounded-quota` stage. The source ceiling is 256 HTTP attempts total—including health
-observations—concurrency 2, 30 seconds wall time, a three-second per-request timeout, and zero
-retries. Stimulus requests alternate
-only between `GET /` and `GET /api/v1/meta` on `https://staging.token.place`; `/livez` and
-`/healthz` are status observations, never load targets. Each batch reasserts cluster, Deployment,
-image, memory, replica, and marker identity. It stops immediately at `429/429/200/200`, on drift,
-on a mixed or unreachable state, on loss of either health route, or when any budget expires.
-Sending the budget is not success: only the exact tuple advances the source-derived
-`verify-quota-condition` gate. The required order is marker creation, `generate-bounded-quota`,
-then `verify-quota-condition`. That gate requires the trigger record to be no more than 30 seconds
-old, observes all four routes again, and advances to the existing Probe containment/replacement
-sequence only while the exact tuple and its gate record remain fresh.
+This opt-in plan preserves the image, memory limit, probes and metrics discovery. The required
+image-coordinate arguments may all name the current immutable image; `--acknowledge-state-loss`
+is not required for this path. Keep the explicit staging and stimulus acknowledgements. Offline
+fixture plans remain non-executing previews, and ordinary planning never generates traffic.
+
+Before separately authorizing execution, review the exact image's models-list implementation,
+effective hourly/daily limit, remaining counter/window, storage backend and proxy-derived client
+identity. A models-list GET does not invoke inference in the reviewed source, but consumes real
+quota and can affect legitimate clients sharing that identity. An edge-generated response cannot
+establish application exhaustion. Review edge behavior separately; the JSON signature below is
+an application-response check, not cryptographic origin authentication. If isolation or a safe
+request budget cannot be established, do not execute or lower quotas to manufacture success.
+
+Execution requires a separate `--acknowledge-bounded-quota-stimulus` on the exact
+`generate-bounded-quota` stage. That stage retains the ceiling of 256 HTTP attempts, including its
+baseline and control observations, concurrency at most 2, 30 seconds, a three-second request
+timeout and zero retries. It sends up to four sequential `GET /api/v1/models` requests per batch,
+stopping model requests at the first rejection, then checks root, metadata, `/livez` and `/healthz`.
+These four routes are preservation controls, never quota stimulus targets. Every batch reasserts
+cluster, Deployment, image, memory, replica and marker identity. Any control response other than
+`200`, unexpected model response, redirect, transport failure, drift or exhausted budget stops the
+run. A baseline models `429` also stops: the healthy-to-exhausted transition must be observed.
+
+Success requires models `429` with a bounded JSON error containing code `rate_limit_exceeded`
+and type `rate_limit_error`, while all four controls remain `200`. At most 4,097 response bytes
+are inspected to reject bodies larger than 4,096 bytes; no response body is retained. HTML,
+status-only and malformed quota errors fail. Sending the budget is not success.
+
+The stage order is marker creation, `generate-bounded-quota`, `verify-quota-condition`, then
+`verify-quota-recovery`. Condition verification requires a trigger receipt no older than 30 seconds
+and one fresh five-route sweep with the same application error check. After the actual quota window
+recovers, recovery verification requires a fresh all-`200` sweep. It does not poll, sleep, reset
+counters or replace a Pod. Each separately invoked verification sweep adds at most five requests
+outside the stimulus-stage budget, including one models read; preflight also includes one models
+read. Include these requests in the operator's total run budget. A failed verification is not
+recovery and repeated invocations are not automatically authorized. Stop and review before retrying.
+There are no probe-pause, replacement, compute mutation or metrics-restoration stages in this
+opt-in plan. Preserving these controls does not prove E2EE or compute execution, or satisfy the
+independent authentic OOM obligation.
 
 The trigger journal retains only per-route attempt counts, each route's last observed status (an
 explicit `null` when no response was observed), and zero-retry metadata; it contains no URL query,
 header, caller identity, request identifier, response body, or credential. Forward coordinates are
-`generate-bounded-quota` then `verify-quota-condition`.
+`generate-bounded-quota`, `verify-quota-condition`, then `verify-quota-recovery`.
 Failure/rollback coordinates are `internal:stop-bounded-quota --run-id $RUN_ID`, followed by
 `--cleanup --plan "$PLAN" --journal "$JOURNAL" --kubeconfig "$STAGING_KUBECONFIG"` to reconcile
 deletion of only the exact run-owned marker. Cleanup still removes that marker if Deployment
@@ -228,10 +255,10 @@ marker ownership are re-established. If cluster identity cannot be established, 
 durably pending and performs no deletion; it never acts on the drifted Deployment. The stage cannot
 change a Deployment, image, Probe, or ServiceMonitor. An interrupted or failed stimulus is
 nonresumable: retain its private journal, clean up, and prepare a new reviewed run ID. Stopping
-traffic or deleting the marker does not restore quota already consumed; wait for the provider's
+traffic or deleting the marker does not restore quota already consumed; wait for the application's
 quota window to recover and obtain fresh operator authorization before creating a replacement run.
 
-The quota plan pauses only the root and metadata Probe discovery labels, leaving `/livez` and
+The historical non-stimulus quota plan pauses only the root and metadata Probe discovery labels, leaving `/livez` and
 `/healthz` continuously discovered. After replacement and the readiness, compute, and encrypted
 E2EE gates, it runs the quota validator, restores root and observes it for 15 minutes, then restores
 metadata and observes it for 15 minutes. A failed quota-validation gate holds that narrow

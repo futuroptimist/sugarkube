@@ -11,6 +11,7 @@ import inspect
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -50,6 +51,14 @@ QUOTA_STIMULUS_LIMITS = {
     "request_timeout_seconds": 3,
     "retries": 0,
 }
+QUOTA_CONTROL_ROUTES = {
+    "root": "/",
+    "metadata": "/api/v1/meta",
+    "livez": "/livez",
+    "healthz": "/healthz",
+}
+QUOTA_ROUTES = {**QUOTA_CONTROL_ROUTES, "models": "/api/v1/models"}
+QUOTA_SUCCESS = {**dict.fromkeys(QUOTA_CONTROL_ROUTES, 200), "models": 429}
 QUOTA_EVIDENCE_FRESHNESS_SECONDS = 30
 EXECUTION_OPERATIONS = ("--execute-stage", "--rollback-stage", "--cleanup")
 GATE_EVIDENCE_MAX_BYTES = 64 * 1024
@@ -231,14 +240,14 @@ def validate(args: argparse.Namespace) -> Coordinates:
             raise DrillError("incident image is only valid for metrics-OOM staging rehearsal")
     elif incident_image is not None or getattr(args, "acknowledge_staging_fault_injection", False):
         raise DrillError("rehearsal stimulus controls require staging-rehearsal lifecycle")
-    if args.current_image == args.replacement_image:
+    if args.current_image == args.replacement_image and not quota_stimulus:
         raise DrillError("current and replacement images must be distinct")
     if not re.fullmatch(r"[1-9][0-9]*(Mi|Gi)", args.memory_limit):
         raise DrillError("memory limit must be an explicit positive Mi or Gi quantity")
     for field in ("namespace", "deployment", "container", "service_monitor", "run_id"):
         if not SAFE_NAME.fullmatch(str(getattr(args, field))):
             raise DrillError(f"{field.replace('_', ' ')} is not an exact safe Kubernetes name")
-    if not args.acknowledge_state_loss:
+    if not args.acknowledge_state_loss and not quota_stimulus:
         raise DrillError(
             "explicit authorization for process-local and emptyDir state loss is required"
         )
@@ -445,7 +454,7 @@ def _validate_snapshot(
         )
     elif mode == "quota-exhaustion":
         statuses = evidence.get("route_statuses")
-        if statuses != {"root": 200, "metadata": 200, "livez": 200, "healthz": 200}:
+        if statuses != dict.fromkeys(QUOTA_ROUTES, 200):
             raise DrillError("quota stimulus requires a separate healthy all-200 baseline")
         if evidence.get("quota_validator_success") is not True:
             raise DrillError("quota stimulus requires validator success")
@@ -533,7 +542,7 @@ def preflight_live(
     if mode == "metrics-oom" and c.lifecycle == "real-incident":
         snapshot["classification"] = _observe_live_oom(c, deployment, base, runner)
     if mode == "quota-exhaustion":
-        snapshot["classification"] = _observe_live_quota(runner)
+        snapshot["classification"] = _observe_live_quota(runner, include_models=c.quota_stimulus)
     if c.lifecycle == "staging-rehearsal":
         _assert_healthy_rehearsal(deployment, c.replicas)
     return _validate_snapshot(
@@ -714,7 +723,7 @@ def _controller_uid(obj: dict) -> object:
     return controllers[0] if len(controllers) == 1 else None
 
 
-def _observe_live_quota(runner: Runner) -> dict:
+def _observe_live_quota(runner: Runner, *, include_models=False) -> dict:
     validator = [
         sys.executable,
         "-S",
@@ -725,12 +734,8 @@ def _observe_live_quota(runner: Runner) -> dict:
     if runner(validator).returncode:
         raise DrillError("staging quota validation failed")
     statuses = {}
-    for route, path in (
-        ("root", "/"),
-        ("metadata", "/api/v1/meta"),
-        ("livez", "/livez"),
-        ("healthz", "/healthz"),
-    ):
+    routes = QUOTA_ROUTES if include_models else QUOTA_CONTROL_ROUTES
+    for route, path in routes.items():
         command = [
             "curl",
             "--silent",
@@ -748,6 +753,8 @@ def _observe_live_quota(runner: Runner) -> dict:
             statuses[route] = int(result.stdout.strip()) if result.returncode == 0 else 0
         except ValueError as exc:
             raise DrillError("status-only route observation failed") from exc
+        if include_models and statuses[route] != 200:
+            raise DrillError("quota stimulus requires a separate healthy all-200 baseline")
     return {"route_statuses": statuses, "quota_validator_success": True}
 
 
@@ -875,7 +882,7 @@ def build_plan(preflight: Preflight) -> dict:
         previous = stage
 
     if c.lifecycle == "staging-rehearsal" and mode == "quota-exhaustion" and c.quota_stimulus:
-        routes = {name: probes[name]["route"] for name in ("root", "metadata")}
+        routes = {"models": "/api/v1/models"}
         actions.append(
             {
                 "id": "generate-bounded-quota",
@@ -885,7 +892,7 @@ def build_plan(preflight: Preflight) -> dict:
                 "target": {"scheme": "https", "host": STAGING_HOST, "redirects": "reject"},
                 "routes": routes,
                 "limits": dict(QUOTA_STIMULUS_LIMITS),
-                "success_condition": {"root": 429, "metadata": 429, "livez": 200, "healthz": 200},
+                "success_condition": dict(QUOTA_SUCCESS),
                 "command": [
                     "internal:generate-bounded-quota",
                     "--host",
@@ -909,12 +916,7 @@ def build_plan(preflight: Preflight) -> dict:
                     "value": value,
                     "unit": "http_status",
                 }
-                for name, value in (
-                    ("root", 429),
-                    ("metadata", 429),
-                    ("livez", 200),
-                    ("healthz", 200),
-                )
+                for name, value in QUOTA_SUCCESS.items()
             ],
             {"outcome": "stop-without-containment", "mutation": None},
             preserves=("deployment/image", "probe/livez", "probe/healthz"),
@@ -1281,6 +1283,27 @@ def build_plan(preflight: Preflight) -> dict:
         duration=30,
         preserves=("probe/livez", "probe/healthz"),
     )
+    if c.quota_stimulus:
+        # Application quota recovery is window expiry, never a Pod replacement or probe pause.
+        actions = actions[:2]
+        previous = "verify-quota-condition"
+        containment = "stop-stimulus-await-quota-window"
+        gate(
+            "verify-quota-recovery",
+            [
+                {"metric": f"{name}_status", "operator": "eq", "value": 200, "unit": "http_status"}
+                for name in QUOTA_ROUTES
+            ],
+            {"outcome": "stop-without-containment", "mutation": None},
+            preserves=(
+                "deployment/image",
+                "probe/root",
+                "probe/metadata",
+                "probe/livez",
+                "probe/healthz",
+                "servicemonitor/metrics",
+            ),
+        )
     plan = {
         "schema_version": 2,
         "mode": mode,
@@ -1394,6 +1417,7 @@ def _validate_quota_plan_classification(plan: dict) -> bool:
         "metadata_baseline_status": 200,
         "livez_baseline_status": 200,
         "healthz_baseline_status": 200,
+        "models_baseline_status": 200,
     }
     ordinary_quota = {
         "root_status": 429,
@@ -1447,7 +1471,10 @@ def _validate_staging_execution_contract(plan: dict) -> None:
             or expected["replicas"] <= 0
             or not re.fullmatch(r"[1-9][0-9]*(Mi|Gi)", expected["memory_limit"])
             or any(not IMAGE.fullmatch(value) for value in images)
-            or expected["current_image"] == expected["replacement_image"]
+            or (
+                expected["current_image"] == expected["replacement_image"]
+                and not _validate_quota_plan_classification(plan)
+            )
         ):
             raise DrillError("quota staging rehearsal deployment coordinates are malformed")
 
@@ -2291,39 +2318,84 @@ class _RejectQuotaRedirects(urllib.request.HTTPRedirectHandler):
         raise DrillError("bounded quota target attempted a redirect")
 
 
-def _bounded_quota_status(opener, path: str, timeout: float) -> int:
-    request = urllib.request.Request(
-        f"https://{STAGING_HOST}{path}",
-        method="GET",
-        headers={"Accept": "text/plain", "User-Agent": QUOTA_STIMULUS_USER_AGENT},
-    )
+@contextlib.contextmanager
+def _quota_request_deadline(timeout: float):
+    """Interrupt trickling bodies too; never leave a request worker running after timeout."""
+    if threading.current_thread() is not threading.main_thread() or signal.getitimer(
+        signal.ITIMER_REAL
+    ) != (0.0, 0.0):
+        raise DrillError("bounded quota requires the main thread with no active alarm")
+    previous = signal.getsignal(signal.SIGALRM)
+
+    def expired(_signum, _frame):
+        raise DrillError("bounded quota request deadline exceeded")
+
+    signal.signal(signal.SIGALRM, expired)
     try:
-        with opener.open(request, timeout=timeout) as response:
-            value, final = response.status, urlsplit(response.geturl())
-    except urllib.error.HTTPError as exc:
+        signal.setitimer(signal.ITIMER_REAL, timeout)
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+
+
+def _bounded_quota_status(opener, path: str, timeout: float) -> int:
+    with _quota_request_deadline(timeout):
+        request = urllib.request.Request(
+            f"https://{STAGING_HOST}{path}",
+            method="GET",
+            headers={"Accept": "application/json", "User-Agent": QUOTA_STIMULUS_USER_AGENT},
+        )
         try:
-            value, final = exc.code, urlsplit(exc.geturl())
-        finally:
-            exc.close()
-    except (urllib.error.URLError, TimeoutError) as exc:
-        raise DrillError("bounded quota request failed") from exc
-    if final.scheme != "https" or final.hostname != STAGING_HOST or final.path != path:
-        raise DrillError("bounded quota destination drifted")
-    return value
+            try:
+                response = opener.open(request, timeout=timeout)
+            except urllib.error.HTTPError as exc:
+                response = exc
+            with response:
+                value = (
+                    response.code
+                    if isinstance(response, urllib.error.HTTPError)
+                    else response.status
+                )
+                final = urlsplit(response.geturl())
+                if (
+                    final.scheme != "https"
+                    or final.netloc != STAGING_HOST
+                    or final.path != path
+                    or final.query
+                    or final.fragment
+                ):
+                    raise DrillError("bounded quota destination drifted")
+                if path == "/api/v1/models" and value == 429:
+                    body = response.read(4097)
+                    try:
+                        if len(body) > 4096:
+                            raise ValueError()
+                        payload = json.loads(body)
+                        error = payload["error"]
+                        if (
+                            error["code"] != "rate_limit_exceeded"
+                            or error["type"] != "rate_limit_error"
+                        ):
+                            raise ValueError()
+                    except (ValueError, TypeError, KeyError):
+                        raise DrillError(
+                            "models response does not prove application quota"
+                        ) from None
+        except (urllib.error.URLError, TimeoutError) as exc:
+            raise DrillError("bounded quota request failed") from exc
+        return value
 
 
 def _observe_bounded_quota_routes(timeout: float) -> dict[str, int]:
-    """Re-observe every route without adding traffic to either stimulus route."""
+    """One bounded verification sweep, including one counter-bearing models read."""
     opener = urllib.request.build_opener(_RejectQuotaRedirects)
-    return {
-        name: _bounded_quota_status(opener, path, timeout)
-        for name, path in {
-            "root": "/",
-            "metadata": "/api/v1/meta",
-            "livez": "/livez",
-            "healthz": "/healthz",
-        }.items()
-    }
+    observed = {}
+    for name, path in QUOTA_ROUTES.items():
+        observed[name] = _bounded_quota_status(opener, path, timeout)
+        if name in QUOTA_CONTROL_ROUTES and observed[name] != 200:
+            raise DrillError("bounded quota control preservation failed")
+    return observed
 
 
 def _bounded_cardinality_path(run_id: str, sequence: int) -> str:
@@ -2336,8 +2408,10 @@ def _run_bounded_quota(action: dict, boundary_check: Callable[[float], None] | N
     """Apply only the reviewed finite quota load and prove the complete result tuple."""
     if action.get("target") != {"scheme": "https", "host": STAGING_HOST, "redirects": "reject"}:
         raise DrillError("bounded quota target is not the reviewed staging host")
-    if action.get("routes") != {"root": "/", "metadata": "/api/v1/meta"}:
+    if action.get("routes") != {"models": "/api/v1/models"}:
         raise DrillError("bounded quota routes are not the reviewed public routes")
+    if action.get("success_condition") != QUOTA_SUCCESS:
+        raise DrillError("bounded quota success condition is not the reviewed contract")
     limits = action.get("limits")
     if limits != QUOTA_STIMULUS_LIMITS or any(
         isinstance(value, bool) or not isinstance(value, int) or value < 0
@@ -2356,8 +2430,8 @@ def _run_bounded_quota(action: dict, boundary_check: Callable[[float], None] | N
         raise DrillError("bounded quota command is not the reviewed contract")
     opener = urllib.request.build_opener(_RejectQuotaRedirects)
     deadline = time.monotonic() + limits["duration_seconds"]
-    counts = {"root": 0, "metadata": 0, "livez": 0, "healthz": 0}
-    latest = {"root": None, "metadata": None, "livez": None, "healthz": None}
+    counts = dict.fromkeys(QUOTA_ROUTES, 0)
+    latest = dict.fromkeys(QUOTA_ROUTES)
 
     def summary(reason: str) -> dict:
         return {
@@ -2391,20 +2465,15 @@ def _run_bounded_quota(action: dict, boundary_check: Callable[[float], None] | N
         latest[name] = value
         if time.monotonic() >= deadline:
             stop("bounded quota duration limit reached", "duration-budget")
-        if name in {"livez", "healthz"} and value != 200:
+        if name in QUOTA_CONTROL_ROUTES and value != 200:
             stop("bounded quota health preservation failed", "unhealthy-observation")
-        if name in {"root", "metadata"} and value not in {200, 429}:
+        if name == "models" and value not in {200, 429}:
             stop("bounded quota route entered a mixed unsafe state", "unsafe-response")
         return value
 
     # Re-establish the plan's all-healthy baseline at the execution boundary.
     # These are still HTTP attempts and therefore consume the same total budget.
-    for name, path in {
-        "root": "/",
-        "metadata": "/api/v1/meta",
-        "livez": "/livez",
-        "healthz": "/healthz",
-    }.items():
+    for name, path in QUOTA_ROUTES.items():
         latest[name] = status(name, path)
     if set(latest.values()) != {200}:
         stop("bounded quota healthy baseline drifted", "baseline-drift")
@@ -2423,19 +2492,15 @@ def _run_bounded_quota(action: dict, boundary_check: Callable[[float], None] | N
                 raise _QuotaStimulusFailure(str(exc), summary("boundary-drift")) from exc
             if time.monotonic() >= deadline:
                 stop("bounded quota duration limit reached", "duration-budget")
-        for name, path in action["routes"].items():
+        # Four sequential models reads per control sweep; stop on the first rejection.
+        for _ in range(4):
+            if status("models", "/api/v1/models") == 429:
+                break
+        # Preserve public information and health; these never drive quota exhaustion.
+        for name, path in QUOTA_CONTROL_ROUTES.items():
             latest[name] = status(name, path)
-        # Health endpoints are observations, never members of the stimulus route set.
-        latest["livez"] = status("livez", "/livez")
-        latest["healthz"] = status("healthz", "/healthz")
         if latest == action["success_condition"]:
             return summary("condition-established")
-        if latest["livez"] != 200 or latest["healthz"] != 200:
-            stop("bounded quota health preservation failed", "unhealthy-observation")
-        if latest["root"] not in {200, 429} or latest["metadata"] not in {200, 429}:
-            stop("bounded quota route entered a mixed unsafe state", "unsafe-response")
-        if (latest["root"] == 429) != (latest["metadata"] == 429):
-            stop("bounded quota route entered a mixed unsafe state", "mixed-response")
 
 
 def _run_bounded_cardinality(
@@ -3038,8 +3103,10 @@ def _execute_locked(args, runner, plan, journal, now=None):
     if done != expected[: len(done)] or expected[len(done)] != stage:
         raise DrillError("stage is out of order")
     quota_ids = [item["id"] for item in actions]
-    if "verify-quota-condition" in quota_ids and quota_ids.index(stage) > quota_ids.index(
-        "verify-quota-condition"
+    if (
+        stage != "verify-quota-recovery"
+        and "verify-quota-condition" in quota_ids
+        and quota_ids.index(stage) > quota_ids.index("verify-quota-condition")
     ):
         # The first containment command must remain adjacent to a current,
         # source-observed condition rather than trusting an old journal tuple.
@@ -3147,7 +3214,7 @@ def _execute_locked(args, runner, plan, journal, now=None):
             if args.gate_evidence is not None:
                 raise DrillError("quota condition gate refuses operator-authored evidence")
             trigger_record = _fresh_quota_record(records, "generate-bounded-quota", now)
-            expected = {"root": 429, "metadata": 429, "livez": 200, "healthz": 200}
+            expected = QUOTA_SUCCESS
             summary = trigger_record.get("evidence_summary")
             if not isinstance(summary, dict) or summary.get("route_statuses") != expected:
                 raise DrillError("bounded quota evidence does not prove the required condition")
@@ -3156,6 +3223,23 @@ def _execute_locked(args, runner, plan, journal, now=None):
             )
             if observed != expected:
                 raise DrillError("bounded quota condition is no longer present")
+            _record_phase(
+                journal,
+                plan,
+                operation,
+                stage,
+                "completed",
+                evidence_summary={"route_statuses": observed, "source": "live-revalidation"},
+            )
+            return {"status": "completed", "stage": stage}
+        if action["id"] == "verify-quota-recovery":
+            if args.gate_evidence is not None:
+                raise DrillError("quota recovery gate refuses operator-authored evidence")
+            observed = _observe_bounded_quota_routes(
+                QUOTA_STIMULUS_LIMITS["request_timeout_seconds"]
+            )
+            if observed != dict.fromkeys(QUOTA_ROUTES, 200):
+                raise DrillError("application quota has not recovered; wait for its window")
             _record_phase(
                 journal,
                 plan,
