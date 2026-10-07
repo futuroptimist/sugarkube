@@ -272,3 +272,19 @@ def test_disruption_budget_selector_matches_primary_workload(valid):
     )
     errors = app_chart.validate_workload_inventory(docs, inputs("relay"))
     assert (errors == []) is valid
+
+
+def test_monitor_selector_cannot_broaden_beyond_the_primary_workload():
+    docs = documents("dspace")
+    docs.append(
+        {
+            "apiVersion": "monitoring.coreos.com/v1",
+            "kind": "ServiceMonitor",
+            "metadata": copy.deepcopy(docs[1]["metadata"]),
+            "spec": {"selector": {"matchLabels": {"app.kubernetes.io/name": "dspace"}}},
+        }
+    )
+    assert any(
+        "ServiceMonitor selector" in error
+        for error in app_chart.validate_workload_inventory(docs, inputs("dspace"))
+    )

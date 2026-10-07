@@ -408,6 +408,8 @@ def validate_workload_inventory(documents: list[object], inputs: ReleaseInputs) 
             or not isinstance(monitor_matches, dict)
             or not monitor_matches
             or not isinstance(service_labels, dict)
+            or not isinstance(matches, dict)
+            or any(monitor_matches.get(key) != value for key, value in matches.items())
             or any(service_labels.get(key) != value for key, value in monitor_matches.items())
         ):
             errors.append("inventory: ServiceMonitor selector does not match the primary Service")
