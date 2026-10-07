@@ -934,8 +934,9 @@ drill.
 The `/chat synthetic result and freshness` panel formats the result and age separately.
 Success is green `SUCCESS` (1); an observed failure is red `FAILED` (0). Age is in seconds
 and turns red at the 900-second freshness limit. The alert separately requires age greater
-than 900 seconds for five minutes. Both queries are instant reads, so the selected history
-range does not turn the displayed age into a historical aggregate.
+than 900 seconds for five minutes. Both queries are instant reads evaluated at the selected
+time range end, not aggregates over the range. An absolute historical end shows historical
+status and must not be interpreted as current health.
 
 ## danielsmith.io GitHub metadata cache collection
 

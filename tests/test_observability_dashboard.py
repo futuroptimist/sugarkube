@@ -2299,6 +2299,8 @@ def test_synthetic_fields_have_independent_units_and_freshness_threshold(dashboa
                 steps[1]["color"] if seconds >= steps[1]["value"] else steps[0]["color"]
             ) == color
         assert all(t["instant"] and not t["range"] for t in item["targets"])
+        assert "selected time range end" in item["description"]
+        assert "not current health" in item["description"]
         assert item["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
 
 

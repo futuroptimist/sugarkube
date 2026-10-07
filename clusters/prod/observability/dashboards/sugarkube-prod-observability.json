@@ -2301,7 +2301,7 @@
       "id": 47,
       "type": "stat",
       "title": "/chat synthetic result and freshness",
-      "description": "Latest synthetic result and producer age, independent of the selected history range. Success is 1; failure is 0. Age reaches its freshness limit at 900 seconds; the alert requires age greater than 900 seconds for 5 minutes. Missing telemetry remains explicit.",
+      "description": "Synthetic result and producer age evaluated at the selected time range end, not an aggregate over the range. A historical end shows historical status, not current health. Success is 1; failure is 0. Age reaches its freshness limit at 900 seconds; the alert requires age greater than 900 seconds for 5 minutes. Missing telemetry remains explicit.",
       "gridPos": {
         "h": 6,
         "w": 8,
