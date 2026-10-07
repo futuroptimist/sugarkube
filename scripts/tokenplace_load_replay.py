@@ -116,6 +116,7 @@ class Fixture:
         self.expires = 2400
         self.gates = dict.fromkeys(GATES, True)
         self.polls = 0
+        self.completed_response = False
         self.calls = []
 
     def observe(self):
@@ -142,6 +143,7 @@ class Fixture:
             return Reply(429 if self.scenario == "quota" else 404)
         if operation == "select":
             self.polls = 0
+            self.completed_response = False
             return Reply(
                 200,
                 {
@@ -165,6 +167,7 @@ class Fixture:
             self.polls += 1
             if self.polls < 12 or self.scenario == "pending":
                 return Reply(202, {"status": "pending"})
+            self.completed_response = True
             return Reply(
                 200,
                 {
@@ -181,7 +184,9 @@ class Fixture:
         if operation == "ack":
             return Reply(503 if self.scenario == "ack_failure" else 200, {"status": "acknowledged"})
         if operation == "cancel":
-            return Reply(200, {"status": "cancelled"})
+            # The deployed store never rewrites a completed terminal outcome to cancelled,
+            # including after a lost acknowledgement. Cleanup remains unconfirmed here.
+            return Reply(200, {"status": "completed" if self.completed_response else "cancelled"})
         return Reply(200)
 
     def seal(self, plaintext, server_key):
@@ -450,6 +455,7 @@ class Harness:
                 self.job(number)
             self.wait(self.started + 1440)
             self.phase = "recovery"
+            self.observe()
             self.wait(self.started + 2340)
         except Stop as exc:
             outcome, reason = "stopped", str(exc)

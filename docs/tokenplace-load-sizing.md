@@ -117,6 +117,8 @@ admission is not retried. Expiry or identity drift can prevent cleanup; that rem
 unconfirmed. A relay cancellation response does not prove that compute stopped. No process restart,
 counter reset, replacement job, or unbounded cleanup loop is allowed. A future adapter needs a
 reviewed process-interruption and outstanding-work recovery procedure before live execution.
+If completion already won, cancellation returns the existing `completed` outcome, not `cancelled`.
+In particular, a failed or lost acknowledgement leaves cleanup unconfirmed in this replay.
 
 ## Observation gates and remaining authorization
 

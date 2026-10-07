@@ -152,7 +152,9 @@ def test_failure_scenarios_stop_without_retry(scenario, reason, attempts):
     assert report["completed_fixture_jobs"] == 0
     assert report["attempts_by_operation"].get("select", 0) <= 1
     if scenario in {"pending", "ack_failure"}:
-        assert report["cleanup"] == "relay_cancelled_compute_unproven"
+        assert report["cleanup"] == (
+            "unconfirmed" if scenario == "ack_failure" else "relay_cancelled_compute_unproven"
+        )
         assert report["attempts_by_operation"]["cancel"] == 1
 
 
@@ -369,6 +371,18 @@ def test_success_requires_acknowledgement_and_recovery():
     assert report["outcome"] == "stopped"
 
 
+def test_recovery_threshold_applies_at_exact_phase_entry():
+    fixture = Fault(
+        observation=lambda time: {"working_set": load.RECOVERY_MEMORY} if time == 1440 else {}
+    )
+    report = load.Harness(fixture).run()
+    assert report["outcome"] == "stopped"
+    assert report["reason"] == "recovery_memory"
+    assert report["elapsed_seconds"] == 1440
+    assert report["phase"] == "recovery"
+    assert report["attempts"] == 55
+
+
 def test_hard_attempt_and_job_deadline_guards():
     fixture = load.Fixture()
     harness = load.Harness(fixture)
@@ -435,6 +449,7 @@ def test_lost_ack_never_completes_or_retries_job():
     assert report["completed_fixture_jobs"] == 0
     assert report["attempts_by_operation"]["ack"] == 1
     assert report["attempts_by_operation"]["cancel"] == 1
+    assert report["cleanup"] == "unconfirmed"
 
 
 def test_expiry_revoked_after_admission_blocks_cleanup():
