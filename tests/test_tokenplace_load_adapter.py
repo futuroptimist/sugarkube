@@ -33,6 +33,9 @@ def forbid_external_io(monkeypatch):
 def crypto():
     source = os.environ.get("TOKENPLACE_CRYPTO_SOURCE")
     if not source:
+        # TODO: Supply the pinned application crypto when running protocol tests.
+        # Root cause: General CI does not materialize this external dependency.
+        # Estimated fix: Set TOKENPLACE_CRYPTO_SOURCE as dedicated adapter CI does.
         pytest.skip("pinned application crypto absent; dedicated offline-protocol CI supplies it")
     return adapter.load_application_crypto(source)
 
