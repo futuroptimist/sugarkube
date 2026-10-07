@@ -233,7 +233,10 @@ class Harness:
             finite(s["sample_at"]) and 0 <= f.now - s["sample_at"] < 2 * s["cadence"],
             "telemetry_missing",
         )
-        need(finite(s["working_set"]) and 0 <= s["working_set"] < ABORT_MEMORY, "memory")
+        need(finite(s["working_set"]) and 0 <= s["working_set"], "memory")
+        self.samples += 1
+        self.peak = max(self.peak, s["working_set"])
+        need(s["working_set"] < ABORT_MEMORY, "memory")
         if self.phase in {"baseline", "recovery"}:
             need(s["working_set"] < RECOVERY_MEMORY, "recovery_memory")
         need(s["ready"] is True and s["scrape"] is True and s["oom"] is False, "health")
@@ -248,13 +251,12 @@ class Harness:
             s["memory_request"],
             s["replicas"],
         )
+        need(type(s["replicas"]) is int, "identity")
         need(coordinates[1:] == (IMAGE, MEMORY, MEMORY, 1), "identity")
         need(bool(s["identity"]), "identity")
         if self.identity is None:
             self.identity = coordinates
         need(coordinates == self.identity, "identity")
-        self.samples += 1
-        self.peak = max(self.peak, s["working_set"])
 
     def wait(self, target):
         need(finite(target) and target >= self.fixture.now, "clock")
@@ -363,6 +365,7 @@ class Harness:
         need(
             finite(remaining)
             and 0 < remaining <= deadline - submit_started
+            and finite(submitted.get("request_ttl_seconds"))
             and submitted.get("request_ttl_seconds") == remaining
             and submitted.get("retrieval_credential") == selected["reservation_token"],
             "admission",

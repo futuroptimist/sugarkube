@@ -194,6 +194,7 @@ def test_expiry_is_per_run_and_requires_full_recovery(expiry):
         ({"memory_limit": load.MEMORY * 2}, "identity"),
         ({"memory_request": 1}, "identity"),
         ({"replicas": 2}, "identity"),
+        ({"replicas": True}, "identity"),
     ],
 )
 def test_invalid_baseline(values, reason):
@@ -277,6 +278,7 @@ def test_selection_never_falls_back(fields):
     [
         {"retrieval_credential": "other"},
         {"request_ttl_seconds": 1},
+        {"request_ttl_seconds": True, "request_deadline_remaining_seconds": 1},
         {"request_deadline_remaining_seconds": float("inf")},
         {"request_ttl_seconds": 700, "request_deadline_remaining_seconds": 700},
     ],
@@ -515,3 +517,21 @@ def test_rejected_arguments_never_echo_private_values(arguments, capsys):
     assert output.err == (
         "load replay: invalid arguments; only offline plan or built-in scenario allowed\n"
     )
+
+
+@pytest.mark.parametrize("at", [0, 30, 910])
+def test_aborting_memory_sample_is_reported(at):
+    fixture = Fault(observation=lambda now: {"working_set": load.ABORT_MEMORY} if now >= at else {})
+    report = load.Harness(fixture).run()
+    assert report["reason"] == "memory"
+    assert report["sampled_peak_bytes"] == load.ABORT_MEMORY
+    assert report["samples"] >= (1 if at == 0 else 2)
+    assert report["elapsed_seconds"] == at
+
+
+@pytest.mark.parametrize("value", [-1, float("nan"), float("inf"), True])
+def test_invalid_memory_is_not_counted_as_sample(value):
+    report = load.Harness(Fault(observation=lambda _: {"working_set": value})).run()
+    assert report["reason"] == "memory"
+    assert report["samples"] == 0
+    assert report["sampled_peak_bytes"] == 0
