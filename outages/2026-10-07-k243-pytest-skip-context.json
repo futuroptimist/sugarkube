@@ -1,0 +1,14 @@
+{
+  "id": "2026-10-07-k243-pytest-skip-context",
+  "date": "2026-10-07",
+  "component": "K243 pull-request Test Suite workflow",
+  "rootCause": "The new optional Helm rendering test introduced a pytest.skip call without the repository-required TODO, Root cause and Estimated fix comments. Focused lane tests passed, but repeated full Test Suite runs failed tests/test_pytest_skip_guidelines.py. This was a PR validation failure, not a serving-relay outage.",
+  "resolution": "Added the required skip context in c46f22a1 and ran the repository skip-policy check alongside both lane suites: 21 tests passed. The dedicated workflow installs Helm so its render tests execute rather than skip. Superseded in-progress runs were cancelled after the fix; final-head CI must pass before human-ready handoff.",
+  "references": [
+    "https://github.com/futuroptimist/sugarkube/pull/2908",
+    "https://github.com/futuroptimist/sugarkube/actions/runs/37584827157",
+    "https://github.com/futuroptimist/sugarkube/actions/runs/37585014155",
+    "tests/test_tokenplace_test_lane.py",
+    "tests/test_pytest_skip_guidelines.py"
+  ]
+}
