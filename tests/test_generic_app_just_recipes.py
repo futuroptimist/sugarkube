@@ -5703,7 +5703,7 @@ def test_tokenplace_compat_wrappers_propagate_explicit_matching_env(
 
 
 @pytest.mark.usefixtures("ensure_just_available")
-def test_tokenplace_compat_wrapper_custom_release_still_runs_onboarded_preflight(
+def test_tokenplace_compat_wrapper_custom_release_rejects_unconfigured_metrics(
     generic_app_stub_env: dict[str, str],
 ) -> None:
     result = _run_just(
@@ -5723,10 +5723,13 @@ def test_tokenplace_compat_wrapper_custom_release_still_runs_onboarded_preflight
         generic_app_stub_env,
     )
 
-    assert result.returncode == 0, result.stderr + result.stdout
+    # The real chart uses the custom release in its selectors; the checked-in
+    # metrics inventory is configured for tokenplace, so mutation must stop.
+    assert result.returncode != 0
+    assert "exactly one configured ServiceMonitor" in result.stderr
     helm_log = Path(generic_app_stub_env["HELM_LOG"]).read_text(encoding="utf-8")
     assert "template tokenplace-staging " in helm_log
-    assert "upgrade tokenplace-staging " in helm_log
+    assert "upgrade tokenplace-staging " not in helm_log
 
 
 @pytest.mark.usefixtures("ensure_just_available")

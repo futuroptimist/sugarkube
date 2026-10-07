@@ -2595,10 +2595,13 @@ def production_render(target: dict[str, object]) -> str:
     secret_reference = {"name": "dspace-prod-metrics-token", "key": "token"}
     image = f"{manifest.IMAGE_REF}:{target['imageTag']}@{target['imageDigest']}"
     deployment = {
+        "apiVersion": "apps/v1",
         "kind": "Deployment",
         "metadata": metadata,
         "spec": {
+            "selector": {"matchLabels": labels},
             "template": {
+                "metadata": {"labels": labels},
                 "spec": {
                     "containers": [
                         {
@@ -2617,6 +2620,7 @@ def production_render(target: dict[str, object]) -> str:
         },
     }
     monitor = {
+        "apiVersion": "monitoring.coreos.com/v1",
         "kind": "ServiceMonitor",
         "metadata": {**metadata, "labels": {**labels, "release": "kube-prometheus-stack"}},
         "spec": {
@@ -2646,7 +2650,12 @@ def production_render(target: dict[str, object]) -> str:
         json.dumps(item)
         for item in [
             deployment,
-            {"kind": "Service", "metadata": metadata},
+            {
+                "apiVersion": "v1",
+                "kind": "Service",
+                "metadata": metadata,
+                "spec": {"selector": labels},
+            },
             monitor,
         ]
     )

@@ -43,3 +43,7 @@ renders the checked-in local relay chart with Helm when Helm is available.
 
 The fixture quotes the service account token mounting field name to avoid a
 false positive from the diff secret scanner; its value remains false.
+
+A custom release can satisfy the workload inventory while failing the separate
+application metrics inventory. The existing token.place metrics configuration
+names the default release; a custom release does not bypass that check.
