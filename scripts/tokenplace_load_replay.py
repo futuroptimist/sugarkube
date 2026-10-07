@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline K133 sizing harness. No network, cluster, crypto, or live adapter exists."""
+"""Synthetic K133 replay CLI. The offline application-protocol adapter is separate."""
 
 from __future__ import annotations
 
@@ -119,6 +119,15 @@ class Fixture:
         self.completed_response = False
         self.calls = []
 
+    def advance_to(self, target):
+        self.now = target
+
+    def elapse(self, seconds):
+        self.now += seconds
+
+    def new_job(self, number):
+        return (f"fixture-client-{number}", f"fixture-request-{number}", f"fixture-cancel-{number}")
+
     def observe(self):
         return {
             "sample_at": self.now,
@@ -190,7 +199,7 @@ class Fixture:
         return Reply(200)
 
     def seal(self, plaintext, server_key):
-        # Reuse real application crypto only in a future independently reviewed adapter.
+        # The separate ProtocolAdapter delegates to pinned application crypto.
         return {"ciphertext": "fixture-ciphertext", "cipherkey": "fixture-key", "iv": "fixture-iv"}
 
     def open(self, body):
@@ -261,7 +270,7 @@ class Harness:
     def wait(self, target):
         need(finite(target) and target >= self.fixture.now, "clock")
         while self.fixture.now < target:
-            self.fixture.now = min(target, self.fixture.now + 30)
+            self.fixture.advance_to(min(target, self.fixture.now + 30))
             self.observe()
 
     def request(self, operation, body=None, *, cleanup=False):
@@ -289,7 +298,7 @@ class Harness:
         self.counts[operation] += 1  # An uncertain response still consumes an attempt.
         reply = self.fixture.call(operation, body)
         need(finite(reply.seconds) and reply.seconds >= 0, "request_deadline")
-        self.fixture.now += min(reply.seconds, 3)
+        self.fixture.elapse(min(reply.seconds, 3))
         need(reply.seconds <= 3, "request_deadline")
         need(reply.redirected is False, "redirect")
         need(type(reply.status) is int and 100 <= reply.status <= 599, "status")
@@ -309,8 +318,7 @@ class Harness:
     def job(self, number):
         self.job_end = self.fixture.now + LIMITS["job_seconds"]
         self.job_counts = Counter()
-        key, request_id = f"fixture-client-{number}", f"fixture-request-{number}"
-        proof = f"fixture-cancel-{number}"
+        key, request_id, proof = self.fixture.new_job(number)
         binding = {"client_public_key": key, "request_id": request_id}
         # Selection may reserve even when its response is lost. Retain cleanup coordinates first.
         self.pending = {

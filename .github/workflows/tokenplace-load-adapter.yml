@@ -1,0 +1,40 @@
+name: Offline token.place protocol adapter
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/tokenplace_load_*.py'
+      - 'tests/test_tokenplace_load_*.py'
+      - '.github/workflows/tokenplace-load-adapter.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/tokenplace_load_*.py'
+      - 'tests/test_tokenplace_load_*.py'
+      - '.github/workflows/tokenplace-load-adapter.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  offline-protocol:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Materialize pinned application crypto dependency
+        run: |
+          curl --fail --silent --show-error --max-time 30 \
+            https://raw.githubusercontent.com/futuroptimist/token.place/5e190f5c6ff66e9c05934a0e2ce2c1a440b9ea49/encrypt.py \
+            -o "$RUNNER_TEMP/tokenplace-encrypt.py"
+          echo "e661e4195fa94a78e68282526dfe16a9b2e9f27755d788a14868022506e461cb  $RUNNER_TEMP/tokenplace-encrypt.py" | sha256sum --check
+          pip install pytest pytest-cov cryptography==46.0.1
+      - name: Exercise actual crypto and protocol with offline transport
+        env:
+          TOKENPLACE_CRYPTO_SOURCE: ${{ runner.temp }}/tokenplace-encrypt.py
+        run: |
+          pytest -q tests/test_tokenplace_load_adapter.py tests/test_tokenplace_load_replay.py \
+            --cov=scripts.tokenplace_load_adapter --cov=scripts.tokenplace_load_replay \
+            --cov-report=term-missing

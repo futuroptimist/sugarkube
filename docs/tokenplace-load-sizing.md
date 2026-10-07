@@ -22,7 +22,7 @@ virtual time, with no wall-clock waiting. It uses all twelve retrieval slots per
 55 simulated attempts. Three additional cancellation attempts are reserved in the 58-attempt
 ceiling; a real failure stops the sequence instead of continuing to spend that reservation.
 
-**There is no live execution, network, cluster, or cryptographic adapter in this command.**
+**There is no live execution, network, cluster, or cryptographic adapter in this replay command.**
 It accepts no hostname, credentials, evidence file, execution flag, or external fixture file.
 Synthetic keys, ciphertext and decryption assertions exercise the protocol state machine only.
 Every result states that live execution, encryption verification, capacity/headroom proof, and
@@ -30,9 +30,9 @@ worker-traffic qualification are false. Passing a replay is never an execution a
 
 The stock application chat client cannot simply be run under this budget: it polls approximately
 every two seconds, lacks this attempt ceiling, and does not implement the full acknowledgement
-flow required here. A future independently reviewed adapter must reuse application-owned
-encryption and verify actual decryption. This replay deliberately does not copy encryption code,
-import an arbitrary checkout, or pretend that fixture ciphertext provides E2EE.
+flow required here. The separate protocol adapter below reuses application-owned encryption and verifies actual
+local decryption through an injected offline transport. The original replay still uses synthetic
+ciphertext; neither command proves deployed E2EE. No encryption implementation is copied here.
 
 ## Source and workload binding
 
@@ -142,5 +142,66 @@ timing, sampled memory summaries, and finite outcome/cleanup classes. Do not ret
 paths or queries, caller identities, request identifiers, keys, credentials, payloads, or responses.
 The replay's in-memory transport transcript contains synthetic fixtures only and is never printed.
 
-The next executable step is an independently reviewed live adapter with those prerequisites;
-this repository-only replay does not authorize or implement that step.
+A real network transport and live evidence providers still require independent review and those
+prerequisites. This repository preparation does not authorize live execution.
+
+
+## Application protocol adapter and offline transport
+
+`scripts/tokenplace_load_adapter.py` implements the actual client protocol behind an injected
+asynchronous transport. It reuses the replay's attempt, phase, per-job, polling, response-binding,
+acknowledgement and cancellation checks. It generates fresh client keys and proofs for each job,
+serializes selection as GET query parameters, submits base64 `chat_history`, `cipherkey` and `iv`,
+and serializes retrieval, acknowledgement and cancellation as JSON POST bodies. Conflicting
+`ciphertext` and `chat_history` response aliases fail closed. Public HTML/text is size-checked and
+discarded rather than interpreted as protocol JSON.
+
+The dependency is the unchanged `encrypt.py` from the pinned token.place revision above, with
+SHA-256 `e661e4195fa94a78e68282526dfe16a9b2e9f27755d788a14868022506e461cb` and its pinned
+`cryptography==46.0.1` dependency. Materialize that file separately; it is not vendored or downloaded
+by the adapter. The loader hashes the exact bytes it executes and uses the application's standalone
+configuration fallback. It never adds a checkout to the import path or imports application/ambient
+`config`. Encryption remains the deployed application's default AES-CBC and RSA-OAEP wrapping;
+this does not add authenticated encryption or invent another crypto scheme.
+
+With Python 3.11 or newer and the dependency installed, run the offline integration tests using:
+
+```bash
+TOKENPLACE_CRYPTO_SOURCE=/path/to/pinned/encrypt.py \
+  pytest -q tests/test_tokenplace_load_adapter.py tests/test_tokenplace_load_replay.py
+```
+
+The dedicated `Offline token.place protocol adapter` workflow materializes and verifies that source
+before testing. General test runs without this external source explicitly skip crypto-dependent
+adapter tests; the dedicated job must pass to validate this integration. Tests prohibit network
+connections and subprocesses. An in-memory peer decrypts the real client request, checks its exact
+bounded application payload, encrypts a response to the fresh client key, and verifies the returned
+acknowledgement or cancellation proof. Tests also cover interrupted submission, failed
+acknowledgement, wrong response binding, malformed base64/JSON, redirects, streamed body overflow,
+and stalled or cumulative reads exceeding the single request deadline.
+
+The library entry point is `run_protocol_rehearsal(ProtocolAdapter(...))`. All dependencies are
+explicit: verified crypto, an offline transport, virtual epoch clock, observation callback, finite
+prerequisite assertions, and expiry. No host, credentials, network transport, or live CLI is
+provided. The transport's `open(request, absolute_monotonic_deadline)` and response `read(max_bytes)`
+are asynchronous and must cooperate with cancellation; response and transport `close()` must
+synchronously release their resources. One absolute three-second timeout covers opening and every
+stream read; the adapter also checks the deadline around parsing. Real crypto and request finalization time also count toward the job clock. There are no retries,
+redirects, or background requests left by compliant transports. Request bodies and query targets are capped
+before sending; cumulative response bytes are capped before JSON parsing and decryption. These
+are body/target caps, not whole-network-byte or worker-traffic bounds.
+
+A handled interruption stops new jobs, closes transport state, and permits at most the existing
+single bounded cancellation. Failure or loss after completion remains unconfirmed cleanup.
+Private client state and the upstream private-key cache are released at the end; Python memory is
+not guaranteed to be erased. SIGKILL, power loss, or an uncooperative transport cannot guarantee
+cleanup. Never automatically restart the workload after process loss: outstanding server work
+remains unconfirmed and needs separate reviewed reconciliation. No secrets or lifecycle journal
+are persisted to manufacture recoverability.
+
+Reports may set `local_crypto_roundtrip_verified` after an acknowledged locally encrypted job.
+They continue to report `encryption_verified: false` for deployed E2EE and retain false live,
+capacity/headroom and worker-traffic claims. Virtual-clock rehearsals do not establish wall-clock
+phase scheduling or real telemetry quality. Network connection establishment, live clock/evidence
+providers, deployment E2EE verification and interrupted-process reconciliation remain outside this
+offline preparation and require review before any live run.
