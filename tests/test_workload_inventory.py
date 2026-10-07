@@ -288,3 +288,49 @@ def test_monitor_selector_cannot_broaden_beyond_the_primary_workload():
         "ServiceMonitor selector" in error
         for error in app_chart.validate_workload_inventory(docs, inputs("dspace"))
     )
+
+
+@pytest.mark.parametrize("document", [42, "unexpected scalar", [], {"kind": "Service"}])
+def test_malformed_resource_documents_fail_closed(document):
+    docs = documents("dspace")
+    docs.append(document)
+    assert app_chart.validate_workload_inventory(docs, inputs("dspace"))
+
+
+def test_unnamed_primary_resource_fails_closed():
+    docs = documents("dspace")
+    del docs[0]["metadata"]["name"]
+    assert any(
+        "missing name" in error
+        for error in app_chart.validate_workload_inventory(docs, inputs("dspace"))
+    )
+
+
+def test_empty_yaml_documents_do_not_create_resources():
+    assert (
+        app_chart.validate_workload_inventory([None, *documents("dspace"), None], inputs("dspace"))
+        == []
+    )
+
+
+def test_unreadable_archive_cannot_claim_published_provenance(tmp_path):
+    original = inputs("dspace")
+    bound = replace(
+        original,
+        chart=str(tmp_path / "missing.tgz"),
+        chart_origin=original.chart,
+        chart_archive_digest="sha256:" + "a" * 64,
+    )
+    assert app_chart.validate_workload_inventory(documents("dspace"), bound) == [
+        "inventory: chart archive digest mismatch"
+    ]
+
+
+def test_unknown_archive_origin_cannot_select_a_profile(tmp_path):
+    original = inputs("dspace")
+    bound = replace(
+        original, chart=str(tmp_path / "chart.tgz"), chart_origin="oci://example/charts/dspace"
+    )
+    assert app_chart.validate_workload_inventory(documents("dspace"), bound) == [
+        "inventory: unsupported chart origin"
+    ]
