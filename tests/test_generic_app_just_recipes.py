@@ -241,33 +241,8 @@ if [[ "$*" == template* ]]; then
     echo 'Error: synthetic helm template failure' >&2
     exit 1
   fi
-  if [ "${{SUGARKUBE_STUB_HELM_TEMPLATE_MISSING_META:-}}" = "1" ]; then
-    printf 'apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: tokenplace
-  labels:
-    app.kubernetes.io/instance: tokenplace
-spec:
-  template:
-    spec:
-      containers:
-        - name: relay
-          image: ghcr.io/example/tokenplace:main-deadbee
----
-kind: Ingress
-metadata:
-  name: tokenplace
-spec:
-  rules:
-    - host: staging.token.place
-'
-  elif [ "${{SUGARKUBE_STUB_HELM_TEMPLATE_COMMENT_META:-}}" = "1" ]; then
+  if [ "${{SUGARKUBE_STUB_HELM_TEMPLATE_MISSING_META:-}}" = "1" ] || [ "${{SUGARKUBE_STUB_HELM_TEMPLATE_COMMENT_META:-}}" = "1" ]; then
     printf '# TOKENPLACE_IMAGE_TAG TOKENPLACE_RELEASE_VERSION TOKENPLACE_CHART_VERSION TOKENPLACE_DEPLOY_ENV
-kind: ConfigMap
-data:
-  TOKENPLACE_IMAGE_TAG: main-deadbee
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -275,21 +250,34 @@ metadata:
   labels:
     app.kubernetes.io/instance: tokenplace
 spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: tokenplace
   template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: tokenplace
     spec:
       containers:
         - name: relay
-          image: ghcr.io/example/tokenplace:main-deadbee
-        - name: metrics-sidecar
-          env:
-            - name: TOKENPLACE_IMAGE_TAG
-            - name: TOKENPLACE_RELEASE_VERSION
-            - name: TOKENPLACE_CHART_VERSION
-            - name: TOKENPLACE_DEPLOY_ENV
+          image: ghcr.io/futuroptimist/tokenplace-relay:main-deadbee
 ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tokenplace
+  labels:
+    app.kubernetes.io/instance: tokenplace
+spec:
+  selector:
+    app.kubernetes.io/instance: tokenplace
+---
+apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: tokenplace
+  labels:
+    app.kubernetes.io/instance: tokenplace
 spec:
   rules:
     - host: staging.token.place
@@ -298,7 +286,7 @@ spec:
     release="${{2}}"
     app="${{release}}"
     workload="${{release}}"
-    if [[ "$*" == *charts/tokenplace* ]]; then container=relay; app=tokenplace; workload=tokenplace; fi
+    if [[ "$*" == *charts/tokenplace* ]]; then container=relay; app=tokenplace; workload="${{release}}"; fi
     container="${{container:-${{app}}}}"
     tag=main-deadbee
     previous=""
@@ -329,6 +317,9 @@ spec:
         metrics_cluster=sugarkube-prod
       fi
     fi
+    repository=ghcr.io/example/${{app}}
+    if [ "${{app}}" = tokenplace ]; then repository=ghcr.io/futuroptimist/tokenplace-relay; fi
+    if [ "${{app}}" = dspace ]; then repository=ghcr.io/democratizedspace/dspace; fi
     cat <<YAML
 apiVersion: apps/v1
 kind: Deployment
@@ -337,11 +328,17 @@ metadata:
   labels:
     app.kubernetes.io/instance: ${{release}}
 spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: ${{release}}
   template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: ${{release}}
     spec:
       containers:
         - name: ${{container}}
-          image: ghcr.io/example/${{app}}:${{tag}}
+          image: ${{repository}}:${{tag}}
           env:
             - name: METRICS_TOKEN
               valueFrom:
@@ -362,6 +359,10 @@ kind: Service
 metadata:
   name: ${{release}}
   labels:
+    app.kubernetes.io/name: ${{app}}
+    app.kubernetes.io/instance: ${{release}}
+spec:
+  selector:
     app.kubernetes.io/instance: ${{release}}
 ---
 apiVersion: networking.k8s.io/v1
@@ -380,8 +381,9 @@ YAML
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: tokenplace
+  name: ${{release}}
   labels:
+    app.kubernetes.io/instance: ${{release}}
     release: kube-prometheus-stack
 spec:
   namespaceSelector:
@@ -389,7 +391,7 @@ spec:
       - tokenplace
   selector:
     matchLabels:
-      app.kubernetes.io/instance: tokenplace
+      app.kubernetes.io/instance: ${{release}}
       app.kubernetes.io/name: tokenplace
   endpoints:
     - path: /metrics
@@ -2007,7 +2009,7 @@ def test_app_chart_cmd_preflight_rejects_envs_split_across_candidate_containers(
         app="tokenplace",
         env="staging",
         tag="main-deadbee",
-        chart="oci://ghcr.io/futuroptimist/charts/tokenplace",
+        chart="oci://example/charts/tokenplace",
         version_file="docs/apps/tokenplace.version",
         version="0.1.4",
         release="tokenplace",
@@ -2184,7 +2186,7 @@ def test_app_chart_cmd_preflight_rejects_metadata_from_unrelated_deployment(
         app="tokenplace",
         env="staging",
         tag="main-deadbee",
-        chart="oci://ghcr.io/futuroptimist/charts/tokenplace",
+        chart="oci://example/charts/tokenplace",
         version_file="docs/apps/tokenplace.version",
         version="0.1.4",
         release="tokenplace",
@@ -2244,7 +2246,7 @@ def test_app_chart_cmd_preflight_passes_when_relay_envs_present(
         app="tokenplace",
         env="staging",
         tag="main-deadbee",
-        chart="oci://ghcr.io/futuroptimist/charts/tokenplace",
+        chart="oci://example/charts/tokenplace",
         version_file="docs/apps/tokenplace.version",
         version="0.1.4",
         release="tokenplace",

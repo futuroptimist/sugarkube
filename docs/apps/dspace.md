@@ -965,3 +965,6 @@ just helm-oci-install release=dspace namespace=dspace chart=oci://ghcr.io/democr
 ```bash
 just helm-oci-upgrade release=dspace namespace=dspace chart=oci://ghcr.io/democratizedspace/charts/dspace values=docs/examples/dspace.values.dev.yaml,docs/examples/dspace.values.staging.yaml version_file=docs/apps/dspace.staging.version tag="$APP_TAG" env=staging
 ```
+
+See [application workload inventory](workload-inventory.md) for supported chart
+layouts and the offline render checks.

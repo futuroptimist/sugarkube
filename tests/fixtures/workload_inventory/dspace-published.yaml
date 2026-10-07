@@ -1,0 +1,209 @@
+---
+# Source: dspace/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dspace
+  labels:
+    helm.sh/chart: dspace-3.1.2
+    app.kubernetes.io/name: dspace
+    app.kubernetes.io/instance: dspace
+    app.kubernetes.io/version: 3.1.1
+    app.kubernetes.io/managed-by: Helm
+"automountServiceAccountToken": false
+---
+# Source: dspace/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: dspace
+  labels:
+    helm.sh/chart: dspace-3.1.2
+    app.kubernetes.io/name: dspace
+    app.kubernetes.io/instance: dspace
+    app.kubernetes.io/version: 3.1.1
+    app.kubernetes.io/managed-by: Helm
+    dspace.dev/app: "dspace"
+    dspace.dev/environment: "staging"
+    dspace.dev/release: "dspace"
+    dspace.dev/cluster: "sugarkube-int"
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: dspace
+    app.kubernetes.io/instance: dspace
+---
+# Source: dspace/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dspace
+  labels:
+    helm.sh/chart: dspace-3.1.2
+    app.kubernetes.io/name: dspace
+    app.kubernetes.io/instance: dspace
+    app.kubernetes.io/version: 3.1.1
+    app.kubernetes.io/managed-by: Helm
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dspace
+      app.kubernetes.io/instance: dspace
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dspace
+        app.kubernetes.io/instance: dspace
+    spec:
+      serviceAccountName: dspace
+      securityContext:
+        fsGroup: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: dspace
+          image: "ghcr.io/democratizedspace/dspace:main-deadbee"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: PORT
+              value: "8080"
+            - name: DSPACE_VERSION
+              value: "main-deadbee"
+            - name: DSPACE_ENV
+              value: "staging"
+            - name: METRICS_ENABLED
+              value: "true"
+            - name: METRICS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: "dspace-staging-metrics-token"
+                  key: "token"
+            - name: DSPACE_TOKEN_PLACE_URL
+              value: https://staging.token.place
+            - name: DSPACE_TOKEN_PLACE_CHAT_MODEL
+              value: qwen3-8b-instruct
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsGroup: 1000
+            runAsNonRoot: true
+            runAsUser: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            failureThreshold: 3
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 2
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            failureThreshold: 3
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 2
+          resources:
+            limits:
+              cpu: "1"
+              memory: 1536Mi
+            requests:
+              cpu: 500m
+              memory: 768Mi
+---
+# Source: dspace/templates/ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dspace
+  labels:
+    helm.sh/chart: dspace-3.1.2
+    app.kubernetes.io/name: dspace
+    app.kubernetes.io/instance: dspace
+    app.kubernetes.io/version: 3.1.1
+    app.kubernetes.io/managed-by: Helm
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: staging.democratized.space
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: dspace
+                port:
+                  number: 8080
+---
+# Source: dspace/templates/servicemonitor.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: dspace
+  labels:
+    helm.sh/chart: dspace-3.1.2
+    app.kubernetes.io/name: dspace
+    app.kubernetes.io/instance: dspace
+    app.kubernetes.io/version: 3.1.1
+    app.kubernetes.io/managed-by: Helm
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - dspace
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dspace
+      app.kubernetes.io/instance: dspace
+  targetLabels:
+    - app.kubernetes.io/name
+    - app.kubernetes.io/instance
+    - app.kubernetes.io/managed-by
+    - dspace.dev/app
+    - dspace.dev/environment
+    - dspace.dev/release
+    - dspace.dev/cluster
+  endpoints:
+    - port: http
+      path: "/metrics"
+      interval: "30s"
+      scrapeTimeout: "10s"
+      bearerTokenSecret:
+        name: "dspace-staging-metrics-token"
+        key: "token"
+      relabelings:
+        - action: replace
+          targetLabel: app
+          replacement: "dspace"
+        - action: replace
+          targetLabel: environment
+          replacement: "staging"
+        - action: replace
+          targetLabel: namespace
+          replacement: "dspace"
+        - action: replace
+          targetLabel: release
+          replacement: "dspace"
+        - action: replace
+          targetLabel: cluster
+          replacement: "sugarkube-int"

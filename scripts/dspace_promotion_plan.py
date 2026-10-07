@@ -267,6 +267,8 @@ def render(
         release="dspace",
         namespace="dspace",
         chart=str(chart),
+        chart_origin="oci://ghcr.io/democratizedspace/charts/dspace",
+        chart_archive_digest=archive_digest,
         version=wanted["chartVersion"],
         values=tuple(str(item) for item in values),
         tag=wanted["imageTag"],

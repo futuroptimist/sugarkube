@@ -1,0 +1,45 @@
+{
+  "relay-local": {
+    "app": "tokenplace",
+    "localPath": "apps/tokenplace-relay",
+    "sourceRepository": "https://github.com/futuroptimist/sugarkube",
+    "sourcePath": "apps/tokenplace-relay",
+    "container": "relay",
+    "imageRepository": "ghcr.io/futuroptimist/tokenplace-relay",
+    "optionalKinds": [
+      "ServiceAccount",
+      "Ingress"
+    ],
+    "chartName": "tokenplace-relay"
+  },
+  "relay-published": {
+    "app": "tokenplace",
+    "chart": "oci://ghcr.io/futuroptimist/charts/tokenplace",
+    "sourceRepository": "https://github.com/futuroptimist/token.place",
+    "sourcePath": "charts/tokenplace",
+    "container": "relay",
+    "imageRepository": "ghcr.io/futuroptimist/tokenplace-relay",
+    "optionalKinds": [
+      "ServiceAccount",
+      "Ingress",
+      "PodDisruptionBudget",
+      "ServiceMonitor"
+    ],
+    "chartName": "tokenplace"
+  },
+  "dspace-published": {
+    "app": "dspace",
+    "chart": "oci://ghcr.io/democratizedspace/charts/dspace",
+    "sourceRepository": "https://github.com/democratizedspace/dspace",
+    "sourcePath": "charts/dspace",
+    "container": "dspace",
+    "imageRepository": "ghcr.io/democratizedspace/dspace",
+    "optionalKinds": [
+      "ServiceAccount",
+      "Ingress",
+      "ConfigMap",
+      "ServiceMonitor"
+    ],
+    "chartName": "dspace"
+  }
+}
