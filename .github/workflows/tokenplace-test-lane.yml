@@ -1,0 +1,45 @@
+name: K243 offline lane contracts
+on:
+  pull_request:
+    paths:
+      - apps/tokenplace-test-lane/**
+      - tests/test_tokenplace_test_lane.py
+      - tests/test_tokenplace_pinned_quota.py
+      - .github/workflows/tokenplace-test-lane.yml
+  push:
+    branches: [main]
+    paths:
+      - apps/tokenplace-test-lane/**
+      - tests/test_tokenplace_test_lane.py
+      - tests/test_tokenplace_pinned_quota.py
+      - .github/workflows/tokenplace-test-lane.yml
+permissions:
+  contents: read
+jobs:
+  offline-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: futuroptimist/token.place
+          ref: 5e190f5c6ff66e9c05934a0e2ce2c1a440b9ea49
+          path: .external-tokenplace
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: azure/setup-helm@v4.3.0
+        with:
+          version: v3.17.3
+      - name: Prepare offline test dependencies
+        run: |
+          python -m pip install -r .external-tokenplace/config/requirements_relay.txt 'limits==5.8.0' pytest
+      - name: Render isolation and exercise pinned quota middleware without sockets
+        env:
+          TOKENPLACE_QUOTA_SOURCE: ${{ github.workspace }}/.external-tokenplace
+        run: |
+          python -m pytest -q tests/test_tokenplace_test_lane.py tests/test_tokenplace_pinned_quota.py

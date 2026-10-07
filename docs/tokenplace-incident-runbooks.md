@@ -432,3 +432,9 @@ namespace deletion. A drill passes only when both incident classes demonstrate p
 replacement, compute recovery, ordered restoration, threshold rollback, and exact cleanup while
 health coverage remains uninterrupted. Update the canonical incident records and GitHub trackers
 manually after review; use no automatic issue-closing action.
+
+## Disposable relay qualification lane
+
+For K243 offline preparation and the K133 harness handoff, see the
+[disposable staging relay lane](tokenplace-test-lane.md). It is separate from serving-relay
+incident drills. Rendering the lane does not authorize deployment, traffic, or inference.
