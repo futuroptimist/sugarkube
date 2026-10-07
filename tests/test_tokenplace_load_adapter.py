@@ -416,3 +416,29 @@ def test_decrypted_plaintext_must_be_bounded_protocol_object(crypto, clear):
             }
         )
     client.close()
+
+
+@pytest.mark.parametrize("stage", ["open", "read", "close"])
+def test_transport_stop_is_sanitized(crypto, stage):
+    client, peer = setup(crypto)
+    response = Response(200, b"{}")
+
+    async def private_failure(*args):
+        raise replay.Stop("PRIVATE-URL-AND-CREDENTIAL")
+
+    async def open_response(*args):
+        return response
+
+    def private_close():
+        response.closed = True
+        raise replay.Stop("PRIVATE-CLOSE-CREDENTIAL")
+
+    peer.open = private_failure if stage == "open" else open_response
+    if stage == "read":
+        response.read = private_failure
+    if stage == "close":
+        response.close = private_close
+    report = adapter.run_protocol_rehearsal(client)
+    assert report["reason"] == "transport"
+    assert "PRIVATE" not in json.dumps(report)
+    assert peer.closed == 1

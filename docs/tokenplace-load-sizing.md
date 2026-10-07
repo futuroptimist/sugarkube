@@ -126,6 +126,9 @@ Use existing telemetry with cadence at most 30 seconds. Stop when a sample is tw
 or sooner if any sample reaches 192Mi working set (75% of 256Mi). Baseline and recovery require
 working set strictly below 70%. Stop on any new restart/OOM, readiness/scrape failure, coordinate
 drift, unexpected status, malformed response, timeout, missing telemetry, or budget exhaustion.
+Observation identity must be a nonempty string naming the workload instance; availability flags
+or other types cannot substitute for that identifier. Reports retain only fixed reason codes,
+including when an injected provider raises its own stop exception.
 RSS and working-set samples are observations, not a true unsampled peak or capacity proof.
 
 The replay's prerequisite booleans are synthetic assertions only. A live adapter requires separate,

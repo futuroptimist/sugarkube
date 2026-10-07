@@ -165,6 +165,12 @@ class ProtocolAdapter:
             payload,
         )
 
+    async def transport_call(self, method, *args):
+        try:
+            return await method(*args)
+        except Stop:
+            raise Stop("transport") from None
+
     async def exchange(self, operation, request):
         response = None
         started = time.monotonic()
@@ -174,13 +180,15 @@ class ProtocolAdapter:
             async with asyncio.timeout_at(
                 asyncio.get_running_loop().time() + LIMITS["request_seconds"]
             ):
-                response = await self.transport.open(request, deadline)
+                response = await self.transport_call(self.transport.open, request, deadline)
                 need(response.redirected is False, "redirect")
                 need(type(response.status) is int and 100 <= response.status <= 599, "status")
                 data = bytearray()
                 while True:
                     need(time.monotonic() < deadline, "request_deadline")
-                    chunk = await response.read(min(4096, LIMITS["http_bytes"] + 1 - len(data)))
+                    chunk = await self.transport_call(
+                        response.read, min(4096, LIMITS["http_bytes"] + 1 - len(data))
+                    )
                     need(isinstance(chunk, bytes), "invalid_body")
                     data.extend(chunk)
                     need(len(data) <= LIMITS["http_bytes"], "body_limit")
@@ -205,7 +213,10 @@ class ProtocolAdapter:
             raise Stop("request_deadline") from None
         finally:
             if response is not None:
-                response.close()
+                try:
+                    response.close()
+                except Stop:
+                    raise Stop("transport") from None
 
     def call(self, operation, body):
         started = time.monotonic()

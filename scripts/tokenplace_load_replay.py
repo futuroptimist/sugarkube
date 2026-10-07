@@ -52,6 +52,47 @@ LIMITS = {
 GATES = ("authorization", "headroom", "isolation", "edge_origin", "compute", "worker_budget")
 SCENARIOS = ("healthy", "pending", "quota", "memory", "missing_telemetry", "ack_failure")
 
+# Only these fixed outcomes may leave a replay, including injected-provider failures.
+STOP_REASONS = frozenset(
+    [
+        "acknowledgement",
+        "admission",
+        "attempt_limit",
+        "binding",
+        "body_limit",
+        "clock",
+        "completion",
+        "crypto_source",
+        "decryption",
+        "envelope",
+        "expiry",
+        "health",
+        "identity",
+        "interrupted",
+        "invalid_body",
+        "job_deadline",
+        "malformed_pending",
+        "memory",
+        "offline_transport",
+        "operation",
+        "operation_limit",
+        "poll_limit",
+        "prerequisites",
+        "recovery_memory",
+        "redirect",
+        "request_deadline",
+        "reservation_deadline",
+        "restart",
+        "selection",
+        "status",
+        "telemetry_cadence",
+        "telemetry_missing",
+        "transport",
+        "unexpected_status",
+        "unknown_scenario",
+    ]
+)
+
 
 class Stop(ValueError):
     """Only internally assigned finite reason codes may leave the replay."""
@@ -262,7 +303,7 @@ class Harness:
         )
         need(type(s["replicas"]) is int, "identity")
         need(coordinates[1:] == (IMAGE, MEMORY, MEMORY, 1), "identity")
-        need(bool(s["identity"]), "identity")
+        need(isinstance(s["identity"], str) and bool(s["identity"].strip()), "identity")
         if self.identity is None:
             self.identity = coordinates
         need(coordinates == self.identity, "identity")
@@ -469,7 +510,9 @@ class Harness:
             self.observe()
             self.wait(self.started + 2340)
         except Stop as exc:
-            outcome, reason = "stopped", str(exc)
+            code = exc.args[0] if len(exc.args) == 1 else None
+            reason = code if type(code) is str and code in STOP_REASONS else "fixture_error"
+            outcome = "stopped"
             self.cancel()
         except (Exception, KeyboardInterrupt):
             outcome, reason = "stopped", "fixture_error"

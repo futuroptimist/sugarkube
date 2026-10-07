@@ -191,6 +191,9 @@ def test_expiry_is_per_run_and_requires_full_recovery(expiry):
         ({"sample_at": 1}, "telemetry_missing"),
         ({"restarts": True}, "restart"),
         ({"image": "different"}, "identity"),
+        ({"identity": True}, "identity"),
+        ({"identity": ["pod"]}, "identity"),
+        ({"identity": "  "}, "identity"),
         ({"memory_limit": load.MEMORY * 2}, "identity"),
         ({"memory_request": 1}, "identity"),
         ({"replicas": 2}, "identity"),
@@ -535,3 +538,12 @@ def test_invalid_memory_is_not_counted_as_sample(value):
     assert report["reason"] == "memory"
     assert report["samples"] == 0
     assert report["sampled_peak_bytes"] == 0
+
+
+def test_provider_stop_cannot_publish_private_reason():
+    def observe(_):
+        raise load.Stop("PRIVATE-OBSERVATION")
+
+    report = load.Harness(Fault(observation=observe)).run()
+    assert report["reason"] == "fixture_error"
+    assert "PRIVATE" not in json.dumps(report)
