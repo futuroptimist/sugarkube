@@ -232,6 +232,39 @@ def test_string_annotation_entries_remain_supported(profile):
 
 
 @pytest.mark.parametrize("profile", ["dspace", "relay", "local"])
+@pytest.mark.parametrize("entry", [{"example.com/enabled": False}, {1: "value"}, {"key": 1}])
+@pytest.mark.parametrize("target", ["resource", "pod", "selectors"])
+def test_label_entries_must_be_strings(profile, entry, target):
+    docs = documents(profile)
+    deployment = docs[0]
+    if target == "resource":
+        deployment["metadata"]["labels"].update(entry)
+    else:
+        deployment["spec"]["template"]["metadata"]["labels"].update(entry)
+        if target == "selectors":
+            deployment["spec"]["selector"]["matchLabels"].update(entry)
+            docs[1]["spec"]["selector"].update(entry)
+    assert app_chart.validate_workload_inventory(docs, inputs(profile))
+
+
+@pytest.mark.parametrize("annotations", [[], False, "", None, {"key": False}, {1: "value"}])
+def test_pod_annotation_mapping_must_contain_strings(annotations):
+    docs = documents("dspace")
+    docs[0]["spec"]["template"]["metadata"]["annotations"] = annotations
+    assert "inventory: invalid pod annotations" in app_chart.validate_workload_inventory(
+        docs, inputs("dspace")
+    )
+
+
+def test_string_pod_metadata_remains_supported():
+    docs = documents("dspace")
+    metadata = docs[0]["spec"]["template"]["metadata"]
+    metadata["annotations"] = {"example.com/enabled": "false"}
+    metadata["labels"]["example.com/enabled"] = "false"
+    assert app_chart.validate_workload_inventory(docs, inputs("dspace")) == []
+
+
+@pytest.mark.parametrize("profile", ["dspace", "relay", "local"])
 def test_primary_name_cannot_be_replaced_with_an_unrelated_workload(profile):
     docs = documents(profile)
     docs[0]["metadata"]["name"] = "unexpected"

@@ -299,6 +299,12 @@ def validate_workload_inventory(documents: list[object], inputs: ReleaseInputs) 
         "ServiceMonitor": "monitoring.coreos.com/v1",
     }
     allowed = {"Deployment", "Service", *profile["optionalKinds"]}
+
+    def string_mapping(value: object) -> bool:
+        return isinstance(value, dict) and all(
+            isinstance(key, str) and isinstance(item, str) for key, item in value.items()
+        )
+
     resources: dict[str, list[dict]] = {}
     for document in documents:
         if document is None:
@@ -322,14 +328,7 @@ def validate_workload_inventory(documents: list[object], inputs: ReleaseInputs) 
         if "namespace" in metadata and metadata["namespace"] != inputs.namespace:
             errors.append(f"inventory: namespace conflict for {kind}")
         annotations = metadata.get("annotations", {})
-        if (
-            not isinstance(annotations, dict)
-            or any(
-                not isinstance(key, str) or not isinstance(value, str)
-                for key, value in annotations.items()
-            )
-            or "helm.sh/hook" in annotations
-        ):
+        if not string_mapping(annotations) or "helm.sh/hook" in annotations:
             errors.append(f"inventory: unexpected hook for {kind}")
         if isinstance(annotations, dict):
             for key, expected in (
@@ -339,10 +338,7 @@ def validate_workload_inventory(documents: list[object], inputs: ReleaseInputs) 
                 if key in annotations and annotations[key] != expected:
                     errors.append(f"inventory: conflicting {key} for {kind}")
         labels = metadata.get("labels") or {}
-        if (
-            not isinstance(labels, dict)
-            or labels.get("app.kubernetes.io/instance") != inputs.release
-        ):
+        if not string_mapping(labels) or labels.get("app.kubernetes.io/instance") != inputs.release:
             errors.append(f"inventory: release label mismatch for {kind}")
     for kind in allowed:
         count = len(resources.get(kind, []))
@@ -370,14 +366,16 @@ def validate_workload_inventory(documents: list[object], inputs: ReleaseInputs) 
     if (
         not isinstance(selector, dict)
         or set(selector) != {"matchLabels"}
-        or not isinstance(matches, dict)
+        or not string_mapping(matches)
         or not matches
         or matches.get("app.kubernetes.io/instance") != inputs.release
-        or not isinstance(labels, dict)
+        or not string_mapping(labels)
         or any(labels.get(key) != value for key, value in (matches or {}).items())
     ):
         errors.append("inventory: Deployment selector and pod labels are inconsistent")
     _, pod_metadata = nested_value(deployment, ("spec", "template", "metadata"))
+    if isinstance(pod_metadata, dict) and not string_mapping(pod_metadata.get("annotations", {})):
+        errors.append("inventory: invalid pod annotations")
     if isinstance(pod_metadata, dict) and "namespace" in pod_metadata:
         if pod_metadata["namespace"] != inputs.namespace:
             errors.append("inventory: pod namespace conflict")
@@ -421,7 +419,7 @@ def validate_workload_inventory(documents: list[object], inputs: ReleaseInputs) 
         if (
             not isinstance(monitor_selector, dict)
             or set(monitor_selector) != {"matchLabels"}
-            or not isinstance(monitor_matches, dict)
+            or not string_mapping(monitor_matches)
             or not monitor_matches
             or not isinstance(service_labels, dict)
             or not isinstance(matches, dict)
