@@ -120,7 +120,16 @@ puts JSON.generate(convert(Psych.parse_stream(STDIN.read), scanner))
         raise ValueError(f"YAML parser launch failed: {error}") from error
     if parsed.returncode != 0:
         raise ValueError((parsed.stderr or "invalid YAML").strip())
-    value = json.loads(parsed.stdout)
+
+    def unique_mapping(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, item in pairs:
+            if key in result:
+                raise ValueError("duplicate YAML mapping key after JSON conversion")
+            result[key] = item
+        return result
+
+    value = json.loads(parsed.stdout, object_pairs_hook=unique_mapping)
     return value if isinstance(value, list) else []
 
 
@@ -258,11 +267,11 @@ def validate_workload_inventory(documents: list[object], inputs: ReleaseInputs) 
     chart = inputs.chart_origin or inputs.chart
     coordinate = chart.split("@", 1)[0]
     profile = None
+    path = Path(inputs.chart)
+    if not path.is_absolute():
+        path = REPO_ROOT / path
     for candidate in profiles.values():
         local = candidate.get("localPath")
-        path = Path(inputs.chart)
-        if not path.is_absolute():
-            path = REPO_ROOT / path
         if candidate.get("chart") == coordinate or (
             local and not inputs.chart_origin and path.resolve() == (REPO_ROOT / local).resolve()
         ):
@@ -275,7 +284,7 @@ def validate_workload_inventory(documents: list[object], inputs: ReleaseInputs) 
         errors.append("inventory: chart application identity mismatch")
     if inputs.chart_origin:
         try:
-            actual = "sha256:" + hashlib.sha256(Path(inputs.chart).read_bytes()).hexdigest()
+            actual = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
         except OSError:
             actual = ""
         if not actual or actual != inputs.chart_archive_digest:
@@ -339,11 +348,11 @@ def validate_workload_inventory(documents: list[object], inputs: ReleaseInputs) 
     deployment = deployments[0]
     values = merged_values_document(inputs.values)
     values = values if isinstance(values, dict) else {}
-    chart_name = scalar(values.get("nameOverride") or profile["chartName"])[:63].rstrip("-")
+    chart_name = scalar(values.get("nameOverride") or profile["chartName"])
     fullname = scalar(
         values.get("fullnameOverride")
         or (inputs.release if chart_name in inputs.release else f"{inputs.release}-{chart_name}")
-    )[:63].rstrip("-")
+    )[:63].removesuffix("-")
     for resource in [deployment, *resources.get("Service", [])]:
         _, name = nested_value(resource, ("metadata", "name"))
         if name != fullname:

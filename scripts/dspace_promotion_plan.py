@@ -253,6 +253,7 @@ def historical_staging_evidence(path: Path, wanted: dict[str, Any]) -> None:
 def render(
     chart: Path, wanted: dict[str, Any], archive_digest: str, environment: str
 ) -> None:
+    chart = chart.resolve()
     actual = "sha256:" + hashlib.sha256(chart.read_bytes()).hexdigest()
     if actual != archive_digest:
         raise PlanError("offline chart archive digest mismatch")

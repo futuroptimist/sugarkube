@@ -238,7 +238,8 @@ def test_published_dspace_source_render_fixture():
     assert app_chart.validate_rendered_manifest(manifest, original) == []
 
 
-def test_local_relay_chart_render_matches_profile():
+@pytest.mark.parametrize("name_override", ["", "tokenplace-"])
+def test_local_relay_chart_render_matches_profile(tmp_path, name_override):
     import shutil
     import subprocess
 
@@ -247,7 +248,11 @@ def test_local_relay_chart_render_matches_profile():
         # Root cause: Helm is not installed in every Python-only test environment.
         # Estimated fix: Install Helm locally or in CI and rerun this test.
         pytest.skip("Helm is required for the local chart render test")
-    original = replace(inputs("local"), release="tokenplace", namespace="tokenplace")
+    values = tmp_path / "values.yaml"
+    values.write_text(f'nameOverride: "{name_override}"\n')
+    original = replace(
+        inputs("local"), release="tokenplace", namespace="tokenplace", values=(str(values),)
+    )
     command = original.helm_template_command() + [
         "--set",
         "image.repository=ghcr.io/futuroptimist/tokenplace-relay",
@@ -334,3 +339,58 @@ def test_unknown_archive_origin_cannot_select_a_profile(tmp_path):
     assert app_chart.validate_workload_inventory(documents("dspace"), bound) == [
         "inventory: unsupported chart origin"
     ]
+
+
+def test_archive_digest_uses_the_same_working_directory_as_helm(tmp_path, monkeypatch):
+    original = inputs("dspace")
+    profiles = (app_chart.REPO_ROOT / "config/workload-inventory/profiles.json").read_bytes()
+    root = tmp_path / "repo"
+    profile_path = root / "config/workload-inventory/profiles.json"
+    profile_path.parent.mkdir(parents=True)
+    profile_path.write_bytes(profiles)
+    (root / "chart.tgz").write_bytes(b"archive Helm renders")
+    caller = tmp_path / "caller"
+    caller.mkdir()
+    (caller / "chart.tgz").write_bytes(b"different caller archive")
+    monkeypatch.chdir(caller)
+    monkeypatch.setattr(app_chart, "REPO_ROOT", root)
+    bound = replace(
+        original,
+        chart="chart.tgz",
+        chart_origin=original.chart,
+        chart_archive_digest="sha256:"
+        + hashlib.sha256((root / "chart.tgz").read_bytes()).hexdigest(),
+    )
+    assert app_chart.validate_workload_inventory(documents("dspace"), bound) == []
+    wrong = replace(
+        bound,
+        chart_archive_digest="sha256:"
+        + hashlib.sha256((caller / "chart.tgz").read_bytes()).hexdigest(),
+    )
+    assert app_chart.validate_workload_inventory(documents("dspace"), wrong) == [
+        "inventory: chart archive digest mismatch"
+    ]
+
+
+@pytest.mark.parametrize("key", ["1", "true"])
+def test_yaml_keys_cannot_collide_during_json_conversion(key):
+    with pytest.raises(ValueError, match="duplicate YAML mapping key after JSON conversion"):
+        app_chart.safe_yaml_documents(f'labels:\n  {key}: first\n  "{key}": second\n')
+
+
+def test_noncolliding_numeric_yaml_keys_remain_supported():
+    assert app_chart.safe_yaml_documents("ports:\n  80: http\n") == [{"ports": {"80": "http"}}]
+
+
+def test_name_override_is_not_trimmed_before_fullname_selection(tmp_path):
+    docs = documents("local")
+    values = tmp_path / "values.yaml"
+    values.write_text('nameOverride: "tokenplace-"\n')
+    original = replace(inputs("local"), release="tokenplace", values=(str(values),))
+    for resource in docs:
+        resource["metadata"]["name"] = "tokenplace-tokenplace"
+        resource["metadata"]["labels"]["app.kubernetes.io/instance"] = "tokenplace"
+    docs[0]["spec"]["selector"]["matchLabels"]["app.kubernetes.io/instance"] = "tokenplace"
+    docs[0]["spec"]["template"]["metadata"]["labels"]["app.kubernetes.io/instance"] = "tokenplace"
+    docs[1]["spec"]["selector"]["app.kubernetes.io/instance"] = "tokenplace"
+    assert app_chart.validate_workload_inventory(docs, original) == []

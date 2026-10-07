@@ -256,8 +256,9 @@ def test_synthetic_exact_finalized_staging_proof_is_accepted():
     plan.staging_proof(wrapper, {"schemaVersion": 2, "app": "dspace", **plan.TARGET})
 
 
+@pytest.mark.parametrize("relative_archive", [False, True])
 def test_offline_render_requires_two_replicas_always_and_rejects_prod_leaks(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, relative_archive
 ):
     archive = tmp_path / "dspace.tgz"
     archive.write_bytes(b"offline chart")
@@ -315,8 +316,12 @@ spec:
             }
         ],
     )
-    plan.render(archive, wanted, archive_digest, "staging")
-    plan.render(archive, wanted, archive_digest, "prod")
+    monkeypatch.chdir(tmp_path)
+    supplied_archive = Path(archive.name) if relative_archive else archive
+    plan.render(supplied_archive, wanted, archive_digest, "staging")
+    plan.render(supplied_archive, wanted, archive_digest, "prod")
+    assert all(command[3] == str(archive.resolve()) for command in calls)
+    assert all(item.chart == str(archive.resolve()) for item in validated)
     assert all("helm" == command[0] and "template" in command for command in calls)
     assert all(
         "upgrade" not in command and "--reuse-values" not in command

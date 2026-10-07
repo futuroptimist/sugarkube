@@ -22,7 +22,9 @@ Pod or hook exceptions to the published profile.
 
 The offline DSPACE promotion planner supplies the published chart origin only
 after validating its artifact and source reports. It passes the archive digest
-to the shared validator, which rechecks the local archive bytes. A local archive
+to the shared validator, which rechecks the local archive bytes. Relative archive
+arguments are resolved before Helm changes its working directory, so the digest
+check and render use the same file. A local archive
 filename alone does not establish published provenance. OCI references select a
 profile by exact registry coordinate, including digest-qualified references;
 existing chart version and provenance checks remain in force.
