@@ -71,7 +71,7 @@ These commands render and test only; they neither install nor contact a relay:
 ```bash
 helm template k243 apps/tokenplace-test-lane --namespace tokenplace-k243 \
   --set-string runId=offline-fixture > /tmp/k243-rendered.yaml
-pytest -q tests/test_tokenplace_test_lane.py
+SUGARKUBE_SKIP_PREINSTALL_TOOLS=1 pytest -q tests/test_tokenplace_test_lane.py
 ```
 
 Do not use `offline-fixture` as an operational experiment identifier. Rendering validates isolation,
@@ -84,11 +84,12 @@ prepare that checkout and install its `config/requirements_relay.txt`, `limits==
 Then run (with an absolute checkout path):
 
 ```bash
-TOKENPLACE_QUOTA_SOURCE=/path/to/pinned/token.place \
+SUGARKUBE_SKIP_PREINSTALL_TOOLS=1 TOKENPLACE_QUOTA_SOURCE=/path/to/pinned/token.place \
   python -m pytest -q tests/test_tokenplace_pinned_quota.py
 ```
 
-Dependency preparation needs package/source access; the tests themselves use Flask's in-process
+The skip setting disables the repository fixture that otherwise tries to install unrelated CLI
+tools. Dependency preparation needs package/source access; the tests themselves use Flask's in-process
 client and reject socket connections. They clear inherited environment settings and use temporary
 configuration directories. No container, cluster, real relay HTTP request, inference, counter reset,
 or privileged counter endpoint is involved. The dedicated
