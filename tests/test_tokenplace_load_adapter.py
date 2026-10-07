@@ -281,9 +281,12 @@ def test_ambient_configuration_is_not_imported(crypto, monkeypatch):
     hostile = types.ModuleType("config")
     hostile.RSA_KEY_SIZE = 512
     monkeypatch.setitem(sys.modules, "config", hostile)
+    previous = types.ModuleType("_k133_application_crypto")
+    monkeypatch.setitem(sys.modules, "_k133_application_crypto", previous)
     loaded = adapter.load_application_crypto(os.environ["TOKENPLACE_CRYPTO_SOURCE"])
     assert loaded.RSA_KEY_SIZE == 2048
     assert sys.modules["config"] is hostile
+    assert sys.modules["_k133_application_crypto"] is previous
 
 
 @pytest.mark.parametrize("stage", ["open", "read", "cumulative"])

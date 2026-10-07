@@ -37,4 +37,10 @@ jobs:
         run: |
           pytest -q tests/test_tokenplace_load_adapter.py tests/test_tokenplace_load_replay.py \
             --cov=scripts.tokenplace_load_adapter --cov=scripts.tokenplace_load_replay \
-            --cov-report=term-missing
+            --cov-report=term-missing --cov-report=xml:coverage/tokenplace-adapter.xml
+      - name: Upload offline adapter coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage/tokenplace-adapter.xml
+          flags: python
+          fail_ci_if_error: true
