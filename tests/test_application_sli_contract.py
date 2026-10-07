@@ -239,7 +239,7 @@ def test_dashboard_keeps_signal_classes_separate_and_budget_unmeasured():
     assert "sli_observation_state" in expression and "probe_success" not in expression
     assert success["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
     assert "two actual-request SLIs" in success["description"]
-    assert "probe, DSPACE synthetic, and Daniel visitor panels" in success["description"]
+    assert "probe, DSPACE synthetic, and danielsmith.io visitor panels" in success["description"]
     budget = panels["Error budget and burn"]
     assert "UNMEASURED — NO DATA" in budget["options"]["content"]
     assert not budget.get("targets")

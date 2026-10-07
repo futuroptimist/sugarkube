@@ -4018,7 +4018,7 @@
       "id": 96,
       "title": "Application SLI observation state",
       "type": "stat",
-      "description": "Exclusive states for the two actual-request SLIs and the disabled token.place encrypted-completion SLI in this first slice. Use the existing probe, DSPACE synthetic, and Daniel visitor panels for their source-specific state. Counts and ratios share the full-observation gate.",
+      "description": "Exclusive states for the two actual-request SLIs and the disabled token.place encrypted-completion SLI in this first slice. Use the existing probe, DSPACE synthetic, and danielsmith.io visitor panels for their source-specific state. Counts and ratios share the full-observation gate.",
       "gridPos": {
         "h": 8,
         "w": 12,

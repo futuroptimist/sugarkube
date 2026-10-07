@@ -2312,6 +2312,7 @@ def test_danielsmith_display_titles_preserve_panel_ids(dashboards):
         assert len(renamed) == 23
         assert sum(p["type"] == "row" for p in renamed) == 3
         assert not any(p["title"].startswith("Daniel ") for p in document["panels"])
+        assert "Daniel visitor panels" not in json.dumps(document)
 
 
 @pytest.mark.parametrize("mutation", ["missing", "wrong-query", "wrong-unit", "wrong-threshold"])
