@@ -243,6 +243,9 @@ def test_local_relay_chart_render_matches_profile():
     import subprocess
 
     if not shutil.which("helm"):
+        # TODO: Run this offline chart integration check wherever Helm is available.
+        # Root cause: Helm is not installed in every Python-only test environment.
+        # Estimated fix: Install Helm locally or in CI and rerun this test.
         pytest.skip("Helm is required for the local chart render test")
     original = replace(inputs("local"), release="tokenplace", namespace="tokenplace")
     command = original.helm_template_command() + [
