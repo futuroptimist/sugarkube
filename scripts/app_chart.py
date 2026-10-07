@@ -384,6 +384,12 @@ def validate_workload_inventory(documents: list[object], inputs: ReleaseInputs) 
         _, service_selector = nested_value(service, ("spec", "selector"))
         if not matches or service_selector != matches:
             errors.append("inventory: Service selector differs from Deployment selector")
+    for budget in resources.get("PodDisruptionBudget", []):
+        _, budget_selector = nested_value(budget, ("spec", "selector"))
+        if not selector or budget_selector != selector:
+            errors.append(
+                "inventory: PodDisruptionBudget selector differs from Deployment selector"
+            )
     for monitor in resources.get("ServiceMonitor", []):
         _, namespace_selector = nested_value(monitor, ("spec", "namespaceSelector"))
         if namespace_selector not in (None, {}, {"matchNames": [inputs.namespace]}):

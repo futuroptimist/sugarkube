@@ -254,3 +254,21 @@ def test_local_relay_chart_render_matches_profile():
     ]
     manifest = subprocess.run(command, check=True, text=True, capture_output=True).stdout
     assert app_chart.validate_rendered_manifest(manifest, original) == []
+
+
+@pytest.mark.parametrize("valid", [True, False])
+def test_disruption_budget_selector_matches_primary_workload(valid):
+    docs = documents("relay")
+    selector = copy.deepcopy(docs[0]["spec"]["selector"])
+    if not valid:
+        selector["matchLabels"]["app.kubernetes.io/instance"] = "unrelated"
+    docs.append(
+        {
+            "apiVersion": "policy/v1",
+            "kind": "PodDisruptionBudget",
+            "metadata": copy.deepcopy(docs[0]["metadata"]),
+            "spec": {"minAvailable": 1, "selector": selector},
+        }
+    )
+    errors = app_chart.validate_workload_inventory(docs, inputs("relay"))
+    assert (errors == []) is valid
