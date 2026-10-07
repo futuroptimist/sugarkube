@@ -121,12 +121,21 @@ have their own budget in a later reviewed run.
 
 Reuse [K133 PR #2907](https://github.com/futuroptimist/sugarkube/pull/2907); do not build a second
 workload harness or add a counter endpoint. Its documented offline interface is
-`python3 scripts/tokenplace_load_replay.py --plan` and `--scenario healthy`. K133 owns the bounded
-protocol adapter, application crypto, HTTP/deadline enforcement, interruption recovery, and its
-offline transport tests. This lane does not import unpublished implementation symbols or modify
-that branch. The currently published replay binds to serving coordinates; **do not execute it
-against those coordinates or simply substitute a URL**. A reviewed adapter supporting explicit
-lane workload/telemetry coordinates remains a dependency before any real run.
+`python3 scripts/tokenplace_load_replay.py --plan` and `--scenario healthy`. Its expanded adapter
+contract, reviewed here at commit `94a8b19b6f5caeb42f890dc54b33d25a15072292`, documents
+`run_protocol_rehearsal(ProtocolAdapter(...))` with explicit crypto, offline transport, virtual
+clock, observation callback, prerequisite assertions and expiry. Transport operations are
+`open(request, absolute_monotonic_deadline)`, `read(max_bytes)` and `close()`. K133 owns this bounded
+protocol adapter, application crypto, deadline enforcement, interruption behavior and offline
+transport tests. This lane does not import unpublished implementation symbols or modify that
+branch. Merge/review completion of K133 remains a dependency; the snapshot is not a promise that
+its API cannot change.
+
+K133's source-binding documentation records serving coordinates; **do not use those coordinates
+for a lane experiment or simply substitute a URL**. Its adapter explicitly requires an offline
+transport. A separately reviewed network transport, live clock and lane-specific workload/telemetry
+evidence providers remain dependencies before any real run. Neither a lane rendering nor a passing
+local crypto round trip permits bypassing that offline guard.
 
 The integration contract is the K133 source/image binding and attempt ledger: five public attempts,
 five unmatched attempts, and three sequential jobs reserving sixteen attempts each, **58 maximum
