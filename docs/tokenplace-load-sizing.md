@@ -184,8 +184,10 @@ The library entry point is `run_protocol_rehearsal(ProtocolAdapter(...))`. All d
 explicit: verified crypto, an offline transport, virtual epoch clock, observation callback, finite
 prerequisite assertions, and expiry. No host, credentials, network transport, or live CLI is
 provided. The transport's `open(request, absolute_monotonic_deadline)` and response `read(max_bytes)`
-are asynchronous and must cooperate with cancellation; response and transport `close()` must
-synchronously release their resources. One absolute three-second timeout covers opening and every
+are asynchronous and must cooperate with cancellation; a cancelled `open` must release partial resources. Response `close()` releases each exchange,
+while transport `close()` runs only at final teardown, leaving the session usable for bounded
+cancellation after interrupted submission. Both close operations must synchronously release
+their owned resources. One absolute three-second timeout covers opening and every
 stream read; the adapter also checks the deadline around parsing. Real crypto and request finalization time also count toward the job clock. There are no retries,
 redirects, or background requests left by compliant transports. Request bodies and query targets are capped
 before sending; cumulative response bytes are capped before JSON parsing and decryption. These

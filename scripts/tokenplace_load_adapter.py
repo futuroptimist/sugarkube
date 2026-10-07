@@ -81,7 +81,8 @@ class ProtocolAdapter:
 
     transport.open(request, absolute_monotonic_deadline) returns a response with
     integer status, redirected bool, async read(max_bytes) and synchronous close().
-    open/read MUST cooperate with cancellation and close MUST release all work.
+    open/read MUST cooperate with cancellation; a cancelled open releases partial
+    resources. Response close releases that exchange; transport close is final.
     No transport implementation or live evidence is selected implicitly.
     """
 
@@ -196,18 +197,15 @@ class ProtocolAdapter:
                 need(time.monotonic() < deadline, "request_deadline")
                 if operation == "retrieve" and response.status == 200:
                     alias = parsed.get("chat_history")
-                    if alias is not None:
+                    if "chat_history" in parsed:
                         need(parsed.get("ciphertext", alias) == alias, "envelope")
                         parsed["ciphertext"] = alias
                 return Reply(response.status, parsed, time.monotonic() - started, len(data))
         except TimeoutError:
             raise Stop("request_deadline") from None
         finally:
-            try:
-                if response is not None:
-                    response.close()
-            finally:
-                self.transport.close()
+            if response is not None:
+                response.close()
 
     def call(self, operation, body):
         started = time.monotonic()
@@ -219,7 +217,7 @@ class ProtocolAdapter:
         except Stop:
             self.elapse(time.monotonic() - started)
             raise
-        except KeyboardInterrupt:
+        except (KeyboardInterrupt, asyncio.CancelledError):
             self.elapse(time.monotonic() - started)
             raise Stop("interrupted") from None
         except Exception:
@@ -232,7 +230,7 @@ class ProtocolAdapter:
         for release in (self.crypto._load_private_key_cached.cache_clear, self.transport.close):
             try:
                 release()
-            except (Exception, KeyboardInterrupt):
+            except (Exception, KeyboardInterrupt, asyncio.CancelledError):
                 complete = False
         return complete
 

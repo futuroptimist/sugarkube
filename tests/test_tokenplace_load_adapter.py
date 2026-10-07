@@ -57,6 +57,10 @@ class Response:
             await asyncio.Event().wait()
         if self.fault == "interrupt":
             raise KeyboardInterrupt
+        if self.fault == "cancelled":
+            raise asyncio.CancelledError
+        if self.fault == "error":
+            raise RuntimeError("PRIVATE-TRANSPORT-CREDENTIAL")
         part, self.data = self.data[:size], self.data[size:]
         return part
 
@@ -76,6 +80,7 @@ class Peer:
         self.closed = 0
 
     async def open(self, request, deadline):
+        assert self.closed == 0, "transport session permanently closed"
         assert deadline > adapter.time.monotonic()
         self.requests.append(request)
         route = urlsplit(request.target)
@@ -128,8 +133,10 @@ class Peer:
                 "request_ttl_seconds": remaining,
                 "request_deadline_remaining_seconds": remaining,
             }
-            if self.fault == "submit_interrupt":
-                fault = "interrupt"
+            if self.fault in {"submit_interrupt", "submit_cancelled"}:
+                fault = "interrupt" if self.fault == "submit_interrupt" else "cancelled"
+            if self.fault == "submit_error":
+                fault = "error"
         elif route.path.endswith("responses/retrieve"):
             assert fields["retrieval_credential"] == "proof"
             assert all(fields[k] == v for k, v in self.binding.items())
@@ -161,6 +168,9 @@ class Peer:
                 }
                 if self.fault == "alias_conflict":
                     result["ciphertext"] = "conflicting"
+                if self.fault == "null_alias":
+                    result["ciphertext"] = result["chat_history"]
+                    result["chat_history"] = None
                 if self.fault == "bad_base64":
                     result["cipherkey"] = "!"
                 self.completed = True
@@ -222,6 +232,7 @@ def test_actual_crypto_and_wire_lifecycle(crypto):
     assert report["encryption_verified"] is report["live_execution"] is False
     assert all(r.closed for r in peer.responses)
     assert client.private_key is None
+    assert peer.closed == 1
     text = json.dumps(report)
     assert "BEGIN" not in text and "ack-proof" not in text and "Reply with OK" not in text
 
@@ -232,10 +243,13 @@ def test_actual_crypto_and_wire_lifecycle(crypto):
         ("oversize", "body_limit"),
         ("redirect", "redirect"),
         ("alias_conflict", "envelope"),
+        ("null_alias", "envelope"),
         ("wrong_binding", "binding"),
         ("bad_base64", "envelope"),
         ("ack_failure", "unexpected_status"),
         ("submit_interrupt", "interrupted"),
+        ("submit_cancelled", "interrupted"),
+        ("submit_error", "transport"),
         ("stall", "request_deadline"),
     ],
 )
@@ -248,9 +262,10 @@ def test_transport_and_crypto_failures_stop_and_close(crypto, fault, reason):
     assert peer.cancelled <= 1
     assert all(r.closed for r in peer.responses)
     assert client.private_key is None
+    assert "PRIVATE" not in json.dumps(report)
     if fault in {"ack_failure", "wrong_binding", "bad_base64", "alias_conflict"}:
         assert report["cleanup"] == "unconfirmed"
-    if fault == "submit_interrupt":
+    if fault in {"submit_interrupt", "submit_cancelled", "submit_error"}:
         assert peer.cancelled == 1
         assert report["cleanup"] == "relay_cancelled_compute_unproven"
 
@@ -301,7 +316,7 @@ def test_absolute_deadline_cancels_stalled_io(crypto, monkeypatch, stage):
         client.call("root", None)
     assert adapter.time.monotonic() - start < 1
     assert cancelled
-    assert peer.closed == 1
+    assert peer.closed == 0
     assert response.closed is (stage != "open")
     assert client.now >= 1_800_000_000.04
     client.close()
@@ -318,7 +333,7 @@ def test_malformed_protocol_json_is_finite_failure(crypto, data):
     peer.open = open_response
     with pytest.raises(replay.Stop, match="invalid_body"):
         client.call("select", {})
-    assert response.closed and peer.closed == 1
+    assert response.closed and peer.closed == 0
     client.close()
 
 
