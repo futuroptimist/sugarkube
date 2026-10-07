@@ -20,6 +20,9 @@ SOURCE = "5e190f5c6ff66e9c05934a0e2ce2c1a440b9ea49"
 def render(*args, namespace="tokenplace-k243"):
     helm = shutil.which("helm")
     if not helm:
+        # TODO: Provide Helm on hosts running this optional rendering suite.
+        # Root cause: General Python-only test jobs do not install Helm.
+        # Estimated fix: Install Helm 3 locally; dedicated K243 CI already installs it.
         pytest.skip("Helm required for offline rendering")
     return subprocess.run(
         [helm, "template", "k243", str(CHART), "--namespace", namespace, *args],
