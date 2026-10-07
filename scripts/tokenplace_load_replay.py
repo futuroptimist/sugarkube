@@ -483,12 +483,20 @@ class Harness:
         }
 
 
+class SafeParser(argparse.ArgumentParser):
+    def error(self, message):
+        # Unsupported live options may contain credentials or private paths. Never echo argv.
+        self.exit(
+            2, "load replay: invalid arguments; only offline plan or built-in scenario allowed\n"
+        )
+
+
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scenario", choices=SCENARIOS, help="run a built-in offline fixture")
-    parser.add_argument("--plan", action="store_true", help="print the non-executing plan")
+    parser = SafeParser(description=__doc__)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--scenario", choices=SCENARIOS, help="run a built-in offline fixture")
+    mode.add_argument("--plan", action="store_true", help="print the non-executing plan")
     args = parser.parse_args(argv)
-    need(not (args.plan and args.scenario), "choose_plan_or_replay")
     result = Harness(Fixture(args.scenario)).run() if args.scenario else plan()
     print(json.dumps(result, indent=2))
     return 0 if result.get("outcome", "passed") == "passed" else 1

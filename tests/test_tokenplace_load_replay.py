@@ -495,3 +495,23 @@ def test_no_plaintext_fallback_when_sealing_fails(monkeypatch):
     assert report["reason"] == "envelope"
     assert "submit" not in report["attempts_by_operation"]
     assert "private plaintext" not in json.dumps(report)
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["--url", "https://private-user:private-token@example.invalid/private-path?private-query"],
+        ["--authorization", "/private-evidence-path"],
+        ["--scenario", "private-value"],
+        ["--plan", "--scenario", "healthy"],
+    ],
+)
+def test_rejected_arguments_never_echo_private_values(arguments, capsys):
+    with pytest.raises(SystemExit) as error:
+        load.main(arguments)
+    assert error.value.code == 2
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == (
+        "load replay: invalid arguments; only offline plan or built-in scenario allowed\n"
+    )
