@@ -267,7 +267,7 @@ A successful scrape does not prove that the application exports every metric fam
 DSPACE instrumentation must come from a metrics-capable application release. Chat and
 dependency rates show an idle zero only behind the existing complete health gate;
 latency percentiles require actual observations. Missing instrumentation or histograms
-remain **NO DATA**. The optional Daniel cache, controlled performance, and visitor journey
+remain **NO DATA**. The optional danielsmith.io cache, controlled performance, and visitor journey
 panels now explain their producer dependencies in their panel descriptions. Missing
 producers require an application release or collector configuration, not fabricated
 dashboard values. Confirm those producers separately before interpreting an empty panel
@@ -931,16 +931,27 @@ Merging this repository support does not deploy any application, create any
 Secret, dashboard, alert rule, schedulability check, shared-state check, or live
 drill.
 
-## Daniel GitHub metadata cache collection
+The `/chat synthetic result and freshness` panel formats the result and age separately.
+Success is green `SUCCESS` (1); an observed failure is red `FAILED` (0). Age is in seconds
+and turns red at the 900-second freshness limit. The alert separately requires age greater
+than 900 seconds for five minutes. Both queries are instant reads, so the selected history
+range does not turn the displayed age into a historical aggregate.
+
+## danielsmith.io GitHub metadata cache collection
 
 The pinned, disabled-by-default collector contract, exact bounded vocabulary, passive transport
 boundary, offline validation, and later authorized installation procedure are documented in
-[Daniel GitHub-cache collector contract](danielsmith-github-cache.md). No collector schedule or live
+[danielsmith.io GitHub-cache collector contract](danielsmith-github-cache.md). No collector schedule or live
 rollout is authorized by repository provisioning.
 
-## Daniel controlled-performance collection
+The **danielsmith.io cache collection health** panel preserves a reported transport failure
+as zero when monitoring is enabled and the collection timestamp is no more than 910 seconds
+old. Disabled, absent, future-dated, or stale transport remains **NO DATA**. This display
+change does not activate a collector or establish that one is installed.
 
-Daniel revision `26f0745d91f6522e0fd8d618929db74d563d6f07` owns the exact
+## danielsmith.io controlled-performance collection
+
+danielsmith.io revision `26f0745d91f6522e0fd8d618929db74d563d6f07` owns the exact
 `PerformanceResultV1` contract. The shared Sugarkube base contains the visitor-journey
 **routing prerequisite**, but no scheduler or producer for this performance result.
 Step 08a is therefore blocked on #2810 / Step 06 for scheduler integration and a
@@ -981,10 +992,10 @@ only for a validated 120-sample
 `controlled_hardware_v1` Chromium result; software, fallback, unsupported, and
 not-collected results expose a reason and leave the duration series absent.
 
-The **Daniel controlled performance** dashboard row contains **Daniel
-collection/document status**, **Daniel measurement age**, **Daniel performance result
-state**, **Daniel application-ready duration**, **Daniel controlled interaction
-latency**, **Daniel renderer and fallback state**, and **Daniel controlled frame
+The **danielsmith.io controlled performance** dashboard row contains **danielsmith.io
+collection/document status**, **danielsmith.io measurement age**, **danielsmith.io performance result
+state**, **danielsmith.io application-ready duration**, **danielsmith.io controlled interaction
+latency**, **danielsmith.io renderer and fallback state**, and **danielsmith.io controlled frame
 time**. All queries retain environment scope and display `NO DATA`; none synthesize
 zero. Duration series carry renderer identity directly. Freshness joins retain the
 node-exporter `instance` and `job` target identity before aggregation, so two targets

@@ -124,63 +124,64 @@ DANIEL_CACHE_CURRENT = (
     f"(time() - {DANIEL_CACHE_TIMESTAMP} >= 0) and on ({DANIEL_CACHE_IDENTITY}) "
     f"(time() - {DANIEL_CACHE_TIMESTAMP} <= 910)"
 )
-DANIEL_CACHE_STATE_NOT_DISABLED = _cache_metric(
-    "daniel_github_cache_state", ',state!="disabled"'
-)
+DANIEL_CACHE_STATE_NOT_DISABLED = _cache_metric("daniel_github_cache_state", ',state!="disabled"')
 DANIEL_CACHE_STATE_DISABLED = _cache_metric("daniel_github_cache_state", ',state="disabled"')
 DANIEL_CACHE_STATE_FRESH = _cache_metric("daniel_github_cache_state", ',state="fresh"')
 DANIEL_CACHE_STATE_STALE = _cache_metric("daniel_github_cache_state", ',state="stale"')
 
 
 DANIEL_PANEL_CONTRACT = {
-    "Daniel cache state": (
+    "danielsmith.io cache state": (
         f"max by (state) ((({DANIEL_CACHE_STATE_NOT_DISABLED} == 1) and on (cluster) ({DANIEL_CACHE_CURRENT})) or (({DANIEL_CACHE_STATE_DISABLED} == 1) and on (cluster) ({DANIEL_CACHE_ENABLED} == 0)))",  # noqa: E501
         "none",
         "{{state}}",
     ),
-    "Daniel cache freshness": (
+    "danielsmith.io cache freshness": (
         f'max(((time() - {_cache_metric("daniel_github_cache_last_success_unixtime_seconds")} > 0) and on (cluster) ({DANIEL_CACHE_CURRENT})) and on (cluster) ({DANIEL_CACHE_STATE_FRESH} == 1))',  # noqa: E501
         "s",
         "age",
     ),
-    "Daniel cache completeness": (
+    "danielsmith.io cache completeness": (
         f'max by (completeness) (({_cache_metric("daniel_github_cache_data_completeness")}) and on (cluster) ({DANIEL_CACHE_CURRENT}))',
         "none",
         "{{completeness}}",
     ),
-    "Daniel cache refresh duration": (
+    "danielsmith.io cache refresh duration": (
         f'max(({_cache_metric("daniel_github_cache_refresh_duration_milliseconds")} > 0) and on (cluster) ({DANIEL_CACHE_CURRENT}))',
         "ms",
         "duration",
     ),
-    "Daniel cache retained-data age": (
+    "danielsmith.io cache retained-data age": (
         f'max((({_cache_metric("daniel_github_cache_retained_data_age_seconds")}) and on (cluster) ({DANIEL_CACHE_CURRENT})) and on (cluster) ({DANIEL_CACHE_STATE_STALE} == 1))',  # noqa: E501
         "s",
         "age",
     ),
-    "Daniel cache failure categories": (
+    "danielsmith.io cache failure categories": (
         f'max by (category) (({_cache_metric("daniel_github_cache_refresh_failure")} == 1) and on (cluster) ({DANIEL_CACHE_CURRENT}))',
         "none",
         "{{category}}",
     ),
-    "Daniel cache collection health": (
-        f"min by (environment, name, cluster) ({DANIEL_CACHE_CURRENT})",
+    "danielsmith.io cache collection health": (
+        f"min by (environment, name, cluster) (({DANIEL_CACHE_UP}) "
+        f"and on ({DANIEL_CACHE_IDENTITY}) ({DANIEL_CACHE_ENABLED} == 1) "
+        f"and on ({DANIEL_CACHE_IDENTITY}) (time() - {DANIEL_CACHE_TIMESTAMP} >= 0) "
+        f"and on ({DANIEL_CACHE_IDENTITY}) (time() - {DANIEL_CACHE_TIMESTAMP} <= 910))",
         "none",
         "{{environment}} {{name}}",
     ),
-    "Daniel collection/document status": (
+    "danielsmith.io collection/document status": (
         "max by (environment, status) "
         '(daniel_performance_document_status{environment=~"$environment"})',
         "short",
         "{{environment}} {{status}}",
     ),  # noqa: E501
-    "Daniel measurement age": (
+    "danielsmith.io measurement age": (
         "time() - max by (environment, instance, job) "
         '(daniel_performance_measurement_timestamp_seconds{environment=~"$environment"})',
         "s",
         "{{environment}} age",
     ),  # noqa: E501
-    "Daniel performance result state": (
+    "danielsmith.io performance result state": (
         "max by (environment, state) ((max by (environment, instance, job, state) "
         '(daniel_performance_result_state{environment=~"$environment"})) and '
         "on(environment, instance, job) (max by (environment, instance, job) "
@@ -189,7 +190,7 @@ DANIEL_PANEL_CONTRACT = {
         "short",
         "{{environment}} {{state}}",
     ),  # noqa: E501
-    "Daniel application-ready duration": (
+    "danielsmith.io application-ready duration": (
         "max by (environment, renderer_class, renderer_state, fallback_status) ((max by "
         "(environment, instance, job, renderer_class, renderer_state, fallback_status) "
         '(daniel_performance_application_ready_seconds{environment=~"$environment",'
@@ -200,7 +201,7 @@ DANIEL_PANEL_CONTRACT = {
         "s",
         "{{environment}} {{renderer_class}} {{renderer_state}} {{fallback_status}} p95",
     ),  # noqa: E501
-    "Daniel controlled interaction latency": (
+    "danielsmith.io controlled interaction latency": (
         "max by (environment, renderer_class, renderer_state, fallback_status, statistic) "
         "((max by (environment, instance, job, renderer_class, renderer_state, "
         "fallback_status, statistic) "
@@ -211,7 +212,7 @@ DANIEL_PANEL_CONTRACT = {
         "s",
         "{{environment}} {{renderer_class}} {{renderer_state}} {{fallback_status}} {{statistic}}",
     ),  # noqa: E501
-    "Daniel renderer and fallback state": (
+    "danielsmith.io renderer and fallback state": (
         "max by (environment, renderer_class, renderer_state, fallback_status) (((max by "
         "(environment, instance, job, renderer_class) "
         '(daniel_performance_renderer_class{environment=~"$environment"} == 1)) * '
@@ -227,7 +228,7 @@ DANIEL_PANEL_CONTRACT = {
         "short",
         "{{environment}} {{renderer_class}} {{renderer_state}} {{fallback_status}}",
     ),  # noqa: E501
-    "Daniel controlled frame time": (
+    "danielsmith.io controlled frame time": (
         "max by (environment, renderer_class, renderer_state, fallback_status, statistic) "
         "((max by (environment, instance, job, renderer_class, renderer_state, "
         "fallback_status, statistic) "
@@ -285,14 +286,14 @@ DANIEL_VISITOR_FAILURE_STATE = _visitor_metric(
     "danielsmith_visitor_journey_state", ',state="failure"'
 )
 DANIEL_VISITOR_PANEL_CONTRACT = {
-    "Daniel visitor journey state": (
+    "danielsmith.io visitor journey state": (
         f"max by (state) (({_visitor_metric('danielsmith_visitor_journey_state')}) "
         f"and on ({DANIEL_VISITOR_IDENTITY}) ({DANIEL_VISITOR_EXPECTED_ENABLED}) "
         f"and on ({DANIEL_VISITOR_IDENTITY}) {DANIEL_VISITOR_CURRENT})",
         "short",
         "{{state}}",
     ),
-    "Daniel visitor journey success": (
+    "danielsmith.io visitor journey success": (
         f"max by ({DANIEL_VISITOR_IDENTITY}) "
         f"({_visitor_metric('danielsmith_visitor_journey_success')}) "
         f"and on ({DANIEL_VISITOR_IDENTITY}) ({DANIEL_VISITOR_EXPECTED_ENABLED}) "
@@ -301,14 +302,14 @@ DANIEL_VISITOR_PANEL_CONTRACT = {
         "short",
         "success",
     ),
-    "Daniel visitor journey freshness": (
+    "danielsmith.io visitor journey freshness": (
         f"time() - max by ({DANIEL_VISITOR_IDENTITY}) "
         f"({DANIEL_VISITOR_FRESHNESS}) "
         f"and on ({DANIEL_VISITOR_IDENTITY}) ({DANIEL_VISITOR_EXPECTED_ENABLED})",
         "s",
         "age",
     ),
-    "Daniel visitor journey aggregate duration": (
+    "danielsmith.io visitor journey aggregate duration": (
         f"max by ({DANIEL_VISITOR_IDENTITY}) "
         f"({_visitor_metric('danielsmith_visitor_journey_duration_seconds')}) "
         f"and on ({DANIEL_VISITOR_IDENTITY}) ({DANIEL_VISITOR_EXPECTED_ENABLED}) "
@@ -317,7 +318,7 @@ DANIEL_VISITOR_PANEL_CONTRACT = {
         "s",
         "duration",
     ),
-    "Daniel visitor journey failure stage": (
+    "danielsmith.io visitor journey failure stage": (
         f"max by ({DANIEL_VISITOR_IDENTITY}, failure_stage) "
         f"({DANIEL_VISITOR_FAILURE_STAGE}) "
         f"and on ({DANIEL_VISITOR_IDENTITY}) ({DANIEL_VISITOR_EXPECTED_ENABLED}) "
@@ -327,7 +328,7 @@ DANIEL_VISITOR_PANEL_CONTRACT = {
         "short",
         "{{failure_stage}}",
     ),
-    "Daniel visitor journey unavailable or stale": (
+    "danielsmith.io visitor journey unavailable or stale": (
         f"max by (state) (label_replace((({DANIEL_VISITOR_EXPECTED} == 1) "
         f"unless on ({DANIEL_VISITOR_IDENTITY}) {DANIEL_VISITOR_FRESHNESS}) or "
         f"(({DANIEL_VISITOR_EXPECTED} == 1) and on ({DANIEL_VISITOR_IDENTITY}) "
@@ -339,29 +340,29 @@ DANIEL_VISITOR_PANEL_CONTRACT = {
     ),
 }
 DANIEL_VISITOR_LAYOUT_CONTRACT = {
-    "Daniel visitor journey": (79, "row", {"h": 1, "w": 24, "x": 0, "y": 247}),
-    "Daniel visitor journey state": (80, "timeseries", {"h": 8, "w": 12, "x": 0, "y": 248}),
-    "Daniel visitor journey success": (
+    "danielsmith.io visitor journey": (79, "row", {"h": 1, "w": 24, "x": 0, "y": 247}),
+    "danielsmith.io visitor journey state": (80, "timeseries", {"h": 8, "w": 12, "x": 0, "y": 248}),
+    "danielsmith.io visitor journey success": (
         81,
         "timeseries",
         {"h": 8, "w": 12, "x": 12, "y": 248},
     ),
-    "Daniel visitor journey freshness": (
+    "danielsmith.io visitor journey freshness": (
         82,
         "timeseries",
         {"h": 8, "w": 12, "x": 0, "y": 256},
     ),
-    "Daniel visitor journey aggregate duration": (
+    "danielsmith.io visitor journey aggregate duration": (
         83,
         "timeseries",
         {"h": 8, "w": 12, "x": 12, "y": 256},
     ),
-    "Daniel visitor journey failure stage": (
+    "danielsmith.io visitor journey failure stage": (
         84,
         "timeseries",
         {"h": 8, "w": 12, "x": 0, "y": 264},
     ),
-    "Daniel visitor journey unavailable or stale": (
+    "danielsmith.io visitor journey unavailable or stale": (
         85,
         "timeseries",
         {"h": 8, "w": 12, "x": 12, "y": 264},
@@ -972,6 +973,33 @@ def _validate_semantics(dashboard: dict) -> None:
         not in panel_named(dashboard, "/chat synthetic result and freshness")["targets"][0]["expr"]
     ):
         raise SystemExit("ERROR: chat synthetic fallback requires approved-release capability.")
+    synthetic = panel_named(dashboard, "/chat synthetic result and freshness")
+    overrides = synthetic.get("fieldConfig", {}).get("overrides", [])
+    fields = {
+        item.get("matcher", {}).get("options"): {
+            prop.get("id"): prop.get("value") for prop in item.get("properties", [])
+        }
+        for item in overrides
+        if item.get("matcher", {}).get("id") == "byFrameRefID"
+    }
+    success, age = fields.get("A", {}), fields.get("B", {})
+    if (
+        len(overrides) != 2
+        or set(fields) != {"A", "B"}
+        or success.get("unit") != "none"
+        or age.get("unit") != "s"
+        or success.get("thresholds")
+        != {
+            "mode": "absolute",
+            "steps": [{"color": "red", "value": None}, {"color": "green", "value": 1}],
+        }
+        or age.get("thresholds")
+        != {
+            "mode": "absolute",
+            "steps": [{"color": "green", "value": None}, {"color": "red", "value": 900}],
+        }
+    ):
+        raise SystemExit("ERROR: synthetic success and age require independent field formatting.")
     blackbox = [expr for expr in expressions if "probe_" in expr or "blackbox-" in expr]
     if any("blackbox-" in expr and "-$environment-.*" not in expr for expr in blackbox):
         raise SystemExit("ERROR: blackbox jobs must use the environment variable.")
