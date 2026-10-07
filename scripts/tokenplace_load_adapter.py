@@ -165,9 +165,9 @@ class ProtocolAdapter:
             payload,
         )
 
-    async def transport_call(self, method, *args):
+    async def transport_call(self, provider, method, *args):
         try:
-            return await method(*args)
+            return await getattr(provider, method)(*args)
         except Stop:
             raise Stop("transport") from None
 
@@ -180,14 +180,18 @@ class ProtocolAdapter:
             async with asyncio.timeout_at(
                 asyncio.get_running_loop().time() + LIMITS["request_seconds"]
             ):
-                response = await self.transport_call(self.transport.open, request, deadline)
-                need(response.redirected is False, "redirect")
-                need(type(response.status) is int and 100 <= response.status <= 599, "status")
+                response = await self.transport_call(self.transport, "open", request, deadline)
+                try:
+                    redirected, status = response.redirected, response.status
+                except Stop:
+                    raise Stop("transport") from None
+                need(redirected is False, "redirect")
+                need(type(status) is int and 100 <= status <= 599, "status")
                 data = bytearray()
                 while True:
                     need(time.monotonic() < deadline, "request_deadline")
                     chunk = await self.transport_call(
-                        response.read, min(4096, LIMITS["http_bytes"] + 1 - len(data))
+                        response, "read", min(4096, LIMITS["http_bytes"] + 1 - len(data))
                     )
                     need(isinstance(chunk, bytes), "invalid_body")
                     data.extend(chunk)
@@ -203,12 +207,12 @@ class ProtocolAdapter:
                         raise Stop("invalid_body") from None
                     need(isinstance(parsed, dict), "invalid_body")
                 need(time.monotonic() < deadline, "request_deadline")
-                if operation == "retrieve" and response.status == 200:
+                if operation == "retrieve" and status == 200:
                     alias = parsed.get("chat_history")
                     if "chat_history" in parsed:
                         need(parsed.get("ciphertext", alias) == alias, "envelope")
                         parsed["ciphertext"] = alias
-                return Reply(response.status, parsed, time.monotonic() - started, len(data))
+                return Reply(status, parsed, time.monotonic() - started, len(data))
         except TimeoutError:
             raise Stop("request_deadline") from None
         finally:
@@ -238,7 +242,10 @@ class ProtocolAdapter:
     def close(self):
         self.private_key = None
         complete = True
-        for release in (self.crypto._load_private_key_cached.cache_clear, self.transport.close):
+        for release in (
+            lambda: self.crypto._load_private_key_cached.cache_clear(),
+            lambda: self.transport.close(),
+        ):
             try:
                 release()
             except (Exception, KeyboardInterrupt, asyncio.CancelledError):

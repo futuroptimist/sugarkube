@@ -269,7 +269,10 @@ class Harness:
         self.job_counts = Counter()
         self.cleanup = "not_needed"
         self.pending = None
-        self.started = fixture.now
+        try:
+            self.started = fixture.now
+        except (Exception, KeyboardInterrupt):
+            self.started = None
 
     def observe(self):
         f = self.fixture
@@ -294,6 +297,18 @@ class Harness:
         if self.baseline_restarts is None:
             self.baseline_restarts = s["restarts"]
         need(s["restarts"] == self.baseline_restarts, "restart")
+        coordinates = self.coordinates(s)
+        if self.identity is None:
+            self.identity = coordinates
+        need(coordinates == self.identity, "identity")
+
+    @staticmethod
+    def coordinates(s):
+        need(type(s["identity"]) is str and bool(s["identity"].strip()), "identity")
+        need(
+            all(type(s[k]) is int for k in ("memory_limit", "memory_request", "replicas")),
+            "identity",
+        )
         coordinates = (
             s["identity"],
             s["image"],
@@ -301,12 +316,8 @@ class Harness:
             s["memory_request"],
             s["replicas"],
         )
-        need(type(s["replicas"]) is int, "identity")
         need(coordinates[1:] == (IMAGE, MEMORY, MEMORY, 1), "identity")
-        need(isinstance(s["identity"], str) and bool(s["identity"].strip()), "identity")
-        if self.identity is None:
-            self.identity = coordinates
-        need(coordinates == self.identity, "identity")
+        return coordinates
 
     def wait(self, target):
         need(finite(target) and target >= self.fixture.now, "clock")
@@ -322,11 +333,7 @@ class Harness:
             # No cleanup traffic after expiry or fixture identity loss.
             need(self.fixture.now < self.fixture.expires, "expiry")
             s = self.fixture.observe()
-            need(
-                (s["identity"], s["image"], s["memory_limit"], s["memory_request"], s["replicas"])
-                == self.identity,
-                "identity",
-            )
+            need(self.coordinates(s) == self.identity, "identity")
         need(sum(self.counts.values()) < LIMITS["attempts"], "attempt_limit")
         if self.job_end is not None:
             need(self.fixture.now + LIMITS["request_seconds"] <= self.job_end, "job_deadline")
@@ -517,6 +524,13 @@ class Harness:
         except (Exception, KeyboardInterrupt):
             outcome, reason = "stopped", "fixture_error"
             self.cancel()
+        try:
+            ended = self.fixture.now
+            elapsed = ended - self.started if finite(ended) and finite(self.started) else None
+            if not finite(elapsed) or elapsed < 0:
+                elapsed = None
+        except (Exception, KeyboardInterrupt):
+            elapsed = None
         return {
             "kind": "offline-replay",
             "outcome": outcome,
@@ -526,7 +540,7 @@ class Harness:
             "attempts_by_operation": dict(self.counts),
             "status_counts": dict(self.statuses),
             "completed_fixture_jobs": self.completed,
-            "elapsed_seconds": self.fixture.now - self.started,
+            "elapsed_seconds": elapsed,
             "samples": self.samples,
             "sampled_peak_bytes": self.peak,
             "cleanup": self.cleanup,

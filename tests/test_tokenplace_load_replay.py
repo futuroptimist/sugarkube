@@ -547,3 +547,48 @@ def test_provider_stop_cannot_publish_private_reason():
     report = load.Harness(Fault(observation=observe)).run()
     assert report["reason"] == "fixture_error"
     assert "PRIVATE" not in json.dumps(report)
+
+
+def test_cleanup_rejects_boolean_replica_drift():
+    fixture = Fault(observation=lambda now: {"replicas": True} if now >= 910 else {})
+    report = load.Harness(fixture).run()
+    assert report["reason"] == "identity"
+    assert report["cleanup"] == "unconfirmed"
+    assert report["attempts_by_operation"].get("cancel", 0) == 0
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), None, True])
+@pytest.mark.parametrize("at_start", [True, False])
+def test_invalid_clock_never_emits_nonfinite_elapsed(value, at_start):
+    fixture = load.Fixture()
+    harness = load.Harness(fixture)
+    if at_start:
+        harness.started = value
+    fixture.now = value
+    report = harness.run()
+    assert report["outcome"] == "stopped"
+    assert report["elapsed_seconds"] is None
+    json.dumps(report, allow_nan=False)
+
+
+def test_unreadable_clock_still_returns_strict_json():
+    class BrokenClock(load.Fixture):
+        broken = False
+
+        @property
+        def now(self):
+            if self.broken:
+                raise RuntimeError("PRIVATE-CLOCK-DETAIL")
+            return self._now
+
+        @now.setter
+        def now(self, value):
+            self._now = value
+
+    fixture = BrokenClock()
+    harness = load.Harness(fixture)
+    fixture.broken = True
+    report = harness.run()
+    assert report["reason"] == "fixture_error"
+    assert report["elapsed_seconds"] is None
+    assert "PRIVATE" not in json.dumps(report, allow_nan=False)

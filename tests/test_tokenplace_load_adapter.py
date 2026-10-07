@@ -442,3 +442,44 @@ def test_transport_stop_is_sanitized(crypto, stage):
     assert report["reason"] == "transport"
     assert "PRIVATE" not in json.dumps(report)
     assert peer.closed == 1
+
+
+@pytest.mark.parametrize("field", ["redirected", "status", "read"])
+def test_response_metadata_stop_is_a_transport_failure(crypto, field):
+    client, peer = setup(crypto)
+
+    class MetadataFailure:
+        redirected = False
+        status = 200
+
+        def __getattribute__(self, name):
+            if name == field:
+                raise replay.Stop("memory")
+            return object.__getattribute__(self, name)
+
+        def close(self):
+            pass
+
+    async def open_response(*args):
+        return MetadataFailure()
+
+    peer.open = open_response
+    report = adapter.run_protocol_rehearsal(client)
+    assert report["reason"] == "transport"
+    assert peer.closed == 1
+
+
+def test_initially_unreadable_clock_is_sanitized_at_entry(crypto):
+    client, peer = setup(crypto)
+
+    class UnreadableClock:
+        @property
+        def now(self):
+            raise RuntimeError("PRIVATE-INITIAL-CLOCK")
+
+    client.clock = UnreadableClock()
+    report = adapter.run_protocol_rehearsal(client)
+    assert report["reason"] == "fixture_error"
+    assert report["elapsed_seconds"] is None
+    assert "PRIVATE" not in json.dumps(report, allow_nan=False)
+    assert peer.requests == [] and peer.closed == 1

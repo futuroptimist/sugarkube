@@ -128,7 +128,8 @@ working set strictly below 70%. Stop on any new restart/OOM, readiness/scrape fa
 drift, unexpected status, malformed response, timeout, missing telemetry, or budget exhaustion.
 Observation identity must be a nonempty string naming the workload instance; availability flags
 or other types cannot substitute for that identifier. Reports retain only fixed reason codes,
-including when an injected provider raises its own stop exception.
+including when an injected provider raises its own stop exception. Invalid or unreadable clocks
+produce `elapsed_seconds: null`, never a fabricated duration or non-standard JSON number.
 RSS and working-set samples are observations, not a true unsampled peak or capacity proof.
 
 The replay's prerequisite booleans are synthetic assertions only. A live adapter requires separate,
