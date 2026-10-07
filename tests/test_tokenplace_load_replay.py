@@ -592,3 +592,14 @@ def test_unreadable_clock_still_returns_strict_json():
     assert report["reason"] == "fixture_error"
     assert report["elapsed_seconds"] is None
     assert "PRIVATE" not in json.dumps(report, allow_nan=False)
+
+
+@pytest.mark.parametrize("drift", [0, -1, 1, 31])
+def test_clock_must_reach_each_requested_step(drift):
+    class BadClock(load.Fixture):
+        def advance_to(self, target):
+            self.now += drift
+
+    report = load.Harness(BadClock()).run()
+    assert report["reason"] == "clock"
+    assert report["attempts"] == 0

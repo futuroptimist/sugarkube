@@ -322,7 +322,11 @@ class Harness:
     def wait(self, target):
         need(finite(target) and target >= self.fixture.now, "clock")
         while self.fixture.now < target:
-            self.fixture.advance_to(min(target, self.fixture.now + 30))
+            previous = self.fixture.now
+            step = min(target, previous + 30)
+            need(step > previous, "clock")
+            self.fixture.advance_to(step)
+            need(finite(self.fixture.now) and self.fixture.now == step, "clock")
             self.observe()
 
     def request(self, operation, body=None, *, cleanup=False):

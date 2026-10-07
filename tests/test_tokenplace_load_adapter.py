@@ -469,17 +469,51 @@ def test_response_metadata_stop_is_a_transport_failure(crypto, field):
     assert peer.closed == 1
 
 
-def test_initially_unreadable_clock_is_sanitized_at_entry(crypto):
+@pytest.mark.parametrize(
+    "exception,reason", [(RuntimeError, "fixture_error"), (replay.Stop, "clock")]
+)
+def test_initially_unreadable_clock_is_sanitized_at_entry(crypto, exception, reason):
     client, peer = setup(crypto)
 
     class UnreadableClock:
         @property
         def now(self):
-            raise RuntimeError("PRIVATE-INITIAL-CLOCK")
+            raise exception("memory" if exception is replay.Stop else "PRIVATE-INITIAL-CLOCK")
 
     client.clock = UnreadableClock()
     report = adapter.run_protocol_rehearsal(client)
-    assert report["reason"] == "fixture_error"
+    assert report["reason"] == reason
     assert report["elapsed_seconds"] is None
     assert "PRIVATE" not in json.dumps(report, allow_nan=False)
     assert peer.requests == [] and peer.closed == 1
+
+
+def test_observer_stop_is_not_a_memory_measurement(crypto):
+    client, peer = setup(crypto)
+
+    def failed_observer(now):
+        raise replay.Stop("memory")
+
+    client.observer = failed_observer
+    report = adapter.run_protocol_rehearsal(client)
+    assert report["reason"] == "fixture_error"
+    assert report["samples"] == 0
+    assert peer.requests == []
+
+
+@pytest.mark.parametrize("mode", ["stationary", "backward", "overshoot", "stop"])
+def test_adapter_rejects_invalid_clock_advancement(crypto, mode):
+    client, peer = setup(crypto)
+
+    def invalid_advance(target):
+        if mode == "stop":
+            raise replay.Stop("memory")
+        if mode == "backward":
+            client.clock.now -= 1
+        if mode == "overshoot":
+            client.clock.now = target + 1
+
+    client.clock.advance_to = invalid_advance
+    report = adapter.run_protocol_rehearsal(client)
+    assert report["reason"] == "clock"
+    assert peer.requests == []

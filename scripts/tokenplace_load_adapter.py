@@ -19,7 +19,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlencode
 
-from scripts.tokenplace_load_replay import LIMITS, ROUTES, Harness, Reply, Stop, encoded, need
+from scripts.tokenplace_load_replay import (
+    LIMITS,
+    ROUTES,
+    Harness,
+    Reply,
+    Stop,
+    encoded,
+    finite,
+    need,
+)
 
 CRYPTO_SHA256 = "e661e4195fa94a78e68282526dfe16a9b2e9f27755d788a14868022506e461cb"
 
@@ -95,16 +104,28 @@ class ProtocolAdapter:
 
     @property
     def now(self):
-        return self.clock.now
+        try:
+            return self.clock.now
+        except Stop:
+            raise Stop("clock") from None
 
     def advance_to(self, target):
-        self.clock.advance_to(target)
+        need(finite(target) and target >= self.now, "clock")
+        try:
+            self.clock.advance_to(target)
+        except Stop:
+            raise Stop("clock") from None
+        need(finite(self.now) and self.now == target, "clock")
 
     def elapse(self, seconds):
-        self.clock.advance_to(self.now + seconds)
+        self.advance_to(self.now + seconds)
 
     def observe(self):
-        return self.observer(self.now)
+        now = self.now
+        try:
+            return self.observer(now)
+        except Stop:
+            raise Stop("fixture_error") from None
 
     def new_job(self, number):
         started = time.monotonic()
