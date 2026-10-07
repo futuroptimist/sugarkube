@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - apps/tokenplace-test-lane/**
+      - docs/tokenplace-test-lane.md
       - tests/test_tokenplace_test_lane.py
       - tests/test_tokenplace_pinned_quota.py
       - .github/workflows/tokenplace-test-lane.yml
@@ -10,6 +11,7 @@ on:
     branches: [main]
     paths:
       - apps/tokenplace-test-lane/**
+      - docs/tokenplace-test-lane.md
       - tests/test_tokenplace_test_lane.py
       - tests/test_tokenplace_pinned_quota.py
       - .github/workflows/tokenplace-test-lane.yml
