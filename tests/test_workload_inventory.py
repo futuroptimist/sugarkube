@@ -214,6 +214,24 @@ def test_present_nonmapping_annotations_are_rejected(profile, annotations):
 
 
 @pytest.mark.parametrize("profile", ["dspace", "relay", "local"])
+@pytest.mark.parametrize("annotations", [{"example.com/enabled": False}, {1: "value"}, {"key": 1}])
+def test_annotation_entries_must_be_strings(profile, annotations):
+    docs = documents(profile)
+    docs[0]["metadata"]["annotations"] = annotations
+    assert any(
+        "unexpected hook" in error
+        for error in app_chart.validate_workload_inventory(docs, inputs(profile))
+    )
+
+
+@pytest.mark.parametrize("profile", ["dspace", "relay", "local"])
+def test_string_annotation_entries_remain_supported(profile):
+    docs = documents(profile)
+    docs[0]["metadata"]["annotations"] = {"example.com/enabled": "false"}
+    assert app_chart.validate_workload_inventory(docs, inputs(profile)) == []
+
+
+@pytest.mark.parametrize("profile", ["dspace", "relay", "local"])
 def test_primary_name_cannot_be_replaced_with_an_unrelated_workload(profile):
     docs = documents(profile)
     docs[0]["metadata"]["name"] = "unexpected"
