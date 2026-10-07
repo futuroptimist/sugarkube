@@ -203,6 +203,17 @@ def test_duplicate_yaml_keys_cannot_hide_an_extra_container():
 
 
 @pytest.mark.parametrize("profile", ["dspace", "relay", "local"])
+@pytest.mark.parametrize("annotations", [[], False, "", None, 0])
+def test_present_nonmapping_annotations_are_rejected(profile, annotations):
+    docs = documents(profile)
+    docs[0]["metadata"]["annotations"] = annotations
+    assert any(
+        "unexpected hook" in error
+        for error in app_chart.validate_workload_inventory(docs, inputs(profile))
+    )
+
+
+@pytest.mark.parametrize("profile", ["dspace", "relay", "local"])
 def test_primary_name_cannot_be_replaced_with_an_unrelated_workload(profile):
     docs = documents(profile)
     docs[0]["metadata"]["name"] = "unexpected"

@@ -321,7 +321,7 @@ def validate_workload_inventory(documents: list[object], inputs: ReleaseInputs) 
             errors.append(f"inventory: missing name for {kind}")
         if "namespace" in metadata and metadata["namespace"] != inputs.namespace:
             errors.append(f"inventory: namespace conflict for {kind}")
-        annotations = metadata.get("annotations") or {}
+        annotations = metadata.get("annotations", {})
         if not isinstance(annotations, dict) or "helm.sh/hook" in annotations:
             errors.append(f"inventory: unexpected hook for {kind}")
         if isinstance(annotations, dict):
