@@ -511,9 +511,10 @@ def test_daniel_dashboard_contract_covers_metrics_scope_grouping_units_and_missi
             assert item["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
             assert 'environment=~"$environment"' in expression
             assert "vector(0)" not in expression
-        assert "by (state)" in validator.DANIEL_PANEL_CONTRACT["Daniel cache state"][0]
+        assert "by (state)" in validator.DANIEL_PANEL_CONTRACT["danielsmith.io cache state"][0]
         assert (
-            "by (completeness)" in validator.DANIEL_PANEL_CONTRACT["Daniel cache completeness"][0]
+            "by (completeness)"
+            in validator.DANIEL_PANEL_CONTRACT["danielsmith.io cache completeness"][0]
         )
 
 
@@ -543,10 +544,10 @@ def test_daniel_cache_fstring_replacement_fields_do_not_contain_backslashes():
 def test_daniel_visitor_dashboard_contract_is_scoped_bounded_and_fail_closed(dashboards):
     documents = (json.loads(TEMPLATE.read_text()), *dashboards)
     categorical = {
-        "Daniel visitor journey state",
-        "Daniel visitor journey success",
-        "Daniel visitor journey failure stage",
-        "Daniel visitor journey unavailable or stale",
+        "danielsmith.io visitor journey state",
+        "danielsmith.io visitor journey success",
+        "danielsmith.io visitor journey failure stage",
+        "danielsmith.io visitor journey unavailable or stale",
     }
     for document in documents:
         cluster = next(
@@ -569,9 +570,14 @@ def test_daniel_visitor_dashboard_contract_is_scoped_bounded_and_fail_closed(das
             assert "vector(0)" not in expression
             if title in categorical:
                 assert unit == "short"
-        assert validator.DANIEL_VISITOR_PANEL_CONTRACT["Daniel visitor journey freshness"][1] == "s"
         assert (
-            validator.DANIEL_VISITOR_PANEL_CONTRACT["Daniel visitor journey aggregate duration"][1]
+            validator.DANIEL_VISITOR_PANEL_CONTRACT["danielsmith.io visitor journey freshness"][1]
+            == "s"
+        )
+        assert (
+            validator.DANIEL_VISITOR_PANEL_CONTRACT[
+                "danielsmith.io visitor journey aggregate duration"
+            ][1]
             == "s"
         )
 
@@ -667,17 +673,17 @@ def test_daniel_visitor_promql_lifecycle_semantics_with_promtool(tmp_path, dashb
         add_case(
             _visitor_fixture(state=state),
             {
-                "Daniel visitor journey state": [sample({"state": state}, 1)],
-                "Daniel visitor journey success": [sample(identity, 1)],
-                "Daniel visitor journey freshness": [sample(identity, 1020)],
-                "Daniel visitor journey unavailable or stale": [],
+                "danielsmith.io visitor journey state": [sample({"state": state}, 1)],
+                "danielsmith.io visitor journey success": [sample(identity, 1)],
+                "danielsmith.io visitor journey freshness": [sample(identity, 1020)],
+                "danielsmith.io visitor journey unavailable or stale": [],
             },
         )
     add_case(
         _visitor_fixture(state="failure"),
         {
-            "Daniel visitor journey success": [sample(identity, 0)],
-            "Daniel visitor journey failure stage": [
+            "danielsmith.io visitor journey success": [sample(identity, 0)],
+            "danielsmith.io visitor journey failure stage": [
                 sample({**identity, "failure_stage": "navigation"}, 1)
             ],
         },
@@ -685,33 +691,33 @@ def test_daniel_visitor_promql_lifecycle_semantics_with_promtool(tmp_path, dashb
     add_case(
         _visitor_fixture(freshness=779),
         {
-            "Daniel visitor journey state": [],
-            "Daniel visitor journey success": [],
-            "Daniel visitor journey unavailable or stale": [sample({"state": "stale"}, 1)],
+            "danielsmith.io visitor journey state": [],
+            "danielsmith.io visitor journey success": [],
+            "danielsmith.io visitor journey unavailable or stale": [sample({"state": "stale"}, 1)],
         },
     )
     add_case(
         _visitor_fixture(freshness=779, state="failure"),
-        {"Daniel visitor journey failure stage": []},
+        {"danielsmith.io visitor journey failure stage": []},
     )
     add_case(
         _visitor_fixture(expected=0, enabled=0, freshness=None),
         {
-            "Daniel visitor journey success": [],
-            "Daniel visitor journey unavailable or stale": [],
+            "danielsmith.io visitor journey success": [],
+            "danielsmith.io visitor journey unavailable or stale": [],
         },
     )
     add_case(
         _visitor_fixture(freshness=None),
-        {"Daniel visitor journey unavailable or stale": [sample({"state": "stale"}, 1)]},
+        {"danielsmith.io visitor journey unavailable or stale": [sample({"state": "stale"}, 1)]},
     )
     add_case(
         _visitor_fixture(cluster="wrong-cluster"),
-        {"Daniel visitor journey success": [], "Daniel visitor journey state": []},
+        {"danielsmith.io visitor journey success": [], "danielsmith.io visitor journey state": []},
     )
     add_case(
         _visitor_fixture(environment="prod", name="danielsmith-visitor-journey-prod"),
-        {"Daniel visitor journey success": [], "Daniel visitor journey state": []},
+        {"danielsmith.io visitor journey success": [], "danielsmith.io visitor journey state": []},
     )
 
     fixture = tmp_path / "visitor-dashboard-promql.yml"
@@ -727,33 +733,33 @@ def test_daniel_visitor_promql_lifecycle_semantics_with_promtool(tmp_path, dashb
 
 def test_daniel_visitor_dashboard_layout_is_stable(dashboards):
     expected_layout = {
-        "Daniel visitor journey": (79, "row", {"h": 1, "w": 24, "x": 0, "y": 247}),
-        "Daniel visitor journey state": (
+        "danielsmith.io visitor journey": (79, "row", {"h": 1, "w": 24, "x": 0, "y": 247}),
+        "danielsmith.io visitor journey state": (
             80,
             "timeseries",
             {"h": 8, "w": 12, "x": 0, "y": 248},
         ),
-        "Daniel visitor journey success": (
+        "danielsmith.io visitor journey success": (
             81,
             "timeseries",
             {"h": 8, "w": 12, "x": 12, "y": 248},
         ),
-        "Daniel visitor journey freshness": (
+        "danielsmith.io visitor journey freshness": (
             82,
             "timeseries",
             {"h": 8, "w": 12, "x": 0, "y": 256},
         ),
-        "Daniel visitor journey aggregate duration": (
+        "danielsmith.io visitor journey aggregate duration": (
             83,
             "timeseries",
             {"h": 8, "w": 12, "x": 12, "y": 256},
         ),
-        "Daniel visitor journey failure stage": (
+        "danielsmith.io visitor journey failure stage": (
             84,
             "timeseries",
             {"h": 8, "w": 12, "x": 0, "y": 264},
         ),
-        "Daniel visitor journey unavailable or stale": (
+        "danielsmith.io visitor journey unavailable or stale": (
             85,
             "timeseries",
             {"h": 8, "w": 12, "x": 12, "y": 264},
@@ -774,16 +780,16 @@ def test_daniel_visitor_dashboard_layout_is_stable(dashboards):
 
 def test_daniel_visitor_results_exclude_disabled_stale_and_unavailable():
     for title in (
-        "Daniel visitor journey success",
-        "Daniel visitor journey aggregate duration",
-        "Daniel visitor journey failure stage",
+        "danielsmith.io visitor journey success",
+        "danielsmith.io visitor journey aggregate duration",
+        "danielsmith.io visitor journey failure stage",
     ):
         expression = validator.DANIEL_VISITOR_PANEL_CONTRACT[title][0]
         assert "monitoring_enabled" in expression and "== 1" in expression
         assert "<= 1020" in expression
         assert (
             'state="failure"' in expression
-            if title == "Daniel visitor journey failure stage"
+            if title == "danielsmith.io visitor journey failure stage"
             else 'state=~"success|recovered|failure"' in expression
         )
         assert not any(
@@ -814,13 +820,13 @@ def test_daniel_visitor_dashboard_validator_rejects_contract_regressions(
     ("title", "mutation"),
     [
         (
-            "Daniel cache freshness",
+            "danielsmith.io cache freshness",
             lambda item: item["targets"][0].update(
                 expr=item["targets"][0]["expr"].replace("last_success_unixtime", "wrong_unixtime")
             ),
         ),
         (
-            "Daniel cache refresh duration",
+            "danielsmith.io cache refresh duration",
             lambda item: item["targets"][0].update(
                 expr=item["targets"][0]["expr"].replace(
                     'name=~"danielsmith-github-cache-$environment"', 'name=~"wrong"', 1
@@ -828,13 +834,13 @@ def test_daniel_visitor_dashboard_validator_rejects_contract_regressions(
             ),
         ),
         (
-            "Daniel cache state",
+            "danielsmith.io cache state",
             lambda item: item["targets"][0].update(
                 expr=item["targets"][0]["expr"].replace("max by (state)", "max by (repository)", 1)
             ),
         ),
         (
-            "Daniel cache completeness",
+            "danielsmith.io cache completeness",
             lambda item: item["targets"][0].update(
                 expr=item["targets"][0]["expr"] + " or vector(0)"
             ),
@@ -852,13 +858,13 @@ def test_daniel_dashboard_validator_rejects_contract_regressions(
 
 def test_daniel_cache_panels_use_canonical_scoped_fail_closed_contract(dashboards):
     expected = {
-        "Daniel cache state": (66, "none"),
-        "Daniel cache freshness": (67, "s"),
-        "Daniel cache completeness": (68, "none"),
-        "Daniel cache refresh duration": (69, "ms"),
-        "Daniel cache retained-data age": (70, "s"),
-        "Daniel cache failure categories": (93, "none"),
-        "Daniel cache collection health": (94, "none"),
+        "danielsmith.io cache state": (66, "none"),
+        "danielsmith.io cache freshness": (67, "s"),
+        "danielsmith.io cache completeness": (68, "none"),
+        "danielsmith.io cache refresh duration": (69, "ms"),
+        "danielsmith.io cache retained-data age": (70, "s"),
+        "danielsmith.io cache failure categories": (93, "none"),
+        "danielsmith.io cache collection health": (94, "none"),
     }
     for document in dashboards:
         for title, (panel_id, unit) in expected.items():
@@ -881,15 +887,19 @@ def test_daniel_cache_panels_use_canonical_scoped_fail_closed_contract(dashboard
         scoped = "\n".join(validator.panel_expression(document, title) for title in expected)
         assert 'environment=~"$environment"' in scoped
         assert 'name=~"danielsmith-github-cache-$environment"' in scoped
-        assert 'state="fresh"' in validator.panel_expression(document, "Daniel cache freshness")
-        assert 'state="stale"' in validator.panel_expression(
-            document, "Daniel cache retained-data age"
+        assert 'state="fresh"' in validator.panel_expression(
+            document, "danielsmith.io cache freshness"
         )
-        assert "== 1" in validator.panel_expression(document, "Daniel cache failure categories")
+        assert 'state="stale"' in validator.panel_expression(
+            document, "danielsmith.io cache retained-data age"
+        )
+        assert "== 1" in validator.panel_expression(
+            document, "danielsmith.io cache failure categories"
+        )
 
 
 def test_daniel_cache_state_preserves_disabled_and_rejects_failed_collection():
-    expression = validator.DANIEL_PANEL_CONTRACT["Daniel cache state"][0]
+    expression = validator.DANIEL_PANEL_CONTRACT["danielsmith.io cache state"][0]
     assert 'state="disabled"' in expression
     assert "daniel_github_cache_collection_up" in expression
     assert f"{validator.DANIEL_CACHE_ENABLED} == 0" in expression
@@ -897,7 +907,7 @@ def test_daniel_cache_state_preserves_disabled_and_rejects_failed_collection():
 
 
 def test_daniel_cache_refresh_duration_excludes_unknown_zero():
-    expression = validator.DANIEL_PANEL_CONTRACT["Daniel cache refresh duration"][0]
+    expression = validator.DANIEL_PANEL_CONTRACT["danielsmith.io cache refresh duration"][0]
     assert "daniel_github_cache_refresh_duration_milliseconds" in expression
     assert '"cluster", "${CLUSTER}", "cluster", "^$") > 0' in expression
 
@@ -981,30 +991,47 @@ def test_daniel_cache_promql_lifecycle_semantics_with_promtool(tmp_path, dashboa
         add_case(
             _cache_fixture(**fixture_identity),
             {
-                "Daniel cache state": [sample({"state": "fresh"}, 1)],
-                "Daniel cache freshness": [sample({}, 850)],
-                "Daniel cache completeness": [sample({"completeness": "complete"}, 1)],
-                "Daniel cache refresh duration": [sample({}, 25)],
-                "Daniel cache failure categories": [sample({"category": "timeout"}, 1)],
-                "Daniel cache collection health": [sample(identity, 1)],
+                "danielsmith.io cache state": [sample({"state": "fresh"}, 1)],
+                "danielsmith.io cache freshness": [sample({}, 850)],
+                "danielsmith.io cache completeness": [sample({"completeness": "complete"}, 1)],
+                "danielsmith.io cache refresh duration": [sample({}, 25)],
+                "danielsmith.io cache failure categories": [sample({"category": "timeout"}, 1)],
+                "danielsmith.io cache collection health": [sample(identity, 1)],
             },
         )
         add_case(
             _cache_fixture(enabled=0, up=0, state="disabled", **fixture_identity),
-            {"Daniel cache state": [sample({"state": "disabled"}, 1)]},
+            {"danielsmith.io cache state": [sample({"state": "disabled"}, 1)]},
         )
         add_case(
             _cache_fixture(state="stale", **fixture_identity),
             {
-                "Daniel cache state": [sample({"state": "stale"}, 1)],
-                "Daniel cache completeness": [sample({"completeness": "complete"}, 1)],
-                "Daniel cache refresh duration": [sample({}, 25)],
-                "Daniel cache retained-data age": [sample({}, 600)],
-                "Daniel cache failure categories": [sample({"category": "timeout"}, 1)],
-                "Daniel cache collection health": [sample(identity, 1)],
+                "danielsmith.io cache state": [sample({"state": "stale"}, 1)],
+                "danielsmith.io cache completeness": [sample({"completeness": "complete"}, 1)],
+                "danielsmith.io cache refresh duration": [sample({}, 25)],
+                "danielsmith.io cache retained-data age": [sample({}, 600)],
+                "danielsmith.io cache failure categories": [sample({"category": "timeout"}, 1)],
+                "danielsmith.io cache collection health": [sample(identity, 1)],
             },
         )
-        add_case(_cache_fixture(up=0, **fixture_identity), {})
+        add_case(
+            _cache_fixture(up=0, **fixture_identity),
+            {"danielsmith.io cache collection health": [sample(identity, 0)]},
+        )
+        # Freshness is inclusive at 910 seconds, and failure remains observed zero.
+        add_case(
+            _cache_fixture(up=0, timestamp=890, **fixture_identity),
+            {"danielsmith.io cache collection health": [sample(identity, 0)]},
+        )
+        for missing in ("collection_up", "collection_timestamp_seconds", "monitoring_enabled"):
+            add_case(
+                [
+                    item
+                    for item in _cache_fixture(up=0, **fixture_identity)
+                    if not item["series"].startswith("daniel_github_cache_" + missing + "{")
+                ],
+                {},
+            )
         add_case(_cache_fixture(timestamp=889, **fixture_identity), {})
         add_case(_cache_fixture(timestamp=1801, **fixture_identity), {})
         add_case([], {})
@@ -1023,11 +1050,11 @@ def test_daniel_cache_promql_lifecycle_semantics_with_promtool(tmp_path, dashboa
 
 def test_daniel_cache_added_panels_fill_existing_grid_slot(dashboards):
     for document in dashboards:
-        failure = panel(document, "Daniel cache failure categories")
-        health = panel(document, "Daniel cache collection health")
+        failure = panel(document, "danielsmith.io cache failure categories")
+        health = panel(document, "danielsmith.io cache collection health")
         assert failure["gridPos"] == {"h": 8, "w": 6, "x": 12, "y": 206}
         assert health["gridPos"] == {"h": 8, "w": 6, "x": 18, "y": 206}
-        assert panel(document, "Daniel controlled performance")["gridPos"]["y"] == 214
+        assert panel(document, "danielsmith.io controlled performance")["gridPos"]["y"] == 214
 
 
 def test_finalized_staging_evidence_link_is_current(dashboards):
@@ -1107,9 +1134,9 @@ def test_canonical_order_ids_grid_and_defaults(dashboards):
         "DSPACE release integrity",
         "token.place relay and compute capacity",
         "token.place HTTP and release",
-        "Daniel GitHub metadata cache",
-        "Daniel controlled performance",
-        "Daniel visitor journey",
+        "danielsmith.io GitHub metadata cache",
+        "danielsmith.io controlled performance",
+        "danielsmith.io visitor journey",
         "Cross-application resource, placement and release overview",
         "Application SLI and error-budget foundation",
     ]
@@ -1133,30 +1160,30 @@ def test_canonical_order_ids_grid_and_defaults(dashboards):
 
 def test_daniel_queries_are_target_safe_and_expose_stale_or_missing_health(dashboards):
     staging, _ = dashboards
-    age = validator.panel_expression(staging, "Daniel measurement age")
-    health = validator.panel_expression(staging, "Daniel collection/document status")
+    age = validator.panel_expression(staging, "danielsmith.io measurement age")
+    health = validator.panel_expression(staging, "danielsmith.io collection/document status")
     assert "time() -" in age and "time() - 86400" not in age
     assert "status" in health and "collection_up" not in health
     for title in (
-        "Daniel performance result state",
-        "Daniel application-ready duration",
-        "Daniel controlled interaction latency",
-        "Daniel renderer and fallback state",
-        "Daniel controlled frame time",
+        "danielsmith.io performance result state",
+        "danielsmith.io application-ready duration",
+        "danielsmith.io controlled interaction latency",
+        "danielsmith.io renderer and fallback state",
+        "danielsmith.io controlled frame time",
     ):
         expression = validator.panel_expression(staging, title)
         assert "on(environment, instance, job)" in expression
         assert "time() - 86400" in expression
     for title in (
-        "Daniel application-ready duration",
-        "Daniel controlled interaction latency",
-        "Daniel controlled frame time",
+        "danielsmith.io application-ready duration",
+        "danielsmith.io controlled interaction latency",
+        "danielsmith.io controlled frame time",
     ):
         expression = validator.panel_expression(staging, title)
         assert all(
             label in expression for label in ("renderer_class", "renderer_state", "fallback_status")
         )
-    assert " or " not in validator.panel_expression(staging, "Daniel controlled frame time")
+    assert " or " not in validator.panel_expression(staging, "danielsmith.io controlled frame time")
 
 
 def test_all_twelve_tables_are_simultaneous_single_frames(dashboards):
@@ -2241,3 +2268,64 @@ def test_actual_overview_promql_preserves_identity_coverage_and_serving_state(da
         ["promtool", "test", "rules", str(fixture)], capture_output=True, text=True, check=False
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+def test_synthetic_fields_have_independent_units_and_freshness_threshold(dashboards):
+    for document in (json.loads(TEMPLATE.read_text()), *dashboards):
+        item = panel(document, "/chat synthetic result and freshness")
+        overrides = {
+            entry["matcher"]["options"]: {p["id"]: p["value"] for p in entry["properties"]}
+            for entry in item["fieldConfig"]["overrides"]
+            if entry["matcher"]["id"] == "byFrameRefID"
+        }
+        assert set(overrides) == {"A", "B"}
+        success, age = overrides["A"], overrides["B"]
+        assert success["unit"] == "none"
+        assert (success["min"], success["max"]) == (0, 1)
+        assert success["mappings"][0]["options"] == {
+            "0": {"text": "FAILED"},
+            "1": {"text": "SUCCESS"},
+        }
+        assert success["thresholds"]["steps"] == [
+            {"color": "red", "value": None},
+            {"color": "green", "value": 1},
+        ]
+        assert age["unit"] == "s"
+        assert age["thresholds"]["mode"] == "absolute"
+        steps = age["thresholds"]["steps"]
+        assert steps == [{"color": "green", "value": None}, {"color": "red", "value": 900}]
+        for seconds, color in ((14, "green"), (163, "green"), (899, "green"), (900, "red")):
+            assert (
+                steps[1]["color"] if seconds >= steps[1]["value"] else steps[0]["color"]
+            ) == color
+        assert all(t["instant"] and not t["range"] for t in item["targets"])
+        assert "selected time range end" in item["description"]
+        assert "not current health" in item["description"]
+        assert item["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
+
+
+def test_danielsmith_display_titles_preserve_panel_ids(dashboards):
+    expected_ids = set(range(65, 86)) | {93, 94}
+    for document in (json.loads(TEMPLATE.read_text()), *dashboards):
+        renamed = [p for p in document["panels"] if p["title"].startswith("danielsmith.io ")]
+        assert {p["id"] for p in renamed} == expected_ids
+        assert len(renamed) == 23
+        assert sum(p["type"] == "row" for p in renamed) == 3
+        assert not any(p["title"].startswith("Daniel ") for p in document["panels"])
+        assert "Daniel visitor panels" not in json.dumps(document)
+
+
+@pytest.mark.parametrize("mutation", ["missing", "wrong-query", "wrong-unit", "wrong-threshold"])
+def test_validator_rejects_synthetic_field_formatting_drift(tmp_path, dashboards, mutation):
+    changed = copy.deepcopy(dashboards[0])
+    overrides = panel(changed, "/chat synthetic result and freshness")["fieldConfig"]["overrides"]
+    if mutation == "missing":
+        overrides.clear()
+    elif mutation == "wrong-query":
+        overrides[1]["matcher"]["options"] = "A"
+    elif mutation == "wrong-unit":
+        overrides[1]["properties"][0]["value"] = "percentunit"
+    else:
+        overrides[1]["properties"][-1]["value"]["steps"][-1]["value"] = 80
+    with pytest.raises(SystemExit, match="independent field formatting"):
+        validator.validate_dashboard(write_candidate(tmp_path, changed))

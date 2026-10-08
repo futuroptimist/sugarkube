@@ -156,10 +156,14 @@ def test_optional_producer_dependencies_are_visible_in_both_dashboards():
             f"sugarkube-{environment}-observability.json"
         )
         panels = json.loads(path.read_text())["panels"]
-        for panel in panels:
-            if panel["title"].startswith("Daniel") and panel["type"] != "row":
-                assert "Requires the optional" in panel["description"]
-                assert panel["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
+        expected_ids = set(range(66, 71)) | set(range(72, 79)) | set(range(80, 86)) | {93, 94}
+        optional_panels = [panel for panel in panels if panel["id"] in expected_ids]
+        assert len(optional_panels) == 20
+        assert {panel["id"] for panel in optional_panels} == expected_ids
+        for panel in optional_panels:
+            assert panel["type"] != "row"
+            assert "Requires the optional" in panel["description"]
+            assert panel["fieldConfig"]["defaults"]["noValue"] == "NO DATA"
 
 
 @pytest.mark.parametrize("failed_write", [1, 2])

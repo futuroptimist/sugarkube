@@ -2210,13 +2210,98 @@
         "defaults": {
           "noValue": "NO DATA"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "max",
+                "value": 1
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "green",
+                      "value": 1
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "FAILED"
+                      },
+                      "1": {
+                        "text": "SUCCESS"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "red",
+                      "value": 900
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
       },
       "options": {},
       "id": 47,
       "type": "stat",
       "title": "/chat synthetic result and freshness",
-      "description": "Success and age; missing or older than 15 minutes fails closed.",
+      "description": "Synthetic result and producer age evaluated at the selected time range end, not an aggregate over the range. A historical end shows historical status, not current health. Success is 1; failure is 0. Age reaches its freshness limit at 900 seconds; the alert requires age greater than 900 seconds for 5 minutes. Missing telemetry remains explicit.",
       "gridPos": {
         "h": 6,
         "w": 8,
@@ -2965,7 +3050,7 @@
     {
       "id": 65,
       "type": "row",
-      "title": "Daniel GitHub metadata cache",
+      "title": "danielsmith.io GitHub metadata cache",
       "description": "Passive, bounded cache telemetry; not application availability.",
       "gridPos": {
         "h": 1,
@@ -2978,7 +3063,7 @@
     },
     {
       "id": 66,
-      "title": "Daniel cache state",
+      "title": "danielsmith.io cache state",
       "type": "timeseries",
       "description": "Latest published lifecycle state; disabled, stale, and unavailable remain explicit. Requires the optional GitHub-cache collector and its published metrics; without that producer, NO DATA is expected, not a healthy cache.",
       "gridPos": {
@@ -3010,7 +3095,7 @@
     },
     {
       "id": 67,
-      "title": "Daniel cache freshness",
+      "title": "danielsmith.io cache freshness",
       "type": "timeseries",
       "description": "Age since the last fully successful refresh; non-fresh states render as NO DATA. Requires the optional GitHub-cache collector and its published metrics; without that producer, NO DATA is expected, not a healthy cache.",
       "gridPos": {
@@ -3042,7 +3127,7 @@
     },
     {
       "id": 68,
-      "title": "Daniel cache completeness",
+      "title": "danielsmith.io cache completeness",
       "type": "timeseries",
       "description": "Complete, partial, or none from the validated cache document. Requires the optional GitHub-cache collector and its published metrics; without that producer, NO DATA is expected, not a healthy cache.",
       "gridPos": {
@@ -3074,7 +3159,7 @@
     },
     {
       "id": 69,
-      "title": "Daniel cache refresh duration",
+      "title": "danielsmith.io cache refresh duration",
       "type": "timeseries",
       "description": "Duration of the latest refresh attempt, when monitoring and transport are healthy. Requires the optional GitHub-cache collector and its published metrics; without that producer, NO DATA is expected, not a healthy cache.",
       "gridPos": {
@@ -3106,7 +3191,7 @@
     },
     {
       "id": 70,
-      "title": "Daniel cache retained-data age",
+      "title": "danielsmith.io cache retained-data age",
       "type": "timeseries",
       "description": "Age of the oldest retained repository record; shown only for explicit stale state. Requires the optional GitHub-cache collector and its published metrics; without that producer, NO DATA is expected, not a healthy cache.",
       "gridPos": {
@@ -3138,7 +3223,7 @@
     },
     {
       "id": 93,
-      "title": "Daniel cache failure categories",
+      "title": "danielsmith.io cache failure categories",
       "type": "timeseries",
       "description": "Active bounded refresh failure categories; arbitrary upstream errors are never displayed. Requires the optional GitHub-cache collector and its published metrics; without that producer, NO DATA is expected, not a healthy cache.",
       "gridPos": {
@@ -3170,9 +3255,9 @@
     },
     {
       "id": 94,
-      "title": "Daniel cache collection health",
+      "title": "danielsmith.io cache collection health",
       "type": "timeseries",
-      "description": "Monitoring-enabled, successful, recent collector transport health; zero is an explicit non-success state. Requires the optional GitHub-cache collector and its published metrics; without that producer, NO DATA is expected, not a healthy cache.",
+      "description": "Observed collector transport health while enabled and collected within 910 seconds: 1 means success and 0 means failure. Disabled, absent, future-dated, or stale collection remains NO DATA. Requires the optional GitHub-cache collector; missing telemetry is not a healthy cache.",
       "gridPos": {
         "h": 8,
         "w": 6,
@@ -3195,7 +3280,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "min by (environment, name, cluster) ((label_replace((daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"${CLUSTER}\", \"cluster\", \"^$\") == 1) and on (environment, name, cluster) (label_replace((daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"${CLUSTER}\", \"cluster\", \"^$\") == 1) and on (environment, name, cluster) (time() - label_replace((daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"${CLUSTER}\", \"cluster\", \"^$\") >= 0) and on (environment, name, cluster) (time() - label_replace((daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"${CLUSTER}\", \"cluster\", \"^$\") <= 910))",
+          "expr": "min by (environment, name, cluster) ((label_replace((daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_collection_up{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"${CLUSTER}\", \"cluster\", \"^$\")) and on (environment, name, cluster) (label_replace((daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_monitoring_enabled{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"${CLUSTER}\", \"cluster\", \"^$\") == 1) and on (environment, name, cluster) (time() - label_replace((daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"${CLUSTER}\", \"cluster\", \"^$\") >= 0) and on (environment, name, cluster) (time() - label_replace((daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=~\"$cluster\"} or daniel_github_cache_collection_timestamp_seconds{environment=~\"$environment\",name=~\"danielsmith-github-cache-$environment\",cluster=\"\"}), \"cluster\", \"${CLUSTER}\", \"cluster\", \"^$\") <= 910))",
           "legendFormat": "{{environment}} {{name}}"
         }
       ]
@@ -3203,7 +3288,7 @@
     {
       "id": 71,
       "type": "row",
-      "title": "Daniel controlled performance",
+      "title": "danielsmith.io controlled performance",
       "description": "Passive controlled-run aggregates; no real-user monitoring or production thresholds.",
       "gridPos": {
         "h": 1,
@@ -3216,7 +3301,7 @@
     },
     {
       "id": 72,
-      "title": "Daniel collection/document status",
+      "title": "danielsmith.io collection/document status",
       "type": "timeseries",
       "description": "Selected bounded document status; valid is collected and validated. Requires the optional controlled-run collector and a supported measurement; absent or unsupported results remain NO DATA, not zero latency.",
       "gridPos": {
@@ -3248,7 +3333,7 @@
     },
     {
       "id": 73,
-      "title": "Daniel measurement age",
+      "title": "danielsmith.io measurement age",
       "type": "timeseries",
       "description": "Age of the retained controlled result; remains visible when stale. Requires the optional controlled-run collector and a supported measurement; absent or unsupported results remain NO DATA, not zero latency.",
       "gridPos": {
@@ -3280,7 +3365,7 @@
     },
     {
       "id": 74,
-      "title": "Daniel performance result state",
+      "title": "danielsmith.io performance result state",
       "type": "timeseries",
       "description": "Completed, regression, or explicitly unavailable current result. Requires the optional controlled-run collector and a supported measurement; absent or unsupported results remain NO DATA, not zero latency.",
       "gridPos": {
@@ -3312,7 +3397,7 @@
     },
     {
       "id": 75,
-      "title": "Daniel application-ready duration",
+      "title": "danielsmith.io application-ready duration",
       "type": "timeseries",
       "description": "Application-ready p95 by renderer identity from the current controlled run. Requires the optional controlled-run collector and a supported measurement; absent or unsupported results remain NO DATA, not zero latency.",
       "gridPos": {
@@ -3344,7 +3429,7 @@
     },
     {
       "id": 76,
-      "title": "Daniel controlled interaction latency",
+      "title": "danielsmith.io controlled interaction latency",
       "type": "timeseries",
       "description": "Controlled keyboard latency by renderer identity from the current run. Requires the optional controlled-run collector and a supported measurement; absent or unsupported results remain NO DATA, not zero latency.",
       "gridPos": {
@@ -3376,7 +3461,7 @@
     },
     {
       "id": 77,
-      "title": "Daniel renderer and fallback state",
+      "title": "danielsmith.io renderer and fallback state",
       "type": "timeseries",
       "description": "Bounded renderer class, state, and fallback reason by target. Requires the optional controlled-run collector and a supported measurement; absent or unsupported results remain NO DATA, not zero latency.",
       "gridPos": {
@@ -3408,7 +3493,7 @@
     },
     {
       "id": 78,
-      "title": "Daniel controlled frame time",
+      "title": "danielsmith.io controlled frame time",
       "type": "timeseries",
       "description": "Optional 120-frame hardware summary; unsupported runs remain NO DATA. Requires the optional controlled-run collector and a supported measurement; absent or unsupported results remain NO DATA, not zero latency.",
       "gridPos": {
@@ -3441,7 +3526,7 @@
     {
       "id": 79,
       "type": "row",
-      "title": "Daniel visitor journey",
+      "title": "danielsmith.io visitor journey",
       "description": "Application-owned, disabled-by-default essential visitor-journey telemetry. Dashboard queries never execute the journey.",
       "gridPos": {
         "h": 1,
@@ -3454,7 +3539,7 @@
     },
     {
       "id": 80,
-      "title": "Daniel visitor journey state",
+      "title": "danielsmith.io visitor journey state",
       "type": "timeseries",
       "description": "Current enabled lifecycle state, gated by the independent expected declaration and completion age. Disabled, stale, unavailable, or missing telemetry remains NO DATA. Requires the optional application-owned visitor journey producer; disabled or unconfigured monitoring is not evidence of a successful journey.",
       "gridPos": {
@@ -3486,7 +3571,7 @@
     },
     {
       "id": 81,
-      "title": "Daniel visitor journey success",
+      "title": "danielsmith.io visitor journey success",
       "type": "timeseries",
       "description": "Last essential-journey result only while independently expected, enabled, and no older than 1020 seconds; stale, disabled, or missing telemetry remains NO DATA. Requires the optional application-owned visitor journey producer; disabled or unconfigured monitoring is not evidence of a successful journey.",
       "gridPos": {
@@ -3518,7 +3603,7 @@
     },
     {
       "id": 82,
-      "title": "Daniel visitor journey freshness",
+      "title": "danielsmith.io visitor journey freshness",
       "type": "timeseries",
       "description": "Increasing age in seconds of the last sanitized completion while monitoring is independently expected and enabled. It remains visible after the result becomes stale. Requires the optional application-owned visitor journey producer; disabled or unconfigured monitoring is not evidence of a successful journey.",
       "gridPos": {
@@ -3550,7 +3635,7 @@
     },
     {
       "id": 83,
-      "title": "Daniel visitor journey aggregate duration",
+      "title": "danielsmith.io visitor journey aggregate duration",
       "type": "timeseries",
       "description": "Aggregate duration of the current essential journey while independently expected, enabled, and no older than 1020 seconds. Requires the optional application-owned visitor journey producer; disabled or unconfigured monitoring is not evidence of a successful journey.",
       "gridPos": {
@@ -3582,7 +3667,7 @@
     },
     {
       "id": 84,
-      "title": "Daniel visitor journey failure stage",
+      "title": "danielsmith.io visitor journey failure stage",
       "type": "timeseries",
       "description": "Bounded failure stage only for an independently expected, enabled failure no older than 1020 seconds. Requires the optional application-owned visitor journey producer; disabled or unconfigured monitoring is not evidence of a successful journey.",
       "gridPos": {
@@ -3614,7 +3699,7 @@
     },
     {
       "id": 85,
-      "title": "Daniel visitor journey unavailable or stale",
+      "title": "danielsmith.io visitor journey unavailable or stale",
       "type": "timeseries",
       "description": "Expected telemetry that is missing or older than 1020 seconds, plus explicit unavailable or stale lifecycle signals. Expected=0 remains NO DATA. Requires the optional application-owned visitor journey producer; disabled or unconfigured monitoring is not evidence of a successful journey.",
       "gridPos": {
@@ -3933,7 +4018,7 @@
       "id": 96,
       "title": "Application SLI observation state",
       "type": "stat",
-      "description": "Exclusive states for the two actual-request SLIs and the disabled token.place encrypted-completion SLI in this first slice. Use the existing probe, DSPACE synthetic, and Daniel visitor panels for their source-specific state. Counts and ratios share the full-observation gate.",
+      "description": "Exclusive states for the two actual-request SLIs and the disabled token.place encrypted-completion SLI in this first slice. Use the existing probe, DSPACE synthetic, and danielsmith.io visitor panels for their source-specific state. Counts and ratios share the full-observation gate.",
       "gridPos": {
         "h": 8,
         "w": 12,

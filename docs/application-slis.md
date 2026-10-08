@@ -20,7 +20,7 @@ whole application. A reset makes the window `reset_or_incomplete_history`, rathe
 for every observed source series in that hour, and the latest sample must be no older than 60
 seconds. These guards make stale, gapped, or partial history NO DATA. Recordings are also absent
 when there is no eligible traffic instead of converting that absence to success or failure.
-In this first slice, `sugarkube:sli_observation_state` emits exactly one mutually exclusive state for the two actual-request SLIs and the explicitly disabled encrypted-completion SLI. It does not record states for every contract entry. Operators should continue to use the preserved probe panels, DSPACE synthetic panels, and Daniel visitor panels for those source-specific views. Interpret the recorded states separately:
+In this first slice, `sugarkube:sli_observation_state` emits exactly one mutually exclusive state for the two actual-request SLIs and the explicitly disabled encrypted-completion SLI. It does not record states for every contract entry. Operators should continue to use the preserved probe panels, DSPACE synthetic panels, and danielsmith.io visitor panels for those source-specific views. Interpret the recorded states separately:
 
 - a positive denominator with all successes is successful eligible traffic;
 - a positive denominator with fewer successes is failed eligible traffic; an absent success
