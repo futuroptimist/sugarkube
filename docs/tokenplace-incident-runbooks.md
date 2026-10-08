@@ -15,6 +15,10 @@ For repository-only defense-in-depth analysis, see the
 [unmatched-path edge evaluation](design/tokenplace-unmatched-edge-evaluation.md).
 Its offline replay rejects a shared unmatched budget; it authorizes no live rule.
 
+For the separate bounded memory-sizing proposal, see the
+[offline load replay](tokenplace-load-sizing.md). It preserves 256Mi and does not perform live
+traffic, prove quota headroom, or replace the incident acceptance gates below.
+
 ## Safety contract shared by both incidents
 
 Classification is read-only. Mutation is a separately authorized phase. Before mutation, record
