@@ -1,0 +1,183 @@
+{{- if ne .Release.Namespace "tokenplace-k243" }}
+{{- fail "K243 requires the dedicated tokenplace-k243 namespace" }}
+{{- end }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tokenplace-k243
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tokenplace-k243-relay
+  namespace: tokenplace-k243
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tokenplace-k243-relay
+  namespace: tokenplace-k243
+  annotations:
+    sugarkube.dev/source-revision: 5e190f5c6ff66e9c05934a0e2ce2c1a440b9ea49
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tokenplace-k243-relay
+      sugarkube.dev/k243-run: {{ .Values.runId | quote }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tokenplace-k243-relay
+        sugarkube.dev/k243-run: {{ .Values.runId | quote }}
+    spec:
+      serviceAccountName: tokenplace-k243-relay
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: relay
+          image: ghcr.io/futuroptimist/tokenplace-relay@sha256:5d761cefc0495926b63da1e0a4119155a005e165e469da90e7f19be0f7fdff8e
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 5010
+          env:
+            - name: RELAY_HOST
+              value: 0.0.0.0
+            - name: RELAY_PORT
+              value: "5010"
+            - name: RELAY_WORKERS
+              value: "1"
+            - name: TOKENPLACE_RATE_LIMIT_STORAGE_URI
+              value: memory://
+            - name: TOKENPLACE_RATE_LIMIT_TRUSTED_PROXIES
+              value: ""
+            - name: XDG_CONFIG_HOME
+              value: /tmp/config
+            - name: XDG_DATA_HOME
+              value: /tmp/data
+            - name: XDG_CACHE_HOME
+              value: /tmp/cache
+            - name: XDG_STATE_HOME
+              value: /tmp/state
+            - name: API_RATE_LIMIT
+              value: 60/hour
+            - name: API_DAILY_QUOTA
+              value: 1000/day
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 2
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 32Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tokenplace-k243-relay
+  namespace: tokenplace-k243
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: tokenplace-k243-relay
+    sugarkube.dev/k243-run: {{ .Values.runId | quote }}
+  ports:
+    - name: http
+      port: 5010
+      targetPort: http
+      protocol: TCP
+---
+# Deny all ingress/egress for every pod, including a future designated runner.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tokenplace-k243-default-deny
+  namespace: tokenplace-k243
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress: []
+---
+# Both selectors below are in this namespace; no namespaceSelector or IP bypass.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tokenplace-k243-relay-ingress
+  namespace: tokenplace-k243
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: tokenplace-k243-relay
+      sugarkube.dev/k243-run: {{ .Values.runId | quote }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: tokenplace-k243-runner
+              sugarkube.dev/k243-run: {{ .Values.runId | quote }}
+      ports:
+        - protocol: TCP
+          port: 5010
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tokenplace-k243-runner-egress
+  namespace: tokenplace-k243
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: tokenplace-k243-runner
+      sugarkube.dev/k243-run: {{ .Values.runId | quote }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: tokenplace-k243-relay
+              sugarkube.dev/k243-run: {{ .Values.runId | quote }}
+      ports:
+        - protocol: TCP
+          port: 5010

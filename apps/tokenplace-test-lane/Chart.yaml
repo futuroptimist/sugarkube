@@ -1,0 +1,5 @@
+apiVersion: v2
+name: tokenplace-test-lane
+description: Operator-owned disposable K243 relay lane; never part of cluster reconciliation
+version: 0.1.0
+type: application
