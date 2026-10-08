@@ -1,0 +1,54 @@
+{
+  "apiVersion": "apps/v1",
+  "kind": "Deployment",
+  "metadata": {
+    "name": "relay-tokenplace",
+    "labels": {
+      "app.kubernetes.io/name": "relay",
+      "app.kubernetes.io/instance": "relay"
+    }
+  },
+  "spec": {
+    "replicas": 1,
+    "selector": {
+      "matchLabels": {
+        "app.kubernetes.io/name": "relay",
+        "app.kubernetes.io/instance": "relay"
+      }
+    },
+    "template": {
+      "metadata": {
+        "labels": {
+          "app.kubernetes.io/name": "relay",
+          "app.kubernetes.io/instance": "relay"
+        }
+      },
+      "spec": {
+        "containers": [
+          {
+            "name": "relay",
+            "image": "ghcr.io/futuroptimist/tokenplace-relay:main-deadbee"
+          }
+        ]
+      }
+    }
+  }
+}
+---
+{
+  "apiVersion": "v1",
+  "kind": "Service",
+  "metadata": {
+    "name": "relay-tokenplace",
+    "labels": {
+      "app.kubernetes.io/name": "relay",
+      "app.kubernetes.io/instance": "relay"
+    }
+  },
+  "spec": {
+    "selector": {
+      "app.kubernetes.io/name": "relay",
+      "app.kubernetes.io/instance": "relay"
+    }
+  }
+}

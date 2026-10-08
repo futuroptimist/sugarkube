@@ -1,0 +1,54 @@
+{
+  "apiVersion": "apps/v1",
+  "kind": "Deployment",
+  "metadata": {
+    "name": "dspace",
+    "labels": {
+      "app.kubernetes.io/name": "dspace",
+      "app.kubernetes.io/instance": "dspace"
+    }
+  },
+  "spec": {
+    "replicas": 1,
+    "selector": {
+      "matchLabels": {
+        "app.kubernetes.io/name": "dspace",
+        "app.kubernetes.io/instance": "dspace"
+      }
+    },
+    "template": {
+      "metadata": {
+        "labels": {
+          "app.kubernetes.io/name": "dspace",
+          "app.kubernetes.io/instance": "dspace"
+        }
+      },
+      "spec": {
+        "containers": [
+          {
+            "name": "dspace",
+            "image": "ghcr.io/democratizedspace/dspace:main-deadbee"
+          }
+        ]
+      }
+    }
+  }
+}
+---
+{
+  "apiVersion": "v1",
+  "kind": "Service",
+  "metadata": {
+    "name": "dspace",
+    "labels": {
+      "app.kubernetes.io/name": "dspace",
+      "app.kubernetes.io/instance": "dspace"
+    }
+  },
+  "spec": {
+    "selector": {
+      "app.kubernetes.io/name": "dspace",
+      "app.kubernetes.io/instance": "dspace"
+    }
+  }
+}

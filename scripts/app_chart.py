@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import ipaddress
 import json
 import os
@@ -68,6 +69,8 @@ class ReleaseInputs:
     tag: str
     host: str = ""
     pull_policy: str = "Always"
+    chart_origin: str = ""
+    chart_archive_digest: str = ""
 
     def helm_template_command(self) -> list[str]:
         command = ["helm", "template", self.release, self.chart, "--namespace", self.namespace]
@@ -94,7 +97,11 @@ def convert(node, scanner)
   when Psych::Nodes::Stream then node.children.map { |child| convert(child, scanner) }
   when Psych::Nodes::Document then convert(node.root, scanner)
   when Psych::Nodes::Mapping
-    Hash[*node.children.map { |child| convert(child, scanner) }]
+    pairs = node.children.each_slice(2).map do |key, value|
+      [convert(key, scanner), convert(value, scanner)]
+    end
+    raise "duplicate YAML mapping key" if pairs.map(&:first).uniq.length != pairs.length
+    pairs.to_h
   when Psych::Nodes::Sequence then node.children.map { |child| convert(child, scanner) }
   when Psych::Nodes::Scalar
     raise "unsafe YAML tag #{node.tag}" if node.tag && !node.tag.start_with?("tag:yaml.org,2002:")
@@ -113,7 +120,16 @@ puts JSON.generate(convert(Psych.parse_stream(STDIN.read), scanner))
         raise ValueError(f"YAML parser launch failed: {error}") from error
     if parsed.returncode != 0:
         raise ValueError((parsed.stderr or "invalid YAML").strip())
-    value = json.loads(parsed.stdout)
+
+    def unique_mapping(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, item in pairs:
+            if key in result:
+                raise ValueError("duplicate YAML mapping key after JSON conversion")
+            result[key] = item
+        return result
+
+    value = json.loads(parsed.stdout, object_pairs_hook=unique_mapping)
     return value if isinstance(value, list) else []
 
 
@@ -238,18 +254,193 @@ def dspace_production_metrics_token_is_unsafe(
     return has_unsafe_token(document)
 
 
+def validate_workload_inventory(documents: list[object], inputs: ReleaseInputs) -> list[str]:
+    """Enforce reviewed inventories only for bound application chart coordinates.
+
+    Archive callers supply the published origin after verifying their provenance
+    report; the archive digest is checked again here to bind that report to bytes.
+    Unrelated external charts retain the generic render contract.
+    """
+    profiles = json.loads(
+        (REPO_ROOT / "config/workload-inventory/profiles.json").read_text(encoding="utf-8")
+    )
+    chart = inputs.chart_origin or inputs.chart
+    coordinate = chart.split("@", 1)[0]
+    profile = None
+    path = Path(inputs.chart)
+    if not path.is_absolute():
+        path = REPO_ROOT / path
+    for candidate in profiles.values():
+        local = candidate.get("localPath")
+        if candidate.get("chart") == coordinate or (
+            local and not inputs.chart_origin and path.resolve() == (REPO_ROOT / local).resolve()
+        ):
+            profile = candidate
+            break
+    if profile is None:
+        return ["inventory: unsupported chart origin"] if inputs.chart_origin else []
+    errors: list[str] = []
+    if inputs.app != profile["app"]:
+        errors.append("inventory: chart application identity mismatch")
+    if inputs.chart_origin:
+        try:
+            actual = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError:
+            actual = ""
+        if not actual or actual != inputs.chart_archive_digest:
+            errors.append("inventory: chart archive digest mismatch")
+    versions = {
+        "Deployment": "apps/v1",
+        "Service": "v1",
+        "ServiceAccount": "v1",
+        "ConfigMap": "v1",
+        "Ingress": "networking.k8s.io/v1",
+        "PodDisruptionBudget": "policy/v1",
+        "ServiceMonitor": "monitoring.coreos.com/v1",
+    }
+    allowed = {"Deployment", "Service", *profile["optionalKinds"]}
+
+    def string_mapping(value: object) -> bool:
+        return isinstance(value, dict) and all(
+            isinstance(key, str) and isinstance(item, str) for key, item in value.items()
+        )
+
+    resources: dict[str, list[dict]] = {}
+    for document in documents:
+        if document is None:
+            continue
+        if not isinstance(document, dict):
+            errors.append("inventory: resource must be a mapping")
+            continue
+        kind = document.get("kind")
+        if not isinstance(kind, str) or kind not in allowed:
+            errors.append(f"inventory: unexpected resource kind {kind!r}")
+            continue
+        resources.setdefault(kind, []).append(document)
+        if document.get("apiVersion") != versions[kind]:
+            errors.append(f"inventory: unexpected apiVersion for {kind}")
+        metadata = document.get("metadata")
+        if not isinstance(metadata, dict):
+            errors.append(f"inventory: missing metadata for {kind}")
+            continue
+        if not isinstance(metadata.get("name"), str) or not metadata["name"]:
+            errors.append(f"inventory: missing name for {kind}")
+        if "namespace" in metadata and metadata["namespace"] != inputs.namespace:
+            errors.append(f"inventory: namespace conflict for {kind}")
+        annotations = metadata.get("annotations", {})
+        if not string_mapping(annotations) or "helm.sh/hook" in annotations:
+            errors.append(f"inventory: unexpected hook for {kind}")
+        if isinstance(annotations, dict):
+            for key, expected in (
+                ("meta.helm.sh/release-name", inputs.release),
+                ("meta.helm.sh/release-namespace", inputs.namespace),
+            ):
+                if key in annotations and annotations[key] != expected:
+                    errors.append(f"inventory: conflicting {key} for {kind}")
+        labels = metadata.get("labels") or {}
+        if not string_mapping(labels) or labels.get("app.kubernetes.io/instance") != inputs.release:
+            errors.append(f"inventory: release label mismatch for {kind}")
+    for kind in allowed:
+        count = len(resources.get(kind, []))
+        if count > 1 or (kind in {"Deployment", "Service"} and count != 1):
+            quantifier = "exactly" if kind in {"Deployment", "Service"} else "at most"
+            errors.append(f"inventory: expected {quantifier} one {kind}")
+    deployments = resources.get("Deployment", [])
+    if len(deployments) != 1:
+        return errors
+    deployment = deployments[0]
+    values = merged_values_document(inputs.values)
+    values = values if isinstance(values, dict) else {}
+    chart_name = scalar(values.get("nameOverride") or profile["chartName"])
+    fullname = scalar(
+        values.get("fullnameOverride")
+        or (inputs.release if chart_name in inputs.release else f"{inputs.release}-{chart_name}")
+    )[:63].removesuffix("-")
+    for resource in [deployment, *resources.get("Service", [])]:
+        _, name = nested_value(resource, ("metadata", "name"))
+        if name != fullname:
+            errors.append("inventory: primary workload or Service name mismatch")
+    _, selector = nested_value(deployment, ("spec", "selector"))
+    _, labels = nested_value(deployment, ("spec", "template", "metadata", "labels"))
+    matches = selector.get("matchLabels") if isinstance(selector, dict) else None
+    if (
+        not isinstance(selector, dict)
+        or set(selector) != {"matchLabels"}
+        or not string_mapping(matches)
+        or not matches
+        or matches.get("app.kubernetes.io/instance") != inputs.release
+        or not string_mapping(labels)
+        or any(labels.get(key) != value for key, value in (matches or {}).items())
+    ):
+        errors.append("inventory: Deployment selector and pod labels are inconsistent")
+    _, pod_metadata = nested_value(deployment, ("spec", "template", "metadata"))
+    if isinstance(pod_metadata, dict) and not string_mapping(pod_metadata.get("annotations", {})):
+        errors.append("inventory: invalid pod annotations")
+    if isinstance(pod_metadata, dict) and "namespace" in pod_metadata:
+        if pod_metadata["namespace"] != inputs.namespace:
+            errors.append("inventory: pod namespace conflict")
+    _, pod_spec = nested_value(deployment, ("spec", "template", "spec"))
+    pod_spec = pod_spec if isinstance(pod_spec, dict) else {}
+    for field in ("initContainers", "ephemeralContainers"):
+        if field in pod_spec and pod_spec[field] != []:
+            errors.append(f"inventory: unexpected {field}")
+    containers = pod_spec.get("containers")
+    if not isinstance(containers, list) or len(containers) != 1:
+        errors.append("inventory: expected exactly one primary container")
+    else:
+        container = containers[0]
+        if not isinstance(container, dict) or (
+            container.get("name") != profile["container"]
+            or container.get("image") != f"{profile['imageRepository']}:{inputs.tag}"
+        ):
+            errors.append("inventory: primary container or image identity mismatch")
+    for service in resources.get("Service", []):
+        _, service_selector = nested_value(service, ("spec", "selector"))
+        if not matches or service_selector != matches:
+            errors.append("inventory: Service selector differs from Deployment selector")
+    for budget in resources.get("PodDisruptionBudget", []):
+        _, budget_selector = nested_value(budget, ("spec", "selector"))
+        if not selector or budget_selector != selector:
+            errors.append(
+                "inventory: PodDisruptionBudget selector differs from Deployment selector"
+            )
+    for monitor in resources.get("ServiceMonitor", []):
+        _, namespace_selector = nested_value(monitor, ("spec", "namespaceSelector"))
+        if namespace_selector not in (None, {}, {"matchNames": [inputs.namespace]}):
+            errors.append("inventory: ServiceMonitor namespace selector conflict")
+        _, monitor_selector = nested_value(monitor, ("spec", "selector"))
+        services = resources.get("Service", [])
+        service_labels = {}
+        if len(services) == 1:
+            _, service_labels = nested_value(services[0], ("metadata", "labels"))
+        monitor_matches = (
+            monitor_selector.get("matchLabels") if isinstance(monitor_selector, dict) else None
+        )
+        if (
+            not isinstance(monitor_selector, dict)
+            or set(monitor_selector) != {"matchLabels"}
+            or not string_mapping(monitor_matches)
+            or not monitor_matches
+            or not isinstance(service_labels, dict)
+            or not isinstance(matches, dict)
+            or any(monitor_matches.get(key) != value for key, value in matches.items())
+            or any(service_labels.get(key) != value for key, value in monitor_matches.items())
+        ):
+            errors.append("inventory: ServiceMonitor selector does not match the primary Service")
+    return errors
+
+
 def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str]:
     try:
         documents = safe_yaml_documents(manifest)
     except (ValueError, json.JSONDecodeError) as error:
         return [f"rendered output is not safe structural YAML: {error}"]
     workloads: list[tuple[str, str]] = []
-    kinds: set[str] = set()
     ingress_hosts: set[str] = set()
     service_monitors: list[dict[str, object]] = []
     candidates = {inputs.app, inputs.release, *APP_CONTAINER_NAMES.get(inputs.app, set())}
     expected_suffix = f":{inputs.tag}"
-    errors: list[str] = []
+    errors = validate_workload_inventory(documents, inputs)
     coherent_workload = False
     intended_container_found = False
     for document in documents:
@@ -259,10 +450,6 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
         metadata = document.get("metadata") if isinstance(document.get("metadata"), dict) else {}
         name = scalar(metadata.get("name"))
         namespace = scalar(metadata.get("namespace"))
-        labels = metadata.get("labels") if isinstance(metadata.get("labels"), dict) else {}
-        annotations = (
-            metadata.get("annotations") if isinstance(metadata.get("annotations"), dict) else {}
-        )
         associated = release_associated(
             document,
             inputs.release,
@@ -272,7 +459,8 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
         )
         if inputs.app == "dspace" and kind == "Secret":
             errors.append(
-                f"DSPACE rendered Secret {name or '<unnamed>'}; literal Secret resources are forbidden"
+                f"DSPACE rendered Secret {name or '<unnamed>'}; "
+                "literal Secret resources are forbidden"
             )
         if namespace and namespace != inputs.namespace:
             errors.append(
@@ -416,9 +604,7 @@ def validate_rendered_manifest(manifest: str, inputs: ReleaseInputs) -> list[str
                     auth = endpoint.get("bearerTokenSecret")
                     relabelings = endpoint.get("relabelings")
                     effective_namespace = (
-                        metadata.get("namespace")
-                        if "namespace" in metadata
-                        else inputs.namespace
+                        metadata.get("namespace") if "namespace" in metadata else inputs.namespace
                     )
                     expected_relabelings = [
                         {"action": "replace", "targetLabel": "app", "replacement": "dspace"},
@@ -587,7 +773,8 @@ def latest_version(chart: str) -> tuple[str, str]:
         if production_safe_versions
         else (
             "",
-            f"latest unknown: no semver tags found; run: helm show chart {chart} --version <version>",
+            "latest unknown: no semver tags found; run: "
+            f"helm show chart {chart} --version <version>",
         )
     )
 
@@ -611,11 +798,7 @@ def validate_ingress_host(host: str) -> str:
         is_ip = True
     name = host[2:] if host.startswith("*.") else host
     label = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
-    if host and (
-        len(host) > 253
-        or not re.fullmatch(rf"{label}(?:\.{label})*", name)
-        or is_ip
-    ):
+    if host and (len(host) > 253 or not re.fullmatch(rf"{label}(?:\.{label})*", name) or is_ip):
         raise ValueError(
             "ingress.host must be a lowercase DNS hostname (optionally prefixed with '*.'), "
             "at most 253 characters with labels of at most 63 characters; "

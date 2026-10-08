@@ -161,3 +161,6 @@ just cf-tunnel-debug
 - Git tag: `v0.1.0`
 - Release image tag: `v0.1.0`
 - Staging candidate image tag: `main-<shortsha>`
+
+See [application workload inventory](workload-inventory.md) for supported chart
+layouts and the offline render checks.
