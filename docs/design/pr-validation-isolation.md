@@ -136,6 +136,11 @@ environment. Use an immutable toolchain manifest with pinned versions, platform 
 integrity digests. If the base lacks a reproducible manifest, mark the lane blocked until one is
 reviewed; do not silently resolve floating versions and call them pinned.
 
+Approval binds an expected dependency-bundle digest from a separately reviewed trusted preparation
+record for the exact base and toolchain. If that record is missing, this lane remains blocked until
+separate trusted preparation and approval establish it. Preparation in this lane must reproduce
+the expected digest; it cannot replace the digest in an existing approval record.
+
 Dependency input comparison happens before any PR installation or execution. The protected set
 includes lockfiles, dependency declarations, requirements/constraint includes, build backends,
 installer scripts, package-manager configuration, and preparation-affecting workflow or wrapper

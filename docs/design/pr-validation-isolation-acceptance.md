@@ -47,7 +47,9 @@ pass. A case passes only on the final implementation and exact pinned boundary b
 - **PREP-03 Reproducible dependencies.** An unknown digest, missing wheel, source distribution,
   floating dependency, registry redirect outside policy, incompatible platform, or missing
   transitive pin must block preparation. Do not fall back to source builds, alternate registries,
-  or PR configuration. Use preloaded local fixtures; no registry calls occur in this harness.
+  or PR configuration. A missing reviewed preparation record or a produced bundle that differs
+  from its approved expected digest must block the lane without changing the approval record.
+  Use preloaded local fixtures; no registry calls occur in this harness.
 - **PREP-04 Startup and cache poisoning.** Place hostile `.env`, package-manager config, Git
   filters, `sitecustomize.py`, `.pth`, shell startup files, and fake binaries in PR input. Seed a
   PR-writable cache. Trusted preparation must not load them. Restore only authenticated trusted
