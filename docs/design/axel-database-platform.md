@@ -10,15 +10,17 @@ personas:
 **Proposal only. No database, migration, deployment, cluster probe, credential change, or
 runtime security test is implemented or performed by this document.** The companion Axel
 design owns the application contract; this document owns the proposed Sugarkube boundary.
-One K269 tracking card covers both separate design PRs and completes only after both are
+One K269 tracking card covers [Sugarkube #2910](https://github.com/futuroptimist/sugarkube/pull/2910)
+and [Axel #251](https://github.com/futuroptimist/axel/pull/251), and completes only after both are
 owner-merged. A ready PR or green documentation CI does not complete that card or authorize
-implementation. Companion PR linkage remains a coordination gate before implementation.
+implementation. Keep independent exact-head checks, reviews and owner merge receipts on the card.
 
 The following requirements are release blockers:
 
 1. Authentication is not tenant authorization. Every server-side read, mutation, search,
    subscription, export, attachment access, and background job checks current membership and
-   its allowed action. Client-supplied tenant or object identifiers never establish authority.
+   its allowed action, including private-board scope within a tenant. Client-supplied tenant,
+   board or object identifiers never establish authority.
 2. No private board data, snapshots, account identifiers, secrets, or production payloads enter
    public documentation, test fixtures, PR evidence, metrics, or model prompts by default.
    Use synthetic tenants and records. Staging never receives production credentials or data.
@@ -65,6 +67,14 @@ Axel's interface should include readiness and schema-compatibility status withou
 bounded metrics, idempotency keys scoped to tenant/action, transaction retry semantics, and a
 machine-readable release manifest. Credential values travel through secret references only.
 Neither a generic HTTP proxy nor a caller-selected SQL query is an acceptable tenant data API.
+
+The [Axel contract at the inspected revision](https://github.com/futuroptimist/axel/blob/4023352e779a9a46b05d75f64be3654f527b3eb5/docs/design/sanitized-kanban-contract.md)
+defines `ReleaseManifest v1`, tenant/board-scoped API commands and a separate private local
+profile. This Sugarkube proposal applies only to the explicitly enabled online service. Its
+off-site backups do not relax the sensitive profile's device-local backup and exact outbound
+packet approval rules. Online workers cannot mount the private corpus or access its inference
+service, local UI or backups. Reuse the Axel bounded backup/transfer codec rather than inventing
+a second card-export format; physical database recovery remains a separate operational layer.
 
 ## Engine evaluation and decision gate
 
@@ -206,7 +216,15 @@ acknowledged transactions and service within 5 minutes, subject to rehearsal. Th
 not achieved SLOs; common-site failure depends on off-site backups and available replacement compute.
 
 Propose daily base backups plus continuous WAL archiving, 35 days of recovery retention, and
-independent encrypted off-site copies. Confirm retention, data deletion obligations and costs
+independent encrypted off-site copies. PostgreSQL archives completed WAL segments: low write
+traffic can otherwise leave acknowledged changes unarchived indefinitely. Require a bounded
+`archive_timeout` (initial trial: 5 minutes) or a qualified streaming archive, with segment close,
+upload/retry and off-site durable verification together below the 15-minute RPO. Verify a lone
+synthetic commit after idle time is recoverable off-site within that bound, including delayed
+uploads and retries. Measure last recoverable commit age rather than treating a running archive
+process as proof. Warn before 10 minutes and page by 15; a transport outage exceeding the budget
+is an RPO breach, not a met guarantee. Account for extra archive volume from forced segment
+switches. Confirm retention, data deletion obligations and costs
 with the owner. Use engine-consistent backups, authenticated transport, integrity manifests and
 client-side encryption with separately held recovery keys. Archive writers must not delete older
 backups; retention administration has a separate identity. Evaluate immutable retention against
@@ -226,13 +244,19 @@ access and history; rotate exposed credentials if needed; invalidate old session
 capabilities; reconcile durable inbox/outbox deduplication; approve the new writer; switch DNS/
 ingress with bounded cache assumptions; verify; resume bounded consumers. Never replay side
 effects merely because a restored outbox says pending. Use external action reconciliation and
-fresh approval where outcome is uncertain. Keep the old cluster fenced during failback and
+fresh approval where outcome is uncertain. Independently reestablish current revocations,
+consumed capabilities and deletion restrictions against an authority freshness anchor outside
+the restored data lineage. Its custody/protocol is an open joint decision; unknown freshness
+blocks activation and dispatch. Keep the old cluster fenced during failback and
 reseed it from the authoritative lineage rather than merging divergent histories.
 
 ## Schema, release integrity and legacy migration
 
 Axel publishes reviewed migration checksums and required/current schema ranges with immutable
-code revision, image and chart digests. Sugarkube's proposed release evidence additionally binds
+code revision, frontend artifact, image and chart digests through `ReleaseManifest v1`.
+Its proposed authenticated `GET /api/v1/compatibility` exposes bounded API/schema compatibility
+metadata; readiness/write availability remain distinct operational signals. Sugarkube's proposed
+deployment receipt references the manifest digest and actual deployed schema/artifacts, and binds
 environment, values digest, engine/operator versions, schema target, migration set and staging
 test results. Tags alone are mutable references: resolve and record immutable identities and
 refuse mismatches. A successful tag workflow does not establish a supported Sites publication
@@ -287,6 +311,7 @@ canary secrets. Assert response, database effects, audit record and absence of c
 | Supply chain / release | Reassigned tag; digest mismatch; untrusted migration image; wrong ARM64 build; altered dependency; stale CI result; PR code requesting deployment secret | Reject release; pin artifacts, verify provenance and scan dependencies; untrusted CI gets no production credentials; joint |
 | DoS / resource exhaustion | Connection flood; hot tenant; expensive query; queue growth; import bomb; log-cardinality burst; archive outage filling WAL; disk full; node pressure | Per-tenant quotas, deadlines and backpressure; bounded queues; platform survives; alerts before exhaustion; joint |
 | Network / TLS | Untrusted pod reaches DB; label spoof; staging reaches production; expired/wrong-host cert; SSRF to metadata/admin; DNS rebinding | Enforced default deny and identity controls; no insecure retry; only reviewed traffic paths; Sugarkube |
+| Profile / authority separation | Online worker reaches sensitive corpus, local UI, inference or backups; stale restored approval matches old state but not independent freshness | No cross-profile access or egress; unknown freshness blocks activation/dispatch; joint |
 | Failure / recovery | Primary loss; partition; one-node maintenance; disk corruption; total site loss; backup endpoint unavailable; lost recovery key | Single writer or explicit unavailable state; validated recovery timing/data bounds; no assumed second cluster; Sugarkube |
 
 Slack implementation should follow [official request verification](https://docs.slack.dev/authentication/verifying-requests-from-slack/).
