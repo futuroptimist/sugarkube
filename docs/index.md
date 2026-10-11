@@ -14,6 +14,8 @@ Pi cluster and aquarium aerator while the frame supports climbing plants.*
 ## Getting Started
 Review the safety notes before working with power components.
 
+- [Axel database platform design](design/axel-database-platform.md) — proposed K269/P6 tenant,
+  storage, recovery and security boundaries; documentation only
 - [start-here.md](start-here.md) — orientation tracks for newcomers
 - [glossary.md](glossary.md) — shared vocabulary for the tutorials and docs
 - [SAFETY.md](SAFETY.md) — wiring and battery safety guidelines
