@@ -1,8 +1,8 @@
 # Offline chart lock contract
 
-This is PR A of K057: an inert data contract. Nothing imports it from an existing
-command or workflow. Valid data is **not approval**, admission, a receipt, or a
-capability. K057, K056, and K051 remain open. No chart has been admitted.
+This module defines an inert, offline chart lock data contract. No existing
+command or workflow imports it. Valid data is **not approval**, admission, a
+receipt, or a capability. K057, K056, and K051 remain open. No chart has been admitted.
 
 The module uses only the Python standard library. It accepts supplied bytes and
 explicit expected coordinates; it does not read files, log source text, acquire
