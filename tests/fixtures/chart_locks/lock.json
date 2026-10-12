@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "policy_version": 1,
+  "artifacts": [
+    {
+      "artifact_id": "synthetic-chart",
+      "chart_name": "synthetic-chart",
+      "chart_version": "1.2.3",
+      "package_url": "https://example.invalid/synthetic-chart-1.2.3.tgz",
+      "archive_size_bytes": 36,
+      "archive_sha256": "3956e40a35975c754e0016770a9125352089f7b5bd12f4f27e5691ec1b8ea30f",
+      "review_id": "synthetic-review",
+      "review_sha256": "4fba00b6a25d920730bfc1efbd08aa752e721d1671e68e5e2b9d3fc5ef1cf76e"
+    }
+  ]
+}

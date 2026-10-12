@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Chart lock contract v1: lock",
+  "$comment": "Documentation only. Strict byte decoding, resource bounds, exact hashes, cross-record checks and expectations require the offline Python validator. This schema grants no authority.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "policy_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "artifact_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[\\x20-\\x7e]+$",
+            "allOf": [
+              {
+                "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)$"
+              }
+            ]
+          },
+          "chart_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[\\x20-\\x7e]+$",
+            "allOf": [
+              {
+                "pattern": "^(?:[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?)$"
+              }
+            ]
+          },
+          "chart_version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[\\x20-\\x7e]+$",
+            "allOf": [
+              {
+                "pattern": "^(?:(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?)$"
+              }
+            ]
+          },
+          "archive_sha256": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[\\x20-\\x7e]+$",
+            "allOf": [
+              {
+                "pattern": "^(?:[0-9a-f]{64})$"
+              }
+            ]
+          },
+          "package_url": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "pattern": "^[\\x20-\\x7e]+$",
+            "format": "uri",
+            "description": "Exact HTTPS DNS-host URL; no userinfo, query, fragment, whitespace, controls or malformed percent escapes. Runtime enforces the full URL restrictions.",
+            "allOf": [
+              {
+                "pattern": "^https://[^/?#@\\\\ :]+(?::[0-9]+)?(?:/[^?#\\\\ ]*)?$"
+              }
+            ]
+          },
+          "archive_size_bytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          "review_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[\\x20-\\x7e]+$",
+            "allOf": [
+              {
+                "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)$"
+              }
+            ]
+          },
+          "review_sha256": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[\\x20-\\x7e]+$",
+            "allOf": [
+              {
+                "pattern": "^(?:[0-9a-f]{64})$"
+              }
+            ]
+          }
+        },
+        "required": [
+          "artifact_id",
+          "chart_name",
+          "chart_version",
+          "archive_sha256",
+          "package_url",
+          "archive_size_bytes",
+          "review_id",
+          "review_sha256"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 1,
+      "maxItems": 16,
+      "uniqueItems": true
+    }
+  },
+  "required": [
+    "schema_version",
+    "policy_version",
+    "artifacts"
+  ],
+  "additionalProperties": false
+}
