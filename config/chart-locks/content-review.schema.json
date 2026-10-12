@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Chart lock contract v1: content-review",
+  "$comment": "Documentation only. Strict byte decoding, resource bounds, exact hashes, cross-record checks and expectations require the offline Python validator. This schema grants no authority.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "review_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[\\x20-\\x7e]+$",
+      "allOf": [
+        {
+          "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)$"
+        }
+      ]
+    },
+    "artifact_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[\\x20-\\x7e]+$",
+      "allOf": [
+        {
+          "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)$"
+        }
+      ]
+    },
+    "chart_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[\\x20-\\x7e]+$",
+      "allOf": [
+        {
+          "pattern": "^(?:[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?)$"
+        }
+      ]
+    },
+    "chart_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[\\x20-\\x7e]+$",
+      "allOf": [
+        {
+          "pattern": "^(?:(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?)$"
+        }
+      ]
+    },
+    "archive_sha256": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[\\x20-\\x7e]+$",
+      "allOf": [
+        {
+          "pattern": "^(?:[0-9a-f]{64})$"
+        }
+      ]
+    },
+    "reviewer": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[\\x20-\\x7e]+$"
+    },
+    "evidence_kind": {
+      "type": "string",
+      "enum": [
+        "publisher-authenticated",
+        "operator-review"
+      ]
+    },
+    "evidence_references": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512,
+        "pattern": "^[\\x20-\\x7e]+$"
+      },
+      "minItems": 1,
+      "maxItems": 16,
+      "uniqueItems": true
+    },
+    "dependencies": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[\\x20-\\x7e]+$",
+        "allOf": [
+          {
+            "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)$"
+          }
+        ]
+      },
+      "minItems": 0,
+      "maxItems": 16,
+      "uniqueItems": true
+    },
+    "environments": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "dev",
+          "staging",
+          "prod"
+        ]
+      },
+      "minItems": 1,
+      "maxItems": 16,
+      "uniqueItems": true
+    },
+    "outcome": {
+      "type": "string",
+      "enum": [
+        "accepted",
+        "rejected"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "review_id",
+    "artifact_id",
+    "chart_name",
+    "chart_version",
+    "archive_sha256",
+    "reviewer",
+    "evidence_kind",
+    "evidence_references",
+    "dependencies",
+    "environments",
+    "outcome"
+  ],
+  "additionalProperties": false
+}

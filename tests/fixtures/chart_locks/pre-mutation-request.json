@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "policy_version": 1,
+  "repository": "example/synthetic",
+  "repository_revision": "1111111111111111111111111111111111111111",
+  "lock_sha256": "c1c9abbd6f7189e8f197edd092f736f6541ae669cb8353e624cc6206a960cde7",
+  "artifact_ids": [
+    "synthetic-chart"
+  ],
+  "environment": "staging",
+  "action": "install",
+  "namespace": "fixture",
+  "release": "fixture",
+  "operation_id": "synthetic-operation",
+  "phase": "pre-mutation",
+  "frozen_input_manifest_sha256": "a45247c8a8a46f5bcf28560f920604666f5e1ba7ffb954092695b1308e32e1f2",
+  "validated_output_sha256": "cfa304e9fe9a7889adc2c9048cf4bf7a18d0a3304c801274f4259b6b34493a51"
+}

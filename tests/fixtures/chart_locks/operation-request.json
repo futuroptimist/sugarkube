@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "policy_version": 1,
+  "repository": "example/synthetic",
+  "repository_revision": "1111111111111111111111111111111111111111",
+  "lock_sha256": "c1c9abbd6f7189e8f197edd092f736f6541ae669cb8353e624cc6206a960cde7",
+  "artifact_ids": [
+    "synthetic-chart"
+  ],
+  "environment": "staging",
+  "action": "render",
+  "namespace": "fixture",
+  "release": "fixture",
+  "operation_id": "synthetic-operation",
+  "phase": "pre-acquisition"
+}

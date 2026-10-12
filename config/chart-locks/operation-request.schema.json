@@ -1,0 +1,297 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Chart lock contract v1: operation-request",
+  "$comment": "Documentation only. Strict byte decoding, resource bounds, exact hashes, cross-record checks and expectations require the offline Python validator. This schema grants no authority.",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "policy_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "repository": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[\\x20-\\x7e]+$",
+          "allOf": [
+            {
+              "pattern": "^(?:[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_][A-Za-z0-9_.-]{0,99})$"
+            }
+          ]
+        },
+        "repository_revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^[\\x20-\\x7e]+$",
+          "allOf": [
+            {
+              "pattern": "^(?:(?:[0-9a-f]{40}|[0-9a-f]{64}))$"
+            }
+          ]
+        },
+        "lock_sha256": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[\\x20-\\x7e]+$",
+          "allOf": [
+            {
+              "pattern": "^(?:[0-9a-f]{64})$"
+            }
+          ]
+        },
+        "artifact_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[\\x20-\\x7e]+$",
+            "allOf": [
+              {
+                "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)$"
+              }
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true
+        },
+        "environment": {
+          "type": "string",
+          "enum": [
+            "dev",
+            "staging",
+            "prod"
+          ]
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "render",
+            "install",
+            "upgrade",
+            "rollback",
+            "status",
+            "verify"
+          ]
+        },
+        "namespace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 63,
+          "pattern": "^[\\x20-\\x7e]+$",
+          "allOf": [
+            {
+              "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)$"
+            }
+          ]
+        },
+        "release": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 63,
+          "pattern": "^[\\x20-\\x7e]+$",
+          "allOf": [
+            {
+              "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)$"
+            }
+          ]
+        },
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 63,
+          "pattern": "^[\\x20-\\x7e]+$",
+          "allOf": [
+            {
+              "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)$"
+            }
+          ]
+        },
+        "phase": {
+          "const": "pre-acquisition"
+        }
+      },
+      "required": [
+        "schema_version",
+        "policy_version",
+        "repository",
+        "repository_revision",
+        "lock_sha256",
+        "artifact_ids",
+        "environment",
+        "action",
+        "namespace",
+        "release",
+        "operation_id",
+        "phase"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "policy_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "repository": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[\\x20-\\x7e]+$",
+          "allOf": [
+            {
+              "pattern": "^(?:[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_][A-Za-z0-9_.-]{0,99})$"
+            }
+          ]
+        },
+        "repository_revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^[\\x20-\\x7e]+$",
+          "allOf": [
+            {
+              "pattern": "^(?:(?:[0-9a-f]{40}|[0-9a-f]{64}))$"
+            }
+          ]
+        },
+        "lock_sha256": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[\\x20-\\x7e]+$",
+          "allOf": [
+            {
+              "pattern": "^(?:[0-9a-f]{64})$"
+            }
+          ]
+        },
+        "artifact_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[\\x20-\\x7e]+$",
+            "allOf": [
+              {
+                "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)$"
+              }
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true
+        },
+        "environment": {
+          "type": "string",
+          "enum": [
+            "dev",
+            "staging",
+            "prod"
+          ]
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "render",
+            "install",
+            "upgrade",
+            "rollback",
+            "status",
+            "verify"
+          ]
+        },
+        "namespace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 63,
+          "pattern": "^[\\x20-\\x7e]+$",
+          "allOf": [
+            {
+              "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)$"
+            }
+          ]
+        },
+        "release": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 63,
+          "pattern": "^[\\x20-\\x7e]+$",
+          "allOf": [
+            {
+              "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)$"
+            }
+          ]
+        },
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 63,
+          "pattern": "^[\\x20-\\x7e]+$",
+          "allOf": [
+            {
+              "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)$"
+            }
+          ]
+        },
+        "phase": {
+          "const": "pre-mutation"
+        },
+        "frozen_input_manifest_sha256": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[\\x20-\\x7e]+$",
+          "allOf": [
+            {
+              "pattern": "^(?:[0-9a-f]{64})$"
+            }
+          ]
+        },
+        "validated_output_sha256": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[\\x20-\\x7e]+$",
+          "allOf": [
+            {
+              "pattern": "^(?:[0-9a-f]{64})$"
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "policy_version",
+        "repository",
+        "repository_revision",
+        "lock_sha256",
+        "artifact_ids",
+        "environment",
+        "action",
+        "namespace",
+        "release",
+        "operation_id",
+        "phase",
+        "frozen_input_manifest_sha256",
+        "validated_output_sha256"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}

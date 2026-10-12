@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "review_id": "synthetic-review",
+  "artifact_id": "synthetic-chart",
+  "chart_name": "synthetic-chart",
+  "chart_version": "1.2.3",
+  "archive_sha256": "3956e40a35975c754e0016770a9125352089f7b5bd12f4f27e5691ec1b8ea30f",
+  "reviewer": "Invented Fixture Reviewer",
+  "evidence_kind": "operator-review",
+  "evidence_references": [
+    "https://example.invalid/synthetic-evidence"
+  ],
+  "dependencies": [],
+  "environments": [
+    "staging"
+  ],
+  "outcome": "accepted"
+}
