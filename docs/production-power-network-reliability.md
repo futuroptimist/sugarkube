@@ -9,7 +9,7 @@ fiber service, or both. The initial target is cellular connectivity plus battery
 power for **three production Raspberry Pis** and every local dependency needed to
 serve critical production traffic. Staging is excluded from the battery budget:
 the requested scope reduces the Pi count from six to three, not the dependency
-count to three. General backlog work remains paused.
+count to three.
 
 This proposal authorizes no implementation, deployment, purchase, host access,
 credential or security change, merge, or outage test. All measurement and validation
@@ -18,11 +18,11 @@ No measurements, carrier suitability, or hardware compatibility are claimed here
 
 ## Evidence and unknown topology
 
-The user reports an AT&T neighborhood outage. The app shows the fiber gateway
-online while the Google Wifi router is unresponsive. These are reported symptoms,
-not independent tests of service continuity. Root cause is unknown: an app status
-alone cannot distinguish an upstream outage, stale status, local power loss,
-router failure, or a broken link between devices.
+Hypothetical failure scenario: a status app could show a fiber gateway online
+while a downstream router is unresponsive. Such status indicators would not be
+independent tests of service continuity. An app status alone cannot distinguish
+an upstream outage, stale status, local power loss, router failure, or a broken
+link between devices; the root cause would remain unknown without further evidence.
 
 Repository evidence describes intended configuration and historical observations,
 not a current physical survey:
@@ -41,7 +41,7 @@ not a current physical survey:
 | Surface | Known or proposed role | Evidence still needed before design approval |
 | --- | --- | --- |
 | Fiber gateway | Reported primary internet gateway | Exact mode, power feed, handoff, actual link health, and whether it supplies any required LAN service |
-| Google Wifi router | Reported router, currently reported unresponsive | Routing, DHCP, DNS, WiFi and switch dependencies; installed model and supported WAN behavior |
+| Google Wifi router | Router in the proposed dependency inventory | Routing, DHCP, DNS, WiFi and switch dependencies; installed model and supported WAN behavior |
 | Cellular gateway | Proposed alternate internet path | Carrier, plan, reception, interface, routing mode, power draw and independent operation |
 | WAN selection and LAN routing | Required function; device ownership unresolved | Manual versus automatic switching, DHCP/DNS ownership, address stability and supported topology |
 | Necessary switches | Every switch on the production path must remain powered | Port and cable map, uplinks, power supplies, PoE loads and shared staging dependencies |
