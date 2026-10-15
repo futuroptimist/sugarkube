@@ -192,7 +192,13 @@ up env='dev':
     fi
 
     if [ "${SUGARKUBE_SET_K3S_NODE_IP:-1}" = "1" ]; then
-        summary_run "Node IP configure" sudo -E bash scripts/configure_k3s_node_ip.sh
+        if summary_run "Node IP configure" sudo -E bash scripts/configure_k3s_node_ip.sh; then
+            :
+        else
+            status=$?
+            printf 'ERROR: required Ethernet preparation failed; K3s installation blocked.\n' >&2
+            exit "${status}"
+        fi
     else
         summary_skip "Node IP configure" "disabled"
     fi

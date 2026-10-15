@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Sugarkube managed Ethernet preparation and pre-start refresh
 set -euo pipefail
 
 IFACE="${SUGARKUBE_MDNS_INTERFACE:-eth0}"
@@ -84,6 +85,55 @@ write_network_config() {
   fi
   mv "${tmp}" "${dest}" || { rm -f "${tmp}"; return 2; }
   log "Prepared ${dest}; no service restart performed"
+}
+
+# Install before persisting an address: every subsequent systemd start refreshes it.
+# Nothing here reloads systemd or starts K3s; the installer/reboot loads the drop-ins.
+install_start_refresh() {
+  local source="${BASH_SOURCE[0]}" runtime="${K3S_CONFIG_DIR}/sugarkube-network-prestart.sh"
+  local ip_binary unit dest tmp marker
+  ip_binary="$(command -v "${IP_CMD}")" || return 2
+  # Keep systemd arguments literal: no specifiers, escaping, whitespace or shell expansion.
+  for value in "${K3S_CONFIG_DIR}" "${LOG_DIR}" "${ip_binary}"; do
+    [[ "${value}" =~ ^/[a-zA-Z0-9_./:-]+$ ]] || {
+      log "Unsupported path for required network pre-start hook"; return 2;
+    }
+  done
+  for unit in runtime k3s.service k3s-agent.service; do
+    if [ "${unit}" = runtime ]; then
+      dest="${runtime}"
+      marker='# Sugarkube managed Ethernet preparation and pre-start refresh'
+    else
+      dest="${SYSTEMD_SYSTEM_DIR}/${unit}.d/20-sugarkube-network.conf"
+      marker='# Managed by configure_k3s_node_ip.sh'
+    fi
+    mkdir -p "$(dirname "${dest}")" || return 2
+    [ ! -L "${dest}" ] || { log "Refusing symlink ${dest}"; return 2; }
+    tmp="$(mktemp "${dest}.XXXXXX")" || return 2
+    if [ "${unit}" = runtime ]; then
+      cat "${source}" >"${tmp}" || { rm -f "${tmp}"; return 2; }
+    else
+      printf '%s\n' "${marker}" '[Unit]' 'Wants=network-online.target' \
+        'After=network-online.target' '[Service]' \
+        "ExecStartPre=/usr/bin/timeout 30s /bin/bash ${runtime} --refresh-on-start ${IFACE} ${K3S_CONFIG_DIR} ${LOG_DIR} ${ip_binary}" \
+        >"${tmp}" || { rm -f "${tmp}"; return 2; }
+    fi
+    chmod 0644 "${tmp}" || { rm -f "${tmp}"; return 2; }
+    if [ -f "${dest}" ] && cmp -s "${tmp}" "${dest}"; then
+      rm -f "${tmp}"
+      continue
+    fi
+    if [ -e "${dest}" ] && ! head -n 2 "${dest}" | grep -qx "${marker}"; then
+      rm -f "${tmp}"; log "Refusing unmanaged pre-start file ${dest}"; return 2
+    fi
+    if { unit_exists k3s.service || [ -e "${K3S_DATA_DIR}/server/db" ]; } && \
+      [ "${PREPARE_SERVER}" != 1 ]; then
+      rm -f "${tmp}"
+      log "Installing/updating server pre-start refresh requires --prepare-server"
+      return 2
+    fi
+    mv "${tmp}" "${dest}" || { rm -f "${tmp}"; return 2; }
+  done
 }
 
 # Only retire the exact legacy format this helper owned. Preserve custom files.
@@ -194,8 +244,23 @@ detect_primary_ipv4() {
 
 main() {
   PREPARE_SERVER=0
+  local refresh_only=0
   case "${1:-}" in
     --prepare-server) PREPARE_SERVER=1; shift ;;
+    --refresh-on-start)
+      # Invoked by the installed unit on every start, including ordinary reboots.
+      [ "$#" -eq 5 ] || return 2
+      IFACE="$2"; K3S_CONFIG_DIR="$3"; LOG_DIR="$4"; IP_CMD="$5"
+      LOG_FILE="${LOG_DIR}/configure_k3s_node_ip.log"
+      SUGARKUBE_FLANNEL_IFACE="${IFACE}"
+      PREPARE_SERVER=1; refresh_only=1; shift 5
+      local managed="${K3S_CONFIG_DIR}/config.yaml.d/20-sugarkube-network.yaml"
+      if [ ! -f "${managed}" ] || [ -L "${managed}" ] || ! head -n 1 "${managed}" | \
+        grep -qx '# Managed by configure_k3s_node_ip.sh'; then
+        printf '%s\n' 'Required managed network configuration missing; refusing K3s start.' >&2
+        return 2
+      fi
+      ;;
     "") ;;
     *) printf 'Usage: %s [--prepare-server]\n' "$0" >&2; return 2 ;;
   esac
@@ -220,11 +285,18 @@ ip = ipaddress.IPv4Address(sys.argv[1])
 if ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_unspecified:
     raise SystemExit("Unusable Ethernet IPv4 address")
 PYIP
+  if [ "${refresh_only}" = 0 ]; then
+    install_start_refresh || return 2
+  fi
   if write_network_config "${ip}" "${iface}"; then
     :
   else
     status=$?
     [ "${status}" -eq 1 ] || return "${status}"
+  fi
+  if [ "${refresh_only}" = 1 ]; then
+    log "Ethernet address refreshed before K3s start; no membership or Node status mutation"
+    return 0
   fi
   # Preserve initial TLS template setup, but never overwrite existing SAN policy.
   local tls_dest="${K3S_CONFIG_DIR}/config.yaml.d/${TLS_SAN_DEST_NAME}"

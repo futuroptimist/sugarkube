@@ -1,6 +1,8 @@
 """Supported YAML binding, migration, and failure-safe Ethernet configuration."""
 
 import os
+import shlex
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -70,7 +72,7 @@ def test_existing_server_requires_explicit_prepare_and_never_restarts(setup):
     env, units, config, _ = setup
     (units / "k3s.service").touch()
     legacy = units / "k3s.service.d/10-node-ip.conf"
-    legacy.parent.mkdir()
+    legacy.parent.mkdir(exist_ok=True)
     old = "[Service]\nEnvironment=K3S_NODE_IP=192.168.50.1\nEnvironment=K3S_FLANNEL_IFACE=eth0\n"
     legacy.write_text(old)
     assert run(setup).returncode == 2
@@ -105,7 +107,7 @@ def test_missing_or_invalid_ip_preserves_configuration(setup, content):
 def test_custom_legacy_dropin_preserved(setup):
     _, units, _, _ = setup
     legacy = units / "k3s-agent.service.d/10-node-ip.conf"
-    legacy.parent.mkdir()
+    legacy.parent.mkdir(exist_ok=True)
     old = "[Service]\nEnvironment=K3S_NODE_IP=10.0.0.1\nExecStart=/custom\n"
     legacy.write_text(old)
     assert run(setup).returncode == 0
@@ -230,7 +232,7 @@ def test_matching_yaml_does_not_authorize_pending_legacy_migration(setup, server
     else:
         (Path(env["K3S_DATA_DIR"]) / "server/db").mkdir(parents=True)
     legacy = units / "k3s.service.d/10-node-ip.conf"
-    legacy.parent.mkdir()
+    legacy.parent.mkdir(exist_ok=True)
     old = "[Service]\nEnvironment=K3S_NODE_IP=192.168.50.1\n"
     legacy.write_text(old)
 
@@ -245,3 +247,118 @@ def test_matching_yaml_does_not_authorize_pending_legacy_migration(setup, server
     assert run(setup).returncode == 0  # Fully converged retry performs no migration.
     assert dest.stat().st_mtime_ns == original_mtime
     assert "restart" not in Path(env["CALLS"]).read_text()
+
+
+def boot_installed_unit(setup, unit):
+    """Offline systemd start harness: execute installed pre-starts before ExecStart.
+
+    Uses the files persisted by preparation, with no just/helper invocation on reboot.
+    Actual systemd/K3s qualification remains an owner-run staging gate.
+    """
+    env, units, config, _ = setup
+    dropin = units / f"{unit}.d/20-sugarkube-network.conf"
+    content = dropin.read_text()
+    assert "After=network-online.target" in content
+    commands = [
+        line.split("=", 1)[1] for line in content.splitlines() if line.startswith("ExecStartPre=")
+    ]
+    assert len(commands) == 1
+    assert str(config / "sugarkube-network-prestart.sh") in commands[0]
+    assert str(SCRIPT) not in commands[0]
+    for command in commands:
+        result = subprocess.run(shlex.split(command), env=env, capture_output=True, text=True)
+        if result.returncode:
+            return result, None  # systemd must not reach ExecStart after pre-start failure.
+    # Stand-in for K3s reading its configuration at process startup.
+    return result, (config / "config.yaml.d/20-sugarkube-network.yaml").read_text()
+
+
+@pytest.mark.parametrize("unit", ["k3s.service", "k3s-agent.service"])
+def test_ordinary_reboot_refreshes_dhcp_without_manual_preparation(setup, unit):
+    env, units, config, sample = setup
+    assert run(setup).returncode == 0
+    (units / unit).touch()
+    database = Path(env["K3S_DATA_DIR"]) / "server/db/member"
+    database.parent.mkdir(parents=True)
+    database.write_bytes(b"persisted-identity-and-data")
+    first, loaded = boot_installed_unit(setup, unit)
+    assert first.returncode == 0 and 'node-ip: "192.168.50.12"' in loaded
+    sample.write_text("2: eth0 inet 192.168.50.99/24 scope global eth0\n")
+    # A normal reboot runs only the installed unit, not just up or configure.
+    second, loaded = boot_installed_unit(setup, unit)
+    assert second.returncode == 0 and 'node-ip: "192.168.50.99"' in loaded
+    assert "192.168.50.12" not in loaded
+    dest = config / "config.yaml.d/20-sugarkube-network.yaml"
+    mtime = dest.stat().st_mtime_ns
+    assert boot_installed_unit(setup, unit)[0].returncode == 0
+    assert dest.stat().st_mtime_ns == mtime
+    assert database.read_bytes() == b"persisted-identity-and-data"
+    assert "restart" not in Path(env["CALLS"]).read_text()
+
+
+@pytest.mark.parametrize("bad_address", ["", "2: eth0 inet 169.254.1.2/16 scope global eth0\n"])
+def test_boot_failure_blocks_k3s_and_preserves_previous_config(setup, bad_address):
+    _, units, config, sample = setup
+    assert run(setup).returncode == 0
+    (units / "k3s.service").touch()
+    dest = config / "config.yaml.d/20-sugarkube-network.yaml"
+    old = dest.read_bytes()
+    sample.write_text(bad_address)
+    result, started = boot_installed_unit(setup, "k3s.service")
+    assert result.returncode != 0
+    assert started is None
+    assert dest.read_bytes() == old
+
+
+def test_boot_missing_managed_config_blocks_k3s(setup):
+    assert run(setup).returncode == 0
+    (setup[2] / "config.yaml.d/20-sugarkube-network.yaml").unlink()
+    result, started = boot_installed_unit(setup, "k3s.service")
+    assert result.returncode == 2 and started is None
+
+
+@pytest.mark.parametrize("failure", ["missing_address", "server_guard", "hook_write"])
+def test_just_up_preparation_failure_prevents_installation(
+    setup, tmp_path, failure, ensure_just_available
+):
+    env, units, config, sample = setup
+    project = tmp_path / "project"
+    scripts = project / "scripts"
+    scripts.mkdir(parents=True)
+    shutil.copyfile(ROOT / "justfile", project / "justfile")
+    shutil.copyfile(SCRIPT, scripts / SCRIPT.name)
+    summary = scripts / "lib/summary.sh"
+    summary.parent.mkdir()
+    shutil.copyfile(ROOT / "scripts/lib/summary.sh", summary)
+    for name in ("install_deps.sh", "check_memory_cgroup.sh"):
+        (scripts / name).write_text("#!/bin/sh\nexit 0\n")
+        (scripts / name).chmod(0o755)
+    sentinel = project / "installation-reached"
+    (scripts / "k3s-discover.sh").write_text(f"#!/bin/sh\ntouch '{sentinel}'\n")
+    binaries = tmp_path / "bin"
+    binaries.mkdir()
+    (binaries / "sudo").write_text('#!/bin/sh\n[ "$1" != -E ] || shift\nexec "$@"\n')
+    (binaries / "sudo").chmod(0o755)
+    env.update(
+        {
+            "PATH": f"{binaries}:{env['PATH']}",
+            "SUGARKUBE_CONFIGURE_AVAHI": "0",
+            "SUGARKUBE_DISABLE_WLAN_DURING_BOOTSTRAP": "0",
+            "SUGARKUBE_SET_K3S_NODE_IP": "1",
+            "SUGARKUBE_SUMMARY_LIB": str(summary),
+        }
+    )
+    if failure == "missing_address":
+        sample.write_text("")
+    elif failure == "server_guard":
+        (units / "k3s.service").touch()
+    else:
+        config.mkdir()
+        (config / "sugarkube-network-prestart.sh").write_text("operator-owned")
+    result = subprocess.run(
+        ["just", "up", "dev"], cwd=project, env=env, capture_output=True, text=True
+    )
+    assert result.returncode != 0
+    assert "K3s installation blocked" in result.stderr
+    assert not sentinel.exists()
+    assert not (config / "config.yaml.d/20-sugarkube-network.yaml").exists()
