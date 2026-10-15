@@ -51,6 +51,154 @@ def run(setup, *args):
     )
 
 
+def inject_network_replace_failure(setup):
+    import sys
+
+    env, _, config, _ = setup
+    binaries = config / "bin"
+    binaries.mkdir()
+    stub = binaries / "python3"
+    stub.write_text(
+        f"#!{sys.executable}\n"
+        "import os, sys\n"
+        "if len(sys.argv) > 3 and sys.argv[2] == 'publish' "
+        "and sys.argv[3].endswith('/20-sugarkube-network.yaml'):\n"
+        "    def fail(*args):\n"
+        "        raise OSError('injected atomic replace failure')\n"
+        "    os.replace = fail\n"
+        "    sys.argv = sys.argv[1:]\n"
+        "    exec(sys.stdin.read(), {'__name__': '__main__'})\n"
+        "else:\n"
+        f"    os.execv({sys.executable!r}, [{sys.executable!r}, *sys.argv[1:]])\n"
+    )
+    stub.chmod(0o755)
+    env["PATH"] = str(binaries) + ":" + env["PATH"]
+    return stub
+
+
+def install_file_action(monkeypatch, action, target, temporary=None):
+    """Execute the actual embedded installer with real temporary filesystem paths."""
+    import sys
+
+    code = SCRIPT.read_text().split("<<'PYINSTALL'\n", 1)[1].split("\nPYINSTALL", 1)[0]
+    arguments = ["-", action, str(target)]
+    if temporary is not None:
+        arguments.append(str(temporary))
+    monkeypatch.setattr(sys, "argv", arguments)
+    exec(code, {})
+
+
+def test_runtime_file_and_directories_are_durable_before_hook_publication(tmp_path, monkeypatch):
+    events = []
+    original_sync, original_replace = os.fsync, os.replace
+
+    def sync(fd):
+        events.append(("sync", Path(os.readlink(f"/proc/self/fd/{fd}"))))
+        original_sync(fd)
+
+    def replace(source, destination):
+        events.append(("replace", destination))
+        original_replace(source, destination)
+
+    monkeypatch.setattr(os, "fsync", sync)
+    monkeypatch.setattr(os, "replace", replace)
+    runtime = tmp_path / "config" / "runtime.sh"
+    hook = tmp_path / "systemd" / "k3s.service.d" / "network.conf"
+    for target in (runtime, hook):
+        install_file_action(monkeypatch, "prepare", target)
+        staged = target.with_suffix(".tmp")
+        staged.write_text("synthetic prerequisite\n")
+        staged.chmod(0o644)
+        install_file_action(monkeypatch, "publish", target, staged)
+        publish = events.index(("replace", target))
+        assert ("sync", staged) in events[:publish]
+        assert events[publish + 1] == ("sync", target.parent)
+    runtime_publish = events.index(("replace", runtime))
+    hook_publish = events.index(("replace", hook))
+    assert runtime_publish < hook_publish
+    assert ("sync", runtime.parent) in events[runtime_publish:hook_publish]
+    assert ("sync", tmp_path) in events[:hook_publish]
+
+
+@pytest.mark.parametrize("failure", ["file", "directory"])
+def test_prestart_sync_failure_never_publishes_file(tmp_path, monkeypatch, failure):
+    target, staged = tmp_path / "runtime.sh", tmp_path / "staged"
+    staged.write_text("synthetic prerequisite\n")
+    original_sync = os.fsync
+
+    def sync(fd):
+        path = Path(os.readlink(f"/proc/self/fd/{fd}"))
+        if path == (staged if failure == "file" else tmp_path):
+            raise OSError("injected persistence failure")
+        original_sync(fd)
+
+    monkeypatch.setattr(os, "fsync", sync)
+    with pytest.raises(OSError, match="persistence failure"):
+        install_file_action(monkeypatch, "publish", target, staged)
+    assert not target.exists()
+    assert staged.read_text() == "synthetic prerequisite\n"
+
+
+@pytest.mark.parametrize(
+    "failure", ["directory_mode", "directory_owner", "file_mode", "file_owner", "symlink"]
+)
+def test_root_installation_refuses_untrusted_paths(tmp_path, monkeypatch, failure):
+    import stat
+
+    directory = tmp_path / "config"
+    directory.mkdir()
+    target = directory / "runtime.sh"
+    target.write_text("existing content\n")
+    if failure == "symlink":
+        target.unlink()
+        target.symlink_to(tmp_path / "absent")
+    original_stat = Path.lstat
+
+    def root_stat(path, *args, **kwargs):
+        info = list(original_stat(path, *args, **kwargs))
+        info[4] = 0  # Synthetic root-owned layout; no privileged filesystem access.
+        if stat.S_ISDIR(info[0]):
+            info[0] &= ~0o022
+        bad = directory if failure.startswith("directory") else target
+        if path == bad and failure.endswith("owner"):
+            info[4] = 1000
+        if path == bad and failure.endswith("mode"):
+            info[0] |= 0o022
+        return os.stat_result(info)
+
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    monkeypatch.setattr(Path, "lstat", root_stat)
+    with pytest.raises(SystemExit, match="[Uu]ntrusted|installing user"):
+        install_file_action(monkeypatch, "prepare", target)
+    if failure != "symlink":
+        assert target.read_text() == "existing content\n"
+
+
+@pytest.mark.parametrize(
+    "failure", ["config_mode", "config_symlink", "lock_symlink", "log_symlink"]
+)
+def test_unsafe_paths_are_rejected_before_lock_or_log_writes(setup, tmp_path, failure):
+    env, _, config, _ = setup
+    victim = tmp_path / "preserve"
+    victim.write_text("must remain unchanged\n")
+    if failure == "config_symlink":
+        other = tmp_path / "other"
+        other.mkdir()
+        config.symlink_to(other, target_is_directory=True)
+    else:
+        config.mkdir()
+    if failure == "config_mode":
+        config.chmod(0o777)
+    if failure in ("config_mode", "config_symlink", "lock_symlink"):
+        (config / ".sugarkube-network.lock").symlink_to(victim)
+    else:
+        log = Path(env["SUGARKUBE_LOG_DIR"]) / "configure_k3s_node_ip.log"
+        log.parent.mkdir()
+        log.symlink_to(victim)
+    assert run(setup).returncode != 0
+    assert victim.read_text() == "must remain unchanged\n"
+
+
 def test_supported_yaml_and_idempotent_dhcp_change(setup):
     env, units, config, sample = setup
     assert run(setup).returncode == 0
@@ -162,12 +310,7 @@ def test_atomic_replace_failure_preserves_old_yaml(setup):
     dest = config / "config.yaml.d/20-sugarkube-network.yaml"
     before = dest.read_bytes()
     sample.write_text("2: eth0 inet 192.168.50.99/24 scope global eth0\n")
-    binaries = config / "bin"
-    binaries.mkdir()
-    stub = binaries / "mv"
-    stub.write_text("#!/bin/sh\nexit 1\n")
-    stub.chmod(0o755)
-    env["PATH"] = str(binaries) + ":" + env["PATH"]
+    inject_network_replace_failure(setup)
     assert run(setup).returncode == 2
     assert dest.read_bytes() == before
 
@@ -207,12 +350,7 @@ def test_retry_after_failed_replace_converges_without_restart(setup):
     env, _, config, sample = setup
     assert run(setup).returncode == 0
     sample.write_text("2: eth0 inet 192.168.50.99/24 scope global eth0\n")
-    binaries = config / "bin"
-    binaries.mkdir()
-    stub = binaries / "mv"
-    stub.write_text("#!/bin/sh\nexit 1\n")
-    stub.chmod(0o755)
-    env["PATH"] = str(binaries) + ":" + env["PATH"]
+    stub = inject_network_replace_failure(setup)
     assert run(setup).returncode == 2
     stub.unlink()
     assert run(setup).returncode == 0

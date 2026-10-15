@@ -19,7 +19,7 @@ TLS_SAN_DEST_NAME="10-sugarkube-tls.yaml"
 log() {
   local ts
   ts="$(date --iso-8601=seconds 2>/dev/null || date '+%Y-%m-%dT%H:%M:%S')"
-  mkdir -p "${LOG_DIR}"
+  prestart_file_action prepare "${LOG_FILE}" || return 2
   printf '%s %s\n' "${ts}" "$*" | tee -a "${LOG_FILE}" >/dev/null
 }
 
@@ -58,7 +58,7 @@ write_network_config() {
   local ip="$1" iface="$2"
   local dir="${K3S_CONFIG_DIR}/config.yaml.d" dest tmp
   dest="${dir}/20-sugarkube-network.yaml"
-  mkdir -p "${dir}" || return 2
+  prestart_file_action prepare "${dest}" || return 2
   if [ -L "${dest}" ]; then
     log "Refusing symlink ${dest}"
     return 2
@@ -84,8 +84,71 @@ write_network_config() {
     printf '%s\n' 'Server change blocked: review quorum, then use --prepare-server (stages only).' >&2
     return 2
   fi
-  mv "${tmp}" "${dest}" || { rm -f "${tmp}"; return 2; }
+  prestart_file_action publish "${dest}" "${tmp}" || { rm -f "${tmp}"; return 2; }
   log "Prepared ${dest}; no service restart performed"
+}
+
+# Prepare trusted directories and durably publish each prerequisite before hooks.
+prestart_file_action() {
+  python3 - "$@" <<'PYINSTALL'
+import os
+import stat
+import sys
+from pathlib import Path
+
+action, target = sys.argv[1:3]
+target = Path(target)
+uid = os.geteuid()
+
+def inspect(path, directory=False):
+    info = path.lstat()
+    if path.is_symlink() or not (stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode)):
+        raise SystemExit("Untrusted pre-start installation path")
+    # Non-root runs may use a sticky temporary ancestor for isolated tests/user
+    # files; root installations must have exclusively root-trusted ancestry.
+    temporary = directory and uid != 0 and bool(info.st_mode & stat.S_ISVTX)
+    if not temporary and ((uid == 0 and info.st_uid != 0) or info.st_mode & 0o022):
+        raise SystemExit("Untrusted pre-start installation ownership or permissions")
+    if not directory and info.st_uid != uid:
+        raise SystemExit("Pre-start file must belong to its installing user")
+
+def sync_directory(path):
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+def prepare_directory(path):
+    if path.exists() or path.is_symlink():
+        for ancestor in (path, *path.parents):
+            inspect(ancestor, directory=True)
+    else:
+        prepare_directory(path.parent)
+        path.mkdir(mode=0o755)
+        path.chmod(0o755)
+        inspect(path, directory=True)
+    # Include existing ancestors left by an interrupted previous attempt.
+    for ancestor in (path, *path.parents):
+        sync_directory(ancestor)
+
+prepare_directory(target.parent)
+if target.exists() or target.is_symlink():
+    inspect(target)
+    with target.open("rb") as existing:
+        os.fsync(existing.fileno())
+if action == "publish":
+    temporary = Path(sys.argv[3])
+    if temporary.parent != target.parent:
+        raise SystemExit("Pre-start temporary file must share its destination directory")
+    inspect(temporary)
+    with temporary.open("rb") as staged:
+        os.fsync(staged.fileno())
+    os.replace(temporary, target)
+    sync_directory(target.parent)
+elif action != "prepare":
+    raise SystemExit("Unsupported pre-start file operation")
+PYINSTALL
 }
 
 # Install before persisting an address: every subsequent systemd start refreshes it.
@@ -108,7 +171,7 @@ install_start_refresh() {
       dest="${SYSTEMD_SYSTEM_DIR}/${unit}.d/20-sugarkube-network.conf"
       marker='# Managed by configure_k3s_node_ip.sh'
     fi
-    mkdir -p "$(dirname "${dest}")" || return 2
+    prestart_file_action prepare "${dest}" || return 2
     [ ! -L "${dest}" ] || { log "Refusing symlink ${dest}"; return 2; }
     tmp="$(mktemp "${dest}.XXXXXX")" || return 2
     if [ "${unit}" = runtime ]; then
@@ -133,7 +196,7 @@ install_start_refresh() {
       log "Installing/updating server pre-start refresh requires --prepare-server"
       return 2
     fi
-    mv "${tmp}" "${dest}" || { rm -f "${tmp}"; return 2; }
+    prestart_file_action publish "${dest}" "${tmp}" || { rm -f "${tmp}"; return 2; }
   done
 }
 
@@ -143,7 +206,7 @@ retire_legacy_dropins() {
   for unit in k3s.service k3s-agent.service; do
     file="${SYSTEMD_SYSTEM_DIR}/${unit}.d/${DROPIN_NAME}"
     [ -e "${file}" ] || continue
-    if [ -L "${file}" ] || ! awk '
+    if [ ! -f "${file}" ] || [ -L "${file}" ] || ! awk '
       NR == 1 { if ($0 != "[Service]") exit 1; next }
       /^Environment=K3S_NODE_IP=[0-9.]+$/ { ip++; next }
       /^Environment=K3S_FLANNEL_IFACE=[a-zA-Z0-9_.:-]+$/ { iface++; next }
@@ -179,7 +242,7 @@ render_tls_san_config() {
     return 2
   fi
 
-  mkdir -p "${dest_dir}" || return 3
+  prestart_file_action prepare "${dest}" || return 3
   local tmp
   tmp="$(mktemp "${dest}.XXXXXX")" || return 3
 
@@ -215,7 +278,7 @@ render_tls_san_config() {
 
   if [ "${changed}" -eq 1 ]; then
     log "Updating TLS SAN configuration at ${dest}"
-    mv "${tmp}" "${dest}" || { rm -f "${tmp}"; return 3; }
+    prestart_file_action publish "${dest}" "${tmp}" || { rm -f "${tmp}"; return 3; }
     return 0
   fi
 
@@ -271,7 +334,7 @@ main() {
   esac
   [ "$#" -eq 0 ] || return 2
   # Serialize local invocations; this is not a cluster-wide recovery lock.
-  mkdir -p "${K3S_CONFIG_DIR}"
+  prestart_file_action prepare "${K3S_CONFIG_DIR}/.sugarkube-network.lock" || return 2
   exec 9>"${K3S_CONFIG_DIR}/.sugarkube-network.lock"
   flock -n 9 || { log "Another network configuration run is active"; return 2; }
   local ip iface status

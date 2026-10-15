@@ -47,6 +47,9 @@ Before persisting a literal address, preparation installs a managed helper copy 
 an ordinary reboot after DHCP changes, refreshes `config.yaml.d/20-sugarkube-network.yaml`
 from the current primary global Ethernet IPv4 address. The interface defaults to `eth0`;
 `SUGARKUBE_MDNS_INTERFACE` selects another Ethernet interface during preparation.
+Root installation refuses untrusted file ownership, writable or symlinked ancestry. Runtime
+files and all directory entries are synced before either start hook is published, so an
+interrupted installation cannot expose a durable hook with an unpersisted runtime prerequisite.
 
 The pre-start command runs after `network-online.target`, has a 30-second timeout, and blocks
 K3s execution if the address is missing, invalid or ambiguous, or the reserved YAML path is
