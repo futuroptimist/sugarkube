@@ -137,3 +137,99 @@ A simultaneous three-server address change may remove the quorum needed to commi
 updates; mDNS cannot bypass the consensus requirement. Total quorum-loss reset remains an
 explicit operator operation even after that work. No live-cluster validation has been performed
 for this implementation.
+
+## Owner-executed validation and rollout gate (K-339)
+
+**K-339 is not Done on CI success or merge.** The owner must exercise the change in staging,
+record the results, and explicitly accept the bounded behavior before production rollout.
+The following is a proposed live validation plan, not authorization to execute it. No live
+steps were executed while preparing this PR. Full unattended recovery remains unfinished.
+
+### 1. Establish a recoverable staging baseline
+
+1. Schedule a maintenance window and secure console access independent of the affected LAN
+   address. Record all three node names, UIDs, Ethernet MACs/interfaces, current DHCP addresses,
+   exact K3s versions, etcd cluster/member IDs, peer URLs and effective CLI/env/YAML settings.
+   Confirm both supported K3s versions in staging or an isolated representative test cluster
+   before considering production on a version not yet exercised.
+2. Verify all three voters with authenticated etcd proposal health, all Nodes Ready, and
+   normal application reads/writes. Record a persistent application test marker and its content
+   digest, representative workload health and current restart counts. Record Node annotations
+   **and** status addresses separately. Do not use API readiness as the sole quorum check.
+3. Make an etcd snapshot and validate its integrity with compatible tools. Preserve the server
+   token, configuration and full database directories in protected backups. Obtain cold copies
+   with one server stopped at a time, leaving two verified healthy voters; restart and verify
+   all three voters before stopping the next. Stop if that quorum margin cannot be maintained.
+   Record checksums and verify restoration in an isolated environment that cannot contact the
+   original cluster. Keep originals intact; do not delete or replace peer DB directories.
+4. Record the operator-selected rollback strategy and time budget. Preserve pre-change files
+   and capture the exact Git commit under test. Keep credentials and database copies out of
+   public PR logs. Without verified recoverability and independent access, do not proceed.
+
+### 2. Exercise one staging member's Ethernet address change
+
+1. Select one nonessential-to-current-quorum member; keep the other two unchanged and healthy.
+   Use the router's normal DHCP mechanism to give that member a different lease, under owner
+   control. Do not introduce static assignments or reservations as the fix. Confirm the new
+   address from the node's Ethernet interface and independently via mDNS; record old/new values.
+2. Before a restart or membership write, collect fresh authenticated evidence for the two
+   unaffected voters. Run the planner with `--resolve-mdns`. Expect `live-quorum-review` and the
+   exact affected member ID/peer URL, not a replacement member or reset recommendation.
+3. Run local preparation without `--prepare-server` and verify refusal leaves the previous
+   network file intact. After reviewing the plan, run explicit preparation and inspect the
+   YAML. Confirm no systemd reload, restart, database mutation or membership change occurred.
+   Inspect and resolve stale `--server`/`K3S_URL` and higher-precedence network settings manually;
+   a YAML write alone is not proof the effective settings changed.
+4. Any live membership update or service restart requires the owner's separate reviewed
+   procedure, verified current quorum, peer TLS/identity checks and preserved backups. This PR
+   does not execute those actions. Keep the same member identity and work on only that member.
+   If its recovery needs reset, removal or database replacement, stop this test and escalate.
+5. Check that the member rejoins the same cluster, all three proposal-health checks succeed,
+   peer URLs reflect current addresses, Node status/annotations converge, restart counts
+   stabilize, and application test-marker reads and new writes succeed with unchanged data.
+   Observe for an owner-chosen window long enough to detect repeated K3s restart loops.
+
+### 3. Exercise stale status, retries and failure safety
+
+- If stale InternalIP occurs naturally, capture the Node object and local interface evidence
+  before intervention. Expect a guarded status-only patch candidate only when the annotation,
+  Ethernet address and mDNS agree. Have the owner review the UID/resourceVersion tests and
+  status subresource. Recollect on conflict; verify other Node fields and address types remain
+  unchanged. If staging does not reproduce this failure, record it as **not exercised** and
+  use an isolated disposable cluster for controlled reproduction; do not corrupt production
+  Node status merely to test a patch.
+- Repeat preparation at the same IP: YAML content and modification time should remain unchanged,
+  no restart should occur, and the post-recovery planner should report `no-change`. Re-run after
+  a second controlled lease change on the same staging member to test repeatability.
+- Exercise a deliberate owner-controlled restart of that one recovered member while the other
+  two remain healthy. Verify effective YAML use, stable membership and application data after
+  restart. This is a manual validation step, not a behavior supplied by the helper.
+- With offline copies of the evidence, test missing/failed mDNS, stale timestamps, contradictory
+  Node identities, missing health, and zero/one healthy voter. Expect exit 2 or no mutation
+  candidates and no fallback reset. A real simultaneous quorum-loss drill belongs in an
+  isolated, restorable staging clone with separately approved recovery leadership. Do not
+  break the original cluster's quorum to demonstrate this tool's refusal behavior.
+- Retain before/after member lists, health results, Node objects, file checksums, application
+  marker results and relevant redacted logs. Unit tests cover atomic-write failure and local
+  lock contention; report any live failure mode that was not exercised explicitly.
+
+**Stop immediately** on loss of a second voter, cluster/member identity mismatch, unverified
+backup, ambiguous mDNS/interface evidence, TLS mismatch, unexpected database change, missing
+application data or persistent restart loops. Freeze further automation, preserve evidence and
+DBs, and use the owner's state-preserving recovery procedure. Do not repeatedly restart peers,
+reset membership, wipe data or treat an old plan as a queue of authorized actions. Restoring an
+old file does not restore etcd membership or Node status and may advertise the old IP again.
+
+### 4. Production gate and acceptance evidence
+
+After documented staging results and explicit owner approval, repeat backup and baseline checks
+for production. Start with one server while two verified voters remain unchanged. Validate
+configuration preparation, effective settings, stable membership, Node status, restart behavior
+and representative workload reads/writes before proceeding to another server. A production
+DHCP-change exercise requires its own approved window; do not infer approval from the staging
+test or a merge. Preserve a rollback decision point after every server.
+
+Record the tested commit, K3s versions, date, operator, lease changes, checks, failures, recovery
+steps and unexercised cases. Production completion requires all three servers and workloads
+healthy with data preserved and owner acceptance. Keep K-339 open if live testing is outstanding
+or if its required unattended recovery behavior exceeds this PR's explicitly bounded scope.
