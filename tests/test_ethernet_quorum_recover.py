@@ -401,6 +401,7 @@ def test_backend_inventory_pins_all_inputs_and_rejects_overrides(enrollment, tmp
         )
 
     backend.command = output
+    monkeypatch.setattr(backend, "recovery_hook_loaded", lambda: None)
     enrollment.update(backend.inventory())
     assert "/etc/systemd/system/k3s.service.env" in enrollment["files"]
     assert "/etc/key" not in enrollment["files"]
@@ -1219,3 +1220,62 @@ def test_directory_persistence_failure_prevents_child_creation(tmp_path, monkeyp
     with pytest.raises(OSError, match="persistence failed"):
         MODULE.install_directory(tmp_path / "libexec" / "sugarkube")
     assert not (tmp_path / "libexec" / "sugarkube").exists()
+
+
+@pytest.mark.parametrize(
+    "damage", [None, "missing", "changed", "unloaded", "dirty", "pre", "post", "ignore"]
+)
+def test_recovery_requires_exact_installed_and_loaded_hook(
+    enrollment, tmp_path, monkeypatch, damage
+):
+    hook = tmp_path / "recovery.conf"
+    monkeypatch.setattr(MODULE, "HOOK", hook)
+    monkeypatch.setattr(MODULE, "trusted_file", lambda path: None)
+    hook.write_bytes(MODULE.recovery_hook())
+    properties = {"NeedDaemonReload": "no", "DropInPaths": str(hook)}
+    for line in MODULE.recovery_hook().decode().splitlines()[2:]:
+        key, value = line.split("=", 1)
+        ignore = "yes" if value.startswith("-") else "no"
+        properties[key] = f"{{ argv[]={value.lstrip('-')} ; ignore_errors={ignore} ; pid=0 }}"
+    if damage == "missing":
+        hook.unlink()
+    elif damage == "changed":
+        hook.write_text("[Service]\nExecStartPre=\n")
+    elif damage == "unloaded":
+        properties["DropInPaths"] = ""
+    elif damage == "dirty":
+        properties["NeedDaemonReload"] = "yes"
+    elif damage in ("pre", "post"):
+        properties["ExecStart" + damage.title()] = ""
+    elif damage == "ignore":
+        properties["ExecStartPre"] = properties["ExecStartPre"].replace("errors=no", "errors=yes")
+    backend = MODULE.Backend(enrollment)
+    backend.command = lambda argv: "\n".join(f"{k}={v}" for k, v in properties.items())
+    backend.inventory = lambda: {}
+    if damage:
+        with pytest.raises(MODULE.Stop, match="recovery"):
+            backend.config()
+        for watch in (False, True):
+            fake = FakeBackend(enrollment)
+            fake.config = backend.config
+            recovery = MODULE.Recovery(enrollment, fake, tmp_path / "incident.json")
+            with pytest.raises(MODULE.Stop, match="recovery"):
+                recovery.pre_start(watch=watch)
+            assert not fake.calls and fake.owner is None
+            assert not recovery.path.exists()
+    else:
+        backend.config()
+
+
+def test_only_explicit_enrollment_can_prove_before_hook_installation(enrollment, monkeypatch):
+    backend = MODULE.Backend(enrollment)
+    backend.inventory = lambda: {}
+
+    def missing():
+        raise MODULE.Stop("missing recovery hook")
+
+    backend.recovery_hook_loaded = missing
+    with pytest.raises(MODULE.Stop, match="missing recovery hook"):
+        backend.config()
+    backend.enrolling = True
+    backend.config()

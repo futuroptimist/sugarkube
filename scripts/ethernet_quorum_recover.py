@@ -57,6 +57,15 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def recovery_hook():
+    invocation = f"/usr/bin/python3 -I {RUNTIME}"
+    return (
+        "# Managed by ethernet_quorum_recover.py\n[Service]\n"
+        f"ExecStartPre=/usr/bin/timeout 180s {invocation} pre-start --enrollment {ENROLLMENT}\n"
+        f"ExecStartPost=-/usr/bin/timeout 60s {invocation} post-start --enrollment {ENROLLMENT}\n"
+    ).encode()
+
+
 def atomic_json(path, value):
     atomic_write(path, json.dumps(value, sort_keys=True).encode())
 
@@ -113,6 +122,7 @@ class Backend:
 
     def __init__(self, enrollment):
         self.e = enrollment
+        self.enrolling = False
         self.connections = {}
         self.locators = {}
 
@@ -405,7 +415,41 @@ class Backend:
             "join target must be an enrolled hostname, not a stale IP",
         )
 
+    def recovery_hook_loaded(self):
+        # Enrollment installs this last and deliberately does not reload systemd.
+        # Every operational invocation must prove both disk and loaded unit state.
+        require(HOOK.is_file(), "missing recovery hook")
+        trusted_file(HOOK)
+        require(HOOK.read_bytes() == recovery_hook(), "recovery hook changed")
+        unit = self.command(
+            [
+                "/usr/bin/systemctl",
+                "show",
+                "k3s.service",
+                "--property=NeedDaemonReload,DropInPaths,ExecStartPre,ExecStartPost",
+            ]
+        )
+        properties = dict(line.split("=", 1) for line in unit.splitlines() if "=" in line)
+        require(
+            properties.get("NeedDaemonReload") == "no"
+            and str(HOOK) in properties.get("DropInPaths", "").split(),
+            "recovery hook is not loaded; operator daemon-reload required",
+        )
+        for line in recovery_hook().decode().splitlines()[2:]:
+            key, expected = line.split("=", 1)
+            ignore = "yes" if expected.startswith("-") else "no"
+            expected = expected.lstrip("-")
+            commands = re.findall(
+                r"argv\[\]=(.*?) ; ignore_errors=(yes|no) ;", properties.get(key, "")
+            )
+            require(
+                commands.count((expected, ignore)) == 1,
+                "loaded recovery command differs from the installed hook",
+            )
+
     def config(self):
+        if not self.enrolling:
+            self.recovery_hook_loaded()
         inventory = self.inventory()
         require(
             all(inventory[key] == self.e[key] for key in inventory),
@@ -835,6 +879,7 @@ def enroll(request, destination):
     trusted_file(request)
     e = json.loads(request.read_text())
     backend = Backend(e)
+    backend.enrolling = True  # Read-only healthy-time proof precedes hook installation.
     e.update(backend.inventory())
     e["local_ipv4"] = backend.address()
     validate_enrollment(e)
@@ -874,11 +919,7 @@ def enroll(request, destination):
     enrollment_arg = f"--enrollment {ENROLLMENT}"
     files = {
         RUNTIME: Path(__file__).read_bytes(),
-        HOOK: (
-            "# Managed by ethernet_quorum_recover.py\n[Service]\n"
-            f"ExecStartPre=/usr/bin/timeout 180s {invocation} pre-start {enrollment_arg}\n"
-            f"ExecStartPost=-/usr/bin/timeout 60s {invocation} post-start {enrollment_arg}\n"
-        ).encode(),
+        HOOK: recovery_hook(),
         WATCH_SERVICE: (
             "# Managed by ethernet_quorum_recover.py\n[Unit]\n"
             "Description=Guarded Ethernet address recovery\nAfter=network-online.target\n"
