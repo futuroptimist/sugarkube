@@ -808,6 +808,27 @@ def trusted_file(path):
         )
 
 
+def install_directory(path, mode=0o755):
+    """Create only trusted directories and persist every new ancestor entry."""
+    if path.exists() or path.is_symlink():
+        require(path.is_dir(), "installation parent is not a directory")
+        trusted_file(path)
+    else:
+        install_directory(path.parent)
+        path.mkdir(mode=mode)
+        path.chmod(mode)
+        trusted_file(path)
+    # A durable child file is insufficient if its newly created directory can
+    # disappear after power loss. Persist this directory and its parent entry,
+    # including an existing directory left by an interrupted previous attempt.
+    for directory in (path, path.parent):
+        fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
+
 def enroll(request, destination):
     """Explicit healthy-time enrollment; install inactive hooks, never reload/start."""
     require(destination == ENROLLMENT, "only the standard enrollment path is supported")
@@ -880,21 +901,23 @@ def enroll(request, destination):
     # The K3s hook is the activation boundary: a reboot discovers it even without
     # daemon-reload. Persist every prerequisite before making that hook visible.
     hook_content = files.pop(HOOK)
+    # Validate/create every destination directory before installing executable
+    # content. Refuse existing writable/symlink ancestors instead of changing them.
+    for path in [destination, HOOK, *files]:
+        install_directory(path.parent)
     for path, content in files.items():
-        path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write(path, content)
         path.chmod(0o644)
-    destination.parent.mkdir(parents=True, exist_ok=True)
     atomic_json(destination, e)
-    HOOK.parent.mkdir(parents=True, exist_ok=True)
     atomic_write(HOOK, hook_content)
     HOOK.chmod(0o644)
     return "enrolled; hooks and timer installed but not reloaded or enabled"
 
 
 def private_state(path):
-    path.mkdir(mode=0o700, parents=True, exist_ok=True)
-    trusted_file(path)
+    # Journal durability also requires the state directory's own entry to survive
+    # power loss before a membership write or start authorization can occur.
+    install_directory(path, mode=0o700)
     info = path.lstat()
     require(
         not path.is_symlink() and info.st_uid == 0 and info.st_mode & 0o077 == 0,

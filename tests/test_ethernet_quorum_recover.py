@@ -682,15 +682,18 @@ def test_atomic_journal_replace_failure_preserves_previous_record(tmp_path, monk
     "uid,mode,symlink",
     [(0, 0o600, False), (1000, 0o600, False), (0, 0o622, False), (0, 0o600, True)],
 )
-def test_enrollment_and_state_permissions_are_enforced(uid, mode, symlink):
+def test_enrollment_and_state_permissions_are_enforced(uid, mode, symlink, monkeypatch):
     from types import SimpleNamespace
 
     path = SimpleNamespace(
         lstat=lambda: SimpleNamespace(st_uid=uid, st_mode=mode),
         is_symlink=lambda: symlink,
+        exists=lambda: True,
+        is_dir=lambda: True,
         mkdir=lambda **kwargs: None,
         parents=[],
     )
+    monkeypatch.setattr(MODULE, "install_directory", lambda path, mode: MODULE.trusted_file(path))
     if uid == 0 and mode == 0o600 and not symlink:
         MODULE.trusted_file(path)
         MODULE.private_state(path)
@@ -1126,3 +1129,75 @@ def test_mutable_parent_directory_cannot_supply_root_credentials():
         MODULE.trusted_file(path)
     parent.lstat = lambda: SimpleNamespace(st_uid=0, st_mode=0o755)
     MODULE.trusted_file(path)
+
+
+def test_new_install_directories_have_fixed_modes_and_durable_parent_entries(tmp_path, monkeypatch):
+    import os
+    import stat
+
+    checked, synced = [], []
+    monkeypatch.setattr(MODULE, "trusted_file", lambda path: checked.append(path))
+    real_sync = os.fsync
+
+    def sync(fd):
+        synced.append(Path(os.readlink(f"/proc/self/fd/{fd}")))
+        real_sync(fd)
+
+    monkeypatch.setattr(MODULE.os, "fsync", sync)
+    destination = tmp_path / "libexec" / "sugarkube"
+    previous_umask = os.umask(0)
+    try:
+        MODULE.install_directory(destination)
+    finally:
+        os.umask(previous_umask)
+    assert checked == [tmp_path, destination.parent, destination]
+    assert synced == [
+        tmp_path,
+        tmp_path.parent,
+        destination.parent,
+        tmp_path,
+        destination,
+        destination.parent,
+    ]
+    assert stat.S_IMODE(destination.stat().st_mode) == 0o755
+    assert stat.S_IMODE(destination.parent.stat().st_mode) == 0o755
+    state = destination / "state"
+    MODULE.install_directory(state, mode=0o700)
+    assert stat.S_IMODE(state.stat().st_mode) == 0o700
+    assert synced[-2:] == [state, destination]
+
+
+@pytest.mark.parametrize(
+    "uid,mode,symlink,is_directory",
+    [
+        (1000, 0o755, False, True),
+        (0, 0o777, False, True),
+        (0, 0o775, False, True),
+        (0, 0o755, True, True),
+        (0, 0o644, False, False),
+    ],
+)
+def test_install_directory_rejects_untrusted_existing_paths(uid, mode, symlink, is_directory):
+    from types import SimpleNamespace
+
+    path = SimpleNamespace(
+        exists=lambda: True,
+        is_symlink=lambda: symlink,
+        is_dir=lambda: is_directory,
+        lstat=lambda: SimpleNamespace(st_uid=uid, st_mode=mode),
+        parents=[],
+    )
+    with pytest.raises(MODULE.Stop):
+        MODULE.install_directory(path)
+
+
+def test_directory_persistence_failure_prevents_child_creation(tmp_path, monkeypatch):
+    monkeypatch.setattr(MODULE, "trusted_file", lambda path: None)
+
+    def fail(fd):
+        raise OSError("directory persistence failed")
+
+    monkeypatch.setattr(MODULE.os, "fsync", fail)
+    with pytest.raises(OSError, match="persistence failed"):
+        MODULE.install_directory(tmp_path / "libexec" / "sugarkube")
+    assert not (tmp_path / "libexec" / "sugarkube").exists()
