@@ -107,6 +107,13 @@ retire_legacy_dropins() {
       log "Backup already exists: ${file}.pre-yaml; legacy drop-in retained"
       continue
     fi
+    # Matching YAML does not authorize a pending legacy-file migration on retry.
+    if { unit_exists k3s.service || [ -e "${K3S_DATA_DIR}/server/db" ]; } && \
+      [ "${PREPARE_SERVER:-0}" != 1 ]; then
+      log "Legacy server configuration change requires --prepare-server; file preserved"
+      printf '%s\n' 'Legacy migration blocked: review quorum, then use --prepare-server.' >&2
+      return 2
+    fi
     mv "${file}" "${file}.pre-yaml"
     log "Preserved legacy drop-in at ${file}.pre-yaml; daemon-reload required"
   done

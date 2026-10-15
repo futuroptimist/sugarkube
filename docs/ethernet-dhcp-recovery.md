@@ -275,9 +275,11 @@ or distributing new administrator credentials. Their broad privileges must remai
 to the local host service. Node replacement, CA rotation or changed membership invalidates
 enrollment and requires operator review.
 
-The architectural decision is whether to authorize that narrowly privileged automatic
+The concrete architectural choice is persistent incident ownership that can require operator
+unblocking, versus automatic takeover requiring stronger fencing across membership and service
+actions. Recommend persistent ownership for the first implementation, with a narrowly scoped
 member-URL update, local configuration change, guarded status correction and **one local
-restart per address-change incident**. Recommended scope is opt-in, three fixed voters,
+restart request per address-change incident**. Recommended scope is opt-in, three fixed voters,
 single-stack Ethernet IPv4, the two exact K3s versions, and a pre-migrated supported YAML
 layout with hostname join targets. Refuse custom CLI/config overrides instead of rewriting
 arbitrary systemd commands. No second cluster or load balancer is required.
@@ -318,8 +320,12 @@ arbitrary systemd commands. No second cluster or load balancer is required.
 This design trades availability for safety if an incident owner crashes or evidence changes.
 It cannot promise atomicity between checking survivor health and a later restart: an unrelated
 second voter can fail in that interval. The fixed two-survivor margin, serialized ownership and
-single restart bound limit the automation's contribution; loss of the margin always stops
-further action. Automatic recovery from simultaneous majority address loss remains excluded.
+single restart-request bound limit the automation's contribution; loss of the margin always
+stops further action. K3s installs `Restart=always`, so one request does not bound process
+restart loops. Before enabling a writer, its service supervisor must account for the existing
+restart policy and `NRestarts`, latch repeated failures, and safely stop only the affected
+member while preserving the two-survivor margin. Restoration of the original policy must be
+journaled and tested across a watcher crash. The current helper does not change that policy. Automatic recovery from simultaneous majority address loss remains excluded.
 
 ### Smallest implementation and acceptance scope after the decision
 

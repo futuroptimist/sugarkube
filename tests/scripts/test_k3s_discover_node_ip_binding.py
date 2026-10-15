@@ -33,6 +33,7 @@ def setup(tmp_path):
         "SYSTEMD_UNIT_PATHS": str(units),
         "SUGARKUBE_LOG_DIR": str(tmp_path / "log"),
         "K3S_CONFIG_DIR": str(config),
+        "K3S_DATA_DIR": str(tmp_path / "data"),
         "TLS_SAN_TEMPLATE_PATH": str(
             ROOT / "systemd/etc/rancher/k3s/config.yaml.d/10-sugarkube-tls.yaml"
         ),
@@ -215,4 +216,32 @@ def test_retry_after_failed_replace_converges_without_restart(setup):
     assert run(setup).returncode == 0
     dest = config / "config.yaml.d/20-sugarkube-network.yaml"
     assert 'node-ip: "192.168.50.99"' in dest.read_text()
+    assert "restart" not in Path(env["CALLS"]).read_text()
+
+
+@pytest.mark.parametrize("server_evidence", ["unit", "database"])
+def test_matching_yaml_does_not_authorize_pending_legacy_migration(setup, server_evidence):
+    env, units, config, _ = setup
+    assert run(setup).returncode == 0
+    dest = config / "config.yaml.d/20-sugarkube-network.yaml"
+    original_mtime = dest.stat().st_mtime_ns
+    if server_evidence == "unit":
+        (units / "k3s.service").touch()
+    else:
+        (Path(env["K3S_DATA_DIR"]) / "server/db").mkdir(parents=True)
+    legacy = units / "k3s.service.d/10-node-ip.conf"
+    legacy.parent.mkdir()
+    old = "[Service]\nEnvironment=K3S_NODE_IP=192.168.50.1\n"
+    legacy.write_text(old)
+
+    # A previous attempt may have committed the YAML but not the migration.
+    assert run(setup).returncode == 2
+    assert legacy.read_text() == old
+    assert not Path(str(legacy) + ".pre-yaml").exists()
+    assert dest.stat().st_mtime_ns == original_mtime
+    assert run(setup, "--prepare-server").returncode == 0
+    assert Path(str(legacy) + ".pre-yaml").read_text() == old
+    assert not legacy.exists()
+    assert run(setup).returncode == 0  # Fully converged retry performs no migration.
+    assert dest.stat().st_mtime_ns == original_mtime
     assert "restart" not in Path(env["CALLS"]).read_text()
