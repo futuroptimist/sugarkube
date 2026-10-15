@@ -310,14 +310,64 @@ def test_boot_failure_blocks_k3s_and_preserves_previous_config(setup, bad_addres
     assert dest.read_bytes() == old
 
 
-def test_boot_missing_managed_config_blocks_k3s(setup):
+def test_installed_hook_recreates_absent_owned_yaml_from_current_address(setup):
     assert run(setup).returncode == 0
     (setup[2] / "config.yaml.d/20-sugarkube-network.yaml").unlink()
+    setup[3].write_text("2: eth0 inet 192.168.50.99/24 scope global eth0\n")
+    result, loaded = boot_installed_unit(setup, "k3s.service")
+    assert result.returncode == 0 and 'node-ip: "192.168.50.99"' in loaded
+
+
+@pytest.mark.parametrize("replacement", ["unmanaged", "symlink", "directory"])
+def test_boot_refuses_unmanaged_network_path(setup, replacement):
+    assert run(setup).returncode == 0
+    dest = setup[2] / "config.yaml.d/20-sugarkube-network.yaml"
+    dest.unlink()
+    if replacement == "unmanaged":
+        dest.write_text("node-ip: 192.168.50.1\n")
+    elif replacement == "symlink":
+        dest.symlink_to(setup[3])
+    else:
+        dest.mkdir()
     result, started = boot_installed_unit(setup, "k3s.service")
     assert result.returncode == 2 and started is None
 
 
-@pytest.mark.parametrize("failure", ["missing_address", "server_guard", "hook_write"])
+def test_failed_first_server_preparation_leaves_bootstrap_capable_hook(setup):
+    env, units, config, sample = setup
+    (units / "k3s.service").touch()
+    conflicting = units / "k3s-agent.service.d/20-sugarkube-network.conf"
+    conflicting.parent.mkdir()
+    conflicting.write_text("operator-owned\n")
+    database = Path(env["K3S_DATA_DIR"]) / "server/db/member"
+    database.parent.mkdir(parents=True)
+    database.write_bytes(b"persisted-identity-and-data")
+    assert run(setup, "--prepare-server").returncode == 2
+    assert (units / "k3s.service.d/20-sugarkube-network.conf").exists()
+    assert not (config / "config.yaml.d/20-sugarkube-network.yaml").exists()
+    # A reboot after the interrupted/failed preparation uses only persisted files.
+    sample.write_text("2: eth0 inet 192.168.50.99/24 scope global eth0\n")
+    result, loaded = boot_installed_unit(setup, "k3s.service")
+    assert result.returncode == 0 and 'node-ip: "192.168.50.99"' in loaded
+    assert conflicting.read_text() == "operator-owned\n"
+    assert database.read_bytes() == b"persisted-identity-and-data"
+
+
+def test_preparation_creates_non_writable_directories_under_permissive_umask(setup):
+    result = subprocess.run(
+        ["bash", "-c", 'umask 000; exec bash "$1"', "_", str(SCRIPT)],
+        env=setup[0],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    for directory in (setup[2], setup[2] / "config.yaml.d", setup[1] / "k3s.service.d"):
+        assert directory.stat().st_mode & 0o022 == 0
+
+
+@pytest.mark.parametrize(
+    "failure", ["missing_address", "server_guard", "hook_write", "second_hook_write"]
+)
 def test_just_up_preparation_failure_prevents_installation(
     setup, tmp_path, failure, ensure_just_available
 ):
@@ -352,6 +402,10 @@ def test_just_up_preparation_failure_prevents_installation(
         sample.write_text("")
     elif failure == "server_guard":
         (units / "k3s.service").touch()
+    elif failure == "second_hook_write":
+        conflicting = units / "k3s-agent.service.d/20-sugarkube-network.conf"
+        conflicting.parent.mkdir()
+        conflicting.write_text("operator-owned\n")
     else:
         config.mkdir()
         (config / "sugarkube-network-prestart.sh").write_text("operator-owned")

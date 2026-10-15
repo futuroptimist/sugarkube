@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Sugarkube managed Ethernet preparation and pre-start refresh
 set -euo pipefail
+umask 022
 
 IFACE="${SUGARKUBE_MDNS_INTERFACE:-eth0}"
 IP_CMD="${IP_CMD:-ip}"
@@ -255,9 +256,13 @@ main() {
       SUGARKUBE_FLANNEL_IFACE="${IFACE}"
       PREPARE_SERVER=1; refresh_only=1; shift 5
       local managed="${K3S_CONFIG_DIR}/config.yaml.d/20-sugarkube-network.yaml"
-      if [ ! -f "${managed}" ] || [ -L "${managed}" ] || ! head -n 1 "${managed}" | \
-        grep -qx '# Managed by configure_k3s_node_ip.sh'; then
-        printf '%s\n' 'Required managed network configuration missing; refusing K3s start.' >&2
+      # The explicitly installed hook owns this reserved YAML path. It must be
+      # able to bootstrap an absent file after interrupted first preparation,
+      # without persisting a literal address before refresh protection exists.
+      if [ -L "${managed}" ] || { [ -e "${managed}" ] && \
+        { [ ! -f "${managed}" ] || ! head -n 1 "${managed}" | \
+          grep -qx '# Managed by configure_k3s_node_ip.sh'; }; }; then
+        printf '%s\n' 'Unmanaged network configuration; refusing K3s start.' >&2
         return 2
       fi
       ;;

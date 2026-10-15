@@ -49,8 +49,11 @@ from the current primary global Ethernet IPv4 address. The interface defaults to
 `SUGARKUBE_MDNS_INTERFACE` selects another Ethernet interface during preparation.
 
 The pre-start command runs after `network-online.target`, has a 30-second timeout, and blocks
-K3s execution if the address is missing, invalid or ambiguous, or the managed YAML is missing
-or replaced. A failed refresh preserves the old file but does not allow K3s to consume it
+K3s execution if the address is missing, invalid or ambiguous, or the reserved YAML path is
+unmanaged, a symlink or a directory. The installed hook owns that path and recreates an absent
+file from the current address. This lets a reboot finish interrupted first preparation even
+if a hook was published before YAML existed; no literal address is persisted before refresh
+protection exists. A failed refresh preserves the old file but does not allow K3s to consume it
 through this start path. It writes only owned network YAML; it cannot migrate legacy files,
 rewrite TLS policy or mutate membership. The installed copy does not depend on the checkout.
 
