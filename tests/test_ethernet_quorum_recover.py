@@ -868,6 +868,12 @@ def test_disposable_etcd_preserves_identity_and_data(tmp_path, monkeypatch, star
         "1",
         "-subj",
         "/CN=disposable-k339-ca",
+        "-addext",
+        "basicConstraints=critical,CA:TRUE",
+        "-addext",
+        "keyUsage=critical,keyCertSign,cRLSign",
+        "-addext",
+        "subjectKeyIdentifier=hash",
     )
     openssl(
         "req",
@@ -885,6 +891,9 @@ def test_disposable_etcd_preserves_identity_and_data(tmp_path, monkeypatch, star
         "subjectAltName=DNS:pi0.local,DNS:pi1.local,DNS:pi2.local,IP:127.0.0.1,"
         + ",".join("IP:" + ip for ip in ips)
         + "\nextendedKeyUsage=serverAuth,clientAuth\n"
+        + "basicConstraints=critical,CA:FALSE\n"
+        + "keyUsage=critical,digitalSignature,keyEncipherment\n"
+        + "subjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid,issuer\n"
     )
     openssl(
         "x509",
@@ -903,6 +912,15 @@ def test_disposable_etcd_preserves_identity_and_data(tmp_path, monkeypatch, star
         "-extfile",
         str(tmp_path / "extensions"),
     )
+    default_context = ssl.create_default_context
+
+    def strict_context(*args, **kwargs):
+        context = default_context(*args, **kwargs)
+        context.verify_flags |= ssl.VERIFY_X509_STRICT
+        return context
+
+    # Exercise current Python defaults even when the local interpreter is older.
+    monkeypatch.setattr(ssl, "create_default_context", strict_context)
     context = ssl.create_default_context(cafile=str(ca))
     context.load_cert_chain(str(cert), str(key))
     opener = urllib.request.build_opener(
