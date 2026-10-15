@@ -802,6 +802,9 @@ def test_disposable_etcd_preserves_identity_and_data(tmp_path, monkeypatch, star
 
     binary = os.environ.get("SUGARKUBE_TEST_ETCD_BINARY")
     if not binary:
+        # TODO: Provide the pinned disposable etcd binary to exercise real protocol recovery.
+        # Root cause: Ordinary local environments may not have a compatible etcd executable.
+        # Estimated fix: Set SUGARKUBE_TEST_ETCD_BINARY; ordinary PR CI provisions it.
         pytest.skip("set SUGARKUBE_TEST_ETCD_BINARY for disposable etcd protocol tests")
     ca, key, cert = (tmp_path / name for name in ("ca.crt", "tls.key", "tls.crt"))
     subnet = uuid.uuid4().bytes
