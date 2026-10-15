@@ -877,12 +877,18 @@ def enroll(request, destination):
             not path.exists() and not path.is_symlink(),
             "existing enrollment/hook must be reconciled",
         )
+    # The K3s hook is the activation boundary: a reboot discovers it even without
+    # daemon-reload. Persist every prerequisite before making that hook visible.
+    hook_content = files.pop(HOOK)
     for path, content in files.items():
         path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write(path, content)
         path.chmod(0o644)
     destination.parent.mkdir(parents=True, exist_ok=True)
     atomic_json(destination, e)
+    HOOK.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write(HOOK, hook_content)
+    HOOK.chmod(0o644)
     return "enrolled; hooks and timer installed but not reloaded or enabled"
 
 

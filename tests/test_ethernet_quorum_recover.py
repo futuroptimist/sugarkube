@@ -505,7 +505,18 @@ def test_gateway_routes_are_limited_to_approved_operations(enrollment):
         backend.etcd("pi1.local", "member", "remove", "1")
 
 
-def test_explicit_enrollment_installs_inactive_units_only(enrollment, tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "failure,after_write",
+    [(None, False)]
+    + [
+        (name, after)
+        for name in ("RUNTIME", "WATCH_SERVICE", "WATCH_TIMER", "ENROLLMENT", "HOOK")
+        for after in (False, True)
+    ],
+)
+def test_explicit_enrollment_installs_inactive_units_only(
+    enrollment, tmp_path, monkeypatch, failure, after_write
+):
     backend = FakeBackend(enrollment)
     backend.ip = enrollment["local_ipv4"]
     inventory = {
@@ -541,7 +552,30 @@ def test_explicit_enrollment_installs_inactive_units_only(enrollment, tmp_path, 
         monkeypatch.setattr(MODULE, key, path)
     request = tmp_path / "request.json"
     request.write_text(json.dumps(enrollment))
+    written = []
+    real_write = MODULE.atomic_write
+
+    def write(path, content):
+        if failure and path == paths[failure] and not after_write:
+            raise OSError("injected enrollment interruption")
+        real_write(path, content)
+        written.append(path)
+        if path == paths["HOOK"]:
+            # Simulate reboot discovery at the instant the hook becomes visible.
+            assert all(paths[key].is_file() for key in paths)
+            assert json.loads(paths["ENROLLMENT"].read_text())["local_ipv4"] == "10.0.0.10"
+        if failure and path == paths[failure] and after_write:
+            raise OSError("injected enrollment interruption")
+
+    monkeypatch.setattr(MODULE, "atomic_write", write)
+    if failure:
+        with pytest.raises(OSError, match="injected enrollment"):
+            MODULE.enroll(request, paths["ENROLLMENT"])
+        assert paths["HOOK"].exists() == (failure == "HOOK" and after_write)
+        assert not updates(backend) and backend.owner is None
+        return
     assert "not reloaded or enabled" in MODULE.enroll(request, paths["ENROLLMENT"])
+    assert written[-1] == paths["HOOK"]
     assert paths["RUNTIME"].read_bytes() == SCRIPT.read_bytes()
     assert "ExecStartPre=" in paths["HOOK"].read_text()
     assert "ExecStartPost=-" in paths["HOOK"].read_text()
