@@ -242,6 +242,10 @@ def test_cli_entrypoint_results_and_evidence_preservation(
         evidence["captured_at"] = (datetime.now(timezone.utc) - timedelta(seconds=301)).isoformat()
     elif scenario == "malformed":
         evidence = {"private": "do-not-echo"}
+    elif scenario == "discovery":
+        evidence["nodes"][0]["mdns_ipv4"] = ["192.168.1.250"]
+        with pytest.raises(MODULE.UnsafeEvidence, match="mDNS or Ethernet mismatch"):
+            MODULE.plan(evidence)
     path = tmp_path / "evidence.json"
     original = json.dumps(evidence)
     path.write_text(original)
