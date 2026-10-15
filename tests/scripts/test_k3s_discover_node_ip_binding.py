@@ -140,7 +140,8 @@ def test_prestart_sync_failure_never_publishes_file(tmp_path, monkeypatch, failu
 
 
 @pytest.mark.parametrize(
-    "failure", ["directory_mode", "directory_owner", "file_mode", "file_owner", "symlink"]
+    "failure",
+    ["directory_mode", "directory_owner", "directory_sticky", "file_mode", "file_owner", "symlink"],
 )
 def test_root_installation_refuses_untrusted_paths(tmp_path, monkeypatch, failure):
     import stat
@@ -162,8 +163,10 @@ def test_root_installation_refuses_untrusted_paths(tmp_path, monkeypatch, failur
         bad = directory if failure.startswith("directory") else target
         if path == bad and failure.endswith("owner"):
             info[4] = 1000
-        if path == bad and failure.endswith("mode"):
+        if path == bad and failure.endswith(("mode", "sticky")):
             info[0] |= 0o022
+            if failure.endswith("sticky"):
+                info[0] |= stat.S_ISVTX
         return os.stat_result(info)
 
     monkeypatch.setattr(os, "geteuid", lambda: 0)
@@ -197,6 +200,28 @@ def test_unsafe_paths_are_rejected_before_lock_or_log_writes(setup, tmp_path, fa
         log.symlink_to(victim)
     assert run(setup).returncode != 0
     assert victim.read_text() == "must remain unchanged\n"
+
+
+def test_root_fixture_uses_trusted_ancestry_without_weakening_runtime(
+    setup, trusted_network_test_ancestry
+):
+    setup[0]["PYTHONPATH"] = trusted_network_test_ancestry(synthetic_root=True)
+    probe = subprocess.run(
+        [
+            "python3",
+            "-c",
+            "import os; from pathlib import Path; "
+            "assert os.geteuid() == 0; assert Path('/tmp').lstat().st_mode & 0o022 == 0",
+        ],
+        env=setup[0],
+        capture_output=True,
+        text=True,
+    )
+    assert probe.returncode == 0, probe.stderr
+    assert run(setup).returncode == 0
+    setup[3].write_text("2: eth0 inet 192.168.50.99/24 scope global eth0\n")
+    result, loaded = boot_installed_unit(setup, "k3s.service")
+    assert result.returncode == 0 and 'node-ip: "192.168.50.99"' in loaded
 
 
 def test_supported_yaml_and_idempotent_dhcp_change(setup):
